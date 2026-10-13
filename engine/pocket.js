@@ -145,6 +145,14 @@ export const BODY_DEFAULTS = {
   ignore: '', // comma-separated tags this body passes through
   layer: 0, // physics layer (0-7): which others it collides with comes from the scene's layer matrix
 };
+/** A collider component's shape as body settings (sizes left out = fit the visible shape). */
+export function colliderBody(c) {
+  if (!c) return null;
+  const sized = c.w || c.h || c.r || c.d, shape = c.shape === 'circle' || c.shape === 'sphere' ? c.shape : 'box';
+  const out = { shape: sized ? shape : 'auto', sensor: !!c.trigger };
+  for (const k of ['w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'bounce', 'friction', 'layer', 'oneWay']) if (c[k] !== undefined && c[k] !== '') out[k] = c[k];
+  return out;
+}
 /** Physics layers (Unity-style). matrix[i] is a bit mask of the layers layer i collides with. */
 export const PHYSICS_LAYERS = ['Default', 'Player', 'Enemy', 'Bullet', 'Ground', 'Pickup', 'Layer 6', 'Layer 7'];
 export const layerMatrix = (pl) => (Array.isArray(pl?.matrix) && pl.matrix.length === 8 ? pl.matrix : Array(8).fill(255));
@@ -171,14 +179,19 @@ export class Entity {
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.tiles = props.tiles ? new TileMap(props.tiles) : null; // 2D tilemap
+    this.sun = props.sun ? { color: '#ffffff', intensity: 1, ambient: 0.45, shadows: true, ...props.sun } : null; // Directional Light (3D): its rotation aims the sunlight
+    this.globalLight = props.globalLight ? { brightness: 1, color: '#0a0a1e', ...props.globalLight } : null; // Global Light 2D: how bright the whole scene is
     this.tileLayer = props.tiles?.layer ?? 4; // tilemaps collide as the Ground physics layer
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
+    this.collider = props.collider ? { ...props.collider } : null; // Unity-style collider: alone it makes a solid (static) object
     this.body = null;
-    if (props.body) this.setBody(props.body);
+    const col = colliderBody(props.collider);
+    if (props.body || col) { this.setBody({ ...(props.body ? {} : { type: 'static' }), ...(props.body || {}), ...(col || {}) }); if (!props.body) this.body._colliderOnly = true; }
     this.data = { ...(props.data || {}) };
     this.behaviors = [];
     this.scene = null;
@@ -282,6 +295,10 @@ export class Entity {
   /** Give this entity a body sized to its visuals if it has none. */
   ensureBody(opts = {}) {
     if (!this.body) this.setBody(opts);
+    else if (this.body._colliderOnly && opts.type) { // a component needs this collider to move or be a trigger (coins, hazards)
+      this.body.type = opts.type; if (opts.sensor) this.body.sensor = true; if (opts.gravityScale != null) this.body.gravityScale = opts.gravityScale;
+      this.body._colliderOnly = false;
+    }
     return this.body;
   }
 }
@@ -470,102 +487,171 @@ export const Ease = {
   inOutElastic: (x) => (x === 0 ? 0 : x === 1 ? 1 : x < 0.5 ? -(2 ** (20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2 : (2 ** (-20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1),
   inBounce: (x) => 1 - bounceOut(1 - x), outBounce: bounceOut, inOutBounce: (x) => (x < 0.5 ? (1 - bounceOut(1 - 2 * x)) / 2 : (1 + bounceOut(2 * x - 1)) / 2),
 };
+Object.assign(Ease, {
+  smoothStep: (x) => x * x * (3 - 2 * x),
+  spring: (x) => 1 - Math.cos(x * PI * 4.5) * Math.exp(-x * 6),
+  flash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : x), // blinks between the start and the end while it moves
+  inFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? x * x : 0),
+  outFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : 1 - (1 - x) ** 2),
+});
 export const EASES = Object.keys(Ease);
-const easeFn = (e) => (typeof e === 'function' ? e : Ease[e] || Ease.outQuad);
+/** A custom ease from points [[t, v], …] between (0,0) and (1,1), like Unity's AnimationCurve. */
+Ease.curve = (pts) => { const P = [[0, 0], ...pts.filter((q) => q[0] > 0 && q[0] < 1).sort((a, b) => a[0] - b[0]), [1, 1]]; return (x) => { for (let i = 1; i < P.length; i++) if (x <= P[i][0]) { const [a, va] = P[i - 1], [b, vb] = P[i]; return va + (vb - va) * ((x - a) / (b - a || 1)); } return 1; }; };
+/** Jump in n steps (no in-between). */
+Ease.steps = (n) => (x) => (x >= 1 ? 1 : Math.floor(x * n) / n);
+const easeFn = (e) => (typeof e === 'function' ? e : Array.isArray(e) ? Ease.curve(e) : /^steps?\d+$/.test(e || '') ? Ease.steps(+e.replace(/\D/g, '')) : Ease[e] || Ease.outQuad);
 const getP = (o, path) => (path.includes('.') ? path.split('.').reduce((a, k) => a?.[k], o) : o[path]);
 const setP = (o, path, v) => { if (!path.includes('.')) { o[path] = v; return; } const ks = path.split('.'); let a = o; for (const k of ks.slice(0, -1)) { if (a[k] == null) return; a = a[k]; } a[ks.at(-1)] = v; };
 const isColor = (v) => typeof v === 'string' && /^#[0-9a-f]{3,6}$/i.test(v);
 const mixColor = (a, b, t) => { const A = hexToRgb(a), B = hexToRgb(b); return '#' + [0, 1, 2].map((i) => Math.round((A[i] + (B[i] - A[i]) * t) * 255).toString(16).padStart(2, '0')).join(''); };
 
+/** What tweens and sequences share: playback control (DOTween's Play / Pause / Restart / Rewind / PlayBackwards / Complete / Goto), callbacks, speed and IDs. */
+class TweenCore {
+  initCore(o = {}) {
+    this.time = 0; this.done = false; this.paused = false; this.backwards = false; this.started = false;
+    this.timeScale = o.timeScale ?? 1; this.id = o.id; this.autoKill = o.autoKill ?? true; this.lastCycle = 0;
+    this.completeFns = o.onComplete ? [o.onComplete] : []; this.startFns = o.onStart ? [o.onStart] : [];
+    this.stepFns = o.onStepComplete ? [o.onStepComplete] : []; this.killFns = o.onKill ? [o.onKill] : []; this.rewindFns = o.onRewind ? [o.onRewind] : [];
+  }
+  setId(id) { this.id = id; return this; }
+  setTimeScale(k) { this.timeScale = Math.max(0, +k || 0); return this; }
+  setAutoKill(v = true) { this.autoKill = v; return this; }
+  onComplete(fn) { this.completeFns.push(fn); return this; }
+  onStart(fn) { this.startFns.push(fn); return this; }
+  onStepComplete(fn) { this.stepFns.push(fn); return this; }
+  onKill(fn) { this.killFns.push(fn); return this; }
+  onRewind(fn) { this.rewindFns.push(fn); return this; }
+  kill(complete = false) { if (this.done) return this; if (complete && this.totalDuration() < Infinity) this.seek(this.totalDuration()); this.done = true; for (const f of this.killFns) f(this); return this; }
+  pause() { this.paused = true; return this; }
+  play() { this.paused = false; this.backwards = false; return this; }
+  togglePause() { this.paused = !this.paused; return this; }
+  isPlaying() { return !this.paused && !this.done; }
+  playForward() { this.backwards = false; this.paused = false; return this; }
+  playBackwards() { this.backwards = true; this.paused = false; if (this.time >= this.totalDuration()) this.time = this.totalDuration(); return this; }
+  /** Turn around: forwards becomes backwards and the other way. */
+  flip() { const T = this.totalDuration(); if (this.time <= 0) return this.playForward(); if (this.time >= T) return this.playBackwards(); return this.backwards ? this.playForward() : this.playBackwards(); }
+  restart() { this.goto(0); this.backwards = false; this.paused = false; this.done = false; return this; }
+  rewind() { this.goto(0); this.paused = true; return this; }
+  complete() { if (this.totalDuration() < Infinity) this.goto(this.totalDuration()); return this; }
+  goto(t, andPlay = false) { this.time = Math.max(0, Math.min(t, this.totalDuration())); this.seek(this.time); if (andPlay) this.paused = false; return this; }
+  elapsed() { return this.time; }
+  /** 0 → 1 through the whole tween (loops included; 0 for endless ones). */
+  progress() { const T = this.totalDuration(); return T === Infinity ? 0 : Math.min(1, this.time / (T || 1)); }
+  update(dt) {
+    if (this.paused || this.done) return this.done;
+    dt *= this.timeScale;
+    if (this.backwards) {
+      const t = Math.max(0, Math.min(this.time, this.totalDuration()) - dt); this.time = t; this.seek(t);
+      if (t <= 0) { this.paused = true; this.backwards = false; for (const f of this.rewindFns) f(this); }
+      return false;
+    }
+    if (this.seek(this.time + dt)) {
+      this.time = Math.min(this.time, this.totalDuration());
+      for (const f of this.completeFns) f(this);
+      if (this.autoKill) { this.done = true; for (const f of this.killFns) f(this); } else this.paused = true;
+    }
+    return this.done;
+  }
+}
+
 /**
  * A tween: animates properties of `target` (numbers or #colors, nested paths like 'shape.fill'; 'scale' sets sx/sy/sz).
- * Chain options: .setEase('outBack').setDelay(0.2).setLoops(3, 'yoyo').setRelative().onComplete(fn)
+ * Chain options: .setEase('outBack').setDelay(0.2).setLoops(3, 'yoyo').setRelative().setFrom().setSpeedBased().onComplete(fn)
+ * Options: ease, delay, loops, loopType ('restart' | 'yoyo' | 'incremental'), relative, from, speedBased, blend, id, timeScale, autoKill,
+ * onStart, onUpdate, onStepComplete (each loop), onComplete, onKill, onRewind.
  */
-export class Tween {
+export class Tween extends TweenCore {
   constructor(target, props, duration = 0.5, o = {}) {
+    super(); this.initCore(o);
     this.target = target; this.props = { ...props }; this.duration = Math.max(1e-4, duration);
     this.ease = easeFn(o.ease); this.delay = o.delay || 0; this.loops = o.loops ?? 0; this.loopType = o.loopType || 'restart';
-    this.relative = !!o.relative; this.custom = o.custom || null; this.done = false; this.paused = false; this.time = 0;
-    this.completeFns = o.onComplete ? [o.onComplete] : []; this.updateFn = o.onUpdate || null; this.from = null; this.id = o.id;
+    this.relative = !!o.relative; this.custom = o.custom || null; this.isFrom = !!o.from; this.speedBased = !!o.speedBased; this.blend = !!o.blend;
+    this.updateFn = o.onUpdate || null; this.from = null;
     if (this.props.scale !== undefined) { const k = this.props.scale; delete this.props.scale; Object.assign(this.props, { sx: k, sy: k, sz: k }); }
   }
   setEase(e) { this.ease = easeFn(e); return this; }
   setDelay(d) { this.delay = d; return this; }
   setLoops(n, type = 'restart') { this.loops = n; this.loopType = type; return this; }
   setRelative(r = true) { this.relative = r; return this; }
-  onComplete(fn) { this.completeFns.push(fn); return this; }
+  /** DOTween .From(): start at the given values and animate back to where the target is now. */
+  setFrom(v = true) { this.isFrom = v; if (v && !this.from) this.capture(); return this; }
+  /** The duration becomes a speed: units (or degrees) per second. */
+  setSpeedBased(v = true) { this.speedBased = v; return this; }
+  /** Blendable: adds its change instead of setting the value, so several tweens on one property mix. */
+  setBlendable(v = true) { this.blend = v; return this; }
   onUpdate(fn) { this.updateFn = fn; return this; }
-  kill(complete = false) { if (complete) this.seek(this.totalDuration()); this.done = true; return this; }
-  pause() { this.paused = true; return this; }
-  play() { this.paused = false; return this; }
   totalDuration() { return this.loops < 0 ? Infinity : this.delay + this.duration * (this.loops + 1); }
   capture() {
-    this.from = {}; this.to = {};
+    this.from = {}; this.to = {}; this.last = {};
     for (const [k, v] of Object.entries(this.props)) {
-      const cur = getP(this.target, k);
-      this.from[k] = cur;
-      this.to[k] = this.relative && !isColor(v) ? (+cur || 0) + v : v;
+      const cur = getP(this.target, k), end = this.relative && !isColor(v) ? (+cur || 0) + v : v;
+      if (this.isFrom) { this.from[k] = end; this.to[k] = cur; } else { this.from[k] = cur; this.to[k] = end; }
+      this.last[k] = this.from[k];
     }
+    if (this.speedBased && !this.custom) {
+      const dist = Math.max(0, ...Object.keys(this.to).filter((k) => !isColor(this.to[k])).map((k) => Math.abs((+this.to[k] || 0) - (+this.from[k] || 0))));
+      this.duration = Math.max(1e-4, dist / (this.speedBased === true ? this.duration : +this.speedBased || 1));
+      this.speedBased = false;
+    }
+    if (this.isFrom && !this.custom) this.apply(0, 0);
+    if (!this.started) { this.started = true; for (const f of this.startFns) f(this); }
+  }
+  apply(k, c) {
+    const e = this.ease(k);
+    if (this.custom) this.custom(e, k, this);
+    else for (const key in this.to) {
+      const a = this.from[key], b = this.to[key];
+      if (isColor(b)) { setP(this.target, key, mixColor(isColor(a) ? a : b, b, e)); continue; }
+      const inc = this.loopType === 'incremental' ? (b - a) * c : 0, v = (+a || 0) + inc + ((+b || 0) - (+a || 0)) * e;
+      if (this.blend) { setP(this.target, key, (+getP(this.target, key) || 0) + v - this.last[key]); this.last[key] = v; } else setP(this.target, key, v);
+    }
+    this.updateFn?.(e, this);
   }
   /** Set the state at local time t (seconds since the tween started, delay included). */
   seek(t) {
     this.time = t;
-    if (t < this.delay) return false;
+    if (t < this.delay) { if (this.from) this.apply(0, 0); return false; }
     if (!this.from) this.capture();
     const lt = t - this.delay, cycle = Math.floor(lt / this.duration), end = this.loops >= 0 && cycle > this.loops;
     let k = end ? 1 : (lt % this.duration) / this.duration, c = end ? this.loops : cycle;
     if (end && this.loopType === 'yoyo' && this.loops % 2 === 1) k = 0;
     else if (this.loopType === 'yoyo' && c % 2 === 1) k = 1 - k;
-    const e = this.ease(k);
-    if (this.custom) this.custom(e, k, this);
-    else for (const key in this.to) {
-      const a = this.from[key], b = this.to[key];
-      if (isColor(b)) setP(this.target, key, mixColor(isColor(a) ? a : b, b, e));
-      else {
-        const inc = this.loopType === 'incremental' ? (b - a) * c : 0;
-        setP(this.target, key, (+a || 0) + inc + ((+b || 0) - (+a || 0)) * e);
-      }
-    }
-    this.updateFn?.(e, this);
+    if (cycle > this.lastCycle && !this.backwards) for (let i = this.lastCycle; i < Math.min(cycle, this.loops < 0 ? cycle : this.loops + 1); i++) for (const f of this.stepFns) f(this);
+    this.lastCycle = cycle;
+    this.apply(k, c);
     return end;
-  }
-  update(dt) {
-    if (this.paused || this.done) return this.done;
-    if (this.seek(this.time + dt)) { this.done = true; for (const f of this.completeFns) f(this); }
-    return this.done;
   }
 }
 
-/** A timeline of tweens and callbacks (DOTween Sequence): append, join, insert, interval, callback. */
-export class Sequence {
-  constructor() { this.items = []; this.end = 0; this.lastStart = 0; this.time = 0; this.loops = 0; this.loopType = 'restart'; this.done = false; this.paused = false; this.completeFns = []; }
+/** A timeline of tweens and callbacks (DOTween Sequence): append, join, insert, prepend, interval, callback. */
+export class Sequence extends TweenCore {
+  constructor(o = {}) { super(); this.initCore(o); this.items = []; this.end = 0; this.lastStart = 0; this.loops = o.loops ?? 0; this.loopType = o.loopType || 'restart'; this.delay = o.delay || 0; }
   append(tw) { this.lastStart = this.end; this.items.push({ at: this.end, tw }); this.end += tw.totalDuration(); return this; }
   join(tw) { this.items.push({ at: this.lastStart, tw }); this.end = Math.max(this.end, this.lastStart + tw.totalDuration()); return this; }
   insert(at, tw) { this.items.push({ at, tw }); this.end = Math.max(this.end, at + tw.totalDuration()); return this; }
-  appendInterval(sec) { this.end += sec; return this; }
+  prepend(tw) { const d = tw.totalDuration(); for (const it of this.items) it.at += d; this.items.unshift({ at: 0, tw }); this.end += d; this.lastStart = 0; return this; }
+  appendInterval(sec) { this.end += Math.max(0, sec); return this; }
+  prependInterval(sec) { for (const it of this.items) it.at += sec; this.end += sec; return this; }
   appendCallback(fn) { this.items.push({ at: this.end, fn }); return this; }
+  insertCallback(at, fn) { this.items.push({ at, fn }); this.end = Math.max(this.end, at); return this; }
   setLoops(n, type = 'restart') { this.loops = n; this.loopType = type; return this; }
-  onComplete(fn) { this.completeFns.push(fn); return this; }
-  kill() { this.done = true; return this; }
-  pause() { this.paused = true; return this; }
-  play() { this.paused = false; return this; }
-  totalDuration() { return this.loops < 0 ? Infinity : this.end * (this.loops + 1); }
+  setDelay(d) { this.delay = Math.max(0, d); return this; }
+  totalDuration() { return this.loops < 0 ? Infinity : this.delay + this.end * (this.loops + 1); }
   seek(t) {
-    const len = this.end || 1e-4, cycle = Math.floor(t / len), end = this.loops >= 0 && cycle > this.loops;
+    this.time = t;
+    if (t < this.delay) return false;
+    if (!this.started) { this.started = true; for (const f of this.startFns) f(this); }
+    t -= this.delay;
+    const len = this.end || 1e-4, raw = Math.floor(t / len), end = this.loops >= 0 && raw > this.loops, cycle = end ? this.loops : raw;
     let lt = end ? len : t % len;
-    if (this.loopType === 'yoyo' && cycle % 2 === 1 && !end) lt = len - lt;
-    if (cycle !== this.cycle) { this.cycle = cycle; this.fired = new Set(); }
+    if (this.loopType === 'yoyo' && cycle % 2 === 1) lt = end ? 0 : len - lt;
+    if (cycle !== this.cycle) { if (this.cycle != null && cycle > this.cycle && !this.backwards) for (const f of this.stepFns) f(this); this.cycle = cycle; this.fired = new Set(); }
+    for (let i = this.items.length - 1; i >= 0; i--) { const it = this.items[i]; if (it.tw && it.on && lt < it.at) { it.on = false; it.tw.seek(0); } } // not reached yet (new loop / going back): put it back to its start
     for (const it of this.items) {
-      if (it.fn) { if (lt >= it.at && !this.fired.has(it)) { this.fired.add(it); it.fn(); } continue; }
-      if (lt >= it.at) it.tw.seek(Math.min(lt - it.at, it.tw.totalDuration()));
+      if (it.fn) { if (lt >= it.at && !this.fired.has(it) && !this.backwards) { this.fired.add(it); it.fn(); } continue; }
+      if (lt >= it.at) { it.on = true; it.tw.seek(Math.min(lt - it.at, it.tw.totalDuration())); }
     }
     return end;
-  }
-  update(dt) {
-    if (this.paused || this.done) return this.done;
-    this.time += dt;
-    if (this.seek(this.time)) { this.done = true; for (const f of this.completeFns) f(this); }
-    return this.done;
   }
 }
 const catmull = (p0, p1, p2, p3, t) => { const t2 = t * t, t3 = t2 * t; return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3); };
@@ -769,7 +855,7 @@ export class Scene {
       const p = e.parentEnt;
       if (e.dead || !p) continue;
       if (p.dead) { if (!edit) e.destroy(); continue; }
-      e._parentHidden = p.visible === false || !!p._parentHidden;
+      e._parentHidden = p.visible === false || !!p._parentHidden || !!p._clipHidden;
       if (e.ui) continue; // UI children are positioned inside their parent's box (uiOrigin)
       const L = e.local;
       if (!edit && e._lw) { // a behaviour or physics moved the child: fold that into its local transform
@@ -784,6 +870,17 @@ export class Scene {
       e.sx = p.sx * L.sx; e.sy = p.sy * L.sy; e.sz = p.sz * L.sz;
       e._lw = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz };
     }
+  }
+  /** Light objects (Unity's Directional Light / Global Light 2D) drive the scene lighting. */
+  syncLights() {
+    let sun = null, gl = null;
+    for (const e of this.entities) { if (e.dead || e.visible === false) continue; if (e.sun && !sun) sun = e; if (e.globalLight && !gl) gl = e; }
+    if (sun && this.mode === '3d' && !this.light._driven) { // (a Day/Night Cycle component drives the sun itself)
+      const rx = (sun.rx || 0) * DEG, ry = (sun.ry || 0) * DEG, L = this.light, S = sun.sun;
+      L.dir = { x: Math.cos(rx) * Math.sin(ry), y: -Math.sin(rx), z: Math.cos(rx) * Math.cos(ry) };
+      L.color = S.color; L.intensity = +S.intensity; L.ambient = +S.ambient; L.shadows = !!S.shadows;
+    }
+    if (gl && this.mode !== '3d' && !this.light._driven) { this.light.darkness = clamp(1 - (+gl.globalLight.brightness), 0, 1); this.light.ambientColor = gl.globalLight.color; }
   }
   childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
 
@@ -815,15 +912,18 @@ export class Scene {
   /** Quick tween (kept for older code): animate `to` over `duration`. */
   tween(target, to, duration = 0.3, ease = 'outCubic') { return this.to(target, to, duration, { ease }); }
   /** DOTween-style: scene.to(e, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' }) */
-  to(target, props, duration = 0.5, opts = {}) { const t = new Tween(target, props, duration, opts); this.tweens.push(t); return t; }
+  to(target, props, duration = 0.5, opts = {}) { const t = new Tween(target, props, duration, opts); if (opts.from) t.capture(); this.tweens.push(t); return t; }
+  /** DOTween .From(): jump to these values now and animate back to where the target is. */
+  from(target, props, duration = 0.5, opts = {}) { return this.to(target, props, duration, { ...opts, from: true }); }
   /** A sequence you fill with .append(scene.make(...)), .join(...), .appendInterval(s), .appendCallback(fn). */
-  sequence() { const q = new Sequence(); this.tweens.push(q); return q; }
+  sequence(opts = {}) { const q = new Sequence(opts); this.tweens.push(q); return q; }
   /** A tween that is not started on its own (for sequences). */
   make(target, props, duration = 0.5, opts = {}) { return new Tween(target, props, duration, opts); }
   /** Punch: kick a property set away and spring back (DOPunchScale / DOPunchPosition). */
   punch(target, amount, duration = 0.5, { vibrato = 8, elasticity = 0.6, add = false } = {}) {
-    const base = {}; for (const k in amount) base[k] = getP(target, k);
+    let base = null; // taken when it starts, so it works inside sequences
     const t = new Tween(target, {}, duration, { ease: 'linear', custom: (e, k) => {
+      if (!base) { base = {}; for (const key in amount) base[key] = getP(target, key); }
       const w = Math.sin(k * PI * vibrato) * (1 - k) ** (1 + elasticity);
       for (const key in amount) setP(target, key, base[key] + amount[key] * w);
       if (k >= 1) for (const key in amount) setP(target, key, base[key]);
@@ -833,9 +933,9 @@ export class Scene {
   }
   /** Shake: random jitter that fades out (DOShakePosition / DOShakeRotation). */
   shakeProps(target, amount, duration = 0.5, { vibrato = 18 } = {}) {
-    const base = {}; for (const k in amount) base[k] = getP(target, k);
-    let last = -1, off = {};
+    let base = null, last = -1, off = {};
     const t = new Tween(target, {}, duration, { ease: 'linear', custom: (e, k) => {
+      if (!base) { base = {}; for (const key in amount) base[key] = getP(target, key); }
       const step = Math.floor(k * vibrato);
       if (step !== last) { last = step; for (const key in amount) off[key] = rand(-1, 1) * amount[key] * (1 - k); }
       for (const key in amount) setP(target, key, k >= 1 ? base[key] : base[key] + off[key]);
@@ -844,10 +944,9 @@ export class Scene {
   }
   /** Move through points [{x,y,z}…] on a smooth curve (DOPath). orient: turn to face the direction of travel. */
   path(target, points, duration = 2, opts = {}) {
-    const P = [{ x: target.x, y: target.y, z: target.z || 0 }, ...points.map((q) => ({ x: +q.x || 0, y: +q.y || 0, z: +q.z || 0 }))];
-    if (opts.closed) P.push({ ...P[0] });
-    const n = P.length - 1, at = (i) => P[clamp(i, 0, n)];
+    let P = null, n = 0; const at = (i) => P[clamp(i, 0, n)];
     const t = new Tween(target, {}, duration, { ...opts, custom: (e) => {
+      if (!P) { P = [{ x: target.x, y: target.y, z: target.z || 0 }, ...points.map((q) => ({ x: +q.x || 0, y: +q.y || 0, z: +q.z || 0 }))]; if (opts.closed) P.push({ ...P[0] }); n = P.length - 1; }
       const f = clamp(e, 0, 1) * n, i = Math.min(n - 1, Math.floor(f)), u = f - i;
       const a = at(i - 1), b = at(i), c = at(i + 1), d = at(i + 2);
       const nx = catmull(a.x, b.x, c.x, d.x, u), ny = catmull(a.y, b.y, c.y, d.y, u), nz = catmull(a.z, b.z, c.z, d.z, u);
@@ -858,17 +957,77 @@ export class Scene {
   }
   /** Hop to a point in an arc (DOJump). */
   jumpTo(target, to, power = 80, jumps = 1, duration = 0.6, opts = {}) {
-    const fx = target.x, fy = target.y, fz = target.z || 0, up = this.mode === '3d' ? 1 : -1;
+    const up = this.mode === '3d' ? 1 : -1; let fx, fy, fz, tx, ty, tz, started = false;
     const t = new Tween(target, {}, duration, { ease: 'linear', ...opts, custom: (e, k) => {
-      target.x = fx + ((to.x ?? fx) - fx) * e; target.z = fz + ((to.z ?? fz) - fz) * e;
+      if (!started) { // taken when it starts; relative: `to` is an offset from there
+        started = true; fx = target.x; fy = target.y; fz = target.z || 0;
+        tx = opts.relative ? fx + (+to.x || 0) : to.x ?? fx; ty = opts.relative ? fy + (+to.y || 0) : to.y ?? fy; tz = opts.relative ? fz + (+to.z || 0) : to.z ?? fz;
+      }
+      target.x = fx + (tx - fx) * e; target.z = fz + (tz - fz) * e;
       const hop = Math.abs(Math.sin(k * PI * jumps)) * power * up;
-      target.y = fy + ((to.y ?? fy) - fy) * e + hop;
+      target.y = fy + (ty - fy) * e + hop;
     } });
     this.tweens.push(t); return t;
   }
-  /** Stop tweens on a target (or all with no target). complete: jump to their end first. */
-  killTweens(target, complete = false) { for (const t of this.tweens) if (!target || t.target === target) t.kill(complete); }
-  tweensOf(target) { return this.tweens.filter((t) => t.target === target && !t.done); }
+  /** Tweens on a target, with an id (a string), or all of them (no argument). */
+  tweensOf(target) { return this.tweens.filter((t) => !t.done && (target == null || (typeof target === 'string' ? t.id === target : t.target === target))); }
+  /** Stop tweens on a target or with an id (or all). complete: jump to their end first. */
+  killTweens(target, complete = false) { for (const t of this.tweensOf(target)) t.kill(complete); }
+  pauseTweens(target) { for (const t of this.tweensOf(target)) t.pause(); }
+  playTweens(target) { for (const t of this.tweensOf(target)) t.play(); }
+  reverseTweens(target) { for (const t of this.tweensOf(target)) t.playBackwards(); }
+  restartTweens(target) { for (const t of this.tweensOf(target)) t.restart(); }
+  completeTweens(target) { for (const t of this.tweensOf(target)) t.complete(); }
+  tweenSpeed(target, k) { for (const t of this.tweensOf(target)) t.setTimeScale(k); }
+  isTweening(target) { return this.tweensOf(target).some((t) => !t.paused); }
+  /** DOVirtual.Float: tween a number from a to b and get each value. */
+  virtual(a, b, duration, onValue, opts = {}) { const box = { v: a }; return this.to(box, { v: b }, duration, { ...opts, onUpdate: () => onValue(box.v) }); }
+  /** DOVirtual.DelayedCall: run fn after some seconds (a tween, so it can be paused or killed by id). */
+  delayedCall(sec, fn, opts = {}) { return this.to({}, {}, Math.max(1e-4, sec), { ease: 'linear', ...opts, onComplete: fn }); }
+  /** Count a number up or down over time (DOCounter): a variable (HUD texts update) or an object's text. */
+  counter(target, from, to, duration = 1, opts = {}) {
+    const fmt = (v) => `${opts.prefix || ''}${opts.decimals ? v.toFixed(opts.decimals) : formatNumber(Math.round(v))}${opts.suffix || ''}`;
+    return this.virtual(from, to, duration, (v) => {
+      if (typeof target === 'string') this.setVar(target, opts.decimals ? +v.toFixed(opts.decimals) : Math.round(v));
+      else if (target) { target.text ||= { ...TEXT_DEFAULTS }; target.text.value = fmt(v); }
+    }, { ease: 'outQuad', ...opts });
+  }
+  /** Type a text out letter by letter (DOText); scramble shows random letters for the ones still coming. */
+  typeText(e, text, duration = 1, opts = {}) {
+    const full = String(text ?? ''), pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*';
+    e.text ||= { ...TEXT_DEFAULTS };
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v) => {
+      const n = Math.round(clamp(v, 0, 1) * full.length);
+      e.text.value = full.slice(0, n) + (opts.scramble && n < full.length ? Array.from({ length: Math.min(3, full.length - n) }, () => pool[Math.floor(Math.random() * pool.length)]).join('') : '');
+    } });
+  }
+  /** Spiral out from where it is (DOSpiral). */
+  spiral(e, duration = 2, { radius = this.mode === '3d' ? 3 : 120, turns = 3, ...opts } = {}) {
+    const three = this.mode === '3d'; let cx = null, cy, cz;
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v) => {
+      if (cx === null) { cx = e.x; cy = e.y; cz = e.z || 0; }
+      const a = v * turns * PI * 2, r = radius * v;
+      e.x = cx + Math.cos(a) * r; if (three) e.z = cz + Math.sin(a) * r; else e.y = cy + Math.sin(a) * r;
+    } });
+  }
+  /** Turn smoothly to face an object or point (DOLookAt), the short way round. */
+  lookAtTween(e, at, duration = 0.4, opts = {}) {
+    if (!at) return null;
+    const three = this.mode === '3d', key = three ? 'ry' : 'rz', cur = e[key] || 0;
+    let ang = three ? Math.atan2(at.x - e.x, (at.z || 0) - (e.z || 0)) / DEG : Math.atan2(at.y - e.y, at.x - e.x) / DEG;
+    ang = cur + ((((ang - cur) % 360) + 540) % 360) - 180;
+    return this.to(e, { [key]: ang }, duration, { ease: 'outQuad', ...opts });
+  }
+  /** Flash on and off a number of times, ending visible. */
+  blink(e, duration = 1, times = 6, opts = {}) {
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v, k) => { e.visible = k >= 1 ? true : Math.floor(k * times * 2) % 2 === 1; } });
+  }
+  /** A colour flash over the whole screen that fades out. */
+  flashScreen(color = '#ffffff', duration = 0.3, strength = 0.8) {
+    const f = { a: strength }, draw = (ctx) => { if (f.a <= 0) return; ctx.save(); ctx.globalAlpha = f.a; ctx.fillStyle = color; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); ctx.restore(); };
+    (this.overlays ||= []).push(draw);
+    return this.to(f, { a: 0 }, duration, { ease: 'outQuad', onKill: () => { this.overlays = this.overlays.filter((q) => q !== draw); } });
+  }
 
   burst(x, y, z = 0, color = '#ffffff', count = 16, speed = 1) {
     const is3D = this.mode === '3d', base = is3D ? 6 : 220;
@@ -886,7 +1045,7 @@ export class Scene {
   win() { this.endWith('win'); }
   endWith(state) {
     if (this.state !== 'play') return;
-    this.state = state;
+    this.state = state; this.emit(state === 'win' ? 'win' : 'gameover');
     this.endTime = this.time;
     const key = this.settings.saveBest;
     if (key && (+this.vars.score || 0) > (+this.vars.best || 0)) {
@@ -1193,12 +1352,12 @@ export class Physics {
 
 function separate(e, other) {
   if (e.dead) return;
-  for (const b of e.behaviors) b.separate?.(e, other, e.scene);
+  for (const b of e.behaviors) if (!b.off) b.separate?.(e, other, e.scene);
   e.scene?.emit('separate', e, other);
 }
 
 function collide(e, other, m) {
-  for (const b of e.behaviors) if (b.collide && !e.dead) b.collide(e, other, e.scene, m);
+  for (const b of e.behaviors) if (b.collide && !e.dead && !b.off) b.collide(e, other, e.scene, m);
   e.scene?.emit('collide', e, other, m);
 }
 
@@ -1217,6 +1376,7 @@ export class Input {
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
+    this.ups = []; // fingers lifted this frame: { id, x, y, sx, sy, time }
     this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
 
     el.addEventListener('pointerdown', (e) => this.down(e));
@@ -1269,6 +1429,7 @@ export class Input {
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
     const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
+    if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000 });
     if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
@@ -1341,7 +1502,7 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
+  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
   reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
@@ -1395,11 +1556,144 @@ export class Audio {
 // Asset loading
 // ============================================================================
 const images = new Map();
+// ---- Built-in sprite art: small vector drawings (no emoji). Use as sprite src 'art:<name>'. ----
+const ART_O = '#22203a';
+const artO = (w = 3) => `stroke="${ART_O}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"`;
+const artEyes = (y = 26, dx = 6, cx = 32, r = 2.6) => `<circle cx="${cx - dx}" cy="${y}" r="${r}" fill="${ART_O}"/><circle cx="${cx + dx}" cy="${y}" r="${r}" fill="${ART_O}"/>`;
+const artShine = (x, y, r = 3) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity=".7"/>`;
+const artIcon = (d, extra = '') => `<path d="${d}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
+export const SPRITE_ART = {
+  // characters
+  hero: `<rect x="20" y="34" width="24" height="21" rx="6" fill="#3f7fd8" ${artO()}/><rect x="22" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><rect x="35" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><circle cx="32" cy="24" r="14" fill="#ffd3a8" ${artO()}/><path d="M18 23c0-10 7-15 14-15s14 5 14 15c-4-4-9-6-14-6s-10 2-14 6z" fill="#6b3f1f" ${artO()}/>${artEyes(26, 5.5)}<path d="M28 32q4 3 8 0" fill="none" ${artO(2)}/>`,
+  girl: `<path d="M20 56l4-22h16l4 22z" fill="#e45c9b" ${artO()}/><path d="M16 40c-2-18 4-32 16-32s18 14 16 32c-4-2-6-8-6-14H22c0 6-2 12-6 14z" fill="#9b4a1c" ${artO()}/><circle cx="32" cy="25" r="12" fill="#ffd3a8" ${artO()}/><path d="M20 22c4-8 20-8 24 0-8-3-16-3-24 0z" fill="#9b4a1c"/>${artEyes(26, 5)}<path d="M29 31q3 2 6 0" fill="none" ${artO(2)}/>`,
+  wizard: `<path d="M16 58l8-26h16l8 26z" fill="#6c45c4" ${artO()}/><circle cx="32" cy="28" r="10" fill="#ffd3a8" ${artO()}/><path d="M24 32q8 20 16 0q-8 6-16 0z" fill="#eee" ${artO(2)}/><path d="M14 22h36L33 2z" fill="#4b2fa0" ${artO()}/><circle cx="33" cy="12" r="2.5" fill="#ffd23d"/>${artEyes(27, 4, 32, 2)}`,
+  knight: `<rect x="18" y="34" width="28" height="22" rx="5" fill="#9aa7b8" ${artO()}/><circle cx="32" cy="24" r="15" fill="#b9c4d2" ${artO()}/><rect x="20" y="21" width="24" height="6" rx="3" fill="${ART_O}"/><path d="M32 9V3" ${artO(4)}/><path d="M32 4q8-2 10 6" fill="none" stroke="#e53935" stroke-width="4" stroke-linecap="round"/><rect x="28" y="40" width="8" height="12" rx="2" fill="#e53935"/>`,
+  robot: `<rect x="16" y="20" width="32" height="26" rx="6" fill="#9eb3c2" ${artO()}/><rect x="22" y="46" width="20" height="10" rx="3" fill="#6f8696" ${artO()}/><path d="M32 20v-9" ${artO()}/><circle cx="32" cy="9" r="4" fill="#ff5252" ${artO(2)}/><rect x="21" y="27" width="22" height="10" rx="5" fill="#22203a"/><circle cx="27" cy="32" r="3" fill="#33f0ff"/><circle cx="37" cy="32" r="3" fill="#33f0ff"/>`,
+  cat: `<path d="M14 26l4-16 10 8h8l10-8 4 16v8c0 12-8 20-18 20S14 46 14 34z" fill="#f2a03d" ${artO()}/><path d="M20 14l5 5M44 14l-5 5" ${artO(2)}/>${artEyes(32, 7)}<path d="M29 39l3 2 3-2" fill="none" ${artO(2)}/><path d="M8 36h12M8 42h12M44 36h12M44 42h12" ${artO(1.5)}/>`,
+  dog: `<circle cx="32" cy="34" r="18" fill="#c8915a" ${artO()}/><path d="M14 22c-6 4-6 18 2 20 2-6 2-14-2-20zM50 22c6 4 6 18-2 20-2-6-2-14 2-20z" fill="#7a4e2a" ${artO()}/>${artEyes(31, 7)}<ellipse cx="32" cy="40" rx="5" ry="4" fill="${ART_O}"/><path d="M32 44v4" ${artO(2)}/>`,
+  frog: `<ellipse cx="32" cy="40" rx="22" ry="16" fill="#5cc45a" ${artO()}/><circle cx="21" cy="24" r="8" fill="#5cc45a" ${artO()}/><circle cx="43" cy="24" r="8" fill="#5cc45a" ${artO()}/><circle cx="21" cy="24" r="3.5" fill="${ART_O}"/><circle cx="43" cy="24" r="3.5" fill="${ART_O}"/><path d="M20 42q12 8 24 0" fill="none" ${artO(2.5)}/>`,
+  bird: `<ellipse cx="30" cy="36" rx="18" ry="15" fill="#ffd23d" ${artO()}/><path d="M22 34q-10-14 6-10q2 6-6 10z" fill="#ffb300" ${artO(2.5)}/><circle cx="38" cy="30" r="3" fill="${ART_O}"/><path d="M47 34l10 3-10 4z" fill="#ff7043" ${artO(2)}/>`,
+  bird2: `<ellipse cx="30" cy="36" rx="18" ry="15" fill="#ffd23d" ${artO()}/><path d="M22 36q-12 12 6 10q2-6-6-10z" fill="#ffb300" ${artO(2.5)}/><circle cx="38" cy="30" r="3" fill="${ART_O}"/><path d="M47 34l10 3-10 4z" fill="#ff7043" ${artO(2)}/>`,
+  ninja: `<circle cx="32" cy="32" r="20" fill="#2e3350" ${artO()}/><rect x="14" y="25" width="36" height="11" rx="5" fill="#ffd3a8" ${artO(2)}/>${artEyes(30.5, 7)}<path d="M50 28l10-6M50 32l10 2" stroke="#e53935" stroke-width="4" stroke-linecap="round"/>`,
+  astronaut: `<rect x="18" y="36" width="28" height="20" rx="8" fill="#eef2f7" ${artO()}/><circle cx="32" cy="26" r="16" fill="#eef2f7" ${artO()}/><rect x="21" y="18" width="22" height="16" rx="8" fill="#3b6fd8" ${artO(2)}/>${artShine(27, 22, 2.5)}<rect x="27" y="42" width="10" height="6" rx="2" fill="#ff7043"/>`,
+  alien: `<ellipse cx="32" cy="30" rx="18" ry="20" fill="#7ee36d" ${artO()}/><ellipse cx="24" cy="30" rx="6" ry="8" fill="${ART_O}" transform="rotate(-20 24 30)"/><ellipse cx="40" cy="30" rx="6" ry="8" fill="${ART_O}" transform="rotate(20 40 30)"/><path d="M28 42q4 3 8 0" fill="none" ${artO(2)}/><path d="M24 12l-4-8M40 12l4-8" ${artO(2.5)}/>`,
+  // enemies
+  slime: `<path d="M8 50c0-20 10-34 24-34s24 14 24 34c0 4-4 6-8 6H16c-4 0-8-2-8-6z" fill="#4fd36a" ${artO()}/>${artShine(22, 28, 4)}${artEyes(38, 7)}<path d="M28 46q4 3 8 0" fill="none" ${artO(2)}/>`,
+  slimeBlue: `<path d="M8 50c0-20 10-34 24-34s24 14 24 34c0 4-4 6-8 6H16c-4 0-8-2-8-6z" fill="#4fa3ff" ${artO()}/>${artShine(22, 28, 4)}${artEyes(38, 7)}<path d="M28 47q4-3 8 0" fill="none" ${artO(2)}/>`,
+  ghost: `<path d="M12 56V30C12 16 20 8 32 8s20 8 20 22v26l-6-5-7 5-7-5-7 5-7-5z" fill="#eef2ff" ${artO()}/>${artEyes(30, 7, 32, 3.5)}<ellipse cx="32" cy="41" rx="4" ry="5" fill="${ART_O}"/>`,
+  bat: `<path d="M32 26c-8-10-20-12-28-4 6 0 10 6 10 12 4-4 10-4 12 2zM32 26c8-10 20-12 28-4-6 0-10 6-10 12-4-4-10-4-12 2z" fill="#7b4bc4" ${artO()}/><circle cx="32" cy="32" r="10" fill="#9c6ae0" ${artO()}/><path d="M26 24l-2-6 6 3M38 24l2-6-6 3" fill="#9c6ae0" ${artO(2)}/><circle cx="28" cy="31" r="2" fill="#ffd23d"/><circle cx="36" cy="31" r="2" fill="#ffd23d"/>`,
+  skull: `<path d="M12 30c0-14 9-22 20-22s20 8 20 22c0 8-4 12-8 14v10H20V44c-4-2-8-6-8-14z" fill="#f2f0e6" ${artO()}/><circle cx="24" cy="31" r="6" fill="${ART_O}"/><circle cx="40" cy="31" r="6" fill="${ART_O}"/><path d="M32 38l-3 6h6z" fill="${ART_O}"/><path d="M26 54v-6M32 54v-6M38 54v-6" ${artO(2)}/>`,
+  spider: `<path d="M20 30L6 20M20 36L4 36M22 42L8 54M44 30l14-10M44 36h16M42 42l14 12" ${artO(3)}/><ellipse cx="32" cy="36" rx="14" ry="12" fill="#3a3550" ${artO()}/><circle cx="27" cy="34" r="3" fill="#ff5252"/><circle cx="37" cy="34" r="3" fill="#ff5252"/>`,
+  bee: `<ellipse cx="32" cy="36" rx="18" ry="13" fill="#ffd23d" ${artO()}/><path d="M27 24v24M36 24v24" stroke="${ART_O}" stroke-width="5"/><ellipse cx="26" cy="20" rx="8" ry="6" fill="#cfefff" ${artO(2)}/><ellipse cx="38" cy="20" rx="8" ry="6" fill="#cfefff" ${artO(2)}/><circle cx="45" cy="33" r="2.5" fill="${ART_O}"/><path d="M14 36l-6 2 6 2" fill="${ART_O}"/>`,
+  shark: `<path d="M4 38c10-14 30-18 46-10l10-8v28l-10-6c-16 8-36 6-46-4z" fill="#8fa6bd" ${artO()}/><path d="M28 24l6-14 6 16z" fill="#8fa6bd" ${artO()}/><circle cx="16" cy="36" r="2.5" fill="${ART_O}"/><path d="M8 42l4 2 3-2 3 2 3-2" fill="none" ${artO(2)}/>`,
+  eyeMonster: `<circle cx="32" cy="34" r="22" fill="#e85a7a" ${artO()}/><circle cx="32" cy="30" r="11" fill="#fff" ${artO(2)}/><circle cx="34" cy="31" r="5" fill="${ART_O}"/><path d="M22 46q10 8 20 0" fill="#fff" ${artO(2)}/><path d="M18 16l4 6M46 16l-4 6" ${artO(3)}/>`,
+  dragon: `<path d="M10 40c0-16 12-26 26-24l12-10-2 14c8 4 12 12 10 20-2 10-14 16-26 16S10 50 10 40z" fill="#e5533d" ${artO()}/><path d="M18 40l6 6 6-6 6 6 6-6" fill="none" ${artO(2)}/>${artEyes(30, 8, 34, 3)}<path d="M8 32l-4-6M14 26l-2-8" ${artO(3)}/>`,
+  zombie: `<rect x="20" y="36" width="24" height="20" rx="5" fill="#5d8a5a" ${artO()}/><circle cx="32" cy="25" r="14" fill="#9ccc65" ${artO()}/><circle cx="26" cy="25" r="3" fill="#fff" ${artO(1.5)}/><circle cx="38" cy="24" r="2" fill="${ART_O}"/><path d="M26 33h12" ${artO(2)}/><path d="M28 33v3M33 33v3" ${artO(1.5)}/>`,
+  // items
+  coin: `<circle cx="32" cy="32" r="22" fill="#ffd23d" ${artO()}/><circle cx="32" cy="32" r="14" fill="none" stroke="#e0a800" stroke-width="3"/><path d="M32 22v20" stroke="#e0a800" stroke-width="5" stroke-linecap="round"/>${artShine(22, 22)}`,
+  gem: `<path d="M18 12h28l12 14-26 30L6 26z" fill="#4fc3f7" ${artO()}/><path d="M6 26h52M18 12l8 14 6 30 6-30 8-14M26 26h12" fill="none" stroke="#1e88b5" stroke-width="2"/>${artShine(20, 20)}`,
+  gemRed: `<path d="M18 12h28l12 14-26 30L6 26z" fill="#ff5c7a" ${artO()}/><path d="M6 26h52M18 12l8 14 6 30 6-30 8-14M26 26h12" fill="none" stroke="#c2185b" stroke-width="2"/>${artShine(20, 20)}`,
+  heart: `<path d="M32 56S6 40 6 22c0-8 6-14 14-14 6 0 10 4 12 8 2-4 6-8 12-8 8 0 14 6 14 14 0 18-26 34-26 34z" fill="#ff4d6d" ${artO()}/>${artShine(18, 20, 4)}`,
+  star: `<path d="M32 4l8 18 20 2-15 13 5 20-18-11-18 11 5-20L4 24l20-2z" fill="#ffd23d" ${artO()}/>${artShine(26, 22)}`,
+  key: `<circle cx="18" cy="32" r="12" fill="#ffd23d" ${artO()}/><circle cx="18" cy="32" r="4" fill="#fff8e1" ${artO(2)}/><path d="M30 32h28M50 32v10M42 32v8" fill="none" stroke="${ART_O}" stroke-width="9" stroke-linecap="round"/><path d="M30 32h28M50 32v10M42 32v8" fill="none" stroke="#ffd23d" stroke-width="4" stroke-linecap="round"/>`,
+  potion: `<path d="M26 6h12v14l12 16c4 8 0 22-18 22S10 44 14 36l12-16z" fill="#ef4f9b" ${artO()}/><path d="M16 38h32" stroke="#fff" stroke-width="2" opacity=".6"/><rect x="24" y="4" width="16" height="6" rx="2" fill="#a1887f" ${artO(2)}/>${artShine(24, 44)}`,
+  potionBlue: `<path d="M26 6h12v14l12 16c4 8 0 22-18 22S10 44 14 36l12-16z" fill="#4f8cff" ${artO()}/><path d="M16 38h32" stroke="#fff" stroke-width="2" opacity=".6"/><rect x="24" y="4" width="16" height="6" rx="2" fill="#a1887f" ${artO(2)}/>${artShine(24, 44)}`,
+  sword: `<path d="M40 6l18 0 0 18-26 26-18-18z" fill="#dfe6ee" ${artO()}/><path d="M12 36l16 16" ${artO(6)}/><path d="M12 36l16 16" stroke="#ffd23d" stroke-width="3" stroke-linecap="round"/><path d="M14 50l-8 8" ${artO(7)}/><path d="M14 50l-8 8" stroke="#8d5a2b" stroke-width="3" stroke-linecap="round"/>`,
+  shield: `<path d="M32 4l24 8v16c0 16-10 26-24 32C18 54 8 44 8 28V12z" fill="#3f7fd8" ${artO()}/><path d="M32 12v40M14 26h36" stroke="#ffd23d" stroke-width="5"/>`,
+  bomb: `<circle cx="28" cy="38" r="20" fill="#3a3550" ${artO()}/><rect x="34" y="14" width="10" height="8" rx="2" transform="rotate(35 39 18)" fill="#6f6a8a" ${artO(2)}/><path d="M44 14q4-8 10-6" fill="none" ${artO(2)}/><path d="M55 6l2-4M58 9l4-1M56 3l3 2" stroke="#ff9800" stroke-width="2.5" stroke-linecap="round"/>${artShine(20, 30, 4)}`,
+  chest: `<rect x="8" y="26" width="48" height="28" rx="4" fill="#b57a3e" ${artO()}/><path d="M8 30c0-12 8-18 24-18s24 6 24 18z" fill="#c98a4b" ${artO()}/><path d="M8 30h48" ${artO(3)}/><rect x="27" y="26" width="10" height="12" rx="2" fill="#ffd23d" ${artO(2)}/>`,
+  crown: `<path d="M8 50L4 18l16 12 12-20 12 20 16-12-4 32z" fill="#ffd23d" ${artO()}/><circle cx="32" cy="38" r="4" fill="#ff4d6d" ${artO(1.5)}/><circle cx="18" cy="40" r="3" fill="#4fc3f7"/><circle cx="46" cy="40" r="3" fill="#4fc3f7"/>`,
+  trophy: `<path d="M18 8h28v14c0 10-6 16-14 16s-14-6-14-16z" fill="#ffd23d" ${artO()}/><path d="M18 12H8c0 10 4 14 12 14M46 12h10c0 10-4 14-12 14" fill="none" ${artO()}/><path d="M28 38h8v10h-8z" fill="#e0a800" ${artO(2)}/><rect x="18" y="48" width="28" height="8" rx="2" fill="#8d5a2b" ${artO()}/>`,
+  apple: `<path d="M32 18c-14-8-26 4-22 20 3 12 12 20 22 16 10 4 19-4 22-16 4-16-8-28-22-20z" fill="#e53935" ${artO()}/><path d="M32 18c0-6 2-10 6-12" fill="none" ${artO(3)}/><path d="M34 12c6-4 12-2 14 2-6 2-10 2-14-2z" fill="#66bb6a" ${artO(2)}/>${artShine(20, 28, 4)}`,
+  cherry: `<path d="M22 40C26 24 34 12 46 6M42 40C42 26 44 16 46 6" fill="none" ${artO(3)}/><circle cx="20" cy="44" r="12" fill="#d81b60" ${artO()}/><circle cx="44" cy="44" r="12" fill="#d81b60" ${artO()}/>${artShine(16, 40)}${artShine(40, 40)}`,
+  mushroom: `<rect x="22" y="34" width="20" height="22" rx="6" fill="#fff3e0" ${artO()}/><path d="M6 36C6 18 18 8 32 8s26 10 26 28z" fill="#e53935" ${artO()}/><circle cx="20" cy="24" r="5" fill="#fff"/><circle cx="40" cy="20" r="4" fill="#fff"/><circle cx="46" cy="30" r="3" fill="#fff"/>`,
+  flag: `<path d="M16 6v52" ${artO(4)}/><path d="M18 8c12-6 18 6 34 0v24c-16 6-22-6-34 0z" fill="#4fd36a" ${artO()}/>`,
+  magnet: `<path d="M12 10h14v24a6 6 0 0 0 12 0V10h14v24a20 20 0 0 1-40 0z" fill="#e53935" ${artO()}/><path d="M12 10h14v8H12zM38 10h14v8H38z" fill="#dfe6ee" ${artO(2)}/>`,
+  scroll: `<rect x="12" y="12" width="40" height="40" rx="4" fill="#f5deb3" ${artO()}/><path d="M20 24h24M20 32h24M20 40h16" stroke="#b08a5a" stroke-width="3" stroke-linecap="round"/>`,
+  // nature
+  tree: `<rect x="27" y="36" width="10" height="22" rx="2" fill="#8d5a2b" ${artO()}/><circle cx="32" cy="26" r="20" fill="#4caf50" ${artO()}/><circle cx="24" cy="20" r="5" fill="#81c784"/>`,
+  pine: `<rect x="28" y="46" width="8" height="12" fill="#8d5a2b" ${artO()}/><path d="M32 4L12 30h10L8 48h48L42 30h10z" fill="#2e7d32" ${artO()}/>`,
+  bush: `<path d="M8 50c-4-12 6-20 14-16 0-10 12-14 18-6 8-4 18 4 14 14 6 2 4 8 2 8z" fill="#43a047" ${artO()}/><circle cx="24" cy="40" r="3" fill="#ff5252"/><circle cx="40" cy="38" r="3" fill="#ff5252"/>`,
+  rock: `<path d="M6 52l8-24 14-12 18 4 12 18 0 14z" fill="#9e9e9e" ${artO()}/><path d="M28 16l4 14 14 4" fill="none" stroke="#757575" stroke-width="3"/>`,
+  flower: `<path d="M32 36v22" stroke="#43a047" stroke-width="4"/><path d="M32 48q8-8 14-4-6 8-14 4z" fill="#66bb6a" ${artO(2)}/>${[0, 72, 144, 216, 288].map((a) => `<circle cx="${32 + Math.cos(a * Math.PI / 180) * 11}" cy="${24 + Math.sin(a * Math.PI / 180) * 11}" r="8" fill="#ff80ab" ${artO(2)}/>`).join('')}<circle cx="32" cy="24" r="7" fill="#ffd23d" ${artO(2)}/>`,
+  cloud: `<path d="M14 46c-8 0-10-12-2-14 0-10 12-14 18-8 4-8 18-8 20 4 10 0 12 18 0 18z" fill="#ffffff" ${artO()}/>`,
+  sun: `<circle cx="32" cy="32" r="14" fill="#ffd23d" ${artO()}/>${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); return `<path d="M${32 + c * 20} ${32 + s * 20}L${32 + c * 28} ${32 + s * 28}" stroke="#ffb300" stroke-width="4" stroke-linecap="round"/>`; }).join('')}`,
+  moon: `<path d="M40 8a24 24 0 1 0 16 36A20 20 0 0 1 40 8z" fill="#fff3b0" ${artO()}/><circle cx="26" cy="30" r="3" fill="#e6d77a"/><circle cx="32" cy="44" r="4" fill="#e6d77a"/>`,
+  fire: `<path d="M32 58c-14 0-22-10-18-24 2-8 8-10 8-18 8 4 10 10 10 16 2-4 4-8 4-14 10 8 16 18 14 26-2 8-8 14-18 14z" fill="#ff7043" ${artO()}/><path d="M32 56c-6 0-10-4-8-10 2-4 6-6 6-10 6 4 10 8 10 12 0 6-4 8-8 8z" fill="#ffd23d"/>`,
+  drop: `<path d="M32 6C24 20 14 30 14 40a18 18 0 0 0 36 0c0-10-10-20-18-34z" fill="#4fa3ff" ${artO()}/>${artShine(24, 40, 4)}`,
+  cactus: `<path d="M26 58V12a6 6 0 0 1 12 0v46z" fill="#5cb85c" ${artO()}/><path d="M26 36h-8a4 4 0 0 1-4-4v-8a4 4 0 0 1 8 0v4h4M38 30h6v-6a4 4 0 0 1 8 0v8a6 6 0 0 1-6 6h-8" fill="#5cb85c" ${artO()}/>`,
+  grass: `<path d="M8 56c2-12 4-18 8-24 0 8 2 14 4 20 2-14 6-24 12-30-2 12 0 22 2 30 2-10 6-18 12-22-2 8-2 16 0 22 2-6 6-10 10-12-2 6-2 12 0 16z" fill="#66bb6a" ${artO(2.5)}/>`,
+  // vehicles
+  car: `<path d="M4 44v-8l8-2 8-12h22l10 12 8 2v8z" fill="#e53935" ${artO()}/><path d="M22 26h8v8h-14zM34 26h6l6 8H34z" fill="#bbdefb" ${artO(2)}/><circle cx="16" cy="46" r="7" fill="${ART_O}"/><circle cx="48" cy="46" r="7" fill="${ART_O}"/><circle cx="16" cy="46" r="2.5" fill="#bbb"/><circle cx="48" cy="46" r="2.5" fill="#bbb"/>`,
+  rocket: `<path d="M32 4c10 8 14 20 12 36H20C18 24 22 12 32 4z" fill="#eef2f7" ${artO()}/><circle cx="32" cy="24" r="6" fill="#4fc3f7" ${artO(2)}/><path d="M20 30l-10 14 10-2zM44 30l10 14-10-2z" fill="#e53935" ${artO()}/><path d="M26 42q6 16 12 0z" fill="#ff9800" ${artO(2)}/>`,
+  ufo: `<ellipse cx="32" cy="38" rx="28" ry="10" fill="#9eb3c2" ${artO()}/><path d="M16 34c0-12 7-20 16-20s16 8 16 20z" fill="#7ee36d" opacity=".85" ${artO()}/><circle cx="18" cy="40" r="2.5" fill="#ffd23d"/><circle cx="32" cy="42" r="2.5" fill="#ffd23d"/><circle cx="46" cy="40" r="2.5" fill="#ffd23d"/>`,
+  plane: `<path d="M6 34l50-10c4 0 6 4 2 6L8 40z" fill="#eef2f7" ${artO()}/><path d="M26 30l-8-16h8l14 14zM30 38l-6 14h8l10-14z" fill="#3f7fd8" ${artO(2.5)}/><path d="M8 34l-2-10h6l4 8z" fill="#3f7fd8" ${artO(2)}/>`,
+  boat: `<path d="M6 40h52l-8 14H14z" fill="#8d5a2b" ${artO()}/><path d="M32 6v34" ${artO(3)}/><path d="M34 8l18 26H34z" fill="#fff" ${artO(2.5)}/><path d="M30 14L14 34h16z" fill="#ffd23d" ${artO(2.5)}/>`,
+  // blocks & places
+  brick: `<rect x="4" y="4" width="56" height="56" fill="#c0603e" ${artO()}/><path d="M4 18h56M4 32h56M4 46h56M22 4v14M44 4v14M12 18v14M34 18v14M54 18v14M22 32v14M44 32v14M12 46v14M34 46v14" stroke="#7a3520" stroke-width="2.5"/>`,
+  crate: `<rect x="6" y="6" width="52" height="52" rx="3" fill="#c98a4b" ${artO()}/><rect x="12" y="12" width="40" height="40" fill="none" stroke="#8d5a2b" stroke-width="3"/><path d="M12 12l40 40M52 12L12 52" stroke="#8d5a2b" stroke-width="3"/>`,
+  grassBlock: `<rect x="4" y="4" width="56" height="56" fill="#9c6b3e" ${artO()}/><path d="M4 4h56v16c-4 4-8 0-10 4s-6 4-8 0-6-4-8 0-6 4-8 0-6-4-8 0-6 4-8 0-4-4-6 0V4z" fill="#5cc45a" ${artO(2)}/><circle cx="20" cy="40" r="2.5" fill="#7a5230"/><circle cx="42" cy="48" r="2.5" fill="#7a5230"/>`,
+  stone: `<rect x="4" y="4" width="56" height="56" fill="#8a8f99" ${artO()}/><path d="M4 24l14-4 10 8 16-6 16 6M18 20v-16M34 42l-8 18M34 42l26-6M28 28l6 14" fill="none" stroke="#6b707a" stroke-width="2.5"/>`,
+  spikes: `<path d="M2 58l8-26 8 26 7-26 7 26 7-26 7 26 8-26 8 26z" fill="#c4ccd6" ${artO()}/>`,
+  door: `<path d="M14 58V18a18 18 0 0 1 36 0v40z" fill="#8d5a2b" ${artO()}/><path d="M32 4v54" stroke="#6b4320" stroke-width="2.5"/><circle cx="40" cy="36" r="3" fill="#ffd23d" ${artO(1.5)}/>`,
+  ladder: `<path d="M18 2v60M46 2v60" ${artO(4)}/><path d="M18 2v60M46 2v60" stroke="#c98a4b" stroke-width="2"/><path d="M18 12h28M18 26h28M18 40h28M18 54h28" stroke="#c98a4b" stroke-width="5"/>`,
+  portal: `<ellipse cx="32" cy="32" rx="20" ry="28" fill="#7b4bc4" ${artO()}/><ellipse cx="32" cy="32" rx="13" ry="20" fill="#b388ff"/><ellipse cx="32" cy="32" rx="6" ry="11" fill="#ede7f6"/>`,
+  sign: `<path d="M30 30v28h4V30" fill="#8d5a2b" ${artO(2)}/><rect x="8" y="10" width="48" height="24" rx="3" fill="#c98a4b" ${artO()}/><path d="M16 18h32M16 26h20" stroke="#6b4320" stroke-width="3" stroke-linecap="round"/>`,
+  torch: `<path d="M28 30h8l-2 28h-4z" fill="#8d5a2b" ${artO(2.5)}/><path d="M32 32c-8 0-12-6-10-14 2-4 4-6 4-10 4 2 6 6 6 8 2-2 2-6 2-8 6 6 8 10 8 14 0 6-4 10-10 10z" fill="#ff7043" ${artO(2.5)}/><path d="M32 30c-3 0-5-2-4-6 1-2 3-3 3-5 3 2 5 4 5 6 0 3-2 5-4 5z" fill="#ffd23d"/>`,
+  house: `<path d="M8 30L32 8l24 22v28H8z" fill="#f3e5ab" ${artO()}/><path d="M4 32L32 6l28 26" fill="none" stroke="#c0392b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><rect x="26" y="38" width="12" height="20" fill="#8d5a2b" ${artO(2)}/><rect x="14" y="34" width="8" height="8" fill="#81d4fa" ${artO(2)}/><rect x="42" y="34" width="8" height="8" fill="#81d4fa" ${artO(2)}/>`,
+  castle: `<path d="M6 58V20h8v6h8v-6h8v6h4v-6h8v6h8v-6h8v38z" fill="#9e9e9e" ${artO()}/><path d="M26 58V44a6 6 0 0 1 12 0v14z" fill="#5d4037" ${artO(2)}/><rect x="14" y="34" width="6" height="8" fill="${ART_O}"/><rect x="44" y="34" width="6" height="8" fill="${ART_O}"/>`,
+  // UI icons (white, for buttons and nav bars)
+  'ui-home': artIcon('M10 30L32 10l22 20M16 26v26h32V26M27 52V38h10v14'),
+  'ui-play': `<path d="M22 12l28 20-28 20z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>`,
+  'ui-pause': `<rect x="16" y="12" width="10" height="40" rx="3" fill="#fff"/><rect x="38" y="12" width="10" height="40" rx="3" fill="#fff"/>`,
+  'ui-menu': artIcon('M12 18h40M12 32h40M12 46h40'),
+  'ui-close': artIcon('M16 16l32 32M48 16L16 48'),
+  'ui-back': artIcon('M38 12L18 32l20 20'),
+  'ui-next': artIcon('M26 12l20 20-20 20'),
+  'ui-gear': `<circle cx="32" cy="32" r="9" fill="none" stroke="#fff" stroke-width="5"/>${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); return `<path d="M${32 + c * 16} ${32 + s * 16}L${32 + c * 24} ${32 + s * 24}" stroke="#fff" stroke-width="7" stroke-linecap="round"/>`; }).join('')}<circle cx="32" cy="32" r="17" fill="none" stroke="#fff" stroke-width="5"/>`,
+  'ui-user': artIcon('M14 54c0-10 8-16 18-16s18 6 18 16', '<circle cx="32" cy="22" r="10" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-cart': artIcon('M6 12h8l6 28h28l6-20H18', '<circle cx="24" cy="50" r="4" fill="#fff"/><circle cx="44" cy="50" r="4" fill="#fff"/>'),
+  'ui-star': `<path d="M32 8l7 15 16 2-12 11 3 16-14-8-14 8 3-16L9 25l16-2z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>`,
+  'ui-heart': `<path d="M32 52S10 38 10 24c0-7 5-12 11-12 5 0 9 3 11 7 2-4 6-7 11-7 6 0 11 5 11 12 0 14-22 28-22 28z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>`,
+  'ui-trophy': artIcon('M20 10h24v12c0 8-5 13-12 13s-12-5-12-13zM20 14h-8c0 8 3 11 8 12M44 14h8c0 8-3 11-8 12M32 35v10M22 52h20'),
+  'ui-map': artIcon('M8 14l16-6 16 6 16-6v42l-16 6-16-6-16 6zM24 8v42M40 14v42'),
+  'ui-chat': artIcon('M10 14h44v28H28l-12 10v-10h-6z'),
+  'ui-bell': artIcon('M18 44V28a14 14 0 0 1 28 0v16l4 4H14zM28 54h8'),
+  'ui-search': artIcon('M42 42l12 12', '<circle cx="28" cy="28" r="15" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-plus': artIcon('M32 12v40M12 32h40'),
+  'ui-music': artIcon('M24 46V14l26-6v32', '<circle cx="18" cy="46" r="7" fill="#fff"/><circle cx="44" cy="40" r="7" fill="#fff"/>'),
+  'ui-sound': artIcon('M10 24h10l14-12v40L20 40H10zM42 22q8 10 0 20M48 16q14 16 0 32'),
+  'ui-lock': artIcon('M18 30h28v24H18zM24 30v-8a8 8 0 0 1 16 0v8'),
+  'ui-check': artIcon('M12 34l14 14 26-30'),
+  'ui-coin': `<circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="5"/><path d="M32 22v20" stroke="#fff" stroke-width="5" stroke-linecap="round"/>`,
+  'ui-gem': artIcon('M18 12h28l12 14-26 30L6 26zM6 26h52'),
+  'ui-shop': artIcon('M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'),
+  'ui-info': artIcon('M32 28v18M32 18v1', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+};
+/** Groups for the Project panel's sprite library. */
+export const SPRITE_GROUPS = {
+  Characters: ['hero', 'girl', 'wizard', 'knight', 'robot', 'cat', 'dog', 'frog', 'bird', 'ninja', 'astronaut', 'alien'],
+  Enemies: ['slime', 'slimeBlue', 'ghost', 'bat', 'skull', 'spider', 'bee', 'shark', 'eyeMonster', 'dragon', 'zombie'],
+  Items: ['coin', 'gem', 'gemRed', 'heart', 'star', 'key', 'potion', 'potionBlue', 'sword', 'shield', 'bomb', 'chest', 'crown', 'trophy', 'apple', 'cherry', 'mushroom', 'flag', 'magnet', 'scroll'],
+  Nature: ['tree', 'pine', 'bush', 'rock', 'flower', 'cloud', 'sun', 'moon', 'fire', 'drop', 'cactus', 'grass'],
+  Vehicles: ['car', 'rocket', 'ufo', 'plane', 'boat'],
+  Blocks: ['brick', 'crate', 'grassBlock', 'stone', 'spikes', 'door', 'ladder', 'portal', 'sign', 'torch', 'house', 'castle'],
+  Icons: Object.keys(SPRITE_ART).filter((k) => k.startsWith('ui-')),
+};
+const artCache = new Map();
+/** 'art:slime' → an SVG data URL (other sources pass through). */
+export function artURL(src) {
+  if (typeof src !== 'string' || !src.startsWith('art:')) return src;
+  const k = src.slice(4);
+  if (!artCache.has(k)) artCache.set(k, SPRITE_ART[k] ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="128" height="128">${SPRITE_ART[k]}</svg>`) : '');
+  return artCache.get(k);
+}
+
 export function loadImage(src) {
   if (!images.has(src)) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.src = src;
+    img.src = artURL(src);
     images.set(src, img);
   }
   return images.get(src);
@@ -1500,7 +1794,15 @@ function drawEntity2D(ctx, e, vars, time) {
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
-    if (img.complete && img.naturalWidth) ctx.drawImage(img, -e.sprite.w / 2, -e.sprite.h / 2, e.sprite.w, e.sprite.h);
+    if (img.complete && img.naturalWidth) {
+      const S = e.sprite, cols = Math.max(1, S.cols | 0 || 1), rows = Math.max(1, S.rows | 0 || 1);
+      if (S.flip) ctx.scale(-1, 1);
+      if (cols > 1 || rows > 1) { // sprite sheet: draw one cell of the grid
+        const fw = img.naturalWidth / cols, fh = img.naturalHeight / rows, f = ((S.frame | 0) % (cols * rows) + cols * rows) % (cols * rows);
+        ctx.drawImage(img, (f % cols) * fw, Math.floor(f / cols) * fh, fw, fh, -S.w / 2, -S.h / 2, S.w, S.h);
+      } else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      if (S.flip) ctx.scale(-1, 1);
+    }
   }
   if (e.bar) { // progress / health bar bound to a variable (or this object's own value with "self.hp")
     const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
@@ -1515,8 +1817,9 @@ function drawEntity2D(ctx, e, vars, time) {
       if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${Math.round(k * 100)}%`, 0, 1); }
     } else if (b.icon) { // hearts-style: one icon per point, empty ones faded
       const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
-      ctx.font = `${Math.round(sz)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
+      const img = /^(art:|https?:|data:|blob:|\.?\/)/.test(b.icon) ? loadImage(b.icon) : null; // a sprite (art:heart) or a text symbol (★)
+      ctx.font = `900 ${Math.round(sz)}px system-ui, sans-serif, "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = b.color || b.fill || '#ffffff';
+      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); if (img) { if (img.complete && img.naturalWidth) ctx.drawImage(img, x0 + i * gap - sz / 2, -sz / 2, sz, sz); } else ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
       ctx.globalAlpha = alpha;
     } else {
     e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
@@ -1877,9 +2180,11 @@ export class Renderer3D {
     gl.uniformMatrix4fv(this.u.uModel, false, M4.identity());
     gl.uniformMatrix3fv(this.u.uNormalMat, false, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
     gl.uniform3fv(this.u.uColor, hexToRgb(color)); gl.uniform1f(this.u.uEmissive, 1); gl.uniform1f(this.u.uOpacity, opacity);
+    if (this.u.uVColor) gl.uniform1f(this.u.uVColor, 0); // plain colour, not the last mesh's vertex colours
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
     gl.vertexAttribPointer(this.a.pos, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineNorm); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr.length), gl.DYNAMIC_DRAW);
+    const nrm = new Float32Array(arr.length); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1; // a real normal: a zero one turns the shader's colour into NaN (black lines)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineNorm); gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.DYNAMIC_DRAW);
     gl.vertexAttribPointer(this.a.normal, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.normal);
     if (opacity < 1) gl.enable(gl.BLEND);
     gl.drawArrays(gl.LINES, 0, arr.length / 3);
@@ -2133,12 +2438,29 @@ const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('rig
 export function uiOrigin(e, W, H, safe) {
   const p = e.parentEnt;
   if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
-  return anchorPoint(e.anchor, W, H, safe);
+  return anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe);
 }
-/** Screen box of a UI element: centre x/y, width, height. */
+/** UI scale (Canvas Scaler): screen pixels per UI unit. It rides along on the safe-area object. */
+export const uiK = (safe) => safe?.k || 1;
+/** Screen box of a UI element: centre x/y, width, height (in screen pixels, UI scale applied). */
 export function uiBox(e, W, H, safe) {
-  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy;
-  return { x: o.x + e.x + (ex.ox || 0), y: o.y + e.y + (ex.oy || 0), w: hw * 2, h: hh * 2 };
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy, k = uiK(safe);
+  return { x: o.x + (e.x + (ex.ox || 0)) * k, y: o.y + (e.y + (ex.oy || 0)) * k, w: hw * 2 * k, h: hh * 2 * k };
+}
+/** Put a UI element's centre at a screen point (the inverse of uiBox). */
+export function placeUI(e, sx, sy, W, H, safe) {
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), k = uiK(safe);
+  e.x = (sx - o.x) / k - (ex.ox || 0); e.y = (sy - o.y) / k - (ex.oy || 0);
+}
+/**
+ * How big UI should be on this screen (like Unity's Canvas Scaler "Scale With Screen Size"):
+ * the game's design size (view width × height) is the reference; match 0 = by width, 1 = by height, 0.5 = both.
+ */
+export function uiScaleFor(W, H, settings = {}, view = {}) {
+  if (settings.uiScale === 'constant') return clamp(+settings.uiScaleFactor || 1, 0.25, 4);
+  const rw = +view.width || 400, rh = +view.height || 700, m = clamp(settings.uiMatch ?? 0.5, 0, 1);
+  const k = Math.exp((1 - m) * Math.log(W / rw) + m * Math.log(H / rh));
+  return clamp(k * (+settings.uiScaleFactor || 1), +settings.uiMinScale || 0.6, +settings.uiMaxScale || 2.5);
 }
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
@@ -2149,11 +2471,12 @@ export function anchorPoint(anchor, W, H, safe) {
 
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
-  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null;
-  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: safe.left, t: safe.top, w: W - safe.left - safe.right, h: H - safe.top - safe.bottom };
+  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
+  const sf = e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe;
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: sf.left, t: sf.top, w: W - sf.left - sf.right, h: H - sf.top - sf.bottom };
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w - m * 2)); e.x = box.l + box.w / 2 - ao.x; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h - m * 2)); e.y = box.t + box.h / 2 - ao.y; }
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -2196,18 +2519,32 @@ function renderUI(engine, scene) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
     for (const e of scene.entities) {
-      if (!e.ui || !e.visible || e.dead || e._parentHidden) continue;
+      if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
+      if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
-      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
+      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
+      if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
-      const o = uiOrigin(e, W, H, engine.safe);
-      ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time);
+      const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
+      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       ctx.restore();
     }
     if (V) ctx.restore();
   }
   if (engine.editing) return;
+  for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  if (scene.popups?.length) { // floating "+10" texts
+    const now = scene.time;
+    scene.popups = scene.popups.filter((q) => now - q.t < q.life);
+    for (const q of scene.popups) {
+      const k = (now - q.t) / q.life;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.fillStyle = q.color;
+      const y = q.y - k * q.rise; ctx.strokeText(q.text, q.x, y); ctx.fillText(q.text, q.x, y);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   const big = (txt, y, size, color = '#fff') => {
     ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
@@ -2599,7 +2936,7 @@ registerBehavior('hazard', {
   ],
   create(p) {
     return {
-      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || other.dead || s.state !== 'play' || e.data.blinkOff) return;
         if (other.data.invuln > 0) return;
@@ -2829,75 +3166,188 @@ registerBehavior('camera', {
 });
 
 // ---- animation components ----
-const VEC_FX = ['move to', 'move by', 'jump to', 'punch position'];
+const VEC_FX = ['move to', 'move by', 'move from', 'jump to', 'punch position'];
+export const TWEEN_EFFECTS = ['move by', 'move to', 'move from', 'rotate by', 'rotate to', 'spin', 'scale to', 'scale by', 'fade to', 'color to', 'punch scale', 'punch position', 'punch rotation',
+  'shake position', 'shake rotation', 'shake scale', 'path', 'jump to', 'spiral', 'look at', 'blink', 'type text', 'count up'];
+const AMOUNT_FX = ['scale to', 'scale by', 'fade to', 'punch scale', 'punch rotation', 'shake position', 'shake rotation', 'shake scale'];
+/** Build one Tween effect on an object (shared by the Tween and Tween Sequence components). Returns the tween, already running. */
+export function tweenEffect(s, e, p) {
+  const o = { ease: p.ease, loops: +p.loops || 0, loopType: p.loopType || 'restart', delay: +p.delay || 0, speedBased: !!p.speedBased, id: p.id || undefined };
+  const d = Math.max(0.01, +p.duration || 1), three = is3D(e), A = (k, def) => (Number.isFinite(+p[k]) && p[k] !== '' ? +p[k] : def);
+  const vec = { x: +p.x || 0, y: +p.y || 0, ...(three ? { z: +p.z || 0 } : {}) }, rk = three ? 'ry' : 'rz';
+  const loopIt = (tw) => { if (tw) { tw.setLoops(o.loops, o.loopType === 'incremental' ? 'restart' : o.loopType); tw.delay = o.delay; tw.id = o.id; } return tw; };
+  let tw = null;
+  switch (p.effect) {
+    case 'move to': tw = s.to(e, vec, d, o); break;
+    case 'move by': tw = s.to(e, vec, d, { ...o, relative: true }); break;
+    case 'move from': tw = s.to(e, vec, d, { ...o, relative: true, from: true }); break;
+    case 'rotate by': tw = s.to(e, { [rk]: A('angle', 360) }, d, { ...o, relative: true }); break;
+    case 'rotate to': tw = s.to(e, { [rk]: A('angle', 0) }, d, o); break;
+    case 'spin': tw = s.to(e, { [rk]: A('angle', 360) }, d, { ...o, ease: 'linear', relative: true, loops: o.loops, loopType: 'incremental' }); break;
+    case 'scale to': tw = s.to(e, { scale: A('amount', 1) }, d, o); break;
+    case 'scale by': { const k = A('amount', 1.5); tw = s.to(e, three ? { sx: e.sx * k, sy: e.sy * k, sz: e.sz * k } : { sx: e.sx * k, sy: e.sy * k }, d, o); break; }
+    case 'fade to': tw = s.to(e, { alpha: clamp(A('amount', 0), 0, 1) }, d, o); break;
+    case 'color to': tw = s.to(e, e.mesh ? { 'mesh.color': p.color } : e.text && !e.shape ? { 'text.color': p.color } : { 'shape.fill': p.color }, d, o); break;
+    case 'punch scale': { const a = A('amount', 0.3); tw = loopIt(s.punch(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break; }
+    case 'punch position': tw = loopIt(s.punch(e, vec, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break;
+    case 'punch rotation': tw = loopIt(s.punch(e, { [rk]: A('amount', 30) }, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break;
+    case 'shake position': { const a = A('amount', three ? 0.3 : 10); tw = loopIt(s.shakeProps(e, three ? { x: a, y: a, z: a } : { x: a, y: a }, d, { vibrato: A('vibrato', 18) })); break; }
+    case 'shake rotation': tw = loopIt(s.shakeProps(e, { [rk]: A('amount', 15) }, d, { vibrato: A('vibrato', 18) })); break;
+    case 'shake scale': { const a = A('amount', 0.2); tw = loopIt(s.shakeProps(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { vibrato: A('vibrato', 18) })); break; }
+    case 'path': { const pts = (Array.isArray(p.points) ? p.points : []).map((q) => ({ x: e.x + (+q.x || 0), y: e.y + (+q.y || 0), z: e.z + (+q.z || 0) })); if (pts.length) tw = s.path(e, pts, d, { ...o, orient: p.orient, closed: p.closed }); break; }
+    case 'jump to': tw = s.jumpTo(e, vec, A('height', three ? 2 : 80), Math.max(1, A('jumps', 1)), d, { ease: p.ease, delay: o.delay, id: o.id, relative: true }); tw.setLoops(o.loops, o.loopType); break;
+    case 'spiral': tw = s.spiral(e, d, { radius: A('radius', three ? 3 : 120), turns: A('turns', 3), ...o }); break;
+    case 'look at': { const t = nearest(s, e, p.target || 'player'); tw = t ? s.lookAtTween(e, t, d, o) : null; break; }
+    case 'blink': tw = loopIt(s.blink(e, d, Math.max(1, A('times', 6)))); break;
+    case 'type text': tw = s.typeText(e, p.text ?? '', d, { ...o, scramble: !!p.scramble }); break;
+    case 'count up': {
+      const v = p.var || '', to = A('to', 100);
+      tw = v ? s.counter(v, +s.vars[v] || 0, to, d, o) : s.counter(e, A('from', 0), to, d, { ...o, prefix: p.prefix || '', suffix: p.suffix || '' });
+      break;
+    }
+    default: break;
+  }
+  if (tw && p.from && p.effect !== 'move from' && tw.props && Object.keys(tw.props).length) tw.setFrom(true);
+  return tw;
+}
 /** Tween (DOTween Animation): animate this object with easing and loops, no code needed. */
 registerBehavior('tween', {
-  label: 'Tween', description: 'Animate this object with no code: move, rotate, scale, fade, color, punch, shake, follow a path or jump, with easing, loops and delays.',
+  label: 'Tween', description: 'Animate this object with no code (like DOTween): move, rotate, spin, scale, fade, color, punch, shake, path, jump, spiral, look at, blink, type text or count up, with easing, loops and delays.',
   params: [
-    { key: 'effect', label: 'Effect', type: 'select', options: ['move by', 'move to', 'rotate by', 'scale to', 'fade to', 'color to', 'punch scale', 'punch position', 'shake position', 'shake rotation', 'path', 'jump to'], default: 'move by' },
+    { key: 'effect', label: 'Effect', type: 'select', options: TWEEN_EFFECTS, default: 'move by' },
     { key: 'x', label: 'X', type: 'number', default: 0, showIf: { effect: VEC_FX } },
     { key: 'y', label: 'Y', type: 'number', default: -40, default3d: 1, showIf: { effect: VEC_FX } },
     { key: 'z', label: 'Z (3D)', type: 'number', default: 0, showIf: { effect: VEC_FX }, only3d: true },
-    { key: 'angle', label: 'Degrees', type: 'number', default: 360, showIf: { effect: ['rotate by'] } },
-    { key: 'amount', label: 'Amount', type: 'number', default: 0.3, showIf: { effect: ['scale to', 'fade to', 'punch scale', 'shake position', 'shake rotation'] }, info: { 'scale to': 'Final size (1 = normal).', 'fade to': 'Final opacity: 0 = invisible, 1 = solid.', 'punch scale': 'How much bigger it pops (0.3 = 30%).', 'shake position': 'How far it jitters.', 'shake rotation': 'How many degrees it wobbles.' } },
+    { key: 'angle', label: 'Degrees', type: 'number', default: 360, showIf: { effect: ['rotate by', 'rotate to', 'spin'] }, info: { spin: 'Degrees per turn of the loop: 360 = one full spin each Duration.' } },
+    { key: 'amount', label: 'Amount', type: 'number', default: 0.3, showIf: { effect: AMOUNT_FX }, info: { 'scale to': 'Final size (1 = normal).', 'scale by': 'Multiply the size (2 = twice as big).', 'fade to': 'Final opacity: 0 = invisible, 1 = solid.', 'punch scale': 'How much bigger it pops (0.3 = 30%).', 'punch rotation': 'Degrees it kicks round.', 'shake position': 'How far it jitters.', 'shake rotation': 'How many degrees it wobbles.', 'shake scale': 'How much the size jitters.' } },
+    { key: 'vibrato', label: 'Vibrato (wobbles)', type: 'number', default: 10, range: [1, 40], step: 1, showIf: { effect: ['punch scale', 'punch position', 'punch rotation', 'shake position', 'shake rotation', 'shake scale'] } },
+    { key: 'elasticity', label: 'Elasticity', type: 'number', default: 0.6, range: [0, 1], step: 0.05, showIf: { effect: ['punch scale', 'punch position', 'punch rotation'] } },
     { key: 'color', label: 'Color', type: 'color', default: '#ff5252', showIf: { effect: ['color to'] } },
     { key: 'points', label: 'Path points (relative)', type: 'json', default: [{ x: 120, y: 0 }, { x: 120, y: 120 }, { x: 0, y: 120 }], default3d: [{ x: 3, y: 0, z: 0 }, { x: 3, y: 0, z: 3 }, { x: 0, y: 0, z: 3 }], showIf: { effect: ['path'] } },
     { key: 'orient', label: 'Face the way it moves', type: 'bool', default: false, showIf: { effect: ['path'] } },
+    { key: 'closed', label: 'Closed loop (back to start)', type: 'bool', default: false, showIf: { effect: ['path'] } },
     { key: 'height', label: 'Jump height', type: 'number', default: 80, default3d: 2, showIf: { effect: ['jump to'] } },
+    { key: 'jumps', label: 'Number of hops', type: 'number', default: 1, range: [1, 10], step: 1, showIf: { effect: ['jump to'] } },
+    { key: 'radius', label: 'Radius', type: 'number', default: 120, default3d: 3, showIf: { effect: ['spiral'] } },
+    { key: 'turns', label: 'Turns', type: 'number', default: 3, step: 0.5, showIf: { effect: ['spiral'] } },
+    { key: 'target', label: 'Look at (object or tag)', type: 'text', default: 'player', suggest: 'tags', showIf: { effect: ['look at'] } },
+    { key: 'times', label: 'Blinks', type: 'number', default: 6, range: [1, 30], step: 1, showIf: { effect: ['blink'] } },
+    { key: 'text', label: 'Text to type', type: 'text', default: 'Hello there!', showIf: { effect: ['type text'] } },
+    { key: 'scramble', label: 'Scramble letters while typing', type: 'bool', default: false, showIf: { effect: ['type text'] } },
+    { key: 'var', label: 'Count variable (blank = this text)', type: 'text', default: '', suggest: 'vars', showIf: { effect: ['count up'] } },
+    { key: 'to', label: 'Count to', type: 'number', default: 100, showIf: { effect: ['count up'] } },
+    { key: 'prefix', label: 'Text before', type: 'text', default: '', showIf: (b) => b.effect === 'count up' && !b.var },
+    { key: 'suffix', label: 'Text after', type: 'text', default: '', showIf: (b) => b.effect === 'count up' && !b.var },
     { key: 'duration', label: 'Duration (sec)', type: 'number', default: 1, range: [0.05, 10], step: 0.05 },
+    { key: 'speedBased', label: 'Duration is a speed (units per sec)', type: 'bool', default: false, showIf: { effect: ['move by', 'move to', 'move from', 'rotate by', 'rotate to'] }, info: 'Like DOTween SetSpeedBased: long moves take longer, so everything moves at the same speed.' },
     { key: 'ease', label: 'Ease', type: 'select', options: EASES, default: 'inOutSine', ease: true },
+    { key: 'from', label: 'Play as From (start at the value, end where it is)', type: 'bool', default: false, showIf: { effect: ['move to', 'rotate to', 'scale to', 'fade to', 'color to'] } },
     { key: 'loops', label: 'Loops (-1 = forever)', type: 'number', default: -1, range: [-1, 20], step: 1 },
     { key: 'loopType', label: 'Loop type', type: 'select', options: ['yoyo', 'restart', 'incremental'], default: 'yoyo', showIf: (b) => +b.loops !== 0 },
     { key: 'delay', label: 'Delay (sec)', type: 'number', default: 0, range: [0, 10], step: 0.05, group: 'Timing & trigger' },
-    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'touched by tag', 'message', 'never'], default: 'start', group: 'Timing & trigger' },
+    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'tap (forward / back)', 'touched by tag', 'message', 'never'], default: 'start', group: 'Timing & trigger', info: { 'tap (forward / back)': 'Each tap plays it the other way, like a switch.' } },
     { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player', suggest: 'tags', showIf: { playOn: ['touched by tag'] }, group: 'Timing & trigger' },
     { key: 'message', label: 'Message name', type: 'text', default: 'go', suggest: 'messages', showIf: { playOn: ['message'] }, group: 'Timing & trigger' },
+    { key: 'id', label: 'Tween ID', type: 'text', default: '', group: 'Timing & trigger', info: 'Name it to pause, resume, reverse or stop it from nodes (Tween ID fields).' },
+    { key: 'loopDo', label: 'Each loop, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops !== 0 },
+    { key: 'loopValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.loopDo && b.loopDo !== 'nothing' && +b.loops !== 0 },
     { key: 'thenDo', label: 'When finished, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops >= 0 },
     { key: 'thenValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.thenDo && b.thenDo !== 'nothing' && +b.loops >= 0 },
   ],
   create(p) {
     let tw = null;
+    const toggle = p.playOn === 'tap (forward / back)';
     const play = (e, s) => {
+      if (toggle && tw && !tw.done) { tw.flip(); return; }
       tw?.kill();
-      const o = { ease: p.ease, loops: +p.loops, loopType: p.loopType, delay: +p.delay || 0 }, d = Math.max(0.01, +p.duration || 1), three = is3D(e);
-      const vec = { x: +p.x || 0, y: +p.y || 0, ...(three ? { z: +p.z || 0 } : {}) };
-      switch (p.effect) {
-        case 'move to': tw = s.to(e, vec, d, o); break;
-        case 'move by': tw = s.to(e, vec, d, { ...o, relative: true }); break;
-        case 'rotate by': tw = s.to(e, three ? { ry: +p.angle || 0 } : { rz: +p.angle || 0 }, d, { ...o, relative: true }); break;
-        case 'scale to': tw = s.to(e, { scale: +p.amount || 1 }, d, o); break;
-        case 'fade to': tw = s.to(e, { alpha: clamp(+p.amount, 0, 1) }, d, o); break;
-        case 'color to': tw = s.to(e, e.mesh ? { 'mesh.color': p.color } : e.text && !e.shape ? { 'text.color': p.color } : { 'shape.fill': p.color }, d, o); break;
-        case 'punch scale': { const a = +p.amount || 0.3; tw = s.punch(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { add: true }); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'punch position': tw = s.punch(e, vec, d, { add: true }); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break;
-        case 'shake position': { const a = +p.amount || 10; tw = s.shakeProps(e, three ? { x: a, y: a, z: a } : { x: a, y: a }, d); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'shake rotation': { const a = +p.amount || 15; tw = s.shakeProps(e, three ? { ry: a } : { rz: a }, d); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'path': { const pts = (Array.isArray(p.points) ? p.points : []).map((q) => ({ x: e.x + (+q.x || 0), y: e.y + (+q.y || 0), z: e.z + (+q.z || 0) })); if (pts.length) tw = s.path(e, pts, d, { ...o, orient: p.orient }); break; }
-        case 'jump to': tw = s.jumpTo(e, { x: e.x + vec.x, y: e.y + vec.y, z: e.z + (vec.z || 0) }, +p.height || 0, 1, d, { ease: p.ease, delay: o.delay }); tw.setLoops(+p.loops, p.loopType); break;
-        default: break;
-      }
-      if (tw && p.thenDo && p.thenDo !== 'nothing') tw.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
+      tw = tweenEffect(s, e, toggle ? { ...p, loops: 0 } : p);
+      if (!tw) return;
+      if (toggle) tw.setAutoKill(false);
+      if (p.loopDo && p.loopDo !== 'nothing') tw.onStepComplete(() => runAction(s, e, { action: p.loopDo, value: p.loopValue, amount: 1 }));
+      if (p.thenDo && p.thenDo !== 'nothing') tw.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
     };
-    let off = null;
     return {
       play, uiAlways: true,
+      get tween() { return tw; },
       start(e, s) {
         if (p.playOn === 'start') play(e, s);
         if (p.playOn === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
-        if (p.playOn === 'message') s.on('message', off = (name) => { if (name === p.message && !e.dead) play(e, s); });
+        if (p.playOn === 'message') s.on('message', (name) => { if (name === p.message && !e.dead) play(e, s); });
       },
-      update(e, dt, s) { if (p.playOn === 'tap' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) play(e, s); },
+      update(e, dt, s) { if ((p.playOn === 'tap' || toggle) && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) play(e, s); },
       collide(e, other, s) { if (p.playOn === 'touched by tag' && other.has(p.tag)) play(e, s); },
       destroy() { tw?.kill(); },
     };
   },
 });
 
+/** Tween Sequence (DOTween Sequence): several tween steps in a row or at the same time, as one animation. */
+export const SEQ_STEP_DEFAULT = { effect: 'move by', x: 0, y: -40, z: 0, amount: 0.3, angle: 360, color: '#ff5252', duration: 0.4, ease: 'outQuad', with: 'after' };
+registerBehavior('tweenSequence', {
+  label: 'Tween Sequence', description: 'Chain tween steps into one animation (DOTween Sequence): each step plays after the last, at the same time, or after a pause. Loop it, play it on tap or message, and do something when it ends.',
+  params: [
+    { key: 'steps', label: 'Steps', type: 'tweenSteps', default: [
+      { ...SEQ_STEP_DEFAULT, effect: 'scale to', amount: 1.3, duration: 0.2, ease: 'outBack' },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: 20, duration: 0.2, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: -40, duration: 0.3, ease: 'outQuad' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: 40, duration: 0.4, ease: 'outBounce' },
+      { ...SEQ_STEP_DEFAULT, effect: 'scale to', amount: 1, duration: 0.2, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: -20, duration: 0.2, with: 'with' },
+    ], default3d: [
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: 1, duration: 0.3 },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: 180, duration: 0.3, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: -1, duration: 0.4, ease: 'outBounce' },
+    ] },
+    { key: 'loops', label: 'Loops (-1 = forever)', type: 'number', default: 0, range: [-1, 20], step: 1 },
+    { key: 'loopType', label: 'Loop type', type: 'select', options: ['restart', 'yoyo'], default: 'restart', showIf: (b) => +b.loops !== 0 },
+    { key: 'delay', label: 'Delay (sec)', type: 'number', default: 0, range: [0, 10], step: 0.05 },
+    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'touched by tag', 'message', 'never'], default: 'tap' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player', suggest: 'tags', showIf: { playOn: ['touched by tag'] } },
+    { key: 'message', label: 'Message name', type: 'text', default: 'go', suggest: 'messages', showIf: { playOn: ['message'] } },
+    { key: 'restartOnPlay', label: 'Restart if played again', type: 'bool', default: true },
+    { key: 'id', label: 'Tween ID', type: 'text', default: '' },
+    { key: 'thenDo', label: 'When finished, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops >= 0 },
+    { key: 'thenValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.thenDo && b.thenDo !== 'nothing' && +b.loops >= 0 },
+  ],
+  create(p) {
+    let seq = null, base = null;
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const play = (e, s) => {
+      if (seq && !seq.done && !p.restartOnPlay) return;
+      if (seq) { seq.kill(); if (base) Object.assign(e, base); } // back to the rest pose before playing again
+      base = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz, alpha: e.alpha };
+      seq = new Sequence({ loops: +p.loops || 0, loopType: p.loopType, delay: +p.delay || 0, id: p.id || undefined });
+      for (const st of steps) {
+        if (st.with === 'wait') { seq.appendInterval(+st.duration || 0); continue; }
+        const n = s.tweens.length, tw = tweenEffect(s, e, { ...st, loops: 0, delay: 0 });
+        if (!tw) continue;
+        const i = s.tweens.indexOf(tw, n - 1 < 0 ? 0 : n - 1); if (i >= 0) s.tweens.splice(i, 1); // the sequence drives it
+        if (st.with === 'with') seq.join(tw); else seq.append(tw);
+      }
+      seq.target = e;
+      if (p.thenDo && p.thenDo !== 'nothing') seq.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
+      s.tweens.push(seq);
+    };
+    return {
+      play, uiAlways: true,
+      get sequence() { return seq; },
+      start(e, s) {
+        if (p.playOn === 'start') play(e, s);
+        if (p.playOn === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.playOn === 'message') s.on('message', (name) => { if (name === p.message && !e.dead) play(e, s); });
+      },
+      update(e, dt, s) { if (p.playOn === 'tap' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) play(e, s); },
+      collide(e, other, s) { if (p.playOn === 'touched by tag' && other.has(p.tag)) play(e, s); },
+      destroy() { seq?.kill(); },
+    };
+  },
+});
+
 /** Sprite Animation (flipbook): cycle through emoji or image frames. */
 registerBehavior('flipbook', {
-  label: 'Sprite Animation', description: 'Flip through frames like a cartoon: emoji (🐱,😺,😸) or image links, at a speed you choose. Can play only while moving.',
+  label: 'Sprite Animation', description: 'Flip through frames like a cartoon: built-in sprites (art:bird,art:bird2) or image links, at a speed you choose. Can play only while moving.',
   params: [
-    { key: 'frames', label: 'Frames (comma separated)', type: 'text', default: '🐥,🐤,🐣,🐤' },
+    { key: 'frames', label: 'Frames (comma separated)', type: 'text', default: 'art:bird,art:bird2', info: 'Built-in sprites (art:bird), image links, or emoji.' },
     { key: 'fps', label: 'Frames per second', type: 'number', default: 6, range: [1, 30], step: 1 },
     { key: 'mode', label: 'Play mode', type: 'select', options: ['loop', 'ping-pong', 'once'], default: 'loop' },
     { key: 'when', label: 'Play', type: 'select', options: ['always', 'while moving', 'on message'], default: 'always' },
@@ -2907,7 +3357,7 @@ registerBehavior('flipbook', {
     const frames = String(p.frames || '').split(',').map((f) => f.trim()).filter(Boolean);
     let t = 0, px = null, py = null, active = p.when === 'always';
     const show = (e, f) => {
-      if (/^(https?:|data:|blob:|\.?\/)/.test(f)) { e.sprite ||= { ...SPRITE_DEFAULTS }; e.sprite.src = f; }
+      if (/^(https?:|data:|blob:|art:|\.?\/)/.test(f)) { e.sprite ||= { ...SPRITE_DEFAULTS }; e.sprite.src = f; if (e.shape?.type === 'emoji') e.shape = null; }
       else { e.shape ||= { ...SHAPE_DEFAULTS, type: 'emoji', w: 56, h: 56, fill: '' }; e.shape.type = 'emoji'; e.shape.emoji = f; }
     };
     return {
@@ -2948,18 +3398,24 @@ registerBehavior('animator', {
       default3d: [{ name: 'Bounce', length: 1, loop: 'loop', tracks: { y: [[0, 0, 'outQuad'], [0.5, 1, 'inQuad'], [1, 0]], ry: [[0, 0], [1, 360]] } }] },
     { key: 'autoplay', label: 'Play on start', type: 'text', default: 'Bounce', suggest: 'clips' },
     { key: 'speed', label: 'Speed', type: 'number', default: 1, range: [0, 4], step: 0.1 },
+    { key: 'idleClip', label: 'Auto: clip when standing still', type: 'text', default: '', suggest: 'clips', group: 'Auto states', info: 'Fill these and it switches clips by itself, like Unity\'s Animator: idle, moving, in the air.' },
+    { key: 'moveClip', label: 'Auto: clip when moving', type: 'text', default: '', suggest: 'clips', group: 'Auto states' },
+    { key: 'airClip', label: 'Auto: clip in the air', type: 'text', default: '', suggest: 'clips', group: 'Auto states' },
   ],
   create(p) {
-    let clip = null, t = 0, dir = 1, playing = false, last = {};
+    let clip = null, t = 0, dir = 1, playing = false, last = {}, rate = 1, px = null, py = null, pz = null, mode = 'once', manual = false;
     const clips = Array.isArray(p.clips) ? p.clips : [];
     const inst = {
       uiAlways: true,
-      play(name) {
+      play(name, loop, auto = false) { // loop: undefined = the clip's own setting, true / false to override
         const e = inst.entity;
         if (e && clip) inst.apply(e, true); // undo the current clip's offsets
         clip = clips.find((c) => c.name === name) || null; t = 0; dir = 1; playing = !!clip; last = {};
+        mode = loop === undefined ? clip?.loop : loop ? 'loop' : 'once'; manual = !auto;
+        return !!clip;
       },
       stop() { const e = inst.entity; if (e && clip) inst.apply(e, true); playing = false; clip = null; },
+      setSpeed(k) { rate = +k || 0; },
       get current() { return playing ? clip?.name : ''; },
       apply(e, reset = false) {
         for (const [prop, tr] of Object.entries(clip.tracks || {})) {
@@ -2975,15 +3431,84 @@ registerBehavior('animator', {
         s.on('message', (n) => { if (!e.dead && clips.some((c) => c.name === n)) inst.play(n); });
       },
       update(e, dt, s) {
+        if ((p.idleClip || p.moveClip || p.airClip) && !(manual && playing && mode !== 'loop')) { // auto states (a one-shot clip played by a node finishes first)
+          const moved = px !== null && Math.hypot(e.x - px, e.y - py, e.z - pz) > 0.5 * dt * (s.mode === '3d' ? 1 : 30); px = e.x; py = e.y; pz = e.z;
+          const want = e.body && !e.body.grounded && (s.gravity || 0) !== 0 && e.body.gravityScale !== 0 && p.airClip ? p.airClip : moved && p.moveClip ? p.moveClip : p.idleClip;
+          if (want && (clip?.name !== want || !playing)) inst.play(want, undefined, true);
+        }
         if (!playing || !clip) return;
         const L = Math.max(0.01, +clip.length || 1);
-        t += dt * (+p.speed || 0) * dir;
+        t += dt * (+p.speed || 0) * rate * dir;
         if (t >= L || t < 0) {
-          if (clip.loop === 'loop') t = ((t % L) + L) % L;
-          else if (clip.loop === 'ping-pong') { dir = -dir; t = clamp(t, 0, L); }
+          if (mode === 'loop') t = ((t % L) + L) % L;
+          else if (mode === 'ping-pong') { dir = -dir; t = clamp(t, 0, L); }
           else { t = L; inst.apply(e); playing = false; s.emit('animationEnd', e, clip.name); return; }
         }
         inst.apply(e);
+      },
+    };
+    return inst;
+  },
+});
+
+/** Play a clip on whichever animator the object has (keyframe Animator or Sprite Sheet). */
+export function playClip(e, name, loop) {
+  for (const t of ['animator', 'spriteSheet']) { const a = e?.getBehavior(t); if (a?.play(name, loop)) return true; }
+  return false;
+}
+/** Sprite sheet animation: one image cut into a grid of frames, played as named clips. */
+export function parseSheetClips(text) {
+  const out = {};
+  for (const part of String(text || '').split(',')) {
+    const m = part.match(/^\s*([^:]+?)\s*:\s*(\d+)\s*(?:-\s*(\d+))?\s*$/); if (!m) continue;
+    const a = +m[2], b = m[3] != null ? +m[3] : a; out[m[1]] = a <= b ? [a, b] : [b, a];
+  }
+  return out;
+}
+registerBehavior('spriteSheet', {
+  label: 'Sprite Sheet Animator', description: 'Animate with a sprite sheet: one picture cut into a grid of frames. Name clips by frame range (idle: 0-3, run: 4-9) and it can switch idle / run / jump by itself.',
+  params: [
+    { key: 'image', label: 'Sprite sheet', type: 'image', default: '' },
+    { key: 'cols', label: 'Columns', type: 'number', default: 4, step: 1, range: [1, 32] },
+    { key: 'rows', label: 'Rows', type: 'number', default: 1, step: 1, range: [1, 32] },
+    { key: 'size', label: 'Size on screen', type: 'number', default: 64, step: 4 },
+    { key: 'fps', label: 'Frames per second', type: 'number', default: 8, step: 1, range: [1, 30] },
+    { key: 'clips', label: 'Clips (name: first-last, …)', type: 'text', default: 'idle: 0-3', info: 'Frames count from 0, left to right, then the next row. e.g. idle: 0-3, run: 4-9, jump: 10-11' },
+    { key: 'autoplay', label: 'Play on start', type: 'text', default: 'idle' },
+    { key: 'auto', label: 'Switch idle / run / jump by itself', type: 'bool', default: false },
+    { key: 'runClip', label: 'Run clip', type: 'text', default: 'run', showIf: { auto: [true] } },
+    { key: 'jumpClip', label: 'Jump clip', type: 'text', default: 'jump', showIf: { auto: [true] } },
+    { key: 'flip', label: 'Face the way it moves (2D)', type: 'bool', default: true },
+  ],
+  create(p) {
+    const clips = parseSheetClips(p.clips); let cur = null, t = 0, playing = false, once = false, rate = 1, px = null, py = null, manual = false;
+    const inst = {
+      uiAlways: true,
+      play(name, loop, auto = false) { loop ??= true; if (!clips[name]) return false; if (cur !== name) t = 0; cur = name; playing = true; once = !loop; manual = !auto; return true; },
+      stop() { playing = false; },
+      setSpeed(k) { rate = +k || 0; },
+      get current() { return playing ? cur : ''; },
+      start(e, s) {
+        inst.entity = e;
+        e.sprite = { ...SPRITE_DEFAULTS, ...(e.sprite || {}), src: p.image || e.sprite?.src || '', w: p.size, h: p.size, cols: p.cols, rows: p.rows, frame: 0 };
+        if (p.image) { const img = loadImage(p.image); const fit = () => { if (img.naturalWidth) e.sprite.h = p.size * (img.naturalHeight / p.rows) / (img.naturalWidth / p.cols); }; if (img.complete) fit(); else img.addEventListener('load', fit, { once: true }); }
+        if (p.autoplay) inst.play(p.autoplay);
+        s.on('message', (n) => { if (!e.dead && clips[n]) inst.play(n); });
+      },
+      update(e, dt, s) {
+        if (!e.sprite) return;
+        const dx = px === null ? 0 : e.x - px, moved = px !== null && Math.hypot(dx, e.y - py) > 15 * dt; px = e.x; py = e.y;
+        if (p.flip && Math.abs(dx) > 0.5 * dt) e.sprite.flip = dx < 0;
+        if (p.auto && !(manual && playing && once)) { // a clip played once by a node/trigger finishes first
+          const air = e.body && !e.body.grounded && (s.gravity || 0) !== 0 && e.body.gravityScale !== 0;
+          const want = air && clips[p.jumpClip] ? p.jumpClip : moved && clips[p.runClip] ? p.runClip : p.autoplay;
+          if (want && (want !== cur || !playing)) inst.play(want, true, true);
+        }
+        if (!playing || !clips[cur]) return;
+        const [a, b] = clips[cur], n = b - a + 1;
+        t += dt * p.fps * rate;
+        if (t >= n) { if (once) { t = n - 1e-6; playing = false; s.emit('animationEnd', e, cur); } else t %= n; }
+        e.sprite.frame = a + Math.floor(t);
       },
     };
     return inst;
@@ -3184,11 +3709,11 @@ registerBehavior('sound', {
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
-  if (e._parentHidden) return false;
+  if (e._parentHidden || e._clipHidden) return false;
   if (e.ui) {
-    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents();
-    const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
-    return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
+    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
+    const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
+    return Math.abs(sx - o.x - e.x * k) <= hx + 8 && Math.abs(sy - o.y - e.y * k) <= hy + 8;
   }
   const ex = e.extents();
   if (s.mode === '2d') {
@@ -3425,6 +3950,254 @@ registerBehavior('uiSlider', {
 });
 
 /** Toggle: tap to switch a variable between on (1) and off (0); changes its text and color. */
+// ---- navigation & more UI ----
+const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
+const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
+const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
+/** Show or hide a UI element with a little animation. */
+function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
+  s.killTweens(e, true);
+  const k = 1;
+  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
+  const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
+  const off = { 'slide from right': { x: 220 }, 'slide from left': { x: -220 }, 'slide from bottom': { y: 220 }, 'slide from top': { y: -220 } }[anim];
+  if (show) {
+    e.visible = true; e.alpha = 0;
+    if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
+    if (anim === 'pop') { e.sx = base.sx * 0.6; e.sy = base.sy * 0.6; s.to(e, { sx: base.sx, sy: base.sy }, dur * 1.4, { ease: 'outBack' }); }
+    s.to(e, { alpha: 1 }, dur, { ease: 'outQuad', onComplete: () => done?.() });
+  } else {
+    if (off) s.to(e, { x: base.x + (off.x || 0) * k, y: base.y + (off.y || 0) * k }, dur, { ease: 'inCubic' });
+    if (anim === 'pop') s.to(e, { sx: base.sx * 0.7, sy: base.sy * 0.7 }, dur, { ease: 'inBack' });
+    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+  }
+}
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
+
+registerBehavior('navItem', {
+  label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
+  params: [
+    { key: 'page', label: 'Page name', type: 'text', default: 'home' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'startHere', label: 'Start on this page', type: 'bool', default: false },
+    { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#3a6ea5', optional: true },
+    { key: 'idleColor', label: 'Normal colour', type: 'color', default: '', optional: true },
+    { key: 'dimIdle', label: 'Fade when not selected', type: 'bool', default: true },
+    { key: 'message', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let kids = [], was = null;
+    return {
+      uiAlways: true,
+      start(e, s) { if (p.startHere && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, p.page); },
+      update(e, dt, s) {
+        if (uiTapped(s, e)) { s.setVar(p.var, p.page); s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message); }
+        const on = sameVal(s.vars[p.var], p.page);
+        if (on !== was) { kids = uiKids(s, e); was = on; }
+        if (e.shape) e.shape.fill = on ? p.activeColor || '' : p.idleColor || '';
+        const a = on || !p.dimIdle ? 1 : 0.55;
+        for (const q of kids) q.alpha = a;
+        if (!e.shape && e.text) e.alpha = a;
+      },
+    };
+  },
+});
+
+registerBehavior('uiShowIf', {
+  label: 'Show If (pages)', description: 'Show this UI only when a variable matches, e.g. page = shop for a Shop page, or messages > 0 for a badge. Everything inside it shows and hides with it.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
+    { key: 'value', label: 'Value', type: 'text', default: 'home' },
+    { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade' },
+  ],
+  create(p) {
+    let shown = null;
+    const test = (v) => {
+      if (v == null || v === '') return !!p.whenUnset;
+      const a = +v, b = +p.value, num = p.value !== '' && Number.isFinite(a) && Number.isFinite(b);
+      switch (p.op) {
+        case '≠': return num ? a !== b : !sameVal(v, p.value);
+        case '>': return a > b; case '<': return a < b; case '≥': return a >= b; case '≤': return a <= b;
+        default: return num ? a === b : sameVal(v, p.value);
+      }
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; },
+      update(e, dt, s) {
+        const want = test(s.vars[p.var]);
+        if (want !== shown) { shown = want; uiAnimate(s, e, want, p.anim, 0.22); }
+      },
+    };
+  },
+});
+
+registerBehavior('drawer', {
+  label: 'Side Bar (drawer)', description: 'A menu that slides in from the side (or bottom / top) when a message arrives, e.g. from a ☰ menu button. Dims the game behind it; tap outside or pick an item to close it.',
+  params: [
+    { key: 'side', label: 'Slides in from', type: 'select', options: ['left', 'right', 'bottom', 'top'], default: 'left' },
+    { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'duration', label: 'Slide time (sec)', type: 'number', default: 0.25, range: [0.05, 1], step: 0.05 },
+    { key: 'dim', label: 'Dim behind it', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05 },
+    { key: 'closeOnPick', label: 'Close when a page is picked', type: 'bool', default: true },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars', showIf: (b) => b.closeOnPick !== false },
+  ],
+  create(p) {
+    let open = false, home = null, dim = { e: null, a: 0 };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want, instant = false) {
+        open = want; if (!home) home = { x: e.x, y: e.y };
+        const r = uiBox(e, s.engine.width, s.engine.height, s.engine.safe), k = uiK(s.engine.safe) || 1, d = instant ? 0.001 : +p.duration || 0.25;
+        const away = { left: { x: home.x - (r.w / k + 40) }, right: { x: home.x + (r.w / k + 40) }, bottom: { y: home.y + (r.h / k + 40) }, top: { y: home.y - (r.h / k + 40) } }[p.side] || { x: home.x - (r.w / k + 40) };
+        s.killTweens(e); s.killTweens(dim);
+        dim.e = e; s.uiDim = dim;
+        if (want) { e.visible = true; s.modal = e; s.to(e, { x: home.x, y: home.y }, d, { ease: 'outCubic' }); s.to(dim, { a: +p.dim || 0 }, d, { ease: 'outQuad' }); }
+        else { if (s.modal === e) s.modal = null; s.to(e, { ...away }, d, { ease: 'inCubic', onComplete: () => { if (!open) e.visible = false; } }); s.to(dim, { a: 0 }, d, { ease: 'outQuad' }); }
+      },
+      start(e, s) {
+        e._dismiss = () => inst.set(e, s, false);
+        inst.set(e, s, !!p.startOpen, true);
+        s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !open); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+        if (p.closeOnPick !== false) s.on('var', (k) => { if (!e.dead && open && k === p.var) inst.set(e, s, false); });
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+registerBehavior('uiPopup', {
+  label: 'Popup (modal / toast)', description: 'A window that pops up on a message and closes on another (or after a few seconds, like a toast). Can dim the game and close when you tap outside.',
+  params: [
+    { key: 'openOn', label: 'Open on message', type: 'text', default: 'popup', suggest: 'messages' },
+    { key: 'closeOn', label: 'Close on message', type: 'text', default: 'close', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS.filter((a) => a !== 'none'), default: 'pop' },
+    { key: 'autoClose', label: 'Close after (sec, 0 = stay)', type: 'number', default: 0, range: [0, 10], step: 0.5 },
+    { key: 'modal', label: 'Dim behind & tap outside closes', type: 'bool', default: true },
+    { key: 'tapCloses', label: 'Tapping it closes it', type: 'bool', default: false },
+  ],
+  create(p) {
+    let open = false, timer = 0; const dim = { e: null, a: 0 };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want, instant = false) {
+        if (want === open && !instant) { if (want) timer = 0; return; }
+        open = want; timer = 0;
+        uiAnimate(s, e, want, instant ? 'none' : p.anim, 0.22);
+        if (p.modal) { dim.e = e; s.uiDim = dim; s.killTweens(dim); s.to(dim, { a: want ? 0.55 : 0 }, instant ? 0.001 : 0.2); if (want) s.modal = e; else if (s.modal === e) s.modal = null; }
+      },
+      start(e, s) {
+        e._dismiss = () => inst.set(e, s, false);
+        open = !p.startOpen; inst.set(e, s, !!p.startOpen, true);
+        s.on('message', (m) => { if (e.dead) return; if (m === p.openOn) inst.set(e, s, true); else if (m === p.closeOn) inst.set(e, s, false); });
+      },
+      update(e, dt, s) {
+        if (!open) return;
+        timer += dt;
+        if (+p.autoClose > 0 && timer >= +p.autoClose) inst.set(e, s, false);
+        else if (p.tapCloses && timer > 0.2 && uiTapped(s, e)) inst.set(e, s, false);
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+registerBehavior('uiSelector', {
+  label: 'Option Picker', description: 'Pick one of several options with ‹ and › (e.g. Easy / Normal / Hard). Tap the left half for the previous one, the right half for the next. The choice goes into a variable.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'difficulty', suggest: 'vars' },
+    { key: 'options', label: 'Options (comma separated)', type: 'text', default: 'Easy, Normal, Hard' },
+    { key: 'start', label: 'Start on option #', type: 'number', default: 2, step: 1 },
+    { key: 'wrap', label: 'Loop around', type: 'bool', default: true },
+  ],
+  create(p) {
+    const opts = String(p.options || '').split(',').map((o) => o.trim()).filter(Boolean);
+    let i = 0;
+    const show = (e, s) => { if (e.text) e.text.value = `‹   ${opts[i] ?? ''}   ›`; s.setVar(p.var, opts[i] ?? ''); s.setVar(p.var + 'Index', i); };
+    return {
+      uiAlways: true,
+      start(e, s) { const cur = opts.indexOf(String(s.vars[p.var] ?? '')); i = cur >= 0 ? cur : clamp(Math.round(+p.start || 1) - 1, 0, Math.max(0, opts.length - 1)); e.text ||= { ...TEXT_DEFAULTS, size: 20 }; show(e, s); },
+      update(e, dt, s) {
+        if (!opts.length || !e.visible) return;
+        const t = s.engine.input.taps.find((q) => hitTest(s, e, q.x, q.y)); if (!t) return;
+        const r = uiRect(s, e), d = t.x < r.x ? -1 : 1, n = opts.length;
+        const j = p.wrap ? (i + d + n) % n : clamp(i + d, 0, n - 1);
+        if (j !== i) { i = j; show(e, s); s.engine.audio.sfx('click'); s.punch(e, { x: d * 4 }, 0.2, { add: true }); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiScroll', {
+  label: 'Scroll View', description: 'Drag to scroll the UI inside it (a list of items, a shop, levels…). Items outside its box are hidden.',
+  params: [
+    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal'], default: 'vertical' },
+    { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
+  ],
+  create(p) {
+    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0;
+    const v = p.direction !== 'horizontal';
+    const bounds = (s, e) => { // how far the content can move
+      const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
+      let lo = Infinity, hi = -Infinity;
+      for (const q of kids) { const b = base.get(q), ex = q.extents(), h = (v ? ex.hy : ex.hx) || 0; lo = Math.min(lo, (v ? b.y : b.x) - h); hi = Math.max(hi, (v ? b.y : b.x) + h); }
+      if (!kids.length) return [0, 0];
+      const view = (v ? r.h : r.w) / k, top = -view / 2 + pad, bottom = view / 2 - pad;
+      const min = Math.min(0, bottom - hi), max = Math.max(0, top - lo);
+      return [Math.min(min, max), max];
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); },
+      update(e, dt, s) {
+        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
+        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
+        const ptr = drag != null && inp.pointers.get(drag);
+        if (ptr) { const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
+        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
+        const [mn, mx] = bounds(s, e);
+        if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
+        else off = clamp(off, mn - 60, mx + 60);
+        if (moved > 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2)); // a drag isn't a tap
+        for (const q of kids) {
+          const b = base.get(q); if (!b) continue;
+          if (v) q.y = b.y + off; else q.x = b.x + off;
+          const qb = uiRect(s, q);
+          q._clipHidden = v ? qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 : qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiRating', {
+  label: 'Star Rating', description: 'Tap along it to set a rating (e.g. 1–5 stars) in a variable. Pair it with a Progress Bar that uses ★ as its icon.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'rating', suggest: 'vars' },
+    { key: 'max', label: 'Stars', type: 'number', default: 5, step: 1, range: [1, 10] },
+    { key: 'start', label: 'Starts at', type: 'number', default: 3, step: 1 },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var] == null) s.setVar(p.var, +p.start || 0); if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max || 5; } },
+      update(e, dt, s) {
+        const t = e.visible && s.engine.input.taps.find((q) => hitTest(s, e, q.x, q.y)); if (!t) return;
+        const r = uiRect(s, e), n = Math.max(1, +p.max || 5);
+        s.setVar(p.var, clamp(Math.ceil(((t.x - (r.x - r.w / 2)) / (r.w || 1)) * n), 1, n)); s.engine.audio.sfx('coin'); s.punch(e, { sx: 0.08, sy: 0.08 }, 0.2, { add: true });
+      },
+    };
+  },
+});
+
 registerBehavior('uiToggle', {
   label: 'Toggle', description: 'A switch or checkbox: tap to turn a variable on (1) or off (0). Shows different text and color for each state (e.g. Sound: ON / OFF).',
   params: [
@@ -3450,22 +4223,24 @@ registerBehavior('uiToggle', {
 
 /** Layout Group (like Unity's Horizontal / Vertical / Grid Layout): lines up UI elements with a tag inside this one. */
 registerBehavior('uiLayout', {
-  label: 'Layout Group', description: 'Lines up other UI elements in a row, a column or a grid inside this one, with even spacing. Give the elements a tag and enter it here.',
+  label: 'Layout Group', description: 'Lines up UI elements in a row, a column or a grid inside this one, with even spacing: its own children, or UI with a tag.',
   params: [
-    { key: 'tag', label: 'Arrange UI tagged', type: 'text', default: 'menu', suggest: 'tags' },
+    { key: 'tag', label: 'Arrange UI tagged (blank = its children)', type: 'text', default: 'menu', suggest: 'tags' },
     { key: 'direction', label: 'Direction', type: 'select', options: ['vertical', 'horizontal', 'grid'], default: 'vertical' },
     { key: 'spacing', label: 'Spacing', type: 'number', default: 12 },
     { key: 'columns', label: 'Columns (grid)', type: 'number', default: 3, showIf: { direction: ['grid'] } },
     { key: 'align', label: 'Align', type: 'select', options: ['center', 'start', 'end'], default: 'center' },
+    { key: 'justify', label: 'Place along', type: 'select', options: ['center', 'start', 'end', 'spread'], default: 'center', showIf: { direction: ['vertical', 'horizontal'] }, info: { spread: 'Share the space evenly (tabs in a navigation bar).' } },
+    { key: 'pad', label: 'Padding', type: 'number', default: 12, showIf: (b) => b.justify === 'start' || b.justify === 'end' },
   ],
   create(p) {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.has(p.tag) && q.visible);
+        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && (p.tag ? q.has(p.tag) : q.parentEnt === e));
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
-        const eng = s.engine, place = (q, cx, cy) => { const o = uiOrigin(q, eng.width, eng.height, eng.safe), ex = q.extents(); q.x = cx - o.x - (ex.ox || 0); q.y = cy - o.y - (ex.oy || 0); };
+        const eng = s.engine, place = (q, cx, cy) => placeUI(q, cx, cy, eng.width, eng.height, eng.safe);
         if (p.direction === 'grid') {
           const cols = Math.max(1, +p.columns || 1), cw = Math.max(...sizes.map((z) => z[0])), ch = Math.max(...sizes.map((z) => z[1])), rows = Math.ceil(items.length / cols);
           const W = cols * cw + (cols - 1) * gap, H = rows * ch + (rows - 1) * gap;
@@ -3473,7 +4248,13 @@ registerBehavior('uiLayout', {
           return;
         }
         const v = p.direction === 'vertical', total = sizes.reduce((a, z) => a + (v ? z[1] : z[0]), 0) + gap * (items.length - 1);
-        let at = (v ? box.y : box.x) - total / 2;
+        const k = uiK(eng.safe) || 1, roomMain = v ? box.h : box.w, pad = (+p.pad || 0) * k;
+        if (p.justify === 'spread') { // each item gets an equal slot
+          const slot = roomMain / items.length, start = (v ? box.y : box.x) - roomMain / 2;
+          items.forEach((q, i) => { const [w, h] = sizes[i], cross = v ? w : h, room = v ? box.w : box.h, off = p.align === 'start' ? -room / 2 + cross / 2 : p.align === 'end' ? room / 2 - cross / 2 : 0; const c = start + slot * (i + 0.5); if (v) place(q, box.x + off, c); else place(q, c, box.y + off); });
+          return;
+        }
+        let at = (v ? box.y : box.x) - (p.justify === 'start' ? roomMain / 2 - pad : p.justify === 'end' ? total - roomMain / 2 + pad : total / 2);
         items.forEach((q, i) => {
           const [w, h] = sizes[i], len = v ? h : w, cross = v ? w : h, room = v ? box.w : box.h;
           const off = p.align === 'start' ? -room / 2 + cross / 2 : p.align === 'end' ? room / 2 - cross / 2 : 0;
@@ -3863,7 +4644,7 @@ registerBehavior('dayNight', {
       update(e, dt, s) {
         hour = (hour + dt * 24 / Math.max(1, +p.dayLength || 60)) % 24;
         const sun = Math.sin((hour - 6) / 24 * Math.PI * 2), day = clamp(sun * 1.6 + 0.3, 0, 1);
-        s.background = mixColor(p.nightColor, p.dayColor, day);
+        s.background = mixColor(p.nightColor, p.dayColor, day); s.light._driven = true;
         if (s.mode === '3d') {
           s.light.sunAngle = hour * 15; const h = clamp(sun, 0.05, 1) * 80 + 5, a = s.light.sunAngle * DEG, hh = h * DEG;
           s.light.dir = { x: -Math.cos(hh) * Math.sin(a), y: -Math.sin(hh), z: -Math.cos(hh) * Math.cos(a) };
@@ -4315,7 +5096,7 @@ function runAction(s, e, p, other) {
     case 'set gravity': s.gravity = +p.amount || 0; break;
     case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
     case 'send message': s.send(v); break;
-    case 'play animation': e.getBehavior('animator')?.play(v); break;
+    case 'play animation': playClip(e, v); break;
     default: break;
   }
   if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
@@ -4441,7 +5222,7 @@ registerBehavior('gridMove', {
   create(p) {
     let busy = 0, armed = true;
     return {
-      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic' }); s.want('player'); },
+      start(e, s) { e.ensureBody({ type: 'kinematic' }); s.want('player'); },
       update(e, dt, s) {
         if ((busy -= dt) > 0 || s.state !== 'play' || (s.settings.turnBased && !s.isPlayerTurn)) return;
         const inp = s.engine.input, a = inp.axis();
@@ -4472,6 +5253,115 @@ registerBehavior('gridMove', {
         s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
         busy = 0.14;
         if (s.settings.turnBased) s.endTurn();
+      },
+    };
+  },
+});
+
+// ---- Character Controller 2D: one component, many kinds of 2D movement ----
+const withParamDefaults = (type, extra) => { const d = Behaviors[type]; const o = {}; for (const q of d.params || []) o[q.key] = paramDefault(q, false); return { ...o, ...extra }; };
+registerBehavior('controller2d', {
+  label: 'Character Controller 2D', description: 'Pick how the player moves: top-down, platformer, runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle or grid steps.',
+  params: [
+    { key: 'mode', label: 'Movement type', type: 'select', default: 'topdown8', options: [
+      ['topdown8', 'Top-down (8 directions)'], ['topdown4', 'Top-down (4 directions)'], ['platformer', 'Platformer (run & jump)'], ['runner', 'Auto-runner (tap to jump)'],
+      ['flappy', 'Flappy (tap to fly up)'], ['car', 'Car (steer & drive)'], ['spaceship', 'Spaceship (turn & thrust)'], ['tank', 'Tank (turn & roll)'],
+      ['tapToMove', 'Tap to move (point & click)'], ['followFinger', 'Follow finger'], ['sideToSide', 'Side to side (paddle)'], ['grid', 'Grid steps (one tile per swipe)']],
+      info: { topdown8: 'Joystick or drag moves it in any direction.', topdown4: 'Up, down, left or right only (classic RPG).', platformer: 'Needs gravity. Joystick to run, jump button or tap to jump.',
+        runner: 'Runs forward on its own; tap to jump. Needs gravity and ground.', flappy: 'Each tap pushes it up; gravity pulls it down.', car: 'Joystick left/right steers, up drives (or always drives).',
+        spaceship: 'Turn with the joystick, push forward to thrust. Drifts in space.', tank: 'Joystick left/right turns, up/down drives forward and back.', tapToMove: 'Tap anywhere and it walks there.',
+        followFinger: 'Sticks to your finger while you touch the screen.', sideToSide: 'Left and right only, like a paddle or shooter ship.', grid: 'One tile per swipe or joystick push.' } },
+    { key: 'speed', label: 'Speed', type: 'number', default: 240, step: 10 },
+    { key: 'jump', label: 'Jump / flap power', type: 'number', default: 620, step: 20, showIf: { mode: ['platformer', 'runner', 'flappy'] } },
+    { key: 'turn', label: 'Turn speed (°/s)', type: 'number', default: 200, step: 10, showIf: { mode: ['car', 'spaceship', 'tank'] } },
+    { key: 'accel', label: 'Acceleration', type: 'number', default: 600, step: 50, showIf: { mode: ['car', 'spaceship'] } },
+    { key: 'friction', label: 'Slow down (0 = slide forever)', type: 'number', default: 2, step: 0.25, showIf: { mode: ['car', 'spaceship', 'topdown8', 'topdown4'] } },
+    { key: 'autoDrive', label: 'Always drive forward', type: 'bool', default: false, showIf: { mode: ['car'] } },
+    { key: 'faceMove', label: 'Turn to face movement', type: 'bool', default: false, showIf: { mode: ['topdown8', 'topdown4', 'tapToMove'] } },
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, showIf: { mode: ['grid'] } },
+    { key: 'keepInView', label: 'Keep on screen', type: 'bool', default: true, showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'followFinger', 'spaceship', 'flappy'] } },
+    { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn', showIf: { mode: ['platformer', 'runner', 'flappy'] } },
+  ],
+  create(p) {
+    // movements the engine already does well
+    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'all', keepInView: p.keepInView })),
+      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'horizontal', keepInView: p.keepInView })),
+      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { speed: p.speed, jump: p.jump, onFall: p.onFall })),
+      grid: () => Behaviors.gridMove.create(withParamDefaults('gridMove', { tile: p.tile })) }[p.mode];
+    if (delegate) {
+      const inner = delegate();
+      return { ...inner, start(e, s) { if (['topdown8', 'sideToSide', 'platformer'].includes(p.mode)) { s.settings.joystick = true; if (p.mode === 'platformer') s.settings.jumpButton = true; s.engine.layoutButtons?.(); } inner.start?.(e, s); } };
+    }
+    let heading = 0, target = null, speed = 0;
+    const keep = (e, s) => { if (!p.keepInView) return; const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; e.x = clamp(e.x, v.left + hx, v.right - hx); e.y = clamp(e.y, v.top + hy, v.bottom - hy); };
+    const fell = (e, s) => { const v = s.viewBounds(); if (e.y > v.bottom + 300) respawnOrEnd(e, s, p.onFall); };
+    const face = (e, vx, vy) => { if (p.faceMove && Math.hypot(vx, vy) > 5) e.rz = Math.atan2(vy, vx) / DEG; };
+    return {
+      start(e, s) {
+        const gravity = ['runner', 'flappy'].includes(p.mode);
+        e.ensureBody({ type: 'dynamic', gravityScale: gravity ? 1 : 0 });
+        if (!gravity) e.body.gravityScale = 0;
+        heading = (e.rz || 0) * DEG; e.data.respawn ||= { x: e.x, y: e.y, z: e.z };
+        if (['topdown4', 'car', 'spaceship', 'tank'].includes(p.mode)) { s.settings.joystick = true; s.engine.layoutButtons?.(); }
+        if (p.mode === 'runner') { s.settings.jumpButton = true; s.engine.layoutButtons?.(); }
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play') return;
+        const inp = s.engine.input, a = inp.axis(), b = e.body, damp = Math.max(0, 1 - (+p.friction || 0) * dt);
+        switch (p.mode) {
+          case 'topdown4': {
+            let ax = a.x, ay = a.y; if (Math.abs(ax) > Math.abs(ay)) ay = 0; else ax = 0;
+            const d = inp.drag; let dx = d.dx, dy = d.dy; if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0;
+            const z = s.engine.renderer.zoomFor(s);
+            b.vel.x = Math.sign(ax) * (Math.abs(ax) > 0.3 ? p.speed : 0); b.vel.y = Math.sign(ay) * (Math.abs(ay) > 0.3 ? p.speed : 0);
+            e.x += dx / z; e.y += dy / z; face(e, b.vel.x || dx, b.vel.y || dy); keep(e, s); break;
+          }
+          case 'runner': {
+            b.vel.x = p.speed;
+            if ((inp.pressed('tap') || inp.pressed('btn:jump') || inp.pressed('swipe:up')) && b.grounded) { b.vel.y = -p.jump; s.engine.audio.sfx('jump'); }
+            fell(e, s); break;
+          }
+          case 'flappy': {
+            if (inp.pressed('tap') || inp.pressed('btn:jump')) { b.vel.y = -p.jump * 0.6; s.engine.audio.sfx('jump'); }
+            e.rz = clamp(b.vel.y / 12, -30, 70); if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = 0; } }
+            fell(e, s); break;
+          }
+          case 'car': {
+            const thr = p.autoDrive ? 1 : Math.max(0, -a.y) + (a.y > 0.3 ? -0.5 : 0);
+            speed = speed * damp + thr * p.accel * dt; speed = clamp(speed, -p.speed * 0.4, p.speed);
+            heading += a.x * (p.turn * DEG) * dt * clamp(Math.abs(speed) / (p.speed * 0.3), 0, 1) * Math.sign(speed || 1);
+            b.vel.x = Math.cos(heading) * speed; b.vel.y = Math.sin(heading) * speed; e.rz = heading / DEG; break;
+          }
+          case 'spaceship': {
+            heading += a.x * (p.turn * DEG) * dt;
+            const thrust = Math.max(0, -a.y) + (inp.pointers.size && !inp.stick ? 1 : 0);
+            b.vel.x = b.vel.x * damp + Math.cos(heading) * thrust * p.accel * dt; b.vel.y = b.vel.y * damp + Math.sin(heading) * thrust * p.accel * dt;
+            const v = Math.hypot(b.vel.x, b.vel.y); if (v > p.speed) { b.vel.x *= p.speed / v; b.vel.y *= p.speed / v; }
+            e.rz = heading / DEG;
+            if (p.keepInView) { const vb = s.viewBounds(); if (e.x < vb.left) e.x = vb.right; else if (e.x > vb.right) e.x = vb.left; if (e.y < vb.top) e.y = vb.bottom; else if (e.y > vb.bottom) e.y = vb.top; }
+            break;
+          }
+          case 'tank': {
+            heading += a.x * (p.turn * DEG) * dt; const fwd = -a.y * p.speed;
+            b.vel.x = Math.cos(heading) * fwd; b.vel.y = Math.sin(heading) * fwd; e.rz = heading / DEG; break;
+          }
+          case 'tapToMove': {
+            const t = inp.taps[0] || [...inp.pointers.values()][0];
+            if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y); target = { x: w.x, y: w.y }; }
+            if (target) {
+              const dx = target.x - e.x, dy = target.y - e.y, d = Math.hypot(dx, dy);
+              if (d < 4) { b.vel.x = b.vel.y = 0; target = null; } else { const v = Math.min(p.speed, d / Math.max(dt, 1e-3)); b.vel.x = dx / d * v; b.vel.y = dy / d * v; face(e, dx, dy); }
+            }
+            break;
+          }
+          case 'followFinger': {
+            const t = [...inp.pointers.values()].find((q) => q.role === 'free');
+            if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y), dx = w.x - e.x, dy = w.y - e.y, k = Math.min(1, dt * (p.speed / 20)); b.vel.x = dx * k / Math.max(dt, 1e-3); b.vel.y = dy * k / Math.max(dt, 1e-3); }
+            else { b.vel.x = 0; b.vel.y = 0; }
+            keep(e, s); break;
+          }
+          default: break;
+        }
       },
     };
   },
@@ -4722,6 +5612,232 @@ registerBehavior('button', {
   },
 });
 
+// ---- tap & click components ----
+/** Float a text up from a screen point (clicker "+10" feedback). */
+export function popText(s, x, y, text, color = '#ffd23d', size = 26) { (s.popups ||= []).push({ x: x + rand(-18, 18), y, text: String(text), color, size, t: s.time, life: 0.9, rise: 60 }); }
+const screenOf = (s, e) => (e.ui ? (() => { const o = uiOrigin(e, s.engine.width, s.engine.height, s.engine.safe), k = uiK(s.engine.safe); return { x: o.x + e.x * k, y: o.y + e.y * k }; })() : s.engine.renderer.worldToScreen(s, e.x, e.y, e.z));
+const tapsOn = (s, e) => s.engine.input.taps.filter((t) => e.visible && !e.dead && hitTest(s, e, t.x, t.y));
+const squash = (s, e, k = 0.88) => { const b = e.data.baseScale ??= e.sx; e.sx = e.sy = b * k; s.tween(e, { sx: b, sy: b }, 0.18); };
+
+registerBehavior('clickPopup', {
+  label: 'Click Popup', description: 'Floating text like “+10” rises where this object is tapped. Use {score} and other variables. Pairs well with Tap Target and Combo Clicker.',
+  params: [
+    { key: 'text', label: 'Text', type: 'text', default: '+1' },
+    { key: 'color', label: 'Colour', type: 'color', default: '#ffd23d' },
+    { key: 'size', label: 'Size', type: 'number', default: 26, range: [10, 80] },
+  ],
+  create(p) { return { uiAlways: true, update(e, dt, s) { for (const t of tapsOn(s, e)) popText(s, t.x, t.y - 20, fillTemplate(p.text, s.vars), p.color, p.size); } }; },
+});
+
+registerBehavior('comboClicker', {
+  label: 'Combo Clicker', description: 'Tap it for points. Quick taps build a combo that multiplies them; some taps are critical hits. {combo} shows the combo.',
+  params: [
+    { key: 'points', label: 'Points per tap', type: 'number', default: 1 },
+    { key: 'var', label: 'Adds to variable', type: 'text', default: 'score', suggest: 'vars' },
+    { key: 'bonusVar', label: 'Extra points from variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “power”, raised by an Upgrade Button.' },
+    { key: 'window', label: 'Combo window (seconds)', type: 'number', default: 0.6, step: 0.1, range: [0.1, 3] },
+    { key: 'comboStep', label: 'Extra multiplier per combo tap', type: 'number', default: 0.25, step: 0.05 },
+    { key: 'maxCombo', label: 'Max combo', type: 'number', default: 50, step: 5 },
+    { key: 'critChance', label: 'Critical hit chance %', type: 'number', default: 10, range: [0, 100] },
+    { key: 'critMult', label: 'Critical multiplier', type: 'number', default: 3, step: 0.5 },
+    { key: 'popup', label: 'Show “+points”', type: 'bool', default: true },
+    { key: 'sound', label: 'Sound', type: 'select', options: SOUNDS, default: 'click' },
+  ],
+  create(p) {
+    let combo = 0, last = -99;
+    return {
+      update(e, dt, s) {
+        if (combo && s.time - last > p.window) { combo = 0; s.setVar('combo', 0); }
+        for (const t of tapsOn(s, e)) {
+          combo = s.time - last <= p.window ? Math.min(p.maxCombo, combo + 1) : 1; last = s.time;
+          const crit = Math.random() * 100 < p.critChance, mult = (1 + (combo - 1) * p.comboStep) * (crit ? p.critMult : 1);
+          const pts = Math.max(0, Math.round((p.points + (p.bonusVar ? +s.vars[p.bonusVar] || 0 : 0)) * mult * 100) / 100);
+          s.addVar(p.var || 'score', pts); s.setVar('combo', combo);
+          s.engine.audio.sfx(crit ? 'power' : p.sound); s.engine.vibrate(crit ? 25 : 8);
+          if (p.popup) popText(s, t.x, t.y - 20, (crit ? 'CRIT +' : '+') + formatNumber(pts), crit ? '#ff5d8f' : '#ffd23d', crit ? 34 : 24 + Math.min(10, combo / 3));
+          squash(s, e, crit ? 0.8 : 0.9);
+          if (crit) s.burst(e.x, e.y, e.z, '#ff5d8f', 14, 0.8);
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('longPress', {
+  label: 'Long Press', description: 'Hold a finger on it for a moment to do something. A ring fills up while you hold.',
+  params: [{ key: 'seconds', label: 'Hold for (seconds)', type: 'number', default: 0.8, step: 0.1, range: [0.2, 5] }, ...ACTION_PARAMS.map((q) => (q.key === 'value' ? { ...q, default: 'Held!' } : q))],
+  create(p) {
+    let held = null, t = 0, fired = false, ref = null;
+    return {
+      uiAlways: true,
+      start(e, s) { (s.overlays ||= []).push(ref = (ctx) => {
+        if (!held || fired || e.dead) return;
+        const c = screenOf(s, e); if (!c) return;
+        ctx.save(); ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, t / p.seconds)); ctx.stroke(); ctx.restore();
+      }); },
+      update(e, dt, s) {
+        const inp = s.engine.input;
+        if (!held) { const d = inp.downs.find((q) => e.visible && hitTest(s, e, q.x, q.y)); if (d) { held = d.id; t = 0; fired = false; } return; }
+        const ptr = inp.pointers.get(held);
+        if (!ptr || !hitTest(s, e, ptr.x, ptr.y)) { held = null; return; } // let go or slid off
+        t += dt;
+        if (!fired && t >= p.seconds) { fired = true; s.engine.vibrate(30); squash(s, e, 0.85); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound); runAction(s, e, p); }
+      },
+      destroy(e, s) { s.overlays = (s.overlays || []).filter((f) => f !== ref); },
+    };
+  },
+});
+
+registerBehavior('doubleTap', {
+  label: 'Double Tap', description: 'Tap it twice quickly to do something.',
+  params: [{ key: 'gap', label: 'Max time between taps', type: 'number', default: 0.35, step: 0.05, range: [0.15, 1] }, ...ACTION_PARAMS.map((q) => (q.key === 'value' ? { ...q, default: 'Double tap!' } : q))],
+  create(p) {
+    let last = -99;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        for (const t of tapsOn(s, e)) {
+          if (s.time - last <= p.gap) { last = -99; squash(s, e, 0.85); s.engine.vibrate(15); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound); runAction(s, e, p); }
+          else last = s.time;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('tapToggle', {
+  label: 'Tap Toggle', description: 'Each tap switches it on or off: sets a variable to 1 or 0, swaps its colour, and can show or hide another object.',
+  params: [
+    { key: 'var', label: 'Variable (1 = on, 0 = off)', type: 'text', default: 'switch', suggest: 'vars' },
+    { key: 'startOn', label: 'Starts on', type: 'bool', default: false },
+    { key: 'onColor', label: 'Colour when on', type: 'color', default: '#66bb6a' },
+    { key: 'offColor', label: 'Colour when off', type: 'color', default: '#78909c' },
+    { key: 'object', label: 'Shows / hides object (optional)', type: 'text', default: '', suggest: 'objects' },
+    { key: 'message', label: 'Sends “<message> on” / “off” (optional)', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let on = false;
+    const apply = (e, s) => {
+      s.setVar(p.var || 'switch', on ? 1 : 0);
+      const c = on ? p.onColor : p.offColor; if (e.shape) e.shape.fill = c; else if (e.mesh) e.mesh.color = c;
+      if (p.object) { const t = s.find(p.object); if (t) t.visible = on; }
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { on = !!p.startOn; apply(e, s); },
+      update(e, dt, s) {
+        for (const t of tapsOn(s, e)) { on = !on; apply(e, s); squash(s, e); s.engine.audio.sfx('click'); s.engine.vibrate(10); if (p.message) s.send(`${p.message} ${on ? 'on' : 'off'}`); }
+      },
+    };
+  },
+});
+
+registerBehavior('pressFeedback', {
+  label: 'Press Feedback', description: 'Makes tapping feel good: squashes the moment a finger lands, springs back on release, with a sound, a buzz and optional sparkles.',
+  params: [
+    { key: 'squash', label: 'Squash to', type: 'number', default: 0.88, step: 0.02, range: [0.5, 1] },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['none', ...SOUNDS], default: 'click' },
+    { key: 'haptic', label: 'Buzz', type: 'bool', default: true },
+    { key: 'sparkles', label: 'Sparkles', type: 'bool', default: false },
+  ],
+  create(p) {
+    let held = null;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const inp = s.engine.input, base = e.data.baseScale ??= e.sx;
+        if (held == null) {
+          const d = inp.downs.find((q) => e.visible && hitTest(s, e, q.x, q.y)); if (!d) return;
+          held = d.id; s.killTweens(e); e.sx = e.sy = base * p.squash;
+          if (p.sound !== 'none') s.engine.audio.sfx(p.sound); if (p.haptic) s.engine.vibrate(8);
+          if (p.sparkles) s.burst(e.x, e.y, e.z, e.shape?.fill || e.mesh?.color || '#fff', 10, 0.6);
+        } else if (!inp.pointers.has(held)) { held = null; s.tween(e, { sx: base, sy: base }, 0.22, 'outBack'); }
+      },
+    };
+  },
+});
+
+registerBehavior('tapToSpawn', {
+  label: 'Tap to Spawn', description: 'Tapping the screen creates a copy of a template where you tapped (on the ground in 3D). Put it on any object; it listens to the whole screen.',
+  params: [
+    { key: 'template', label: 'Template', type: 'template', default: '' },
+    { key: 'where', label: 'Taps on', type: 'select', options: [['empty', 'Empty space only'], ['anywhere', 'Anywhere']], default: 'empty' },
+    { key: 'cooldown', label: 'Cooldown (seconds)', type: 'number', default: 0.2, step: 0.1 },
+    { key: 'max', label: 'Max at once (0 = no limit)', type: 'number', default: 20 },
+    { key: 'cost', label: 'Costs (from variable)', type: 'number', default: 0, info: 'e.g. 5 coins per spawn. Leave 0 for free.' },
+    { key: 'costVar', label: 'Pay with', type: 'text', default: 'score', suggest: 'vars', showIf: (b) => +b.cost > 0 },
+  ],
+  create(p) {
+    let last = -99; const made = [];
+    return {
+      update(e, dt, s) {
+        if (!p.template || s.state !== 'play') return;
+        for (const t of s.engine.input.taps) {
+          if (s.time - last < p.cooldown) continue;
+          if (p.where === 'empty' && s.entities.some((q) => q !== e && q.visible && !q.dead && (q.shape || q.mesh || q.sprite || q.ui) && hitTest(s, q, t.x, t.y))) continue;
+          for (let i = made.length - 1; i >= 0; i--) if (made[i].dead) made.splice(i, 1);
+          if (p.max > 0 && made.length >= p.max) { s.message('Too many!', 0.8); continue; }
+          if (p.cost > 0) { if ((+s.vars[p.costVar] || 0) < p.cost) { s.message(`Need ${formatNumber(p.cost)} ${p.costVar}`, 1); continue; } s.addVar(p.costVar, -p.cost); }
+          let at;
+          if (s.mode === '3d') { const r = s.engine.renderer.screenRay(s, t.x, t.y); if (!r || Math.abs(r.dir.y) < 1e-4) continue; const k = -r.origin.y / r.dir.y; if (k < 0) continue; at = { x: r.origin.x + r.dir.x * k, y: 0.5, z: r.origin.z + r.dir.z * k }; }
+          else { const w = s.engine.renderer.screenToWorld(s, t.x, t.y); at = { x: w.x, y: w.y, z: 0 }; }
+          const c = s.spawn(p.template, at); if (c) { made.push(c); last = s.time; s.engine.vibrate(8); }
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('dragLaunch', {
+  label: 'Drag to Launch', description: 'Slingshot: pull back from it and let go to fling it (Angry Birds, golf, pool). An aim line shows the shot.',
+  params: [
+    { key: 'power', label: 'Power', type: 'number', default: 6, step: 0.5, range: [0.5, 30] },
+    { key: 'maxPull', label: 'Max pull (pixels)', type: 'number', default: 140, step: 10 },
+    { key: 'shots', label: 'Shots (0 = no limit)', type: 'number', default: 0 },
+    { key: 'whileStill', label: 'Only when it has stopped', type: 'bool', default: true },
+    { key: 'shotsVar', label: 'Count shots in variable', type: 'text', default: 'shots', suggest: 'vars' },
+  ],
+  create(p) {
+    let held = null, used = 0, ref = null;
+    const pull = (s, e) => { const ptr = s.engine.input.pointers.get(held), c = screenOf(s, e); if (!ptr || !c) return null; let dx = c.x - ptr.x, dy = c.y - ptr.y; const d = Math.hypot(dx, dy); if (d > p.maxPull) { dx *= p.maxPull / d; dy *= p.maxPull / d; } return { c, dx, dy }; };
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        (s.overlays ||= []).push(ref = (ctx) => {
+          if (held == null || e.dead) return;
+          const q = pull(s, e); if (!q) return;
+          ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(q.c.x, q.c.y); ctx.lineTo(q.c.x + q.dx * 1.6, q.c.y + q.dy * 1.6); ctx.stroke();
+          ctx.setLineDash([]); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.moveTo(q.c.x, q.c.y); ctx.lineTo(q.c.x - q.dx, q.c.y - q.dy); ctx.stroke();
+          ctx.fillStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(q.c.x + q.dx * 1.6, q.c.y + q.dy * 1.6, 6, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        });
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play') return;
+        const inp = s.engine.input, b = e.body;
+        if (held == null) {
+          if (p.shots > 0 && used >= p.shots) return;
+          if (p.whileStill && b && Math.hypot(b.vel.x, b.vel.y, b.vel.z) > (s.mode === '3d' ? 0.3 : 20)) return;
+          const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y)); if (d) held = d.id;
+          return;
+        }
+        if (inp.pointers.has(held)) return;
+        // released: launch opposite the pull
+        const up = inp.ups.find((u) => u.id === held); held = null;
+        const c = screenOf(s, e); if (!up || !c) return;
+        let dx = c.x - up.x, dy = c.y - up.y; const d = Math.hypot(dx, dy); if (d < 12) return;
+        if (d > p.maxPull) { dx *= p.maxPull / d; dy *= p.maxPull / d; }
+        const k = p.power * (s.mode === '3d' ? 0.06 : 1);
+        if (s.mode === '3d') { b.vel.x = dx * k; b.vel.z = dy * k; b.vel.y = Math.hypot(dx, dy) * k * 0.35; } else { b.vel.x = dx * k; b.vel.y = dy * k; }
+        used++; if (p.shotsVar) s.addVar(p.shotsVar, 1);
+        s.engine.audio.sfx('jump'); s.engine.vibrate(15);
+      },
+      destroy(e, s) { s.overlays = (s.overlays || []).filter((f) => f !== ref); },
+    };
+  },
+});
+
 /** Rules: WHEN something happens, IF a condition holds, DO a list of actions. */
 export const RULE_EVENTS = ['game starts', 'every few seconds', 'touched by tag', 'tapped', 'jump button', 'fire button', 'swipe', 'variable reaches', 'destroyed'];
 registerBehavior('rules', {
@@ -4800,6 +5916,11 @@ export const NODE_TYPES = {
   damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'] },
   death: { cat: 'Events', label: 'On Death', outs: ['then'] },
   holding: { cat: 'Events', label: 'While Touching Screen', outs: ['then'] },
+  released: { cat: 'Events', label: 'On Finger Lifted', outs: ['then'] },
+  onWin: { cat: 'Events', label: 'On Win', outs: ['then'] },
+  onGameOver: { cat: 'Events', label: 'On Game Over', outs: ['then'] },
+  stateEntered: { cat: 'Events', label: 'On State Entered', outs: ['then'], params: [txt('state', 'Idle', 'state (blank = any)')] },
+  animEnd: { cat: 'Animation', label: 'On Animation End', outs: ['then'], params: [txt('clip', '', 'clip (blank = any)')] },
   // flow
   branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
   wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
@@ -4832,20 +5953,53 @@ export const NODE_TYPES = {
   nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
   restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
   saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message')] },
-  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['no save'], params: [num('slot', 1, 'slot')] },
+  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['then', 'no save'], params: [num('slot', 1, 'slot')] },
   deleteSave: { cat: 'Actions', label: 'Delete Save', exec: true, outs: ['then'], params: [num('slot', 1, 'slot')] },
   push: { cat: 'Actions', label: 'Push (add velocity)', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: -400 }, { key: 'z', type: 'number', default: 0 }] },
   setGravity: { cat: 'Actions', label: 'Set Gravity', exec: true, outs: ['then'], inputs: [{ key: 'y', type: 'number', default: 1600 }, { key: 'x', type: 'number', default: 0 }] },
   switchCamera: { cat: 'Actions', label: 'Switch Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera object')] },
   zoomCamera: { cat: 'Actions', label: 'Zoom Camera (2D)', exec: true, outs: ['then'], inputs: [{ key: 'zoom', type: 'number', default: 1.5 }], params: [num('seconds', 0.5, 'seconds')] },
   setLight: { cat: 'Actions', label: 'Set Light', exec: true, outs: ['then'], params: [txt('object', '', 'object (empty = this)'), opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')], inputs: [{ key: 'intensity', type: 'number', default: 1 }] },
-  tweenTo: { cat: 'Actions', label: 'Tween', exec: true, outs: ['then', 'finished'], params: [opt('prop', ['x', 'y', 'z', 'rz', 'ry', 'scale', 'alpha'], 'y', 'property'), opt('mode', ['by', 'to'], 'by', 'mode'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'value', type: 'number', default: -40 }, { key: 'seconds', type: 'number', default: 0.5 }] },
-  punch: { cat: 'Actions', label: 'Punch', exec: true, outs: ['then'], params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'amount', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 0.4 }] },
-  killTweens: { cat: 'Actions', label: 'Stop Tweens', exec: true, outs: ['then'] },
-  playAnim: { cat: 'Actions', label: 'Play Animation', exec: true, outs: ['then'], params: [txt('clip', 'Bounce', 'clip')] },
-  stopAnim: { cat: 'Actions', label: 'Stop Animation', exec: true, outs: ['then'] },
+  tweenTo: { cat: 'Tween', label: 'Tween', exec: true, outs: ['then', 'finished'], params: [opt('prop', ['x', 'y', 'z', 'rz', 'ry', 'scale', 'alpha'], 'y', 'property'), opt('mode', ['by', 'to'], 'by', 'mode'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'value', type: 'number', default: -40 }, { key: 'seconds', type: 'number', default: 0.5 }] },
+  punch: { cat: 'Tween', label: 'Punch', exec: true, outs: ['then'], params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'amount', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 0.4 }] },
+  killTweens: { cat: 'Tween', label: 'Stop Tweens', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['stop', 'jump to end'], 'stop', 'how')] },
+  tweenMove: { cat: 'Tween', label: 'Tween Move To', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'x', type: 'number', default: 200 }, { key: 'y', type: 'number', default: 300 }, { key: 'z', type: 'number', default: 0 }, { key: 'seconds', type: 'number', default: 0.6 }], params: [opt('mode', ['to', 'by', 'from'], 'to', 'mode'), opt('ease', EASES, 'outQuad', 'ease'), txt('id', '', 'tween ID')] },
+  tweenToObj: { cat: 'Tween', label: 'Tween To Object', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'seconds', type: 'number', default: 0.6 }], params: [txt('object', 'Goal', 'object or tag'), opt('ease', EASES, 'outQuad', 'ease')] },
+  jumpTo: { cat: 'Tween', label: 'Jump Tween', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'x', type: 'number', default: 120 }, { key: 'y', type: 'number', default: 0 }, { key: 'height', type: 'number', default: 80 }, { key: 'seconds', type: 'number', default: 0.6 }], params: [num('jumps', 1, 'hops')] },
+  shakeTw: { cat: 'Tween', label: 'Shake', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'strength', type: 'number', default: 10 }, { key: 'seconds', type: 'number', default: 0.5 }], params: [opt('what', ['position', 'rotation', 'scale'], 'position', 'what'), num('vibrato', 18, 'vibrato')] },
+  spin: { cat: 'Tween', label: 'Spin', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'degrees', type: 'number', default: 360 }, { key: 'seconds', type: 'number', default: 1 }], params: [opt('repeat', ['once', 'forever'], 'once', 'repeat'), opt('ease', EASES, 'outQuad', 'ease')] },
+  pulse: { cat: 'Tween', label: 'Pulse', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1.15 }, { key: 'seconds', type: 'number', default: 0.4 }], params: [opt('repeat', ['once', 'forever'], 'forever', 'repeat'), txt('id', 'pulse', 'tween ID')] },
+  tweenColor: { cat: 'Tween', label: 'Tween Colour', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'seconds', type: 'number', default: 0.5 }], params: [{ key: 'color', type: 'color', default: '#ff5252', label: 'colour' }, opt('repeat', ['once', 'there and back', 'forever'], 'once', 'repeat')] },
+  tweenVar: { cat: 'Tween', label: 'Tween Variable', exec: true, outs: ['then', 'finished'], params: [txt('name', 'score', 'variable'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'to', type: 'number', default: 100 }, { key: 'seconds', type: 'number', default: 1 }] },
+  typeText: { cat: 'Tween', label: 'Type Text', exec: true, outs: ['then', 'finished'], params: [txt('object', '', 'object (blank = me)'), txt('text', 'Hello there!', 'text'), { key: 'scramble', type: 'bool', default: false, label: 'scramble' }], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
+  spiralTw: { cat: 'Tween', label: 'Spiral', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'radius', type: 'number', default: 120 }, { key: 'turns', type: 'number', default: 3 }, { key: 'seconds', type: 'number', default: 2 }] },
+  lookAtTw: { cat: 'Tween', label: 'Turn To Face (smooth)', exec: true, outs: ['then', 'finished'], params: [txt('tag', 'player', 'object or tag')], inputs: [{ key: 'seconds', type: 'number', default: 0.4 }] },
+  pauseTw: { cat: 'Tween', label: 'Pause / Resume Tweens', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
+  reverseTw: { cat: 'Tween', label: 'Play Tweens Backwards', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['backwards', 'forwards', 'flip', 'restart'], 'flip', 'play')] },
+  tweenSpeed: { cat: 'Tween', label: 'Tween Speed', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)')], inputs: [{ key: 'speed', type: 'number', default: 2 }] },
+  playTween: { cat: 'Tween', label: 'Play Tween Component', exec: true, outs: ['then'], params: [opt('which', ['all', 'Tween', 'Tween Sequence'], 'all', 'which')] },
+  delayedCall: { cat: 'Tween', label: 'Delayed Call', exec: true, outs: ['then', 'later'], inputs: [{ key: 'seconds', type: 'number', default: 1 }], params: [txt('id', '', 'tween ID (to cancel)')] },
+  playAnim: { cat: 'Animation', label: 'Play Animation', exec: true, outs: ['then'], params: [txt('clip', 'Bounce', 'clip'), opt('loop', ['clip setting', 'loop', 'once'], 'clip setting', 'repeat')] },
+  stopAnim: { cat: 'Animation', label: 'Stop Animation', exec: true, outs: ['then'] },
+  animSpeed: { cat: 'Animation', label: 'Set Animation Speed', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 2 }] },
+  setFrame: { cat: 'Animation', label: 'Show Sprite Frame', exec: true, outs: ['then'], inputs: [{ key: 'frame', type: 'number', default: 0 }] },
+  flipX: { cat: 'Animation', label: 'Flip Sprite', exec: true, outs: ['then'], params: [opt('mode', ['face left', 'face right', 'toggle'], 'toggle', 'make it')] },
+  fadeTo: { cat: 'Animation', label: 'Fade To', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'alpha', type: 'number', default: 0 }, { key: 'seconds', type: 'number', default: 0.5 }] },
+  blink: { cat: 'Animation', label: 'Blink', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
   sendMessage: { cat: 'Actions', label: 'Send Message', exec: true, outs: ['then'], params: [txt('message', 'go', 'message')] },
   impulse: { cat: 'Actions', label: 'Camera Impulse', exec: true, outs: ['then'], inputs: [{ key: 'strength', type: 'number', default: 12 }] },
+  toggleVar: { cat: 'Actions', label: 'Toggle Variable (0 ↔ 1)', exec: true, outs: ['then'], params: [txt('name', 'on', 'variable')] },
+  setBackground: { cat: 'Looks', label: 'Set Background', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#20304a', label: 'colour' }] },
+  setAlpha: { cat: 'Looks', label: 'Set Opacity', exec: true, outs: ['then'], inputs: [{ key: 'alpha', type: 'number', default: 0.5 }] },
+  stopMoving: { cat: 'Move', label: 'Stop Moving', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  gravityScale: { cat: 'Move', label: 'Set Gravity Scale', exec: true, outs: ['then'], inputs: [{ key: 'scale', type: 'number', default: 0 }] },
+  popText: { cat: 'Looks', label: 'Pop Text', exec: true, outs: ['then'], params: [txt('text', '+1', 'text'), { key: 'color', type: 'color', default: '#ffd23d', label: 'colour' }, num('size', 26, 'size')] },
+  flashScreen: { cat: 'Looks', label: 'Flash Screen', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], inputs: [{ key: 'seconds', type: 'number', default: 0.3 }] },
+  randomVar: { cat: 'Actions', label: 'Set Variable to Random', exec: true, outs: ['then'], params: [txt('name', 'roll', 'variable')], inputs: [{ key: 'min', type: 'number', default: 1 }, { key: 'max', type: 'number', default: 6 }] },
+  goToLevel: { cat: 'Game', label: 'Go To Level', exec: true, outs: [], inputs: [{ key: 'level', type: 'number', default: 1 }] },
+  toggleComp: { cat: 'Objects', label: 'Turn Component On / Off', exec: true, outs: ['then'], params: [txt('component', 'patrol', 'component type'), opt('mode', ['off', 'on', 'toggle'], 'off', 'make it'), txt('object', '', 'object (blank = me)')] },
+  waitUntil: { cat: 'Flow', label: 'Wait Until', exec: true, outs: ['then'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('timeout', 0, 'give up after (0 = never)')] },
+  randomWait: { cat: 'Flow', label: 'Random Wait', exec: true, outs: ['then'], inputs: [{ key: 'min', type: 'number', default: 0.5 }, { key: 'max', type: 'number', default: 2 }] },
   setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
@@ -4867,7 +6021,7 @@ export const NODE_TYPES = {
   number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
   getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
   random: { cat: 'Values', label: 'Random Number', value: 'number', params: [num('min', 0, 'min'), num('max', 10, 'max')] },
-  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max'], '+', 'operation')] },
+  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max', 'mod', 'power'], '+', 'operation')] },
   compare: { cat: 'Values', label: 'Compare', value: 'bool', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['≥', '≤', '=', '>', '<', '≠'], '≥', 'is')] },
   and: { cat: 'Values', label: 'And', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: true }, { key: 'b', type: 'bool', default: true }] },
   or: { cat: 'Values', label: 'Or', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }, { key: 'b', type: 'bool', default: false }] },
@@ -4891,6 +6045,19 @@ export const NODE_TYPES = {
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
+  isMoving: { cat: 'Values', label: 'Is Moving', value: 'bool' },
+  isTweening: { cat: 'Tween', label: 'Is Tweening', value: 'bool', params: [txt('id', '', 'tween ID (blank = this object)')] },
+  choose: { cat: 'Math', label: 'Choose (if)', value: 'number', inputs: [{ key: 'condition', type: 'bool', default: true }, { key: 'yes', type: 'number', default: 1 }, { key: 'no', type: 'number', default: 0 }] },
+  wave: { cat: 'Math', label: 'Wave', value: 'number', inputs: [{ key: 'size', type: 'number', default: 1 }, { key: 'speed', type: 'number', default: 1 }], params: [opt('shape', ['sine', 'triangle', 'square'], 'sine', 'shape')] },
+  remap: { cat: 'Math', label: 'Remap', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0.5 }, { key: 'fromMin', type: 'number', default: 0 }, { key: 'fromMax', type: 'number', default: 1 }, { key: 'toMin', type: 'number', default: 0 }, { key: 'toMax', type: 'number', default: 100 }] },
+  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  deltaTime: { cat: 'Values', label: 'Frame Time', value: 'number' },
+  isHolding: { cat: 'Values', label: 'Finger On Screen', value: 'bool' },
+  touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
+  coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
+  level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  animPlaying: { cat: 'Animation', label: 'Is Animation Playing', value: 'bool', params: [txt('clip', '', 'clip (blank = any)')] },
+  spriteFrame: { cat: 'Animation', label: 'Sprite Frame', value: 'number' },
 };
 
 // ---- Logic library (PlayMaker / Game Creator style): events → conditions → instructions ----
@@ -4955,7 +6122,7 @@ export const LOGIC_ACTIONS = {
   scaleTo: { cat: 'Motion', label: 'Scale to', icon: 'scale', params: [num('scale', 1.5, 'scale'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outBack', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { scale: +p.scale || 1 }, d, { ease: p.ease }); return p.wait ? d : 0; }, say: (p) => `Scale to ${p.scale}` },
   fade: { cat: 'Motion', label: 'Fade', icon: 'eye', params: [num('alpha', 0, 'opacity (0–1)'), num('seconds', 0.5, 'over seconds'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { alpha: clamp(+p.alpha, 0, 1) }, d); return p.wait ? d : 0; }, say: (p) => `Fade to ${p.alpha}` },
   punch: { cat: 'Motion', label: 'Punch (juice)', icon: 'star', params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), num('amount', 0.3, 'amount'), num('seconds', 0.4, 'seconds')], run: (c, p) => { const a = +p.amount || 0.3, three = c.s.mode === '3d'; c.s.punch(c.e, p.what === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : p.what === 'rotation' ? (three ? { ry: a * 90 } : { rz: a * 90 }) : { y: three ? a : -a * 60 }, +p.seconds || 0.4); }, say: (p) => `Punch ${p.what}` },
-  playAnim: { cat: 'Motion', label: 'Play animation', icon: 'clock', params: [sug(txt('clip', 'Bounce', 'clip'), 'clips')], run: (c, p) => c.e.getBehavior('animator')?.play(p.clip), say: (p) => `Play “${p.clip}”` },
+  playAnim: { cat: 'Motion', label: 'Play animation', icon: 'clock', params: [sug(txt('clip', 'Bounce', 'clip'), 'clips')], run: (c, p) => playClip(c.e, p.clip), say: (p) => `Play “${p.clip}”` },
   // physics
   push: { cat: 'Physics', label: 'Push (add velocity)', icon: 'arrow', params: [opt('who', ['self', 'other'], 'self', 'who'), num('x', 0, 'x'), num('y', -500, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const t = p.who === 'other' ? c.other : c.e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +p.x || 0; b.vel.y += +p.y || 0; b.vel.z += +p.z || 0; } }, say: (p) => `Push ${p.who} ${p.x}, ${p.y}` },
   setVelocity: { cat: 'Physics', label: 'Set velocity', icon: 'arrow', params: [num('x', 0, 'x'), num('y', 0, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const b = c.e.ensureBody({ type: 'dynamic' }); b.vel.x = +p.x || 0; b.vel.y = +p.y || 0; b.vel.z = +p.z || 0; }, say: (p) => `Velocity ${p.x}, ${p.y}` },
@@ -5132,6 +6299,7 @@ registerBehavior('graph', {
   create(p) {
     const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
     const def = (n) => NODE_TYPES[n.type] || {};
+    const anims = (e) => ['animator', 'spriteSheet'].map((t) => e.getBehavior(t)).filter(Boolean);
     const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
     const input = (n, key, ctx, depth = 0) => {
       const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
@@ -5144,7 +6312,7 @@ registerBehavior('graph', {
         case 'number': return +P('value') || 0;
         case 'getVar': return +s.vars[P('name')] || 0;
         case 'random': { const a = +P('min') || 0, b = +P('max') || 0; return Number.isInteger(a) && Number.isInteger(b) ? Math.min(b, Math.floor(rand(a, b + 1))) : rand(a, b); }
-        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b) }[P('op')] ?? 0; }
+        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b), mod: b ? ((a % b) + b) % b : 0, power: a ** b }[P('op')] ?? 0; }
         case 'compare': { const a = +I('a') || 0, b = +I('b') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')] ?? false; }
         case 'and': return !!I('a') && !!I('b');
         case 'or': return !!I('a') || !!I('b');
@@ -5168,12 +6336,29 @@ registerBehavior('graph', {
         case 'itemCount': return s.itemCount(P('item'));
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
+        case 'isMoving': { const v = e.body?.vel; if (v) return Math.hypot(v.x, v.y, v.z) > (s.mode === '3d' ? 0.2 : 10); const m = state.get('_moved'); return !!m && s.time - m < 0.1; }
+        case 'isTweening': return s.isTweening(P('id') || e);
+        case 'choose': return I('condition') ? +I('yes') || 0 : +I('no') || 0;
+        case 'wave': { const t = s.time * (+I('speed') || 0), k = +I('size') || 0, f = t - Math.floor(t); return k * (P('shape') === 'square' ? (f < 0.5 ? 1 : -1) : P('shape') === 'triangle' ? 1 - 4 * Math.abs(f - 0.5) : Math.sin(t * PI * 2)); }
+        case 'remap': { const a = +I('fromMin') || 0, b = +I('fromMax') || 0, t = b === a ? 0 : ((+I('value') || 0) - a) / (b - a); return (+I('toMin') || 0) + ((+I('toMax') || 0) - (+I('toMin') || 0)) * t; }
+        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null); return t ? t[P('axis')] || 0 : 0; }
+        case 'deltaTime': return ctx.dt ?? 1 / 60;
+        case 'isHolding': return s.engine.input.pointers.size > 0;
+        case 'touchPos': {
+          const inp = s.engine.input, pt = [...inp.pointers.values()][0] || inp.taps[0] || inp.ups[0];
+          if (pt) state.set('_finger', s.mode === '2d' ? s.engine.renderer.screenToWorld(s, pt.x, pt.y) : { x: pt.x, y: pt.y });
+          return state.get('_finger')?.[P('axis') === 'y' ? 'y' : 'x'] ?? 0;
+        }
+        case 'coinFlip': return Math.random() < 0.5;
+        case 'level': return (s.engine.levelIndex ?? 0) + 1;
+        case 'animPlaying': { const c = anims(e).map((a) => a.current).find(Boolean) || ''; return P('clip') ? c === P('clip') : !!c; }
+        case 'spriteFrame': return e.sprite?.frame | 0;
         default: return 0;
       }
     };
     const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
     const run = (n, ctx) => {
-      if (!n || ++ctx.steps > 300 || ctx.e.dead && n.type !== 'destroyed') return;
+      if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
@@ -5185,7 +6370,7 @@ registerBehavior('graph', {
         case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
         case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
         case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
-        case 'randomBranch': { const ports = ['1', '2', '3'].filter((pt) => g.links.some((l) => l.from.node === n.id && l.from.port === pt)); return ports.length ? follow(n, pick(ports), ctx) : undefined; }
+        case 'randomBranch': { const ports = ['1', '2', '3'].filter((pt) => g.links.some((l) => l.from.node === n.id && l.from.port === pt)); return ports.length ? follow(n, ports[Math.floor(Math.random() * ports.length)], ctx) : undefined; }
         case 'switchNum': { const v = Math.round(+I('value') || 0); return follow(n, v >= 0 && v <= 3 ? String(v) : 'other', ctx); }
         case 'compareBranch': { const a = +I('a') || 0, b = +I('b') || 0, ok = { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')]; return follow(n, ok ? 'yes' : 'no', ctx); }
         case 'setPosition': { const t = P('target') === 'other' ? ctx.other : e; if (t) { t.x = +I('x') || 0; t.y = +I('y') || 0; if (s.mode === '3d') t.z = +I('z') || 0; if (t.body) t.body.vel = { x: 0, y: 0, z: 0 }; } break; }
@@ -5227,7 +6412,7 @@ registerBehavior('graph', {
         case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
         case 'restart': s.engine.restart(); return;
         case 'saveGame': if (s.saveGame(+P('slot') || 1) && P('text')) s.message(P('text'), 1.5); break;
-        case 'loadGame': if (!s.loadGame(+P('slot') || 1)) follow(n, 'no save', ctx); return;
+        case 'loadGame': follow(n, s.loadGame(+P('slot') || 1) ? 'then' : 'no save', ctx); return;
         case 'deleteSave': s.deleteSave(+P('slot') || 1); break;
         case 'push': { const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +I('x') || 0; b.vel.y += +I('y') || 0; b.vel.z += +I('z') || 0; } break; }
         case 'setGravity': s.gravity = +I('y') || 0; s.gravityX = +I('x') || 0; break;
@@ -5247,9 +6432,54 @@ registerBehavior('graph', {
           s.punch(t, P('what') === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : P('what') === 'rotation' ? (three ? { ry: a * 90 } : { rz: a * 90 }) : { y: three ? a : -a * 60 }, d);
           break;
         }
-        case 'killTweens': s.killTweens(e); break;
-        case 'playAnim': e.getBehavior('animator')?.play(P('clip')); break;
-        case 'stopAnim': e.getBehavior('animator')?.stop(); break;
+        case 'killTweens': s.killTweens(P('id') || e, P('mode') === 'jump to end'); break;
+        case 'tweenMove': {
+          const m = P('mode'), v = { x: +I('x') || 0, y: +I('y') || 0, ...(s.mode === '3d' ? { z: +I('z') || 0 } : {}) };
+          const tw = s.to(e, v, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease'), relative: m !== 'to', from: m === 'from', id: P('id') || undefined });
+          tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break;
+        }
+        case 'tweenToObj': { const k = P('object'), t = s.find(k) || nearest(s, e, k); if (!t) break; const tw = s.to(e, { x: t.x, y: t.y, ...(s.mode === '3d' ? { z: t.z } : {}) }, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'jumpTo': { const tw = s.jumpTo(e, { x: +I('x') || 0, y: +I('y') || 0, z: 0 }, +I('height') || 0, Math.max(1, +P('jumps') || 1), Math.max(0.01, +I('seconds') || 0.01), { relative: true }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'shakeTw': {
+          const a = +I('strength') || 0, w = P('what'), three = s.mode === '3d';
+          const amt = w === 'rotation' ? { [three ? 'ry' : 'rz']: a } : w === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : (three ? { x: a, y: a, z: a } : { x: a, y: a });
+          const tw = s.shakeProps(e, amt, Math.max(0.01, +I('seconds') || 0.01), { vibrato: Math.max(1, +P('vibrato') || 18) }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break;
+        }
+        case 'spin': { const k = s.mode === '3d' ? 'ry' : 'rz', fe = P('repeat') === 'forever'; const tw = s.to(e, { [k]: +I('degrees') || 0 }, Math.max(0.01, +I('seconds') || 0.01), { ease: fe ? 'linear' : P('ease'), relative: true, loops: fe ? -1 : 0, loopType: 'incremental' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'pulse': { const k = +I('amount') || 1, fe = P('repeat') === 'forever', three = s.mode === '3d'; if (P('id')) s.killTweens(P('id')); s.to(e, three ? { sx: e.sx * k, sy: e.sy * k, sz: e.sz * k } : { sx: e.sx * k, sy: e.sy * k }, Math.max(0.01, +I('seconds') || 0.01), { ease: 'inOutSine', loops: fe ? -1 : 1, loopType: 'yoyo', id: P('id') || undefined }); break; }
+        case 'tweenColor': { const key = e.mesh ? 'mesh.color' : e.text && !e.shape ? 'text.color' : 'shape.fill', r = P('repeat'); if (key === 'shape.fill' && !e.shape) break; const tw = s.to(e, { [key]: P('color') }, Math.max(0.01, +I('seconds') || 0.01), { ease: 'inOutSine', loops: r === 'forever' ? -1 : r === 'there and back' ? 1 : 0, loopType: 'yoyo' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'tweenVar': { const k = P('name') || 'score', tw = s.counter(k, +s.vars[k] || 0, +I('to') || 0, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'typeText': { const t = P('object') ? s.find(P('object')) : e; if (!t) break; const tw = s.typeText(t, fillTemplate(P('text'), s.vars), Math.max(0.01, +I('seconds') || 0.01), { scramble: !!P('scramble') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'spiralTw': { const tw = s.spiral(e, Math.max(0.01, +I('seconds') || 0.01), { radius: +I('radius') || 0, turns: +I('turns') || 0 }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'lookAtTw': { const k = P('tag'), t = s.find(k) !== e && s.find(k) || nearest(s, e, k); const tw = t && s.lookAtTween(e, t, Math.max(0.01, +I('seconds') || 0.01)); tw?.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'pauseTw': { const who = P('id') || e; if (P('mode') === 'pause') s.pauseTweens(who); else if (P('mode') === 'resume') s.playTweens(who); else for (const t of s.tweensOf(who)) t.togglePause(); break; }
+        case 'reverseTw': { const who = P('id') || e, m = P('mode'); if (m === 'backwards') s.reverseTweens(who); else if (m === 'forwards') for (const t of s.tweensOf(who)) t.playForward(); else if (m === 'restart') s.restartTweens(who); else for (const t of s.tweensOf(who)) t.flip(); break; }
+        case 'tweenSpeed': s.tweenSpeed(P('id') || e, +I('speed') || 0); break;
+        case 'playTween': for (const b of e.behaviors) if ((b.type === 'tween' && P('which') !== 'Tween Sequence') || (b.type === 'tweenSequence' && P('which') !== 'Tween')) b.play(e, s); break;
+        case 'delayedCall': { const tw = s.delayedCall(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'later', { ...ctx, steps: 0 }); }, { id: P('id') || undefined }); tw.target = e; break; }
+        case 'popText': popText(s, e.x, e.y, fillTemplate(P('text'), s.vars), P('color') || '#ffd23d', +P('size') || 26); break;
+        case 'flashScreen': s.flashScreen(P('color') || '#ffffff', Math.max(0.01, +I('seconds') || 0.3)); break;
+        case 'randomVar': { const a = Math.round(+I('min') || 0), b = Math.round(+I('max') || 0); s.setVar(P('name') || 'roll', Math.min(a, b) + Math.floor(Math.random() * (Math.abs(b - a) + 1))); break; }
+        case 'goToLevel': s.engine.goToLevel?.(+I('level') || 1); return;
+        case 'toggleComp': { const t = P('object') ? s.find(P('object')) : e, k = String(P('component') || '').trim().toLowerCase(); if (!t || !k) break; for (const b of t.behaviors) if ((b.type || '').toLowerCase() === k || (Behaviors[b.type]?.label || '').toLowerCase() === k) b.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !b.off; break; }
+        case 'waitUntil': {
+          const start = s.time, limit = +P('timeout') || 0, c2 = { ...ctx, steps: 0 };
+          const check = () => { if (e.dead || s.engine.scene !== s) return; if (input(n, 'condition', c2)) follow(n, 'then', { ...c2, steps: 0 }); else if (limit > 0 && s.time - start >= limit) return; else s.after(0, check); };
+          check(); return;
+        }
+        case 'randomWait': { const a = +I('min') || 0, b = +I('max') || 0; s.after(Math.max(0, rand(Math.min(a, b), Math.max(a, b))), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
+        case 'playAnim': { const lp = P('loop'), loop = lp === 'loop' ? true : lp === 'once' ? false : undefined; playClip(e, P('clip'), loop); break; }
+        case 'stopAnim': for (const a of anims(e)) a.stop(); break;
+        case 'animSpeed': for (const a of anims(e)) a.setSpeed(+I('speed') || 0); break;
+        case 'setFrame': { e.getBehavior('spriteSheet')?.stop(); if (e.sprite) e.sprite.frame = Math.max(0, Math.round(+I('frame') || 0)); break; }
+        case 'flipX': if (e.sprite) e.sprite.flip = P('mode') === 'face left' ? true : P('mode') === 'face right' ? false : !e.sprite.flip; else if (P('mode') !== 'toggle') e.sx = Math.abs(e.sx) * (P('mode') === 'face left' ? -1 : 1); else e.sx = -e.sx; break;
+        case 'fadeTo': { const tw = s.to(e, { alpha: clamp(+I('alpha') || 0, 0, 1) }, Math.max(0.01, +I('seconds') || 0.5), { ease: 'outQuad' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'blink': { const end = s.time + Math.max(0.05, +I('seconds') || 1), id = e.data._blink = (e.data._blink || 0) + 1, tick = () => { if (e.dead || e.data._blink !== id) return; if (s.time >= end) { e.visible = true; return; } e.visible = !e.visible; s.after(0.08, tick); }; tick(); break; }
+        case 'toggleVar': s.setVar(P('name') || 'on', +s.vars[P('name') || 'on'] ? 0 : 1); break;
+        case 'setBackground': s.background = P('color') || s.background; break;
+        case 'setAlpha': e.alpha = clamp(+I('alpha') || 0, 0, 1); break;
+        case 'stopMoving': { const t = P('target') === 'other' ? ctx.other : e; if (t?.body) { t.body.vel.x = t.body.vel.y = t.body.vel.z = 0; if (t.body.angVel != null) t.body.angVel = 0; } break; }
+        case 'gravityScale': { const b = e.ensureBody({ type: 'dynamic' }); b.gravityScale = +I('scale') || 0; break; }
         case 'sendMessage': s.send(P('message')); break;
         case 'impulse': s.impulse(+I('strength') || 10, e); break;
         default: break;
@@ -5257,6 +6487,7 @@ registerBehavior('graph', {
       follow(n, 'then', ctx);
     };
     const fire = (type, e, s, other, filter, dt) => {
+      if (e.dead && type !== 'destroyed') return;
       for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt });
     };
     const timers = new Map();
@@ -5267,6 +6498,10 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
+        if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
+        if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
+        if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
+        if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
         if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
         fire('start', e, s);
       },
@@ -5276,6 +6511,8 @@ registerBehavior('graph', {
         if (!playing) return;
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
+        if (g.nodes.some((n) => n.type === 'released') && inp.ups?.length) fire('released', e, s);
+        if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
           else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });
@@ -5320,7 +6557,9 @@ export class Engine {
     this.root = document.createElement('div');
     this.root.className = 'pocket-root';
     const fixed = this.parent === document.body;
-    this.root.style.cssText = `position:${fixed ? 'fixed' : 'absolute'};inset:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
+    this.rootBase = `position:${fixed ? 'fixed' : 'absolute'};overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
+    this.root.style.cssText = this.rootBase + 'inset:0;';
+    this.letterbox = null; // true / false overrides the game's "held the wrong way" setting (the editor uses it)
     this.parent.appendChild(this.root);
     this.uiCanvas = document.createElement('canvas');
     this.uiCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:2;touch-action:none;';
@@ -5330,7 +6569,9 @@ export class Engine {
     this.safeProbe = document.createElement('div');
     this.safeProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);';
     this.root.appendChild(this.safeProbe);
-    this.safe = { top: 0, right: 0, bottom: 0, left: 0 };
+    this.deviceSafe = { top: 0, right: 0, bottom: 0, left: 0 };
+    this.safe = { top: 0, right: 0, bottom: 0, left: 0, k: 1 };
+    this.safeOverride = null; // the editor's phone preview: pretend there is a notch / home bar
 
     this.input = new Input(this, this.uiCanvas);
     this.audio = new Audio();
@@ -5364,7 +6605,8 @@ export class Engine {
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
     for (const c of [this.uiCanvas, this.canvas]) if (c) { c.width = Math.round(this.width * this.dpr); c.height = Math.round(this.height * this.dpr); }
     const cs = getComputedStyle(this.safeProbe);
-    this.safe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+    this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+    this.updateSafe();
     if (this.scene && !this.editing) this.render();
   }
 
@@ -5408,6 +6650,13 @@ export class Engine {
   }
 
   hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+  /** Jump to a level by number (1 = first), keeping variables like score. */
+  goToLevel(n) {
+    if (!this.levels) return;
+    const i = clamp(Math.round(n) - 1, 0, this.levels.length - 1), carry = { ...this.scene.vars };
+    delete carry.best; delete carry.level; delete carry.time;
+    this.carry = carry; this.levelIndex = i; this.setScene(this.factory()); this.saveProgress();
+  }
 
   nextLevel() {
     if (!this.hasNextLevel()) return;
@@ -5429,7 +6678,7 @@ export class Engine {
 
   setScene(scene, { skipRestore = false } = {}) {
     scene.engine = this;
-    this.scene = scene;
+    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe();
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });
@@ -5487,7 +6736,7 @@ export class Engine {
     for (const e of s.entities) {
       if (!e.ui || e.dead) continue;
       if (!e.started) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
-      for (const b of e.behaviors) if (b.uiAlways) b.update?.(e, dt, s);
+      for (const b of e.behaviors) if (b.uiAlways && !b.off) b.update?.(e, dt, s);
     }
     s.flush();
   }
@@ -5554,10 +6803,41 @@ export class Engine {
     return true;
   }
 
-  /** True when the game wants portrait/landscape and a phone is held the other way. */
+  /**
+   * Portrait or landscape games on a screen held the other way: with settings.wrongWay = 'letterbox' (or engine.letterbox),
+   * the game plays in a box of its own shape (black bars), instead of asking the player to turn the phone.
+   */
+  fitScreen() {
+    const s = this.scene, o = s?.settings.orientation, want = this.letterbox ?? (s?.settings.wrongWay === 'letterbox');
+    const P = this.parent === document.body ? { width: innerWidth, height: innerHeight } : this.parent.getBoundingClientRect();
+    let box = null;
+    if (s && want && (o === 'portrait' || o === 'landscape') && P.width > 0 && P.height > 0 && (o === 'landscape') === (P.height > P.width)) {
+      const v = s.view || {}, a = Math.max(+v.width || 0, +v.height || 0) / Math.max(1, Math.min(+v.width || 0, +v.height || 0));
+      const ratio = s.mode === '3d' || !(a >= 1.2 && a <= 3) ? 16 / 9 : a;
+      const w = o === 'landscape' ? P.width : Math.min(P.width, P.height / ratio), hh = o === 'landscape' ? Math.min(P.height, P.width / ratio) : P.height;
+      box = { w: Math.round(w), h: Math.round(hh), x: Math.round((P.width - w) / 2), y: Math.round((P.height - hh) / 2) };
+    }
+    const css = this.rootBase + (box ? `left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px;` : 'inset:0;');
+    this.boxed = !!box;
+    if (css !== this._fitCss) { this._fitCss = css; this.root.style.cssText = css; this.resize(); }
+    return box;
+  }
+
+  /** An open side bar or popup takes the taps: one outside it closes it and goes no further. */
+  modalTaps(s) {
+    const m = s.modal;
+    if (!m || m.dead || !m.visible) { s.modal = null; return; }
+    const inp = this.input, r = uiBox(m, this.width, this.height, this.safe);
+    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2;
+    const out = inp.taps.some((t) => !inside(t));
+    inp.taps = inp.taps.filter(inside); inp.downs = inp.downs.filter(inside);
+    if (out) m._dismiss?.();
+  }
+
+  /** True when the game wants portrait/landscape and a phone is held the other way (and it isn't letterboxed). */
   wrongOrientation(s) {
     const o = s.settings.orientation;
-    if (!o || o === 'any' || !matchMedia('(pointer: coarse)').matches) return false;
+    if (!o || o === 'any' || this.boxed || !matchMedia('(pointer: coarse)').matches) return false;
     return o === 'portrait' ? this.width > this.height * 1.1 : this.height > this.width * 1.1;
   }
 
@@ -5607,8 +6887,10 @@ export class Engine {
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
+    if (!this.editing) this.fitScreen();
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
+    this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
       this.runUIOnly(s, dt);
@@ -5642,7 +6924,7 @@ export class Engine {
     for (const e of s.entities) {
       if (e.dead) continue;
       if (e.data.invuln > 0) e.data.invuln -= dt;
-      for (const b of e.behaviors) { if (e.dead) break; b.update?.(e, dt, s); }
+      for (const b of e.behaviors) { if (e.dead) break; if (!b.off) b.update?.(e, dt, s); }
     }
     s.update(dt, this);
     if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
@@ -5685,9 +6967,24 @@ export class Engine {
     if (s.msg && (s.msg.t -= dt) <= 0) s.msg = null;
   }
 
+  /**
+   * The safe area UI keeps inside (away from notches, rounded corners and the home bar) and the UI scale for this screen.
+   * Settings: safeArea ('device' | 'off'), safeMargin (extra space on every side), uiScale ('scale with screen' | 'constant'), uiMatch, uiScaleFactor.
+   */
+  updateSafe() {
+    const st = this.scene?.settings || {}, d = this.safeOverride || this.deviceSafe, off = st.safeArea === 'off', m = Math.max(0, +st.safeMargin || 0);
+    const side = (k) => (off ? 0 : d[k] || 0) + m;
+    const k = this.editing && !this.safeOverride?.scale ? 1 : uiScaleFor(this.width, this.height, st, this.scene?.view);
+    const S = this.safe;
+    S.top = side('top'); S.right = side('right'); S.bottom = side('bottom'); S.left = side('left'); S.k = k;
+    return S;
+  }
+
   render() {
     if (!this.scene || !this.renderer) return;
+    this.updateSafe();
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
+    this.scene.syncLights();
     this.renderer.render(this.scene, this);
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);

@@ -23,6 +23,16 @@ Or use the live version: **https://kingimann.github.io/AppTest/editor/**
 
 ## The editor
 
+**Finding your way around (phones):**
+- **Bottom bar:** works like an app's navigation bar: **Scene · Hierarchy · Inspector · Scripts · Project · Console**.
+  - **Scene** gives the Scene view the whole screen.
+  - The other tabs open full size, so nothing is cramped. Drag the handle to make them half height (remembered), or tap the open tab again to go back to the Scene.
+  - Pressing Play always shows the game, and Stop brings your panel back.
+- **+ Add opens the Create screen:** a full-screen place for everything you can add.
+  - A search box and **Quick add** (player, platform, coin, enemy, goal, score).
+  - Big folders: Gameplay, Characters & Sprites, Shapes & Objects, 3D Models, UI & Menus, Logic & Scripts, Camera & Lights, My Prefabs.
+  - The Hierarchy's **Create** button and the Project tab open it too.
+
 Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Install App* adds it to your home screen, and it works offline.
 
 1. **Home screen**: continue your last game, or pick a **game type**. Each one is a complete, playable starter you change any way you like:
@@ -112,6 +122,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 ### Hierarchy and Inspector
 
+- **Home** and **New Game** split game types into **2D games** and **3D games** (with Blank first), and **My games** has All / 2D / 3D tabs with a 2D/3D badge on each.
 - **Hierarchy**:
   - Each row shows a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing its components.
   - Three or more objects with the same name fold into one row (**Gem ×8**). Tap to open or fold it; its eye shows or hides them all.
@@ -131,15 +142,27 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 ### Node coding (Visual Script)
 
-Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
+Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**.
 
-- **Add Node** opens a list with category chips to jump between sections, and a search:
-  - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**.
+The **Scripts** tab (between Inspector and Project) lists every Visual Script in the game:
+- Each card shows the object, a mini map of its nodes, which events start it and how many nodes it has.
+- Tap a card to open it in the Node Editor. Scripts on other levels are listed under their level; opening one switches to that level.
+- ⋮ shows the object in the Inspector, saves the script for reuse (or unlinks it), turns it off or on, or removes it.
+- **New Visual Script** adds one to the selected object. With more than a few scripts, search by object, event or node name.
+- **Saved scripts** lists your reusable scripts with how often each is used; **Add** puts one on the selected object.
+
+The editor fills the screen:
+
+- **Add Node** opens like Add Component: a search box, **Suggested next** (nodes that usually follow the selected one, or events to start with), **Recently used**, and a folder per category with how many nodes it holds. Tap a folder to open it, ‹ to go back:
+  - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**, **On Finger Lifted**, **On Win**, **On Game Over**, **On State Entered**.
+  - **Tween** (teal): Tween, Punch, Stop Tweens (by object or ID, optionally jumping to the end), **Tween Move To** (to / by / from), **Tween To Object**, **Jump Tween**, **Shake**, **Spin**, **Pulse**, **Tween Colour**, **Tween Variable** (smooth score counters), **Type Text**, **Spiral**, **Turn To Face**, **Pause / Resume**, **Play Backwards / Flip / Restart**, **Tween Speed**, **Play Tween Component**, **Delayed Call**, and the value **Is Tweening**. Most have a **finished** output for what happens when they end.
+  - **Animation** (pink): **Play Animation** (loop / once / the clip's setting), Stop Animation, **Set Animation Speed**, **Show Sprite Frame**, **Flip Sprite**, **Fade To**, **Blink**, **On Animation End**, and the values **Is Animation Playing** and **Sprite Frame**. They work with both the Animator and the Sprite Sheet Animator.
   - **Flow** (purple): If, Wait, Random Chance, Do Once, Sequence, **Repeat N Times** (with Loop Index), **Flip Flop**, **Cooldown**, **Count To**, **Random Branch**, **Switch on Number**, **Compare Branch**.
   - **Actions** (blue): variables, messages, Debug Log, sounds, spawn, destroy, velocity, jump, show/hide, camera, lights, tweens, animation, saving, win / game over.
-  - **Move**: **Set Position**, **Move Toward** (a tag), **Look At**, **Rotate By**, **Set Scale**, **Teleport To**. **Looks**: **Set Text**, **Set Colour**, **Particle Burst**. **Objects**: **Spawn At**, **Destroy All With Tag**, **Add / Remove Tag**. **Game**: **Slow Motion**, **Damage**, **Heal**, **Give Item**.
-  - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
-- ★ Templates include Chase the player, Tap 5 times → win, and Spawn a ring of 8.
+  - **Move**: **Set Position**, **Move Toward** (a tag), **Look At**, **Rotate By**, **Set Scale**, **Teleport To**. **Looks**: **Set Text**, **Set Colour**, **Particle Burst**, **Set Background**, **Set Opacity**. More moves: **Stop Moving**, **Set Gravity Scale**; **Toggle Variable** flips a variable between 0 and 1. Also **Pop Text** (“+10”), **Flash Screen**, **Set Variable to Random**, **Go To Level**, **Turn Component On / Off**, **Wait Until** (a condition), **Random Wait**, and the values **Choose (if)**, **Wave**, **Remap**, **Position Of**, **Frame Time**; Math also does **mod** and **power**. **Objects**: **Spawn At**, **Destroy All With Tag**, **Add / Remove Tag**. **Game**: **Slow Motion**, **Damage**, **Heal**, **Give Item**.
+  - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**, **Is Moving**, **Finger On Screen**, **Finger Position**, **Coin Flip**, **Level Number**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
+- ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, Run / idle by speed, Collect: hop, fade, remove, and Tap → score counts up.
+- **Reusable scripts.** The 💾 button (or *Save as Reusable Script* on the component) names and saves the graph. Add it to any other object from **Add Component → My Scripts**. Copies stay **linked**: edit any of them and every copy updates (the component shows the script's name and how many objects use it; ⋮ → *Unlink* to change one copy on its own, or *Rename*). Saved scripts are also kept on your device, so **My Scripts** and ★ list the ones from your other games too.
 - If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
 - Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
@@ -202,6 +225,39 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
 ```
 
+### Colliders and Rigidbody (Unity-style)
+
+- **2D games:** Box Collider 2D and Circle Collider 2D. **3D games:** Box Collider and Sphere Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).
+- **See them like Unity:** every collider is outlined in green in the Scene view (2D outlines, 3D wireframes; triggers are dashed / lighter). Turn it off with *2D/3D menu → Show All Colliders* or the checkbox on a collider; the selected object's collider always shows.
+
+- **Colliders** are their own components: **Box Collider 2D**, **Circle Collider 2D** (2D) and **Box Collider**, **Sphere Collider** (3D). New Squares, Circles, Cubes, Spheres… come with one, like Unity's primitives.
+  - A collider on its own makes a solid object that never moves (walls, ground, obstacles). Add a **Rigidbody** to make it fall and get pushed.
+  - **Is Trigger** detects touches without blocking. Coins, hazards and other "touch" components turn a plain collider into a trigger for you.
+  - **Size** / **Radius**, **Offset**, **Set Size / Fit to Shape**, **Shape** (box ↔ circle), **Material** (bounce, friction), and **Edit Collider** handles in the 2D Scene.
+- **Rigidbody 2D / Rigidbody**: Body Type (Dynamic / Kinematic / Static), Mass, Gravity Scale, Linear Drag, Bounciness, Friction, Material, Freeze Position, Start Velocity, Max Speed, Max Fall Speed, Collision Detection (Continuous for fast objects), Physics layer and pass-through tags.
+- New blank 2D games have gravity on (like Unity). If a level's gravity is off, a Rigidbody shows a **Turn on gravity** button. Top-down movers set their own Gravity Scale to 0.
+
+### Camera and lights in the scene
+
+- New games start, like a Unity scene, with a **Main Camera** object (follows the player, or stays put if there isn't one) and a light object: **Directional Light** in 3D (its rotation aims the sun and the shadows; colour, intensity, ambient, shadows) or **Global Light 2D** (how bright the level is; Point Lights shine through the dark).
+- Create → **Camera & lights** adds more: Camera, Directional Light / Global Light 2D, Point Light. While a light object exists, the level's Lighting settings defer to it.
+
+### Character Controller 2D
+
+- One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle) and Grid steps. Only the settings that matter for the chosen type are shown, with a tip for each.
+
+### Tap and click components
+
+- **Click Popup**: a floating "+1" (any text, with `{score}` etc.) rises where the object is tapped.
+- **Combo Clicker**: tap for points; quick taps build a combo multiplier (`{combo}`), with critical hits, popups, squash and sparkles.
+- **Long Press**: hold a finger on it for a moment (a ring fills up) to do any Button action.
+- **Double Tap**: two quick taps do any Button action.
+- **Tap Toggle**: each tap switches on/off: a 0/1 variable, its colour, another object's visibility, and an "on/off" message.
+- **Press Feedback**: squashes the moment a finger lands, springs back on release, with sound, buzz and optional sparkles (great on UI buttons).
+- **Tap to Spawn**: tapping empty space (or anywhere) creates a template there; cooldown, max count and an optional cost.
+- **Drag to Launch**: slingshot — pull back from the object and let go to fling it, with an aim line (Angry Birds, golf, pool).
+- New prefabs: **Big Clicker**, **Slingshot Ball** and **Switch**.
+
 ### Sounds
 
 - **Project › Sounds › Import Sound** brings in MP3, WAV, OGG or M4A files from your phone (short clips work best: they're saved inside the project). Tap ▶ to preview; ⋯ renames (everything using it follows) or deletes.
@@ -223,6 +279,52 @@ The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while
 - Repeated messages fold into one line with a count. Filter by Log / Warn / Error, clear it, and choose whether Play clears it. Tap a message from an object to jump to it.
 - While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
 - A custom script that crashes is reported once and the game keeps running.
+
+### Portrait or landscape
+
+- **Pick it when you start:** New Game has a *Blank game: Portrait / Landscape* switch, and every game type shows which way it plays.
+- **Change it any time:**
+  - *Game Settings → Orientation* (Portrait / Landscape / Either), or the orientation button on the UI editor's screen bar.
+  - Switching turns a 2D game's screen size around (400 × 700 ↔ 700 × 400) for every level, and a camera sitting in the middle of the old screen moves to the middle of the new one.
+- **Held the other way?** Choose what players see: *Ask the player to turn it*, or *Play in a box* (the game keeps its shape with bars at the edges). *Go full screen and lock the rotation* locks it on phones that allow it.
+- **In the editor:** the UI editor and Play show the game in its own shape, so a landscape game is a wide box on a portrait phone. Turn the phone to play it full screen.
+- From code: `settings.orientation` ('portrait' | 'landscape' | 'any'), `settings.wrongWay` ('ask' | 'letterbox'), `engine.letterbox` to force the box, and `engine.fitScreen()`.
+
+### Navigation, popups and more UI
+
+Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.
+- **Bottom Nav Bar:**
+  - Four tabs with icons (Home, Shop, Awards, Profile) that spread across the screen.
+  - Three ready-made **Pages**: tapping a tab sets the variable `page`, and each page shows when it matches.
+- **Side Bars:**
+  - **Side Bar (left):** a ☰ button slides in a menu with icons. It dims the game, and picking an item or tapping outside closes it.
+  - **Side Bar (right):** a ⚙ button opens settings toggles.
+  - **Bottom Sheet:** a + button slides up a panel.
+- **Tab Bar, Page, App Bar** (menu + title + settings).
+- **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
+- **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
+- **New components** (Add Component › UI):
+  - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
+  - **Show If (pages):** shows UI only when a variable matches, with fade / pop / slide.
+  - **Side Bar (drawer):** slides in from any edge on a message.
+  - **Popup (modal / toast)**, **Option Picker**, **Scroll View**, **Star Rating**.
+  - **Layout Group** can now arrange its own children and spread them evenly.
+- **In the UI editor:** the **Pages** button previews one page at a time.
+
+### Sprites (drawn art, no emoji)
+
+- *Project › Sprites* is a library of about 100 drawn sprites (as of v0.1): characters, enemies, items, nature, vehicles, blocks and white UI icons. They are vector art, so they stay sharp at any size and add almost nothing to a project (`sprite: { src: 'art:slime' }`).
+- The Image component has **Sprite library** and **From device** buttons. A shape can be turned into a sprite with *Use a sprite picture instead*.
+- Built-in prefabs (NPC, guard, torch, key, bird…) and UI widgets use these sprites instead of emoji. Hearts and star ratings can use sprites as their icons (`icon: 'art:heart'`), and Sprite Animation frames can be sprites (`art:bird,art:bird2`).
+
+### Safe area and UI scaling (fits every phone)
+
+- **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.
+  - Tick **Ignore safe area** on a UI element (UI Element card) for full-screen backgrounds that should go under the notch.
+  - *Game Settings → Screen & Safe Area*: turn the safe area off, or add **extra edge space** on every side.
+- **UI scaling (like Unity's Canvas Scaler):** UI grows or shrinks with the screen, using the game's design size (*view width × height*) as the reference. **Match width ↔ height** picks what to follow (0 = width, 1 = height, 0.5 = both), **UI size multiplier** makes everything bigger or smaller, and *Same size on every screen* turns scaling off. Taps, sliders, buttons and layouts all follow the scale.
+- **Preview phones in the UI editor:** the phone button on the screen bar shows an iPhone notch, Dynamic Island, Android camera hole, a sideways iPhone, no notch, or this device. The safe area is outlined, the unsafe edges are tinted, and the preview also applies when you press Play.
+- From code: `uiBox(e, W, H, engine.safe)` gives an element's on-screen box, `placeUI(e, x, y, W, H, engine.safe)` moves it to a screen point, `engine.safe` holds the insets and the scale `k`, and `engine.safeOverride` fakes insets for testing.
 
 ### Parenting, UI anchoring and UI zoom
 
@@ -261,17 +363,23 @@ Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are rel
   - Keys are offsets from the object's rest pose, so clips work wherever the object is (even while physics moves it).
   - Play clips with the *play animation* action, the Play Animation node, or a message with the clip's name.
 - **Tween** component (like DOTween Animation):
-  - Effects: move by/to, rotate, scale, fade, colour, punch scale/position, shake position/rotation, path, jump.
-  - 28 eases with a curve preview, loops (−1 = forever), yoyo/restart/incremental, delay.
-  - Play on start, tap, touch or message, and **when finished, do** an action. **Preview** plays it right in the Scene.
+  - Effects: move by / to / **from**, rotate by / **to**, **spin**, scale to / **by**, fade, colour, punch scale / position / **rotation**, shake position / rotation / **scale**, path (optionally closed), jump (with **number of hops**), **spiral**, **look at**, **blink**, **type text** (optionally scrambled) and **count up** (a variable or the object's text).
+  - 33 eases with a curve preview (adds smoothStep, spring and flash), loops (−1 = forever), yoyo / restart / incremental, delay, **vibrato and elasticity** for punches and shakes.
+  - **Play as From**, **speed-based** duration (units per second), a **Tween ID** for controlling it from nodes.
+  - Play on start, tap, **tap (forward / back)** like a switch, touch or message; **each loop, do** and **when finished, do** an action. **Preview** plays it right in the Scene.
+- **Tween Sequence** component (DOTween Sequence): a list of steps, each one **Then** (after the last), **Together** (with the last) or a **Pause**. Pick the effect, ease and values per step, reorder, duplicate or delete steps. Loop it (restart or yoyo), add a delay, play on start, tap, touch or message, and do something when it ends. **Preview** plays the whole sequence.
 - **Sprite Animation** (flipbook): emoji or image frames at any fps; loop, ping-pong or once; always, only while moving, or on a message.
+- **Sprite Sheet Animator**: pick one picture holding a grid of frames, set columns and rows, and name clips by frame range (`idle: 0-3, run: 4-9, jump: 10`). It plays the start clip, can switch **idle / run / jump by itself**, and faces the way it moves. Play clips from nodes, triggers or messages; a clip played *once* finishes before the automatic switching takes over again, and fires **On Animation End**.
+- **Animator auto states**: fill *clip when standing still / moving / in the air* and the Animator picks the clip itself, like Unity's Animator.
 - **From code** (DOTween style):
-  - `scene.to(obj, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' })` returns a tween you can chain: `.setDelay()`, `.onComplete()`, `.kill()`.
-  - `scene.sequence().append(scene.make(…)).join(…).appendInterval(0.2).appendCallback(fn)`.
-  - `scene.punch`, `scene.shakeProps`, `scene.path`, `scene.jumpTo`, `scene.killTweens`.
-  - `Ease.outBounce` and friends.
+  - `scene.to(obj, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' })` returns a tween you can chain: `.setDelay()`, `.setFrom()`, `.setSpeedBased()`, `.setBlendable()`, `.setId()`, `.setTimeScale()`, `.setAutoKill(false)`, `.onStart()`, `.onUpdate()`, `.onStepComplete()`, `.onComplete()`, `.onKill()`, `.onRewind()`.
+  - Playback: `.pause()`, `.play()`, `.togglePause()`, `.playBackwards()`, `.playForward()`, `.flip()`, `.restart()`, `.rewind()`, `.complete()`, `.goto(seconds)`, `.kill()`, `.progress()`, `.isPlaying()`.
+  - `scene.from(…)`, `scene.sequence({ loops, loopType, delay })` with `.append`, `.join`, `.insert`, `.prepend`, `.appendInterval`, `.prependInterval`, `.appendCallback`, `.insertCallback`.
+  - `scene.punch`, `scene.shakeProps`, `scene.path`, `scene.jumpTo`, `scene.spiral`, `scene.lookAtTween`, `scene.blink`, `scene.typeText`, `scene.counter`, `scene.virtual` (DOVirtual.Float), `scene.delayedCall`, `scene.flashScreen`.
+  - Control many at once by target or ID: `scene.killTweens`, `pauseTweens`, `playTweens`, `reverseTweens`, `restartTweens`, `completeTweens`, `tweenSpeed`, `isTweening`.
+  - `Ease.outBounce` and friends, `Ease.curve([[0.5, 0.9]])` for your own curve, and `'steps4'` for stepped motion.
 - **Messages:** `scene.send('door-open')`, the *send message* action, and the Send Message / On Message nodes let objects trigger each other.
-- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Send Message, On Message, Camera Impulse.
+- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Animation Speed, Sprite Frame, Flip, Fade, Blink, On Animation End, Send Message, On Message, Camera Impulse.
 
 ### Inspector superpowers (Odin-style)
 

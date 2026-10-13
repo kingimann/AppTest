@@ -6472,7 +6472,7 @@ export const NODE_TYPES = {
   velocity: { cat: 'Values', label: 'My Velocity', value: 'number', params: [opt('axis', ['x', 'y', 'z', 'speed'], 'x', 'axis')] },
   touching: { cat: 'Values', label: 'Is Touching', value: 'bool', params: [txt('tag', 'player', 'tag')] },
   canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
-  math1: { cat: 'Math', label: 'Math (one value)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }], params: [opt('op', ['abs', 'round', 'floor', 'ceil', 'sqrt', 'negate', 'sin', 'cos'], 'abs', 'operation')] },
+  math1: { cat: 'Math', label: 'Math (one value)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }], params: [opt('op', ['abs', 'round', 'floor', 'ceil', 'sqrt', 'negate', 'sin', 'cos', 'tan', 'square', 'cube root', 'reciprocal', 'fraction', 'log', 'exp'], 'abs', 'operation')] },
   clamp: { cat: 'Math', label: 'Clamp', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 10 }] },
   lerp: { cat: 'Math', label: 'Lerp (blend)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 10 }, { key: 't', type: 'number', default: 0.5 }] },
   loopIndex: { cat: 'Math', label: 'Loop Index', value: 'number' },
@@ -6537,6 +6537,43 @@ export const NODE_TYPES = {
   fingers: { cat: 'Values', label: 'Fingers On Screen', value: 'number' },
   isPaused: { cat: 'Values', label: 'Is Paused', value: 'bool' },
   childCount: { cat: 'Values', label: 'Child Count', value: 'number' },
+  // more math
+  formula: { cat: 'Math', label: 'Formula', value: 'number', params: [txt('expr', 'a * 2 + b', 'formula')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }] },
+  randomRange: { cat: 'Math', label: 'Random Between', value: 'number', inputs: [{ key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 1 }], params: [{ key: 'whole', type: 'bool', default: false, label: 'whole numbers' }] },
+  randomPick: { cat: 'Math', label: 'Random Pick', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }], params: [num('count', 4, 'how many inputs (2–4)')] },
+  noise: { cat: 'Math', label: 'Smooth Noise', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'scale', type: 'number', default: 1 }], params: [opt('by', ['game time', 'input value'], 'game time', 'changes with')] },
+  invLerp: { cat: 'Math', label: 'Inverse Lerp (0–1)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 100 }, { key: 'value', type: 'number', default: 50 }] },
+  moveTowards: { cat: 'Math', label: 'Move Towards Value', value: 'number', inputs: [{ key: 'current', type: 'number', default: 0 }, { key: 'target', type: 'number', default: 10 }, { key: 'step', type: 'number', default: 1 }] },
+  angleDiff: { cat: 'Math', label: 'Angle Difference', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 90 }] },
+  wrap: { cat: 'Math', label: 'Wrap Around', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 360 }] },
+  roundTo: { cat: 'Math', label: 'Round To Decimals', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'decimals', type: 'number', default: 1 }] },
+  percent: { cat: 'Math', label: 'Percent Of', value: 'number', inputs: [{ key: 'part', type: 'number', default: 25 }, { key: 'total', type: 'number', default: 100 }] },
+  easeVal: { cat: 'Math', label: 'Ease Curve', value: 'number', inputs: [{ key: 't', type: 'number', default: 0.5 }], params: [opt('ease', EASES, 'outQuad', 'ease')] },
+  vecLength: { cat: 'Math', label: 'Vector Length', value: 'number', inputs: [{ key: 'x', type: 'number', default: 3 }, { key: 'y', type: 'number', default: 4 }, { key: 'z', type: 'number', default: 0 }] },
+  distPoints: { cat: 'Math', label: 'Distance (points)', value: 'number', inputs: [{ key: 'x1', type: 'number', default: 0 }, { key: 'y1', type: 'number', default: 0 }, { key: 'x2', type: 'number', default: 3 }, { key: 'y2', type: 'number', default: 4 }] },
+  anglePoints: { cat: 'Math', label: 'Angle (points)', value: 'number', inputs: [{ key: 'x1', type: 'number', default: 0 }, { key: 'y1', type: 'number', default: 0 }, { key: 'x2', type: 'number', default: 1 }, { key: 'y2', type: 'number', default: 1 }] },
+  minMax3: { cat: 'Math', label: 'Min / Max / Average', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }], params: [opt('op', ['min', 'max', 'average', 'sum'], 'max', 'give'), num('count', 3, 'how many inputs (2–4)')] },
+  between: { cat: 'Math', label: 'Is Between', value: 'bool', inputs: [{ key: 'value', type: 'number', default: 5 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 10 }] },
+  isEven: { cat: 'Math', label: 'Is Even', value: 'bool', inputs: [{ key: 'value', type: 'number', default: 2 }] },
+  // more game
+  addScore: { cat: 'Game', label: 'Add Score', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 10 }], params: [{ key: 'pop', type: 'bool', default: true, label: 'pop "+10" here' }] },
+  loseLife: { cat: 'Game', label: 'Lose a Life', exec: true, outs: ['then', 'no lives left'], params: [{ key: 'end', type: 'bool', default: true, label: 'game over at 0' }] },
+  gainLife: { cat: 'Game', label: 'Gain a Life', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1 }], params: [num('max', 0, 'most lives (0 = no limit)')] },
+  checkBest: { cat: 'Game', label: 'Check Best Score', exec: true, outs: ['new best', 'not'] },
+  addTime: { cat: 'Game', label: 'Add Time', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 5 }], params: [opt('mode', ['add', 'set'], 'add', 'mode')] },
+  restartLevel: { cat: 'Game', label: 'Restart Level', exec: true, outs: [] },
+  setCheckpoint: { cat: 'Game', label: 'Set Checkpoint', exec: true, outs: ['then'], params: [opt('at', ['this object', 'where the player is'], 'this object', 'at')] },
+  respawn: { cat: 'Game', label: 'Respawn Player', exec: true, outs: ['then'] },
+  useItem: { cat: 'Game', label: 'Use Item', exec: true, outs: ['used', 'not enough'], params: [txt('item', 'key', 'item')], inputs: [{ key: 'count', type: 'number', default: 1 }] },
+  hasItem: { cat: 'Game', label: 'Has Item', value: 'bool', params: [txt('item', 'key', 'item')], inputs: [{ key: 'count', type: 'number', default: 1 }] },
+  combo: { cat: 'Game', label: 'Add Combo', exec: true, outs: ['then'], params: [num('window', 1.5, 'resets after (sec)')] },
+  unlock: { cat: 'Game', label: 'Unlock Achievement', exec: true, outs: ['first time', 'already'], params: [txt('name', 'First Win', 'achievement'), { key: 'show', type: 'bool', default: true, label: 'show a message' }] },
+  isUnlocked: { cat: 'Game', label: 'Is Unlocked', value: 'bool', params: [txt('name', 'First Win', 'achievement')] },
+  hitStop: { cat: 'Game', label: 'Hit Stop (freeze frame)', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 0.08 }] },
+  gameSpeed: { cat: 'Game', label: 'Set Game Speed', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 1 }] },
+  sayLine: { cat: 'Game', label: 'Say (dialogue box)', exec: true, outs: ['then', 'closed'], params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello! Score: {score}', 'text'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  gameValue: { cat: 'Game', label: 'Game Value', value: 'number', params: [opt('what', ['score', 'lives', 'best', 'time left', 'combo', 'level', 'levels'], 'score', 'what')] },
+  gameStateIs: { cat: 'Game', label: 'Game State Is', value: 'bool', params: [opt('state', ['playing', 'title', 'game over', 'won', 'paused'], 'playing', 'state')] },
   // online: Photon multiplayer and PlayFab services
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
@@ -6876,6 +6913,62 @@ function castRay(s, e, o, d, max, opts = {}) {
   }
   return hit;
 }
+/**
+ * Formula node: a tiny, safe math language (no eval). Numbers, a b c d (the inputs), any game variable by name, pi, e, time;
+ * + − × ÷ % ^, comparisons (< > <= >= == !=) giving 1 / 0, parentheses, and functions:
+ * sin cos tan (degrees), asin acos atan atan2 (give degrees), abs floor ceil round sqrt pow min max clamp lerp sign log exp mod random(lo, hi).
+ */
+const FORMULA_FN = {
+  sin: (a) => Math.sin(a * DEG), cos: (a) => Math.cos(a * DEG), tan: (a) => Math.tan(a * DEG),
+  asin: (a) => Math.asin(a) / DEG, acos: (a) => Math.acos(a) / DEG, atan: (a) => Math.atan(a) / DEG, atan2: (y, x) => Math.atan2(y, x) / DEG,
+  abs: Math.abs, floor: Math.floor, ceil: Math.ceil, round: Math.round, sqrt: (a) => Math.sqrt(Math.max(0, a)), pow: Math.pow, sign: Math.sign, log: Math.log, exp: Math.exp,
+  min: Math.min, max: Math.max, clamp: (v, lo, hi) => clamp(v, lo, hi), lerp: (a, b, t) => a + (b - a) * t, mod: (a, b) => (b ? ((a % b) + b) % b : 0),
+  random: (lo = 0, hi = 1) => lo + Math.random() * (hi - lo),
+};
+const formulaCache = new Map();
+export function compileFormula(src) {
+  if (formulaCache.has(src)) return formulaCache.get(src);
+  const toks = String(src).match(/\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_][A-Za-z0-9_]*|<=|>=|==|!=|[-+*\/%^(),<>×÷−]/g) || [];
+  let i = 0;
+  const peek = () => toks[i], next = () => toks[i++];
+  const expect = (t) => { if (next() !== t) throw new Error(`expected ${t}`); };
+  const cmp = () => { let a = add(); for (;;) { const o = peek(); if (!['<', '>', '<=', '>=', '==', '!='].includes(o)) return a; next(); const l = a, r = add(); a = (env) => { const x = l(env), y = r(env); return +({ '<': x < y, '>': x > y, '<=': x <= y, '>=': x >= y, '==': x === y, '!=': x !== y }[o]); }; } };
+  const add = () => { let a = mul(); for (;;) { const o = peek(); if (o !== '+' && o !== '-' && o !== '−') return a; next(); const l = a, r = mul(); a = o === '+' ? (env) => l(env) + r(env) : (env) => l(env) - r(env); } };
+  const mul = () => { let a = pow(); for (;;) { const o = peek(); if (!['*', '/', '%', '×', '÷'].includes(o)) return a; next(); const l = a, r = pow(); a = o === '%' ? (env) => { const y = r(env); return y ? ((l(env) % y) + y) % y : 0; } : o === '/' || o === '÷' ? (env) => { const y = r(env); return y ? l(env) / y : 0; } : (env) => l(env) * r(env); } };
+  const pow = () => { const a = unary(); if (peek() !== '^') return a; next(); const b = pow(); return (env) => Math.pow(a(env), b(env)); };
+  const unary = () => { if (peek() === '-' || peek() === '−') { next(); const a = unary(); return (env) => -a(env); } if (peek() === '+') { next(); return unary(); } return atom(); };
+  const atom = () => {
+    const t = next();
+    if (t == null) throw new Error('unfinished formula');
+    if (t === '(') { const a = cmp(); expect(')'); return a; }
+    if (/^[\d.]/.test(t)) { const v = parseFloat(t); return () => v; }
+    if (/^[A-Za-z_]/.test(t)) {
+      if (peek() === '(') { // a function call
+        const fn = FORMULA_FN[t.toLowerCase()]; if (!fn) throw new Error(`unknown function ${t}`);
+        next(); const args = [];
+        if (peek() !== ')') { args.push(cmp()); while (peek() === ',') { next(); args.push(cmp()); } }
+        expect(')'); return (env) => +fn(...args.map((f) => f(env))) || 0;
+      }
+      const k = t.toLowerCase();
+      if (k === 'pi') return () => Math.PI; if (k === 'e') return () => Math.E;
+      return (env) => { const v = env(t); return Number.isFinite(+v) ? +v : 0; };
+    }
+    throw new Error(`unexpected ${t}`);
+  };
+  let f;
+  try { f = cmp(); if (i < toks.length) throw new Error(`unexpected ${toks[i]}`); } catch (err) { f = Object.assign(() => 0, { error: err.message }); }
+  formulaCache.set(src, f);
+  return f;
+}
+const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
+const achieved = (s, name) => store.get(achKey(s, name), '') === '1';
+/** Smooth 1D noise in −1…1: like random, but it drifts instead of jumping (wobbling lights, drifting clouds). */
+function noise1(x) {
+  const h = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return h(i) * (1 - u) + h(i + 1) * u;
+}
+
 /** Where the finger is in the world (2D: the point under it; 3D: where it meets the ground plane y = 0). */
 function fingerWorld(s) {
   const inp = s.engine.input, pt = [...inp.pointers.values()].find((q) => q.role === 'free') || inp.taps[0] || inp.ups[0];
@@ -6950,7 +7043,7 @@ registerBehavior('graph', {
         case 'velocity': { const v = e.body?.vel || { x: 0, y: 0, z: 0 }; return P('axis') === 'speed' ? Math.hypot(v.x, v.y, v.z) : v[P('axis')] || 0; }
         case 'touching': return s.engine.physics.touching(e, P('tag'));
         case 'canSee': { const t = s.findAll(P('tag')).find((q) => q !== e); return !!t && s.canSee(e, t, +P('range') || Infinity); }
-        case 'math1': { const a = +I('a') || 0; return { abs: Math.abs(a), round: Math.round(a), floor: Math.floor(a), ceil: Math.ceil(a), sqrt: Math.sqrt(Math.max(0, a)), negate: -a, sin: Math.sin(a * DEG), cos: Math.cos(a * DEG) }[P('op')] ?? a; }
+        case 'math1': { const a = +I('a') || 0; return { abs: Math.abs(a), round: Math.round(a), floor: Math.floor(a), ceil: Math.ceil(a), sqrt: Math.sqrt(Math.max(0, a)), negate: -a, sin: Math.sin(a * DEG), cos: Math.cos(a * DEG), tan: Math.tan(a * DEG), square: a * a, 'cube root': Math.cbrt(a), reciprocal: a ? 1 / a : 0, fraction: a - Math.floor(a), log: a > 0 ? Math.log(a) : 0, exp: Math.exp(a) }[P('op')] ?? a; }
         case 'clamp': return clamp(+I('value') || 0, +I('min') || 0, +I('max') || 0);
         case 'lerp': return lerp(+I('a') || 0, +I('b') || 0, +I('t') || 0);
         case 'loopIndex': return ctx.index ?? 0;
@@ -7013,6 +7106,27 @@ registerBehavior('graph', {
         case 'fingers': return s.engine.input.pointers.size;
         case 'isPaused': return !!s.engine.paused;
         case 'childCount': return s.childrenOf(e).length;
+        case 'formula': { const f = compileFormula(P('expr') || '0'), inp = { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0, d: +I('d') || 0 }; if (f.error && !state.has('fe:' + n.id)) { state.set('fe:' + n.id, 1); Log.add('warn', `Formula "${P('expr')}": ${f.error}`); } return f((k) => (k in inp ? inp[k] : k === 'time' ? s.time : k === 'dt' ? ctx.dt ?? 1 / 60 : s.vars[k] ?? e.data[k] ?? 0)); }
+        case 'randomRange': { const a = +I('min') || 0, b = +I('max') || 0; return P('whole') ? Math.floor(rand(Math.min(a, b), Math.max(a, b) + 1)) : rand(a, b); }
+        case 'randomPick': { const c = clamp(Math.round(+P('count') || 4), 2, 4); return +I('abcd'[Math.floor(Math.random() * c)]) || 0; }
+        case 'noise': { const sc = +I('scale') || 1; return noise1((P('by') === 'input value' ? +I('value') || 0 : s.time + (+I('value') || 0)) * sc); }
+        case 'invLerp': { const a = +I('a') || 0, b = +I('b') || 0; return b === a ? 0 : ((+I('value') || 0) - a) / (b - a); }
+        case 'moveTowards': { const c = +I('current') || 0, t = +I('target') || 0, st = Math.abs(+I('step') || 0); return Math.abs(t - c) <= st ? t : c + Math.sign(t - c) * st; }
+        case 'angleDiff': return ((((+I('b') || 0) - (+I('a') || 0)) % 360) + 540) % 360 - 180;
+        case 'wrap': { const lo = +I('min') || 0, hi = +I('max') || 0, r = hi - lo; return r ? lo + ((((+I('value') || 0) - lo) % r) + r) % r : lo; }
+        case 'roundTo': { const k = 10 ** clamp(Math.round(+I('decimals') || 0), 0, 8); return Math.round((+I('value') || 0) * k) / k; }
+        case 'percent': { const t = +I('total') || 0; return t ? (+I('part') || 0) / t * 100 : 0; }
+        case 'easeVal': return (Ease[P('ease')] || Ease.linear)(clamp(+I('t') || 0, 0, 1));
+        case 'vecLength': return Math.hypot(+I('x') || 0, +I('y') || 0, +I('z') || 0);
+        case 'distPoints': return Math.hypot((+I('x2') || 0) - (+I('x1') || 0), (+I('y2') || 0) - (+I('y1') || 0));
+        case 'anglePoints': return Math.atan2((+I('y2') || 0) - (+I('y1') || 0), (+I('x2') || 0) - (+I('x1') || 0)) / DEG;
+        case 'minMax3': { const c = clamp(Math.round(+P('count') || 3), 2, 4), v = 'abcd'.slice(0, c).split('').map((k) => +I(k) || 0); const o = P('op'); return o === 'min' ? Math.min(...v) : o === 'average' ? v.reduce((x, y) => x + y, 0) / v.length : o === 'sum' ? v.reduce((x, y) => x + y, 0) : Math.max(...v); }
+        case 'between': { const v = +I('value') || 0, a = +I('min') || 0, b = +I('max') || 0; return v >= Math.min(a, b) && v <= Math.max(a, b); }
+        case 'isEven': return Math.round(+I('value') || 0) % 2 === 0;
+        case 'hasItem': return s.itemCount(P('item')) >= Math.max(1, +I('count') || 1);
+        case 'isUnlocked': return achieved(s, P('name'));
+        case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
+        case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
@@ -7228,6 +7342,41 @@ registerBehavior('graph', {
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
+        case 'addScore': { const a = +I('amount') || 0; s.addVar('score', a); if (P('pop') !== false && a) popText(s, e.x, e.y, (a > 0 ? '+' : '') + formatNumber(a), '#ffd23d', 26); break; }
+        case 'loseLife': {
+          const left = Math.max(0, (+s.vars.lives || 0) - 1); s.setVar('lives', left); s.engine.vibrate(40);
+          if (left <= 0) { follow(n, 'no lives left', ctx); if (P('end') !== false) s.gameOver(); return; }
+          break;
+        }
+        case 'gainLife': { const mx = +P('max') || 0, v = (+s.vars.lives || 0) + (+I('amount') || 1); s.setVar('lives', mx > 0 ? Math.min(mx, v) : v); break; }
+        case 'checkBest': {
+          const sc = Math.floor(+s.vars.score || 0), best = +s.vars.best || 0;
+          if (sc > best) { s.setVar('best', sc); if (s.settings.saveBest) store.set('pocket.best.' + s.settings.saveBest, String(sc)); s.newBest = true; return follow(n, 'new best', ctx); }
+          return follow(n, 'not', ctx);
+        }
+        case 'addTime': s.setVar('time', Math.max(0, (P('mode') === 'set' ? 0 : +s.vars.time || 0) + (+I('seconds') || 0))); break;
+        case 'restartLevel': s.engine.goToLevel?.(s.level || 1); return;
+        case 'setCheckpoint': { const pl = s.findAll('player')[0]; if (pl) { const at = P('at') === 'this object' ? e : pl; pl.data.respawn = { x: at.x, y: at.y, z: at.z }; } break; }
+        case 'respawn': { const pl = s.findAll('player')[0]; if (pl) respawnOrEnd(pl, s, 'respawn'); break; }
+        case 'useItem': { const c = Math.max(1, +I('count') || 1), it = P('item'); if (s.itemCount(it) >= c) { s.addItem(it, -c); return follow(n, 'used', ctx); } return follow(n, 'not enough', ctx); }
+        case 'combo': {
+          const w = Math.max(0.1, +P('window') || 1.5), now = s.time; s.setVar('combo', (now - (s._comboT ?? -99) <= w ? +s.vars.combo || 0 : 0) + 1); s._comboT = now;
+          s.after(w + 0.01, () => { if (s._comboT === now) s.setVar('combo', 0); }); break;
+        }
+        case 'unlock': {
+          const nm = P('name') || 'Achievement';
+          if (achieved(s, nm)) return follow(n, 'already', ctx);
+          store.set(achKey(s, nm), '1'); s.setVar('ach_' + nm.replace(/\W+/g, '_'), 1); s.emit('achievement', nm);
+          if (P('show') !== false) { s.message(`🏆 ${nm}`, 2); s.engine.audio.sfx('win'); }
+          return follow(n, 'first time', ctx);
+        }
+        case 'hitStop': { const eng = s.engine, k = eng.timeScale; eng.timeScale = 0.02; setTimeout(() => { if (eng.timeScale === 0.02) eng.timeScale = k || 1; }, Math.max(10, (+I('seconds') || 0.08) * 1000)); break; }
+        case 'gameSpeed': s.engine.timeScale = clamp(+I('speed') || 0, 0.05, 4); break;
+        case 'sayLine': {
+          if (!s.dialog) s.dialog = { lines: [{ who: P('who'), text: fillTemplate(P('text'), s.vars) }], i: 0, chars: 0, pause: P('pause') !== false };
+          const later = { ...ctx, steps: 0 }, wait = () => { if (e.dead) return; if (s.dialog) setTimeout(wait, 100); else follow(n, 'closed', later); };
+          setTimeout(wait, 100); break; // real time: the game may be paused while the box is open
+        }
         case 'netConnect': s.engine.online.connect(); break;
         case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
         case 'netLeave': s.engine.online.leave(); break;

@@ -270,7 +270,7 @@ engine.onRenderUI = (ctx, s) => {
 // ============================================================================
 // Transform gizmos (move / rotate / scale)
 // ============================================================================
-const GIZ = 70;
+const GIZ = 84;
 /** Screen-space axes for the selected entity: [{ k, dx, dy, ppu, sign }] */
 function gizmoAxes(e) {
   const s = engine.scene, o = screenCenter(e);
@@ -1263,6 +1263,9 @@ function openFileMenu() {
   popMenu($('#fileBtn'), [
     { icon: 'newfile', label: 'New Project…', fn: openNewDialog },
     { icon: 'folder', label: 'Open Project…', fn: openProjectsDialog },
+    { icon: 'undo', label: 'Undo', k: 'Ctrl+Z', fn: () => undoRedo(-1) },
+    { icon: 'redo', label: 'Redo', k: 'Ctrl+Y', fn: () => undoRedo(1) },
+    '-',
     { icon: 'save', label: 'Save', k: 'auto', fn: () => { saveNow(); toast('Saved'); } },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', project.name); if (n) { project.name = n; changed(); refreshAll(); } } },
     { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(project); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },

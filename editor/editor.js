@@ -1,10 +1,11 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
+import { openNodeEditor } from './nodes.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -814,7 +815,7 @@ function select(id, { fromScene = false } = {}) {
   renderHierarchy();
   renderInspector();
   updateCtxBar();
-  if (selectedId && fromScene && dockTab === 'hierarchy' && !isDesktop()) setDock('inspector');
+  if (selectedId && fromScene && dockTab === 'hierarchy' && sheetState() !== 'peek') setDock('inspector');
 }
 
 /** Quick actions for the selected object, floating over the Scene view. */
@@ -869,6 +870,8 @@ function renderHierarchy() {
   const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
+  const gs = gettingStarted();
+  if (gs) box.append(gs);
   const rows = h('div');
   box.append(rows);
   function renderRows() {
@@ -892,11 +895,51 @@ function renderHierarchy() {
   box.scrollTop = scroll;
 }
 
+/** A short checklist that walks new users through making a playable game. */
+function gettingStarted() {
+  const key = 'pocket.editor.gs.' + projectId;
+  if (store.get(key, '') === 'hide' || uiMode) return null;
+  const E = project.entities, has = (f) => E.some(f), beh = (e, t) => (e.behaviors || []).some((b) => b.type === t);
+  const P = is3D() ? PREFABS_3D : PREFABS_2D, pf = (...labels) => labels.map((l) => P.find((q) => q.label === l)).find(Boolean);
+  const steps = [
+    { done: has((e) => (e.tags || []).includes('player')), label: 'Add a player', btn: 'Player', fn: () => addPrefab(pf('Player')) },
+    { done: has((e) => e.body?.type === 'static' || e.voxels), label: 'Add ground to stand on', btn: 'Platform', fn: () => addPrefab(pf('Platform')) },
+    { done: has((e) => ['collectible', 'hazard', 'tappable', 'goal'].some((t) => beh(e, t))), label: 'Add something to collect', btn: is3D() ? 'Gem' : 'Coin', fn: () => addPrefab(pf('Coin', 'Gem')) },
+    { done: has((e) => beh(e, 'graph') || beh(e, 'rules')), label: 'Add logic with nodes', btn: 'Script', fn: addVisualScript },
+    { done: store.get('pocket.editor.played.' + projectId, '') === '1', label: 'Press Play to test', btn: 'Play', fn: play },
+  ];
+  const n = steps.filter((x) => x.done).length;
+  if (n === steps.length) return null;
+  return h('div', { class: 'gs' },
+    h('div', { class: 'gs-hd' }, h('b', {}, 'Getting started'), h('span', { class: 'gs-n' }, `${n} / ${steps.length}`),
+      h('button', { class: 'gs-x', title: 'Hide', onclick: () => { store.set(key, 'hide'); renderHierarchy(); } }, icon('close'))),
+    h('div', { class: 'gs-bar' }, h('i', { style: `width:${(n / steps.length) * 100}%` })),
+    steps.map((x) => h('div', { class: 'gs-step' + (x.done ? ' done' : '') },
+      h('span', { class: 'gs-dot' }, x.done ? icon('check') : null), h('span', { class: 'gs-l' }, x.label),
+      !x.done && h('button', { class: 'gs-go', onclick: x.fn }, x.btn))));
+}
+
+/** Add a Visual Script to the selected object (or the player, or a new logic object) and open the Node Editor. */
+function addVisualScript() {
+  let j = ent(selectedId);
+  if (!j || j.template) j = project.entities.find((e) => (e.tags || []).includes('player'));
+  if (!j) j = addEntity({ name: 'Game Logic', ...(is3D() ? { y: 0 } : {}) });
+  const b = defaultBehavior('graph', is3D() && !j.ui);
+  if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
+    b.graph = { nodes: [{ id: 'n1', type: 'every', x: 20, y: 40, params: { seconds: 1 } }, { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } }],
+      links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
+  (j.behaviors ||= []).push(b);
+  selectedId = j.id;
+  changed({ structure: true }); pushHistory();
+  editGraph(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.graph`);
+}
+
 function openCreateMenu(anchor) {
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
   popMenu(anchor, [
     { cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
     '-', { cap: 'Prefabs' }, ...groups.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) })),
+    '-', { cap: 'Logic' }, { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
   ]);
 }
 
@@ -987,6 +1030,8 @@ function control(target, path, spec) {
       break;
     case 'rules':
       return rulesEditor(target, path);
+    case 'graph':
+      return graphCard(target, path);
     case 'template': {
       const names = project.entities.filter((e) => e.template).map((e) => e.name);
       el = h('select', { onchange: (e) => set(e.target.value) },
@@ -998,6 +1043,31 @@ function control(target, path, spec) {
       el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', oninput: (e) => set(e.target.value) });
   }
   return h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+}
+
+/** Node-based coding: a summary card that opens the full-screen Node Editor. */
+function graphCard(target, path) {
+  const g = getPath(target(), path) || { nodes: [], links: [] };
+  const events = [...new Set((g.nodes || []).filter((n) => NODE_TYPES[n.type]?.cat === 'Events').map((n) => NODE_TYPES[n.type].label))];
+  return h('div', { class: 'row full graph-card' },
+    h('div', { class: 'gc-sum' }, icon('nodes'), h('div', {},
+      h('b', {}, `${(g.nodes || []).length} nodes · ${(g.links || []).length} wires`),
+      h('small', {}, events.length ? 'Runs: ' + events.join(', ') : 'No event yet. Add a green Event node to start.'))),
+    h('button', { class: 'btn primary gc-open', onclick: () => editGraph(target, path) }, icon('nodes'), 'Open Node Editor'));
+}
+function editGraph(target, path) {
+  const e = target(), id = e.id;
+  const T = () => ent(id) || e;
+  const back = () => ed.close();
+  const ed = openNodeEditor({
+    graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
+    templates: project.entities.filter((x) => x.template).map((x) => x.name),
+    objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
+    vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
+    onChange: (g) => { setPath(T(), path, g); requestRebuild(); saveSoon(); },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+  });
+  pushBack(back);
 }
 
 /** Visual logic: WHEN … IF … DO … cards. */
@@ -1417,7 +1487,7 @@ const BEH_META = {
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
-  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'],
+  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1439,7 +1509,7 @@ function componentsFor(j) {
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
-      ok: (e) => !e.ui || type === 'script', add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
+      ok: (e) => !e.ui || ['script', 'graph', 'rules', 'button'].includes(type), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
   return list;
 }
@@ -1796,7 +1866,23 @@ function pickImage(cb) {
 // Menus & dialogs
 // ============================================================================
 const layer = $('#menuLayer');
-function closeLayer() { layer.hidden = true; layer.className = ''; layer.replaceChildren(); }
+function closeLayer() { layer.hidden = true; layer.className = ''; layer.replaceChildren(); dropBack(layerBack); }
+
+// Phone back button / back gesture closes the open dialog, Node Editor or Home menu instead of leaving the page.
+const backStack = [];
+let skipPops = 0, owedPushes = 0;
+const pushEntry = () => { try { window.history.pushState({ pocket: 1 }, ''); } catch { /* sandboxed */ } };
+function pushBack(fn) {
+  if (backStack.includes(fn)) return;
+  backStack.push(fn);
+  if (skipPops) owedPushes++; else pushEntry(); // wait for a pending history.back() to land first
+}
+function dropBack(fn) { const i = backStack.lastIndexOf(fn); if (i < 0) return; backStack.splice(i, 1); if (owedPushes) { owedPushes--; return; } skipPops++; window.history.back(); }
+window.addEventListener('popstate', () => {
+  if (skipPops) { if (--skipPops === 0) for (; owedPushes > 0; owedPushes--) pushEntry(); return; }
+  const fn = backStack.pop(); if (fn) fn();
+});
+const layerBack = () => closeLayer();
 layer.addEventListener('pointerdown', (e) => { if (e.target === layer) closeLayer(); });
 
 /** Dropdown menu under an element. items: {icon,label,fn,k} | '-' | {cap} */
@@ -1820,6 +1906,7 @@ function popMenu(anchor, items) {
 function openDialog(title, kids) {
   const d = h('div', { class: 'dialog' }, h('div', { class: 'dh' }, h('span', {}, title), h('button', { onclick: closeLayer, title: 'Close' }, icon('close'))), h('div', { class: 'db' }, kids));
   layer.replaceChildren(d); layer.className = 'dim'; layer.hidden = false;
+  pushBack(layerBack);
 }
 
 function openFileMenu() {
@@ -2021,11 +2108,14 @@ function play() {
     if (engine.scene.state === 'title') engine.scene.state = 'play';
   } catch (err) { console.error(err); toast('Error: ' + err.message); stop(); return; }
   updatePauseButtons();
+  pushBack(stop);
+  store.set('pocket.editor.played.' + projectId, '1');
   requestAnimationFrame(() => { engine.resize(); engine.layoutButtons(); });
 }
 function stop() {
   if (!playing) return;
   playing = false;
+  dropBack(stop);
   document.body.classList.remove('playing');
   $('#playBar').hidden = true;
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
@@ -2037,6 +2127,7 @@ function stop() {
   engine.factory = null;
   updatePauseButtons();
   updateCtxBar();
+  renderHierarchy();
   requestAnimationFrame(() => { engine.resize(); rebuild(); });
 }
 function togglePause() { if (!playing) return; engine.paused = !engine.paused; updatePauseButtons(); }
@@ -2059,7 +2150,23 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
-$('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
+{ // tabs: tap to switch, swipe up/down on them to open or close the panel
+  const tabs = $('#dockTabs');
+  let sw = null, swiped = false;
+  tabs.addEventListener('pointerdown', (e) => { sw = { y: e.clientY, x: e.clientX }; swiped = false; });
+  tabs.addEventListener('pointermove', (e) => {
+    if (!sw || swiped) return;
+    const dy = e.clientY - sw.y;
+    if (Math.abs(dy) > 28 && Math.abs(dy) > Math.abs(e.clientX - sw.x)) {
+      swiped = true;
+      const order = ['peek', 'half', 'full'], i = order.indexOf(sheetState());
+      setSheet(order[Math.max(0, Math.min(2, i + (dy < 0 ? 1 : -1)))]); buzz(6);
+    }
+  });
+  tabs.addEventListener('pointerup', () => { sw = null; });
+  tabs.addEventListener('pointercancel', () => { sw = null; });
+  tabs.addEventListener('click', (e) => { if (swiped) { swiped = false; return; } const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
+}
 $('#panelsFab').append(icon('list'));
 $('#addFab').append(icon('plus'));
 for (const [z, ic] of [['out', 'minus'], ['in', 'plus'], ['reset', 'frame']]) {
@@ -2103,7 +2210,7 @@ $('#snapBtn').addEventListener('click', () => { snap = !snap; store.set('pocket.
 $('#gridBtn').addEventListener('click', () => { showGrid = !showGrid; store.set('pocket.editor.grid', showGrid ? '1' : '0'); $('#gridBtn').classList.toggle('on', showGrid); });
 window.addEventListener('beforeunload', saveNow);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
-$('#app').dataset.sheet = 'half';
+$('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to open the panel
 setTool('move');
 
 {

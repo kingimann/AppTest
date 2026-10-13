@@ -38,18 +38,21 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Racing | Desert Rally | car controls, chase camera, time limit |
    | Endless Runner | Lane Rush | swipe lanes, jump |
    | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
-| Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
-| Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
-| Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
-| Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
-| Board Game | Tic-Tac-Toe | tap cells, play the computer |
+   | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
+   | Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
+   | Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
+   | Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
+   | Board Game | Tic-Tac-Toe | tap cells, play the computer |
    | Tap Arcade | Tap Frenzy | tap targets against the clock |
    | Blank 2D / 3D | | start from nothing |
 
 2. **Scene** fills the screen. Tap an object to select it; drag to move it. The tool rail on the left has Hand, Move, Rotate, Scale and **Paint** (stamp copies by tapping or dragging). Pinch to zoom; drag empty space to pan (2D) or orbit (3D).
 3. **Blue + button**: add things. Tap a tile to add it, or press, hold and drag it to the exact spot.
-4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). Drag the handle or tap the open tab for peek, half or full height. Held sideways, the panels move to the right.
-5. **▶ Play** tests the game instantly; **■ Stop** returns to editing.
+4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). It starts small so the Scene gets the screen: tap a tab or swipe up on the tabs to open it, swipe down to close it, or drag the handle. Held sideways, the panels move to the right.
+5. **▶ Play** tests the game instantly; **■ Stop** (or the phone's back gesture) returns to editing.
+
+New projects show a **Getting started** checklist at the top of the Hierarchy: add a player, ground, something to collect, some node logic, and press Play. Each step has a button that does it for you.
+
 
 | Gesture | Does |
 | --- | --- |
@@ -66,6 +69,18 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 **Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** component then creates copies of it by name.
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
+
+### Node coding (Visual Script)
+
+Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
+
+- **Add Node** opens a list grouped into **Events** (green: On Start, On Tap, On Touch, Every N Seconds, On Button, On Swipe, Every Frame, On Destroyed), **Actions** (blue: change variables, show messages, sounds, spawn, destroy, move, jump, show/hide, shake, vibrate, win, game over, next level), **Flow** (purple: If, Wait, Random Chance, Do Once, Sequence) and **Values** (orange: numbers, variables, random, math, compare, and/or/not, position, distance, time).
+- If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
+- **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
+- Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
+- Drag nodes to move them, drag empty space to pan, pinch to zoom. ⟲ undoes, ⛶ fits everything on screen, and **Done** or the back gesture closes the editor.
+
+Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
 ## Using the engine from code
 
@@ -167,6 +182,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
 | `button` | Tap it (UI or game object) to do an action: start/restart/pause the game, show/hide menus, change variables, jump… Keeps working on title and end screens. | `action`, `value`, `amount`, `sound` |
 | `rules` | Visual logic: WHEN (game starts, every few seconds, touched by tag, tapped, jump/fire button, swipe, variable reaches, destroyed) IF (variable compare, optional) DO (a list of actions). | `rules` |
+| `graph` | Visual Script: node-based logic built in the Node Editor. Events start a chain of actions; value nodes feed numbers and true/false into inputs. | `graph` |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.

@@ -3014,6 +3014,151 @@ registerBehavior('rules', {
   },
 });
 
+// ---- node-based visual scripting ----
+const num = (k, d = 0, label) => ({ key: k, type: 'number', default: d, label: label || k });
+const txt = (k, d = '', label) => ({ key: k, type: 'text', default: d, label: label || k });
+const opt = (k, options, d, label) => ({ key: k, type: 'select', options, default: d ?? options[0], label: label || k });
+/**
+ * Node types. Events start a flow (white "exec" wires); actions run in order; values feed numbers/booleans
+ * into inputs (blue/orange wires). Unwired inputs use the value typed on the node.
+ */
+export const NODE_TYPES = {
+  // events
+  start: { cat: 'Events', label: 'On Start', outs: ['then'] },
+  update: { cat: 'Events', label: 'Every Frame', outs: ['then'] },
+  every: { cat: 'Events', label: 'Every N Seconds', outs: ['then'], params: [num('seconds', 1, 'seconds')] },
+  touch: { cat: 'Events', label: 'On Touch', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
+  tap: { cat: 'Events', label: 'On Tap', outs: ['then'] },
+  button: { cat: 'Events', label: 'On Button', outs: ['then'], params: [opt('button', ['jump', 'fire'], 'jump', 'button')] },
+  swipe: { cat: 'Events', label: 'On Swipe', outs: ['then'], params: [opt('dir', ['up', 'down', 'left', 'right'], 'up', 'direction')] },
+  destroyed: { cat: 'Events', label: 'On Destroyed', outs: ['then'] },
+  // flow
+  branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
+  wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
+  chance: { cat: 'Flow', label: 'Random Chance', exec: true, outs: ['yes', 'no'], inputs: [{ key: 'percent', type: 'number', default: 50 }] },
+  once: { cat: 'Flow', label: 'Do Once', exec: true, outs: ['then'] },
+  sequence: { cat: 'Flow', label: 'Sequence', exec: true, outs: ['first', 'second', 'third'] },
+  // actions
+  setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
+  message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
+  sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')] },
+  spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
+  destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  moveBy: { cat: 'Actions', label: 'Move By', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  setVelocity: { cat: 'Actions', label: 'Set Velocity', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  jump: { cat: 'Actions', label: 'Jump', exec: true, outs: ['then'], inputs: [{ key: 'power', type: 'number', default: 600 }] },
+  showHide: { cat: 'Actions', label: 'Show / Hide Object', exec: true, outs: ['then'], params: [txt('object', '', 'object name'), opt('mode', ['show', 'hide', 'toggle'], 'toggle', 'make it')] },
+  vibrate: { cat: 'Actions', label: 'Vibrate', exec: true, outs: ['then'] },
+  shake: { cat: 'Actions', label: 'Camera Shake', exec: true, outs: ['then'], inputs: [{ key: 'strength', type: 'number', default: 10 }] },
+  win: { cat: 'Actions', label: 'Win', exec: true, outs: [] },
+  gameOver: { cat: 'Actions', label: 'Game Over', exec: true, outs: [] },
+  nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
+  restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
+  // values
+  number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
+  getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
+  random: { cat: 'Values', label: 'Random Number', value: 'number', params: [num('min', 0, 'min'), num('max', 10, 'max')] },
+  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max'], '+', 'operation')] },
+  compare: { cat: 'Values', label: 'Compare', value: 'bool', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['≥', '≤', '=', '>', '<', '≠'], '≥', 'is')] },
+  and: { cat: 'Values', label: 'And', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: true }, { key: 'b', type: 'bool', default: true }] },
+  or: { cat: 'Values', label: 'Or', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }, { key: 'b', type: 'bool', default: false }] },
+  not: { cat: 'Values', label: 'Not', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }] },
+  position: { cat: 'Values', label: 'My Position', value: 'number', params: [opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  distance: { cat: 'Values', label: 'Distance To', value: 'number', params: [txt('tag', 'player', 'tag')] },
+  time: { cat: 'Values', label: 'Game Time', value: 'number' },
+};
+
+registerBehavior('graph', {
+  label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
+  params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
+    { id: 'n1', type: 'tap', x: 20, y: 40, params: {} },
+    { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } },
+    { id: 'n3', type: 'message', x: 640, y: 40, params: { text: 'Score: {score}', seconds: 1.5 } },
+  ], links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }, { from: { node: 'n2', port: 'then' }, to: { node: 'n3', port: 'in' } }] } }],
+  create(p) {
+    const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
+    const def = (n) => NODE_TYPES[n.type] || {};
+    const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
+    const input = (n, key, ctx, depth = 0) => {
+      const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
+      return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
+    };
+    const value = (n, ctx, depth) => {
+      if (!n) return 0;
+      const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
+      switch (n.type) {
+        case 'number': return +P('value') || 0;
+        case 'getVar': return +s.vars[P('name')] || 0;
+        case 'random': { const a = +P('min') || 0, b = +P('max') || 0; return Number.isInteger(a) && Number.isInteger(b) ? Math.min(b, Math.floor(rand(a, b + 1))) : rand(a, b); }
+        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b) }[P('op')] ?? 0; }
+        case 'compare': { const a = +I('a') || 0, b = +I('b') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')] ?? false; }
+        case 'and': return !!I('a') && !!I('b');
+        case 'or': return !!I('a') || !!I('b');
+        case 'not': return !I('a');
+        case 'position': return e[P('axis')] || 0;
+        case 'distance': { const t = s.findAll(P('tag'))[0]; return t ? Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) : Infinity; }
+        case 'time': return s.time;
+        default: return 0;
+      }
+    };
+    const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
+    const run = (n, ctx) => {
+      if (!n || ++ctx.steps > 300 || ctx.e.dead && n.type !== 'destroyed') return;
+      const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
+      switch (n.type) {
+        case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
+        case 'wait': { s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
+        case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
+        case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
+        case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
+        case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
+        case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
+        case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
+        case 'sound': s.engine.audio.sfx(P('sound')); break;
+        case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
+        case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
+        case 'moveBy': e.x += +I('x') || 0; e.y += +I('y') || 0; e.z += +I('z') || 0; break;
+        case 'setVelocity': { const b = e.ensureBody({ type: 'dynamic' }); b.vel.x = +I('x') || 0; b.vel.y = +I('y') || 0; b.vel.z = +I('z') || 0; break; }
+        case 'jump': if (e.body) e.body.vel.y = (+I('power') || 0) * up; s.engine.audio.sfx('jump'); break;
+        case 'showHide': { const t = P('object') ? s.find(P('object')) : e; if (t) t.visible = P('mode') === 'show' ? true : P('mode') === 'hide' ? false : !t.visible; break; }
+        case 'vibrate': s.engine.vibrate([30, 30, 30]); break;
+        case 'shake': s.camera.shake = Math.max(s.camera.shake, +I('strength') || 10); break;
+        case 'win': s.win(); return;
+        case 'gameOver': s.gameOver(); return;
+        case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
+        case 'restart': s.engine.restart(); return;
+        default: break;
+      }
+      follow(n, 'then', ctx);
+    };
+    const fire = (type, e, s, other, filter) => {
+      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0 });
+    };
+    const timers = new Map();
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (g.nodes.some((n) => n.type === 'touch')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (n.type === 'touch') s.want(param(n, 'tag')); }
+        fire('start', e, s);
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, playing = s.state === 'play';
+        if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
+        if (!playing) return;
+        fire('update', e, s);
+        for (const n of g.nodes) {
+          if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
+          else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });
+          else if (n.type === 'swipe' && inp.pressed('swipe:' + param(n, 'dir'))) follow(n, 'then', { s, e, steps: 0 });
+        }
+      },
+      collide(e, other, s) { fire('touch', e, s, other, (n) => other.has(param(n, 'tag'))); },
+      destroy(e, s) { fire('destroyed', e, s); },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],

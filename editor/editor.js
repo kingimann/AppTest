@@ -1,8 +1,10 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
-import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
+import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
+const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
+const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
@@ -1810,7 +1812,7 @@ function addVisualScript() {
 }
 
 function openCreateMenu(anchor) {
-  if (uiMode) { popMenu(anchor, [{ cap: 'UI widgets' }, ...UI_WIDGETS.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))]); return; }
+  if (uiMode) { popMenu(anchor, UI_GROUPS.flatMap((g) => [{ cap: g }, ...UI_WIDGETS.filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
   const sceneObj = (label) => objs.find((o) => o.label === label);
   popMenu(anchor, [
@@ -2234,6 +2236,13 @@ function vecRow(target, label, keys, defs, step) {
 
 const GEO_OPTIONS = [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['capsule', 'Capsule'], ['pyramid', 'Pyramid'], ['wedge', 'Ramp / Wedge'], ['prism', 'Prism'], ['gem', 'Gem'], ['dome', 'Dome'], ['torus', 'Ring / Torus'], ['plane', 'Plane']];
 
+/** Built-in sprite art picker (and your own pictures). */
+function pickSprite(cb, { device = true } = {}) {
+  openDialog('Choose a sprite', [
+    device ? h('div', { class: 'btns', style: 'margin-bottom:8px' }, h('button', { class: 'btn', onclick: () => { closeLayer(); pickImage((url) => cb(url), 512); } }, icon('image'), 'From your device…')) : null,
+    ...Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => [h('div', { class: 'ac-cat' }, cat),
+      h('div', { class: 'art-grid' }, list.map((k) => h('button', { title: k, onclick: () => { closeLayer(); cb('art:' + k); } }, h('img', { src: artURL('art:' + k), alt: k, class: k.startsWith('ui-') ? 'uiic' : '' }))))])]);
+}
 function pickEmoji(cb) {
   openDialog('Choose a sprite', Object.entries(EMOJI).flatMap(([cat, list]) => [h('div', { class: 'ac-cat' }, cat),
     h('div', { class: 'emoji-grid' }, list.map((em) => h('button', { onclick: () => { closeLayer(); cb(em); } }, em)))]));
@@ -2487,7 +2496,8 @@ function renderInspector() {
   if (j.shape) {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
-      C('shape.type', { label: 'Shape', type: 'select', options: [['emoji', 'Sprite (emoji)'], ['rect', 'Rectangle'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['triangle', 'Triangle'], ['star', 'Star'], ['heart', 'Heart'], ['diamond', 'Diamond'], ['hexagon', 'Hexagon'], ['pentagon', 'Pentagon'], ['octagon', 'Octagon'], ['capsule', 'Capsule'], ['ring', 'Ring'], ['arrow', 'Arrow'], ['cloud', 'Cloud']], structure: true }),
+      C('shape.type', { label: 'Shape', type: 'select', options: [['rect', 'Rectangle'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['triangle', 'Triangle'], ['star', 'Star'], ['heart', 'Heart'], ['diamond', 'Diamond'], ['hexagon', 'Hexagon'], ['pentagon', 'Pentagon'], ['octagon', 'Octagon'], ['capsule', 'Capsule'], ['ring', 'Ring'], ['arrow', 'Arrow'], ['cloud', 'Cloud'], ['emoji', 'Emoji (text)']], structure: true }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }, icon('image'), 'Use a sprite picture instead')),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
@@ -2500,7 +2510,9 @@ function renderInspector() {
   if (j.sprite) {
     box.append(comp('Image', [
       C('sprite.src', { label: 'Source URL', type: 'text' }),
-      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'Choose from device')),
+      j.sprite.src ? h('div', { class: 'row side' }, h('label', {}, 'Picture'), h('img', { class: 'img-thumb', src: artURL(j.sprite.src), alt: '' })) : null,
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
+        h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'From device')),
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
     ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }, 'sprite') }));
@@ -2862,6 +2874,7 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
@@ -3129,20 +3142,20 @@ const PREFABS_2D = [
   { icon: 'plus', label: 'Upgrade', props: { name: 'Upgrade Button', ui: true, anchor: 'bottom', x: 0, y: -100, shape: { type: 'rect', w: 320, h: 60, radius: 14, fill: '#5d4037' }, text: { value: 'Upgrade +1/s  ·  {cost}', size: 18, color: '#fff3e0' }, behaviors: [{ type: 'upgrade', cost: 15, costVar: 'score', addVar: 'perSecond', amount: 1, growth: 1.15 }] }, vars: { perSecond: 0 },
     extra: [{ name: 'Income', offset: { x: -150, y: -300 }, behaviors: [{ type: 'income', var: 'score', rateVar: 'perSecond' }] }] },
   { icon: 'arrow', label: 'Wind Zone', props: { name: 'Wind Zone', shape: { type: 'rect', w: 120, h: 200, fill: 'rgba(120,200,255,0.18)', stroke: 'rgba(120,200,255,0.5)', lineWidth: 2 }, behaviors: [{ type: 'forceZone', mode: 'direction', fx: 0, fy: -1, fz: 0, strength: 2400, tag: '', hidden: false }] } },
-  { icon: 'save', label: 'Save Point', props: { name: 'Save Point', shape: { type: 'emoji', emoji: '💾', w: 40, h: 40 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'float', amount: 6, period: 1.6 }] } },
-  { icon: 'bulb', label: 'Torch', props: { name: 'Torch', shape: { type: 'emoji', emoji: '🔥', w: 36, h: 36 }, light: { color: '#ffb056', intensity: 1, range: 180, flicker: 0.5 } }, scene: { light: { darkness: 0.85 } } },
+  { icon: 'save', label: 'Save Point', props: { name: 'Save Point', sprite: { src: 'art:scroll', w: 40, h: 40 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'float', amount: 6, period: 1.6 }] } },
+  { icon: 'bulb', label: 'Torch', props: { name: 'Torch', sprite: { src: 'art:torch', w: 36, h: 36 }, light: { color: '#ffb056', intensity: 1, range: 180, flicker: 0.5 } }, scene: { light: { darkness: 0.85 } } },
   { icon: 'rotate', label: 'Spinning Bar', props: { name: 'Spinning Bar', shape: { type: 'rect', w: 160, h: 16, radius: 8, fill: '#e53935' }, body: { type: 'kinematic' }, behaviors: [{ type: 'rotate', speed: 90 }, { type: 'hazard', action: 'damage' }] } },
   { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', shape: { type: 'rect', w: 140, h: 24, radius: 6, fill: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 160, y: 0, duration: 2, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
-  { icon: 'image', label: 'Animated Sprite', props: { name: 'Bird', shape: { type: 'emoji', emoji: '🐥', w: 56, h: 56 }, behaviors: [{ type: 'flipbook', frames: '🐥,🐤,🐣,🐤', fps: 6, mode: 'loop', when: 'always' }, { type: 'tween', effect: 'move by', x: 0, y: -20, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'image', label: 'Animated Sprite', props: { name: 'Bird', sprite: { src: 'art:bird', w: 56, h: 56 }, behaviors: [{ type: 'flipbook', frames: 'art:bird,art:bird2', fps: 6, mode: 'loop', when: 'always' }, { type: 'tween', effect: 'move by', x: 0, y: -20, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'camera', label: 'Group Camera', props: { name: 'Group Camera', behaviors: [{ type: 'camera', mode: 'group', target: 'player', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: 0 }] } },
-  { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], shape: { type: 'emoji', emoji: '👹', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
-  { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', shape: { type: 'emoji', emoji: '🧙', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
-  { icon: 'key', label: 'Inventory Key', props: { name: 'Key Pickup', shape: { type: 'emoji', emoji: '🔑', w: 36, h: 36 }, behaviors: [{ type: 'inventoryItem', item: 'Key', icon: '🔑', amount: 1, tag: 'player' }, { type: 'tween', effect: 'move by', x: 0, y: -8, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], sprite: { src: 'art:zombie', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
+  { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', sprite: { src: 'art:wizard', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
+  { icon: 'key', label: 'Inventory Key', props: { name: 'Key Pickup', sprite: { src: 'art:key', w: 36, h: 36 }, behaviors: [{ type: 'inventoryItem', item: 'Key', icon: '🔑', amount: 1, tag: 'player' }, { type: 'tween', effect: 'move by', x: 0, y: -8, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'star', label: 'Rain', props: { name: 'Rain', behaviors: [{ type: 'particles', preset: 'rain', rate: 0, size: 0, playing: true }] } },
   { icon: 'sun', label: 'Day & Night', props: { name: 'Day & Night', behaviors: [{ type: 'dayNight', dayLength: 60, start: 8, dayColor: '#87b8e8', nightColor: '#0b1030', maxDark: 0.8 }] } },
   { icon: 'spawner', label: 'Wave Spawner', props: { name: 'Wave Spawner', y: -40, behaviors: [{ type: 'waveSpawner', waves: [{ template: 'Wave Enemy', count: 4, every: 1 }, { template: 'Wave Enemy', count: 7, every: 0.7 }], pause: 3, area: 300, areaH: 0, whenDone: 'win' }] },
-    extra: [{ name: 'Wave Enemy', template: true, tags: ['enemy'], offset: { x: 0, y: 0 }, shape: { type: 'emoji', emoji: '👾', w: 36, h: 36 }, behaviors: [{ type: 'velocity', vx: 0, vy: 120, vz: 0 }, { type: 'health', hp: 1, hurtBy: 'bullet', damage: 1, invuln: 0, knockback: 0, onDeath: 'destroy', points: 5 }, { type: 'destroyOffscreen', margin: 80 }] }] },
-  { icon: 'nodes', label: 'Patrol Guard (FSM)', props: { name: 'Guard', tags: ['enemy'], shape: { type: 'emoji', emoji: '💂', w: 44, h: 44 }, behaviors: [{ type: 'fsm', fsm: { start: 'p', any: [], states: [
+    extra: [{ name: 'Wave Enemy', template: true, tags: ['enemy'], offset: { x: 0, y: 0 }, sprite: { src: 'art:alien', w: 36, h: 36 }, behaviors: [{ type: 'velocity', vx: 0, vy: 120, vz: 0 }, { type: 'health', hp: 1, hurtBy: 'bullet', damage: 1, invuln: 0, knockback: 0, onDeath: 'destroy', points: 5 }, { type: 'destroyOffscreen', margin: 80 }] }] },
+  { icon: 'nodes', label: 'Patrol Guard (FSM)', props: { name: 'Guard', tags: ['enemy'], sprite: { src: 'art:knight', w: 44, h: 44 }, behaviors: [{ type: 'fsm', fsm: { start: 'p', any: [], states: [
     { id: 'p', name: 'Patrol', x: 30, y: 40, enter: [{ type: 'moveBy', x: 120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }, { type: 'moveBy', x: -120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }], stay: [], exit: [], transitions: [{ event: { type: 'finished' }, conditions: [], to: 'p2' }, { event: { type: 'always' }, conditions: [{ type: 'near', tag: 'player', op: '<', value: 150 }], to: 'a' }] },
     { id: 'p2', name: 'Look Around', x: 30, y: 170, enter: [{ type: 'rotateBy', degrees: 20, seconds: 0.3 }, { type: 'wait', seconds: 0.4 }, { type: 'rotateBy', degrees: -20, seconds: 0.3 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 1.2 }, conditions: [], to: 'p' }] },
     { id: 'a', name: 'Alert', x: 260, y: 100, enter: [{ type: 'punch', what: 'scale', amount: 0.4, seconds: 0.4 }, { type: 'message', text: 'Hey! Stop!', seconds: 1.2 }, { type: 'shake', strength: 8 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 2 }, conditions: [{ type: 'near', tag: 'player', op: '>', value: 220 }], to: 'p' }] },
@@ -3206,7 +3219,7 @@ const OBJECTS_2D = [
   { icon: 'circle', label: 'Ring', props: { name: 'Ring', shape: { type: 'ring', r: 30, fill: '#ffca28' } } },
   { icon: 'arrow', label: 'Arrow', props: { name: 'Arrow', shape: { type: 'arrow', w: 60, h: 40, fill: '#ffffff' } } },
   { icon: 'star', label: 'Cloud', props: { name: 'Cloud', shape: { type: 'cloud', w: 100, h: 60, fill: '#ffffff' } } },
-  { icon: 'star', label: 'Sprite', props: { name: 'Sprite', shape: { type: 'emoji', emoji: '🐱', w: 56, h: 56 } } },
+  { icon: 'star', label: 'Sprite', props: { name: 'Sprite', sprite: { src: 'art:hero', w: 56, h: 56 } } },
   { icon: 'text', label: 'Text', props: { name: 'Text', text: { value: 'Hello', size: 32, color: '#ffffff' } } },
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
@@ -3257,9 +3270,9 @@ function renderProject() {
   } else {
     const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
       : projectTab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
-        : projectTab === 'sprites' ? Object.entries(EMOJI).flatMap(([cat, list]) => { const one = { Characters: 'Character', Enemies: 'Enemy', Items: 'Item', Vehicles: 'Vehicle', Places: 'Prop' }[cat] || cat; return list.map((em) => ({ emoji: em, label: one, props: { name: one, shape: { type: 'emoji', emoji: em, w: 56, h: 56 } } })); })
+        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
           : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
-    items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'star' } }));
+    items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
   }
   const mine = projectTab === 'prefabs' ? userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode) : [];
   if (projectTab === 'prefabs') {
@@ -3273,11 +3286,14 @@ function renderProject() {
     })));
     box.append(h('div', { class: 'p-sec' }, 'Built-in'));
   }
-  box.append(h('div', { class: 'tiles' }, items.map((it) => {
-    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
+  const tileOf = (it) => {
+    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.art ? h('div', { class: 'th art' + (it.art.startsWith('art:ui-') ? ' uiic' : '') }, h('img', { src: artURL(it.art), alt: '' })) : it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
     draggable(t, it.payload);
     return t;
-  })));
+  };
+  const groups = [...new Set(items.map((it) => it.group).filter(Boolean))].sort((a, b) => (UI_GROUPS.indexOf(a) + 99) % 99 - (UI_GROUPS.indexOf(b) + 99) % 99);
+  if (groups.length > 1) for (const g of groups) box.append(h('div', { class: 'p-sec' }, g), h('div', { class: 'tiles' }, items.filter((it) => it.group === g).map(tileOf)));
+  else box.append(h('div', { class: 'tiles' }, items.map(tileOf)));
   box.append(h('p', { class: 'p-note' }, projectTab === 'components'
     ? 'Drag a component onto an object in the Scene or Hierarchy, or tap to add it to the selected object.'
     : 'Drag into the Scene to place, or tap to add at the center of the view.'));
@@ -3396,7 +3412,17 @@ function addPrefab(def, at) {
     const base = at || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
     addEntity(props, props.ui ? undefined : { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
   }
-  const j = addEntity(def.props, at);
+  const addTree = (props, parent, where) => { // an element and everything inside it
+    const { children, offset, ...rest } = props;
+    const base = where || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
+    const k = addEntity({ ...rest, ...(parent ? { parent } : {}) }, rest.ui || parent ? undefined : { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
+    for (const c of children || []) addTree({ ui: rest.ui, ...c }, k.id);
+    return k;
+  };
+  for (const b of def.before || []) addTree(b, null, at);
+  const j = def.children ? addTree({ ...def.props, children: def.children }, null, at) : addEntity(def.props, at);
+  if (def.children || def.before) { selectedId = j.id; changed({ structure: true }); }
+  if (def.note) setTimeout(() => toast(def.note), 900);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
     const sz = j.tiles.size; j.x = Math.round((j.x - 5 * sz) / sz) * sz; j.y = Math.round((j.y + 2 * sz) / sz) * sz;
@@ -4092,11 +4118,33 @@ function drawPhoneCutouts(ctx, W, H) {
   ctx.fillStyle = 'rgba(255,255,255,0.75)'; pill(W / 2 - 67, H - 13, 134, 5); // home bar
   ctx.restore();
 }
+/** Pages (UI with "Show If": page = shop…): preview one at a time in the UI editor. */
+let uiPage = 'all';
+const showIfOf = (j) => (j?.behaviors || []).find((b) => b.type === 'uiShowIf' && (b.op || '=') === '=');
+function uiPages() {
+  const out = new Map();
+  for (const j of project.entities) { const b = showIfOf(j); if (b && j.ui) { const v = b.var || 'page'; if (!out.has(v)) out.set(v, new Set()); out.get(v).add(String(b.value ?? '')); } }
+  return out;
+}
+engine.uiFilter = (e) => {
+  if (uiPage === 'all' || !uiMode) return true;
+  const [v, val] = uiPage.split('='), seen = new Set();
+  for (let j = ent(e.id); j && !seen.has(j.id); j = j.parent ? ent(j.parent) : null) { seen.add(j.id); const b = showIfOf(j); if (b && (b.var || 'page') === v && String(b.value ?? '') !== val) return false; }
+  return true;
+};
+function pageMenu(anchor) {
+  const pages = uiPages();
+  if (!pages.size) { toast('No pages yet: add Project › UI › Navigation › Page or a Bottom Nav Bar'); return; }
+  popMenu(anchor, [{ cap: 'Preview page' }, { icon: uiPage === 'all' ? 'check' : 'layers', label: 'All pages', fn: () => setUIPage('all') },
+    ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: uiPage === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) })))]);
+}
+function setUIPage(k) { uiPage = k; const b = $('.page-btn span'); if (b) b.textContent = k === 'all' ? 'Pages' : k.split('=')[1]; engine.render(); }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));
   const orientBtn = h('button', { class: 'orient-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Game orientation' }, ...[['portrait', 'Portrait'], ['landscape', 'Landscape'], ['any', 'Either way']].map(([k, l]) => ({ icon: orientationOf() === k ? 'check' : 'phone', label: l, fn: () => setOrientation(k) }))]) });
-  const bar = h('div', { id: 'uiScreens', hidden: true }, orientBtn, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
+  const pageBtn = h('button', { class: 'page-btn', onclick: (ev) => pageMenu(ev.currentTarget) }, icon('layers'), h('span', {}, 'Pages'));
+  const bar = h('div', { id: 'uiScreens', hidden: true }, orientBtn, phoneBtn, pageBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
   $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected

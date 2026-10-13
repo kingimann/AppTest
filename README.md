@@ -280,6 +280,33 @@ The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while
 - **In the editor:** the UI editor and Play show the game in its own shape, so a landscape game is a wide box on a portrait phone. Turn the phone to play it full screen.
 - From code: `settings.orientation` ('portrait' | 'landscape' | 'any'), `settings.wrongWay` ('ask' | 'letterbox'), `engine.letterbox` to force the box, and `engine.fitScreen()`.
 
+### Navigation, popups and more UI
+
+Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.
+- **Bottom Nav Bar:**
+  - Four tabs with icons (Home, Shop, Awards, Profile) that spread across the screen.
+  - Three ready-made **Pages**: tapping a tab sets the variable `page`, and each page shows when it matches.
+- **Side Bars:**
+  - **Side Bar (left):** a ☰ button slides in a menu with icons. It dims the game, and picking an item or tapping outside closes it.
+  - **Side Bar (right):** a ⚙ button opens settings toggles.
+  - **Bottom Sheet:** a + button slides up a panel.
+- **Tab Bar, Page, App Bar** (menu + title + settings).
+- **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
+- **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
+- **New components** (Add Component › UI):
+  - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
+  - **Show If (pages):** shows UI only when a variable matches, with fade / pop / slide.
+  - **Side Bar (drawer):** slides in from any edge on a message.
+  - **Popup (modal / toast)**, **Option Picker**, **Scroll View**, **Star Rating**.
+  - **Layout Group** can now arrange its own children and spread them evenly.
+- **In the UI editor:** the **Pages** button previews one page at a time.
+
+### Sprites (drawn art, no emoji)
+
+- *Project › Sprites* is a library of about 100 drawn sprites (as of v0.1): characters, enemies, items, nature, vehicles, blocks and white UI icons. They are vector art, so they stay sharp at any size and add almost nothing to a project (`sprite: { src: 'art:slime' }`).
+- The Image component has **Sprite library** and **From device** buttons. A shape can be turned into a sprite with *Use a sprite picture instead*.
+- Built-in prefabs (NPC, guard, torch, key, bird…) and UI widgets use these sprites instead of emoji. Hearts and star ratings can use sprites as their icons (`icon: 'art:heart'`), and Sprite Animation frames can be sprites (`art:bird,art:bird2`).
+
 ### Safe area and UI scaling (fits every phone)
 
 - **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.

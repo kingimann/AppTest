@@ -855,7 +855,7 @@ export class Scene {
       const p = e.parentEnt;
       if (e.dead || !p) continue;
       if (p.dead) { if (!edit) e.destroy(); continue; }
-      e._parentHidden = p.visible === false || !!p._parentHidden;
+      e._parentHidden = p.visible === false || !!p._parentHidden || !!p._clipHidden;
       if (e.ui) continue; // UI children are positioned inside their parent's box (uiOrigin)
       const L = e.local;
       if (!edit && e._lw) { // a behaviour or physics moved the child: fold that into its local transform
@@ -1556,11 +1556,144 @@ export class Audio {
 // Asset loading
 // ============================================================================
 const images = new Map();
+// ---- Built-in sprite art: small vector drawings (no emoji). Use as sprite src 'art:<name>'. ----
+const ART_O = '#22203a';
+const artO = (w = 3) => `stroke="${ART_O}" stroke-width="${w}" stroke-linejoin="round" stroke-linecap="round"`;
+const artEyes = (y = 26, dx = 6, cx = 32, r = 2.6) => `<circle cx="${cx - dx}" cy="${y}" r="${r}" fill="${ART_O}"/><circle cx="${cx + dx}" cy="${y}" r="${r}" fill="${ART_O}"/>`;
+const artShine = (x, y, r = 3) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity=".7"/>`;
+const artIcon = (d, extra = '') => `<path d="${d}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
+export const SPRITE_ART = {
+  // characters
+  hero: `<rect x="20" y="34" width="24" height="21" rx="6" fill="#3f7fd8" ${artO()}/><rect x="22" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><rect x="35" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><circle cx="32" cy="24" r="14" fill="#ffd3a8" ${artO()}/><path d="M18 23c0-10 7-15 14-15s14 5 14 15c-4-4-9-6-14-6s-10 2-14 6z" fill="#6b3f1f" ${artO()}/>${artEyes(26, 5.5)}<path d="M28 32q4 3 8 0" fill="none" ${artO(2)}/>`,
+  girl: `<path d="M20 56l4-22h16l4 22z" fill="#e45c9b" ${artO()}/><path d="M16 40c-2-18 4-32 16-32s18 14 16 32c-4-2-6-8-6-14H22c0 6-2 12-6 14z" fill="#9b4a1c" ${artO()}/><circle cx="32" cy="25" r="12" fill="#ffd3a8" ${artO()}/><path d="M20 22c4-8 20-8 24 0-8-3-16-3-24 0z" fill="#9b4a1c"/>${artEyes(26, 5)}<path d="M29 31q3 2 6 0" fill="none" ${artO(2)}/>`,
+  wizard: `<path d="M16 58l8-26h16l8 26z" fill="#6c45c4" ${artO()}/><circle cx="32" cy="28" r="10" fill="#ffd3a8" ${artO()}/><path d="M24 32q8 20 16 0q-8 6-16 0z" fill="#eee" ${artO(2)}/><path d="M14 22h36L33 2z" fill="#4b2fa0" ${artO()}/><circle cx="33" cy="12" r="2.5" fill="#ffd23d"/>${artEyes(27, 4, 32, 2)}`,
+  knight: `<rect x="18" y="34" width="28" height="22" rx="5" fill="#9aa7b8" ${artO()}/><circle cx="32" cy="24" r="15" fill="#b9c4d2" ${artO()}/><rect x="20" y="21" width="24" height="6" rx="3" fill="${ART_O}"/><path d="M32 9V3" ${artO(4)}/><path d="M32 4q8-2 10 6" fill="none" stroke="#e53935" stroke-width="4" stroke-linecap="round"/><rect x="28" y="40" width="8" height="12" rx="2" fill="#e53935"/>`,
+  robot: `<rect x="16" y="20" width="32" height="26" rx="6" fill="#9eb3c2" ${artO()}/><rect x="22" y="46" width="20" height="10" rx="3" fill="#6f8696" ${artO()}/><path d="M32 20v-9" ${artO()}/><circle cx="32" cy="9" r="4" fill="#ff5252" ${artO(2)}/><rect x="21" y="27" width="22" height="10" rx="5" fill="#22203a"/><circle cx="27" cy="32" r="3" fill="#33f0ff"/><circle cx="37" cy="32" r="3" fill="#33f0ff"/>`,
+  cat: `<path d="M14 26l4-16 10 8h8l10-8 4 16v8c0 12-8 20-18 20S14 46 14 34z" fill="#f2a03d" ${artO()}/><path d="M20 14l5 5M44 14l-5 5" ${artO(2)}/>${artEyes(32, 7)}<path d="M29 39l3 2 3-2" fill="none" ${artO(2)}/><path d="M8 36h12M8 42h12M44 36h12M44 42h12" ${artO(1.5)}/>`,
+  dog: `<circle cx="32" cy="34" r="18" fill="#c8915a" ${artO()}/><path d="M14 22c-6 4-6 18 2 20 2-6 2-14-2-20zM50 22c6 4 6 18-2 20-2-6-2-14 2-20z" fill="#7a4e2a" ${artO()}/>${artEyes(31, 7)}<ellipse cx="32" cy="40" rx="5" ry="4" fill="${ART_O}"/><path d="M32 44v4" ${artO(2)}/>`,
+  frog: `<ellipse cx="32" cy="40" rx="22" ry="16" fill="#5cc45a" ${artO()}/><circle cx="21" cy="24" r="8" fill="#5cc45a" ${artO()}/><circle cx="43" cy="24" r="8" fill="#5cc45a" ${artO()}/><circle cx="21" cy="24" r="3.5" fill="${ART_O}"/><circle cx="43" cy="24" r="3.5" fill="${ART_O}"/><path d="M20 42q12 8 24 0" fill="none" ${artO(2.5)}/>`,
+  bird: `<ellipse cx="30" cy="36" rx="18" ry="15" fill="#ffd23d" ${artO()}/><path d="M22 34q-10-14 6-10q2 6-6 10z" fill="#ffb300" ${artO(2.5)}/><circle cx="38" cy="30" r="3" fill="${ART_O}"/><path d="M47 34l10 3-10 4z" fill="#ff7043" ${artO(2)}/>`,
+  bird2: `<ellipse cx="30" cy="36" rx="18" ry="15" fill="#ffd23d" ${artO()}/><path d="M22 36q-12 12 6 10q2-6-6-10z" fill="#ffb300" ${artO(2.5)}/><circle cx="38" cy="30" r="3" fill="${ART_O}"/><path d="M47 34l10 3-10 4z" fill="#ff7043" ${artO(2)}/>`,
+  ninja: `<circle cx="32" cy="32" r="20" fill="#2e3350" ${artO()}/><rect x="14" y="25" width="36" height="11" rx="5" fill="#ffd3a8" ${artO(2)}/>${artEyes(30.5, 7)}<path d="M50 28l10-6M50 32l10 2" stroke="#e53935" stroke-width="4" stroke-linecap="round"/>`,
+  astronaut: `<rect x="18" y="36" width="28" height="20" rx="8" fill="#eef2f7" ${artO()}/><circle cx="32" cy="26" r="16" fill="#eef2f7" ${artO()}/><rect x="21" y="18" width="22" height="16" rx="8" fill="#3b6fd8" ${artO(2)}/>${artShine(27, 22, 2.5)}<rect x="27" y="42" width="10" height="6" rx="2" fill="#ff7043"/>`,
+  alien: `<ellipse cx="32" cy="30" rx="18" ry="20" fill="#7ee36d" ${artO()}/><ellipse cx="24" cy="30" rx="6" ry="8" fill="${ART_O}" transform="rotate(-20 24 30)"/><ellipse cx="40" cy="30" rx="6" ry="8" fill="${ART_O}" transform="rotate(20 40 30)"/><path d="M28 42q4 3 8 0" fill="none" ${artO(2)}/><path d="M24 12l-4-8M40 12l4-8" ${artO(2.5)}/>`,
+  // enemies
+  slime: `<path d="M8 50c0-20 10-34 24-34s24 14 24 34c0 4-4 6-8 6H16c-4 0-8-2-8-6z" fill="#4fd36a" ${artO()}/>${artShine(22, 28, 4)}${artEyes(38, 7)}<path d="M28 46q4 3 8 0" fill="none" ${artO(2)}/>`,
+  slimeBlue: `<path d="M8 50c0-20 10-34 24-34s24 14 24 34c0 4-4 6-8 6H16c-4 0-8-2-8-6z" fill="#4fa3ff" ${artO()}/>${artShine(22, 28, 4)}${artEyes(38, 7)}<path d="M28 47q4-3 8 0" fill="none" ${artO(2)}/>`,
+  ghost: `<path d="M12 56V30C12 16 20 8 32 8s20 8 20 22v26l-6-5-7 5-7-5-7 5-7-5z" fill="#eef2ff" ${artO()}/>${artEyes(30, 7, 32, 3.5)}<ellipse cx="32" cy="41" rx="4" ry="5" fill="${ART_O}"/>`,
+  bat: `<path d="M32 26c-8-10-20-12-28-4 6 0 10 6 10 12 4-4 10-4 12 2zM32 26c8-10 20-12 28-4-6 0-10 6-10 12-4-4-10-4-12 2z" fill="#7b4bc4" ${artO()}/><circle cx="32" cy="32" r="10" fill="#9c6ae0" ${artO()}/><path d="M26 24l-2-6 6 3M38 24l2-6-6 3" fill="#9c6ae0" ${artO(2)}/><circle cx="28" cy="31" r="2" fill="#ffd23d"/><circle cx="36" cy="31" r="2" fill="#ffd23d"/>`,
+  skull: `<path d="M12 30c0-14 9-22 20-22s20 8 20 22c0 8-4 12-8 14v10H20V44c-4-2-8-6-8-14z" fill="#f2f0e6" ${artO()}/><circle cx="24" cy="31" r="6" fill="${ART_O}"/><circle cx="40" cy="31" r="6" fill="${ART_O}"/><path d="M32 38l-3 6h6z" fill="${ART_O}"/><path d="M26 54v-6M32 54v-6M38 54v-6" ${artO(2)}/>`,
+  spider: `<path d="M20 30L6 20M20 36L4 36M22 42L8 54M44 30l14-10M44 36h16M42 42l14 12" ${artO(3)}/><ellipse cx="32" cy="36" rx="14" ry="12" fill="#3a3550" ${artO()}/><circle cx="27" cy="34" r="3" fill="#ff5252"/><circle cx="37" cy="34" r="3" fill="#ff5252"/>`,
+  bee: `<ellipse cx="32" cy="36" rx="18" ry="13" fill="#ffd23d" ${artO()}/><path d="M27 24v24M36 24v24" stroke="${ART_O}" stroke-width="5"/><ellipse cx="26" cy="20" rx="8" ry="6" fill="#cfefff" ${artO(2)}/><ellipse cx="38" cy="20" rx="8" ry="6" fill="#cfefff" ${artO(2)}/><circle cx="45" cy="33" r="2.5" fill="${ART_O}"/><path d="M14 36l-6 2 6 2" fill="${ART_O}"/>`,
+  shark: `<path d="M4 38c10-14 30-18 46-10l10-8v28l-10-6c-16 8-36 6-46-4z" fill="#8fa6bd" ${artO()}/><path d="M28 24l6-14 6 16z" fill="#8fa6bd" ${artO()}/><circle cx="16" cy="36" r="2.5" fill="${ART_O}"/><path d="M8 42l4 2 3-2 3 2 3-2" fill="none" ${artO(2)}/>`,
+  eyeMonster: `<circle cx="32" cy="34" r="22" fill="#e85a7a" ${artO()}/><circle cx="32" cy="30" r="11" fill="#fff" ${artO(2)}/><circle cx="34" cy="31" r="5" fill="${ART_O}"/><path d="M22 46q10 8 20 0" fill="#fff" ${artO(2)}/><path d="M18 16l4 6M46 16l-4 6" ${artO(3)}/>`,
+  dragon: `<path d="M10 40c0-16 12-26 26-24l12-10-2 14c8 4 12 12 10 20-2 10-14 16-26 16S10 50 10 40z" fill="#e5533d" ${artO()}/><path d="M18 40l6 6 6-6 6 6 6-6" fill="none" ${artO(2)}/>${artEyes(30, 8, 34, 3)}<path d="M8 32l-4-6M14 26l-2-8" ${artO(3)}/>`,
+  zombie: `<rect x="20" y="36" width="24" height="20" rx="5" fill="#5d8a5a" ${artO()}/><circle cx="32" cy="25" r="14" fill="#9ccc65" ${artO()}/><circle cx="26" cy="25" r="3" fill="#fff" ${artO(1.5)}/><circle cx="38" cy="24" r="2" fill="${ART_O}"/><path d="M26 33h12" ${artO(2)}/><path d="M28 33v3M33 33v3" ${artO(1.5)}/>`,
+  // items
+  coin: `<circle cx="32" cy="32" r="22" fill="#ffd23d" ${artO()}/><circle cx="32" cy="32" r="14" fill="none" stroke="#e0a800" stroke-width="3"/><path d="M32 22v20" stroke="#e0a800" stroke-width="5" stroke-linecap="round"/>${artShine(22, 22)}`,
+  gem: `<path d="M18 12h28l12 14-26 30L6 26z" fill="#4fc3f7" ${artO()}/><path d="M6 26h52M18 12l8 14 6 30 6-30 8-14M26 26h12" fill="none" stroke="#1e88b5" stroke-width="2"/>${artShine(20, 20)}`,
+  gemRed: `<path d="M18 12h28l12 14-26 30L6 26z" fill="#ff5c7a" ${artO()}/><path d="M6 26h52M18 12l8 14 6 30 6-30 8-14M26 26h12" fill="none" stroke="#c2185b" stroke-width="2"/>${artShine(20, 20)}`,
+  heart: `<path d="M32 56S6 40 6 22c0-8 6-14 14-14 6 0 10 4 12 8 2-4 6-8 12-8 8 0 14 6 14 14 0 18-26 34-26 34z" fill="#ff4d6d" ${artO()}/>${artShine(18, 20, 4)}`,
+  star: `<path d="M32 4l8 18 20 2-15 13 5 20-18-11-18 11 5-20L4 24l20-2z" fill="#ffd23d" ${artO()}/>${artShine(26, 22)}`,
+  key: `<circle cx="18" cy="32" r="12" fill="#ffd23d" ${artO()}/><circle cx="18" cy="32" r="4" fill="#fff8e1" ${artO(2)}/><path d="M30 32h28M50 32v10M42 32v8" fill="none" stroke="${ART_O}" stroke-width="9" stroke-linecap="round"/><path d="M30 32h28M50 32v10M42 32v8" fill="none" stroke="#ffd23d" stroke-width="4" stroke-linecap="round"/>`,
+  potion: `<path d="M26 6h12v14l12 16c4 8 0 22-18 22S10 44 14 36l12-16z" fill="#ef4f9b" ${artO()}/><path d="M16 38h32" stroke="#fff" stroke-width="2" opacity=".6"/><rect x="24" y="4" width="16" height="6" rx="2" fill="#a1887f" ${artO(2)}/>${artShine(24, 44)}`,
+  potionBlue: `<path d="M26 6h12v14l12 16c4 8 0 22-18 22S10 44 14 36l12-16z" fill="#4f8cff" ${artO()}/><path d="M16 38h32" stroke="#fff" stroke-width="2" opacity=".6"/><rect x="24" y="4" width="16" height="6" rx="2" fill="#a1887f" ${artO(2)}/>${artShine(24, 44)}`,
+  sword: `<path d="M40 6l18 0 0 18-26 26-18-18z" fill="#dfe6ee" ${artO()}/><path d="M12 36l16 16" ${artO(6)}/><path d="M12 36l16 16" stroke="#ffd23d" stroke-width="3" stroke-linecap="round"/><path d="M14 50l-8 8" ${artO(7)}/><path d="M14 50l-8 8" stroke="#8d5a2b" stroke-width="3" stroke-linecap="round"/>`,
+  shield: `<path d="M32 4l24 8v16c0 16-10 26-24 32C18 54 8 44 8 28V12z" fill="#3f7fd8" ${artO()}/><path d="M32 12v40M14 26h36" stroke="#ffd23d" stroke-width="5"/>`,
+  bomb: `<circle cx="28" cy="38" r="20" fill="#3a3550" ${artO()}/><rect x="34" y="14" width="10" height="8" rx="2" transform="rotate(35 39 18)" fill="#6f6a8a" ${artO(2)}/><path d="M44 14q4-8 10-6" fill="none" ${artO(2)}/><path d="M55 6l2-4M58 9l4-1M56 3l3 2" stroke="#ff9800" stroke-width="2.5" stroke-linecap="round"/>${artShine(20, 30, 4)}`,
+  chest: `<rect x="8" y="26" width="48" height="28" rx="4" fill="#b57a3e" ${artO()}/><path d="M8 30c0-12 8-18 24-18s24 6 24 18z" fill="#c98a4b" ${artO()}/><path d="M8 30h48" ${artO(3)}/><rect x="27" y="26" width="10" height="12" rx="2" fill="#ffd23d" ${artO(2)}/>`,
+  crown: `<path d="M8 50L4 18l16 12 12-20 12 20 16-12-4 32z" fill="#ffd23d" ${artO()}/><circle cx="32" cy="38" r="4" fill="#ff4d6d" ${artO(1.5)}/><circle cx="18" cy="40" r="3" fill="#4fc3f7"/><circle cx="46" cy="40" r="3" fill="#4fc3f7"/>`,
+  trophy: `<path d="M18 8h28v14c0 10-6 16-14 16s-14-6-14-16z" fill="#ffd23d" ${artO()}/><path d="M18 12H8c0 10 4 14 12 14M46 12h10c0 10-4 14-12 14" fill="none" ${artO()}/><path d="M28 38h8v10h-8z" fill="#e0a800" ${artO(2)}/><rect x="18" y="48" width="28" height="8" rx="2" fill="#8d5a2b" ${artO()}/>`,
+  apple: `<path d="M32 18c-14-8-26 4-22 20 3 12 12 20 22 16 10 4 19-4 22-16 4-16-8-28-22-20z" fill="#e53935" ${artO()}/><path d="M32 18c0-6 2-10 6-12" fill="none" ${artO(3)}/><path d="M34 12c6-4 12-2 14 2-6 2-10 2-14-2z" fill="#66bb6a" ${artO(2)}/>${artShine(20, 28, 4)}`,
+  cherry: `<path d="M22 40C26 24 34 12 46 6M42 40C42 26 44 16 46 6" fill="none" ${artO(3)}/><circle cx="20" cy="44" r="12" fill="#d81b60" ${artO()}/><circle cx="44" cy="44" r="12" fill="#d81b60" ${artO()}/>${artShine(16, 40)}${artShine(40, 40)}`,
+  mushroom: `<rect x="22" y="34" width="20" height="22" rx="6" fill="#fff3e0" ${artO()}/><path d="M6 36C6 18 18 8 32 8s26 10 26 28z" fill="#e53935" ${artO()}/><circle cx="20" cy="24" r="5" fill="#fff"/><circle cx="40" cy="20" r="4" fill="#fff"/><circle cx="46" cy="30" r="3" fill="#fff"/>`,
+  flag: `<path d="M16 6v52" ${artO(4)}/><path d="M18 8c12-6 18 6 34 0v24c-16 6-22-6-34 0z" fill="#4fd36a" ${artO()}/>`,
+  magnet: `<path d="M12 10h14v24a6 6 0 0 0 12 0V10h14v24a20 20 0 0 1-40 0z" fill="#e53935" ${artO()}/><path d="M12 10h14v8H12zM38 10h14v8H38z" fill="#dfe6ee" ${artO(2)}/>`,
+  scroll: `<rect x="12" y="12" width="40" height="40" rx="4" fill="#f5deb3" ${artO()}/><path d="M20 24h24M20 32h24M20 40h16" stroke="#b08a5a" stroke-width="3" stroke-linecap="round"/>`,
+  // nature
+  tree: `<rect x="27" y="36" width="10" height="22" rx="2" fill="#8d5a2b" ${artO()}/><circle cx="32" cy="26" r="20" fill="#4caf50" ${artO()}/><circle cx="24" cy="20" r="5" fill="#81c784"/>`,
+  pine: `<rect x="28" y="46" width="8" height="12" fill="#8d5a2b" ${artO()}/><path d="M32 4L12 30h10L8 48h48L42 30h10z" fill="#2e7d32" ${artO()}/>`,
+  bush: `<path d="M8 50c-4-12 6-20 14-16 0-10 12-14 18-6 8-4 18 4 14 14 6 2 4 8 2 8z" fill="#43a047" ${artO()}/><circle cx="24" cy="40" r="3" fill="#ff5252"/><circle cx="40" cy="38" r="3" fill="#ff5252"/>`,
+  rock: `<path d="M6 52l8-24 14-12 18 4 12 18 0 14z" fill="#9e9e9e" ${artO()}/><path d="M28 16l4 14 14 4" fill="none" stroke="#757575" stroke-width="3"/>`,
+  flower: `<path d="M32 36v22" stroke="#43a047" stroke-width="4"/><path d="M32 48q8-8 14-4-6 8-14 4z" fill="#66bb6a" ${artO(2)}/>${[0, 72, 144, 216, 288].map((a) => `<circle cx="${32 + Math.cos(a * Math.PI / 180) * 11}" cy="${24 + Math.sin(a * Math.PI / 180) * 11}" r="8" fill="#ff80ab" ${artO(2)}/>`).join('')}<circle cx="32" cy="24" r="7" fill="#ffd23d" ${artO(2)}/>`,
+  cloud: `<path d="M14 46c-8 0-10-12-2-14 0-10 12-14 18-8 4-8 18-8 20 4 10 0 12 18 0 18z" fill="#ffffff" ${artO()}/>`,
+  sun: `<circle cx="32" cy="32" r="14" fill="#ffd23d" ${artO()}/>${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); return `<path d="M${32 + c * 20} ${32 + s * 20}L${32 + c * 28} ${32 + s * 28}" stroke="#ffb300" stroke-width="4" stroke-linecap="round"/>`; }).join('')}`,
+  moon: `<path d="M40 8a24 24 0 1 0 16 36A20 20 0 0 1 40 8z" fill="#fff3b0" ${artO()}/><circle cx="26" cy="30" r="3" fill="#e6d77a"/><circle cx="32" cy="44" r="4" fill="#e6d77a"/>`,
+  fire: `<path d="M32 58c-14 0-22-10-18-24 2-8 8-10 8-18 8 4 10 10 10 16 2-4 4-8 4-14 10 8 16 18 14 26-2 8-8 14-18 14z" fill="#ff7043" ${artO()}/><path d="M32 56c-6 0-10-4-8-10 2-4 6-6 6-10 6 4 10 8 10 12 0 6-4 8-8 8z" fill="#ffd23d"/>`,
+  drop: `<path d="M32 6C24 20 14 30 14 40a18 18 0 0 0 36 0c0-10-10-20-18-34z" fill="#4fa3ff" ${artO()}/>${artShine(24, 40, 4)}`,
+  cactus: `<path d="M26 58V12a6 6 0 0 1 12 0v46z" fill="#5cb85c" ${artO()}/><path d="M26 36h-8a4 4 0 0 1-4-4v-8a4 4 0 0 1 8 0v4h4M38 30h6v-6a4 4 0 0 1 8 0v8a6 6 0 0 1-6 6h-8" fill="#5cb85c" ${artO()}/>`,
+  grass: `<path d="M8 56c2-12 4-18 8-24 0 8 2 14 4 20 2-14 6-24 12-30-2 12 0 22 2 30 2-10 6-18 12-22-2 8-2 16 0 22 2-6 6-10 10-12-2 6-2 12 0 16z" fill="#66bb6a" ${artO(2.5)}/>`,
+  // vehicles
+  car: `<path d="M4 44v-8l8-2 8-12h22l10 12 8 2v8z" fill="#e53935" ${artO()}/><path d="M22 26h8v8h-14zM34 26h6l6 8H34z" fill="#bbdefb" ${artO(2)}/><circle cx="16" cy="46" r="7" fill="${ART_O}"/><circle cx="48" cy="46" r="7" fill="${ART_O}"/><circle cx="16" cy="46" r="2.5" fill="#bbb"/><circle cx="48" cy="46" r="2.5" fill="#bbb"/>`,
+  rocket: `<path d="M32 4c10 8 14 20 12 36H20C18 24 22 12 32 4z" fill="#eef2f7" ${artO()}/><circle cx="32" cy="24" r="6" fill="#4fc3f7" ${artO(2)}/><path d="M20 30l-10 14 10-2zM44 30l10 14-10-2z" fill="#e53935" ${artO()}/><path d="M26 42q6 16 12 0z" fill="#ff9800" ${artO(2)}/>`,
+  ufo: `<ellipse cx="32" cy="38" rx="28" ry="10" fill="#9eb3c2" ${artO()}/><path d="M16 34c0-12 7-20 16-20s16 8 16 20z" fill="#7ee36d" opacity=".85" ${artO()}/><circle cx="18" cy="40" r="2.5" fill="#ffd23d"/><circle cx="32" cy="42" r="2.5" fill="#ffd23d"/><circle cx="46" cy="40" r="2.5" fill="#ffd23d"/>`,
+  plane: `<path d="M6 34l50-10c4 0 6 4 2 6L8 40z" fill="#eef2f7" ${artO()}/><path d="M26 30l-8-16h8l14 14zM30 38l-6 14h8l10-14z" fill="#3f7fd8" ${artO(2.5)}/><path d="M8 34l-2-10h6l4 8z" fill="#3f7fd8" ${artO(2)}/>`,
+  boat: `<path d="M6 40h52l-8 14H14z" fill="#8d5a2b" ${artO()}/><path d="M32 6v34" ${artO(3)}/><path d="M34 8l18 26H34z" fill="#fff" ${artO(2.5)}/><path d="M30 14L14 34h16z" fill="#ffd23d" ${artO(2.5)}/>`,
+  // blocks & places
+  brick: `<rect x="4" y="4" width="56" height="56" fill="#c0603e" ${artO()}/><path d="M4 18h56M4 32h56M4 46h56M22 4v14M44 4v14M12 18v14M34 18v14M54 18v14M22 32v14M44 32v14M12 46v14M34 46v14" stroke="#7a3520" stroke-width="2.5"/>`,
+  crate: `<rect x="6" y="6" width="52" height="52" rx="3" fill="#c98a4b" ${artO()}/><rect x="12" y="12" width="40" height="40" fill="none" stroke="#8d5a2b" stroke-width="3"/><path d="M12 12l40 40M52 12L12 52" stroke="#8d5a2b" stroke-width="3"/>`,
+  grassBlock: `<rect x="4" y="4" width="56" height="56" fill="#9c6b3e" ${artO()}/><path d="M4 4h56v16c-4 4-8 0-10 4s-6 4-8 0-6-4-8 0-6 4-8 0-6-4-8 0-6 4-8 0-4-4-6 0V4z" fill="#5cc45a" ${artO(2)}/><circle cx="20" cy="40" r="2.5" fill="#7a5230"/><circle cx="42" cy="48" r="2.5" fill="#7a5230"/>`,
+  stone: `<rect x="4" y="4" width="56" height="56" fill="#8a8f99" ${artO()}/><path d="M4 24l14-4 10 8 16-6 16 6M18 20v-16M34 42l-8 18M34 42l26-6M28 28l6 14" fill="none" stroke="#6b707a" stroke-width="2.5"/>`,
+  spikes: `<path d="M2 58l8-26 8 26 7-26 7 26 7-26 7 26 8-26 8 26z" fill="#c4ccd6" ${artO()}/>`,
+  door: `<path d="M14 58V18a18 18 0 0 1 36 0v40z" fill="#8d5a2b" ${artO()}/><path d="M32 4v54" stroke="#6b4320" stroke-width="2.5"/><circle cx="40" cy="36" r="3" fill="#ffd23d" ${artO(1.5)}/>`,
+  ladder: `<path d="M18 2v60M46 2v60" ${artO(4)}/><path d="M18 2v60M46 2v60" stroke="#c98a4b" stroke-width="2"/><path d="M18 12h28M18 26h28M18 40h28M18 54h28" stroke="#c98a4b" stroke-width="5"/>`,
+  portal: `<ellipse cx="32" cy="32" rx="20" ry="28" fill="#7b4bc4" ${artO()}/><ellipse cx="32" cy="32" rx="13" ry="20" fill="#b388ff"/><ellipse cx="32" cy="32" rx="6" ry="11" fill="#ede7f6"/>`,
+  sign: `<path d="M30 30v28h4V30" fill="#8d5a2b" ${artO(2)}/><rect x="8" y="10" width="48" height="24" rx="3" fill="#c98a4b" ${artO()}/><path d="M16 18h32M16 26h20" stroke="#6b4320" stroke-width="3" stroke-linecap="round"/>`,
+  torch: `<path d="M28 30h8l-2 28h-4z" fill="#8d5a2b" ${artO(2.5)}/><path d="M32 32c-8 0-12-6-10-14 2-4 4-6 4-10 4 2 6 6 6 8 2-2 2-6 2-8 6 6 8 10 8 14 0 6-4 10-10 10z" fill="#ff7043" ${artO(2.5)}/><path d="M32 30c-3 0-5-2-4-6 1-2 3-3 3-5 3 2 5 4 5 6 0 3-2 5-4 5z" fill="#ffd23d"/>`,
+  house: `<path d="M8 30L32 8l24 22v28H8z" fill="#f3e5ab" ${artO()}/><path d="M4 32L32 6l28 26" fill="none" stroke="#c0392b" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/><rect x="26" y="38" width="12" height="20" fill="#8d5a2b" ${artO(2)}/><rect x="14" y="34" width="8" height="8" fill="#81d4fa" ${artO(2)}/><rect x="42" y="34" width="8" height="8" fill="#81d4fa" ${artO(2)}/>`,
+  castle: `<path d="M6 58V20h8v6h8v-6h8v6h4v-6h8v6h8v-6h8v38z" fill="#9e9e9e" ${artO()}/><path d="M26 58V44a6 6 0 0 1 12 0v14z" fill="#5d4037" ${artO(2)}/><rect x="14" y="34" width="6" height="8" fill="${ART_O}"/><rect x="44" y="34" width="6" height="8" fill="${ART_O}"/>`,
+  // UI icons (white, for buttons and nav bars)
+  'ui-home': artIcon('M10 30L32 10l22 20M16 26v26h32V26M27 52V38h10v14'),
+  'ui-play': `<path d="M22 12l28 20-28 20z" fill="#fff" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>`,
+  'ui-pause': `<rect x="16" y="12" width="10" height="40" rx="3" fill="#fff"/><rect x="38" y="12" width="10" height="40" rx="3" fill="#fff"/>`,
+  'ui-menu': artIcon('M12 18h40M12 32h40M12 46h40'),
+  'ui-close': artIcon('M16 16l32 32M48 16L16 48'),
+  'ui-back': artIcon('M38 12L18 32l20 20'),
+  'ui-next': artIcon('M26 12l20 20-20 20'),
+  'ui-gear': `<circle cx="32" cy="32" r="9" fill="none" stroke="#fff" stroke-width="5"/>${[0, 45, 90, 135, 180, 225, 270, 315].map((a) => { const c = Math.cos(a * Math.PI / 180), s = Math.sin(a * Math.PI / 180); return `<path d="M${32 + c * 16} ${32 + s * 16}L${32 + c * 24} ${32 + s * 24}" stroke="#fff" stroke-width="7" stroke-linecap="round"/>`; }).join('')}<circle cx="32" cy="32" r="17" fill="none" stroke="#fff" stroke-width="5"/>`,
+  'ui-user': artIcon('M14 54c0-10 8-16 18-16s18 6 18 16', '<circle cx="32" cy="22" r="10" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-cart': artIcon('M6 12h8l6 28h28l6-20H18', '<circle cx="24" cy="50" r="4" fill="#fff"/><circle cx="44" cy="50" r="4" fill="#fff"/>'),
+  'ui-star': `<path d="M32 8l7 15 16 2-12 11 3 16-14-8-14 8 3-16L9 25l16-2z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>`,
+  'ui-heart': `<path d="M32 52S10 38 10 24c0-7 5-12 11-12 5 0 9 3 11 7 2-4 6-7 11-7 6 0 11 5 11 12 0 14-22 28-22 28z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>`,
+  'ui-trophy': artIcon('M20 10h24v12c0 8-5 13-12 13s-12-5-12-13zM20 14h-8c0 8 3 11 8 12M44 14h8c0 8-3 11-8 12M32 35v10M22 52h20'),
+  'ui-map': artIcon('M8 14l16-6 16 6 16-6v42l-16 6-16-6-16 6zM24 8v42M40 14v42'),
+  'ui-chat': artIcon('M10 14h44v28H28l-12 10v-10h-6z'),
+  'ui-bell': artIcon('M18 44V28a14 14 0 0 1 28 0v16l4 4H14zM28 54h8'),
+  'ui-search': artIcon('M42 42l12 12', '<circle cx="28" cy="28" r="15" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-plus': artIcon('M32 12v40M12 32h40'),
+  'ui-music': artIcon('M24 46V14l26-6v32', '<circle cx="18" cy="46" r="7" fill="#fff"/><circle cx="44" cy="40" r="7" fill="#fff"/>'),
+  'ui-sound': artIcon('M10 24h10l14-12v40L20 40H10zM42 22q8 10 0 20M48 16q14 16 0 32'),
+  'ui-lock': artIcon('M18 30h28v24H18zM24 30v-8a8 8 0 0 1 16 0v8'),
+  'ui-check': artIcon('M12 34l14 14 26-30'),
+  'ui-coin': `<circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="5"/><path d="M32 22v20" stroke="#fff" stroke-width="5" stroke-linecap="round"/>`,
+  'ui-gem': artIcon('M18 12h28l12 14-26 30L6 26zM6 26h52'),
+  'ui-shop': artIcon('M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'),
+  'ui-info': artIcon('M32 28v18M32 18v1', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+};
+/** Groups for the Project panel's sprite library. */
+export const SPRITE_GROUPS = {
+  Characters: ['hero', 'girl', 'wizard', 'knight', 'robot', 'cat', 'dog', 'frog', 'bird', 'ninja', 'astronaut', 'alien'],
+  Enemies: ['slime', 'slimeBlue', 'ghost', 'bat', 'skull', 'spider', 'bee', 'shark', 'eyeMonster', 'dragon', 'zombie'],
+  Items: ['coin', 'gem', 'gemRed', 'heart', 'star', 'key', 'potion', 'potionBlue', 'sword', 'shield', 'bomb', 'chest', 'crown', 'trophy', 'apple', 'cherry', 'mushroom', 'flag', 'magnet', 'scroll'],
+  Nature: ['tree', 'pine', 'bush', 'rock', 'flower', 'cloud', 'sun', 'moon', 'fire', 'drop', 'cactus', 'grass'],
+  Vehicles: ['car', 'rocket', 'ufo', 'plane', 'boat'],
+  Blocks: ['brick', 'crate', 'grassBlock', 'stone', 'spikes', 'door', 'ladder', 'portal', 'sign', 'torch', 'house', 'castle'],
+  Icons: Object.keys(SPRITE_ART).filter((k) => k.startsWith('ui-')),
+};
+const artCache = new Map();
+/** 'art:slime' → an SVG data URL (other sources pass through). */
+export function artURL(src) {
+  if (typeof src !== 'string' || !src.startsWith('art:')) return src;
+  const k = src.slice(4);
+  if (!artCache.has(k)) artCache.set(k, SPRITE_ART[k] ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="128" height="128">${SPRITE_ART[k]}</svg>`) : '');
+  return artCache.get(k);
+}
+
 export function loadImage(src) {
   if (!images.has(src)) {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    img.src = src;
+    img.src = artURL(src);
     images.set(src, img);
   }
   return images.get(src);
@@ -1684,8 +1817,9 @@ function drawEntity2D(ctx, e, vars, time) {
       if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${Math.round(k * 100)}%`, 0, 1); }
     } else if (b.icon) { // hearts-style: one icon per point, empty ones faded
       const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
-      ctx.font = `${Math.round(sz)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
+      const img = /^(art:|https?:|data:|blob:|\.?\/)/.test(b.icon) ? loadImage(b.icon) : null; // a sprite (art:heart) or a text symbol (★)
+      ctx.font = `900 ${Math.round(sz)}px system-ui, sans-serif, "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = b.color || b.fill || '#ffffff';
+      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); if (img) { if (img.complete && img.naturalWidth) ctx.drawImage(img, x0 + i * gap - sz / 2, -sz / 2, sz, sz); } else ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
       ctx.globalAlpha = alpha;
     } else {
     e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
@@ -2385,9 +2519,11 @@ function renderUI(engine, scene) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
     for (const e of scene.entities) {
-      if (!e.ui || !e.visible || e.dead || e._parentHidden) continue;
+      if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
+      if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
-      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
+      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
+      if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
@@ -3209,9 +3345,9 @@ registerBehavior('tweenSequence', {
 
 /** Sprite Animation (flipbook): cycle through emoji or image frames. */
 registerBehavior('flipbook', {
-  label: 'Sprite Animation', description: 'Flip through frames like a cartoon: emoji (🐱,😺,😸) or image links, at a speed you choose. Can play only while moving.',
+  label: 'Sprite Animation', description: 'Flip through frames like a cartoon: built-in sprites (art:bird,art:bird2) or image links, at a speed you choose. Can play only while moving.',
   params: [
-    { key: 'frames', label: 'Frames (comma separated)', type: 'text', default: '🐥,🐤,🐣,🐤' },
+    { key: 'frames', label: 'Frames (comma separated)', type: 'text', default: 'art:bird,art:bird2', info: 'Built-in sprites (art:bird), image links, or emoji.' },
     { key: 'fps', label: 'Frames per second', type: 'number', default: 6, range: [1, 30], step: 1 },
     { key: 'mode', label: 'Play mode', type: 'select', options: ['loop', 'ping-pong', 'once'], default: 'loop' },
     { key: 'when', label: 'Play', type: 'select', options: ['always', 'while moving', 'on message'], default: 'always' },
@@ -3221,7 +3357,7 @@ registerBehavior('flipbook', {
     const frames = String(p.frames || '').split(',').map((f) => f.trim()).filter(Boolean);
     let t = 0, px = null, py = null, active = p.when === 'always';
     const show = (e, f) => {
-      if (/^(https?:|data:|blob:|\.?\/)/.test(f)) { e.sprite ||= { ...SPRITE_DEFAULTS }; e.sprite.src = f; }
+      if (/^(https?:|data:|blob:|art:|\.?\/)/.test(f)) { e.sprite ||= { ...SPRITE_DEFAULTS }; e.sprite.src = f; if (e.shape?.type === 'emoji') e.shape = null; }
       else { e.shape ||= { ...SHAPE_DEFAULTS, type: 'emoji', w: 56, h: 56, fill: '' }; e.shape.type = 'emoji'; e.shape.emoji = f; }
     };
     return {
@@ -3573,7 +3709,7 @@ registerBehavior('sound', {
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
-  if (e._parentHidden) return false;
+  if (e._parentHidden || e._clipHidden) return false;
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
@@ -3814,6 +3950,254 @@ registerBehavior('uiSlider', {
 });
 
 /** Toggle: tap to switch a variable between on (1) and off (0); changes its text and color. */
+// ---- navigation & more UI ----
+const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
+const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
+const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
+/** Show or hide a UI element with a little animation. */
+function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
+  s.killTweens(e, true);
+  const k = 1;
+  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
+  const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
+  const off = { 'slide from right': { x: 220 }, 'slide from left': { x: -220 }, 'slide from bottom': { y: 220 }, 'slide from top': { y: -220 } }[anim];
+  if (show) {
+    e.visible = true; e.alpha = 0;
+    if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
+    if (anim === 'pop') { e.sx = base.sx * 0.6; e.sy = base.sy * 0.6; s.to(e, { sx: base.sx, sy: base.sy }, dur * 1.4, { ease: 'outBack' }); }
+    s.to(e, { alpha: 1 }, dur, { ease: 'outQuad', onComplete: () => done?.() });
+  } else {
+    if (off) s.to(e, { x: base.x + (off.x || 0) * k, y: base.y + (off.y || 0) * k }, dur, { ease: 'inCubic' });
+    if (anim === 'pop') s.to(e, { sx: base.sx * 0.7, sy: base.sy * 0.7 }, dur, { ease: 'inBack' });
+    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+  }
+}
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
+
+registerBehavior('navItem', {
+  label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
+  params: [
+    { key: 'page', label: 'Page name', type: 'text', default: 'home' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'startHere', label: 'Start on this page', type: 'bool', default: false },
+    { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#3a6ea5', optional: true },
+    { key: 'idleColor', label: 'Normal colour', type: 'color', default: '', optional: true },
+    { key: 'dimIdle', label: 'Fade when not selected', type: 'bool', default: true },
+    { key: 'message', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let kids = [], was = null;
+    return {
+      uiAlways: true,
+      start(e, s) { if (p.startHere && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, p.page); },
+      update(e, dt, s) {
+        if (uiTapped(s, e)) { s.setVar(p.var, p.page); s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message); }
+        const on = sameVal(s.vars[p.var], p.page);
+        if (on !== was) { kids = uiKids(s, e); was = on; }
+        if (e.shape) e.shape.fill = on ? p.activeColor || '' : p.idleColor || '';
+        const a = on || !p.dimIdle ? 1 : 0.55;
+        for (const q of kids) q.alpha = a;
+        if (!e.shape && e.text) e.alpha = a;
+      },
+    };
+  },
+});
+
+registerBehavior('uiShowIf', {
+  label: 'Show If (pages)', description: 'Show this UI only when a variable matches, e.g. page = shop for a Shop page, or messages > 0 for a badge. Everything inside it shows and hides with it.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
+    { key: 'value', label: 'Value', type: 'text', default: 'home' },
+    { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade' },
+  ],
+  create(p) {
+    let shown = null;
+    const test = (v) => {
+      if (v == null || v === '') return !!p.whenUnset;
+      const a = +v, b = +p.value, num = p.value !== '' && Number.isFinite(a) && Number.isFinite(b);
+      switch (p.op) {
+        case '≠': return num ? a !== b : !sameVal(v, p.value);
+        case '>': return a > b; case '<': return a < b; case '≥': return a >= b; case '≤': return a <= b;
+        default: return num ? a === b : sameVal(v, p.value);
+      }
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; },
+      update(e, dt, s) {
+        const want = test(s.vars[p.var]);
+        if (want !== shown) { shown = want; uiAnimate(s, e, want, p.anim, 0.22); }
+      },
+    };
+  },
+});
+
+registerBehavior('drawer', {
+  label: 'Side Bar (drawer)', description: 'A menu that slides in from the side (or bottom / top) when a message arrives, e.g. from a ☰ menu button. Dims the game behind it; tap outside or pick an item to close it.',
+  params: [
+    { key: 'side', label: 'Slides in from', type: 'select', options: ['left', 'right', 'bottom', 'top'], default: 'left' },
+    { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'duration', label: 'Slide time (sec)', type: 'number', default: 0.25, range: [0.05, 1], step: 0.05 },
+    { key: 'dim', label: 'Dim behind it', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05 },
+    { key: 'closeOnPick', label: 'Close when a page is picked', type: 'bool', default: true },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars', showIf: (b) => b.closeOnPick !== false },
+  ],
+  create(p) {
+    let open = false, home = null, dim = { e: null, a: 0 };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want, instant = false) {
+        open = want; if (!home) home = { x: e.x, y: e.y };
+        const r = uiBox(e, s.engine.width, s.engine.height, s.engine.safe), k = uiK(s.engine.safe) || 1, d = instant ? 0.001 : +p.duration || 0.25;
+        const away = { left: { x: home.x - (r.w / k + 40) }, right: { x: home.x + (r.w / k + 40) }, bottom: { y: home.y + (r.h / k + 40) }, top: { y: home.y - (r.h / k + 40) } }[p.side] || { x: home.x - (r.w / k + 40) };
+        s.killTweens(e); s.killTweens(dim);
+        dim.e = e; s.uiDim = dim;
+        if (want) { e.visible = true; s.modal = e; s.to(e, { x: home.x, y: home.y }, d, { ease: 'outCubic' }); s.to(dim, { a: +p.dim || 0 }, d, { ease: 'outQuad' }); }
+        else { if (s.modal === e) s.modal = null; s.to(e, { ...away }, d, { ease: 'inCubic', onComplete: () => { if (!open) e.visible = false; } }); s.to(dim, { a: 0 }, d, { ease: 'outQuad' }); }
+      },
+      start(e, s) {
+        e._dismiss = () => inst.set(e, s, false);
+        inst.set(e, s, !!p.startOpen, true);
+        s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !open); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+        if (p.closeOnPick !== false) s.on('var', (k) => { if (!e.dead && open && k === p.var) inst.set(e, s, false); });
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+registerBehavior('uiPopup', {
+  label: 'Popup (modal / toast)', description: 'A window that pops up on a message and closes on another (or after a few seconds, like a toast). Can dim the game and close when you tap outside.',
+  params: [
+    { key: 'openOn', label: 'Open on message', type: 'text', default: 'popup', suggest: 'messages' },
+    { key: 'closeOn', label: 'Close on message', type: 'text', default: 'close', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS.filter((a) => a !== 'none'), default: 'pop' },
+    { key: 'autoClose', label: 'Close after (sec, 0 = stay)', type: 'number', default: 0, range: [0, 10], step: 0.5 },
+    { key: 'modal', label: 'Dim behind & tap outside closes', type: 'bool', default: true },
+    { key: 'tapCloses', label: 'Tapping it closes it', type: 'bool', default: false },
+  ],
+  create(p) {
+    let open = false, timer = 0; const dim = { e: null, a: 0 };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want, instant = false) {
+        if (want === open && !instant) { if (want) timer = 0; return; }
+        open = want; timer = 0;
+        uiAnimate(s, e, want, instant ? 'none' : p.anim, 0.22);
+        if (p.modal) { dim.e = e; s.uiDim = dim; s.killTweens(dim); s.to(dim, { a: want ? 0.55 : 0 }, instant ? 0.001 : 0.2); if (want) s.modal = e; else if (s.modal === e) s.modal = null; }
+      },
+      start(e, s) {
+        e._dismiss = () => inst.set(e, s, false);
+        open = !p.startOpen; inst.set(e, s, !!p.startOpen, true);
+        s.on('message', (m) => { if (e.dead) return; if (m === p.openOn) inst.set(e, s, true); else if (m === p.closeOn) inst.set(e, s, false); });
+      },
+      update(e, dt, s) {
+        if (!open) return;
+        timer += dt;
+        if (+p.autoClose > 0 && timer >= +p.autoClose) inst.set(e, s, false);
+        else if (p.tapCloses && timer > 0.2 && uiTapped(s, e)) inst.set(e, s, false);
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+registerBehavior('uiSelector', {
+  label: 'Option Picker', description: 'Pick one of several options with ‹ and › (e.g. Easy / Normal / Hard). Tap the left half for the previous one, the right half for the next. The choice goes into a variable.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'difficulty', suggest: 'vars' },
+    { key: 'options', label: 'Options (comma separated)', type: 'text', default: 'Easy, Normal, Hard' },
+    { key: 'start', label: 'Start on option #', type: 'number', default: 2, step: 1 },
+    { key: 'wrap', label: 'Loop around', type: 'bool', default: true },
+  ],
+  create(p) {
+    const opts = String(p.options || '').split(',').map((o) => o.trim()).filter(Boolean);
+    let i = 0;
+    const show = (e, s) => { if (e.text) e.text.value = `‹   ${opts[i] ?? ''}   ›`; s.setVar(p.var, opts[i] ?? ''); s.setVar(p.var + 'Index', i); };
+    return {
+      uiAlways: true,
+      start(e, s) { const cur = opts.indexOf(String(s.vars[p.var] ?? '')); i = cur >= 0 ? cur : clamp(Math.round(+p.start || 1) - 1, 0, Math.max(0, opts.length - 1)); e.text ||= { ...TEXT_DEFAULTS, size: 20 }; show(e, s); },
+      update(e, dt, s) {
+        if (!opts.length || !e.visible) return;
+        const t = s.engine.input.taps.find((q) => hitTest(s, e, q.x, q.y)); if (!t) return;
+        const r = uiRect(s, e), d = t.x < r.x ? -1 : 1, n = opts.length;
+        const j = p.wrap ? (i + d + n) % n : clamp(i + d, 0, n - 1);
+        if (j !== i) { i = j; show(e, s); s.engine.audio.sfx('click'); s.punch(e, { x: d * 4 }, 0.2, { add: true }); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiScroll', {
+  label: 'Scroll View', description: 'Drag to scroll the UI inside it (a list of items, a shop, levels…). Items outside its box are hidden.',
+  params: [
+    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal'], default: 'vertical' },
+    { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
+  ],
+  create(p) {
+    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0;
+    const v = p.direction !== 'horizontal';
+    const bounds = (s, e) => { // how far the content can move
+      const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
+      let lo = Infinity, hi = -Infinity;
+      for (const q of kids) { const b = base.get(q), ex = q.extents(), h = (v ? ex.hy : ex.hx) || 0; lo = Math.min(lo, (v ? b.y : b.x) - h); hi = Math.max(hi, (v ? b.y : b.x) + h); }
+      if (!kids.length) return [0, 0];
+      const view = (v ? r.h : r.w) / k, top = -view / 2 + pad, bottom = view / 2 - pad;
+      const min = Math.min(0, bottom - hi), max = Math.max(0, top - lo);
+      return [Math.min(min, max), max];
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); },
+      update(e, dt, s) {
+        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
+        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
+        const ptr = drag != null && inp.pointers.get(drag);
+        if (ptr) { const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
+        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
+        const [mn, mx] = bounds(s, e);
+        if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
+        else off = clamp(off, mn - 60, mx + 60);
+        if (moved > 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2)); // a drag isn't a tap
+        for (const q of kids) {
+          const b = base.get(q); if (!b) continue;
+          if (v) q.y = b.y + off; else q.x = b.x + off;
+          const qb = uiRect(s, q);
+          q._clipHidden = v ? qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 : qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiRating', {
+  label: 'Star Rating', description: 'Tap along it to set a rating (e.g. 1–5 stars) in a variable. Pair it with a Progress Bar that uses ★ as its icon.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'rating', suggest: 'vars' },
+    { key: 'max', label: 'Stars', type: 'number', default: 5, step: 1, range: [1, 10] },
+    { key: 'start', label: 'Starts at', type: 'number', default: 3, step: 1 },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var] == null) s.setVar(p.var, +p.start || 0); if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max || 5; } },
+      update(e, dt, s) {
+        const t = e.visible && s.engine.input.taps.find((q) => hitTest(s, e, q.x, q.y)); if (!t) return;
+        const r = uiRect(s, e), n = Math.max(1, +p.max || 5);
+        s.setVar(p.var, clamp(Math.ceil(((t.x - (r.x - r.w / 2)) / (r.w || 1)) * n), 1, n)); s.engine.audio.sfx('coin'); s.punch(e, { sx: 0.08, sy: 0.08 }, 0.2, { add: true });
+      },
+    };
+  },
+});
+
 registerBehavior('uiToggle', {
   label: 'Toggle', description: 'A switch or checkbox: tap to turn a variable on (1) or off (0). Shows different text and color for each state (e.g. Sound: ON / OFF).',
   params: [
@@ -3839,19 +4223,21 @@ registerBehavior('uiToggle', {
 
 /** Layout Group (like Unity's Horizontal / Vertical / Grid Layout): lines up UI elements with a tag inside this one. */
 registerBehavior('uiLayout', {
-  label: 'Layout Group', description: 'Lines up other UI elements in a row, a column or a grid inside this one, with even spacing. Give the elements a tag and enter it here.',
+  label: 'Layout Group', description: 'Lines up UI elements in a row, a column or a grid inside this one, with even spacing: its own children, or UI with a tag.',
   params: [
-    { key: 'tag', label: 'Arrange UI tagged', type: 'text', default: 'menu', suggest: 'tags' },
+    { key: 'tag', label: 'Arrange UI tagged (blank = its children)', type: 'text', default: 'menu', suggest: 'tags' },
     { key: 'direction', label: 'Direction', type: 'select', options: ['vertical', 'horizontal', 'grid'], default: 'vertical' },
     { key: 'spacing', label: 'Spacing', type: 'number', default: 12 },
     { key: 'columns', label: 'Columns (grid)', type: 'number', default: 3, showIf: { direction: ['grid'] } },
     { key: 'align', label: 'Align', type: 'select', options: ['center', 'start', 'end'], default: 'center' },
+    { key: 'justify', label: 'Place along', type: 'select', options: ['center', 'start', 'end', 'spread'], default: 'center', showIf: { direction: ['vertical', 'horizontal'] }, info: { spread: 'Share the space evenly (tabs in a navigation bar).' } },
+    { key: 'pad', label: 'Padding', type: 'number', default: 12, showIf: (b) => b.justify === 'start' || b.justify === 'end' },
   ],
   create(p) {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.has(p.tag) && q.visible);
+        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && (p.tag ? q.has(p.tag) : q.parentEnt === e));
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
         const eng = s.engine, place = (q, cx, cy) => placeUI(q, cx, cy, eng.width, eng.height, eng.safe);
@@ -3862,7 +4248,13 @@ registerBehavior('uiLayout', {
           return;
         }
         const v = p.direction === 'vertical', total = sizes.reduce((a, z) => a + (v ? z[1] : z[0]), 0) + gap * (items.length - 1);
-        let at = (v ? box.y : box.x) - total / 2;
+        const k = uiK(eng.safe) || 1, roomMain = v ? box.h : box.w, pad = (+p.pad || 0) * k;
+        if (p.justify === 'spread') { // each item gets an equal slot
+          const slot = roomMain / items.length, start = (v ? box.y : box.x) - roomMain / 2;
+          items.forEach((q, i) => { const [w, h] = sizes[i], cross = v ? w : h, room = v ? box.w : box.h, off = p.align === 'start' ? -room / 2 + cross / 2 : p.align === 'end' ? room / 2 - cross / 2 : 0; const c = start + slot * (i + 0.5); if (v) place(q, box.x + off, c); else place(q, c, box.y + off); });
+          return;
+        }
+        let at = (v ? box.y : box.x) - (p.justify === 'start' ? roomMain / 2 - pad : p.justify === 'end' ? total - roomMain / 2 + pad : total / 2);
         items.forEach((q, i) => {
           const [w, h] = sizes[i], len = v ? h : w, cross = v ? w : h, room = v ? box.w : box.h;
           const off = p.align === 'start' ? -room / 2 + cross / 2 : p.align === 'end' ? room / 2 - cross / 2 : 0;
@@ -6431,6 +6823,17 @@ export class Engine {
     return box;
   }
 
+  /** An open side bar or popup takes the taps: one outside it closes it and goes no further. */
+  modalTaps(s) {
+    const m = s.modal;
+    if (!m || m.dead || !m.visible) { s.modal = null; return; }
+    const inp = this.input, r = uiBox(m, this.width, this.height, this.safe);
+    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2;
+    const out = inp.taps.some((t) => !inside(t));
+    inp.taps = inp.taps.filter(inside); inp.downs = inp.downs.filter(inside);
+    if (out) m._dismiss?.();
+  }
+
   /** True when the game wants portrait/landscape and a phone is held the other way (and it isn't letterboxed). */
   wrongOrientation(s) {
     const o = s.settings.orientation;
@@ -6487,6 +6890,7 @@ export class Engine {
     if (!this.editing) this.fitScreen();
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
+    this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
       this.runUIOnly(s, dt);

@@ -1009,8 +1009,15 @@ body.playing #attachBar { display: none !important; }
 .seg.orient button { height: 46px; font-size: 14px; }
 .seg button.landscape svg.i, .pv-or.landscape::before { transform: rotate(90deg); }
 .orient-btn svg.i, .phone-btn svg.i { width: 18px; height: 18px; }
-#uiScreens .orient-btn, #uiScreens .phone-btn { display: inline-flex; align-items: center; gap: 6px; }
+#uiScreens .orient-btn, #uiScreens .phone-btn, #uiScreens .page-btn { display: inline-flex; align-items: center; gap: 6px; }
 .orient-pick { align-items: center; }
 .orient-pick .seg-l { padding: 0 6px 0 8px; color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .pv { position: relative; }
 .pv-or { position: absolute; left: 6px; bottom: 6px; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 8px; background: rgba(0,0,0,.45); color: #fff; }
+/* sprite art */
+.art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.art-grid button { aspect-ratio: 1; border: 1px solid #2a2a2a; border-radius: 12px; background: #2c3140; display: grid; place-items: center; padding: 6px; }
+.art-grid img { width: 100%; height: 100%; object-fit: contain; }
+.art-grid img.uiic, .tile .th.uiic { background: #3a6ea5; border-radius: 10px; }
+.tile .th.art { background: #2c3140; padding: 6px; }
+.tile .th.art img { width: 100%; height: 100%; object-fit: contain; }

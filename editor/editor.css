@@ -1070,3 +1070,16 @@ body.playing #attachBar { display: none !important; }
 .font-list { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; margin-top: 10px; }
 .font-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; border: 0; border-radius: 12px; background: #2f2f2f; color: #eee; font-size: 20px; text-align: left; }
 .font-row small { font: 12px -apple-system, system-ui, sans-serif; color: #9a9a9a; white-space: nowrap; }
+
+/* Home: how safe your games are */
+.safe-card { margin-top: 16px; padding: 14px 16px; border-radius: 14px; background: #2b2f2b; border: 1px solid #3c4a3c; display: flex; flex-direction: column; gap: 6px; }
+.safe-card.warn { background: #33302a; border-color: #6b5a2c; }
+.safe-card .safe-top { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.safe-card .safe-top svg { width: 22px; height: 22px; color: #7ad67a; }
+.safe-card.warn .safe-top svg { color: #f2c14e; }
+.safe-card .safe-info { color: #9a9a9a; font-size: 13px; }
+.safe-card p { margin: 2px 0; color: #c9c9c9; font-size: 14px; line-height: 1.4; }
+.safe-card .btns { display: flex; gap: 8px; margin-top: 6px; }
+.safe-card .btns .btn { flex: 1; }
+.snap-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.snap-list .nm small { color: #9a9a9a; }

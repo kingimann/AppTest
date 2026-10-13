@@ -329,6 +329,15 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
 - **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
 - **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.
 
+### Saving, restore points and backups
+
+- **Autosave** to the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.
+- **Safety copy:** when you switch apps, lock the phone or close the tab, the open game is also copied instantly, so a phone freezing the page mid-save can't lose the last edits.
+- **Earlier versions** (☰ → *Restore Earlier Version…*): a restore point every few minutes while you work (the last 12 per game). Restoring keeps your current version as a restore point too.
+- **Back Up All Games** (☰ or the Home card) puts every game and your saved scripts in one file and opens the share sheet (Files, iCloud Drive, Google Drive, email…). **Restore** brings them back on any phone or browser: missing games are added, older copies updated, and newer ones on the phone kept.
+- The Home screen shows how your games are kept (size, *kept safe ✓* when the browser promises not to clear them) and nudges you to back up after a week. On iPhone it explains that Safari can clear a website's data after a week without a visit and suggests adding the app to the Home Screen, which avoids that.
+- If storage runs out, a dialog says so and offers a backup straight away.
+
 ### Updates
 
 The editor, home page and player check for a new release when they open, when you come back to them, when the phone goes online and every 10 minutes. A bar says *A new version is ready*: **Update** saves your project, clears the old cached files and reloads. Home → **Updates** checks by hand and shows the version you're on. This matters most for the home-screen app, which a phone can keep open for days.

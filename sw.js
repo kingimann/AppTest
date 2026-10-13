@@ -2,7 +2,7 @@
 const CACHE = 'pocket-v36';
 const CORE = ['./', './index.html', './play.html', './icon.svg', './manifest.webmanifest', './update.js', './engine/pocket.js',
   './editor/', './editor/index.html', './editor/editor.css', './editor/editor.js', './editor/icons.js', './editor/nodes.js', './editor/modeler.js', './editor/meshops.js', './editor/timeline.js', './editor/logic.js',
-  './editor/library.js', './examples/templates.js', './examples/neon-dodge/', './examples/neon-dodge/main.js'];
+  './editor/library.js', './editor/storage.js', './examples/templates.js', './examples/neon-dodge/', './examples/neon-dodge/main.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).catch(() => {}).then(() => self.skipWaiting()));

@@ -6,6 +6,7 @@ import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './libr
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
+import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB } from './storage.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
@@ -50,8 +51,8 @@ function toast(msg) {
 // ============================================================================
 // Projects (saved in localStorage)
 // ============================================================================
-const PROJECTS_KEY = 'pocket.editor.projects', CURRENT_KEY = 'pocket.editor.current';
-const loadProjects = () => { try { return JSON.parse(store.get(PROJECTS_KEY, '{}')) || {}; } catch { return {}; } };
+const CURRENT_KEY = 'pocket.editor.current'; // projects themselves live in IndexedDB (storage.js)
+const loadProjects = () => allProjects(); // every project, kept in memory by storage.js (IndexedDB underneath)
 const SCENE_ID = '__scene';
 
 // root = the whole game (level 1 plus root.levels[]); project = the level being edited
@@ -68,10 +69,19 @@ let playing = false;
 
 function saveNow() {
   if (!project) return;
-  const all = loadProjects();
-  all[projectId] = { name: root.name, updated: Date.now(), json: root };
-  if (!store.set(PROJECTS_KEY, JSON.stringify(all))) toast('Could not save: browser storage is full');
+  const rec = { name: root.name, updated: Date.now(), json: root };
+  saveProject(projectId, rec).then((ok) => { if (!ok) storageFull(); });
   store.set(CURRENT_KEY, projectId);
+}
+/** Leaving the app (switching apps, locking the phone, closing the tab): save, plus an instant safety copy. */
+function saveOnLeave() { if (!project) return; saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
+let fullWarned = 0;
+function storageFull() {
+  if (Date.now() - fullWarned < 60000) return; fullWarned = Date.now();
+  openDialog('Storage is full', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
+    h('h4', {}, 'Your latest changes could not be saved'),
+    h('p', {}, 'The phone has run out of space for this app. Back up your games to a file now, then delete games you no longer need or remove big imported pictures and sounds.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => { closeLayer(); backupAll(); } }, icon('download'), 'Back Up Now'), h('button', { class: 'btn', onclick: closeLayer }, 'Later')))]);
 }
 let saveTimer;
 /** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
@@ -3849,8 +3859,10 @@ function openFileMenu() {
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
     '-',
-    { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
-    { icon: 'upload', label: 'Import Project…', fn: importJSON },
+    { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
+    { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
+    { icon: 'upload', label: 'Restore Backup / Import…', fn: importJSON },
+    { icon: 'download', label: 'Export This Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     '-',
     !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
@@ -3924,8 +3936,9 @@ function showHome() {
       h('small', {}, new Date(pr.updated).toLocaleDateString()),
       id !== projectId && h('button', { title: 'Delete', onclick: () => {
         if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return;
-        const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); showHome();
+        deleteProject(id); showHome();
       } }, icon('trash'))))] : null,
+    safetyCard(all.length),
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
       !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App'),
@@ -3944,7 +3957,7 @@ function openProjectsDialog() {
     h('small', {}, new Date(p.updated).toLocaleDateString()),
     id !== projectId && h('button', { title: 'Delete', onclick: () => {
       if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
-      const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); openProjectsDialog();
+      deleteProject(id); openProjectsDialog();
     } }, icon('trash')))) : h('div', { class: 'empty' }, 'No saved projects.'));
 }
 const TOUR = [
@@ -3999,15 +4012,63 @@ function download(name, text, type) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
+/** Every game (and saved scripts) in one file: shared to Files / iCloud / Drive / email, or downloaded. */
+async function backupAll() {
+  saveNow();
+  const data = JSON.stringify(makeBackup()), d = new Date(), name = `pocket-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+  const file = typeof File === 'function' ? new File([data], name, { type: 'application/json' }) : null;
+  if (file && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Pocket Engine backup' }); markBackedUp(); toast('Backup saved'); if (!$('#home').hidden) showHome(); return; }
+    catch (e) { if (e?.name === 'AbortError') return; } // cancelled: nothing saved
+  }
+  download(name, data, 'application/json'); markBackedUp(); toast('Backup downloaded'); if (!$('#home').hidden) showHome();
+}
+const ago = (t) => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+/** Restore points: earlier versions of the open game, taken every few minutes while you work. */
+async function openRestorePoints() {
+  saveNow();
+  const list = await listSnapshots(projectId);
+  const count = (j) => [j, ...(j.levels || [])].reduce((n, lv) => n + (lv.entities?.length || 0), 0);
+  openDialog('Earlier Versions', [
+    h('p', { class: 'desc' }, usingIndexedDB() ? `A version of “${root.name}” is kept every few minutes while you work (the last 12). Restoring one keeps your current version here too, so you can always go back.` : 'Earlier versions need more storage than this browser allows (private browsing?).'),
+    list.length ? h('div', { class: 'snap-list' }, list.map((sn) => h('div', { class: 'proj-row' },
+      h('span', { class: 'nm' }, h('b', {}, new Date(sn.time).toLocaleString()), h('small', {}, ` ${ago(sn.time)} · ${count(sn.json)} objects · ${(sn.json.levels?.length || 0) + 1} level${sn.json.levels?.length ? 's' : ''}${sn.reason !== 'auto' ? ' · ' + sn.reason : ''}`)),
+      h('button', { class: 'btn', onclick: async () => {
+        await snapshot(projectId, { name: root.name, updated: Date.now(), json: clone(root) }, 'before restore');
+        closeLayer(); openProject(clone(sn.json), projectId); saveNow(); toast('Earlier version restored');
+      } }, 'Restore')))) : h('div', { class: 'empty' }, 'No earlier versions yet: they appear after a few minutes of editing.'),
+  ]);
+}
+/** Home: how safe your games are, with a nudge to back up. */
+function safetyCard(count) {
+  if (!count) return null;
+  const last = lastBackup(), stale = !last || Date.now() - last > 7 * 86400000;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const info = h('small', { class: 'safe-info' }, `Saved on this phone · ${count} game${count === 1 ? '' : 's'}`);
+  storageUse().then((u) => isPersisted().then((p) => { if (u) info.textContent = `Saved on this phone · ${count} game${count === 1 ? '' : 's'} · ${u.used < 1048576 ? Math.max(1, Math.round(u.used / 1024)) + ' KB' : (u.used / 1048576).toFixed(1) + ' MB'}${p ? ' · kept safe ✓' : ''}`; }));
+  return h('div', { class: 'safe-card' + (stale ? ' warn' : '') },
+    h('div', { class: 'safe-top' }, icon(stale ? 'info' : 'check'), h('b', {}, stale ? (last ? `Last backup ${ago(last)}` : 'Your games aren\'t backed up yet') : `Backed up ${ago(last)}`)),
+    info,
+    stale && h('p', {}, ios && !standalone ? 'Safari can clear a website\'s data if you don\'t visit for a week. Back up to Files or iCloud, and add the app to your Home Screen.' : 'A backup file keeps your games safe if the phone is lost, reset, or the browser is cleared.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn' + (stale ? ' primary' : ''), onclick: backupAll }, icon('save'), 'Back Up'),
+      h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Restore')));
+}
 function importJSON() {
   const fi = $('#fileInput');
-  fi.accept = 'application/json,.json';
+  fi.accept = 'application/json,.json,.pocket';
   fi.onchange = async () => {
     const f = fi.files[0]; fi.value = '';
     if (!f) return;
     try {
       const json = JSON.parse(await f.text());
-      if (!Array.isArray(json.entities)) throw new Error('not a Pocket project');
+      if (json.pocketBackup) { // a full backup: bring every game back
+        saveNow();
+        const r = await restoreBackup(json);
+        toast(`Backup restored: ${r.added} added, ${r.updated} updated${r.kept ? `, ${r.kept} kept (yours were newer)` : ''}`);
+        if (r.updated && allProjects()[projectId]) openProject(clone(allProjects()[projectId].json), projectId);
+        showHome(); return;
+      }
+      if (!Array.isArray(json.entities)) throw new Error('not a Pocket project or backup');
       for (const e of json.entities) e.id ||= uid();
       openProject(json); hideHome(); toast(`Imported ${json.name || 'project'}`);
     } catch (err) { toast('Could not import: ' + err.message); }
@@ -4366,12 +4427,16 @@ $('#snapBtn').classList.toggle('on', snap);
 $('#gridBtn').classList.toggle('on', showGrid);
 $('#snapBtn').addEventListener('click', () => { snap = !snap; store.set('pocket.editor.snap', snap ? '1' : '0'); $('#snapBtn').classList.toggle('on', snap); toast(snap ? 'Snapping on' : 'Snapping off'); });
 $('#gridBtn').addEventListener('click', () => { showGrid = !showGrid; store.set('pocket.editor.grid', showGrid ? '1' : '0'); $('#gridBtn').classList.toggle('on', showGrid); });
-window.addEventListener('beforeunload', saveNow);
-window.pocketBeforeUpdate = saveNow; // the update bar saves before it reloads
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+window.addEventListener('beforeunload', saveOnLeave);
+window.addEventListener('pagehide', saveOnLeave);
+window.pocketBeforeUpdate = saveOnLeave; // the update bar saves before it reloads
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveOnLeave(); });
 $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to open the panel
 setTool('move');
 
+await initStorage();
+askPersist(); // ask the browser to keep our data (Android / Chrome say yes for installed or often-used apps)
+storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('Storage is almost full: back up your games'); });
 {
   const all = loadProjects(), cur = store.get(CURRENT_KEY, '');
   const q = new URLSearchParams(location.search);

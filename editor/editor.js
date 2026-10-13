@@ -1022,6 +1022,67 @@ function childOf(g) {
   return g.par;
 }
 
+// ---- Tags & Layers (Unity-style): a game-wide tag list, named Layers (also the collision layers) and draw layers ----
+const DEFAULT_TAGS = ['player', 'enemy', 'coin', 'pickup', 'hazard', 'ground', 'platform', 'bullet', 'goal', 'npc'];
+const allEnts = () => levelList().flatMap((lv) => lv.entities || []);
+const allTags = () => [...new Set([...DEFAULT_TAGS, ...(root.tagList || []), ...allEnts().flatMap((e) => e.tags || [])])].filter(Boolean);
+const layerOf = (j) => +(j.body?.layer ?? j.physLayer ?? 0) || 0;
+function setLayerOf(j, i) { i = Math.max(0, Math.min(7, +i || 0)); if (i) j.physLayer = i; else delete j.physLayer; if (j.body) j.body.layer = i; }
+const SORT_LAYERS = [['Background', -1000], ['Default', 0], ['Foreground', 1000], ['Top', 2000]];
+const sortOf = (j) => { const v = +j.layer || 0; let b = SORT_LAYERS[0]; for (const q of SORT_LAYERS) if (v >= q[1] - 500) b = q; return { name: b[0], base: b[1], order: v - b[1] }; };
+function addTag(j, t) { t = String(t || '').trim(); if (!t) return; j.tags = [...new Set([...(j.tags || []), t])]; if (!allTags().includes(t) || !DEFAULT_TAGS.includes(t)) root.tagList = [...new Set([...(root.tagList || []), t])]; changed({ structure: true }); pushHistory(); }
+function tagMenu(anchor, j) {
+  const on = new Set(j.tags || []);
+  popMenu(anchor, [{ cap: 'Tags (tap to add or remove)' },
+    ...allTags().map((t) => ({ icon: on.has(t) ? 'check' : 'key', label: t, fn: () => { if (on.has(t)) j.tags = (j.tags || []).filter((q) => q !== t); else j.tags = [...(j.tags || []), t]; changed({ structure: true }); pushHistory(); renderInspector(); } })),
+    '-', { icon: 'plus', label: 'New Tag…', fn: () => { const t = prompt('New tag (e.g. boss, door, checkpoint)'); if (t?.trim()) { addTag(j, t.trim().toLowerCase().replace(/\s+/g, '-')); renderInspector(); } } },
+    { icon: 'gear', label: 'Manage Tags & Layers…', fn: openTagsLayers }]);
+}
+/** Inspector header rows: tag chips, Layer and (2D / UI) draw layer + order. */
+function tagLayerRows(j) {
+  const threeD = is3D(), names = layerNames(), so = sortOf(j);
+  const chips = h('div', { class: 'tag-chips' }, (j.tags || []).map((t) => h('span', { class: 'tag-chip' }, t,
+    h('button', { type: 'button', title: 'Remove tag', onclick: () => { j.tags = (j.tags || []).filter((q) => q !== t); changed({ structure: true }); pushHistory(); renderInspector(); } }, '×'))),
+    h('button', { type: 'button', class: 'tag-add', onclick: (e) => tagMenu(e.currentTarget, j) }, icon('plus'), (j.tags || []).length ? '' : 'Add tag'));
+  return [
+    h('div', { class: 'sub tl-row' }, h('span', {}, 'Tags'), chips),
+    h('div', { class: 'sub tl-row' }, h('span', {}, 'Layer'),
+      h('select', { class: 'layer-sel', onchange: (e) => { if (e.target.value === 'edit') { e.target.value = String(layerOf(j)); openTagsLayers(); return; } setLayerOf(j, e.target.value); changed({ structure: true }); pushHistory(); } },
+        names.map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, `${i} · ${n}`)), h('option', { value: 'edit' }, 'Edit layers…'))),
+    !threeD && h('div', { class: 'sub tl-row' }, h('span', {}, 'Draw'),
+      h('select', { class: 'sort-sel', title: 'Draw layer: Background is behind everything, Top is in front', onchange: (e) => { const b = SORT_LAYERS.find((q) => q[0] === e.target.value)[1]; j.layer = b + sortOf(j).order; if (!j.layer) delete j.layer; changed(); pushHistory(); renderInspector(); } },
+        SORT_LAYERS.map(([n]) => h('option', { value: n, selected: n === so.name }, n))),
+      h('label', { class: 'ord' }, 'Order', h('input', { type: 'number', inputMode: 'numeric', value: so.order, title: 'Higher draws in front within the same draw layer',
+        oninput: (e) => { j.layer = sortOf(j).base + (parseInt(e.target.value, 10) || 0); if (!j.layer) delete j.layer; changed(); } }))),
+  ];
+}
+/** The Tags & Layers manager: add, rename and delete tags (everywhere at once), rename layers, see what uses them. */
+function openTagsLayers() {
+  const ents = allEnts(), names = layerNames();
+  const used = (t) => ents.filter((e) => (e.tags || []).includes(t)).length;
+  const onLayer = (i) => ents.filter((e) => layerOf(e) === i).length;
+  const redo = () => { closeLayer(); openTagsLayers(); };
+  const renameTag = (t) => { const n = prompt(`Rename tag "${t}" on every object to`, t)?.trim(); if (!n || n === t) return; for (const e of ents) if ((e.tags || []).includes(t)) e.tags = [...new Set(e.tags.map((q) => (q === t ? n : q)))]; root.tagList = [...new Set([...(root.tagList || []).filter((q) => q !== t), n])]; changed({ structure: true }); pushHistory(); redo(); };
+  const deleteTag = (t) => { const k = used(t); if (k && !confirm(`Remove the tag "${t}" from ${k} object${k === 1 ? '' : 's'}?`)) return; for (const e of ents) if (e.tags) e.tags = e.tags.filter((q) => q !== t); root.tagList = (root.tagList || []).filter((q) => q !== t); root.hiddenTags = [...new Set([...(root.hiddenTags || []), t])]; changed({ structure: true }); pushHistory(); redo(); };
+  const renameLayer = (i) => { const n = prompt('Layer name', names[i])?.trim(); if (!n) return; const all = layerNames(); all[i] = n; root.physicsLayers = { ...(root.physicsLayers || {}), names: all }; changed({ structure: true }); pushHistory(); redo(); };
+  const add = h('input', { type: 'text', placeholder: 'New tag (boss, door…)', autocapitalize: 'off', onkeydown: (e) => { if (e.key === 'Enter') addBtn.click(); } });
+  const addBtn = h('button', { class: 'btn primary', onclick: () => { const t = add.value.trim().toLowerCase().replace(/\s+/g, '-'); if (!t) return; root.tagList = [...new Set([...(root.tagList || []), t])]; root.hiddenTags = (root.hiddenTags || []).filter((q) => q !== t); changed(); pushHistory(); redo(); } }, icon('plus'), 'Add');
+  const tags = allTags().filter((t) => !(root.hiddenTags || []).includes(t) || used(t));
+  openDialog('Tags & Layers', [
+    h('p', { class: 'desc' }, 'Tags name what an object is (player, enemy, coin): triggers, hazards, cameras and scripts look for them. An object can have several. Layers decide what collides with what (Scene Settings › Collision Layers) and can be used by scripts. Every object has one Layer.'),
+    h('h4', { class: 'tl-h' }, icon('key'), 'Tags'),
+    h('div', { class: 'tl-list' }, tags.map((t) => h('div', { class: 'tl-item' }, h('span', { class: 'tag-chip big' }, t), h('small', {}, `${used(t)} object${used(t) === 1 ? '' : 's'}`),
+      h('button', { class: 'btn', title: 'Rename everywhere', onclick: () => renameTag(t) }, icon('edit')), h('button', { class: 'btn', title: 'Delete', onclick: () => deleteTag(t) }, icon('trash'))))),
+    h('div', { class: 'tl-add' }, add, addBtn),
+    h('h4', { class: 'tl-h' }, icon('layers'), 'Layers'),
+    h('div', { class: 'tl-list' }, names.map((n, i) => h('div', { class: 'tl-item' }, h('span', { class: 'tl-idx' }, i), h('b', {}, n), h('small', {}, `${onLayer(i)} object${onLayer(i) === 1 ? '' : 's'}`),
+      h('button', { class: 'btn', title: 'Rename', onclick: () => renameLayer(i) }, icon('edit'))))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); select(SCENE_ID); if (!isDesktop()) setDock('inspector'); toast('Collision Layers are in Scene Settings'); } }, icon('grid'), 'Which layers collide…')),
+    h('h4', { class: 'tl-h' }, icon('scene'), 'Draw layers (2D and UI)'),
+    h('p', { class: 'desc' }, 'Background is drawn behind everything, then Default, Foreground and Top. Order picks who is in front within the same draw layer. Set both at the top of the Inspector.'),
+  ]);
+}
+
 // ---- physics layers (Unity-style collision matrix), shared by every level ----
 const layerNames = () => { const n = root.physicsLayers?.names; return PHYSICS_LAYERS.map((d, i) => n?.[i] || d); };
 function layerMatrixEditor() {
@@ -1594,6 +1655,8 @@ function startRowDrag(ev, id) {
 function hMatch(e) {
   if (uiMode && !e.ui) return false;
   if (hFilter && !(e.name || '').toLowerCase().includes(hFilter) && !(e.tags || []).some((t) => t.includes(hFilter)) && !compBadges(e).some((c) => c.toLowerCase().includes(hFilter))) return false;
+  if (hKind.startsWith('tag:')) return (e.tags || []).includes(hKind.slice(4));
+  if (hKind.startsWith('layer:')) return layerOf(e) === +hKind.slice(6);
   if (hKind === 'physics') return !!e.body;
   if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
   return hKind === 'all' || kindOf(e) === hKind;
@@ -1604,9 +1667,13 @@ function renderHierarchy() {
   box.replaceChildren();
   const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
-  const kindLabel = H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
+  const kindLabel = hKind.startsWith('tag:') ? `tag “${hKind.slice(4)}”` : hKind.startsWith('layer:') ? `layer “${layerNames()[+hKind.slice(6)]}”` : H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
   const filterBtn = h('button', { class: 'h-filter-btn' + (hKind !== 'all' ? ' on' : ''), title: 'Show only…',
-    onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
+    onclick: (e) => { const usedTags = [...new Set(project.entities.flatMap((q) => q.tags || []))].sort(), usedLayers = [...new Set(project.entities.map(layerOf))].sort((a, b) => a - b);
+      popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } })),
+        usedTags.length && { cap: 'With tag' }, ...usedTags.map((t) => ({ icon: hKind === 'tag:' + t ? 'check' : 'key', label: t, fn: () => { hKind = 'tag:' + t; renderHierarchy(); } })),
+        { cap: 'On layer' }, ...usedLayers.map((i) => ({ icon: hKind === 'layer:' + i ? 'check' : 'layers', label: `${i} · ${layerNames()[i]}`, fn: () => { hKind = 'layer:' + i; renderHierarchy(); } })),
+        '-', { icon: 'gear', label: 'Tags & Layers…', fn: openTagsLayers }].filter(Boolean)); } },
     icon('list'), hKind === 'all' ? '' : kindLabel);
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn));
@@ -2100,7 +2167,7 @@ function drawEase(cv, name) {
 /** Values that already exist in the game, for dropdown suggestions. */
 function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
-  if (kind === 'tags') return uniq(['player', 'enemy', ...all.flatMap((e) => e.tags || []), ...all.map((e) => e.name)]);
+  if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
@@ -2545,18 +2612,14 @@ function renderInspector() {
     h('div', { class: 'big-ico' }, icon(iconFor(j))),
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
     h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
-    h('div', { class: 'sub' },
-      h('span', {}, 'Tags'),
-      h('input', { type: 'text', value: (j.tags || []).join(', '), placeholder: 'player, enemy', autocapitalize: 'off',
-        onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
+    ...tagLayerRows(j),
     h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
       h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
       j.parent && h('button', { class: 'btn', title: 'Take it out of its parent', onclick: () => setParent(j.id, null) }, icon('unlink'))),
     kidsCard(j),
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
-      h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
-      !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
+      h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
   const pfb = prefabBanner(j); if (pfb) box.append(pfb);
 
@@ -2812,7 +2875,7 @@ function renderInspector() {
       dyn && vecRow(() => T().body, 'Start Velocity', threeD ? ['vx', 'vy', 'vz'] : ['vx', 'vy'], [0, 0, 0], threeD ? 0.5 : 10),
       dyn && [C('body.maxSpeed', { label: 'Max Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 }), C('body.maxFall', { label: 'Max Fall Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 })],
       dyn && C('body.ccd', { label: 'Collision Detection', type: 'select', options: [['', 'Discrete'], ['1', 'Continuous (fast objects)']], def: '' }),
-      C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
+      h('div', { class: 'row' }, h('label', {}, 'Layer'), h('select', { onchange: (e) => { setLayerOf(j, e.target.value); changed({ inspector: true }); pushHistory(); } }, layerNames().map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, n)))),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '', suggest: 'tags' }),
       !dyn && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
       ...(j.collider ? [] : [ // no collider component: the body fits the visible shape (older projects can size it here)
@@ -2949,7 +3012,7 @@ function renderSceneSettings(box) {
     C('post.tint', { label: 'Tint colour', type: 'color', def: '#ff8800' }),
     C('post.tintAmount', { label: 'Tint amount', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
   ], { icon: 'sun', key: 's-post' }));
-  box.append(comp('Collision Layers', [layerMatrixEditor()], { icon: 'grid', key: 's-layers' }));
+  box.append(comp('Collision Layers', [layerMatrixEditor(), h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openTagsLayers }, icon('key'), 'Tags & Layers…'))], { icon: 'grid', key: 's-layers' }));
   box.append(comp('Physics', [
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
@@ -3934,6 +3997,7 @@ function openFileMenu() {
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
     { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
+    { icon: 'key', label: 'Tags & Layers…', fn: openTagsLayers },
     '-',
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },

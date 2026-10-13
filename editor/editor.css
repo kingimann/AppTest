@@ -1180,3 +1180,26 @@ body.playing #attachBar { display: none !important; }
   #toolbar .tb { height: 34px; }
   #scenePanel .panel-tabs { height: 40px; }
 }
+
+/* ---------- Tags & Layers ---------- */
+.insp-head .tl-row { gap: 10px; }
+.insp-head .tl-row > span:first-child { width: 46px; flex: none; }
+.insp-head .tl-row select { flex: 1; min-width: 0; height: 40px; }
+.insp-head .tl-row .ord { min-height: 40px; gap: 6px; }
+.insp-head .tl-row .ord input { width: 64px; height: 40px; }
+.tag-chips { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+.tag-chip { display: inline-flex; align-items: center; gap: 2px; height: 32px; padding: 0 4px 0 12px; border-radius: 16px; background: #2c4a6e; color: #dbeaff; font-size: 14px; font-weight: 600; }
+.tag-chip button { width: 28px; height: 28px; border: 0; background: transparent; color: #a9c6ea; font-size: 18px; border-radius: 14px; display: grid; place-items: center; }
+.tag-chip.big { height: 30px; padding: 0 12px; }
+.tag-add { height: 32px; border: 1px dashed #5b6b85; background: transparent; color: #a9c6ea; border-radius: 16px; padding: 0 10px; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.tag-add svg.i { width: 16px; height: 16px; }
+.tl-h { display: flex; align-items: center; gap: 8px; margin: 16px 0 6px; font-size: 15px; }
+.tl-h svg.i { width: 18px; height: 18px; opacity: .8; }
+.tl-list { display: flex; flex-direction: column; gap: 4px; }
+.tl-item { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 2px 4px 2px 8px; border-radius: 10px; background: rgba(255,255,255,.04); }
+.tl-item small { flex: 1; color: var(--muted); }
+.tl-item b { font-weight: 600; }
+.tl-item .btn { width: 40px; height: 40px; padding: 0; min-width: 0; flex: none; }
+.tl-idx { width: 24px; height: 24px; border-radius: 6px; background: #3a3f4f; display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none; }
+.tl-add { display: flex; gap: 8px; margin-top: 8px; }
+.tl-add input { flex: 1; min-width: 0; }

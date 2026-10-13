@@ -265,6 +265,18 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { post: { bloom: 0.8, bloomRadius: 16, vignette: 0.35, saturation: 125, tint: '#ff9a3c', tintAmount: 0.2 } } // on a level
 ```
 
+### Tags and layers
+
+Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at the top of the Inspector:
+- **Tags:** chips you add from a game-wide list (+ → pick, or **New Tag…**) and remove with ×. An object can have several. Triggers, hazards, cameras, colliders' *Pass through tags* and scripts use them.
+- **Layer:** one of eight named layers (Default, Player, Enemy, Bullet, Ground, Pickup…). It is the object's collision layer, and its collider follows it (the Rigidbody shows the same setting).
+- **Draw:** Background, Default, Foreground or Top, plus an **Order** within it (higher is in front).
+- **Tags & Layers…** (☰ menu, Scene Settings › Collision Layers, or the bottom of a tag or layer menu):
+  - Add tags, or rename or delete a tag on every object at once.
+  - Rename layers, and see how many objects use each one.
+- **Hierarchy:** the filter can show only objects **with a tag** or **on a layer**.
+- **Visual Script:** **Set Layer**, **Layer Is**, **Count In Layer** and **For Each In Layer**. In scripts: `scene.setLayer(e, 'Enemy')`, `scene.findInLayer('Enemy')`, `scene.layerNames`.
+
 ### Collision layers
 
 - Each **Rigidbody** has a **Physics layer**: Default, Player, Enemy, Bullet, Ground, Pickup, or two spare layers you can rename.

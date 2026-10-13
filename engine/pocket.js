@@ -240,7 +240,8 @@ export class Entity {
     this.sx = props.sx ?? 1; this.sy = props.sy ?? 1; this.sz = props.sz ?? 1;
     this.visible = props.visible ?? true;
     this.alpha = props.alpha ?? 1;
-    this.layer = props.layer || 0;
+    this.layer = props.layer || 0; // draw order (higher = in front)
+    this.physLayer = props.physLayer | 0; // its Layer (0–7, named in Game Settings): which collision layer its collider uses
     this.ui = !!props.ui; // screen-space HUD element (2D overlay, also in 3D games)
     this.anchor = props.anchor || 'top-left';
     this.shape = props.shape ? { ...SHAPE_DEFAULTS, ...props.shape } : null;
@@ -274,7 +275,7 @@ export class Entity {
   }
 
   setBody(opts = {}) {
-    this.body = { ...BODY_DEFAULTS, ...opts, vel: { x: +opts.vx || 0, y: +opts.vy || 0, z: +opts.vz || 0 }, grounded: false };
+    this.body = { ...BODY_DEFAULTS, layer: this.physLayer || 0, ...opts, vel: { x: +opts.vx || 0, y: +opts.vy || 0, z: +opts.vz || 0 }, grounded: false };
     return this.body;
   }
 
@@ -769,6 +770,7 @@ export class Scene {
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
     this.post = { ...(opts.post || {}) }; // post-processing: bloom, vignette, colour grading
     this.layerMask = layerMatrix(opts.physicsLayers); // which physics layers collide
+    this.layerNames = PHYSICS_LAYERS.map((d, i) => opts.physicsLayers?.names?.[i] || d);
     // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
     this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
     if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
@@ -978,6 +980,12 @@ export class Scene {
   emit(evt, ...args) { for (const fn of this.listeners[evt] || []) fn(...args); }
 
   setVar(k, v) { this.vars[k] = v; this.emit('var', k, v); }
+  /** A Layer by name or number (0–7). */
+  layerIndex(l) { if (typeof l === 'number' || /^\d+$/.test(String(l).trim())) return clamp(Math.round(+l), 0, 7); const i = this.layerNames.findIndex((n) => n.toLowerCase() === String(l || '').trim().toLowerCase()); return i < 0 ? 0 : i; }
+  /** Put an object on a Layer: its collider follows. */
+  setLayer(e, l) { const i = this.layerIndex(l); e.physLayer = i; if (e.body) e.body.layer = i; return i; }
+  /** Everything on a Layer. */
+  findInLayer(l) { const i = this.layerIndex(l); return this.entities.filter((e) => !e.dead && (e.body ? e.body.layer | 0 : e.physLayer) === i); }
   /** Inventory: add (or with a negative n, remove) items. {inventory} lists them, {item_Name} counts one. */
   addItem(name, n = 1, icon = '') {
     const inv = (this.inventory ||= {});
@@ -7460,6 +7468,13 @@ function numAsText(v, f) {
   return fmtNumber(v, f === 'normal (1,234)' ? '' : f);
 }
 const wordsOf = (w) => String(w || '').split('|').map((x) => x.trim()).filter(Boolean);
+// ---- Layer nodes ----
+Object.assign(NODE_TYPES, {
+  setObjLayer: { cat: 'Objects', label: 'Set Layer', exec: true, outs: ['then'], params: [opt('target', ['self', 'other', 'object'], 'self', 'who'), txt('object', '', 'object name (for "object")'), txt('layer', 'Enemy', 'layer (name or 0–7)')] },
+  layerIs: { cat: 'Objects', label: 'Layer Is', value: 'bool', params: [opt('target', ['self', 'other'], 'other', 'who'), txt('layer', 'Enemy', 'layer')] },
+  countInLayer: { cat: 'Objects', label: 'Count In Layer', value: 'number', params: [txt('layer', 'Enemy', 'layer')] },
+  forEachInLayer: { cat: 'Objects', label: 'For Each In Layer', exec: true, outs: ['each', 'done'], params: [txt('layer', 'Enemy', 'layer')] },
+});
 // ---- UI nodes ----
 Object.assign(NODE_TYPES, {
   onUiTap: { cat: 'UI', label: 'On UI Tapped', outs: ['then'], params: [txt('object', 'Play Button', 'object (name or tag)')] },
@@ -8060,6 +8075,8 @@ registerBehavior('graph', {
         case 'camValue': { const c = s.camera, w = P('what'); return w === 'zoom' ? (s.mode === '3d' ? 60 / (c.fov || 60) : c.zoom || 1) : s.mode === '3d' ? c.position?.[w] || 0 : c[w] || 0; }
         case 'isMuted': return !!s.engine.audio.muted;
         case 'deviceIs': { const mm = (q) => typeof matchMedia === 'function' && matchMedia(q).matches; switch (P('is')) { case 'landscape': return s.engine.width > s.engine.height; case 'touch screen': return mm('(pointer: coarse)') || 'ontouchstart' in window; case 'online': return navigator.onLine !== false; case 'installed app': return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || !!navigator.standalone; case 'dark mode': return mm('(prefers-color-scheme: dark)'); case 'reduced motion': return mm('(prefers-reduced-motion: reduce)'); default: return s.engine.height >= s.engine.width; } }
+        case 'layerIs': { const t = P('target') === 'self' ? e : ctx.other; return !!t && (t.body ? t.body.layer | 0 : t.physLayer) === s.layerIndex(P('layer')); }
+        case 'countInLayer': return s.findInLayer(P('layer')).filter((q) => !q.template).length;
         case 'popupOpen': return !!(s.modal && !s.modal.dead && s.modal.visible);
         case 'uiVisible': { const t = uiFind(s, null, P('object')); return !!t && t.visible && !t._parentHidden; }
         case 'uiEnabled': { const t = uiFind(s, null, P('object')); return !!t && !t.data.uiDisabled; }
@@ -8225,7 +8242,7 @@ registerBehavior('graph', {
         }
         case 'setBodyType': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: P('type') }); b.type = P('type'); if (b.type !== 'dynamic') b.vel = { x: 0, y: 0, z: 0 }; break; }
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
-        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
+        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const i = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); t.ensureBody({ type: 'kinematic' }).layer = i; t.physLayer = i; break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
         case 'setMyVar': setMy(s, e, P('name') || 'hp', +I('value') || 0); break;
         case 'addMyVar': { const k = P('name') || 'hp'; setMy(s, e, k, (+e.data[k] || 0) + (+I('amount') || 0)); break; }
@@ -8450,6 +8467,8 @@ registerBehavior('graph', {
         case 'share': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)); if (navigator.share) navigator.share({ text }).catch(() => {}); else navigator.clipboard?.writeText(text).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {}); break; }
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
+        case 'setObjLayer': { const w = P('target'), t = w === 'other' ? ctx.other : w === 'object' ? uiFind(s, e, P('object')) : e; if (t) s.setLayer(t, P('layer')); break; }
+        case 'forEachInLayer': { s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 })); return follow(n, 'done', ctx); }
         case 'uiShow': {
           const t = uiFind(s, e, P('object')); if (!t) break;
           const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };

@@ -186,6 +186,15 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { post: { bloom: 0.8, bloomRadius: 16, vignette: 0.35, saturation: 125, tint: '#ff9a3c', tintAmount: 0.2 } } // on a level
 ```
 
+### Collision layers
+
+- Each **Rigidbody** has a **Physics layer**: Default, Player, Enemy, Bullet, Ground, Pickup, or two spare layers you can rename.
+- Tap the level → **Collision Layers**: a grid of which layers collide. Untick a box and those two layers pass through each other with no touch events (e.g. enemies' bullets ignore other enemies). Tilemaps count as Ground. The grid is shared by every level.
+
+```js
+{ physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
+```
+
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.

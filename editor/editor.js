@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -864,6 +864,25 @@ function childOf(g) {
     }
   }
   return g.par;
+}
+
+// ---- physics layers (Unity-style collision matrix), shared by every level ----
+const layerNames = () => { const n = root.physicsLayers?.names; return PHYSICS_LAYERS.map((d, i) => n?.[i] || d); };
+function layerMatrixEditor() {
+  const names = layerNames(), M = layerMatrix(root.physicsLayers).slice();
+  const used = new Set(levelList().flatMap((lv) => lv.entities).map((e) => +(e.body?.layer || 0)));
+  const set = (i, j, on) => { for (const [a, b] of [[i, j], [j, i]]) M[a] = on ? M[a] | (1 << b) : M[a] & ~(1 << b);
+    root.physicsLayers = { ...(root.physicsLayers || {}), matrix: M }; changed({ inspector: true }); pushHistory(); };
+  const rename = (i) => { const n = prompt('Layer name', names[i]); if (!n?.trim()) return; const all = layerNames(); all[i] = n.trim(); root.physicsLayers = { ...(root.physicsLayers || {}), names: all, matrix: M }; changed({ inspector: true }); pushHistory(); };
+  return h('div', { class: 'lm' },
+    h('p', { class: 'desc' }, 'Pick a layer on each Rigidbody (Player, Enemy, Bullet…). Untick a box and those two layers pass through each other — no bumping, no touch events. Tilemaps count as Ground. Tap a name to rename it.'),
+    h('div', { class: 'lm-grid', style: `--n:${names.length}` },
+      names.map((nm, i) => h('div', { class: 'lm-row' },
+        h('button', { class: 'lm-name' + (used.has(i) ? ' used' : ''), onclick: () => rename(i) }, nm),
+        names.map((_, j) => j > i ? h('span', { class: 'lm-sp' }) : h('label', { class: 'lm-cell', title: `${nm} ↔ ${names[j]}` },
+          h('input', { type: 'checkbox', checked: !!((M[i] >> j) & 1), onchange: (e) => set(i, j, e.target.checked) }))))),
+      h('div', { class: 'lm-row lm-foot' }, h('span', { class: 'lm-name' }), names.map((nm) => h('span', { class: 'lm-col' }, nm.slice(0, 3))))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { root.physicsLayers = { ...(root.physicsLayers || {}), matrix: Array(8).fill(255) }; changed({ inspector: true }); pushHistory(); } }, icon('undo'), 'Everything collides')));
 }
 
 /** Inspector card for a 2D tilemap: brush, tile types, and the selected type's look and behaviour. */
@@ -2215,6 +2234,7 @@ function renderInspector() {
       j.body.type === 'dynamic' && [C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }), C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05 })],
       j.body.type === 'dynamic' && h('div', { class: 'row' }, h('label', {}, 'Freeze'), h('div', { class: 'pair' }, (threeD ? ['X', 'Y', 'Z'] : ['X', 'Y']).map((a) =>
         h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.body['lock' + a], onchange: (e) => { if (e.target.checked) j.body['lock' + a] = true; else delete j.body['lock' + a]; changed(); } }), a)))),
+      C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
@@ -2306,6 +2326,7 @@ function renderSceneSettings(box) {
     C('post.tint', { label: 'Tint colour', type: 'color', def: '#ff8800' }),
     C('post.tintAmount', { label: 'Tint amount', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
   ], { icon: 'sun', key: 's-post' }));
+  box.append(comp('Collision Layers', [layerMatrixEditor()], { icon: 'grid', key: 's-layers' }));
   box.append(comp('Physics', [
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
@@ -3335,7 +3356,7 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
+    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid, .lm-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
   }, { passive: true });
   $('#sheet').addEventListener('touchend', (e) => {
     if (!st) return;

@@ -143,7 +143,11 @@ export const BODY_DEFAULTS = {
   lockX: false, lockY: false, lockZ: false, // freeze movement along an axis
   maxSpeed: 0, // 0 = no limit
   ignore: '', // comma-separated tags this body passes through
+  layer: 0, // physics layer (0-7): which others it collides with comes from the scene's layer matrix
 };
+/** Physics layers (Unity-style). matrix[i] is a bit mask of the layers layer i collides with. */
+export const PHYSICS_LAYERS = ['Default', 'Player', 'Enemy', 'Bullet', 'Ground', 'Pickup', 'Layer 6', 'Layer 7'];
+export const layerMatrix = (pl) => (Array.isArray(pl?.matrix) && pl.matrix.length === 8 ? pl.matrix : Array(8).fill(255));
 
 const TRANSFORM_KEYS = ['x', 'y', 'z', 'rx', 'ry', 'rz'];
 
@@ -167,6 +171,7 @@ export class Entity {
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.tiles = props.tiles ? new TileMap(props.tiles) : null; // 2D tilemap
+    this.tileLayer = props.tiles?.layer ?? 4; // tilemaps collide as the Ground physics layer
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
@@ -605,6 +610,7 @@ export class Scene {
     this.gravityX = +opts.gravityX || 0; this.gravityZ = +opts.gravityZ || 0; // sideways gravity (wind, tilted worlds)
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
     this.post = { ...(opts.post || {}) }; // post-processing: bloom, vignette, colour grading
+    this.layerMask = layerMatrix(opts.physicsLayers); // which physics layers collide
     // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
     this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
     if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
@@ -1085,6 +1091,7 @@ export class Physics {
         const b = e.body;
         if (b.type !== 'dynamic' || b.sensor) continue;
         for (const w of maps) {
+          if (!((scene.layerMask[b.layer | 0] >> (w.tileLayer | 0)) & 1)) continue;
           const T = w.tiles, sz = T.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: Infinity };
           let ex = e.extents();
           const hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
@@ -1125,6 +1132,7 @@ export class Physics {
         if (ba.type === 'static' && bb.type === 'static') continue;
         if (a.dead || b.dead) continue;
         if ((ba.ignore || bb.ignore) && passes(a, b)) continue;
+        if (!((scene.layerMask[ba.layer | 0] >> (bb.layer | 0)) & 1)) continue; // layer matrix says these two don't touch
         const m = overlap(a, A.ex, b, B.ex);
         if (!m) continue;
         const key = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
@@ -5298,7 +5306,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }

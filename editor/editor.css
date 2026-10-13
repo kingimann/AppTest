@@ -862,3 +862,12 @@ body.playing #attachBar { display: none !important; }
 #playConsole .pc-list { overflow-y: auto; }
 #playConsole .log-row { padding: 8px 12px; } #playConsole .log-txt { font-size: 14px; }
 .post-presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 12px; } .post-presets .btn { height: 46px; font-size: 14px; padding: 0 8px; }
+
+/* ---------- collision layer matrix ---------- */
+.lm-grid { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; overflow-x: auto; }
+.lm-row { display: grid; grid-template-columns: 70px repeat(var(--n), 28px); gap: 3px; align-items: center; }
+.lm-name { height: 30px; border: 0; background: transparent; color: var(--muted); text-align: left; font-size: 13.5px; padding: 0 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lm-name.used { color: var(--text); font-weight: 600; }
+.lm-cell { width: 28px; height: 28px; display: grid; place-items: center; background: #2e2e2e; border-radius: 8px; }
+.lm-cell input[type=checkbox] { width: 22px; height: 22px; border-radius: 5px; }
+.lm-col { font-size: 11px; color: var(--dim); text-align: center; }

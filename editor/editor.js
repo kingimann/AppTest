@@ -71,9 +71,60 @@ function saveNow() {
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
+/** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
+function renderMultiBar() {
+  const box = $('#hierarchy');
+  box.querySelector('.multi-bar')?.remove();
+  if (!multi) return;
+  for (const id of [...multi]) if (!ent(id)) multi.delete(id);
+  const list = [...multi].map(ent).filter(Boolean), n = list.length, none = !n;
+  const act = (icn, label, fn, cls = '') => h('button', { class: cls, disabled: none, onclick: fn }, icon(icn), label);
+  const visible = list.some((e) => e.visible !== false);
+  box.append(h('div', { class: 'multi-bar' },
+    h('div', { class: 'mb-top' }, h('b', {}, n ? `${n} selected` : 'Tap objects to select them'),
+      h('button', { class: 'mb-all', onclick: () => { const all = project.entities.filter(hMatch).map((e) => e.id), every = all.every((id) => multi.has(id)); multi = new Set(every ? [] : all); renderHierarchy(); } }, 'All'),
+      h('button', { class: 'mb-done', onclick: () => { multi = null; renderHierarchy(); } }, 'Done')),
+    h('div', { class: 'mb-acts' },
+      act('copy', 'Duplicate', () => multiDuplicate(list)),
+      act('child', 'Group', () => multiGroup(list)),
+      act(visible ? 'eyeoff' : 'eye', visible ? 'Hide' : 'Show', () => { for (const e of list) e.visible = !visible; changed({ structure: true }); pushHistory(); }),
+      act('folder', 'Folder', () => moveToFolder(list)),
+      act('trash', 'Delete', () => multiDelete(list), 'danger'))));
+}
+/** Top-most picks only: a ticked child is already covered by its ticked parent. */
+const topPicks = (list) => list.filter((e) => !list.some((q) => q !== e && isInside(e.id, q.id)));
+function multiDelete(list) {
+  const tops = topPicks(list), ids = new Set(tops.flatMap((e) => subtree(e.id)));
+  if (ids.size > 1 && !confirm(`Delete ${ids.size} objects?`)) return;
+  project.entities = project.entities.filter((e) => !ids.has(e.id));
+  if (ids.has(selectedId)) selectedId = null;
+  multi = new Set(); changed({ structure: true }); pushHistory(); updateCtxBar();
+  toast(`Deleted ${ids.size} object${ids.size > 1 ? 's' : ''}. Undo to restore.`);
+}
+function multiDuplicate(list) {
+  const made = [];
+  for (const e of topPicks(list)) { duplicateEntity(e.id); made.push(selectedId); }
+  multi = new Set(made); renderHierarchy(); toast(`Duplicated ${made.length} object${made.length > 1 ? 's' : ''}`);
+}
+/** Put the picked objects inside a new empty parent at their middle, so they move together. */
+function multiGroup(list) {
+  const tops = topPicks(list);
+  if (tops.some((e) => !!e.ui !== !!tops[0].ui)) { toast('Group UI and game objects separately'); return; }
+  const live = tops.map((e) => engine.scene.byId(e.id)).filter(Boolean), avg = (k) => live.reduce((a, q) => a + (q[k] || 0), 0) / (live.length || 1);
+  const r = (v) => (is3D() ? round(v, 2) : Math.round(v));
+  const g = { id: uid(), name: 'Group', ...(tops[0].ui ? { ui: true, anchor: tops[0].anchor || 'center', x: 0, y: 0 } : { x: r(avg('x')), y: r(avg('y')), ...(is3D() ? { z: r(avg('z')) } : {}) }) };
+  if (tops.every((e) => e.folder && e.folder === tops[0].folder)) g.folder = tops[0].folder;
+  const L = project.entities; L.splice(Math.min(...tops.map((e) => L.indexOf(e))), 0, g);
+  rebuild();
+  for (const e of tops) setParent(e.id, g.id, { batch: true });
+  multi = null; selectedId = g.id; closedKids.delete(g.id);
+  changed({ structure: true }); pushHistory(); updateCtxBar();
+  toast(`Grouped ${tops.length} objects. Move the Group to move them all.`);
+}
 const openDups = new Set(); // Hierarchy "Gem ×8" groups the user opened
 let hRevealed = null; // last selection the Hierarchy scrolled to
-let attachFor = null; // object waiting for the user to tap its new parent (Attach mode)
+let attachFor = null;
+let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
 const levelList = () => [root, ...(root.levels || [])];
@@ -314,6 +365,13 @@ engine.onRenderWorld = (r, s, z) => {
       const zm = +cam.zoom || 1, w = s.view.width / zm, hgt = s.view.height / zm;
       ctx.save(); ctx.setLineDash([8 / z, 6 / z]); ctx.strokeStyle = pe.id === selectedId ? ORANGE : 'rgba(140,200,255,0.7)'; ctx.lineWidth = 1.5 / z;
       ctx.strokeRect((pe.x || 0) - w / 2, (pe.y || 0) - hgt / 2, w, hgt); ctx.restore();
+    }
+    if (multi) for (const id of multi) { // objects ticked in the Hierarchy's Select mode
+      const e = s.byId(id); if (!e || e.ui) continue;
+      const b = boundsOf(e), pad = 4 / z;
+      ctx.save(); ctx.setLineDash([6 / z, 4 / z]); ctx.strokeStyle = ORANGE; ctx.lineWidth = 2 / z;
+      if (b.sphere) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r + pad, 0, Math.PI * 2); ctx.stroke(); } else ctx.strokeRect(b.x - b.hx - pad, b.y - b.hy - pad, (b.hx + pad) * 2, (b.hy + pad) * 2);
+      ctx.restore();
     }
     if (sel?.tiles && tool === 'paint') { // the tile grid while painting
       const T = sel.tiles, sz = T.size, inv = ctx.getTransform().inverse(), W = ctx.canvas.width, H = ctx.canvas.height;
@@ -1203,8 +1261,9 @@ function renderHierarchy() {
   const kindLabel = H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
   const filterBtn = h('button', { class: 'h-filter-btn' + (hKind !== 'all' ? ' on' : ''), title: 'Show only…',
     onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
-    icon('list'), hKind === 'all' ? 'Filter' : kindLabel);
-  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn));
+    icon('list'), hKind === 'all' ? '' : kindLabel);
+  const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
+  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn, selBtn));
   if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
   const rows = h('div');
   box.append(rows);
@@ -1216,8 +1275,9 @@ function renderHierarchy() {
     return h('div', {
       class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
-      onclick: () => { if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+      onclick: () => { if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); } else if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
+    multi ? h('span', { class: 'h-check' + (multi.has(e.id) ? ' on' : '') }, multi.has(e.id) ? icon('check') : null) : '',
     depth ? h('span', { class: 'h-branch' }) : '',
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
     h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
@@ -1248,11 +1308,14 @@ function renderHierarchy() {
   };
   const groupRow = (g) => {
     const shut = !openDups.has(g.key), first = g.members[0], kind = kindOf(first), badges = compBadges(first), vis = g.members.some((m) => m.visible !== false);
-    return h('div', { class: 'h-row h-group' + (g.members.some((m) => m.id === selectedId) ? ' has-sel' : ''), onclick: () => { shut ? openDups.add(g.key) : openDups.delete(g.key); renderRows(); } },
-      h('span', { class: 'h-twisty' + (shut ? ' shut' : '') }, icon('chevron')),
+    const allOn = multi && g.members.every((m) => multi.has(m.id)), fold = () => { shut ? openDups.add(g.key) : openDups.delete(g.key); renderRows(); };
+    return h('div', { class: 'h-row h-group' + (g.members.some((m) => m.id === selectedId) ? ' has-sel' : ''),
+      onclick: () => { if (!multi) return fold(); for (const m of g.members) allOn ? multi.delete(m.id) : multi.add(m.id); renderRows(); renderMultiBar(); } },
+      multi ? h('span', { class: 'h-check' + (allOn ? ' on' : '') }, allOn ? icon('check') : null) : '',
+      h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), onclick: (ev) => { ev.stopPropagation(); fold(); } }, icon('chevron')),
       h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(first))),
       h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, g.name, h('span', { class: 'h-count' }, '×' + g.members.length)),
-        h('span', { class: 'h-sub' }, [shut ? 'tap to show all' : 'tap to fold', ...badges.slice(0, 2)].join(' · '))),
+        h('span', { class: 'h-sub' }, [multi ? 'tap to select all' : shut ? 'tap to show all' : 'tap to fold', ...badges.slice(0, 2)].join(' · '))),
       h('button', { class: 'eye', title: vis ? 'Hide all' : 'Show all', onclick: (ev) => { ev.stopPropagation(); for (const m of g.members) m.visible = !vis; changed({ structure: true }); } }, icon(vis ? 'eye' : 'eyeoff')));
   };
   const rowsOf = (items) => tree(items).map(([e, d]) => (e === 'group' ? groupRow(d) : row(e, d)));
@@ -1281,7 +1344,9 @@ function renderHierarchy() {
     ].filter(Boolean));
   }
   if (selectedId && selectedId !== hRevealed) reveal(selectedId); // newly selected (maybe in the Scene): unfold its way and scroll to it
+  box.classList.toggle('multi-on', !!multi);
   renderRows();
+  renderMultiBar();
   box.scrollTop = scroll;
   if (selectedId && selectedId !== hRevealed) { hRevealed = selectedId; box.querySelector(`.h-row[data-id="${selectedId}"]`)?.scrollIntoView({ block: 'nearest' }); }
 }
@@ -1301,7 +1366,7 @@ function subtree(id) { const out = [id]; for (const k of kidsOf(id)) out.push(..
 /** Objects that `j` could be put inside (not itself or its own children; UI only inside UI). */
 const parentChoices = (j) => project.entities.filter((e) => e.id !== j.id && !isInside(e.id, j.id) && !!e.ui === !!j.ui && !e.template);
 /** Make `id` a child of `pid` (or move it back to the top level with null), keeping where it is on screen. */
-function setParent(id, pid) {
+function setParent(id, pid, { batch = false } = {}) {
   const j = ent(id); if (!j) return;
   const pj = pid ? ent(pid) : null;
   if (pid && (pid === id || isInside(pid, id))) { toast('An object can’t go inside its own child'); return; }
@@ -1328,6 +1393,7 @@ function setParent(id, pid) {
     L.splice(at, 0, ...moving);
     closedKids.delete(pid);
   }
+  if (batch) return;
   changed({ structure: true }); pushHistory();
   toast(pid ? `${j.name} is now inside ${pj.name}` : `${j.name} moved to the top level`);
 }
@@ -1369,12 +1435,13 @@ function parentMenu(j, anchor) {
 }
 
 function moveToFolder(j) {
+  const list = Array.isArray(j) ? j : [j];
   const existing = [...new Set(project.entities.map((e) => e.folder).filter(Boolean))];
-  const pick = (f) => { if (f) j.folder = f; else delete j.folder; changed({ structure: true }); pushHistory(); };
+  const pick = (f) => { for (const q of list) { if (f) q.folder = f; else delete q.folder; } changed({ structure: true }); pushHistory(); };
   popMenu({ left: window.innerWidth / 2 - 110, top: window.innerHeight / 3, bottom: window.innerHeight / 3 }, [
     { cap: 'Folder' }, ...existing.map((f) => ({ icon: 'folder', label: f, fn: () => pick(f) })),
     { icon: 'plus', label: 'New Folder…', fn: () => { const n = prompt('Folder name', is3D() ? 'Environment' : 'Level'); if (n?.trim()) pick(n.trim()); } },
-    j.folder && { icon: 'close', label: 'No Folder', fn: () => pick('') },
+    list.some((q) => q.folder) && { icon: 'close', label: 'No Folder', fn: () => pick('') },
   ]);
 }
 

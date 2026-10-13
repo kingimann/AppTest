@@ -793,3 +793,21 @@ body.playing #attachBar { display: none !important; }
 .tile-sw.add { align-items: center; justify-content: center; color: var(--muted); border-style: dashed; padding-bottom: 6px; }
 .tile-sw.add small { position: static; }
 .tile-edit { margin-top: 10px; padding: 4px 12px 12px; background: #333; border-radius: 12px; }
+
+/* ---------- Hierarchy select mode ---------- */
+.h-tools .h-sel-btn { padding: 0; width: 50px; justify-content: center; background: #3a3a3a; color: var(--muted); }
+.h-tools .h-sel-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.h-check { width: 28px; height: 28px; flex: none; border-radius: 50%; border: 2px solid #777; display: grid; place-items: center; margin-right: -4px; }
+.h-check.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.h-check svg.i { width: 17px; height: 17px; stroke-width: 2.6; }
+.multi-bar { position: sticky; bottom: 0; z-index: 3; background: #2b2b2b; border-top: 1px solid #111; box-shadow: 0 -6px 16px rgba(0,0,0,.35); padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+.mb-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.mb-top b { flex: 1; font-size: 15px; }
+.mb-top button { height: 40px; padding: 0 16px; border: 0; border-radius: 20px; background: #3a3a3a; font-weight: 600; font-size: 14px; }
+.mb-top .mb-done { background: var(--accent); color: #fff; }
+.mb-acts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.mb-acts button { height: 58px; border: 0; border-radius: 12px; background: #383838; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; font-weight: 600; }
+.mb-acts button:disabled { opacity: .35; }
+.mb-acts button.danger { color: #ff8a80; }
+.h-tools .h-filter-btn:not(.on) { width: 50px; padding: 0; justify-content: center; }
+#hierarchy.multi-on .h-row .eye { display: none; }

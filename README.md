@@ -118,6 +118,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Filter** button next to search: Player, Logic, Physics, UI or Templates only. Search also matches tags and components.
   - Selecting an object in the Scene scrolls the Hierarchy to it, opening its folder, group or parent.
   - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - **Select** (the tick button next to search): tick several objects (tapping a ×N group ticks all its copies), then **Duplicate**, **Group** (puts them in a new parent so they move together), **Hide / Show**, **Folder** or **Delete** them at once. **All** ticks everything shown.
   - **Getting started** is a one-line strip with the next step (tap to see all steps).
   - Bring to front / send to back; a lock button on locked objects.
 - **Inspector**:

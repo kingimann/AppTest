@@ -132,7 +132,16 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 ### Node coding (Visual Script)
 
-Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
+Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**.
+
+The **Scripts** tab (between Inspector and Project) lists every Visual Script in the game:
+- Each card shows the object, a mini map of its nodes, which events start it and how many nodes it has.
+- Tap a card to open it in the Node Editor. Scripts on other levels are listed under their level; opening one switches to that level.
+- ⋮ shows the object in the Inspector, saves the script for reuse (or unlinks it), turns it off or on, or removes it.
+- **New Visual Script** adds one to the selected object. With more than a few scripts, search by object, event or node name.
+- **Saved scripts** lists your reusable scripts with how often each is used; **Add** puts one on the selected object.
+
+The editor fills the screen:
 
 - **Add Node** opens like Add Component: a search box, **Suggested next** (nodes that usually follow the selected one, or events to start with), **Recently used**, and a folder per category with how many nodes it holds. Tap a folder to open it, ‹ to go back:
   - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**, **On Finger Lifted**, **On Win**, **On Game Over**, **On State Entered**.

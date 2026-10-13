@@ -5,7 +5,7 @@ import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXE
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
-import { openNodeEditor } from './nodes.js';
+import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
@@ -267,7 +267,7 @@ function changed({ structure = false, inspector = false } = {}) {
   requestRebuild();
   saveSoon();
   pushHistorySoon();
-  if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); }
+  if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); if (dockTab === 'scripts') renderScripts(); }
   else if (inspector) renderInspector();
   else { // a field changed: keep the prefab banner's "changed here" state current
     const j = ent(selectedId), old = j?.prefab && $('#inspector .pf-banner');
@@ -1192,6 +1192,7 @@ function setDock(name, { fromTab = false } = {}) {
   }
   dockTab = name;
   if (name === 'console') { consoleSeen = Log.entries.length; renderConsole(); }
+  if (name === 'scripts') renderScripts();
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
@@ -1240,6 +1241,109 @@ Log.listeners.add(() => { // batch redraws to once a frame
   consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(); } else updateConsoleBadge(); });
 });
 window.addEventListener('error', (e) => { if (playing) Log.add('error', e.message || 'Error', 'game'); });
+
+// ---- Scripts tab: every Visual Script in the game at a glance; tap one to open it ----
+let scriptQuery = '';
+/** Each Visual Script component: { lv, li, e, b, bi }. */
+function allGraphs() {
+  const out = [];
+  levelList().forEach((lv, li) => { for (const e of lv.entities || []) (e.behaviors || []).forEach((b, bi) => { if (b.type === 'graph') out.push({ lv, li, e, b, bi }); }); });
+  return out;
+}
+const graphEvents = (g) => [...new Set((g?.nodes || []).filter((n) => NODE_TYPES[n.type]?.cat === 'Events' || (NODE_TYPES[n.type]?.cat === 'Animation' && !NODE_TYPES[n.type].exec && !NODE_TYPES[n.type].value)).map((n) => NODE_TYPES[n.type].label.replace(/^On /, '')))];
+/** A tiny map of the graph: coloured blocks for nodes, lines for wires. */
+function graphThumb(g) {
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg'), N = g?.nodes || [];
+  svg.setAttribute('class', 'sc-thumb');
+  if (!N.length) { svg.setAttribute('viewBox', '0 0 100 60'); return svg; }
+  const W = 260, H = 90, x0 = Math.min(...N.map((n) => n.x || 0)), y0 = Math.min(...N.map((n) => n.y || 0));
+  const x1 = Math.max(...N.map((n) => (n.x || 0) + W)), y1 = Math.max(...N.map((n) => (n.y || 0) + H)), pad = 30;
+  svg.setAttribute('viewBox', `${x0 - pad} ${y0 - pad} ${Math.max(400, x1 - x0) + pad * 2} ${Math.max(240, y1 - y0) + pad * 2}`);
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  const at = new Map(N.map((n) => [n.id, n]));
+  for (const l of g.links || []) {
+    const a = at.get(l.from.node), c = at.get(l.to.node); if (!a || !c) continue;
+    const ax = (a.x || 0) + W, ay = (a.y || 0) + H / 2, cx = c.x || 0, cy = (c.y || 0) + H / 2, d = Math.max(40, Math.abs(cx - ax) / 2);
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', `M${ax},${ay} C${ax + d},${ay} ${cx - d},${cy} ${cx},${cy}`);
+    path.setAttribute('class', NODE_TYPES[a.type]?.value ? 'v' : '');
+    svg.append(path);
+  }
+  for (const n of N) {
+    const r = document.createElementNS(ns, 'rect');
+    r.setAttribute('x', n.x || 0); r.setAttribute('y', n.y || 0); r.setAttribute('width', W); r.setAttribute('height', H); r.setAttribute('rx', 22);
+    r.setAttribute('fill', NODE_CAT_COLOR[NODE_TYPES[n.type]?.cat] || '#555');
+    svg.append(r);
+  }
+  return svg;
+}
+function openGraphAt(li, id, bi) {
+  if (li !== levelIdx) setLevel(li);
+  selectedId = id; renderHierarchy(); updateCtxBar();
+  editGraph(() => ent(id) || {}, `behaviors.${bi}.graph`);
+}
+function scriptCard(x) {
+  const { li, e, b, bi } = x, g = b.graph || { nodes: [] }, sc = scriptOf(b), ev = graphEvents(g), here = li === levelIdx;
+  const menu = (anchor) => popMenu(anchor, [
+    { cap: `${e.name || 'Object'} · Visual Script` },
+    { icon: 'nodes', label: 'Open Node Editor', fn: () => openGraphAt(li, e.id, bi) },
+    { icon: 'info', label: 'Show Object in Inspector', fn: () => { if (li !== levelIdx) setLevel(li); select(e.id); setDock('inspector'); } },
+    sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete b.scriptRef; changed(); renderScripts(); toast('Unlinked'); } }
+      : { icon: 'save', label: 'Save as Reusable Script…', fn: () => { if (!g.nodes.length) { toast('Add some nodes first'); return; } const n = prompt('Name this script so you can reuse it', `${e.name || 'My'} script`); if (n?.trim()) { saveScript(b, g, n.trim()); renderScripts(); } } },
+    { icon: b.enabled === false ? 'eye' : 'eyeoff', label: b.enabled === false ? 'Turn On' : 'Turn Off', fn: () => { if (b.enabled === false) delete b.enabled; else b.enabled = false; changed(); renderScripts(); } },
+    '-',
+    { icon: 'trash', label: 'Remove Script', fn: () => { if (!confirm(`Remove this Visual Script from ${e.name || 'the object'}?`)) return; e.behaviors.splice(e.behaviors.indexOf(b), 1); changed({ structure: true }); pushHistory(); renderScripts(); } },
+  ]);
+  return h('div', { class: 'sc-card' + (b.enabled === false ? ' off' : '') + (selectedId === e.id && here ? ' sel' : ''), 'data-obj': e.name || '', onclick: (ev2) => { if (!ev2.target.closest('.sc-more')) openGraphAt(li, e.id, bi); } },
+    graphThumb(g),
+    h('div', { class: 'sc-info' },
+      h('b', {}, e.name || 'Object', e.behaviors.filter((q) => q.type === 'graph').length > 1 ? h('span', { class: 'sc-nth' }, `#${e.behaviors.filter((q) => q.type === 'graph').indexOf(b) + 1}`) : null, e.template ? h('em', { class: 'sc-tag' }, 'template') : null, sc ? h('em', { class: 'sc-tag link' }, icon('link'), sc.name) : null, b.enabled === false ? h('em', { class: 'sc-tag' }, 'off') : null),
+      h('small', {}, ev.length ? 'When: ' + ev.join(', ') : 'No event yet: add a green Event node'),
+      h('small', { class: 'sc-n' }, `${g.nodes.length} node${g.nodes.length === 1 ? '' : 's'} · ${(g.links || []).length} wire${(g.links || []).length === 1 ? '' : 's'}`)),
+    h('button', { class: 'sc-more', title: 'Script options', onclick: (ev2) => { ev2.stopPropagation(); menu(ev2.currentTarget); } }, icon('more')));
+}
+function renderScripts() {
+  const box = $('#scripts'); if (!box) return;
+  const all = allGraphs(), q = scriptQuery.trim().toLowerCase();
+  const match = (x) => !q || [x.e.name, ...(x.e.tags || []), scriptOf(x.b)?.name, ...graphEvents(x.b.graph), ...(x.b.graph?.nodes || []).map((n) => NODE_TYPES[n.type]?.label)].some((t) => String(t || '').toLowerCase().includes(q));
+  const shown = all.filter(match), here = shown.filter((x) => x.li === levelIdx), other = shown.filter((x) => x.li !== levelIdx);
+  const saved = userScripts();
+  const sel = ent(selectedId);
+  const search = all.length > 3 ? h('input', { class: 'sc-search', type: 'search', placeholder: `Search ${all.length} scripts (object, event or node)`, value: scriptQuery, autocapitalize: 'off',
+    oninput: (ev) => { scriptQuery = ev.target.value; const pos = ev.target.selectionStart; renderScripts(); const n = $('#scripts .sc-search'); n?.focus(); n?.setSelectionRange(pos, pos); } }) : null;
+  const parts = [
+    h('div', { class: 'sc-top' },
+      h('button', { class: 'btn primary sc-new', onclick: () => { addVisualScript(); } }, icon('plus'), sel && !sel.template ? `New Script on ${sel.name || 'object'}` : 'New Visual Script'),
+      search),
+  ];
+  if (!all.length) parts.push(h('div', { class: 'sc-empty' }, icon('nodes'), h('b', {}, 'No Visual Scripts yet'),
+    h('span', {}, 'Visual Scripts make things happen with nodes: “On Tap → Add to Score → Play Sound”. Every script in your game shows up here, so you can open it with one tap.')));
+  else if (!shown.length) parts.push(h('div', { class: 'empty' }, `No script matches “${scriptQuery}”.`));
+  if (here.length) parts.push(h('div', { class: 'sc-head' }, levelList().length > 1 ? `This level · ${levelName(project, levelIdx)}` : 'In this game', h('small', {}, String(here.length))), ...here.map(scriptCard));
+  if (other.length) {
+    const byLevel = new Map(); for (const x of other) (byLevel.get(x.li) || byLevel.set(x.li, []).get(x.li)).push(x);
+    for (const [li, xs] of byLevel) parts.push(h('div', { class: 'sc-head' }, levelName(levelList()[li], li), h('small', {}, String(xs.length))), ...xs.map(scriptCard));
+  }
+  if (saved.length && !q) {
+    parts.push(h('div', { class: 'sc-head' }, 'Saved scripts', h('small', {}, 'reuse on any object')));
+    for (const sc of saved) {
+      let uses = 0; eachScriptUse(sc.id, () => uses++);
+      parts.push(h('div', { class: 'sc-saved' }, h('span', { class: 'sc-sic' }, icon('link')),
+        h('span', { class: 'sc-info' }, h('b', {}, sc.name), h('small', {}, `${sc.graph.nodes.length} nodes · used ${uses} time${uses === 1 ? '' : 's'}`)),
+        h('button', { class: 'btn', disabled: !sel, title: sel ? `Add to ${sel.name}` : 'Select an object first', onclick: () => { const j = ent(selectedId); if (!j) { toast('Select an object first'); return; } addSavedScript(j, sc); changed({ structure: true }); pushHistory(); renderScripts(); toast(`Added “${sc.name}” to ${j.name}`); } }, icon('plus'), 'Add'),
+        h('button', { class: 'sc-more', title: 'More', onclick: (ev) => popMenu(ev.currentTarget, [
+          { cap: sc.name },
+          { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Script name', sc.name); if (!n?.trim()) return; sc.name = n.trim(); saveScriptToLibrary(sc); changed(); renderScripts(); } },
+          { icon: 'trash', label: 'Delete Saved Script', fn: () => {
+            if (!confirm(`Delete “${sc.name}”? Objects using it keep their own copy.`)) return;
+            eachScriptUse(sc.id, (b) => delete b.scriptRef); root.scripts = userScripts().filter((q2) => q2 !== sc);
+            changed({ structure: true }); pushHistory(); renderScripts();
+          } },
+        ]) }, icon('more'))));
+    }
+  }
+  box.replaceChildren(...parts);
+}
 
 // ---- bottom sheet (phones): peek / half / full ----
 function setSheet(state) {
@@ -1331,7 +1435,7 @@ function refreshAll() {
   $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
   const n = levelList().length;
   $('#levelBtn').replaceChildren(...[icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
-  renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons(); updateCtxBar();
+  renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons(); updateCtxBar(); if (dockTab === 'scripts') renderScripts();
 }
 
 // ============================================================================
@@ -1923,7 +2027,7 @@ function editGraph(target, path) {
     saveScript: (name, g) => saveScript(B(), g, name),
     unlink: () => { delete B().scriptRef; changed(); },
     onChange: (g) => { setPath(T(), path, g); const b = B(); if (b?.scriptRef) syncScript(b.scriptRef, g, b); requestRebuild(); saveSoon(); },
-    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); if (dockTab === 'scripts') renderScripts(); },
   });
   pushBack(back);
 }
@@ -3743,12 +3847,12 @@ $('#pbStats').addEventListener('click', toggleStats);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
-for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
+for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['scripts', 'nodes', 'Scripts'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
 { // swipe left / right across a panel to move between Hierarchy, Inspector and Project
-  const order = ['hierarchy', 'inspector', 'project', 'console'];
+  const order = ['hierarchy', 'inspector', 'scripts', 'project', 'console'];
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];

@@ -152,6 +152,7 @@ export class Entity {
 
   /** Add a behavior: a {type, ...params} description from the registry, or a plain hooks object. */
   addBehavior(b) {
+    if (b && b.enabled === false) return null; // switched off in the editor
     let inst = b;
     if (b && typeof b.type === 'string') {
       const def = Behaviors[b.type];

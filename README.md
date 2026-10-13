@@ -21,22 +21,22 @@ Or turn on **GitHub Pages** for the repo (Settings → Pages → deploy from bra
 
 ## The editor
 
-Open `editor/` on your phone (or a desktop browser).
+Open `editor/` on your phone (or a desktop browser). The layout follows desktop game engines: a toolbar, the **Scene** view, and **Hierarchy**, **Inspector** and **Project** panels (tabs at the bottom on phones, docked around the scene on wide screens).
 
 | Do this | How |
 | --- | --- |
-| Add objects | **+** button: presets (Player, Jumper, Platform, Coin, Enemy, Goal, Spawner, Score HUD) or plain shapes/meshes, text, images from your photos |
-| Select / move | Tap an object, then drag it. Snap-to-grid is the **#** button |
-| Pan / orbit / zoom | Drag empty space (2D pans, 3D orbits), pinch to zoom. Desktop: mouse wheel, shift-drag pans |
-| Edit properties | **Inspector** tab: transform, look, physics body, behaviors |
-| Game settings | **Game** tab: title screen, gravity, touch controls, win score, variables, 3D camera and light |
-| Test | **▶ Play**, then **■ Stop** |
-| Save | Automatic (in the browser). **☰ → My games** lists your projects |
-| Share | **☰ → Export playable HTML** creates one file that runs offline in any browser. JSON import/export is in the menu too |
+| Add objects | **Project → Prefabs / Objects**: drag a tile into the Scene (press and hold briefly on touch), or tap it to add at the center. Also **Hierarchy → Create** |
+| Add components | **Project → Components**: drag onto an object in the Scene or Hierarchy, or use **Add Component** in the Inspector |
+| Select | Tap an object in the Scene or Hierarchy. Tap the scene name at the top of the Hierarchy for game settings |
+| Move / Rotate / Scale | Toolbar tools (Q W E R). Drag the object, or drag the gizmo handles to lock an axis |
+| Pan / Orbit / Zoom | Drag empty space (2D pans, 3D orbits), pinch to zoom. Hand tool always pans. Desktop: wheel zooms, shift-drag pans |
+| Edit numbers | Type in the field, or drag the field's label left and right |
+| Test | **▶** in the toolbar. **▶** again (or the floating bar) stops |
+| Save / share | Saving is automatic. **☰** menu: New/Open Project, Build HTML (one offline file), JSON export/import |
 
-Undo/redo: ↶ ↷ (or Ctrl/Cmd+Z). Delete: 🗑 in the inspector (or the Delete key).
+Other shortcuts: undo/redo arrows (Ctrl/Cmd+Z), F frames the selection, Ctrl+D duplicates, Delete removes.
 
-**Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** behavior then creates copies of it by name. Sky Dodge shows how.
+**Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** component then creates copies of it by name. Sky Dodge shows how.
 
 ## Using the engine from code
 

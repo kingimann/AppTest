@@ -21,7 +21,7 @@ Or turn on **GitHub Pages** for the repo (Settings → Pages → deploy from bra
 
 ## The editor
 
-Open `editor/` on your phone (or a desktop browser). The layout follows desktop game engines: a toolbar, the **Scene** view, and **Hierarchy**, **Inspector** and **Project** panels (tabs at the bottom on phones, docked around the scene on wide screens).
+Open `editor/` on your phone (or a desktop browser). **Live version: https://kingimann.github.io/AppTest/editor/** — use *☰ → Install App* to add it to your home screen; it works offline. The layout follows desktop game engines: a toolbar, the **Scene** view, and **Hierarchy**, **Inspector** and **Project** panels (tabs at the bottom on phones, docked around the scene on wide screens).
 
 | Do this | How |
 | --- | --- |
@@ -37,6 +37,16 @@ Open `editor/` on your phone (or a desktop browser). The layout follows desktop 
 | Edit numbers | Type in the field, or drag the field's label left and right. ‹ › in the Inspector steps through objects; the ⋮ menu copies a component so you can paste it onto another object |
 | Test | **▶** in the toolbar. **▶** again (or the floating bar) stops |
 | Save / share | Saving is automatic. **☰** menu: New/Open Project, Build HTML (one offline file), JSON export/import |
+
+**On a phone** the Scene fills the screen with a tool rail on the left, and the Hierarchy / Inspector / Project panels live in a bottom sheet: drag its handle (or tap the open tab) to switch between peek, half and full height. Held sideways, the panels move to the right. Touch gestures:
+
+| Gesture | Does |
+| --- | --- |
+| Long-press an object | Object menu: Inspect, Duplicate, Copy, Paint copies, Focus, Hide, Lock, Delete |
+| Long-press empty space | Paste here, Add object here, Reset view, Game settings |
+| Two-finger tap / three-finger tap | Undo / Redo |
+| Double-tap empty space | Reset the view |
+| − / + next to numbers | Nudge values without typing |
 
 Other shortcuts: undo/redo arrows (Ctrl/Cmd+Z), F frames the selection, Ctrl+D duplicates, Delete removes.
 
@@ -88,7 +98,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 
 | Type | What it does | Params (defaults) |
 | --- | --- | --- |
-| `move` | Player movement with joystick, keyboard, or dragging. | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true) |
+| `move` | Player movement with joystick, keyboard, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true) |
 | `platformer` | Run & jump. Uses gravity; tap or the jump button to jump. | `speed` (240 / 3D 7), `jump` (620 / 3D 10), `doubleJump` (false), `onFall` ("respawn") |
 | `rotate` | Spin continuously. | `speed` (90), `axis` ("z" / 3D "y") |
 | `patrol` | Move back and forth from the start point. | `dx` (120 / 3D 4), `dy` (0), `dz` (0), `duration` (2) |
@@ -110,6 +120,13 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `teleport` | Sends the player to another object (by name). | `target` (""), `tag` ("player") |
 | `unlock` | Disappears once a variable reaches an amount, e.g. a door that opens with keys. | `var` ("keys"), `amount` (1), `text` |
 | `sound` | Plays a sound when the game starts or when touched. | `sound` ("power"), `when` ("touched"), `tag` ("player") |
+| `tappable` | The player taps it on screen to score (clicker, whack-a-mole, bubble games). | `points` (10), `destroy` (true), `sound` ("coin") |
+| `draggable` | The player can pick it up and move it with a finger (puzzles, sorting games). | `snap` (0), `lift` (true) |
+| `swipeMove` | Swipe left/right to change lanes, swipe up to jump (endless-runner controls). | `distance` (110 / 3D 2.5), `lanes` (3), `jump` (0 / 3D 9) |
+| `orbit` | Circles around its starting point. | `radius` (80 / 3D 3), `speed` (90) |
+| `pulse` | Grows and shrinks to draw attention. | `amount` (0.15), `period` (0.8) |
+| `checkpoint` | The player respawns here after falling or getting hurt. | `text`, `tag` ("player") |
+| `destructible` | Health: takes hits from objects with a tag (like bullets) and breaks when health runs out. | `hp` (3), `hitBy` ("bullet"), `points` (10), `removeHitter` (true) |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`).
@@ -141,13 +158,14 @@ registerBehavior('blink', {
 | | |
 | --- | --- |
 | `engine.input.axis()` | `{x, y}` from joystick or keys |
-| `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'KeyX')`, `isDown(...)` | buttons, taps, keys |
+| `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'swipe:left' \| 'KeyX')`, `isDown(...)` | buttons, taps, swipes, keys |
+| `engine.input.taps`, `engine.input.pointers`, `engine.input.useTilt = true` | raw touches, tilt controls |
 | `engine.audio.sfx('coin' \| 'jump' \| 'hit' \| 'power' \| 'win' \| 'lose')`, `audio.play(url)` | sound |
 | `engine.vibrate(ms)`, `engine.timeScale`, `engine.paused`, `engine.restart()` | misc |
 
 ### Scene settings
 
-`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, winScore, timeLimit, saveBest }`. With `timeLimit`, `{time}` counts down and the game ends at zero.
+`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. With `timeLimit`, `{time}` counts down and the game ends at zero.
 
 **Levels:** put more scenes in `levels: [sceneJson, ...]` on the first scene. Winning a level shows "Level complete" and continues to the next one, carrying variables like score and lives over; `{level}` shows the level number. `engine.start(json, { level: 1 })` starts at the second level. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
 

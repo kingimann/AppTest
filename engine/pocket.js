@@ -227,6 +227,7 @@ export class Camera3D {
 // ============================================================================
 const DEFAULT_SETTINGS = {
   joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
+  muteButton: true, orientation: 'any', fullscreen: false,
 };
 
 export class Scene {
@@ -453,7 +454,8 @@ export class Input {
     this.drag = { dx: 0, dy: 0 };
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
-    this.tilt = null;
+    this.downs = []; // pointers pressed this frame: { id, x, y }
+    this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
 
     el.addEventListener('pointerdown', (e) => this.down(e));
     el.addEventListener('pointermove', (e) => this.move(e));
@@ -475,6 +477,8 @@ export class Input {
   down(e) {
     this.engine.audio.unlock();
     if (!this.enabled) return;
+    if (this.useTilt && !this.tiltOn) this.enableTilt();
+    this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.buttons.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3);
@@ -484,6 +488,7 @@ export class Input {
       ptr.role = 'stick'; this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     }
     this.pointers.set(e.pointerId, ptr);
+    if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
   }
 
   move(e) {
@@ -505,10 +510,33 @@ export class Input {
     this.pointers.delete(e.pointerId);
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
-    if (!cancelled && ptr.role === 'free' && performance.now() - ptr.t < 350 && Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) < 14) {
+    const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
+    if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
+    } else if (!cancelled && ptr.role === 'free' && dt < 500 && dist > 40) {
+      const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+      this.justPressed.add('swipe:' + dir); this.justPressed.add('swipe');
     }
+  }
+
+  /** Tilt-to-move using the device's motion sensors (asks permission on iOS). */
+  enableTilt() {
+    if (this.tiltOn) return;
+    const listen = () => {
+      this.tiltOn = true;
+      window.addEventListener('deviceorientation', (e) => {
+        if (e.gamma == null) return;
+        const angle = screen.orientation?.angle ?? window.orientation ?? 0;
+        let x = e.gamma, y = e.beta;
+        if (angle === 90) { x = e.beta; y = -e.gamma; } else if (angle === -90 || angle === 270) { x = -e.beta; y = e.gamma; }
+        if (this.tiltBase == null) this.tiltBase = y;
+        this.tiltAxis = { x: clamp(x / 25, -1, 1), y: clamp((y - this.tiltBase) / 25, -1, 1) };
+      });
+    };
+    const D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === 'function') D.requestPermission().then((r) => r === 'granted' && listen()).catch(() => {});
+    else if (D) listen();
   }
 
   get stickRadius() { return Math.min(70, this.engine.width * 0.15); }
@@ -522,6 +550,10 @@ export class Input {
     if (k.has('ArrowUp') || k.has('KeyW')) y -= 1;
     if (k.has('ArrowDown') || k.has('KeyS')) y += 1;
     if (this.stick) { x += (this.stick.x - this.stick.bx) / this.stickRadius; y += (this.stick.y - this.stick.by) / this.stickRadius; }
+    if (this.useTilt && this.tiltAxis) {
+      const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
+      x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
+    }
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
@@ -545,8 +577,8 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
-  reset() { this.pointers.clear(); this.stick = null; this.keys.clear(); this.endFrame(); }
+  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
+  reset() { this.pointers.clear(); this.stick = null; this.keys.clear(); this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
 // ============================================================================
@@ -961,8 +993,12 @@ function renderUI(engine, scene) {
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' ? 0.6 : 0.42)}px system-ui, sans-serif`;
+      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
+      if (b.action === 'mute' && engine.audio.muted) {
+        ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(b.x - b.r * 0.5, b.y - b.r * 0.5); ctx.lineTo(b.x + b.r * 0.5, b.y + b.r * 0.5); ctx.stroke();
+      }
     }
   }
   if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
@@ -971,6 +1007,12 @@ function renderUI(engine, scene) {
     ctx.globalAlpha = 1;
   }
   drawMessage(ctx, scene, W, H, engine);
+  if (scene.rotateNeeded) {
+    dim(0.9);
+    big('⟳', H * 0.4, 64);
+    big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
+    return;
+  }
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -1014,7 +1056,8 @@ function respawnOrEnd(player, s, action) {
     s.engine.audio.sfx('hit'); s.engine.vibrate(60); s.camera.shake = is3D(player) ? 12 : 10;
     s.burst(player.x, player.y, player.z, player.mesh?.color || player.shape?.fill || '#fff', 14);
     if (action === 'respawn' || player.data.respawnOnHit) {
-      player.x = player.props.x || 0; player.y = player.props.y || 0; player.z = player.props.z || 0;
+      const sp = player.data.respawn || player.props;
+      player.x = sp.x || 0; player.y = sp.y || 0; player.z = sp.z || 0;
       if (player.body) player.body.vel = { x: 0, y: 0, z: 0 };
     }
     player.data.invuln = 1.2;
@@ -1034,18 +1077,21 @@ registerBehavior('move', {
   label: 'Move', description: 'Player movement with joystick, keyboard, or dragging.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
-    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both'], default: 'both' },
+    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both' },
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 }); },
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
+        if (p.control === 'tilt') s.engine.input.useTilt = true;
+      },
       update(e, dt, s) {
         const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis();
         const ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y, b = e.body;
-        const d = p.control !== 'joystick' ? inp.drag : { dx: 0, dy: 0 };
+        const d = p.control === 'drag' || p.control === 'both' ? inp.drag : { dx: 0, dy: 0 };
         if (is3D(e)) {
           b.vel.x = ax * p.speed; b.vel.z = ay * p.speed;
           const k = 0.025 * p.speed / 7;
@@ -1471,6 +1517,210 @@ registerBehavior('sound', {
   },
 });
 
+/** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
+function hitTest(s, e, sx, sy) {
+  const eng = s.engine;
+  if (e.ui) {
+    const o = anchorPoint(e.anchor, eng.width, eng.height, eng.safe), ex = e.extents();
+    const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
+    return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
+  }
+  const ex = e.extents();
+  if (s.mode === '2d') {
+    const w = eng.renderer.screenToWorld(s, sx, sy), pad = 10 / eng.renderer.zoomFor(s);
+    return ex.sphere ? Math.hypot(w.x - e.x, w.y - e.y) <= ex.r + pad : Math.abs(w.x - e.x) <= ex.hx + pad && Math.abs(w.y - e.y) <= ex.hy + pad;
+  }
+  const p = eng.renderer.worldToScreen(s, e.x, e.y, e.z);
+  if (p.behind) return false;
+  const edge = eng.renderer.worldToScreen(s, e.x + (ex.sphere ? ex.r : Math.max(ex.hx, ex.hz)), e.y, e.z);
+  return Math.hypot(sx - p.x, sy - p.y) <= Math.max(24, Math.hypot(edge.x - p.x, edge.y - p.y) * 1.2);
+}
+/** World point under a screen point (2D), or on the horizontal plane at height y (3D). */
+function screenToWorldAt(s, sx, sy, y) {
+  const eng = s.engine;
+  if (s.mode === '2d') return eng.renderer.screenToWorld(s, sx, sy);
+  const r = eng.renderer.screenRay(s, sx, sy);
+  if (Math.abs(r.dir.y) < 1e-6) return null;
+  const t = (y - r.origin.y) / r.dir.y;
+  return t < 0 ? null : { x: r.origin.x + r.dir.x * t, y, z: r.origin.z + r.dir.z * t };
+}
+
+registerBehavior('tappable', {
+  label: 'Tap Target', description: 'The player taps it on screen to score (clicker, whack-a-mole, bubble games).',
+  params: [
+    { key: 'points', label: 'Points', type: 'number', default: 10 },
+    { key: 'destroy', label: 'Disappear when tapped', type: 'bool', default: true },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'power', 'click', 'hit', 'none'], default: 'coin' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        for (const t of s.engine.input.taps) {
+          if (e.dead || !hitTest(s, e, t.x, t.y)) continue;
+          s.addVar('score', p.points);
+          if (p.sound !== 'none') s.engine.audio.sfx(p.sound);
+          s.engine.vibrate(10);
+          s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ffd23d', 14, 0.8);
+          if (p.destroy) e.destroy(); else { const k = e.sx; e.sx = e.sy = k * 1.25; s.tween(e, { sx: k, sy: k }, 0.2); }
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('draggable', {
+  label: 'Draggable', description: 'The player can pick it up and move it with a finger (puzzles, sorting games).',
+  params: [
+    { key: 'snap', label: 'Snap to grid', type: 'number', default: 0 },
+    { key: 'lift', label: 'Grow while held', type: 'bool', default: true },
+  ],
+  create(p) {
+    let grab = null;
+    return {
+      update(e, dt, s) {
+        const inp = s.engine.input;
+        if (!grab) {
+          const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y));
+          if (!d) return;
+          const w = screenToWorldAt(s, d.x, d.y, e.y);
+          if (!w) return;
+          grab = { id: d.id, ox: e.x - w.x, oy: e.y - w.y, oz: e.z - (w.z || 0), sx: e.sx, sy: e.sy };
+          inp.downs.splice(inp.downs.indexOf(d), 1);
+          if (p.lift) { e.sx *= 1.12; e.sy *= 1.12; }
+          s.engine.vibrate(8);
+        }
+        const ptr = inp.pointers.get(grab.id);
+        if (!ptr) {
+          if (p.snap) { e.x = Math.round(e.x / p.snap) * p.snap; e.y = Math.round(e.y / p.snap) * p.snap; if (is3D(e)) e.z = Math.round(e.z / p.snap) * p.snap; }
+          e.sx = grab.sx; e.sy = grab.sy; grab = null;
+          return;
+        }
+        inp.drag.dx = 0; inp.drag.dy = 0; // don't also steer the player
+        const w = screenToWorldAt(s, ptr.x, ptr.y, e.y);
+        if (!w) return;
+        if (is3D(e)) { e.x = w.x + grab.ox; e.z = w.z + grab.oz; } else { e.x = w.x + grab.ox; e.y = w.y + grab.oy; }
+        if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+      },
+    };
+  },
+});
+
+registerBehavior('swipeMove', {
+  label: 'Swipe Lanes', description: 'Swipe left/right to change lanes, swipe up to jump (endless-runner controls).',
+  params: [
+    { key: 'distance', label: 'Lane width', type: 'number', default: 110, default3d: 2.5 },
+    { key: 'lanes', label: 'Lanes', type: 'number', default: 3 },
+    { key: 'jump', label: 'Swipe-up jump power (0 = off)', type: 'number', default: 0, default3d: 9 },
+  ],
+  create(p) {
+    let lane = 0, home = 0;
+    return {
+      start(e) { home = e.x; },
+      update(e, dt, s) {
+        const inp = s.engine.input, max = Math.floor((p.lanes - 1) / 2);
+        if (inp.pressed('swipe:left') || inp.pressed('ArrowLeft')) lane = Math.max(-max, lane - 1);
+        if (inp.pressed('swipe:right') || inp.pressed('ArrowRight')) lane = Math.min(max, lane + 1);
+        if (p.jump && e.body && e.body.grounded && (inp.pressed('swipe:up') || inp.pressed('ArrowUp') || inp.pressed('Space'))) {
+          e.body.vel.y = is3D(e) ? p.jump : -p.jump; s.engine.audio.sfx('jump');
+        }
+        e.x += (home + lane * p.distance - e.x) * Math.min(1, dt * 14);
+      },
+    };
+  },
+});
+
+registerBehavior('orbit', {
+  label: 'Orbit', description: 'Circles around its starting point.',
+  params: [
+    { key: 'radius', label: 'Radius', type: 'number', default: 80, default3d: 3 },
+    { key: 'speed', label: 'Degrees / sec', type: 'number', default: 90 },
+  ],
+  create(p) {
+    let cx, cy, cz, a = 0;
+    return {
+      start(e) { cx = e.x; cy = e.y; cz = e.z; },
+      update(e, dt) {
+        a += p.speed * dt * DEG;
+        e.x = cx + Math.cos(a) * p.radius;
+        if (is3D(e)) e.z = cz + Math.sin(a) * p.radius; else e.y = cy + Math.sin(a) * p.radius;
+      },
+    };
+  },
+});
+
+registerBehavior('pulse', {
+  label: 'Pulse', description: 'Grows and shrinks to draw attention.',
+  params: [
+    { key: 'amount', label: 'Size change', type: 'number', default: 0.15 },
+    { key: 'period', label: 'Seconds per pulse', type: 'number', default: 0.8 },
+  ],
+  create(p) {
+    let t = 0, base;
+    return {
+      start(e) { base = { x: e.sx, y: e.sy, z: e.sz }; },
+      update(e, dt) {
+        t += dt; const k = 1 + Math.sin(t / Math.max(0.1, p.period) * Math.PI * 2) * p.amount;
+        e.sx = base.x * k; e.sy = base.y * k; e.sz = base.z * k;
+      },
+    };
+  },
+});
+
+registerBehavior('checkpoint', {
+  label: 'Checkpoint', description: 'The player respawns here after falling or getting hurt.',
+  params: [
+    { key: 'text', label: 'Message', type: 'text', default: 'Checkpoint!' },
+    { key: 'tag', label: 'Saved by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let hit = false;
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || hit) return;
+        hit = true;
+        other.data.respawn = { x: e.x, y: is3D(e) ? e.y + 1 : e.y - 20, z: e.z };
+        other.data.respawnOnHit = true;
+        if (e.shape) e.shape.fill = '#5dff8a'; if (e.mesh) e.mesh.color = '#5dff8a';
+        if (p.text) s.message(p.text, 1.5);
+        s.engine.audio.sfx('power');
+        s.burst(e.x, e.y, e.z, '#5dff8a', 18);
+      },
+    };
+  },
+});
+
+registerBehavior('destructible', {
+  label: 'Health', description: 'Takes hits from objects with a tag (like bullets) and breaks when health runs out.',
+  params: [
+    { key: 'hp', label: 'Health', type: 'number', default: 3 },
+    { key: 'hitBy', label: 'Hurt by tag', type: 'text', default: 'bullet' },
+    { key: 'points', label: 'Points when destroyed', type: 'number', default: 10 },
+    { key: 'removeHitter', label: 'Remove what hit it', type: 'bool', default: true },
+  ],
+  create(p) {
+    let hp;
+    return {
+      start(e) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); },
+      update(e, dt, s) { // make sure whatever can hit us takes part in collisions
+        for (const o of s.entities) if (!o.body && o.tags.has(p.hitBy)) o.setBody({ type: 'kinematic', sensor: true });
+      },
+      collide(e, other, s) {
+        if (!other.has(p.hitBy) || e.dead) return;
+        if (p.removeHitter) other.destroy();
+        hp--;
+        e.data.invuln = 0.15;
+        s.engine.audio.sfx(hp > 0 ? 'click' : 'hit');
+        if (hp > 0) return;
+        s.addVar('score', p.points);
+        s.camera.shake = Math.max(s.camera.shake, 6);
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
+        e.destroy();
+      },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -1523,7 +1773,10 @@ export class Engine {
     this.resize();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
-    this.onVis = () => { if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true; };
+    this.onVis = () => {
+      if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true;
+      if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
+    };
     document.addEventListener('visibilitychange', this.onVis);
     this.last = performance.now();
     this.running = true;
@@ -1616,10 +1869,39 @@ export class Engine {
       const r = Math.min(44, this.width * 0.11), bottom = this.height - this.safe.bottom - m - r;
       if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: this.width - this.safe.right - m - r, y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: this.width - this.safe.right - m - r - (s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
-      if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2, y: this.safe.top + 30, r: 20, id: null });
+      const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
+      if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
+      if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
     this.input.buttons = b;
   }
+
+  /** True when the game wants portrait/landscape and a phone is held the other way. */
+  wrongOrientation(s) {
+    const o = s.settings.orientation;
+    if (!o || o === 'any' || !matchMedia('(pointer: coarse)').matches) return false;
+    return o === 'portrait' ? this.width > this.height * 1.1 : this.height > this.width * 1.1;
+  }
+
+  /** First touch: go fullscreen if the game asks for it, and keep the screen awake while playing. */
+  onFirstGesture() {
+    const s = this.scene;
+    if (!s || this.editing) return;
+    if (s.settings.fullscreen && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().then(() => {
+        if (s.settings.orientation !== 'any') screen.orientation?.lock?.(s.settings.orientation).catch(() => {});
+      }).catch(() => {});
+    }
+    this.keepAwake();
+  }
+  async keepAwake() {
+    if (this.wakeLock || !navigator.wakeLock || this.editing) return;
+    try {
+      this.wakeLock = await navigator.wakeLock.request('screen');
+      this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });
+    } catch { /* not allowed right now */ }
+  }
+  releaseAwake() { this.wakeLock?.release().catch(() => {}); this.wakeLock = null; }
 
   vibrate(p) { try { if (!this.audio.muted) navigator.vibrate?.(p); } catch { /* unsupported */ } }
 
@@ -1639,6 +1921,9 @@ export class Engine {
   update(dt) {
     const s = this.scene, inp = this.input;
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
+    if (inp.pressed('btn:mute') || inp.pressed('KeyM')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
+    s.rotateNeeded = this.wrongOrientation(s);
+    if (s.rotateNeeded) return;
     if (this.paused) { if (inp.pressed('tap') || inp.pressed('Escape') || inp.pressed('btn:pause')) this.paused = false; return; }
     if (inp.pressed('btn:pause') || inp.pressed('Escape') || inp.pressed('KeyP')) { if (s.state === 'play') { this.paused = true; return; } }
     if (s.state === 'title') {

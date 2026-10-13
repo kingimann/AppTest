@@ -98,6 +98,22 @@ export const templates = {
     ],
   },
 
+  'tap-frenzy': {
+    version: 1, name: 'Tap Frenzy', mode: '2d', background: '#16233b', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'TAP FRENZY', subtitle: 'Pop the bubbles, avoid the bombs. 30 seconds!', saveBest: 'tap-frenzy', timeLimit: 30, orientation: 'portrait' },
+    vars: { score: 0 },
+    entities: [
+      { id: 'bubble-spawner', name: 'Bubble Spawner', x: 60, y: 120, behaviors: [{ type: 'spawner', template: 'Bubble', every: [0.35, 0.7], x: [50, 350], y: [160, 640], ramp: 0.2, max: 12 }] },
+      { id: 'bomb-spawner', name: 'Bomb Spawner', x: 340, y: 120, behaviors: [{ type: 'spawner', template: 'Bomb', every: [1.2, 2.2], x: [50, 350], y: [160, 640], ramp: 0.1, max: 4 }] },
+      { id: 'bubble', name: 'Bubble', template: true, x: 120, y: 300, shape: { type: 'circle', r: 30, fill: 'rgba(80,200,255,0.35)', stroke: '#7fdcff', lineWidth: 3, glow: 10 },
+        behaviors: [{ type: 'tappable', points: 10, destroy: true, sound: 'coin' }, { type: 'pulse', amount: 0.08, period: 0.9 }, { type: 'lifetime', seconds: 1.8 }] },
+      { id: 'bomb', name: 'Bomb', template: true, x: 280, y: 300, shape: { type: 'circle', r: 26, fill: '#222', stroke: '#ff4d6d', lineWidth: 4 },
+        behaviors: [{ type: 'tappable', points: -30, destroy: true, sound: 'hit' }, { type: 'pulse', amount: 0.15, period: 0.4 }, { type: 'lifetime', seconds: 1.6 }] },
+      { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
+      { id: 'hud-time', name: 'Timer Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '{time}s', size: 24, align: 'right', color: '#ffd23d' } },
+    ],
+  },
+
   'empty-2d': {
     version: 1, name: 'Empty 2D', mode: '2d', background: '#0b0b1a', view: { width: 400, height: 700 }, gravity: 0,
     settings: {}, vars: { score: 0 }, entities: [],
@@ -114,6 +130,7 @@ export const templateInfo = [
   { key: 'sky-dodge', title: 'Sky Dodge', blurb: '2D dodger with spawners' },
   { key: 'jump-quest', title: 'Jump Quest', blurb: '2D platformer, 2 levels' },
   { key: 'gem-garden', title: 'Gem Garden', blurb: '3D collect-a-thon' },
+  { key: 'tap-frenzy', title: 'Tap Frenzy', blurb: 'Tap-only arcade, made for phones' },
   { key: 'empty-2d', title: 'Empty 2D', blurb: 'Blank canvas' },
   { key: 'empty-3d', title: 'Empty 3D', blurb: 'Just a floor' },
 ];

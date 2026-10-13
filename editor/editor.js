@@ -472,11 +472,19 @@ let gesture = null;
 const snapV = (v, step) => (snap ? Math.round(v / step) * step : round(v, 2));
 const localXY = (ev) => { const r = surface.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
 
+let tapTrack = null, lastEmptyTap = 0, lpTimer = 0;
+const LONG_PRESS = 520;
+function armLongPress(fn) { clearTimeout(lpTimer); lpTimer = setTimeout(() => { lpTimer = 0; fn(); }, LONG_PRESS); }
+const cancelLongPress = () => { clearTimeout(lpTimer); lpTimer = 0; };
+
 surface.addEventListener('pointerdown', (ev) => {
   if (playing) return;
   surface.setPointerCapture(ev.pointerId);
   const { x, y } = localXY(ev);
-  ptrs.set(ev.pointerId, { x, y });
+  ptrs.set(ev.pointerId, { x, y, sx: x, sy: y });
+  if (ptrs.size === 1) tapTrack = { t0: performance.now(), max: 1, moved: false };
+  else if (tapTrack) tapTrack.max = Math.max(tapTrack.max, ptrs.size);
+  if (ptrs.size > 1) cancelLongPress();
   $('#hint').hidden = true;
   if (ptrs.size === 1 && tool === 'paint' && ev.button === 0 && !ev.altKey) {
     const src = ent(selectedId);
@@ -488,7 +496,11 @@ surface.addEventListener('pointerdown', (ev) => {
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
     const giz = !panBtn && hitGizmo(x, y);
-    if (giz) { beginTransform(giz, x, y); return; }
+    if (giz) {
+      beginTransform(giz, x, y);
+      if (giz.handle === 'free' && ev.pointerType !== 'mouse') armLongPress(() => { if (gesture && !gesture.moved) { const id = gesture.id; gesture = null; buzz(15); openObjectMenu(id, x, y); } });
+      return;
+    }
     const hit = panBtn || tool === 'hand' ? null : pick(x, y);
     if (hit) {
       const was = selectedId === hit.id;
@@ -496,6 +508,7 @@ surface.addEventListener('pointerdown', (ev) => {
       const j = ent(hit.id);
       if (tool === 'rotate' || tool === 'scale') { gesture = { type: 'tap', id: hit.id, sx: x, sy: y, moved: false, was }; return; }
       gesture = { type: 'free', id: hit.id, sx: x, sy: y, orig: { x: j.x || 0, y: j.y || 0, z: j.z || 0 }, ui: !!j.ui, moved: false };
+      if (ev.pointerType !== 'mouse') armLongPress(() => { if (gesture?.id === hit.id && !gesture.moved) { gesture = null; buzz(15); openObjectMenu(hit.id, x, y); } });
       if (is3D() && !j.ui) {
         const p = rayPlaneY(engine.renderer.screenRay(engine.scene, x, y), gesture.orig.y);
         gesture.grab = p ? { x: p.x - gesture.orig.x, z: p.z - gesture.orig.z } : { x: 0, z: 0 };
@@ -503,6 +516,7 @@ surface.addEventListener('pointerdown', (ev) => {
     } else {
       const orbitMode = is3D() && !panBtn && !ev.shiftKey;
       gesture = { type: orbitMode ? 'orbit' : 'pan', lx: x, ly: y, sx: x, sy: y, moved: false };
+      if (ev.pointerType !== 'mouse') armLongPress(() => { if (gesture && !gesture.moved && (gesture.type === 'pan' || gesture.type === 'orbit')) { gesture = null; buzz(15); openSpaceMenu(x, y); } });
     }
   } else if (ptrs.size === 2) {
     if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
@@ -510,7 +524,12 @@ surface.addEventListener('pointerdown', (ev) => {
     gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, zoom0: cam2d.zoom, dist0: orbit.dist };
   }
 });
-surface.addEventListener('contextmenu', (e) => e.preventDefault());
+surface.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (playing) return;
+  const { x, y } = localXY(e), hit = pick(x, y);
+  if (hit) { select(hit.id); openObjectMenu(hit.id, x, y); } else openSpaceMenu(x, y);
+});
 
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
@@ -530,6 +549,7 @@ surface.addEventListener('pointermove', (ev) => {
   if (!p || !gesture || playing) return;
   const { x, y } = localXY(ev);
   p.x = x; p.y = y;
+  if (Math.hypot(x - p.sx, y - p.sy) > 10) { if (tapTrack) tapTrack.moved = true; cancelLongPress(); }
   const s = engine.scene, g = gesture;
   const dx = x - (g.sx ?? x), dy = y - (g.sy ?? y);
   if (['free', 'axis', 'rotate', 'scale', 'tap'].includes(g.type)) {
@@ -627,11 +647,20 @@ function panOrbit(dx, dy) {
 const endPointer = (ev) => {
   if (!ptrs.has(ev.pointerId)) return;
   ptrs.delete(ev.pointerId);
+  cancelLongPress();
+  if (ptrs.size === 0 && tapTrack && tapTrack.max >= 2 && !tapTrack.moved && performance.now() - tapTrack.t0 < 400) {
+    undoRedo(tapTrack.max >= 3 ? 1 : -1); buzz(10); toast(tapTrack.max >= 3 ? 'Redo' : 'Undo');
+    tapTrack = null; gesture = null; return;
+  }
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
-  if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && tool !== 'hand') select(null);
+  if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
+    const now = performance.now();
+    if (now - lastEmptyTap < 320) { resetCamera(); applyCamera(); lastEmptyTap = 0; }
+    else { lastEmptyTap = now; if (tool !== 'hand') select(null); }
+  }
   if (ptrs.size === 0 || g.type === 'pinch') gesture = null;
 };
 surface.addEventListener('pointerup', endPointer);
@@ -650,6 +679,43 @@ surface.addEventListener('wheel', (ev) => {
   }
   applyCamera();
 }, { passive: false });
+
+let objClipboard = null;
+/** Turn a Scene-view point into an "at" position for addEntity. */
+function worldAt(sx, sy) {
+  const s = engine.scene;
+  if (!is3D()) return engine.renderer.screenToWorld(s, sx, sy);
+  const hit = rayPlaneY(engine.renderer.screenRay(s, sx, sy), 0);
+  return hit ? { x: hit.x, z: hit.z } : undefined;
+}
+const pointRect = (sx, sy) => { const r = surface.getBoundingClientRect(); return { left: r.left + sx, right: r.left + sx, top: r.top + sy, bottom: r.top + sy }; };
+function openObjectMenu(id, sx, sy) {
+  const j = ent(id); if (!j) return;
+  select(id);
+  popMenu(pointRect(sx, sy), [
+    { cap: j.name || 'Object' },
+    { icon: 'info', label: 'Inspect', fn: () => ctxAction('inspect') },
+    { icon: 'copy', label: 'Duplicate', fn: () => duplicateEntity(id) },
+    { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
+    !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
+    { icon: 'frame', label: 'Focus', fn: frameSelected },
+    { icon: j.visible === false ? 'eye' : 'eyeoff', label: j.visible === false ? 'Show' : 'Hide', fn: () => { j.visible = j.visible === false; changed({ structure: true }); } },
+    { icon: 'gear', label: j.locked ? 'Unlock' : 'Lock', fn: () => { j.locked = !j.locked; changed({ structure: true }); } },
+    '-',
+    { icon: 'trash', label: 'Delete', fn: () => deleteEntity(id) },
+  ]);
+}
+function openSpaceMenu(sx, sy) {
+  const at = worldAt(sx, sy);
+  const objs = is3D() ? OBJECTS_3D : OBJECTS_2D, prefabs = is3D() ? PREFABS_3D : PREFABS_2D;
+  popMenu(pointRect(sx, sy), [
+    objClipboard && { icon: 'paste', label: `Paste ${objClipboard.name || 'object'} here`, fn: () => { const c = clone(objClipboard); delete c.id; addEntity(c, objClipboard.ui ? undefined : at); toast('Pasted'); } },
+    { icon: 'plus', label: 'Add Object Here…', fn: () => popMenu(pointRect(sx, sy), [{ cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o, at) })),
+      '-', { cap: 'Prefabs' }, ...prefabs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o, at) }))]) },
+    { icon: 'frame', label: 'Reset View', fn: () => { resetCamera(); applyCamera(); } },
+    { icon: 'gear', label: 'Game Settings', fn: () => { select(SCENE_ID); setDock('inspector'); } },
+  ]);
+}
 
 function frameSelected() {
   const j = ent(selectedId);
@@ -678,32 +744,56 @@ window.addEventListener('keydown', (ev) => {
 function setTool(t) {
   const was = tool;
   tool = t;
-  for (const b of $$('#tools [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
 }
 
 let dockTab = 'hierarchy';
-function setDock(name) {
-  const app = $('#app');
-  if (name === dockTab && !isDesktop() && $('#dockTabs').dataset.ready) { app.classList.toggle('dock-collapsed'); requestAnimationFrame(() => engine.resize()); return; }
-  if (app.classList.contains('dock-collapsed')) { app.classList.remove('dock-collapsed'); requestAnimationFrame(() => engine.resize()); }
+function setDock(name, { fromTab = false } = {}) {
+  if (!isDesktop()) {
+    if (fromTab && name === dockTab) setSheet(sheetState() === 'peek' ? 'half' : 'peek');
+    else if (sheetState() === 'peek') setSheet('half');
+  }
   dockTab = name;
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
-const isDesktop = () => matchMedia('(min-width: 900px)').matches;
+const isDesktop = () => matchMedia('(min-width: 1000px)').matches;
 
-{ // splitter: resize the bottom dock on phones
-  const sp = $('#splitter');
-  let start = null;
-  sp.addEventListener('pointerdown', (e) => { sp.setPointerCapture(e.pointerId); start = { y: e.clientY, h: $$('.dock.active')[0]?.getBoundingClientRect().height || 300 }; });
-  sp.addEventListener('pointermove', (e) => {
-    if (!start) return;
-    const hgt = Math.min(window.innerHeight * 0.8, Math.max(80, start.h - (e.clientY - start.y)));
-    document.documentElement.style.setProperty('--dock-h', hgt + 'px');
+// ---- bottom sheet (phones): peek / half / full ----
+function setSheet(state) {
+  const app = $('#app');
+  if (app.dataset.sheet === state) return;
+  app.dataset.sheet = state;
+}
+const sheetState = () => $('#app').dataset.sheet || 'half';
+{
+  const handle = $('#sheetHandle'), app = $('#app');
+  let drag = null;
+  handle.addEventListener('pointerdown', (e) => {
+    handle.setPointerCapture(e.pointerId);
+    drag = { y: e.clientY, h: $('#sheet').getBoundingClientRect().height, moved: false };
+    app.classList.add('dragging');
   });
-  sp.addEventListener('pointerup', () => { start = null; });
+  handle.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const dy = e.clientY - drag.y;
+    if (Math.abs(dy) > 4) drag.moved = true;
+    const hgt = Math.max(70, Math.min(window.innerHeight - 90, drag.h - dy));
+    app.style.setProperty('--sheet-h', hgt + 'px');
+  });
+  const end = () => {
+    if (!drag) return;
+    app.classList.remove('dragging');
+    const hgt = parseFloat(app.style.getPropertyValue('--sheet-h')) || drag.h, H = window.innerHeight;
+    app.style.removeProperty('--sheet-h');
+    if (!drag.moved) setSheet(sheetState() === 'peek' ? 'half' : sheetState() === 'half' ? 'full' : 'peek');
+    else setSheet(hgt < H * 0.25 ? 'peek' : hgt < H * 0.66 ? 'half' : 'full');
+    drag = null;
+  };
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
 }
 
 function select(id, { fromScene = false } = {}) {
@@ -722,7 +812,7 @@ function updateCtxBar() {
 }
 function ctxAction(act) {
   const j = ent(selectedId); if (!j) return;
-  if (act === 'inspect') { if (!isDesktop()) setDock('inspector'); $('#app').classList.remove('dock-collapsed'); }
+  if (act === 'inspect') { if (!isDesktop()) { setDock('inspector'); if (sheetState() === 'peek') setSheet('half'); } }
   else if (act === 'duplicate') duplicateEntity(j.id);
   else if (act === 'focus') frameSelected();
   else if (act === 'delete') deleteEntity(j.id);
@@ -736,9 +826,10 @@ function stepSelection(d) {
 }
 
 function refreshAll() {
-  $('#sceneTab').replaceChildren(icon(is3D() ? 'cube' : 'grid'), h('span', { class: 'scene-word' }, 'Scene '), is3D() ? '3D' : '2D');
+  $('#sceneTab').replaceChildren(icon(is3D() ? 'cube' : 'grid'), is3D() ? '3D' : '2D');
+  $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
   const n = levelList().length;
-  $('#levelBtn').replaceChildren(icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron'));
+  $('#levelBtn').replaceChildren(...[icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
   renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons(); updateCtxBar();
 }
 
@@ -830,14 +921,18 @@ function control(target, path, spec) {
   let el;
   switch (spec.type) {
     case 'number': {
-      el = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path,
+      const step = spec.step || (is3D() ? 0.1 : 1);
+      const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path,
         oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) set(n); } });
-      scrubber(label, el, get, set, spec.step || (is3D() ? 0.1 : 1));
+      const bump = (d) => { const v = round((+get() || 0) + d * step, 3); inp.value = v; set(v); buzz(4); };
+      el = h('div', { class: 'num' }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), inp,
+        h('button', { type: 'button', 'aria-label': 'Increase', onclick: () => bump(1) }, '+'));
+      scrubber(label, inp, get, set, step);
       break;
     }
     case 'bool':
-      el = h('div', {}, h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) }));
-      break;
+      el = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
+      return h('div', { class: 'row inline' }, label, el);
     case 'select':
       el = h('select', { onchange: (e) => set(e.target.value) },
         spec.options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: v === val }, l); }));
@@ -1089,13 +1184,20 @@ function renderSceneSettings(box) {
     C('settings.jumpButton', { label: 'Jump Button', type: 'bool', def: false }),
     C('settings.actionButton', { label: 'Fire Button', type: 'bool', def: false }),
     C('settings.pauseButton', { label: 'Pause Button', type: 'bool', def: true }),
+    C('settings.muteButton', { label: 'Mute Button', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
+  box.append(comp('Mobile', [
+    C('settings.orientation', { label: 'Screen Orientation', type: 'select', options: [['any', 'Any'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], def: 'any' }),
+    h('p', { class: 'desc' }, 'Players holding the phone the wrong way see a "turn your device" screen.'),
+    C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
+  ], { icon: 'gamepad', key: 's-mobile' }));
   box.append(comp('Rules', [
     C('settings.winScore', { label: 'Win at Score', type: 'number', def: 0, step: 10 }),
     C('settings.timeLimit', { label: 'Time Limit (sec)', type: 'number', def: 0, step: 5 }),
     h('p', { class: 'desc' }, 'With a time limit, show the countdown in a text with {time}. 0 = no limit.'),
-    h('div', { class: 'row' }, h('label', {}, 'Save Best Score'), h('div', {}, h('input', { type: 'checkbox', checked: !!project.settings.saveBest,
+    h('div', { class: 'row inline' }, h('label', {}, 'Save Best Score'), h('div', {}, h('input', { type: 'checkbox', checked: !!project.settings.saveBest,
       onchange: (e) => { project.settings.saveBest = e.target.checked ? slug(levelList()[0].name) + '-' + projectId.slice(-4) : ''; changed(); } }))),
     C('vars', { label: 'Variables', type: 'json' }),
     h('p', { class: 'desc' }, 'Starting values, e.g. {"score": 0, "lives": 3}. Hazards that "damage" use lives.'),
@@ -1130,6 +1232,8 @@ const BEH_META = {
   spawner: ['Spawning', 'spawner'], shooter: ['Spawning', 'bolt'], script: ['Scripting', 'script'],
   chase: ['Movement', 'ghost'], float: ['Movement', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
   unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
+  tappable: ['Touch', 'hand'], draggable: ['Touch', 'move'], swipeMove: ['Touch', 'arrow'],
+  orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Gameplay', 'bolt'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1200,6 +1304,14 @@ const PREFABS_2D = [
   { icon: 'sign', label: 'Sign', props: { name: 'Sign', shape: { type: 'rect', w: 34, h: 44, radius: 4, fill: '#c38b5f' }, behaviors: [{ type: 'message', text: 'Hello! Edit me in the Inspector.', seconds: 3, once: true, tag: 'player' }] } },
   { icon: 'portal', label: 'Portal', props: { name: 'Portal', shape: { type: 'circle', r: 22, fill: '', stroke: '#a77bff', lineWidth: 5, glow: 12 }, behaviors: [{ type: 'teleport', target: '', tag: 'player' }, { type: 'rotate', speed: 90 }] } },
   { icon: 'clock', label: 'Timer Text', props: { name: 'Timer Text', ui: true, anchor: 'top', x: 0, y: 34, text: { value: '{time}', size: 26, color: '#ffffff' } }, settings: { timeLimit: 60 } },
+  { icon: 'hand', label: 'Tap Target', props: { name: 'Tap Target', shape: { type: 'circle', r: 30, fill: 'rgba(80,200,255,0.35)', stroke: '#7fdcff', lineWidth: 3 }, behaviors: [{ type: 'tappable', points: 10, destroy: true, sound: 'coin' }, { type: 'pulse', amount: 0.08, period: 0.9 }] } },
+  { icon: 'move', label: 'Draggable', props: { name: 'Draggable Block', shape: { type: 'rect', w: 70, h: 70, radius: 10, fill: '#7e57c2' }, behaviors: [{ type: 'draggable', snap: 0, lift: true }] } },
+  { icon: 'arrow', label: 'Lane Runner', props: { name: 'Runner', tags: ['player'], shape: { type: 'rect', w: 40, h: 40, radius: 8, fill: '#4fc3f7' }, behaviors: [{ type: 'swipeMove', distance: 110, lanes: 3, jump: 0 }] } },
+  { icon: 'flag', label: 'Checkpoint', props: { name: 'Checkpoint', shape: { type: 'rect', w: 14, h: 70, fill: '#90a4ae' }, behaviors: [{ type: 'checkpoint', text: 'Checkpoint!', tag: 'player' }] } },
+  { icon: 'rotate', label: 'Orbiter', props: { name: 'Orbiter', shape: { type: 'circle', r: 14, fill: '#e53935' }, behaviors: [{ type: 'orbit', radius: 80, speed: 120 }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'bolt', label: 'Shooter Ship', props: { name: 'Ship', tags: ['player'], shape: { type: 'triangle', w: 34, h: 40, fill: '#4fc3f7' }, behaviors: [{ type: 'move', control: 'both', speed: 280, axes: 'horizontal' }, { type: 'shooter', template: 'Bullet', every: 0.25, trigger: 'auto' }] },
+    extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 60, y: 0 }, shape: { type: 'rect', w: 6, h: 16, radius: 3, fill: '#fff59d' }, behaviors: [{ type: 'velocity', vx: 0, vy: -600, vz: 0 }, { type: 'destroyOffscreen', margin: 60 }] }] },
+  { icon: 'square', label: 'Target', props: { name: 'Target', shape: { type: 'rect', w: 50, h: 50, radius: 8, fill: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -1216,6 +1328,12 @@ const PREFABS_3D = [
   { icon: 'sign', label: 'Sign', props: { name: 'Sign', y: 0.6, mesh: { geometry: 'box', w: 0.8, h: 1.2, d: 0.15, color: '#c38b5f' }, behaviors: [{ type: 'message', text: 'Hello! Edit me in the Inspector.', seconds: 3, once: true, tag: 'player' }] } },
   { icon: 'portal', label: 'Portal', props: { name: 'Portal', y: 0.05, mesh: { geometry: 'cylinder', r: 0.8, h: 0.1, color: '#a77bff', emissive: 0.6 }, behaviors: [{ type: 'teleport', target: '', tag: 'player' }] } },
   { icon: 'clock', label: 'Timer Text', props: { name: 'Timer Text', ui: true, anchor: 'top', x: 0, y: 34, text: { value: '{time}', size: 26, color: '#ffffff' } }, settings: { timeLimit: 60 } },
+  { icon: 'hand', label: 'Tap Target', props: { name: 'Tap Target', y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4fc3f7', emissive: 0.3 }, behaviors: [{ type: 'tappable', points: 10, destroy: true, sound: 'coin' }, { type: 'pulse', amount: 0.08, period: 0.9 }] } },
+  { icon: 'move', label: 'Draggable', props: { name: 'Draggable Block', y: 0.5, mesh: { geometry: 'box', w: 1, h: 1, d: 1, color: '#7e57c2' }, behaviors: [{ type: 'draggable', snap: 0, lift: true }] } },
+  { icon: 'arrow', label: 'Lane Runner', props: { name: 'Runner', tags: ['player'], y: 0.5, mesh: { geometry: 'box', w: 0.8, h: 1, d: 0.8, color: '#4fc3f7' }, behaviors: [{ type: 'swipeMove', distance: 2.5, lanes: 3, jump: 9 }, { type: 'cameraFollow', oy: 5, oz: 8, smooth: 5 }] } },
+  { icon: 'flag', label: 'Checkpoint', props: { name: 'Checkpoint', y: 0.75, mesh: { geometry: 'cylinder', r: 0.15, h: 1.5, color: '#90a4ae' }, behaviors: [{ type: 'checkpoint', text: 'Checkpoint!', tag: 'player' }] } },
+  { icon: 'rotate', label: 'Orbiter', props: { name: 'Orbiter', y: 0.5, mesh: { geometry: 'sphere', r: 0.4, color: '#e53935' }, behaviors: [{ type: 'orbit', radius: 3, speed: 90 }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'square', label: 'Target', props: { name: 'Target', y: 0.75, mesh: { geometry: 'box', w: 1.5, h: 1.5, d: 0.3, color: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -1367,6 +1485,12 @@ function addPrefab(def, at) {
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
+  for (const x of def.extra || []) {
+    if (project.entities.some((e) => e.name === x.name && e.template)) continue;
+    const { offset, ...props } = x;
+    const base = at || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
+    addEntity(props, { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
+  }
   const j = addEntity(def.props, at);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   toast(`Added ${j.name}`);
@@ -1425,7 +1549,7 @@ layer.addEventListener('pointerdown', (e) => { if (e.target === layer) closeLaye
 
 /** Dropdown menu under an element. items: {icon,label,fn,k} | '-' | {cap} */
 function popMenu(anchor, items) {
-  const r = anchor.getBoundingClientRect();
+  const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : anchor;
   const m = h('div', { class: 'menu' }, items.filter(Boolean).map((it) => it === '-' ? h('hr') : it.cap ? h('div', { class: 'cap' }, it.cap)
     : h('button', { onclick: () => { closeLayer(); it.fn(); } }, it.icon ? icon(it.icon) : h('span', { style: 'width:16px' }), it.label, it.k && h('span', { class: 'k' }, it.k))));
   layer.replaceChildren(m); layer.className = ''; layer.hidden = false;
@@ -1458,13 +1582,14 @@ function openFileMenu() {
     { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     { icon: 'upload', label: 'Import Project…', fn: importJSON },
     '-',
+    !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
     { icon: 'help', label: 'Controls', fn: openHelp },
     { icon: 'external', label: 'Examples & Docs', fn: () => { location.href = '../'; } },
   ]);
 }
 
-const TPL_COLORS = { 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
+const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
 function openNewDialog() {
   openDialog('New Project', [
     h('div', { class: 'tpl-grid' }, templateInfo.map((t) => h('button', { class: 'tpl', onclick: () => { closeLayer(); newFromTemplate(t.key); toast(`Created ${project.name}`); } },
@@ -1502,12 +1627,28 @@ function openTour(i) {
 }
 function endTour() { store.set('pocket.editor.toured', '1'); closeLayer(); }
 
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+function installApp() {
+  if (installPrompt) { installPrompt.prompt(); installPrompt = null; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  openDialog('Install App', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('download')),
+    h('h4', {}, 'Add Pocket Editor to your home screen'),
+    h('p', {}, ios ? 'In Safari, tap the Share button, then "Add to Home Screen".' : 'Open your browser menu (⋮), then choose "Install app" or "Add to Home screen".'),
+    h('p', {}, 'It opens full screen and keeps working offline.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: closeLayer }, 'Got it')))]);
+}
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {});
+
 function openHelp() {
-  const row = (a, b) => h('div', { class: 'row' }, h('label', {}, a), h('span', { style: 'color:var(--muted)' }, b));
+  const row = (a, b) => h('div', { class: 'help-row' }, h('b', {}, a), h('span', {}, b));
   openDialog('Controls', [
     row('Select', 'Tap an object'), row('Move', 'Drag it, or use the arrows'), row('Rotate / Scale', 'Pick the tool, drag the handles'),
     row('Paint', 'Select an object, pick the brush, tap or drag to place copies'), row('Levels', 'Level button above the Scene'),
-    row('More room', 'Tap the open panel tab to hide panels'),
+    row('More room', 'Tap the open panel tab, or drag the sheet handle'),
+    row('Object menu', 'Long-press an object (or empty space to paste/add)'),
+    row('Undo / Redo', 'Two-finger tap / three-finger tap'),
+    row('Reset view', 'Double-tap empty space'),
     row('Pan / Orbit', 'Drag empty space'), row('Zoom', 'Pinch, or mouse wheel'), row('Add objects', 'Drag from Project into the Scene'),
     row('Add components', 'Drag onto an object, or Add Component'), row('Edit numbers', 'Drag a field label left/right'),
     row('Keyboard', 'Q W E R B tools · F frame · Ctrl+Z undo · Ctrl+D duplicate · Del delete'),
@@ -1573,12 +1714,12 @@ function play() {
   updateCtxBar();
   document.body.classList.add('playing');
   $('#playBar').hidden = false;
-  $('#playBtn').classList.add('on');
+  $('#playBtn').classList.add('on'); $('#playBtn').replaceChildren(icon('stop'), h('span', {}, 'Stop'));
   engine.editing = false;
   engine.input.enabled = true;
   engine.timeScale = 1;
   const json = clone(root);
-  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false };
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
@@ -1591,7 +1732,7 @@ function stop() {
   playing = false;
   document.body.classList.remove('playing');
   $('#playBar').hidden = true;
-  $('#playBtn').classList.remove('on');
+  $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
   engine.editing = true;
   engine.paused = false;
   engine.input.enabled = false;
@@ -1613,8 +1754,8 @@ setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can 
 // Wire up
 // ============================================================================
 $('#fileBtn').append(icon('menu'));
-for (const b of $$('#tools [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
-$('#playBtn').append(icon('play')); $('#pauseBtn').append(icon('pause'));
+for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
+$('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause'));
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
@@ -1622,7 +1763,9 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
-$('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { $('#dockTabs').dataset.ready = '1'; setDock(b.dataset.dock); } });
+$('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
+$('#panelsFab').append(icon('list'));
+$('#panelsFab').addEventListener('click', () => setSheet('half'));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {
   const b = $(`#ctxBar [data-act="${act}"]`);
   b.append(icon(ic), label);
@@ -1643,6 +1786,7 @@ $('#snapBtn').addEventListener('click', () => { snap = !snap; store.set('pocket.
 $('#gridBtn').addEventListener('click', () => { showGrid = !showGrid; store.set('pocket.editor.grid', showGrid ? '1' : '0'); $('#gridBtn').classList.toggle('on', showGrid); });
 window.addEventListener('beforeunload', saveNow);
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+$('#app').dataset.sheet = 'half';
 setTool('move');
 
 {

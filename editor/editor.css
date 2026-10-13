@@ -254,7 +254,6 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
   .tb { height: 38px; }
 }
 
-}
 @media (max-height: 780px) and (max-width: 999px) {
   #toolRail button { width: 42px; height: 42px; }
   #toolRail { gap: 2px; padding: 4px; }
@@ -509,9 +508,9 @@ input[type=range].slider::-moz-range-thumb { width: 22px; height: 22px; border-r
 .tl-key:empty { display: none; }
 .tl-kname { font-weight: 700; color: #ffd28a; flex: none; }
 body.animating #sheet { visibility: hidden; }
-#uiScreens { position: absolute; left: 50%; transform: translateX(-50%); top: 60px; z-index: 6; display: flex; gap: 4px; padding: 4px; max-width: calc(100% - 100px); overflow-x: auto;
-  background: rgba(32,32,32,.94); border: 1px solid #111; border-radius: 12px; scrollbar-width: none; }
-#uiScreens button { flex: none; height: 38px; padding: 0 11px; border: 0; border-radius: 8px; background: transparent; color: #cfcfcf; font-weight: 600; font-size: 13px; }
+#uiScreens { flex: none; display: flex; gap: 6px; padding: 8px 10px; overflow-x: auto; background: var(--tab-off); border-bottom: 1px solid var(--line); scrollbar-width: none; }
+#uiScreens::-webkit-scrollbar { display: none; }
+#uiScreens button { flex: none; height: 40px; padding: 0 16px; border: 1px solid #2a2a2a; border-radius: 20px; background: #2e2e2e; color: #cfcfcf; font-weight: 600; font-size: 13px; }
 #uiScreens button.on { background: #3a6ea5; color: #fff; }
 body.playing #uiScreens { display: none !important; }
 .h-cap { padding: 10px 14px 4px; color: #8fc3ff; font-size: 13px; font-weight: 600; }
@@ -693,3 +692,10 @@ body.playing #uiScreens { display: none !important; }
   #frameBtn { display: none; } /* the selection bar's Focus button does the same */
   .level-btn > svg.i:first-child, .level-btn small { display: none; }
 }
+/* tool rail wraps into a second column when the view is short, instead of hiding tools */
+#toolRail { display: grid; grid-template-columns: auto; overflow: visible; }
+#toolRail.two { grid-template-columns: auto auto; }
+/* very short scene view: smaller floating controls so the canvas stays visible */
+#viewport.short #zoomBar { padding: 3px; bottom: 10px; right: 80px; }
+#viewport.short #zoomBar button { width: 42px; height: 42px; }
+#viewport.short #addFab { width: 54px; height: 54px; right: 12px; bottom: 10px; border-radius: 17px; }

@@ -2947,16 +2947,21 @@ function setViewMode(m) {
   $('#uiBtn').classList.toggle('on', uiMode);
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
-  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
+  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: drag to move, pull edges to resize, pinch to zoom.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   refreshAll(); applyCamera();
 }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const bar = h('div', { id: 'uiScreens', hidden: true }, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
-  $('#scenePanel').append(bar);
+  $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
+new ResizeObserver(() => { // short view: smaller zoom buttons and the tool rail folds into two columns
+  const v = $('#viewport'), rail = $('#toolRail');
+  v.classList.toggle('short', v.clientHeight < 260);
+  rail.classList.toggle('two', v.clientHeight - 20 < rail.children.length * (rail.firstElementChild.offsetHeight + 4) + 10);
+}).observe($('#viewport'));
 engine.uiView = uiView; // the engine draws UI with the editor's zoom while editing
 engine.screenFilter = (e) => e.id === selectedId || (uiMode && (uiScreen === 'all' || e.showWhen === uiScreen));
 engine.onBeforeUI = (ctx) => {

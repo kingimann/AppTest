@@ -157,6 +157,7 @@ export class Entity {
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -506,6 +507,24 @@ export class Sequence {
 }
 const catmull = (p0, p1, p2, p3, t) => { const t2 = t * t, t3 = t2 * t; return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3); };
 
+/** A point in a parent's local space → world space (parent position, rotation, scale). */
+export function localToWorld(p, x, y, z, mode) {
+  if (mode !== '3d' && !p.mesh && !p.model && !p.voxels) { const a = (p.rz || 0) * DEG, c = Math.cos(a), sn = Math.sin(a), lx = x * p.sx, ly = y * p.sy; return [p.x + lx * c - ly * sn, p.y + lx * sn + ly * c, p.z + z * p.sz]; }
+  const q = M4.transformPoint(M4.trs(p.x, p.y, p.z, p.rx * DEG, p.ry * DEG, p.rz * DEG, p.sx, p.sy, p.sz), x, y, z);
+  return [q.x, q.y, q.z];
+}
+/** A world point → a parent's local space. */
+export function worldToLocal(p, x, y, z, mode) {
+  if (mode !== '3d' && !p.mesh && !p.model && !p.voxels) { const a = -(p.rz || 0) * DEG, c = Math.cos(a), sn = Math.sin(a), dx = x - p.x, dy = y - p.y; return [(dx * c - dy * sn) / (p.sx || 1), (dx * sn + dy * c) / (p.sy || 1), (z - p.z) / (p.sz || 1)]; }
+  const q = M4.transformPoint(M4.invert(M4.trs(p.x, p.y, p.z, p.rx * DEG, p.ry * DEG, p.rz * DEG, p.sx, p.sy, p.sz)), x, y, z);
+  return [q.x, q.y, q.z];
+}
+/** A world-space movement → the same movement in a parent's local space. */
+export function localDelta(p, dx, dy, dz, mode) {
+  const a = worldToLocal(p, p.x, p.y, p.z, mode), b = worldToLocal(p, p.x + dx, p.y + dy, p.z + dz, mode);
+  return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+}
+
 // ============================================================================
 // Scene
 // ============================================================================
@@ -541,6 +560,8 @@ export class Scene {
       : new Camera2D({ x: this.view.width / 2, y: this.view.height / 2, ...(opts.camera || {}) });
     this.entities = [];
     this.templates = {};
+    this.templateKids = {}; // template id → child descriptions
+    this.kids = []; // entities that have a parent, parents first
     this.particles = [];
     this.timers = [];
     this.tweens = [];
@@ -625,7 +646,9 @@ export class Scene {
   /** Build a scene from a plain JSON description (what the editor saves). */
   static fromJSON(json, { editing = false } = {}) {
     const s = new Scene({ ...json, json });
+    const tplIds = new Set((json.entities || []).filter((q) => q.template).map((q) => q.id)), inTpl = (ep) => { let q = ep, n = 0; const byId = s._jsonIds ||= new Map((json.entities || []).map((x) => [x.id, x])); while (q?.parent && n++ < 50) { if (tplIds.has(q.parent)) return true; q = byId.get(q.parent); } return false; };
     for (const ep of json.entities || []) {
+      if (!editing && !ep.template && inTpl(ep)) { (s.templateKids[ep.parent] ||= []).push(ep); continue; } // children of templates spawn with them
       if (ep.template && !editing) { s.templates[ep.name] = ep; continue; }
       const e = s.add(new Entity(editing ? { ...ep, behaviors: [] } : ep));
       if (ep.template) { e.template = true; e.alpha = 0.45; }
@@ -645,16 +668,59 @@ export class Scene {
   spawn(templateOrProps, overrides = {}) {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
     if (!base) { console.warn(`[pocket] no template "${templateOrProps}"`); return null; }
-    return this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
+    if (base.id) spawnKids(base.id, e);
+    return e;
   }
 
   flush() {
-    if (this.pending.length) { this.entities.push(...this.pending); this.pending.length = 0; this.entities.sort((a, b) => a.layer - b.layer); }
+    if (this.pending.length) {
+      const linked = this.pending.some((e) => e.parentId) || this.kids.length;
+      this.entities.push(...this.pending); this.pending.length = 0; this.entities.sort((a, b) => a.layer - b.layer);
+      if (linked) this.linkHierarchy();
+    }
     if (this.entities.some((e) => e.dead)) {
       for (const e of this.entities) if (e.dead) for (const b of e.behaviors) b.destroy?.(e, this);
       this.entities = this.entities.filter((e) => !e.dead);
     }
   }
+
+  /** Connect children to parents (by id) and remember each child's local transform. */
+  linkHierarchy() {
+    const byId = new Map(this.entities.map((e) => [e.id, e]));
+    const depth = (e) => { let n = 0, q = e; while (q.parentEnt && n < 50) { q = q.parentEnt; n++; } return n; };
+    for (const e of this.entities) {
+      const p = e.parentId ? byId.get(e.parentId) || null : null;
+      e.parentEnt = p && p !== e ? p : null;
+      if (e.parentEnt && !e.local) { e.local = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz, visible: e.visible }; e._lw = null; }
+    }
+    this.kids = this.entities.filter((e) => e.parentEnt).sort((a, b) => depth(a) - depth(b));
+    this.syncHierarchy(true);
+  }
+  /** Children follow their parents (position, rotation, scale, visibility). Moves made to a child this frame are kept. */
+  syncHierarchy(edit = false) {
+    for (const e of this.kids) {
+      const p = e.parentEnt;
+      if (e.dead || !p) continue;
+      if (p.dead) { if (!edit) e.destroy(); continue; }
+      e._parentHidden = p.visible === false || !!p._parentHidden;
+      if (e.ui) continue; // UI children are positioned inside their parent's box (uiOrigin)
+      const L = e.local;
+      if (!edit && e._lw) { // a behaviour or physics moved the child: fold that into its local transform
+        const dx = e.x - e._lw.x, dy = e.y - e._lw.y, dz = e.z - e._lw.z;
+        if (dx || dy || dz) { const d = localDelta(p, dx, dy, dz, this.mode); L.x += d[0]; L.y += d[1]; L.z += d[2]; }
+        for (const k of ['rx', 'ry', 'rz']) L[k] += e[k] - e._lw[k];
+        for (const k of ['sx', 'sy', 'sz']) if (e._lw[k]) L[k] *= e[k] / e._lw[k];
+      }
+      const w = localToWorld(p, L.x, L.y, L.z, this.mode);
+      e.x = w[0]; e.y = w[1]; e.z = w[2];
+      e.rx = p.rx + L.rx; e.ry = p.ry + L.ry; e.rz = p.rz + L.rz;
+      e.sx = p.sx * L.sx; e.sy = p.sy * L.sy; e.sz = p.sz * L.sz;
+      e._lw = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz };
+    }
+  }
+  childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
 
   find(name) { return this.entities.find((e) => e.name === name && !e.dead) || this.pending.find((e) => e.name === name); }
   findAll(tag) { return this.entities.filter((e) => !e.dead && (e.tags.has(tag) || e.name === tag)); }
@@ -1379,7 +1445,7 @@ export class Renderer2D {
     ctx.translate(-c.x, -c.y);
     if (engine.editing && engine.drawGrid) engine.drawGrid(ctx, scene, z);
     for (const e of scene.entities) { const L = e.data._line; if (L && !e.dead) { ctx.strokeStyle = L[6]; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(L[3], L[4]); ctx.stroke(); } }
-    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead) drawEntity2D(ctx, e, scene.vars, scene.time);
+    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead && !e._parentHidden) drawEntity2D(ctx, e, scene.vars, scene.time);
     for (const p of scene.particles) {
       ctx.globalAlpha = Math.max(0, p.life) * (p.alpha ?? 1);
       ctx.fillStyle = p.color;
@@ -1847,14 +1913,14 @@ export class Renderer3D {
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
 
     const transparent = [], shadows = [];
-    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead) this.drawVoxels(e);
+    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead && !e._parentHidden) this.drawVoxels(e);
     for (const e of scene.entities) {
-      if (!e.model || !e.visible || e.dead) continue;
+      if (!e.model || !e.visible || e.dead || e._parentHidden) continue;
       this.drawModel(e, e.data.invuln > 0 && Math.floor(scene.time * 12) % 2 ? 0.3 : 1);
       if (e.body && e.body.type !== 'static' && !e.body.sensor) shadows.push(e);
     }
     for (const e of scene.entities) {
-      if (!e.mesh || !e.visible || e.dead) continue;
+      if (!e.mesh || !e.visible || e.dead || e._parentHidden) continue;
       let op = e.mesh.opacity * e.alpha;
       if (e.data.invuln > 0 && Math.floor(scene.time * 12) % 2) op *= 0.3;
       if (op < 1) { transparent.push([e, op]); } else this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive);
@@ -1939,6 +2005,18 @@ function drawMessage(ctx, scene, W, H, engine) {
   ctx.globalAlpha = 1;
 }
 
+const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
+/** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
+export function uiOrigin(e, W, H, safe) {
+  const p = e.parentEnt;
+  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
+  return anchorPoint(e.anchor, W, H, safe);
+}
+/** Screen box of a UI element: centre x/y, width, height. */
+export function uiBox(e, W, H, safe) {
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy;
+  return { x: o.x + e.x + (ex.ox || 0), y: o.y + e.y + (ex.oy || 0), w: hw * 2, h: hh * 2 };
+}
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
   const x = a.includes('left') ? safe.left : a.includes('right') ? W - safe.right : W / 2;
@@ -1948,10 +2026,11 @@ export function anchorPoint(anchor, W, H, safe) {
 
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
-  const m = +e.margin || 0, ao = anchorPoint(e.anchor, W, H, safe);
+  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null;
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: safe.left, t: safe.top, w: W - safe.left - safe.right, h: H - safe.top - safe.bottom };
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
-  if (e.stretch === 'width' || e.stretch === 'both') { const w = W - safe.left - safe.right - m * 2; set('w', Math.max(4, w)); e.x = (safe.left + W - safe.right) / 2 - ao.x; }
-  if (e.stretch === 'height' || e.stretch === 'both') { const h = H - safe.top - safe.bottom - m * 2; set('h', Math.max(4, h)); e.y = (safe.top + H - safe.bottom) / 2 - ao.y; }
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w - m * 2)); e.x = box.l + box.w / 2 - ao.x; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h - m * 2)); e.y = box.t + box.h / 2 - ao.y; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -1976,11 +2055,7 @@ function drawMinimap(ctx, e, s) {
   ctx.restore();
 }
 /** Screen rectangle of a UI element: { x, y (center), w, h }. */
-function uiRect(s, e) {
-  const eng = s.engine, o = anchorPoint(e.anchor, eng.width, eng.height, eng.safe), ex = e.extents();
-  const hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy;
-  return { x: o.x + e.x + (ex.ox || 0), y: o.y + e.y + (ex.oy || 0), w: hw * 2, h: hh * 2 };
-}
+function uiRect(s, e) { const eng = s.engine; return uiBox(e, eng.width, eng.height, eng.safe); }
 
 /** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
 function ownScreen(scene, screen) {
@@ -1995,17 +2070,19 @@ function renderUI(engine, scene) {
   if (!scene) return;
   engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
-    const screen = engine.paused ? 'paused' : scene.state;
+    const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
+    if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
     for (const e of scene.entities) {
-      if (!e.ui || !e.visible || e.dead) continue;
+      if (!e.ui || !e.visible || e.dead || e._parentHidden) continue;
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
-      const o = anchorPoint(e.anchor, W, H, engine.safe);
+      const o = uiOrigin(e, W, H, engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time);
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       ctx.restore();
     }
+    if (V) ctx.restore();
   }
   if (engine.editing) return;
 
@@ -2984,8 +3061,9 @@ registerBehavior('sound', {
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
+  if (e._parentHidden) return false;
   if (e.ui) {
-    const o = anchorPoint(e.anchor, eng.width, eng.height, eng.safe), ex = e.extents();
+    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents();
     const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
     return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
   }
@@ -3264,7 +3342,7 @@ registerBehavior('uiLayout', {
         const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.has(p.tag) && q.visible);
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
-        const eng = s.engine, place = (q, cx, cy) => { const o = anchorPoint(q.anchor, eng.width, eng.height, eng.safe), ex = q.extents(); q.x = cx - o.x - (ex.ox || 0); q.y = cy - o.y - (ex.oy || 0); };
+        const eng = s.engine, place = (q, cx, cy) => { const o = uiOrigin(q, eng.width, eng.height, eng.safe), ex = q.extents(); q.x = cx - o.x - (ex.ox || 0); q.y = cy - o.y - (ex.oy || 0); };
         if (p.direction === 'grid') {
           const cols = Math.max(1, +p.columns || 1), cw = Math.max(...sizes.map((z) => z[0])), ch = Math.max(...sizes.map((z) => z[1])), rows = Math.ceil(items.length / cols);
           const W = cols * cw + (cols - 1) * gap, H = rows * ch + (rows - 1) * gap;
@@ -5359,6 +5437,7 @@ export class Engine {
     }
     this.stepEffects(dt);
     s.flush();
+    if (s.kids.length) s.syncHierarchy(false);
   }
 
   stepEffects(dt) {
@@ -5386,6 +5465,7 @@ export class Engine {
 
   render() {
     if (!this.scene || !this.renderer) return;
+    if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.renderer.render(this.scene, this);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);

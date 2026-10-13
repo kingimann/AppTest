@@ -2666,7 +2666,7 @@ function renderUI(engine, scene) {
     for (const e of scene.entities) {
       if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
       if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
-      if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
+      if (!engine.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== screen) continue; }
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
@@ -2982,6 +2982,7 @@ registerBehavior('spawner', {
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
     { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
     { key: 'clear', label: 'Keep clear of others (0 = off)', type: 'number', default: 0 },
+    { key: 'online', label: 'Multiplayer', type: 'select', options: ['each player spawns their own', 'room host spawns for everyone'], default: 'each player spawns their own' },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -2998,7 +2999,9 @@ registerBehavior('spawner', {
         const pos = { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) };
         // don't drop things on top of each other (e.g. a coin inside a barrier)
         if (p.clear && s.entities.some((o) => o.spawned && !o.dead && Math.abs(o.x - pos.x) < p.clear && Math.abs(o.y - pos.y) < p.clear * (s.mode === '3d' ? 2 : 1) && Math.abs(o.z - pos.z) < p.clear)) return;
-        const c = s.spawn(p.template, pos);
+        const O = s.engine.online, shared = p.online === 'room host spawns for everyone' && O?.inRoom();
+        if (shared && !O.isMaster()) return; // the host spawns; everyone else gets the copies
+        const c = shared ? O.spawnForAll(p.template, pos) : s.spawn(p.template, pos);
         if (c) c.spawned = true;
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
@@ -3012,6 +3015,7 @@ registerBehavior('shooter', {
     { key: 'template', label: 'Bullet template', type: 'template', default: '' },
     { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 0.25 },
     { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button', 'tap'], default: 'auto' },
+    { key: 'online', label: 'Multiplayer: bullets appear for everyone', type: 'bool', default: false },
   ],
   create(p) {
     let t = 0;
@@ -3030,7 +3034,7 @@ registerBehavior('shooter', {
           const ry = (e.ry || 0) * DEG, rx = o.rx * DEG;
           o.x += -Math.sin(ry) * Math.cos(rx) * 0.9; o.y += Math.sin(rx) * 0.9; o.z += -Math.cos(ry) * Math.cos(rx) * 0.9;
         }
-        s.spawn(p.template, o);
+        if (p.online && s.engine.online?.inRoom()) s.engine.online.spawnForAll(p.template, o); else s.spawn(p.template, o);
       },
     };
   },
@@ -3863,9 +3867,12 @@ registerBehavior('sound', {
 });
 
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
+/** Which screen a UI element shows on: its own "Show when", or the nearest parent's (things inside a game-over panel belong to game over). */
+function uiScreenOf(e) { for (let q = e, n = 0; q && n < 20; q = q.parentEnt, n++) if (q.showWhen && q.showWhen !== 'always') return q.showWhen; return 'always'; }
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
   if (e._parentHidden || e._clipHidden) return false;
+  if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
@@ -6478,6 +6485,7 @@ export const NODE_TYPES = {
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
   netLeave: { cat: 'Online', label: 'Leave Room', exec: true, outs: ['then'] },
   netSend: { cat: 'Online', label: 'Send Network Message', exec: true, outs: ['then'], params: [txt('message', 'boom', 'message')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  netSpawn: { cat: 'Online', label: 'Spawn For Everyone', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('at', ['this object', 'position'], 'this object', 'at')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
   netShared: { cat: 'Online', label: 'Set Shared Variable', exec: true, outs: ['then'], params: [txt('name', 'roundScore', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   onNetJoined: { cat: 'Online', label: 'On Joined Room', outs: ['then'] },
   onPlayerJoined: { cat: 'Online', label: 'On Player Joined', outs: ['then'] },
@@ -7079,6 +7087,7 @@ registerBehavior('graph', {
         case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
         case 'netLeave': s.engine.online.leave(); break;
         case 'netSend': s.engine.online.sendMessage(P('message'), +I('value') || 0); break;
+        case 'netSpawn': { const at = P('at') === 'position' ? { x: +I('x') || 0, y: +I('y') || 0, z: +I('z') || 0 } : { x: e.x, y: e.y, z: e.z }; const c = s.engine.online.spawnForAll(P('template'), at); if (c) ctx = { ...ctx, other: c }; break; }
         case 'netShared': s.engine.online.setShared(P('name') || 'shared', +I('value') || 0); break;
         case 'pfLogin': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLogin().then((ok) => { if (!e.dead) follow(n, ok ? 'logged in' : 'failed', later); }); return; }
         case 'pfSubmit': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSubmit(P('stat'), +I('value') || 0).then((ok) => { if (!e.dead) follow(n, ok ? 'posted' : 'failed', later); }); break; }
@@ -7221,7 +7230,7 @@ registerBehavior('script', {
 // ============================================================================
 export const PHOTON_SDK = 'https://cdn.jsdelivr.net/npm/photon-realtime@4.4.0/photon-realtime-module.js';
 export const PHOTON_REGIONS = ['eu', 'us', 'usw', 'asia', 'jp', 'kr', 'in', 'au', 'sa', 'cae', 'za', 'uae', 'tr'];
-const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6 }; // Photon event codes this engine uses
+const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6, SPAWNT: 7, KILL: 8 }; // Photon event codes this engine uses
 const NET_VISUAL = ['animator', 'spriteSheet', 'flipbook']; // components a remote copy keeps (looks only, no control)
 
 export class Online {
@@ -7232,6 +7241,7 @@ export class Online {
     this.local = new Map(); // netId → { e, p } objects this player owns and sends
     this.proxies = new Map(); // `${actor}:${netId}` → { e, to, anim }
     this.shared = {}; this.sendT = 0; this.sceneRef = null; this.lastValue = 0;
+    this.objs = new Map(); this.objSeq = 0; // objects spawned for everyone: netObj id → { e, t }
   }
   get scene() { return this.engine.scene; }
   cfg(k) { return this.scene?.settings?.[k] || {}; }
@@ -7358,7 +7368,7 @@ export class Online {
         this.setState('room'); this.setVar('netRoom', lbc.myRoom()?.name || ''); this.counts();
         this.announce(); this.scene?.emit('online', 'joined', lbc.myRoom()?.name);
       };
-      lbc.onActorJoin = (a) => { this.counts(); if (a.actorNr !== this.myNr()) { this.announce([a.actorNr]); if (this.isMaster() && Object.keys(this.shared).length) this.raise(NET.SHARED, { all: this.shared }, [a.actorNr]); this.scene?.emit('online', 'playerJoined', a.actorNr); } };
+      lbc.onActorJoin = (a) => { this.counts(); if (a.actorNr !== this.myNr()) { this.announce([a.actorNr]); if (this.isMaster() && Object.keys(this.shared).length) this.raise(NET.SHARED, { all: this.shared }, [a.actorNr]); for (const [o, q] of this.objs) if (!q.e.dead && o.startsWith(this.myNr() + '-')) this.raise(NET.SPAWNT, { t: q.t, o, a: { x: q.e.x, y: q.e.y, z: q.e.z, rx: q.e.rx, ry: q.e.ry, rz: q.e.rz } }, [a.actorNr]); this.scene?.emit('online', 'playerJoined', a.actorNr); } };
       lbc.onActorLeave = (a) => { this.counts(); this.dropActor(a.actorNr); this.scene?.emit('online', 'playerLeft', a.actorNr); };
       lbc.onEvent = (code, data, actor) => this.receive(code, data, actor);
       lbc.onError = (code, msg) => this.fail('Photon', `${msg} (${code})`);
@@ -7387,6 +7397,17 @@ export class Online {
   /** A message to everyone else in the room (they get it as a game message, plus On Network Message). */
   sendMessage(name, value = 0) { return this.raise(NET.MESSAGE, { m: String(name), v: value }); }
   setShared(k, v) { this.shared[k] = v; this.scene?.setVar(k, v); this.raise(NET.SHARED, { k, v }); }
+  /** Spawn a template for everyone in the room (just here when offline). Destroying it anywhere removes it everywhere. */
+  spawnForAll(tpl, at = {}) {
+    const s = this.scene; if (!s) return null;
+    const e = s.spawn(tpl, at); if (!e) return null;
+    if (this.inRoom()) {
+      const id = this.myNr() + '-' + (++this.objSeq);
+      e.data.netObj = id; this.objs.set(id, { e, t: tpl });
+      this.raise(NET.SPAWNT, { t: tpl, o: id, a: { ...at, x: e.x, y: e.y, z: e.z } }); // with its turn, so bullets fly the same way
+    }
+    return e;
+  }
 
   // synced objects: the local player's copy sends where it is; everyone else draws a copy that follows
   register(e, p) { this.local.set(e.data.netId || e.id, { e, p }); if (this.inRoom()) this.announce(null, e); }
@@ -7433,6 +7454,8 @@ export class Online {
       case NET.DESPAWN: { const k = actor + ':' + data.i; this.proxies.get(k)?.e.destroy(); this.proxies.delete(k); break; }
       case NET.NEED: this.announce([actor]); break;
       case NET.SHARED: if (data.all) for (const [k, v] of Object.entries(data.all)) { this.shared[k] = v; s.setVar(k, v); } else { this.shared[data.k] = data.v; s.setVar(data.k, data.v); } break;
+      case NET.SPAWNT: { if (this.objs.has(data.o)) break; const e = s.spawn(data.t, data.a || { x: data.x, y: data.y, z: data.z }); if (e) { e.data.netObj = data.o; e.spawned = true; this.objs.set(data.o, { e, t: data.t }); } break; }
+      case NET.KILL: { const q = this.objs.get(data.o); if (q) { q.e.data.netKilled = true; if (!q.e.dead) q.e.destroy(); this.objs.delete(data.o); } break; }
       case NET.MESSAGE: this.lastValue = data.v; s.emit('netMessage', data.m, data.v, actor); s.send(data.m, data.v); break;
       default: s.emit('netEvent', code, data, actor);
     }
@@ -7440,13 +7463,14 @@ export class Online {
   update(dt) {
     const s = this.scene; if (!s) return;
     if (this.sceneRef !== s) { // a new level or restart: old copies went with the old scene
-      this.sceneRef = s; this.proxies.clear();
+      this.sceneRef = s; this.proxies.clear(); this.objs.clear();
       const pf = this.cfg('playfab'), ph = this.cfg('photon');
       if (pf.autoLogin && this.titleId() && !this.pf.ticket) this.pfLogin();
       if (ph.autoJoin && String(ph.appId || '').trim() && this.state === 'offline') this.join(ph.room || '', ph.maxPlayers);
       this.setVar('netState', this.state); this.counts();
       if (this.inRoom()) setTimeout(() => this.announce(), 0);
     }
+    for (const [id, q] of this.objs) if (q.e.dead) { if (!q.e.data.netKilled) this.raise(NET.KILL, { o: id }); this.objs.delete(id); } // collected / destroyed here: gone for everyone
     for (const [k, q] of this.proxies) { // smooth the copies toward the last place we heard
       if (q.e.dead) { this.proxies.delete(k); continue; }
       if (!q.to) continue;

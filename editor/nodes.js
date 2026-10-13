@@ -49,6 +49,7 @@ const CAT_HELP = {
   Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  netSpawn: 'Create a template for everyone in the room (bullets, pickups); destroying it anywhere removes it for everyone',
   netConnect: 'Connect to Photon (Join Room does this for you)', netJoin: 'Join a room by name, or any open room; “joined” runs once you are in', netLeave: 'Leave the multiplayer room',
   netSend: 'Tell everyone else in the room something (they get it as a message)', netShared: 'A variable everyone in the room shares (late joiners get it too)',
   onNetJoined: 'When you join a room', onPlayerJoined: 'When someone else joins your room', onPlayerLeft: 'When someone leaves your room', onNetMessage: 'When another player sends a network message',

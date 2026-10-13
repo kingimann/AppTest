@@ -329,6 +329,35 @@ export const templates = {
     ],
   },
 
+  'online-rush': {
+    version: 1, name: 'Online Coin Rush', mode: '2d', background: '#0f2027', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'COIN RUSH ONLINE', subtitle: 'Grab more coins than everyone else in 60 seconds!', joystick: true, timeLimit: 60, saveBest: 'online-rush', orientation: 'portrait',
+      playfab: { titleId: '', autoLogin: true }, photon: { appId: '', autoJoin: true, maxPlayers: 6, region: 'eu', appVersion: '1.0' } },
+    vars: { score: 0, netState: 'offline', netPlayers: 0 },
+    entities: [
+      ...[[200, 104, 400, 16], [200, 696, 400, 16], [8, 400, 16, 600], [392, 400, 16, 600]].map(([x, y, w, h], i) => ({ id: 'wall' + i, name: 'Wall', x, y, shape: { type: 'rect', w, h, fill: '#1f4450' }, body: { type: 'static' } })),
+      { id: 'player', name: 'Player', tags: ['player'], x: 200, y: 400, layer: 2, shape: { type: 'circle', r: 16, fill: '#33f0ff', glow: 14 }, body: { type: 'dynamic', gravityScale: 0 },
+        behaviors: [{ type: 'move', control: 'joystick', speed: 260 }, { type: 'netSync', rate: 15, solid: false }] },
+      { id: 'coin-spawner', name: 'Coin Spawner', x: 200, y: 120, behaviors: [{ type: 'spawner', template: 'Coin', every: [0.5, 1.1], x: [40, 360], y: [140, 660], ramp: 0, max: 12, clear: 34, online: 'room host spawns for everyone' }] },
+      { id: 'coin', name: 'Coin', template: true, x: 120, y: 300, shape: { type: 'circle', r: 11, fill: '#ffd23d', stroke: '#fff3b0', lineWidth: 3 }, behaviors: [{ type: 'collectible', score: 10 }] },
+      { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
+      { id: 'hud-time', name: 'Time Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '{time}s', size: 24, align: 'right', color: '#9fe8ff' } },
+      { id: 'hud-net', name: 'Online Status', ui: true, anchor: 'top', x: 0, y: 72, text: { value: '● {netPlayers} in room', size: 14, color: '#7dffb0', weight: '700' },
+        behaviors: [{ type: 'uiShowIf', var: 'netState', op: '=', value: 'room', whenUnset: false, anim: 'fade' }] },
+      { id: 'hud-solo', name: 'Solo Hint', ui: true, anchor: 'top', x: 0, y: 72, text: { value: 'Solo · add a Photon App ID (Game Settings › Online) to play with friends', size: 12, color: 'rgba(255,255,255,0.6)', wrap: 340 },
+        behaviors: [{ type: 'uiShowIf', var: 'netState', op: '≠', value: 'room', whenUnset: true, anim: 'fade' }] },
+      { id: 'over', name: 'Results', ui: true, anchor: 'center', x: 0, y: 0, showWhen: 'over', shape: { type: 'rect', w: 320, h: 470, radius: 24, fill: '#162b33', stroke: 'rgba(255,255,255,0.15)', lineWidth: 2 } },
+      { id: 'over-title', name: 'Results Title', parent: 'over', ui: true, anchor: 'top', x: 0, y: 40, text: { value: 'TIME!  {score} coins', size: 24, color: '#ffd23d', weight: '900' } },
+      { id: 'over-board', name: 'Leaderboard Rows', parent: 'over', ui: true, anchor: 'left', x: 30, y: -10, text: { value: '', size: 17, color: '#ffffff', align: 'left', weight: '700', lineHeight: 1.55 },
+        behaviors: [{ type: 'pfLeaderboard', stat: 'coins', count: 8, around: false, refreshOn: 'leaderboard', format: '{rank}. {name}  {value}' }] },
+      { id: 'over-again', name: 'Play Again', parent: 'over', ui: true, anchor: 'bottom', x: 0, y: -40, shape: { type: 'rect', w: 200, h: 52, radius: 16, fill: '#2e8b57' }, text: { value: 'Play again', size: 18, color: '#ffffff', weight: '800' },
+        behaviors: [{ type: 'button', action: 'restart game', value: '', amount: 1, sound: 'click' }] },
+      { id: 'logic', name: 'Online Logic', x: 0, y: 0, behaviors: [{ type: 'graph', graph: {
+        nodes: [{ id: 'g', type: 'onGameOver', x: 20, y: 40, params: {} }, { id: 'p', type: 'pfSubmit', x: 320, y: 30, params: { stat: 'coins' } }, { id: 'v', type: 'getVar', x: 20, y: 200, params: { name: 'score' } }],
+        links: [{ from: { node: 'g', port: 'then' }, to: { node: 'p', port: 'in' } }, { from: { node: 'v', port: 'value' }, to: { node: 'p', port: 'value' } }] } }] },
+    ],
+  },
+
   'voxel-world': {
     version: 1, name: 'Block Craft', mode: '3d', background: '#8fd0ff', gravity: -25,
     settings: { title: 'BLOCK CRAFT', subtitle: 'Left thumb: walk. Right thumb: drag to look, hold on a block to mine it, tap to place. Pick blocks in the hotbar.', joystick: true, jumpButton: true, pauseButton: true, orientation: 'landscape' },
@@ -365,6 +394,7 @@ export const templateInfo = [
   { key: 'racer', title: 'Racing', blurb: 'Drive, beat the clock', icon: 'car', color: '#8a6a3a' },
   { key: 'lane-runner', title: 'Endless Runner', blurb: 'Swipe between lanes', icon: 'arrow', color: '#2f6f8f' },
   { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade (saves progress)', icon: 'hand', color: '#5d4037' },
+  { key: 'online-rush', title: 'Online Coin Rush', blurb: 'Multiplayer + leaderboard (Photon, PlayFab)', icon: 'globe', color: '#0e5a5a' },
   { key: 'voxel-world', title: 'Voxel Sandbox', blurb: 'Minecraft-style mine & build', icon: 'cube', color: '#4e7d3a' },
   { key: 'rpg-battle', title: 'Turn-Based RPG', blurb: 'Pick attacks, heals and spells', icon: 'bolt', color: '#2e4057' },
   { key: 'dungeon', title: 'Dungeon Crawler', blurb: 'Turn-based grid adventure', icon: 'door', color: '#3b2f4f' },

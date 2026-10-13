@@ -49,6 +49,7 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Endless Runner | Lane Rush | swipe lanes, jump |
    | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
    | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
+   | Online Coin Rush | Online Coin Rush | Multiplayer coin race (Photon) with an online leaderboard (PlayFab); plays solo until you add your IDs |
    | Voxel Sandbox | Block Craft | Minecraft-style terrain: hold to mine, tap to place, hotbar, auto-jump |
    | Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
    | Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
@@ -314,6 +315,8 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Layout Group** can now arrange its own children and spread them evenly.
 - **In the UI editor:** the **Pages** button previews one page at a time.
 
+Everything inside a panel that has *Show when* (title, game over, paused…) now belongs to that screen too: it's only drawn, and can only be tapped, on that screen.
+
 **Advanced navigation (pages with history, like an app):**
 - **Menu with Pages:** a main menu whose buttons open Levels, Settings and Credits pages (Levels has a World 2 page inside it). Each page slides in from the right; Back slides it out to the left and returns to the exact page you came from.
 - **Back Button:** goes back one page, closing an open popup or side bar first, and hides itself when there's nowhere to go back to (or goes to a *fallback* page). The **phone's back gesture / browser Back**, **Esc**, and a **swipe in from the left edge** (Game Settings › Mobile, on by default) do the same in played and exported games.
@@ -351,6 +354,7 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 **Photon** (real-time multiplayer), loading the official Photon Realtime library (`photon-realtime` from npm via jsDelivr) when it's first needed:
 - **Join Room** (by name, or any open room; it connects first), **Leave Room**, or *Join a room when the game starts*. **Multiplayer Lobby** widget: status, *Play Online* and *Leave* buttons.
 - **Network Sync** component: put it on your player. Everyone else in the room sees a copy that follows you (position, turning, facing, animation clip), with your name over it in 2D. Copies are tagged `remote` and are left out of the camera and the player tag; *solid* makes them bump.
+- **Spawn For Everyone** (node), Spawner's *room host spawns for everyone* and Shooter's *bullets appear for everyone*: the object appears for every player, and when it's collected or destroyed anywhere it disappears everywhere. Players who join later get the objects that are already there.
 - **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
 - Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
 - Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.

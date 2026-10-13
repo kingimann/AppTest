@@ -213,3 +213,51 @@ body.playing #scenePanel .panel-tabs, body.playing #hint { display: none; }
   .tb { min-width: 38px; padding: 0 4px; }
   #redoBtn { display: none; }
 }
+
+/* ---------- navigation & roomier panels ---------- */
+.level-btn { margin: 0 0 3px 6px; height: 34px; max-width: 46vw; border: 1px solid #1f1f1f; background: #333; border-radius: 6px; padding: 0 10px;
+  display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 13.5px; white-space: nowrap; overflow: hidden; }
+.level-btn span { overflow: hidden; text-overflow: ellipsis; }
+.level-btn svg.i { width: 16px; height: 16px; }
+#ctxBar { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 5; display: flex; gap: 4px; padding: 5px;
+  background: rgba(30,30,30,.94); border: 1px solid #111; border-radius: 12px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+#ctxBar button { width: 70px; height: 54px; border: 0; border-radius: 8px; background: transparent; color: var(--text);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 12px; }
+#ctxBar button:active, #ctxBar button:hover { background: #3a3a3a; }
+#ctxBar button[data-act=delete] { color: #ff8a80; }
+#app { grid-template-rows: calc(env(safe-area-inset-top) + 56px) minmax(140px, 1fr) 14px 60px var(--dock-h); }
+#app.dock-collapsed { --dock-h: 0px; }
+#app.dock-collapsed .panel.dock { display: none; }
+#dockTabs button { height: 56px; flex-direction: column; gap: 3px; font-size: 12.5px; border-radius: 10px 10px 0 0; }
+#dockTabs button svg.i { width: 22px; height: 22px; }
+.comp { margin: 10px 10px 0; border: 1px solid #2a2a2a; border-radius: 10px; overflow: hidden; background: #3a3a3a; }
+.comp-h { border-top: 0; }
+.h-row { height: 50px; }
+.nav-strip { display: flex; align-items: center; gap: 8px; padding: 10px 10px 0; }
+.nav-strip .btn { height: 40px; padding: 0 12px; flex: none; }
+.nav-strip .sp { flex: 1; }
+.nav-strip .crumb { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tour { text-align: center; padding: 8px 6px 4px; }
+.tour .big { width: 84px; height: 84px; margin: 6px auto 14px; border-radius: 20px; background: #2b2b2b; display: grid; place-items: center; color: #9cc3ea; }
+.tour .big svg.i { width: 44px; height: 44px; stroke-width: 1.3; }
+.tour h4 { margin: 0 0 8px; font-size: 18px; }
+.tour p { margin: 0 auto 16px; color: var(--muted); max-width: 360px; line-height: 1.5; }
+.tour .dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 16px; }
+.tour .dots i { width: 8px; height: 8px; border-radius: 50%; background: #555; }
+.tour .dots i.on { background: var(--accent); }
+@media (max-width: 430px) { #pauseBtn { display: none; } }
+@media (min-width: 900px) {
+  #app { grid-template-rows: 52px 1fr 250px; }
+  .nav-strip .back { display: none; }
+  .h-row { height: 36px; }
+  .comp { margin: 8px 8px 0; }
+}
+
+.level-btn { flex: 0 1 auto; min-width: 0; }
+.level-btn small { color: var(--muted); font-size: 12px; flex: none; }
+#sceneTab { flex: none; padding: 0 12px; }
+@media (max-width: 600px) { .scene-word { display: none; } }
+#ctxBar button { width: 64px; height: 50px; font-size: 11.5px; }
+@media (max-height: 760px) and (max-width: 899px) { #ctxBar button { height: 42px; width: 52px; font-size: 0; gap: 0; } #ctxBar { bottom: 8px; } }
+#ctxBar { top: 8px; bottom: auto; }
+@media (max-height: 760px) and (max-width: 899px) { #ctxBar { top: 6px; bottom: auto; } }

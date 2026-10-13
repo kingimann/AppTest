@@ -21,6 +21,7 @@
       <button class="tb" data-tool="move" title="Move tool (W)"></button>
       <button class="tb" data-tool="rotate" title="Rotate tool (E)"></button>
       <button class="tb" data-tool="scale" title="Scale tool (R)"></button>
+      <button class="tb" data-tool="paint" title="Paint tool (B): tap or drag to place copies of the selected object"></button>
     </div>
     <div class="tb-spacer"></div>
     <div class="tb-group" id="playGroup">
@@ -37,6 +38,7 @@
   <section id="scenePanel" class="panel">
     <div class="panel-tabs">
       <div class="ptab active" id="sceneTab"></div>
+      <button class="level-btn" id="levelBtn" title="Levels"></button>
       <span class="sp"></span>
       <button class="pt-btn" id="snapBtn" title="Snap to grid"></button>
       <button class="pt-btn" id="gridBtn" title="Show grid"></button>
@@ -44,6 +46,12 @@
     </div>
     <div id="viewport">
       <div id="hint" hidden></div>
+      <div id="ctxBar" hidden>
+        <button data-act="inspect"></button>
+        <button data-act="duplicate"></button>
+        <button data-act="focus"></button>
+        <button data-act="delete"></button>
+      </div>
     </div>
   </section>
 

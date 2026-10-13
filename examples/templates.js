@@ -25,7 +25,7 @@ export const templates = {
   },
 
   'jump-quest': {
-    version: 1, name: 'Jump Quest', mode: '2d', background: '#1d2b53', view: { width: 400, height: 700 }, gravity: 1600,
+    version: 1, name: 'Jump Quest', levelName: 'Green Hills', mode: '2d', background: '#1d2b53', view: { width: 400, height: 700 }, gravity: 1600,
     settings: { title: 'JUMP QUEST', subtitle: 'Reach the green flag', joystick: true, jumpButton: true },
     vars: { score: 0, lives: 3 },
     entities: [
@@ -46,6 +46,32 @@ export const templates = {
       { id: 'goal', name: 'Goal Flag', x: 1700, y: 560, shape: { type: 'rect', w: 16, h: 100, fill: '#5dff8a' }, behaviors: [{ type: 'goal' }] },
       ...hud([{ id: 'hud-lives', name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 24, align: 'right', color: '#ff5d8f' } }]),
     ],
+    levels: [{
+      levelName: 'The Locked Door', mode: '2d', background: '#2b1d43', view: { width: 400, height: 700 }, gravity: 1600,
+      settings: { joystick: true, jumpButton: true }, vars: { keys: 0 },
+      entities: [
+        { id: 'l2-player', name: 'Player', tags: ['player'], x: 60, y: 540, layer: 2, shape: { type: 'rect', w: 30, h: 40, radius: 6, fill: '#ffd23d' },
+          behaviors: [{ type: 'platformer', speed: 240, jump: 680, onFall: 'damage' }, { type: 'cameraFollow', axes: 'x', smooth: 6 }] },
+        ...[[300, 640, 600], [1060, 640, 720]].map(([x, y, w], i) => ({
+          id: 'l2-ground' + i, name: 'Ground', x, y, shape: { type: 'rect', w, h: 60, fill: '#5b4a8a' }, body: { type: 'static' } })),
+        ...[[620, 520, 140], [840, 430, 140]].map(([x, y, w], i) => ({
+          id: 'l2-plat' + i, name: 'Platform', x, y, shape: { type: 'rect', w, h: 20, radius: 6, fill: '#8a6a4f' }, body: { type: 'static' } })),
+        { id: 'l2-sign', name: 'Sign', x: 170, y: 588, shape: { type: 'rect', w: 34, h: 44, radius: 4, fill: '#c38b5f' },
+          behaviors: [{ type: 'message', text: 'Grab the key to open the door. Watch out for the ghost!', seconds: 3.5, once: true }] },
+        { id: 'l2-key', name: 'Key', x: 840, y: 380, shape: { type: 'star', w: 32, h: 32, fill: '#ffd23d', glow: 12 },
+          behaviors: [{ type: 'float', amount: 8, period: 1.4 }, { type: 'collectible', score: 1, var: 'keys', sound: 'power' }] },
+        { id: 'l2-door', name: 'Door', x: 1180, y: 560, shape: { type: 'rect', w: 30, h: 100, radius: 4, fill: '#a0522d', stroke: '#ffd23d', lineWidth: 3 }, body: { type: 'static' },
+          behaviors: [{ type: 'unlock', var: 'keys', amount: 1, text: 'The door is open!' }] },
+        { id: 'l2-ghost', name: 'Ghost', x: 1000, y: 520, shape: { type: 'circle', r: 16, fill: '#ff4d6d', glow: 10 },
+          behaviors: [{ type: 'chase', speed: 85, range: 260 }, { type: 'hazard', action: 'damage' }, { type: 'float', amount: 6, period: 1 }] },
+        ...[[620, 470], [700, 590], [1300, 590], [1360, 590]].map(([x, y], i) => ({
+          id: 'l2-coin' + i, name: 'Coin', x, y, shape: { type: 'circle', r: 11, fill: '#ffd23d', stroke: '#fff3b0', lineWidth: 3 }, behaviors: [{ type: 'collectible', score: 10 }] })),
+        { id: 'l2-goal', name: 'Goal Flag', x: 1380, y: 560, shape: { type: 'rect', w: 16, h: 100, fill: '#5dff8a' }, behaviors: [{ type: 'goal' }] },
+        { id: 'l2-hud', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
+        { id: 'l2-lives', name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 24, align: 'right', color: '#ff5d8f' } },
+        { id: 'l2-keys', name: 'Keys Text', ui: true, anchor: 'top-left', x: 20, y: 70, text: { value: 'Keys {keys}', size: 16, align: 'left', color: '#ffd23d' } },
+      ],
+    }],
   },
 
   'gem-garden': {
@@ -86,7 +112,7 @@ export const templates = {
 
 export const templateInfo = [
   { key: 'sky-dodge', title: 'Sky Dodge', blurb: '2D dodger with spawners' },
-  { key: 'jump-quest', title: 'Jump Quest', blurb: '2D platformer' },
+  { key: 'jump-quest', title: 'Jump Quest', blurb: '2D platformer, 2 levels' },
   { key: 'gem-garden', title: 'Gem Garden', blurb: '3D collect-a-thon' },
   { key: 'empty-2d', title: 'Empty 2D', blurb: 'Blank canvas' },
   { key: 'empty-3d', title: 'Empty 3D', blurb: 'Just a floor' },

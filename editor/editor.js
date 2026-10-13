@@ -46,7 +46,8 @@ const PROJECTS_KEY = 'pocket.editor.projects', CURRENT_KEY = 'pocket.editor.curr
 const loadProjects = () => { try { return JSON.parse(store.get(PROJECTS_KEY, '{}')) || {}; } catch { return {}; } };
 const SCENE_ID = '__scene';
 
-let project = null, projectId = null, selectedId = null;
+// root = the whole game (level 1 plus root.levels[]); project = the level being edited
+let root = null, project = null, projectId = null, selectedId = null, levelIdx = 0;
 let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
@@ -56,18 +57,22 @@ let playing = false;
 function saveNow() {
   if (!project) return;
   const all = loadProjects();
-  all[projectId] = { name: project.name, updated: Date.now(), json: project };
+  all[projectId] = { name: root.name, updated: Date.now(), json: root };
   if (!store.set(PROJECTS_KEY, JSON.stringify(all))) toast('Could not save: browser storage is full');
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
+const levelList = () => [root, ...(root.levels || [])];
+const levelName = (lv, i) => lv.levelName || `Level ${i + 1}`;
+function normalize(lv) { lv.entities ||= []; lv.settings ||= {}; lv.vars ||= {}; return lv; }
+
 function openProject(json, id = uid('p')) {
-  project = json;
-  project.entities ||= [];
-  project.settings ||= {};
-  project.vars ||= { score: 0 };
+  root = json;
+  normalize(root); root.vars.score ??= 0;
+  (root.levels || []).forEach(normalize);
+  project = root; levelIdx = 0;
   projectId = id;
   selectedId = null;
   history = []; hIndex = -1; pushHistory();
@@ -84,11 +89,70 @@ function newFromTemplate(key, name) {
   openProject(json);
 }
 
+function setLevel(i) {
+  levelIdx = Math.max(0, Math.min(i, levelList().length - 1));
+  project = levelList()[levelIdx];
+  selectedId = null;
+  resetCamera(); rebuild(); refreshAll();
+}
+function addLevel(duplicate) {
+  const n = levelList().length + 1;
+  const lv = duplicate ? clone(project) : {
+    mode: root.mode, background: project.background, view: clone(project.view || { width: 400, height: 700 }), gravity: project.gravity,
+    settings: { joystick: !!project.settings.joystick, jumpButton: !!project.settings.jumpButton }, vars: {},
+    camera: project.camera ? clone(project.camera) : undefined, entities: project.entities.filter((e) => e.ui).map(clone),
+  };
+  if (duplicate) { delete lv.levels; delete lv.name; delete lv.version; for (const e of lv.entities) e.id = uid(); }
+  lv.levelName = duplicate ? `${levelName(project, levelIdx)} (copy)` : `Level ${n}`;
+  for (const e of lv.entities) e.id = uid();
+  (root.levels ||= []).push(normalize(lv));
+  pushHistory(); saveSoon();
+  setLevel(levelList().length - 1);
+  toast(`Added ${lv.levelName}`);
+}
+function deleteLevel() {
+  const list = levelList();
+  if (list.length < 2) { toast('A game needs at least one level'); return; }
+  if (!confirm(`Delete "${levelName(project, levelIdx)}"?`)) return;
+  list.splice(levelIdx, 1);
+  const first = list[0];
+  if (first !== root) { // promote the next level to be level 1
+    first.name = root.name; first.version = root.version;
+    first.settings = { ...first.settings, title: root.settings.title, subtitle: root.settings.subtitle, saveBest: root.settings.saveBest };
+  }
+  first.levels = list.slice(1);
+  if (!first.levels.length) delete first.levels;
+  root = first;
+  pushHistory(); saveSoon();
+  setLevel(Math.min(levelIdx, levelList().length - 1));
+}
+function moveLevel(d) {
+  const list = levelList(), j = levelIdx + d;
+  if (j < 0 || j >= list.length) return;
+  if (levelIdx === 0 || j === 0) { toast('Level 1 holds the game settings; add a new level and move others instead'); return; }
+  root.levels.splice(j - 1, 0, root.levels.splice(levelIdx - 1, 1)[0]);
+  pushHistory(); saveSoon(); setLevel(j);
+}
+function openLevelMenu() {
+  const list = levelList();
+  popMenu($('#levelBtn'), [
+    { cap: 'Levels' },
+    ...list.map((lv, i) => ({ icon: i === levelIdx ? 'right' : 'layers', label: `${i + 1}. ${levelName(lv, i)}`, fn: () => setLevel(i) })),
+    '-',
+    { icon: 'plus', label: 'New Level', fn: () => addLevel(false) },
+    { icon: 'copy', label: 'Duplicate This Level', fn: () => addLevel(true) },
+    { icon: 'edit', label: 'Rename Level…', fn: () => { const n = prompt('Level name', levelName(project, levelIdx)); if (n) { project.levelName = n; changed(); refreshAll(); } } },
+    levelIdx > 1 && { icon: 'upload', label: 'Move Earlier', fn: () => moveLevel(-1) },
+    levelIdx > 0 && levelIdx < list.length - 1 && { icon: 'download', label: 'Move Later', fn: () => moveLevel(1) },
+    list.length > 1 && { icon: 'trash', label: 'Delete Level', fn: deleteLevel },
+  ]);
+}
+
 // ============================================================================
 // Undo history
 // ============================================================================
 function pushHistory() {
-  const s = JSON.stringify(project);
+  const s = JSON.stringify(root);
   if (history[hIndex] === s) return;
   history = history.slice(0, hIndex + 1);
   history.push(s);
@@ -103,9 +167,11 @@ function undoRedo(step) {
   const i = hIndex + step;
   if (i < 0 || i >= history.length) return;
   hIndex = i;
-  project = JSON.parse(history[i]);
+  root = JSON.parse(history[i]);
+  levelIdx = Math.min(levelIdx, levelList().length - 1);
+  project = levelList()[levelIdx];
   if (selectedId !== SCENE_ID && !ent(selectedId)) selectedId = null;
-  rebuild(); refreshAll(); saveSoon(); updateUndoButtons();
+  rebuild(); refreshAll(); saveSoon(); updateUndoButtons(); updateCtxBar();
 }
 function updateUndoButtons() { $('#undoBtn').disabled = hIndex <= 0; $('#redoBtn').disabled = hIndex >= history.length - 1; }
 
@@ -412,6 +478,13 @@ surface.addEventListener('pointerdown', (ev) => {
   const { x, y } = localXY(ev);
   ptrs.set(ev.pointerId, { x, y });
   $('#hint').hidden = true;
+  if (ptrs.size === 1 && tool === 'paint' && ev.button === 0 && !ev.altKey) {
+    const src = ent(selectedId);
+    if (!src || src.ui) { toast('Select an object first, then paint copies of it'); gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: true }; return; }
+    gesture = { type: 'paint', srcId: src.id, last: null, count: 0 };
+    paintAt(x, y);
+    return;
+  }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
     const giz = !panBtn && hitGizmo(x, y);
@@ -490,6 +563,8 @@ surface.addEventListener('pointermove', (ev) => {
     }
     if (live) Object.assign(live, { x: j.x || 0, y: j.y || 0, z: j.z || 0, rx: j.rx || 0, ry: j.ry || 0, rz: j.rz || 0, sx: j.sx ?? 1, sy: j.sy ?? 1, sz: j.sz ?? 1 });
     syncTransformInputs();
+  } else if (g.type === 'paint') {
+    paintAt(x, y);
   } else if (g.type === 'pan' || g.type === 'orbit') {
     const mx = x - g.lx, my = y - g.ly;
     g.lx = x; g.ly = y;
@@ -516,6 +591,33 @@ surface.addEventListener('pointermove', (ev) => {
   }
 });
 
+/** Paint tool: stamp a copy of the source object at a screen point, spaced by its size. */
+function paintAt(sx, sy) {
+  const g = gesture, src = ent(g.srcId), s = engine.scene, live = s.byId(g.srcId);
+  if (!src) return;
+  let pos;
+  if (is3D()) {
+    const hit = rayPlaneY(engine.renderer.screenRay(s, sx, sy), src.y || 0);
+    if (!hit) return;
+    pos = { x: snapV(hit.x, 0.5), y: src.y || 0, z: snapV(hit.z, 0.5) };
+  } else {
+    const w = engine.renderer.screenToWorld(s, sx, sy);
+    pos = { x: snapV(w.x, 10), y: snapV(w.y, 10), z: 0 };
+  }
+  const ex = live ? live.extents() : { hx: 20, hy: 20, hz: 0.5 };
+  const sw = ex.sphere ? ex.r * 2 : ex.hx * 2, sh = ex.sphere ? ex.r * 2 : (is3D() ? ex.hz : ex.hy) * 2;
+  const near = (p) => Math.abs(p.x - pos.x) < sw * 0.95 && Math.abs((is3D() ? p.z : p.y) - (is3D() ? pos.z : pos.y)) < sh * 0.95;
+  if (g.last && near(g.last)) return;
+  if (near({ x: src.x || 0, y: src.y || 0, z: src.z || 0 })) { g.last = pos; return; }
+  const c = clone(src); c.id = uid(); c.x = pos.x; c.y = pos.y; c.z = pos.z;
+  delete c.locked;
+  project.entities.push(c);
+  g.last = pos; g.count++;
+  s.add({ ...c, behaviors: [] });
+  s.flush();
+  buzz(5);
+}
+
 function panOrbit(dx, dy) {
   const k = orbit.dist * 0.0022, sy = Math.sin(orbit.yaw), cy = Math.cos(orbit.yaw);
   orbit.target.x -= (cy * dx + sy * dy) * k;
@@ -528,6 +630,7 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
+  if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && tool !== 'hand') select(null);
   if (ptrs.size === 0 || g.type === 'pinch') gesture = null;
 };
@@ -565,7 +668,7 @@ window.addEventListener('keydown', (ev) => {
   else if (mod && k === 'd' && ent(selectedId)) { ev.preventDefault(); duplicateEntity(selectedId); }
   else if (mod && k === 'p') { ev.preventDefault(); play(); }
   else if ((k === 'delete' || k === 'backspace') && ent(selectedId)) deleteEntity(selectedId);
-  else if (!mod && ({ q: 'hand', w: 'move', e: 'rotate', r: 'scale' })[k]) setTool(({ q: 'hand', w: 'move', e: 'rotate', r: 'scale' })[k]);
+  else if (!mod && ({ q: 'hand', w: 'move', e: 'rotate', r: 'scale', b: 'paint' })[k]) setTool(({ q: 'hand', w: 'move', e: 'rotate', r: 'scale', b: 'paint' })[k]);
   else if (!mod && k === 'f') frameSelected();
 });
 
@@ -573,12 +676,18 @@ window.addEventListener('keydown', (ev) => {
 // Tools, dock panels
 // ============================================================================
 function setTool(t) {
+  const was = tool;
   tool = t;
   for (const b of $$('#tools [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
+  updateCtxBar();
 }
 
 let dockTab = 'hierarchy';
 function setDock(name) {
+  const app = $('#app');
+  if (name === dockTab && !isDesktop() && $('#dockTabs').dataset.ready) { app.classList.toggle('dock-collapsed'); requestAnimationFrame(() => engine.resize()); return; }
+  if (app.classList.contains('dock-collapsed')) { app.classList.remove('dock-collapsed'); requestAnimationFrame(() => engine.resize()); }
   dockTab = name;
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
@@ -601,12 +710,36 @@ function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
   renderHierarchy();
   renderInspector();
+  updateCtxBar();
   if (selectedId && fromScene && dockTab === 'hierarchy' && !isDesktop()) setDock('inspector');
 }
 
+/** Quick actions for the selected object, floating over the Scene view. */
+function updateCtxBar() {
+  const bar = $('#ctxBar'), j = ent(selectedId);
+  bar.hidden = !j || playing;
+  if (j) $('#hint').hidden = true;
+}
+function ctxAction(act) {
+  const j = ent(selectedId); if (!j) return;
+  if (act === 'inspect') { if (!isDesktop()) setDock('inspector'); $('#app').classList.remove('dock-collapsed'); }
+  else if (act === 'duplicate') duplicateEntity(j.id);
+  else if (act === 'focus') frameSelected();
+  else if (act === 'delete') deleteEntity(j.id);
+}
+/** Step through objects in the Inspector with ‹ ›. */
+function stepSelection(d) {
+  const list = project.entities;
+  if (!list.length) return;
+  const i = list.findIndex((e) => e.id === selectedId);
+  select(list[(i + d + list.length) % list.length].id);
+}
+
 function refreshAll() {
-  $('#sceneTab').replaceChildren(icon(is3D() ? 'cube' : 'grid'), `Scene · ${is3D() ? '3D' : '2D'}`);
-  renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons();
+  $('#sceneTab').replaceChildren(icon(is3D() ? 'cube' : 'grid'), h('span', { class: 'scene-word' }, 'Scene '), is3D() ? '3D' : '2D');
+  const n = levelList().length;
+  $('#levelBtn').replaceChildren(icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron'));
+  renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons(); updateCtxBar();
 }
 
 // ============================================================================
@@ -623,17 +756,19 @@ function iconFor(e) {
   return 'gear';
 }
 function renderHierarchy() {
-  const root = $('#hierarchy');
-  const scroll = root.scrollTop;
-  root.replaceChildren();
+  const box = $('#hierarchy');
+  const scroll = box.scrollTop;
+  box.replaceChildren();
   const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
-  root.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
+  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
   const rows = h('div');
-  root.append(rows);
+  box.append(rows);
   function renderRows() {
     rows.replaceChildren(...[
-      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, icon('scene', 'ico'), h('span', { class: 'nm' }, project.name || 'Untitled')),
+      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, icon('scene', 'ico'),
+        h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
+        h('span', { class: 'tagchip' }, 'settings')),
       project.entities.filter((e) => !hFilter || (e.name || '').toLowerCase().includes(hFilter)).map((e) => h('div', {
         class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : ''),
         'data-id': e.id, style: '--indent: 14px',
@@ -647,7 +782,7 @@ function renderHierarchy() {
       h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye'))))].flat());
   }
   renderRows();
-  root.scrollTop = scroll;
+  box.scrollTop = scroll;
 }
 
 function openCreateMenu(anchor) {
@@ -767,6 +902,14 @@ function vecRow(target, label, keys, defs, step) {
 }
 
 const closedComps = new Set();
+let compClipboard = null;
+function pasteComponent(j) {
+  const c = compClipboard; if (!c) return;
+  if (c.kind === 'behavior') (j.behaviors ||= []).push(clone(c.data));
+  else j[c.kind] = clone(c.data);
+  changed({ structure: true }); pushHistory();
+  toast('Component pasted');
+}
 /** A collapsible component block. opts: { icon, key, enabled, onToggle, menu: [{label, fn}], desc } */
 function comp(title, kids, opts = {}) {
   const key = opts.key || title;
@@ -794,18 +937,26 @@ function syncTransformInputs() {
 }
 
 function renderInspector() {
-  const root = $('#inspector');
-  const scroll = root.scrollTop;
-  root.replaceChildren();
-  if (selectedId === SCENE_ID) { renderSceneSettings(root); root.scrollTop = scroll; return; }
+  const box = $('#inspector');
+  const scroll = box.scrollTop;
+  box.replaceChildren();
+  if (selectedId === SCENE_ID) { renderSceneSettings(box); box.scrollTop = scroll; return; }
   const j = ent(selectedId);
-  if (!j) { root.append(h('div', { class: 'empty' }, 'Nothing selected.', h('br'), 'Tap an object in the Scene or Hierarchy.')); return; }
+  if (!j) { box.append(h('div', { class: 'empty' }, 'Nothing selected.', h('br'), 'Tap an object in the Scene or Hierarchy.')); return; }
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
+  const idx = project.entities.indexOf(j);
+
+  box.append(h('div', { class: 'nav-strip' },
+    h('button', { class: 'btn back', onclick: () => setDock('hierarchy') }, icon('left'), 'Hierarchy'),
+    h('span', { class: 'crumb' }, `${idx + 1} of ${project.entities.length}`),
+    h('span', { class: 'sp' }),
+    h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
+    h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
 
   // header: active toggle + name, tag, flags
-  root.append(h('div', { class: 'insp-head' },
+  box.append(h('div', { class: 'insp-head' },
     h('div', { class: 'big-ico' }, icon(iconFor(j))),
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
     h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
@@ -817,20 +968,21 @@ function renderInspector() {
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
-  if (j.template) root.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
+  if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
 
   // Transform
-  root.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
+  box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
     ? [vecRow(T, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.1), vecRow(T, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(T, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)]
     : [
       j.ui && C('anchor', { label: 'Anchor', type: 'select', options: ['top-left', 'top', 'top-right', 'center', 'bottom-left', 'bottom', 'bottom-right'], def: 'top-left' }),
       vecRow(T, j.ui ? 'Offset' : 'Position', ['x', 'y'], [0, 0], 1), vecRow(T, 'Rotation', ['rz'], [0], 1), vecRow(T, 'Scale', ['sx', 'sy'], [1, 1], 0.05)],
   { icon: 'move', key: 'transform', menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
 
-  const removeMenu = (fn) => [{ icon: 'trash', label: 'Remove Component', fn }];
+  const copyItem = (kind, get) => ({ icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind, data: clone(get()) }; toast('Component copied'); } });
+  const removeMenu = (fn, kind) => [kind && copyItem(kind, () => j[kind]), { icon: 'trash', label: 'Remove Component', fn }].filter(Boolean);
   if (j.shape) {
     const t = j.shape.type;
-    root.append(comp('Shape Renderer', [
+    box.append(comp('Shape Renderer', [
       C('shape.type', { label: 'Shape', type: 'select', options: [['rect', 'Rectangle'], ['circle', 'Circle'], ['triangle', 'Triangle'], ['star', 'Star']], structure: true }),
       t === 'circle' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: 'Height', type: 'number', def: 40 })],
       t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
@@ -838,28 +990,28 @@ function renderInspector() {
       C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
       j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
       C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
-    ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }) }));
+    ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
-    root.append(comp('Image', [
+    box.append(comp('Image', [
       C('sprite.src', { label: 'Source URL', type: 'text' }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'Choose from device')),
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
-    ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }) }));
+    ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }, 'sprite') }));
   }
   if (j.text) {
-    root.append(comp('Text', [
+    box.append(comp('Text', [
       C('text.value', { label: 'Text', type: 'text' }),
       h('p', { class: 'desc' }, 'Show game variables with braces: {score}, {lives}, {best}.'),
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
-    ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }) }));
+    ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
     const g = j.mesh.geometry;
-    root.append(comp('Mesh Renderer', [
+    box.append(comp('Mesh Renderer', [
       C('mesh.geometry', { label: 'Mesh', type: 'select', options: [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['plane', 'Plane']], structure: true }),
       g === 'box' && [C('mesh.w', { label: 'Width', type: 'number', def: 1, step: 0.1 }), C('mesh.h', { label: 'Height', type: 'number', def: 1, step: 0.1 }), C('mesh.d', { label: 'Depth', type: 'number', def: 1, step: 0.1 })],
       g === 'sphere' && C('mesh.r', { label: 'Radius', type: 'number', def: 0.5, step: 0.05 }),
@@ -868,11 +1020,11 @@ function renderInspector() {
       C('mesh.color', { label: 'Color', type: 'color' }),
       C('mesh.emissive', { label: 'Emission', type: 'number', def: 0, step: 0.05 }),
       C('mesh.opacity', { label: 'Opacity', type: 'number', def: 1, step: 0.05 }),
-    ], { icon: 'cube', key: 'mesh', menu: removeMenu(() => { delete j.mesh; changed({ structure: true }); }) }));
+    ], { icon: 'cube', key: 'mesh', menu: removeMenu(() => { delete j.mesh; changed({ structure: true }); }, 'mesh') }));
   }
   if (j.body && !j.ui) {
     const shp = j.body.shape || 'auto';
-    root.append(comp(threeD ? 'Rigidbody' : 'Rigidbody 2D', [
+    box.append(comp(threeD ? 'Rigidbody' : 'Rigidbody 2D', [
       C('body.type', { label: 'Body Type', type: 'select', options: [['static', 'Static'], ['dynamic', 'Dynamic'], ['kinematic', 'Kinematic']], def: 'dynamic', structure: true }),
       C('body.sensor', { label: 'Is Trigger', type: 'bool', def: false }),
       j.body.type === 'dynamic' && [C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }), C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05 })],
@@ -880,64 +1032,76 @@ function renderInspector() {
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
       (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
     ], { icon: 'body', key: 'body', desc: 'Static: walls and ground. Dynamic: pushed by physics. Kinematic: moves on its own.',
-      menu: removeMenu(() => { delete j.body; changed({ structure: true }); }) }));
+      menu: removeMenu(() => { delete j.body; changed({ structure: true }); }, 'body') }));
   }
 
   (j.behaviors || []).forEach((b, i) => {
     const def = Behaviors[b.type];
     const menu = [
+      { icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind: 'behavior', data: clone(b) }; toast('Component copied'); } },
       { icon: 'trash', label: 'Remove Component', fn: () => { j.behaviors.splice(i, 1); changed({ structure: true }); } },
       i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { j.behaviors.splice(i - 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       i < j.behaviors.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { j.behaviors.splice(i + 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
     ].filter(Boolean);
-    if (!def) { root.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
-    root.append(comp(def.label, def.params.map((p) => C(`behaviors.${i}.${p.key}`, { ...p, def: paramDefault(p, threeD) })), {
+    if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    box.append(comp(def.label, def.params.map((p) => C(`behaviors.${i}.${p.key}`, { ...p, def: paramDefault(p, threeD) })), {
       icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu,
       enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); },
     }));
   });
 
-  root.append(h('div', { class: 'add-comp' }, h('button', { class: 'btn wide', onclick: openAddComponent }, 'Add Component')));
-  root.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
+  box.append(h('div', { class: 'add-comp', style: 'flex-direction:column;align-items:center;gap:10px' },
+    h('button', { class: 'btn wide', onclick: openAddComponent }, icon('plus'), 'Add Component'),
+    compClipboard && h('button', { class: 'btn wide', onclick: () => pasteComponent(j) }, icon('paste'), `Paste ${compClipboard.kind === 'behavior' ? Behaviors[compClipboard.data.type]?.label || 'Component' : compClipboard.kind}`)));
+  box.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
     h('button', { class: 'btn', onclick: () => duplicateEntity(j.id) }, icon('copy'), 'Duplicate'),
     h('button', { class: 'btn', onclick: () => deleteEntity(j.id) }, icon('trash'), 'Delete')));
-  root.scrollTop = scroll;
+  box.scrollTop = scroll;
 }
 
 // ---- scene settings (shown when the scene root is selected) ----
-function renderSceneSettings(root) {
+function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
-  root.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
-    h('span'), h('input', { type: 'text', value: project.name, oninput: (e) => { project.name = e.target.value; changed(); renderHierarchy(); } }),
-    h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} scene · Pocket Engine ${VERSION}`)));
-  root.append(comp('Environment', [
+  const game = levelList()[0];
+  box.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
+    h('span'), h('input', { type: 'text', value: game.name, placeholder: 'Game name', oninput: (e) => { game.name = e.target.value; changed(); renderHierarchy(); } }),
+    h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} game · Pocket Engine ${VERSION}`)));
+  box.append(comp('Level', [
+    C('levelName', { label: 'Level Name', type: 'text', def: levelName(project, levelIdx) }),
+    h('p', { class: 'desc' }, `This is level ${levelIdx + 1} of ${levelList().length}. Reaching a Goal moves on to the next level; score and lives carry over.`),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => addLevel(false) }, icon('plus'), 'New Level'), h('button', { class: 'btn', onclick: openLevelMenu }, icon('layers'), 'All Levels')),
+  ], { icon: 'layers', key: 's-level' }));
+  box.append(comp('Environment', [
     C('background', { label: 'Background', type: 'color' }),
     C('gravity', { label: 'Gravity', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     h('p', { class: 'desc' }, threeD ? 'Use about -25 for normal gravity.' : 'Use 0 for top-down games and about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
   ], { icon: 'sun', key: 's-env' }));
-  root.append(comp('Start Screen', [
+  box.append(comp('Start Screen', [
+    levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
     C('settings.title', { label: 'Title', type: 'text', def: '' }),
     C('settings.subtitle', { label: 'Subtitle', type: 'text', def: '' }),
     h('p', { class: 'desc' }, 'Leave Title empty to start the game right away.'),
   ], { icon: 'hud', key: 's-start' }));
-  root.append(comp('Touch Controls', [
+  box.append(comp('Touch Controls', [
     C('settings.joystick', { label: 'Joystick', type: 'bool', def: false }),
     C('settings.jumpButton', { label: 'Jump Button', type: 'bool', def: false }),
     C('settings.actionButton', { label: 'Fire Button', type: 'bool', def: false }),
     C('settings.pauseButton', { label: 'Pause Button', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
-  root.append(comp('Rules', [
+  box.append(comp('Rules', [
     C('settings.winScore', { label: 'Win at Score', type: 'number', def: 0, step: 10 }),
+    C('settings.timeLimit', { label: 'Time Limit (sec)', type: 'number', def: 0, step: 5 }),
+    h('p', { class: 'desc' }, 'With a time limit, show the countdown in a text with {time}. 0 = no limit.'),
     h('div', { class: 'row' }, h('label', {}, 'Save Best Score'), h('div', {}, h('input', { type: 'checkbox', checked: !!project.settings.saveBest,
-      onchange: (e) => { project.settings.saveBest = e.target.checked ? slug(project.name) + '-' + projectId.slice(-4) : ''; changed(); } }))),
+      onchange: (e) => { project.settings.saveBest = e.target.checked ? slug(levelList()[0].name) + '-' + projectId.slice(-4) : ''; changed(); } }))),
     C('vars', { label: 'Variables', type: 'json' }),
     h('p', { class: 'desc' }, 'Starting values, e.g. {"score": 0, "lives": 3}. Hazards that "damage" use lives.'),
   ], { icon: 'trophy', key: 's-rules' }));
   if (threeD) {
-    root.append(comp('Camera & Lighting', [
+    box.append(comp('Camera & Lighting', [
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => {
         const c = engine.scene.camera, rv = (v) => ({ x: round(v.x), y: round(v.y), z: round(v.z) });
         project.camera = { ...(project.camera || {}), position: rv(c.position), target: rv(c.target) };
@@ -950,7 +1114,7 @@ function renderSceneSettings(root) {
       C('fog.far', { label: 'Fog End', type: 'number', def: 120 }),
     ], { icon: 'camera', key: 's-cam' }));
   }
-  root.append(h('div', { class: 'btns', style: 'padding:12px 8px 24px' },
+  box.append(h('div', { class: 'btns', style: 'padding:12px 8px 24px' },
     h('button', { class: 'btn primary', onclick: play }, icon('play'), 'Play'),
     h('button', { class: 'btn', onclick: exportHTML }, icon('download'), 'Build HTML')));
 }
@@ -964,6 +1128,8 @@ const BEH_META = {
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Spawning', 'bolt'], script: ['Scripting', 'script'],
+  chase: ['Movement', 'ghost'], float: ['Movement', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
+  unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1028,6 +1194,12 @@ const PREFABS_2D = [
   { icon: 'flag', label: 'Goal', props: { name: 'Goal', shape: { type: 'rect', w: 20, h: 100, fill: '#66bb6a' }, behaviors: [{ type: 'goal' }] } },
   { icon: 'spawner', label: 'Spawner', props: { name: 'Spawner', behaviors: [{ type: 'spawner', template: '', every: 1, x: [20, 380], y: -40, z: 0, relative: false, ramp: 0.1, max: 60 }] } },
   { icon: 'hud', label: 'Score Text', props: { name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left', color: '#ffffff' } } },
+  { icon: 'ghost', label: 'Chaser', props: { name: 'Chaser', shape: { type: 'circle', r: 16, fill: '#e53935' }, behaviors: [{ type: 'chase', speed: 100, range: 300, tag: 'player' }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'key', label: 'Key', props: { name: 'Key', shape: { type: 'star', w: 30, h: 30, fill: '#ffca28' }, behaviors: [{ type: 'float', amount: 8, period: 1.4 }, { type: 'collectible', score: 1, var: 'keys', sound: 'power' }] }, vars: { keys: 0 } },
+  { icon: 'door', label: 'Door', props: { name: 'Door', shape: { type: 'rect', w: 30, h: 100, radius: 4, fill: '#a0522d', stroke: '#ffca28', lineWidth: 3 }, body: { type: 'static' }, behaviors: [{ type: 'unlock', var: 'keys', amount: 1, text: 'Unlocked!' }] }, vars: { keys: 0 } },
+  { icon: 'sign', label: 'Sign', props: { name: 'Sign', shape: { type: 'rect', w: 34, h: 44, radius: 4, fill: '#c38b5f' }, behaviors: [{ type: 'message', text: 'Hello! Edit me in the Inspector.', seconds: 3, once: true, tag: 'player' }] } },
+  { icon: 'portal', label: 'Portal', props: { name: 'Portal', shape: { type: 'circle', r: 22, fill: '', stroke: '#a77bff', lineWidth: 5, glow: 12 }, behaviors: [{ type: 'teleport', target: '', tag: 'player' }, { type: 'rotate', speed: 90 }] } },
+  { icon: 'clock', label: 'Timer Text', props: { name: 'Timer Text', ui: true, anchor: 'top', x: 0, y: 34, text: { value: '{time}', size: 26, color: '#ffffff' } }, settings: { timeLimit: 60 } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -1038,6 +1210,12 @@ const PREFABS_3D = [
   { icon: 'flag', label: 'Goal', props: { name: 'Goal', y: 1, mesh: { geometry: 'cylinder', r: 0.6, h: 2, color: '#66bb6a', emissive: 0.4, opacity: 0.7 }, behaviors: [{ type: 'goal' }] } },
   { icon: 'spawner', label: 'Spawner', props: { name: 'Spawner', y: 3, behaviors: [{ type: 'spawner', template: '', every: 1, x: [-8, 8], y: 5, z: [-8, 8], relative: false, ramp: 0.1, max: 60 }] } },
   { icon: 'hud', label: 'Score Text', props: { name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left', color: '#ffffff' } } },
+  { icon: 'ghost', label: 'Chaser', props: { name: 'Chaser', y: 0.5, mesh: { geometry: 'sphere', r: 0.5, color: '#e53935' }, behaviors: [{ type: 'chase', speed: 3.5, range: 10, tag: 'player' }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'key', label: 'Key', props: { name: 'Key', y: 0.9, mesh: { geometry: 'cone', r: 0.3, h: 0.6, color: '#ffca28', emissive: 0.4 }, behaviors: [{ type: 'rotate', axis: 'y', speed: 150 }, { type: 'float', amount: 0.2, period: 1.4 }, { type: 'collectible', score: 1, var: 'keys', sound: 'power' }] }, vars: { keys: 0 } },
+  { icon: 'door', label: 'Door', props: { name: 'Door', y: 1, mesh: { geometry: 'box', w: 2, h: 2, d: 0.3, color: '#a0522d' }, body: { type: 'static' }, behaviors: [{ type: 'unlock', var: 'keys', amount: 1, text: 'Unlocked!' }] }, vars: { keys: 0 } },
+  { icon: 'sign', label: 'Sign', props: { name: 'Sign', y: 0.6, mesh: { geometry: 'box', w: 0.8, h: 1.2, d: 0.15, color: '#c38b5f' }, behaviors: [{ type: 'message', text: 'Hello! Edit me in the Inspector.', seconds: 3, once: true, tag: 'player' }] } },
+  { icon: 'portal', label: 'Portal', props: { name: 'Portal', y: 0.05, mesh: { geometry: 'cylinder', r: 0.8, h: 0.1, color: '#a77bff', emissive: 0.6 }, behaviors: [{ type: 'teleport', target: '', tag: 'player' }] } },
+  { icon: 'clock', label: 'Timer Text', props: { name: 'Timer Text', ui: true, anchor: 'top', x: 0, y: 34, text: { value: '{time}', size: 26, color: '#ffffff' } }, settings: { timeLimit: 60 } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -1061,11 +1239,11 @@ const OBJECTS_3D = [
 
 let projectTab = 'prefabs';
 function renderProject() {
-  const root = $('#project');
-  root.replaceChildren();
+  const box = $('#project');
+  box.replaceChildren();
   const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], ['components', 'Components', 'folder']];
-  root.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
-  root.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
+  box.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
+  box.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
   let items;
   if (projectTab === 'components') {
     items = componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
@@ -1073,12 +1251,12 @@ function renderProject() {
     const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D) : (is3D() ? OBJECTS_3D : OBJECTS_2D);
     items = src.map((o) => ({ icon: o.icon, label: o.label, payload: { kind: 'prefab', def: o, label: o.label, icon: o.icon } }));
   }
-  root.append(h('div', { class: 'tiles' }, items.map((it) => {
+  box.append(h('div', { class: 'tiles' }, items.map((it) => {
     const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
     draggable(t, it.payload);
     return t;
   })));
-  root.append(h('p', { class: 'p-note' }, projectTab === 'components'
+  box.append(h('p', { class: 'p-note' }, projectTab === 'components'
     ? 'Drag a component onto an object in the Scene or Hierarchy, or tap to add it to the selected object.'
     : 'Drag into the Scene to place, or tap to add at the center of the view.'));
 }
@@ -1187,6 +1365,8 @@ function addPrefab(def, at) {
     Object.assign(project.settings, def.scene.settings || {});
   }
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
+  if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
+  if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   const j = addEntity(def.props, at);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   toast(`Added ${j.name}`);
@@ -1213,7 +1393,7 @@ function deleteEntity(id) {
   const name = project.entities[i].name;
   project.entities.splice(i, 1);
   if (selectedId === id) selectedId = null;
-  changed({ structure: true }); pushHistory();
+  changed({ structure: true }); pushHistory(); updateCtxBar();
   toast(`Deleted ${name}. Undo to restore.`);
 }
 
@@ -1267,16 +1447,18 @@ function openFileMenu() {
     { icon: 'redo', label: 'Redo', k: 'Ctrl+Y', fn: () => undoRedo(1) },
     '-',
     { icon: 'save', label: 'Save', k: 'auto', fn: () => { saveNow(); toast('Saved'); } },
-    { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', project.name); if (n) { project.name = n; changed(); refreshAll(); } } },
-    { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(project); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
+    { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
+    { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
+    { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
     '-',
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', k: 'Ctrl+P', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
     '-',
-    { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(project.name) + '.json', JSON.stringify(project, null, 2), 'application/json') },
+    { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     { icon: 'upload', label: 'Import Project…', fn: importJSON },
     '-',
+    { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
     { icon: 'help', label: 'Controls', fn: openHelp },
     { icon: 'external', label: 'Examples & Docs', fn: () => { location.href = '../'; } },
   ]);
@@ -1301,13 +1483,34 @@ function openProjectsDialog() {
       const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); openProjectsDialog();
     } }, icon('trash')))) : h('div', { class: 'empty' }, 'No saved projects.'));
 }
+const TOUR = [
+  ['cube', 'Welcome to Pocket Editor', 'Build 2D and 3D games right on your phone. Here is a quick tour; it takes 30 seconds.'],
+  ['folder', 'Add things', 'Open the Project tab, then press and hold a tile and drag it into the Scene. A quick tap adds it in the middle.'],
+  ['move', 'Arrange', 'Tap an object to select it and drag to move it. The tools at the top rotate, scale, and paint copies.'],
+  ['info', 'Customize', 'The Inspector lists the selected object\'s components. Change any value, or tap Add Component for movement, scoring, enemies, doors and more.'],
+  ['layers', 'Levels & settings', 'The level button above the Scene adds and switches levels. Tap the game name at the top of the Hierarchy for game settings like controls and time limits.'],
+  ['play', 'Play and share', 'Tap the play button to test instantly. Build HTML in the menu makes one file anyone can play in a browser.'],
+];
+function openTour(i) {
+  const [ic, title, text] = TOUR[i], last = i === TOUR.length - 1;
+  openDialog('Quick Tour', [h('div', { class: 'tour' },
+    h('div', { class: 'big' }, icon(ic)), h('h4', {}, title), h('p', {}, text),
+    h('div', { class: 'dots' }, TOUR.map((_, k) => h('i', { class: k === i ? 'on' : '' }))),
+    h('div', { class: 'btns' },
+      i > 0 ? h('button', { class: 'btn', onclick: () => openTour(i - 1) }, icon('left'), 'Back') : h('button', { class: 'btn', onclick: endTour }, 'Skip'),
+      h('button', { class: 'btn primary', onclick: () => (last ? endTour() : openTour(i + 1)) }, last ? 'Start building' : 'Next', !last && icon('right'))))]);
+}
+function endTour() { store.set('pocket.editor.toured', '1'); closeLayer(); }
+
 function openHelp() {
   const row = (a, b) => h('div', { class: 'row' }, h('label', {}, a), h('span', { style: 'color:var(--muted)' }, b));
   openDialog('Controls', [
     row('Select', 'Tap an object'), row('Move', 'Drag it, or use the arrows'), row('Rotate / Scale', 'Pick the tool, drag the handles'),
+    row('Paint', 'Select an object, pick the brush, tap or drag to place copies'), row('Levels', 'Level button above the Scene'),
+    row('More room', 'Tap the open panel tab to hide panels'),
     row('Pan / Orbit', 'Drag empty space'), row('Zoom', 'Pinch, or mouse wheel'), row('Add objects', 'Drag from Project into the Scene'),
     row('Add components', 'Drag onto an object, or Add Component'), row('Edit numbers', 'Drag a field label left/right'),
-    row('Keyboard', 'Q W E R tools · F frame · Ctrl+Z undo · Ctrl+D duplicate · Del delete'),
+    row('Keyboard', 'Q W E R B tools · F frame · Ctrl+Z undo · Ctrl+D duplicate · Del delete'),
   ]);
 }
 
@@ -1336,9 +1539,9 @@ function importJSON() {
 async function exportHTML() {
   try {
     const src = await (await fetch(new URL('../engine/pocket.js', import.meta.url))).text();
-    const game = JSON.stringify(project).replace(/</g, '\\u003c');
-    const title = String(project.name).replace(/[<&"]/g, (c) => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' })[c]);
-    const bg = /^#[0-9a-f]{3,8}$/i.test(project.background || '') ? project.background : '#000000';
+    const game = JSON.stringify(root).replace(/</g, '\\u003c');
+    const title = String(root.name).replace(/[<&"]/g, (c) => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' })[c]);
+    const bg = /^#[0-9a-f]{3,8}$/i.test(root.background || '') ? root.background : '#000000';
     const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -1352,7 +1555,7 @@ ${src.replace(/<\/script/gi, '<\\/script')}
 new Engine().start(${game});
 </script>
 </body></html>`;
-    download(slug(project.name) + '.html', html, 'text/html');
+    download(slug(root.name) + '.html', html, 'text/html');
     toast('Build complete: open the HTML file in any browser');
   } catch (err) {
     toast('Build failed: ' + err.message);
@@ -1367,16 +1570,17 @@ function play() {
   closeLayer();
   document.activeElement?.blur?.();
   playing = true;
+  updateCtxBar();
   document.body.classList.add('playing');
   $('#playBar').hidden = false;
   $('#playBtn').classList.add('on');
   engine.editing = false;
   engine.input.enabled = true;
   engine.timeScale = 1;
-  const json = clone(project);
-  json.settings = { ...json.settings, pauseButton: false };
+  const json = clone(root);
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false };
   try {
-    engine.start(json);
+    engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
   } catch (err) { console.error(err); toast('Error: ' + err.message); stop(); return; }
   updatePauseButtons();
@@ -1395,6 +1599,7 @@ function stop() {
   engine.timeScale = 1;
   engine.factory = null;
   updatePauseButtons();
+  updateCtxBar();
   requestAnimationFrame(() => { engine.resize(); rebuild(); });
 }
 function togglePause() { if (!playing) return; engine.paused = !engine.paused; updatePauseButtons(); }
@@ -1408,7 +1613,7 @@ setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can 
 // Wire up
 // ============================================================================
 $('#fileBtn').append(icon('menu'));
-for (const b of $$('#tools [data-tool]')) { b.append(icon(b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
+for (const b of $$('#tools [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
 $('#playBtn').append(icon('play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause'));
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
@@ -1417,7 +1622,13 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
-$('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setDock(b.dataset.dock); });
+$('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { $('#dockTabs').dataset.ready = '1'; setDock(b.dataset.dock); } });
+for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {
+  const b = $(`#ctxBar [data-act="${act}"]`);
+  b.append(icon(ic), label);
+  b.addEventListener('click', () => ctxAction(act));
+}
+$('#levelBtn').addEventListener('click', openLevelMenu);
 $('#fileBtn').addEventListener('click', openFileMenu);
 $('#playBtn').addEventListener('click', () => (playing ? stop() : play()));
 $('#pauseBtn').addEventListener('click', togglePause);
@@ -1441,6 +1652,7 @@ setTool('move');
   else if (all[cur]) openProject(all[cur].json, cur);
   else {
     newFromTemplate('sky-dodge', 'My First Game');
+    if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 300);
     const hint = $('#hint');
     hint.textContent = 'Drag items from Project into the Scene · Tap to select';
     hint.hidden = false;

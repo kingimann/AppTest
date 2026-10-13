@@ -226,7 +226,7 @@ export class Camera3D {
 // Scene
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true,
+  joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
 };
 
 export class Scene {
@@ -256,7 +256,13 @@ export class Scene {
     this.engine = null;
     this.json = opts.json || null;
     if (this.settings.saveBest) this.vars.best = +store.get('pocket.best.' + this.settings.saveBest, 0) || 0;
+    if (this.settings.timeLimit) this.vars.time = +this.settings.timeLimit;
+    this.msg = null;
+    this.level = 1; this.levelCount = 1;
   }
+
+  /** Show a message banner over the game for a few seconds. */
+  message(text, seconds = 2.5) { this.msg = { text: String(text), t: seconds }; }
 
   /** Build a scene from a plain JSON description (what the editor saves). */
   static fromJSON(json, { editing = false } = {}) {
@@ -332,6 +338,7 @@ export class Scene {
       this.vars.best = Math.floor(this.vars.score); this.newBest = true;
       store.set('pocket.best.' + key, String(this.vars.best));
     }
+    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
     this.emit(state);
@@ -604,7 +611,8 @@ export function loadImage(src) {
 // ============================================================================
 const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
-  return typeof v === 'number' ? String(Math.floor(v)) : v ?? '';
+  if (typeof v !== 'number') return v ?? '';
+  return String(k === 'time' ? Math.ceil(v) : Math.floor(v));
 });
 
 function drawEntity2D(ctx, e, vars, time) {
@@ -887,6 +895,28 @@ export class Renderer3D {
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
+function drawMessage(ctx, scene, W, H, engine) {
+  const m = scene.msg;
+  if (!m) return;
+  const maxW = Math.min(W - 40, 460), size = 18, lines = [];
+  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`;
+  let line = '';
+  for (const word of m.text.split(/\s+/)) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
+  }
+  if (line) lines.push(line);
+  const h = lines.length * (size + 6) + 24, y = H - engine.safe.bottom - 130 - h;
+  ctx.globalAlpha = Math.min(1, m.t * 3);
+  ctx.fillStyle = 'rgba(15,15,25,0.85)';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect((W - maxW) / 2, y, maxW, h, 12); else ctx.rect((W - maxW) / 2, y, maxW, h);
+  ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + 12 + (size + 6) * i + (size + 6) / 2));
+  ctx.globalAlpha = 1;
+}
+
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
   const x = a.includes('left') ? safe.left : a.includes('right') ? W - safe.right : W / 2;
@@ -935,6 +965,12 @@ function renderUI(engine, scene) {
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
     }
   }
+  if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
+    ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
+    big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
+    ctx.globalAlpha = 1;
+  }
+  drawMessage(ctx, scene, W, H, engine);
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -945,8 +981,14 @@ function renderUI(engine, scene) {
     if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, 'rgba(220,225,255,0.7)');
     big('Tap to start', H * 0.66, 22, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'over' || scene.state === 'win') {
-    if (scene.time - (scene.endTime ?? scene.time) < 0.5) return;
+    if (scene.time - (scene.endTime ?? scene.time) < 0.5) { drawMessage(ctx, scene, W, H, engine); return; }
     dim(0.65);
+    if (scene.levelComplete) {
+      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), '#5dff8a');
+      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
+      big('Tap for the next level', H * 0.62, 20, `rgba(255,255,255,${pulse})`);
+      return;
+    }
     big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? '#5dff8a' : '#ff5d8f');
     big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
@@ -1311,6 +1353,124 @@ registerBehavior('timeScore', {
   create(p) { return { update(e, dt, s) { s.addVar('score', p.rate * dt); } }; },
 });
 
+registerBehavior('chase', {
+  label: 'Chase', description: 'Moves toward the player when it gets close.',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 110, default3d: 3.5 },
+    { key: 'range', label: 'Notice range (0 = always)', type: 'number', default: 320, default3d: 10 },
+    { key: 'tag', label: 'Chase tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let target = null;
+    return {
+      update(e, dt, s) {
+        if (!target || target.dead) target = s.findAll(p.tag)[0];
+        if (!target) return;
+        const dx = target.x - e.x, dy = is3D(e) ? 0 : target.y - e.y, dz = is3D(e) ? target.z - e.z : 0;
+        const d = Math.hypot(dx, dy, dz);
+        if (d < 1e-3 || (p.range && d > p.range)) return;
+        const k = Math.min(d, p.speed * dt) / d;
+        e.x += dx * k; e.y += dy * k; e.z += dz * k;
+        if (is3D(e)) e.ry = Math.atan2(dx, dz) / DEG;
+      },
+    };
+  },
+});
+
+registerBehavior('float', {
+  label: 'Float', description: 'Bobs gently up and down.',
+  params: [
+    { key: 'amount', label: 'Height', type: 'number', default: 8, default3d: 0.25 },
+    { key: 'period', label: 'Seconds per bob', type: 'number', default: 1.6 },
+  ],
+  create(p) {
+    let t = Math.random() * 10, base = null;
+    return {
+      start(e) { base = e.y; },
+      update(e, dt) { t += dt; e.y = base + Math.sin(t / Math.max(0.1, p.period) * Math.PI * 2) * p.amount * (is3D(e) ? 1 : -1); },
+    };
+  },
+});
+
+registerBehavior('message', {
+  label: 'Message', description: 'Shows a message when the player touches it (signs, hints, story).',
+  params: [
+    { key: 'text', label: 'Message', type: 'text', default: 'Hello there!' },
+    { key: 'seconds', label: 'Show for (sec)', type: 'number', default: 3 },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'tag', label: 'Shown to tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let shown = false;
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (p.once && shown)) return;
+        shown = true; s.message(p.text, p.seconds); s.engine.audio.sfx('click');
+      },
+    };
+  },
+});
+
+registerBehavior('teleport', {
+  label: 'Teleport', description: 'Sends the player to another object (by name).',
+  params: [
+    { key: 'target', label: 'Destination name', type: 'text', default: '' },
+    { key: 'tag', label: 'Teleports tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (other.data.tpUntil || 0) > s.time) return;
+        const dest = s.find(p.target);
+        if (!dest || dest === e) return;
+        s.burst(other.x, other.y, other.z, '#a77bff', 16);
+        other.x = dest.x; other.y = dest.y; other.z = dest.z;
+        if (other.body) other.body.vel = { x: 0, y: 0, z: 0 };
+        other.data.tpUntil = s.time + 0.8;
+        s.burst(dest.x, dest.y, dest.z, '#a77bff', 16);
+        s.engine.audio.sfx('power');
+      },
+    };
+  },
+});
+
+registerBehavior('unlock', {
+  label: 'Unlock', description: 'Disappears once a variable reaches an amount, e.g. a door that opens with keys.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'keys' },
+    { key: 'amount', label: 'Needed', type: 'number', default: 1 },
+    { key: 'text', label: 'Message when opened', type: 'text', default: 'Unlocked!' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        if ((+s.vars[p.var] || 0) < p.amount) return;
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#fff', 30, 1.2);
+        if (p.text) s.message(p.text, 2);
+        s.engine.audio.sfx('power');
+        e.destroy();
+      },
+    };
+  },
+});
+
+registerBehavior('sound', {
+  label: 'Sound', description: 'Plays a sound when the game starts or when touched.',
+  params: [
+    { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], default: 'power' },
+    { key: 'when', label: 'When', type: 'select', options: ['touched', 'start'], default: 'touched' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    return {
+      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) { if (p.when === 'touched' && other.has(p.tag)) s.engine.audio.sfx(p.sound); },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -1391,17 +1551,48 @@ export class Engine {
     this.renderer = kind === '3d' ? new Renderer3D(this.canvas) : new Renderer2D(this.canvas);
   }
 
-  /** Start a game. Pass a function that builds a fresh Scene (used for restarts), a Scene, or scene JSON. */
-  start(source) {
+  /**
+   * Start a game. Pass a function that builds a fresh Scene (used for restarts), a Scene, or scene JSON.
+   * Scene JSON may carry more levels in `levels: [sceneJson, ...]`; opts.level picks the starting one.
+   */
+  start(source, opts = {}) {
+    this.levels = null; this.carry = null;
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;
-    else this.factory = () => Scene.fromJSON(source);
+    else {
+      this.levels = [source, ...(source.levels || [])];
+      this.levelIndex = clamp(opts.level || 0, 0, this.levels.length - 1);
+      this.factory = () => this.buildLevel();
+    }
     this.setScene(this.factory());
     return this.scene;
   }
 
+  buildLevel() {
+    const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
+    const json = i === 0 ? lv : { ...lv, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const s = Scene.fromJSON(json);
+    s.level = i + 1; s.levelCount = this.levels.length;
+    if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
+    if (s.settings.timeLimit) s.vars.time = +s.settings.timeLimit;
+    s.vars.level = s.level;
+    return s;
+  }
+
+  hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+
+  nextLevel() {
+    if (!this.hasNextLevel()) return;
+    const carry = { ...this.scene.vars };
+    delete carry.best; delete carry.level; delete carry.time;
+    this.carry = carry;
+    this.levelIndex++;
+    this.setScene(this.factory());
+  }
+
   restart(skipTitle = true) {
     if (!this.factory) return;
+    if (this.levels && this.scene?.state === 'win') { this.levelIndex = 0; this.carry = null; } // finished the last level
     const s = this.factory();
     if (skipTitle && s.state === 'title') s.state = 'play';
     this.setScene(s);
@@ -1456,7 +1647,9 @@ export class Engine {
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
-      if (s.time - s.endTime > 0.8 && (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter'))) this.restart();
+      if (s.time - s.endTime > 0.8 && (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter'))) {
+        if (s.levelComplete) this.nextLevel(); else this.restart();
+      }
       return;
     }
     for (const e of s.entities) {
@@ -1472,6 +1665,10 @@ export class Engine {
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();
+    if (s.settings.timeLimit && s.state === 'play') {
+      s.vars.time = Math.max(0, (s.vars.time ?? s.settings.timeLimit) - dt);
+      if (s.vars.time <= 0) { s.message("Time's up!", 3); s.gameOver(); }
+    }
     this.stepEffects(dt);
     s.flush();
   }
@@ -1496,6 +1693,7 @@ export class Engine {
       if ((p.life -= p.decay * dt) <= 0) s.particles.splice(i, 1);
     }
     s.camera.shake = Math.max(0, s.camera.shake - dt * 40);
+    if (s.msg && (s.msg.t -= dt) <= 0) s.msg = null;
   }
 
   render() {

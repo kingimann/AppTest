@@ -175,6 +175,17 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 - Each copy keeps its own position, rotation, scale and name; everything else (look, components, children) comes from the prefab. Copies are blue in the Hierarchy.
 - Change a copy and its banner turns amber: **Apply to all** updates the prefab and every copy in every level, **Revert** goes back to the prefab, **⋯** selects all copies or **Unpacks** this one into a plain object.
 
+### Post Processing
+
+- Tap the level (top row of the Hierarchy) → **Post Processing**. Start from a look — **Neon glow**, **Warm sunset**, **Cold**, **Night**, **Retro**, **Dreamy**, **Black & white** — then tune it:
+  - **Bloom** (glow around bright things) with size and "only bright parts".
+  - **Vignette** (dark edges), **Brightness**, **Contrast**, **Saturation**, **Hue shift**, **Tint** colour and amount.
+- Works in 2D and 3D, in the editor and while playing. The HUD isn't affected.
+
+```js
+{ post: { bloom: 0.8, bloomRadius: 16, vignette: 0.35, saturation: 125, tint: '#ff9a3c', tintAmount: 0.2 } } // on a level
+```
+
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.

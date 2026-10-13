@@ -2288,6 +2288,24 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, threeD ? 'Gravity is in Physics below: about -25 is normal.' : 'Gravity is in Physics below: 0 for top-down games, about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
   ], { icon: 'sun', key: 's-env' }));
+  const POST_PRESETS = [['none', 'None', {}], ['glow', 'Neon glow', { bloom: 0.8, bloomRadius: 16, bloomThreshold: 50, saturation: 125, vignette: 0.35 }],
+    ['warm', 'Warm sunset', { tint: '#ff9a3c', tintAmount: 0.25, saturation: 115, contrast: 105, vignette: 0.3 }], ['cold', 'Cold', { tint: '#4fa3ff', tintAmount: 0.2, saturation: 85, contrast: 108 }],
+    ['night', 'Night', { brightness: 70, saturation: 70, tint: '#2a3d8f', tintAmount: 0.35, vignette: 0.6 }], ['retro', 'Retro', { contrast: 120, saturation: 140, vignette: 0.5, bloom: 0.35 }],
+    ['dream', 'Dreamy', { bloom: 0.9, bloomRadius: 28, bloomThreshold: 20, brightness: 108, saturation: 90 }], ['bw', 'Black & white', { saturation: 0, contrast: 115, vignette: 0.4 }]];
+  box.append(comp('Post Processing', [
+    h('p', { class: 'desc' }, 'Effects over the whole game view (your HUD stays crisp). Start from a look, then tune it.'),
+    h('div', { class: 'post-presets' }, POST_PRESETS.map(([k, l, v]) => h('button', { class: 'btn', onclick: () => { project.post = clone(v); changed({ inspector: true }); pushHistory(); toast(k === 'none' ? 'Effects off' : `${l} look`); } }, l))),
+    C('post.bloom', { label: 'Bloom (glow)', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+    C('post.bloomRadius', { label: 'Glow size', type: 'number', def: 12, step: 2, range: [2, 40] }),
+    C('post.bloomThreshold', { label: 'Glow only bright parts', type: 'number', def: 60, step: 5, range: [0, 100] }),
+    C('post.vignette', { label: 'Vignette (dark edges)', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+    C('post.brightness', { label: 'Brightness %', type: 'number', def: 100, step: 5, range: [20, 200] }),
+    C('post.contrast', { label: 'Contrast %', type: 'number', def: 100, step: 5, range: [20, 200] }),
+    C('post.saturation', { label: 'Saturation %', type: 'number', def: 100, step: 5, range: [0, 250] }),
+    C('post.hue', { label: 'Hue shift °', type: 'number', def: 0, step: 10, range: [-180, 180] }),
+    C('post.tint', { label: 'Tint colour', type: 'color', def: '#ff8800' }),
+    C('post.tintAmount', { label: 'Tint amount', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+  ], { icon: 'sun', key: 's-post' }));
   box.append(comp('Physics', [
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),

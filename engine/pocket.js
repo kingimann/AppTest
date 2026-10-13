@@ -604,6 +604,7 @@ export class Scene {
     this.gravity = opts.gravity ?? (this.mode === '3d' ? -20 : 0); // along y (2D: +down, 3D: +up)
     this.gravityX = +opts.gravityX || 0; this.gravityZ = +opts.gravityZ || 0; // sideways gravity (wind, tilted worlds)
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
+    this.post = { ...(opts.post || {}) }; // post-processing: bloom, vignette, colour grading
     // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
     this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
     if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
@@ -5271,7 +5272,7 @@ export class Engine {
   useRenderer(kind) {
     if (this.renderer?.kind === kind) return;
     this.canvas?.remove();
-    this.canvas = document.createElement('canvas');
+    this.canvas = document.createElement('canvas'); this._grade = null;
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
     this.root.insertBefore(this.canvas, this.uiCanvas);
     this.canvas.width = Math.round(this.width * this.dpr); this.canvas.height = Math.round(this.height * this.dpr);
@@ -5587,8 +5588,50 @@ export class Engine {
     if (!this.scene || !this.renderer) return;
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.renderer.render(this.scene, this);
+    this.applyPost(this.scene.post);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);
+  }
+
+  /** Post-processing over the game view (not the HUD): colour grading and bloom on the GPU, vignette and tint as overlays. */
+  applyPost(P = {}) {
+    const on = (k) => +P[k] > 0, grade = [
+      P.brightness != null && +P.brightness !== 100 && `brightness(${+P.brightness / 100})`,
+      P.contrast != null && +P.contrast !== 100 && `contrast(${+P.contrast / 100})`,
+      P.saturation != null && +P.saturation !== 100 && `saturate(${+P.saturation / 100})`,
+      +P.hue && `hue-rotate(${+P.hue}deg)`,
+    ].filter(Boolean).join(' ');
+    if (this.canvas && this._grade !== grade) { this.canvas.style.filter = grade; this._grade = grade; }
+    // bloom: a small copy of the frame, bright parts kept, blurred, and added on top with "screen"
+    if (on('bloom')) {
+      let b = this.bloomCanvas;
+      if (!b) {
+        b = this.bloomCanvas = document.createElement('canvas');
+        b.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;mix-blend-mode:screen;';
+        this.root.insertBefore(b, this.uiCanvas);
+      }
+      const w = Math.max(1, Math.round(this.width / 4)), hgt = Math.max(1, Math.round(this.height / 4));
+      if (b.width !== w || b.height !== hgt) { b.width = w; b.height = hgt; }
+      const g = b.getContext('2d'); g.clearRect(0, 0, w, hgt); g.drawImage(this.canvas, 0, 0, w, hgt);
+      const r = Math.max(1, (+P.bloomRadius || 12) / 4), th = 1 + +(P.bloomThreshold ?? 60) / 40;
+      const f = `brightness(${0.85 - (th - 1) * 0.15}) contrast(${th}) blur(${r}px) ${grade}`;
+      if (b._f !== f) { b.style.filter = f; b._f = f; }
+      b.style.opacity = Math.min(1, +P.bloom); b.hidden = false;
+    } else if (this.bloomCanvas) this.bloomCanvas.hidden = true;
+    // vignette (dark edges) and tint (a colour wash)
+    const vig = on('vignette'), tint = on('tintAmount') && P.tint;
+    if (vig || tint) {
+      let o = this.postOverlay;
+      if (!o) { o = this.postOverlay = document.createElement('div'); o.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none;'; this.root.insertBefore(o, this.uiCanvas); }
+      const key = `${P.vignette}|${P.tint}|${P.tintAmount}|${P.vignetteColor}`;
+      if (o._k !== key) {
+        o._k = key;
+        const c255 = (hex) => hexToRgb(hex).map((v) => Math.round(v * 255)), [vr, vg, vb] = c255(P.vignetteColor || '#000000'), [tr, tg, tb] = c255(P.tint || '#ff8800');
+        o.style.background = [vig && `radial-gradient(ellipse at center, rgba(${vr},${vg},${vb},0) ${Math.round(70 - +P.vignette * 35)}%, rgba(${vr},${vg},${vb},${Math.min(1, +P.vignette * 0.9)}) 100%)`,
+          tint && `linear-gradient(rgba(${tr},${tg},${tb},${Math.min(0.8, +P.tintAmount * 0.75)}), rgba(${tr},${tg},${tb},${Math.min(0.8, +P.tintAmount * 0.75)}))`].filter(Boolean).join(',');
+      }
+      o.hidden = false;
+    } else if (this.postOverlay) this.postOverlay.hidden = true;
   }
 
   destroy() {

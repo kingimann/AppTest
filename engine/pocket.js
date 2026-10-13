@@ -1848,8 +1848,21 @@ export function formatNumber(v) {
   for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return (Math.floor(v / n * 10) / 10) + u;
   return String(Math.floor(v));
 }
-const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
+/** Numbers in text: how a Text component wants them shown. */
+function fmtNumber(v, fmt, k) {
+  switch (fmt) {
+    case 'short (1.2K)': { const a = Math.abs(v); return a >= 1e9 ? (v / 1e9).toFixed(1).replace(/\.0$/, '') + 'B' : a >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : a >= 1e3 ? (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : String(Math.round(v)); }
+    case 'whole number': return String(Math.round(v));
+    case '2 decimals': return v.toFixed(2);
+    case 'time (m:ss)': { const t = Math.max(0, Math.ceil(v)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
+    case 'percent': return Math.round(v * (Math.abs(v) <= 1 ? 100 : 1)) + '%';
+    case 'plain': return String(Math.round(v * 1000) / 1000);
+    default: return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
+  }
+}
+const fillTemplate = (str, vars, fmt) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
+  if (fmt && typeof v === 'number') return fmtNumber(v, fmt, k);
   if (Array.isArray(v)) return v.map((q) => (typeof q === 'number' ? formatNumber(q) : q)).join(', ') || '—'; // lists read "1, 2, 3"
   if (typeof v !== 'number') return v ?? '';
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
@@ -1984,18 +1997,64 @@ function drawEntity2D(ctx, e, vars, time) {
   }
   if (e.text) {
     const t = e.text;
-    ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${t.size}px ${fontOf(t.font)}`;
+    let size = t.size;
+    const setFont = () => { ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${size}px ${fontOf(t.font)}`; };
+    setFont();
     ctx.textAlign = t.align; ctx.textBaseline = 'middle';
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
-    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars, t.format);
     if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
-    const lines = textLines(ctx, str, +t.wrap || 0), lh = t.size * (+t.lineHeight || 1.2), y0 = -(lines.length - 1) * lh / 2;
-    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, lines.length * lh);
+    let lines = textLines(ctx, str, +t.wrap || 0);
+    if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
+      if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); setFont(); }
+    }
+    const lh = size * (+t.lineHeight || 1.2), block = lines.length * lh;
+    const vy = t.valign === 'top' ? block / 2 - lh / 2 : t.valign === 'bottom' ? -block / 2 + lh / 2 : 0; // top: the first line sits at the object's position
+    const y0 = -(lines.length - 1) * lh / 2 + vy;
+    const widths = lines.map((l) => ctx.measureText(l).width), maxW = Math.max(...widths, 0);
+    const leftOf = (w) => (t.align === 'left' ? 0 : t.align === 'right' ? -w : -w / 2);
+    if (t.bg) { // a label box behind the text
+      const pad = +t.bgPad || 8, x = leftOf(maxW) - pad, y = y0 - lh / 2 - pad * 0.6, w = maxW + pad * 2, hgt = block + pad * 1.2;
+      ctx.fillStyle = t.bg; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hgt, +t.bgRadius || 0); else ctx.rect(x, y, w, hgt); ctx.fill();
+    }
+    const fx = t.effect || 'none', perLetter = ['wave', 'shake', 'rainbow', 'bounce'].includes(fx);
+    let pulseK = 1;
+    if (fx === 'pulse') { pulseK = 1 + Math.sin(time * 5) * 0.06; ctx.scale(pulseK, pulseK); }
+    if (fx === 'float') ctx.translate(0, Math.sin(time * 2.5) * size * 0.12);
+    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, block);
+    const shade = () => {
+      if (t.glow) { ctx.shadowColor = t.glow; ctx.shadowBlur = size * 0.6; ctx.shadowOffsetY = 0; }
+      else if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = size * 0.25; ctx.shadowOffsetY = size * 0.08; }
+    };
     lines.forEach((ln, i) => {
       const y = y0 + i * lh;
-      if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
-      if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); ctx.shadowColor = 'transparent'; }
-      ctx.fillText(ln, 0, y);
+      shade();
+      if (!perLetter) {
+        if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); if (!t.glow) ctx.shadowColor = 'transparent'; }
+        ctx.fillText(ln, 0, y);
+      } else { // each letter moves on its own
+        const align = ctx.textAlign; ctx.textAlign = 'left';
+        let x = leftOf(widths[i]);
+        [...ln].forEach((ch, j) => {
+          const cw = ctx.measureText(ch).width, ph = time * 6 - j * 0.5;
+          let dx = 0, dy = 0;
+          if (fx === 'wave') dy = Math.sin(ph) * size * 0.15;
+          else if (fx === 'bounce') dy = -Math.abs(Math.sin(ph * 0.8)) * size * 0.25;
+          else if (fx === 'shake') { const r = Math.sin((j + 1) * 99.1 + Math.floor(time * 20) * 7.3); dx = r * size * 0.05; dy = Math.cos(r * 13) * size * 0.05; }
+          if (fx === 'rainbow') ctx.fillStyle = `hsl(${(time * 120 + j * 25) % 360}, 90%, 62%)`;
+          if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ch, x + dx, y + dy); }
+          ctx.fillText(ch, x + dx, y + dy);
+          x += cw;
+        });
+        ctx.textAlign = align;
+      }
+      if (t.underline || t.strike) { // lines under / through the text, in the text colour
+        ctx.shadowColor = 'transparent'; ctx.fillStyle = typeof ctx.fillStyle === 'string' ? ctx.fillStyle : t.color;
+        const x = leftOf(widths[i]), th = Math.max(1, size * 0.07);
+        if (t.underline) ctx.fillRect(x, y + size * 0.42, widths[i], th);
+        if (t.strike) ctx.fillRect(x, y + size * 0.02, widths[i], th);
+      }
     });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
@@ -6031,22 +6090,88 @@ registerBehavior('voxelBuilder', {
 });
 
 registerBehavior('button', {
-  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game.',
-  params: [...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q))],
+  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game. It can fire on press, repeat while held, cost something, cool down, or only work when a variable allows it.',
+  params: [
+    ...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q)),
+    { key: 'also', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'when', label: 'Fires', type: 'select', options: ['on tap', 'on press', 'while held (repeats)', 'on long press'], default: 'on tap', group: 'When it fires' },
+    { key: 'repeat', label: 'Repeat every (sec)', type: 'number', default: 0.15, range: [0.05, 1], step: 0.05, group: 'When it fires', showIf: { when: ['while held (repeats)'] } },
+    { key: 'holdTime', label: 'Hold for (sec)', type: 'number', default: 0.6, range: [0.2, 3], step: 0.1, group: 'When it fires', showIf: { when: ['on long press'] } },
+    { key: 'once', label: 'Only works once', type: 'bool', default: false, group: 'When it fires' },
+    { key: 'pressScale', label: 'Squash when pressed', type: 'number', default: 0.92, range: [0.6, 1.1], step: 0.02, group: 'Look & feel' },
+    { key: 'pressColor', label: 'Colour while pressed', type: 'color', default: '', optional: true, group: 'Look & feel' },
+    { key: 'haptic', label: 'Buzz the phone', type: 'bool', default: true, group: 'Look & feel' },
+    { key: 'enableVar', label: 'Only works when variable', type: 'text', default: '', suggest: 'vars', group: 'Only works when…' },
+    { key: 'enableOp', label: 'is', type: 'select', options: ['≥', '>', '=', '≠', '<', '≤'], default: '≥', group: 'Only works when…', showIf: (b) => !!b.enableVar },
+    { key: 'enableValue', label: 'value', type: 'number', default: 1, group: 'Only works when…', showIf: (b) => !!b.enableVar },
+    { key: 'costVar', label: 'Costs (variable)', type: 'text', default: '', suggest: 'vars', group: 'Cost & cooldown' },
+    { key: 'cost', label: 'Cost', type: 'number', default: 10, group: 'Cost & cooldown', showIf: (b) => !!b.costVar },
+    { key: 'cooldown', label: 'Cooldown (sec)', type: 'number', default: 0, range: [0, 30], step: 0.5, group: 'Cost & cooldown' },
+    { key: 'disabledAlpha', label: 'Look when it can\'t be used (opacity)', type: 'number', default: 0.45, range: [0, 1], step: 0.05, group: 'Cost & cooldown' },
+    { key: 'denied', label: 'Message when it can\'t be used', type: 'text', default: '', group: 'Cost & cooldown' },
+  ],
   create(p) {
+    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null;
+    const gated = () => !!(p.enableVar || p.costVar || p.once || +p.cooldown > 0);
+    const allowed = (s) => {
+      if (p.once && used) return false;
+      if (p.enableVar) { const a = +s.vars[p.enableVar] || 0, b = +p.enableValue || 0; if (!({ '≥': a >= b, '>': a > b, '=': a === b, '≠': a !== b, '<': a < b, '≤': a <= b }[p.enableOp || '≥'])) return false; }
+      if (p.costVar && (+s.vars[p.costVar] || 0) < (+p.cost || 0)) return false;
+      return true;
+    };
+    const fireIt = (e, s) => {
+      if (s.time < cdUntil) return;
+      if (!allowed(s)) { // can't: a little "no" shake
+        s.punch(e, { x: 8 }, 0.3, { add: true }); s.engine.audio.sfx('hit');
+        if (p.denied) s.message(fillTemplate(p.denied, s.vars), 1.3);
+        return;
+      }
+      if (p.costVar) s.addVar(p.costVar, -(+p.cost || 0));
+      if (p.haptic !== false) s.engine.vibrate(10);
+      if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
+      runAction(s, e, p);
+      if (p.also) s.send(p.also);
+      used = true; if (+p.cooldown > 0) cdUntil = s.time + +p.cooldown;
+    };
     return {
       uiAlways: true, // keeps working on title and end screens
-      update(e, dt, s) {
-        if (!e.visible) return;
-        for (const t of s.engine.input.taps) {
-          if (!hitTest(s, e, t.x, t.y)) continue;
-          s.engine.vibrate(10);
-          const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
-          if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
-          runAction(s, e, p);
-          break;
-        }
+      start(e, s) {
+        if (!(+p.cooldown > 0)) return;
+        (s.overlays ||= []).push(ring = (ctx) => { // a dark sweep over the button while it cools down
+          if (e.dead || !e.visible || e._parentHidden || s.time >= cdUntil) return;
+          const c = screenOf(s, e), ex = e.extents(), k = e.ui ? uiK(s.engine.safe) || 1 : 1, r = Math.max(10, (ex.sphere ? ex.r : Math.min(ex.hx, ex.hy)) * k);
+          const f = (cdUntil - s.time) / (+p.cooldown || 1), round = ex.sphere || e.shape?.type === 'circle';
+          ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath();
+          if (round) { ctx.moveTo(c.x, c.y); ctx.arc(c.x, c.y, r, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.closePath(); }
+          else { const w = ex.hx * 2 * k, hh = ex.hy * 2 * k, rad = Math.min((e.shape?.radius || 0) * k, hh / 2), x0 = c.x - w / 2; ctx.save(); if (ctx.roundRect) ctx.roundRect(x0, c.y - hh / 2, w, hh, rad); else ctx.rect(x0, c.y - hh / 2, w, hh); ctx.clip(); ctx.fillRect(x0, c.y - hh / 2, w * f, hh); ctx.restore(); } // a band that shrinks as it cools down
+          if (round) ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(r * 0.6)}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(Math.ceil(cdUntil - s.time), c.x, c.y + 1); ctx.restore();
+        });
       },
+      update(e, dt, s) {
+        if (!e.visible) { held = null; return; }
+        base ??= { sx: e.sx, sy: e.sy };
+        const inp = s.engine.input, mode = p.when || 'on tap';
+        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) { held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s); break; }
+        const ptr = held != null && inp.pointers.get(held);
+        if (ptr) {
+          heldT += dt;
+          if (mode === 'while held (repeats)' && heldT >= nextRep) { fireIt(e, s); nextRep = heldT + Math.max(0.05, +p.repeat || 0.15) + (nextRep === 0 ? 0.25 : 0); } // first right away, a short pause, then steady repeats
+          if (mode === 'on long press' && !longDone && heldT >= (+p.holdTime || 0.6)) { longDone = true; fireIt(e, s); }
+        } else held = null;
+        if (mode === 'on tap') for (const t of inp.taps) if (hitTest(s, e, t.x, t.y)) { fireIt(e, s); break; }
+        // feel: squash while the finger is on it, optional pressed colour
+        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y);
+        if (down || e.data._btnSq) {
+          const k = down ? +p.pressScale || 0.92 : 1, a = Math.min(1, dt * 25);
+          e.sx += (base.sx * k - e.sx) * a; e.sy += (base.sy * k - e.sy) * a;
+          e.data._btnSq = down || Math.abs(e.sx - base.sx) > 0.002; if (!e.data._btnSq) { e.sx = base.sx; e.sy = base.sy; }
+        }
+        if (p.pressColor && e.shape) { if (fill0 === undefined) fill0 = e.shape.fill; e.shape.fill = down ? p.pressColor : fill0; }
+        // look disabled when it can't be used (only if something can disable it)
+        if (gated()) { const off = !allowed(s) || s.time < cdUntil; if (off !== lastOff) { e.alpha = off ? +p.disabledAlpha : 1; lastOff = off; } }
+      },
+      destroy(e, s) { if (ring) s.overlays = (s.overlays || []).filter((f) => f !== ring); },
     };
   },
 });

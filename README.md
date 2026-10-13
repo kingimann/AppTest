@@ -268,6 +268,12 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 - **Combo Clicker**: tap for points; quick taps build a combo multiplier (`{combo}`), with critical hits, popups, squash and sparkles.
 - **Long Press**: hold a finger on it for a moment (a ring fills up) to do any Button action.
 - **Double Tap**: two quick taps do any Button action.
+- **Button** settings:
+  - **When it fires**: on tap (finger lifted on it), on press (finger lands), while held (repeats every N seconds, after a short pause) or on long press (hold for N seconds). **Only once** makes a one-shot button.
+  - **Look & feel**: how far it squashes while pressed, an optional pressed colour, and a buzz.
+  - **Only works when…**: a variable check such as `level ≥ 3`. Until then the button fades out and does nothing.
+  - **Cost & cooldown**: spend a variable (for example 10 `coins`) each time; it fades out when you can't afford it, shakes and sends an optional "denied" message. A cooldown dims it with a sweep and a countdown.
+  - **Also send message**: send a message as well as doing the action.
 - **Tap Toggle**: each tap switches on/off: a 0/1 variable, its colour, another object's visibility, and an "on/off" message.
 - **Press Feedback**: squashes the moment a finger lands, springs back on release, with sound, buzz and optional sparkles (great on UI buttons).
 - **Tap to Spawn**: tapping empty space (or anywhere) creates a template there; cooldown, max count and an optional cost.
@@ -350,6 +356,13 @@ Everything inside a panel that has *Show when* (title, game over, paused…) now
 - **UI Theme** (Game Settings): pick a ready-made look (Default, Neon, Candy, Retro, Fantasy, Ocean, Light) or set your own font, text, accent, panel, dimming, touch-control, win and lose colours and corner roundness. The built-in title, pause and game-over screens, touch buttons, joystick, messages and dialogs all follow it, as does any text whose font is **Theme font** (the default for new text). **Apply to my UI** restyles everything you already made; **Use Theme** does one element.
 - **Fonts:** eleven built-in fonts plus any **Google Font** (*More fonts…*; it downloads the first time a player opens the game). The theme can use one too.
 - **Text:** gradient colour, italic, UPPERCASE / lowercase, letter spacing, wrap width with line spacing (type `\n` for a line break), outline, and a drop shadow with its own colour.
+- **More text options:**
+  - **Glow**, **underline** and **strikethrough**.
+  - **Number format** for `{variables}`: short (1.2K, 3.4M), whole number, 2 decimals, time (m:ss), percent, or plain.
+  - **Shrink to fit**: the text gets smaller so it never runs wider than a set width.
+  - **Lines grow**: from the middle, downward or upward.
+  - **Label box**: a rounded background behind the text, with padding and corner settings.
+  - **Animation**: wave, bounce, shake, rainbow (moving letter by letter), pulse or float.
 - **Shapes:** gradient fill (down, across, diagonal or from the centre), soft drop shadow with distance, dashed outlines.
 - **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
 - **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.

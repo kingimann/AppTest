@@ -37,14 +37,22 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Space Shooter | Star Defender | waves, bosses with health |
    | Racing | Desert Rally | car controls, chase camera, time limit |
    | Endless Runner | Lane Rush | swipe lanes, jump |
-   | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second |
+   | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
+   | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
+   | Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
+   | Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
+   | Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
+   | Board Game | Tic-Tac-Toe | tap cells, play the computer |
    | Tap Arcade | Tap Frenzy | tap targets against the clock |
    | Blank 2D / 3D | | start from nothing |
 
 2. **Scene** fills the screen. Tap an object to select it; drag to move it. The tool rail on the left has Hand, Move, Rotate, Scale and **Paint** (stamp copies by tapping or dragging). Pinch to zoom; drag empty space to pan (2D) or orbit (3D).
 3. **Blue + button**: add things. Tap a tile to add it, or press, hold and drag it to the exact spot.
-4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). Drag the handle or tap the open tab for peek, half or full height. Held sideways, the panels move to the right.
-5. **▶ Play** tests the game instantly; **■ Stop** returns to editing.
+4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). It starts small so the Scene gets the screen: tap a tab or swipe up on the tabs to open it, swipe down to close it, or drag the handle. Held sideways, the panels move to the right.
+5. **▶ Play** tests the game instantly; **■ Stop** (or the phone's back gesture) returns to editing.
+
+New projects show a **Getting started** checklist at the top of the Hierarchy: add a player, ground, something to collect, some node logic, and press Play. Each step has a button that does it for you.
+
 
 | Gesture | Does |
 | --- | --- |
@@ -53,12 +61,58 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
 | Two-finger tap / three-finger tap | Undo / Redo |
 | Double-tap empty space | Reset the view |
 | Drag a field's label | Scrub its number |
+| − / + / ⟲ buttons over the Scene | Zoom out, zoom in, reset the view (the page itself never zooms) |
+| **UI** button above the Scene | UI mode: only on-screen UI can be selected; Project → UI has panels, buttons, bars and ready-made menus |
 
 The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears when something is selected. The level button above the Scene adds and switches levels.
 
 **Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** component then creates copies of it by name.
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
+
+### Node coding (Visual Script)
+
+Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
+
+- **Add Node** opens a list grouped into **Events** (green: On Start, On Tap, On Touch, Every N Seconds, On Button, On Swipe, Every Frame, On Destroyed), **Actions** (blue: change variables, show messages, sounds, spawn, destroy, move, jump, show/hide, shake, vibrate, win, game over, next level), **Flow** (purple: If, Wait, Random Chance, Do Once, Sequence) and **Values** (orange: numbers, variables, random, math, compare, and/or/not, position, distance, time).
+- If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
+- **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
+- Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
+- Drag nodes to move them, drag empty space to pan, pinch to zoom. ⟲ undoes, ⛶ fits everything on screen, and **Done** or the back gesture closes the editor.
+
+Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
+
+### Saving, lighting, physics and cameras
+
+- **Saving.** A save keeps variables, the level, where objects are and what was collected or destroyed. You can save with any of these:
+  - a **Save Point** prefab;
+  - a Button with *Do → save game* (Amount = slot);
+  - the Save Game node;
+  - the **Pause Menu** UI widget (Resume / Save / Load / Restart).
+
+  To load, use *load game*, the Load Game node, or the **Continue Menu** widget. *Game Settings → Saving → Continue from save slot 1 on start* resumes automatically.
+- **Lighting.** Add a **Light** object, or the Light component on anything (a torch on the player):
+  - **2D:** *Game Settings → Lighting → Darkness* makes caves and night levels, and lights cut through it. The **Torch** prefab sets this up for you.
+  - **3D:** up to 8 coloured point lights; sun colour, brightness, direction and height; ambient light; sky and ground tint; shadows on or off. The **Lamp** object is a lamp post with its own light.
+- **Physics.**
+  - Gravity on X, Y (and Z in 3D).
+  - Rigidbody materials: Ice, Rubber, Wood, Metal, Sticky, Bouncy, Feather.
+  - Freeze X/Y/Z, max speed, and "pass through tags" (e.g. bullets that ignore their shooter).
+  - **Force Zones** (Wind Zone prefab).
+  - Nodes: Push, Set Gravity, Is On Ground, My Velocity.
+- **Collisions.**
+  - 2D boxes collide at their rotation (a **Spinning Bar** really sweeps).
+  - Fast objects are checked in extra sub-steps, so they don't pass through walls.
+  - A sweep-and-prune broad phase keeps big scenes fast.
+  - "On Touch End", Is Touching and Can See (line of sight) nodes.
+- **Cameras.**
+  - Add a **Camera** object (Create → Camera). In 2D its dashed frame shows what it sees.
+  - Several cameras can sit in one scene: the highest priority starts active, and Switch Camera / Zoom Camera change it during play.
+- **UI.**
+  - Text can have fonts, weight, an outline and a drop shadow.
+  - Progress bars can show icons (Hearts widget).
+  - New widgets: Coin Counter, Big Title, Save / Load buttons, Pause Menu, Continue Menu, Dialog Box.
+  - Any UI set to *Show when: Paused / Title / Game over* replaces that built-in screen. In the editor these menus show in UI mode or when selected.
 
 ## Using the engine from code
 
@@ -119,7 +173,10 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `hazard` | Hurts the player on touch. | `action` ("gameover"), `tag` ("player"), `destroySelf` (false) |
 | `goal` | The player wins when touching this. | `tag` ("player") |
 | `spring` | Bounces the player upward on touch. | `power` (900 / 3D 16), `tag` ("player") |
-| `cameraFollow` | The camera tracks this object. | `smooth` (6), `axes` ("both"), `ox` (0), `oy` (0 / 3D 7), `oz` (0 / 3D 11) |
+| `camera` | Put on a Camera object. Modes: follow, fixed, side scroller, top down, orbit (drag to look around). Smoothing, look-ahead, dead zone, 2D zoom / 3D field of view, keep-inside-level bounds, priority. Switch with the *switch camera* action or Switch Camera node. | `mode`, `target` ("player"), `smooth`, `zoom`, `fov`, `ox/oy/oz`, `lookAhead`, `deadZone`, `bounds`, `priority` |
+| `forceZone` | Area that pushes dynamic bodies inside it: wind, currents, conveyors, magnets (pull to center), blasts (push from center). | `mode`, `fx/fy/fz`, `strength`, `tag` |
+| `savePoint` | Saves the game when the player touches it. | `slot` (1), `text`, `tag` |
+| `cameraFollow` | The camera tracks this object (simple version of `camera`). | `smooth` (6), `axes` ("both"), `ox` (0), `oy` (0 / 3D 7), `oz` (0 / 3D 11) |
 | `wrap` | Leaving one edge brings it back on the other (2D). | — |
 | `timeScore` | Adds points every second while playing. | `rate` (10) |
 | `chase` | Moves toward the player when it gets close. | `speed` (110 / 3D 3.5), `range` (320 / 3D 10), `tag` ("player") |
@@ -141,6 +198,26 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `projectile` | Flies straight the way it faces (bullet templates fired by a Shooter). | `speed` (650 / 3D 30), `life` (2) |
 | `income` | Adds a "per second" variable into another every second (idle games). | `var` ("score"), `rateVar` ("perSecond") |
 | `upgrade` | Tap to buy: spends one variable to raise another; price grows. Show it with `{cost}`. | `cost` (10), `costVar`, `addVar`, `amount`, `growth` (1.15) |
+| `follow` | Follows another object at a distance (pets, sidekicks). | `target` ("player"), `distance` (60 / 3D 2), `speed` |
+| `wander` | Roams around its starting area at random (animals, villagers). | `speed` (60 / 3D 2), `radius` (120 / 3D 5) |
+| `path` | Moves through points like `"0,0; 150,0; 150,-100"` (offsets; 3D uses x,z). | `points`, `speed`, `loop` |
+| `turret` | Turns toward the player and fires a template in range. | `template`, `every` (1.2), `range`, `tag` |
+| `bounce` | Bouncing ball at a steady speed off walls, paddles and screen edges (breakout, pong). | `speed` (340 / 3D 9), `bottom` ("lose a life" / "bounce") |
+| `trigger` | When the player touches it: message, change a variable, spawn, destroy, show, win, game over, next level, vibrate. | `action`, `value`, `amount`, `sound`, `tag`, `once`, `hidden` |
+| `timer` | After some seconds (optionally repeating), do one of the same actions. | `seconds`, `repeat`, `action`, `value`, `amount`, `sound` |
+| `dropItem` | Drops a template when destroyed (loot, power-ups). | `template`, `chance` (1) |
+| `emitter` | Keeps giving off particles (fire, smoke, sparkles). | `color`, `rate` (20), `spread` (0.5) |
+| `blink` | Flashes on and off; with Hazard it only hurts while visible. | `on` (0.6), `off` (0.6), `solid` (true) |
+| `gridMove` | Moves one tile per swipe, joystick push or tap beside the player; ends your turn in turn-based games. Bump enemies to attack, push objects tagged `pushable`. | `tile` (40 / 3D 1), `tapToMove`, `damage` |
+| `gridEnemy` | Turn Enemy: each enemy turn steps toward the player and attacks when adjacent. | `tile`, `hp`, `points`, `sight` |
+| `boardCell` | A board square (tic-tac-toe, connect-style): tap to place a mark; vs a friend or the computer. | `row`, `col`, `line` (3), `vsComputer` |
+| `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
+| `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |
+| `condition` | When a variable passes a value, do an action (win when enemyHp ≤ 0, lose when hp ≤ 0…). | `var`, `op`, `target`, `action`, … |
+| `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
+| `button` | Tap it (UI or game object) to do an action: start/restart/pause the game, show/hide menus, change variables, jump… Keeps working on title and end screens. | `action`, `value`, `amount`, `sound` |
+| `rules` | Visual logic: WHEN (game starts, every few seconds, touched by tag, tapped, jump/fire button, swipe, variable reaches, destroyed) IF (variable compare, optional) DO (a list of actions). | `rules` |
+| `graph` | Visual Script: node-based logic built in the Node Editor. Events start a chain of actions; value nodes feed numbers and true/false into inputs. | `graph` |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.
@@ -167,7 +244,10 @@ registerBehavior('blink', {
 | `scene.message('Hi!', 3)` | message banner over the game |
 | `scene.burst(x, y, z, color, count)` | particle burst |
 | `scene.camera` | 2D: `{x, y, zoom, shake}`. 3D: `{position, target, fov, shake}` |
-| `scene.on('collide' \| 'var' \| 'over' \| 'win', fn)` | events |
+| `scene.on('collide' \| 'separate' \| 'var' \| 'over' \| 'win', fn)` | events (`separate` = stopped touching; behaviors get a `separate(e, other, scene)` hook) |
+| `scene.raycast(origin, dir, maxDist, { ignore, tag })`, `scene.canSee(a, b)` | ray tests against colliders (rotated 2D boxes, circles, 3D boxes and spheres) |
+| `scene.saveGame(slot)`, `scene.loadGame(slot)`, `scene.hasSave(slot)`, `scene.deleteSave(slot)` | save slots: variables, level, positions and what was collected |
+| `scene.setCamera('Camera 2')`, `scene.gravityX`, `scene.gravityZ`, `scene.light` | switch cameras, sideways gravity, lighting (`darkness` for 2D, sun / ambient / sky / ground for 3D) |
 
 | | |
 | --- | --- |
@@ -179,7 +259,23 @@ registerBehavior('blink', {
 
 ### Scene settings
 
-`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. With `timeLimit`, `{time}` counts down and the game ends at zero.
+`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. More phone settings: `joystickSide` (`'left'`/`'right'` for left-handed players; buttons move to the other side), `controlSize` (`'small'`/`'medium'`/`'large'`), `saveProgress` (variables and level survive closing the game; reset on game over), `shareButton` (a *Share score* button on the end screen using the phone's share sheet). Buttons vibrate when pressed, audio recovers after calls or app switches, and the engine lowers its resolution automatically if a phone can't hold a smooth frame rate. With `timeLimit`, `{time}` counts down and the game ends at zero.
+
+**Turn-based games:** set `settings.turnBased`. Grid Move, Turn Button and Board Cell end the player's turn; then every component with a `turn(e, scene)` hook acts (Turn Enemy, Enemy Turn, the board's computer player) after `turnDelay` seconds. Texts can show `{turnText}` and `{turn}`; `scene.endTurn()` ends a turn from scripts. `messageTop` moves message banners to the top of the screen.
+
+**Actions** (Trigger, Timer, Condition, Button, Rules): message, add score, add to variable, set variable, spawn template, destroy object/other, show/hide/toggle object, play sound, vibrate, camera shake, jump, move by, win, game over, next level, start/restart/pause/resume game.
+
+**Custom UI:** UI entities can have a `bar: { var, max, maxVar, w, h, fill, bg, radius, label }` (health/progress bar; `var: "self.hp"` reads an object's own health from the Health component) and `showWhen: 'always' | 'play' | 'title' | 'paused' | 'over' | 'win'`. `settings.customScreens` turns off the built-in title/pause/end screens so your own UI and Buttons run them. Anchors include `left`, `center` and `right` edges.
+
+**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` or `'fixed'`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
+
+**Physics:** bodies support `oneWay` platforms (jump up through, land on top), riding moving (kinematic) platforms, `mass` (heavier pushes lighter), `friction`, `drag`, `maxFall`, and collider offsets `ox/oy/oz`.
+
+**3D shapes and models:** meshes come in box, sphere, cylinder, cone, capsule, pyramid, wedge (ramp), prism, gem, dome, torus and plane. `model: { parts: [{ geometry, x, y, z, rx, ry, rz, w, h, d, r, color, emissive }] }` builds a model from parts (the editor's 3D Model component edits parts and highlights the selected one; Project → Models has 17 ready-made models). The collider fits around all parts.
+
+**2D sprites:** shapes include rect, circle, ellipse, triangle, star, heart, diamond, hexagon, pentagon, octagon, capsule, ring, arrow, cloud, and `emoji` sprites (`shape: { type: 'emoji', emoji: '🐱', w, h }`; Project → Sprites has a library of characters, enemies, items, nature, food, vehicles and props).
+
+**Voxels:** give an entity `voxels: { size, gen: { type: 'hills' | 'flat' | 'empty', w, d, h, seed, trees }, edits: { "i,j,k": block } }` for a Minecraft-style block world (12-block palette: grass, dirt, stone, wood, leaves, sand, water, brick, snow, obsidian, gold, crystal). It is drawn as merged chunks (only visible faces), dynamic bodies walk on it and bump into it, projectiles stop at blocks, and `entity.voxels.get/set(i, j, k)` / `raycast(entity, origin, dir)` let scripts dig and build. In the editor, select the world, pick the brush (Paint tool), choose Add/Remove and a block, then tap or drag to build.
 
 **Levels:** put more scenes in `levels: [sceneJson, ...]` on the first scene. Winning a level shows "Level complete" and continues to the next one, carrying variables like score and lives over; `{level}` shows the level number. `engine.start(json, { level: 1 })` starts at the second level. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
 

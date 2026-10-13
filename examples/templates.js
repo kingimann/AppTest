@@ -184,7 +184,7 @@ export const templates = {
 
   'idle-clicker': {
     version: 1, name: 'Cookie Tap', mode: '2d', background: '#3b2a20', view: { width: 400, height: 700 }, gravity: 0,
-    settings: { orientation: 'portrait', pauseButton: false, muteButton: false },
+    settings: { orientation: 'portrait', pauseButton: false, muteButton: false, saveProgress: true },
     vars: { score: 0, perSecond: 0, perTap: 0 },
     entities: [
       { id: 'bank', name: 'Bank', x: 40, y: 40, behaviors: [{ type: 'income', var: 'score', rateVar: 'perSecond' }] },
@@ -240,10 +240,106 @@ export const templates = {
         behaviors: [{ type: 'velocity', vz: 16 }, { type: 'hazard', action: 'gameover' }, { type: 'destroyOffscreen', margin: 80 }] },
       { id: 'coin', name: 'Coin', template: true, x: 3, y: 0.8, z: -10, rx: 90, mesh: { geometry: 'cylinder', r: 0.35, h: 0.1, color: '#ffd23d', emissive: 0.6 },
         behaviors: [{ type: 'velocity', vz: 16 }, { type: 'collectible', score: 25 }, { type: 'destroyOffscreen', margin: 80 }] },
-      { id: 'sp1', name: 'Barrier Spawner', x: -3, y: 2, z: -20, behaviors: [{ type: 'spawner', template: 'Barrier', every: [0.55, 1.1], x: [-2.5, 2.5], y: 0.6, z: -60, ramp: 0.12, max: 40, snap: 2.5 }] },
-      { id: 'sp2', name: 'Coin Spawner', x: 3, y: 2, z: -20, behaviors: [{ type: 'spawner', template: 'Coin', every: [0.35, 0.8], x: [-2.5, 2.5], y: 0.8, z: -60, ramp: 0.12, max: 40, snap: 2.5 }] },
+      { id: 'sp1', name: 'Barrier Spawner', x: -3, y: 2, z: -20, behaviors: [{ type: 'spawner', template: 'Barrier', every: [0.55, 1.1], x: [-2.5, 2.5], y: 0.6, z: -60, ramp: 0.12, max: 40, snap: 2.5, clear: 2 }] },
+      { id: 'sp2', name: 'Coin Spawner', x: 3, y: 2, z: -20, behaviors: [{ type: 'spawner', template: 'Coin', every: [0.35, 0.8], x: [-2.5, 2.5], y: 0.8, z: -60, ramp: 0.12, max: 40, snap: 2.5, clear: 2 }] },
       { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
       { id: 'hud-best', name: 'Best Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: 'BEST {best}', size: 15, align: 'right', color: '#1b4f72' } },
+    ],
+  },
+
+  'breakout': {
+    version: 1, name: 'Brick Breaker', mode: '2d', background: '#14142b', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'BRICK BREAKER', subtitle: 'Drag to move the paddle. Break every brick!', orientation: 'portrait', winScore: 350, saveBest: 'brick-breaker' },
+    vars: { score: 0, lives: 3 },
+    entities: [
+      { id: 'paddle', name: 'Paddle', tags: ['player'], x: 200, y: 630, shape: { type: 'rect', w: 90, h: 16, radius: 8, fill: '#4fc3f7', glow: 10 }, body: { type: 'kinematic' },
+        behaviors: [{ type: 'move', control: 'drag', speed: 0, axes: 'horizontal', keepInView: true }] },
+      { id: 'ball', name: 'Ball', tags: ['ball'], x: 200, y: 560, shape: { type: 'circle', r: 9, fill: '#ffffff', glow: 8 },
+        behaviors: [{ type: 'bounce', speed: 360, bottom: 'lose a life' }] },
+      ...Array.from({ length: 35 }, (_, i) => {
+        const row = Math.floor(i / 7), col = i % 7;
+        return { id: 'brick' + i, name: 'Brick', x: 44 + col * 52, y: 130 + row * 28, shape: { type: 'rect', w: 46, h: 20, radius: 4, fill: ['#ef5350', '#ffa726', '#ffee58', '#66bb6a', '#42a5f5'][row] },
+          body: { type: 'static' }, behaviors: [{ type: 'destructible', hp: 1, hitBy: 'ball', points: 10, removeHitter: false }] };
+      }),
+      { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
+      { id: 'hud-lives', name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 24, align: 'right', color: '#ff5d8f' } },
+    ],
+  },
+
+  'rpg-battle': {
+    version: 1, name: 'Slime Battle', mode: '2d', background: '#1e2a38', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'SLIME BATTLE', subtitle: 'A turn-based fight. Pick an action each turn.', turnBased: true, turnDelay: 1, orientation: 'portrait', pauseButton: false, messageTop: true },
+    vars: { hp: 60, mp: 12, enemyHp: 90, score: 0 },
+    entities: [
+      { id: 'floor', name: 'Floor', x: 200, y: 360, shape: { type: 'rect', w: 400, h: 120, fill: '#2c3e50' } },
+      { id: 'slime', name: 'Slime', x: 200, y: 270, shape: { type: 'circle', r: 70, fill: '#66bb6a', stroke: '#2e7d32', lineWidth: 6 },
+        behaviors: [{ type: 'turnOpponent', var: 'hp', amount: [-12, -6], text: 'The slime bounces on you for {n}!' }, { type: 'pulse', amount: 0.04, period: 1.4 }] },
+      ...[[175, 255], [225, 255]].map(([x, y], i) => ({ id: 'eye' + i, name: 'Eye', x, y, layer: 1, shape: { type: 'circle', r: 9, fill: '#1b1b1b' } })),
+      { id: 'enemy-hp', name: 'Enemy HP', ui: true, anchor: 'top', x: 0, y: 104, text: { value: 'Slime  HP {enemyHp}', size: 22, color: '#a5d6a7' } },
+      { id: 'turn', name: 'Turn Text', ui: true, anchor: 'top', x: 0, y: 72, text: { value: '{turnText}', size: 18, color: '#ffd23d', weight: '700' } },
+      { id: 'hp', name: 'Player HP', ui: true, anchor: 'bottom-left', x: 24, y: -300, text: { value: 'HP {hp}', size: 22, align: 'left', color: '#ef9a9a' } },
+      { id: 'mp', name: 'Player MP', ui: true, anchor: 'bottom-right', x: -24, y: -300, text: { value: 'MP {mp}', size: 22, align: 'right', color: '#90caf9' } },
+      ...[
+        ['Attack', 'enemyHp', [-14, -8], 0, '', 0, 'You strike for {n}!', 'hit', '#455a64', -230],
+        ['Fireball  (4 MP)', 'enemyHp', [-26, -18], 0, 'mp', 4, 'Fireball! {n} damage!', 'power', '#bf360c', -160],
+        ['Heal  (3 MP)', 'hp', [14, 22], 60, 'mp', 3, 'You heal {n} HP.', 'coin', '#2e7d32', -90],
+      ].map(([label, v, amount, max, costVar, cost, text, sound, fill, y], i) => ({
+        id: 'act' + i, name: label.split(' ')[0] + ' Button', ui: true, anchor: 'bottom', x: 0, y,
+        shape: { type: 'rect', w: 330, h: 58, radius: 14, fill }, text: { value: label, size: 20, color: '#ffffff' },
+        behaviors: [{ type: 'turnAction', var: v, amount, max, costVar, cost, text, sound }] })),
+      { id: 'win', name: 'Win Check', x: 30, y: 30, behaviors: [{ type: 'condition', var: 'enemyHp', op: '<=', target: 0, action: 'win', value: '', amount: 1, sound: 'none' }] },
+      { id: 'lose', name: 'Lose Check', x: 370, y: 30, behaviors: [{ type: 'condition', var: 'hp', op: '<=', target: 0, action: 'game over', value: '', amount: 1, sound: 'none' }] },
+    ],
+  },
+
+  'dungeon': {
+    version: 1, name: 'Tiny Dungeon', mode: '2d', background: '#120f1a', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'TINY DUNGEON', subtitle: 'Turn-based: swipe or tap to step. Bump monsters to fight. Reach the stairs!', turnBased: true, turnDelay: 0.15, orientation: 'portrait' },
+    vars: { score: 0, lives: 3 },
+    entities: (() => {
+      const map = ['#########', '#P..#..c#', '#.#.#.#.#', '#.#...#.#', '#.##E##.#', '#c......#', '###.#.###', '#...#..E#', '#.#c#.#.#', '#.#.....#', '#E..##.c#', '#..#...G#', '#########'];
+      const out = [], at = (c, r) => ({ x: 40 + c * 40, y: 130 + r * 40 });
+      map.forEach((row, r) => [...row].forEach((ch, c) => {
+        const { x, y } = at(c, r), id = `t${r}_${c}`;
+        if (ch === '#') out.push({ id, name: 'Wall', x, y, shape: { type: 'rect', w: 40, h: 40, fill: '#4a3f5c', stroke: '#2b2438', lineWidth: 2 }, body: { type: 'static' } });
+        else out.push({ id: id + 'f', name: 'Floor', layer: -1, x, y, shape: { type: 'rect', w: 40, h: 40, fill: (r + c) % 2 ? '#211b2d' : '#1c1726' } });
+        if (ch === 'P') out.push({ id: 'hero', name: 'Hero', tags: ['player'], layer: 3, x, y, shape: { type: 'circle', r: 15, fill: '#4fc3f7' }, behaviors: [{ type: 'gridMove', tile: 40, tapToMove: true, damage: 1 }] });
+        if (ch === 'E') out.push({ id: id + 'e', name: 'Goblin', layer: 2, x, y, shape: { type: 'rect', w: 28, h: 28, radius: 8, fill: '#e53935' }, behaviors: [{ type: 'gridEnemy', tile: 40, hp: 2, points: 25, sight: 5 }] });
+        if (ch === 'c') out.push({ id: id + 'c', name: 'Gold', layer: 1, x, y, shape: { type: 'star', w: 22, h: 22, fill: '#ffd23d' }, behaviors: [{ type: 'collectible', score: 10 }] });
+        if (ch === 'G') out.push({ id: 'stairs', name: 'Stairs', layer: 1, x, y, shape: { type: 'rect', w: 30, h: 30, radius: 4, fill: '#66bb6a' }, behaviors: [{ type: 'goal' }] });
+      }));
+      out.push({ id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 28, align: 'left' } });
+      out.push({ id: 'hud-lives', name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 24, align: 'right', color: '#ff5d8f' } });
+      out.push({ id: 'hud-turn', name: 'Turn Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Turn {turn} · {turnText}', size: 15, color: '#b39ddb', weight: '600' } });
+      return out;
+    })(),
+  },
+
+  'tic-tac-toe': {
+    version: 1, name: 'Tic-Tac-Toe', mode: '2d', background: '#1b2433', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'TIC-TAC-TOE', subtitle: 'Three in a row beats the computer', turnBased: true, orientation: 'portrait', pauseButton: false },
+    vars: { score: 0 },
+    entities: [
+      ...Array.from({ length: 9 }, (_, i) => {
+        const r = Math.floor(i / 3), c = i % 3;
+        return { id: 'cell' + i, name: `Cell ${r + 1}-${c + 1}`, x: 90 + c * 110, y: 240 + r * 110, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' },
+          behaviors: [{ type: 'boardCell', row: r, col: c, line: 3, vsComputer: true }] };
+      }),
+      { id: 'hud-turn', name: 'Turn Text', ui: true, anchor: 'top', x: 0, y: 96, text: { value: '{turnText}', size: 22, color: '#ffd23d' } },
+    ],
+  },
+
+  'voxel-world': {
+    version: 1, name: 'Block Craft', mode: '3d', background: '#8fd0ff', gravity: -25,
+    settings: { title: 'BLOCK CRAFT', subtitle: 'Joystick to walk, drag to look. Tap blocks to break them; PLACE builds. Tap the color button to pick a block.', joystick: true, jumpButton: true, orientation: 'landscape' },
+    vars: { score: 0, blocks: 0 }, fog: { near: 18, far: 46 }, light: { dir: { x: -0.5, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.5 },
+    camera: { position: { x: 0, y: 14, z: 14 }, target: { x: 0, y: 4, z: 0 }, fov: 70 },
+    entities: [
+      { id: 'world', name: 'World', voxels: { size: 1, gen: { type: 'hills', w: 40, d: 40, h: 7, seed: 7, trees: true }, edits: {} } },
+      { id: 'player', name: 'Player', tags: ['player'], x: 0.5, y: 14, z: 0.5, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' },
+        behaviors: [{ type: 'firstPerson', speed: 5, look: 0.25, eye: 0.65, jump: 8.5 }, { type: 'voxelBuilder', reach: 6, block: 3, mode: 'break' }] },
+      { id: 'crosshair', name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 30, color: '#ffffff' } },
+      { id: 'hud', name: 'Blocks Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: 'Mined {blocks}', size: 20, align: 'left' } },
     ],
   },
 
@@ -269,7 +365,12 @@ export const templateInfo = [
   { key: 'space-shooter', title: 'Space Shooter', blurb: 'Waves of enemies', icon: 'bolt', color: '#141b3a' },
   { key: 'racer', title: 'Racing', blurb: 'Drive, beat the clock', icon: 'car', color: '#8a6a3a' },
   { key: 'lane-runner', title: 'Endless Runner', blurb: 'Swipe between lanes', icon: 'arrow', color: '#2f6f8f' },
-  { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade', icon: 'hand', color: '#5d4037' },
+  { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade (saves progress)', icon: 'hand', color: '#5d4037' },
+  { key: 'voxel-world', title: 'Voxel Sandbox', blurb: 'Minecraft-style break & build', icon: 'cube', color: '#4e7d3a' },
+  { key: 'rpg-battle', title: 'Turn-Based RPG', blurb: 'Pick attacks, heals and spells', icon: 'bolt', color: '#2e4057' },
+  { key: 'dungeon', title: 'Dungeon Crawler', blurb: 'Turn-based grid adventure', icon: 'door', color: '#3b2f4f' },
+  { key: 'tic-tac-toe', title: 'Board Game', blurb: 'Tic-tac-toe vs the computer', icon: 'grid', color: '#2a3550' },
+  { key: 'breakout', title: 'Breakout', blurb: 'Bounce the ball, break bricks', icon: 'square', color: '#2a2450' },
   { key: 'tap-frenzy', title: 'Tap Arcade', blurb: 'Quick tap reflex game', icon: 'circle', color: '#16233b' },
   { key: 'empty-2d', title: 'Blank 2D', blurb: 'Start from nothing', icon: 'grid', color: '#2b2b2b' },
   { key: 'empty-3d', title: 'Blank 3D', blurb: 'Just a floor', icon: 'cube', color: '#2f3a44' },

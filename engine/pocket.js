@@ -32,6 +32,9 @@ export function hexToRgb(hex) {
   return c;
 }
 
+const rgba = (hex, a) => { const [r, g, b] = hexToRgb(hex); return `rgba(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0},${a})`; };
+const flickerK = (L, time, i) => (L.flicker ? 1 - L.flicker * 0.25 * (1 + Math.sin(time * 23 + i * 7) * Math.sin(time * 7.3 + i)) : 1);
+
 /** Column-major 4x4 matrix helpers (WebGL layout). */
 export const M4 = {
   identity() { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
@@ -110,11 +113,21 @@ export { store as storage };
 // ============================================================================
 // Entities
 // ============================================================================
-export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null };
-export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center' };
+export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null, emoji: '' };
+export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false, icon: '' }; // icon: show the value as repeated emoji (hearts)
+export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+export const LIGHT_DEFAULTS = { color: '#ffd9a0', intensity: 1, range: 160, flicker: 0 }; // 2D range in px, 3D range in units
 export const MESH_DEFAULTS = { geometry: 'box', w: 1, h: 1, d: 1, r: 0.5, color: '#33f0ff', emissive: 0, opacity: 1 };
 export const SPRITE_DEFAULTS = { src: '', w: 64, h: 64 };
-export const BODY_DEFAULTS = { type: 'dynamic', shape: 'auto', w: 0, h: 0, d: 0, r: 0, sensor: false, gravityScale: 1, bounce: 0, vx: 0, vy: 0, vz: 0 };
+export const BODY_DEFAULTS = {
+  type: 'dynamic', shape: 'auto', w: 0, h: 0, d: 0, r: 0, sensor: false, gravityScale: 1, bounce: 0, vx: 0, vy: 0, vz: 0,
+  ox: 0, oy: 0, oz: 0, // collider offset from the object's center
+  oneWay: false, // platforms you can jump up through and land on
+  mass: 1, friction: 0, drag: 0, maxFall: 0,
+  lockX: false, lockY: false, lockZ: false, // freeze movement along an axis
+  maxSpeed: 0, // 0 = no limit
+  ignore: '', // comma-separated tags this body passes through
+};
 
 const TRANSFORM_KEYS = ['x', 'y', 'z', 'rx', 'ry', 'rz'];
 
@@ -134,6 +147,11 @@ export class Entity {
     this.text = props.text ? { ...TEXT_DEFAULTS, ...props.text } : null;
     this.sprite = props.sprite ? { ...SPRITE_DEFAULTS, ...props.sprite } : null;
     this.mesh = props.mesh ? { ...MESH_DEFAULTS, ...props.mesh } : null;
+    this.bar = props.bar ? { ...BAR_DEFAULTS, ...props.bar } : null;
+    this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
+    this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
+    this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
+    this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -173,12 +191,34 @@ export class Entity {
 
   /** Half-extents used for physics & picking. Planar 2D entities have infinite depth. */
   extents() {
+    const x = this.rawExtents();
+    if (x.swap) { const t = x.hx; x.hx = x.hy; x.hy = t; delete x.swap; }
+    if (x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; }
+    return x;
+  }
+  rawExtents() {
+    if (this.voxels) {
+      const b = this.voxels.bounds, s = this.voxels.size;
+      return { sphere: false, hx: (b.i1 - b.i0 + 1) * s / 2, hy: (b.j1 - b.j0 + 1) * s / 2, hz: (b.k1 - b.k0 + 1) * s / 2, voxel: true };
+    }
     const b = this.body, is2D = !this.mesh;
     const sx = Math.abs(this.sx), sy = Math.abs(this.sy), sz = Math.abs(this.sz);
+    const off = b && (b.ox || b.oy || b.oz) ? { ox: b.ox * sx, oy: b.oy * sy, oz: (b.oz || 0) * sz } : null;
     if (b && b.shape !== 'auto') {
-      if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz) };
-      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2 };
+      if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz), ...off };
+      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2, ...off, ...this.rot2D() };
     }
+    if (this.model && this.model.parts?.length) { // box around all the parts
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const q of this.model.parts) {
+        const [gx, gy, gz] = partSize(q);
+        x0 = Math.min(x0, (q.x || 0) - gx / 2); x1 = Math.max(x1, (q.x || 0) + gx / 2);
+        y0 = Math.min(y0, (q.y || 0) - gy / 2); y1 = Math.max(y1, (q.y || 0) + gy / 2);
+        z0 = Math.min(z0, (q.z || 0) - gz / 2); z1 = Math.max(z1, (q.z || 0) + gz / 2);
+      }
+      return { sphere: false, hx: (x1 - x0) * sx / 2, hy: (y1 - y0) * sy / 2, hz: (z1 - z0) * sz / 2, ox: (x0 + x1) / 2 * sx + (off?.ox || 0), oy: (y0 + y1) / 2 * sy + (off?.oy || 0), oz: (z0 + z1) / 2 * sz + (off?.oz || 0) };
+    }
+    if (off) { const r = this.rawExtents.call(Object.assign(Object.create(Entity.prototype), this, { body: { ...b, ox: 0, oy: 0, oz: 0 } })); return { ...r, ...off }; }
     if (this.mesh) {
       const m = this.mesh;
       switch (m.geometry) {
@@ -190,10 +230,11 @@ export class Entity {
     }
     if (this.shape) {
       const s = this.shape;
-      if (s.type === 'circle') return { sphere: true, r: s.r * Math.max(sx, sy) };
-      return { sphere: false, hx: s.w * sx / 2, hy: s.h * sy / 2, hz: Infinity };
+      if (s.type === 'circle' || s.type === 'ring') return { sphere: true, r: s.r * Math.max(sx, sy) };
+      return { sphere: false, hx: s.w * sx / 2, hy: s.h * sy / 2, hz: Infinity, ...this.rot2D() };
     }
-    if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity };
+    if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity, ...this.rot2D() };
+    if (this.bar) return { sphere: false, hx: this.bar.w * sx / 2, hy: this.bar.h * sy / 2, hz: Infinity };
     if (this.text) {
       const len = String(this.text.value).length;
       return { sphere: false, hx: this.text.size * len * 0.3 * sx, hy: this.text.size * 0.6 * sy, hz: Infinity };
@@ -201,11 +242,126 @@ export class Entity {
     return { sphere: false, hx: 10, hy: 10, hz: is2D ? Infinity : 0.5 };
   }
 
+  /** 2D boxes turned by rz collide as rotated rectangles. */
+  rot2D() {
+    if (this.mesh || this.ui || !this.rz || this.rz % 180 === 0) return null;
+    if (this.rz % 90 === 0) return { swap: true };
+    return { rot: this.rz * DEG };
+  }
+
   /** Give this entity a body sized to its visuals if it has none. */
   ensureBody(opts = {}) {
     if (!this.body) this.setBody(opts);
     return this.body;
   }
+}
+
+// ============================================================================
+// Voxels (Minecraft-style block worlds)
+// ============================================================================
+export const VOXEL_PALETTE = ['#6aa84f', '#8d6e63', '#9e9e9e', '#6d4c41', '#3d8b37', '#e3cf8f', '#4fa3e0', '#c0392b', '#f5f5f5', '#2b2b2b', '#f1c40f', '#8e44ad'];
+export const VOXEL_NAMES = ['Grass', 'Dirt', 'Stone', 'Wood', 'Leaves', 'Sand', 'Water', 'Brick', 'Snow', 'Obsidian', 'Gold', 'Crystal'];
+const CHUNK = 16;
+
+/** A grid of colored blocks. Block (i, j, k) fills [i, i+1) × size from the owning entity's position. */
+export class VoxelWorld {
+  constructor(o = {}) {
+    this.size = o.size || 1;
+    this.palette = (o.palette && o.palette.length ? o.palette : VOXEL_PALETTE).slice();
+    this.gen = { type: 'hills', w: 32, d: 32, h: 6, seed: 1, trees: true, ...(o.gen || {}) };
+    this.edits = { ...(o.edits || {}) };
+    this.blocks = new Map();
+    this.dirty = new Set();
+    this.generate();
+  }
+  static key(i, j, k) { return ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512); }
+  get(i, j, k) { return this.blocks.get(VoxelWorld.key(i, j, k)) || 0; }
+  setRaw(i, j, k, c) {
+    const key = VoxelWorld.key(i, j, k);
+    if (c) this.blocks.set(key, c); else this.blocks.delete(key);
+    if (this.bounds) {
+      const b = this.bounds;
+      if (c) { b.i0 = Math.min(b.i0, i); b.i1 = Math.max(b.i1, i); b.j0 = Math.min(b.j0, j); b.j1 = Math.max(b.j1, j); b.k0 = Math.min(b.k0, k); b.k1 = Math.max(b.k1, k); }
+      for (const di of [-1, 0, 1]) for (const dk of [-1, 0, 1]) this.dirty.add(Math.floor((i + di) / CHUNK) + ',' + Math.floor((k + dk) / CHUNK));
+    }
+  }
+  /** Change a block (0 = remove) and remember it as an edit. */
+  set(i, j, k, c) { this.setRaw(i, j, k, c); this.edits[`${i},${j},${k}`] = c; }
+
+  generate() {
+    this.blocks.clear(); this.bounds = null;
+    const g = this.gen;
+    let seed = (g.seed * 9301 + 49297) % 233280 || 1;
+    const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+    const hash = (x, z) => { const n = Math.sin(x * 127.1 + z * 311.7 + g.seed * 74.7) * 43758.5453; return n - Math.floor(n); };
+    const smooth = (x, z, sc) => {
+      const fx = x / sc, fz = z / sc, x0 = Math.floor(fx), z0 = Math.floor(fz), tx = fx - x0, tz = fz - z0;
+      const u = tx * tx * (3 - 2 * tx), v = tz * tz * (3 - 2 * tz);
+      return lerp(lerp(hash(x0, z0), hash(x0 + 1, z0), u), lerp(hash(x0, z0 + 1), hash(x0 + 1, z0 + 1), u), v);
+    };
+    const set = (i, j, k, c) => this.blocks.set(VoxelWorld.key(i, j, k), c);
+    if (g.type !== 'empty') {
+      const hw = Math.floor(g.w / 2), hd = Math.floor(g.d / 2), tops = [];
+      for (let i = -hw; i < g.w - hw; i++) for (let k = -hd; k < g.d - hd; k++) {
+        const n = g.type === 'flat' ? 0 : smooth(i, k, 9) * 0.7 + smooth(i, k, 4) * 0.3;
+        const h = g.type === 'flat' ? 2 : Math.max(1, Math.round(1 + n * g.h));
+        for (let j = 0; j < h; j++) set(i, j, k, j === h - 1 ? (g.type === 'hills' && h <= 2 ? 6 : 1) : j >= h - 3 ? 2 : 3);
+        tops.push([i, h, k]);
+      }
+      if (g.trees && g.type !== 'flat') {
+        for (const [i, h, k] of tops) {
+          if (h <= 2 || rnd() > 0.018 || Math.abs(i) < 2 && Math.abs(k) < 2) continue;
+          for (let j = h; j < h + 4; j++) set(i, j, k, 4);
+          for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (let j = h + 3; j <= h + 4; j++) {
+            if (Math.abs(a) + Math.abs(b) > 3 || (a === 0 && b === 0 && j < h + 4)) continue;
+            if (!this.get(i + a, j, k + b)) set(i + a, j, k + b, 5);
+          }
+          set(i, h + 5, k, 5);
+        }
+      }
+    }
+    for (const [kk, c] of Object.entries(this.edits)) { const [i, j, k] = kk.split(',').map(Number); if (c) set(i, j, k, c); else this.blocks.delete(VoxelWorld.key(i, j, k)); }
+    // bounds of what exists
+    const b = { i0: 0, i1: 0, j0: 0, j1: 0, k0: 0, k1: 0 };
+    let first = true;
+    for (const key of this.blocks.keys()) {
+      const k = (key % 1024) - 512, j = (Math.floor(key / 1024) % 1024) - 512, i = Math.floor(key / 1048576) - 512;
+      if (first) { Object.assign(b, { i0: i, i1: i, j0: j, j1: j, k0: k, k1: k }); first = false; continue; }
+      if (i < b.i0) b.i0 = i; if (i > b.i1) b.i1 = i; if (j < b.j0) b.j0 = j; if (j > b.j1) b.j1 = j; if (k < b.k0) b.k0 = k; if (k > b.k1) b.k1 = k;
+    }
+    this.bounds = b;
+    this.allDirty = true;
+  }
+
+  /** Local block coordinates for a world point. */
+  cell(e, x, y, z) { const s = this.size; return [Math.floor((x - e.x) / s), Math.floor((y - e.y) / s), Math.floor((z - e.z) / s)]; }
+  solidAtWorld(e, x, y, z) { const [i, j, k] = this.cell(e, x, y, z); return !!this.get(i, j, k); }
+  /** Height (world y) of the highest block top at or below `belowY` in the column under (x, z). */
+  groundAt(e, x, z, belowY) {
+    const [i, , k] = this.cell(e, x, 0, z), s = this.size;
+    for (let j = Math.min(this.bounds.j1, Math.floor((belowY - e.y) / s)); j >= this.bounds.j0; j--) if (this.get(i, j, k)) return e.y + (j + 1) * s;
+    return -Infinity;
+  }
+  /** Step along a ray through the grid; returns the first solid block and the face it entered through. */
+  raycast(e, o, d, max = 60) {
+    const s = this.size;
+    let x = (o.x - e.x) / s, y = (o.y - e.y) / s, z = (o.z - e.z) / s;
+    let i = Math.floor(x), j = Math.floor(y), k = Math.floor(z);
+    const si = Math.sign(d.x), sj = Math.sign(d.y), sk = Math.sign(d.z);
+    const tdx = si ? Math.abs(1 / d.x) : Infinity, tdy = sj ? Math.abs(1 / d.y) : Infinity, tdz = sk ? Math.abs(1 / d.z) : Infinity;
+    let tx = si ? (si > 0 ? i + 1 - x : x - i) * tdx : Infinity, ty = sj ? (sj > 0 ? j + 1 - y : y - j) * tdy : Infinity, tz = sk ? (sk > 0 ? k + 1 - z : z - k) * tdz : Infinity;
+    let n = [0, 0, 0], t = 0;
+    const lim = max / s;
+    while (t <= lim) {
+      if (this.get(i, j, k)) return { i, j, k, n, dist: t * s };
+      if (tx < ty && tx < tz) { i += si; t = tx; tx += tdx; n = [-si, 0, 0]; }
+      else if (ty < tz) { j += sj; t = ty; ty += tdy; n = [0, -sj, 0]; }
+      else { k += sk; t = tz; tz += tdz; n = [0, 0, -sk]; }
+    }
+    return null;
+  }
+  toJSON() { return { size: this.size, palette: this.palette, gen: this.gen, edits: this.edits }; }
+  get count() { return this.blocks.size; }
 }
 
 // ============================================================================
@@ -228,7 +384,11 @@ export class Camera3D {
 const DEFAULT_SETTINGS = {
   joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
   muteButton: true, orientation: 'any', fullscreen: false,
+  joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
+  controls: 'auto', joystickMode: 'floating', controlsOpacity: 1, jumpLabel: 'JUMP', actionLabel: 'FIRE', customScreens: false,
+  turnBased: false, turnDelay: 0.3, loadOnStart: false,
 };
+const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
 
 export class Scene {
   constructor(opts = {}) {
@@ -237,8 +397,14 @@ export class Scene {
     this.background = opts.background || (this.mode === '3d' ? '#87b8e8' : '#0b0b1a');
     this.view = { width: 400, height: 700, ...(opts.view || {}) };
     this.gravity = opts.gravity ?? (this.mode === '3d' ? -20 : 0); // along y (2D: +down, 3D: +up)
+    this.gravityX = +opts.gravityX || 0; this.gravityZ = +opts.gravityZ || 0; // sideways gravity (wind, tilted worlds)
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
-    this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, ...(opts.light || {}) };
+    // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
+    this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
+    if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
+      const a = (+this.light.sunAngle || 0) * DEG, h = (this.light.sunHeight ?? 60) * DEG;
+      this.light.dir = { x: -Math.cos(h) * Math.sin(a), y: -Math.sin(h), z: -Math.cos(h) * Math.cos(a) };
+    }
     this.fog = { near: 30, far: 120, ...(opts.fog || {}) };
     this.vars = { score: 0, ...(opts.vars || {}) };
     this.initialVars = { ...this.vars };
@@ -260,6 +426,62 @@ export class Scene {
     if (this.settings.timeLimit) this.vars.time = +this.settings.timeLimit;
     this.msg = null;
     this.level = 1; this.levelCount = 1;
+    this.turnSide = 'player';
+    if (this.settings.turnBased) { this.vars.turn ??= 1; this.vars.turnText = 'Your turn'; }
+  }
+
+  /** Turn-based games: the player finished a move; enemies/opponents act next (their components' turn() hooks). */
+  endTurn() {
+    if (this.turnSide !== 'player' || this.state !== 'play') return;
+    this.turnSide = 'enemy';
+    this.turnDelay = this.settings.turnDelay ?? 0.3;
+    this.setVar('turnText', this.settings.enemyTurnText || 'Enemy turn');
+  }
+  get isPlayerTurn() { return this.turnSide === 'player'; }
+
+  /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
+  want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
+
+  /**
+   * Cast a ray and return the closest body it hits: { entity, dist, point } or null.
+   * opts: { ignore: entity, tag: only this tag, solidOnly: skip triggers (default true) }
+   */
+  raycast(origin, dir, maxDist = Infinity, opts = {}) {
+    const o = { x: origin.x, y: origin.y, z: origin.z || 0 }, l = Math.hypot(dir.x, dir.y, dir.z || 0) || 1;
+    const d = { x: dir.x / l, y: dir.y / l, z: (dir.z || 0) / l };
+    let best = null;
+    for (const e of this.entities) {
+      if (e.dead || e === opts.ignore || e.ui || !(e.body || opts.any)) continue;
+      if (e.body && e.body.sensor && opts.solidOnly !== false) continue;
+      if (opts.tag && !e.has(opts.tag)) continue;
+      const t = rayHitExtents(o, d, e, e.extents());
+      if (t != null && t <= maxDist && (!best || t < best.dist)) best = { entity: e, dist: t };
+    }
+    if (best) best.point = { x: o.x + d.x * best.dist, y: o.y + d.y * best.dist, z: o.z + d.z * best.dist };
+    return best;
+  }
+  /** Can `a` see `b` without a solid body in between? */
+  canSee(a, b, maxDist = Infinity) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = (b.z || 0) - (a.z || 0), dist = Math.hypot(dx, dy, dz);
+    if (dist > maxDist) return false;
+    const hit = this.raycast(a, { x: dx, y: dy, z: dz }, dist, { ignore: a });
+    return !hit || hit.entity === b || hit.dist >= dist - 1e-3;
+  }
+
+  // ---- save slots: variables, level, and where things are (collected items stay collected) ----
+  saveGame(slot = 1) { return this.engine?.saveGame(slot); }
+  loadGame(slot = 1) { return this.engine?.loadGame(slot); }
+  hasSave(slot = 1) { return !!this.engine?.readSave(slot); }
+  deleteSave(slot = 1) { this.engine?.deleteSave(slot); }
+
+  // ---- cameras: objects with a Camera component; the active one drives the view ----
+  setCamera(name) { this.activeCamera = name; this.cameraCut = true; }
+  isActiveCamera(e) {
+    const cams = (this.cameras || []).filter((c) => !c.dead);
+    if (this.activeCamera) { const named = cams.find((c) => c.name === this.activeCamera); if (named) return named === e; }
+    let top = null;
+    for (const c of cams) if (!top || (c.data.camPriority || 0) > (top.data.camPriority || 0)) top = c;
+    return top === e;
   }
 
   /** Show a message banner over the game for a few seconds. */
@@ -340,6 +562,7 @@ export class Scene {
       store.set('pocket.best.' + key, String(this.vars.best));
     }
     this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
+    if (!this.levelComplete && this.settings.saveProgress) this.engine?.clearProgress();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
     this.emit(state);
@@ -358,10 +581,78 @@ export class Scene {
   update() {}
 }
 
+/** Distance along a ray to an entity's collider, or null. */
+function rayHitExtents(o, d, e, ex) {
+  const c = { x: e.x + (ex.ox || 0), y: e.y + (ex.oy || 0), z: e.z + (ex.oz || 0) };
+  if (ex.sphere) {
+    const flat = !e.mesh && e.scene?.mode !== '3d';
+    const mx = o.x - c.x, my = o.y - c.y, mz = flat ? 0 : o.z - c.z, dz = flat ? 0 : d.z;
+    const A = d.x * d.x + d.y * d.y + dz * dz || 1, B = mx * d.x + my * d.y + mz * dz, C = mx * mx + my * my + mz * mz - ex.r * ex.r;
+    if (C <= 0) return 0;
+    const disc = B * B - A * C; if (disc < 0 || B > 0) return null;
+    return (-B - Math.sqrt(disc)) / A;
+  }
+  let ox = o.x - c.x, oy = o.y - c.y, dx = d.x, dy = d.y;
+  if (ex.rot) { const cs = Math.cos(ex.rot), sn = Math.sin(ex.rot); [ox, oy] = [ox * cs + oy * sn, -ox * sn + oy * cs]; [dx, dy] = [dx * cs + dy * sn, -dx * sn + dy * cs]; }
+  let t0 = 0, t1 = Infinity;
+  for (const [p, v, h] of [[ox, dx, ex.hx], [oy, dy, ex.hy], [o.z - c.z, d.z, ex.hz]]) {
+    if (!Number.isFinite(h)) continue;
+    if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h) return null; continue; }
+    let a = (-h - p) / v, b = (h - p) / v;
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    if (t0 > t1) return null;
+  }
+  return t0;
+}
+
 // ============================================================================
 // Physics (arcade: axis-aligned boxes & spheres, shared by 2D and 3D)
 // ============================================================================
 function overlap(a, ea, b, eb) {
+  if (ea.ox || ea.oy || ea.oz) a = { x: a.x + (ea.ox || 0), y: a.y + (ea.oy || 0), z: a.z + (ea.oz || 0) };
+  if (eb.ox || eb.oy || eb.oz) b = { x: b.x + (eb.ox || 0), y: b.y + (eb.oy || 0), z: b.z + (eb.oz || 0) };
+  return overlapRaw(a, ea, b, eb);
+}
+/** 2D separating-axis test for rotated rectangles (and circles against them). Normal points from a to b. */
+function overlapSAT(a, ea, b, eb) {
+  if (ea.sphere && eb.sphere) return null;
+  if (ea.sphere || eb.sphere) {
+    const [c, ec, bx, eBox, flip] = ea.sphere ? [a, ea, b, eb, false] : [b, eb, a, ea, true];
+    const t = eBox.rot || 0, cs = Math.cos(t), sn = Math.sin(t);
+    const dx = c.x - bx.x, dy = c.y - bx.y, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs; // circle in the box's frame
+    const qx = clamp(lx, -eBox.hx, eBox.hx), qy = clamp(ly, -eBox.hy, eBox.hy);
+    let nx, ny, depth;
+    const ox = lx - qx, oy = ly - qy, d = Math.hypot(ox, oy);
+    if (d > 1e-6) { if (d >= ec.r) return null; nx = ox / d; ny = oy / d; depth = ec.r - d; }
+    else { // center inside the box: push out along the nearest face
+      const px = eBox.hx - Math.abs(lx), py = eBox.hy - Math.abs(ly);
+      if (px < py) { nx = Math.sign(lx) || 1; ny = 0; depth = px + ec.r; } else { nx = 0; ny = Math.sign(ly) || 1; depth = py + ec.r; }
+    }
+    // (nx, ny) points box → circle in box space; rotate back to world
+    let wx = nx * cs - ny * sn, wy = nx * sn + ny * cs;
+    if (!flip) { wx = -wx; wy = -wy; } // a is the circle: normal from circle to box
+    return { nx: wx, ny: wy, nz: 0, depth };
+  }
+  const axes = [];
+  for (const e of [ea, eb]) { const t = e.rot || 0; axes.push([Math.cos(t), Math.sin(t)], [-Math.sin(t), Math.cos(t)]); }
+  const dx = b.x - a.x, dy = b.y - a.y;
+  let best = null;
+  for (const [ux, uy] of axes) {
+    const ra = proj(ea, ux, uy), rb = proj(eb, ux, uy), d = dx * ux + dy * uy, o = ra + rb - Math.abs(d);
+    if (o <= 0) return null;
+    if (!best || o < best.depth) best = { nx: ux * (Math.sign(d) || 1), ny: uy * (Math.sign(d) || 1), nz: 0, depth: o };
+  }
+  return best;
+}
+function proj(e, ux, uy) { const t = e.rot || 0, c = Math.cos(t), s = Math.sin(t); return e.hx * Math.abs(c * ux + s * uy) + e.hy * Math.abs(-s * ux + c * uy); }
+
+function overlapRaw(a, ea, b, eb) {
+  if (ea.rot || eb.rot) { // only 2D rectangles carry a rotation
+    const ia = ea.sphere ? ea.r : ea.bx ?? ea.hx, ja = ea.sphere ? ea.r : ea.by ?? ea.hy, ib = eb.sphere ? eb.r : eb.bx ?? eb.hx, jb = eb.sphere ? eb.r : eb.by ?? eb.hy;
+    if (Math.abs(b.x - a.x) >= ia + ib || Math.abs(b.y - a.y) >= ja + jb) return null;
+    return overlapSAT(a, ea, b, eb);
+  }
   if (!ea.sphere && !eb.sphere) {
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const ox = ea.hx + eb.hx - Math.abs(dx); if (ox <= 0) return null;
@@ -377,61 +668,165 @@ function overlap(a, ea, b, eb) {
     if (d < 1e-6) return { nx: 0, ny: 1, nz: 0, depth: rs };
     return { nx: dx / d, ny: dy / d, nz: dz / d, depth: rs - d };
   }
-  if (!ea.sphere) { const m = overlap(b, eb, a, ea); if (m) { m.nx = -m.nx; m.ny = -m.ny; m.nz = -m.nz; } return m; }
+  if (!ea.sphere) { const m = overlapRaw(b, eb, a, ea); if (m) { m.nx = -m.nx; m.ny = -m.ny; m.nz = -m.nz; } return m; }
   // a = sphere, b = box
   const cx = clamp(a.x, b.x - eb.hx, b.x + eb.hx), cy = clamp(a.y, b.y - eb.hy, b.y + eb.hy), cz = clamp(a.z, b.z - eb.hz, b.z + eb.hz);
   const dx = a.x - cx, dy = a.y - cy, dz = a.z - cz, d = Math.hypot(dx, dy, dz);
   if (d >= ea.r) return null;
   if (d > 1e-6) return { nx: -dx / d, ny: -dy / d, nz: -dz / d, depth: ea.r - d };
-  return overlap(a, { sphere: false, hx: ea.r, hy: ea.r, hz: Number.isFinite(eb.hz) ? ea.r : Infinity }, b, eb);
+  return overlapRaw(a, { sphere: false, hx: ea.r, hy: ea.r, hz: Number.isFinite(eb.hz) ? ea.r : Infinity }, b, eb);
 }
 
+const ignoreSet = (b) => (b.ignore ? (b._ig && b._igSrc === b.ignore ? b._ig : (b._igSrc = b.ignore, b._ig = new Set(String(b.ignore).split(',').map((t) => t.trim()).filter(Boolean)))) : null);
+const passes = (a, b) => { const ia = ignoreSet(a.body), ib = ignoreSet(b.body); return (ia && [...b.tags].some((t) => ia.has(t))) || (ib && [...a.tags].some((t) => ib.has(t))); };
+/** Half-size of the box around a collider on the sweep axis (x). */
+const spanX = (ex) => (ex.sphere ? ex.r : ex.bx ?? ex.hx);
+
 export class Physics {
-  constructor() { this.contacts = new Set(); }
+  constructor() { this.contacts = new Map(); }
+
+  /** How many sub-steps this frame needs so fast, small bodies can't tunnel through walls. */
+  substeps(scene, dt) {
+    let n = Math.ceil(dt / (1 / 120));
+    for (const e of scene.entities) {
+      const b = e.body;
+      if (!b || b.type === 'static' || e.dead || b.sensor && !b.ccd) continue;
+      const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z);
+      if (v < 1e-3) continue;
+      const ex = e.extents(), size = Math.max(1e-3, ex.sphere ? ex.r : Math.min(ex.hx, ex.hy, Number.isFinite(ex.hz) ? ex.hz : Infinity));
+      n = Math.max(n, Math.ceil(v * dt / (size * 0.8)));
+    }
+    return Math.min(n, 24);
+  }
 
   step(scene, dt) {
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
+    const gx = scene.gravityX || 0, gz = scene.gravityZ || 0;
+    if (scene.wantedTags) {
+      for (const e of scene.entities) {
+        if (e.body || e.dead || e.ui) continue;
+        for (const t of e.tags) if (scene.wantedTags.has(t)) { e.setBody({ type: 'kinematic', sensor: true }); break; }
+      }
+    }
     const list = scene.entities.filter((e) => e.body && !e.dead);
     for (const e of list) {
       const b = e.body;
+      if (b.type !== 'dynamic') { // how far moving platforms travelled since last step (to carry riders)
+        b.dx = e.x - (b.px ?? e.x); b.dy = e.y - (b.py ?? e.y); b.dz = e.z - (b.pz ?? e.z);
+      }
       if (b.type === 'static') continue;
-      if (b.type === 'dynamic') b.vel.y += g * b.gravityScale * dt;
+      if (b.type === 'dynamic') {
+        b.vel.y += g * b.gravityScale * dt; b.vel.x += gx * b.gravityScale * dt; b.vel.z += gz * b.gravityScale * dt;
+        if (b.force && b.forceT === scene.time) { b.vel.x += b.force.x * dt; b.vel.y += b.force.y * dt; b.vel.z += b.force.z * dt; } // force zones
+        if (b.drag) { const k = Math.max(0, 1 - b.drag * dt); b.vel.x *= k; b.vel.z *= k; if (!g || !b.gravityScale) b.vel.y *= k; }
+        if (b.maxFall && gd && b.vel.y * gd > b.maxFall) b.vel.y = b.maxFall * gd;
+        if (b.maxSpeed) { const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z); if (v > b.maxSpeed) { const k = b.maxSpeed / v; b.vel.x *= k; b.vel.y *= k; b.vel.z *= k; } }
+      }
+      if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
+      b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.grounded = false;
+      b.grounded = false; b.groundedOn = null;
     }
-    const ext = list.map((e) => e.extents());
-    const now = new Set();
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i], ba = a.body;
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j], bb = b.body;
+    // dynamic bodies collide with voxel worlds block by block
+    const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
+    if (worlds.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of worlds) {
+          const V = w.voxels, sz = V.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: half };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz;
+          const [i0, j0, k0] = V.cell(w, e.x - hx, e.y - hy, e.z - hz), [i1, j1, k1] = V.cell(w, e.x + hx, e.y + hy, e.z + hz);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
+            if (!V.get(i, j, k)) continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: w.z + (k + 0.5) * sz };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
+            if (gd && m.ny * gd > 0.5) b.grounded = true;
+          }
+        }
+      }
+    }
+    // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
+    const items = list.map((e) => { const ex = e.extents(), cx = e.x + (ex.ox || 0), w = spanX(ex); return { e, ex, l: cx - w, r: cx + w }; });
+    items.sort((p, q) => p.l - q.l);
+    const now = new Map();
+    for (let i = 0; i < items.length; i++) {
+      const A = items[i], a = A.e, ba = a.body;
+      for (let j = i + 1; j < items.length; j++) {
+        const B = items[j];
+        if (B.l > A.r) break; // everything after starts further right
+        const b = B.e, bb = b.body;
         if (ba.type === 'static' && bb.type === 'static') continue;
         if (a.dead || b.dead) continue;
-        const m = overlap(a, ext[i], b, ext[j]);
+        if ((ba.ignore || bb.ignore) && passes(a, b)) continue;
+        const m = overlap(a, A.ex, b, B.ex);
         if (!m) continue;
         const key = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
-        now.add(key);
+        now.set(key, [a, b]);
         if (!this.contacts.has(key)) { collide(a, b, m); collide(b, a, { nx: -m.nx, ny: -m.ny, nz: -m.nz, depth: m.depth }); }
         if (ba.sensor || bb.sensor) continue;
         const ma = ba.type === 'dynamic', mb = bb.type === 'dynamic';
         if (!ma && !mb) continue;
-        const share = ma && mb ? 0.5 : 1;
+        // one-way platforms: only solid for something landing on top while falling
+        if (ba.oneWay || bb.oneWay) {
+          const [dyn, plat, n] = ma && !mb ? [a, b, m.ny] : mb && !ma ? [b, a, -m.ny] : [null];
+          if (!dyn || !(gd && n * gd > 0.5) || dyn.body.vel.y * gd < -0.01) continue;
+          const dex = dyn.extents(), hh = dex.sphere ? dex.r : dex.hy;
+          if (m.depth > Math.max(hh * 0.5, 0.0001)) continue;
+        }
+        const share = ma && mb ? bb.mass / ((ba.mass + bb.mass) || 1) : 1, shareB = ma && mb ? 1 - share : 1;
+        const fr = Math.max(ba.friction || 0, bb.friction || 0);
         if (ma) {
           a.x -= m.nx * m.depth * share; a.y -= m.ny * m.depth * share; a.z -= m.nz * m.depth * share;
           const vn = ba.vel.x * m.nx + ba.vel.y * m.ny + ba.vel.z * m.nz;
-          if (vn > 0) { const k = vn * (1 + ba.bounce); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
-          if (gd && m.ny * gd > 0.5) ba.grounded = true;
+          if (vn > 0) { const k = vn * (1 + Math.max(ba.bounce, bb.bounce * 0.5)); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
+          if (gd && m.ny * gd > 0.5) {
+            ba.grounded = true; ba.groundedOn = b;
+            if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
+            if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
+          }
+          A.ex = a.extents();
         }
         if (mb) {
-          b.x += m.nx * m.depth * share; b.y += m.ny * m.depth * share; b.z += m.nz * m.depth * share;
+          b.x += m.nx * m.depth * shareB; b.y += m.ny * m.depth * shareB; b.z += m.nz * m.depth * shareB;
           const vn = bb.vel.x * m.nx + bb.vel.y * m.ny + bb.vel.z * m.nz;
-          if (vn < 0) { const k = vn * (1 + bb.bounce); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
-          if (gd && m.ny * gd < -0.5) bb.grounded = true;
+          if (vn < 0) { const k = vn * (1 + Math.max(bb.bounce, ba.bounce * 0.5)); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
+          if (gd && m.ny * gd < -0.5) {
+            bb.grounded = true; bb.groundedOn = a;
+            if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
+            if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
+          }
+          B.ex = b.extents();
         }
       }
     }
+    // contacts that ended this step
+    for (const [key, [a, b]] of this.contacts) if (!now.has(key)) { separate(a, b); separate(b, a); }
     this.contacts = now;
+    for (const e of list) {
+      const b = e.body;
+      if (b.type !== 'dynamic') { b.px = e.x; b.py = e.y; b.pz = e.z; }
+      else { if (b.lockX) e.x = b.lx; if (b.lockY) e.y = b.ly; if (b.lockZ) e.z = b.lz; }
+    }
   }
+
+  /** Is `a` touching something tagged `tag` right now? */
+  touching(a, tag) {
+    for (const [x, y] of this.contacts.values()) if ((x === a && y.has(tag)) || (y === a && x.has(tag))) return true;
+    return false;
+  }
+}
+
+function separate(e, other) {
+  if (e.dead) return;
+  for (const b of e.behaviors) b.separate?.(e, other, e.scene);
+  e.scene?.emit('separate', e, other);
 }
 
 function collide(e, other, m) {
@@ -474,9 +869,13 @@ export class Input {
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.buttons.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3);
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
-    if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); }
-    else if (this.engine.scene?.settings.joystick && this.engine.scene.state === 'play' && p.x < this.engine.width * 0.5 && !this.stick) {
-      ptr.role = 'stick'; this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
+    const st = this.engine.scene?.settings || {};
+    const stickSide = st.joystickSide === 'right' ? p.x > this.engine.width * 0.5 : p.x < this.engine.width * 0.5;
+    if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
+    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
+      ptr.role = 'stick';
+      const f = st.joystickMode === 'fixed' ? this.fixedStick() : null;
+      this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     }
     this.pointers.set(e.pointerId, ptr);
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
@@ -490,7 +889,7 @@ export class Input {
     ptr.x = p.x; ptr.y = p.y;
     if (this.stick && this.stick.id === e.pointerId) {
       const max = this.stickRadius, dx = p.x - this.stick.bx, dy = p.y - this.stick.by, d = Math.hypot(dx, dy);
-      if (d > max) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
+      if (d > max && !this.stick.fixed) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
       this.stick.x = p.x; this.stick.y = p.y;
     }
   }
@@ -505,7 +904,7 @@ export class Input {
     if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
-    } else if (!cancelled && ptr.role === 'free' && dt < 500 && dist > 40) {
+    } else if (!cancelled && ptr.role === 'free' && dt < 700 && dist > 40) {
       const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
       this.justPressed.add('swipe:' + dir); this.justPressed.add('swipe');
     }
@@ -530,12 +929,24 @@ export class Input {
     else if (D) listen();
   }
 
-  get stickRadius() { return Math.min(70, this.engine.width * 0.15); }
+  /** Where a fixed joystick sits. */
+  fixedStick() {
+    const eng = this.engine, r = this.stickRadius, right = eng.scene?.settings.joystickSide === 'right';
+    return { x: right ? eng.width - eng.safe.right - 30 - r : eng.safe.left + 30 + r, y: eng.height - eng.safe.bottom - 30 - r };
+  }
+  get stickRadius() { return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[this.engine.scene?.settings.controlSize] || 1); }
 
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
-    if (this.stick) { x += (this.stick.x - this.stick.bx) / this.stickRadius; y += (this.stick.y - this.stick.by) / this.stickRadius; }
+    if (this.stick) {
+      const sx = (this.stick.x - this.stick.bx) / this.stickRadius, sy = (this.stick.y - this.stick.by) / this.stickRadius, l = Math.hypot(sx, sy);
+      if (l > 0.12) { x += sx / Math.max(1, l); y += sy / Math.max(1, l); } // small dead zone
+    }
+    for (const b of this.buttons) {
+      if (b.id == null) continue;
+      if (b.action === 'dleft') x -= 1; else if (b.action === 'dright') x += 1; else if (b.action === 'dup') y -= 1; else if (b.action === 'ddown') y += 1;
+    }
     if (this.useTilt && this.tiltAxis) {
       const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
       x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
@@ -662,23 +1073,73 @@ function drawEntity2D(ctx, e, vars, time) {
         ctx.closePath(); break;
       }
       case 'polygon': (s.points || []).forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); ctx.closePath(); break;
+      case 'ellipse': ctx.ellipse(0, 0, s.w / 2, s.h / 2, 0, 0, Math.PI * 2); break;
+      case 'hexagon': case 'pentagon': case 'octagon': {
+        const n = { pentagon: 5, hexagon: 6, octagon: 8 }[s.type];
+        for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i / n * Math.PI * 2; ctx.lineTo(Math.cos(a) * s.w / 2, Math.sin(a) * s.h / 2); }
+        ctx.closePath(); break;
+      }
+      case 'diamond': ctx.moveTo(0, -s.h / 2); ctx.lineTo(s.w / 2, 0); ctx.lineTo(0, s.h / 2); ctx.lineTo(-s.w / 2, 0); ctx.closePath(); break;
+      case 'heart': {
+        const w = s.w / 2, hh = s.h / 2;
+        ctx.moveTo(0, hh); ctx.bezierCurveTo(-w * 1.3, hh * 0.2, -w * 0.9, -hh * 1.1, 0, -hh * 0.4);
+        ctx.bezierCurveTo(w * 0.9, -hh * 1.1, w * 1.3, hh * 0.2, 0, hh); ctx.closePath(); break;
+      }
+      case 'capsule': if (ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, Math.min(s.w, s.h) / 2); else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h); break;
+      case 'ring': ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.arc(0, 0, s.r * 0.6, 0, Math.PI * 2, true); break;
+      case 'arrow': ctx.moveTo(s.w / 2, 0); ctx.lineTo(0, -s.h / 2); ctx.lineTo(0, -s.h / 5); ctx.lineTo(-s.w / 2, -s.h / 5); ctx.lineTo(-s.w / 2, s.h / 5); ctx.lineTo(0, s.h / 5); ctx.lineTo(0, s.h / 2); ctx.closePath(); break;
+      case 'cloud':
+        for (const [cx, cy, cr] of [[-0.25, 0.1, 0.25], [0, -0.1, 0.32], [0.27, 0.08, 0.24], [0, 0.18, 0.22]]) { ctx.moveTo(cx * s.w + cr * s.w, cy * s.h); ctx.arc(cx * s.w, cy * s.h, cr * s.w, 0, Math.PI * 2); }
+        break;
+      case 'emoji': break;
       default:
         if (s.radius && ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, s.radius);
         else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h);
     }
-    if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
-    if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+    if (s.type === 'emoji') { // emoji sprites: thousands of ready-made characters, items and props
+      ctx.font = `${Math.round(s.h * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      if (e.data.flipX) ctx.scale(-1, 1);
+      ctx.fillText(s.emoji || '⭐', 0, s.h * 0.06);
+    } else {
+      if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
+      if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+    }
     ctx.shadowBlur = 0;
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
     if (img.complete && img.naturalWidth) ctx.drawImage(img, -e.sprite.w / 2, -e.sprite.h / 2, e.sprite.w, e.sprite.h);
   }
+  if (e.bar) { // progress / health bar bound to a variable (or this object's own value with "self.hp")
+    const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
+    const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
+    const k = clamp((+src[key] || 0) / max, 0, 1);
+    if (b.icon) { // hearts-style: one icon per point, empty ones faded
+      const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
+      ctx.font = `${Math.round(sz)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
+      ctx.globalAlpha = alpha;
+    } else {
+    e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w, b.h);
+    ctx.fillStyle = b.bg; ctx.fill();
+    if (e.data._barK > 0.001) {
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h);
+      ctx.fillStyle = b.fill; ctx.fill();
+    }
+    if (b.label) { ctx.font = `800 ${Math.round(b.h * 0.7)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${formatNumber(+src[key] || 0)} / ${formatNumber(max)}`, 0, 1); }
+    }
+  }
   if (e.text) {
     const t = e.text;
     ctx.font = `${t.weight} ${t.size}px ${t.font}`;
     ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    ctx.fillText(fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars), 0, 0);
+    const str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    if (t.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
+    if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(str, 0, 0); ctx.shadowColor = 'transparent'; }
+    ctx.fillText(str, 0, 0);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   }
   ctx.restore();
 }
@@ -715,8 +1176,37 @@ export class Renderer2D {
       ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
     ctx.globalAlpha = 1;
+    // lights: a soft additive glow, and holes cut into the darkness layer
+    const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible && !e.dead && !e.ui);
+    if (lights.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      lights.forEach((e, i) => {
+        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+        gr.addColorStop(0, rgba(L.color, clamp(0.35 * L.intensity, 0, 1))); gr.addColorStop(1, rgba(L.color, 0));
+        ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+      });
+      ctx.globalCompositeOperation = 'source-over';
+    }
     engine.onRenderWorld?.(ctx, scene, z);
     ctx.restore();
+    const dark = +scene.light.darkness || 0;
+    if (dark > 0) {
+      const lm = this.lightMap ||= document.createElement('canvas');
+      if (lm.width !== this.canvas.width || lm.height !== this.canvas.height) { lm.width = this.canvas.width; lm.height = this.canvas.height; }
+      const l = lm.getContext('2d');
+      l.setTransform(1, 0, 0, 1, 0, 0); l.globalCompositeOperation = 'source-over';
+      l.clearRect(0, 0, lm.width, lm.height);
+      l.fillStyle = rgba(scene.light.ambientColor || '#0a0a1e', clamp(engine.editing ? dark * 0.6 : dark, 0, 1));
+      l.fillRect(0, 0, lm.width, lm.height);
+      l.globalCompositeOperation = 'destination-out';
+      l.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0); l.translate(engine.width / 2, engine.height / 2); l.scale(z, z); l.translate(-c.x, -c.y);
+      lights.forEach((e, i) => {
+        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+        gr.addColorStop(0, `rgba(0,0,0,${clamp(L.intensity, 0, 1)})`); gr.addColorStop(0.55, `rgba(0,0,0,${clamp(L.intensity * 0.6, 0, 1)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+      });
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lm, 0, 0);
+    }
   }
 }
 
@@ -724,28 +1214,116 @@ export class Renderer2D {
 // 3D renderer (WebGL)
 // ============================================================================
 const VS = `
-attribute vec3 aPos; attribute vec3 aNormal;
+attribute vec3 aPos; attribute vec3 aNormal; attribute vec3 aColor;
 uniform mat4 uModel, uViewProj; uniform mat3 uNormalMat;
-varying vec3 vN; varying vec3 vW;
-void main() { vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * aNormal; gl_Position = uViewProj * w; }`;
+varying vec3 vN; varying vec3 vW; varying vec3 vCol;
+void main() { vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * aNormal; vCol = aColor; gl_Position = uViewProj * w; }`;
 const FS = `
 precision mediump float;
-varying vec3 vN; varying vec3 vW;
-uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos;
-uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity;
+varying vec3 vN; varying vec3 vW; varying vec3 vCol;
+uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos, uSky, uGround;
+uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
+uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount;
 void main() {
+  vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
   vec3 l = normalize(-uLightDir);
   float d = max(dot(n, l), 0.0);
   vec3 v = normalize(uCamPos - vW);
   float sp = pow(max(dot(n, normalize(l + v)), 0.0), 32.0) * 0.25;
-  vec3 lit = uColor * (uAmbient + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
-  vec3 c = mix(lit, uColor, uEmissive);
+  vec3 amb = uAmbient * mix(uGround, uSky, n.y * 0.5 + 0.5);
+  vec3 lit = base * (amb + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uPLCount) break;
+    vec3 tl = uPLPos[i] - vW; float dist = length(tl);
+    float att = clamp(1.0 - dist / uPLRange[i], 0.0, 1.0); att *= att;
+    vec3 pl = tl / max(dist, 0.0001);
+    lit += base * uPLCol[i] * max(dot(n, pl), 0.0) * att + uPLCol[i] * pow(max(dot(n, normalize(pl + v)), 0.0), 24.0) * 0.2 * att;
+  }
+  vec3 c = mix(lit, base, uEmissive);
   float f = clamp((length(uCamPos - vW) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
   gl_FragColor = vec4(mix(c, uFogColor, f), uOpacity);
 }`;
 
+export const GEOMETRIES = ['box', 'sphere', 'cylinder', 'cone', 'plane', 'capsule', 'pyramid', 'wedge', 'prism', 'gem', 'dome', 'torus'];
+
+/** Extra shapes built from triangles; each fits a unit box and is oriented outward automatically. */
+function extraGeometry(kind) {
+  const P = [], N = [];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = (v) => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  /** Add a triangle. Normals: one flat vector, or one per vertex (smooth). `out` points away from the surface. */
+  const tri = (a, b, c, ns, out) => {
+    const fn = norm(cross(sub(b, a), sub(c, a)));
+    const ref = out || (ns && Array.isArray(ns[0]) ? norm([ns[0][0] + ns[1][0] + ns[2][0], ns[0][1] + ns[1][1] + ns[2][1], ns[0][2] + ns[1][2] + ns[2][2]]) : [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3]);
+    let v = [a, b, c], n = ns && Array.isArray(ns[0]) ? ns : [fn, fn, fn];
+    if (dot(fn, ref) < 0) { v = [a, c, b]; n = n === ns ? [ns[0], ns[2], ns[1]] : [[-fn[0], -fn[1], -fn[2]], [-fn[0], -fn[1], -fn[2]], [-fn[0], -fn[1], -fn[2]]]; }
+    for (let i = 0; i < 3; i++) { P.push(...v[i]); N.push(...n[i]); }
+  };
+  const quad = (a, b, c, d, out) => { tri(a, b, c, null, out); tri(a, c, d, null, out); };
+  const h = 0.5, seg = 24;
+  if (kind === 'pyramid') {
+    const t = [0, h, 0], c = [[-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]];
+    for (let i = 0; i < 4; i++) tri(c[i], c[(i + 1) % 4], t);
+    quad(c[0], c[1], c[2], c[3]);
+  } else if (kind === 'wedge') { // a ramp: high at the back (-z), low at the front (+z)
+    const b0 = [-h, -h, -h], b1 = [h, -h, -h], b2 = [h, -h, h], b3 = [-h, -h, h], t0 = [-h, h, -h], t1 = [h, h, -h];
+    quad(b0, b1, b2, b3, [0, -1, 0]); quad(b0, b1, t1, t0, [0, 0, -1]); quad(t0, t1, b2, b3, [0, 1, 1]); // the slope passes through the center, so say which way is out
+    tri(b0, t0, b3, null, [-1, 0, 0]); tri(b1, t1, b2, null, [1, 0, 0]);
+  } else if (kind === 'prism') {
+    const f = [[-h, -h, h], [h, -h, h], [0, h, h]], k = [[-h, -h, -h], [h, -h, -h], [0, h, -h]];
+    tri(f[0], f[1], f[2]); tri(k[0], k[1], k[2]);
+    for (let i = 0; i < 3; i++) quad(f[i], f[(i + 1) % 3], k[(i + 1) % 3], k[i]);
+  } else if (kind === 'gem') {
+    const v = [[h, 0, 0], [-h, 0, 0], [0, h, 0], [0, -h, 0], [0, 0, h], [0, 0, -h]];
+    for (const x of [0, 1]) for (const y of [2, 3]) for (const z of [4, 5]) tri(v[x], v[y], v[z]);
+  } else if (kind === 'dome' || kind === 'capsule') {
+    // dome: half an ellipsoid sitting on y = -0.5; capsule: cylinder with rounded ends (shape is right when height = 2 × width)
+    const ring = 10, pts = [];
+    const prof = kind === 'dome'
+      ? Array.from({ length: ring + 1 }, (_, i) => { const v = i / ring * Math.PI / 2; return [Math.sin(v) * h, -h + Math.cos(v) * 1, Math.sin(v), Math.cos(v) * 0.25]; })
+      : [...Array.from({ length: ring + 1 }, (_, i) => { const v = i / ring * Math.PI / 2; return [Math.sin(v) * h, 0.25 + Math.cos(v) * 0.25, Math.sin(v), Math.cos(v)]; }),
+        ...Array.from({ length: ring + 1 }, (_, i) => { const v = Math.PI / 2 + i / ring * Math.PI / 2; return [Math.sin(v) * h, -0.25 + Math.cos(v) * 0.25, Math.sin(v), Math.cos(v)]; })];
+    for (let r = 0; r < prof.length; r++) for (let i = 0; i <= seg; i++) {
+      const u = i / seg * Math.PI * 2, [rad, y, nr, ny] = prof[r];
+      pts.push({ p: [Math.cos(u) * rad, y, Math.sin(u) * rad], n: norm([Math.cos(u) * nr, ny, Math.sin(u) * nr]) });
+    }
+    const W = seg + 1;
+    for (let r = 0; r < prof.length - 1; r++) for (let i = 0; i < seg; i++) {
+      const a = pts[r * W + i], b = pts[r * W + i + 1], c = pts[(r + 1) * W + i + 1], d = pts[(r + 1) * W + i];
+      tri(a.p, b.p, c.p, [a.n, b.n, c.n]); tri(a.p, c.p, d.p, [a.n, c.n, d.n]);
+    }
+    if (kind === 'dome') for (let i = 0; i < seg; i++) {
+      const u0 = i / seg * Math.PI * 2, u1 = (i + 1) / seg * Math.PI * 2;
+      tri([0, -h, 0], [Math.cos(u0) * h, -h, Math.sin(u0) * h], [Math.cos(u1) * h, -h, Math.sin(u1) * h], null, [0, -1, 0]);
+    }
+  } else if (kind === 'torus') {
+    const R = 0.35, r = 0.15, tube = 14, ptAt = (i, j) => {
+      const u = i / seg * Math.PI * 2, v = j / tube * Math.PI * 2;
+      return { p: [(R + r * Math.cos(v)) * Math.cos(u), r * Math.sin(v), (R + r * Math.cos(v)) * Math.sin(u)], n: [Math.cos(v) * Math.cos(u), Math.sin(v), Math.cos(v) * Math.sin(u)] };
+    };
+    for (let i = 0; i < seg; i++) for (let j = 0; j < tube; j++) {
+      const a = ptAt(i, j), b = ptAt(i + 1, j), c = ptAt(i + 1, j + 1), d = ptAt(i, j + 1);
+      tri(a.p, b.p, c.p, [a.n, b.n, c.n]); tri(a.p, c.p, d.p, [a.n, c.n, d.n]);
+    }
+  }
+  const n = P.length / 3;
+  return { P: new Float32Array(P), N: new Float32Array(N), I: new Uint16Array(Array.from({ length: n }, (_, i) => i)) };
+}
+
+/** Size [x, y, z] of a mesh or model part from its geometry and dimensions. */
+export function partSize(m) {
+  const g = m.geometry || 'box', w = m.w ?? 1, hh = m.h ?? 1, d = m.d ?? 1, r = m.r ?? 0.5;
+  if (g === 'sphere') return [r * 2, r * 2, r * 2];
+  if (g === 'cylinder' || g === 'cone') return [r * 2, hh, r * 2];
+  if (g === 'plane') return [w, 0.02, d];
+  return [w, hh, d];
+}
+
 function geometry(kind) {
+  if (!['box', 'plane', 'sphere', 'cylinder', 'cone'].includes(kind)) return extraGeometry(kind);
   const P = [], N = [], I = [];
   const quad = (a, b, c, d, n) => { const o = P.length / 3; P.push(...a, ...b, ...c, ...d); for (let i = 0; i < 4; i++) N.push(...n); I.push(o, o + 1, o + 2, o, o + 2, o + 3); };
   if (kind === 'box') {
@@ -797,12 +1375,15 @@ export class Renderer3D {
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
     const prog = this.prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+    gl.bindAttribLocation(prog, 0, 'aPos'); gl.bindAttribLocation(prog, 1, 'aNormal'); gl.bindAttribLocation(prog, 2, 'aColor');
     gl.linkProgram(prog); gl.useProgram(prog);
-    this.a = { pos: gl.getAttribLocation(prog, 'aPos'), normal: gl.getAttribLocation(prog, 'aNormal') };
+    this.a = { pos: 0, normal: 1, color: 2 };
+    gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
+    this.voxelCache = new WeakMap();
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
-    for (const k of ['box', 'plane', 'sphere', 'cylinder', 'cone']) {
+    for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
       b.pos = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b.pos); gl.bufferData(gl.ARRAY_BUFFER, g.P, gl.STATIC_DRAW);
       b.norm = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b.norm); gl.bufferData(gl.ARRAY_BUFFER, g.N, gl.STATIC_DRAW);
@@ -836,6 +1417,7 @@ export class Renderer3D {
     gl.uniform3fv(this.u.uColor, hexToRgb(color));
     gl.uniform1f(this.u.uEmissive, emissive);
     gl.uniform1f(this.u.uOpacity, opacity);
+    gl.uniform1f(this.u.uVColor, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, g.pos); gl.vertexAttribPointer(this.a.pos, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.pos);
     gl.bindBuffer(gl.ARRAY_BUFFER, g.norm); gl.vertexAttribPointer(this.a.normal, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.normal);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g.idx);
@@ -857,12 +1439,77 @@ export class Renderer3D {
     gl.disable(gl.BLEND);
   }
 
+  /** Build one chunk's faces (only faces next to air) as an interleaved pos/normal/color buffer. */
+  buildChunk(V, cx, cz) {
+    const out = [], s = V.size, b = V.bounds;
+    const FACES = [
+      [[1, 0, 0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], 0.86], [[-1, 0, 0], [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], 0.86],
+      [[0, 1, 0], [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], 1], [[0, -1, 0], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], 0.6],
+      [[0, 0, 1], [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], 0.93], [[0, 0, -1], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], 0.93],
+    ];
+    const cols = V.palette.map(hexToRgb);
+    for (let i = cx * CHUNK; i < cx * CHUNK + CHUNK; i++) for (let k = cz * CHUNK; k < cz * CHUNK + CHUNK; k++) for (let j = b.j0; j <= b.j1; j++) {
+      const c = V.get(i, j, k);
+      if (!c) continue;
+      const base = cols[(c - 1) % cols.length], h = Math.sin(i * 12.9898 + j * 78.233 + k * 37.719) * 43758.5453, jit = 0.94 + (h - Math.floor(h)) * 0.1;
+      for (const [n, q, shade] of FACES) {
+        if (V.get(i + n[0], j + n[1], k + n[2])) continue;
+        const fc = c === 1 && n[1] !== 1 && cols[1] ? cols[1] : base; // grass blocks have dirt sides
+        const r = fc[0] * jit * shade, g = fc[1] * jit * shade, bl = fc[2] * jit * shade;
+        for (const vi of [0, 1, 2, 0, 2, 3]) {
+          const v = q[vi];
+          out.push((i + v[0]) * s, (j + v[1]) * s, (k + v[2]) * s, n[0], n[1], n[2], r, g, bl);
+        }
+      }
+    }
+    return new Float32Array(out);
+  }
+
+  drawVoxels(e) {
+    const gl = this.gl, V = e.voxels;
+    let cache = this.voxelCache.get(V);
+    if (!cache) { cache = new Map(); this.voxelCache.set(V, cache); }
+    const rebuild = (key) => {
+      const [cx, cz] = key.split(',').map(Number), data = this.buildChunk(V, cx, cz);
+      let c = cache.get(key);
+      if (!c) { c = { buf: gl.createBuffer(), count: 0 }; cache.set(key, c); }
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      c.count = data.length / 9;
+    };
+    if (V.allDirty) {
+      const b = V.bounds;
+      for (let cx = Math.floor(b.i0 / CHUNK); cx <= Math.floor(b.i1 / CHUNK); cx++) for (let cz = Math.floor(b.k0 / CHUNK); cz <= Math.floor(b.k1 / CHUNK); cz++) rebuild(cx + ',' + cz);
+      V.allDirty = false; V.dirty.clear();
+    } else if (V.dirty.size) { for (const key of V.dirty) rebuild(key); V.dirty.clear(); }
+    gl.uniformMatrix4fv(this.u.uModel, false, M4.trs(e.x, e.y, e.z, 0, 0, 0, 1, 1, 1));
+    gl.uniformMatrix3fv(this.u.uNormalMat, false, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    gl.uniform3f(this.u.uColor, 1, 1, 1); gl.uniform1f(this.u.uEmissive, 0); gl.uniform1f(this.u.uOpacity, e.alpha); gl.uniform1f(this.u.uVColor, 1);
+    gl.enableVertexAttribArray(2);
+    for (const c of cache.values()) {
+      if (!c.count) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 36, 0); gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 36, 12); gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+      gl.drawArrays(gl.TRIANGLES, 0, c.count);
+    }
+    gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
+    gl.uniform1f(this.u.uVColor, 0);
+  }
+
   meshModel(e) {
-    const m = e.mesh; let gx = m.w, gy = m.h, gz = m.d;
-    if (m.geometry === 'sphere') gx = gy = gz = m.r * 2;
-    else if (m.geometry === 'cylinder' || m.geometry === 'cone') { gx = gz = m.r * 2; }
-    else if (m.geometry === 'plane') gy = 1;
+    const m = e.mesh, [gx, gy0, gz] = partSize(m), gy = m.geometry === 'plane' ? 1 : gy0;
     return M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx * gx, e.sy * gy, e.sz * gz);
+  }
+
+  /** Draw a model: each part is a primitive placed relative to the object. */
+  drawModel(e, opacityMul = 1) {
+    const base = M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx, e.sy, e.sz);
+    for (const q of e.model.parts) {
+      const [gx, gy0, gz] = partSize(q), gy = q.geometry === 'plane' ? 1 : gy0;
+      const local = M4.trs(q.x || 0, q.y || 0, q.z || 0, (q.rx || 0) * DEG, (q.ry || 0) * DEG, (q.rz || 0) * DEG, gx, gy, gz);
+      this.drawMesh(q.geometry || 'box', M4.mul(base, local), q.color || '#cccccc', q.emissive || 0, (q.opacity ?? 1) * e.alpha * opacityMul);
+    }
   }
 
   render(scene, engine) {
@@ -880,13 +1527,31 @@ export class Renderer3D {
     const L = scene.light, ld = L.dir, ll = Math.hypot(ld.x, ld.y, ld.z) || 1;
     gl.uniformMatrix4fv(this.u.uViewProj, false, this.viewProj);
     gl.uniform3f(this.u.uLightDir, ld.x / ll, ld.y / ll, ld.z / ll);
-    gl.uniform3fv(this.u.uLightColor, hexToRgb(L.color));
+    const lc = hexToRgb(L.color), li = L.intensity ?? 1;
+    gl.uniform3f(this.u.uLightColor, lc[0] * li, lc[1] * li, lc[2] * li);
     gl.uniform1f(this.u.uAmbient, L.ambient);
+    gl.uniform3fv(this.u.uSky, L.sky ? hexToRgb(L.sky) : [1, 1, 1]);
+    gl.uniform3fv(this.u.uGround, L.ground ? hexToRgb(L.ground) : L.sky ? hexToRgb(L.sky).map((c) => c * 0.6) : [1, 1, 1]);
+    // point lights: the 8 nearest to the camera
+    const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible !== false && !e.dead && !e.ui)
+      .sort((a, b) => Math.hypot(a.x - eye.x, a.y - eye.y, a.z - eye.z) - Math.hypot(b.x - eye.x, b.y - eye.y, b.z - eye.z)).slice(0, 8);
+    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8);
+    lights.forEach((e, i) => {
+      const Lt = e.light, c = hexToRgb(Lt.color), k = (Lt.intensity ?? 1) * flickerK(Lt, scene.time, i);
+      pos.set([e.x, e.y, e.z], i * 3); col.set([c[0] * k, c[1] * k, c[2] * k], i * 3); rng[i] = Math.max(0.1, Lt.range > 50 ? 8 : Lt.range || 8);
+    });
+    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform1i(this.u.uPLCount, lights.length);
     gl.uniform3fv(this.u.uFogColor, bg);
     gl.uniform1f(this.u.uFogNear, scene.fog.near); gl.uniform1f(this.u.uFogFar, scene.fog.far);
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
 
     const transparent = [], shadows = [];
+    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead) this.drawVoxels(e);
+    for (const e of scene.entities) {
+      if (!e.model || !e.visible || e.dead) continue;
+      this.drawModel(e, e.data.invuln > 0 && Math.floor(scene.time * 12) % 2 ? 0.3 : 1);
+      if (e.body && e.body.type !== 'static' && !e.body.sensor) shadows.push(e);
+    }
     for (const e of scene.entities) {
       if (!e.mesh || !e.visible || e.dead) continue;
       let op = e.mesh.opacity * e.alpha;
@@ -896,8 +1561,8 @@ export class Renderer3D {
     }
     // blob shadows onto the highest static surface below each moving body
     gl.enable(gl.BLEND); gl.depthMask(false);
-    const statics = scene.entities.filter((e) => e.body && e.body.type === 'static' && e.mesh);
-    for (const e of shadows) {
+    const statics = scene.entities.filter((e) => e.body && e.body.type === 'static' && (e.mesh || e.model));
+    for (const e of L.shadows === false ? [] : shadows) {
       const ex = e.extents(), r = ex.sphere ? ex.r : Math.max(ex.hx, ex.hz);
       const bottom = e.y - (ex.sphere ? ex.r : ex.hy);
       let ground = -Infinity;
@@ -905,6 +1570,7 @@ export class Renderer3D {
         const sx = s.extents(); if (sx.sphere) continue;
         if (Math.abs(e.x - s.x) < sx.hx && Math.abs(e.z - s.z) < sx.hz) { const top = s.y + sx.hy; if (top <= bottom + 0.05 && top > ground) ground = top; }
       }
+      for (const w of scene.entities) if (w.voxels) ground = Math.max(ground, w.voxels.groundAt(w, e.x, e.z, bottom + 0.05));
       if (ground === -Infinity) continue;
       const k = clamp(1 - (bottom - ground) / 6, 0.2, 1);
       this.drawMesh('cylinder', M4.trs(e.x, ground + 0.015, e.z, 0, 0, 0, r * 2 * k, 0.01, r * 2 * k), '#000000', 1, 0.28 * k);
@@ -930,7 +1596,7 @@ function drawMessage(ctx, scene, W, H, engine) {
     if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
   }
   if (line) lines.push(line);
-  const h = lines.length * (size + 6) + 24, y = H - engine.safe.bottom - 130 - h;
+  const h = lines.length * (size + 6) + 24, y = scene.settings.messageTop ? engine.safe.top + H * 0.2 : H - engine.safe.bottom - 130 - h;
   ctx.globalAlpha = Math.min(1, m.t * 3);
   ctx.fillStyle = 'rgba(15,15,25,0.85)';
   ctx.beginPath();
@@ -948,14 +1614,24 @@ export function anchorPoint(anchor, W, H, safe) {
   return { x, y };
 }
 
+/** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
+function ownScreen(scene, screen) {
+  if (scene.settings.customScreens) return true;
+  return scene.entities.some((e) => e.ui && !e.dead && e.visible && e.showWhen === screen);
+}
+
 function renderUI(engine, scene) {
   const ctx = engine.uiCtx, W = engine.width, H = engine.height, inp = engine.input;
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
+  engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
+    const screen = engine.paused ? 'paused' : scene.state;
     for (const e of scene.entities) {
       if (!e.ui || !e.visible || e.dead) continue;
+      if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
+      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
       const o = anchorPoint(e.anchor, W, H, engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time); ctx.restore();
     }
@@ -971,20 +1647,30 @@ function renderUI(engine, scene) {
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
   if (scene.state === 'play' && !engine.paused) {
+    ctx.save();
+    ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
+    const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
+    if (useStick && st.joystickMode === 'fixed' && !inp.stick) {
+      const f = inp.fixedStick(), r = inp.stickRadius;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
+    }
     if (inp.stick) {
       const s = inp.stick, r = inp.stickRadius;
       ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(s.bx, s.by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
-    } else if (scene.settings.joystick && scene.time < 4) {
+    } else if (useStick && st.joystickMode !== 'fixed' && scene.time < 4) {
       ctx.fillStyle = `rgba(255,255,255,${0.25 * pulse})`; ctx.font = '600 14px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('Touch & drag here to move', W * 0.25, H - engine.safe.bottom - 40);
+      ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
     for (const b of inp.buttons) {
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.stroke(); }
       ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
       if (b.action === 'mute' && engine.audio.muted) {
@@ -992,6 +1678,7 @@ function renderUI(engine, scene) {
         ctx.beginPath(); ctx.moveTo(b.x - b.r * 0.5, b.y - b.r * 0.5); ctx.lineTo(b.x + b.r * 0.5, b.y + b.r * 0.5); ctx.stroke();
       }
     }
+    ctx.restore();
   }
   if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
     ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
@@ -1005,6 +1692,8 @@ function renderUI(engine, scene) {
     big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
     return;
   }
+  if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
+  if (ownScreen(scene, engine.paused ? 'paused' : scene.state)) return;
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -1028,6 +1717,13 @@ function renderUI(engine, scene) {
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
     else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, 'rgba(220,225,255,0.7)');
     big('Tap to play again', H * 0.66, 20, `rgba(255,255,255,${pulse})`);
+    if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
+      const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
+      engine.shareRect = { x, y, w, h };
+      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 23); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+      big('Share score', y + h / 2, 17);
+    } else engine.shareRect = null;
   }
 }
 
@@ -1040,7 +1736,7 @@ export const Behaviors = {};
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
-const is3D = (e) => !!e.mesh;
+const is3D = (e) => !!(e.mesh || e.voxels || e.model || e.scene?.mode === '3d');
 
 function respawnOrEnd(player, s, action) {
   if (action === 'respawn' || (action === 'damage' && s.vars.lives > 1)) {
@@ -1118,9 +1814,13 @@ registerBehavior('platformer', {
     { key: 'jump', label: 'Jump power', type: 'number', default: 620, default3d: 10 },
     { key: 'doubleJump', label: 'Double jump', type: 'bool', default: false },
     { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn' },
+    { key: 'accel', label: 'Acceleration (0 = instant)', type: 'number', default: 0, default3d: 0, advanced: true },
+    { key: 'airControl', label: 'Air control (0–1)', type: 'number', default: 1, advanced: true },
+    { key: 'variableJump', label: 'Short hop when tapping jump', type: 'bool', default: true, advanced: true },
+    { key: 'faceDirection', label: 'Flip to face movement (2D)', type: 'bool', default: true, advanced: true },
   ],
   create(p) {
-    let coyote = 0, jumps = 0;
+    let coyote = 0, jumps = 0, rising = false;
     return {
       start(e, s) {
         e.ensureBody({ type: 'dynamic' });
@@ -1128,14 +1828,22 @@ registerBehavior('platformer', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = inp.axis(), b = e.body, up = is3D(e) ? 1 : -1;
-        b.vel.x = a.x * p.speed;
-        if (is3D(e)) b.vel.z = a.y * p.speed;
+        const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
+        const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
+        b.vel.x = steer(b.vel.x, a.x * p.speed);
+        if (is3D(e)) b.vel.z = steer(b.vel.z, a.y * p.speed);
         if (b.grounded) { coyote = 0.12; jumps = 0; } else coyote -= dt;
         if (inp.pressed('jump') && (coyote > 0 || (p.doubleJump && jumps < 2))) {
-          b.vel.y = p.jump * up; coyote = 0; jumps = jumps ? jumps + 1 : 1;
+          b.vel.y = p.jump * up; coyote = 0; jumps = jumps ? jumps + 1 : 1; rising = true;
           s.engine.audio.sfx('jump');
         }
-        if (!is3D(e) && a.x) e.sx = Math.abs(e.sx) * (a.x < 0 && e.data.flip ? -1 : 1);
+        // let go of the jump button early for a shorter hop
+        const hasBtn = inp.buttons.some((q) => q.action === 'jump'); // tap-to-jump fires on release, so only with a button
+        if (rising && p.variableJump && hasBtn && !inp.isDown('jump') && b.vel.y * up > 0) { b.vel.y *= 0.5; rising = false; }
+        if (b.vel.y * up <= 0) rising = false;
+        if (!is3D(e) && a.x && p.faceDirection !== false) {
+          if (e.shape?.type === 'emoji') e.data.flipX = a.x > 0; else if (e.sprite) e.sx = Math.abs(e.sx) * (a.x < 0 ? -1 : 1);
+        }
         const fell = is3D(e) ? e.y < -25 : e.y > s.view.height + 600;
         if (fell) respawnOrEnd(e, s, p.onFall);
       },
@@ -1203,6 +1911,7 @@ registerBehavior('spawner', {
     { key: 'ramp', label: 'Speed-up per 10s', type: 'number', default: 0.1 },
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
     { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
+    { key: 'clear', label: 'Keep clear of others (0 = off)', type: 'number', default: 0 },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -1216,7 +1925,11 @@ registerBehavior('spawner', {
         if (alive.length >= p.max) return;
         const ox = p.relative ? e.x : 0, oy = p.relative ? e.y : 0, oz = p.relative ? e.z : 0;
         const sn = (v) => (p.snap ? Math.round(v / p.snap) * p.snap : v);
-        const c = s.spawn(p.template, { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) });
+        const pos = { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) };
+        // don't drop things on top of each other (e.g. a coin inside a barrier)
+        if (p.clear && s.entities.some((o) => o.spawned && !o.dead && Math.abs(o.x - pos.x) < p.clear && Math.abs(o.y - pos.y) < p.clear * (s.mode === '3d' ? 2 : 1) && Math.abs(o.z - pos.z) < p.clear)) return;
+        const c = s.spawn(p.template, pos);
+        if (c) c.spawned = true;
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
     };
@@ -1287,7 +2000,7 @@ registerBehavior('collectible', {
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || e.dead) return;
         s.addVar(p.var, p.score);
@@ -1309,9 +2022,9 @@ registerBehavior('hazard', {
   ],
   create(p) {
     return {
-      start(e) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
-        if (!other.has(p.tag) || other.dead || s.state !== 'play') return;
+        if (!other.has(p.tag) || other.dead || s.state !== 'play' || e.data.blinkOff) return;
         if (other.data.invuln > 0) return;
         if (other.data.shield > 0) {
           other.data.shield = 0; s.engine.audio.sfx('hit');
@@ -1330,7 +2043,7 @@ registerBehavior('goal', {
   params: [{ key: 'tag', label: 'Reached by tag', type: 'text', default: 'player' }],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) { if (other.has(p.tag)) { s.burst(e.x, e.y, e.z, '#5dff8a', 40, 1.2); s.win(); } },
     };
   },
@@ -1377,6 +2090,142 @@ registerBehavior('cameraFollow', {
           if (p.axes !== 'y') c.x += (e.x + p.ox - c.x) * k;
           if (p.axes !== 'x') c.y += (e.y + p.oy - c.y) * k;
         }
+      },
+    };
+  },
+});
+
+/** Camera: put it on a camera object. Follows a tagged target, or stays where the object is. The active camera drives the view. */
+registerBehavior('camera', {
+  label: 'Camera', description: 'A camera: follow the player (with smoothing, look-ahead, dead zone and level bounds), stay fixed, top-down, side-scroller or orbit by dragging. Switch cameras with the Switch Camera action.',
+  params: [
+    { key: 'mode', label: 'Mode', type: 'select', options: ['follow', 'fixed', 'side scroller', 'top down', 'orbit'], default: 'follow' },
+    { key: 'target', label: 'Follow tag', type: 'text', default: 'player' },
+    { key: 'smooth', label: 'Smoothness (higher = snappier)', type: 'number', default: 6 },
+    { key: 'zoom', label: 'Zoom (2D)', type: 'number', default: 1 },
+    { key: 'fov', label: 'Field of view (3D)', type: 'number', default: 60 },
+    { key: 'ox', label: 'Offset X', type: 'number', default: 0 },
+    { key: 'oy', label: 'Offset Y', type: 'number', default: 0, default3d: 7 },
+    { key: 'oz', label: 'Offset Z (3D)', type: 'number', default: 0, default3d: 11 },
+    { key: 'lookAhead', label: 'Look ahead (sec of movement)', type: 'number', default: 0, advanced: true },
+    { key: 'deadZone', label: 'Dead zone (target moves freely inside)', type: 'number', default: 0, advanced: true },
+    { key: 'bounds', label: 'Keep inside (2D)', type: 'select', options: ['none', 'level', 'custom'], default: 'none' },
+    { key: 'minX', label: 'Bounds min X', type: 'number', default: 0, advanced: true },
+    { key: 'maxX', label: 'Bounds max X', type: 'number', default: 400, advanced: true },
+    { key: 'minY', label: 'Bounds min Y', type: 'number', default: 0, advanced: true },
+    { key: 'maxY', label: 'Bounds max Y', type: 'number', default: 700, advanced: true },
+    { key: 'priority', label: 'Priority (highest starts active)', type: 'number', default: 0, advanced: true },
+  ],
+  create(p) {
+    let yaw = 0, pitch = 0.5, dist = 10, box = null, first = true;
+    const levelBounds = (s) => {
+      let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity;
+      for (const e of s.entities) {
+        if (e.ui || e.dead || e.template || e.getBehavior('camera') || !(e.shape || e.sprite || e.text)) continue;
+        const ex = e.extents(), hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy;
+        l = Math.min(l, e.x - hx); r = Math.max(r, e.x + hx); t = Math.min(t, e.y - hy); b = Math.max(b, e.y + hy);
+      }
+      return Number.isFinite(l) ? { l: Math.min(l, 0), r: Math.max(r, s.view.width), t: Math.min(t, 0), b: Math.max(b, s.view.height) } : null;
+    };
+    return {
+      start(e, s) {
+        (s.cameras ||= []).push(e); e.data.camPriority = +p.priority || 0;
+        if (is3D(e)) { dist = Math.hypot(p.ox, p.oy, p.oz) || 10; yaw = Math.atan2(p.ox, p.oz); pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); }
+        else if (p.bounds === 'level') box = levelBounds(s);
+        else if (p.bounds === 'custom') box = { l: p.minX, r: p.maxX, t: p.minY, b: p.maxY };
+      },
+      update(e, dt, s) {
+        if (!s.isActiveCamera(e)) return;
+        const cut = first || s.cameraCut; first = false; s.cameraCut = false;
+        const t = p.mode !== 'fixed' && p.target ? s.findAll(p.target).find((q) => q !== e) : null;
+        const k = cut ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt), c = s.camera, la = +p.lookAhead || 0, dz = +p.deadZone || 0;
+        const vel = t?.body?.vel || { x: 0, y: 0, z: 0 };
+        if (!is3D(e)) {
+          c.zoom += ((+p.zoom || 1) - c.zoom) * k;
+          let fx = e.x, fy = e.y;
+          if (t) { fx = t.x + p.ox + vel.x * la; fy = p.mode === 'side scroller' ? e.y : t.y + p.oy + (p.mode === 'top down' ? vel.y * la : 0); }
+          if (dz && t && !cut) { const ax = fx - c.x, ay = fy - c.y; fx = Math.abs(ax) < dz ? c.x : fx - Math.sign(ax) * dz; fy = Math.abs(ay) < dz ? c.y : fy - Math.sign(ay) * dz; }
+          let nx = c.x + (fx - c.x) * k, ny = c.y + (fy - c.y) * k;
+          if (box && s.engine) {
+            const z = s.engine.renderer.zoomFor(s), hw = s.engine.width / 2 / z, hh = s.engine.height / 2 / z;
+            nx = box.r - box.l > hw * 2 ? clamp(nx, box.l + hw, box.r - hw) : (box.l + box.r) / 2;
+            ny = box.b - box.t > hh * 2 ? clamp(ny, box.t + hh, box.b - hh) : (box.t + box.b) / 2;
+          }
+          c.x = nx; c.y = ny;
+          return;
+        }
+        c.fov += ((+p.fov || 60) - c.fov) * k;
+        let pos, look;
+        if (!t) { // fixed camera: sits on this object, looks at its target tag or straight ahead
+          const ft = p.target ? s.findAll(p.target).find((q) => q !== e) : null, ry = e.ry * DEG, rx = e.rx * DEG;
+          pos = { x: e.x, y: e.y, z: e.z };
+          look = ft ? { x: ft.x, y: ft.y, z: ft.z } : { x: e.x - Math.sin(ry) * Math.cos(rx), y: e.y + Math.sin(rx), z: e.z - Math.cos(ry) * Math.cos(rx) };
+        } else {
+          look = { x: t.x + vel.x * la, y: p.mode === 'side scroller' ? e.y : t.y, z: t.z + vel.z * la };
+          if (dz && !cut) for (const a of ['x', 'z']) { const d = look[a] - c.target[a]; look[a] = Math.abs(d) < dz ? c.target[a] : look[a] - Math.sign(d) * dz; }
+          if (p.mode === 'orbit') {
+            const inp = s.engine.input;
+            if (inp.pointerDown && !inp.stick) { yaw -= inp.drag.dx * 0.008; pitch = clamp(pitch + inp.drag.dy * 0.006, -0.2, 1.45); }
+            pos = { x: look.x + Math.sin(yaw) * Math.cos(pitch) * dist, y: look.y + Math.sin(pitch) * dist, z: look.z + Math.cos(yaw) * Math.cos(pitch) * dist };
+          } else if (p.mode === 'top down') pos = { x: look.x, y: look.y + dist, z: look.z + 0.001 };
+          else pos = { x: look.x + p.ox, y: look.y + p.oy, z: look.z + p.oz };
+        }
+        if (cut) { c.target = { ...look }; c.position = { ...pos }; return; }
+        for (const a of ['x', 'y', 'z']) { c.target[a] += (look[a] - c.target[a]) * k; c.position[a] += (pos[a] - c.position[a]) * k; }
+      },
+      destroy(e, s) { s.cameras = (s.cameras || []).filter((q) => q !== e); },
+    };
+  },
+});
+
+registerBehavior('forceZone', {
+  label: 'Force Zone', description: 'An area that pushes bodies inside it: wind, conveyor, water current, magnet (pull) or blast (push away).',
+  params: [
+    { key: 'mode', label: 'Force', type: 'select', options: ['direction', 'pull to center', 'push from center'], default: 'direction' },
+    { key: 'fx', label: 'Direction X', type: 'number', default: 0 },
+    { key: 'fy', label: 'Direction Y', type: 'number', default: -1, default3d: 1 },
+    { key: 'fz', label: 'Direction Z (3D)', type: 'number', default: 0 },
+    { key: 'strength', label: 'Strength', type: 'number', default: 1800, default3d: 40 },
+    { key: 'tag', label: 'Only affects tag (empty = all)', type: 'text', default: '' },
+    { key: 'hidden', label: 'Invisible while playing', type: 'bool', default: false },
+  ],
+  create(p) {
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); if (p.hidden) e.visible = false; if (p.tag) s.want(p.tag); },
+      update(e, dt, s) {
+        const ez = e.extents();
+        const l = Math.hypot(p.fx, p.fy, p.fz) || 1;
+        for (const o of s.entities) {
+          const b = o.body;
+          if (o === e || o.dead || !b || b.type !== 'dynamic' || (p.tag && !o.has(p.tag))) continue;
+          if (!overlap(e, ez, o, o.extents())) continue;
+          let fx, fy, fz;
+          if (p.mode === 'direction') { fx = p.fx / l; fy = p.fy / l; fz = p.fz / l; }
+          else { const dx = e.x - o.x, dy = e.y - o.y, dz = e.z - o.z, d = Math.hypot(dx, dy, dz) || 1, sg = p.mode === 'pull to center' ? 1 : -1; fx = sg * dx / d; fy = sg * dy / d; fz = sg * dz / d; }
+          if (b.forceT !== s.time) { b.force = { x: 0, y: 0, z: 0 }; b.forceT = s.time; }
+          b.force.x += fx * p.strength; b.force.y += fy * p.strength; b.force.z += fz * p.strength;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('savePoint', {
+  label: 'Save Point', description: 'Saves the game when the player touches it (variables, level and what was collected). Load it with the Load Game action or Load on start.',
+  params: [
+    { key: 'slot', label: 'Save slot', type: 'number', default: 1 },
+    { key: 'text', label: 'Message', type: 'text', default: 'Game saved' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let cool = 0;
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
+      update(e, dt) { cool -= dt; },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || cool > 0) return;
+        cool = 2;
+        if (s.saveGame(p.slot)) { if (p.text) s.message(p.text, 1.5); s.burst(e.x, e.y, e.z, '#7cf7a0', 14); s.engine.audio.sfx('power'); }
       },
     };
   },
@@ -1452,7 +2301,7 @@ registerBehavior('message', {
   create(p) {
     let shown = false;
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || (p.once && shown)) return;
         shown = true; s.message(p.text, p.seconds); s.engine.audio.sfx('click');
@@ -1469,7 +2318,7 @@ registerBehavior('teleport', {
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || (other.data.tpUntil || 0) > s.time) return;
         const dest = s.find(p.target);
@@ -1514,7 +2363,7 @@ registerBehavior('sound', {
   ],
   create(p) {
     return {
-      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } },
       collide(e, other, s) { if (p.when === 'touched' && other.has(p.tag)) s.engine.audio.sfx(p.sound); },
     };
   },
@@ -1620,7 +2469,13 @@ registerBehavior('swipeMove', {
   create(p) {
     let lane = 0, home = 0;
     return {
-      start(e) { home = e.x; },
+      start(e, s) {
+        home = e.x;
+        // a real body so the runner can jump, land, and get hit
+        const b = e.body && e.body.type === 'dynamic' ? e.body : e.setBody({ type: 'dynamic' });
+        if (!is3D(e) && !p.jump) b.gravityScale = 0;
+        if (p.jump && !s.gravity) s.gravity = is3D(e) ? -25 : 1600;
+      },
       update(e, dt, s) {
         const inp = s.engine.input, max = Math.floor((p.lanes - 1) / 2);
         if (inp.pressed('swipe:left')) lane = Math.max(-max, lane - 1);
@@ -1680,7 +2535,7 @@ registerBehavior('checkpoint', {
   create(p) {
     let hit = false;
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || hit) return;
         hit = true;
@@ -1706,14 +2561,11 @@ registerBehavior('destructible', {
   create(p) {
     let hp;
     return {
-      start(e) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); },
-      update(e, dt, s) { // make sure whatever can hit us takes part in collisions
-        for (const o of s.entities) if (!o.body && o.tags.has(p.hitBy)) o.setBody({ type: 'kinematic', sensor: true });
-      },
+      start(e, s) { hp = p.hp; e.data.hp = hp; e.data.hpMax = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.hitBy); },
       collide(e, other, s) {
         if (!other.has(p.hitBy) || e.dead) return;
         if (p.removeHitter) other.destroy();
-        hp--;
+        hp--; e.data.hp = hp;
         e.data.invuln = 0.15;
         s.engine.audio.sfx(hp > 0 ? 'click' : 'hit');
         if (hp > 0) return;
@@ -1866,9 +2718,10 @@ registerBehavior('projectile', {
           d = { x: -Math.sin(ry) * Math.cos(rx), y: Math.sin(rx), z: -Math.cos(ry) * Math.cos(rx) };
         } else d = { x: Math.sin((e.rz || 0) * DEG), y: -Math.cos((e.rz || 0) * DEG), z: 0 };
       },
-      update(e, dt) {
+      update(e, dt, s) {
         e.x += d.x * p.speed * dt; e.y += d.y * p.speed * dt; e.z += d.z * p.speed * dt;
         if ((t += dt) > p.life) e.destroy();
+        for (const w of s.entities) if (w.voxels && w.voxels.solidAtWorld(w, e.x, e.y, e.z)) { s.burst(e.x, e.y, e.z, '#ddd', 6, 0.5); e.destroy(); break; }
       },
     };
   },
@@ -1913,6 +2766,819 @@ registerBehavior('upgrade', {
           const k = e.sx; e.sx = e.sy = k * 1.08; s.tween(e, { sx: k, sy: k }, 0.18);
         }
       },
+    };
+  },
+});
+
+// ---- AI & movement ----
+registerBehavior('follow', {
+  label: 'Follow', description: 'Follows another object at a distance (pets, sidekicks, escorts).',
+  params: [
+    { key: 'target', label: 'Follow (name or tag)', type: 'text', default: 'player' },
+    { key: 'distance', label: 'Keep distance', type: 'number', default: 60, default3d: 2 },
+    { key: 'speed', label: 'Speed', type: 'number', default: 200, default3d: 6 },
+  ],
+  create(p) {
+    let t = null;
+    return {
+      update(e, dt, s) {
+        if (!t || t.dead) t = s.find(p.target) || s.findAll(p.target)[0];
+        if (!t || t === e) return;
+        const dx = t.x - e.x, dy = is3D(e) ? 0 : t.y - e.y, dz = is3D(e) ? t.z - e.z : 0, d = Math.hypot(dx, dy, dz);
+        if (d <= p.distance) return;
+        const k = Math.min(d - p.distance, p.speed * dt) / d;
+        e.x += dx * k; e.y += dy * k; e.z += dz * k;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dz) / DEG;
+      },
+    };
+  },
+});
+
+registerBehavior('wander', {
+  label: 'Wander', description: 'Roams around its starting area at random (animals, villagers, slimes).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 60, default3d: 2 },
+    { key: 'radius', label: 'Stay within', type: 'number', default: 120, default3d: 5 },
+  ],
+  create(p) {
+    let home, dir, t = 0;
+    return {
+      start(e) { home = { x: e.x, y: e.y, z: e.z }; },
+      update(e, dt) {
+        if ((t -= dt) <= 0) {
+          t = rand(1, 3);
+          const a = rand(0, Math.PI * 2), away = Math.hypot(e.x - home.x, (is3D(e) ? e.z - home.z : e.y - home.y)) > p.radius;
+          dir = Math.random() < 0.25 && !away && dir !== undefined ? null : away ? Math.atan2(is3D(e) ? home.z - e.z : home.y - e.y, home.x - e.x) : a;
+        }
+        if (dir == null) return;
+        e.x += Math.cos(dir) * p.speed * dt;
+        if (is3D(e)) { e.z += Math.sin(dir) * p.speed * dt; e.ry = Math.atan2(-Math.cos(dir), -Math.sin(dir)) / DEG; }
+        else e.y += Math.sin(dir) * p.speed * dt;
+      },
+    };
+  },
+});
+
+registerBehavior('path', {
+  label: 'Path', description: 'Moves along a list of points, e.g. "0,0; 150,0; 150,-100" (offsets from the start; 3D uses x,z).',
+  params: [
+    { key: 'points', label: 'Points (x,y; x,y …)', type: 'text', default: '0,0; 150,0; 150,-100; 0,-100', default3d: '0,0; 4,0; 4,-4; 0,-4' },
+    { key: 'speed', label: 'Speed', type: 'number', default: 120, default3d: 3 },
+    { key: 'loop', label: 'Loop (off = back and forth)', type: 'bool', default: true },
+  ],
+  create(p) {
+    let pts, i = 1, step = 1, home;
+    return {
+      start(e) {
+        home = { x: e.x, y: e.y, z: e.z };
+        pts = String(p.points).split(';').map((q) => q.split(',').map(Number)).filter((q) => q.length >= 2 && q.every(Number.isFinite));
+        if (pts.length < 2) pts = null;
+      },
+      update(e, dt) {
+        if (!pts) return;
+        const [px, py] = pts[i], tx = home.x + px, tyz = (is3D(e) ? home.z : home.y) + py;
+        const cy = is3D(e) ? e.z : e.y, dx = tx - e.x, dy = tyz - cy, d = Math.hypot(dx, dy), mv = p.speed * dt;
+        if (d <= mv) {
+          e.x = tx; if (is3D(e)) e.z = tyz; else e.y = tyz;
+          if (p.loop) i = (i + 1) % pts.length;
+          else { if (i + step < 0 || i + step >= pts.length) step = -step; i += step; }
+          return;
+        }
+        e.x += dx / d * mv;
+        if (is3D(e)) { e.z += dy / d * mv; e.ry = Math.atan2(-dx, -dy) / DEG; } else e.y += dy / d * mv;
+      },
+    };
+  },
+});
+
+registerBehavior('turret', {
+  label: 'Turret', description: 'Turns toward the player and fires a template when in range (give the template Projectile + Hazard).',
+  params: [
+    { key: 'template', label: 'Bullet template', type: 'template', default: '' },
+    { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 1.2 },
+    { key: 'range', label: 'Range', type: 'number', default: 300, default3d: 14 },
+    { key: 'tag', label: 'Target tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let t = 1, target = null;
+    return {
+      update(e, dt, s) {
+        if (!target || target.dead) target = s.findAll(p.tag)[0];
+        if (!target) return;
+        const dx = target.x - e.x, dy = target.y - e.y, dz = target.z - e.z;
+        if (Math.hypot(dx, is3D(e) ? dz : dy) > p.range) return;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dz) / DEG; else e.rz = Math.atan2(dx, -dy) / DEG;
+        if ((t -= dt) > 0 || !p.template) return;
+        t = p.every;
+        const o = { x: e.x, y: e.y, z: e.z, ry: e.ry, rz: e.rz, rx: is3D(e) ? Math.atan2(dy, Math.hypot(dx, dz)) / DEG : 0 };
+        if (is3D(e)) { const ry = e.ry * DEG; o.x += -Math.sin(ry) * 0.8; o.z += -Math.cos(ry) * 0.8; }
+        else { o.x += Math.sin(e.rz * DEG) * 24; o.y += -Math.cos(e.rz * DEG) * 24; }
+        s.spawn(p.template, o);
+      },
+    };
+  },
+});
+
+registerBehavior('bounce', {
+  label: 'Bouncing Ball', description: 'Keeps moving at a steady speed and bounces off walls, paddles and the screen edges (breakout, pong).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 340, default3d: 9 },
+    { key: 'bottom', label: 'At the bottom edge', type: 'select', options: ['lose a life', 'bounce'], default: 'lose a life' },
+  ],
+  create(p) {
+    let home;
+    const launch = (e) => { const a = rand(-0.6, 0.6); e.body.vel = { x: Math.sin(a) * p.speed, y: is3D(e) ? 0 : -Math.cos(a) * p.speed, z: is3D(e) ? -Math.cos(a) * p.speed : 0 }; };
+    return {
+      start(e) {
+        home = { x: e.x, y: e.y, z: e.z };
+        const b = e.ensureBody({ type: 'dynamic' });
+        b.gravityScale = 0; b.bounce = 1;
+        launch(e);
+      },
+      update(e, dt, s) {
+        const v = e.body.vel;
+        if (!is3D(e)) {
+          const vb = s.viewBounds(), r = e.extents().r || e.extents().hx || 10;
+          if (e.x < vb.left + r) { e.x = vb.left + r; v.x = Math.abs(v.x); }
+          if (e.x > vb.right - r) { e.x = vb.right - r; v.x = -Math.abs(v.x); }
+          if (e.y < vb.top + r) { e.y = vb.top + r; v.y = Math.abs(v.y); }
+          if (e.y > vb.bottom - r) {
+            if (p.bottom === 'bounce') { e.y = vb.bottom - r; v.y = -Math.abs(v.y); }
+            else {
+              const lives = +s.vars.lives || 1;
+              s.engine.audio.sfx('hit'); s.engine.vibrate(60);
+              if (lives <= 1) { s.setVar('lives', 0); s.gameOver(); return; }
+              s.addVar('lives', -1); e.x = home.x; e.y = home.y; launch(e); return;
+            }
+          }
+          if (Math.abs(v.y) < p.speed * 0.3) v.y = (v.y < 0 ? -1 : 1) * p.speed * 0.3; // never get stuck flat
+        }
+        const sp = Math.hypot(v.x, v.y, v.z) || 1, k = p.speed / sp;
+        v.x *= k; v.y *= k; v.z *= k;
+      },
+    };
+  },
+});
+
+// ---- events & effects ----
+export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light'];
+/** Shared actions for Trigger, Timer, Condition, Button and Rules. */
+function runAction(s, e, p, other) {
+  const v = p.value, obj = (name) => (name ? s.find(name) || s.findAll(name)[0] : e);
+  switch (p.action) {
+    case 'set variable': s.setVar(v || 'score', p.amount); break;
+    case 'hide object': { const t = obj(v); if (t) t.visible = false; break; }
+    case 'toggle object': { const t = obj(v); if (t) t.visible = !t.visible; break; }
+    case 'destroy other': if (other) { s.burst(other.x, other.y, other.z, '#fff', 12); other.destroy(); } break;
+    case 'play sound': s.engine.audio.sfx(p.sound && p.sound !== 'none' ? p.sound : v || 'click'); return;
+    case 'camera shake': s.camera.shake = Math.max(s.camera.shake, p.amount * 4 || 10); break;
+    case 'jump': { const t = obj(v) || e; if (t?.body) t.body.vel.y = (s.mode === '3d' ? 1 : -1) * (p.amount > 50 || s.mode === '3d' ? p.amount : p.amount * 60); break; }
+    case 'move by': { const t = obj(v) || e; const [dx, dy, dz] = String(p.amount).split(',').map(Number); if (t) { t.x += dx || 0; t.y += dy || 0; t.z += dz || 0; } break; }
+    case 'start game': if (s.state === 'title') s.state = 'play'; break;
+    case 'restart game': s.engine.restart(); return;
+    case 'pause game': s.engine.paused = !s.engine.paused; break;
+    case 'resume game': s.engine.paused = false; break;
+    case 'add score': s.addVar('score', p.amount); break;
+    case 'win': s.win(); break;
+    case 'game over': s.gameOver(); break;
+    case 'message': s.message(v || '…', 2.5); break;
+    case 'add to variable': s.addVar(v || 'score', p.amount); break;
+    case 'spawn template': if (v) s.spawn(v, { x: e.x, y: e.y, z: e.z }); break;
+    case 'destroy object': { const t = v ? s.find(v) : e; if (t) { s.burst(t.x, t.y, t.z, '#ffffff', 16); t.destroy(); } break; }
+    case 'show object': { const t = s.find(v); if (t) t.visible = true; break; }
+    case 'next level': if (s.engine.hasNextLevel()) s.win(); break;
+    case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
+    case 'save game': if (s.saveGame(p.amount || 1)) s.message(v && v !== 'Hello!' ? v : 'Game saved', 1.5); break;
+    case 'load game': if (!s.loadGame(p.amount || 1)) s.message('No saved game yet', 1.5); return;
+    case 'delete save': s.deleteSave(p.amount || 1); s.message('Save deleted', 1.5); break;
+    case 'switch camera': s.setCamera(v); break;
+    case 'push': { const t = (v ? obj(v) : other) || e, b = t?.ensureBody({ type: 'dynamic' }); const [px, py, pz] = String(p.amount).split(',').map(Number); if (b) { b.vel.x += px || 0; b.vel.y += py || 0; b.vel.z += pz || 0; } break; }
+    case 'set gravity': s.gravity = +p.amount || 0; break;
+    case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
+    default: break;
+  }
+  if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
+}
+const ACTION_PARAMS = [
+  { key: 'action', label: 'Do', type: 'select', options: ACTIONS, default: 'message' },
+  { key: 'value', label: 'Message / variable / template / object name', type: 'text', default: 'Hello!' },
+  { key: 'amount', label: 'Amount (for variables)', type: 'number', default: 1 },
+  { key: 'sound', label: 'Sound', type: 'select', options: ['none', 'coin', 'power', 'jump', 'hit', 'click', 'win', 'lose'], default: 'none' },
+];
+
+registerBehavior('trigger', {
+  label: 'Trigger Zone', description: 'When the player touches it, do something: show a message, change a variable, spawn, destroy, win…',
+  params: [
+    ...ACTION_PARAMS,
+    { key: 'tag', label: 'Triggered by tag', type: 'text', default: 'player' },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'hidden', label: 'Invisible while playing', type: 'bool', default: true },
+  ],
+  create(p) {
+    let done = false;
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); if (p.hidden) e.visible = false; s.want(p.tag); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (p.once && done)) return;
+        done = true; runAction(s, e, p, other);
+      },
+    };
+  },
+});
+
+registerBehavior('timer', {
+  label: 'Timer', description: 'After some seconds (optionally repeating), do something: spawn waves, show hints, end the game…',
+  params: [
+    { key: 'seconds', label: 'After (sec)', type: 'number', default: 5 },
+    { key: 'repeat', label: 'Repeat', type: 'bool', default: false },
+    ...ACTION_PARAMS,
+  ],
+  create(p) {
+    let t = 0, done = false;
+    return {
+      update(e, dt, s) {
+        if (done) return;
+        if ((t += dt) < p.seconds) return;
+        runAction(s, e, p);
+        if (p.repeat) t = 0; else done = true;
+      },
+    };
+  },
+});
+
+registerBehavior('dropItem', {
+  label: 'Drop Item', description: 'When this object is destroyed, it drops a copy of a template (loot, power-ups, coins).',
+  params: [
+    { key: 'template', label: 'Drop template', type: 'template', default: '' },
+    { key: 'chance', label: 'Chance (0–1)', type: 'number', default: 1 },
+  ],
+  create(p) {
+    return { destroy(e, s) { if (p.template && s.state === 'play' && Math.random() < p.chance) s.spawn(p.template, { x: e.x, y: e.y, z: e.z }); } };
+  },
+});
+
+registerBehavior('emitter', {
+  label: 'Particle Emitter', description: 'Keeps giving off particles: fire, smoke, sparkles, exhaust.',
+  params: [
+    { key: 'color', label: 'Color', type: 'text', default: '#ffb74d' },
+    { key: 'rate', label: 'Particles / sec', type: 'number', default: 20 },
+    { key: 'spread', label: 'Spread', type: 'number', default: 0.5 },
+  ],
+  create(p) {
+    let acc = 0;
+    return {
+      update(e, dt, s) {
+        acc += p.rate * dt;
+        const n = Math.floor(acc);
+        if (n > 0) { acc -= n; s.burst(e.x, e.y, e.z, p.color, n, p.spread); }
+      },
+    };
+  },
+});
+
+registerBehavior('blink', {
+  label: 'Blink', description: 'Flashes on and off (warnings, hazards that come and go).',
+  params: [
+    { key: 'on', label: 'Visible for (sec)', type: 'number', default: 0.6 },
+    { key: 'off', label: 'Hidden for (sec)', type: 'number', default: 0.6 },
+    { key: 'solid', label: 'Only hurts while visible', type: 'bool', default: true },
+  ],
+  create(p) {
+    let t = 0;
+    return {
+      update(e, dt) {
+        t = (t + dt) % (p.on + p.off);
+        e.visible = t < p.on;
+        e.data.blinkOff = p.solid && !e.visible; // Hazard ignores touches while hidden
+      },
+    };
+  },
+});
+
+// ---- turn-based games ----
+/** Is a grid cell blocked? Static bodies, objects tagged "wall", other turn enemies, voxel blocks. */
+function blockerAt(s, x, y, z, except) {
+  for (const o of s.entities) {
+    if (o === except || o.dead || o.ui) continue;
+    if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
+    const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable');
+    if (!solid) continue;
+    const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
+    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && Math.abs(o.y - y) < Math.max(hy, 0.6) : Math.abs(o.y - y) < hy)) return o;
+  }
+  return null;
+}
+
+registerBehavior('gridMove', {
+  label: 'Grid Move', description: 'Moves one tile per swipe (or joystick push / tap beside the player). In turn-based games each move ends your turn. Bump enemies to attack, push "pushable" objects.',
+  params: [
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'tapToMove', label: 'Tap beside the player to move', type: 'bool', default: true },
+    { key: 'damage', label: 'Bump attack damage', type: 'number', default: 1 },
+  ],
+  create(p) {
+    let busy = 0, armed = true;
+    return {
+      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic' }); s.want('player'); },
+      update(e, dt, s) {
+        if ((busy -= dt) > 0 || s.state !== 'play' || (s.settings.turnBased && !s.isPlayerTurn)) return;
+        const inp = s.engine.input, a = inp.axis();
+        let dx = 0, dy = 0;
+        if (inp.pressed('swipe:left')) dx = -1; else if (inp.pressed('swipe:right')) dx = 1;
+        else if (inp.pressed('swipe:up')) dy = -1; else if (inp.pressed('swipe:down')) dy = 1;
+        else if (Math.hypot(a.x, a.y) > 0.6) { if (armed) { if (Math.abs(a.x) > Math.abs(a.y)) dx = Math.sign(a.x); else dy = Math.sign(a.y); armed = false; } }
+        else armed = true;
+        if (!dx && !dy && p.tapToMove && inp.taps.length) {
+          const t = inp.taps[0], sp = s.mode === '3d' ? s.engine.renderer.worldToScreen(s, e.x, e.y, e.z) : s.engine.renderer.worldToScreen(s, e.x, e.y);
+          const ox = t.x - sp.x, oy = t.y - sp.y;
+          if (Math.hypot(ox, oy) > 24) { if (Math.abs(ox) > Math.abs(oy)) dx = Math.sign(ox); else dy = Math.sign(oy); }
+        }
+        if (!dx && !dy) return;
+        const T = p.tile, tx = e.x + dx * T, ty = is3D(e) ? e.y : e.y + dy * T, tz = is3D(e) ? e.z + dy * T : e.z;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dy) / DEG;
+        const hit = blockerAt(s, tx, ty, tz, e);
+        if (hit && hit.getBehavior('gridEnemy')) { // bump attack
+          hit.getBehavior('gridEnemy').hurt(hit, s, p.damage);
+          busy = 0.15; if (s.settings.turnBased) s.endTurn(); return;
+        }
+        if (hit && hit.tags.has('pushable')) {
+          const bx = hit.x + dx * T, by = is3D(e) ? hit.y : hit.y + dy * T, bz = is3D(e) ? hit.z + dy * T : hit.z;
+          if (blockerAt(s, bx, by, bz, hit)) { s.engine.vibrate(15); return; }
+          s.tween(hit, { x: bx, y: by, z: bz }, 0.12);
+        } else if (hit) { s.engine.vibrate(15); return; }
+        s.tween(e, { x: tx, y: ty, z: tz }, 0.12);
+        s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
+        busy = 0.14;
+        if (s.settings.turnBased) s.endTurn();
+      },
+    };
+  },
+});
+
+registerBehavior('gridEnemy', {
+  label: 'Turn Enemy', description: 'On each enemy turn, steps one tile toward the player and attacks when next to them. Bump it to hurt it.',
+  params: [
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'hp', label: 'Health', type: 'number', default: 1 },
+    { key: 'points', label: 'Points when defeated', type: 'number', default: 10 },
+    { key: 'sight', label: 'Notices player within (tiles, 0 = always)', type: 'number', default: 6 },
+  ],
+  create(p) {
+    let hp = p.hp;
+    const self = {
+      hurt(e, s, dmg) {
+        hp -= dmg; e.data.invuln = 0.2; s.engine.audio.sfx('hit');
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#f55', 12);
+        if (hp <= 0) { s.addVar('score', p.points); e.destroy(); }
+      },
+      turn(e, s) {
+        const pl = s.findAll('player')[0];
+        if (!pl) return;
+        const T = p.tile, dx = Math.round((pl.x - e.x) / T), dy = Math.round(((is3D(e) ? pl.z : pl.y) - (is3D(e) ? e.z : e.y)) / T);
+        if (Math.abs(dx) + Math.abs(dy) === 1) { // adjacent: attack
+          s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
+          if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
+          return;
+        }
+        if (p.sight && Math.abs(dx) + Math.abs(dy) > p.sight) return;
+        const tries = Math.abs(dx) >= Math.abs(dy) ? [[Math.sign(dx), 0], [0, Math.sign(dy)]] : [[0, Math.sign(dy)], [Math.sign(dx), 0]];
+        for (const [mx, my] of tries) {
+          if (!mx && !my) continue;
+          const tx = e.x + mx * T, ty = is3D(e) ? e.y : e.y + my * T, tz = is3D(e) ? e.z + my * T : e.z;
+          if (blockerAt(s, tx, ty, tz, e) || (Math.abs(pl.x - tx) < T / 2 && Math.abs((is3D(e) ? pl.z - tz : pl.y - ty)) < T / 2)) continue;
+          s.tween(e, { x: tx, y: ty, z: tz }, 0.15);
+          if (is3D(e)) e.ry = Math.atan2(-mx, -my) / DEG;
+          break;
+        }
+      },
+    };
+    return self;
+  },
+});
+
+registerBehavior('boardCell', {
+  label: 'Board Cell', description: 'A square on a game board (tic-tac-toe, connect-style). Tap to place your mark; play a friend or the computer.',
+  params: [
+    { key: 'row', label: 'Row', type: 'number', default: 0 },
+    { key: 'col', label: 'Column', type: 'number', default: 0 },
+    { key: 'line', label: 'Marks in a row to win', type: 'number', default: 3 },
+    { key: 'vsComputer', label: 'Play against the computer', type: 'bool', default: true },
+  ],
+  create(p) {
+    const cells = (s) => s.entities.filter((c) => c.getBehavior('boardCell') && !c.dead);
+    const at = (s, r, c) => cells(s).find((x) => x.data.row === r && x.data.col === c);
+    const wins = (s, cell, mark) => {
+      for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+        let n = 1;
+        for (const sgn of [1, -1]) for (let k = 1; ; k++) { const o = at(s, cell.data.row + dr * k * sgn, cell.data.col + dc * k * sgn); if (o && o.data.mark === mark) n++; else break; }
+        if (n >= cell.data.line) return true;
+      }
+      return false;
+    };
+    const place = (s, cell, mark) => {
+      cell.data.mark = mark;
+      const size = Math.min(cell.shape?.w || 80, cell.shape?.h || 80);
+      cell.text = { ...TEXT_DEFAULTS, value: mark, size: size * 0.62, weight: '900', color: mark === 'X' ? '#4fc3f7' : '#ff7043' };
+      s.engine.audio.sfx(mark === 'X' ? 'click' : 'coin'); s.engine.vibrate(8);
+      const k = cell.sx; cell.sx = cell.sy = k * 0.85; s.tween(cell, { sx: k, sy: k }, 0.15);
+      if (wins(s, cell, mark)) {
+        s.burst(cell.x, cell.y, cell.z, mark === 'X' ? '#4fc3f7' : '#ff7043', 30);
+        if (cell.data.vs) { if (mark === 'X') s.win(); else { s.message('The computer wins!', 2); s.gameOver(); } }
+        else { s.message(`${mark} wins!`, 2.5); s.addVar('score', 1); s.win(); }
+        return true;
+      }
+      if (cells(s).every((c) => c.data.mark)) { s.message("It's a draw!", 1.4); s.after(1.5, () => s.engine.restart()); return true; }
+      return false;
+    };
+    return {
+      start(e, s) {
+        Object.assign(e.data, { row: p.row, col: p.col, line: p.line, vs: p.vsComputer, mark: '' });
+        s.vars.turnText = p.vsComputer ? 'Your turn (X)' : 'X to play';
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play' || e.data.mark || !s.isPlayerTurn) return;
+        if (!s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) return;
+        const mark = p.vsComputer ? 'X' : (s.vars.nextMark || 'X');
+        if (place(s, e, mark)) return;
+        if (p.vsComputer) { s.settings.enemyTurnText = 'Computer is thinking…'; s.settings.playerTurnText = 'Your turn (X)'; s.settings.turnDelay = 0.5; s.endTurn(); }
+        else { s.vars.nextMark = mark === 'X' ? 'O' : 'X'; s.setVar('turnText', `${s.vars.nextMark} to play`); }
+      },
+      turn(e, s) {
+        const all = cells(s);
+        if (all[0] !== e || !e.data.vs) return; // one cell plays for the computer
+        const empty = all.filter((c) => !c.data.mark);
+        if (!empty.length) return;
+        const tryMark = (mark) => empty.find((c) => { c.data.mark = mark; const w = wins(s, c, mark); c.data.mark = ''; return w; });
+        const mid = Math.floor(Math.sqrt(all.length) / 2);
+        const pickCell = tryMark('O') || tryMark('X') || empty.find((c) => c.data.row === mid && c.data.col === mid) || empty[Math.floor(Math.random() * empty.length)];
+        place(s, pickCell, 'O');
+      },
+    };
+  },
+});
+
+registerBehavior('turnAction', {
+  label: 'Turn Button', description: 'A battle/menu button: on your turn, tap to change a variable (attack, heal, spell), then the enemy takes its turn.',
+  params: [
+    { key: 'var', label: 'Changes variable', type: 'text', default: 'enemyHp' },
+    { key: 'amount', label: 'By (min/max)', type: 'range', default: [-14, -8] },
+    { key: 'max', label: 'Up to (0 = no cap)', type: 'number', default: 0 },
+    { key: 'costVar', label: 'Costs variable', type: 'text', default: '' },
+    { key: 'cost', label: 'Cost', type: 'number', default: 0 },
+    { key: 'text', label: 'Message ({n} = amount)', type: 'text', default: 'You hit for {n}!' },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['hit', 'power', 'coin', 'jump', 'click'], default: 'hit' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        const ready = s.state === 'play' && s.isPlayerTurn && (!p.costVar || (+s.vars[p.costVar] || 0) >= p.cost);
+        e.alpha += ((ready ? 1 : 0.45) - e.alpha) * Math.min(1, dt * 10);
+        if (s.state !== 'play' || !s.isPlayerTurn) return;
+        if (!s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) return;
+        if (p.costVar && (+s.vars[p.costVar] || 0) < p.cost) { s.message(`Not enough ${p.costVar}`, 1.2); s.engine.vibrate(30); return; }
+        if (p.costVar) s.addVar(p.costVar, -p.cost);
+        const n = Math.round(pick(p.amount));
+        let v = (+s.vars[p.var] || 0) + n;
+        if (n < 0) v = Math.max(0, v);
+        if (p.max) v = Math.min(p.max, v);
+        s.setVar(p.var, v);
+        s.message(p.text.replace('{n}', Math.abs(n)), Math.max(0.8, (s.settings.turnDelay ?? 0.3) + 0.4));
+        s.engine.audio.sfx(p.sound); s.engine.vibrate(12);
+        const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
+        s.endTurn();
+      },
+    };
+  },
+});
+
+registerBehavior('turnOpponent', {
+  label: 'Enemy Turn', description: 'On the enemy\'s turn, changes a variable (e.g. hits the player) and shows a message.',
+  params: [
+    { key: 'var', label: 'Changes variable', type: 'text', default: 'hp' },
+    { key: 'amount', label: 'By (min/max)', type: 'range', default: [-12, -6] },
+    { key: 'text', label: 'Message ({n} = amount)', type: 'text', default: 'The enemy hits you for {n}!' },
+  ],
+  create(p) {
+    return {
+      turn(e, s) {
+        const n = Math.round(pick(p.amount));
+        s.setVar(p.var, Math.max(0, (+s.vars[p.var] || 0) + n));
+        s.message(p.text.replace('{n}', Math.abs(n)), 1.4);
+        s.engine.audio.sfx('hit'); s.engine.vibrate(40); s.camera.shake = 8;
+        const k = e.sx; e.sx = e.sy = k * 1.15; s.tween(e, { sx: k, sy: k }, 0.25);
+      },
+    };
+  },
+});
+
+registerBehavior('condition', {
+  label: 'Condition', description: 'Watches a variable and does something when it passes a value, e.g. win when enemyHp ≤ 0, lose when hp ≤ 0.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'hp' },
+    { key: 'op', label: 'When it is', type: 'select', options: ['<=', '>=', '=='], default: '<=' },
+    { key: 'target', label: 'Value', type: 'number', default: 0 },
+    ...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'game over' } : q)),
+  ],
+  create(p) {
+    let done = false;
+    return {
+      update(e, dt, s) {
+        if (done || s.state !== 'play') return;
+        const v = +s.vars[p.var] || 0;
+        if (p.op === '<=' ? v <= p.target : p.op === '>=' ? v >= p.target : v === p.target) { done = true; runAction(s, e, p); }
+      },
+    };
+  },
+});
+
+registerBehavior('voxelBuilder', {
+  label: 'Block Builder', description: 'Minecraft-style building: tap a block to break it, or switch to Place and tap to add blocks. Buttons swap mode and block.',
+  params: [
+    { key: 'reach', label: 'Reach (blocks)', type: 'number', default: 6 },
+    { key: 'block', label: 'Starting block (1–12)', type: 'number', default: 3 },
+    { key: 'mode', label: 'Starting mode', type: 'select', options: ['break', 'place'], default: 'break' },
+  ],
+  create(p) {
+    let mode = p.mode, block = p.block;
+    const syncButtons = (s, V) => {
+      const col = V?.palette[(block - 1) % V.palette.length] || '#fff';
+      s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      s.engine.layoutButtons();
+    };
+    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    return {
+      start(e, s) { syncButtons(s, world(s)?.voxels); },
+      update(e, dt, s) {
+        const inp = s.engine.input, W = world(s);
+        if (!W) return;
+        if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, W.voxels); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
+        if (inp.pressed('btn:vblock')) { block = block % W.voxels.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, W.voxels); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
+        for (const t of inp.taps) {
+          const ray = s.engine.renderer.screenRay(s, t.x, t.y), cam = s.camera.position;
+          const max = p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
+          const hit = W.voxels.raycast(W, ray.origin, ray.dir, max);
+          if (!hit) continue;
+          const V = W.voxels, sz = V.size;
+          if (mode === 'break') {
+            const col = V.palette[(V.get(hit.i, hit.j, hit.k) - 1) % V.palette.length];
+            V.set(hit.i, hit.j, hit.k, 0);
+            s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
+            s.engine.audio.tone({ freq: 180, to: 90, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
+            s.addVar('blocks', 1);
+          } else {
+            const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
+            const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
+            const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
+            if (inside) continue; // don't build inside yourself
+            V.set(ni, nj, nk, block);
+            s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+          }
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('button', {
+  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game.',
+  params: [...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q))],
+  create(p) {
+    return {
+      uiAlways: true, // keeps working on title and end screens
+      update(e, dt, s) {
+        if (!e.visible) return;
+        for (const t of s.engine.input.taps) {
+          if (!hitTest(s, e, t.x, t.y)) continue;
+          s.engine.vibrate(10);
+          const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
+          if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
+          runAction(s, e, p);
+          break;
+        }
+      },
+    };
+  },
+});
+
+/** Rules: WHEN something happens, IF a condition holds, DO a list of actions. */
+export const RULE_EVENTS = ['game starts', 'every few seconds', 'touched by tag', 'tapped', 'jump button', 'fire button', 'swipe', 'variable reaches', 'destroyed'];
+registerBehavior('rules', {
+  label: 'Rules', description: 'Build logic without code: WHEN something happens, IF a condition is true, DO one or more actions.',
+  params: [{ key: 'rules', label: 'Rules', type: 'rules', default: [{ when: 'tapped', tag: 'player', seconds: 1, dir: 'up', ifVar: '', ifOp: '>=', ifValue: 0, once: false, do: [{ action: 'add score', value: '', amount: 1 }] }] }],
+  create(p) {
+    const rules = (p.rules || []).map((r) => ({ ...r, t: 0, fired: false, wasTrue: false }));
+    const check = (r, s) => {
+      if (!r.ifVar) return true;
+      const v = +s.vars[r.ifVar] || 0, n = +r.ifValue || 0;
+      return r.ifOp === '<=' ? v <= n : r.ifOp === '==' ? v === n : r.ifOp === '<' ? v < n : r.ifOp === '>' ? v > n : v >= n;
+    };
+    const fire = (r, e, s, other) => {
+      if ((r.once && r.fired) || !check(r, s)) return;
+      r.fired = true;
+      for (const a of r.do || []) runAction(s, e, { sound: 'none', ...a }, other);
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        for (const r of rules) {
+          if (r.when === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(r.tag || 'player'); }
+          if (r.when === 'game starts') fire(r, e, s);
+        }
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, playing = s.state === 'play';
+        for (const r of rules) {
+          if (!playing && !(r.when === 'tapped' && e.ui)) continue;
+          switch (r.when) {
+            case 'every few seconds': if ((r.t += dt) >= Math.max(0.05, +r.seconds || 1)) { r.t = 0; fire(r, e, s); } break;
+            case 'tapped': if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) fire(r, e, s); break;
+            case 'jump button': if (inp.pressed('jump')) fire(r, e, s); break;
+            case 'fire button': if (inp.pressed('action')) fire(r, e, s); break;
+            case 'swipe': if (inp.pressed('swipe:' + (r.dir || 'up'))) fire(r, e, s); break;
+            case 'variable reaches': { const now = check({ ...r, ifVar: r.ifVar || 'score' }, s); if (now && !r.wasTrue) { r.wasTrue = true; for (const a of r.do || []) runAction(s, e, { sound: 'none', ...a }); } else if (!now) r.wasTrue = false; break; }
+            default: break;
+          }
+        }
+      },
+      collide(e, other, s) { for (const r of rules) if (r.when === 'touched by tag' && other.has(r.tag || 'player')) fire(r, e, s, other); },
+      destroy(e, s) { for (const r of rules) if (r.when === 'destroyed') fire(r, e, s); },
+    };
+  },
+});
+
+// ---- node-based visual scripting ----
+const num = (k, d = 0, label) => ({ key: k, type: 'number', default: d, label: label || k });
+const txt = (k, d = '', label) => ({ key: k, type: 'text', default: d, label: label || k });
+const opt = (k, options, d, label) => ({ key: k, type: 'select', options, default: d ?? options[0], label: label || k });
+/**
+ * Node types. Events start a flow (white "exec" wires); actions run in order; values feed numbers/booleans
+ * into inputs (blue/orange wires). Unwired inputs use the value typed on the node.
+ */
+export const NODE_TYPES = {
+  // events
+  start: { cat: 'Events', label: 'On Start', outs: ['then'] },
+  update: { cat: 'Events', label: 'Every Frame', outs: ['then'] },
+  every: { cat: 'Events', label: 'Every N Seconds', outs: ['then'], params: [num('seconds', 1, 'seconds')] },
+  touch: { cat: 'Events', label: 'On Touch', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
+  tap: { cat: 'Events', label: 'On Tap', outs: ['then'] },
+  button: { cat: 'Events', label: 'On Button', outs: ['then'], params: [opt('button', ['jump', 'fire'], 'jump', 'button')] },
+  swipe: { cat: 'Events', label: 'On Swipe', outs: ['then'], params: [opt('dir', ['up', 'down', 'left', 'right'], 'up', 'direction')] },
+  destroyed: { cat: 'Events', label: 'On Destroyed', outs: ['then'] },
+  touchEnd: { cat: 'Events', label: 'On Touch End', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
+  // flow
+  branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
+  wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
+  chance: { cat: 'Flow', label: 'Random Chance', exec: true, outs: ['yes', 'no'], inputs: [{ key: 'percent', type: 'number', default: 50 }] },
+  once: { cat: 'Flow', label: 'Do Once', exec: true, outs: ['then'] },
+  sequence: { cat: 'Flow', label: 'Sequence', exec: true, outs: ['first', 'second', 'third'] },
+  // actions
+  setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
+  message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
+  sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')] },
+  spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
+  destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  moveBy: { cat: 'Actions', label: 'Move By', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  setVelocity: { cat: 'Actions', label: 'Set Velocity', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  jump: { cat: 'Actions', label: 'Jump', exec: true, outs: ['then'], inputs: [{ key: 'power', type: 'number', default: 600 }] },
+  showHide: { cat: 'Actions', label: 'Show / Hide Object', exec: true, outs: ['then'], params: [txt('object', '', 'object name'), opt('mode', ['show', 'hide', 'toggle'], 'toggle', 'make it')] },
+  vibrate: { cat: 'Actions', label: 'Vibrate', exec: true, outs: ['then'] },
+  shake: { cat: 'Actions', label: 'Camera Shake', exec: true, outs: ['then'], inputs: [{ key: 'strength', type: 'number', default: 10 }] },
+  win: { cat: 'Actions', label: 'Win', exec: true, outs: [] },
+  gameOver: { cat: 'Actions', label: 'Game Over', exec: true, outs: [] },
+  nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
+  restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
+  saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message')] },
+  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['no save'], params: [num('slot', 1, 'slot')] },
+  deleteSave: { cat: 'Actions', label: 'Delete Save', exec: true, outs: ['then'], params: [num('slot', 1, 'slot')] },
+  push: { cat: 'Actions', label: 'Push (add velocity)', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: -400 }, { key: 'z', type: 'number', default: 0 }] },
+  setGravity: { cat: 'Actions', label: 'Set Gravity', exec: true, outs: ['then'], inputs: [{ key: 'y', type: 'number', default: 1600 }, { key: 'x', type: 'number', default: 0 }] },
+  switchCamera: { cat: 'Actions', label: 'Switch Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera object')] },
+  zoomCamera: { cat: 'Actions', label: 'Zoom Camera (2D)', exec: true, outs: ['then'], inputs: [{ key: 'zoom', type: 'number', default: 1.5 }], params: [num('seconds', 0.5, 'seconds')] },
+  setLight: { cat: 'Actions', label: 'Set Light', exec: true, outs: ['then'], params: [txt('object', '', 'object (empty = this)'), opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')], inputs: [{ key: 'intensity', type: 'number', default: 1 }] },
+  setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
+  // values
+  number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
+  getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
+  random: { cat: 'Values', label: 'Random Number', value: 'number', params: [num('min', 0, 'min'), num('max', 10, 'max')] },
+  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max'], '+', 'operation')] },
+  compare: { cat: 'Values', label: 'Compare', value: 'bool', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['≥', '≤', '=', '>', '<', '≠'], '≥', 'is')] },
+  and: { cat: 'Values', label: 'And', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: true }, { key: 'b', type: 'bool', default: true }] },
+  or: { cat: 'Values', label: 'Or', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }, { key: 'b', type: 'bool', default: false }] },
+  not: { cat: 'Values', label: 'Not', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }] },
+  position: { cat: 'Values', label: 'My Position', value: 'number', params: [opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  distance: { cat: 'Values', label: 'Distance To', value: 'number', params: [txt('tag', 'player', 'tag')] },
+  time: { cat: 'Values', label: 'Game Time', value: 'number' },
+  hasSave: { cat: 'Values', label: 'Has Saved Game', value: 'bool', params: [num('slot', 1, 'slot')] },
+  grounded: { cat: 'Values', label: 'Is On Ground', value: 'bool' },
+  velocity: { cat: 'Values', label: 'My Velocity', value: 'number', params: [opt('axis', ['x', 'y', 'z', 'speed'], 'x', 'axis')] },
+  touching: { cat: 'Values', label: 'Is Touching', value: 'bool', params: [txt('tag', 'player', 'tag')] },
+  canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
+};
+
+registerBehavior('graph', {
+  label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
+  params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
+    { id: 'n1', type: 'tap', x: 20, y: 40, params: {} },
+    { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } },
+    { id: 'n3', type: 'message', x: 640, y: 40, params: { text: 'Score: {score}', seconds: 1.5 } },
+  ], links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }, { from: { node: 'n2', port: 'then' }, to: { node: 'n3', port: 'in' } }] } }],
+  create(p) {
+    const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
+    const def = (n) => NODE_TYPES[n.type] || {};
+    const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
+    const input = (n, key, ctx, depth = 0) => {
+      const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
+      return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
+    };
+    const value = (n, ctx, depth) => {
+      if (!n) return 0;
+      const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
+      switch (n.type) {
+        case 'number': return +P('value') || 0;
+        case 'getVar': return +s.vars[P('name')] || 0;
+        case 'random': { const a = +P('min') || 0, b = +P('max') || 0; return Number.isInteger(a) && Number.isInteger(b) ? Math.min(b, Math.floor(rand(a, b + 1))) : rand(a, b); }
+        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b) }[P('op')] ?? 0; }
+        case 'compare': { const a = +I('a') || 0, b = +I('b') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')] ?? false; }
+        case 'and': return !!I('a') && !!I('b');
+        case 'or': return !!I('a') || !!I('b');
+        case 'not': return !I('a');
+        case 'position': return e[P('axis')] || 0;
+        case 'distance': { const t = s.findAll(P('tag'))[0]; return t ? Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) : Infinity; }
+        case 'time': return s.time;
+        case 'hasSave': return s.hasSave(+P('slot') || 1);
+        case 'grounded': return !!e.body?.grounded;
+        case 'velocity': { const v = e.body?.vel || { x: 0, y: 0, z: 0 }; return P('axis') === 'speed' ? Math.hypot(v.x, v.y, v.z) : v[P('axis')] || 0; }
+        case 'touching': return s.engine.physics.touching(e, P('tag'));
+        case 'canSee': { const t = s.findAll(P('tag')).find((q) => q !== e); return !!t && s.canSee(e, t, +P('range') || Infinity); }
+        default: return 0;
+      }
+    };
+    const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
+    const run = (n, ctx) => {
+      if (!n || ++ctx.steps > 300 || ctx.e.dead && n.type !== 'destroyed') return;
+      const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
+      switch (n.type) {
+        case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
+        case 'wait': { s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
+        case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
+        case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
+        case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
+        case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
+        case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
+        case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
+        case 'sound': s.engine.audio.sfx(P('sound')); break;
+        case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
+        case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
+        case 'moveBy': e.x += +I('x') || 0; e.y += +I('y') || 0; e.z += +I('z') || 0; break;
+        case 'setVelocity': { const b = e.ensureBody({ type: 'dynamic' }); b.vel.x = +I('x') || 0; b.vel.y = +I('y') || 0; b.vel.z = +I('z') || 0; break; }
+        case 'jump': if (e.body) e.body.vel.y = (+I('power') || 0) * up; s.engine.audio.sfx('jump'); break;
+        case 'showHide': { const t = P('object') ? s.find(P('object')) : e; if (t) t.visible = P('mode') === 'show' ? true : P('mode') === 'hide' ? false : !t.visible; break; }
+        case 'vibrate': s.engine.vibrate([30, 30, 30]); break;
+        case 'shake': s.camera.shake = Math.max(s.camera.shake, +I('strength') || 10); break;
+        case 'win': s.win(); return;
+        case 'gameOver': s.gameOver(); return;
+        case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
+        case 'restart': s.engine.restart(); return;
+        case 'saveGame': if (s.saveGame(+P('slot') || 1) && P('text')) s.message(P('text'), 1.5); break;
+        case 'loadGame': if (!s.loadGame(+P('slot') || 1)) follow(n, 'no save', ctx); return;
+        case 'deleteSave': s.deleteSave(+P('slot') || 1); break;
+        case 'push': { const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +I('x') || 0; b.vel.y += +I('y') || 0; b.vel.z += +I('z') || 0; } break; }
+        case 'setGravity': s.gravity = +I('y') || 0; s.gravityX = +I('x') || 0; break;
+        case 'switchCamera': s.setCamera(P('camera')); break;
+        case 'zoomCamera': if (s.mode === '2d') s.tween(s.camera, { zoom: Math.max(0.05, +I('zoom') || 1) }, Math.max(0.01, +P('seconds') || 0.01)); else s.tween(s.camera, { fov: clamp(60 / (+I('zoom') || 1), 10, 120) }, Math.max(0.01, +P('seconds') || 0.01)); break;
+        case 'setLight': { const t = P('object') ? s.find(P('object')) : e; if (t) { t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !t.light.off; t.light.intensity = +I('intensity') || 0; } break; }
+        case 'setDarkness': s.light.darkness = clamp(+I('darkness') || 0, 0, 1); break;
+        default: break;
+      }
+      follow(n, 'then', ctx);
+    };
+    const fire = (type, e, s, other, filter) => {
+      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0 });
+    };
+    const timers = new Map();
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
+        fire('start', e, s);
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, playing = s.state === 'play';
+        if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
+        if (!playing) return;
+        fire('update', e, s);
+        for (const n of g.nodes) {
+          if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
+          else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });
+          else if (n.type === 'swipe' && inp.pressed('swipe:' + param(n, 'dir'))) follow(n, 'then', { s, e, steps: 0 });
+        }
+      },
+      collide(e, other, s) { fire('touch', e, s, other, (n) => other.has(param(n, 'tag'))); },
+      separate(e, other, s) { fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag'))); },
+      destroy(e, s) { fire('destroyed', e, s); },
     };
   },
 });
@@ -1970,6 +3636,8 @@ export class Engine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
     this.onVis = () => {
+      if (document.hidden) this.saveProgress();
+      else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
@@ -2037,6 +3705,7 @@ export class Engine {
     this.carry = carry;
     this.levelIndex++;
     this.setScene(this.factory());
+    this.saveProgress();
   }
 
   restart(skipTitle = true) {
@@ -2047,9 +3716,22 @@ export class Engine {
     this.setScene(s);
   }
 
-  setScene(scene) {
+  setScene(scene, { skipRestore = false } = {}) {
     scene.engine = this;
     this.scene = scene;
+    if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
+      this.loadedOnce = true;
+      return this.loadGame(1, { keepTitle: true });
+    }
+    if (scene.settings.saveProgress && !this.editing && !this.restoredOnce && !skipRestore) { // continue where the player left off
+      this.restoredOnce = true;
+      const saved = this.loadProgress(scene);
+      if (saved && this.levels && saved.level > 0 && saved.level < this.levels.length && this.levelIndex !== saved.level) {
+        this.levelIndex = saved.level; this.carry = saved.vars;
+        return this.setScene(this.factory());
+      }
+      if (saved?.vars) Object.assign(scene.vars, saved.vars);
+    }
     this.useRenderer(scene.mode);
     this.physics.contacts.clear();
     this.input.reset();
@@ -2062,14 +3744,103 @@ export class Engine {
   layoutButtons() {
     const s = this.scene, b = [], m = 24;
     if (s && !this.editing) {
-      const r = Math.min(44, this.width * 0.11), bottom = this.height - this.safe.bottom - m - r;
-      if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: this.width - this.safe.right - m - r, y: bottom, r, id: null });
-      if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: this.width - this.safe.right - m - r - (s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1), bottom = this.height - this.safe.bottom - m - r;
+      // buttons go on the side opposite the joystick (left-handed players can swap)
+      const left = s.settings.joystickSide === 'right';
+      const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
+      if (s.settings.jumpButton) b.push({ action: 'jump', label: s.settings.jumpLabel || 'JUMP', x: X(0), y: bottom, r, id: null });
+      if (s.settings.actionButton) b.push({ action: 'action', label: s.settings.actionLabel || 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      // D-pad or left/right arrows instead of a joystick
+      const c = s.settings.controls, DX = (off) => (left ? this.width - this.safe.right - m - off : this.safe.left + m + off);
+      if (c === 'arrows') {
+        b.push({ action: 'dleft', label: '◀', x: DX(r), y: bottom, r, id: null });
+        b.push({ action: 'dright', label: '▶', x: DX(r * 3.4), y: bottom, r, id: null });
+      } else if (c === 'dpad') {
+        const cx = DX(r * 2.2), cy = bottom - r * 1.1, dr = r * 0.78;
+        b.push({ action: 'dup', label: '▲', x: cx, y: cy - dr * 1.9, r: dr, id: null });
+        b.push({ action: 'ddown', label: '▼', x: cx, y: cy + dr * 1.9, r: dr, id: null });
+        b.push({ action: 'dleft', label: '◀', x: cx - dr * 1.9, y: cy, r: dr, id: null });
+        b.push({ action: 'dright', label: '▶', x: cx + dr * 1.9, y: cy, r: dr, id: null });
+      }
+      // extra buttons that components add (e.g. the block builder's mode and block pickers), stacked above
+      (s.customButtons || []).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
     this.input.buttons = b;
+  }
+
+  /** Outside of play (title / end screens) only UI buttons keep working, so custom menus can be tapped. */
+  runUIOnly(s, dt) {
+    for (const e of s.entities) {
+      if (!e.ui || e.dead) continue;
+      if (!e.started) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
+      for (const b of e.behaviors) if (b.uiAlways) b.update?.(e, dt, s);
+    }
+    s.flush();
+  }
+
+  /** Share the score with the phone's share sheet (or copy it). */
+  shareScore() {
+    const s = this.scene, title = s.json?.name || document.title || 'my game';
+    const text = `I scored ${formatNumber(s.vars.score || 0)} in ${title}!`;
+    if (navigator.share) navigator.share({ title, text, url: location.href }).catch(() => {});
+    else navigator.clipboard?.writeText(`${text} ${location.href}`).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {});
+  }
+
+  // ---- saved progress (settings.saveProgress): variables and level survive closing the game ----
+  saveKey(s = this.scene) { return 'pocket.save.' + (s?.settings.saveBest || s?.json?.name || 'game'); }
+  saveProgress() {
+    const s = this.scene;
+    if (!s || this.editing || !s.settings.saveProgress || s.state !== 'play') return;
+    const vars = { ...s.vars }; delete vars.time; delete vars.best;
+    store.set(this.saveKey(), JSON.stringify({ vars, level: this.levelIndex || 0 }));
+  }
+  loadProgress(s) {
+    try { return JSON.parse(store.get(this.saveKey(s), 'null')); } catch { return null; }
+  }
+  clearProgress() { try { localStorage.removeItem(this.saveKey()); } catch { /* storage unavailable */ } }
+
+  // ---- save slots (Save Game / Load Game actions and nodes) ----
+  slotKey(slot) { return this.saveKey() + '.slot' + (slot || 1); }
+  readSave(slot) { try { return JSON.parse(store.get(this.slotKey(slot), 'null')); } catch { return null; } }
+  deleteSave(slot) { try { localStorage.removeItem(this.slotKey(slot)); } catch { /* storage unavailable */ } }
+  saveGame(slot = 1) {
+    const s = this.scene;
+    if (!s || this.editing) return false;
+    const vars = { ...s.vars }; delete vars.best;
+    const ids = new Set((s.json?.entities || []).filter((ep) => ep.id && !ep.template).map((ep) => ep.id)), alive = new Set();
+    const entities = {};
+    for (const e of s.entities) {
+      if (e.dead || !ids.has(e.id)) continue;
+      alive.add(e.id);
+      entities[e.id] = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, visible: e.visible, data: Object.fromEntries(Object.entries(e.data).filter(([k, v]) => !k.startsWith('_') && typeof v !== 'object')) };
+    }
+    const data = { vars, level: this.levelIndex || 0, entities, removed: [...ids].filter((id) => !alive.has(id)), time: s.time, saved: Date.now() };
+    store.set(this.slotKey(slot), JSON.stringify(data));
+    return true;
+  }
+  loadGame(slot = 1, { keepTitle = false } = {}) {
+    const d = this.readSave(slot);
+    if (!d || !this.factory) return false;
+    if (this.levels && d.level !== this.levelIndex && d.level < this.levels.length) this.levelIndex = d.level;
+    this.carry = null;
+    const s = this.factory();
+    if (!keepTitle || s.state !== 'title') s.state = 'play';
+    this.setScene(s, { skipRestore: true });
+    Object.assign(s.vars, d.vars);
+    const removed = new Set(d.removed || []);
+    for (const e of s.entities) {
+      if (removed.has(e.id)) { e.dead = true; continue; }
+      const st = d.entities?.[e.id];
+      if (!st) continue;
+      Object.assign(e, { x: st.x, y: st.y, z: st.z, rx: st.rx, ry: st.ry, rz: st.rz, visible: st.visible });
+      Object.assign(e.data, st.data || {});
+      if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+    }
+    s.flush();
+    return true;
   }
 
   /** True when the game wants portrait/landscape and a phone is held the other way. */
@@ -2106,6 +3877,12 @@ export class Engine {
     const dt = Math.min(1 / 20, (now - this.last) / 1000);
     this.last = now;
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
+    // adaptive resolution: if a phone can't keep up, render fewer pixels
+    if (!this.editing && this.scene?.state === 'play' && !this.paused) {
+      this.slowTime = this.fps < 42 ? (this.slowTime || 0) + dt : 0;
+      if (this.slowTime > 2 && this.dpr > 1) { this.maxDpr = Math.max(1, this.dpr - 0.5); this.slowTime = 0; this.resize(); }
+      if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
+    }
     if (this.scene) {
       if (!this.editing) this.update(dt * this.timeScale);
       this.render();
@@ -2120,16 +3897,24 @@ export class Engine {
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
-    if (this.paused) { if (inp.pressed('tap') || inp.pressed('btn:pause')) this.paused = false; return; }
+    if (this.paused) {
+      this.runUIOnly(s, dt);
+      if ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause')) this.paused = false;
+      return;
+    }
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
-      if (inp.pressed('tap')) { s.state = 'play'; this.audio.sfx('click'); }
+      this.runUIOnly(s, dt);
+      if (inp.pressed('tap') && !ownScreen(s, 'title')) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
-      if (s.time - s.endTime > 0.8 && inp.pressed('tap')) {
-        if (s.levelComplete) this.nextLevel(); else this.restart();
+      this.runUIOnly(s, dt);
+      if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !ownScreen(s, s.state)) {
+        const t = inp.taps[0], r = this.shareRect;
+        if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
+        else if (s.levelComplete) this.nextLevel(); else this.restart();
       }
       return;
     }
@@ -2142,7 +3927,11 @@ export class Engine {
       for (const b of e.behaviors) { if (e.dead) break; b.update?.(e, dt, s); }
     }
     s.update(dt, this);
-    const steps = Math.ceil(dt / (1 / 120));
+    if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
+      for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
+      if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
+    }
+    const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();
@@ -2194,7 +3983,7 @@ export class Engine {
 
 /** Everything, for scripts: `P.Entity`, `P.rand`, ... */
 export const Pocket = {
-  VERSION, Engine, Scene, Entity, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
+  VERSION, Engine, Scene, Entity, VoxelWorld, GEOMETRIES, partSize, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
   Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
 };
 export default Pocket;

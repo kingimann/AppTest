@@ -1,0 +1,12 @@
+{
+  "name": "Pocket Engine",
+  "short_name": "Pocket",
+  "start_url": "./editor/",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#232323",
+  "theme_color": "#191919",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

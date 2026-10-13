@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Neon Dodge">
+<title>Neon Dodge</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="hud" class="hidden">
+  <div class="stat"><span class="label">Score</span><span id="score">0</span></div>
+  <button id="pauseBtn" aria-label="Pause">II</button>
+  <div class="stat right"><span class="label">Best</span><span id="best">0</span></div>
+</div>
+
+<div id="menu" class="overlay">
+  <h1>NEON<br>DODGE</h1>
+  <p class="tagline">Drag anywhere to steer.<br>Dodge the blocks. Grab the orbs.</p>
+  <div class="legend">
+    <span><i class="dot orb"></i> +10</span>
+    <span><i class="dot shield"></i> Shield</span>
+    <span><i class="dot slow"></i> Slow-mo</span>
+  </div>
+  <button id="playBtn" class="btn">PLAY</button>
+  <p class="small">Best: <span id="menuBest">0</span></p>
+</div>
+
+<div id="pause" class="overlay hidden">
+  <h2>Paused</h2>
+  <button id="resumeBtn" class="btn">RESUME</button>
+  <button id="quitBtn" class="btn ghost">MENU</button>
+</div>
+
+<div id="over" class="overlay hidden">
+  <h2>Game Over</h2>
+  <p class="big" id="finalScore">0</p>
+  <p class="small" id="newBest" hidden>New best!</p>
+  <button id="retryBtn" class="btn">PLAY AGAIN</button>
+  <button id="menuBtn" class="btn ghost">MENU</button>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>

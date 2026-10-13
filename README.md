@@ -202,6 +202,18 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
 ```
 
+### Tap and click components
+
+- **Click Popup**: a floating "+1" (any text, with `{score}` etc.) rises where the object is tapped.
+- **Combo Clicker**: tap for points; quick taps build a combo multiplier (`{combo}`), with critical hits, popups, squash and sparkles.
+- **Long Press**: hold a finger on it for a moment (a ring fills up) to do any Button action.
+- **Double Tap**: two quick taps do any Button action.
+- **Tap Toggle**: each tap switches on/off: a 0/1 variable, its colour, another object's visibility, and an "on/off" message.
+- **Press Feedback**: squashes the moment a finger lands, springs back on release, with sound, buzz and optional sparkles (great on UI buttons).
+- **Tap to Spawn**: tapping empty space (or anywhere) creates a template there; cooldown, max count and an optional cost.
+- **Drag to Launch**: slingshot — pull back from the object and let go to fling it, with an aim line (Angry Birds, golf, pool).
+- New prefabs: **Big Clicker**, **Slingshot Ball** and **Switch**.
+
 ### Sounds
 
 - **Project › Sounds › Import Sound** brings in MP3, WAV, OGG or M4A files from your phone (short clips work best: they're saved inside the project). Tap ▶ to preview; ⋯ renames (everything using it follows) or deletes.

@@ -1217,6 +1217,7 @@ export class Input {
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
+    this.ups = []; // fingers lifted this frame: { id, x, y, sx, sy, time }
     this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
 
     el.addEventListener('pointerdown', (e) => this.down(e));
@@ -1269,6 +1270,7 @@ export class Input {
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
     const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
+    if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000 });
     if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
@@ -1341,7 +1343,7 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
+  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
   reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
@@ -2208,6 +2210,18 @@ function renderUI(engine, scene) {
     if (V) ctx.restore();
   }
   if (engine.editing) return;
+  for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  if (scene.popups?.length) { // floating "+10" texts
+    const now = scene.time;
+    scene.popups = scene.popups.filter((q) => now - q.t < q.life);
+    for (const q of scene.popups) {
+      const k = (now - q.t) / q.life;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.fillStyle = q.color;
+      const y = q.y - k * q.rise; ctx.strokeText(q.text, q.x, y); ctx.fillText(q.text, q.x, y);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   const big = (txt, y, size, color = '#fff') => {
     ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
@@ -4718,6 +4732,232 @@ registerBehavior('button', {
           break;
         }
       },
+    };
+  },
+});
+
+// ---- tap & click components ----
+/** Float a text up from a screen point (clicker "+10" feedback). */
+export function popText(s, x, y, text, color = '#ffd23d', size = 26) { (s.popups ||= []).push({ x: x + rand(-18, 18), y, text: String(text), color, size, t: s.time, life: 0.9, rise: 60 }); }
+const screenOf = (s, e) => (e.ui ? (() => { const o = uiOrigin(e, s.engine.width, s.engine.height, s.engine.safe); return { x: o.x + e.x, y: o.y + e.y }; })() : s.engine.renderer.worldToScreen(s, e.x, e.y, e.z));
+const tapsOn = (s, e) => s.engine.input.taps.filter((t) => e.visible && !e.dead && hitTest(s, e, t.x, t.y));
+const squash = (s, e, k = 0.88) => { const b = e.data.baseScale ??= e.sx; e.sx = e.sy = b * k; s.tween(e, { sx: b, sy: b }, 0.18); };
+
+registerBehavior('clickPopup', {
+  label: 'Click Popup', description: 'Floating text like “+10” rises where this object is tapped. Use {score} and other variables. Pairs well with Tap Target and Combo Clicker.',
+  params: [
+    { key: 'text', label: 'Text', type: 'text', default: '+1' },
+    { key: 'color', label: 'Colour', type: 'color', default: '#ffd23d' },
+    { key: 'size', label: 'Size', type: 'number', default: 26, range: [10, 80] },
+  ],
+  create(p) { return { uiAlways: true, update(e, dt, s) { for (const t of tapsOn(s, e)) popText(s, t.x, t.y - 20, fillTemplate(p.text, s.vars), p.color, p.size); } }; },
+});
+
+registerBehavior('comboClicker', {
+  label: 'Combo Clicker', description: 'Tap it for points. Quick taps build a combo that multiplies them; some taps are critical hits. {combo} shows the combo.',
+  params: [
+    { key: 'points', label: 'Points per tap', type: 'number', default: 1 },
+    { key: 'var', label: 'Adds to variable', type: 'text', default: 'score', suggest: 'vars' },
+    { key: 'bonusVar', label: 'Extra points from variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “power”, raised by an Upgrade Button.' },
+    { key: 'window', label: 'Combo window (seconds)', type: 'number', default: 0.6, step: 0.1, range: [0.1, 3] },
+    { key: 'comboStep', label: 'Extra multiplier per combo tap', type: 'number', default: 0.25, step: 0.05 },
+    { key: 'maxCombo', label: 'Max combo', type: 'number', default: 50, step: 5 },
+    { key: 'critChance', label: 'Critical hit chance %', type: 'number', default: 10, range: [0, 100] },
+    { key: 'critMult', label: 'Critical multiplier', type: 'number', default: 3, step: 0.5 },
+    { key: 'popup', label: 'Show “+points”', type: 'bool', default: true },
+    { key: 'sound', label: 'Sound', type: 'select', options: SOUNDS, default: 'click' },
+  ],
+  create(p) {
+    let combo = 0, last = -99;
+    return {
+      update(e, dt, s) {
+        if (combo && s.time - last > p.window) { combo = 0; s.setVar('combo', 0); }
+        for (const t of tapsOn(s, e)) {
+          combo = s.time - last <= p.window ? Math.min(p.maxCombo, combo + 1) : 1; last = s.time;
+          const crit = Math.random() * 100 < p.critChance, mult = (1 + (combo - 1) * p.comboStep) * (crit ? p.critMult : 1);
+          const pts = Math.max(0, Math.round((p.points + (p.bonusVar ? +s.vars[p.bonusVar] || 0 : 0)) * mult * 100) / 100);
+          s.addVar(p.var || 'score', pts); s.setVar('combo', combo);
+          s.engine.audio.sfx(crit ? 'power' : p.sound); s.engine.vibrate(crit ? 25 : 8);
+          if (p.popup) popText(s, t.x, t.y - 20, (crit ? 'CRIT +' : '+') + formatNumber(pts), crit ? '#ff5d8f' : '#ffd23d', crit ? 34 : 24 + Math.min(10, combo / 3));
+          squash(s, e, crit ? 0.8 : 0.9);
+          if (crit) s.burst(e.x, e.y, e.z, '#ff5d8f', 14, 0.8);
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('longPress', {
+  label: 'Long Press', description: 'Hold a finger on it for a moment to do something. A ring fills up while you hold.',
+  params: [{ key: 'seconds', label: 'Hold for (seconds)', type: 'number', default: 0.8, step: 0.1, range: [0.2, 5] }, ...ACTION_PARAMS.map((q) => (q.key === 'value' ? { ...q, default: 'Held!' } : q))],
+  create(p) {
+    let held = null, t = 0, fired = false, ref = null;
+    return {
+      uiAlways: true,
+      start(e, s) { (s.overlays ||= []).push(ref = (ctx) => {
+        if (!held || fired || e.dead) return;
+        const c = screenOf(s, e); if (!c) return;
+        ctx.save(); ctx.lineWidth = 6; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(c.x, c.y, 34, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.min(1, t / p.seconds)); ctx.stroke(); ctx.restore();
+      }); },
+      update(e, dt, s) {
+        const inp = s.engine.input;
+        if (!held) { const d = inp.downs.find((q) => e.visible && hitTest(s, e, q.x, q.y)); if (d) { held = d.id; t = 0; fired = false; } return; }
+        const ptr = inp.pointers.get(held);
+        if (!ptr || !hitTest(s, e, ptr.x, ptr.y)) { held = null; return; } // let go or slid off
+        t += dt;
+        if (!fired && t >= p.seconds) { fired = true; s.engine.vibrate(30); squash(s, e, 0.85); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound); runAction(s, e, p); }
+      },
+      destroy(e, s) { s.overlays = (s.overlays || []).filter((f) => f !== ref); },
+    };
+  },
+});
+
+registerBehavior('doubleTap', {
+  label: 'Double Tap', description: 'Tap it twice quickly to do something.',
+  params: [{ key: 'gap', label: 'Max time between taps', type: 'number', default: 0.35, step: 0.05, range: [0.15, 1] }, ...ACTION_PARAMS.map((q) => (q.key === 'value' ? { ...q, default: 'Double tap!' } : q))],
+  create(p) {
+    let last = -99;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        for (const t of tapsOn(s, e)) {
+          if (s.time - last <= p.gap) { last = -99; squash(s, e, 0.85); s.engine.vibrate(15); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound); runAction(s, e, p); }
+          else last = s.time;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('tapToggle', {
+  label: 'Tap Toggle', description: 'Each tap switches it on or off: sets a variable to 1 or 0, swaps its colour, and can show or hide another object.',
+  params: [
+    { key: 'var', label: 'Variable (1 = on, 0 = off)', type: 'text', default: 'switch', suggest: 'vars' },
+    { key: 'startOn', label: 'Starts on', type: 'bool', default: false },
+    { key: 'onColor', label: 'Colour when on', type: 'color', default: '#66bb6a' },
+    { key: 'offColor', label: 'Colour when off', type: 'color', default: '#78909c' },
+    { key: 'object', label: 'Shows / hides object (optional)', type: 'text', default: '', suggest: 'objects' },
+    { key: 'message', label: 'Sends “<message> on” / “off” (optional)', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let on = false;
+    const apply = (e, s) => {
+      s.setVar(p.var || 'switch', on ? 1 : 0);
+      const c = on ? p.onColor : p.offColor; if (e.shape) e.shape.fill = c; else if (e.mesh) e.mesh.color = c;
+      if (p.object) { const t = s.find(p.object); if (t) t.visible = on; }
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { on = !!p.startOn; apply(e, s); },
+      update(e, dt, s) {
+        for (const t of tapsOn(s, e)) { on = !on; apply(e, s); squash(s, e); s.engine.audio.sfx('click'); s.engine.vibrate(10); if (p.message) s.send(`${p.message} ${on ? 'on' : 'off'}`); }
+      },
+    };
+  },
+});
+
+registerBehavior('pressFeedback', {
+  label: 'Press Feedback', description: 'Makes tapping feel good: squashes the moment a finger lands, springs back on release, with a sound, a buzz and optional sparkles.',
+  params: [
+    { key: 'squash', label: 'Squash to', type: 'number', default: 0.88, step: 0.02, range: [0.5, 1] },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['none', ...SOUNDS], default: 'click' },
+    { key: 'haptic', label: 'Buzz', type: 'bool', default: true },
+    { key: 'sparkles', label: 'Sparkles', type: 'bool', default: false },
+  ],
+  create(p) {
+    let held = null;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const inp = s.engine.input, base = e.data.baseScale ??= e.sx;
+        if (held == null) {
+          const d = inp.downs.find((q) => e.visible && hitTest(s, e, q.x, q.y)); if (!d) return;
+          held = d.id; s.killTweens(e); e.sx = e.sy = base * p.squash;
+          if (p.sound !== 'none') s.engine.audio.sfx(p.sound); if (p.haptic) s.engine.vibrate(8);
+          if (p.sparkles) s.burst(e.x, e.y, e.z, e.shape?.fill || e.mesh?.color || '#fff', 10, 0.6);
+        } else if (!inp.pointers.has(held)) { held = null; s.tween(e, { sx: base, sy: base }, 0.22, 'outBack'); }
+      },
+    };
+  },
+});
+
+registerBehavior('tapToSpawn', {
+  label: 'Tap to Spawn', description: 'Tapping the screen creates a copy of a template where you tapped (on the ground in 3D). Put it on any object; it listens to the whole screen.',
+  params: [
+    { key: 'template', label: 'Template', type: 'template', default: '' },
+    { key: 'where', label: 'Taps on', type: 'select', options: [['empty', 'Empty space only'], ['anywhere', 'Anywhere']], default: 'empty' },
+    { key: 'cooldown', label: 'Cooldown (seconds)', type: 'number', default: 0.2, step: 0.1 },
+    { key: 'max', label: 'Max at once (0 = no limit)', type: 'number', default: 20 },
+    { key: 'cost', label: 'Costs (from variable)', type: 'number', default: 0, info: 'e.g. 5 coins per spawn. Leave 0 for free.' },
+    { key: 'costVar', label: 'Pay with', type: 'text', default: 'score', suggest: 'vars', showIf: (b) => +b.cost > 0 },
+  ],
+  create(p) {
+    let last = -99; const made = [];
+    return {
+      update(e, dt, s) {
+        if (!p.template || s.state !== 'play') return;
+        for (const t of s.engine.input.taps) {
+          if (s.time - last < p.cooldown) continue;
+          if (p.where === 'empty' && s.entities.some((q) => q !== e && q.visible && !q.dead && (q.shape || q.mesh || q.sprite || q.ui) && hitTest(s, q, t.x, t.y))) continue;
+          for (let i = made.length - 1; i >= 0; i--) if (made[i].dead) made.splice(i, 1);
+          if (p.max > 0 && made.length >= p.max) { s.message('Too many!', 0.8); continue; }
+          if (p.cost > 0) { if ((+s.vars[p.costVar] || 0) < p.cost) { s.message(`Need ${formatNumber(p.cost)} ${p.costVar}`, 1); continue; } s.addVar(p.costVar, -p.cost); }
+          let at;
+          if (s.mode === '3d') { const r = s.engine.renderer.screenRay(s, t.x, t.y); if (!r || Math.abs(r.dir.y) < 1e-4) continue; const k = -r.origin.y / r.dir.y; if (k < 0) continue; at = { x: r.origin.x + r.dir.x * k, y: 0.5, z: r.origin.z + r.dir.z * k }; }
+          else { const w = s.engine.renderer.screenToWorld(s, t.x, t.y); at = { x: w.x, y: w.y, z: 0 }; }
+          const c = s.spawn(p.template, at); if (c) { made.push(c); last = s.time; s.engine.vibrate(8); }
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('dragLaunch', {
+  label: 'Drag to Launch', description: 'Slingshot: pull back from it and let go to fling it (Angry Birds, golf, pool). An aim line shows the shot.',
+  params: [
+    { key: 'power', label: 'Power', type: 'number', default: 6, step: 0.5, range: [0.5, 30] },
+    { key: 'maxPull', label: 'Max pull (pixels)', type: 'number', default: 140, step: 10 },
+    { key: 'shots', label: 'Shots (0 = no limit)', type: 'number', default: 0 },
+    { key: 'whileStill', label: 'Only when it has stopped', type: 'bool', default: true },
+    { key: 'shotsVar', label: 'Count shots in variable', type: 'text', default: 'shots', suggest: 'vars' },
+  ],
+  create(p) {
+    let held = null, used = 0, ref = null;
+    const pull = (s, e) => { const ptr = s.engine.input.pointers.get(held), c = screenOf(s, e); if (!ptr || !c) return null; let dx = c.x - ptr.x, dy = c.y - ptr.y; const d = Math.hypot(dx, dy); if (d > p.maxPull) { dx *= p.maxPull / d; dy *= p.maxPull / d; } return { c, dx, dy }; };
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        (s.overlays ||= []).push(ref = (ctx) => {
+          if (held == null || e.dead) return;
+          const q = pull(s, e); if (!q) return;
+          ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.setLineDash([2, 10]); ctx.lineCap = 'round';
+          ctx.beginPath(); ctx.moveTo(q.c.x, q.c.y); ctx.lineTo(q.c.x + q.dx * 1.6, q.c.y + q.dy * 1.6); ctx.stroke();
+          ctx.setLineDash([]); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.beginPath(); ctx.moveTo(q.c.x, q.c.y); ctx.lineTo(q.c.x - q.dx, q.c.y - q.dy); ctx.stroke();
+          ctx.fillStyle = '#ffd23d'; ctx.beginPath(); ctx.arc(q.c.x + q.dx * 1.6, q.c.y + q.dy * 1.6, 6, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        });
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play') return;
+        const inp = s.engine.input, b = e.body;
+        if (held == null) {
+          if (p.shots > 0 && used >= p.shots) return;
+          if (p.whileStill && b && Math.hypot(b.vel.x, b.vel.y, b.vel.z) > (s.mode === '3d' ? 0.3 : 20)) return;
+          const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y)); if (d) held = d.id;
+          return;
+        }
+        if (inp.pointers.has(held)) return;
+        // released: launch opposite the pull
+        const up = inp.ups.find((u) => u.id === held); held = null;
+        const c = screenOf(s, e); if (!up || !c) return;
+        let dx = c.x - up.x, dy = c.y - up.y; const d = Math.hypot(dx, dy); if (d < 12) return;
+        if (d > p.maxPull) { dx *= p.maxPull / d; dy *= p.maxPull / d; }
+        const k = p.power * (s.mode === '3d' ? 0.06 : 1);
+        if (s.mode === '3d') { b.vel.x = dx * k; b.vel.z = dy * k; b.vel.y = Math.hypot(dx, dy) * k * 0.35; } else { b.vel.x = dx * k; b.vel.y = dy * k; }
+        used++; if (p.shotsVar) s.addVar(p.shotsVar, 1);
+        s.engine.audio.sfx('jump'); s.engine.vibrate(15);
+      },
+      destroy(e, s) { s.overlays = (s.overlays || []).filter((f) => f !== ref); },
     };
   },
 });

@@ -2500,6 +2500,8 @@ const BEH_META = {
   orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Combat', 'bolt'],
   firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
   projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
+  clickPopup: ['Clicker', 'star'], comboClicker: ['Clicker', 'bolt'], longPress: ['Touch', 'clock'], doubleTap: ['Touch', 'hand'], tapToggle: ['Touch', 'check'],
+  pressFeedback: ['Touch', 'hand'], tapToSpawn: ['Touch', 'spawner'], dragLaunch: ['Touch', 'arrow'],
   follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
   bounce: ['Movement', 'circle'], trigger: ['Logic', 'bolt'], timer: ['Logic', 'clock'], dropItem: ['Gameplay', 'coin'],
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
@@ -2655,7 +2657,8 @@ function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringi
 function suggestComps(j, list) {
   const has = (t) => (j.behaviors || []).some((b) => b.type === t), keys = [];
   const isPlayer = (j.tags || []).includes('player'), logic = ['triggers', 'graph', 'fsm', 'rules', 'script'].some(has);
-  if (j.ui) keys.push('b:button', 'b:tween', 'b:triggers', 'b:uiCounter');
+  if (j.ui) keys.push('b:button', 'b:pressFeedback', 'b:tween', 'b:triggers', 'b:uiCounter');
+  else if (has('tappable') || has('comboClicker') || has('upgrade')) keys.push('b:clickPopup', 'b:pressFeedback', 'b:comboClicker', 'b:longPress');
   else {
     if (!j.body) keys.push('body');
     if (isPlayer) keys.push(is3D() ? 'b:thirdPerson' : 'b:platformer', 'b:move', 'b:health', 'b:cameraFollow');
@@ -2720,6 +2723,9 @@ const PREFABS_2D = [
   { icon: 'portal', label: 'Portal', props: { name: 'Portal', shape: { type: 'circle', r: 22, fill: '', stroke: '#a77bff', lineWidth: 5, glow: 12 }, behaviors: [{ type: 'teleport', target: '', tag: 'player' }, { type: 'rotate', speed: 90 }] } },
   { icon: 'clock', label: 'Timer Text', props: { name: 'Timer Text', ui: true, anchor: 'top', x: 0, y: 34, text: { value: '{time}', size: 26, color: '#ffffff' } }, settings: { timeLimit: 60 } },
   { icon: 'hand', label: 'Tap Target', props: { name: 'Tap Target', shape: { type: 'circle', r: 30, fill: 'rgba(80,200,255,0.35)', stroke: '#7fdcff', lineWidth: 3 }, behaviors: [{ type: 'tappable', points: 10, destroy: true, sound: 'coin' }, { type: 'pulse', amount: 0.08, period: 0.9 }] } },
+  { icon: 'coin', label: 'Big Clicker', props: { name: 'Big Clicker', shape: { type: 'circle', r: 70, fill: '#c98a4b', stroke: '#8d5a2b', lineWidth: 6 }, behaviors: [{ type: 'comboClicker', points: 1, var: 'score', window: 0.6, comboStep: 0.25, maxCombo: 50, critChance: 10, critMult: 3, popup: true, sound: 'click' }, { type: 'pressFeedback', squash: 0.9, sound: 'none', haptic: true, sparkles: true }] } },
+  { icon: 'arrow', label: 'Slingshot Ball', props: { name: 'Slingshot Ball', tags: ['player'], shape: { type: 'circle', r: 18, fill: '#ef5350' }, body: { type: 'dynamic', bounce: 0.3, friction: 0.4 }, behaviors: [{ type: 'dragLaunch', power: 6, maxPull: 140, shots: 0, whileStill: true, shotsVar: 'shots' }] } },
+  { icon: 'check', label: 'Switch', props: { name: 'Switch', shape: { type: 'rect', w: 70, h: 40, radius: 20, fill: '#78909c' }, behaviors: [{ type: 'tapToggle', var: 'switch', startOn: false, onColor: '#66bb6a', offColor: '#78909c', object: '', message: '' }] } },
   { icon: 'move', label: 'Draggable', props: { name: 'Draggable Block', shape: { type: 'rect', w: 70, h: 70, radius: 10, fill: '#7e57c2' }, behaviors: [{ type: 'draggable', snap: 0, lift: true }] } },
   { icon: 'arrow', label: 'Lane Runner', props: { name: 'Runner', tags: ['player'], shape: { type: 'rect', w: 40, h: 40, radius: 8, fill: '#4fc3f7' }, behaviors: [{ type: 'swipeMove', distance: 110, lanes: 3, jump: 0 }] } },
   { icon: 'flag', label: 'Checkpoint', props: { name: 'Checkpoint', shape: { type: 'rect', w: 14, h: 70, fill: '#90a4ae' }, behaviors: [{ type: 'checkpoint', text: 'Checkpoint!', tag: 'player' }] } },

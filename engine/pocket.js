@@ -2373,6 +2373,7 @@ export class Renderer3D {
     for (const [e, op] of transparent) this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive, op);
     for (const p of scene.particles) this.drawMesh(p.round ? 'sphere' : 'box', M4.trs(p.x, p.y, p.z, 0, 0, 0, p.size, p.size * (p.stretch || 1), p.size), p.color, 1, Math.max(0, p.life) * (p.alpha ?? 1));
     for (const e of scene.entities) if (e.data._line && !e.dead) { const L = e.data._line; this.drawLines(L.slice(0, 6), L[6]); }
+    for (const f of scene.worldDraws || []) f(this, scene); // components that draw in the 3D world (block selection box)
     gl.depthMask(true); gl.disable(gl.BLEND);
     engine.onRenderWorld?.(this, scene);
   }
@@ -2576,6 +2577,16 @@ function renderUI(engine, scene) {
     }
     for (const b of inp.buttons) {
       if (b.hidden) continue; // UI Touch Buttons draw themselves
+      if (b.hotbar) { // square inventory slot: block colour, white frame when picked, count in the corner
+        const x = b.x - b.w / 2, y = b.y - b.h / 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, b.w, b.h);
+        ctx.fillStyle = b.color || '#fff'; ctx.fillRect(x + b.w * 0.2, y + b.h * 0.2, b.w * 0.6, b.h * 0.6);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + b.w * 0.2, y + b.h * 0.62, b.w * 0.6, b.h * 0.18);
+        ctx.strokeStyle = b.selected ? '#ffffff' : 'rgba(255,255,255,0.3)'; ctx.lineWidth = b.selected ? 3 : 1.5;
+        ctx.strokeRect(x, y, b.w, b.h);
+        if (b.label) { ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(b.h * 0.3)}px system-ui, sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(b.label, x + b.w - 3, y + b.h - 1); }
+        continue;
+      }
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -4729,9 +4740,23 @@ registerBehavior('firstPerson', {
     { key: 'look', label: 'Look sensitivity', type: 'number', default: 0.25 },
     { key: 'eye', label: 'Eye height above center', type: 'number', default: 0.6 },
     { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 9 },
+    { key: 'autoJump', label: 'Auto-jump up blocks', type: 'bool', default: true },
   ],
   create(p) {
     let yaw = 0, pitch = 0;
+    /** Walking into a one-block step of a voxel world with room above it: hop up, like Minecraft's auto-jump. */
+    const stepAhead = (e, s, b) => {
+      const l = Math.hypot(b.vel.x, b.vel.z);
+      if (l < 0.5) return false;
+      const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
+      for (const w of s.entities) {
+        if (!w.voxels || w.dead) continue;
+        const V = w.voxels, sz = V.size, ax = e.x + b.vel.x / l * (hx + 0.2), az = e.z + b.vel.z / l * (hx + 0.2);
+        const [i, j, k] = V.cell(w, ax, e.y - hy + sz * 0.5, az), [pi, pj, pk] = V.cell(w, e.x, e.y + hy + sz * 0.5, e.z);
+        if (V.get(i, j, k) && !V.get(i, j + 1, k) && !V.get(i, j + 2, k) && !V.get(pi, pj, pk)) return true;
+      }
+      return false;
+    };
     return {
       start(e, s) {
         e.ensureBody({ type: 'dynamic' });
@@ -4747,6 +4772,7 @@ registerBehavior('firstPerson', {
         b.vel.x = (f.x * -a.y + r.x * a.x) * p.speed;
         b.vel.z = (f.z * -a.y + r.z * a.x) * p.speed;
         if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        else if (p.jump && p.autoJump !== false && b.grounded && stepAhead(e, s, b)) b.vel.y = Math.max(p.jump, Math.sqrt(-2 * (s.gravity || -25) * 1.25));
         e.ry = yaw / DEG; e.data.aimPitch = pitch / DEG;
         const eye = { x: e.x, y: e.y + p.eye, z: e.z }, cp = Math.cos(pitch);
         s.camera.position = eye;
@@ -5543,49 +5569,148 @@ registerBehavior('condition', {
   },
 });
 
+// seconds to mine each block (by palette slot) and the pitch of its break sound
+const VOXEL_HARDNESS = [0, 0.5, 0.45, 1.1, 0.8, 0.2, 0.45, 0.35, 1.1, 0.3, 2.5, 1.3, 0.9];
+const VOXEL_PITCH = [0, 150, 130, 230, 170, 260, 200, 320, 210, 280, 110, 360, 420];
+
 registerBehavior('voxelBuilder', {
-  label: 'Block Builder', description: 'Minecraft-style building: tap a block to break it, or switch to Place and tap to add blocks. Buttons swap mode and block.',
+  label: 'Block Builder', description: 'Minecraft-style building: hold on a block to mine it, tap to place the block picked in the hotbar. Survival mode collects the blocks you mine.',
   params: [
     { key: 'reach', label: 'Reach (blocks)', type: 'number', default: 6 },
-    { key: 'block', label: 'Starting block (1–12)', type: 'number', default: 3 },
-    { key: 'mode', label: 'Starting mode', type: 'select', options: ['break', 'place'], default: 'break' },
+    { key: 'controls', label: 'Controls', type: 'select', options: ['hold to mine', 'mode buttons'], default: 'hold to mine' },
+    { key: 'aim', label: 'Aim with', type: 'select', options: ['finger', 'crosshair'], default: 'finger' },
+    { key: 'hotbar', label: 'Hotbar blocks (1–12)', type: 'text', default: '1,2,3,4,5,6,8,9,12' },
+    { key: 'inventory', label: 'Inventory', type: 'select', options: ['creative', 'survival'], default: 'creative' },
+    { key: 'mineSpeed', label: 'Mining speed', type: 'number', default: 1 },
+    { key: 'block', label: 'Starting block (mode buttons)', type: 'number', default: 3 },
+    { key: 'mode', label: 'Starting mode (mode buttons)', type: 'select', options: ['break', 'place'], default: 'break' },
   ],
   create(p) {
-    let mode = p.mode, block = p.block;
+    const classic = p.controls === 'mode buttons', survival = p.inventory === 'survival';
+    let mode = p.mode, block = p.block, sel = 0, touch = null, target = null, mine = null, refO, refW;
+    const inv = {}, got = []; // survival: block counts, in the order they were first collected
+    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    const slots = (V) => (survival ? got.filter((c) => inv[c] > 0) : String(p.hotbar ?? '').split(',').map(Number).filter((c) => c >= 1 && c <= V.palette.length));
     const syncButtons = (s, V) => {
-      const col = V?.palette[(block - 1) % V.palette.length] || '#fff';
-      s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      if (!V) return;
+      if (classic) {
+        const col = V.palette[(block - 1) % V.palette.length] || '#fff';
+        s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      } else {
+        const list = slots(V); sel = clamp(sel, 0, Math.max(0, list.length - 1));
+        s.customButtons = list.map((c, i) => ({ action: 'hb' + i, hotbar: true, label: survival ? String(inv[c]) : '', color: V.palette[c - 1], selected: i === sel }));
+      }
       s.engine.layoutButtons();
     };
-    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    const cast = (s, W, e, x, y) => {
+      const ray = s.engine.renderer.screenRay(s, x, y), cam = s.camera.position;
+      if (!ray) return null;
+      return W.voxels.raycast(W, ray.origin, ray.dir, p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z));
+    };
+    const center = (s) => ({ x: s.engine.width / 2, y: s.engine.height / 2 });
+    const breakBlock = (e, s, W, hit) => {
+      const V = W.voxels, sz = V.size, c = V.get(hit.i, hit.j, hit.k), col = V.palette[(c - 1) % V.palette.length];
+      V.set(hit.i, hit.j, hit.k, 0);
+      s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
+      const f = VOXEL_PITCH[c] || 180;
+      s.engine.audio.tone({ freq: f, to: f / 2, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
+      s.addVar('blocks', 1);
+      if (survival) { if (!got.includes(c)) got.push(c); const had = slots(V).length; inv[c] = (inv[c] || 0) + 1; if (slots(V).length === 1 && !had) sel = 0; syncButtons(s, V); }
+    };
+    const placeBlock = (e, s, W, hit, c) => {
+      const V = W.voxels, sz = V.size;
+      const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
+      const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
+      const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
+      if (inside || V.get(ni, nj, nk)) return false; // don't build inside yourself
+      V.set(ni, nj, nk, c);
+      s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+      if (survival) { inv[c]--; syncButtons(s, V); }
+      return true;
+    };
     return {
-      start(e, s) { syncButtons(s, world(s)?.voxels); },
+      start(e, s) {
+        const W = world(s);
+        syncButtons(s, W?.voxels);
+        if (classic) return;
+        // the block under your finger gets a dark outline, like Minecraft's selection box
+        (s.worldDraws ||= []).push(refW = (r) => {
+          if (!target || !target.W || target.W.dead) return;
+          const V = target.W.voxels, sz = V.size, g = 0.004;
+          const x0 = target.W.x + target.i * sz - g, y0 = target.W.y + target.j * sz - g, z0 = target.W.z + target.k * sz - g, x1 = x0 + sz + 2 * g, y1 = y0 + sz + 2 * g, z1 = z0 + sz + 2 * g;
+          const P = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], pts = [];
+          for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) pts.push(...P[a], ...P[b]);
+          r.drawLines(pts, '#000000', 0.75);
+        });
+        // a ring that fills while you mine
+        (s.overlays ||= []).push(refO = (ctx) => {
+          if (!mine || !mine.at || mine.prog <= 0) return;
+          const x = mine.at.x, y = mine.at.y - (p.aim === 'crosshair' ? 0 : 64), R = 22, k = clamp(mine.prog / mine.need, 0, 1);
+          ctx.save(); ctx.lineWidth = 6; ctx.lineCap = 'round';
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke();
+          ctx.restore();
+        });
+      },
       update(e, dt, s) {
         const inp = s.engine.input, W = world(s);
         if (!W) return;
-        if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, W.voxels); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
-        if (inp.pressed('btn:vblock')) { block = block % W.voxels.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, W.voxels); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
-        for (const t of inp.taps) {
-          const ray = s.engine.renderer.screenRay(s, t.x, t.y), cam = s.camera.position;
-          const max = p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
-          const hit = W.voxels.raycast(W, ray.origin, ray.dir, max);
-          if (!hit) continue;
-          const V = W.voxels, sz = V.size;
-          if (mode === 'break') {
-            const col = V.palette[(V.get(hit.i, hit.j, hit.k) - 1) % V.palette.length];
-            V.set(hit.i, hit.j, hit.k, 0);
-            s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
-            s.engine.audio.tone({ freq: 180, to: 90, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
-            s.addVar('blocks', 1);
-          } else {
-            const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
-            const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
-            const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
-            if (inside) continue; // don't build inside yourself
-            V.set(ni, nj, nk, block);
-            s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+        const V = W.voxels;
+        if (classic) {
+          if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, V); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
+          if (inp.pressed('btn:vblock')) { block = block % V.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, V); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
+          for (const t of inp.taps) {
+            const hit = cast(s, W, e, t.x, t.y);
+            if (!hit) continue;
+            if (mode === 'break') breakBlock(e, s, W, hit); else placeBlock(e, s, W, hit, block);
           }
+          return;
         }
+        // hotbar: tap a slot to pick that block
+        const list = slots(V);
+        for (let i = 0; i < list.length; i++) if (inp.pressed('btn:hb' + i) && sel !== i) {
+          sel = i; for (const b of inp.buttons) if (b.hotbar) b.selected = b.action === 'hb' + i;
+          s.message(VOXEL_NAMES[list[i] - 1] || `Block ${list[i]}`, 0.7);
+        }
+        // one finger on the look side: hold still to mine, quick tap to place, drag to look around
+        if (!touch) { const d = inp.downs[0]; if (d) touch = { id: d.id, sx: d.x, sy: d.y, lx: d.x, ly: d.y, held: 0, still: 0, moved: false, mining: false }; }
+        const ptr = touch && inp.pointers.get(touch.id);
+        target = null;
+        if (touch && ptr) {
+          touch.held += dt;
+          const step = Math.hypot(ptr.x - touch.lx, ptr.y - touch.ly); touch.lx = ptr.x; touch.ly = ptr.y;
+          if (Math.hypot(ptr.x - touch.sx, ptr.y - touch.sy) > 14) touch.moved = true;
+          touch.still = step > 2.5 ? 0 : touch.still + dt;
+          if (touch.still >= 0.3) touch.mining = true; // a pause after looking around starts mining too
+          const at = p.aim === 'crosshair' ? center(s) : ptr, hit = cast(s, W, e, at.x, at.y);
+          if (hit) target = { ...hit, W };
+          if (touch.mining && hit) {
+            const key = `${hit.i},${hit.j},${hit.k}`, c = V.get(hit.i, hit.j, hit.k);
+            if (!mine || mine.key !== key) mine = { key, prog: 0, need: Math.max(0.15, VOXEL_HARDNESS[c] ?? 0.6) / Math.max(0.05, p.mineSpeed || 1), chip: 0 };
+            mine.at = { x: at.x, y: at.y }; mine.prog += dt; mine.chip -= dt;
+            if (mine.chip <= 0) { // little chips fly off while you dig
+              mine.chip = 0.18; const sz = V.size;
+              s.burst(W.x + (hit.i + 0.5 + hit.n[0] * 0.5) * sz, W.y + (hit.j + 0.5 + hit.n[1] * 0.5) * sz, W.z + (hit.k + 0.5 + hit.n[2] * 0.5) * sz, V.palette[(c - 1) % V.palette.length], 3, 0.3);
+              s.engine.audio.tone({ freq: (VOXEL_PITCH[c] || 180) * 1.5, to: VOXEL_PITCH[c] || 180, dur: 0.04, type: 'square', vol: 0.03 });
+            }
+            if (mine.prog >= mine.need) { breakBlock(e, s, W, hit); mine = null; }
+          } else if (!hit) mine = null;
+        } else if (touch) {
+          // finger lifted: a quick tap (not a look drag) places the picked block on the face you touched
+          const up = inp.ups.find((u) => u.id === touch.id);
+          if (up && !touch.moved && !touch.mining && touch.held < 0.3) {
+            const at = p.aim === 'crosshair' ? center(s) : up, hit = cast(s, W, e, at.x, at.y), c = slots(V)[sel];
+            if (hit && c) placeBlock(e, s, W, hit, c);
+            else if (hit && survival) s.message('Mine some blocks first', 1);
+          }
+          touch = null; mine = null;
+        }
+        if (!touch && p.aim === 'crosshair') { const c = center(s), hit = cast(s, W, e, c.x, c.y); if (hit) target = { ...hit, W }; }
+      },
+      destroy(e, s) {
+        s.overlays = (s.overlays || []).filter((f) => f !== refO);
+        s.worldDraws = (s.worldDraws || []).filter((f) => f !== refW);
+        s.customButtons = []; s.engine.layoutButtons();
       },
     };
   },
@@ -6723,7 +6848,15 @@ export class Engine {
         b.push({ action: 'dright', label: '▶', x: cx + dr * 1.9, y: cy, r: dr, id: null });
       }
       // extra buttons that components add (e.g. the block builder's mode and block pickers), stacked above
-      (s.customButtons || []).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
+      (s.customButtons || []).filter((cb) => !cb.hotbar).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
+      // a hotbar row of square slots along the bottom middle (the block builder's blocks); it moves up when the screen is too narrow
+      const hb = (s.customButtons || []).filter((cb) => cb.hotbar);
+      if (hb.length) {
+        const side = m + r * 2 + 12, room = this.width - this.safe.left - this.safe.right - side * 2, fits = room / hb.length >= 34;
+        const size = Math.min(48, fits ? room / hb.length : (this.width - this.safe.left - this.safe.right - 16) / hb.length), cx = (this.safe.left + this.width - this.safe.right) / 2;
+        const y = fits ? this.height - this.safe.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
+        hb.forEach((cb, i) => b.push({ ...cb, x: cx + (i - (hb.length - 1) / 2) * size, y, w: size - 4, h: size - 4, r: size / 2, id: null }));
+      }
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });

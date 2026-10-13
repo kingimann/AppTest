@@ -49,7 +49,7 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Endless Runner | Lane Rush | swipe lanes, jump |
    | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
    | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
-   | Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
+   | Voxel Sandbox | Block Craft | Minecraft-style terrain: hold to mine, tap to place, hotbar, auto-jump |
    | Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
    | Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
    | Board Game | Tic-Tac-Toe | tap cells, play the computer |
@@ -537,7 +537,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `pulse` | Grows and shrinks to draw attention. | `amount` (0.15), `period` (0.8) |
 | `checkpoint` | The player respawns here after falling or getting hurt. | `text`, `tag` ("player") |
 | `destructible` | Health: takes hits from objects with a tag (like bullets) and breaks when health runs out. | `hp` (3), `hitBy` ("bullet"), `points` (10), `removeHitter` (true) |
-| `firstPerson` | First-person controls: joystick to walk, drag the screen to look. | `speed` (6), `look` (0.25), `eye` (0.6), `jump` (9) |
+| `firstPerson` | First-person controls: joystick to walk, drag the screen to look. In a voxel world it hops up one-block steps on its own (auto-jump). | `speed` (6), `look` (0.25), `eye` (0.6), `jump` (9), `autoJump` (on) |
 | `thirdPerson` | Over-the-shoulder controls: joystick moves relative to the camera, drag to turn it. | `speed` (6), `jump` (10), `distance` (7), `height` (25), `look` (0.3) |
 | `car` | Drive with the joystick (up = gas). 3D cars get a chase camera. | `maxSpeed` (320 / 3D 16), `accel` (260 / 3D 12), `turn` (160 / 3D 110), `autoGas`, `chaseCam` |
 | `projectile` | Flies straight the way it faces (bullet templates fired by a Shooter). | `speed` (650 / 3D 30), `life` (2) |
@@ -559,7 +559,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
 | `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |
 | `condition` | When a variable passes a value, do an action (win when enemyHp ≤ 0, lose when hp ≤ 0…). | `var`, `op`, `target`, `action`, … |
-| `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
+| `voxelBuilder` | Block Builder, with Minecraft-style touch controls: hold a finger still on a block to mine it (a ring fills; stone takes longer than dirt, leaves break fast), tap to place the block picked in the hotbar on the face you tapped, and drag to look. The targeted block gets a dark outline. Survival inventory collects what you mine and counts it in the hotbar. `controls: 'mode buttons'` keeps the old tap-to-break with BREAK/PLACE buttons. | `reach` (6), `controls` (hold to mine / mode buttons), `aim` (finger / crosshair), `hotbar` (`'1,2,3,4,5,6,8,9,12'`), `inventory` (creative / survival), `mineSpeed` (1) |
 | `button` | Tap it (UI or game object) to do an action: start/restart/pause the game, show/hide menus, change variables, jump… Keeps working on title and end screens. | `action`, `value`, `amount`, `sound` |
 | `rules` | Visual logic: WHEN (game starts, every few seconds, touched by tag, tapped, jump/fire button, swipe, variable reaches, destroyed) IF (variable compare, optional) DO (a list of actions). | `rules` |
 | `graph` | Visual Script: node-based logic built in the Node Editor. Events start a chain of actions; value nodes feed numbers and true/false into inputs. | `graph` |

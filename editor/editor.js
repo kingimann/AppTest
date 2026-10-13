@@ -3265,7 +3265,7 @@ const PREFABS_3D = [
     scene: { settings: { joystick: true, actionButton: true, jumpButton: true } },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 2, y: 1 }, mesh: { geometry: 'sphere', r: 0.15, color: '#fff59d', emissive: 1 }, behaviors: [{ type: 'projectile', speed: 30, life: 1.5 }] },
       { name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 34, color: '#ffffff' } }] },
-  { icon: 'cube', label: 'Block Builder', props: { name: 'Builder', tags: ['player'], y: 10, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 5, look: 0.25, eye: 0.65, jump: 8.5 }, { type: 'voxelBuilder', reach: 6, block: 3, mode: 'break' }] },
+  { icon: 'cube', label: 'Block Builder', props: { name: 'Builder', tags: ['player'], y: 10, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 4.3, look: 0.3, eye: 0.65, jump: 8.5, autoJump: true }, { type: 'voxelBuilder', reach: 5, controls: 'hold to mine', inventory: 'creative' }] },
     scene: { settings: { joystick: true, jumpButton: true } }, extra: [{ name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 30, color: '#ffffff' } }] },
   { icon: 'player', label: 'TPS Player', props: { name: 'Hero', tags: ['player'], y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 1.4, color: '#ff8a3d' }, behaviors: [{ type: 'thirdPerson', speed: 6, jump: 10, distance: 7, height: 25, look: 0.3 }] },
     scene: { settings: { joystick: true, jumpButton: true } } },

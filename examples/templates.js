@@ -331,14 +331,13 @@ export const templates = {
 
   'voxel-world': {
     version: 1, name: 'Block Craft', mode: '3d', background: '#8fd0ff', gravity: -25,
-    settings: { title: 'BLOCK CRAFT', subtitle: 'Joystick to walk, drag to look. Tap blocks to break them; PLACE builds. Tap the color button to pick a block.', joystick: true, jumpButton: true, orientation: 'landscape' },
-    vars: { score: 0, blocks: 0 }, fog: { near: 18, far: 46 }, light: { dir: { x: -0.5, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.5 },
+    settings: { title: 'BLOCK CRAFT', subtitle: 'Left thumb: walk. Right thumb: drag to look, hold on a block to mine it, tap to place. Pick blocks in the hotbar.', joystick: true, jumpButton: true, pauseButton: true, orientation: 'landscape' },
+    vars: { score: 0, blocks: 0 }, fog: { near: 22, far: 52 }, light: { dir: { x: -0.5, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.5 },
     camera: { position: { x: 0, y: 14, z: 14 }, target: { x: 0, y: 4, z: 0 }, fov: 70 },
     entities: [
-      { id: 'world', name: 'World', voxels: { size: 1, gen: { type: 'hills', w: 40, d: 40, h: 7, seed: 7, trees: true }, edits: {} } },
+      { id: 'world', name: 'World', voxels: { size: 1, gen: { type: 'hills', w: 48, d: 48, h: 7, seed: 7, trees: true }, edits: {} } },
       { id: 'player', name: 'Player', tags: ['player'], x: 0.5, y: 14, z: 0.5, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' },
-        behaviors: [{ type: 'firstPerson', speed: 5, look: 0.25, eye: 0.65, jump: 8.5 }, { type: 'voxelBuilder', reach: 6, block: 3, mode: 'break' }] },
-      { id: 'crosshair', name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 30, color: '#ffffff' } },
+        behaviors: [{ type: 'firstPerson', speed: 4.3, look: 0.3, eye: 0.65, jump: 8.5, autoJump: true }, { type: 'voxelBuilder', reach: 5, controls: 'hold to mine', aim: 'finger', hotbar: '1,2,3,4,5,6,8,9,12', inventory: 'creative', mineSpeed: 1 }] },
       { id: 'hud', name: 'Blocks Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: 'Mined {blocks}', size: 20, align: 'left' } },
     ],
   },

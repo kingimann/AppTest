@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Lists: '#8d6e63', Functions: '#6a5acd' };
-const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Lists', 'Functions', 'Physics', 'Sensing', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', Lists: 'list', Functions: 'script' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b' };
+const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: '#8bd347' };
+const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -28,6 +28,10 @@ const NEXT = {
   raycast: ['destroy', 'damage', 'push', 'particles', 'setColor'], overlap: ['damage', 'push', 'setColor', 'destroy'], forEachTag: ['setColor', 'push', 'destroy', 'damage'],
   pickNearest: ['moveToward', 'lookAt', 'damage', 'tweenToObj'], objectNear: ['message', 'playAnim', 'sound', 'lookAt'], explosion: ['particles', 'sound', 'destroy'],
   branch: ['playAnim', 'addVar', 'sound', 'message'], wait: ['playAnim', 'destroy', 'spawn', 'showHide'],
+  onKey: ['jump', 'addVar', 'setVelocity', 'sound'], onShake: ['particles', 'shake', 'addVar', 'randomWord'], onTimerDone: ['gameOver', 'message', 'sound', 'timerStart'],
+  dailyCheck: ['addVar', 'message', 'sound'], timerStart: ['message', 'sound'], chase: ['damage', 'sound', 'message'], patrol: ['sound', 'particles'],
+  _text: ['textJoin', 'numText', 'textFill', 'getText', 'randomWord'],
+  onUiTap: ['uiShow', 'openPopup', 'confirm', 'toast', 'goToPage', 'sound'], confirm: ['restart', 'toast', 'uiShow'], askText: ['toast', 'setText', 'uiShow'], alert: ['nextLevel', 'restart', 'uiShow'],
 };
 const RECENT_KEY = 'pocket.recentNodes';
 const recentNodes = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((t) => NODE_TYPES[t]); } catch { return []; } };
@@ -50,8 +54,44 @@ const CAT_HELP = {
   Functions: 'Functions with inputs and a result, your own events (now or later) and Comments.',
   Online: 'Multiplayer rooms (Photon) and accounts, leaderboards and cloud saves (PlayFab). Set them up in Game Settings › Online.',
   Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
+  Text: 'Words: join, fill in {braces}, numbers as text (1.2K, 1st, XII), case, replace, part, checks, random words. Green dots carry text.',
+  Time: 'Named timers (count down or stopwatch), the real clock, daily rewards with streaks, and time away from the game.',
+  Input: 'Keyboard keys and arrow keys / WASD, phone tilt and shake, screen touches by area, finger drag and pinch.',
+  Camera: 'Glide the camera to a point or an object, zoom smoothly, and read where it is.',
+  Audio: 'Background music from your imported sounds, volume, mute, and musical notes.',
+  AI: 'Simple behaviours to run every frame: chase, run away, wander, orbit, keep a distance, patrol.',
+  Device: 'Share, copy to the clipboard, open a website, and check portrait, touch screen, online, dark mode…',
+  UI: 'Menus and screens: show / hide with animations, popups, toasts, alerts, yes / no questions, typing a name, badges, enabling buttons, images, bars, themes, scrolling.',
 };
 export const NODE_HELP = {
+  onUiTap: 'When a named UI element (or anything with that tag) is tapped, from any script. It becomes “other”', uiShow: 'Show or hide a panel with an animation (fade, pop, zoom, slide); “done” when it finishes',
+  openPopup: 'Open or close a Popup or Side Bar component', closeTop: 'Close whatever popup or side bar is open (like the back gesture)',
+  toast: 'A short message that slides in and disappears', alert: 'A message box with one button; “closed” when it is tapped', confirm: 'A question with two buttons: “yes” or “no”',
+  askText: 'A text box with the keyboard (player names, codes); stores what was typed in a variable', uiEnable: 'Grey out a button so it can\'t be tapped, or turn it back on',
+  setImage: 'Change a picture (built-in art:name or a link)', setBadge: 'A red bubble with a number on a button (0 hides it)', setBar: 'Change a progress bar\'s variable, maximum or colour',
+  uiTheme: 'Switch the whole game\'s UI theme (fonts, colours, built-in screens)', uiOrder: 'Draw a UI element above or below the others', uiSize: 'Resize a UI element, smoothly if seconds > 0',
+  scrollTo: 'Scroll a Scroll View to the top, bottom or part of the way', popupOpen: 'Is a popup or side bar open', uiVisible: 'Is an element showing', uiEnabled: 'Is an element tappable',
+  safeArea: 'How much room the notch / home bar takes on each side',
+  textJoin: 'Put up to three pieces of text (or numbers) together, with something between them', textFill: 'Text with {variables} filled in, plus {a} and {b} from the inputs',
+  numText: 'A number as words: 1,234 · 1.2K · 1:05 · 42% · 1st · XII · +5', textLen: 'How many letters', textCase: 'UPPER, lower, Title Case, reversed or tidied spaces',
+  textReplace: 'Swap every “find” for “with”', textPart: 'Some letters from a position (1 = first)', textCheck: 'Equals, contains, starts / ends with or is empty (ignores case except “equals”)',
+  textNum: 'Read a number out of text (“1,500” → 1500)', getText: 'A variable as text (names, choices)', setTextTo: 'Store the wired text in a variable (show it with {name})',
+  showText: 'Change an object\'s text to the wired text', randomWord: 'One of the words, picked at random', wordAt: 'The word at a position (wraps around: 8 → the 1st of 7)',
+  timerStart: 'Start a named timer. Its name is also a variable, so text can show {timer}', timerControl: 'Pause, resume, stop or add seconds to a timer',
+  timerValue: 'Seconds left (or counted), whole seconds, how far along, or running', onTimerDone: 'When a countdown reaches 0',
+  clock: 'The phone\'s real time and date', dailyCheck: 'Once a day: “new day” (daily reward) or “same day”. Keeps a streak of days in a row',
+  stampTime: 'Remember the time now on this device (e.g. when lives ran out)', timeSince: 'Seconds since Remember Time Now (0 if never): refill energy while away',
+  onKey: 'A keyboard key (Space, Up, Down, Left, Right, Enter, A–Z, 0–9) pressed, released or held', keyHeld: 'Is a key down right now',
+  keyAxis: '−1, 0 or 1 from the arrow keys or WASD', tiltValue: 'How far the phone is tilted, −1 to 1 (asks permission on iPhone at the first touch)',
+  onShake: 'When the phone is shaken', onScreenTouch: 'A finger lands anywhere, or in one half of the screen', dragAmount: 'How far a finger moved this frame',
+  pinchAmount: 'Two fingers: 1 = no pinch, bigger = spread apart, smaller = pinched in', camMoveTo: 'Glide the camera to a point (without a Camera component following something)',
+  camToObject: 'Glide the camera to an object', camZoomTo: 'Smoothly zoom (3D: narrows the view)', camValue: 'Where the camera is, or its zoom',
+  playMusic: 'Loop an imported sound as music (one at a time)', stopMusic: 'Fade the music out', setVolume: '0 = silent, 1 = full', muteSound: 'Mute or unmute everything',
+  playNote: 'A note by number (60 = middle C, 62 = D, 64 = E…)', isMuted: 'Is the sound off',
+  chase: 'Move toward an object each frame; “caught” when close', flee: 'Move away each frame; “safe” once far enough', wander: 'Stroll to random spots around where it started',
+  orbit: 'Circle around an object', keepDistance: 'Move closer or back off to stay at a distance', patrol: 'Back and forth from where it started; “turned” at each end',
+  share: 'Open the share sheet with text ({score} works)', copyText: 'Copy text to the clipboard', openLink: 'Open a website in a new tab (in the played game)',
+  deviceIs: 'Portrait, landscape, touch screen, online, installed as an app, dark mode, reduced motion',
   changeVar: 'Change a variable any way: set, add, subtract, multiply, divide, min, max, power or mod; the game\'s, this object\'s or other\'s', clampVar: 'Keep a variable between a min and max',
   copyVar: 'Copy one variable into another', toggleMyVar: 'Flip this object\'s variable between 0 and 1', resetVars: 'Put variables back to how they started (blank = all)',
   setTextVar: 'Put words in a variable ({braces} work): names, messages, choices', textIs: 'Check a text variable: equals, contains, starts with, or empty',
@@ -160,6 +200,30 @@ export const NODE_HELP = {
 
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
+  { label: 'UI: ask the player\'s name', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'c', type: 'textCheck', x: 0, y: 200, params: { op: 'is empty' } }, { id: 'g', type: 'getText', x: -300, y: 200, params: { name: 'playerName' } }, { id: 'b', type: 'branch', x: 300, y: 0 },
+    { id: 'a', type: 'askText', x: 620, y: 0, params: { question: 'What\'s your name?', name: 'playerName', placeholder: 'Hero', max: 16 } }, { id: 't', type: 'toast', x: 960, y: 0, params: { text: 'Welcome, {playerName}!', where: 'top' } }, { id: 'v', type: 'saveVar', x: 1280, y: 0, params: { name: 'playerName' } }, { id: 'l', type: 'loadVar', x: -300, y: -40, params: { name: 'playerName' } }],
+    links: [['s', 'then', 'l'], ['l', 'loaded', 'b'], ['l', 'not saved yet', 'b'], ['g', 'value', 'c', 'text'], ['c', 'value', 'b', 'condition'], ['b', 'true', 'a'], ['a', 'entered', 't'], ['t', 'then', 'v']] },
+  { label: 'UI: Restart button asks first', nodes: [{ id: 'u', type: 'onUiTap', x: 0, y: 0, params: { object: 'Restart Button' } }, { id: 'c', type: 'confirm', x: 300, y: 0, params: { title: 'Restart?', text: 'Your progress on this level will be lost.', yes: 'Restart', no: 'Keep playing' } }, { id: 'r', type: 'restart', x: 640, y: -40 }],
+    links: [['u', 'then', 'c'], ['c', 'yes', 'r']] },
+  { label: 'UI: menu button opens a panel', nodes: [{ id: 'u', type: 'onUiTap', x: 0, y: 0, params: { object: 'Menu Button' } }, { id: 'h', type: 'uiShow', x: 300, y: 0, params: { object: 'Menu Panel', mode: 'toggle', anim: 'slide from left', seconds: 0.25 } }, { id: 'p', type: 'sound', x: 640, y: 0, params: { sound: 'click' } }],
+    links: [['u', 'then', 'h'], ['h', 'then', 'p']] },
+  { label: 'UI: shop badge counts new items', nodes: [{ id: 'v', type: 'varChanged', x: 0, y: 0, params: { name: 'newItems' } }, { id: 'b', type: 'setBadge', x: 300, y: 0, params: { object: 'Shop Button' } }, { id: 'g', type: 'getVar', x: 0, y: 200, params: { name: 'newItems' } },
+    { id: 'u', type: 'onUiTap', x: 0, y: 360, params: { object: 'Shop Button' } }, { id: 'z', type: 'setVar', x: 300, y: 360, params: { name: 'newItems', value: 0 } }],
+    links: [['v', 'then', 'b'], ['g', 'value', 'b', 'number'], ['u', 'then', 'z']] },
+  { label: 'Daily reward with streak', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'd', type: 'dailyCheck', x: 300, y: 0, params: { key: 'daily', streak: 'streak' } }, { id: 'a', type: 'addVar', x: 640, y: -60, params: { name: 'coins' } },
+    { id: 'f', type: 'formula', x: 300, y: 220, params: { expr: 'min(streak, 7) * 10' } }, { id: 'm', type: 'message', x: 960, y: -60, params: { text: 'Day {streak} in a row! +coins', seconds: 2.5 } }],
+    links: [['s', 'then', 'd'], ['d', 'new day', 'a'], ['f', 'value', 'a', 'amount'], ['a', 'then', 'm']] },
+  { label: 'Countdown: 30 seconds to win', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 't', type: 'timerStart', x: 300, y: 0, params: { name: 'clock', mode: 'count down', seconds: 30 } },
+    { id: 'o', type: 'onTimerDone', x: 0, y: 220, params: { name: 'clock' } }, { id: 'g', type: 'gameOver', x: 300, y: 220 }, { id: 'n', type: 'comment', x: 640, y: 0, params: { text: 'Show the time left in any text with {clock}. Add time with Pause / Resume / Stop Timer → add seconds.' } }],
+    links: [['s', 'then', 't'], ['o', 'then', 'g']] },
+  { label: 'Enemy AI: wander, chase when near', nodes: [{ id: 'u', type: 'update', x: 0, y: 0 }, { id: 'c', type: 'compareBranch', x: 300, y: 0, params: { op: '<' } }, { id: 'd', type: 'distance', x: 0, y: 200, params: { tag: 'player' } },
+    { id: 'n', type: 'number', x: 0, y: 360, params: { value: 180 } }, { id: 'h', type: 'chase', x: 640, y: -80, params: { tag: 'player' } }, { id: 'w', type: 'wander', x: 640, y: 160 }, { id: 'k', type: 'cooldown', x: 960, y: -80, params: { seconds: 1 } }, { id: 'x', type: 'damage', x: 1260, y: -80 }],
+    links: [['u', 'then', 'c'], ['d', 'value', 'c', 'a'], ['n', 'value', 'c', 'b'], ['c', 'yes', 'h'], ['c', 'no', 'w'], ['h', 'caught', 'k'], ['k', 'then', 'x']] },
+  { label: 'Keyboard: arrows move, Space jumps', nodes: [{ id: 'u', type: 'update', x: 0, y: 0 }, { id: 'v', type: 'setVelocity', x: 300, y: 0 }, { id: 'f', type: 'formula', x: 0, y: 180, params: { expr: 'a * 220' } }, { id: 'a', type: 'keyAxis', x: -300, y: 180 },
+    { id: 'y', type: 'velocity', x: 0, y: 380, params: { axis: 'y' } }, { id: 'k', type: 'onKey', x: 0, y: 560, params: { key: 'Space', when: 'pressed' } }, { id: 'j', type: 'jump', x: 300, y: 560 }],
+    links: [['u', 'then', 'v'], ['a', 'value', 'f', 'a'], ['f', 'value', 'v', 'x'], ['y', 'value', 'v', 'y'], ['k', 'then', 'j']] },
+  { label: 'Name tag: “Hero the 3rd”', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 't', type: 'showText', x: 640, y: 0 }, { id: 'j', type: 'textJoin', x: 300, y: 120, params: { a: 'Hero the ', sep: '' } }, { id: 'o', type: 'numText', x: 0, y: 200, params: { format: 'ordinal (1st)' } }, { id: 'l', type: 'level', x: -300, y: 200 }],
+    links: [['s', 'then', 't'], ['j', 'value', 't', 'text'], ['o', 'value', 'j', 'b'], ['l', 'value', 'o', 'value']] },
   { label: 'Function: damage with armour', nodes: [{ id: 'f', type: 'funcDef', x: 0, y: 0, params: { name: 'hurt' } }, { id: 'r', type: 'funcReturn', x: 620, y: 0 }, { id: 'm', type: 'formula', x: 300, y: 120, params: { expr: 'max(1, a - armour)' } }, { id: 'a', type: 'funcArg', x: 0, y: 200, params: { which: 'a' } },
     { id: 't', type: 'triggerEnter', x: 0, y: 380, params: { tag: 'bullet' } }, { id: 'c', type: 'changeVar', x: 620, y: 380, params: { name: 'hp', op: 'subtract', scope: 'this object' } }, { id: 'k', type: 'callFunc', x: 300, y: 480, params: { name: 'hurt', a: 5 } },
     { id: 'w', type: 'whenMyVarReaches', x: 0, y: 700, params: { name: 'hp', op: '≤', value: 0 } }, { id: 'd', type: 'destroy', x: 300, y: 700 }, { id: 'n', type: 'comment', x: -320, y: 0, params: { text: 'A Function returns the damage after armour; hits subtract it from this object\'s own hp, and at 0 it is destroyed. Set a game variable "armour".' } }],
@@ -359,7 +423,7 @@ export function openNodeEditor(opts) {
       if (o === 'then' && (d.outs.length === 1)) { head.insertBefore(port(n, o, 'out', 'exec', 'then'), head.lastChild); continue; }
       rows.push(h('div', { class: 'ne-row out' }, h('span', { class: 'lbl' }, o), port(n, o, 'out', 'exec', o)));
     }
-    if (d.value) rows.push(h('div', { class: 'ne-row out' }, h('span', { class: 'lbl' }, d.value === 'bool' ? 'true / false' : 'value'), port(n, 'value', 'out', d.value)));
+    if (d.value) rows.push(h('div', { class: 'ne-row out' }, h('span', { class: 'lbl' }, d.value === 'bool' ? 'true / false' : d.value === 'text' ? 'text' : 'value'), port(n, 'value', 'out', d.value)));
     for (const inp of d.inputs || []) {
       const wired = linkedIn(inp.key);
       rows.push(h('div', { class: 'ne-row in' + (wired ? ' wired' : '') }, port(n, inp.key, 'in', inp.type, inp.key),

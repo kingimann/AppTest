@@ -1429,7 +1429,13 @@ function setSheet(state) {
   markTabs();
 }
 /** The bottom tabs work like an app's navigation bar: Scene is lit while the panel is down. */
-function markTabs() { const st = $('#app').dataset.sheet; for (const b of $$('#dockTabs button')) b.classList.toggle('active', st === 'peek' ? b.dataset.dock === 'scene' : b.dataset.dock === dockTab); }
+function markTabs() {
+  const st = $('#app').dataset.sheet;
+  for (const b of $$('#dockTabs button')) b.classList.toggle('active', st === 'peek' ? b.dataset.dock === 'scene' : b.dataset.dock === dockTab);
+  // a dot on Inspector while something is selected and the Inspector isn't showing: one tap edits it
+  const ins = $('#dockTabs [data-dock="inspector"]');
+  if (ins) { let dot = ins.querySelector('.sel-dot'); const want = !!selectedId && selectedId !== SCENE_ID; if (want && !dot) ins.append(h('span', { class: 'sel-dot' })); else if (!want && dot) dot.remove(); }
+}
 const sheetState = () => $('#app').dataset.sheet || 'half';
 {
   const handle = $('#sheetHandle'), app = $('#app');
@@ -1465,6 +1471,7 @@ function select(id, { fromScene = false } = {}) {
   renderHierarchy();
   renderInspector();
   updateCtxBar();
+  markTabs();
   if (selectedId && fromScene && dockTab === 'hierarchy' && sheetState() !== 'peek') setDock('inspector');
 }
 
@@ -3239,6 +3246,7 @@ function componentsFor(j) {
   ];
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
+    if (def.hidden) continue; // engine-internal helpers
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
@@ -4619,6 +4627,39 @@ for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'lis
     }
     st = null;
   }, { passive: true });
+}
+{ // drag a panel down from the top of its list and the sheet follows the finger: let go low enough and it lowers (full → half → down)
+  let pd = null;
+  const app = $('#app');
+  for (const body of $$('.panel.dock .panel-body')) {
+    body.addEventListener('touchstart', (e) => {
+      pd = null;
+      if (e.touches.length !== 1 || body.scrollTop > 0 || sheetState() === 'peek' || e.target.closest('input, textarea, select, .num, .slider, .h-grip, .tl, .ap-grid, .lm-grid')) return;
+      pd = { y: e.touches[0].clientY, x: e.touches[0].clientX, t: performance.now(), h: $('#sheet').getBoundingClientRect().height, on: false };
+    }, { passive: true });
+    body.addEventListener('touchmove', (e) => {
+      if (!pd) return;
+      const dy = e.touches[0].clientY - pd.y, dx = e.touches[0].clientX - pd.x;
+      if (!pd.on) {
+        if (dy < -4 || Math.abs(dx) > 12 || body.scrollTop > 0) { pd = null; return; } // scrolling the list or swiping sideways
+        if (dy < 10) return;
+        pd.on = true; pd.y += 10; app.classList.add('dragging');
+      }
+      e.preventDefault();
+      app.style.setProperty('--sheet-h', Math.max(98, pd.h - Math.max(0, e.touches[0].clientY - pd.y)) + 'px');
+    }, { passive: false });
+    const end = (e) => {
+      if (!pd?.on) { pd = null; return; }
+      const dy = (e.changedTouches?.[0]?.clientY ?? pd.y) - pd.y, fast = performance.now() - pd.t < 450, H = window.innerHeight;
+      const hgt = pd.h - Math.max(0, dy);
+      app.classList.remove('dragging'); app.style.removeProperty('--sheet-h');
+      if (fast && dy > 50) setSheet(sheetState() === 'full' && dy < 220 ? 'half' : 'peek');
+      else setSheet(hgt < H * 0.25 ? 'peek' : hgt < H * 0.66 ? 'half' : 'full');
+      buzz(6); pd = null;
+    };
+    body.addEventListener('touchend', end, { passive: true });
+    body.addEventListener('touchcancel', end, { passive: true });
+  }
 }
 { // tabs: tap to switch, swipe up/down on them to open or close the panel
   const tabs = $('#dockTabs');

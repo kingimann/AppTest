@@ -1486,6 +1486,11 @@ function collide(e, other, m) {
 // ============================================================================
 // Input: touch — virtual joystick, buttons, taps, drags, swipes and tilt
 // ============================================================================
+/** A key's name for scripts: 'space', 'arrowup', 'a', 'enter'… (also accepts Space, Up, ArrowUp, A). */
+export function keyName(k) {
+  const q = String(k ?? '').toLowerCase();
+  return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
+}
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -1500,6 +1505,16 @@ export class Input {
     this.downs = []; // pointers pressed this frame: { id, x, y }
     this.ups = []; // fingers lifted this frame: { id, x, y, sx, sy, time }
     this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
+    this.keys = new Set(); this.keysDown = []; this.keysUp = []; // keyboard: held now, pressed / released this frame (names like 'space', 'arrowup', 'a')
+    this.wantMotion = false; this.shakeOn = false; this.shook = false; // Visual Script tilt / shake nodes ask for the motion sensors on the first touch
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', (ev) => {
+        if (!this.enabled || ev.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+        const k = keyName(ev.key); if (!this.keys.has(k)) this.keysDown.push(k); this.keys.add(k);
+      });
+      window.addEventListener('keyup', (ev) => { const k = keyName(ev.key); if (this.keys.delete(k)) this.keysUp.push(k); });
+      window.addEventListener('blur', () => this.keys.clear());
+    }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
     el.addEventListener('pointermove', (e) => this.move(e));
@@ -1514,6 +1529,7 @@ export class Input {
     this.engine.audio.unlock();
     if (!this.enabled) return;
     if (this.useTilt && !this.tiltOn) this.enableTilt();
+    if (this.wantMotion) { if (!this.tiltOn) this.enableTilt(); this.enableShake(); }
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
@@ -1580,6 +1596,23 @@ export class Input {
     else if (D) listen();
   }
 
+  /** Shake detection from the motion sensors (asks permission on iOS): sets `shook` for one frame. */
+  enableShake() {
+    if (this.shakeOn) return;
+    let last = 0;
+    const listen = () => {
+      this.shakeOn = true;
+      window.addEventListener('devicemotion', (e) => {
+        const a = e.acceleration?.x != null ? e.acceleration : null, g = e.accelerationIncludingGravity;
+        const m = a ? Math.hypot(a.x || 0, a.y || 0, a.z || 0) : g ? Math.abs(Math.hypot(g.x || 0, g.y || 0, g.z || 0) - 9.81) : 0;
+        if (m > 14 && performance.now() - last > 700) { last = performance.now(); this.shook = true; }
+      });
+    };
+    const D = window.DeviceMotionEvent;
+    if (D && typeof D.requestPermission === 'function') D.requestPermission().then((r) => r === 'granted' && listen()).catch(() => {});
+    else if (D) listen();
+  }
+
   /** Where a fixed joystick sits. */
   fixedStick() {
     const eng = this.engine, r = this.stickRadius, right = eng.scene?.settings.joystickSide === 'right';
@@ -1624,7 +1657,7 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
+  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
   reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
@@ -1639,7 +1672,23 @@ export class Audio {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; } }
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
-  setMuted(m) { this.muted = m; store.set('pocket.muted', m ? '1' : '0'); }
+  setMuted(m) { this.muted = m; store.set('pocket.muted', m ? '1' : '0'); if (this.mus) this.mus.g.gain.value = m ? 0 : this.mus.vol * this.volume; }
+  setVolume(v) { this.volume = clamp(+v || 0, 0, 1); if (this.mus) this.mus.g.gain.value = this.muted ? 0 : this.mus.vol * this.volume; }
+  /** Background music: an imported sound (by name) or a URL, looped. Playing new music replaces the old. */
+  async music(src, { loop = true, vol = 0.6 } = {}) {
+    this.stopMusic(0);
+    const url = this.clips[src] || src; if (!url) return;
+    const token = (this._musicToken = {});
+    this.unlock(); const buf = await this.load(url);
+    if (!buf || this._musicToken !== token || !this.ctx) return;
+    const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
+    s.buffer = buf; s.loop = loop; g.gain.value = this.muted ? 0 : vol * this.volume; s.connect(g).connect(this.ctx.destination); s.start();
+    this.mus = { s, g, vol, src };
+  }
+  stopMusic(fade = 0) {
+    this._musicToken = null; const m = this.mus; this.mus = null; if (!m) return;
+    try { if (fade > 0 && this.ctx) { const t = this.ctx.currentTime; m.g.gain.setValueAtTime(m.g.gain.value, t); m.g.gain.linearRampToValueAtTime(0, t + fade); m.s.stop(t + fade + 0.05); } else m.s.stop(); } catch { /* already stopped */ }
+  }
   tone({ freq = 440, to = freq, dur = 0.15, type = 'square', vol = 0.15, delay = 0 } = {}) {
     if (this.muted || !this.ctx) return;
     const t = this.ctx.currentTime + delay, o = this.ctx.createOscillator(), g = this.ctx.createGain();
@@ -2144,6 +2193,13 @@ function drawEntity2D(ctx, e, vars, time) {
     });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  }
+  if (e.data.badge != null && e.data.badge !== '' && e.data.badge !== 0) { // Set Badge node: a red bubble with a number on the top-right corner
+    const ex = e.extents(), hx = ex.sphere ? ex.r * 0.75 : ex.hx || 12, hy = ex.sphere ? ex.r * 0.75 : ex.hy || 12, txt = String(typeof e.data.badge === 'number' && e.data.badge > 99 ? '99+' : e.data.badge);
+    ctx.globalAlpha = 1; ctx.font = `800 12px system-ui, sans-serif`; const w = Math.max(20, ctx.measureText(txt).width + 10);
+    ctx.fillStyle = e.data.badgeColor || '#ff3b30'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(hx - w / 2, -hy - 10, w, 20, 10); else ctx.rect(hx - w / 2, -hy - 10, w, 20); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, hx, -hy + 0.5);
   }
   ctx.restore();
 }
@@ -4033,7 +4089,7 @@ registerBehavior('sound', {
 function uiScreenOf(e) { for (let q = e, n = 0; q && n < 20; q = q.parentEnt, n++) if (q.showWhen && q.showWhen !== 'always') return q.showWhen; return 'always'; }
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
-  if (e._parentHidden || e._clipHidden) return false;
+  if (e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (Enable / Disable UI node)
   if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
@@ -4574,6 +4630,20 @@ registerBehavior('uiPopup', {
   },
 });
 
+/** (Internal) taps on the buttons of a dialog made by a Visual Script node (Show Alert, Ask Yes / No). */
+registerBehavior('_nodeDialog', {
+  label: 'Node dialog', hidden: true, params: [],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        if (!e.visible || (p.t = (p.t || 0) + dt) < 0.25) return; // ignore the tap that opened it
+        for (const t of s.engine.input.taps) for (const [b, v] of p.buttons || []) if (b.visible && !b.dead && hitTest(s, b, t.x, t.y)) { s.engine.input.taps.length = 0; p.pick?.(v); return; }
+      },
+    };
+  },
+});
+
 registerBehavior('uiSelector', {
   label: 'Option Picker', description: 'Pick one of several options with ‹ and › (e.g. Easy / Normal / Hard). Tap the left half for the previous one, the right half for the next. The choice goes into a variable.',
   params: [
@@ -4607,7 +4677,7 @@ registerBehavior('uiScroll', {
     { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
   ],
   create(p) {
-    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0;
+    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0, goal = null;
     const v = p.direction !== 'horizontal';
     const bounds = (s, e) => { // how far the content can move
       const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
@@ -4620,12 +4690,13 @@ registerBehavior('uiScroll', {
     };
     return {
       uiAlways: true,
-      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); },
+      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); e._scrollTo = (f) => { goal = clamp(+f || 0, 0, 1); vel = 0; }; },
       update(e, dt, s) {
         const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
+        if (goal != null) { const [a, b] = bounds(s, e), want = b + (a - b) * goal; off += (want - off) * Math.min(1, dt * 10); if (Math.abs(want - off) < 0.5) { off = want; goal = null; } } // Scroll To node (0 = top, 1 = bottom)
         if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
         const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
+        if (ptr) { goal = null; const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
         else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
         const [mn, mx] = bounds(s, e);
         if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
@@ -6991,6 +7062,149 @@ export const NODE_TYPES = {
 // ---- Logic library (PlayMaker / Game Creator style): events → conditions → instructions ----
 const bool = (k, d = false, label) => ({ key: k, type: 'bool', default: d, label: label || k });
 const sug = (prm, kind) => ({ ...prm, suggest: kind });
+// ---- More nodes: Text, Time, Input, Camera, Audio, AI and Device ----
+const T_IN = (k, d = '') => ({ key: k, type: 'text', default: d });
+const N_IN = (k, d = 0) => ({ key: k, type: 'number', default: d });
+Object.assign(NODE_TYPES, {
+  // text values (wire them into Set Text Variable To / Show Text On Object, or anywhere a word fits)
+  textJoin: { cat: 'Text', label: 'Join Text', value: 'text', inputs: [T_IN('a', 'Score: '), T_IN('b', ''), T_IN('c', '')], params: [txt('sep', '', 'between them')] },
+  textFill: { cat: 'Text', label: 'Fill In Text', value: 'text', params: [txt('text', 'Hi {playerName}! {a} coins', 'text with {braces}')], inputs: [N_IN('a', 0), N_IN('b', 0)] },
+  numText: { cat: 'Text', label: 'Number As Text', value: 'text', inputs: [N_IN('value', 1234)], params: [opt('format', ['normal (1,234)', 'short (1.2K)', 'whole number', '2 decimals', 'time (m:ss)', 'percent', 'plain', 'ordinal (1st)', 'roman (XII)', 'with + sign'], 'normal (1,234)', 'show as')] },
+  textLen: { cat: 'Text', label: 'Text Length', value: 'number', inputs: [T_IN('text', 'hello')] },
+  textCase: { cat: 'Text', label: 'Change Case', value: 'text', inputs: [T_IN('text', 'hello world')], params: [opt('to', ['UPPER', 'lower', 'Title Case', 'reversed', 'trim spaces'], 'UPPER', 'make it')] },
+  textReplace: { cat: 'Text', label: 'Replace In Text', value: 'text', inputs: [T_IN('text', 'I like cats'), T_IN('find', 'cats'), T_IN('with', 'dogs')] },
+  textPart: { cat: 'Text', label: 'Part Of Text', value: 'text', inputs: [T_IN('text', 'Pocket'), N_IN('start', 1), N_IN('length', 3)] },
+  textCheck: { cat: 'Text', label: 'Text Check', value: 'bool', inputs: [T_IN('text', 'Hello'), T_IN('other', 'he')], params: [opt('op', ['equals', 'equals (any case)', 'contains', 'starts with', 'ends with', 'is empty'], 'starts with', 'is')] },
+  textNum: { cat: 'Text', label: 'Text To Number', value: 'number', inputs: [T_IN('text', '42')] },
+  getText: { cat: 'Text', label: 'Get Text Variable', value: 'text', params: [txt('name', 'playerName', 'variable')] },
+  setTextTo: { cat: 'Text', label: 'Set Text Variable To', exec: true, outs: ['then'], params: [txt('name', 'playerName', 'variable')], inputs: [T_IN('text', 'Hero')] },
+  showText: { cat: 'Text', label: 'Show Text On Object', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)')], inputs: [T_IN('text', 'Hello')] },
+  randomWord: { cat: 'Text', label: 'Random Word', value: 'text', params: [txt('words', 'red | green | blue', 'words (separate with |)')] },
+  wordAt: { cat: 'Text', label: 'Word At', value: 'text', params: [txt('words', 'Mon | Tue | Wed | Thu | Fri | Sat | Sun', 'words (separate with |)')], inputs: [N_IN('position', 1)] },
+  // timers and the real clock
+  timerStart: { cat: 'Time', label: 'Start Timer', exec: true, outs: ['then'], params: [txt('name', 'timer', 'timer (also a variable)'), opt('mode', ['count down', 'count up (stopwatch)'], 'count down', 'mode')], inputs: [N_IN('seconds', 30)] },
+  timerControl: { cat: 'Time', label: 'Pause / Resume / Stop Timer', exec: true, outs: ['then'], params: [txt('name', 'timer', 'timer'), opt('do', ['pause', 'resume', 'stop', 'add seconds'], 'pause', 'do')], inputs: [N_IN('seconds', 5)] },
+  timerValue: { cat: 'Time', label: 'Timer Value', value: 'number', params: [txt('name', 'timer', 'timer'), opt('what', ['seconds', 'whole seconds', 'fraction done (0–1)', 'is running (1/0)'], 'seconds', 'give')] },
+  onTimerDone: { cat: 'Time', label: 'On Timer Finished', outs: ['then'], params: [txt('name', 'timer', 'timer (blank = any)')] },
+  clock: { cat: 'Time', label: 'Real Clock', value: 'number', params: [opt('part', ['hour', 'minute', 'second', 'weekday (0 = Sun)', 'day of month', 'month', 'year', 'day of year', 'seconds since 1970'], 'hour', 'part')] },
+  dailyCheck: { cat: 'Time', label: 'Daily Check', exec: true, outs: ['new day', 'same day'], params: [txt('key', 'daily', 'name'), txt('streak', 'streak', 'streak variable')] },
+  stampTime: { cat: 'Time', label: 'Remember Time Now', exec: true, outs: ['then'], params: [txt('key', 'lastPlayed', 'name')] },
+  timeSince: { cat: 'Time', label: 'Seconds Since Remembered', value: 'number', params: [txt('key', 'lastPlayed', 'name')] },
+  // keyboard, tilt, shake, fingers
+  onKey: { cat: 'Input', label: 'On Key', outs: ['then'], params: [txt('key', 'Space', 'key (Space, Up, A, Enter…)'), opt('when', ['pressed', 'released', 'held'], 'pressed', 'when')] },
+  keyHeld: { cat: 'Input', label: 'Key Is Held', value: 'bool', params: [txt('key', 'Space', 'key')] },
+  keyAxis: { cat: 'Input', label: 'Arrow Keys / WASD', value: 'number', params: [opt('axis', ['left / right', 'up / down'], 'left / right', 'axis')] },
+  tiltValue: { cat: 'Input', label: 'Phone Tilt', value: 'number', params: [opt('axis', ['left / right', 'forward / back'], 'left / right', 'axis')] },
+  onShake: { cat: 'Input', label: 'On Phone Shaken', outs: ['then'] },
+  onScreenTouch: { cat: 'Input', label: 'On Screen Touched', outs: ['then'], params: [opt('where', ['anywhere', 'left half', 'right half', 'top half', 'bottom half'], 'anywhere', 'where')] },
+  dragAmount: { cat: 'Input', label: 'Finger Drag', value: 'number', params: [opt('axis', ['x', 'y', 'distance'], 'x', 'this frame')] },
+  pinchAmount: { cat: 'Input', label: 'Pinch Zoom', value: 'number' },
+  // camera
+  camMoveTo: { cat: 'Camera', label: 'Move Camera To', exec: true, outs: ['then', 'arrived'], inputs: [N_IN('x', 200), N_IN('y', 350), N_IN('seconds', 0.6)] },
+  camToObject: { cat: 'Camera', label: 'Move Camera To Object', exec: true, outs: ['then', 'arrived'], params: [txt('object', 'Player', 'object or tag')], inputs: [N_IN('seconds', 0.6)] },
+  camZoomTo: { cat: 'Camera', label: 'Zoom Camera To', exec: true, outs: ['then', 'arrived'], inputs: [N_IN('zoom', 1.5), N_IN('seconds', 0.5)] },
+  camValue: { cat: 'Camera', label: 'Camera Value', value: 'number', params: [opt('what', ['x', 'y', 'z', 'zoom'], 'x', 'give')] },
+  // audio
+  playMusic: { cat: 'Audio', label: 'Play Music', exec: true, outs: ['then'], params: [txt('sound', '', 'imported sound or URL'), opt('loop', ['loop', 'once'], 'loop', 'play')], inputs: [N_IN('volume', 0.6)] },
+  stopMusic: { cat: 'Audio', label: 'Stop Music', exec: true, outs: ['then'], inputs: [N_IN('fade', 0.5)] },
+  setVolume: { cat: 'Audio', label: 'Set Volume', exec: true, outs: ['then'], inputs: [N_IN('volume', 1)] },
+  muteSound: { cat: 'Audio', label: 'Mute / Unmute', exec: true, outs: ['then'], params: [opt('mode', ['toggle', 'mute', 'unmute'], 'toggle', 'make it')] },
+  playNote: { cat: 'Audio', label: 'Play Note', exec: true, outs: ['then'], params: [opt('wave', ['square', 'sine', 'triangle', 'sawtooth'], 'triangle', 'sound')], inputs: [N_IN('note', 60), N_IN('seconds', 0.25)] },
+  isMuted: { cat: 'Audio', label: 'Is Muted', value: 'bool' },
+  // simple AI moves (run them from Every Frame)
+  chase: { cat: 'AI', label: 'Chase', exec: true, outs: ['then', 'caught'], params: [txt('tag', 'player', 'object or tag')], inputs: [N_IN('speed', 0), N_IN('stopAt', 0)] },
+  flee: { cat: 'AI', label: 'Run Away From', exec: true, outs: ['then', 'safe'], params: [txt('tag', 'player', 'object or tag')], inputs: [N_IN('speed', 0), N_IN('safeDistance', 0)] },
+  wander: { cat: 'AI', label: 'Wander', exec: true, outs: ['then'], inputs: [N_IN('speed', 0), N_IN('radius', 0)] },
+  orbit: { cat: 'AI', label: 'Orbit Around', exec: true, outs: ['then'], params: [txt('tag', 'player', 'object or tag')], inputs: [N_IN('radius', 0), N_IN('degreesPerSecond', 90)] },
+  keepDistance: { cat: 'AI', label: 'Keep Distance', exec: true, outs: ['then'], params: [txt('tag', 'player', 'object or tag')], inputs: [N_IN('distance', 0), N_IN('speed', 0)] },
+  patrol: { cat: 'AI', label: 'Patrol Back And Forth', exec: true, outs: ['then', 'turned'], params: [opt('axis', ['left / right', 'up / down'], 'left / right', 'along')], inputs: [N_IN('distance', 0), N_IN('speed', 0)] },
+  // the phone or browser
+  share: { cat: 'Device', label: 'Share', exec: true, outs: ['then'], params: [txt('text', 'I scored {score}!', 'text')] },
+  copyText: { cat: 'Device', label: 'Copy To Clipboard', exec: true, outs: ['then', 'failed'], params: [txt('text', '{score}', 'text')] },
+  openLink: { cat: 'Device', label: 'Open Website', exec: true, outs: ['then'], params: [txt('url', 'https://', 'address')] },
+  deviceIs: { cat: 'Device', label: 'Device Is', value: 'bool', params: [opt('is', ['portrait', 'landscape', 'touch screen', 'online', 'installed app', 'dark mode', 'reduced motion'], 'portrait', 'is')] },
+});
+/** Any value as words: numbers lose float noise, true / false stay words. */
+const asText = (v) => (v == null ? '' : typeof v === 'number' ? String(Math.round(v * 10000) / 10000) : String(v));
+const ROMAN = [[1000, 'M'], [900, 'CM'], [500, 'D'], [400, 'CD'], [100, 'C'], [90, 'XC'], [50, 'L'], [40, 'XL'], [10, 'X'], [9, 'IX'], [5, 'V'], [4, 'IV'], [1, 'I']];
+function numAsText(v, f) {
+  if (f === 'ordinal (1st)') { const n = Math.round(v), t = Math.abs(n) % 100, u = Math.abs(n) % 10; return n + (t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th'); }
+  if (f === 'roman (XII)') { let n = Math.round(v), out = ''; if (n <= 0 || n > 3999) return String(n); for (const [k, r] of ROMAN) while (n >= k) { out += r; n -= k; } return out; }
+  if (f === 'with + sign') return (v > 0 ? '+' : '') + formatNumber(v);
+  return fmtNumber(v, f === 'normal (1,234)' ? '' : f);
+}
+const wordsOf = (w) => String(w || '').split('|').map((x) => x.trim()).filter(Boolean);
+// ---- UI nodes ----
+Object.assign(NODE_TYPES, {
+  onUiTap: { cat: 'UI', label: 'On UI Tapped', outs: ['then'], params: [txt('object', 'Play Button', 'object (name or tag)')] },
+  uiShow: { cat: 'UI', label: 'Show / Hide UI', exec: true, outs: ['then', 'done'], params: [txt('object', 'Panel', 'object'), opt('mode', ['show', 'hide', 'toggle'], 'show', 'make it'), opt('anim', SHOW_ANIMS.filter((a) => a !== 'slide (follows navigation)'), 'pop', 'animation')], inputs: [N_IN('seconds', 0.25)] },
+  openPopup: { cat: 'UI', label: 'Open / Close Popup', exec: true, outs: ['then'], params: [txt('object', 'Popup', 'popup or side bar'), opt('mode', ['open', 'close', 'toggle'], 'open', 'make it')] },
+  closeTop: { cat: 'UI', label: 'Close Top Popup', exec: true, outs: ['then', 'nothing open'] },
+  toast: { cat: 'UI', label: 'Show Toast', exec: true, outs: ['then'], params: [txt('text', 'Saved!', 'text ({braces} work)'), opt('where', ['bottom', 'top', 'middle'], 'bottom', 'where'), { key: 'color', type: 'color', default: '#1f2433', label: 'colour' }], inputs: [N_IN('seconds', 2)] },
+  alert: { cat: 'UI', label: 'Show Alert', exec: true, outs: ['closed'], params: [txt('title', 'Level complete!', 'title'), txt('text', 'You scored {score}.', 'text'), txt('ok', 'OK', 'button'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  confirm: { cat: 'UI', label: 'Ask Yes / No', exec: true, outs: ['yes', 'no'], params: [txt('title', 'Restart?', 'title'), txt('text', 'Your progress on this level will be lost.', 'text'), txt('yes', 'Yes', 'yes button'), txt('no', 'No', 'no button'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  askText: { cat: 'UI', label: 'Ask For Text', exec: true, outs: ['entered', 'cancelled'], params: [txt('question', 'What\'s your name?', 'question'), txt('name', 'playerName', 'store in variable'), txt('placeholder', 'Hero', 'hint'), num('max', 16, 'max letters')] },
+  uiEnable: { cat: 'UI', label: 'Enable / Disable UI', exec: true, outs: ['then'], params: [txt('object', 'Shop Button', 'object'), opt('mode', ['disable', 'enable', 'toggle'], 'disable', 'make it')] },
+  setImage: { cat: 'UI', label: 'Set Image', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)'), txt('image', 'art:star', 'picture (art:name or URL)')] },
+  setBadge: { cat: 'UI', label: 'Set Badge', exec: true, outs: ['then'], params: [txt('object', 'Shop Button', 'object (blank = this)'), { key: 'color', type: 'color', default: '#ff3b30', label: 'colour' }], inputs: [N_IN('number', 3)] },
+  setBar: { cat: 'UI', label: 'Set Progress Bar', exec: true, outs: ['then'], params: [txt('object', 'Health Bar', 'bar'), txt('var', '', 'show variable (blank = keep)'), { key: 'color', type: 'color', default: '', label: 'colour (blank = keep)' }], inputs: [N_IN('max', 100)] },
+  uiTheme: { cat: 'UI', label: 'Set UI Theme', exec: true, outs: ['then'], params: [opt('theme', Object.keys(UI_THEMES), 'Neon', 'theme')] },
+  uiOrder: { cat: 'UI', label: 'Bring To Front / Back', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)'), opt('mode', ['to front', 'to back'], 'to front', 'move it')] },
+  uiSize: { cat: 'UI', label: 'Set UI Size', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)')], inputs: [N_IN('width', 200), N_IN('height', 60), N_IN('seconds', 0)] },
+  scrollTo: { cat: 'UI', label: 'Scroll To', exec: true, outs: ['then'], params: [txt('object', 'Scroll View', 'scroll view'), opt('where', ['top', 'bottom', 'part of the way'], 'top', 'where')], inputs: [N_IN('fraction', 0.5)] },
+  popupOpen: { cat: 'UI', label: 'Is A Popup Open', value: 'bool' },
+  uiVisible: { cat: 'UI', label: 'Is Shown', value: 'bool', params: [txt('object', 'Panel', 'object')] },
+  uiEnabled: { cat: 'UI', label: 'Is Enabled', value: 'bool', params: [txt('object', 'Shop Button', 'object')] },
+  safeArea: { cat: 'UI', label: 'Safe Area', value: 'number', params: [opt('side', ['top', 'bottom', 'left', 'right'], 'top', 'side')] },
+});
+/** A ready-made dialog for Show Alert / Ask Yes / No: a dimmed backdrop, a themed panel, title, text and buttons. */
+function nodeDialog(s, o, onPick) {
+  const TH = themeOf(s.settings), btnW = o.buttons.length > 1 ? 120 : 200;
+  const back = s.add({ name: '(dialog)', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, ignoreSafe: true, layer: 9000, shape: { type: 'rect', w: 400, h: 800, radius: 0, fill: 'rgba(0,0,0,0.55)' } });
+  const parts = [back];
+  const add = (j) => { const q = s.add(j); parts.push(q); return q; };
+  const panel = add({ name: '(dialog panel)', ui: true, parent: back.id, anchor: 'center', x: 0, y: 0, layer: 9001, shape: { type: 'rect', w: 300, h: o.text ? 200 : 150, radius: TH.radius || 14, fill: TH.panel, stroke: 'rgba(255,255,255,0.12)', lineWidth: 2 } });
+  const h = o.text ? 200 : 150;
+  add({ name: '(dialog title)', ui: true, parent: back.id, anchor: 'center', x: 0, y: -h / 2 + 34, layer: 9002, text: { ...TEXT_DEFAULTS, value: o.title || '', size: 20, color: TH.text, weight: '800', fit: 270 } });
+  if (o.text) add({ name: '(dialog text)', ui: true, parent: back.id, anchor: 'center', x: 0, y: -8, layer: 9002, text: { ...TEXT_DEFAULTS, value: o.text, size: 15, color: TH.text, weight: '500', wrap: 260, lineHeight: 1.25 } });
+  const btns = o.buttons.map(([label, v, main], i) => {
+    const x = o.buttons.length > 1 ? (i === 0 ? -68 : 68) : 0;
+    const b = add({ name: '(dialog button)', ui: true, parent: back.id, anchor: 'center', x, y: h / 2 - 36, layer: 9003, shape: { type: 'rect', w: btnW, h: 44, radius: Math.min(22, (TH.radius || 12) + 4), fill: main ? TH.accent : 'rgba(255,255,255,0.12)' }, text: { ...TEXT_DEFAULTS, value: label, size: 16, color: main ? '#111' : TH.text, weight: '800', fit: btnW - 16 } });
+    return [b, v];
+  });
+  const dp = { buttons: btns, pick: null };
+  back.behaviors.push(Behaviors._nodeDialog.create(dp)); // (addBehavior would rebuild it from a definition and lose the buttons)
+  back.visible = true; uiAnimate(s, panel, true, 'pop', 0.2);
+  const wasLoading = s.loading; if (o.pause) s.loading = true;
+  s.modal = back; back._dismiss = () => dp.pick(o.cancel);
+  dp.pick = (v) => { dp.pick = () => {}; if (o.pause) s.loading = wasLoading || false; if (s.modal === back) s.modal = null; for (const q of parts) q.destroy(); onPick(v); };
+  return back;
+}
+/** Ask For Text: a real text box over the game (the phone's keyboard opens), OK / Cancel. */
+function askTextBox(s, o, done) {
+  const root = s.engine.root, TH = themeOf(s.settings);
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-family:system-ui,-apple-system,sans-serif;touch-action:auto;';
+  const box = document.createElement('div');
+  box.style.cssText = `width:min(320px,86%);padding:18px;border-radius:${TH.radius || 14}px;background:${TH.panel};color:${TH.text};box-shadow:0 10px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px;`;
+  const q = document.createElement('div'); q.textContent = o.question; q.style.cssText = 'font-weight:800;font-size:18px;text-align:center;';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = Math.max(1, +o.max || 16); inp.placeholder = o.placeholder || ''; inp.value = o.value || '';
+  inp.style.cssText = 'font-size:17px;padding:12px;border-radius:10px;border:2px solid rgba(255,255,255,.2);background:rgba(0,0,0,.3);color:inherit;outline:none;';
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;';
+  const mk = (label, main) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = `flex:1;height:44px;border:0;border-radius:10px;font-weight:800;font-size:16px;background:${main ? TH.accent : 'rgba(255,255,255,.14)'};color:${main ? '#111' : TH.text};`; return b; };
+  const cancel = mk('Cancel', false), ok = mk('OK', true);
+  row.append(cancel, ok); box.append(q, inp, row); wrap.append(box); root.appendChild(wrap);
+  const wasLoading = s.loading; s.loading = true;
+  const finish = (v) => { wrap.remove(); s.loading = wasLoading || false; s.engine.input.reset(); done(v); };
+  ok.onclick = () => finish(inp.value.trim() || null); cancel.onclick = () => finish(null);
+  inp.onkeydown = (ev) => { if (ev.key === 'Enter') finish(inp.value.trim() || null); else if (ev.key === 'Escape') finish(null); ev.stopPropagation(); };
+  ['pointerdown', 'pointerup', 'touchstart'].forEach((t) => wrap.addEventListener(t, (ev) => ev.stopPropagation()));
+  setTimeout(() => inp.focus(), 50);
+}
+const uiFind = (s, e, k) => (k ? s.find(k) || s.findAll(k)[0] || null : e);
+
+const localDay = (t = new Date()) => `${t.getFullYear()}-${t.getMonth() + 1}-${t.getDate()}`;
+
 const OPS6 = ['=', '≠', '>', '<', '≥', '≤'];
 const cmp = (a, op, b) => ({ '=': a === b, '≠': a !== b, '>': a > b, '<': a < b, '≥': a >= b, '≤': a <= b }[op] ?? false);
 const fmtVal = (v) => (typeof v === 'number' ? +v.toFixed(2) : v);
@@ -7494,6 +7708,36 @@ registerBehavior('graph', {
         case 'netIsMaster': return s.engine.online.isMaster();
         case 'netInRoom': return s.engine.online.inRoom();
         case 'netValue': return +(ctx.netValue ?? s.engine.online.lastValue) || 0;
+        case 'textJoin': return [I('a'), I('b'), I('c')].map(asText).filter((x) => x !== '').join(P('sep') ?? '');
+        case 'textFill': return fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data, { a: +I('a') || 0, b: +I('b') || 0 }));
+        case 'numText': return numAsText(+I('value') || 0, P('format'));
+        case 'textLen': return asText(I('text')).length;
+        case 'textCase': { const t = asText(I('text')); switch (P('to')) { case 'lower': return t.toLowerCase(); case 'Title Case': return t.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); case 'reversed': return [...t].reverse().join(''); case 'trim spaces': return t.trim().replace(/\s+/g, ' '); default: return t.toUpperCase(); } }
+        case 'textReplace': { const f = asText(I('find')); return f ? asText(I('text')).split(f).join(asText(I('with'))) : asText(I('text')); }
+        case 'textPart': { const t = [...asText(I('text'))], a = Math.max(0, Math.round(+I('start') || 1) - 1); return t.slice(a, a + Math.max(0, Math.round(+I('length') || 0))).join(''); }
+        case 'textCheck': { const a = asText(I('text')), b = asText(I('other')); switch (P('op')) { case 'equals': return a === b; case 'equals (any case)': return a.toLowerCase() === b.toLowerCase(); case 'contains': return a.toLowerCase().includes(b.toLowerCase()); case 'ends with': return a.toLowerCase().endsWith(b.toLowerCase()); case 'is empty': return !a.trim(); default: return a.toLowerCase().startsWith(b.toLowerCase()); } }
+        case 'textNum': { const v = parseFloat(asText(I('text')).replace(/[, ]/g, '')); return Number.isFinite(v) ? v : 0; }
+        case 'getText': return asText(s.vars[P('name')] ?? '');
+        case 'randomWord': { const w = wordsOf(P('words')); return w.length ? w[Math.floor(Math.random() * w.length)] : ''; }
+        case 'wordAt': { const w = wordsOf(P('words')); if (!w.length) return ''; const i = ((Math.round(+I('position') || 1) - 1) % w.length + w.length) % w.length; return w[i]; }
+        case 'timerValue': { const t = s.namedTimers?.[P('name') || 'timer']; if (!t) return 0; switch (P('what')) { case 'whole seconds': return t.down ? Math.ceil(t.t) : Math.floor(t.t); case 'fraction done (0–1)': return t.down ? (t.total ? 1 - t.t / t.total : 1) : 0; case 'is running (1/0)': return t.running ? 1 : 0; default: return t.t; } }
+        case 'clock': { const d = new Date(); switch (P('part')) { case 'minute': return d.getMinutes(); case 'second': return d.getSeconds(); case 'weekday (0 = Sun)': return d.getDay(); case 'day of month': return d.getDate(); case 'month': return d.getMonth() + 1; case 'year': return d.getFullYear(); case 'day of year': return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5); case 'seconds since 1970': return Math.floor(d.getTime() / 1000); default: return d.getHours(); } }
+        case 'timeSince': { const t = +store.get(savedVarKey(s, '@time.' + (P('key') || 'lastPlayed')), 0); return t ? Math.max(0, (Date.now() - t) / 1000) : 0; }
+        case 'keyHeld': return s.engine.input.keys.has(keyName(P('key')));
+        case 'keyAxis': { const k = s.engine.input.keys, has = (...a) => a.some((q) => k.has(q)); return P('axis') === 'up / down' ? (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0) : (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); }
+        case 'tiltValue': { const inp = s.engine.input; inp.wantMotion = true; const t = inp.tiltAxis; return t ? (P('axis') === 'forward / back' ? t.y : t.x) : 0; }
+        case 'dragAmount': { const d = s.engine.input.drag; return P('axis') === 'y' ? d.dy : P('axis') === 'distance' ? Math.hypot(d.dx, d.dy) : d.dx; }
+        case 'pinchAmount': { // two fingers: how far apart now compared with when the second finger landed (1 = no pinch)
+          const ps = [...s.engine.input.pointers.values()]; if (ps.length < 2) { state.delete('pinch:' + n.id); return 1; }
+          const d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y); if (!state.has('pinch:' + n.id)) state.set('pinch:' + n.id, d || 1); return d / state.get('pinch:' + n.id);
+        }
+        case 'camValue': { const c = s.camera, w = P('what'); return w === 'zoom' ? (s.mode === '3d' ? 60 / (c.fov || 60) : c.zoom || 1) : s.mode === '3d' ? c.position?.[w] || 0 : c[w] || 0; }
+        case 'isMuted': return !!s.engine.audio.muted;
+        case 'deviceIs': { const mm = (q) => typeof matchMedia === 'function' && matchMedia(q).matches; switch (P('is')) { case 'landscape': return s.engine.width > s.engine.height; case 'touch screen': return mm('(pointer: coarse)') || 'ontouchstart' in window; case 'online': return navigator.onLine !== false; case 'installed app': return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || !!navigator.standalone; case 'dark mode': return mm('(prefers-color-scheme: dark)'); case 'reduced motion': return mm('(prefers-reduced-motion: reduce)'); default: return s.engine.height >= s.engine.width; } }
+        case 'popupOpen': return !!(s.modal && !s.modal.dead && s.modal.visible);
+        case 'uiVisible': { const t = uiFind(s, null, P('object')); return !!t && t.visible && !t._parentHidden; }
+        case 'uiEnabled': { const t = uiFind(s, null, P('object')); return !!t && !t.data.uiDisabled; }
+        case 'safeArea': return s.engine.safe?.[P('side') || 'top'] || 0;
         default: return 0;
       }
     };
@@ -7802,6 +8046,132 @@ registerBehavior('graph', {
         case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
+        case 'setTextTo': s.setVar(P('name') || 'text', asText(I('text'))); break;
+        case 'showText': { const k = P('object'), t = k ? s.find(k) || s.findAll(k)[0] : e; if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = asText(I('text')); } break; }
+        case 'timerStart': { const k = P('name') || 'timer', sec = Math.max(0, +I('seconds') || 0), down = P('mode') !== 'count up (stopwatch)'; (s.namedTimers ||= {})[k] = { t: down ? sec : 0, total: sec, down, running: true }; s.setVar(k, down ? Math.ceil(sec) : 0); break; }
+        case 'timerControl': {
+          const k = P('name') || 'timer', t = s.namedTimers?.[k]; if (!t) break;
+          const d = P('do');
+          if (d === 'pause') t.running = false; else if (d === 'resume') t.running = t.down ? t.t > 0 : true;
+          else if (d === 'stop') { delete s.namedTimers[k]; s.setVar(k, 0); }
+          else { t.t = Math.max(0, t.t + (+I('seconds') || 0)); if (t.down) { t.total = Math.max(t.total, t.t); s.setVar(k, Math.ceil(t.t)); } }
+          break;
+        }
+        case 'dailyCheck': {
+          const key = savedVarKey(s, '@daily.' + (P('key') || 'daily')), today = localDay(), y = new Date(); y.setDate(y.getDate() - 1);
+          let rec = {}; try { rec = JSON.parse(store.get(key, '{}')) || {}; } catch { rec = {}; }
+          const sv = P('streak') || 'streak';
+          if (rec.day === today) { s.setVar(sv, rec.streak || 1); return follow(n, 'same day', ctx); }
+          rec = { day: today, streak: rec.day === localDay(y) ? (rec.streak || 0) + 1 : 1 }; store.set(key, JSON.stringify(rec)); s.setVar(sv, rec.streak);
+          return follow(n, 'new day', ctx);
+        }
+        case 'stampTime': store.set(savedVarKey(s, '@time.' + (P('key') || 'lastPlayed')), String(Date.now())); break;
+        case 'camMoveTo': case 'camToObject': {
+          let x = +I('x') || 0, y = +I('y') || 0;
+          if (n.type === 'camToObject') { const t = nearest(s, e, P('object')) || (s.find(P('object')) === e ? e : null); if (!t) break; x = t.x; y = s.mode === '3d' ? t.z : t.y; }
+          const c = s.camera, sec = Math.max(0.001, +I('seconds') || 0), later = { ...ctx, steps: 0 };
+          s.killTweens(c);
+          if (s.mode === '3d') { const p0 = c.position, t0 = c.target, dx = x - t0.x, dz = y - t0.z; s.to(p0, { x: p0.x + dx, z: p0.z + dz }, sec, { ease: 'inOutCubic' }); s.to(t0, { x, z: y }, sec, { ease: 'inOutCubic', onComplete: () => follow(n, 'arrived', later) }); }
+          else s.to(c, { x, y }, sec, { ease: 'inOutCubic', onComplete: () => follow(n, 'arrived', later) });
+          break;
+        }
+        case 'camZoomTo': { const c = s.camera, z = Math.max(0.05, +I('zoom') || 1), sec = Math.max(0.001, +I('seconds') || 0), later = { ...ctx, steps: 0 }; s.to(c, s.mode === '3d' ? { fov: clamp(60 / z, 10, 120) } : { zoom: z }, sec, { ease: 'inOutCubic', onComplete: () => follow(n, 'arrived', later) }); break; }
+        case 'playMusic': s.engine.audio.music(P('sound'), { loop: P('loop') !== 'once', vol: clamp(+I('volume') || 0, 0, 1) }); break;
+        case 'stopMusic': s.engine.audio.stopMusic(Math.max(0, +I('fade') || 0)); break;
+        case 'setVolume': s.engine.audio.setVolume(I('volume')); break;
+        case 'muteSound': { const a = s.engine.audio, m = P('mode'); a.setMuted(m === 'mute' ? true : m === 'unmute' ? false : !a.muted); break; }
+        case 'playNote': { const f = 440 * 2 ** (((+I('note') || 60) - 69) / 12); s.engine.audio.unlock?.(); s.engine.audio.tone({ freq: f, dur: Math.max(0.03, +I('seconds') || 0.25), type: P('wave') || 'triangle', vol: 0.12 }); break; }
+        case 'chase': case 'flee': case 'keepDistance': {
+          const t = nearest(s, e, P('tag')); if (!t) break;
+          const three = s.mode === '3d', dt = ctx.dt ?? 1 / 60, sp = (+I('speed') || (three ? 4 : 140)) * dt;
+          const dx = t.x - e.x, dy = three ? 0 : t.y - e.y, dz = three ? t.z - e.z : 0, d = Math.hypot(dx, dy, dz) || 1e-6;
+          let dir = 0;
+          if (n.type === 'chase') { const stop = +I('stopAt') || (three ? 1.2 : 36); if (d <= stop) { follow(n, 'caught', ctx); break; } dir = 1; }
+          else if (n.type === 'flee') { const safe = +I('safeDistance') || (three ? 8 : 260); if (d >= safe) { follow(n, 'safe', ctx); break; } dir = -1; }
+          else { const want = +I('distance') || (three ? 4 : 150); dir = Math.abs(d - want) < (three ? 0.1 : 3) ? 0 : d > want ? 1 : -1; }
+          const step = Math.min(sp, n.type === 'chase' ? d : Infinity);
+          e.x += dx / d * step * dir; e.y += dy / d * step * dir; e.z += dz / d * step * dir;
+          if (dir && !three && Math.abs(dx) > 1) e.data.facing = Math.sign(dx * dir);
+          break;
+        }
+        case 'wander': {
+          const three = s.mode === '3d', dt = ctx.dt ?? 1 / 60, sp = (+I('speed') || (three ? 2 : 60)) * dt, R = +I('radius') || (three ? 5 : 150);
+          const home = state.get('home:' + n.id) || state.set('home:' + n.id, { x: e.x, y: e.y, z: e.z }).get('home:' + n.id);
+          let g2 = state.get('goal:' + n.id);
+          const pick = () => { const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * R; return three ? { x: home.x + Math.cos(a) * r, y: e.y, z: home.z + Math.sin(a) * r } : { x: home.x + Math.cos(a) * r, y: home.y + Math.sin(a) * r, z: e.z }; };
+          if (!g2) state.set('goal:' + n.id, (g2 = pick()));
+          const dx = g2.x - e.x, dy = three ? 0 : g2.y - e.y, dz = three ? g2.z - e.z : 0, d = Math.hypot(dx, dy, dz);
+          if (d <= sp) { e.x = g2.x; e.y = three ? e.y : g2.y; e.z = three ? g2.z : e.z; state.set('goal:' + n.id, pick()); }
+          else { e.x += dx / d * sp; e.y += dy / d * sp; e.z += dz / d * sp; }
+          break;
+        }
+        case 'orbit': {
+          const t = nearest(s, e, P('tag')); if (!t) break;
+          const three = s.mode === '3d', dt = ctx.dt ?? 1 / 60, R = +I('radius') || (three ? 3 : 100);
+          let a = state.get('ang:' + n.id); if (a == null) a = Math.atan2(three ? e.z - t.z : e.y - t.y, e.x - t.x);
+          a += (+I('degreesPerSecond') || 0) * DEG * dt; state.set('ang:' + n.id, a);
+          e.x = t.x + Math.cos(a) * R; if (three) e.z = t.z + Math.sin(a) * R; else e.y = t.y + Math.sin(a) * R;
+          break;
+        }
+        case 'patrol': {
+          const three = s.mode === '3d', dt = ctx.dt ?? 1 / 60, vert = P('axis') === 'up / down', k = vert ? (three ? 'z' : 'y') : 'x';
+          const D = +I('distance') || (three ? 4 : 140), sp = (+I('speed') || (three ? 2 : 80)) * dt;
+          const o = state.get('o:' + n.id) ?? state.set('o:' + n.id, e[k]).get('o:' + n.id); let dir = state.get('d:' + n.id) || 1;
+          e[k] += sp * dir;
+          if ((dir > 0 && e[k] >= o + D) || (dir < 0 && e[k] <= o)) { e[k] = dir > 0 ? o + D : o; dir = -dir; state.set('d:' + n.id, dir); if (!vert && !three) e.data.facing = dir; follow(n, 'turned', ctx); }
+          break;
+        }
+        case 'share': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)); if (navigator.share) navigator.share({ text }).catch(() => {}); else navigator.clipboard?.writeText(text).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {}); break; }
+        case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
+        case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
+        case 'uiShow': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };
+          uiAnimate(s, t, show, P('anim') || 'fade', Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'done', later); });
+          break;
+        }
+        case 'openPopup': {
+          const t = uiFind(s, e, P('object')), b = t?.behaviors.find((q) => typeof q.set === 'function' && 'open' in q); if (!b) break;
+          const m = P('mode'); b.set(t, s, m === 'toggle' ? !b.open : m !== 'close'); break;
+        }
+        case 'closeTop': { const m = s.modal; if (m && !m.dead && m.visible && m._dismiss) { m._dismiss(); break; } return follow(n, 'nothing open', ctx); }
+        case 'toast': {
+          s._toast?.destroy();
+          const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), where = P('where') || 'bottom', TH = themeOf(s.settings);
+          const t = s._toast = s.add({ name: '(toast)', ui: true, anchor: where === 'top' ? 'top' : where === 'middle' ? 'center' : 'bottom', x: 0, y: where === 'top' ? 90 : where === 'middle' ? 0 : -120, layer: 8000,
+            shape: { type: 'rect', w: Math.min(360, 40 + text.length * 9), h: 46, radius: 23, fill: P('color') || '#1f2433', stroke: 'rgba(255,255,255,0.12)', lineWidth: 1.5 }, text: { ...TEXT_DEFAULTS, value: text, size: 16, color: TH.text, weight: '700', fit: 330 } });
+          uiAnimate(s, t, true, where === 'top' ? 'slide from top' : where === 'middle' ? 'pop' : 'slide from bottom', 0.22, null, 60);
+          s.after(Math.max(0.3, +I('seconds') || 2), () => { if (!t.dead) uiAnimate(s, t, false, 'fade', 0.25, () => t.destroy()); });
+          break;
+        }
+        case 'alert': case 'confirm': {
+          const fill = (x) => fillTemplate(String(x ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 };
+          const buttons = n.type === 'alert' ? [[P('ok') || 'OK', 'closed', true]] : [[P('no') || 'No', 'no', false], [P('yes') || 'Yes', 'yes', true]];
+          nodeDialog(s, { title: fill(P('title')), text: fill(P('text')), buttons, pause: P('pause') !== false, cancel: n.type === 'alert' ? 'closed' : 'no' }, (v) => follow(n, v, later));
+          return;
+        }
+        case 'askText': {
+          const later = { ...ctx, steps: 0 }, name = P('name') || 'playerName';
+          askTextBox(s, { question: P('question'), placeholder: P('placeholder'), max: P('max'), value: typeof s.vars[name] === 'string' ? s.vars[name] : '' }, (v) => { if (v != null) { s.setVar(name, v); follow(n, 'entered', later); } else follow(n, 'cancelled', later); });
+          return;
+        }
+        case 'uiEnable': { const t = uiFind(s, e, P('object')); if (!t) break; const m = P('mode'), off = m === 'toggle' ? !t.data.uiDisabled : m !== 'enable'; t.data.uiDisabled = off; t.alpha = off ? 0.45 : 1; break; }
+        case 'setImage': { const t = uiFind(s, e, P('object')), src = String(P('image') || '').trim(); if (!t || !src) break; if (t.sprite) t.sprite.src = src; else { const ex = t.extents(); t.sprite = { src, w: (ex.hx || 24) * 2, h: (ex.hy || 24) * 2 }; } break; }
+        case 'setBadge': { const t = uiFind(s, e, P('object')); if (!t) break; t.data.badge = Math.round(+I('number') || 0); t.data.badgeColor = P('color') || ''; break; }
+        case 'setBar': { const t = uiFind(s, e, P('object')); if (!t?.bar) break; if (P('var')) t.bar.var = P('var'); if (+I('max') > 0) { t.bar.max = +I('max'); t.bar.maxVar = ''; } if (P('color')) t.bar.fill = P('color'); break; }
+        case 'uiTheme': s.settings.uiTheme = P('theme') || 'Default'; break;
+        case 'uiOrder': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const front = P('mode') !== 'to back', others = s.entities.filter((q) => q !== t && q.ui === t.ui).map((q) => q.layer || 0);
+          t.layer = others.length ? (front ? Math.max(...others) + 1 : Math.min(...others) - 1) : 0;
+          s.entities.sort((a, b) => a.layer - b.layer); break;
+        }
+        case 'uiSize': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const w = Math.max(1, +I('width') || 1), h = Math.max(1, +I('height') || 1), sec = +I('seconds') || 0, tg = t.shape || t.sprite || t.bar; if (!tg) break;
+          if (sec > 0) s.to(tg, { w, h }, sec, { ease: 'outCubic' }); else { tg.w = w; tg.h = h; } break;
+        }
+        case 'scrollTo': { const t = uiFind(s, e, P('object')); const w = P('where'); t?._scrollTo?.(w === 'bottom' ? 1 : w === 'top' ? 0 : +I('fraction') || 0); break; }
         case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
         case 'overlap': case 'forEachTag': {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
@@ -7835,6 +8205,8 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onTimerDone')) s.on('timerDone', (k) => { if (!e.dead) fire('onTimerDone', e, s, null, (n) => !param(n, 'name') || param(n, 'name') === k); });
+        if (has('onShake', 'tiltValue')) s.engine.input.wantMotion = true;
         if (has('onMyVarChanged', 'whenMyVarReaches')) {
           const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
           const was = new Map(g.nodes.filter((n) => n.type === 'whenMyVarReaches').map((n) => [n.id, test(n, e.data[param(n, 'name')])]));
@@ -7905,6 +8277,22 @@ registerBehavior('graph', {
           if (isNear !== !!near.get(n.id)) { follow(n, isNear ? 'near' : 'left', { s, e, other: t || near.get(n.id + 'o') || null, steps: 0, dt }); near.set(n.id, isNear); if (t) near.set(n.id + 'o', t); }
         }
         if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
+        if (has('onUiTap') && inp.taps.length) for (const n of g.nodes) if (n.type === 'onUiTap') {
+          const k = param(n, 'object'), list = k ? [s.find(k), ...s.findAll(k)].filter(Boolean) : [];
+          const hit = list.find((q) => q.visible && inp.taps.some((t) => hitTest(s, q, t.x, t.y)));
+          if (hit) follow(n, 'then', { s, e, other: hit, steps: 0 });
+        }
+        if (has('onKey', 'onShake', 'onScreenTouch')) {
+          for (const n of g.nodes) {
+            if (n.type === 'onKey') { const k = keyName(param(n, 'key')), w = param(n, 'when'); if (w === 'held' ? inp.keys.has(k) : (w === 'released' ? inp.keysUp : inp.keysDown).includes(k)) follow(n, 'then', { s, e, steps: 0, dt }); }
+            else if (n.type === 'onShake' && inp.shook) follow(n, 'then', { s, e, steps: 0 });
+            else if (n.type === 'onScreenTouch' && inp.downs.length) {
+              const W = s.engine.width, H = s.engine.height, w = param(n, 'where');
+              const ok = inp.downs.some((d) => w === 'left half' ? d.x < W / 2 : w === 'right half' ? d.x >= W / 2 : w === 'top half' ? d.y < H / 2 : w === 'bottom half' ? d.y >= H / 2 : true);
+              if (ok) follow(n, 'then', { s, e, steps: 0 });
+            }
+          }
+        }
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
           else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });
@@ -8702,6 +9090,11 @@ export class Engine {
 
   stepEffects(dt) {
     const s = this.scene;
+    if (s.namedTimers && s.state === 'play' && !s.loading) for (const [k, t] of Object.entries(s.namedTimers)) { // Start Timer nodes; the timer's name is also a variable ({timer} in text)
+      if (!t.running) continue;
+      if (t.down) { t.t = Math.max(0, t.t - dt); const v = Math.ceil(t.t); if (s.vars[k] !== v) s.setVar(k, v); if (t.t <= 0) { t.running = false; s.emit('timerDone', k); } }
+      else { t.t += dt; const v = Math.floor(t.t); if (s.vars[k] !== v) s.setVar(k, v); }
+    }
     for (let i = s.timers.length - 1; i >= 0; i--) {
       const t = s.timers[i];
       if ((t.t -= dt) <= 0) { t.fn(); if (t.every) t.t += t.every; else s.timers.splice(i, 1); }

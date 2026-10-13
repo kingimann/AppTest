@@ -4,12 +4,13 @@
 import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
-const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
+const UI_GROUPS = ['Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB } from './storage.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
+import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { makeCube } from './meshops.js';
@@ -2039,7 +2040,7 @@ function control(target, path, spec) {
       break;
     }
     default: {
-      el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', oninput: (e) => set(e.target.value) });
+      el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', placeholder: spec.placeholder, oninput: (e) => set(e.target.value) });
       const list = spec.suggest && suggestions(spec.suggest);
       if (list?.length) { // Odin-style [ValueDropdown]: type or pick from what exists in the game
         const id = 'dl-' + spec.suggest + '-' + Math.random().toString(36).slice(2, 7);
@@ -2680,8 +2681,32 @@ function renderInspector() {
       showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
       C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
       C('bar.fill', { label: 'Bar color', type: 'color' }), C('bar.bg', { label: 'Background', type: 'color' }),
-      C('bar.radius', { label: 'Roundness', type: 'number', def: 8 }),
-      C('bar.label', { label: 'Show numbers', type: 'bool', def: false }),
+      !j.bar.icon && j.bar.style !== 'ring' && C('bar.radius', { label: 'Roundness', type: 'number', def: 8 }),
+      !j.bar.icon && [
+        h('h5', { class: 'sub-head' }, 'Look'),
+        h('div', { class: 'bar-looks' }, [['', 'Flat'], ['striped', 'Striped'], ['segments', 'Blocks'], ['glossy', 'Glossy'], ['glow', 'Glow']].map(([v, l]) =>
+          h('button', { type: 'button', class: 'btn' + ((j.bar.look || '') === v ? ' primary' : ''), onclick: () => { if (v) j.bar.look = v; else delete j.bar.look; changed({ inspector: true }); } }, l))),
+        j.bar.look === 'segments' && C('bar.segments', { label: 'Blocks', type: 'number', def: 10, step: 1, range: [2, 30] }),
+        j.bar.style === 'ring' ? C('bar.thick', { label: 'Thickness', type: 'number', def: 0.22, step: 0.02, range: [0.05, 0.5] })
+          : C('bar.dir', { label: 'Fills', type: 'select', options: [['right', 'Left → right'], ['left', 'Right → left'], ['up', 'Bottom → top'], ['down', 'Top → bottom'], ['center', 'From the middle']], def: 'right' }),
+        j.bar.style !== 'ring' && C('bar.fill2', { label: 'Gradient to', type: 'color', optional: true }),
+        C('bar.border', { label: 'Border', type: 'color', optional: true }),
+        C('bar.borderWidth', { label: 'Border width', type: 'number', def: 2, step: 1 }),
+        h('h5', { class: 'sub-head' }, 'Motion'),
+        C('bar.smooth', { label: 'Changes', type: 'select', options: [['', 'Smoothly (default)'], ['instant', 'Instantly'], ['snappy', 'Quickly'], ['smooth', 'Gently'], ['slow', 'Slowly']], def: '' }),
+        C('bar.trail', { label: 'Damage trail', type: 'color', optional: true, infoText: 'When the value drops, the lost part stays in this colour for a moment, then slides away (fighting-game health bars).' }),
+        C('bar.lowAt', { label: 'Warn below (0–1)', type: 'number', def: 0, step: 0.05, range: [0, 1], lazy: true }),
+        +j.bar.lowAt > 0 && C('bar.lowColor', { label: 'Warning colour', type: 'color', def: '#ff5252' }),
+        C('bar.busy', { label: 'Busy (unknown progress)', type: 'bool', def: false, infoText: 'A piece sweeps across again and again: for waiting when you don\'t know how long it takes.' }),
+      ],
+      h('h5', { class: 'sub-head' }, 'Label'),
+      C('bar.label', { label: 'Show numbers', type: 'bool', def: false, structure: true }),
+      j.bar.label && [
+        C('bar.labelText', { label: 'Text', def: '', placeholder: j.bar.style === 'ring' ? '{percent}%' : '{value} / {max}', infoText: 'Use {value}, {max}, {percent} and {left}. Empty: ' + (j.bar.style === 'ring' ? '{percent}%' : '{value} / {max}') + '.' }),
+        j.bar.style !== 'ring' && C('bar.labelPos', { label: 'Where', type: 'select', options: [['inside', 'Inside'], ['above', 'Above'], ['below', 'Below'], ['right', 'To the right']], def: 'inside' }),
+        C('bar.labelColor', { label: 'Colour', type: 'color', def: '#ffffff' }),
+        j.bar.style !== 'ring' && C('bar.labelSize', { label: 'Size (0 = auto)', type: 'number', def: 0, step: 1 }),
+      ],
     ], { icon: 'hud', key: 'bar', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.bar; changed({ structure: true }); } }] }));
   }
   if (j.voxels) {
@@ -3085,7 +3110,7 @@ const BEH_META = {
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
+  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
@@ -4126,8 +4151,7 @@ function importJSON() {
 // ---- Build Settings: everything about the playable file a game becomes ----
 const BUILD_DEFAULTS = {
   title: '', version: '1.0', author: '', description: '', file: '',
-  icon: '', iconEmoji: '🎮', iconBg: '#3a8dff',
-  splash: 'logo', splashText: '', splashBg: '', splashTime: 1.2, tapToStart: false,
+  icon: '', iconEmoji: '🎮', iconBg: '#3a8dff', ...LOADING_DEFAULTS,
   startLevel: '1', quality: 'balanced', backGesture: true, installable: true, compress: true,
   noMenu: true, showFps: false, showErrors: false,
 };
@@ -4188,19 +4212,23 @@ async function buildHTML() {
   const manifest = { name: title, short_name: title.slice(0, 12), description: o.description || undefined, display: 'fullscreen', orientation: orient,
     background_color: splashBg, theme_color: bg, start_url: '.', icons: [{ src: iconURL, sizes: '512x512', type: 'image/png', purpose: 'any' }] };
   const json = JSON.stringify(game);
-  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, splash: o.splash, text: o.splashText, time: +o.splashTime || 0, tap: !!o.tapToStart, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author });
+  const L = loadingParts(o, { title, icon: small, bg, font: themeOf(root.settings).font });
+  const gf = (root.settings?.fonts || []).filter(Boolean), nameGF = /^"([^"]+)", system-ui, sans-serif$/.exec(o.nameFont || '')?.[1];
+  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author, fonts: gf });
   let payload, engineBytes, gameBytes;
   if (o.compress && typeof CompressionStream === 'function') {
     const [E, G] = await Promise.all([gzip64(src), gzip64(json)]);
     engineBytes = E.length; gameBytes = G.length;
     payload = `const un = async (b) => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); };
-const [src, game] = await Promise.all([un("${E}"), un("${G}")]);
-const { Engine } = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
-boot(Engine, JSON.parse(game));`;
+LD.set(0.08);
+const src = await un("${E}"); LD.set(0.45);
+const { Engine } = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))); LD.set(0.6);
+const game = JSON.parse(await un("${G}")); LD.set(0.66);
+boot(Engine, game);`;
   } else {
     const code = src.replace(/<\/script/gi, '<\\/script'), data = json.replace(/</g, '\\u003c');
     engineBytes = code.length; gameBytes = data.length;
-    payload = `${code}\nboot(Engine, ${data});`;
+    payload = `${code}\nLD.set(0.6);\nboot(Engine, ${data});`;
   }
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -4212,35 +4240,37 @@ boot(Engine, JSON.parse(game));`;
 ${o.description ? `<meta name="description" content="${escHTML(o.description)}">\n` : ''}${o.author ? `<meta name="author" content="${escHTML(o.author)}">\n` : ''}<meta name="generator" content="Pocket Engine">
 <title>${escHTML(title)}</title>
 <link rel="icon" type="image/png" href="${small}"><link rel="apple-touch-icon" href="${small}">
-${o.installable !== false ? `<link rel="manifest" href="data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}">\n` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
-#splash{position:fixed;inset:0;z-index:99;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:${splashBg};color:#fff;font:600 20px -apple-system,system-ui,sans-serif;text-align:center;transition:opacity .4s}
-#splash img{width:96px;height:96px;border-radius:22px;box-shadow:0 8px 30px rgba(0,0,0,.35)}#splash small{font-weight:400;opacity:.7;font-size:14px;padding:0 24px}
-#splash .tap{margin-top:18px;font-size:16px;opacity:.9;animation:pk 1.2s ease-in-out infinite}@keyframes pk{50%{opacity:.35}}
-#splash .bar{width:120px;height:4px;border-radius:2px;background:rgba(255,255,255,.18);overflow:hidden}#splash .bar i{display:block;height:100%;width:40%;background:#fff;animation:ld 1s ease-in-out infinite}@keyframes ld{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+${o.installable !== false ? `<link rel="manifest" href="data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}">\n` : ''}${nameGF ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(nameGF).replace(/%20/g, '+')}&display=swap">\n` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+${L.css}
 #fps{position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:98;font:12px monospace;color:#0f0;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;pointer-events:none}
 #err{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);z-index:100;background:#b3261e;color:#fff;font:13px/1.4 monospace;padding:10px 12px;border-radius:10px;white-space:pre-wrap;max-height:40%;overflow:auto}</style>
 </head><body>
-<div id="splash"${o.splash === 'none' && !o.tapToStart ? ' hidden' : ''}>${o.splash === 'logo' ? `<img src="${small}" alt=""><div>${escHTML(title)}</div>` : ''}${o.splashText ? `<small>${escHTML(o.splashText)}</small>` : ''}<div class="bar"><i></i></div></div>
-<script>window.POCKET_BUILD = ${cfg.replace(/</g, '\\u003c')};</script>
+${L.html}
+<script>window.POCKET_BUILD = ${cfg.replace(/</g, '\\u003c')};
+${L.js}</script>
 <script type="module">
-const C = window.POCKET_BUILD, t0 = performance.now();
+const C = window.POCKET_BUILD, LD = window.PocketLoading;
 if (C.noMenu) { addEventListener('contextmenu', (e) => e.preventDefault()); document.documentElement.style.webkitUserSelect = 'none'; }
 if (C.errors) { const show = (m) => { let d = document.getElementById('err'); if (!d) { d = document.createElement('div'); d.id = 'err'; d.onclick = () => d.remove(); document.body.appendChild(d); } d.textContent = (d.textContent ? d.textContent + '\\n' : '') + m; };
   addEventListener('error', (e) => show(e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''))); addEventListener('unhandledrejection', (e) => show(String(e.reason && e.reason.message || e.reason))); }
-function boot(Engine, game) {
-  const sp = document.getElementById('splash'), wait = Math.max(0, C.splash === 'none' ? 0 : C.time * 1000 - (performance.now() - t0));
-  const go = () => {
+/** Real progress: the pictures the game uses and its fonts (up to a few seconds), then the loading screen leaves. */
+async function preload(game) {
+  const pics = new Set();
+  const walk = (v) => { if (typeof v === 'string') { if (/^data:image\\//.test(v) || /^https?:.*\\.(png|jpe?g|gif|webp|svg)(\\?|$)/i.test(v)) pics.add(v); } else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') for (const k in v) walk(v[k]); };
+  walk(game);
+  const jobs = [...pics].map((u) => new Promise((ok) => { const i = new Image(); i.onload = i.onerror = ok; i.src = u; }));
+  for (const f of C.fonts || []) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(f).replace(/%20/g, '+') + '&display=swap'; jobs.push(new Promise((ok) => { l.onload = () => (document.fonts ? document.fonts.load('16px "' + f + '"').then(ok, ok) : ok()); l.onerror = ok; })); document.head.appendChild(l); }
+  let n = 0; const all = jobs.length;
+  if (!all) return;
+  await Promise.race([Promise.all(jobs.map((j) => j.then(() => LD.set(0.66 + 0.32 * (++n / all))))), new Promise((ok) => setTimeout(ok, 6000))]);
+}
+async function boot(Engine, game) {
+  await preload(game); LD.set(1);
+  LD.done(() => {
     window.engine = new Engine({ maxPixelRatio: C.dpr, systemBack: C.back });
     window.engine.start(game, { level: C.start });
-    if (sp && !sp.hidden) { sp.style.opacity = 0; setTimeout(() => sp.remove(), 450); }
     if (C.fps) { const f = document.createElement('div'); f.id = 'fps'; document.body.appendChild(f); let n = 0, last = performance.now(); const tick = (now) => { n++; if (now - last >= 500) { f.textContent = Math.round(n * 1000 / (now - last)) + ' fps'; n = 0; last = now; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
-  };
-  setTimeout(() => {
-    if (!C.tap) return go();
-    const bar = sp.querySelector('.bar'); if (bar) bar.remove();
-    const t = document.createElement('div'); t.className = 'tap'; t.textContent = 'Tap to start'; sp.appendChild(t);
-    sp.addEventListener('pointerup', go, { once: true });
-  }, wait);
+  });
 }
 ${payload}
 </script>
@@ -4263,6 +4293,97 @@ async function testBuild() {
   const w = window.open('', '_blank');
   try { const b = await buildHTML(), url = URL.createObjectURL(new Blob([b.html], { type: 'text/html' })); if (w) w.location = url; else location.assign(url); setTimeout(() => URL.revokeObjectURL(url), 60000); }
   catch (err) { w?.close(); toast('Build failed: ' + err.message); }
+}
+
+const ldOpen = new Set(['Background']); // which loading-screen groups are unfolded
+/** Build Settings → Loading screen: presets, a live phone preview and every setting, in folding groups. */
+function loadingDesigner(B, C, o, redo) {
+  const frame = h('iframe', { class: 'ld-frame', title: 'Loading screen preview', sandbox: 'allow-scripts' });
+  const doc = async (preview) => {
+    const cur = buildOpts(), title = cur.title || root.name || 'My Game', bg = hexOr(root.background, '#000000');
+    const L = loadingParts(cur, { title, icon: await makeIcon(cur, 180), bg, font: themeOf(root.settings).font, preview });
+    const gfName = /^"([^"]+)", system-ui, sans-serif$/.exec(cur.nameFont || '')?.[1];
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${gfName ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(gfName).replace(/%20/g, '+')}&display=swap">` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden}${L.css}</style></head><body>${L.html}<div style="position:fixed;inset:0;display:grid;place-items:center;color:#fff8;font:600 15px system-ui;z-index:0">Your game starts here</div><script>${L.js}</script></body></html>`;
+  };
+  let tm = 0;
+  const refresh = () => { clearTimeout(tm); tm = setTimeout(async () => { frame.srcdoc = await doc(true); }, 150); };
+  refresh();
+  const full = async () => { // the real thing, full screen: fills up, waits, leaves, then offers to replay
+    const f = h('iframe', { class: 'ld-full-frame', sandbox: 'allow-scripts' });
+    const play = async () => { const d = await doc(false); f.srcdoc = d.replace('</body>', `<script>var s=[0.2,0.45,0.5,0.75,0.9,1],i=0;var iv=setInterval(function(){PocketLoading.set(s[i++]);if(i>=s.length){clearInterval(iv);PocketLoading.done(function(){})}},400);</script></body>`); };
+    const wrap = h('div', { class: 'ld-full' }, f, h('div', { class: 'ld-full-btns' },
+      h('button', { class: 'btn', onclick: play }, icon('redo'), 'Replay'), h('button', { class: 'btn primary', onclick: () => wrap.remove() }, icon('close'), 'Close')));
+    document.body.append(wrap); play();
+  };
+  const fonts = [['', 'Game font'], ...FONTS.filter(([v]) => v !== 'theme'), ...(root.settings?.fonts || []).filter(Boolean).map((n) => [googleFont(n), n + ' (Google)'])];
+  const pic = (key, label, max) => h('div', { class: 'row full' }, h('label', {}, label), h('div', { class: 'pair img-pick' },
+    o[key] ? h('img', { class: 'img-thumb', src: o[key], alt: '' }) : h('span', { class: 'muted' }, 'None'),
+    h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { B()[key] = url; changed(); redo(); }, max) }, o[key] ? 'Change' : 'Choose image'),
+    o[key] ? h('button', { type: 'button', class: 'btn', onclick: () => { B()[key] = ''; changed(); redo(); } }, 'Clear') : null));
+  const R = C;
+  const sel = (path, spec) => { const el = C(path, spec); el.querySelector('select')?.addEventListener('change', redo); return el; };
+  const group = (title, kids) => h('details', { class: 'ld-group', open: ldOpen.has(title), ontoggle: (e) => { if (e.target.open) ldOpen.add(title); else ldOpen.delete(title); } }, h('summary', {}, title), kids);
+  const hasAmount = !['dots', 'spinner', 'none'].includes(o.bar);
+  const wrap = h('div', { class: 'ld' },
+    h('div', { class: 'ld-top' },
+      h('div', { class: 'ld-phone' }, frame),
+      h('div', { class: 'ld-side' },
+        h('div', { class: 'ld-presets' }, Object.keys(LOADING_PRESETS).map((n) => h('button', { type: 'button', class: 'btn', onclick: () => { Object.assign(B(), LOADING_PRESETS[n]); changed(); redo(); toast(n + ' look'); } }, n))),
+        h('button', { type: 'button', class: 'btn', onclick: full }, icon('play'), 'Preview'))),
+    sel('splash', { label: 'Show', type: 'select', options: [['logo', 'Picture and name'], ['text', 'Name and text only'], ['none', 'Nothing (start right away)']] }),
+    o.splash !== 'none' && [
+      group('Background', [
+        R('splashBg', { label: 'Colour', type: 'color', optional: true }),
+        R('splashBg2', { label: 'Second colour', type: 'color', optional: true }),
+        o.splashBg2 && R('splashGrad', { label: 'Blend', type: 'select', options: [['down', 'Top to bottom'], ['across', 'Left to right'], ['diagonal', 'Diagonal'], ['glow', 'Glow from the middle']] }),
+        pic('splashImage', 'Picture', 1280),
+        o.splashImage && [R('splashFit', { label: 'Picture fits', type: 'select', options: [['cover', 'Fill the screen'], ['contain', 'Whole picture'], ['tile', 'Repeat (tiles)']] }),
+          R('splashDim', { label: 'Darken picture', type: 'number', step: 0.05, range: [0, 0.9] })],
+      ]),
+      group('Logo and name', [
+        o.splash === 'logo' && [
+          sel('logo', { label: 'Picture', type: 'select', options: [['icon', 'The app icon'], ['picture', 'Another picture'], ['none', 'None']] }),
+          o.logo === 'picture' && pic('logoImage', 'Logo picture', 512),
+          o.logo !== 'none' && [R('logoSize', { label: 'Size', type: 'number', step: 8, range: [40, 220] }),
+            R('logoShape', { label: 'Shape', type: 'select', options: [['rounded', 'Rounded square'], ['circle', 'Circle'], ['square', 'Square'], ['none', 'As it is (no frame)']] }),
+            R('logoAnim', { label: 'Animation', type: 'select', options: [['none', 'None'], ['pulse', 'Pulse'], ['bounce', 'Bounce'], ['float', 'Float'], ['spin', 'Spin'], ['glow', 'Glow']] })],
+        ],
+        R('showName', { label: 'Show the name', type: 'bool' }),
+        R('nameFont', { label: 'Font', type: 'select', options: fonts }),
+        R('nameColor', { label: 'Colour', type: 'color' }),
+        R('nameSize', { label: 'Size', type: 'number', step: 2, range: [12, 60] }),
+      ]),
+      group('Loading bar', [
+        h('div', { class: 'ld-bars' }, BAR_STYLES.map(([v, l]) => h('button', { type: 'button', class: 'btn' + (o.bar === v ? ' primary' : ''), onclick: () => { B().bar = v; changed(); redo(); } }, l))),
+        o.bar !== 'none' && [
+          R('barColor', { label: 'Colour', type: 'color' }),
+          hasAmount && o.bar !== 'ring' && o.bar !== 'blocks' && R('barColor2', { label: 'Blend to', type: 'color', optional: true }),
+          R('barTrack', { label: 'Empty part', def: '', placeholder: 'rgba(255,255,255,0.18)' }),
+          hasAmount && R('barWidth', { label: 'Width', type: 'number', step: 10, range: [60, 340] }),
+          R('barPos', { label: 'Where', type: 'select', options: [['under', 'Under the name'], ['bottom', 'Near the bottom']] }),
+          hasAmount && R('barLabel', { label: 'Label', def: '', placeholder: o.bar === 'thick' || o.bar === 'ring' ? '{percent}%' : 'e.g. Loading… {percent}%' }),
+          hasAmount && h('p', { class: 'desc' }, 'The bar follows the real loading: unpacking the game, then its pictures and fonts. {percent} shows the amount.'),
+        ],
+      ]),
+      group('Text and tips', [
+        R('splashText', { label: 'Text', def: '' }),
+        R('textColor', { label: 'Text colour', type: 'color', optional: true }),
+        R('tips', { label: 'Tips (separate with |)', def: '', placeholder: 'Tip: jump twice to fly | Tip: coins buy hats' }),
+        R('tipEvery', { label: 'Next tip every (sec)', type: 'number', step: 0.5, range: [1, 10] }),
+        R('credit', { label: '“Made with Pocket Engine”', type: 'bool' }),
+      ]),
+    ],
+    group('Finish', [
+      R('splashTime', { label: 'Show for at least (sec)', type: 'number', step: 0.5, range: [0, 6] }),
+      R('tapToStart', { label: 'Tap to Start', type: 'bool' }),
+      R('tapText', { label: 'Tap text', def: 'Tap to start' }),
+      R('exit', { label: 'Leaves with', type: 'select', options: [['fade', 'Fade'], ['slide up', 'Slide up'], ['zoom', 'Zoom'], ['wipe', 'Circle wipe'], ['none', 'Cut']] }),
+      h('p', { class: 'desc' }, 'Tap to Start waits for a tap before the game begins, so sounds and music can play straight away (phones need a tap first).'),
+    ]),
+  );
+  wrap.addEventListener('input', refresh);
+  wrap.addEventListener('change', (e) => { refresh(); if (e.target.matches('input[type=checkbox], select') && !e.target.closest('.ld-top')) redo(); }); // fields that show or hide other fields
+  return wrap;
 }
 
 function openBuildSettings() {
@@ -4310,14 +4431,7 @@ function openBuildSettings() {
       h('div', { class: 'row' }, h('label', {}, 'Background'), h('input', { type: 'color', value: hexOr(o.iconBg, '#3a8dff').slice(0, 7), onchange: (e) => { B().iconBg = e.target.value; changed(); redo(); } })),
       h('p', { class: 'desc' }, 'Shown on the Home Screen, in the browser tab and on the loading screen.'),
     ]),
-    sec('Loading screen', 'clock', [
-      C('splash', { label: 'Show', type: 'select', options: [['logo', 'Icon and name'], ['text', 'Text only'], ['none', 'Nothing']] }),
-      C('splashText', { label: 'Text', def: '' }),
-      C('splashBg', { label: 'Colour', type: 'color', optional: true }),
-      C('splashTime', { label: 'At least (sec)', type: 'number', step: 0.5, range: [0, 5] }),
-      C('tapToStart', { label: 'Tap to Start', type: 'bool' }),
-      h('p', { class: 'desc' }, 'Tap to Start waits for a tap before the game begins, so sounds and music can play straight away (phones need a tap first).'),
-    ]),
+    sec('Loading screen', 'clock', loadingDesigner(B, C, o, redo)),
     sec('Levels', 'layers', [
       lvls.length > 1 ? h('div', { class: 'build-lvls' }, lvls.map((lv, i) => h('label', { class: 'build-lvl' },
         h('input', { type: 'checkbox', checked: !lv.buildSkip, disabled: i === 0, onchange: (e) => { if (e.target.checked) delete lv.buildSkip; else lv.buildSkip = true; changed(); updateReport(); } }),

@@ -84,7 +84,13 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 **Build Settings** (*☰ → Build Settings…*, or **Build…** at the bottom of Scene Settings) decide what that file becomes:
 - **App:** name, version, author, description and file name.
 - **Icon:** your own picture, or an emoji on a colour. It shows on the Home Screen, in the browser tab and on the loading screen.
-- **Loading screen:** icon and name, text only, or nothing; its colour, a minimum time, and **Tap to Start** (so music can play straight away).
+- **Loading screen designer**, with a live phone preview and a full-screen **Preview**:
+  - **Presets:** Classic, Minimal, Neon, Retro, Candy, Cinematic, Storybook and Arcade, set in one tap.
+  - **Background:** a colour, a second colour blended in (top to bottom, across, diagonal or a glow from the middle), and your own picture (fill, whole or tiled, with darkening).
+  - **Logo and name:** the app icon, another picture or none; size, shape (rounded, circle, square, as it is) and animation (pulse, bounce, float, spin, glow); the name's font (including the game's Google Fonts), colour and size.
+  - **Loading bar:** thin line, rounded, thick with %, striped (moving), retro blocks, glowing, ring, bouncing dots, spinner or none. Set its colours (with a blend), the empty part, width, position and a label with `{percent}`. The bar follows the real loading: unpacking the engine and game, then the game's pictures and fonts.
+  - **Text and tips:** extra text, rotating tips (separate with `|`) and an optional "Made with Pocket Engine" line.
+  - **Finish:** minimum time, **Tap to Start** with your own text (so music can play straight away), and how it leaves (fade, slide up, zoom, circle wipe or cut).
 - **Levels:** untick unfinished levels to leave them out, and pick the level to start at (handy for testing).
 - **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, blocking long-press menus, and whether it can be added to the Home Screen as an app.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
@@ -271,6 +277,14 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 ### Character Controller 2D
 
 - One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle) and Grid steps. Only the settings that matter for the chosen type are shown, with a tip for each.
+
+### Progress bars and in-game loading screens
+
+- **Progress Bar** looks: flat, striped (moving), blocks, glossy or glowing. Bars can fill left to right, right to left, bottom to top, top to bottom or from the middle, blend to a second colour and have a border.
+- **Motion:** how fast it follows the value, a **damage trail** (the lost part lingers, then slides away), a **warning colour** that pulses below a set amount, and **Busy** for waiting when you don't know how long it takes.
+- **Label:** your own text with `{value}`, `{max}`, `{percent}` and `{left}`, placed inside, above, below or to the right, with its colour and size. Rings get a thickness, blocks and glow too.
+- **Loading Screen** component (on a full-screen panel): fills a variable (`loading`) from 0 to 100 with a pace (realistic stops and starts, steady, fast then slow, slow then fast, or steps), waits for pictures and fonts, rotates tips into `{tip}`, pauses the game and hides touch controls while it shows, can wait for a tap at 100%, then hides with a fade, slide or zoom and does an action (by default it sends the message `loaded`). It can start with the game or when a message arrives.
+- **Project → UI → Loading:** ready-made Classic, Retro and Ring loading screens, a **Level Loading** screen that appears on the message `loading` and then goes to the next level, plus Striped Loading Bar, Busy Bar, Battery Blocks, Boss Health with a damage trail, Vertical Gauge and Loading Ring.
 
 ### Tap and click components
 

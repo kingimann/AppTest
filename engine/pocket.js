@@ -1887,6 +1887,95 @@ function drawTiles2D(ctx, e) {
   }
   ctx.restore();
 }
+/** Smoothed fill (and the delayed "damage" trail) of a progress bar, kept on the entity. */
+function barSmooth(e, b, k, time) {
+  const D = e.data, sp = { instant: 1, snappy: 0.4, smooth: 0.18, slow: 0.06 }[b.smooth] ?? 0.25;
+  D._barK = D._barK == null ? k : D._barK + (k - D._barK) * sp;
+  if (b.trail) {
+    if (D._barT == null || k >= D._barT) { D._barT = Math.max(k, D._barK); D._barHold = 0; }
+    else { if (!D._barHold) D._barHold = time + 0.45; if (time > D._barHold) D._barT += (k - D._barT) * 0.07; }
+  }
+  return D._barK;
+}
+/** The bar's colour: its low-value colour (pulsing) when nearly empty. */
+function barColor(b, k, time) {
+  if (+b.lowAt > 0 && k <= +b.lowAt && b.lowColor) return b.lowColor;
+  return b.fill;
+}
+/** Label text: {value}, {max}, {percent} and {left} (what's missing). */
+function barLabel(b, v, max, k, def) {
+  const t = b.labelText || def;
+  return t.replace(/\{(value|max|percent|left)\}/g, (_, n) => (n === 'value' ? formatNumber(Math.round(v * 10) / 10) : n === 'max' ? formatNumber(max) : n === 'left' ? formatNumber(Math.max(0, Math.round((max - v) * 10) / 10)) : String(Math.round(k * 100))));
+}
+/** A straight progress bar: direction, gradient, stripes / segments / gloss / glow, border, trail, low warning, busy (unknown progress) and label. */
+function drawBar(ctx, e, b, k, v, max, time, alpha) {
+  const W = b.w, H = b.h, x0 = -W / 2, y0 = -H / 2, R = Math.min(+b.radius || 0, H / 2, W / 2), dir = b.dir || 'right', vert = dir === 'up' || dir === 'down';
+  const kk = barSmooth(e, b, k, time), col = barColor(b, k, time);
+  const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), Math.max(0, Math.min(r, w / 2, h / 2))); else ctx.rect(x, y, w, h); };
+  const span = (a, f) => { // the part of the track from a to f (0..1) along the bar's direction
+    switch (dir) {
+      case 'left': return [x0 + W * (1 - f), y0, W * (f - a), H];
+      case 'up': return [x0, y0 + H * (1 - f), W, H * (f - a)];
+      case 'down': return [x0, y0 + H * a, W, H * (f - a)];
+      case 'center': return [-W * f / 2, y0, W * f, H];
+      default: return [x0 + W * a, y0, W * (f - a), H];
+    }
+  };
+  const paint = () => {
+    if (!b.fill2) return col;
+    const g = vert ? ctx.createLinearGradient(0, dir === 'up' ? y0 + H : y0, 0, dir === 'up' ? y0 : y0 + H) : ctx.createLinearGradient(dir === 'left' ? x0 + W : x0, 0, dir === 'left' ? x0 : x0 + W, 0);
+    g.addColorStop(0, col); g.addColorStop(1, b.fill2); return g;
+  };
+  const lowPulse = +b.lowAt > 0 && k <= +b.lowAt ? 0.7 + 0.3 * Math.sin(time * 10) : 1;
+  if (b.look === 'segments') { // blocks with gaps, like a battery or a retro loader
+    const n = clamp(Math.round(+b.segments || 10), 2, 60), gap = Math.max(2, (vert ? H : W) * 0.02), len = ((vert ? H : W) - gap * (n - 1)) / n, lit = kk * n;
+    for (let i = 0; i < n; i++) {
+      const o = i * (len + gap), rev = dir === 'left' || dir === 'up';
+      const [x, y, w, h] = vert ? [x0, rev ? y0 + H - o - len : y0 + o, W, len] : [rev ? x0 + W - o - len : x0 + o, y0, len, H];
+      rr(x, y, w, h, Math.min(R, 4)); ctx.fillStyle = b.bg; ctx.fill();
+      const f = clamp(lit - i, 0, 1);
+      if (f > 0) { ctx.globalAlpha = alpha * (f < 1 ? 0.35 + 0.65 * f : 1) * lowPulse; if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = H * 0.6; } ctx.fillStyle = paint(); rr(x, y, w, h, Math.min(R, 4)); ctx.fill(); ctx.shadowBlur = 0; ctx.globalAlpha = alpha; }
+      if (b.border) { ctx.strokeStyle = b.border; ctx.lineWidth = +b.borderWidth || 2; rr(x, y, w, h, Math.min(R, 4)); ctx.stroke(); }
+    }
+  } else {
+    rr(x0, y0, W, H, R); ctx.fillStyle = b.bg; ctx.fill();
+    if (b.look === 'glow' && !b.busy && kk > 0.001) { const [x, y, w, h] = span(0, kk); ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = Math.max(8, H); ctx.fillStyle = col; rr(x, y, w, h, R); ctx.fill(); ctx.restore(); } // the glow spills outside the track
+    ctx.save(); rr(x0, y0, W, H, R); ctx.clip();
+    if (b.busy) { // unknown progress: a piece sweeps across, again and again
+      const p0 = ((time * 0.9) % 1.4) - 0.4, a = clamp(p0, 0, 1), f = clamp(p0 + 0.4, 0, 1);
+      const [x, y, w, h] = dir === 'center' ? span(0, 1) : span(a, f);
+      if (w > 0 && h > 0) { ctx.fillStyle = paint(); if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = H; } rr(x, y, w, h, R); ctx.fill(); ctx.shadowBlur = 0; }
+    } else {
+      if (b.trail && e.data._barT > kk + 0.002) { const [x, y, w, h] = span(0, e.data._barT); ctx.fillStyle = b.trail; rr(x, y, w, h, R); ctx.fill(); }
+      if (kk > 0.001) {
+        const [x, y, w, h] = span(0, kk);
+        ctx.globalAlpha = alpha * lowPulse;
+        if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = Math.max(6, H * 0.8); }
+        ctx.fillStyle = paint(); rr(x, y, w, h, R); ctx.fill(); ctx.shadowBlur = 0;
+        if (b.look === 'striped') { // moving diagonal stripes
+          ctx.save(); rr(x, y, w, h, R); ctx.clip(); ctx.fillStyle = 'rgba(255,255,255,0.22)';
+          const st = Math.max(8, Math.min(W, H) * 0.9), off = (time * st * 1.5) % (st * 2), L = Math.max(W, H);
+          ctx.beginPath(); for (let q = -L - st * 2 + off; q < L + st * 2; q += st * 2) { ctx.moveTo(x0 + q, y0 + H); ctx.lineTo(x0 + q + st, y0 + H); ctx.lineTo(x0 + q + st + H, y0); ctx.lineTo(x0 + q + H, y0); ctx.closePath(); }
+          ctx.fill(); ctx.restore();
+        }
+        if (b.look === 'glossy') { ctx.fillStyle = 'rgba(255,255,255,0.28)'; if (vert) ctx.fillRect(x, y, w * 0.45, h); else ctx.fillRect(x, y, w, h * 0.45); }
+        ctx.globalAlpha = alpha;
+      }
+    }
+    ctx.restore();
+    if (b.border) { ctx.strokeStyle = b.border; ctx.lineWidth = +b.borderWidth || 2; rr(x0, y0, W, H, R); ctx.stroke(); }
+  }
+  if (b.label) {
+    const sz = Math.round(+b.labelSize || Math.min(vert ? W : H, 40) * 0.7);
+    ctx.font = `800 ${sz}px ${fontOf(b.font)}`; ctx.fillStyle = b.labelColor || '#fff'; ctx.textBaseline = 'middle';
+    const txt = b.busy ? (b.labelText || '').replace(/\{(value|max|percent|left)\}/g, '') : barLabel(b, v, max, k, '{value} / {max}');
+    const pos = b.labelPos || 'inside';
+    if (pos === 'above') { ctx.textAlign = 'center'; ctx.fillText(txt, 0, y0 - sz * 0.75); }
+    else if (pos === 'below') { ctx.textAlign = 'center'; ctx.fillText(txt, 0, y0 + H + sz * 0.75); }
+    else if (pos === 'right') { ctx.textAlign = 'left'; ctx.fillText(txt, x0 + W + 8, 1); }
+    else { ctx.textAlign = 'center'; ctx.fillText(txt, 0, 1); }
+  }
+}
 function drawEntity2D(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
@@ -1972,28 +2061,25 @@ function drawEntity2D(ctx, e, vars, time) {
     const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
     const k = clamp((+src[key] || 0) / max, 0, 1);
     if (b.style === 'ring') { // radial / circular progress
-      const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * 0.22);
-      e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
-      ctx.lineWidth = lw; ctx.lineCap = 'round';
-      ctx.strokeStyle = b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, 0, Math.PI * 2); ctx.stroke();
-      if (e.data._barK > 0.001) { ctx.strokeStyle = b.fill; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * e.data._barK); ctx.stroke(); }
-      if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${Math.round(k * 100)}%`, 0, 1); }
+      const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * (+b.thick || 0.22)), kk = barSmooth(e, b, k, time), a0 = -Math.PI / 2;
+      ctx.lineWidth = lw; ctx.lineCap = b.look === 'segments' ? 'butt' : 'round';
+      if (b.look === 'segments') { const n = clamp(Math.round(+b.segments || 10), 2, 60), gap = 0.06; ctx.setLineDash([]); for (let i = 0; i < n; i++) { const s0 = a0 + (i / n) * Math.PI * 2 + gap / 2, s1 = a0 + ((i + 1) / n) * Math.PI * 2 - gap / 2; ctx.strokeStyle = i < Math.round(kk * n) ? barColor(b, k, time) : b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, s0, s1); ctx.stroke(); } }
+      else {
+        ctx.strokeStyle = b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, 0, Math.PI * 2); ctx.stroke();
+        if (b.busy) { const p0 = (time * 1.4) % 1; ctx.strokeStyle = barColor(b, k, time); ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0 + p0 * Math.PI * 2, a0 + (p0 + 0.28) * Math.PI * 2); ctx.stroke(); }
+        else {
+          if (b.trail && e.data._barT > kk + 0.002) { ctx.strokeStyle = b.trail; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0, a0 + Math.PI * 2 * e.data._barT); ctx.stroke(); }
+          if (kk > 0.001) { if (b.look === 'glow') { ctx.shadowColor = barColor(b, k, time); ctx.shadowBlur = lw; } ctx.strokeStyle = barColor(b, k, time); ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0, a0 + Math.PI * 2 * kk); ctx.stroke(); ctx.shadowBlur = 0; }
+        }
+      }
+      if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px ${fontOf(b.font)}`; ctx.fillStyle = b.labelColor || '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(barLabel(b, +src[key] || 0, max, k, '{percent}%'), 0, 1); }
     } else if (b.icon) { // hearts-style: one icon per point, empty ones faded
       const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
       const img = /^(art:|https?:|data:|blob:|\.?\/)/.test(b.icon) ? loadImage(b.icon) : null; // a sprite (art:heart) or a text symbol (★)
       ctx.font = `900 ${Math.round(sz)}px system-ui, sans-serif, "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = b.color || b.fill || '#ffffff';
       for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); if (img) { if (img.complete && img.naturalWidth) ctx.drawImage(img, x0 + i * gap - sz / 2, -sz / 2, sz, sz); } else ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
       ctx.globalAlpha = alpha;
-    } else {
-    e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
-    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w, b.h);
-    ctx.fillStyle = b.bg; ctx.fill();
-    if (e.data._barK > 0.001) {
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h);
-      ctx.fillStyle = b.fill; ctx.fill();
-    }
-    if (b.label) { ctx.font = `800 ${Math.round(b.h * 0.7)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${formatNumber(+src[key] || 0)} / ${formatNumber(max)}`, 0, 1); }
-    }
+    } else drawBar(ctx, e, b, k, +src[key] || 0, max, time, alpha);
   }
   if (e.text) {
     const t = e.text;
@@ -2774,7 +2860,7 @@ function renderUI(engine, scene) {
   const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
-  if (scene.state === 'play' && !engine.paused) {
+  if (scene.state === 'play' && !engine.paused && !scene.loading) { // (a Loading Screen hides the touch controls)
     ctx.save();
     ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
@@ -2819,12 +2905,13 @@ function renderUI(engine, scene) {
     }
     ctx.restore();
   }
-  if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
-    ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
+  const lt = scene.time - (scene.loadedAt || 0); // the level banner shows once a Loading Screen is gone
+  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading) {
+    ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2);
     big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
     ctx.globalAlpha = 1;
   }
-  drawMessage(ctx, scene, W, H, engine);
+  if (!scene.loading) drawMessage(ctx, scene, W, H, engine);
   if (scene.dialog) drawDialog(ctx, scene, W, H, engine);
   if (scene.rotateNeeded) {
     dim(0.9);
@@ -2832,6 +2919,7 @@ function renderUI(engine, scene) {
     big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
     return;
   }
+  if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && engine.inspecting)) return; // the editor's Inspect keeps the view clear
   if (engine.paused) {
@@ -5506,6 +5594,101 @@ const ACTION_PARAMS = [
   { key: 'amount', label: 'Amount (for variables)', type: 'number', default: 1 },
   { key: 'sound', label: 'Sound', type: 'select', options: ['none', 'coin', 'power', 'jump', 'hit', 'click', 'win', 'lose'], default: 'none' },
 ];
+
+/** Loading Screen: fills a variable 0 → 100 like a real loader, shows tips, waits for pictures and fonts, then hides the screen and does something. */
+registerBehavior('loader', {
+  label: 'Loading Screen', description: 'Fills a variable from 0 to 100 like a loading bar, shows tips, then fades this screen (and everything in it) away and does something. Put it on a full-screen panel with a Progress Bar set to the same variable and a text showing {loading}% or {tip}.',
+  params: [
+    { key: 'var', label: 'Progress variable (0–100)', type: 'text', default: 'loading', suggest: 'vars' },
+    { key: 'seconds', label: 'Takes (seconds)', type: 'number', default: 2.5 },
+    { key: 'pace', label: 'Pace', type: 'select', options: ['realistic (stops and starts)', 'steady', 'fast then slow', 'slow then fast', 'steps'], default: 'realistic (stops and starts)' },
+    { key: 'waitAssets', label: 'Wait for pictures and fonts', type: 'bool', default: true },
+    { key: 'startOn', label: 'Starts', type: 'select', options: ['when the game starts', 'on a message'], default: 'when the game starts' },
+    { key: 'message', label: 'Message that starts it', type: 'text', default: 'loading', suggest: 'messages', showIf: { startOn: ['on a message'] } },
+    { key: 'pauseGame', label: 'Pause the game while loading', type: 'bool', default: true },
+    { key: 'tips', label: 'Tips (separate with |)', type: 'text', default: 'Tip: jump on enemies to beat them | Tip: collect coins for extra lives', group: 'Tips' },
+    { key: 'tipVar', label: 'Tip variable', type: 'text', default: 'tip', group: 'Tips' },
+    { key: 'tipEvery', label: 'Next tip every (sec)', type: 'number', default: 3, group: 'Tips' },
+    { key: 'tapToContinue', label: 'Wait for a tap at 100%', type: 'bool', default: false, group: 'When it\'s done' },
+    { key: 'tapText', label: 'Tap text (shown as the tip)', type: 'text', default: 'Tap to continue', group: 'When it\'s done', showIf: { tapToContinue: [true] } },
+    { key: 'hideSelf', label: 'Hide this screen', type: 'bool', default: true, group: 'When it\'s done' },
+    { key: 'exit', label: 'Hide with', type: 'select', options: ['fade', 'slide up', 'slide down', 'zoom', 'instant'], default: 'fade', group: 'When it\'s done', showIf: { hideSelf: [true] } },
+    { key: 'fade', label: 'Hide time (sec)', type: 'number', default: 0.4, group: 'When it\'s done', showIf: { hideSelf: [true] } },
+    { ...ACTION_PARAMS[0], default: 'send message', group: 'When it\'s done' },
+    { ...ACTION_PARAMS[1], default: 'loaded', group: 'When it\'s done' },
+    { ...ACTION_PARAMS[2], group: 'When it\'s done' },
+    { ...ACTION_PARAMS[3], group: 'When it\'s done' },
+  ],
+  create(p) {
+    let t = 0, running = false, waiting = false, shown = 0, tipI = 0, tipT = 0, pts = null, home = null, wasPaused = false;
+    const tips = () => String(p.tips || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const assetsReady = () => { for (const img of images.values()) if (!img.complete) return false; return typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded'; };
+    const realistic = () => { // a few bursts with stalls in between, different every time
+      const out = [[0, 0]]; let tv = 0, vv = 0; const n = 5;
+      for (let i = 0; i < n; i++) { tv += 0.5 + Math.random(); vv += Math.random() < 0.3 ? 0.15 : 0.5 + Math.random(); out.push([tv, vv]); }
+      return out.map(([a, b]) => [a / tv, b / vv]);
+    };
+    const curve = (f) => {
+      switch (p.pace) {
+        case 'steady': return f;
+        case 'fast then slow': return 1 - (1 - f) ** 3;
+        case 'slow then fast': return f ** 2.2;
+        case 'steps': return f >= 1 ? 1 : Math.floor(f * 5) / 5;
+        default: { for (let i = 1; i < pts.length; i++) if (f <= pts[i][0]) { const [a, va] = pts[i - 1], [b, vb] = pts[i], q = (f - a) / Math.max(1e-6, b - a); return va + (vb - va) * clamp(q * 1.6 - 0.3, 0, 1); } return 1; }
+      }
+    };
+    const all = (e, s) => [e, ...s.entities.filter((q) => { for (let a = q.parentEnt; a; a = a.parentEnt) if (a === e) return true; return false; })];
+    const inst = {
+      uiAlways: true,
+      begin(e, s) {
+        t = 0; shown = 0; tipT = 0; running = true; waiting = false; pts = realistic(); home ||= { x: e.x, y: e.y };
+        e.x = home.x; e.y = home.y; e.sx = e.sy = 1;
+        for (const q of all(e, s)) { s.killTweens(q); q.alpha = q._loaderAlpha ?? q.alpha; }
+        e.visible = true; s.modal = e; s.setVar(p.var, 0);
+        const T = tips(); if (T.length && p.tipVar) s.setVar(p.tipVar, T[tipI++ % T.length]);
+        if (p.pauseGame !== false) { wasPaused = s.loading; s.loading = true; }
+      },
+      finish(e, s) {
+        running = false; waiting = false; s.setVar(p.var, 100); s.loadedAt = s.time;
+        if (s.modal === e) s.modal = null;
+        if (p.pauseGame !== false) s.loading = wasPaused || false;
+        if (p.action) runAction(s, e, p);
+        s.emit('loaded', e);
+        if (p.hideSelf === false) return;
+        const d = Math.max(0, +p.fade || 0), list = all(e, s);
+        if (!d || p.exit === 'instant') { e.visible = false; return; }
+        for (const q of list) { q._loaderAlpha ??= q.alpha; s.to(q, { alpha: 0 }, d, { ease: 'outQuad' }); }
+        const H = s.engine?.height || 800, k = uiK(s.engine?.safe) || 1;
+        if (p.exit === 'slide up') s.to(e, { y: home.y - H / k }, d, { ease: 'inCubic' });
+        else if (p.exit === 'slide down') s.to(e, { y: home.y + H / k }, d, { ease: 'inCubic' });
+        else if (p.exit === 'zoom') s.to(e, { sx: 1.25, sy: 1.25 }, d, { ease: 'outQuad' });
+        s.after(d + 0.02, () => { if (running) return; for (const q of list) s.killTweens(q); e.visible = false; for (const q of list) q.alpha = q._loaderAlpha ?? 1; e.x = home.x; e.y = home.y; e.sx = e.sy = 1; });
+      },
+      start(e, s) {
+        if (p.startOn === 'on a message') { e.visible = false; s.on('message', (m) => { if (!e.dead && m === p.message) inst.begin(e, s); }); }
+        else inst.begin(e, s);
+      },
+      update(e, dt, s) {
+        if (!running) return;
+        const T = tips();
+        if (!waiting && T.length > 1 && p.tipVar) { tipT += dt; if (tipT >= (+p.tipEvery || 3)) { tipT = 0; s.setVar(p.tipVar, T[tipI++ % T.length]); } }
+        if (waiting) { if (s.engine.input.taps.length) inst.finish(e, s); return; }
+        t += dt;
+        let f = curve(clamp(t / Math.max(0.1, +p.seconds || 2.5), 0, 1));
+        if (p.waitAssets !== false && !assetsReady()) f = Math.min(f, 0.9);
+        shown = Math.max(shown, f);
+        const pct = Math.round(shown * 100);
+        if (s.vars[p.var] !== pct) s.setVar(p.var, pct);
+        if (shown >= 1) {
+          if (p.tapToContinue) { waiting = true; if (p.tipVar) s.setVar(p.tipVar, p.tapText || 'Tap to continue'); }
+          else inst.finish(e, s);
+        }
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; if (running && p.pauseGame !== false) s.loading = false; },
+    };
+    return inst;
+  },
+});
 
 registerBehavior('trigger', {
   label: 'Trigger Zone', description: 'When the player touches it, do something: show a message, change a variable, spawn, destroy, win…',
@@ -8472,7 +8655,7 @@ export class Engine {
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
       this.runUIOnly(s, dt);
-      if (inp.pressed('tap') && !ownScreen(s, 'title')) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap') && !ownScreen(s, 'title') && !s.loading) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
@@ -8485,6 +8668,7 @@ export class Engine {
       }
       return;
     }
+    if (s.loading) { s.time += dt; this.stepEffects(dt); this.runUIOnly(s, dt); return; } // a Loading Screen is up: the game waits
     if (s.dialog) { // conversations: taps go to the dialogue; optionally the game waits
       const used = stepDialog(s, dt, inp.taps.length > 0);
       if (used) inp.taps.length = 0;

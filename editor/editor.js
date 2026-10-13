@@ -432,7 +432,9 @@ engine.onRenderWorld = (r, s, z) => {
       ctx.save(); ctx.strokeStyle = e.body.sensor ? TRIGGER_GREEN : COLLIDER_GREEN; ctx.globalAlpha = e === sel ? 1 : 0.85; ctx.lineWidth = (e === sel ? 2.5 : 1.75) / z;
       if (e.body.sensor) ctx.setLineDash([5 / z, 4 / z]);
       ctx.translate(e.x + (ex.ox || 0), e.y + (ex.oy || 0)); ctx.beginPath();
-      if (ex.sphere) ctx.arc(0, 0, ex.r, 0, Math.PI * 2); else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
+      if (ex.sphere) ctx.arc(0, 0, ex.r, 0, Math.PI * 2);
+      else if (ex.kind) { ctx.rotate(ex.rot || 0); ex.pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); if (ex.kind !== 'edge') ctx.closePath(); else for (const [px, py] of ex.pts) { ctx.moveTo(px + 3 / z, py); ctx.arc(px, py, 3 / z, 0, Math.PI * 2); } }
+      else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
       ctx.stroke(); ctx.restore();
     }
     // game camera frame
@@ -499,6 +501,14 @@ engine.onRenderWorld = (r, s, z) => {
           const a = (i / N) * Math.PI * 2, b = ((i + 1) / N) * Math.PI * 2, ca = Math.cos(a) * R, sa = Math.sin(a) * R, cb = Math.cos(b) * R, sb = Math.sin(b) * R;
           pts.push(cx + ca, cy + sa, cz, cx + cb, cy + sb, cz, cx + ca, cy, cz + sa, cx + cb, cy, cz + sb, cx, cy + ca, cz + sa, cx, cy + cb, cz + sb);
         }
+      } else if (ex.kind === 'capsule' || ex.kind === 'cylinder') { // rings at the ends (domes for a capsule) joined by four lines
+        const R = ex.r * grow + 0.01, N = 32, top = ex.kind === 'capsule' ? ex.half : ex.hy * grow + 0.01, ring = (y) => { for (let i = 0; i < N; i++) { const a = i / N * Math.PI * 2, b = (i + 1) / N * Math.PI * 2; pts.push(cx + Math.cos(a) * R, y, cz + Math.sin(a) * R, cx + Math.cos(b) * R, y, cz + Math.sin(b) * R); } };
+        ring(cy + top); ring(cy - top);
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) pts.push(cx + dx * R, cy - top, cz + dz * R, cx + dx * R, cy + top, cz + dz * R);
+        if (ex.kind === 'capsule') for (const sgn of [1, -1]) for (const [ux, uz] of [[1, 0], [0, 1]]) for (let i = 0; i < N / 2; i++) { // half circles over each end
+          const a = i / N * Math.PI * 2, b = (i + 1) / N * Math.PI * 2;
+          pts.push(cx + Math.cos(a) * R * ux, cy + sgn * (top + Math.sin(a) * R), cz + Math.cos(a) * R * uz, cx + Math.cos(b) * R * ux, cy + sgn * (top + Math.sin(b) * R), cz + Math.cos(b) * R * uz);
+        }
       } else {
         const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => [cx + a * (ex.hx * grow + 0.01), cy + b * (ex.hy * grow + 0.01), cz + d * (ex.hz * grow + 0.01)]);
         for (const [i, k] of BOX_EDGES) pts.push(...c[i], ...c[k]);
@@ -535,11 +545,13 @@ engine.onRenderUI = (ctx, s) => {
     ctx.save(); ctx.strokeStyle = '#69f0ae'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(105,240,174,0.12)';
     ctx.beginPath();
     if (f.sphere) ctx.arc(f.c.x, f.c.y, f.r, 0, Math.PI * 2);
+    else if (f.pts) { f.pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); if (f.closed) ctx.closePath(); }
     else { const p = [f.at(-f.hx, -f.hy), f.at(f.hx, -f.hy), f.at(f.hx, f.hy), f.at(-f.hx, f.hy)]; ctx.moveTo(p[0].x, p[0].y); for (const q of p.slice(1)) ctx.lineTo(q.x, q.y); ctx.closePath(); }
     ctx.fill(); ctx.stroke();
     for (const [part, q] of f.handles) {
       ctx.beginPath();
-      if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
+      if (part[0] === 'p') { ctx.arc(q.x, q.y, 8, 0, Math.PI * 2); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
+      else if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
       else { ctx.rect(q.x - 8, q.y - 8, 16, 16); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
     }
     ctx.restore();
@@ -691,8 +703,9 @@ function colliderFrame(e) {
   const ex = e.extents(), z = engine.renderer.zoomFor(engine.scene), c = engine.renderer.worldToScreen(engine.scene, e.x + (ex.ox || 0), e.y + (ex.oy || 0));
   const rot = ex.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), at = (lx, ly) => ({ x: c.x + (lx * cs - ly * sn), y: c.y + (lx * sn + ly * cs) });
   if (ex.sphere) { const r = ex.r * z; return { c, sphere: true, r, rot, handles: [['rad', at(r, 0)], ['c', c]] }; }
-  const hx = ex.hx * z, hy = ex.hy * z;
-  return { c, hx, hy, rot, at, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
+  const hx = ex.hx * z, hy = ex.hy * z, pts = ex.kind ? ex.pts.map(([px, py]) => at(px * z, py * z)) : null, closed = ex.kind !== 'edge';
+  if (ex.kind && e.body.shape !== 'capsule') return { c, hx, hy, rot, at, pts, closed, handles: [...pts.map((q, i) => ['p' + i, q]), ['c', c]] }; // polygon / edge: drag the corners
+  return { c, hx, hy, rot, at, pts, closed, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
 }
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
@@ -875,13 +888,13 @@ function beginTransform(giz, x, y) {
   const o = giz.g.o;
   if (giz.handle === 'collider') {
     const live = engine.scene.byId(selectedId), ex = live.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1;
-    const C0 = j.collider || j.body, fitted = j.collider ? !(C0.w || C0.h || C0.r) : (C0.shape || 'auto') === 'auto';
+    const C0 = j.collider || j.body, fitted = j.collider ? !(C0.w || C0.h || C0.r || C0.points?.length) : (C0.shape || 'auto') === 'auto';
     if (fitted) { // fitted collider: becomes an explicit box / circle the first time you drag it
       if (ex.sphere) Object.assign(C0, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(C0, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
       Object.assign(live.body, { shape: C0.shape, r: C0.r, w: C0.w, h: C0.h });
     }
     gesture = { type: 'collider', part: giz.part, id: selectedId, sx: x, sy: y, moved: false, rot: ex.rot || 0, scale: [sx, sy],
-      orig: { w: C0.w || 1, h: C0.h || 1, r: C0.r || 10, ox: C0.ox || 0, oy: C0.oy || 0 } };
+      flip: [Math.sign(j.sx ?? 1) || 1, Math.sign(j.sy ?? 1) || 1], orig: { w: C0.w || 1, h: C0.h || 1, r: C0.r || 10, ox: C0.ox || 0, oy: C0.oy || 0, points: (C0.points || []).map((q) => [...q]) } };
     return;
   }
   if (giz.handle === 'rect') {
@@ -914,6 +927,7 @@ surface.addEventListener('pointermove', (ev) => {
     const z = engine.renderer.zoomFor(s), wx = dx / z, wy = dy / z, cs = Math.cos(-g.rot), sn = Math.sin(-g.rot);
     const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.collider || j.body, r1 = (v) => Math.round(v);
     const shift = (lxx, lyy) => { const c2 = Math.cos(g.rot), s2 = Math.sin(g.rot); B.ox = r1(o.ox + (lxx * c2 - lyy * s2) / scx); B.oy = r1(o.oy + (lxx * s2 + lyy * c2) / scy); };
+    if (g.part[0] === 'p') { const i = +g.part.slice(1), q = o.points[i]; if (!q) return; B.points = o.points.map((v) => [...v]); B.points[i] = [r1(q[0] + lx / scx * g.flip[0]), r1(q[1] + ly / scy * g.flip[1])]; live.body.points = B.points.map((v) => [...v]); return; }
     if (g.part === 'c') { B.ox = r1(o.ox + wx / scx); B.oy = r1(o.oy + wy / scy); }
     else if (g.part === 'rad') B.r = Math.max(2, r1(o.r + lx / Math.max(scx, scy)));
     else if (g.part === 'r' || g.part === 'l') { const d = g.part === 'r' ? lx : -lx; B.w = Math.max(2, r1(o.w + d / scx)); const real = (B.w - o.w) * scx; shift((g.part === 'r' ? 1 : -1) * real / 2, 0); B.oy = r1(B.oy); }
@@ -1020,6 +1034,72 @@ function childOf(g) {
     }
   }
   return g.par;
+}
+
+// ---- Tags & Layers (Unity-style): a game-wide tag list, named Layers (also the collision layers) and draw layers ----
+const DEFAULT_TAGS = ['player', 'enemy', 'coin', 'pickup', 'hazard', 'ground', 'platform', 'bullet', 'goal', 'npc'];
+const allEnts = () => levelList().flatMap((lv) => lv.entities || []);
+const allTags = () => [...new Set([...DEFAULT_TAGS, ...(root.tagList || []), ...allEnts().flatMap((e) => e.tags || [])])].filter(Boolean);
+const layerOf = (j) => +(j.body?.layer ?? j.physLayer ?? 0) || 0;
+function setLayerOf(j, i) { i = Math.max(0, Math.min(7, +i || 0)); if (i) j.physLayer = i; else delete j.physLayer; if (j.body) j.body.layer = i; }
+const SORT_LAYERS = [['Background', -1000], ['Default', 0], ['Foreground', 1000], ['Top', 2000]];
+const sortOf = (j) => { const v = +j.layer || 0; let b = SORT_LAYERS[0]; for (const q of SORT_LAYERS) if (v >= q[1] - 500) b = q; return { name: b[0], base: b[1], order: v - b[1] }; };
+function addTag(j, t) { t = String(t || '').trim(); if (!t) return; j.tags = [...new Set([...(j.tags || []), t])]; if (!allTags().includes(t) || !DEFAULT_TAGS.includes(t)) root.tagList = [...new Set([...(root.tagList || []), t])]; changed({ structure: true }); pushHistory(); }
+function tagMenu(anchor, j) {
+  const on = new Set(j.tags || []);
+  popMenu(anchor, [{ cap: 'Tags (tap to add or remove)' },
+    ...allTags().map((t) => ({ icon: on.has(t) ? 'check' : 'key', label: t, fn: () => { if (on.has(t)) j.tags = (j.tags || []).filter((q) => q !== t); else j.tags = [...(j.tags || []), t]; changed({ structure: true }); pushHistory(); renderInspector(); } })),
+    '-', { icon: 'plus', label: 'New Tag…', fn: () => { const t = prompt('New tag (e.g. boss, door, checkpoint)'); if (t?.trim()) { addTag(j, t.trim().toLowerCase().replace(/\s+/g, '-')); renderInspector(); } } },
+    { icon: 'gear', label: 'Manage Tags & Layers…', fn: openTagsLayers }]);
+}
+/** Inspector header, compact: tag chips, then one row of small pickers (Layer, Draw + order, Parent, + Child). */
+function tagLayerRows(j) {
+  const threeD = is3D(), names = layerNames(), so = sortOf(j), kids = kidsOf(j.id);
+  const chips = h('div', { class: 'tag-chips' }, (j.tags || []).map((t) => h('span', { class: 'tag-chip' }, t,
+    h('button', { type: 'button', title: 'Remove tag', onclick: () => { j.tags = (j.tags || []).filter((q) => q !== t); changed({ structure: true }); pushHistory(); renderInspector(); } }, '×'))),
+    h('button', { type: 'button', class: 'tag-add', onclick: (e) => tagMenu(e.currentTarget, j) }, icon('plus'), (j.tags || []).length ? '' : 'Tag'));
+  const pill = (label, el, title) => h('label', { class: 'pill', title }, h('span', {}, label), el);
+  return [
+    h('div', { class: 'meta' }, chips),
+    h('div', { class: 'meta pills' },
+      pill('Layer', h('select', { class: 'layer-sel', onchange: (e) => { if (e.target.value === 'edit') { e.target.value = String(layerOf(j)); openTagsLayers(); return; } setLayerOf(j, e.target.value); changed({ structure: true }); pushHistory(); } },
+        names.map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, n)), h('option', { value: 'edit' }, 'Edit layers…')), 'Which layer it is on: decides what it collides with'),
+      !threeD && pill('Draw', h('span', { class: 'pill-pair' },
+        h('select', { class: 'sort-sel', onchange: (e) => { const b = SORT_LAYERS.find((q) => q[0] === e.target.value)[1]; j.layer = b + sortOf(j).order; if (!j.layer) delete j.layer; changed(); pushHistory(); renderInspector(); } },
+          SORT_LAYERS.map(([n]) => h('option', { value: n, selected: n === so.name }, n))),
+        h('input', { class: 'ord', type: 'number', inputMode: 'numeric', value: so.order, title: 'Order: higher draws in front',
+          oninput: (e) => { j.layer = sortOf(j).base + (parseInt(e.target.value, 10) || 0); if (!j.layer) delete j.layer; changed(); } })), 'Draw layer and order: Background is behind, Top is in front'),
+      pill('Parent', h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
+        h('option', { value: '' }, 'None'), parentChoices(j).map((q) => h('option', { value: q.id, selected: q.id === j.parent }, q.name || 'Object'))), 'Put it inside another object: it moves with it'),
+      h('button', { type: 'button', class: 'pill pill-btn', onclick: (e) => popMenu(e.currentTarget, [{ icon: 'plus', label: 'New Child', fn: () => addChild(j.id) }, { icon: 'link', label: 'Add Existing…', fn: () => addExistingMenu(j, e.target) }]) },
+        icon('child'), kids.length ? `${kids.length} child${kids.length === 1 ? '' : 'ren'}` : 'Child')),
+  ];
+}
+/** The Tags & Layers manager: add, rename and delete tags (everywhere at once), rename layers, see what uses them. */
+function openTagsLayers() {
+  const ents = allEnts(), names = layerNames();
+  const used = (t) => ents.filter((e) => (e.tags || []).includes(t)).length;
+  const onLayer = (i) => ents.filter((e) => layerOf(e) === i).length;
+  const redo = () => { closeLayer(); openTagsLayers(); };
+  const renameTag = (t) => { const n = prompt(`Rename tag "${t}" on every object to`, t)?.trim(); if (!n || n === t) return; for (const e of ents) if ((e.tags || []).includes(t)) e.tags = [...new Set(e.tags.map((q) => (q === t ? n : q)))]; root.tagList = [...new Set([...(root.tagList || []).filter((q) => q !== t), n])]; changed({ structure: true }); pushHistory(); redo(); };
+  const deleteTag = (t) => { const k = used(t); if (k && !confirm(`Remove the tag "${t}" from ${k} object${k === 1 ? '' : 's'}?`)) return; for (const e of ents) if (e.tags) e.tags = e.tags.filter((q) => q !== t); root.tagList = (root.tagList || []).filter((q) => q !== t); root.hiddenTags = [...new Set([...(root.hiddenTags || []), t])]; changed({ structure: true }); pushHistory(); redo(); };
+  const renameLayer = (i) => { const n = prompt('Layer name', names[i])?.trim(); if (!n) return; const all = layerNames(); all[i] = n; root.physicsLayers = { ...(root.physicsLayers || {}), names: all }; changed({ structure: true }); pushHistory(); redo(); };
+  const add = h('input', { type: 'text', placeholder: 'New tag (boss, door…)', autocapitalize: 'off', onkeydown: (e) => { if (e.key === 'Enter') addBtn.click(); } });
+  const addBtn = h('button', { class: 'btn primary', onclick: () => { const t = add.value.trim().toLowerCase().replace(/\s+/g, '-'); if (!t) return; root.tagList = [...new Set([...(root.tagList || []), t])]; root.hiddenTags = (root.hiddenTags || []).filter((q) => q !== t); changed(); pushHistory(); redo(); } }, icon('plus'), 'Add');
+  const tags = allTags().filter((t) => !(root.hiddenTags || []).includes(t) || used(t));
+  openDialog('Tags & Layers', [
+    h('p', { class: 'desc' }, 'Tags name what an object is (player, enemy, coin): triggers, hazards, cameras and scripts look for them. An object can have several. Layers decide what collides with what (Scene Settings › Collision Layers) and can be used by scripts. Every object has one Layer.'),
+    h('h4', { class: 'tl-h' }, icon('key'), 'Tags'),
+    h('div', { class: 'tl-list' }, tags.map((t) => h('div', { class: 'tl-item' }, h('span', { class: 'tag-chip big' }, t), h('small', {}, `${used(t)} object${used(t) === 1 ? '' : 's'}`),
+      h('button', { class: 'btn', title: 'Rename everywhere', onclick: () => renameTag(t) }, icon('edit')), h('button', { class: 'btn', title: 'Delete', onclick: () => deleteTag(t) }, icon('trash'))))),
+    h('div', { class: 'tl-add' }, add, addBtn),
+    h('h4', { class: 'tl-h' }, icon('layers'), 'Layers'),
+    h('div', { class: 'tl-list' }, names.map((n, i) => h('div', { class: 'tl-item' }, h('span', { class: 'tl-idx' }, i), h('b', {}, n), h('small', {}, `${onLayer(i)} object${onLayer(i) === 1 ? '' : 's'}`),
+      h('button', { class: 'btn', title: 'Rename', onclick: () => renameLayer(i) }, icon('edit'))))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); select(SCENE_ID); if (!isDesktop()) setDock('inspector'); toast('Collision Layers are in Scene Settings'); } }, icon('grid'), 'Which layers collide…')),
+    h('h4', { class: 'tl-h' }, icon('scene'), 'Draw layers (2D and UI)'),
+    h('p', { class: 'desc' }, 'Background is drawn behind everything, then Default, Foreground and Top. Order picks who is in front within the same draw layer. Set both at the top of the Inspector.'),
+  ]);
 }
 
 // ---- physics layers (Unity-style collision matrix), shared by every level ----
@@ -1594,6 +1674,8 @@ function startRowDrag(ev, id) {
 function hMatch(e) {
   if (uiMode && !e.ui) return false;
   if (hFilter && !(e.name || '').toLowerCase().includes(hFilter) && !(e.tags || []).some((t) => t.includes(hFilter)) && !compBadges(e).some((c) => c.toLowerCase().includes(hFilter))) return false;
+  if (hKind.startsWith('tag:')) return (e.tags || []).includes(hKind.slice(4));
+  if (hKind.startsWith('layer:')) return layerOf(e) === +hKind.slice(6);
   if (hKind === 'physics') return !!e.body;
   if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
   return hKind === 'all' || kindOf(e) === hKind;
@@ -1604,9 +1686,13 @@ function renderHierarchy() {
   box.replaceChildren();
   const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
-  const kindLabel = H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
+  const kindLabel = hKind.startsWith('tag:') ? `tag “${hKind.slice(4)}”` : hKind.startsWith('layer:') ? `layer “${layerNames()[+hKind.slice(6)]}”` : H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
   const filterBtn = h('button', { class: 'h-filter-btn' + (hKind !== 'all' ? ' on' : ''), title: 'Show only…',
-    onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
+    onclick: (e) => { const usedTags = [...new Set(project.entities.flatMap((q) => q.tags || []))].sort(), usedLayers = [...new Set(project.entities.map(layerOf))].sort((a, b) => a - b);
+      popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } })),
+        usedTags.length && { cap: 'With tag' }, ...usedTags.map((t) => ({ icon: hKind === 'tag:' + t ? 'check' : 'key', label: t, fn: () => { hKind = 'tag:' + t; renderHierarchy(); } })),
+        { cap: 'On layer' }, ...usedLayers.map((i) => ({ icon: hKind === 'layer:' + i ? 'check' : 'layers', label: `${i} · ${layerNames()[i]}`, fn: () => { hKind = 'layer:' + i; renderHierarchy(); } })),
+        '-', { icon: 'gear', label: 'Tags & Layers…', fn: openTagsLayers }].filter(Boolean)); } },
     icon('list'), hKind === 'all' ? '' : kindLabel);
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn));
@@ -2065,6 +2151,14 @@ function control(target, path, spec) {
 
 // ---- Odin-style inspector helpers ----
 const openGroups = new Set();
+/** A folding group inside a component; it starts open when something in it is already set (so nothing is hidden by surprise). */
+function fold(key, title, kids, isSet = false) {
+  kids = [kids].flat(Infinity).filter(Boolean); if (!kids.length) return null;
+  const body = h('div', { class: 'og-b' }, kids), open = openGroups.has(key) || (isSet && !openGroups.has('-' + key));
+  const g = h('div', { class: 'og' + (open ? ' open' : '') },
+    h('button', { class: 'og-h', onclick: () => { g.classList.toggle('open'); const on = g.classList.contains('open'); openGroups.delete(on ? '-' + key : key); openGroups.add(on ? key : '-' + key); } }, icon('chevron'), title, isSet ? h('span', { class: 'og-dot', title: 'Something here is set' }) : null), body);
+  return g;
+}
 /** A component's fields: validation messages, buttons, then params (hidden by showIf, folded into groups, with sliders and info boxes). */
 function behaviorBody(def, b, i, j, threeD, C) {
   const params = def.params.map((p) => ({ ...p, def: paramDefault(p, threeD) })), deps = showIfDeps(params);
@@ -2072,8 +2166,12 @@ function behaviorBody(def, b, i, j, threeD, C) {
   const btns = (BEH_BUTTONS[b.type] || []).filter((x) => !x.when || x.when(b, threeD));
   if (btns.length) out.push(h('div', { class: 'btns' }, btns.map((x) => h('button', { class: 'btn' + (x.primary ? ' primary' : ''), onclick: () => x.fn(j, i, b) }, icon(x.icon || 'play'), x.label))));
   const groups = new Map();
+  const visible = params.filter((p) => !((!showAdvanced && p.advanced) || !shown(p, b, threeD)));
+  const loose = visible.filter((p) => !p.group), MAIN = 5; // the first few loose settings stay out; the rest fold into "More settings"
+  const extra = !showAdvanced && loose.length > MAIN + 1 ? new Set(loose.slice(MAIN).map((p) => p.key)) : new Set();
   for (const p of params) {
     if ((!showAdvanced && p.advanced) || !shown(p, b, threeD)) continue;
+    if (extra.has(p.key)) p.group = 'More settings';
     let infoText = typeof p.info === 'string' ? p.info : null;
     if (p.info && typeof p.info === 'object') { const k = Object.keys(p.info).find((v) => Object.values(b).includes(v)); if (k) infoText = p.info[k]; }
     const dep = deps.has(p.key), el = C(`behaviors.${i}.${p.key}`, { ...p, infoText, structure: dep && p.type !== 'number', lazy: dep && p.type === 'number' });
@@ -2100,7 +2198,7 @@ function drawEase(cv, name) {
 /** Values that already exist in the game, for dropdown suggestions. */
 function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
-  if (kind === 'tags') return uniq(['player', 'enemy', ...all.flatMap((e) => e.tags || []), ...all.map((e) => e.name)]);
+  if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
@@ -2480,9 +2578,10 @@ function comp(title, kids, opts = {}) {
   h('span', { class: 'fold' }, icon('chevron')),
   opts.onToggle && h('input', { type: 'checkbox', checked: opts.enabled !== false, title: 'Enabled', onchange: (e) => opts.onToggle(e.target.checked) }),
   icon(opts.icon || 'bolt', 'ci'),
-  h('span', { class: 't' }, title),
+  h('span', { class: 't' }, title, opts.summary ? h('small', { class: 'sum' }, opts.summary) : null),
   opts.menu && h('button', { class: 'more', title: 'More', onclick: (e) => popMenu(e.currentTarget, opts.menu) }, icon('more')));
-  el.append(head, h('div', { class: 'comp-b' }, opts.desc && h('p', { class: 'desc' }, opts.desc), kids));
+  const desc = opts.desc && h('p', { class: 'desc clamp', title: 'Tap to read all', onclick: (e) => e.currentTarget.classList.toggle('clamp') }, opts.desc);
+  el.append(head, h('div', { class: 'comp-b' }, desc, kids));
   return el;
 }
 
@@ -2529,42 +2628,34 @@ function renderInspector() {
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
   }
 
-  box.append(h('div', { class: 'nav-strip' },
-    h('button', { class: 'btn back', onclick: () => setDock('hierarchy') }, icon('left'), 'Hierarchy'),
-    h('span', { class: 'crumb' }, `${idx + 1} of ${project.entities.length}`),
-    h('span', { class: 'sp' }),
-    h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
-    h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
-  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings', value: inspQuery, autocapitalize: 'off',
-    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
-    h('button', { class: 'adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
-      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear'), 'Advanced')));
+  box.append(h('div', { class: 'insp-bar' }, // one slim row: back · search · advanced · previous / next
+    h('button', { class: 'ib', title: 'Back to the Hierarchy', onclick: () => setDock('hierarchy') }, icon('left')),
+    h('input', { type: 'search', placeholder: `Search (${idx + 1}/${project.entities.length})`, value: inspQuery, autocapitalize: 'off', oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
+    h('button', { class: 'ib adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
+      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear')),
+    h('button', { class: 'ib', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('chevron')),
+    h('button', { class: 'ib next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
     h('div', { class: 'big-ico' }, icon(iconFor(j))),
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
     h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
-    h('div', { class: 'sub' },
-      h('span', {}, 'Tags'),
-      h('input', { type: 'text', value: (j.tags || []).join(', '), placeholder: 'player, enemy', autocapitalize: 'off',
-        onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
-    h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
-      h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
-      j.parent && h('button', { class: 'btn', title: 'Take it out of its parent', onclick: () => setParent(j.id, null) }, icon('unlink'))),
-    kidsCard(j),
+    ...tagLayerRows(j),
+    kidsOf(j.id).length ? kidsCard(j) : null,
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
-      h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
-      !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
+      h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
   const pfb = prefabBanner(j); if (pfb) box.append(pfb);
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
   const quickRow = quick.length && h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))); // shown by Add Component below
-  box.append(h('div', { class: 'comp-tools' },
-    h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
+  const nComps = 1 + ['shape', 'text', 'sprite', 'mesh', 'model', 'bar', 'body', 'collider', 'light', 'voxels', 'tiles'].filter((k) => j[k]).length + (j.behaviors || []).length;
+  if (nComps < 5 && inspCat !== 'all') inspCat = 'all';
+  box.append(h('div', { class: 'comp-tools' + (nComps < 5 ? ' few' : '') },
+    h('div', { class: 'cf' }, nComps < 5 ? h('span', { class: 'cf-n' }, `${nComps} component${nComps === 1 ? '' : 's'}`) : INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
     h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
       if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
 
@@ -2573,7 +2664,7 @@ function renderInspector() {
     ? [vecRow(T, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.1), vecRow(T, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(T, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)]
     : [
       vecRow(T, j.ui ? 'Offset' : 'Position', ['x', 'y'], [0, 0], 1), vecRow(T, 'Rotation', ['rz'], [0], 1), vecRow(T, 'Scale', ['sx', 'sy'], [1, 1], 0.05)],
-  { icon: 'move', key: 'transform', menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
+  { icon: 'move', key: 'transform', summary: threeD ? `${round(j.x || 0)}, ${round(j.y || 0)}, ${round(j.z || 0)}` : `${round(j.x || 0)}, ${round(j.y || 0)}${j.rz ? ` · ${round(j.rz)}°` : ''}`, menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
 
   if (j.ui) {
     const inParent = j.parent && ent(j.parent)?.ui;
@@ -2605,7 +2696,8 @@ function renderInspector() {
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
-      t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
+      t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
+      fold('shape:more', 'More looks', [
       t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
       t !== 'emoji' && j.shape.stroke && C('shape.dash', { label: 'Dashed outline', type: 'number', def: 0, range: [0, 30], step: 1 }),
       t !== 'emoji' && j.shape.fill && C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
@@ -2613,7 +2705,8 @@ function renderInspector() {
       C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
       j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 })],
       !j.shape.shadow && C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
-    ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
+      ], !!(j.shape.fill2 || j.shape.shadow || +j.shape.glow || +j.shape.dash)),
+    ], { icon: iconFor(j), key: 'shape', summary: `${t === 'rect' ? 'Rectangle' : t} · ${t === 'circle' || t === 'ring' ? 'r ' + (j.shape.r ?? 20) : `${j.shape.w ?? 40}×${j.shape.h ?? 40}`}`, menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
     box.append(comp('Image', [
@@ -2635,15 +2728,20 @@ function renderInspector() {
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
-      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
       C('text.font', { label: 'Font', type: 'select', options: fontOptions(j.text.font), def: 'theme' }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openFontPicker((f) => { j.text.font = f; changed({ inspector: true }); pushHistory(); }) }, icon('text'), 'More fonts…')),
       C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+      fold('text:style', 'Style: italic, letters, gradient', [
       C('text.italic', { label: 'Italic', type: 'bool', def: false }),
+      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
       C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase']], def: '' }),
       C('text.spacing', { label: 'Letter spacing', type: 'number', def: 0, range: [-4, 20], step: 0.5 }),
+      ], !!(j.text.italic || j.text.color2 || j.text.case || +j.text.spacing)),
+      fold('text:lines', 'Wrapping and line spacing', [
       C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
       C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
+      ], !!(+j.text.wrap || (j.text.lineHeight && +j.text.lineHeight !== 1.2))),
+      fold('text:fx', 'Outline, shadow, glow, underline', [
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
       C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
@@ -2651,16 +2749,20 @@ function renderInspector() {
       C('text.glow', { label: 'Glow', type: 'color', optional: true }),
       C('text.underline', { label: 'Underline', type: 'bool', def: false }),
       C('text.strike', { label: 'Strikethrough', type: 'bool', def: false }),
-      h('h5', { class: 'sub-head' }, 'Numbers & fitting'),
+      ], !!(j.text.outline || j.text.shadow || j.text.glow || j.text.underline || j.text.strike)),
+      fold('text:numbers', 'Numbers and fitting', [
       C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
       C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
       C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
-      h('h5', { class: 'sub-head' }, 'Label box'),
+      ], !!(j.text.format || +j.text.fit || j.text.valign)),
+      fold('text:box', 'Label box', [
       C('text.bg', { label: 'Box behind the text', type: 'color', optional: true, structure: true }),
       j.text.bg && [C('text.bgPad', { label: 'Box padding', type: 'number', def: 8, range: [0, 40], step: 1 }), C('text.bgRadius', { label: 'Box roundness', type: 'number', def: 8, range: [0, 40], step: 1 })],
-      h('h5', { class: 'sub-head' }, 'Animation'),
+      ], !!j.text.bg),
+      fold('text:anim', 'Animation', [
       C('text.effect', { label: 'Effect', type: 'select', options: [['', 'None'], ['wave', 'Wave (letters)'], ['bounce', 'Bounce (letters)'], ['shake', 'Shake (letters)'], ['rainbow', 'Rainbow (letters)'], ['pulse', 'Pulse'], ['float', 'Float up and down']], def: '' }),
-    ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
+      ], !!j.text.effect),
+    ], { icon: 'text', key: 'text', summary: `“${String(j.text.value || '').slice(0, 18)}${String(j.text.value || '').length > 18 ? '…' : ''}” · ${j.text.size || 24}px`, menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
     const g = j.mesh.geometry;
@@ -2768,28 +2870,54 @@ function renderInspector() {
   ], { icon: 'sun', key: 'globalLight', menu: removeMenu(() => { delete j.globalLight; changed({ structure: true }); }, 'globalLight') }));
   const editColliderBtn = () => !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
     colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
-    if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
+    if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast(['polygon', 'edge'].includes(j.collider?.shape) ? 'Drag the green dots to move the corners; the middle moves it all' : 'Drag the green handles: edges resize, the middle moves the collider'); }
   } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider'));
   if (j.collider && !j.ui) { // Unity-style collider component
-    const cs = j.collider.shape || 'box', round_ = cs === 'circle' || cs === 'sphere', fitted = !(j.collider.w || j.collider.h || j.collider.r);
-    const title = (cs === 'sphere' ? 'Sphere Collider' : cs === 'circle' ? 'Circle Collider 2D' : threeD ? 'Box Collider' : 'Box Collider 2D');
-    box.append(comp(title, [
+    const cs = j.collider.shape || 'box', round_ = cs === 'circle' || cs === 'sphere', pointy = cs === 'polygon' || cs === 'edge';
+    const fitted = !(j.collider.w || j.collider.h || j.collider.r || j.collider.points?.length), info = colliderInfo(cs, threeD), step = threeD ? 0.05 : 1;
+    const setPts = (fn) => { const np = (j.collider.points || []).map((q) => [...q]); fn(np); j.collider.points = np; changed({ inspector: true }); pushHistory(); };
+    const presetMenu = (ev) => popMenu(ev.currentTarget, [{ cap: cs === 'edge' ? 'Edge shape' : 'Polygon shape' },
+      ...(cs === 'polygon' && shapeOutline(j) ? [{ icon: 'frame', label: 'Match the drawn shape', fn: () => setPts((np) => np.splice(0, np.length, ...shapeOutline(j))) }] : []),
+      ...(cs === 'edge' ? EDGE_PRESETS : POLY_PRESETS).map(([k, l]) => ({ icon: cs, label: l, fn: () => { const f = fitCollider(j, 'box'), hx = (f.w || 40) / 2, hy = (f.h || 40) / 2; setPts((np) => np.splice(0, np.length, ...colliderPreset(cs, k, hx, hy))); } })),
+      { cap: 'Change' },
+      { icon: 'move', label: 'Flip left ↔ right', fn: () => setPts((np) => { for (const q of np) q[0] = -q[0]; np.reverse(); }) },
+      { icon: 'move', label: 'Flip upside down', fn: () => setPts((np) => { for (const q of np) q[1] = -q[1]; np.reverse(); }) },
+      { icon: 'scale', label: 'Bigger (×1.25)', fn: () => setPts((np) => { for (const q of np) { q[0] = round(q[0] * 1.25, 2); q[1] = round(q[1] * 1.25, 2); } }) },
+      { icon: 'scale', label: 'Smaller (×0.8)', fn: () => setPts((np) => { for (const q of np) { q[0] = round(q[0] * 0.8, 2); q[1] = round(q[1] * 0.8, 2); } }) }]);
+    const pointsEditor = () => {
+      const P = j.collider.points || [], min = cs === 'edge' ? 2 : 3;
+      return h('div', { class: 'pts-ed' },
+        h('div', { class: 'row side' }, h('label', {}, `Points (${P.length})`), h('div', { class: 'btns' },
+          h('button', { class: 'btn', onclick: presetMenu }, icon(cs), 'Presets'),
+          h('button', { class: 'btn', onclick: () => setPts((np) => { // a new corner halfway along the last side (an edge grows at its end)
+            const n = np.length, a = np[n - 1] || [0, 0], b = cs === 'edge' ? null : np[0], prev = np[n - 2] || [a[0] - 20, a[1]];
+            np.push(b ? [round((a[0] + b[0]) / 2, 2), round((a[1] + b[1]) / 2, 2)] : [round(a[0] + (a[0] - prev[0] || 20), 2), round(a[1] + (a[1] - prev[1]), 2)]);
+          }) }, icon('plus'), 'Point'))),
+        P.map((q, i) => h('div', { class: 'pt-row' }, vecRow(() => j.collider.points[i], String(i + 1), ['0', '1'], [0, 0], step),
+          h('button', { class: 'icon-btn', title: 'Remove point', disabled: P.length <= min, onclick: () => setPts((np) => np.splice(i, 1)) }, icon('minus')))),
+        cs === 'polygon' && h('p', { class: 'desc' }, 'Corners go around the outline. Dents are fine: they\'re split into pieces automatically.'),
+        cs === 'edge' && h('p', { class: 'desc' }, 'A path things stand on. It has no inside, so keep it under the ground or along walls.'));
+    };
+    const sizeFields = fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
+      : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step })
+        : threeD && (cs === 'capsule' || cs === 'cylinder') ? [C('collider.r', { label: 'Radius', type: 'number', def: 0.5, step }), C('collider.h', { label: 'Height', type: 'number', def: cs === 'capsule' ? 2 : 1, step })]
+          : pointy ? pointsEditor()
+            : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], step);
+    box.append(comp(info[1], [
       C('collider.trigger', { label: 'Is Trigger (detect, don\'t block)', type: 'bool', def: false, structure: true }),
       h('label', { class: 'row inline' }, h('span', {}, 'Show all colliders in the Scene'), h('input', { type: 'checkbox', checked: showColliders, onchange: (ev) => toggleColliders(ev.target.checked) })),
-      fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
-        : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step: threeD ? 0.05 : 1 })
-          : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], threeD ? 0.05 : 1),
-      vecRow(() => T().collider, 'Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], threeD ? 0.05 : 1),
+      sizeFields,
+      vecRow(() => T().collider, 'Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], step),
       h('div', { class: 'btns' },
-        h('button', { class: 'btn', onclick: () => { const f = fitCollider(j, cs); Object.assign(j.collider, f); changed({ inspector: true }); pushHistory(); } }, icon('frame'), fitted ? 'Set Size' : 'Fit to Shape'),
-        h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Collider shape' }, ...(threeD ? [['box', 'Box'], ['sphere', 'Sphere']] : [['box', 'Box'], ['circle', 'Circle']]).map(([k, l]) => ({ icon: k === 'box' ? 'square' : 'circle', label: l, fn: () => { j.collider = { ...fitCollider(j, k), trigger: j.collider.trigger }; changed({ structure: true }); pushHistory(); } }))]) }, icon('square'), 'Shape')),
+        !pointy && h('button', { class: 'btn', onclick: () => { const f = fitCollider(j, cs); Object.assign(j.collider, f); changed({ inspector: true }); pushHistory(); } }, icon('frame'), fitted ? 'Set Size' : 'Fit to Shape'),
+        h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Collider shape' }, ...COLLIDER_TYPES[threeD ? '3d' : '2d'].map(([k, l, ic]) => ({ icon: ic, label: l.replace(/ Collider( 2D)?$/, ''), fn: () => { j.collider = { ...fitCollider(j, k), ...(j.collider.trigger ? { trigger: true } : {}), ...(j.collider.ox ? { ox: j.collider.ox } : {}), ...(j.collider.oy ? { oy: j.collider.oy } : {}) }; changed({ structure: true }); pushHistory(); } }))]) }, icon(info[2]), 'Shape')),
       editColliderBtn(),
       h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { j.collider.bounce = m.bounce; j.collider.friction = m.friction; changed({ inspector: true }); pushHistory(); } } },
         h('option', { value: '' }, materialOf({ bounce: j.collider.bounce || 0, friction: j.collider.friction || 0, drag: 0 })), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
       !j.body && C('collider.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       !j.body && C('collider.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
       !j.body && h('p', { class: 'desc' }, 'On its own it\'s solid but never moves. Add a Rigidbody to make it fall and get pushed.'),
-    ], { icon: round_ ? 'circle' : 'square', key: 'collider', desc: 'The shape physics uses for this object.',
+    ], { icon: info[2], key: 'collider', desc: info[3], summary: pointy ? `${(j.collider.points || []).length} points` : fitted ? 'Fits the shape' : round_ ? `r ${j.collider.r}` : threeD && j.collider.r ? `r ${j.collider.r} · h ${j.collider.h}` : `${j.collider.w ?? '–'} × ${j.collider.h ?? '–'}`,
       menu: removeMenu(() => { delete j.collider; changed({ structure: true }); }, 'collider') }));
   }
   if (j.body && !j.ui) {
@@ -2812,7 +2940,7 @@ function renderInspector() {
       dyn && vecRow(() => T().body, 'Start Velocity', threeD ? ['vx', 'vy', 'vz'] : ['vx', 'vy'], [0, 0, 0], threeD ? 0.5 : 10),
       dyn && [C('body.maxSpeed', { label: 'Max Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 }), C('body.maxFall', { label: 'Max Fall Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 })],
       dyn && C('body.ccd', { label: 'Collision Detection', type: 'select', options: [['', 'Discrete'], ['1', 'Continuous (fast objects)']], def: '' }),
-      C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
+      h('div', { class: 'row' }, h('label', {}, 'Layer'), h('select', { onchange: (e) => { setLayerOf(j, e.target.value); changed({ inspector: true }); pushHistory(); } }, layerNames().map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, n)))),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '', suggest: 'tags' }),
       !dyn && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
       ...(j.collider ? [] : [ // no collider component: the body fits the visible shape (older projects can size it here)
@@ -2837,8 +2965,10 @@ function renderInspector() {
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
+      .map((p) => { const v = b[p.key] ?? paramDefault(p, threeD); const t = String(v ?? ''); return t === '' ? null : `${String(p.label || p.key).replace(/\s*\(.*\)$/, '').split(' ').slice(0, 2).join(' ').toLowerCase()} ${t.length > 14 ? t.slice(0, 13) + '…' : t}`; }).filter(Boolean).join(' · ');
     box.append(comp(def.label, behaviorBody(def, b, i, j, threeD, C), {
-      icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu,
+      icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu, summary,
       enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); },
     }));
   });
@@ -2949,7 +3079,7 @@ function renderSceneSettings(box) {
     C('post.tint', { label: 'Tint colour', type: 'color', def: '#ff8800' }),
     C('post.tintAmount', { label: 'Tint amount', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
   ], { icon: 'sun', key: 's-post' }));
-  box.append(comp('Collision Layers', [layerMatrixEditor()], { icon: 'grid', key: 's-layers' }));
+  box.append(comp('Collision Layers', [layerMatrixEditor(), h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openTagsLayers }, icon('key'), 'Tags & Layers…'))], { icon: 'grid', key: 's-layers' }));
   box.append(comp('Physics', [
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
@@ -3221,13 +3351,75 @@ function defaultBehavior(type, threeD) {
 /** Every component that can be added to the object j. */
 /** A collider sized to the object's visible shape (unscaled units, like the body settings). */
 function fitCollider(j, shape) {
-  const live = engine.scene.byId(j.id), ex = live?.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1, sz = Math.abs(j.sz ?? 1) || 1;
-  if (!ex || ex.hx === Infinity || (!ex.sphere && !ex.hx)) return { shape };
+  const live = engine.scene.byId(j.id), ex = live && visualExtents(live), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1, sz = Math.abs(j.sz ?? 1) || 1;
+  if (!ex || ex.hx === Infinity || (!ex.sphere && !ex.hx)) return shape === 'polygon' || shape === 'edge' ? { shape, points: colliderPreset(shape, shape === 'edge' ? 'flat' : 'box', 40, 40) } : { shape };
   const r1 = (v) => round(v, is3D() ? 2 : 0), rad = ex.sphere ? ex.r : Math.max(ex.hx, ex.hy);
+  const hx = (ex.sphere ? ex.r : ex.hx) / sx, hy = (ex.sphere ? ex.r : ex.hy) / sy, hz = (ex.sphere ? ex.r : ex.hz === Infinity ? 0.5 : ex.hz) / sz;
   if (shape === 'circle' || shape === 'sphere') return { shape, r: r1(rad / Math.max(sx, sy)) };
-  return ex.sphere ? { shape, w: r1(ex.r * 2 / sx), h: r1(ex.r * 2 / sy), ...(is3D() ? { d: r1(ex.r * 2 / sz) } : {}) }
-    : { shape, w: r1(ex.hx * 2 / sx), h: r1(ex.hy * 2 / sy), ...(is3D() ? { d: r1((ex.hz === Infinity ? 1 : ex.hz) * 2 / sz) } : {}) };
+  if (shape === 'capsule' && is3D()) return { shape, r: r1(Math.max(hx, hz)), h: r1(Math.max(hy, hx) * 2) };
+  if (shape === 'cylinder') return { shape, r: r1(Math.max(hx, hz)), h: r1(hy * 2) };
+  if (shape === 'polygon') return { shape, points: shapeOutline(j) || colliderPreset('polygon', 'box', hx, hy) };
+  if (shape === 'edge') return { shape, points: colliderPreset('edge', 'flat', hx, hy) };
+  return { shape, w: r1(hx * 2), h: r1(hy * 2), ...(is3D() && shape === 'box' ? { d: r1(hz * 2) } : {}) };
 }
+/** An object's size from what it draws, ignoring its current collider (falls back to the collider when it draws nothing). */
+function visualExtents(live) {
+  const bare = Object.assign(Object.create(Object.getPrototypeOf(live)), live, { body: null }), ex = bare.extents();
+  return hasVisual(live) && ex && (ex.sphere ? ex.r : ex.hx) && Number.isFinite(ex.sphere ? ex.r : ex.hx) ? ex : live.extents();
+}
+/** Ready-made polygon / edge outlines, hx × hy half size, centred on the object. */
+const POLY_PRESETS = [['box', 'Box'], ['triangle', 'Triangle'], ['slopeR', 'Slope ◢'], ['slopeL', 'Slope ◣'], ['diamond', 'Diamond'], ['pentagon', 'Pentagon'], ['hexagon', 'Hexagon'], ['octagon', 'Octagon'], ['star', 'Star'], ['ramp', 'Ramp (rounded)']];
+const EDGE_PRESETS = [['flat', 'Flat line'], ['slopeUp', 'Slope up'], ['slopeDown', 'Slope down'], ['hill', 'Hill'], ['valley', 'Valley'], ['bowl', 'Bowl ◡'], ['zigzag', 'Zigzag'], ['steps', 'Steps'], ['wave', 'Wave']];
+function colliderPreset(shape, kind, hx, hy) {
+  const R = (v) => Math.round(v * 100) / 100, P = (list) => list.map(([x, y]) => [R(x), R(y)]), ring = (n, a0 = -Math.PI / 2) => P(Array.from({ length: n }, (_, i) => [Math.cos(a0 + i / n * Math.PI * 2) * hx, Math.sin(a0 + i / n * Math.PI * 2) * hy]));
+  if (shape === 'edge') {
+    const curve = (f, n = 9) => P(Array.from({ length: n }, (_, i) => { const t = i / (n - 1); return [-hx + t * hx * 2, f(t)]; }));
+    switch (kind) {
+      case 'slopeUp': return P([[-hx, hy], [hx, -hy]]);
+      case 'slopeDown': return P([[-hx, -hy], [hx, hy]]);
+      case 'hill': return curve((t) => hy - Math.sin(t * Math.PI) * hy * 2);
+      case 'valley': return P([[-hx, -hy], [0, hy], [hx, -hy]]);
+      case 'bowl': return curve((t) => -hy + Math.sin(t * Math.PI) * hy * 2);
+      case 'zigzag': return P([[-hx, hy], [-hx / 2, -hy], [0, hy], [hx / 2, -hy], [hx, hy]]);
+      case 'steps': return P([[-hx, hy], [-hx / 3, hy], [-hx / 3, 0], [hx / 3, 0], [hx / 3, -hy], [hx, -hy]]);
+      case 'wave': return curve((t) => Math.sin(t * Math.PI * 4) * hy, 17);
+      default: return P([[-hx, -hy], [hx, -hy]]); // the top of the object
+    }
+  }
+  switch (kind) {
+    case 'triangle': return P([[0, -hy], [hx, hy], [-hx, hy]]);
+    case 'slopeR': return P([[-hx, hy], [hx, hy], [hx, -hy]]);
+    case 'slopeL': return P([[-hx, hy], [hx, hy], [-hx, -hy]]);
+    case 'diamond': return P([[0, -hy], [hx, 0], [0, hy], [-hx, 0]]);
+    case 'pentagon': return ring(5);
+    case 'hexagon': return ring(6);
+    case 'octagon': return ring(8, -Math.PI / 2 + Math.PI / 8);
+    case 'star': return P(Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, k = i % 2 ? 0.4 : 1; return [Math.cos(a) * hx * k, Math.sin(a) * hy * k]; }));
+    case 'ramp': return P([[-hx, hy], ...Array.from({ length: 7 }, (_, i) => { const t = (i + 1) / 8 * Math.PI / 2; return [-hx + Math.sin(t) * hx * 2, hy - (1 - Math.cos(t)) * hy * 2]; }), [hx, -hy], [hx, hy]]);
+    default: return P([[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]]);
+  }
+}
+/** The object's drawn shape as polygon points (unscaled), when it has a matching outline. */
+function shapeOutline(j) {
+  const s = j.shape; if (!s || is3D()) return null;
+  const hx = (s.w || 40) / 2, hy = (s.h || 40) / 2;
+  if (s.type === 'polygon' && s.points?.length >= 3) return s.points.map(([x, y]) => [x, y]);
+  if (s.type === 'triangle') return colliderPreset('polygon', 'triangle', hx, hy);
+  if (s.type === 'diamond' || s.type === 'star' || s.type === 'pentagon' || s.type === 'hexagon' || s.type === 'octagon') {
+    if (s.type === 'octagon') return Array.from({ length: 8 }, (_, i) => { const a = -Math.PI / 2 + i / 8 * Math.PI * 2; return [Math.round(Math.cos(a) * hx * 100) / 100, Math.round(Math.sin(a) * hy * 100) / 100]; });
+    if (s.type === 'star') return Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s.w * 0.2 : s.w / 2; return [Math.round(Math.cos(a) * r * 100) / 100, Math.round(Math.sin(a) * r * (s.h / s.w) * 100) / 100]; });
+    return colliderPreset('polygon', s.type, hx, hy);
+  }
+  if (s.type === 'arrow') return [[hx, 0], [0, -hy], [0, -hy * 0.4], [-hx, -hy * 0.4], [-hx, hy * 0.4], [0, hy * 0.4], [0, hy]];
+  return null;
+}
+/** Collider types per mode: [shape, label, icon, what it's for]. */
+const COLLIDER_TYPES = {
+  '2d': [['box', 'Box Collider 2D', 'square', 'A rectangle. Best for most things.'], ['circle', 'Circle Collider 2D', 'circle', 'Round: balls, coins, wheels.'], ['capsule', 'Capsule Collider 2D', 'capsule', 'A pill: great for characters (slides over bumps).'],
+    ['polygon', 'Polygon Collider 2D', 'polygon', 'Any outline: triangles, slopes, stars. Edit the points.'], ['edge', 'Edge Collider 2D', 'edge', 'A line (or path) to stand on: ground, hills, slopes.']],
+  '3d': [['box', 'Box Collider', 'square', 'A box. Best for most things.'], ['sphere', 'Sphere Collider', 'sphere', 'Round: balls, coins, planets.'], ['capsule', 'Capsule Collider', 'capsule', 'An upright pill: great for characters.'], ['cylinder', 'Cylinder Collider', 'cylinder', 'An upright column: pillars, barrels, towers.']],
+};
+const colliderInfo = (shape, threeD) => COLLIDER_TYPES[threeD ? '3d' : '2d'].find((t) => t[0] === shape) || COLLIDER_TYPES[threeD ? '3d' : '2d'][0];
 function componentsFor(j) {
   const threeD = is3D() && !(j && j.ui);
   const list = [
@@ -3241,8 +3433,8 @@ function componentsFor(j) {
     { cat: 'UI', key: 'minimap', label: 'Minimap', icon: 'grid', desc: 'A small map of the level on screen', ok: (e) => e.ui && !e.minimap, add: (e) => { e.minimap = { w: 120, h: 120, range: is3D() ? 40 : 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false }; } },
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Falls, gets pushed and bounces (needs gravity; uses its collider)', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
-    ...(threeD ? [['box', 'Box Collider', 'square'], ['sphere', 'Sphere Collider', 'sphere']] : [['box', 'Box Collider 2D', 'square'], ['circle', 'Circle Collider 2D', 'circle']]).map(([shape, label, ic]) => ({
-      cat: 'Colliders', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
+    ...COLLIDER_TYPES[threeD ? '3d' : '2d'].map(([shape, label, ic, desc]) => ({
+      cat: 'Colliders', key: 'col:' + shape, label, icon: ic, desc: desc + ' Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
   ];
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
@@ -3934,6 +4126,7 @@ function openFileMenu() {
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
     { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
+    { icon: 'key', label: 'Tags & Layers…', fn: openTagsLayers },
     '-',
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },

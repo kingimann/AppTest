@@ -220,9 +220,11 @@ export const BODY_DEFAULTS = {
 /** A collider component's shape as body settings (sizes left out = fit the visible shape). */
 export function colliderBody(c) {
   if (!c) return null;
-  const sized = c.w || c.h || c.r || c.d, shape = c.shape === 'circle' || c.shape === 'sphere' ? c.shape : 'box';
-  const out = { shape: sized ? shape : 'auto', sensor: !!c.trigger };
+  const KNOWN = ['circle', 'sphere', 'box', 'capsule', 'polygon', 'edge', 'cylinder'];
+  const pts = Array.isArray(c.points) && c.points.length >= 2, sized = c.w || c.h || c.r || c.d || pts, shape = KNOWN.includes(c.shape) ? c.shape : 'box';
+  const out = { shape: sized && (shape !== 'polygon' && shape !== 'edge' || pts) ? shape : 'auto', sensor: !!c.trigger };
   for (const k of ['w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'bounce', 'friction', 'layer', 'oneWay']) if (c[k] !== undefined && c[k] !== '') out[k] = c[k];
+  if (pts) out.points = c.points.map((q) => [+q[0] || 0, +q[1] || 0]);
   return out;
 }
 /** Physics layers (Unity-style). matrix[i] is a bit mask of the layers layer i collides with. */
@@ -240,7 +242,8 @@ export class Entity {
     this.sx = props.sx ?? 1; this.sy = props.sy ?? 1; this.sz = props.sz ?? 1;
     this.visible = props.visible ?? true;
     this.alpha = props.alpha ?? 1;
-    this.layer = props.layer || 0;
+    this.layer = props.layer || 0; // draw order (higher = in front)
+    this.physLayer = props.physLayer | 0; // its Layer (0–7, named in Game Settings): which collision layer its collider uses
     this.ui = !!props.ui; // screen-space HUD element (2D overlay, also in 3D games)
     this.anchor = props.anchor || 'top-left';
     this.shape = props.shape ? { ...SHAPE_DEFAULTS, ...props.shape } : null;
@@ -274,7 +277,7 @@ export class Entity {
   }
 
   setBody(opts = {}) {
-    this.body = { ...BODY_DEFAULTS, ...opts, vel: { x: +opts.vx || 0, y: +opts.vy || 0, z: +opts.vz || 0 }, grounded: false };
+    this.body = { ...BODY_DEFAULTS, layer: this.physLayer || 0, ...opts, vel: { x: +opts.vx || 0, y: +opts.vy || 0, z: +opts.vz || 0 }, grounded: false };
     return this.body;
   }
 
@@ -302,6 +305,7 @@ export class Entity {
   /** Half-extents used for physics & picking. Planar 2D entities have infinite depth. */
   extents() {
     const x = this.rawExtents();
+    if (x.kind && x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; return x; }
     if (x.swap) { const t = x.hx; x.hx = x.hy; x.hy = t; delete x.swap; }
     if (x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; }
     return x;
@@ -320,6 +324,17 @@ export class Entity {
     const off = b && (b.ox || b.oy || b.oz) ? { ox: b.ox * sx, oy: b.oy * sy, oz: (b.oz || 0) * sz } : null;
     if (b && b.shape !== 'auto') {
       if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz), ...off };
+      if (b.shape === 'capsule' && !is2D) { const r = (b.r || 0.5) * Math.max(sx, sz), hh = Math.max(r, (b.h || 2) * sy / 2); return { sphere: false, kind: 'capsule', r, half: hh - r, hx: r, hy: hh, hz: r, ...off }; }
+      if (b.shape === 'cylinder' && !is2D) { const r = (b.r || 0.5) * Math.max(sx, sz), hh = (b.h || 1) * sy / 2; return { sphere: false, kind: 'cylinder', r, hx: r, hy: hh, hz: r, ...off }; }
+      if (is2D && (b.shape === 'capsule' || b.shape === 'polygon' || b.shape === 'edge')) {
+        let pts;
+        if (b.shape === 'capsule') pts = capsulePoints((b.w || 20) * sx / 2, (b.h || 40) * sy / 2);
+        else pts = (b.points || []).map(([x, y]) => [x * sx * Math.sign(this.sx || 1), y * sy * Math.sign(this.sy || 1)]);
+        if (pts.length < 2) return { sphere: false, hx: 1, hy: 1, hz: Infinity, ...off };
+        const hx = Math.max(1, ...pts.map((q) => Math.abs(q[0]))), hy = Math.max(1, ...pts.map((q) => Math.abs(q[1])));
+        const rz = this.rz && this.rz % 360 ? this.rz * DEG : 0;
+        return { sphere: false, kind: b.shape === 'edge' ? 'edge' : 'poly', pts, src: b.shape === 'polygon' ? b.points : null, hx, hy, hz: Infinity, ...off, ...(rz ? { rot: rz } : {}) };
+      }
       return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2, ...off, ...this.rot2D() };
     }
     if (this.model && this.model.parts?.length) { // box around all the parts
@@ -769,6 +784,7 @@ export class Scene {
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
     this.post = { ...(opts.post || {}) }; // post-processing: bloom, vignette, colour grading
     this.layerMask = layerMatrix(opts.physicsLayers); // which physics layers collide
+    this.layerNames = PHYSICS_LAYERS.map((d, i) => opts.physicsLayers?.names?.[i] || d);
     // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
     this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
     if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
@@ -978,6 +994,12 @@ export class Scene {
   emit(evt, ...args) { for (const fn of this.listeners[evt] || []) fn(...args); }
 
   setVar(k, v) { this.vars[k] = v; this.emit('var', k, v); }
+  /** A Layer by name or number (0–7). */
+  layerIndex(l) { if (typeof l === 'number' || /^\d+$/.test(String(l).trim())) return clamp(Math.round(+l), 0, 7); const i = this.layerNames.findIndex((n) => n.toLowerCase() === String(l || '').trim().toLowerCase()); return i < 0 ? 0 : i; }
+  /** Put an object on a Layer: its collider follows. */
+  setLayer(e, l) { const i = this.layerIndex(l); e.physLayer = i; if (e.body) e.body.layer = i; return i; }
+  /** Everything on a Layer. */
+  findInLayer(l) { const i = this.layerIndex(l); return this.entities.filter((e) => !e.dead && (e.body ? e.body.layer | 0 : e.physLayer) === i); }
   /** Inventory: add (or with a negative n, remove) items. {inventory} lists them, {item_Name} counts one. */
   addItem(name, n = 1, icon = '') {
     const inv = (this.inventory ||= {});
@@ -1260,7 +1282,113 @@ function overlapSAT(a, ea, b, eb) {
 }
 function proj(e, ux, uy) { const t = e.rot || 0, c = Math.cos(t), s = Math.sin(t); return e.hx * Math.abs(c * ux + s * uy) + e.hy * Math.abs(-s * ux + c * uy); }
 
+/** A capsule (stadium) outline as points: half width hw, half height hh, rounded along its long side. */
+function capsulePoints(hw, hh, n = 6) {
+  const out = [], vert = hh >= hw, r = vert ? hw : hh, L = (vert ? hh : hw) - r;
+  for (let k = 0; k <= n; k++) { const t = Math.PI * k / n; out.push(vert ? [Math.cos(t) * r, L + Math.sin(t) * r] : [L + Math.sin(t) * r, -Math.cos(t) * r]); } // one cap
+  for (let k = 0; k <= n; k++) { const t = Math.PI * k / n; out.push(vert ? [-Math.cos(t) * r, -L - Math.sin(t) * r] : [-L - Math.sin(t) * r, Math.cos(t) * r]); } // the other
+  return out;
+}
+/** Collider pieces in world space: convex polygons (an edge is one 2-point piece per segment) and circles. */
+function pieces2D(p, e) {
+  const t = e.rot || 0, cs = Math.cos(t), sn = Math.sin(t), W = ([x, y]) => [p.x + x * cs - y * sn, p.y + x * sn + y * cs];
+  if (e.sphere) return [{ c: [p.x, p.y], r: e.r }];
+  if (e.kind === 'poly') { const w = e.pts.map(W); return convexParts(e.pts, e.src).map((ix) => ({ v: ix.map((i) => w[i]) })); }
+  if (e.kind === 'edge') { const w = e.pts.map(W), out = []; for (let i = 0; i < w.length - 1; i++) out.push({ v: [w[i], w[i + 1]] }); return out; }
+  return [{ v: [[-e.hx, -e.hy], [e.hx, -e.hy], [e.hx, e.hy], [-e.hx, e.hy]].map(W) }];
+}
+/** A polygon split into convex pieces (index lists): itself when convex, otherwise ear-clipped triangles. Cached per points array. */
+const PARTS_CACHE = new WeakMap();
+function convexParts(pts, src) {
+  if (src && PARTS_CACHE.has(src)) return PARTS_CACHE.get(src);
+  const n = pts.length, cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  let area = 0; for (let i = 0; i < n; i++) { const a = pts[i], b = pts[(i + 1) % n]; area += a[0] * b[1] - b[0] * a[1]; }
+  const sg = Math.sign(area) || 1; let convex = true;
+  for (let i = 0; i < n && convex; i++) if (cross(pts[i], pts[(i + 1) % n], pts[(i + 2) % n]) * sg < -1e-9) convex = false;
+  let out;
+  if (convex || n < 4) out = [[...Array(n).keys()]];
+  else { // ear clipping
+    out = []; const idx = [...Array(n).keys()]; let guard = n * n;
+    while (idx.length > 3 && guard-- > 0) {
+      for (let k = 0; k < idx.length; k++) {
+        const i0 = idx[(k + idx.length - 1) % idx.length], i1 = idx[k], i2 = idx[(k + 1) % idx.length], A = pts[i0], B = pts[i1], C = pts[i2];
+        if (cross(A, B, C) * sg <= 1e-9) continue; // reflex corner
+        let blocked = false;
+        for (const j of idx) { if (j === i0 || j === i1 || j === i2) continue; const P = pts[j]; if (cross(A, B, P) * sg >= 0 && cross(B, C, P) * sg >= 0 && cross(C, A, P) * sg >= 0) { blocked = true; break; } }
+        if (blocked) continue;
+        out.push([i0, i1, i2]); idx.splice(k, 1); break;
+      }
+    }
+    if (idx.length === 3) out.push(idx.slice());
+  }
+  if (src) PARTS_CACHE.set(src, out);
+  return out;
+}
+const centroid = (v) => { let x = 0, y = 0; for (const q of v) { x += q[0]; y += q[1]; } return [x / v.length, y / v.length]; };
+function satPolys(A, B) { // normal from A to B, smallest push-out
+  let best = null;
+  for (const P of [A, B]) for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length]; if (P.length === 2 && i === 1) break;
+    let nx = -(b[1] - a[1]), ny = b[0] - a[0]; const l = Math.hypot(nx, ny); if (l < 1e-9) continue; nx /= l; ny /= l;
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const q of A) { const d = q[0] * nx + q[1] * ny; a0 = Math.min(a0, d); a1 = Math.max(a1, d); }
+    for (const q of B) { const d = q[0] * nx + q[1] * ny; b0 = Math.min(b0, d); b1 = Math.max(b1, d); }
+    if (a1 <= b0 || b1 <= a0) return null;
+    const up = a1 - b0, down = b1 - a0, o = Math.min(up, down); // push B along +n or -n, whichever is shorter (works for flat edges too)
+    if (!best || o < best.depth) best = up <= down ? { nx, ny, depth: o } : { nx: -nx, ny: -ny, depth: o };
+  }
+  if (!best) return null;
+  return { nx: best.nx, ny: best.ny, nz: 0, depth: best.depth };
+}
+function circlePoly(c, r, V) { // normal from the circle to the polygon
+  let bd = Infinity, bq = null;
+  for (let i = 0; i < V.length; i++) { if (V.length === 2 && i === 1) break; const a = V[i], b = V[(i + 1) % V.length], ex = b[0] - a[0], ey = b[1] - a[1], L = ex * ex + ey * ey;
+    const t = L ? clamp(((c[0] - a[0]) * ex + (c[1] - a[1]) * ey) / L, 0, 1) : 0, q = [a[0] + ex * t, a[1] + ey * t], d = Math.hypot(c[0] - q[0], c[1] - q[1]); if (d < bd) { bd = d; bq = q; } }
+  let inside = false;
+  if (V.length >= 3) for (let i = 0, k = V.length - 1; i < V.length; k = i++) { const [xi, yi] = V[i], [xk, yk] = V[k]; if ((yi > c[1]) !== (yk > c[1]) && c[0] < ((xk - xi) * (c[1] - yi)) / ((yk - yi) || 1e-9) + xi) inside = !inside; }
+  if (!inside && bd >= r) return null;
+  if (bd < 1e-6) { const g = centroid(V), dx = g[0] - c[0], dy = g[1] - c[1], l = Math.hypot(dx, dy) || 1; return { nx: dx / l, ny: dy / l, nz: 0, depth: r }; }
+  const dx = (bq[0] - c[0]) / bd, dy = (bq[1] - c[1]) / bd;
+  return inside ? { nx: -dx, ny: -dy, nz: 0, depth: r + bd } : { nx: dx, ny: dy, nz: 0, depth: r - bd };
+}
+function overlap2DShapes(a, ea, b, eb) {
+  const A = pieces2D(a, ea), B = pieces2D(b, eb); let best = null;
+  for (const pa of A) for (const pb of B) {
+    let m;
+    if (pa.c && pb.c) { const dx = pb.c[0] - pa.c[0], dy = pb.c[1] - pa.c[1], d = Math.hypot(dx, dy), rs = pa.r + pb.r; m = d >= rs ? null : d < 1e-6 ? { nx: 0, ny: 1, nz: 0, depth: rs } : { nx: dx / d, ny: dy / d, nz: 0, depth: rs - d }; }
+    else if (pa.c) m = circlePoly(pa.c, pa.r, pb.v);
+    else if (pb.c) { m = circlePoly(pb.c, pb.r, pa.v); if (m) { m.nx = -m.nx; m.ny = -m.ny; } }
+    else m = satPolys(pa.v, pb.v);
+    if (m && (!best || m.depth > best.depth)) best = m;
+  }
+  return best;
+}
+/** 3D capsules (upright) and cylinders (upright) against boxes, spheres, capsules and cylinders. Normal from a to b. */
+function overlap3DShapes(a, ea, b, eb) {
+  if (eb.kind === 'cylinder' && ea.kind !== 'cylinder') { const m = overlap3DShapes(b, eb, a, ea); if (m) { m.nx = -m.nx; m.ny = -m.ny; m.nz = -m.nz; } return m; }
+  if (ea.kind === 'cylinder') { // a column: push out sideways or up/down, whichever is less
+    const span = (p, e) => [p.y - (e.sphere ? e.r : e.hy), p.y + (e.sphere ? e.r : e.hy)], [a0, a1] = span(a, ea), [b0, b1] = span(b, eb);
+    const oy = Math.min(a1, b1) - Math.max(a0, b0); if (oy <= 0) return null;
+    let nx, nz, oh;
+    if (!eb.sphere && !eb.kind) { // box: circle against a rectangle on the ground plane
+      const qx = clamp(a.x, b.x - eb.hx, b.x + eb.hx), qz = clamp(a.z, b.z - eb.hz, b.z + eb.hz), dx = qx - a.x, dz = qz - a.z, d = Math.hypot(dx, dz);
+      if (d > 1e-6) { if (d >= ea.r) return null; nx = dx / d; nz = dz / d; oh = ea.r - d; }
+      else { const px = eb.hx - Math.abs(a.x - b.x), pz = eb.hz - Math.abs(a.z - b.z); if (px < pz) { nx = Math.sign(b.x - a.x) || 1; nz = 0; oh = px + ea.r; } else { nx = 0; nz = Math.sign(b.z - a.z) || 1; oh = pz + ea.r; } }
+    } else { const rb = eb.sphere ? eb.r : eb.r || eb.hx, dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz); if (d >= ea.r + rb) return null; nx = d > 1e-6 ? dx / d : 1; nz = d > 1e-6 ? dz / d : 0; oh = ea.r + rb - d; }
+    return oy < oh ? { nx: 0, ny: Math.sign(b.y - a.y) || 1, nz: 0, depth: oy } : { nx, ny: 0, nz, depth: oh };
+  }
+  // capsules become a sphere at the closest height on their spine
+  const pa = ea.kind === 'capsule' ? { x: a.x, y: clamp(b.y, a.y - ea.half, a.y + ea.half), z: a.z } : a, sa = ea.kind === 'capsule' ? { sphere: true, r: ea.r } : ea;
+  const pb = eb.kind === 'capsule' ? { x: b.x, y: clamp(pa.y, b.y - eb.half, b.y + eb.half), z: b.z } : b, sb = eb.kind === 'capsule' ? { sphere: true, r: eb.r } : eb;
+  const pa2 = ea.kind === 'capsule' ? { x: a.x, y: clamp(pb.y, a.y - ea.half, a.y + ea.half), z: a.z } : pa; // settle both closest points
+  return overlapRaw(pa2, sa, pb, sb);
+}
+
 function overlapRaw(a, ea, b, eb) {
+  if (ea.kind || eb.kind) {
+    const k3 = (e) => e.kind === 'capsule' || e.kind === 'cylinder';
+    return k3(ea) || k3(eb) ? overlap3DShapes(a, ea, b, eb) : overlap2DShapes(a, ea, b, eb);
+  }
   if (ea.rot || eb.rot) { // only 2D rectangles carry a rotation
     const ia = ea.sphere ? ea.r : ea.bx ?? ea.hx, ja = ea.sphere ? ea.r : ea.by ?? ea.hy, ib = eb.sphere ? eb.r : eb.bx ?? eb.hx, jb = eb.sphere ? eb.r : eb.by ?? eb.hy;
     if (Math.abs(b.x - a.x) >= ia + ib || Math.abs(b.y - a.y) >= ja + jb) return null;
@@ -1517,6 +1645,8 @@ export class Input {
     }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
+    const askMotion = () => { if (!this.enabled) return; if (this.useTilt && !this.tiltOn) this.enableTilt(); if (this.wantMotion) { if (!this.tiltOn) this.enableTilt(); this.enableShake(); } };
+    el.addEventListener('touchend', askMotion); el.addEventListener('pointerup', askMotion); // iPhone only lets a page ask for motion access when a finger lifts
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e, true));
@@ -1579,9 +1709,9 @@ export class Input {
 
   /** Tilt-to-move using the device's motion sensors (asks permission on iOS). */
   enableTilt() {
-    if (this.tiltOn) return;
+    if (this.tiltOn || this.tiltAsking) return;
     const listen = () => {
-      this.tiltOn = true;
+      this.tiltOn = true; this.tiltAsking = false;
       window.addEventListener('deviceorientation', (e) => {
         if (e.gamma == null) return;
         const angle = screen.orientation?.angle ?? window.orientation ?? 0;
@@ -1592,7 +1722,7 @@ export class Input {
       });
     };
     const D = window.DeviceOrientationEvent;
-    if (D && typeof D.requestPermission === 'function') D.requestPermission().then((r) => r === 'granted' && listen()).catch(() => {});
+    if (D && typeof D.requestPermission === 'function') { this.tiltAsking = true; D.requestPermission().then((r) => { this.tiltAsking = false; if (r === 'granted') listen(); else this.engine.scene?.message?.('Tilt needs motion access: allow it in Settings › Safari', 2.5); }).catch(() => { this.tiltAsking = false; }); }
     else if (D) listen();
   }
 
@@ -1635,6 +1765,7 @@ export class Input {
       const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
       x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
     }
+    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); y += (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); } // arrow keys / WASD on a computer
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
@@ -3053,7 +3184,7 @@ registerBehavior('move', {
   label: 'Move', description: 'Player movement with the joystick, dragging, or tilting the phone.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
-    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both' },
+    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both', info: { joystick: 'A joystick appears where you touch the left half of the screen (it switches the game\'s joystick on). Arrow keys / WASD work on a computer.', both: 'Joystick on the left half, drag anywhere else.', tilt: 'Tilt the phone to steer. On iPhone the game asks for motion access when you first tap the screen.', drag: 'Drag a finger anywhere to move it.' } },
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
@@ -3063,6 +3194,8 @@ registerBehavior('move', {
       start(e, s) {
         e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
         if (p.control === 'tilt') s.engine.input.useTilt = true;
+        // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
+        if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis();
@@ -7460,6 +7593,13 @@ function numAsText(v, f) {
   return fmtNumber(v, f === 'normal (1,234)' ? '' : f);
 }
 const wordsOf = (w) => String(w || '').split('|').map((x) => x.trim()).filter(Boolean);
+// ---- Layer nodes ----
+Object.assign(NODE_TYPES, {
+  setObjLayer: { cat: 'Objects', label: 'Set Layer', exec: true, outs: ['then'], params: [opt('target', ['self', 'other', 'object'], 'self', 'who'), txt('object', '', 'object name (for "object")'), txt('layer', 'Enemy', 'layer (name or 0–7)')] },
+  layerIs: { cat: 'Objects', label: 'Layer Is', value: 'bool', params: [opt('target', ['self', 'other'], 'other', 'who'), txt('layer', 'Enemy', 'layer')] },
+  countInLayer: { cat: 'Objects', label: 'Count In Layer', value: 'number', params: [txt('layer', 'Enemy', 'layer')] },
+  forEachInLayer: { cat: 'Objects', label: 'For Each In Layer', exec: true, outs: ['each', 'done'], params: [txt('layer', 'Enemy', 'layer')] },
+});
 // ---- UI nodes ----
 Object.assign(NODE_TYPES, {
   onUiTap: { cat: 'UI', label: 'On UI Tapped', outs: ['then'], params: [txt('object', 'Play Button', 'object (name or tag)')] },
@@ -8060,6 +8200,8 @@ registerBehavior('graph', {
         case 'camValue': { const c = s.camera, w = P('what'); return w === 'zoom' ? (s.mode === '3d' ? 60 / (c.fov || 60) : c.zoom || 1) : s.mode === '3d' ? c.position?.[w] || 0 : c[w] || 0; }
         case 'isMuted': return !!s.engine.audio.muted;
         case 'deviceIs': { const mm = (q) => typeof matchMedia === 'function' && matchMedia(q).matches; switch (P('is')) { case 'landscape': return s.engine.width > s.engine.height; case 'touch screen': return mm('(pointer: coarse)') || 'ontouchstart' in window; case 'online': return navigator.onLine !== false; case 'installed app': return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || !!navigator.standalone; case 'dark mode': return mm('(prefers-color-scheme: dark)'); case 'reduced motion': return mm('(prefers-reduced-motion: reduce)'); default: return s.engine.height >= s.engine.width; } }
+        case 'layerIs': { const t = P('target') === 'self' ? e : ctx.other; return !!t && (t.body ? t.body.layer | 0 : t.physLayer) === s.layerIndex(P('layer')); }
+        case 'countInLayer': return s.findInLayer(P('layer')).filter((q) => !q.template).length;
         case 'popupOpen': return !!(s.modal && !s.modal.dead && s.modal.visible);
         case 'uiVisible': { const t = uiFind(s, null, P('object')); return !!t && t.visible && !t._parentHidden; }
         case 'uiEnabled': { const t = uiFind(s, null, P('object')); return !!t && !t.data.uiDisabled; }
@@ -8225,7 +8367,7 @@ registerBehavior('graph', {
         }
         case 'setBodyType': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: P('type') }); b.type = P('type'); if (b.type !== 'dynamic') b.vel = { x: 0, y: 0, z: 0 }; break; }
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
-        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
+        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const i = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); t.ensureBody({ type: 'kinematic' }).layer = i; t.physLayer = i; break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
         case 'setMyVar': setMy(s, e, P('name') || 'hp', +I('value') || 0); break;
         case 'addMyVar': { const k = P('name') || 'hp'; setMy(s, e, k, (+e.data[k] || 0) + (+I('amount') || 0)); break; }
@@ -8450,6 +8592,8 @@ registerBehavior('graph', {
         case 'share': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)); if (navigator.share) navigator.share({ text }).catch(() => {}); else navigator.clipboard?.writeText(text).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {}); break; }
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
+        case 'setObjLayer': { const w = P('target'), t = w === 'other' ? ctx.other : w === 'object' ? uiFind(s, e, P('object')) : e; if (t) s.setLayer(t, P('layer')); break; }
+        case 'forEachInLayer': { s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 })); return follow(n, 'done', ctx); }
         case 'uiShow': {
           const t = uiFind(s, e, P('object')); if (!t) break;
           const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };

@@ -64,6 +64,7 @@ const CAT_HELP = {
   UI: 'Menus and screens: show / hide with animations, popups, toasts, alerts, yes / no questions, typing a name, badges, enabling buttons, images, bars, themes, scrolling.',
 };
 export const NODE_HELP = {
+  setObjLayer: 'Put this object, other, or a named object on a Layer (by name or number); its collider follows', layerIs: 'Is this object (or other) on a Layer', countInLayer: 'How many objects are on a Layer', forEachInLayer: 'Run “each” for every object on a Layer (it becomes other)',
   onUiTap: 'When a named UI element (or anything with that tag) is tapped, from any script. It becomes “other”', uiShow: 'Show or hide a panel with an animation (fade, pop, zoom, slide); “done” when it finishes',
   openPopup: 'Open or close a Popup or Side Bar component', closeTop: 'Close whatever popup or side bar is open (like the back gesture)',
   toast: 'A short message that slides in and disappears', alert: 'A message box with one button; “closed” when it is tapped', confirm: 'A question with two buttons: “yes” or “no”',

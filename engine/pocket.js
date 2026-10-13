@@ -8,6 +8,19 @@
  */
 export const VERSION = '0.1.0';
 
+/** The game's console: messages from logic and scripts, warnings and errors (shown in the editor's Console). */
+export const Log = {
+  entries: [], listeners: new Set(), max: 500,
+  add(level, text, source) {
+    const last = this.entries[this.entries.length - 1], msg = String(text);
+    if (last && last.level === level && last.text === msg && last.source === source) { last.count++; last.t = Date.now(); } // repeats collapse into one line
+    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), count: 1 }); if (this.entries.length > this.max) this.entries.shift(); }
+    (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[pocket]', source ? source + ':' : '', msg);
+    for (const f of this.listeners) { try { f(); } catch { /* a listener failing must not break the game */ } }
+  },
+  clear() { this.entries.length = 0; for (const f of this.listeners) f(); },
+};
+
 // ============================================================================
 // Utilities & math
 // ============================================================================
@@ -130,7 +143,11 @@ export const BODY_DEFAULTS = {
   lockX: false, lockY: false, lockZ: false, // freeze movement along an axis
   maxSpeed: 0, // 0 = no limit
   ignore: '', // comma-separated tags this body passes through
+  layer: 0, // physics layer (0-7): which others it collides with comes from the scene's layer matrix
 };
+/** Physics layers (Unity-style). matrix[i] is a bit mask of the layers layer i collides with. */
+export const PHYSICS_LAYERS = ['Default', 'Player', 'Enemy', 'Bullet', 'Ground', 'Pickup', 'Layer 6', 'Layer 7'];
+export const layerMatrix = (pl) => (Array.isArray(pl?.matrix) && pl.matrix.length === 8 ? pl.matrix : Array(8).fill(255));
 
 const TRANSFORM_KEYS = ['x', 'y', 'z', 'rx', 'ry', 'rz'];
 
@@ -153,6 +170,8 @@ export class Entity {
     this.bar = props.bar ? { ...BAR_DEFAULTS, ...props.bar } : null;
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
+    this.tiles = props.tiles ? new TileMap(props.tiles) : null; // 2D tilemap
+    this.tileLayer = props.tiles?.layer ?? 4; // tilemaps collide as the Ground physics layer
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
@@ -180,7 +199,7 @@ export class Entity {
     let inst = b;
     if (b && typeof b.type === 'string') {
       const def = Behaviors[b.type];
-      if (!def) { console.warn(`[pocket] unknown behavior "${b.type}"`); return null; }
+      if (!def) { Log.add('warn', `Unknown component "${b.type}"`, this.name); return null; }
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       inst = def.create(params, this) || {};
@@ -203,6 +222,10 @@ export class Entity {
     return x;
   }
   rawExtents() {
+    if (this.tiles) { // box around the painted cells; the entity sits at the top-left of cell (0, 0)
+      const b = this.tiles.bounds, s = this.tiles.size, w = (b.i1 - b.i0 + 1) * s, hgt = (b.j1 - b.j0 + 1) * s;
+      return { sphere: false, hx: w / 2, hy: hgt / 2, hz: Infinity, ox: b.i0 * s + w / 2, oy: b.j0 * s + hgt / 2, tiles: true };
+    }
     if (this.voxels) {
       const b = this.voxels.bounds, s = this.voxels.size;
       return { sphere: false, hx: (b.i1 - b.i0 + 1) * s / 2, hy: (b.j1 - b.j0 + 1) * s / 2, hz: (b.k1 - b.k0 + 1) * s / 2, voxel: true };
@@ -269,6 +292,46 @@ export class Entity {
 export const VOXEL_PALETTE = ['#6aa84f', '#8d6e63', '#9e9e9e', '#6d4c41', '#3d8b37', '#e3cf8f', '#4fa3e0', '#c0392b', '#f5f5f5', '#2b2b2b', '#f1c40f', '#8e44ad'];
 export const VOXEL_NAMES = ['Grass', 'Dirt', 'Stone', 'Wood', 'Leaves', 'Sand', 'Water', 'Brick', 'Snow', 'Obsidian', 'Gold', 'Crystal'];
 const CHUNK = 16;
+
+/** 2D tile types: what a painted cell does. */
+export const TILE_KINDS = [['solid', 'Solid (walls, ground)'], ['platform', 'One-way platform'], ['hazard', 'Hazard (hurts the player)'], ['decor', 'Decoration (no collision)']];
+export const TILE_PALETTE = [
+  { fill: '#6d4c41', top: '#7cb342', kind: 'solid' }, // grass
+  { fill: '#8d6e63', kind: 'solid' },                  // dirt
+  { fill: '#78909c', kind: 'solid' },                  // stone
+  { fill: '#a1887f', kind: 'platform' },               // plank
+  { fill: '#b0bec5', emoji: '🔺', kind: 'hazard' },     // spikes
+  { fill: '#4fc3f7', kind: 'decor' },                  // water / sky decor
+];
+/** A 2D grid of painted tiles. Cell (i, j) fills [i, i+1) × size from the owning entity's position (its top-left corner). */
+export class TileMap {
+  constructor(o = {}) {
+    this.size = o.size || 40;
+    this.palette = (o.palette && o.palette.length ? o.palette : TILE_PALETTE).map((t) => ({ ...t }));
+    this.cells = new Map();
+    for (const [k, v] of Object.entries(o.cells || {})) if (v) this.cells.set(k, v);
+    this.version = 0;
+  }
+  get(i, j) { return this.cells.get(i + ',' + j) || 0; }
+  set(i, j, n) { const k = i + ',' + j; if (n) this.cells.set(k, n); else this.cells.delete(k); this.version++; this._b = null; }
+  kindOf(n) { return n ? this.palette[n - 1]?.kind || 'solid' : null; }
+  cell(e, x, y) { return [Math.floor((x - e.x) / this.size), Math.floor((y - e.y) / this.size)]; }
+  /** The tile type at a world point (0 when empty). */
+  at(e, x, y) { const [i, j] = this.cell(e, x, y); return this.get(i, j); }
+  solidAtWorld(e, x, y) { const n = this.at(e, x, y); return !!n && this.kindOf(n) === 'solid'; }
+  get count() { return this.cells.size; }
+  get bounds() {
+    if (this._b) return this._b;
+    let i0 = 0, i1 = 0, j0 = 0, j1 = 0, first = true;
+    for (const k of this.cells.keys()) {
+      const [i, j] = k.split(',').map(Number);
+      if (first) { i0 = i1 = i; j0 = j1 = j; first = false; continue; }
+      i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j);
+    }
+    return (this._b = { i0, i1, j0, j1 });
+  }
+  toJSON() { return { size: this.size, palette: this.palette, cells: Object.fromEntries(this.cells) }; }
+}
 
 /** A grid of colored blocks. Block (i, j, k) fills [i, i+1) × size from the owning entity's position. */
 export class VoxelWorld {
@@ -546,6 +609,8 @@ export class Scene {
     this.gravity = opts.gravity ?? (this.mode === '3d' ? -20 : 0); // along y (2D: +down, 3D: +up)
     this.gravityX = +opts.gravityX || 0; this.gravityZ = +opts.gravityZ || 0; // sideways gravity (wind, tilted worlds)
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
+    this.post = { ...(opts.post || {}) }; // post-processing: bloom, vignette, colour grading
+    this.layerMask = layerMatrix(opts.physicsLayers); // which physics layers collide
     // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
     this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
     if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
@@ -667,7 +732,7 @@ export class Scene {
   /** Spawn a copy of a template (by name) or a new entity from props. */
   spawn(templateOrProps, overrides = {}) {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
-    if (!base) { console.warn(`[pocket] no template "${templateOrProps}"`); return null; }
+    if (!base) { Log.add('warn', `Spawn: there is no template called "${templateOrProps}"`); return null; }
     const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
     const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
     if (base.id) spawnKids(base.id, e);
@@ -1019,6 +1084,41 @@ export class Physics {
         }
       }
     }
+    // dynamic bodies collide with 2D tilemaps cell by cell
+    const maps = scene.mode === '3d' ? [] : scene.entities.filter((e) => e.tiles && !e.dead && e.visible !== false);
+    if (maps.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of maps) {
+          if (!((scene.layerMask[b.layer | 0] >> (w.tileLayer | 0)) & 1)) continue;
+          const T = w.tiles, sz = T.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: Infinity };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
+          const [i0, j0] = T.cell(w, cx - hx, cy - hy), [i1, j1] = T.cell(w, cx + hx - 1e-6, cy + hy - 1e-6);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+            const n = T.get(i, j), kind = T.kindOf(n);
+            if (!kind || kind === 'decor') continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: e.z };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            if (kind === 'hazard') { if (e.has('player') && scene.state === 'play' && !(e.data.invuln > 0)) respawnOrEnd(e, scene, 'damage'); continue; }
+            if (kind === 'platform') { // only solid for something landing on top while falling
+              if (!(gd && m.ny * gd > 0.5) || b.vel.y * gd < -0.01) continue;
+              const top = gd > 0 ? w.y + j * sz : w.y + (j + 1) * sz, was = (b.ly ?? e.y) + (ex.oy || 0) + hy * gd; // where its feet were last step
+              if ((was - top) * gd > 1) continue; // it was already below the top: let it pass
+              if (T.get(i, j - gd) && T.kindOf(T.get(i, j - gd)) === 'platform') continue; // only the top of a stack
+            } else if (Math.abs(m.nx) > 0.5 && T.kindOf(T.get(i - Math.sign(m.nx), j)) === 'solid') continue; // inner seam between two solid cells: don't snag
+            else if (Math.abs(m.ny) > 0.5 && T.kindOf(T.get(i, j - Math.sign(m.ny))) === 'solid') continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; }
+          }
+        }
+      }
+    }
     // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
     const items = list.map((e) => { const ex = e.extents(), cx = e.x + (ex.ox || 0), w = spanX(ex); return { e, ex, l: cx - w, r: cx + w }; });
     items.sort((p, q) => p.l - q.l);
@@ -1032,6 +1132,7 @@ export class Physics {
         if (ba.type === 'static' && bb.type === 'static') continue;
         if (a.dead || b.dead) continue;
         if ((ba.ignore || bb.ignore) && passes(a, b)) continue;
+        if (!((scene.layerMask[ba.layer | 0] >> (bb.layer | 0)) & 1)) continue; // layer matrix says these two don't touch
         const m = overlap(a, A.ex, b, B.ex);
         if (!m) continue;
         const key = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
@@ -1318,7 +1419,27 @@ const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => 
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
 
+/** Paint a tilemap's cells (only the ones on screen). */
+function drawTiles2D(ctx, e) {
+  const T = e.tiles, sz = T.size, m = ctx.getTransform(), inv = m.inverse(), W = ctx.canvas.width, H = ctx.canvas.height;
+  const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: W, y: H });
+  const xa = Math.min(p0.x, p1.x) - e.x, xb = Math.max(p0.x, p1.x) - e.x, ya = Math.min(p0.y, p1.y) - e.y, yb = Math.max(p0.y, p1.y) - e.y;
+  ctx.save(); ctx.translate(e.x, e.y); ctx.globalAlpha = e.alpha;
+  for (const [k, n] of T.cells) {
+    const c = k.indexOf(','), i = +k.slice(0, c), j = +k.slice(c + 1), x = i * sz, y = j * sz;
+    if (x + sz < xa || x > xb || y + sz < ya || y > yb) continue;
+    const t = T.palette[n - 1]; if (!t) continue;
+    const kind = t.kind || 'solid', above = T.get(i, j - 1);
+    if (kind === 'platform') { ctx.fillStyle = t.fill; ctx.fillRect(x, y, sz, sz * 0.3); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x, y + sz * 0.3 - 3, sz, 3); }
+    else if (t.fill && !(kind === 'hazard' && t.emoji)) { ctx.fillStyle = t.fill; ctx.fillRect(x, y, sz + 0.5, sz + 0.5); }
+    if (t.top && kind === 'solid' && (!above || T.kindOf(above) !== 'solid')) { ctx.fillStyle = t.top; ctx.fillRect(x, y, sz + 0.5, sz * 0.22); }
+    if (kind === 'solid' && !t.top) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, y, sz, 2); ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x, y + sz - 2, sz, 2); }
+    if (t.emoji) { ctx.font = `${Math.round(sz * 0.8)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.emoji, x + sz / 2, y + sz / 2 + sz * 0.04); }
+  }
+  ctx.restore();
+}
 function drawEntity2D(ctx, e, vars, time) {
+  if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
   ctx.translate(e.x, e.y);
   if (e.rz) ctx.rotate(e.rz * DEG);
@@ -4299,6 +4420,7 @@ function blockerAt(s, x, y, z, except) {
   for (const o of s.entities) {
     if (o === except || o.dead || o.ui) continue;
     if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
+    if (o.tiles) { if (s.mode !== '3d' && o.tiles.solidAtWorld(o, x, y)) return o; continue; }
     const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable');
     if (!solid) continue;
     const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
@@ -4674,6 +4796,7 @@ export const NODE_TYPES = {
   setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
   message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
+  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text')] },
   sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')] },
   spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
   destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
@@ -4796,6 +4919,7 @@ export const LOGIC_ACTIONS = {
   setState: { cat: 'Flow', label: 'Go to state', icon: 'nodes', params: [txt('state', 'Idle', 'state')], run: (c, p) => c.e.getBehavior('fsm')?.goTo(p.state), say: (p) => `Go to ${p.state}` },
   // game
   message: { cat: 'Game', label: 'Show message', icon: 'sign', params: [txt('text', 'Hello! {score}', 'text'), num('seconds', 2, 'seconds')], run: (c, p) => c.s.message(fillTemplate(p.text, c.s.vars), +p.seconds || 2), say: (p) => `Say “${p.text}”` },
+  log: { cat: 'Game', label: 'Debug log', icon: 'list', params: [txt('text', 'score is {score}', 'text')], run: (c, p) => Log.add('info', fillTemplate(p.text, c.s.vars), c.e?.name), say: (p) => `Log “${p.text}”` },
   sound: { cat: 'Game', label: 'Play sound', icon: 'bolt', params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')], run: (c, p) => c.s.engine.audio.sfx(p.sound), say: (p) => `Sound: ${p.sound}` },
   vibrate: { cat: 'Game', label: 'Vibrate', icon: 'gamepad', run: (c) => c.s.engine.vibrate([30, 30, 30]), say: () => 'Vibrate' },
   shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
@@ -4818,7 +4942,7 @@ export function runInstructions(list, ctx, done) {
       const it = list[i++], def = LOGIC_ACTIONS[it?.type];
       if (!def || it.off) continue;
       let r;
-      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { console.warn('[pocket] instruction failed', it.type, err); }
+      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name); }
       if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
       if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
     }
@@ -5001,6 +5125,7 @@ registerBehavior('graph', {
         case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
         case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
         case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
+        case 'log': Log.add('info', fillTemplate(P('text'), s.vars), e?.name); break;
         case 'sound': s.engine.audio.sfx(P('sound')); break;
         case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
         case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
@@ -5082,9 +5207,13 @@ registerBehavior('script', {
         start: typeof start === 'function' ? start : undefined,
         update: typeof update === 'function' ? update : undefined,
         collide: typeof collide === 'function' ? collide : undefined };`);
-      return f(Pocket);
+      const hooks = f(Pocket), out = {};
+      for (const [k, fn] of Object.entries(hooks)) if (fn) out[k] = (e, ...a) => { // a crash in one script is logged, not fatal
+        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script'); } }
+      };
+      return out;
     } catch (err) {
-      console.error('[pocket] script error:', err);
+      Log.add('error', `Script can't run: ${err.message}`, 'Custom script');
       return {};
     }
   },
@@ -5151,7 +5280,7 @@ export class Engine {
   useRenderer(kind) {
     if (this.renderer?.kind === kind) return;
     this.canvas?.remove();
-    this.canvas = document.createElement('canvas');
+    this.canvas = document.createElement('canvas'); this._grade = null;
     this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
     this.root.insertBefore(this.canvas, this.uiCanvas);
     this.canvas.width = Math.round(this.width * this.dpr); this.canvas.height = Math.round(this.height * this.dpr);
@@ -5177,7 +5306,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -5467,8 +5596,50 @@ export class Engine {
     if (!this.scene || !this.renderer) return;
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.renderer.render(this.scene, this);
+    this.applyPost(this.scene.post);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);
+  }
+
+  /** Post-processing over the game view (not the HUD): colour grading and bloom on the GPU, vignette and tint as overlays. */
+  applyPost(P = {}) {
+    const on = (k) => +P[k] > 0, grade = [
+      P.brightness != null && +P.brightness !== 100 && `brightness(${+P.brightness / 100})`,
+      P.contrast != null && +P.contrast !== 100 && `contrast(${+P.contrast / 100})`,
+      P.saturation != null && +P.saturation !== 100 && `saturate(${+P.saturation / 100})`,
+      +P.hue && `hue-rotate(${+P.hue}deg)`,
+    ].filter(Boolean).join(' ');
+    if (this.canvas && this._grade !== grade) { this.canvas.style.filter = grade; this._grade = grade; }
+    // bloom: a small copy of the frame, bright parts kept, blurred, and added on top with "screen"
+    if (on('bloom')) {
+      let b = this.bloomCanvas;
+      if (!b) {
+        b = this.bloomCanvas = document.createElement('canvas');
+        b.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;mix-blend-mode:screen;';
+        this.root.insertBefore(b, this.uiCanvas);
+      }
+      const w = Math.max(1, Math.round(this.width / 4)), hgt = Math.max(1, Math.round(this.height / 4));
+      if (b.width !== w || b.height !== hgt) { b.width = w; b.height = hgt; }
+      const g = b.getContext('2d'); g.clearRect(0, 0, w, hgt); g.drawImage(this.canvas, 0, 0, w, hgt);
+      const r = Math.max(1, (+P.bloomRadius || 12) / 4), th = 1 + +(P.bloomThreshold ?? 60) / 40;
+      const f = `brightness(${0.85 - (th - 1) * 0.15}) contrast(${th}) blur(${r}px) ${grade}`;
+      if (b._f !== f) { b.style.filter = f; b._f = f; }
+      b.style.opacity = Math.min(1, +P.bloom); b.hidden = false;
+    } else if (this.bloomCanvas) this.bloomCanvas.hidden = true;
+    // vignette (dark edges) and tint (a colour wash)
+    const vig = on('vignette'), tint = on('tintAmount') && P.tint;
+    if (vig || tint) {
+      let o = this.postOverlay;
+      if (!o) { o = this.postOverlay = document.createElement('div'); o.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none;'; this.root.insertBefore(o, this.uiCanvas); }
+      const key = `${P.vignette}|${P.tint}|${P.tintAmount}|${P.vignetteColor}`;
+      if (o._k !== key) {
+        o._k = key;
+        const c255 = (hex) => hexToRgb(hex).map((v) => Math.round(v * 255)), [vr, vg, vb] = c255(P.vignetteColor || '#000000'), [tr, tg, tb] = c255(P.tint || '#ff8800');
+        o.style.background = [vig && `radial-gradient(ellipse at center, rgba(${vr},${vg},${vb},0) ${Math.round(70 - +P.vignette * 35)}%, rgba(${vr},${vg},${vb},${Math.min(1, +P.vignette * 0.9)}) 100%)`,
+          tint && `linear-gradient(rgba(${tr},${tg},${tb},${Math.min(0.8, +P.tintAmount * 0.75)}), rgba(${tr},${tg},${tb},${Math.min(0.8, +P.tintAmount * 0.75)}))`].filter(Boolean).join(',');
+      }
+      o.hidden = false;
+    } else if (this.postOverlay) this.postOverlay.hidden = true;
   }
 
   destroy() {
@@ -5483,5 +5654,6 @@ export class Engine {
 export const Pocket = {
   VERSION, Engine, Scene, Entity, VoxelWorld, GEOMETRIES, partSize, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
   Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
+  Log, log: (...a) => Log.add('info', a.join(' '), 'script'), warn: (...a) => Log.add('warn', a.join(' '), 'script'),
 };
 export default Pocket;

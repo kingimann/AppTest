@@ -118,6 +118,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Filter** button next to search: Player, Logic, Physics, UI or Templates only. Search also matches tags and components.
   - Selecting an object in the Scene scrolls the Hierarchy to it, opening its folder, group or parent.
   - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - **Select** (the tick button next to search): tick several objects (tapping a ×N group ticks all its copies), then **Duplicate**, **Group** (puts them in a new parent so they move together), **Hide / Show**, **Folder** or **Delete** them at once. **All** ticks everything shown.
   - **Getting started** is a one-line strip with the next step (tap to see all steps).
   - Bring to front / send to back; a lock button on locked objects.
 - **Inspector**:
@@ -154,6 +155,52 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
   - **Touch Button** (your own on-screen control placed and sized anywhere: left, right, up, down, jump, fire or a message while held).
   - **Minimap** (player, enemies, walls and coins around the player), and **Ring** progress bars.
 - **New UI widgets**: Volume Slider, Toggle, Progress Ring, Minimap, Animated Score, Typewriter Text, Name Input, Touch Controls (◀ ▶ JUMP; replaces the built-in joystick), Vertical Menu (Play / Continue / Restart in a layout group), Top Bar (full-width).
+
+### Tilemaps (2D)
+
+- Add **Objects → Tilemap**. The Paint tool turns on: drag on the Scene to paint tiles on a grid (a faint grid shows while painting).
+- The **Tilemap** card in the Inspector:
+  - **Paint** / **Erase** brush and a palette of tile types (tap one to paint with it, **New** adds a type).
+  - Each type has a colour, an optional grass-style top edge, an optional emoji, and what it **does**: **Solid** (walls and ground), **One-way platform** (jump up through it, land on top), **Hazard** (hurts the player) or **Decoration** (no collision).
+  - Tile size and **Erase all**.
+- Bodies slide smoothly along rows of solid tiles (no snagging on the seams). Grid-based games treat solid tiles as walls.
+
+```js
+{ name: 'Level', x: 0, y: 400, tiles: { size: 40, palette: [{ fill: '#6d4c41', top: '#7cb342', kind: 'solid' }], cells: { '0,0': 1, '1,0': 1 } } }
+```
+
+### Prefabs
+
+- Long-press an object (or its ⋯ menu) → **Make Prefab**. It appears in **Project › Prefabs › My Prefabs**; tap or drag it to place copies.
+- Each copy keeps its own position, rotation, scale and name; everything else (look, components, children) comes from the prefab. Copies are blue in the Hierarchy.
+- Change a copy and its banner turns amber: **Apply to all** updates the prefab and every copy in every level, **Revert** goes back to the prefab, **⋯** selects all copies or **Unpacks** this one into a plain object.
+
+### Post Processing
+
+- Tap the level (top row of the Hierarchy) → **Post Processing**. Start from a look — **Neon glow**, **Warm sunset**, **Cold**, **Night**, **Retro**, **Dreamy**, **Black & white** — then tune it:
+  - **Bloom** (glow around bright things) with size and "only bright parts".
+  - **Vignette** (dark edges), **Brightness**, **Contrast**, **Saturation**, **Hue shift**, **Tint** colour and amount.
+- Works in 2D and 3D, in the editor and while playing. The HUD isn't affected.
+
+```js
+{ post: { bloom: 0.8, bloomRadius: 16, vignette: 0.35, saturation: 125, tint: '#ff9a3c', tintAmount: 0.2 } } // on a level
+```
+
+### Collision layers
+
+- Each **Rigidbody** has a **Physics layer**: Default, Player, Enemy, Bullet, Ground, Pickup, or two spare layers you can rename.
+- Tap the level → **Collision Layers**: a grid of which layers collide. Untick a box and those two layers pass through each other with no touch events (e.g. enemies' bullets ignore other enemies). Tilemaps count as Ground. The grid is shared by every level.
+
+```js
+{ physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
+```
+
+### Console
+
+- The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.
+- Repeated messages fold into one line with a count. Filter by Log / Warn / Error, clear it, and choose whether Play clears it. Tap a message from an object to jump to it.
+- While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
+- A custom script that crashes is reported once and the game keeps running.
 
 ### Parenting, UI anchoring and UI zoom
 

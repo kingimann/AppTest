@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -71,9 +71,60 @@ function saveNow() {
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
+/** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
+function renderMultiBar() {
+  const box = $('#hierarchy');
+  box.querySelector('.multi-bar')?.remove();
+  if (!multi) return;
+  for (const id of [...multi]) if (!ent(id)) multi.delete(id);
+  const list = [...multi].map(ent).filter(Boolean), n = list.length, none = !n;
+  const act = (icn, label, fn, cls = '') => h('button', { class: cls, disabled: none, onclick: fn }, icon(icn), label);
+  const visible = list.some((e) => e.visible !== false);
+  box.append(h('div', { class: 'multi-bar' },
+    h('div', { class: 'mb-top' }, h('b', {}, n ? `${n} selected` : 'Tap objects to select them'),
+      h('button', { class: 'mb-all', onclick: () => { const all = project.entities.filter(hMatch).map((e) => e.id), every = all.every((id) => multi.has(id)); multi = new Set(every ? [] : all); renderHierarchy(); } }, 'All'),
+      h('button', { class: 'mb-done', onclick: () => { multi = null; renderHierarchy(); } }, 'Done')),
+    h('div', { class: 'mb-acts' },
+      act('copy', 'Duplicate', () => multiDuplicate(list)),
+      act('child', 'Group', () => multiGroup(list)),
+      act(visible ? 'eyeoff' : 'eye', visible ? 'Hide' : 'Show', () => { for (const e of list) e.visible = !visible; changed({ structure: true }); pushHistory(); }),
+      act('folder', 'Folder', () => moveToFolder(list)),
+      act('trash', 'Delete', () => multiDelete(list), 'danger'))));
+}
+/** Top-most picks only: a ticked child is already covered by its ticked parent. */
+const topPicks = (list) => list.filter((e) => !list.some((q) => q !== e && isInside(e.id, q.id)));
+function multiDelete(list) {
+  const tops = topPicks(list), ids = new Set(tops.flatMap((e) => subtree(e.id)));
+  if (ids.size > 1 && !confirm(`Delete ${ids.size} objects?`)) return;
+  project.entities = project.entities.filter((e) => !ids.has(e.id));
+  if (ids.has(selectedId)) selectedId = null;
+  multi = new Set(); changed({ structure: true }); pushHistory(); updateCtxBar();
+  toast(`Deleted ${ids.size} object${ids.size > 1 ? 's' : ''}. Undo to restore.`);
+}
+function multiDuplicate(list) {
+  const made = [];
+  for (const e of topPicks(list)) { duplicateEntity(e.id); made.push(selectedId); }
+  multi = new Set(made); renderHierarchy(); toast(`Duplicated ${made.length} object${made.length > 1 ? 's' : ''}`);
+}
+/** Put the picked objects inside a new empty parent at their middle, so they move together. */
+function multiGroup(list) {
+  const tops = topPicks(list);
+  if (tops.some((e) => !!e.ui !== !!tops[0].ui)) { toast('Group UI and game objects separately'); return; }
+  const live = tops.map((e) => engine.scene.byId(e.id)).filter(Boolean), avg = (k) => live.reduce((a, q) => a + (q[k] || 0), 0) / (live.length || 1);
+  const r = (v) => (is3D() ? round(v, 2) : Math.round(v));
+  const g = { id: uid(), name: 'Group', ...(tops[0].ui ? { ui: true, anchor: tops[0].anchor || 'center', x: 0, y: 0 } : { x: r(avg('x')), y: r(avg('y')), ...(is3D() ? { z: r(avg('z')) } : {}) }) };
+  if (tops.every((e) => e.folder && e.folder === tops[0].folder)) g.folder = tops[0].folder;
+  const L = project.entities; L.splice(Math.min(...tops.map((e) => L.indexOf(e))), 0, g);
+  rebuild();
+  for (const e of tops) setParent(e.id, g.id, { batch: true });
+  multi = null; selectedId = g.id; closedKids.delete(g.id);
+  changed({ structure: true }); pushHistory(); updateCtxBar();
+  toast(`Grouped ${tops.length} objects. Move the Group to move them all.`);
+}
 const openDups = new Set(); // Hierarchy "Gem ×8" groups the user opened
 let hRevealed = null; // last selection the Hierarchy scrolled to
-let attachFor = null; // object waiting for the user to tap its new parent (Attach mode)
+let attachFor = null;
+let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
 const levelList = () => [root, ...(root.levels || [])];
@@ -198,6 +249,10 @@ function changed({ structure = false, inspector = false } = {}) {
   pushHistorySoon();
   if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); }
   else if (inspector) renderInspector();
+  else { // a field changed: keep the prefab banner's "changed here" state current
+    const j = ent(selectedId), old = j?.prefab && $('#inspector .pf-banner');
+    if (old) old.replaceWith(prefabBanner(j) || '');
+  }
 }
 
 // ============================================================================
@@ -211,7 +266,7 @@ window.engine = engine;
 
 const ent = (id) => project?.entities.find((e) => e.id === id);
 const is3D = () => project.mode === '3d';
-const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.model || e.bar);
+const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.tiles || e.model || e.bar);
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
@@ -270,6 +325,7 @@ function boundsOf(e) {
   const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
   let x = e.x;
   if (e.text && !e.shape && !e.sprite) x += e.text.align === 'left' ? hx : e.text.align === 'right' ? -hx : 0;
+  if (ex.tiles) return { x: e.x + ex.ox, y: e.y + ex.oy, hx, hy, sphere: false };
   return { x, y: e.y, hx, hy, sphere: ex.sphere, r: ex.r };
 }
 function uiBounds(e) { // on screen, with the UI editor's zoom applied
@@ -313,6 +369,24 @@ engine.onRenderWorld = (r, s, z) => {
       const zm = +cam.zoom || 1, w = s.view.width / zm, hgt = s.view.height / zm;
       ctx.save(); ctx.setLineDash([8 / z, 6 / z]); ctx.strokeStyle = pe.id === selectedId ? ORANGE : 'rgba(140,200,255,0.7)'; ctx.lineWidth = 1.5 / z;
       ctx.strokeRect((pe.x || 0) - w / 2, (pe.y || 0) - hgt / 2, w, hgt); ctx.restore();
+    }
+    if (multi) for (const id of multi) { // objects ticked in the Hierarchy's Select mode
+      const e = s.byId(id); if (!e || e.ui) continue;
+      const b = boundsOf(e), pad = 4 / z;
+      ctx.save(); ctx.setLineDash([6 / z, 4 / z]); ctx.strokeStyle = ORANGE; ctx.lineWidth = 2 / z;
+      if (b.sphere) { ctx.beginPath(); ctx.arc(b.x, b.y, b.r + pad, 0, Math.PI * 2); ctx.stroke(); } else ctx.strokeRect(b.x - b.hx - pad, b.y - b.hy - pad, (b.hx + pad) * 2, (b.hy + pad) * 2);
+      ctx.restore();
+    }
+    if (sel?.tiles && tool === 'paint') { // the tile grid while painting
+      const T = sel.tiles, sz = T.size, inv = ctx.getTransform().inverse(), W = ctx.canvas.width, H = ctx.canvas.height;
+      const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: W, y: H });
+      const i0 = Math.floor((Math.min(p0.x, p1.x) - sel.x) / sz), i1 = Math.ceil((Math.max(p0.x, p1.x) - sel.x) / sz), j0 = Math.floor((Math.min(p0.y, p1.y) - sel.y) / sz), j1 = Math.ceil((Math.max(p0.y, p1.y) - sel.y) / sz);
+      if ((i1 - i0) * (j1 - j0) < 40000) {
+        ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 1 / z; ctx.beginPath();
+        for (let i = i0; i <= i1; i++) { ctx.moveTo(sel.x + i * sz, sel.y + j0 * sz); ctx.lineTo(sel.x + i * sz, sel.y + j1 * sz); }
+        for (let j = j0; j <= j1; j++) { ctx.moveTo(sel.x + i0 * sz, sel.y + j * sz); ctx.lineTo(sel.x + i1 * sz, sel.y + j * sz); }
+        ctx.stroke(); ctx.restore();
+      }
     }
     if (sel?.light) { ctx.save(); ctx.setLineDash([5 / z, 5 / z]); ctx.strokeStyle = 'rgba(255,220,140,0.8)'; ctx.lineWidth = 1.5 / z; ctx.beginPath(); ctx.arc(sel.x, sel.y, sel.light.range, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     for (const [e, col] of [[hover, '#4c8bd6'], [sel, ORANGE]]) {
@@ -540,6 +614,7 @@ function pick(sx, sy) {
     const w = engine.renderer.screenToWorld(s, sx, sy), pad = 6 / engine.renderer.zoomFor(s);
     for (const e of list) {
       if (e.ui || !hasVisual(e)) continue;
+      if (e.tiles) { if (e.tiles.at(e, w.x, w.y) || (tool === 'paint' && e.id === selectedId)) return e; continue; } // empty cells don't grab the finger
       const b = boundsOf(e);
       if (b.sphere ? Math.hypot(w.x - b.x, w.y - b.y) <= b.r + pad : Math.abs(w.x - b.x) <= b.hx + pad && Math.abs(w.y - b.y) <= b.hy + pad) return e;
     }
@@ -608,6 +683,11 @@ surface.addEventListener('pointerdown', (ev) => {
   else if (tapTrack) tapTrack.max = Math.max(tapTrack.max, ptrs.size);
   if (ptrs.size > 1) cancelLongPress();
   $('#hint').hidden = true;
+  if (ptrs.size === 1 && tool === 'paint' && ent(selectedId)?.tiles && !is3D()) {
+    gesture = { type: 'tile', id: selectedId, last: '', count: 0 };
+    tilePaint(x, y);
+    return;
+  }
   if (ptrs.size === 1 && tool === 'paint' && ent(selectedId)?.voxels) {
     gesture = { type: 'voxel', id: selectedId, last: '', count: 0 };
     voxelPaint(x, y);
@@ -741,6 +821,8 @@ surface.addEventListener('pointermove', (ev) => {
     paintAt(x, y);
   } else if (g.type === 'voxel') {
     voxelPaint(x, y);
+  } else if (g.type === 'tile') {
+    tilePaint(x, y);
   } else if (g.type === 'pan' || g.type === 'orbit') {
     const mx = x - g.lx, my = y - g.ly;
     g.lx = x; g.ly = y;
@@ -782,6 +864,81 @@ function childOf(g) {
     }
   }
   return g.par;
+}
+
+// ---- physics layers (Unity-style collision matrix), shared by every level ----
+const layerNames = () => { const n = root.physicsLayers?.names; return PHYSICS_LAYERS.map((d, i) => n?.[i] || d); };
+function layerMatrixEditor() {
+  const names = layerNames(), M = layerMatrix(root.physicsLayers).slice();
+  const used = new Set(levelList().flatMap((lv) => lv.entities).map((e) => +(e.body?.layer || 0)));
+  const set = (i, j, on) => { for (const [a, b] of [[i, j], [j, i]]) M[a] = on ? M[a] | (1 << b) : M[a] & ~(1 << b);
+    root.physicsLayers = { ...(root.physicsLayers || {}), matrix: M }; changed({ inspector: true }); pushHistory(); };
+  const rename = (i) => { const n = prompt('Layer name', names[i]); if (!n?.trim()) return; const all = layerNames(); all[i] = n.trim(); root.physicsLayers = { ...(root.physicsLayers || {}), names: all, matrix: M }; changed({ inspector: true }); pushHistory(); };
+  return h('div', { class: 'lm' },
+    h('p', { class: 'desc' }, 'Pick a layer on each Rigidbody (Player, Enemy, Bullet…). Untick a box and those two layers pass through each other — no bumping, no touch events. Tilemaps count as Ground. Tap a name to rename it.'),
+    h('div', { class: 'lm-grid', style: `--n:${names.length}` },
+      names.map((nm, i) => h('div', { class: 'lm-row' },
+        h('button', { class: 'lm-name' + (used.has(i) ? ' used' : ''), onclick: () => rename(i) }, nm),
+        names.map((_, j) => j > i ? h('span', { class: 'lm-sp' }) : h('label', { class: 'lm-cell', title: `${nm} ↔ ${names[j]}` },
+          h('input', { type: 'checkbox', checked: !!((M[i] >> j) & 1), onchange: (e) => set(i, j, e.target.checked) }))))),
+      h('div', { class: 'lm-row lm-foot' }, h('span', { class: 'lm-name' }), names.map((nm) => h('span', { class: 'lm-col' }, nm.slice(0, 3))))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { root.physicsLayers = { ...(root.physicsLayers || {}), matrix: Array(8).fill(255) }; changed({ inspector: true }); pushHistory(); } }, icon('undo'), 'Everything collides')));
+}
+
+/** Inspector card for a 2D tilemap: brush, tile types, and the selected type's look and behaviour. */
+function tilemapCard(j, C) {
+  const T = j.tiles, pal = T.palette ||= TILE_PALETTE.map((t) => ({ ...t })), cur = Math.min(tileBrush.tile, pal.length), t = pal[cur - 1];
+  const live = engine.scene.byId(j.id), count = Object.keys(T.cells || {}).length;
+  const pick = (n) => { tileBrush.tile = n; tileBrush.mode = 'paint'; setTool('paint'); renderInspector(); };
+  const swatch = (q, n) => h('button', { class: 'tile-sw' + (tileBrush.mode === 'paint' && cur === n ? ' on' : ''), title: (TILE_KINDS.find(([k]) => k === (q.kind || 'solid')) || [])[1], onclick: () => pick(n) },
+    h('i', { style: `background:${q.fill || 'transparent'};${q.top && (q.kind || 'solid') === 'solid' ? `border-top:6px solid ${q.top}` : ''}${q.kind === 'platform' ? ';height:40%;align-self:start' : ''}` }), q.emoji ? h('b', {}, q.emoji) : null,
+    h('small', {}, { solid: 'Solid', platform: 'Platform', hazard: 'Hazard', decor: 'Decor' }[q.kind || 'solid']));
+  const set = (k, v) => { t[k] = v; if (!v && k !== 'kind') delete t[k]; changed({ inspector: false }); if (live) live.tiles.palette[cur - 1] = { ...t }; };
+  return comp('Tilemap', [
+    h('p', { class: 'desc' }, `${count} tile${count === 1 ? '' : 's'}. Pick a tile below, then drag on the Scene to paint. Solid tiles are walls and ground; platforms can be jumped through from below; hazards hurt the player.`),
+    h('div', { class: 'row' }, h('label', {}, 'Brush'), h('div', { class: 'pair' },
+      h('button', { class: 'btn' + (tileBrush.mode === 'paint' && tool === 'paint' ? ' primary' : ''), style: 'flex:1', onclick: () => { tileBrush.mode = 'paint'; setTool('paint'); renderInspector(); } }, icon('brush'), 'Paint'),
+      h('button', { class: 'btn' + (tileBrush.mode === 'erase' && tool === 'paint' ? ' primary' : ''), style: 'flex:1', onclick: () => { tileBrush.mode = 'erase'; setTool('paint'); renderInspector(); } }, icon('trash'), 'Erase'))),
+    h('div', { class: 'tile-pal' }, pal.map((q, i) => swatch(q, i + 1)),
+      h('button', { class: 'tile-sw add', title: 'New tile type', onclick: () => { pal.push({ fill: '#90a4ae', kind: 'solid' }); changed({ structure: true }); pick(pal.length); } }, icon('plus'), h('small', {}, 'New'))),
+    t && h('div', { class: 'tile-edit' },
+      h('div', { class: 'row side' }, h('label', {}, 'Does'), h('select', { onchange: (e) => { set('kind', e.target.value); renderInspector(); } }, TILE_KINDS.map(([k, l]) => h('option', { value: k, selected: (t.kind || 'solid') === k }, l)))),
+      h('div', { class: 'row side' }, h('label', {}, 'Colour'), h('input', { type: 'color', value: t.fill || '#888888', oninput: (e) => set('fill', e.target.value), onchange: () => renderInspector() })),
+      (t.kind || 'solid') === 'solid' && h('div', { class: 'row side' }, h('label', {}, 'Top edge'), h('div', { class: 'pair' },
+        h('input', { type: 'checkbox', checked: !!t.top, onchange: (e) => { set('top', e.target.checked ? '#7cb342' : ''); renderInspector(); } }),
+        t.top && h('input', { type: 'color', value: t.top, oninput: (e) => set('top', e.target.value), onchange: () => renderInspector() }))),
+      h('div', { class: 'row side' }, h('label', {}, 'Emoji'), h('div', { class: 'pair' },
+        h('button', { class: 'btn', style: 'flex:1', onclick: () => pickEmoji((em) => { set('emoji', em); renderInspector(); }) }, t.emoji || 'Choose…'),
+        t.emoji && h('button', { class: 'btn', title: 'No emoji', onclick: () => { set('emoji', ''); renderInspector(); } }, icon('close')))),
+      pal.length > 1 && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => {
+        const used = Object.values(T.cells || {}).filter((v) => v === cur).length;
+        if (used && !confirm(`Remove this tile type and its ${used} painted tile${used === 1 ? '' : 's'}?`)) return;
+        pal.splice(cur - 1, 1);
+        for (const [k, v] of Object.entries(T.cells || {})) { if (v === cur) delete T.cells[k]; else if (v > cur) T.cells[k] = v - 1; }
+        tileBrush.tile = Math.max(1, cur - 1); changed({ structure: true }); pushHistory();
+      } }, icon('trash'), 'Remove this tile type'))),
+    C('tiles.size', { label: 'Tile size', type: 'number', def: 40, step: 4, structure: true }),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Erase every tile?')) return; T.cells = {}; changed({ structure: true }); pushHistory(); } }, icon('trash'), 'Erase all')),
+  ], { icon: 'grid', key: 'tiles', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.tiles; changed({ structure: true }); } }] });
+}
+
+/** Paint tool on a tilemap: paint or erase the cell under the finger (dragging fills a line, so fast strokes leave no gaps). */
+function tilePaint(sx, sy) {
+  const g = gesture, j = ent(g.id), live = engine.scene.byId(g.id);
+  if (!j || !live?.tiles) return;
+  const T = live.tiles, w = engine.renderer.screenToWorld(engine.scene, sx, sy), [ci, cj] = T.cell(live, w.x, w.y);
+  const n = tileBrush.mode === 'erase' ? 0 : Math.min(tileBrush.tile, T.palette.length);
+  const from = g.lastCell || [ci, cj], steps = Math.max(Math.abs(ci - from[0]), Math.abs(cj - from[1]), 1);
+  for (let t = 1; t <= steps; t++) {
+    const i = Math.round(from[0] + (ci - from[0]) * t / steps), jj = Math.round(from[1] + (cj - from[1]) * t / steps), key = i + ',' + jj;
+    if (T.get(i, jj) === n) continue;
+    T.set(i, jj, n);
+    j.tiles.cells ||= {};
+    if (n) j.tiles.cells[key] = n; else delete j.tiles.cells[key];
+    g.count++;
+  }
+  if (g.lastCell?.[0] !== ci || g.lastCell?.[1] !== cj) buzz(4);
+  g.lastCell = [ci, cj];
 }
 
 /** Paint tool on a voxel world: add or remove blocks where the finger is. */
@@ -852,7 +1009,7 @@ const endPointer = (ev) => {
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
   uiGuide = null;
-  if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
+  if ((g.type === 'voxel' || g.type === 'tile') && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
     const now = performance.now();
@@ -883,6 +1040,7 @@ function openObjectMenu(id, sx, sy, anchor) {
     { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
+    j.prefab ? { icon: 'upload', label: 'Apply to Prefab', fn: () => applyPrefab(id) } : { icon: 'cube', label: 'Make Prefab', fn: () => makePrefab(id) },
     { icon: 'clock', label: 'Animate…', fn: () => openAnim(j, (j.behaviors || []).findIndex((b) => b.type === 'animator')) },
     { icon: 'layers', label: 'Make Child Of…', fn: () => parentMenu(j) },
     j.parent && { icon: 'upload', label: 'Unparent (top level)', fn: () => setParent(j.id, null) },
@@ -949,10 +1107,55 @@ function setDock(name, { fromTab = false } = {}) {
     else if (sheetState() === 'peek') setSheet('half');
   }
   dockTab = name;
+  if (name === 'console') { consoleSeen = Log.entries.length; renderConsole(); }
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
 const isDesktop = () => false; // phones and tablets only
+
+// ---- Console (Unity-style): Debug Log messages, warnings and errors from the game ----
+let consoleSeen = 0, consoleLevel = 'all', consoleFrame = 0;
+const LOG_ICON = { info: 'info', warn: 'help', error: 'close' };
+const clearOnPlay = () => store.get('pocket.editor.clearOnPlay', '1') === '1';
+function logRow(x) {
+  const obj = x.source && project.entities.find((e) => e.name === x.source.replace(/ script$/, ''));
+  return h('div', { class: 'log-row ' + x.level + (obj ? ' link' : ''), onclick: obj ? () => { if (playing) return; select(obj.id); setDock('inspector'); } : null },
+    h('span', { class: 'log-ic' }, icon(LOG_ICON[x.level] || 'info')),
+    h('span', { class: 'log-txt' }, h('span', {}, x.text), h('small', {}, [x.source, new Date(x.t).toLocaleTimeString()].filter(Boolean).join(' · '))),
+    x.count > 1 && h('span', { class: 'log-n' }, x.count > 999 ? '999+' : x.count));
+}
+function renderConsole() {
+  const box = $('#console'); if (!box) return;
+  const E = Log.entries, n = (lv) => E.filter((x) => x.level === lv).reduce((a, x) => a + x.count, 0);
+  const shown = consoleLevel === 'all' ? E : E.filter((x) => x.level === consoleLevel);
+  box.replaceChildren(
+    h('div', { class: 'log-tools' },
+      ...[['all', 'All', E.reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
+        h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; renderConsole(); } }, l, h('b', {}, c))),
+      h('span', { class: 'sp' }),
+      h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash'))),
+    h('label', { class: 'log-opt' }, h('input', { type: 'checkbox', checked: clearOnPlay(), onchange: (e) => store.set('pocket.editor.clearOnPlay', e.target.checked ? '1' : '') }), 'Clear when you press Play'),
+    shown.length ? h('div', { class: 'log-list' }, shown.slice().reverse().map(logRow))
+      : h('div', { class: 'empty' }, E.length ? 'Nothing of this kind.' : 'Messages from your game appear here while it runs: the Debug Log action and node, P.log() in scripts, warnings and errors.'));
+  updateConsoleBadge();
+}
+function updateConsoleBadge() {
+  const fresh = Log.entries.slice(consoleSeen), errs = fresh.filter((x) => x.level === 'error').length, warns = fresh.filter((x) => x.level === 'warn').length;
+  const tab = $('#dockTabs [data-dock="console"]'); if (!tab) return;
+  tab.querySelector('.dock-badge')?.remove();
+  if (dockTab !== 'console' && (errs || warns)) tab.append(h('span', { class: 'dock-badge' + (errs ? ' err' : '') }, String(errs || warns)));
+  const pb = $('#pbLog'); if (pb) { pb.querySelector('.dock-badge')?.remove(); const all = Log.entries.filter((x) => x.level === 'error').length; if (all) pb.append(h('span', { class: 'dock-badge err' }, String(all))); }
+  if (!$('#playConsole').hidden) renderPlayConsole();
+}
+function renderPlayConsole() {
+  $('#playConsole').replaceChildren(h('div', { class: 'pc-h' }, h('b', {}, 'Console'), h('button', { onclick: () => { $('#playConsole').hidden = true; } }, icon('close'))),
+    h('div', { class: 'pc-list' }, Log.entries.slice(-40).reverse().map(logRow)));
+}
+Log.listeners.add(() => { // batch redraws to once a frame
+  if (consoleFrame) return;
+  consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(); } else updateConsoleBadge(); });
+});
+window.addEventListener('error', (e) => { if (playing) Log.add('error', e.message || 'Error', 'game'); });
 
 // ---- bottom sheet (phones): peek / half / full ----
 function setSheet(state) {
@@ -1052,7 +1255,7 @@ function refreshAll() {
 let hFilter = '';
 function iconFor(e) {
   if (!e) return 'scene';
-  if (e.voxels) return 'grid';
+  if (e.voxels || e.tiles) return 'grid';
   if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
   if (e.light && !e.shape && !e.mesh && !e.model) return 'bulb';
   if (e.model) return 'cube';
@@ -1070,6 +1273,7 @@ function compBadges(e) {
   if (e.body) out.push(e.body.type === 'static' ? 'Static' : e.body.sensor ? 'Trigger' : 'Rigidbody');
   if (e.light) out.push('Light');
   if (e.model) out.push('Model');
+  if (e.tiles) out.push('Tilemap');
   for (const b of e.behaviors || []) { const d = Behaviors[b.type]; if (d) out.push(d.label.replace(/ \(.*\)$/, '')); }
   return out;
 }
@@ -1126,8 +1330,9 @@ function renderHierarchy() {
   const kindLabel = H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
   const filterBtn = h('button', { class: 'h-filter-btn' + (hKind !== 'all' ? ' on' : ''), title: 'Show only…',
     onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
-    icon('list'), hKind === 'all' ? 'Filter' : kindLabel);
-  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn));
+    icon('list'), hKind === 'all' ? '' : kindLabel);
+  const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
+  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn, selBtn));
   if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
   const rows = h('div');
   box.append(rows);
@@ -1137,10 +1342,11 @@ function renderHierarchy() {
     const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
-      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
+      class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
-      onclick: () => { if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+      onclick: () => { if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); } else if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
+    multi ? h('span', { class: 'h-check' + (multi.has(e.id) ? ' on' : '') }, multi.has(e.id) ? icon('check') : null) : '',
     depth ? h('span', { class: 'h-branch' }) : '',
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
     h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
@@ -1171,11 +1377,14 @@ function renderHierarchy() {
   };
   const groupRow = (g) => {
     const shut = !openDups.has(g.key), first = g.members[0], kind = kindOf(first), badges = compBadges(first), vis = g.members.some((m) => m.visible !== false);
-    return h('div', { class: 'h-row h-group' + (g.members.some((m) => m.id === selectedId) ? ' has-sel' : ''), onclick: () => { shut ? openDups.add(g.key) : openDups.delete(g.key); renderRows(); } },
-      h('span', { class: 'h-twisty' + (shut ? ' shut' : '') }, icon('chevron')),
+    const allOn = multi && g.members.every((m) => multi.has(m.id)), fold = () => { shut ? openDups.add(g.key) : openDups.delete(g.key); renderRows(); };
+    return h('div', { class: 'h-row h-group' + (g.members.some((m) => m.id === selectedId) ? ' has-sel' : ''),
+      onclick: () => { if (!multi) return fold(); for (const m of g.members) allOn ? multi.delete(m.id) : multi.add(m.id); renderRows(); renderMultiBar(); } },
+      multi ? h('span', { class: 'h-check' + (allOn ? ' on' : '') }, allOn ? icon('check') : null) : '',
+      h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), onclick: (ev) => { ev.stopPropagation(); fold(); } }, icon('chevron')),
       h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(first))),
       h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, g.name, h('span', { class: 'h-count' }, '×' + g.members.length)),
-        h('span', { class: 'h-sub' }, [shut ? 'tap to show all' : 'tap to fold', ...badges.slice(0, 2)].join(' · '))),
+        h('span', { class: 'h-sub' }, [multi ? 'tap to select all' : shut ? 'tap to show all' : 'tap to fold', ...badges.slice(0, 2)].join(' · '))),
       h('button', { class: 'eye', title: vis ? 'Hide all' : 'Show all', onclick: (ev) => { ev.stopPropagation(); for (const m of g.members) m.visible = !vis; changed({ structure: true }); } }, icon(vis ? 'eye' : 'eyeoff')));
   };
   const rowsOf = (items) => tree(items).map(([e, d]) => (e === 'group' ? groupRow(d) : row(e, d)));
@@ -1204,7 +1413,9 @@ function renderHierarchy() {
     ].filter(Boolean));
   }
   if (selectedId && selectedId !== hRevealed) reveal(selectedId); // newly selected (maybe in the Scene): unfold its way and scroll to it
+  box.classList.toggle('multi-on', !!multi);
   renderRows();
+  renderMultiBar();
   box.scrollTop = scroll;
   if (selectedId && selectedId !== hRevealed) { hRevealed = selectedId; box.querySelector(`.h-row[data-id="${selectedId}"]`)?.scrollIntoView({ block: 'nearest' }); }
 }
@@ -1224,7 +1435,7 @@ function subtree(id) { const out = [id]; for (const k of kidsOf(id)) out.push(..
 /** Objects that `j` could be put inside (not itself or its own children; UI only inside UI). */
 const parentChoices = (j) => project.entities.filter((e) => e.id !== j.id && !isInside(e.id, j.id) && !!e.ui === !!j.ui && !e.template);
 /** Make `id` a child of `pid` (or move it back to the top level with null), keeping where it is on screen. */
-function setParent(id, pid) {
+function setParent(id, pid, { batch = false } = {}) {
   const j = ent(id); if (!j) return;
   const pj = pid ? ent(pid) : null;
   if (pid && (pid === id || isInside(pid, id))) { toast('An object can’t go inside its own child'); return; }
@@ -1251,6 +1462,7 @@ function setParent(id, pid) {
     L.splice(at, 0, ...moving);
     closedKids.delete(pid);
   }
+  if (batch) return;
   changed({ structure: true }); pushHistory();
   toast(pid ? `${j.name} is now inside ${pj.name}` : `${j.name} moved to the top level`);
 }
@@ -1292,12 +1504,13 @@ function parentMenu(j, anchor) {
 }
 
 function moveToFolder(j) {
+  const list = Array.isArray(j) ? j : [j];
   const existing = [...new Set(project.entities.map((e) => e.folder).filter(Boolean))];
-  const pick = (f) => { if (f) j.folder = f; else delete j.folder; changed({ structure: true }); pushHistory(); };
+  const pick = (f) => { for (const q of list) { if (f) q.folder = f; else delete q.folder; } changed({ structure: true }); pushHistory(); };
   popMenu({ left: window.innerWidth / 2 - 110, top: window.innerHeight / 3, bottom: window.innerHeight / 3 }, [
     { cap: 'Folder' }, ...existing.map((f) => ({ icon: 'folder', label: f, fn: () => pick(f) })),
     { icon: 'plus', label: 'New Folder…', fn: () => { const n = prompt('Folder name', is3D() ? 'Environment' : 'Level'); if (n?.trim()) pick(n.trim()); } },
-    j.folder && { icon: 'close', label: 'No Folder', fn: () => pick('') },
+    list.some((q) => q.folder) && { icon: 'close', label: 'No Folder', fn: () => pick('') },
   ]);
 }
 
@@ -1731,6 +1944,7 @@ function newModel() {
 const closedComps = new Set();
 let showAdvanced = store.get('pocket.editor.advanced', '0') === '1', lastInspected = null, selectedPart = -1;
 const voxelBrush = { mode: 'add', block: 1 };
+const tileBrush = { mode: 'paint', tile: 1 };
 let compClipboard = null;
 function pasteComponent(j) {
   const c = compClipboard; if (!c) return;
@@ -1776,7 +1990,7 @@ const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim
 let inspCat = 'all';
 /** Which inspector filter a component belongs to. */
 function compCat(key) {
-  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'light', 'uiel'].includes(key)) return 'visual';
+  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'tiles', 'light', 'uiel'].includes(key)) return 'visual';
   if (key === 'body') return 'physics';
   const type = String(key).replace(/^b\d+/, ''), c = BEH_META[type]?.[0];
   if (!c) return 'other';
@@ -1842,7 +2056,7 @@ function renderInspector() {
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
     lastInspected = j.id; selectedPart = -1;
     closedComps.clear();
-    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels'].filter((k) => j[k]).length;
+    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
   }
 
@@ -1875,6 +2089,7 @@ function renderInspector() {
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
+  const pfb = prefabBanner(j); if (pfb) box.append(pfb);
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
@@ -1989,6 +2204,7 @@ function renderInspector() {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
     ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
   }
+  if (j.tiles) box.append(tilemapCard(j, C));
   if (j.minimap) {
     box.append(comp('Minimap', [
       h('p', { class: 'desc' }, 'A small map of the level: the player (blue), enemies (red), walls and coins. Resize it with the Rect tool.'),
@@ -2018,6 +2234,7 @@ function renderInspector() {
       j.body.type === 'dynamic' && [C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }), C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05 })],
       j.body.type === 'dynamic' && h('div', { class: 'row' }, h('label', {}, 'Freeze'), h('div', { class: 'pair' }, (threeD ? ['X', 'Y', 'Z'] : ['X', 'Y']).map((a) =>
         h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.body['lock' + a], onchange: (e) => { if (e.target.checked) j.body['lock' + a] = true; else delete j.body['lock' + a]; changed(); } }), a)))),
+      C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
@@ -2091,6 +2308,25 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, threeD ? 'Gravity is in Physics below: about -25 is normal.' : 'Gravity is in Physics below: 0 for top-down games, about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
   ], { icon: 'sun', key: 's-env' }));
+  const POST_PRESETS = [['none', 'None', {}], ['glow', 'Neon glow', { bloom: 0.8, bloomRadius: 16, bloomThreshold: 50, saturation: 125, vignette: 0.35 }],
+    ['warm', 'Warm sunset', { tint: '#ff9a3c', tintAmount: 0.25, saturation: 115, contrast: 105, vignette: 0.3 }], ['cold', 'Cold', { tint: '#4fa3ff', tintAmount: 0.2, saturation: 85, contrast: 108 }],
+    ['night', 'Night', { brightness: 70, saturation: 70, tint: '#2a3d8f', tintAmount: 0.35, vignette: 0.6 }], ['retro', 'Retro', { contrast: 120, saturation: 140, vignette: 0.5, bloom: 0.35 }],
+    ['dream', 'Dreamy', { bloom: 0.9, bloomRadius: 28, bloomThreshold: 20, brightness: 108, saturation: 90 }], ['bw', 'Black & white', { saturation: 0, contrast: 115, vignette: 0.4 }]];
+  box.append(comp('Post Processing', [
+    h('p', { class: 'desc' }, 'Effects over the whole game view (your HUD stays crisp). Start from a look, then tune it.'),
+    h('div', { class: 'post-presets' }, POST_PRESETS.map(([k, l, v]) => h('button', { class: 'btn', onclick: () => { project.post = clone(v); changed({ inspector: true }); pushHistory(); toast(k === 'none' ? 'Effects off' : `${l} look`); } }, l))),
+    C('post.bloom', { label: 'Bloom (glow)', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+    C('post.bloomRadius', { label: 'Glow size', type: 'number', def: 12, step: 2, range: [2, 40] }),
+    C('post.bloomThreshold', { label: 'Glow only bright parts', type: 'number', def: 60, step: 5, range: [0, 100] }),
+    C('post.vignette', { label: 'Vignette (dark edges)', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+    C('post.brightness', { label: 'Brightness %', type: 'number', def: 100, step: 5, range: [20, 200] }),
+    C('post.contrast', { label: 'Contrast %', type: 'number', def: 100, step: 5, range: [20, 200] }),
+    C('post.saturation', { label: 'Saturation %', type: 'number', def: 100, step: 5, range: [0, 250] }),
+    C('post.hue', { label: 'Hue shift °', type: 'number', def: 0, step: 10, range: [-180, 180] }),
+    C('post.tint', { label: 'Tint colour', type: 'color', def: '#ff8800' }),
+    C('post.tintAmount', { label: 'Tint amount', type: 'number', def: 0, step: 0.05, range: [0, 1] }),
+  ], { icon: 'sun', key: 's-post' }));
+  box.append(comp('Collision Layers', [layerMatrixEditor()], { icon: 'grid', key: 's-layers' }));
   box.append(comp('Physics', [
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
@@ -2489,6 +2725,7 @@ const OBJECTS_2D = [
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
+  { icon: 'grid', label: 'Tilemap', props: { name: 'Tilemap', x: 0, y: 520, tiles: { size: 40, palette: TILE_PALETTE.map((t) => ({ ...t })), cells: Object.fromEntries([...Array(10)].map((_, i) => [i + ',0', 1])) } }, tilemap: true },
 ];
 const OBJECTS_3D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -2530,6 +2767,18 @@ function renderProject() {
         : projectTab === 'sprites' ? Object.entries(EMOJI).flatMap(([cat, list]) => { const one = { Characters: 'Character', Enemies: 'Enemy', Items: 'Item', Vehicles: 'Vehicle', Places: 'Prop' }[cat] || cat; return list.map((em) => ({ emoji: em, label: one, props: { name: one, shape: { type: 'emoji', emoji: em, w: 56, h: 56 } } })); })
           : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
     items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'star' } }));
+  }
+  const mine = projectTab === 'prefabs' ? userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode) : [];
+  if (projectTab === 'prefabs') {
+    box.append(h('div', { class: 'p-sec' }, 'My Prefabs'));
+    if (!mine.length) box.append(h('p', { class: 'p-note' }, 'Make your own: long-press an object (or its ⋯ menu) and pick Make Prefab. Change one copy, tap Apply, and every copy updates.'));
+    else box.append(h('div', { class: 'tiles' }, mine.map((pf) => {
+      const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
+        h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
+      draggable(t, { kind: 'prefab', def: { userPrefab: pf.id, label: pf.name }, label: pf.name, icon: iconFor(pf.entities[0]) });
+      return t;
+    })));
+    box.append(h('div', { class: 'p-sec' }, 'Built-in'));
   }
   box.append(h('div', { class: 'tiles' }, items.map((it) => {
     const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
@@ -2638,6 +2887,7 @@ function addEntity(props, at) {
   return j;
 }
 function addPrefab(def, at) {
+  if (def.userPrefab) { instantiatePrefab(def.userPrefab, at); return; }
   if (def.scene) {
     if (def.scene.gravity != null && !project.gravity) project.gravity = def.scene.gravity;
     Object.assign(project.settings, def.scene.settings || {});
@@ -2655,15 +2905,114 @@ function addPrefab(def, at) {
   }
   const j = addEntity(def.props, at);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
+  if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
+    const sz = j.tiles.size; j.x = Math.round((j.x - 5 * sz) / sz) * sz; j.y = Math.round((j.y + 2 * sz) / sz) * sz;
+    tileBrush.mode = 'paint'; tileBrush.tile = 1; changed({ structure: true }); setTool('paint');
+    toast('Tilemap added: drag on the Scene to paint tiles'); return;
+  }
   toast(`Added ${j.name}`);
 }
 function placePrefab(def, sx, sy) {
   const s = engine.scene;
-  if (def.props.ui) { addPrefab(def); return; }
+  if (def.props?.ui || (def.userPrefab && userPrefabs().find((p) => p.id === def.userPrefab)?.entities[0].ui)) { addPrefab(def); return; }
   if (is3D()) {
     const hit = rayPlaneY(engine.renderer.screenRay(s, sx, sy), 0);
     addPrefab(def, hit ? { x: hit.x, z: hit.z } : undefined);
   } else addPrefab(def, engine.renderer.screenToWorld(s, sx, sy));
+}
+
+// ---- Prefabs (Unity-style): an object saved once; its copies in every level update together ----
+/** Per-copy fields: everything else comes from the prefab. */
+const OVERRIDES = ['id', 'name', 'x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'parent', 'folder', 'prefab', 'locked', 'visible', 'anchor'];
+const userPrefabs = () => (root.prefabs ||= []);
+const prefabOf = (j) => (j?.prefab ? userPrefabs().find((p) => p.id === j.prefab) : null);
+/** An object and its children in prefab form: root 'r', children 'c1', 'c2'… with per-copy fields left out of the root. */
+function prefabSnapshot(id) {
+  const ids = subtree(id), local = new Map(ids.map((x, i) => [x, i ? 'c' + i : 'r']));
+  return ids.map((x, i) => {
+    const c = clone(ent(x)); c.id = local.get(x);
+    if (i === 0) { for (const k of OVERRIDES) if (k !== 'id') delete c[k]; }
+    else { c.parent = local.get(c.parent) || 'r'; delete c.prefab; }
+    return c;
+  });
+}
+/** Rebuild one copy from its prefab, keeping its own position, name and other per-copy fields. */
+function syncInstance(inst, pf, lv) {
+  const L = lv.entities, inLevel = (q) => L.find((e) => e.id === q);
+  const old = new Set(); const walk = (pid) => { for (const e of L) if (e.parent === pid) { old.add(e.id); walk(e.id); } }; walk(inst.id);
+  lv.entities = L.filter((e) => !old.has(e.id));
+  const keep = {}; for (const k of OVERRIDES) if (inst[k] !== undefined) keep[k] = inst[k];
+  for (const k of Object.keys(inst)) delete inst[k];
+  const [r, ...kids] = clone(pf.entities); delete r.id;
+  Object.assign(inst, r, keep);
+  const map = new Map(kids.map((c) => [c.id, uid()])); map.set('r', inst.id);
+  const copies = kids.map((c) => ({ ...c, id: map.get(c.id), parent: map.get(c.parent) || inst.id }));
+  lv.entities.splice(lv.entities.indexOf(inLevel(inst.id) || inst) + 1, 0, ...copies);
+}
+/** Rotation, scale and anchor a new copy starts with (each copy can change its own). */
+const prefabBase = (j) => Object.fromEntries(['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'anchor'].filter((k) => j[k] !== undefined).map((k) => [k, j[k]]));
+function eachInstance(pid, fn) { for (const lv of levelList()) for (const e of [...lv.entities]) if (e.prefab === pid) fn(e, lv); }
+function makePrefab(id) {
+  const j = ent(id); if (!j) return;
+  if (j.prefab) { toast(`${j.name} is already a copy of a prefab`); return; }
+  const pf = { id: uid('pf'), name: j.name || 'Prefab', entities: prefabSnapshot(id), base: prefabBase(j) };
+  userPrefabs().push(pf); j.prefab = pf.id;
+  changed({ structure: true }); pushHistory(); renderProject();
+  toast(`Saved “${pf.name}” as a prefab. Find it in Project › Prefabs.`);
+}
+function applyPrefab(id) {
+  const j = ent(id), pf = prefabOf(j); if (!pf) return;
+  pf.entities = prefabSnapshot(id); pf.base = prefabBase(j);
+  let n = 0; eachInstance(pf.id, (e, lv) => { if (e !== j) { syncInstance(e, pf, lv); n++; } });
+  changed({ structure: true }); pushHistory(); renderProject();
+  toast(n ? `Updated the prefab and ${n} other cop${n === 1 ? 'y' : 'ies'}` : 'Updated the prefab');
+}
+function revertPrefab(id) {
+  const j = ent(id), pf = prefabOf(j); if (!pf) return;
+  syncInstance(j, pf, project);
+  changed({ structure: true }); pushHistory(); toast('Back to the prefab');
+}
+function unpackPrefab(id) { const j = ent(id); if (!j) return; delete j.prefab; changed({ structure: true }); pushHistory(); toast(`${j.name} is now a plain object`); }
+/** Same content regardless of key order. */
+const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((q) => [q, x[q]])) : x));
+const prefabChanged = (j) => { const pf = prefabOf(j); return !!pf && canon(prefabSnapshot(j.id)) !== canon(pf.entities); };
+/** Place a new copy of a prefab. */
+function instantiatePrefab(pid, at) {
+  const pf = userPrefabs().find((p) => p.id === pid); if (!pf) return;
+  const r = pf.entities[0], j = addEntity({ name: pf.name, prefab: pid, ...(pf.base || {}), ...(r.ui ? { ui: true, x: 0, y: 0 } : {}) }, at);
+  if (!at && !j.ui) { // don't stack a new copy exactly on another one
+    const step = is3D() ? 1.5 : 40, taken = (q) => project.entities.some((e) => e !== j && e.prefab === pid && Math.abs((e.x || 0) - q.x) < step / 2 && Math.abs((is3D() ? e.z || 0 : e.y || 0) - (is3D() ? q.z : q.y)) < step / 2);
+    for (let n = 0; n < 40 && taken(j); n++) { j.x = (j.x || 0) + step; if (is3D()) j.z = j.z || 0; }
+  }
+  syncInstance(j, pf, project); j.name = pf.name; // copies share the prefab's name (the Hierarchy folds them into one row)
+  changed({ structure: true }); pushHistory(); toast(`Added ${pf.name}`);
+}
+function prefabAssetMenu(pf, anchor) {
+  let count = 0; eachInstance(pf.id, () => count++);
+  popMenu(anchor, [
+    { cap: `${pf.name} · ${count} cop${count === 1 ? 'y' : 'ies'}` },
+    { icon: 'plus', label: 'Add a Copy', fn: () => instantiatePrefab(pf.id) },
+    { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Prefab name', pf.name); if (!n?.trim()) return; pf.name = n.trim(); changed(); renderProject(); } },
+    { icon: 'trash', label: 'Delete Prefab', fn: () => {
+      if (!confirm(`Delete the prefab “${pf.name}”? Its ${count} cop${count === 1 ? 'y stays' : 'ies stay'} as plain objects.`)) return;
+      eachInstance(pf.id, (e) => delete e.prefab); root.prefabs = userPrefabs().filter((p) => p !== pf);
+      changed({ structure: true }); pushHistory(); renderProject();
+    } },
+  ]);
+}
+/** Inspector banner on a prefab copy. */
+function prefabBanner(j) {
+  const pf = prefabOf(j); if (!pf) return null;
+  const dirty = prefabChanged(j); let count = 0; eachInstance(pf.id, () => count++);
+  return h('div', { class: 'pf-banner' + (dirty ? ' dirty' : '') },
+    h('div', { class: 'pf-t' }, icon('cube'), h('span', {}, h('b', {}, pf.name), h('small', {}, dirty ? 'Changed here — apply to update every copy' : `Prefab · ${count} cop${count === 1 ? 'y' : 'ies'}`))),
+    h('div', { class: 'pf-acts' },
+      h('button', { class: 'btn' + (dirty ? ' primary' : ''), disabled: !dirty, onclick: () => applyPrefab(j.id) }, icon('upload'), 'Apply to all'),
+      h('button', { class: 'btn', disabled: !dirty, onclick: () => revertPrefab(j.id) }, icon('undo'), 'Revert'),
+      h('button', { class: 'btn', title: 'More', onclick: (ev) => popMenu(ev.currentTarget, [
+        { icon: 'list', label: 'Select All Copies', fn: () => { const ids = []; eachInstance(pf.id, (e, lv) => { if (lv === project) ids.push(e.id); }); multi = new Set(ids); setDock('hierarchy'); renderHierarchy(); } },
+        { icon: 'unlink', label: 'Unpack (make a plain object)', fn: () => unpackPrefab(j.id) },
+      ]) }, icon('more'))));
 }
 
 function duplicateEntity(id) {
@@ -2951,12 +3300,13 @@ function play() {
   engine.editing = false;
   engine.input.enabled = true;
   engine.timeScale = 1;
+  if (clearOnPlay()) { Log.clear(); consoleSeen = 0; }
   const json = clone(root);
   for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false, loadOnStart: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
-  } catch (err) { console.error(err); toast('Error: ' + err.message); stop(); return; }
+  } catch (err) { Log.add('error', `The game couldn't start: ${err.message}`, 'game'); toast('Error: ' + err.message + ' (see Console)'); stop(); return; }
   updatePauseButtons();
   pushBack(stop);
   store.set('pocket.editor.played.' + projectId, '1');
@@ -2967,7 +3317,7 @@ function stop() {
   playing = false;
   dropBack(stop);
   document.body.classList.remove('playing');
-  $('#playBar').hidden = true;
+  $('#playBar').hidden = true; $('#playConsole').hidden = true;
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
   engine.editing = true;
   engine.paused = false;
@@ -2993,19 +3343,20 @@ setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can 
 $('#fileBtn').append(icon('menu'));
 for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
-$('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause'));
+$('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
+$('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
-for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['project', 'folder', 'Project']]) {
+for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
 { // swipe left / right across a panel to move between Hierarchy, Inspector and Project
-  const order = ['hierarchy', 'inspector', 'project'];
+  const order = ['hierarchy', 'inspector', 'project', 'console'];
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
+    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid, .lm-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
   }, { passive: true });
   $('#sheet').addEventListener('touchend', (e) => {
     if (!st) return;

@@ -72,6 +72,7 @@
     <button data-dock="hierarchy" class="active"></button>
     <button data-dock="inspector"></button>
     <button data-dock="project"></button>
+    <button data-dock="console"></button>
   </nav>
 
   <section id="hierarchyPanel" class="panel dock active" data-dock="hierarchy">
@@ -86,13 +87,19 @@
     <div class="panel-tabs desk"><div class="ptab active" data-title="project"></div></div>
     <div class="panel-body" id="project"></div>
   </section>
+  <section id="consolePanel" class="panel dock" data-dock="console">
+    <div class="panel-tabs desk"><div class="ptab active" data-title="console"></div></div>
+    <div class="panel-body" id="console"></div>
+  </section>
   </section>
 </div>
 
 <div id="playBar" hidden>
   <button id="pbPlay" class="tb on" title="Stop"></button>
   <button id="pbPause" class="tb" title="Pause"></button>
+  <button id="pbLog" class="tb" title="Console"></button>
 </div>
+<div id="playConsole" hidden></div>
 <div id="home" hidden></div>
 <div id="menuLayer" hidden></div>
 <div id="dragGhost" hidden></div>

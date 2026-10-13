@@ -184,7 +184,7 @@ export const templates = {
 
   'idle-clicker': {
     version: 1, name: 'Cookie Tap', mode: '2d', background: '#3b2a20', view: { width: 400, height: 700 }, gravity: 0,
-    settings: { orientation: 'portrait', pauseButton: false, muteButton: false },
+    settings: { orientation: 'portrait', pauseButton: false, muteButton: false, saveProgress: true },
     vars: { score: 0, perSecond: 0, perTap: 0 },
     entities: [
       { id: 'bank', name: 'Bank', x: 40, y: 40, behaviors: [{ type: 'income', var: 'score', rateVar: 'perSecond' }] },
@@ -247,6 +247,25 @@ export const templates = {
     ],
   },
 
+  'breakout': {
+    version: 1, name: 'Brick Breaker', mode: '2d', background: '#14142b', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: 'BRICK BREAKER', subtitle: 'Drag to move the paddle. Break every brick!', orientation: 'portrait', winScore: 350, saveBest: 'brick-breaker' },
+    vars: { score: 0, lives: 3 },
+    entities: [
+      { id: 'paddle', name: 'Paddle', tags: ['player'], x: 200, y: 630, shape: { type: 'rect', w: 90, h: 16, radius: 8, fill: '#4fc3f7', glow: 10 }, body: { type: 'kinematic' },
+        behaviors: [{ type: 'move', control: 'drag', speed: 0, axes: 'horizontal', keepInView: true }] },
+      { id: 'ball', name: 'Ball', tags: ['ball'], x: 200, y: 560, shape: { type: 'circle', r: 9, fill: '#ffffff', glow: 8 },
+        behaviors: [{ type: 'bounce', speed: 360, bottom: 'lose a life' }] },
+      ...Array.from({ length: 35 }, (_, i) => {
+        const row = Math.floor(i / 7), col = i % 7;
+        return { id: 'brick' + i, name: 'Brick', x: 44 + col * 52, y: 130 + row * 28, shape: { type: 'rect', w: 46, h: 20, radius: 4, fill: ['#ef5350', '#ffa726', '#ffee58', '#66bb6a', '#42a5f5'][row] },
+          body: { type: 'static' }, behaviors: [{ type: 'destructible', hp: 1, hitBy: 'ball', points: 10, removeHitter: false }] };
+      }),
+      { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left' } },
+      { id: 'hud-lives', name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 24, align: 'right', color: '#ff5d8f' } },
+    ],
+  },
+
   'empty-2d': {
     version: 1, name: 'Empty 2D', mode: '2d', background: '#0b0b1a', view: { width: 400, height: 700 }, gravity: 0,
     settings: {}, vars: { score: 0 }, entities: [],
@@ -269,7 +288,8 @@ export const templateInfo = [
   { key: 'space-shooter', title: 'Space Shooter', blurb: 'Waves of enemies', icon: 'bolt', color: '#141b3a' },
   { key: 'racer', title: 'Racing', blurb: 'Drive, beat the clock', icon: 'car', color: '#8a6a3a' },
   { key: 'lane-runner', title: 'Endless Runner', blurb: 'Swipe between lanes', icon: 'arrow', color: '#2f6f8f' },
-  { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade', icon: 'hand', color: '#5d4037' },
+  { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade (saves progress)', icon: 'hand', color: '#5d4037' },
+  { key: 'breakout', title: 'Breakout', blurb: 'Bounce the ball, break bricks', icon: 'square', color: '#2a2450' },
   { key: 'tap-frenzy', title: 'Tap Arcade', blurb: 'Quick tap reflex game', icon: 'circle', color: '#16233b' },
   { key: 'empty-2d', title: 'Blank 2D', blurb: 'Start from nothing', icon: 'grid', color: '#2b2b2b' },
   { key: 'empty-3d', title: 'Blank 3D', blurb: 'Just a floor', icon: 'cube', color: '#2f3a44' },

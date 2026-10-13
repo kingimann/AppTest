@@ -228,7 +228,9 @@ export class Camera3D {
 const DEFAULT_SETTINGS = {
   joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
   muteButton: true, orientation: 'any', fullscreen: false,
+  joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
 };
+const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
 
 export class Scene {
   constructor(opts = {}) {
@@ -261,6 +263,9 @@ export class Scene {
     this.msg = null;
     this.level = 1; this.levelCount = 1;
   }
+
+  /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
+  want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
 
   /** Show a message banner over the game for a few seconds. */
   message(text, seconds = 2.5) { this.msg = { text: String(text), t: seconds }; }
@@ -340,6 +345,7 @@ export class Scene {
       store.set('pocket.best.' + key, String(this.vars.best));
     }
     this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
+    if (!this.levelComplete && this.settings.saveProgress) this.engine?.clearProgress();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
     this.emit(state);
@@ -391,6 +397,12 @@ export class Physics {
 
   step(scene, dt) {
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
+    if (scene.wantedTags) {
+      for (const e of scene.entities) {
+        if (e.body || e.dead || e.ui) continue;
+        for (const t of e.tags) if (scene.wantedTags.has(t)) { e.setBody({ type: 'kinematic', sensor: true }); break; }
+      }
+    }
     const list = scene.entities.filter((e) => e.body && !e.dead);
     for (const e of list) {
       const b = e.body;
@@ -474,8 +486,10 @@ export class Input {
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.buttons.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3);
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
-    if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); }
-    else if (this.engine.scene?.settings.joystick && this.engine.scene.state === 'play' && p.x < this.engine.width * 0.5 && !this.stick) {
+    const st = this.engine.scene?.settings || {};
+    const stickSide = st.joystickSide === 'right' ? p.x > this.engine.width * 0.5 : p.x < this.engine.width * 0.5;
+    if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
+    else if (st.joystick && this.engine.scene.state === 'play' && stickSide && !this.stick) {
       ptr.role = 'stick'; this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     }
     this.pointers.set(e.pointerId, ptr);
@@ -530,7 +544,7 @@ export class Input {
     else if (D) listen();
   }
 
-  get stickRadius() { return Math.min(70, this.engine.width * 0.15); }
+  get stickRadius() { return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[this.engine.scene?.settings.controlSize] || 1); }
 
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
@@ -979,7 +993,7 @@ function renderUI(engine, scene) {
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
     } else if (scene.settings.joystick && scene.time < 4) {
       ctx.fillStyle = `rgba(255,255,255,${0.25 * pulse})`; ctx.font = '600 14px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText('Touch & drag here to move', W * 0.25, H - engine.safe.bottom - 40);
+      ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
     for (const b of inp.buttons) {
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
@@ -1028,6 +1042,13 @@ function renderUI(engine, scene) {
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
     else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, 'rgba(220,225,255,0.7)');
     big('Tap to play again', H * 0.66, 20, `rgba(255,255,255,${pulse})`);
+    if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
+      const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
+      engine.shareRect = { x, y, w, h };
+      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 23); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+      big('Share score', y + h / 2, 17);
+    } else engine.shareRect = null;
   }
 }
 
@@ -1287,7 +1308,7 @@ registerBehavior('collectible', {
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || e.dead) return;
         s.addVar(p.var, p.score);
@@ -1309,9 +1330,9 @@ registerBehavior('hazard', {
   ],
   create(p) {
     return {
-      start(e) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
-        if (!other.has(p.tag) || other.dead || s.state !== 'play') return;
+        if (!other.has(p.tag) || other.dead || s.state !== 'play' || e.data.blinkOff) return;
         if (other.data.invuln > 0) return;
         if (other.data.shield > 0) {
           other.data.shield = 0; s.engine.audio.sfx('hit');
@@ -1330,7 +1351,7 @@ registerBehavior('goal', {
   params: [{ key: 'tag', label: 'Reached by tag', type: 'text', default: 'player' }],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) { if (other.has(p.tag)) { s.burst(e.x, e.y, e.z, '#5dff8a', 40, 1.2); s.win(); } },
     };
   },
@@ -1452,7 +1473,7 @@ registerBehavior('message', {
   create(p) {
     let shown = false;
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || (p.once && shown)) return;
         shown = true; s.message(p.text, p.seconds); s.engine.audio.sfx('click');
@@ -1469,7 +1490,7 @@ registerBehavior('teleport', {
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || (other.data.tpUntil || 0) > s.time) return;
         const dest = s.find(p.target);
@@ -1514,7 +1535,7 @@ registerBehavior('sound', {
   ],
   create(p) {
     return {
-      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } },
       collide(e, other, s) { if (p.when === 'touched' && other.has(p.tag)) s.engine.audio.sfx(p.sound); },
     };
   },
@@ -1680,7 +1701,7 @@ registerBehavior('checkpoint', {
   create(p) {
     let hit = false;
     return {
-      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || hit) return;
         hit = true;
@@ -1706,10 +1727,7 @@ registerBehavior('destructible', {
   create(p) {
     let hp;
     return {
-      start(e) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); },
-      update(e, dt, s) { // make sure whatever can hit us takes part in collisions
-        for (const o of s.entities) if (!o.body && o.tags.has(p.hitBy)) o.setBody({ type: 'kinematic', sensor: true });
-      },
+      start(e, s) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.hitBy); },
       collide(e, other, s) {
         if (!other.has(p.hitBy) || e.dead) return;
         if (p.removeHitter) other.destroy();
@@ -1917,6 +1935,270 @@ registerBehavior('upgrade', {
   },
 });
 
+// ---- AI & movement ----
+registerBehavior('follow', {
+  label: 'Follow', description: 'Follows another object at a distance (pets, sidekicks, escorts).',
+  params: [
+    { key: 'target', label: 'Follow (name or tag)', type: 'text', default: 'player' },
+    { key: 'distance', label: 'Keep distance', type: 'number', default: 60, default3d: 2 },
+    { key: 'speed', label: 'Speed', type: 'number', default: 200, default3d: 6 },
+  ],
+  create(p) {
+    let t = null;
+    return {
+      update(e, dt, s) {
+        if (!t || t.dead) t = s.find(p.target) || s.findAll(p.target)[0];
+        if (!t || t === e) return;
+        const dx = t.x - e.x, dy = is3D(e) ? 0 : t.y - e.y, dz = is3D(e) ? t.z - e.z : 0, d = Math.hypot(dx, dy, dz);
+        if (d <= p.distance) return;
+        const k = Math.min(d - p.distance, p.speed * dt) / d;
+        e.x += dx * k; e.y += dy * k; e.z += dz * k;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dz) / DEG;
+      },
+    };
+  },
+});
+
+registerBehavior('wander', {
+  label: 'Wander', description: 'Roams around its starting area at random (animals, villagers, slimes).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 60, default3d: 2 },
+    { key: 'radius', label: 'Stay within', type: 'number', default: 120, default3d: 5 },
+  ],
+  create(p) {
+    let home, dir, t = 0;
+    return {
+      start(e) { home = { x: e.x, y: e.y, z: e.z }; },
+      update(e, dt) {
+        if ((t -= dt) <= 0) {
+          t = rand(1, 3);
+          const a = rand(0, Math.PI * 2), away = Math.hypot(e.x - home.x, (is3D(e) ? e.z - home.z : e.y - home.y)) > p.radius;
+          dir = Math.random() < 0.25 && !away && dir !== undefined ? null : away ? Math.atan2(is3D(e) ? home.z - e.z : home.y - e.y, home.x - e.x) : a;
+        }
+        if (dir == null) return;
+        e.x += Math.cos(dir) * p.speed * dt;
+        if (is3D(e)) { e.z += Math.sin(dir) * p.speed * dt; e.ry = Math.atan2(-Math.cos(dir), -Math.sin(dir)) / DEG; }
+        else e.y += Math.sin(dir) * p.speed * dt;
+      },
+    };
+  },
+});
+
+registerBehavior('path', {
+  label: 'Path', description: 'Moves along a list of points, e.g. "0,0; 150,0; 150,-100" (offsets from the start; 3D uses x,z).',
+  params: [
+    { key: 'points', label: 'Points (x,y; x,y …)', type: 'text', default: '0,0; 150,0; 150,-100; 0,-100', default3d: '0,0; 4,0; 4,-4; 0,-4' },
+    { key: 'speed', label: 'Speed', type: 'number', default: 120, default3d: 3 },
+    { key: 'loop', label: 'Loop (off = back and forth)', type: 'bool', default: true },
+  ],
+  create(p) {
+    let pts, i = 1, step = 1, home;
+    return {
+      start(e) {
+        home = { x: e.x, y: e.y, z: e.z };
+        pts = String(p.points).split(';').map((q) => q.split(',').map(Number)).filter((q) => q.length >= 2 && q.every(Number.isFinite));
+        if (pts.length < 2) pts = null;
+      },
+      update(e, dt) {
+        if (!pts) return;
+        const [px, py] = pts[i], tx = home.x + px, tyz = (is3D(e) ? home.z : home.y) + py;
+        const cy = is3D(e) ? e.z : e.y, dx = tx - e.x, dy = tyz - cy, d = Math.hypot(dx, dy), mv = p.speed * dt;
+        if (d <= mv) {
+          e.x = tx; if (is3D(e)) e.z = tyz; else e.y = tyz;
+          if (p.loop) i = (i + 1) % pts.length;
+          else { if (i + step < 0 || i + step >= pts.length) step = -step; i += step; }
+          return;
+        }
+        e.x += dx / d * mv;
+        if (is3D(e)) { e.z += dy / d * mv; e.ry = Math.atan2(-dx, -dy) / DEG; } else e.y += dy / d * mv;
+      },
+    };
+  },
+});
+
+registerBehavior('turret', {
+  label: 'Turret', description: 'Turns toward the player and fires a template when in range (give the template Projectile + Hazard).',
+  params: [
+    { key: 'template', label: 'Bullet template', type: 'template', default: '' },
+    { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 1.2 },
+    { key: 'range', label: 'Range', type: 'number', default: 300, default3d: 14 },
+    { key: 'tag', label: 'Target tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let t = 1, target = null;
+    return {
+      update(e, dt, s) {
+        if (!target || target.dead) target = s.findAll(p.tag)[0];
+        if (!target) return;
+        const dx = target.x - e.x, dy = target.y - e.y, dz = target.z - e.z;
+        if (Math.hypot(dx, is3D(e) ? dz : dy) > p.range) return;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dz) / DEG; else e.rz = Math.atan2(dx, -dy) / DEG;
+        if ((t -= dt) > 0 || !p.template) return;
+        t = p.every;
+        const o = { x: e.x, y: e.y, z: e.z, ry: e.ry, rz: e.rz, rx: is3D(e) ? Math.atan2(dy, Math.hypot(dx, dz)) / DEG : 0 };
+        if (is3D(e)) { const ry = e.ry * DEG; o.x += -Math.sin(ry) * 0.8; o.z += -Math.cos(ry) * 0.8; }
+        else { o.x += Math.sin(e.rz * DEG) * 24; o.y += -Math.cos(e.rz * DEG) * 24; }
+        s.spawn(p.template, o);
+      },
+    };
+  },
+});
+
+registerBehavior('bounce', {
+  label: 'Bouncing Ball', description: 'Keeps moving at a steady speed and bounces off walls, paddles and the screen edges (breakout, pong).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 340, default3d: 9 },
+    { key: 'bottom', label: 'At the bottom edge', type: 'select', options: ['lose a life', 'bounce'], default: 'lose a life' },
+  ],
+  create(p) {
+    let home;
+    const launch = (e) => { const a = rand(-0.6, 0.6); e.body.vel = { x: Math.sin(a) * p.speed, y: is3D(e) ? 0 : -Math.cos(a) * p.speed, z: is3D(e) ? -Math.cos(a) * p.speed : 0 }; };
+    return {
+      start(e) {
+        home = { x: e.x, y: e.y, z: e.z };
+        const b = e.ensureBody({ type: 'dynamic' });
+        b.gravityScale = 0; b.bounce = 1;
+        launch(e);
+      },
+      update(e, dt, s) {
+        const v = e.body.vel;
+        if (!is3D(e)) {
+          const vb = s.viewBounds(), r = e.extents().r || e.extents().hx || 10;
+          if (e.x < vb.left + r) { e.x = vb.left + r; v.x = Math.abs(v.x); }
+          if (e.x > vb.right - r) { e.x = vb.right - r; v.x = -Math.abs(v.x); }
+          if (e.y < vb.top + r) { e.y = vb.top + r; v.y = Math.abs(v.y); }
+          if (e.y > vb.bottom - r) {
+            if (p.bottom === 'bounce') { e.y = vb.bottom - r; v.y = -Math.abs(v.y); }
+            else {
+              const lives = +s.vars.lives || 1;
+              s.engine.audio.sfx('hit'); s.engine.vibrate(60);
+              if (lives <= 1) { s.setVar('lives', 0); s.gameOver(); return; }
+              s.addVar('lives', -1); e.x = home.x; e.y = home.y; launch(e); return;
+            }
+          }
+          if (Math.abs(v.y) < p.speed * 0.3) v.y = (v.y < 0 ? -1 : 1) * p.speed * 0.3; // never get stuck flat
+        }
+        const sp = Math.hypot(v.x, v.y, v.z) || 1, k = p.speed / sp;
+        v.x *= k; v.y *= k; v.z *= k;
+      },
+    };
+  },
+});
+
+// ---- events & effects ----
+/** Shared actions for Trigger and Timer. */
+function runAction(s, e, p, other) {
+  const v = p.value;
+  switch (p.action) {
+    case 'win': s.win(); break;
+    case 'game over': s.gameOver(); break;
+    case 'message': s.message(v || '…', 2.5); break;
+    case 'add to variable': s.addVar(v || 'score', p.amount); break;
+    case 'spawn template': if (v) s.spawn(v, { x: e.x, y: e.y, z: e.z }); break;
+    case 'destroy object': { const t = v ? s.find(v) : e; if (t) { s.burst(t.x, t.y, t.z, '#ffffff', 16); t.destroy(); } break; }
+    case 'show object': { const t = s.find(v); if (t) t.visible = true; break; }
+    case 'next level': if (s.engine.hasNextLevel()) s.win(); break;
+    case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
+    default: break;
+  }
+  if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
+}
+const ACTION_PARAMS = [
+  { key: 'action', label: 'Do', type: 'select', options: ['message', 'add to variable', 'spawn template', 'destroy object', 'show object', 'win', 'game over', 'next level', 'vibrate'], default: 'message' },
+  { key: 'value', label: 'Message / variable / template / object name', type: 'text', default: 'Hello!' },
+  { key: 'amount', label: 'Amount (for variables)', type: 'number', default: 1 },
+  { key: 'sound', label: 'Sound', type: 'select', options: ['none', 'coin', 'power', 'jump', 'hit', 'click', 'win', 'lose'], default: 'none' },
+];
+
+registerBehavior('trigger', {
+  label: 'Trigger Zone', description: 'When the player touches it, do something: show a message, change a variable, spawn, destroy, win…',
+  params: [
+    ...ACTION_PARAMS,
+    { key: 'tag', label: 'Triggered by tag', type: 'text', default: 'player' },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'hidden', label: 'Invisible while playing', type: 'bool', default: true },
+  ],
+  create(p) {
+    let done = false;
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); if (p.hidden) e.visible = false; s.want(p.tag); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (p.once && done)) return;
+        done = true; runAction(s, e, p, other);
+      },
+    };
+  },
+});
+
+registerBehavior('timer', {
+  label: 'Timer', description: 'After some seconds (optionally repeating), do something: spawn waves, show hints, end the game…',
+  params: [
+    { key: 'seconds', label: 'After (sec)', type: 'number', default: 5 },
+    { key: 'repeat', label: 'Repeat', type: 'bool', default: false },
+    ...ACTION_PARAMS,
+  ],
+  create(p) {
+    let t = 0, done = false;
+    return {
+      update(e, dt, s) {
+        if (done) return;
+        if ((t += dt) < p.seconds) return;
+        runAction(s, e, p);
+        if (p.repeat) t = 0; else done = true;
+      },
+    };
+  },
+});
+
+registerBehavior('dropItem', {
+  label: 'Drop Item', description: 'When this object is destroyed, it drops a copy of a template (loot, power-ups, coins).',
+  params: [
+    { key: 'template', label: 'Drop template', type: 'template', default: '' },
+    { key: 'chance', label: 'Chance (0–1)', type: 'number', default: 1 },
+  ],
+  create(p) {
+    return { destroy(e, s) { if (p.template && s.state === 'play' && Math.random() < p.chance) s.spawn(p.template, { x: e.x, y: e.y, z: e.z }); } };
+  },
+});
+
+registerBehavior('emitter', {
+  label: 'Particle Emitter', description: 'Keeps giving off particles: fire, smoke, sparkles, exhaust.',
+  params: [
+    { key: 'color', label: 'Color', type: 'text', default: '#ffb74d' },
+    { key: 'rate', label: 'Particles / sec', type: 'number', default: 20 },
+    { key: 'spread', label: 'Spread', type: 'number', default: 0.5 },
+  ],
+  create(p) {
+    let acc = 0;
+    return {
+      update(e, dt, s) {
+        acc += p.rate * dt;
+        const n = Math.floor(acc);
+        if (n > 0) { acc -= n; s.burst(e.x, e.y, e.z, p.color, n, p.spread); }
+      },
+    };
+  },
+});
+
+registerBehavior('blink', {
+  label: 'Blink', description: 'Flashes on and off (warnings, hazards that come and go).',
+  params: [
+    { key: 'on', label: 'Visible for (sec)', type: 'number', default: 0.6 },
+    { key: 'off', label: 'Hidden for (sec)', type: 'number', default: 0.6 },
+    { key: 'solid', label: 'Only hurts while visible', type: 'bool', default: true },
+  ],
+  create(p) {
+    let t = 0;
+    return {
+      update(e, dt) {
+        t = (t + dt) % (p.on + p.off);
+        e.visible = t < p.on;
+        e.data.blinkOff = p.solid && !e.visible; // Hazard ignores touches while hidden
+      },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -1970,6 +2252,8 @@ export class Engine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
     this.onVis = () => {
+      if (document.hidden) this.saveProgress();
+      else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
@@ -2037,6 +2321,7 @@ export class Engine {
     this.carry = carry;
     this.levelIndex++;
     this.setScene(this.factory());
+    this.saveProgress();
   }
 
   restart(skipTitle = true) {
@@ -2050,6 +2335,15 @@ export class Engine {
   setScene(scene) {
     scene.engine = this;
     this.scene = scene;
+    if (scene.settings.saveProgress && !this.editing && !this.restoredOnce) { // continue where the player left off
+      this.restoredOnce = true;
+      const saved = this.loadProgress(scene);
+      if (saved && this.levels && saved.level > 0 && saved.level < this.levels.length && this.levelIndex !== saved.level) {
+        this.levelIndex = saved.level; this.carry = saved.vars;
+        return this.setScene(this.factory());
+      }
+      if (saved?.vars) Object.assign(scene.vars, saved.vars);
+    }
     this.useRenderer(scene.mode);
     this.physics.contacts.clear();
     this.input.reset();
@@ -2062,15 +2356,39 @@ export class Engine {
   layoutButtons() {
     const s = this.scene, b = [], m = 24;
     if (s && !this.editing) {
-      const r = Math.min(44, this.width * 0.11), bottom = this.height - this.safe.bottom - m - r;
-      if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: this.width - this.safe.right - m - r, y: bottom, r, id: null });
-      if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: this.width - this.safe.right - m - r - (s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1), bottom = this.height - this.safe.bottom - m - r;
+      // buttons go on the side opposite the joystick (left-handed players can swap)
+      const left = s.settings.joystickSide === 'right';
+      const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
+      if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: X(0), y: bottom, r, id: null });
+      if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
     this.input.buttons = b;
   }
+
+  /** Share the score with the phone's share sheet (or copy it). */
+  shareScore() {
+    const s = this.scene, title = s.json?.name || document.title || 'my game';
+    const text = `I scored ${formatNumber(s.vars.score || 0)} in ${title}!`;
+    if (navigator.share) navigator.share({ title, text, url: location.href }).catch(() => {});
+    else navigator.clipboard?.writeText(`${text} ${location.href}`).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {});
+  }
+
+  // ---- saved progress (settings.saveProgress): variables and level survive closing the game ----
+  saveKey(s = this.scene) { return 'pocket.save.' + (s?.settings.saveBest || s?.json?.name || 'game'); }
+  saveProgress() {
+    const s = this.scene;
+    if (!s || this.editing || !s.settings.saveProgress || s.state !== 'play') return;
+    const vars = { ...s.vars }; delete vars.time; delete vars.best;
+    store.set(this.saveKey(), JSON.stringify({ vars, level: this.levelIndex || 0 }));
+  }
+  loadProgress(s) {
+    try { return JSON.parse(store.get(this.saveKey(s), 'null')); } catch { return null; }
+  }
+  clearProgress() { try { localStorage.removeItem(this.saveKey()); } catch { /* storage unavailable */ } }
 
   /** True when the game wants portrait/landscape and a phone is held the other way. */
   wrongOrientation(s) {
@@ -2106,6 +2424,12 @@ export class Engine {
     const dt = Math.min(1 / 20, (now - this.last) / 1000);
     this.last = now;
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
+    // adaptive resolution: if a phone can't keep up, render fewer pixels
+    if (!this.editing && this.scene?.state === 'play' && !this.paused) {
+      this.slowTime = this.fps < 42 ? (this.slowTime || 0) + dt : 0;
+      if (this.slowTime > 2 && this.dpr > 1) { this.maxDpr = Math.max(1, this.dpr - 0.5); this.slowTime = 0; this.resize(); }
+      if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
+    }
     if (this.scene) {
       if (!this.editing) this.update(dt * this.timeScale);
       this.render();
@@ -2129,7 +2453,9 @@ export class Engine {
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
       if (s.time - s.endTime > 0.8 && inp.pressed('tap')) {
-        if (s.levelComplete) this.nextLevel(); else this.restart();
+        const t = inp.taps[0], r = this.shareRect;
+        if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
+        else if (s.levelComplete) this.nextLevel(); else this.restart();
       }
       return;
     }

@@ -37,7 +37,8 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Space Shooter | Star Defender | waves, bosses with health |
    | Racing | Desert Rally | car controls, chase camera, time limit |
    | Endless Runner | Lane Rush | swipe lanes, jump |
-   | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second |
+   | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
+| Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
    | Tap Arcade | Tap Frenzy | tap targets against the clock |
    | Blank 2D / 3D | | start from nothing |
 
@@ -141,6 +142,16 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `projectile` | Flies straight the way it faces (bullet templates fired by a Shooter). | `speed` (650 / 3D 30), `life` (2) |
 | `income` | Adds a "per second" variable into another every second (idle games). | `var` ("score"), `rateVar` ("perSecond") |
 | `upgrade` | Tap to buy: spends one variable to raise another; price grows. Show it with `{cost}`. | `cost` (10), `costVar`, `addVar`, `amount`, `growth` (1.15) |
+| `follow` | Follows another object at a distance (pets, sidekicks). | `target` ("player"), `distance` (60 / 3D 2), `speed` |
+| `wander` | Roams around its starting area at random (animals, villagers). | `speed` (60 / 3D 2), `radius` (120 / 3D 5) |
+| `path` | Moves through points like `"0,0; 150,0; 150,-100"` (offsets; 3D uses x,z). | `points`, `speed`, `loop` |
+| `turret` | Turns toward the player and fires a template in range. | `template`, `every` (1.2), `range`, `tag` |
+| `bounce` | Bouncing ball at a steady speed off walls, paddles and screen edges (breakout, pong). | `speed` (340 / 3D 9), `bottom` ("lose a life" / "bounce") |
+| `trigger` | When the player touches it: message, change a variable, spawn, destroy, show, win, game over, next level, vibrate. | `action`, `value`, `amount`, `sound`, `tag`, `once`, `hidden` |
+| `timer` | After some seconds (optionally repeating), do one of the same actions. | `seconds`, `repeat`, `action`, `value`, `amount`, `sound` |
+| `dropItem` | Drops a template when destroyed (loot, power-ups). | `template`, `chance` (1) |
+| `emitter` | Keeps giving off particles (fire, smoke, sparkles). | `color`, `rate` (20), `spread` (0.5) |
+| `blink` | Flashes on and off; with Hazard it only hurts while visible. | `on` (0.6), `off` (0.6), `solid` (true) |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.
@@ -179,7 +190,7 @@ registerBehavior('blink', {
 
 ### Scene settings
 
-`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. With `timeLimit`, `{time}` counts down and the game ends at zero.
+`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. More phone settings: `joystickSide` (`'left'`/`'right'` for left-handed players; buttons move to the other side), `controlSize` (`'small'`/`'medium'`/`'large'`), `saveProgress` (variables and level survive closing the game; reset on game over), `shareButton` (a *Share score* button on the end screen using the phone's share sheet). Buttons vibrate when pressed, audio recovers after calls or app switches, and the engine lowers its resolution automatically if a phone can't hold a smooth frame rate. With `timeLimit`, `{time}` counts down and the game ends at zero.
 
 **Levels:** put more scenes in `levels: [sceneJson, ...]` on the first scene. Winning a level shows "Level complete" and continues to the next one, carrying variables like score and lives over; `{level}` shows the level number. `engine.start(json, { level: 1 })` starts at the second level. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
 

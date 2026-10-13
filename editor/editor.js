@@ -1153,12 +1153,17 @@ function renderSceneSettings(box) {
     C('settings.actionButton', { label: 'Fire Button', type: 'bool', def: false }),
     C('settings.pauseButton', { label: 'Pause Button', type: 'bool', def: true }),
     C('settings.muteButton', { label: 'Mute Button', type: 'bool', def: true }),
+    C('settings.joystickSide', { label: 'Joystick Side', type: 'select', options: [['left', 'Left (buttons on right)'], ['right', 'Right (left-handed)']], def: 'left' }),
+    C('settings.controlSize', { label: 'Control Size', type: 'select', options: [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], def: 'medium' }),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
   box.append(comp('Mobile', [
     C('settings.orientation', { label: 'Screen Orientation', type: 'select', options: [['any', 'Any'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], def: 'any' }),
     h('p', { class: 'desc' }, 'Players holding the phone the wrong way see a "turn your device" screen.'),
     C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
+    C('settings.saveProgress', { label: 'Save Progress', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'Keeps variables (and the level) when the player closes the game, great for clicker games. Resets on game over.'),
+    C('settings.shareButton', { label: 'Share Score Button', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
   ], { icon: 'gamepad', key: 's-mobile' }));
   box.append(comp('Rules', [
@@ -1198,12 +1203,15 @@ const BEH_META = {
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
-  chase: ['Movement', 'ghost'], float: ['Movement', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
+  float: ['Effects', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
   unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
   tappable: ['Touch', 'hand'], draggable: ['Touch', 'move'], swipeMove: ['Touch', 'arrow'],
   orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Combat', 'bolt'],
   firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
   projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
+  follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
+  bounce: ['Movement', 'circle'], trigger: ['Events', 'bolt'], timer: ['Events', 'clock'], dropItem: ['Gameplay', 'coin'],
+  emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1282,6 +1290,16 @@ const PREFABS_2D = [
   { icon: 'bolt', label: 'Shooter Ship', props: { name: 'Ship', tags: ['player'], shape: { type: 'triangle', w: 34, h: 40, fill: '#4fc3f7' }, behaviors: [{ type: 'move', control: 'both', speed: 280, axes: 'horizontal' }, { type: 'shooter', template: 'Bullet', every: 0.25, trigger: 'auto' }] },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 60, y: 0 }, shape: { type: 'rect', w: 6, h: 16, radius: 3, fill: '#fff59d' }, behaviors: [{ type: 'velocity', vx: 0, vy: -600, vz: 0 }, { type: 'destroyOffscreen', margin: 60 }] }] },
   { icon: 'square', label: 'Target', props: { name: 'Target', shape: { type: 'rect', w: 50, h: 50, radius: 8, fill: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
+  { icon: 'crosshair', label: 'Turret', props: { name: 'Turret', shape: { type: 'triangle', w: 34, h: 40, fill: '#8e24aa' }, body: { type: 'static' }, behaviors: [{ type: 'turret', template: 'Enemy Bullet', every: 1.2, range: 320, tag: 'player' }] },
+    extra: [{ name: 'Enemy Bullet', template: true, offset: { x: 60, y: 0 }, shape: { type: 'circle', r: 6, fill: '#ff5252' }, behaviors: [{ type: 'projectile', speed: 320, life: 3 }, { type: 'hazard', action: 'damage', destroySelf: true }] }] },
+  { icon: 'ghost', label: 'Wanderer', props: { name: 'Wanderer', shape: { type: 'circle', r: 16, fill: '#81c784' }, behaviors: [{ type: 'wander', speed: 60, radius: 120 }] } },
+  { icon: 'player', label: 'Sidekick', props: { name: 'Sidekick', shape: { type: 'circle', r: 10, fill: '#fff176' }, behaviors: [{ type: 'follow', target: 'player', distance: 50, speed: 220 }, { type: 'float', amount: 6, period: 1.2 }] } },
+  { icon: 'arrow', label: 'Patroller', props: { name: 'Patroller', shape: { type: 'rect', w: 32, h: 32, radius: 8, fill: '#e53935' }, behaviors: [{ type: 'path', points: '0,0; 150,0; 150,-100; 0,-100', speed: 120, loop: true }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'circle', label: 'Ball', props: { name: 'Ball', tags: ['ball'], shape: { type: 'circle', r: 9, fill: '#ffffff' }, behaviors: [{ type: 'bounce', speed: 340, bottom: 'lose a life' }] } },
+  { icon: 'square', label: 'Brick', props: { name: 'Brick', shape: { type: 'rect', w: 46, h: 20, radius: 4, fill: '#ef5350' }, body: { type: 'static' }, behaviors: [{ type: 'destructible', hp: 1, hitBy: 'ball', points: 10, removeHitter: false }] } },
+  { icon: 'bolt', label: 'Trigger Zone', props: { name: 'Trigger Zone', shape: { type: 'rect', w: 80, h: 80, fill: 'rgba(76,139,214,0.25)', stroke: '#4c8bd6', lineWidth: 2 }, behaviors: [{ type: 'trigger', action: 'message', value: 'You found a secret!', amount: 1, sound: 'power', tag: 'player', once: true, hidden: true }] } },
+  { icon: 'clock', label: 'Timer', props: { name: 'Timer', behaviors: [{ type: 'timer', seconds: 5, repeat: false, action: 'message', value: 'Hurry up!', amount: 1, sound: 'none' }] } },
+  { icon: 'star', label: 'Fire', props: { name: 'Fire', shape: { type: 'triangle', w: 24, h: 30, fill: '#ff7043' }, behaviors: [{ type: 'emitter', color: '#ffb74d', rate: 25, spread: 0.4 }, { type: 'hazard', action: 'damage' }] } },
   { icon: 'car', label: 'Car', props: { name: 'Car', tags: ['player'], shape: { type: 'rect', w: 26, h: 44, radius: 8, fill: '#e53935' }, behaviors: [{ type: 'car', maxSpeed: 320, accel: 260, turn: 160, autoGas: false }, { type: 'cameraFollow', axes: 'both', smooth: 5 }] } },
   { icon: 'hand', label: 'Clicker', props: { name: 'Big Button', shape: { type: 'circle', r: 80, fill: '#ffb74d', stroke: '#e65100', lineWidth: 6 }, behaviors: [{ type: 'tappable', points: 1, var: 'score', bonusVar: 'perTap', destroy: false, sound: 'click' }] }, vars: { perTap: 0 } },
   { icon: 'plus', label: 'Upgrade', props: { name: 'Upgrade Button', ui: true, anchor: 'bottom', x: 0, y: -100, shape: { type: 'rect', w: 320, h: 60, radius: 14, fill: '#5d4037' }, text: { value: 'Upgrade +1/s  ·  {cost}', size: 18, color: '#fff3e0' }, behaviors: [{ type: 'upgrade', cost: 15, costVar: 'score', addVar: 'perSecond', amount: 1, growth: 1.15 }] }, vars: { perSecond: 0 },
@@ -1314,6 +1332,14 @@ const PREFABS_3D = [
       { name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 34, color: '#ffffff' } }] },
   { icon: 'player', label: 'TPS Player', props: { name: 'Hero', tags: ['player'], y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 1.4, color: '#ff8a3d' }, behaviors: [{ type: 'thirdPerson', speed: 6, jump: 10, distance: 7, height: 25, look: 0.3 }] },
     scene: { settings: { joystick: true, jumpButton: true } } },
+  { icon: 'crosshair', label: 'Turret', props: { name: 'Turret', y: 0.6, mesh: { geometry: 'cylinder', r: 0.5, h: 1.2, color: '#8e24aa' }, body: { type: 'static' }, behaviors: [{ type: 'turret', template: 'Enemy Bullet', every: 1.2, range: 14, tag: 'player' }] },
+    extra: [{ name: 'Enemy Bullet', template: true, offset: { x: 2, y: 0 }, mesh: { geometry: 'sphere', r: 0.15, color: '#ff5252', emissive: 1 }, behaviors: [{ type: 'projectile', speed: 12, life: 3 }, { type: 'hazard', action: 'damage', destroySelf: true }] }] },
+  { icon: 'ghost', label: 'Wanderer', props: { name: 'Wanderer', y: 0.4, mesh: { geometry: 'sphere', r: 0.4, color: '#81c784' }, behaviors: [{ type: 'wander', speed: 2, radius: 5 }] } },
+  { icon: 'player', label: 'Sidekick', props: { name: 'Sidekick', y: 1.2, mesh: { geometry: 'sphere', r: 0.25, color: '#fff176', emissive: 0.5 }, behaviors: [{ type: 'follow', target: 'player', distance: 1.5, speed: 7 }, { type: 'float', amount: 0.2, period: 1.2 }] } },
+  { icon: 'arrow', label: 'Patroller', props: { name: 'Patroller', y: 0.5, mesh: { geometry: 'box', w: 1, h: 1, d: 1, color: '#e53935' }, behaviors: [{ type: 'path', points: '0,0; 4,0; 4,-4; 0,-4', speed: 3, loop: true }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'bolt', label: 'Trigger Zone', props: { name: 'Trigger Zone', y: 1, mesh: { geometry: 'box', w: 2, h: 2, d: 2, color: '#4c8bd6', opacity: 0.3 }, behaviors: [{ type: 'trigger', action: 'message', value: 'You found a secret!', amount: 1, sound: 'power', tag: 'player', once: true, hidden: true }] } },
+  { icon: 'clock', label: 'Timer', props: { name: 'Timer', y: 2, behaviors: [{ type: 'timer', seconds: 5, repeat: false, action: 'message', value: 'Hurry up!', amount: 1, sound: 'none' }] } },
+  { icon: 'star', label: 'Fire', props: { name: 'Fire', y: 0.3, mesh: { geometry: 'cone', r: 0.3, h: 0.6, color: '#ff7043', emissive: 0.6 }, behaviors: [{ type: 'emitter', color: '#ffb74d', rate: 25, spread: 0.4 }, { type: 'hazard', action: 'damage' }] } },
   { icon: 'car', label: 'Car', props: { name: 'Car', tags: ['player'], y: 0.5, mesh: { geometry: 'box', w: 1.4, h: 0.8, d: 2.4, color: '#e53935' }, behaviors: [{ type: 'car', maxSpeed: 16, accel: 12, turn: 110, autoGas: false, chaseCam: true }] },
     scene: { settings: { joystick: true } } },
 ];
@@ -1743,7 +1769,7 @@ function play() {
   engine.input.enabled = true;
   engine.timeScale = 1;
   const json = clone(root);
-  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any' };
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';

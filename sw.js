@@ -1,5 +1,5 @@
 // Offline support: serve files from the network when online (always fresh), from the cache when offline.
-const CACHE = 'pocket-v2';
+const CACHE = 'pocket-v3';
 const CORE = ['./', './index.html', './play.html', './icon.svg', './manifest.webmanifest', './engine/pocket.js',
   './editor/', './editor/index.html', './editor/editor.css', './editor/editor.js', './editor/icons.js',
   './examples/templates.js', './examples/neon-dodge/', './examples/neon-dodge/main.js'];

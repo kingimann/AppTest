@@ -1596,9 +1596,10 @@ function openNewDialog() {
 // ---- Home screen: continue, new game by type, my games ----
 function showHome() {
   closeLayer();
+  $('.toast')?.remove();
   const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
   const cur = root && all.find(([id]) => id === projectId);
-  home.replaceChildren(
+  home.replaceChildren(...[
     h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('h1', {}, 'Pocket Engine')),
     h('p', { class: 'sub' }, 'Make 2D and 3D games on your phone.'),
     cur && h('button', { class: 'continue', onclick: hideHome },
@@ -1616,7 +1617,7 @@ function showHome() {
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
       !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App')),
-  );
+  ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
   home.scrollTop = 0;
 }

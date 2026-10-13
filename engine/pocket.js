@@ -134,6 +134,7 @@ export class Entity {
     this.text = props.text ? { ...TEXT_DEFAULTS, ...props.text } : null;
     this.sprite = props.sprite ? { ...SPRITE_DEFAULTS, ...props.sprite } : null;
     this.mesh = props.mesh ? { ...MESH_DEFAULTS, ...props.mesh } : null;
+    this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -173,6 +174,10 @@ export class Entity {
 
   /** Half-extents used for physics & picking. Planar 2D entities have infinite depth. */
   extents() {
+    if (this.voxels) {
+      const b = this.voxels.bounds, s = this.voxels.size;
+      return { sphere: false, hx: (b.i1 - b.i0 + 1) * s / 2, hy: (b.j1 - b.j0 + 1) * s / 2, hz: (b.k1 - b.k0 + 1) * s / 2, voxel: true };
+    }
     const b = this.body, is2D = !this.mesh;
     const sx = Math.abs(this.sx), sy = Math.abs(this.sy), sz = Math.abs(this.sz);
     if (b && b.shape !== 'auto') {
@@ -209,6 +214,114 @@ export class Entity {
 }
 
 // ============================================================================
+// Voxels (Minecraft-style block worlds)
+// ============================================================================
+export const VOXEL_PALETTE = ['#6aa84f', '#8d6e63', '#9e9e9e', '#6d4c41', '#3d8b37', '#e3cf8f', '#4fa3e0', '#c0392b', '#f5f5f5', '#2b2b2b', '#f1c40f', '#8e44ad'];
+export const VOXEL_NAMES = ['Grass', 'Dirt', 'Stone', 'Wood', 'Leaves', 'Sand', 'Water', 'Brick', 'Snow', 'Obsidian', 'Gold', 'Crystal'];
+const CHUNK = 16;
+
+/** A grid of colored blocks. Block (i, j, k) fills [i, i+1) × size from the owning entity's position. */
+export class VoxelWorld {
+  constructor(o = {}) {
+    this.size = o.size || 1;
+    this.palette = (o.palette && o.palette.length ? o.palette : VOXEL_PALETTE).slice();
+    this.gen = { type: 'hills', w: 32, d: 32, h: 6, seed: 1, trees: true, ...(o.gen || {}) };
+    this.edits = { ...(o.edits || {}) };
+    this.blocks = new Map();
+    this.dirty = new Set();
+    this.generate();
+  }
+  static key(i, j, k) { return ((i + 512) * 1024 + (j + 512)) * 1024 + (k + 512); }
+  get(i, j, k) { return this.blocks.get(VoxelWorld.key(i, j, k)) || 0; }
+  setRaw(i, j, k, c) {
+    const key = VoxelWorld.key(i, j, k);
+    if (c) this.blocks.set(key, c); else this.blocks.delete(key);
+    if (this.bounds) {
+      const b = this.bounds;
+      if (c) { b.i0 = Math.min(b.i0, i); b.i1 = Math.max(b.i1, i); b.j0 = Math.min(b.j0, j); b.j1 = Math.max(b.j1, j); b.k0 = Math.min(b.k0, k); b.k1 = Math.max(b.k1, k); }
+      for (const di of [-1, 0, 1]) for (const dk of [-1, 0, 1]) this.dirty.add(Math.floor((i + di) / CHUNK) + ',' + Math.floor((k + dk) / CHUNK));
+    }
+  }
+  /** Change a block (0 = remove) and remember it as an edit. */
+  set(i, j, k, c) { this.setRaw(i, j, k, c); this.edits[`${i},${j},${k}`] = c; }
+
+  generate() {
+    this.blocks.clear(); this.bounds = null;
+    const g = this.gen;
+    let seed = (g.seed * 9301 + 49297) % 233280 || 1;
+    const rnd = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+    const hash = (x, z) => { const n = Math.sin(x * 127.1 + z * 311.7 + g.seed * 74.7) * 43758.5453; return n - Math.floor(n); };
+    const smooth = (x, z, sc) => {
+      const fx = x / sc, fz = z / sc, x0 = Math.floor(fx), z0 = Math.floor(fz), tx = fx - x0, tz = fz - z0;
+      const u = tx * tx * (3 - 2 * tx), v = tz * tz * (3 - 2 * tz);
+      return lerp(lerp(hash(x0, z0), hash(x0 + 1, z0), u), lerp(hash(x0, z0 + 1), hash(x0 + 1, z0 + 1), u), v);
+    };
+    const set = (i, j, k, c) => this.blocks.set(VoxelWorld.key(i, j, k), c);
+    if (g.type !== 'empty') {
+      const hw = Math.floor(g.w / 2), hd = Math.floor(g.d / 2), tops = [];
+      for (let i = -hw; i < g.w - hw; i++) for (let k = -hd; k < g.d - hd; k++) {
+        const n = g.type === 'flat' ? 0 : smooth(i, k, 9) * 0.7 + smooth(i, k, 4) * 0.3;
+        const h = g.type === 'flat' ? 2 : Math.max(1, Math.round(1 + n * g.h));
+        for (let j = 0; j < h; j++) set(i, j, k, j === h - 1 ? (g.type === 'hills' && h <= 2 ? 6 : 1) : j >= h - 3 ? 2 : 3);
+        tops.push([i, h, k]);
+      }
+      if (g.trees && g.type !== 'flat') {
+        for (const [i, h, k] of tops) {
+          if (h <= 2 || rnd() > 0.018 || Math.abs(i) < 2 && Math.abs(k) < 2) continue;
+          for (let j = h; j < h + 4; j++) set(i, j, k, 4);
+          for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) for (let j = h + 3; j <= h + 4; j++) {
+            if (Math.abs(a) + Math.abs(b) > 3 || (a === 0 && b === 0 && j < h + 4)) continue;
+            if (!this.get(i + a, j, k + b)) set(i + a, j, k + b, 5);
+          }
+          set(i, h + 5, k, 5);
+        }
+      }
+    }
+    for (const [kk, c] of Object.entries(this.edits)) { const [i, j, k] = kk.split(',').map(Number); if (c) set(i, j, k, c); else this.blocks.delete(VoxelWorld.key(i, j, k)); }
+    // bounds of what exists
+    const b = { i0: 0, i1: 0, j0: 0, j1: 0, k0: 0, k1: 0 };
+    let first = true;
+    for (const key of this.blocks.keys()) {
+      const k = (key % 1024) - 512, j = (Math.floor(key / 1024) % 1024) - 512, i = Math.floor(key / 1048576) - 512;
+      if (first) { Object.assign(b, { i0: i, i1: i, j0: j, j1: j, k0: k, k1: k }); first = false; continue; }
+      if (i < b.i0) b.i0 = i; if (i > b.i1) b.i1 = i; if (j < b.j0) b.j0 = j; if (j > b.j1) b.j1 = j; if (k < b.k0) b.k0 = k; if (k > b.k1) b.k1 = k;
+    }
+    this.bounds = b;
+    this.allDirty = true;
+  }
+
+  /** Local block coordinates for a world point. */
+  cell(e, x, y, z) { const s = this.size; return [Math.floor((x - e.x) / s), Math.floor((y - e.y) / s), Math.floor((z - e.z) / s)]; }
+  solidAtWorld(e, x, y, z) { const [i, j, k] = this.cell(e, x, y, z); return !!this.get(i, j, k); }
+  /** Height (world y) of the highest block top at or below `belowY` in the column under (x, z). */
+  groundAt(e, x, z, belowY) {
+    const [i, , k] = this.cell(e, x, 0, z), s = this.size;
+    for (let j = Math.min(this.bounds.j1, Math.floor((belowY - e.y) / s)); j >= this.bounds.j0; j--) if (this.get(i, j, k)) return e.y + (j + 1) * s;
+    return -Infinity;
+  }
+  /** Step along a ray through the grid; returns the first solid block and the face it entered through. */
+  raycast(e, o, d, max = 60) {
+    const s = this.size;
+    let x = (o.x - e.x) / s, y = (o.y - e.y) / s, z = (o.z - e.z) / s;
+    let i = Math.floor(x), j = Math.floor(y), k = Math.floor(z);
+    const si = Math.sign(d.x), sj = Math.sign(d.y), sk = Math.sign(d.z);
+    const tdx = si ? Math.abs(1 / d.x) : Infinity, tdy = sj ? Math.abs(1 / d.y) : Infinity, tdz = sk ? Math.abs(1 / d.z) : Infinity;
+    let tx = si ? (si > 0 ? i + 1 - x : x - i) * tdx : Infinity, ty = sj ? (sj > 0 ? j + 1 - y : y - j) * tdy : Infinity, tz = sk ? (sk > 0 ? k + 1 - z : z - k) * tdz : Infinity;
+    let n = [0, 0, 0], t = 0;
+    const lim = max / s;
+    while (t <= lim) {
+      if (this.get(i, j, k)) return { i, j, k, n, dist: t * s };
+      if (tx < ty && tx < tz) { i += si; t = tx; tx += tdx; n = [-si, 0, 0]; }
+      else if (ty < tz) { j += sj; t = ty; ty += tdy; n = [0, -sj, 0]; }
+      else { k += sk; t = tz; tz += tdz; n = [0, 0, -sk]; }
+    }
+    return null;
+  }
+  toJSON() { return { size: this.size, palette: this.palette, gen: this.gen, edits: this.edits }; }
+  get count() { return this.blocks.size; }
+}
+
+// ============================================================================
 // Cameras
 // ============================================================================
 export class Camera2D {
@@ -229,6 +342,7 @@ const DEFAULT_SETTINGS = {
   joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
   muteButton: true, orientation: 'any', fullscreen: false,
   joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
+  turnBased: false, turnDelay: 0.3,
 };
 const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
 
@@ -262,7 +376,18 @@ export class Scene {
     if (this.settings.timeLimit) this.vars.time = +this.settings.timeLimit;
     this.msg = null;
     this.level = 1; this.levelCount = 1;
+    this.turnSide = 'player';
+    if (this.settings.turnBased) { this.vars.turn ??= 1; this.vars.turnText = 'Your turn'; }
   }
+
+  /** Turn-based games: the player finished a move; enemies/opponents act next (their components' turn() hooks). */
+  endTurn() {
+    if (this.turnSide !== 'player' || this.state !== 'play') return;
+    this.turnSide = 'enemy';
+    this.turnDelay = this.settings.turnDelay ?? 0.3;
+    this.setVar('turnText', this.settings.enemyTurnText || 'Enemy turn');
+  }
+  get isPlayerTurn() { return this.turnSide === 'player'; }
 
   /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
   want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
@@ -411,6 +536,31 @@ export class Physics {
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
       b.grounded = false;
     }
+    // dynamic bodies collide with voxel worlds block by block
+    const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
+    if (worlds.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of worlds) {
+          const V = w.voxels, sz = V.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: half };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz;
+          const [i0, j0, k0] = V.cell(w, e.x - hx, e.y - hy, e.z - hz), [i1, j1, k1] = V.cell(w, e.x + hx, e.y + hy, e.z + hz);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
+            if (!V.get(i, j, k)) continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: w.z + (k + 0.5) * sz };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
+            if (gd && m.ny * gd > 0.5) b.grounded = true;
+          }
+        }
+      }
+    }
     const ext = list.map((e) => e.extents());
     const now = new Set();
     for (let i = 0; i < list.length; i++) {
@@ -519,7 +669,7 @@ export class Input {
     if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
-    } else if (!cancelled && ptr.role === 'free' && dt < 500 && dist > 40) {
+    } else if (!cancelled && ptr.role === 'free' && dt < 700 && dist > 40) {
       const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
       this.justPressed.add('swipe:' + dir); this.justPressed.add('swipe');
     }
@@ -738,23 +888,24 @@ export class Renderer2D {
 // 3D renderer (WebGL)
 // ============================================================================
 const VS = `
-attribute vec3 aPos; attribute vec3 aNormal;
+attribute vec3 aPos; attribute vec3 aNormal; attribute vec3 aColor;
 uniform mat4 uModel, uViewProj; uniform mat3 uNormalMat;
-varying vec3 vN; varying vec3 vW;
-void main() { vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * aNormal; gl_Position = uViewProj * w; }`;
+varying vec3 vN; varying vec3 vW; varying vec3 vCol;
+void main() { vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * aNormal; vCol = aColor; gl_Position = uViewProj * w; }`;
 const FS = `
 precision mediump float;
-varying vec3 vN; varying vec3 vW;
+varying vec3 vN; varying vec3 vW; varying vec3 vCol;
 uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos;
-uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity;
+uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
 void main() {
+  vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
   vec3 l = normalize(-uLightDir);
   float d = max(dot(n, l), 0.0);
   vec3 v = normalize(uCamPos - vW);
   float sp = pow(max(dot(n, normalize(l + v)), 0.0), 32.0) * 0.25;
-  vec3 lit = uColor * (uAmbient + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
-  vec3 c = mix(lit, uColor, uEmissive);
+  vec3 lit = base * (uAmbient + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
+  vec3 c = mix(lit, base, uEmissive);
   float f = clamp((length(uCamPos - vW) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
   gl_FragColor = vec4(mix(c, uFogColor, f), uOpacity);
 }`;
@@ -811,10 +962,13 @@ export class Renderer3D {
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
     const prog = this.prog = gl.createProgram();
     gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+    gl.bindAttribLocation(prog, 0, 'aPos'); gl.bindAttribLocation(prog, 1, 'aNormal'); gl.bindAttribLocation(prog, 2, 'aColor');
     gl.linkProgram(prog); gl.useProgram(prog);
-    this.a = { pos: gl.getAttribLocation(prog, 'aPos'), normal: gl.getAttribLocation(prog, 'aNormal') };
+    this.a = { pos: 0, normal: 1, color: 2 };
+    gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
+    this.voxelCache = new WeakMap();
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
     for (const k of ['box', 'plane', 'sphere', 'cylinder', 'cone']) {
       const g = geometry(k), b = { count: g.I.length };
@@ -850,6 +1004,7 @@ export class Renderer3D {
     gl.uniform3fv(this.u.uColor, hexToRgb(color));
     gl.uniform1f(this.u.uEmissive, emissive);
     gl.uniform1f(this.u.uOpacity, opacity);
+    gl.uniform1f(this.u.uVColor, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, g.pos); gl.vertexAttribPointer(this.a.pos, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.pos);
     gl.bindBuffer(gl.ARRAY_BUFFER, g.norm); gl.vertexAttribPointer(this.a.normal, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.normal);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, g.idx);
@@ -869,6 +1024,64 @@ export class Renderer3D {
     if (opacity < 1) gl.enable(gl.BLEND);
     gl.drawArrays(gl.LINES, 0, arr.length / 3);
     gl.disable(gl.BLEND);
+  }
+
+  /** Build one chunk's faces (only faces next to air) as an interleaved pos/normal/color buffer. */
+  buildChunk(V, cx, cz) {
+    const out = [], s = V.size, b = V.bounds;
+    const FACES = [
+      [[1, 0, 0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], 0.86], [[-1, 0, 0], [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], 0.86],
+      [[0, 1, 0], [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], 1], [[0, -1, 0], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], 0.6],
+      [[0, 0, 1], [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], 0.93], [[0, 0, -1], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], 0.93],
+    ];
+    const cols = V.palette.map(hexToRgb);
+    for (let i = cx * CHUNK; i < cx * CHUNK + CHUNK; i++) for (let k = cz * CHUNK; k < cz * CHUNK + CHUNK; k++) for (let j = b.j0; j <= b.j1; j++) {
+      const c = V.get(i, j, k);
+      if (!c) continue;
+      const base = cols[(c - 1) % cols.length], h = Math.sin(i * 12.9898 + j * 78.233 + k * 37.719) * 43758.5453, jit = 0.94 + (h - Math.floor(h)) * 0.1;
+      for (const [n, q, shade] of FACES) {
+        if (V.get(i + n[0], j + n[1], k + n[2])) continue;
+        const fc = c === 1 && n[1] !== 1 && cols[1] ? cols[1] : base; // grass blocks have dirt sides
+        const r = fc[0] * jit * shade, g = fc[1] * jit * shade, bl = fc[2] * jit * shade;
+        for (const vi of [0, 1, 2, 0, 2, 3]) {
+          const v = q[vi];
+          out.push((i + v[0]) * s, (j + v[1]) * s, (k + v[2]) * s, n[0], n[1], n[2], r, g, bl);
+        }
+      }
+    }
+    return new Float32Array(out);
+  }
+
+  drawVoxels(e) {
+    const gl = this.gl, V = e.voxels;
+    let cache = this.voxelCache.get(V);
+    if (!cache) { cache = new Map(); this.voxelCache.set(V, cache); }
+    const rebuild = (key) => {
+      const [cx, cz] = key.split(',').map(Number), data = this.buildChunk(V, cx, cz);
+      let c = cache.get(key);
+      if (!c) { c = { buf: gl.createBuffer(), count: 0 }; cache.set(key, c); }
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      c.count = data.length / 9;
+    };
+    if (V.allDirty) {
+      const b = V.bounds;
+      for (let cx = Math.floor(b.i0 / CHUNK); cx <= Math.floor(b.i1 / CHUNK); cx++) for (let cz = Math.floor(b.k0 / CHUNK); cz <= Math.floor(b.k1 / CHUNK); cz++) rebuild(cx + ',' + cz);
+      V.allDirty = false; V.dirty.clear();
+    } else if (V.dirty.size) { for (const key of V.dirty) rebuild(key); V.dirty.clear(); }
+    gl.uniformMatrix4fv(this.u.uModel, false, M4.trs(e.x, e.y, e.z, 0, 0, 0, 1, 1, 1));
+    gl.uniformMatrix3fv(this.u.uNormalMat, false, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
+    gl.uniform3f(this.u.uColor, 1, 1, 1); gl.uniform1f(this.u.uEmissive, 0); gl.uniform1f(this.u.uOpacity, e.alpha); gl.uniform1f(this.u.uVColor, 1);
+    gl.enableVertexAttribArray(2);
+    for (const c of cache.values()) {
+      if (!c.count) continue;
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 36, 0); gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 36, 12); gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+      gl.drawArrays(gl.TRIANGLES, 0, c.count);
+    }
+    gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
+    gl.uniform1f(this.u.uVColor, 0);
   }
 
   meshModel(e) {
@@ -901,6 +1114,7 @@ export class Renderer3D {
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
 
     const transparent = [], shadows = [];
+    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead) this.drawVoxels(e);
     for (const e of scene.entities) {
       if (!e.mesh || !e.visible || e.dead) continue;
       let op = e.mesh.opacity * e.alpha;
@@ -919,6 +1133,7 @@ export class Renderer3D {
         const sx = s.extents(); if (sx.sphere) continue;
         if (Math.abs(e.x - s.x) < sx.hx && Math.abs(e.z - s.z) < sx.hz) { const top = s.y + sx.hy; if (top <= bottom + 0.05 && top > ground) ground = top; }
       }
+      for (const w of scene.entities) if (w.voxels) ground = Math.max(ground, w.voxels.groundAt(w, e.x, e.z, bottom + 0.05));
       if (ground === -Infinity) continue;
       const k = clamp(1 - (bottom - ground) / 6, 0.2, 1);
       this.drawMesh('cylinder', M4.trs(e.x, ground + 0.015, e.z, 0, 0, 0, r * 2 * k, 0.01, r * 2 * k), '#000000', 1, 0.28 * k);
@@ -944,7 +1159,7 @@ function drawMessage(ctx, scene, W, H, engine) {
     if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
   }
   if (line) lines.push(line);
-  const h = lines.length * (size + 6) + 24, y = H - engine.safe.bottom - 130 - h;
+  const h = lines.length * (size + 6) + 24, y = scene.settings.messageTop ? engine.safe.top + H * 0.2 : H - engine.safe.bottom - 130 - h;
   ctx.globalAlpha = Math.min(1, m.t * 3);
   ctx.fillStyle = 'rgba(15,15,25,0.85)';
   ctx.beginPath();
@@ -999,6 +1214,7 @@ function renderUI(engine, scene) {
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.stroke(); }
       ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
       if (b.action === 'mute' && engine.audio.muted) {
@@ -1061,7 +1277,7 @@ export const Behaviors = {};
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
-const is3D = (e) => !!e.mesh;
+const is3D = (e) => !!(e.mesh || e.voxels || e.scene?.mode === '3d');
 
 function respawnOrEnd(player, s, action) {
   if (action === 'respawn' || (action === 'damage' && s.vars.lives > 1)) {
@@ -1224,6 +1440,7 @@ registerBehavior('spawner', {
     { key: 'ramp', label: 'Speed-up per 10s', type: 'number', default: 0.1 },
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
     { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
+    { key: 'clear', label: 'Keep clear of others (0 = off)', type: 'number', default: 0 },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -1237,7 +1454,11 @@ registerBehavior('spawner', {
         if (alive.length >= p.max) return;
         const ox = p.relative ? e.x : 0, oy = p.relative ? e.y : 0, oz = p.relative ? e.z : 0;
         const sn = (v) => (p.snap ? Math.round(v / p.snap) * p.snap : v);
-        const c = s.spawn(p.template, { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) });
+        const pos = { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) };
+        // don't drop things on top of each other (e.g. a coin inside a barrier)
+        if (p.clear && s.entities.some((o) => o.spawned && !o.dead && Math.abs(o.x - pos.x) < p.clear && Math.abs(o.y - pos.y) < p.clear * (s.mode === '3d' ? 2 : 1) && Math.abs(o.z - pos.z) < p.clear)) return;
+        const c = s.spawn(p.template, pos);
+        if (c) c.spawned = true;
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
     };
@@ -1641,7 +1862,13 @@ registerBehavior('swipeMove', {
   create(p) {
     let lane = 0, home = 0;
     return {
-      start(e) { home = e.x; },
+      start(e, s) {
+        home = e.x;
+        // a real body so the runner can jump, land, and get hit
+        const b = e.body && e.body.type === 'dynamic' ? e.body : e.setBody({ type: 'dynamic' });
+        if (!is3D(e) && !p.jump) b.gravityScale = 0;
+        if (p.jump && !s.gravity) s.gravity = is3D(e) ? -25 : 1600;
+      },
       update(e, dt, s) {
         const inp = s.engine.input, max = Math.floor((p.lanes - 1) / 2);
         if (inp.pressed('swipe:left')) lane = Math.max(-max, lane - 1);
@@ -1884,9 +2111,10 @@ registerBehavior('projectile', {
           d = { x: -Math.sin(ry) * Math.cos(rx), y: Math.sin(rx), z: -Math.cos(ry) * Math.cos(rx) };
         } else d = { x: Math.sin((e.rz || 0) * DEG), y: -Math.cos((e.rz || 0) * DEG), z: 0 };
       },
-      update(e, dt) {
+      update(e, dt, s) {
         e.x += d.x * p.speed * dt; e.y += d.y * p.speed * dt; e.z += d.z * p.speed * dt;
         if ((t += dt) > p.life) e.destroy();
+        for (const w of s.entities) if (w.voxels && w.voxels.solidAtWorld(w, e.x, e.y, e.z)) { s.burst(e.x, e.y, e.z, '#ddd', 6, 0.5); e.destroy(); break; }
       },
     };
   },
@@ -2199,6 +2427,290 @@ registerBehavior('blink', {
   },
 });
 
+// ---- turn-based games ----
+/** Is a grid cell blocked? Static bodies, objects tagged "wall", other turn enemies, voxel blocks. */
+function blockerAt(s, x, y, z, except) {
+  for (const o of s.entities) {
+    if (o === except || o.dead || o.ui) continue;
+    if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
+    const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable');
+    if (!solid) continue;
+    const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
+    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && Math.abs(o.y - y) < Math.max(hy, 0.6) : Math.abs(o.y - y) < hy)) return o;
+  }
+  return null;
+}
+
+registerBehavior('gridMove', {
+  label: 'Grid Move', description: 'Moves one tile per swipe (or joystick push / tap beside the player). In turn-based games each move ends your turn. Bump enemies to attack, push "pushable" objects.',
+  params: [
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'tapToMove', label: 'Tap beside the player to move', type: 'bool', default: true },
+    { key: 'damage', label: 'Bump attack damage', type: 'number', default: 1 },
+  ],
+  create(p) {
+    let busy = 0, armed = true;
+    return {
+      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic' }); s.want('player'); },
+      update(e, dt, s) {
+        if ((busy -= dt) > 0 || s.state !== 'play' || (s.settings.turnBased && !s.isPlayerTurn)) return;
+        const inp = s.engine.input, a = inp.axis();
+        let dx = 0, dy = 0;
+        if (inp.pressed('swipe:left')) dx = -1; else if (inp.pressed('swipe:right')) dx = 1;
+        else if (inp.pressed('swipe:up')) dy = -1; else if (inp.pressed('swipe:down')) dy = 1;
+        else if (Math.hypot(a.x, a.y) > 0.6) { if (armed) { if (Math.abs(a.x) > Math.abs(a.y)) dx = Math.sign(a.x); else dy = Math.sign(a.y); armed = false; } }
+        else armed = true;
+        if (!dx && !dy && p.tapToMove && inp.taps.length) {
+          const t = inp.taps[0], sp = s.mode === '3d' ? s.engine.renderer.worldToScreen(s, e.x, e.y, e.z) : s.engine.renderer.worldToScreen(s, e.x, e.y);
+          const ox = t.x - sp.x, oy = t.y - sp.y;
+          if (Math.hypot(ox, oy) > 24) { if (Math.abs(ox) > Math.abs(oy)) dx = Math.sign(ox); else dy = Math.sign(oy); }
+        }
+        if (!dx && !dy) return;
+        const T = p.tile, tx = e.x + dx * T, ty = is3D(e) ? e.y : e.y + dy * T, tz = is3D(e) ? e.z + dy * T : e.z;
+        if (is3D(e)) e.ry = Math.atan2(-dx, -dy) / DEG;
+        const hit = blockerAt(s, tx, ty, tz, e);
+        if (hit && hit.getBehavior('gridEnemy')) { // bump attack
+          hit.getBehavior('gridEnemy').hurt(hit, s, p.damage);
+          busy = 0.15; if (s.settings.turnBased) s.endTurn(); return;
+        }
+        if (hit && hit.tags.has('pushable')) {
+          const bx = hit.x + dx * T, by = is3D(e) ? hit.y : hit.y + dy * T, bz = is3D(e) ? hit.z + dy * T : hit.z;
+          if (blockerAt(s, bx, by, bz, hit)) { s.engine.vibrate(15); return; }
+          s.tween(hit, { x: bx, y: by, z: bz }, 0.12);
+        } else if (hit) { s.engine.vibrate(15); return; }
+        s.tween(e, { x: tx, y: ty, z: tz }, 0.12);
+        s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
+        busy = 0.14;
+        if (s.settings.turnBased) s.endTurn();
+      },
+    };
+  },
+});
+
+registerBehavior('gridEnemy', {
+  label: 'Turn Enemy', description: 'On each enemy turn, steps one tile toward the player and attacks when next to them. Bump it to hurt it.',
+  params: [
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'hp', label: 'Health', type: 'number', default: 1 },
+    { key: 'points', label: 'Points when defeated', type: 'number', default: 10 },
+    { key: 'sight', label: 'Notices player within (tiles, 0 = always)', type: 'number', default: 6 },
+  ],
+  create(p) {
+    let hp = p.hp;
+    const self = {
+      hurt(e, s, dmg) {
+        hp -= dmg; e.data.invuln = 0.2; s.engine.audio.sfx('hit');
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#f55', 12);
+        if (hp <= 0) { s.addVar('score', p.points); e.destroy(); }
+      },
+      turn(e, s) {
+        const pl = s.findAll('player')[0];
+        if (!pl) return;
+        const T = p.tile, dx = Math.round((pl.x - e.x) / T), dy = Math.round(((is3D(e) ? pl.z : pl.y) - (is3D(e) ? e.z : e.y)) / T);
+        if (Math.abs(dx) + Math.abs(dy) === 1) { // adjacent: attack
+          s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
+          if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
+          return;
+        }
+        if (p.sight && Math.abs(dx) + Math.abs(dy) > p.sight) return;
+        const tries = Math.abs(dx) >= Math.abs(dy) ? [[Math.sign(dx), 0], [0, Math.sign(dy)]] : [[0, Math.sign(dy)], [Math.sign(dx), 0]];
+        for (const [mx, my] of tries) {
+          if (!mx && !my) continue;
+          const tx = e.x + mx * T, ty = is3D(e) ? e.y : e.y + my * T, tz = is3D(e) ? e.z + my * T : e.z;
+          if (blockerAt(s, tx, ty, tz, e) || (Math.abs(pl.x - tx) < T / 2 && Math.abs((is3D(e) ? pl.z - tz : pl.y - ty)) < T / 2)) continue;
+          s.tween(e, { x: tx, y: ty, z: tz }, 0.15);
+          if (is3D(e)) e.ry = Math.atan2(-mx, -my) / DEG;
+          break;
+        }
+      },
+    };
+    return self;
+  },
+});
+
+registerBehavior('boardCell', {
+  label: 'Board Cell', description: 'A square on a game board (tic-tac-toe, connect-style). Tap to place your mark; play a friend or the computer.',
+  params: [
+    { key: 'row', label: 'Row', type: 'number', default: 0 },
+    { key: 'col', label: 'Column', type: 'number', default: 0 },
+    { key: 'line', label: 'Marks in a row to win', type: 'number', default: 3 },
+    { key: 'vsComputer', label: 'Play against the computer', type: 'bool', default: true },
+  ],
+  create(p) {
+    const cells = (s) => s.entities.filter((c) => c.getBehavior('boardCell') && !c.dead);
+    const at = (s, r, c) => cells(s).find((x) => x.data.row === r && x.data.col === c);
+    const wins = (s, cell, mark) => {
+      for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+        let n = 1;
+        for (const sgn of [1, -1]) for (let k = 1; ; k++) { const o = at(s, cell.data.row + dr * k * sgn, cell.data.col + dc * k * sgn); if (o && o.data.mark === mark) n++; else break; }
+        if (n >= cell.data.line) return true;
+      }
+      return false;
+    };
+    const place = (s, cell, mark) => {
+      cell.data.mark = mark;
+      const size = Math.min(cell.shape?.w || 80, cell.shape?.h || 80);
+      cell.text = { ...TEXT_DEFAULTS, value: mark, size: size * 0.62, weight: '900', color: mark === 'X' ? '#4fc3f7' : '#ff7043' };
+      s.engine.audio.sfx(mark === 'X' ? 'click' : 'coin'); s.engine.vibrate(8);
+      const k = cell.sx; cell.sx = cell.sy = k * 0.85; s.tween(cell, { sx: k, sy: k }, 0.15);
+      if (wins(s, cell, mark)) {
+        s.burst(cell.x, cell.y, cell.z, mark === 'X' ? '#4fc3f7' : '#ff7043', 30);
+        if (cell.data.vs) { if (mark === 'X') s.win(); else { s.message('The computer wins!', 2); s.gameOver(); } }
+        else { s.message(`${mark} wins!`, 2.5); s.addVar('score', 1); s.win(); }
+        return true;
+      }
+      if (cells(s).every((c) => c.data.mark)) { s.message("It's a draw!", 1.4); s.after(1.5, () => s.engine.restart()); return true; }
+      return false;
+    };
+    return {
+      start(e, s) {
+        Object.assign(e.data, { row: p.row, col: p.col, line: p.line, vs: p.vsComputer, mark: '' });
+        s.vars.turnText = p.vsComputer ? 'Your turn (X)' : 'X to play';
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play' || e.data.mark || !s.isPlayerTurn) return;
+        if (!s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) return;
+        const mark = p.vsComputer ? 'X' : (s.vars.nextMark || 'X');
+        if (place(s, e, mark)) return;
+        if (p.vsComputer) { s.settings.enemyTurnText = 'Computer is thinking…'; s.settings.playerTurnText = 'Your turn (X)'; s.settings.turnDelay = 0.5; s.endTurn(); }
+        else { s.vars.nextMark = mark === 'X' ? 'O' : 'X'; s.setVar('turnText', `${s.vars.nextMark} to play`); }
+      },
+      turn(e, s) {
+        const all = cells(s);
+        if (all[0] !== e || !e.data.vs) return; // one cell plays for the computer
+        const empty = all.filter((c) => !c.data.mark);
+        if (!empty.length) return;
+        const tryMark = (mark) => empty.find((c) => { c.data.mark = mark; const w = wins(s, c, mark); c.data.mark = ''; return w; });
+        const mid = Math.floor(Math.sqrt(all.length) / 2);
+        const pickCell = tryMark('O') || tryMark('X') || empty.find((c) => c.data.row === mid && c.data.col === mid) || empty[Math.floor(Math.random() * empty.length)];
+        place(s, pickCell, 'O');
+      },
+    };
+  },
+});
+
+registerBehavior('turnAction', {
+  label: 'Turn Button', description: 'A battle/menu button: on your turn, tap to change a variable (attack, heal, spell), then the enemy takes its turn.',
+  params: [
+    { key: 'var', label: 'Changes variable', type: 'text', default: 'enemyHp' },
+    { key: 'amount', label: 'By (min/max)', type: 'range', default: [-14, -8] },
+    { key: 'max', label: 'Up to (0 = no cap)', type: 'number', default: 0 },
+    { key: 'costVar', label: 'Costs variable', type: 'text', default: '' },
+    { key: 'cost', label: 'Cost', type: 'number', default: 0 },
+    { key: 'text', label: 'Message ({n} = amount)', type: 'text', default: 'You hit for {n}!' },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['hit', 'power', 'coin', 'jump', 'click'], default: 'hit' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        const ready = s.state === 'play' && s.isPlayerTurn && (!p.costVar || (+s.vars[p.costVar] || 0) >= p.cost);
+        e.alpha += ((ready ? 1 : 0.45) - e.alpha) * Math.min(1, dt * 10);
+        if (s.state !== 'play' || !s.isPlayerTurn) return;
+        if (!s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) return;
+        if (p.costVar && (+s.vars[p.costVar] || 0) < p.cost) { s.message(`Not enough ${p.costVar}`, 1.2); s.engine.vibrate(30); return; }
+        if (p.costVar) s.addVar(p.costVar, -p.cost);
+        const n = Math.round(pick(p.amount));
+        let v = (+s.vars[p.var] || 0) + n;
+        if (n < 0) v = Math.max(0, v);
+        if (p.max) v = Math.min(p.max, v);
+        s.setVar(p.var, v);
+        s.message(p.text.replace('{n}', Math.abs(n)), Math.max(0.8, (s.settings.turnDelay ?? 0.3) + 0.4));
+        s.engine.audio.sfx(p.sound); s.engine.vibrate(12);
+        const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
+        s.endTurn();
+      },
+    };
+  },
+});
+
+registerBehavior('turnOpponent', {
+  label: 'Enemy Turn', description: 'On the enemy\'s turn, changes a variable (e.g. hits the player) and shows a message.',
+  params: [
+    { key: 'var', label: 'Changes variable', type: 'text', default: 'hp' },
+    { key: 'amount', label: 'By (min/max)', type: 'range', default: [-12, -6] },
+    { key: 'text', label: 'Message ({n} = amount)', type: 'text', default: 'The enemy hits you for {n}!' },
+  ],
+  create(p) {
+    return {
+      turn(e, s) {
+        const n = Math.round(pick(p.amount));
+        s.setVar(p.var, Math.max(0, (+s.vars[p.var] || 0) + n));
+        s.message(p.text.replace('{n}', Math.abs(n)), 1.4);
+        s.engine.audio.sfx('hit'); s.engine.vibrate(40); s.camera.shake = 8;
+        const k = e.sx; e.sx = e.sy = k * 1.15; s.tween(e, { sx: k, sy: k }, 0.25);
+      },
+    };
+  },
+});
+
+registerBehavior('condition', {
+  label: 'Condition', description: 'Watches a variable and does something when it passes a value, e.g. win when enemyHp ≤ 0, lose when hp ≤ 0.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'hp' },
+    { key: 'op', label: 'When it is', type: 'select', options: ['<=', '>=', '=='], default: '<=' },
+    { key: 'target', label: 'Value', type: 'number', default: 0 },
+    ...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'game over' } : q)),
+  ],
+  create(p) {
+    let done = false;
+    return {
+      update(e, dt, s) {
+        if (done || s.state !== 'play') return;
+        const v = +s.vars[p.var] || 0;
+        if (p.op === '<=' ? v <= p.target : p.op === '>=' ? v >= p.target : v === p.target) { done = true; runAction(s, e, p); }
+      },
+    };
+  },
+});
+
+registerBehavior('voxelBuilder', {
+  label: 'Block Builder', description: 'Minecraft-style building: tap a block to break it, or switch to Place and tap to add blocks. Buttons swap mode and block.',
+  params: [
+    { key: 'reach', label: 'Reach (blocks)', type: 'number', default: 6 },
+    { key: 'block', label: 'Starting block (1–12)', type: 'number', default: 3 },
+    { key: 'mode', label: 'Starting mode', type: 'select', options: ['break', 'place'], default: 'break' },
+  ],
+  create(p) {
+    let mode = p.mode, block = p.block;
+    const syncButtons = (s, V) => {
+      const col = V?.palette[(block - 1) % V.palette.length] || '#fff';
+      s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      s.engine.layoutButtons();
+    };
+    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    return {
+      start(e, s) { syncButtons(s, world(s)?.voxels); },
+      update(e, dt, s) {
+        const inp = s.engine.input, W = world(s);
+        if (!W) return;
+        if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, W.voxels); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
+        if (inp.pressed('btn:vblock')) { block = block % W.voxels.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, W.voxels); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
+        for (const t of inp.taps) {
+          const ray = s.engine.renderer.screenRay(s, t.x, t.y), cam = s.camera.position;
+          const max = p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
+          const hit = W.voxels.raycast(W, ray.origin, ray.dir, max);
+          if (!hit) continue;
+          const V = W.voxels, sz = V.size;
+          if (mode === 'break') {
+            const col = V.palette[(V.get(hit.i, hit.j, hit.k) - 1) % V.palette.length];
+            V.set(hit.i, hit.j, hit.k, 0);
+            s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
+            s.engine.audio.tone({ freq: 180, to: 90, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
+            s.addVar('blocks', 1);
+          } else {
+            const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
+            const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
+            const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
+            if (inside) continue; // don't build inside yourself
+            V.set(ni, nj, nk, block);
+            s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+          }
+        }
+      },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -2362,6 +2874,8 @@ export class Engine {
       const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
       if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: X(0), y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      // extra buttons that components add (e.g. the block builder's mode and block pickers), stacked above
+      (s.customButtons || []).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
@@ -2468,6 +2982,10 @@ export class Engine {
       for (const b of e.behaviors) { if (e.dead) break; b.update?.(e, dt, s); }
     }
     s.update(dt, this);
+    if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
+      for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
+      if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
+    }
     const steps = Math.ceil(dt / (1 / 120));
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
@@ -2520,7 +3038,7 @@ export class Engine {
 
 /** Everything, for scripts: `P.Entity`, `P.rand`, ... */
 export const Pocket = {
-  VERSION, Engine, Scene, Entity, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
+  VERSION, Engine, Scene, Entity, VoxelWorld, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
   Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
 };
 export default Pocket;

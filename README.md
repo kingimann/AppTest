@@ -39,6 +39,10 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Endless Runner | Lane Rush | swipe lanes, jump |
    | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
 | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
+| Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
+| Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
+| Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
+| Board Game | Tic-Tac-Toe | tap cells, play the computer |
    | Tap Arcade | Tap Frenzy | tap targets against the clock |
    | Blank 2D / 3D | | start from nothing |
 
@@ -152,6 +156,13 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `dropItem` | Drops a template when destroyed (loot, power-ups). | `template`, `chance` (1) |
 | `emitter` | Keeps giving off particles (fire, smoke, sparkles). | `color`, `rate` (20), `spread` (0.5) |
 | `blink` | Flashes on and off; with Hazard it only hurts while visible. | `on` (0.6), `off` (0.6), `solid` (true) |
+| `gridMove` | Moves one tile per swipe, joystick push or tap beside the player; ends your turn in turn-based games. Bump enemies to attack, push objects tagged `pushable`. | `tile` (40 / 3D 1), `tapToMove`, `damage` |
+| `gridEnemy` | Turn Enemy: each enemy turn steps toward the player and attacks when adjacent. | `tile`, `hp`, `points`, `sight` |
+| `boardCell` | A board square (tic-tac-toe, connect-style): tap to place a mark; vs a friend or the computer. | `row`, `col`, `line` (3), `vsComputer` |
+| `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
+| `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |
+| `condition` | When a variable passes a value, do an action (win when enemyHp ≤ 0, lose when hp ≤ 0…). | `var`, `op`, `target`, `action`, … |
+| `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.
@@ -191,6 +202,10 @@ registerBehavior('blink', {
 ### Scene settings
 
 `settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. More phone settings: `joystickSide` (`'left'`/`'right'` for left-handed players; buttons move to the other side), `controlSize` (`'small'`/`'medium'`/`'large'`), `saveProgress` (variables and level survive closing the game; reset on game over), `shareButton` (a *Share score* button on the end screen using the phone's share sheet). Buttons vibrate when pressed, audio recovers after calls or app switches, and the engine lowers its resolution automatically if a phone can't hold a smooth frame rate. With `timeLimit`, `{time}` counts down and the game ends at zero.
+
+**Turn-based games:** set `settings.turnBased`. Grid Move, Turn Button and Board Cell end the player's turn; then every component with a `turn(e, scene)` hook acts (Turn Enemy, Enemy Turn, the board's computer player) after `turnDelay` seconds. Texts can show `{turnText}` and `{turn}`; `scene.endTurn()` ends a turn from scripts. `messageTop` moves message banners to the top of the screen.
+
+**Voxels:** give an entity `voxels: { size, gen: { type: 'hills' | 'flat' | 'empty', w, d, h, seed, trees }, edits: { "i,j,k": block } }` for a Minecraft-style block world (12-block palette: grass, dirt, stone, wood, leaves, sand, water, brick, snow, obsidian, gold, crystal). It is drawn as merged chunks (only visible faces), dynamic bodies walk on it and bump into it, projectiles stop at blocks, and `entity.voxels.get/set(i, j, k)` / `raycast(entity, origin, dir)` let scripts dig and build. In the editor, select the world, pick the brush (Paint tool), choose Add/Remove and a block, then tap or drag to build.
 
 **Levels:** put more scenes in `levels: [sceneJson, ...]` on the first scene. Winning a level shows "Level complete" and continues to the next one, carrying variables like score and lives over; `{level}` shows the level number. `engine.start(json, { level: 1 })` starts at the second level. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
 

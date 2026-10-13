@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES } from '../engine/pocket.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 
@@ -195,7 +195,7 @@ window.engine = engine;
 
 const ent = (id) => project?.entities.find((e) => e.id === id);
 const is3D = () => project.mode === '3d';
-const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite);
+const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels);
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
@@ -430,6 +430,7 @@ function pick(sx, sy) {
   const ray = engine.renderer.screenRay(s, sx, sy);
   let best = null, bestT = Infinity;
   for (const e of list) {
+    if (e.voxels) { const hv = e.voxels.raycast(e, ray.origin, ray.dir, 400); if (hv && hv.dist < bestT) { bestT = hv.dist; best = e; } continue; }
     if (e.ui || !e.mesh) continue;
     const t = rayHit(ray, e);
     if (t != null && t < bestT) { bestT = t; best = e; }
@@ -486,6 +487,11 @@ surface.addEventListener('pointerdown', (ev) => {
   else if (tapTrack) tapTrack.max = Math.max(tapTrack.max, ptrs.size);
   if (ptrs.size > 1) cancelLongPress();
   $('#hint').hidden = true;
+  if (ptrs.size === 1 && tool === 'paint' && ent(selectedId)?.voxels) {
+    gesture = { type: 'voxel', id: selectedId, last: '', count: 0 };
+    voxelPaint(x, y);
+    return;
+  }
   if (ptrs.size === 1 && tool === 'paint' && ev.button === 0 && !ev.altKey) {
     const src = ent(selectedId);
     if (!src || src.ui) { toast('Select an object first, then paint copies of it'); gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: true }; return; }
@@ -580,6 +586,8 @@ surface.addEventListener('pointermove', (ev) => {
     syncTransformInputs();
   } else if (g.type === 'paint') {
     paintAt(x, y);
+  } else if (g.type === 'voxel') {
+    voxelPaint(x, y);
   } else if (g.type === 'pan' || g.type === 'orbit') {
     const mx = x - g.lx, my = y - g.ly;
     g.lx = x; g.ly = y;
@@ -605,6 +613,29 @@ surface.addEventListener('pointermove', (ev) => {
     applyCamera();
   }
 });
+
+/** Paint tool on a voxel world: add or remove blocks where the finger is. */
+function voxelPaint(sx, sy) {
+  const g = gesture, j = ent(g.id), live = engine.scene.byId(g.id);
+  if (!j || !live?.voxels) return;
+  const V = live.voxels, hit = V.raycast(live, ...Object.values(engine.renderer.screenRay(engine.scene, sx, sy)), 400);
+  let i, jj, k, c;
+  if (hit) {
+    if (voxelBrush.mode === 'remove') { i = hit.i; jj = hit.j; k = hit.k; c = 0; }
+    else { i = hit.i + hit.n[0]; jj = hit.j + hit.n[1]; k = hit.k + hit.n[2]; c = voxelBrush.block; }
+  } else if (voxelBrush.mode === 'add') { // empty world: build on the ground plane
+    const p = rayPlaneY(engine.renderer.screenRay(engine.scene, sx, sy), live.y);
+    if (!p) return;
+    [i, jj, k] = V.cell(live, p.x, live.y + 0.01, p.z); c = voxelBrush.block;
+  } else return;
+  const key = `${i},${jj},${k}`;
+  if (key === g.last) return;
+  g.last = key;
+  V.set(i, jj, k, c);
+  (j.voxels.edits ||= {})[key] = c;
+  g.count++;
+  buzz(4);
+}
 
 /** Paint tool: stamp a copy of the source object at a screen point, spaced by its size. */
 function paintAt(sx, sy) {
@@ -650,6 +681,7 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
+  if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
     const now = performance.now();
@@ -807,6 +839,7 @@ function refreshAll() {
 let hFilter = '';
 function iconFor(e) {
   if (!e) return 'scene';
+  if (e.voxels) return 'grid';
   if (e.ui) return 'hud';
   if (e.mesh) return ({ box: 'cube', sphere: 'sphere', cylinder: 'cylinder', cone: 'cone', plane: 'plane' })[e.mesh.geometry] || 'cube';
   if (e.shape) return ({ rect: 'square', circle: 'circle', triangle: 'triangle', star: 'star' })[e.shape.type] || 'square';
@@ -965,6 +998,7 @@ function vecRow(target, label, keys, defs, step) {
 }
 
 const closedComps = new Set();
+const voxelBrush = { mode: 'add', block: 1 };
 let compClipboard = null;
 function pasteComponent(j) {
   const c = compClipboard; if (!c) return;
@@ -1085,6 +1119,24 @@ function renderInspector() {
       C('mesh.opacity', { label: 'Opacity', type: 'number', def: 1, step: 0.05 }),
     ], { icon: 'cube', key: 'mesh', menu: removeMenu(() => { delete j.mesh; changed({ structure: true }); }, 'mesh') }));
   }
+  if (j.voxels) {
+    const V = engine.scene.byId(j.id)?.voxels, pal = V?.palette || [];
+    box.append(comp('Voxel World', [
+      h('p', { class: 'desc' }, `${V ? V.count.toLocaleString() : 0} blocks. To build here: pick the Paint tool (brush), choose Add or Remove and a block, then tap or drag on the world.`),
+      h('div', { class: 'row' }, h('label', {}, 'Brush'), h('div', { class: 'pair' },
+        ...['add', 'remove'].map((m) => h('button', { class: 'btn' + (voxelBrush.mode === m ? ' primary' : ''), style: 'flex:1', onclick: () => { voxelBrush.mode = m; setTool('paint'); renderInspector(); } }, m === 'add' ? 'Add' : 'Remove')))),
+      h('div', { class: 'row' }, h('label', {}, 'Block'), h('div', { class: 'swatches' }, pal.map((c, i) => h('button', {
+        class: 'sw' + (voxelBrush.block === i + 1 ? ' on' : ''), style: `background:${c}`, title: VOXEL_NAMES[i] || `Block ${i + 1}`,
+        onclick: () => { voxelBrush.block = i + 1; voxelBrush.mode = 'add'; setTool('paint'); renderInspector(); } })))),
+      C('voxels.gen.type', { label: 'Terrain', type: 'select', options: [['hills', 'Hills with trees'], ['flat', 'Flat'], ['empty', 'Empty (build from scratch)']], def: 'hills', structure: true }),
+      C('voxels.gen.w', { label: 'Width', type: 'number', def: 24, step: 4 }),
+      C('voxels.gen.d', { label: 'Depth', type: 'number', def: 24, step: 4 }),
+      C('voxels.gen.h', { label: 'Hill height', type: 'number', def: 5 }),
+      C('voxels.gen.seed', { label: 'Seed (shape of the land)', type: 'number', def: 1 }),
+      C('voxels.gen.trees', { label: 'Trees', type: 'bool', def: true }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
+    ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
+  }
   if (j.body && !j.ui) {
     const shp = j.body.shape || 'auto';
     box.append(comp(threeD ? 'Rigidbody' : 'Rigidbody 2D', [
@@ -1169,6 +1221,10 @@ function renderSceneSettings(box) {
   box.append(comp('Rules', [
     C('settings.winScore', { label: 'Win at Score', type: 'number', def: 0, step: 10 }),
     C('settings.timeLimit', { label: 'Time Limit (sec)', type: 'number', def: 0, step: 5 }),
+    C('settings.turnBased', { label: 'Turn-Based', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'Turn-based: each player move (Grid Move, Turn Button, Board Cell) ends your turn, then enemies act. Show it with {turnText} and {turn}.'),
+    C('settings.turnDelay', { label: 'Enemy Turn Delay (sec)', type: 'number', def: 0.3, step: 0.1 }),
+    C('settings.messageTop', { label: 'Show Messages at the Top', type: 'bool', def: false }),
     h('p', { class: 'desc' }, 'With a time limit, show the countdown in a text with {time}. 0 = no limit.'),
     h('div', { class: 'row inline' }, h('label', {}, 'Save Best Score'), h('div', {}, h('input', { type: 'checkbox', checked: !!project.settings.saveBest,
       onchange: (e) => { project.settings.saveBest = e.target.checked ? slug(levelList()[0].name) + '-' + projectId.slice(-4) : ''; changed(); } }))),
@@ -1212,6 +1268,9 @@ const BEH_META = {
   follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
   bounce: ['Movement', 'circle'], trigger: ['Events', 'bolt'], timer: ['Events', 'clock'], dropItem: ['Gameplay', 'coin'],
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
+  gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
+  turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Events', 'bolt'],
+  voxelBuilder: ['Voxel', 'cube'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1226,6 +1285,7 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'mesh', label: 'Mesh Renderer', icon: 'cube', desc: 'Cube, sphere, cylinder, cone or plane', ok: (e) => threeD && !e.mesh, add: (e) => { e.mesh = { geometry: 'box', w: 1, h: 1, d: 1, color: '#4c8bd6' }; } },
     { cat: 'Rendering', key: 'text', label: 'Text', icon: 'text', desc: 'Words and live variables like {score}', ok: (e) => !e.text, add: (e) => { e.text = { value: 'Text', size: 24, color: '#ffffff' }; } },
     { cat: 'Rendering', key: 'sprite', label: 'Image', icon: 'image', desc: 'A picture from your device', ok: (e) => !threeD && !e.sprite, add: (e) => { e.sprite = { src: '', w: 64, h: 64 }; } },
+    { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
@@ -1290,6 +1350,18 @@ const PREFABS_2D = [
   { icon: 'bolt', label: 'Shooter Ship', props: { name: 'Ship', tags: ['player'], shape: { type: 'triangle', w: 34, h: 40, fill: '#4fc3f7' }, behaviors: [{ type: 'move', control: 'both', speed: 280, axes: 'horizontal' }, { type: 'shooter', template: 'Bullet', every: 0.25, trigger: 'auto' }] },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 60, y: 0 }, shape: { type: 'rect', w: 6, h: 16, radius: 3, fill: '#fff59d' }, behaviors: [{ type: 'velocity', vx: 0, vy: -600, vz: 0 }, { type: 'destroyOffscreen', margin: 60 }] }] },
   { icon: 'square', label: 'Target', props: { name: 'Target', shape: { type: 'rect', w: 50, h: 50, radius: 8, fill: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
+  { icon: 'move', label: 'Grid Hero', props: { name: 'Hero', tags: ['player'], shape: { type: 'circle', r: 15, fill: '#4fc3f7' }, behaviors: [{ type: 'gridMove', tile: 40, tapToMove: true, damage: 1 }] }, settings: { turnBased: true } },
+  { icon: 'enemy', label: 'Turn Enemy', props: { name: 'Goblin', shape: { type: 'rect', w: 28, h: 28, radius: 8, fill: '#e53935' }, behaviors: [{ type: 'gridEnemy', tile: 40, hp: 2, points: 25, sight: 5 }] }, settings: { turnBased: true } },
+  { icon: 'square', label: 'Wall Tile', props: { name: 'Wall', shape: { type: 'rect', w: 40, h: 40, fill: '#4a3f5c', stroke: '#2b2438', lineWidth: 2 }, body: { type: 'static' } } },
+  { icon: 'square', label: 'Push Crate', props: { name: 'Crate', tags: ['pushable'], shape: { type: 'rect', w: 36, h: 36, radius: 4, fill: '#a1887f', stroke: '#6d4c41', lineWidth: 3 } } },
+  { icon: 'grid', label: 'Board 3×3', props: { name: 'Cell 2-2', shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 1, col: 1, line: 3, vsComputer: true }] }, settings: { turnBased: true },
+    extra: [{ name: 'Cell 1-1', offset: { x: -110, y: -110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 0, col: 0, line: 3, vsComputer: true }] }, { name: 'Cell 1-2', offset: { x: 0, y: -110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 0, col: 1, line: 3, vsComputer: true }] }, { name: 'Cell 1-3', offset: { x: 110, y: -110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 0, col: 2, line: 3, vsComputer: true }] }, { name: 'Cell 2-1', offset: { x: -110, y: 0 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 1, col: 0, line: 3, vsComputer: true }] }, { name: 'Cell 2-3', offset: { x: 110, y: 0 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 1, col: 2, line: 3, vsComputer: true }] }, { name: 'Cell 3-1', offset: { x: -110, y: 110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 2, col: 0, line: 3, vsComputer: true }] }, { name: 'Cell 3-2', offset: { x: 0, y: 110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 2, col: 1, line: 3, vsComputer: true }] }, { name: 'Cell 3-3', offset: { x: 110, y: 110 }, shape: { type: 'rect', w: 100, h: 100, radius: 14, fill: '#2a3550' }, behaviors: [{ type: 'boardCell', row: 2, col: 2, line: 3, vsComputer: true }] }] },
+  { icon: 'hand', label: 'Battle Button', props: { name: 'Attack Button', ui: true, anchor: 'bottom', x: 0, y: -120, shape: { type: 'rect', w: 320, h: 58, radius: 14, fill: '#455a64' }, text: { value: 'Attack', size: 20, color: '#ffffff' }, behaviors: [{ type: 'turnAction', var: 'enemyHp', amount: [-14, -8], max: 0, costVar: '', cost: 0, text: 'You strike for {n}!', sound: 'hit' }] },
+    settings: { turnBased: true, turnDelay: 1 }, vars: { enemyHp: 60, hp: 50 } },
+  { icon: 'ghost', label: 'Battle Enemy', props: { name: 'Monster', shape: { type: 'circle', r: 60, fill: '#66bb6a' }, behaviors: [{ type: 'turnOpponent', var: 'hp', amount: [-10, -5], text: 'The monster hits you for {n}!' }] },
+    settings: { turnBased: true, turnDelay: 1 }, vars: { enemyHp: 60, hp: 50 },
+    extra: [{ name: 'Win Check', offset: { x: -150, y: -200 }, behaviors: [{ type: 'condition', var: 'enemyHp', op: '<=', target: 0, action: 'win', value: '', amount: 1, sound: 'none' }] },
+      { name: 'Lose Check', offset: { x: 150, y: -200 }, behaviors: [{ type: 'condition', var: 'hp', op: '<=', target: 0, action: 'game over', value: '', amount: 1, sound: 'none' }] }] },
   { icon: 'crosshair', label: 'Turret', props: { name: 'Turret', shape: { type: 'triangle', w: 34, h: 40, fill: '#8e24aa' }, body: { type: 'static' }, behaviors: [{ type: 'turret', template: 'Enemy Bullet', every: 1.2, range: 320, tag: 'player' }] },
     extra: [{ name: 'Enemy Bullet', template: true, offset: { x: 60, y: 0 }, shape: { type: 'circle', r: 6, fill: '#ff5252' }, behaviors: [{ type: 'projectile', speed: 320, life: 3 }, { type: 'hazard', action: 'damage', destroySelf: true }] }] },
   { icon: 'ghost', label: 'Wanderer', props: { name: 'Wanderer', shape: { type: 'circle', r: 16, fill: '#81c784' }, behaviors: [{ type: 'wander', speed: 60, radius: 120 }] } },
@@ -1330,6 +1402,8 @@ const PREFABS_3D = [
     scene: { settings: { joystick: true, actionButton: true, jumpButton: true } },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 2, y: 1 }, mesh: { geometry: 'sphere', r: 0.15, color: '#fff59d', emissive: 1 }, behaviors: [{ type: 'projectile', speed: 30, life: 1.5 }] },
       { name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 34, color: '#ffffff' } }] },
+  { icon: 'cube', label: 'Block Builder', props: { name: 'Builder', tags: ['player'], y: 10, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 5, look: 0.25, eye: 0.65, jump: 8.5 }, { type: 'voxelBuilder', reach: 6, block: 3, mode: 'break' }] },
+    scene: { settings: { joystick: true, jumpButton: true } }, extra: [{ name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 30, color: '#ffffff' } }] },
   { icon: 'player', label: 'TPS Player', props: { name: 'Hero', tags: ['player'], y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 1.4, color: '#ff8a3d' }, behaviors: [{ type: 'thirdPerson', speed: 6, jump: 10, distance: 7, height: 25, look: 0.3 }] },
     scene: { settings: { joystick: true, jumpButton: true } } },
   { icon: 'crosshair', label: 'Turret', props: { name: 'Turret', y: 0.6, mesh: { geometry: 'cylinder', r: 0.5, h: 1.2, color: '#8e24aa' }, body: { type: 'static' }, behaviors: [{ type: 'turret', template: 'Enemy Bullet', every: 1.2, range: 14, tag: 'player' }] },
@@ -1355,6 +1429,8 @@ const OBJECTS_2D = [
 ];
 const OBJECTS_3D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
+  { icon: 'grid', label: 'Voxel World', props: { name: 'Voxel World', y: 0, voxels: { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} } } },
+  { icon: 'grid', label: 'Empty Voxels', props: { name: 'Voxel Build', y: 0, voxels: { size: 1, gen: { type: 'flat', w: 16, d: 16, h: 1, seed: 1, trees: false }, edits: {} } } },
   { icon: 'cube', label: 'Cube', props: { name: 'Cube', mesh: { geometry: 'box', w: 1, h: 1, d: 1, color: '#4c8bd6' } } },
   { icon: 'sphere', label: 'Sphere', props: { name: 'Sphere', mesh: { geometry: 'sphere', r: 0.5, color: '#e57373' } } },
   { icon: 'cylinder', label: 'Cylinder', props: { name: 'Cylinder', mesh: { geometry: 'cylinder', r: 0.5, h: 1, color: '#9575cd' } } },

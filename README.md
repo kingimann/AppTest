@@ -317,6 +317,19 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
 - The Image component has **Sprite library** and **From device** buttons. A shape can be turned into a sprite with *Use a sprite picture instead*.
 - Built-in prefabs (NPC, guard, torch, key, bird…) and UI widgets use these sprites instead of emoji. Hearts and star ratings can use sprites as their icons (`icon: 'art:heart'`), and Sprite Animation frames can be sprites (`art:bird,art:bird2`).
 
+### UI themes, fonts and styling
+
+- **UI Theme** (Game Settings): pick a ready-made look (Default, Neon, Candy, Retro, Fantasy, Ocean, Light) or set your own font, text, accent, panel, dimming, touch-control, win and lose colours and corner roundness. The built-in title, pause and game-over screens, touch buttons, joystick, messages and dialogs all follow it, as does any text whose font is **Theme font** (the default for new text). **Apply to my UI** restyles everything you already made; **Use Theme** does one element.
+- **Fonts:** eleven built-in fonts plus any **Google Font** (*More fonts…*; it downloads the first time a player opens the game). The theme can use one too.
+- **Text:** gradient colour, italic, UPPERCASE / lowercase, letter spacing, wrap width with line spacing (type `\n` for a line break), outline, and a drop shadow with its own colour.
+- **Shapes:** gradient fill (down, across, diagonal or from the centre), soft drop shadow with distance, dashed outlines.
+- **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
+- **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.
+
+### Updates
+
+The editor, home page and player check for a new release when they open, when you come back to them, when the phone goes online and every 10 minutes. A bar says *A new version is ready*: **Update** saves your project, clears the old cached files and reloads. Home → **Updates** checks by hand and shows the version you're on. This matters most for the home-screen app, which a phone can keep open for days.
+
 ### Safe area and UI scaling (fits every phone)
 
 - **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.

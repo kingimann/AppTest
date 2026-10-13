@@ -365,7 +365,7 @@ export const templateInfo = [
   { key: 'racer', title: 'Racing', blurb: 'Drive, beat the clock', icon: 'car', color: '#8a6a3a' },
   { key: 'lane-runner', title: 'Endless Runner', blurb: 'Swipe between lanes', icon: 'arrow', color: '#2f6f8f' },
   { key: 'idle-clicker', title: 'Clicker / Idle', blurb: 'Tap, earn, upgrade (saves progress)', icon: 'hand', color: '#5d4037' },
-  { key: 'voxel-world', title: 'Voxel Sandbox', blurb: 'Minecraft-style break & build', icon: 'cube', color: '#4e7d3a' },
+  { key: 'voxel-world', title: 'Voxel Sandbox', blurb: 'Minecraft-style mine & build', icon: 'cube', color: '#4e7d3a' },
   { key: 'rpg-battle', title: 'Turn-Based RPG', blurb: 'Pick attacks, heals and spells', icon: 'bolt', color: '#2e4057' },
   { key: 'dungeon', title: 'Dungeon Crawler', blurb: 'Turn-based grid adventure', icon: 'door', color: '#3b2f4f' },
   { key: 'tic-tac-toe', title: 'Board Game', blurb: 'Tic-tac-toe vs the computer', icon: 'grid', color: '#2a3550' },

@@ -131,7 +131,79 @@ export { store as storage };
 // ============================================================================
 export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null, emoji: '' };
 export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false, icon: '' }; // icon: show the value as repeated emoji (hearts)
-export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'theme', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+/** Fonts the font pickers offer: [CSS font-family, name]. 'theme' uses the game's UI theme font; games can add Google Fonts (settings.fonts). */
+export const FONTS = [
+  ['theme', 'Theme font'], ['system-ui, -apple-system, sans-serif', 'Clean'], ['"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', 'Rounded'],
+  ['Georgia, "Times New Roman", serif', 'Classic'], ['ui-monospace, Menlo, Consolas, monospace', 'Retro (mono)'], ['Impact, "Arial Black", sans-serif', 'Bold poster'],
+  ['"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive', 'Comic'], ['"Courier New", Courier, monospace', 'Typewriter'],
+  ['"Palatino Linotype", Palatino, "Book Antiqua", serif', 'Storybook'], ['"Avenir Next Condensed", "Arial Narrow", sans-serif-condensed, sans-serif', 'Condensed'],
+  ['"Brush Script MT", "Snell Roundhand", "Segoe Script", cursive', 'Handwriting'],
+];
+/** CSS font-family for a Google Font name. */
+export const googleFont = (name) => `"${name}", system-ui, sans-serif`;
+/** Load Google Fonts by name. They need the internet the first time; the browser keeps them after that. */
+export function loadFonts(names) {
+  if (typeof document === 'undefined') return;
+  for (const n of names || []) {
+    const name = String(n || '').trim(), id = 'gf-' + name.replace(/\W+/g, '-');
+    if (!name || document.getElementById(id)) continue;
+    const l = document.createElement('link');
+    l.id = id; l.rel = 'stylesheet'; l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(name).replace(/%20/g, '+')}&display=swap`;
+    l.onload = () => document.fonts?.load(`16px "${name}"`).catch(() => {}); // canvas text doesn't start a font download by itself
+    document.head.append(l);
+  }
+}
+/** Ready-made looks for the built-in screens, touch controls and any UI that uses the theme font. */
+export const UI_THEMES = {
+  Default: { font: 'system-ui, -apple-system, sans-serif', text: '#ffffff', accent: '#ffd23d', good: '#5dff8a', bad: '#ff5d8f', panel: '#1c2333', overlay: '#05050f', button: '#ffffff', radius: 12 },
+  Neon: { font: '"Avenir Next Condensed", "Arial Narrow", sans-serif-condensed, sans-serif', text: '#e8fbff', accent: '#33f0ff', good: '#7dff5d', bad: '#ff3df0', panel: '#0d0b24', overlay: '#07041a', button: '#33f0ff', radius: 6 },
+  Candy: { font: '"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', text: '#ffffff', accent: '#ffcf4a', good: '#7ee081', bad: '#ff6f91', panel: '#ff8fb8', overlay: '#5b2a6e', button: '#fff0f6', radius: 22 },
+  Retro: { font: 'ui-monospace, Menlo, Consolas, monospace', text: '#f4f4e8', accent: '#ffb000', good: '#41ff00', bad: '#ff4040', panel: '#1a1a1a', overlay: '#000000', button: '#f4f4e8', radius: 0 },
+  Fantasy: { font: '"Palatino Linotype", Palatino, "Book Antiqua", serif', text: '#fff4d6', accent: '#e8b84a', good: '#9be37b', bad: '#e0503c', panel: '#4a2f1b', overlay: '#1f130a', button: '#ffe9b8', radius: 10 },
+  Ocean: { font: 'system-ui, -apple-system, sans-serif', text: '#eaf8ff', accent: '#4fd1ff', good: '#5dffc4', bad: '#ff7a7a', panel: '#0f3a5a', overlay: '#031522', button: '#bfeaff', radius: 16 },
+  Light: { font: 'system-ui, -apple-system, sans-serif', text: '#1d2333', accent: '#3a6ef5', good: '#1f9d55', bad: '#e0364f', panel: '#ffffff', overlay: '#f2f4f8', button: '#1d2333', radius: 14 },
+};
+/** The theme of the scene being drawn (set once per frame). */
+let THEME = UI_THEMES.Default;
+export const themeOf = (settings) => ({ ...UI_THEMES.Default, ...(UI_THEMES[settings?.uiTheme] || {}), ...(settings?.theme || {}) });
+const fontOf = (f) => (!f || f === 'theme' ? THEME.font : f);
+/** '#rrggbb' + alpha → rgba() */
+export function withAlpha(hex, a) { const [r, g, b] = hexToRgb(hex); return `rgba(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)},${a})`; }
+/** A fill: one colour, or a gradient to a second colour across a w × h box centred on 0,0. */
+function paintOf(ctx, c1, c2, dir, w, h) {
+  if (!c2 || !c1) return c1;
+  let g;
+  if (dir === 'radial') g = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(w, h) / 2);
+  else if (dir === 'right') g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  else if (dir === 'diagonal') g = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+  else g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+  g.addColorStop(0, c1); g.addColorStop(1, c2);
+  return g;
+}
+/** 9-slice: corners stay sharp, edges and middle stretch (for framed panels and buttons from one picture). */
+function drawNine(ctx, img, border, x, y, w, h, k = 1) {
+  const iw = img.naturalWidth, ih = img.naturalHeight, b = Math.max(1, Math.min(border, iw / 2 - 1, ih / 2 - 1)), d = Math.min(b * k, w / 2, h / 2);
+  const sx = [0, b, iw - b, iw], sy = [0, b, ih - b, ih], dx = [x, x + d, x + w - d, x + w], dy = [y, y + d, y + h - d, y + h];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    const sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j], dw = dx[i + 1] - dx[i], dh = dy[j + 1] - dy[j];
+    if (sw > 0 && sh > 0 && dw > 0 && dh > 0) ctx.drawImage(img, sx[i], sy[j], sw, sh, dx[i], dy[j], dw, dh);
+  }
+}
+/** Split text into lines: on line breaks ("\n" typed in a text box works too), and to fit a width when given. */
+function textLines(ctx, str, wrap) {
+  const out = [];
+  for (const para of String(str).split(/\n|\\n/)) {
+    if (!(wrap > 0)) { out.push(para); continue; }
+    let line = '';
+    for (const word of para.split(' ')) {
+      const t = line ? line + ' ' + word : word;
+      if (line && ctx.measureText(t).width > wrap) { out.push(line); line = word; } else line = t;
+    }
+    out.push(line);
+  }
+  return out;
+}
 export const LIGHT_DEFAULTS = { color: '#ffd9a0', intensity: 1, range: 160, flicker: 0 }; // 2D range in px, 3D range in units
 export const MESH_DEFAULTS = { geometry: 'box', w: 1, h: 1, d: 1, r: 0.5, color: '#33f0ff', emissive: 0, opacity: 1 };
 export const SPRITE_DEFAULTS = { src: '', w: 64, h: 64 };
@@ -1562,7 +1634,21 @@ const artO = (w = 3) => `stroke="${ART_O}" stroke-width="${w}" stroke-linejoin="
 const artEyes = (y = 26, dx = 6, cx = 32, r = 2.6) => `<circle cx="${cx - dx}" cy="${y}" r="${r}" fill="${ART_O}"/><circle cx="${cx + dx}" cy="${y}" r="${r}" fill="${ART_O}"/>`;
 const artShine = (x, y, r = 3) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity=".7"/>`;
 const artIcon = (d, extra = '') => `<path d="${d}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
+// ---- UI frames: panels and buttons drawn for 9-slice (border 24 px), so they stretch to any size with sharp corners ----
+const artBtn = (c, dark) => `<rect x="2" y="7" width="60" height="55" rx="12" fill="${dark}" ${artO(2)}/><rect x="2" y="2" width="60" height="54" rx="12" fill="${c}" ${artO(2)}/><rect x="9" y="6" width="46" height="4" rx="2" fill="#fff" opacity=".35"/>`;
+const UI_FRAME_ART = {
+  panelDark: `<rect x="2" y="2" width="60" height="60" rx="10" fill="#1d2333" stroke="#5b6b8c" stroke-width="3"/><rect x="7" y="7" width="50" height="50" rx="6" fill="none" stroke="#2c3550" stroke-width="2"/>`,
+  panelWood: `<rect x="2" y="2" width="60" height="60" rx="8" fill="#8a5427" stroke="#3f230c" stroke-width="3"/><rect x="8" y="8" width="48" height="48" rx="4" fill="#c58a4e" stroke="#6e4018" stroke-width="2"/><circle cx="5.5" cy="5.5" r="1.8" fill="#3f230c"/><circle cx="58.5" cy="5.5" r="1.8" fill="#3f230c"/><circle cx="5.5" cy="58.5" r="1.8" fill="#3f230c"/><circle cx="58.5" cy="58.5" r="1.8" fill="#3f230c"/>`,
+  panelStone: `<rect x="2" y="2" width="60" height="60" rx="4" fill="#7d8590" stroke="#30343b" stroke-width="3"/><path d="M5.5 58.5v-53h53" fill="none" stroke="#b3bac4" stroke-width="2.5"/><path d="M5.5 58.5h53v-53" fill="none" stroke="#535a63" stroke-width="2.5"/>`,
+  panelGlass: `<rect x="2" y="2" width="60" height="60" rx="12" fill="#ffffff" fill-opacity=".16" stroke="#ffffff" stroke-opacity=".6" stroke-width="2"/>`,
+  panelParchment: `<rect x="3" y="3" width="58" height="58" rx="6" fill="#f3e2b8" stroke="#7d5a2c" stroke-width="3"/><rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#c9a86a" stroke-width="1.5" stroke-dasharray="3 2"/>`,
+  panelGold: `<rect x="2" y="2" width="60" height="60" rx="6" fill="#2a1b3d" stroke="#e8b84a" stroke-width="4"/><rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#b8862a" stroke-width="1.5"/><path d="M2 8l6-6M56 2l6 6M2 56l6 6M62 56l-6 6" stroke="#ffe08a" stroke-width="2"/>`,
+  panelNeon: `<rect x="3" y="3" width="58" height="58" rx="8" fill="#0d0b24" stroke="#33f0ff" stroke-width="3"/><rect x="7" y="7" width="50" height="50" rx="5" fill="none" stroke="#ff3df0" stroke-width="1.5" opacity=".8"/>`,
+  btnBlue: artBtn('#3a8dff', '#1f4f99'), btnGreen: artBtn('#4cc463', '#23733a'), btnRed: artBtn('#ef5350', '#8e2321'),
+  btnYellow: artBtn('#ffc93d', '#a87310'), btnPurple: artBtn('#9b5cff', '#56279e'), btnGrey: artBtn('#c9ced6', '#6e747d'),
+};
 export const SPRITE_ART = {
+  ...UI_FRAME_ART,
   // characters
   hero: `<rect x="20" y="34" width="24" height="21" rx="6" fill="#3f7fd8" ${artO()}/><rect x="22" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><rect x="35" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><circle cx="32" cy="24" r="14" fill="#ffd3a8" ${artO()}/><path d="M18 23c0-10 7-15 14-15s14 5 14 15c-4-4-9-6-14-6s-10 2-14 6z" fill="#6b3f1f" ${artO()}/>${artEyes(26, 5.5)}<path d="M28 32q4 3 8 0" fill="none" ${artO(2)}/>`,
   girl: `<path d="M20 56l4-22h16l4 22z" fill="#e45c9b" ${artO()}/><path d="M16 40c-2-18 4-32 16-32s18 14 16 32c-4-2-6-8-6-14H22c0 6-2 12-6 14z" fill="#9b4a1c" ${artO()}/><circle cx="32" cy="25" r="12" fill="#ffd3a8" ${artO()}/><path d="M20 22c4-8 20-8 24 0-8-3-16-3-24 0z" fill="#9b4a1c"/>${artEyes(26, 5)}<path d="M29 31q3 2 6 0" fill="none" ${artO(2)}/>`,
@@ -1679,7 +1765,10 @@ export const SPRITE_GROUPS = {
   Vehicles: ['car', 'rocket', 'ufo', 'plane', 'boat'],
   Blocks: ['brick', 'crate', 'grassBlock', 'stone', 'spikes', 'door', 'ladder', 'portal', 'sign', 'torch', 'house', 'castle'],
   Icons: Object.keys(SPRITE_ART).filter((k) => k.startsWith('ui-')),
+  'UI Frames': Object.keys(UI_FRAME_ART),
 };
+/** Built-in UI frames are drawn for 9-slice: use this border so their corners stay sharp. */
+export const frameSlice = (src) => (typeof src === 'string' && /^art:(panel|btn)[A-Z]/.test(src) ? 24 : 0);
 const artCache = new Map();
 /** 'art:slime' → an SVG data URL (other sources pass through). */
 export function artURL(src) {
@@ -1745,7 +1834,8 @@ function drawEntity2D(ctx, e, vars, time) {
   ctx.globalAlpha = alpha;
   const s = e.shape;
   if (s) {
-    if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
+    if (s.shadow) { ctx.shadowColor = s.shadow; ctx.shadowBlur = s.shadowBlur ?? 10; ctx.shadowOffsetX = s.shadowX || 0; ctx.shadowOffsetY = s.shadowY ?? 4; }
+    else if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
     ctx.beginPath();
     switch (s.type) {
       case 'circle': ctx.arc(0, 0, s.r, 0, Math.PI * 2); break;
@@ -1787,20 +1877,29 @@ function drawEntity2D(ctx, e, vars, time) {
       if (e.data.flipX) ctx.scale(-1, 1);
       ctx.fillText(s.emoji || '⭐', 0, s.h * 0.06);
     } else {
-      if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
-      if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+      const bw = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.w, bh = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.h;
+      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
+      if (s.shadow) { ctx.shadowColor = 'transparent'; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; } // shadow under the fill only
+      if (s.stroke) {
+        if (s.dash) ctx.setLineDash([s.dash, s.dash * 0.75]);
+        ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke();
+        if (s.dash) ctx.setLineDash([]);
+      }
     }
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
     if (img.complete && img.naturalWidth) {
       const S = e.sprite, cols = Math.max(1, S.cols | 0 || 1), rows = Math.max(1, S.rows | 0 || 1);
       if (S.flip) ctx.scale(-1, 1);
+      if (S.radius > 0) { ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-S.w / 2, -S.h / 2, S.w, S.h, S.radius); else ctx.rect(-S.w / 2, -S.h / 2, S.w, S.h); ctx.clip(); }
       if (cols > 1 || rows > 1) { // sprite sheet: draw one cell of the grid
         const fw = img.naturalWidth / cols, fh = img.naturalHeight / rows, f = ((S.frame | 0) % (cols * rows) + cols * rows) % (cols * rows);
         ctx.drawImage(img, (f % cols) * fw, Math.floor(f / cols) * fh, fw, fh, -S.w / 2, -S.h / 2, S.w, S.h);
-      } else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      } else if (S.slice > 0) drawNine(ctx, img, S.slice, -S.w / 2, -S.h / 2, S.w, S.h, S.sliceScale || 1);
+      else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      if (S.radius > 0) ctx.restore();
       if (S.flip) ctx.scale(-1, 1);
     }
   }
@@ -1834,13 +1933,21 @@ function drawEntity2D(ctx, e, vars, time) {
   }
   if (e.text) {
     const t = e.text;
-    ctx.font = `${t.weight} ${t.size}px ${t.font}`;
-    ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    const str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
-    if (t.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
-    if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(str, 0, 0); ctx.shadowColor = 'transparent'; }
-    ctx.fillText(str, 0, 0);
+    ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${t.size}px ${fontOf(t.font)}`;
+    ctx.textAlign = t.align; ctx.textBaseline = 'middle';
+    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
+    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
+    const lines = textLines(ctx, str, +t.wrap || 0), lh = t.size * (+t.lineHeight || 1.2), y0 = -(lines.length - 1) * lh / 2;
+    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, lines.length * lh);
+    lines.forEach((ln, i) => {
+      const y = y0 + i * lh;
+      if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
+      if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); ctx.shadowColor = 'transparent'; }
+      ctx.fillText(ln, 0, y);
+    });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
   ctx.restore();
 }
@@ -2394,7 +2501,7 @@ function drawDialog(ctx, scene, W, H, engine) {
     ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
     ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
   }
-  ctx.fillStyle = '#fff'; ctx.font = '600 17px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#fff'; ctx.font = `600 17px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   const text = line.text.slice(0, Math.floor(d.chars)), words = text.split(' '); let row = '', ty = y + 26;
   for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 && row) { ctx.fillText(row, x + 18, ty); row = w; ty += 24; } else row = t; }
   ctx.fillText(row, x + 18, ty);
@@ -2416,7 +2523,7 @@ function drawMessage(ctx, scene, W, H, engine) {
   const m = scene.msg;
   if (!m) return;
   const maxW = Math.min(W - 40, 460), size = 18, lines = [];
-  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`;
+  ctx.font = `700 ${size}px ${THEME.font}`;
   let line = '';
   for (const word of m.text.split(/\s+/)) {
     const test = line ? line + ' ' + word : word;
@@ -2515,6 +2622,7 @@ function renderUI(engine, scene) {
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
+  THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
   engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
@@ -2540,19 +2648,20 @@ function renderUI(engine, scene) {
     scene.popups = scene.popups.filter((q) => now - q.t < q.life);
     for (const q of scene.popups) {
       const k = (now - q.t) / q.life;
-      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px system-ui, -apple-system, sans-serif`;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px ${THEME.font}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.fillStyle = q.color;
       const y = q.y - k * q.rise; ctx.strokeText(q.text, q.x, y); ctx.fillText(q.text, q.x, y);
     }
     ctx.globalAlpha = 1;
   }
 
-  const big = (txt, y, size, color = '#fff') => {
-    ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
+  const TH = THEME, tint = (a) => withAlpha(TH.button, a);
+  const big = (txt, y, size, color = TH.text) => {
+    ctx.font = `900 ${size}px ${TH.font}`;
     ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(txt, W / 2, y);
   };
-  const dim = (a = 0.6) => { ctx.fillStyle = `rgba(5,5,15,${a})`; ctx.fillRect(0, 0, W, H); };
+  const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
   if (scene.state === 'play' && !engine.paused) {
@@ -2561,18 +2670,18 @@ function renderUI(engine, scene) {
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
     if (useStick && st.joystickMode === 'fixed' && !inp.stick) {
       const f = inp.fixedStick(), r = inp.stickRadius;
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = tint(0.4); ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
     }
     if (inp.stick) {
       const s = inp.stick, r = inp.stickRadius;
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(s.bx, s.by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillStyle = tint(0.5);
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
     } else if (useStick && st.joystickMode !== 'fixed' && scene.time < 4) {
-      ctx.fillStyle = `rgba(255,255,255,${0.25 * pulse})`; ctx.font = '600 14px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = tint(0.25 * pulse); ctx.font = `600 14px ${TH.font}`; ctx.textAlign = 'center';
       ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
     for (const b of inp.buttons) {
@@ -2587,11 +2696,11 @@ function renderUI(engine, scene) {
         if (b.label) { ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(b.h * 0.3)}px system-ui, sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(b.label, x + b.w - 3, y + b.h - 1); }
         continue;
       }
-      ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+      ctx.fillStyle = tint(b.id != null ? 0.35 : 0.12);
+      ctx.strokeStyle = tint(0.4); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.stroke(); }
-      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
+      ctx.fillStyle = TH.button; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px ${TH.font}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
       if (b.action === 'mute' && engine.audio.muted) {
         ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 2.5;
@@ -2620,29 +2729,29 @@ function renderUI(engine, scene) {
   } else if (scene.state === 'title') {
     dim(0.55);
     const t = scene.settings.title;
-    big(t, H * 0.38, Math.min(64, W * 0.9 / Math.max(4, t.length) * 1.6), '#ffffff');
-    if (scene.settings.subtitle) big(scene.settings.subtitle, H * 0.47, 17, 'rgba(220,225,255,0.85)');
-    if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, 'rgba(220,225,255,0.7)');
-    big('Tap to start', H * 0.66, 22, `rgba(255,255,255,${pulse})`);
+    big(t, H * 0.38, Math.min(64, W * 0.9 / Math.max(4, t.length) * 1.6), TH.text);
+    if (scene.settings.subtitle) big(scene.settings.subtitle, H * 0.47, 17, withAlpha(TH.text, 0.85));
+    if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, withAlpha(TH.text, 0.7));
+    big('Tap to start', H * 0.66, 22, withAlpha(TH.text, pulse));
   } else if (scene.state === 'over' || scene.state === 'win') {
     if (scene.time - (scene.endTime ?? scene.time) < 0.5) { drawMessage(ctx, scene, W, H, engine); return; }
     dim(0.65);
     if (scene.levelComplete) {
-      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), '#5dff8a');
-      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
-      big('Tap for the next level', H * 0.62, 20, `rgba(255,255,255,${pulse})`);
+      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), TH.good);
+      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
+      big('Tap for the next level', H * 0.62, 20, withAlpha(TH.text, pulse));
       return;
     }
-    big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? '#5dff8a' : '#ff5d8f');
-    big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
-    if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
-    else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, 'rgba(220,225,255,0.7)');
-    big('Tap to play again', H * 0.66, 20, `rgba(255,255,255,${pulse})`);
+    big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? TH.good : TH.bad);
+    big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
+    if (scene.newBest) big('NEW BEST!', H * 0.54, 16, TH.good);
+    else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, withAlpha(TH.text, 0.7));
+    big('Tap to play again', H * 0.66, 20, withAlpha(TH.text, pulse));
     if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
       const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
       engine.shareRect = { x, y, w, h };
-      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 23); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
       big('Share score', y + h / 2, 17);
     } else engine.shareRect = null;
   }
@@ -6765,7 +6874,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts } }; // the UI theme and fonts are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -6818,6 +6927,7 @@ export class Engine {
       if (saved?.vars) Object.assign(scene.vars, saved.vars);
     }
     this.useRenderer(scene.mode);
+    loadFonts(scene.settings.fonts);
     this.physics.contacts.clear();
     this.input.reset();
     this.paused = false;

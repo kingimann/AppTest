@@ -285,8 +285,8 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .type small { color: var(--muted); font-size: 13.5px; line-height: 1.35; }
 .mine { background: var(--panel); border-radius: 18px; overflow: hidden; }
 .mine .proj-row { border-radius: 0; border-bottom: 1px solid #2f2f2f; min-height: 64px; }
-.home-actions { display: flex; gap: 10px; margin-top: 18px; }
-.home-actions .btn { flex: 1; }
+.home-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.home-actions .btn { flex: 1 1 140px; white-space: nowrap; }
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatches .sw { width: 42px; height: 42px; border-radius: 10px; border: 2px solid #1f1f1f; padding: 0; }
 .swatches .sw.on { border-color: #fff; box-shadow: 0 0 0 2px var(--accent); }
@@ -1060,3 +1060,13 @@ body.playing #attachBar { display: none !important; }
 #viewport.short #addFab { width: auto; padding: 0 14px; }
 #zoomBar { left: 12px; right: auto; }
 .cs-top b { font-size: 22px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* UI theme presets and the font picker */
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 6px 0 10px; }
+.theme-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; min-height: 64px; border: 2px solid rgba(255,255,255,0.12); font-size: 16px; text-align: left; }
+.theme-card.on { border-color: #3a8dff; box-shadow: 0 0 0 2px rgba(58,141,255,0.35); }
+.theme-card .chipline { display: flex; gap: 4px; }
+.theme-card .chipline i { width: 14px; height: 14px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.25); }
+.font-list { display: flex; flex-direction: column; gap: 6px; max-height: 55vh; overflow-y: auto; margin-top: 10px; }
+.font-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 52px; padding: 0 14px; border: 0; border-radius: 12px; background: #2f2f2f; color: #eee; font-size: 20px; text-align: left; }
+.font-row small { font: 12px -apple-system, system-ui, sans-serif; color: #9a9a9a; white-space: nowrap; }

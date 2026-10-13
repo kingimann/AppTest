@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -1824,7 +1824,7 @@ function openCreate(startCat) {
   const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light'];
   const artOf = (o) => { const src = o.props?.sprite?.src; return typeof src === 'string' && src.startsWith('art:') ? src : null; };
   const fromDef = (o, kind) => ({ label: o.label, icon: o.icon, art: o.art || artOf(o), desc: o.desc || o.note || '', group: o.group, fn: () => (kind === 'entity' ? addEntity(o.props) : addPrefab(o)) });
-  const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons').flatMap(([g, list]) => list.map((k) => {
+  const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons' && g !== 'UI Frames').flatMap(([g, list]) => list.map((k) => {
     const nm = k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
     return { label: nm, art: 'art:' + k, group: g, fn: () => addEntity({ name: nm, sprite: { src: 'art:' + k, w: 56, h: 56 } }) };
   }));
@@ -2567,6 +2567,10 @@ function renderInspector() {
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => { styleClipboard = styleOf(j); toast('Style copied'); } }, icon('copy'), 'Copy Style'),
+        h('button', { class: 'btn', onclick: () => { if (!styleClipboard) return toast('Copy a style first'); pasteStyle(j, styleClipboard); changed({ inspector: true }); pushHistory(); toast('Style pasted'); } }, icon('paste'), 'Paste Style'),
+        h('button', { class: 'btn', onclick: () => { applyTheme([j]); changed({ inspector: true }); pushHistory(); } }, icon('brush'), 'Use Theme')),
     ], { icon: 'hud', key: 'uiel' }));
   }
 
@@ -2583,17 +2587,25 @@ function renderInspector() {
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
       t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
-      C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
+      t !== 'emoji' && j.shape.stroke && C('shape.dash', { label: 'Dashed outline', type: 'number', def: 0, range: [0, 30], step: 1 }),
+      t !== 'emoji' && j.shape.fill && C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
+      t !== 'emoji' && j.shape.fill2 && C('shape.gradDir', { label: 'Gradient direction', type: 'select', options: [['down', 'Top to bottom'], ['right', 'Left to right'], ['diagonal', 'Diagonal'], ['radial', 'From the centre']], def: 'down' }),
+      C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
+      j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 })],
+      !j.shape.shadow && C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
     ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
     box.append(comp('Image', [
       C('sprite.src', { label: 'Source URL', type: 'text' }),
       j.sprite.src ? h('div', { class: 'row side' }, h('label', {}, 'Picture'), h('img', { class: 'img-thumb', src: artURL(j.sprite.src), alt: '' })) : null,
-      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; if (frameSlice(url) && !j.sprite.slice) j.sprite.slice = frameSlice(url); changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
         h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'From device')),
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
+      C('sprite.radius', { label: 'Round corners', type: 'number', def: 0, range: [0, 100], step: 1 }),
+      C('sprite.slice', { label: '9-slice border (px)', type: 'number', def: 0, range: [0, 128], step: 1, structure: true, infoText: 'For framed panels and buttons: the picture\'s corners stay sharp and only the middle stretches, so one image fits any size. 0 = stretch the whole picture.' }),
+      j.sprite.slice > 0 && C('sprite.sliceScale', { label: 'Border size', type: 'number', def: 1, range: [0.25, 4], step: 0.25 }),
     ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }, 'sprite') }));
   }
   if (j.text) {
@@ -2603,11 +2615,19 @@ function renderInspector() {
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
-      C('text.font', { label: 'Font', type: 'select', options: [['system-ui, -apple-system, sans-serif', 'Clean'], ['"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', 'Rounded'], ['Georgia, "Times New Roman", serif', 'Classic'], ['ui-monospace, Menlo, Consolas, monospace', 'Retro (mono)'], ['Impact, "Arial Black", sans-serif', 'Bold poster']], def: 'system-ui, -apple-system, sans-serif' }),
+      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
+      C('text.font', { label: 'Font', type: 'select', options: fontOptions(j.text.font), def: 'theme' }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openFontPicker((f) => { j.text.font = f; changed({ inspector: true }); pushHistory(); }) }, icon('text'), 'More fonts…')),
       C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+      C('text.italic', { label: 'Italic', type: 'bool', def: false }),
+      C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase']], def: '' }),
+      C('text.spacing', { label: 'Letter spacing', type: 'number', def: 0, range: [-4, 20], step: 0.5 }),
+      C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
+      C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
-      C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false }),
+      C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
+      j.text.shadow && C('text.shadowColor', { label: 'Shadow color', type: 'color', def: '#000000' }),
     ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
@@ -2790,6 +2810,48 @@ function materialOf(b) {
   return hit ? hit[0] + ' ✓' : 'Custom';
 }
 
+// ---- UI styling: fonts, themes, copy / paste style ----
+const GOOGLE_FONTS = ['Press Start 2P', 'Bangers', 'Luckiest Guy', 'Fredoka', 'Lilita One', 'Bungee', 'Orbitron', 'Russo One', 'Silkscreen', 'Pixelify Sans', 'VT323',
+  'Permanent Marker', 'Creepster', 'Cinzel', 'Baloo 2', 'Titan One', 'Chewy', 'Audiowide', 'Black Ops One', 'Patrick Hand'];
+const fontOptions = (cur) => {
+  const list = [...FONTS, ...(root?.settings?.fonts || []).map((n) => [googleFont(n), n])];
+  if (cur && !list.some(([v]) => v === cur)) list.push([cur, String(cur).split(',')[0].replace(/"/g, '')]);
+  return list;
+};
+/** Pick a font: the built-in ones, or any Google Font (added to the game and loaded). */
+function openFontPicker(onPick) {
+  loadFonts(GOOGLE_FONTS);
+  const row = (fam, name, add) => h('button', { class: 'font-row', style: `font-family:${fam === 'theme' ? themeOf(root.settings).font : fam}`, onclick: () => {
+    if (add) { root.settings.fonts = [...new Set([...(root.settings.fonts || []), name])]; loadFonts([name]); }
+    closeLayer(); onPick(fam);
+  } }, name, h('small', {}, add ? 'Google Font' : fam === 'theme' ? 'follows the UI theme' : 'built in'));
+  const inp = h('input', { type: 'text', placeholder: 'Any Google Font name, e.g. Roboto Slab' });
+  openDialog('Fonts', [
+    h('p', { class: 'desc' }, 'Google Fonts download the first time a player opens the game (they need the internet once).'),
+    h('div', { class: 'row' }, inp, h('button', { class: 'btn primary', onclick: () => { const n = inp.value.trim(); if (!n) return; root.settings.fonts = [...new Set([...(root.settings.fonts || []), n])]; loadFonts([n]); closeLayer(); onPick(googleFont(n)); } }, 'Add')),
+    h('div', { class: 'font-list' }, FONTS.map(([v, n]) => row(v, n, false)), GOOGLE_FONTS.map((n) => row(googleFont(n), n, true))),
+  ]);
+}
+const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'lineWidth', 'dash', 'radius', 'glow', 'shadow', 'shadowBlur', 'shadowY'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
+let styleClipboard = null;
+function styleOf(j) { const out = {}; for (const [k, keys] of Object.entries(STYLE_KEYS)) if (j[k]) out[k] = Object.fromEntries(keys.filter((q) => j[k][q] !== undefined).map((q) => [q, j[k][q]])); return clone(out); }
+function pasteStyle(j, st) { for (const [k, v] of Object.entries(st)) if (j[k]) Object.assign(j[k], clone(v)); }
+const isLight = (hex) => { const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16) || 0; return ((n >> 16 & 255) * 0.299 + (n >> 8 & 255) * 0.587 + (n & 255) * 0.114) > 160; };
+/** Restyle UI elements with the game's theme: font, text colours, panel and button colours, corner radius. */
+function applyTheme(list) {
+  const T = themeOf(root.settings), btn = (e) => (e.behaviors || []).some((b) => ['button', 'navItem', 'touchButton'].includes(b.type));
+  const byId = new Map(list.map((e) => [e.id, e])), onButton = (e) => btn(e) || (e.parent && btn(byId.get(e.parent) || ent(e.parent) || {}));
+  for (const e of list) {
+    if (e.text) { e.text.font = 'theme'; e.text.color = onButton(e) ? (isLight(T.accent) ? '#1b1b1b' : '#ffffff') : T.text; delete e.text.color2; }
+    if (e.shape && e.shape.type !== 'emoji' && e.shape.fill) {
+      e.shape.fill = btn(e) ? T.accent : T.panel; delete e.shape.fill2;
+      if (e.shape.type === 'rect' || e.shape.type === 'capsule') e.shape.radius = T.radius;
+      if (e.shape.stroke) e.shape.stroke = T.text;
+    }
+    if (e.bar) e.bar.radius = Math.min(T.radius, (e.bar.h || 16) / 2);
+  }
+}
+
 // ---- scene settings (shown when the scene root is selected) ----
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
@@ -2892,6 +2954,21 @@ function renderSceneSettings(box) {
     C('settings.uiScaleFactor', { label: 'UI size multiplier', type: 'number', def: 1, range: [0.5, 2], step: 0.05 }),
     h('p', { class: 'desc' }, 'Check it in the UI editor: the Phone button shows a notch, Dynamic Island or home bar.'),
   ], { icon: 'hud', key: 's-safe' }));
+  const R = (path, spec) => control(() => root, path, spec), T = themeOf(root.settings), custom = root.settings.theme || {};
+  const setTheme = (name) => { root.settings.uiTheme = name; delete root.settings.theme; changed({ inspector: true }); pushHistory(); };
+  box.append(comp('UI Theme', [
+    h('p', { class: 'desc' }, 'One look for the whole game: the title, pause and game-over screens, touch controls, messages, and any text set to "Theme font". Tap Apply to restyle the UI you already made.'),
+    h('div', { class: 'theme-grid' }, Object.entries(UI_THEMES).map(([name, th]) => h('button', {
+      class: 'theme-card' + ((root.settings.uiTheme || 'Default') === name ? ' on' : ''), style: `background:${th.overlay};color:${th.text};font-family:${th.font};border-radius:${Math.min(th.radius, 14)}px`, onclick: () => setTheme(name),
+    }, h('b', {}, name), h('span', { class: 'chipline' }, h('i', { style: `background:${th.accent}` }), h('i', { style: `background:${th.panel}` }), h('i', { style: `background:${th.good}` }), h('i', { style: `background:${th.bad}` }))))),
+    h('div', { class: 'row' }, h('label', {}, 'Font'), h('button', { class: 'btn', style: `font-family:${T.font};flex:1`, onclick: () => openFontPicker((f) => { (root.settings.theme ||= {}).font = f === 'theme' ? UI_THEMES[root.settings.uiTheme || 'Default'].font : f; changed({ inspector: true }); pushHistory(); }) }, fontOptions(T.font).find(([v]) => v === T.font)?.[1] || 'Custom', ' ▾')),
+    [['text', 'Text'], ['accent', 'Accent (score, buttons)'], ['panel', 'Panels'], ['overlay', 'Screen dimming'], ['button', 'Touch controls'], ['good', 'Win colour'], ['bad', 'Lose colour']].map(([k, label]) =>
+      R(`settings.theme.${k}`, { label: label + (custom[k] ? ' •' : ''), type: 'color', def: T[k] })),
+    R('settings.theme.radius', { label: 'Corner roundness', type: 'number', def: T.radius, range: [0, 30], step: 1 }),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => { const ui = levelList().flatMap((lv) => lv.entities.filter((e) => e.ui)); applyTheme(ui); changed({ structure: true }); pushHistory(); toast(`Theme applied to ${ui.length} UI elements`); } }, icon('brush'), 'Apply to my UI'),
+      Object.keys(custom).length ? h('button', { class: 'btn', onclick: () => setTheme(root.settings.uiTheme || 'Default') }, icon('undo'), 'Reset colours') : null),
+  ], { icon: 'brush', key: 's-theme' }));
   box.append(comp('Mobile', [
     h('p', { class: 'desc' }, 'Portrait or landscape: see Orientation above.'),
     orientationOf() === 'any' && C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
@@ -3349,7 +3426,7 @@ function renderProject() {
   } else {
     const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
       : projectTab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
-        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
+        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
           : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
     items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
   }
@@ -3851,7 +3928,9 @@ function showHome() {
       } }, icon('trash'))))] : null,
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
-      !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App')),
+      !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App'),
+      window.pocketUpdate && h('button', { class: 'btn', onclick: () => { saveNow(); window.pocketUpdate.available ? window.pocketUpdate.apply() : window.pocketUpdate.check(); } }, icon('download'), 'Updates')),
+    window.pocketUpdate && h('p', { class: 'sub' }, `Pocket Engine ${window.pocketUpdate.version}`),
   ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
   home.scrollTop = 0;
@@ -4288,6 +4367,7 @@ $('#gridBtn').classList.toggle('on', showGrid);
 $('#snapBtn').addEventListener('click', () => { snap = !snap; store.set('pocket.editor.snap', snap ? '1' : '0'); $('#snapBtn').classList.toggle('on', snap); toast(snap ? 'Snapping on' : 'Snapping off'); });
 $('#gridBtn').addEventListener('click', () => { showGrid = !showGrid; store.set('pocket.editor.grid', showGrid ? '1' : '0'); $('#gridBtn').classList.toggle('on', showGrid); });
 window.addEventListener('beforeunload', saveNow);
+window.pocketBeforeUpdate = saveNow; // the update bar saves before it reloads
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
 $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to open the panel
 setTool('move');

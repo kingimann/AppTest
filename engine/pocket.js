@@ -486,102 +486,171 @@ export const Ease = {
   inOutElastic: (x) => (x === 0 ? 0 : x === 1 ? 1 : x < 0.5 ? -(2 ** (20 * x - 10) * Math.sin((20 * x - 11.125) * c5)) / 2 : (2 ** (-20 * x + 10) * Math.sin((20 * x - 11.125) * c5)) / 2 + 1),
   inBounce: (x) => 1 - bounceOut(1 - x), outBounce: bounceOut, inOutBounce: (x) => (x < 0.5 ? (1 - bounceOut(1 - 2 * x)) / 2 : (1 + bounceOut(2 * x - 1)) / 2),
 };
+Object.assign(Ease, {
+  smoothStep: (x) => x * x * (3 - 2 * x),
+  spring: (x) => 1 - Math.cos(x * PI * 4.5) * Math.exp(-x * 6),
+  flash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : x), // blinks between the start and the end while it moves
+  inFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? x * x : 0),
+  outFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : 1 - (1 - x) ** 2),
+});
 export const EASES = Object.keys(Ease);
-const easeFn = (e) => (typeof e === 'function' ? e : Ease[e] || Ease.outQuad);
+/** A custom ease from points [[t, v], …] between (0,0) and (1,1), like Unity's AnimationCurve. */
+Ease.curve = (pts) => { const P = [[0, 0], ...pts.filter((q) => q[0] > 0 && q[0] < 1).sort((a, b) => a[0] - b[0]), [1, 1]]; return (x) => { for (let i = 1; i < P.length; i++) if (x <= P[i][0]) { const [a, va] = P[i - 1], [b, vb] = P[i]; return va + (vb - va) * ((x - a) / (b - a || 1)); } return 1; }; };
+/** Jump in n steps (no in-between). */
+Ease.steps = (n) => (x) => (x >= 1 ? 1 : Math.floor(x * n) / n);
+const easeFn = (e) => (typeof e === 'function' ? e : Array.isArray(e) ? Ease.curve(e) : /^steps?\d+$/.test(e || '') ? Ease.steps(+e.replace(/\D/g, '')) : Ease[e] || Ease.outQuad);
 const getP = (o, path) => (path.includes('.') ? path.split('.').reduce((a, k) => a?.[k], o) : o[path]);
 const setP = (o, path, v) => { if (!path.includes('.')) { o[path] = v; return; } const ks = path.split('.'); let a = o; for (const k of ks.slice(0, -1)) { if (a[k] == null) return; a = a[k]; } a[ks.at(-1)] = v; };
 const isColor = (v) => typeof v === 'string' && /^#[0-9a-f]{3,6}$/i.test(v);
 const mixColor = (a, b, t) => { const A = hexToRgb(a), B = hexToRgb(b); return '#' + [0, 1, 2].map((i) => Math.round((A[i] + (B[i] - A[i]) * t) * 255).toString(16).padStart(2, '0')).join(''); };
 
+/** What tweens and sequences share: playback control (DOTween's Play / Pause / Restart / Rewind / PlayBackwards / Complete / Goto), callbacks, speed and IDs. */
+class TweenCore {
+  initCore(o = {}) {
+    this.time = 0; this.done = false; this.paused = false; this.backwards = false; this.started = false;
+    this.timeScale = o.timeScale ?? 1; this.id = o.id; this.autoKill = o.autoKill ?? true; this.lastCycle = 0;
+    this.completeFns = o.onComplete ? [o.onComplete] : []; this.startFns = o.onStart ? [o.onStart] : [];
+    this.stepFns = o.onStepComplete ? [o.onStepComplete] : []; this.killFns = o.onKill ? [o.onKill] : []; this.rewindFns = o.onRewind ? [o.onRewind] : [];
+  }
+  setId(id) { this.id = id; return this; }
+  setTimeScale(k) { this.timeScale = Math.max(0, +k || 0); return this; }
+  setAutoKill(v = true) { this.autoKill = v; return this; }
+  onComplete(fn) { this.completeFns.push(fn); return this; }
+  onStart(fn) { this.startFns.push(fn); return this; }
+  onStepComplete(fn) { this.stepFns.push(fn); return this; }
+  onKill(fn) { this.killFns.push(fn); return this; }
+  onRewind(fn) { this.rewindFns.push(fn); return this; }
+  kill(complete = false) { if (this.done) return this; if (complete && this.totalDuration() < Infinity) this.seek(this.totalDuration()); this.done = true; for (const f of this.killFns) f(this); return this; }
+  pause() { this.paused = true; return this; }
+  play() { this.paused = false; this.backwards = false; return this; }
+  togglePause() { this.paused = !this.paused; return this; }
+  isPlaying() { return !this.paused && !this.done; }
+  playForward() { this.backwards = false; this.paused = false; return this; }
+  playBackwards() { this.backwards = true; this.paused = false; if (this.time >= this.totalDuration()) this.time = this.totalDuration(); return this; }
+  /** Turn around: forwards becomes backwards and the other way. */
+  flip() { const T = this.totalDuration(); if (this.time <= 0) return this.playForward(); if (this.time >= T) return this.playBackwards(); return this.backwards ? this.playForward() : this.playBackwards(); }
+  restart() { this.goto(0); this.backwards = false; this.paused = false; this.done = false; return this; }
+  rewind() { this.goto(0); this.paused = true; return this; }
+  complete() { if (this.totalDuration() < Infinity) this.goto(this.totalDuration()); return this; }
+  goto(t, andPlay = false) { this.time = Math.max(0, Math.min(t, this.totalDuration())); this.seek(this.time); if (andPlay) this.paused = false; return this; }
+  elapsed() { return this.time; }
+  /** 0 → 1 through the whole tween (loops included; 0 for endless ones). */
+  progress() { const T = this.totalDuration(); return T === Infinity ? 0 : Math.min(1, this.time / (T || 1)); }
+  update(dt) {
+    if (this.paused || this.done) return this.done;
+    dt *= this.timeScale;
+    if (this.backwards) {
+      const t = Math.max(0, Math.min(this.time, this.totalDuration()) - dt); this.time = t; this.seek(t);
+      if (t <= 0) { this.paused = true; this.backwards = false; for (const f of this.rewindFns) f(this); }
+      return false;
+    }
+    if (this.seek(this.time + dt)) {
+      this.time = Math.min(this.time, this.totalDuration());
+      for (const f of this.completeFns) f(this);
+      if (this.autoKill) { this.done = true; for (const f of this.killFns) f(this); } else this.paused = true;
+    }
+    return this.done;
+  }
+}
+
 /**
  * A tween: animates properties of `target` (numbers or #colors, nested paths like 'shape.fill'; 'scale' sets sx/sy/sz).
- * Chain options: .setEase('outBack').setDelay(0.2).setLoops(3, 'yoyo').setRelative().onComplete(fn)
+ * Chain options: .setEase('outBack').setDelay(0.2).setLoops(3, 'yoyo').setRelative().setFrom().setSpeedBased().onComplete(fn)
+ * Options: ease, delay, loops, loopType ('restart' | 'yoyo' | 'incremental'), relative, from, speedBased, blend, id, timeScale, autoKill,
+ * onStart, onUpdate, onStepComplete (each loop), onComplete, onKill, onRewind.
  */
-export class Tween {
+export class Tween extends TweenCore {
   constructor(target, props, duration = 0.5, o = {}) {
+    super(); this.initCore(o);
     this.target = target; this.props = { ...props }; this.duration = Math.max(1e-4, duration);
     this.ease = easeFn(o.ease); this.delay = o.delay || 0; this.loops = o.loops ?? 0; this.loopType = o.loopType || 'restart';
-    this.relative = !!o.relative; this.custom = o.custom || null; this.done = false; this.paused = false; this.time = 0;
-    this.completeFns = o.onComplete ? [o.onComplete] : []; this.updateFn = o.onUpdate || null; this.from = null; this.id = o.id;
+    this.relative = !!o.relative; this.custom = o.custom || null; this.isFrom = !!o.from; this.speedBased = !!o.speedBased; this.blend = !!o.blend;
+    this.updateFn = o.onUpdate || null; this.from = null;
     if (this.props.scale !== undefined) { const k = this.props.scale; delete this.props.scale; Object.assign(this.props, { sx: k, sy: k, sz: k }); }
   }
   setEase(e) { this.ease = easeFn(e); return this; }
   setDelay(d) { this.delay = d; return this; }
   setLoops(n, type = 'restart') { this.loops = n; this.loopType = type; return this; }
   setRelative(r = true) { this.relative = r; return this; }
-  onComplete(fn) { this.completeFns.push(fn); return this; }
+  /** DOTween .From(): start at the given values and animate back to where the target is now. */
+  setFrom(v = true) { this.isFrom = v; if (v && !this.from) this.capture(); return this; }
+  /** The duration becomes a speed: units (or degrees) per second. */
+  setSpeedBased(v = true) { this.speedBased = v; return this; }
+  /** Blendable: adds its change instead of setting the value, so several tweens on one property mix. */
+  setBlendable(v = true) { this.blend = v; return this; }
   onUpdate(fn) { this.updateFn = fn; return this; }
-  kill(complete = false) { if (complete) this.seek(this.totalDuration()); this.done = true; return this; }
-  pause() { this.paused = true; return this; }
-  play() { this.paused = false; return this; }
   totalDuration() { return this.loops < 0 ? Infinity : this.delay + this.duration * (this.loops + 1); }
   capture() {
-    this.from = {}; this.to = {};
+    this.from = {}; this.to = {}; this.last = {};
     for (const [k, v] of Object.entries(this.props)) {
-      const cur = getP(this.target, k);
-      this.from[k] = cur;
-      this.to[k] = this.relative && !isColor(v) ? (+cur || 0) + v : v;
+      const cur = getP(this.target, k), end = this.relative && !isColor(v) ? (+cur || 0) + v : v;
+      if (this.isFrom) { this.from[k] = end; this.to[k] = cur; } else { this.from[k] = cur; this.to[k] = end; }
+      this.last[k] = this.from[k];
     }
+    if (this.speedBased && !this.custom) {
+      const dist = Math.max(0, ...Object.keys(this.to).filter((k) => !isColor(this.to[k])).map((k) => Math.abs((+this.to[k] || 0) - (+this.from[k] || 0))));
+      this.duration = Math.max(1e-4, dist / (this.speedBased === true ? this.duration : +this.speedBased || 1));
+      this.speedBased = false;
+    }
+    if (this.isFrom && !this.custom) this.apply(0, 0);
+    if (!this.started) { this.started = true; for (const f of this.startFns) f(this); }
+  }
+  apply(k, c) {
+    const e = this.ease(k);
+    if (this.custom) this.custom(e, k, this);
+    else for (const key in this.to) {
+      const a = this.from[key], b = this.to[key];
+      if (isColor(b)) { setP(this.target, key, mixColor(isColor(a) ? a : b, b, e)); continue; }
+      const inc = this.loopType === 'incremental' ? (b - a) * c : 0, v = (+a || 0) + inc + ((+b || 0) - (+a || 0)) * e;
+      if (this.blend) { setP(this.target, key, (+getP(this.target, key) || 0) + v - this.last[key]); this.last[key] = v; } else setP(this.target, key, v);
+    }
+    this.updateFn?.(e, this);
   }
   /** Set the state at local time t (seconds since the tween started, delay included). */
   seek(t) {
     this.time = t;
-    if (t < this.delay) return false;
+    if (t < this.delay) { if (this.from) this.apply(0, 0); return false; }
     if (!this.from) this.capture();
     const lt = t - this.delay, cycle = Math.floor(lt / this.duration), end = this.loops >= 0 && cycle > this.loops;
     let k = end ? 1 : (lt % this.duration) / this.duration, c = end ? this.loops : cycle;
     if (end && this.loopType === 'yoyo' && this.loops % 2 === 1) k = 0;
     else if (this.loopType === 'yoyo' && c % 2 === 1) k = 1 - k;
-    const e = this.ease(k);
-    if (this.custom) this.custom(e, k, this);
-    else for (const key in this.to) {
-      const a = this.from[key], b = this.to[key];
-      if (isColor(b)) setP(this.target, key, mixColor(isColor(a) ? a : b, b, e));
-      else {
-        const inc = this.loopType === 'incremental' ? (b - a) * c : 0;
-        setP(this.target, key, (+a || 0) + inc + ((+b || 0) - (+a || 0)) * e);
-      }
-    }
-    this.updateFn?.(e, this);
+    if (cycle > this.lastCycle && !this.backwards) for (let i = this.lastCycle; i < Math.min(cycle, this.loops < 0 ? cycle : this.loops + 1); i++) for (const f of this.stepFns) f(this);
+    this.lastCycle = cycle;
+    this.apply(k, c);
     return end;
-  }
-  update(dt) {
-    if (this.paused || this.done) return this.done;
-    if (this.seek(this.time + dt)) { this.done = true; for (const f of this.completeFns) f(this); }
-    return this.done;
   }
 }
 
-/** A timeline of tweens and callbacks (DOTween Sequence): append, join, insert, interval, callback. */
-export class Sequence {
-  constructor() { this.items = []; this.end = 0; this.lastStart = 0; this.time = 0; this.loops = 0; this.loopType = 'restart'; this.done = false; this.paused = false; this.completeFns = []; }
+/** A timeline of tweens and callbacks (DOTween Sequence): append, join, insert, prepend, interval, callback. */
+export class Sequence extends TweenCore {
+  constructor(o = {}) { super(); this.initCore(o); this.items = []; this.end = 0; this.lastStart = 0; this.loops = o.loops ?? 0; this.loopType = o.loopType || 'restart'; this.delay = o.delay || 0; }
   append(tw) { this.lastStart = this.end; this.items.push({ at: this.end, tw }); this.end += tw.totalDuration(); return this; }
   join(tw) { this.items.push({ at: this.lastStart, tw }); this.end = Math.max(this.end, this.lastStart + tw.totalDuration()); return this; }
   insert(at, tw) { this.items.push({ at, tw }); this.end = Math.max(this.end, at + tw.totalDuration()); return this; }
-  appendInterval(sec) { this.end += sec; return this; }
+  prepend(tw) { const d = tw.totalDuration(); for (const it of this.items) it.at += d; this.items.unshift({ at: 0, tw }); this.end += d; this.lastStart = 0; return this; }
+  appendInterval(sec) { this.end += Math.max(0, sec); return this; }
+  prependInterval(sec) { for (const it of this.items) it.at += sec; this.end += sec; return this; }
   appendCallback(fn) { this.items.push({ at: this.end, fn }); return this; }
+  insertCallback(at, fn) { this.items.push({ at, fn }); this.end = Math.max(this.end, at); return this; }
   setLoops(n, type = 'restart') { this.loops = n; this.loopType = type; return this; }
-  onComplete(fn) { this.completeFns.push(fn); return this; }
-  kill() { this.done = true; return this; }
-  pause() { this.paused = true; return this; }
-  play() { this.paused = false; return this; }
-  totalDuration() { return this.loops < 0 ? Infinity : this.end * (this.loops + 1); }
+  setDelay(d) { this.delay = Math.max(0, d); return this; }
+  totalDuration() { return this.loops < 0 ? Infinity : this.delay + this.end * (this.loops + 1); }
   seek(t) {
-    const len = this.end || 1e-4, cycle = Math.floor(t / len), end = this.loops >= 0 && cycle > this.loops;
+    this.time = t;
+    if (t < this.delay) return false;
+    if (!this.started) { this.started = true; for (const f of this.startFns) f(this); }
+    t -= this.delay;
+    const len = this.end || 1e-4, raw = Math.floor(t / len), end = this.loops >= 0 && raw > this.loops, cycle = end ? this.loops : raw;
     let lt = end ? len : t % len;
-    if (this.loopType === 'yoyo' && cycle % 2 === 1 && !end) lt = len - lt;
-    if (cycle !== this.cycle) { this.cycle = cycle; this.fired = new Set(); }
+    if (this.loopType === 'yoyo' && cycle % 2 === 1) lt = end ? 0 : len - lt;
+    if (cycle !== this.cycle) { if (this.cycle != null && cycle > this.cycle && !this.backwards) for (const f of this.stepFns) f(this); this.cycle = cycle; this.fired = new Set(); }
+    for (let i = this.items.length - 1; i >= 0; i--) { const it = this.items[i]; if (it.tw && it.on && lt < it.at) { it.on = false; it.tw.seek(0); } } // not reached yet (new loop / going back): put it back to its start
     for (const it of this.items) {
-      if (it.fn) { if (lt >= it.at && !this.fired.has(it)) { this.fired.add(it); it.fn(); } continue; }
-      if (lt >= it.at) it.tw.seek(Math.min(lt - it.at, it.tw.totalDuration()));
+      if (it.fn) { if (lt >= it.at && !this.fired.has(it) && !this.backwards) { this.fired.add(it); it.fn(); } continue; }
+      if (lt >= it.at) { it.on = true; it.tw.seek(Math.min(lt - it.at, it.tw.totalDuration())); }
     }
     return end;
-  }
-  update(dt) {
-    if (this.paused || this.done) return this.done;
-    this.time += dt;
-    if (this.seek(this.time)) { this.done = true; for (const f of this.completeFns) f(this); }
-    return this.done;
   }
 }
 const catmull = (p0, p1, p2, p3, t) => { const t2 = t * t, t3 = t2 * t; return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3); };
@@ -842,15 +911,18 @@ export class Scene {
   /** Quick tween (kept for older code): animate `to` over `duration`. */
   tween(target, to, duration = 0.3, ease = 'outCubic') { return this.to(target, to, duration, { ease }); }
   /** DOTween-style: scene.to(e, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' }) */
-  to(target, props, duration = 0.5, opts = {}) { const t = new Tween(target, props, duration, opts); this.tweens.push(t); return t; }
+  to(target, props, duration = 0.5, opts = {}) { const t = new Tween(target, props, duration, opts); if (opts.from) t.capture(); this.tweens.push(t); return t; }
+  /** DOTween .From(): jump to these values now and animate back to where the target is. */
+  from(target, props, duration = 0.5, opts = {}) { return this.to(target, props, duration, { ...opts, from: true }); }
   /** A sequence you fill with .append(scene.make(...)), .join(...), .appendInterval(s), .appendCallback(fn). */
-  sequence() { const q = new Sequence(); this.tweens.push(q); return q; }
+  sequence(opts = {}) { const q = new Sequence(opts); this.tweens.push(q); return q; }
   /** A tween that is not started on its own (for sequences). */
   make(target, props, duration = 0.5, opts = {}) { return new Tween(target, props, duration, opts); }
   /** Punch: kick a property set away and spring back (DOPunchScale / DOPunchPosition). */
   punch(target, amount, duration = 0.5, { vibrato = 8, elasticity = 0.6, add = false } = {}) {
-    const base = {}; for (const k in amount) base[k] = getP(target, k);
+    let base = null; // taken when it starts, so it works inside sequences
     const t = new Tween(target, {}, duration, { ease: 'linear', custom: (e, k) => {
+      if (!base) { base = {}; for (const key in amount) base[key] = getP(target, key); }
       const w = Math.sin(k * PI * vibrato) * (1 - k) ** (1 + elasticity);
       for (const key in amount) setP(target, key, base[key] + amount[key] * w);
       if (k >= 1) for (const key in amount) setP(target, key, base[key]);
@@ -860,9 +932,9 @@ export class Scene {
   }
   /** Shake: random jitter that fades out (DOShakePosition / DOShakeRotation). */
   shakeProps(target, amount, duration = 0.5, { vibrato = 18 } = {}) {
-    const base = {}; for (const k in amount) base[k] = getP(target, k);
-    let last = -1, off = {};
+    let base = null, last = -1, off = {};
     const t = new Tween(target, {}, duration, { ease: 'linear', custom: (e, k) => {
+      if (!base) { base = {}; for (const key in amount) base[key] = getP(target, key); }
       const step = Math.floor(k * vibrato);
       if (step !== last) { last = step; for (const key in amount) off[key] = rand(-1, 1) * amount[key] * (1 - k); }
       for (const key in amount) setP(target, key, k >= 1 ? base[key] : base[key] + off[key]);
@@ -871,10 +943,9 @@ export class Scene {
   }
   /** Move through points [{x,y,z}…] on a smooth curve (DOPath). orient: turn to face the direction of travel. */
   path(target, points, duration = 2, opts = {}) {
-    const P = [{ x: target.x, y: target.y, z: target.z || 0 }, ...points.map((q) => ({ x: +q.x || 0, y: +q.y || 0, z: +q.z || 0 }))];
-    if (opts.closed) P.push({ ...P[0] });
-    const n = P.length - 1, at = (i) => P[clamp(i, 0, n)];
+    let P = null, n = 0; const at = (i) => P[clamp(i, 0, n)];
     const t = new Tween(target, {}, duration, { ...opts, custom: (e) => {
+      if (!P) { P = [{ x: target.x, y: target.y, z: target.z || 0 }, ...points.map((q) => ({ x: +q.x || 0, y: +q.y || 0, z: +q.z || 0 }))]; if (opts.closed) P.push({ ...P[0] }); n = P.length - 1; }
       const f = clamp(e, 0, 1) * n, i = Math.min(n - 1, Math.floor(f)), u = f - i;
       const a = at(i - 1), b = at(i), c = at(i + 1), d = at(i + 2);
       const nx = catmull(a.x, b.x, c.x, d.x, u), ny = catmull(a.y, b.y, c.y, d.y, u), nz = catmull(a.z, b.z, c.z, d.z, u);
@@ -885,17 +956,77 @@ export class Scene {
   }
   /** Hop to a point in an arc (DOJump). */
   jumpTo(target, to, power = 80, jumps = 1, duration = 0.6, opts = {}) {
-    const fx = target.x, fy = target.y, fz = target.z || 0, up = this.mode === '3d' ? 1 : -1;
+    const up = this.mode === '3d' ? 1 : -1; let fx, fy, fz, tx, ty, tz, started = false;
     const t = new Tween(target, {}, duration, { ease: 'linear', ...opts, custom: (e, k) => {
-      target.x = fx + ((to.x ?? fx) - fx) * e; target.z = fz + ((to.z ?? fz) - fz) * e;
+      if (!started) { // taken when it starts; relative: `to` is an offset from there
+        started = true; fx = target.x; fy = target.y; fz = target.z || 0;
+        tx = opts.relative ? fx + (+to.x || 0) : to.x ?? fx; ty = opts.relative ? fy + (+to.y || 0) : to.y ?? fy; tz = opts.relative ? fz + (+to.z || 0) : to.z ?? fz;
+      }
+      target.x = fx + (tx - fx) * e; target.z = fz + (tz - fz) * e;
       const hop = Math.abs(Math.sin(k * PI * jumps)) * power * up;
-      target.y = fy + ((to.y ?? fy) - fy) * e + hop;
+      target.y = fy + (ty - fy) * e + hop;
     } });
     this.tweens.push(t); return t;
   }
-  /** Stop tweens on a target (or all with no target). complete: jump to their end first. */
-  killTweens(target, complete = false) { for (const t of this.tweens) if (!target || t.target === target) t.kill(complete); }
-  tweensOf(target) { return this.tweens.filter((t) => t.target === target && !t.done); }
+  /** Tweens on a target, with an id (a string), or all of them (no argument). */
+  tweensOf(target) { return this.tweens.filter((t) => !t.done && (target == null || (typeof target === 'string' ? t.id === target : t.target === target))); }
+  /** Stop tweens on a target or with an id (or all). complete: jump to their end first. */
+  killTweens(target, complete = false) { for (const t of this.tweensOf(target)) t.kill(complete); }
+  pauseTweens(target) { for (const t of this.tweensOf(target)) t.pause(); }
+  playTweens(target) { for (const t of this.tweensOf(target)) t.play(); }
+  reverseTweens(target) { for (const t of this.tweensOf(target)) t.playBackwards(); }
+  restartTweens(target) { for (const t of this.tweensOf(target)) t.restart(); }
+  completeTweens(target) { for (const t of this.tweensOf(target)) t.complete(); }
+  tweenSpeed(target, k) { for (const t of this.tweensOf(target)) t.setTimeScale(k); }
+  isTweening(target) { return this.tweensOf(target).some((t) => !t.paused); }
+  /** DOVirtual.Float: tween a number from a to b and get each value. */
+  virtual(a, b, duration, onValue, opts = {}) { const box = { v: a }; return this.to(box, { v: b }, duration, { ...opts, onUpdate: () => onValue(box.v) }); }
+  /** DOVirtual.DelayedCall: run fn after some seconds (a tween, so it can be paused or killed by id). */
+  delayedCall(sec, fn, opts = {}) { return this.to({}, {}, Math.max(1e-4, sec), { ease: 'linear', ...opts, onComplete: fn }); }
+  /** Count a number up or down over time (DOCounter): a variable (HUD texts update) or an object's text. */
+  counter(target, from, to, duration = 1, opts = {}) {
+    const fmt = (v) => `${opts.prefix || ''}${opts.decimals ? v.toFixed(opts.decimals) : formatNumber(Math.round(v))}${opts.suffix || ''}`;
+    return this.virtual(from, to, duration, (v) => {
+      if (typeof target === 'string') this.setVar(target, opts.decimals ? +v.toFixed(opts.decimals) : Math.round(v));
+      else if (target) { target.text ||= { ...TEXT_DEFAULTS }; target.text.value = fmt(v); }
+    }, { ease: 'outQuad', ...opts });
+  }
+  /** Type a text out letter by letter (DOText); scramble shows random letters for the ones still coming. */
+  typeText(e, text, duration = 1, opts = {}) {
+    const full = String(text ?? ''), pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789#%&*';
+    e.text ||= { ...TEXT_DEFAULTS };
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v) => {
+      const n = Math.round(clamp(v, 0, 1) * full.length);
+      e.text.value = full.slice(0, n) + (opts.scramble && n < full.length ? Array.from({ length: Math.min(3, full.length - n) }, () => pool[Math.floor(Math.random() * pool.length)]).join('') : '');
+    } });
+  }
+  /** Spiral out from where it is (DOSpiral). */
+  spiral(e, duration = 2, { radius = this.mode === '3d' ? 3 : 120, turns = 3, ...opts } = {}) {
+    const three = this.mode === '3d'; let cx = null, cy, cz;
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v) => {
+      if (cx === null) { cx = e.x; cy = e.y; cz = e.z || 0; }
+      const a = v * turns * PI * 2, r = radius * v;
+      e.x = cx + Math.cos(a) * r; if (three) e.z = cz + Math.sin(a) * r; else e.y = cy + Math.sin(a) * r;
+    } });
+  }
+  /** Turn smoothly to face an object or point (DOLookAt), the short way round. */
+  lookAtTween(e, at, duration = 0.4, opts = {}) {
+    if (!at) return null;
+    const three = this.mode === '3d', key = three ? 'ry' : 'rz', cur = e[key] || 0;
+    let ang = three ? Math.atan2(at.x - e.x, (at.z || 0) - (e.z || 0)) / DEG : Math.atan2(at.y - e.y, at.x - e.x) / DEG;
+    ang = cur + ((((ang - cur) % 360) + 540) % 360) - 180;
+    return this.to(e, { [key]: ang }, duration, { ease: 'outQuad', ...opts });
+  }
+  /** Flash on and off a number of times, ending visible. */
+  blink(e, duration = 1, times = 6, opts = {}) {
+    return this.to(e, {}, duration, { ease: 'linear', ...opts, custom: (v, k) => { e.visible = k >= 1 ? true : Math.floor(k * times * 2) % 2 === 1; } });
+  }
+  /** A colour flash over the whole screen that fades out. */
+  flashScreen(color = '#ffffff', duration = 0.3, strength = 0.8) {
+    const f = { a: strength }, draw = (ctx) => { if (f.a <= 0) return; ctx.save(); ctx.globalAlpha = f.a; ctx.fillStyle = color; ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height); ctx.restore(); };
+    (this.overlays ||= []).push(draw);
+    return this.to(f, { a: 0 }, duration, { ease: 'outQuad', onKill: () => { this.overlays = this.overlays.filter((q) => q !== draw); } });
+  }
 
   burst(x, y, z = 0, color = '#ffffff', count = 16, speed = 1) {
     const is3D = this.mode === '3d', base = is3D ? 6 : 220;
@@ -1220,12 +1351,12 @@ export class Physics {
 
 function separate(e, other) {
   if (e.dead) return;
-  for (const b of e.behaviors) b.separate?.(e, other, e.scene);
+  for (const b of e.behaviors) if (!b.off) b.separate?.(e, other, e.scene);
   e.scene?.emit('separate', e, other);
 }
 
 function collide(e, other, m) {
-  for (const b of e.behaviors) if (b.collide && !e.dead) b.collide(e, other, e.scene, m);
+  for (const b of e.behaviors) if (b.collide && !e.dead && !b.off) b.collide(e, other, e.scene, m);
   e.scene?.emit('collide', e, other, m);
 }
 
@@ -2878,66 +3009,179 @@ registerBehavior('camera', {
 });
 
 // ---- animation components ----
-const VEC_FX = ['move to', 'move by', 'jump to', 'punch position'];
+const VEC_FX = ['move to', 'move by', 'move from', 'jump to', 'punch position'];
+export const TWEEN_EFFECTS = ['move by', 'move to', 'move from', 'rotate by', 'rotate to', 'spin', 'scale to', 'scale by', 'fade to', 'color to', 'punch scale', 'punch position', 'punch rotation',
+  'shake position', 'shake rotation', 'shake scale', 'path', 'jump to', 'spiral', 'look at', 'blink', 'type text', 'count up'];
+const AMOUNT_FX = ['scale to', 'scale by', 'fade to', 'punch scale', 'punch rotation', 'shake position', 'shake rotation', 'shake scale'];
+/** Build one Tween effect on an object (shared by the Tween and Tween Sequence components). Returns the tween, already running. */
+export function tweenEffect(s, e, p) {
+  const o = { ease: p.ease, loops: +p.loops || 0, loopType: p.loopType || 'restart', delay: +p.delay || 0, speedBased: !!p.speedBased, id: p.id || undefined };
+  const d = Math.max(0.01, +p.duration || 1), three = is3D(e), A = (k, def) => (Number.isFinite(+p[k]) && p[k] !== '' ? +p[k] : def);
+  const vec = { x: +p.x || 0, y: +p.y || 0, ...(three ? { z: +p.z || 0 } : {}) }, rk = three ? 'ry' : 'rz';
+  const loopIt = (tw) => { if (tw) { tw.setLoops(o.loops, o.loopType === 'incremental' ? 'restart' : o.loopType); tw.delay = o.delay; tw.id = o.id; } return tw; };
+  let tw = null;
+  switch (p.effect) {
+    case 'move to': tw = s.to(e, vec, d, o); break;
+    case 'move by': tw = s.to(e, vec, d, { ...o, relative: true }); break;
+    case 'move from': tw = s.to(e, vec, d, { ...o, relative: true, from: true }); break;
+    case 'rotate by': tw = s.to(e, { [rk]: A('angle', 360) }, d, { ...o, relative: true }); break;
+    case 'rotate to': tw = s.to(e, { [rk]: A('angle', 0) }, d, o); break;
+    case 'spin': tw = s.to(e, { [rk]: A('angle', 360) }, d, { ...o, ease: 'linear', relative: true, loops: o.loops, loopType: 'incremental' }); break;
+    case 'scale to': tw = s.to(e, { scale: A('amount', 1) }, d, o); break;
+    case 'scale by': { const k = A('amount', 1.5); tw = s.to(e, three ? { sx: e.sx * k, sy: e.sy * k, sz: e.sz * k } : { sx: e.sx * k, sy: e.sy * k }, d, o); break; }
+    case 'fade to': tw = s.to(e, { alpha: clamp(A('amount', 0), 0, 1) }, d, o); break;
+    case 'color to': tw = s.to(e, e.mesh ? { 'mesh.color': p.color } : e.text && !e.shape ? { 'text.color': p.color } : { 'shape.fill': p.color }, d, o); break;
+    case 'punch scale': { const a = A('amount', 0.3); tw = loopIt(s.punch(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break; }
+    case 'punch position': tw = loopIt(s.punch(e, vec, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break;
+    case 'punch rotation': tw = loopIt(s.punch(e, { [rk]: A('amount', 30) }, d, { add: true, vibrato: A('vibrato', 8), elasticity: A('elasticity', 0.6) })); break;
+    case 'shake position': { const a = A('amount', three ? 0.3 : 10); tw = loopIt(s.shakeProps(e, three ? { x: a, y: a, z: a } : { x: a, y: a }, d, { vibrato: A('vibrato', 18) })); break; }
+    case 'shake rotation': tw = loopIt(s.shakeProps(e, { [rk]: A('amount', 15) }, d, { vibrato: A('vibrato', 18) })); break;
+    case 'shake scale': { const a = A('amount', 0.2); tw = loopIt(s.shakeProps(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { vibrato: A('vibrato', 18) })); break; }
+    case 'path': { const pts = (Array.isArray(p.points) ? p.points : []).map((q) => ({ x: e.x + (+q.x || 0), y: e.y + (+q.y || 0), z: e.z + (+q.z || 0) })); if (pts.length) tw = s.path(e, pts, d, { ...o, orient: p.orient, closed: p.closed }); break; }
+    case 'jump to': tw = s.jumpTo(e, vec, A('height', three ? 2 : 80), Math.max(1, A('jumps', 1)), d, { ease: p.ease, delay: o.delay, id: o.id, relative: true }); tw.setLoops(o.loops, o.loopType); break;
+    case 'spiral': tw = s.spiral(e, d, { radius: A('radius', three ? 3 : 120), turns: A('turns', 3), ...o }); break;
+    case 'look at': { const t = nearest(s, e, p.target || 'player'); tw = t ? s.lookAtTween(e, t, d, o) : null; break; }
+    case 'blink': tw = loopIt(s.blink(e, d, Math.max(1, A('times', 6)))); break;
+    case 'type text': tw = s.typeText(e, p.text ?? '', d, { ...o, scramble: !!p.scramble }); break;
+    case 'count up': {
+      const v = p.var || '', to = A('to', 100);
+      tw = v ? s.counter(v, +s.vars[v] || 0, to, d, o) : s.counter(e, A('from', 0), to, d, { ...o, prefix: p.prefix || '', suffix: p.suffix || '' });
+      break;
+    }
+    default: break;
+  }
+  if (tw && p.from && p.effect !== 'move from' && tw.props && Object.keys(tw.props).length) tw.setFrom(true);
+  return tw;
+}
 /** Tween (DOTween Animation): animate this object with easing and loops, no code needed. */
 registerBehavior('tween', {
-  label: 'Tween', description: 'Animate this object with no code: move, rotate, scale, fade, color, punch, shake, follow a path or jump, with easing, loops and delays.',
+  label: 'Tween', description: 'Animate this object with no code (like DOTween): move, rotate, spin, scale, fade, color, punch, shake, path, jump, spiral, look at, blink, type text or count up, with easing, loops and delays.',
   params: [
-    { key: 'effect', label: 'Effect', type: 'select', options: ['move by', 'move to', 'rotate by', 'scale to', 'fade to', 'color to', 'punch scale', 'punch position', 'shake position', 'shake rotation', 'path', 'jump to'], default: 'move by' },
+    { key: 'effect', label: 'Effect', type: 'select', options: TWEEN_EFFECTS, default: 'move by' },
     { key: 'x', label: 'X', type: 'number', default: 0, showIf: { effect: VEC_FX } },
     { key: 'y', label: 'Y', type: 'number', default: -40, default3d: 1, showIf: { effect: VEC_FX } },
     { key: 'z', label: 'Z (3D)', type: 'number', default: 0, showIf: { effect: VEC_FX }, only3d: true },
-    { key: 'angle', label: 'Degrees', type: 'number', default: 360, showIf: { effect: ['rotate by'] } },
-    { key: 'amount', label: 'Amount', type: 'number', default: 0.3, showIf: { effect: ['scale to', 'fade to', 'punch scale', 'shake position', 'shake rotation'] }, info: { 'scale to': 'Final size (1 = normal).', 'fade to': 'Final opacity: 0 = invisible, 1 = solid.', 'punch scale': 'How much bigger it pops (0.3 = 30%).', 'shake position': 'How far it jitters.', 'shake rotation': 'How many degrees it wobbles.' } },
+    { key: 'angle', label: 'Degrees', type: 'number', default: 360, showIf: { effect: ['rotate by', 'rotate to', 'spin'] }, info: { spin: 'Degrees per turn of the loop: 360 = one full spin each Duration.' } },
+    { key: 'amount', label: 'Amount', type: 'number', default: 0.3, showIf: { effect: AMOUNT_FX }, info: { 'scale to': 'Final size (1 = normal).', 'scale by': 'Multiply the size (2 = twice as big).', 'fade to': 'Final opacity: 0 = invisible, 1 = solid.', 'punch scale': 'How much bigger it pops (0.3 = 30%).', 'punch rotation': 'Degrees it kicks round.', 'shake position': 'How far it jitters.', 'shake rotation': 'How many degrees it wobbles.', 'shake scale': 'How much the size jitters.' } },
+    { key: 'vibrato', label: 'Vibrato (wobbles)', type: 'number', default: 10, range: [1, 40], step: 1, showIf: { effect: ['punch scale', 'punch position', 'punch rotation', 'shake position', 'shake rotation', 'shake scale'] } },
+    { key: 'elasticity', label: 'Elasticity', type: 'number', default: 0.6, range: [0, 1], step: 0.05, showIf: { effect: ['punch scale', 'punch position', 'punch rotation'] } },
     { key: 'color', label: 'Color', type: 'color', default: '#ff5252', showIf: { effect: ['color to'] } },
     { key: 'points', label: 'Path points (relative)', type: 'json', default: [{ x: 120, y: 0 }, { x: 120, y: 120 }, { x: 0, y: 120 }], default3d: [{ x: 3, y: 0, z: 0 }, { x: 3, y: 0, z: 3 }, { x: 0, y: 0, z: 3 }], showIf: { effect: ['path'] } },
     { key: 'orient', label: 'Face the way it moves', type: 'bool', default: false, showIf: { effect: ['path'] } },
+    { key: 'closed', label: 'Closed loop (back to start)', type: 'bool', default: false, showIf: { effect: ['path'] } },
     { key: 'height', label: 'Jump height', type: 'number', default: 80, default3d: 2, showIf: { effect: ['jump to'] } },
+    { key: 'jumps', label: 'Number of hops', type: 'number', default: 1, range: [1, 10], step: 1, showIf: { effect: ['jump to'] } },
+    { key: 'radius', label: 'Radius', type: 'number', default: 120, default3d: 3, showIf: { effect: ['spiral'] } },
+    { key: 'turns', label: 'Turns', type: 'number', default: 3, step: 0.5, showIf: { effect: ['spiral'] } },
+    { key: 'target', label: 'Look at (object or tag)', type: 'text', default: 'player', suggest: 'tags', showIf: { effect: ['look at'] } },
+    { key: 'times', label: 'Blinks', type: 'number', default: 6, range: [1, 30], step: 1, showIf: { effect: ['blink'] } },
+    { key: 'text', label: 'Text to type', type: 'text', default: 'Hello there!', showIf: { effect: ['type text'] } },
+    { key: 'scramble', label: 'Scramble letters while typing', type: 'bool', default: false, showIf: { effect: ['type text'] } },
+    { key: 'var', label: 'Count variable (blank = this text)', type: 'text', default: '', suggest: 'vars', showIf: { effect: ['count up'] } },
+    { key: 'to', label: 'Count to', type: 'number', default: 100, showIf: { effect: ['count up'] } },
+    { key: 'prefix', label: 'Text before', type: 'text', default: '', showIf: (b) => b.effect === 'count up' && !b.var },
+    { key: 'suffix', label: 'Text after', type: 'text', default: '', showIf: (b) => b.effect === 'count up' && !b.var },
     { key: 'duration', label: 'Duration (sec)', type: 'number', default: 1, range: [0.05, 10], step: 0.05 },
+    { key: 'speedBased', label: 'Duration is a speed (units per sec)', type: 'bool', default: false, showIf: { effect: ['move by', 'move to', 'move from', 'rotate by', 'rotate to'] }, info: 'Like DOTween SetSpeedBased: long moves take longer, so everything moves at the same speed.' },
     { key: 'ease', label: 'Ease', type: 'select', options: EASES, default: 'inOutSine', ease: true },
+    { key: 'from', label: 'Play as From (start at the value, end where it is)', type: 'bool', default: false, showIf: { effect: ['move to', 'rotate to', 'scale to', 'fade to', 'color to'] } },
     { key: 'loops', label: 'Loops (-1 = forever)', type: 'number', default: -1, range: [-1, 20], step: 1 },
     { key: 'loopType', label: 'Loop type', type: 'select', options: ['yoyo', 'restart', 'incremental'], default: 'yoyo', showIf: (b) => +b.loops !== 0 },
     { key: 'delay', label: 'Delay (sec)', type: 'number', default: 0, range: [0, 10], step: 0.05, group: 'Timing & trigger' },
-    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'touched by tag', 'message', 'never'], default: 'start', group: 'Timing & trigger' },
+    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'tap (forward / back)', 'touched by tag', 'message', 'never'], default: 'start', group: 'Timing & trigger', info: { 'tap (forward / back)': 'Each tap plays it the other way, like a switch.' } },
     { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player', suggest: 'tags', showIf: { playOn: ['touched by tag'] }, group: 'Timing & trigger' },
     { key: 'message', label: 'Message name', type: 'text', default: 'go', suggest: 'messages', showIf: { playOn: ['message'] }, group: 'Timing & trigger' },
+    { key: 'id', label: 'Tween ID', type: 'text', default: '', group: 'Timing & trigger', info: 'Name it to pause, resume, reverse or stop it from nodes (Tween ID fields).' },
+    { key: 'loopDo', label: 'Each loop, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops !== 0 },
+    { key: 'loopValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.loopDo && b.loopDo !== 'nothing' && +b.loops !== 0 },
     { key: 'thenDo', label: 'When finished, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops >= 0 },
     { key: 'thenValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.thenDo && b.thenDo !== 'nothing' && +b.loops >= 0 },
   ],
   create(p) {
     let tw = null;
+    const toggle = p.playOn === 'tap (forward / back)';
     const play = (e, s) => {
+      if (toggle && tw && !tw.done) { tw.flip(); return; }
       tw?.kill();
-      const o = { ease: p.ease, loops: +p.loops, loopType: p.loopType, delay: +p.delay || 0 }, d = Math.max(0.01, +p.duration || 1), three = is3D(e);
-      const vec = { x: +p.x || 0, y: +p.y || 0, ...(three ? { z: +p.z || 0 } : {}) };
-      switch (p.effect) {
-        case 'move to': tw = s.to(e, vec, d, o); break;
-        case 'move by': tw = s.to(e, vec, d, { ...o, relative: true }); break;
-        case 'rotate by': tw = s.to(e, three ? { ry: +p.angle || 0 } : { rz: +p.angle || 0 }, d, { ...o, relative: true }); break;
-        case 'scale to': tw = s.to(e, { scale: +p.amount || 1 }, d, o); break;
-        case 'fade to': tw = s.to(e, { alpha: clamp(+p.amount, 0, 1) }, d, o); break;
-        case 'color to': tw = s.to(e, e.mesh ? { 'mesh.color': p.color } : e.text && !e.shape ? { 'text.color': p.color } : { 'shape.fill': p.color }, d, o); break;
-        case 'punch scale': { const a = +p.amount || 0.3; tw = s.punch(e, three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }, d, { add: true }); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'punch position': tw = s.punch(e, vec, d, { add: true }); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break;
-        case 'shake position': { const a = +p.amount || 10; tw = s.shakeProps(e, three ? { x: a, y: a, z: a } : { x: a, y: a }, d); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'shake rotation': { const a = +p.amount || 15; tw = s.shakeProps(e, three ? { ry: a } : { rz: a }, d); tw.setLoops(+p.loops, 'restart'); tw.delay = o.delay; break; }
-        case 'path': { const pts = (Array.isArray(p.points) ? p.points : []).map((q) => ({ x: e.x + (+q.x || 0), y: e.y + (+q.y || 0), z: e.z + (+q.z || 0) })); if (pts.length) tw = s.path(e, pts, d, { ...o, orient: p.orient }); break; }
-        case 'jump to': tw = s.jumpTo(e, { x: e.x + vec.x, y: e.y + vec.y, z: e.z + (vec.z || 0) }, +p.height || 0, 1, d, { ease: p.ease, delay: o.delay }); tw.setLoops(+p.loops, p.loopType); break;
-        default: break;
-      }
-      if (tw && p.thenDo && p.thenDo !== 'nothing') tw.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
+      tw = tweenEffect(s, e, toggle ? { ...p, loops: 0 } : p);
+      if (!tw) return;
+      if (toggle) tw.setAutoKill(false);
+      if (p.loopDo && p.loopDo !== 'nothing') tw.onStepComplete(() => runAction(s, e, { action: p.loopDo, value: p.loopValue, amount: 1 }));
+      if (p.thenDo && p.thenDo !== 'nothing') tw.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
     };
-    let off = null;
     return {
       play, uiAlways: true,
+      get tween() { return tw; },
       start(e, s) {
         if (p.playOn === 'start') play(e, s);
         if (p.playOn === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
-        if (p.playOn === 'message') s.on('message', off = (name) => { if (name === p.message && !e.dead) play(e, s); });
+        if (p.playOn === 'message') s.on('message', (name) => { if (name === p.message && !e.dead) play(e, s); });
+      },
+      update(e, dt, s) { if ((p.playOn === 'tap' || toggle) && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) play(e, s); },
+      collide(e, other, s) { if (p.playOn === 'touched by tag' && other.has(p.tag)) play(e, s); },
+      destroy() { tw?.kill(); },
+    };
+  },
+});
+
+/** Tween Sequence (DOTween Sequence): several tween steps in a row or at the same time, as one animation. */
+export const SEQ_STEP_DEFAULT = { effect: 'move by', x: 0, y: -40, z: 0, amount: 0.3, angle: 360, color: '#ff5252', duration: 0.4, ease: 'outQuad', with: 'after' };
+registerBehavior('tweenSequence', {
+  label: 'Tween Sequence', description: 'Chain tween steps into one animation (DOTween Sequence): each step plays after the last, at the same time, or after a pause. Loop it, play it on tap or message, and do something when it ends.',
+  params: [
+    { key: 'steps', label: 'Steps', type: 'tweenSteps', default: [
+      { ...SEQ_STEP_DEFAULT, effect: 'scale to', amount: 1.3, duration: 0.2, ease: 'outBack' },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: 20, duration: 0.2, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: -40, duration: 0.3, ease: 'outQuad' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: 40, duration: 0.4, ease: 'outBounce' },
+      { ...SEQ_STEP_DEFAULT, effect: 'scale to', amount: 1, duration: 0.2, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: -20, duration: 0.2, with: 'with' },
+    ], default3d: [
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: 1, duration: 0.3 },
+      { ...SEQ_STEP_DEFAULT, effect: 'rotate by', angle: 180, duration: 0.3, with: 'with' },
+      { ...SEQ_STEP_DEFAULT, effect: 'move by', y: -1, duration: 0.4, ease: 'outBounce' },
+    ] },
+    { key: 'loops', label: 'Loops (-1 = forever)', type: 'number', default: 0, range: [-1, 20], step: 1 },
+    { key: 'loopType', label: 'Loop type', type: 'select', options: ['restart', 'yoyo'], default: 'restart', showIf: (b) => +b.loops !== 0 },
+    { key: 'delay', label: 'Delay (sec)', type: 'number', default: 0, range: [0, 10], step: 0.05 },
+    { key: 'playOn', label: 'Play on', type: 'select', options: ['start', 'tap', 'touched by tag', 'message', 'never'], default: 'tap' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player', suggest: 'tags', showIf: { playOn: ['touched by tag'] } },
+    { key: 'message', label: 'Message name', type: 'text', default: 'go', suggest: 'messages', showIf: { playOn: ['message'] } },
+    { key: 'restartOnPlay', label: 'Restart if played again', type: 'bool', default: true },
+    { key: 'id', label: 'Tween ID', type: 'text', default: '' },
+    { key: 'thenDo', label: 'When finished, do', type: 'select', options: ['nothing', ...ACTIONS], default: 'nothing', group: 'When finished', showIf: (b) => +b.loops >= 0 },
+    { key: 'thenValue', label: 'Message / variable / object', type: 'text', default: '', group: 'When finished', showIf: (b) => b.thenDo && b.thenDo !== 'nothing' && +b.loops >= 0 },
+  ],
+  create(p) {
+    let seq = null, base = null;
+    const steps = Array.isArray(p.steps) ? p.steps : [];
+    const play = (e, s) => {
+      if (seq && !seq.done && !p.restartOnPlay) return;
+      if (seq) { seq.kill(); if (base) Object.assign(e, base); } // back to the rest pose before playing again
+      base = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz, alpha: e.alpha };
+      seq = new Sequence({ loops: +p.loops || 0, loopType: p.loopType, delay: +p.delay || 0, id: p.id || undefined });
+      for (const st of steps) {
+        if (st.with === 'wait') { seq.appendInterval(+st.duration || 0); continue; }
+        const n = s.tweens.length, tw = tweenEffect(s, e, { ...st, loops: 0, delay: 0 });
+        if (!tw) continue;
+        const i = s.tweens.indexOf(tw, n - 1 < 0 ? 0 : n - 1); if (i >= 0) s.tweens.splice(i, 1); // the sequence drives it
+        if (st.with === 'with') seq.join(tw); else seq.append(tw);
+      }
+      seq.target = e;
+      if (p.thenDo && p.thenDo !== 'nothing') seq.onComplete(() => runAction(s, e, { action: p.thenDo, value: p.thenValue, amount: 1 }));
+      s.tweens.push(seq);
+    };
+    return {
+      play, uiAlways: true,
+      get sequence() { return seq; },
+      start(e, s) {
+        if (p.playOn === 'start') play(e, s);
+        if (p.playOn === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.playOn === 'message') s.on('message', (name) => { if (name === p.message && !e.dead) play(e, s); });
       },
       update(e, dt, s) { if (p.playOn === 'tap' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) play(e, s); },
       collide(e, other, s) { if (p.playOn === 'touched by tag' && other.has(p.tag)) play(e, s); },
-      destroy() { tw?.kill(); },
+      destroy() { seq?.kill(); },
     };
   },
 });
@@ -5303,9 +5547,25 @@ export const NODE_TYPES = {
   switchCamera: { cat: 'Actions', label: 'Switch Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera object')] },
   zoomCamera: { cat: 'Actions', label: 'Zoom Camera (2D)', exec: true, outs: ['then'], inputs: [{ key: 'zoom', type: 'number', default: 1.5 }], params: [num('seconds', 0.5, 'seconds')] },
   setLight: { cat: 'Actions', label: 'Set Light', exec: true, outs: ['then'], params: [txt('object', '', 'object (empty = this)'), opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')], inputs: [{ key: 'intensity', type: 'number', default: 1 }] },
-  tweenTo: { cat: 'Actions', label: 'Tween', exec: true, outs: ['then', 'finished'], params: [opt('prop', ['x', 'y', 'z', 'rz', 'ry', 'scale', 'alpha'], 'y', 'property'), opt('mode', ['by', 'to'], 'by', 'mode'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'value', type: 'number', default: -40 }, { key: 'seconds', type: 'number', default: 0.5 }] },
-  punch: { cat: 'Actions', label: 'Punch', exec: true, outs: ['then'], params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'amount', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 0.4 }] },
-  killTweens: { cat: 'Actions', label: 'Stop Tweens', exec: true, outs: ['then'] },
+  tweenTo: { cat: 'Tween', label: 'Tween', exec: true, outs: ['then', 'finished'], params: [opt('prop', ['x', 'y', 'z', 'rz', 'ry', 'scale', 'alpha'], 'y', 'property'), opt('mode', ['by', 'to'], 'by', 'mode'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'value', type: 'number', default: -40 }, { key: 'seconds', type: 'number', default: 0.5 }] },
+  punch: { cat: 'Tween', label: 'Punch', exec: true, outs: ['then'], params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'amount', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 0.4 }] },
+  killTweens: { cat: 'Tween', label: 'Stop Tweens', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['stop', 'jump to end'], 'stop', 'how')] },
+  tweenMove: { cat: 'Tween', label: 'Tween Move To', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'x', type: 'number', default: 200 }, { key: 'y', type: 'number', default: 300 }, { key: 'z', type: 'number', default: 0 }, { key: 'seconds', type: 'number', default: 0.6 }], params: [opt('mode', ['to', 'by', 'from'], 'to', 'mode'), opt('ease', EASES, 'outQuad', 'ease'), txt('id', '', 'tween ID')] },
+  tweenToObj: { cat: 'Tween', label: 'Tween To Object', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'seconds', type: 'number', default: 0.6 }], params: [txt('object', 'Goal', 'object or tag'), opt('ease', EASES, 'outQuad', 'ease')] },
+  jumpTo: { cat: 'Tween', label: 'Jump Tween', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'x', type: 'number', default: 120 }, { key: 'y', type: 'number', default: 0 }, { key: 'height', type: 'number', default: 80 }, { key: 'seconds', type: 'number', default: 0.6 }], params: [num('jumps', 1, 'hops')] },
+  shakeTw: { cat: 'Tween', label: 'Shake', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'strength', type: 'number', default: 10 }, { key: 'seconds', type: 'number', default: 0.5 }], params: [opt('what', ['position', 'rotation', 'scale'], 'position', 'what'), num('vibrato', 18, 'vibrato')] },
+  spin: { cat: 'Tween', label: 'Spin', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'degrees', type: 'number', default: 360 }, { key: 'seconds', type: 'number', default: 1 }], params: [opt('repeat', ['once', 'forever'], 'once', 'repeat'), opt('ease', EASES, 'outQuad', 'ease')] },
+  pulse: { cat: 'Tween', label: 'Pulse', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1.15 }, { key: 'seconds', type: 'number', default: 0.4 }], params: [opt('repeat', ['once', 'forever'], 'forever', 'repeat'), txt('id', 'pulse', 'tween ID')] },
+  tweenColor: { cat: 'Tween', label: 'Tween Colour', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'seconds', type: 'number', default: 0.5 }], params: [{ key: 'color', type: 'color', default: '#ff5252', label: 'colour' }, opt('repeat', ['once', 'there and back', 'forever'], 'once', 'repeat')] },
+  tweenVar: { cat: 'Tween', label: 'Tween Variable', exec: true, outs: ['then', 'finished'], params: [txt('name', 'score', 'variable'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'to', type: 'number', default: 100 }, { key: 'seconds', type: 'number', default: 1 }] },
+  typeText: { cat: 'Tween', label: 'Type Text', exec: true, outs: ['then', 'finished'], params: [txt('object', '', 'object (blank = me)'), txt('text', 'Hello there!', 'text'), { key: 'scramble', type: 'bool', default: false, label: 'scramble' }], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
+  spiralTw: { cat: 'Tween', label: 'Spiral', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'radius', type: 'number', default: 120 }, { key: 'turns', type: 'number', default: 3 }, { key: 'seconds', type: 'number', default: 2 }] },
+  lookAtTw: { cat: 'Tween', label: 'Turn To Face (smooth)', exec: true, outs: ['then', 'finished'], params: [txt('tag', 'player', 'object or tag')], inputs: [{ key: 'seconds', type: 'number', default: 0.4 }] },
+  pauseTw: { cat: 'Tween', label: 'Pause / Resume Tweens', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
+  reverseTw: { cat: 'Tween', label: 'Play Tweens Backwards', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)'), opt('mode', ['backwards', 'forwards', 'flip', 'restart'], 'flip', 'play')] },
+  tweenSpeed: { cat: 'Tween', label: 'Tween Speed', exec: true, outs: ['then'], params: [txt('id', '', 'tween ID (blank = this object)')], inputs: [{ key: 'speed', type: 'number', default: 2 }] },
+  playTween: { cat: 'Tween', label: 'Play Tween Component', exec: true, outs: ['then'], params: [opt('which', ['all', 'Tween', 'Tween Sequence'], 'all', 'which')] },
+  delayedCall: { cat: 'Tween', label: 'Delayed Call', exec: true, outs: ['then', 'later'], inputs: [{ key: 'seconds', type: 'number', default: 1 }], params: [txt('id', '', 'tween ID (to cancel)')] },
   playAnim: { cat: 'Animation', label: 'Play Animation', exec: true, outs: ['then'], params: [txt('clip', 'Bounce', 'clip'), opt('loop', ['clip setting', 'loop', 'once'], 'clip setting', 'repeat')] },
   stopAnim: { cat: 'Animation', label: 'Stop Animation', exec: true, outs: ['then'] },
   animSpeed: { cat: 'Animation', label: 'Set Animation Speed', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 2 }] },
@@ -5320,6 +5580,13 @@ export const NODE_TYPES = {
   setAlpha: { cat: 'Looks', label: 'Set Opacity', exec: true, outs: ['then'], inputs: [{ key: 'alpha', type: 'number', default: 0.5 }] },
   stopMoving: { cat: 'Move', label: 'Stop Moving', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   gravityScale: { cat: 'Move', label: 'Set Gravity Scale', exec: true, outs: ['then'], inputs: [{ key: 'scale', type: 'number', default: 0 }] },
+  popText: { cat: 'Looks', label: 'Pop Text', exec: true, outs: ['then'], params: [txt('text', '+1', 'text'), { key: 'color', type: 'color', default: '#ffd23d', label: 'colour' }, num('size', 26, 'size')] },
+  flashScreen: { cat: 'Looks', label: 'Flash Screen', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], inputs: [{ key: 'seconds', type: 'number', default: 0.3 }] },
+  randomVar: { cat: 'Actions', label: 'Set Variable to Random', exec: true, outs: ['then'], params: [txt('name', 'roll', 'variable')], inputs: [{ key: 'min', type: 'number', default: 1 }, { key: 'max', type: 'number', default: 6 }] },
+  goToLevel: { cat: 'Game', label: 'Go To Level', exec: true, outs: [], inputs: [{ key: 'level', type: 'number', default: 1 }] },
+  toggleComp: { cat: 'Objects', label: 'Turn Component On / Off', exec: true, outs: ['then'], params: [txt('component', 'patrol', 'component type'), opt('mode', ['off', 'on', 'toggle'], 'off', 'make it'), txt('object', '', 'object (blank = me)')] },
+  waitUntil: { cat: 'Flow', label: 'Wait Until', exec: true, outs: ['then'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('timeout', 0, 'give up after (0 = never)')] },
+  randomWait: { cat: 'Flow', label: 'Random Wait', exec: true, outs: ['then'], inputs: [{ key: 'min', type: 'number', default: 0.5 }, { key: 'max', type: 'number', default: 2 }] },
   setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
@@ -5341,7 +5608,7 @@ export const NODE_TYPES = {
   number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
   getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
   random: { cat: 'Values', label: 'Random Number', value: 'number', params: [num('min', 0, 'min'), num('max', 10, 'max')] },
-  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max'], '+', 'operation')] },
+  math: { cat: 'Values', label: 'Math', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['+', '−', '×', '÷', 'min', 'max', 'mod', 'power'], '+', 'operation')] },
   compare: { cat: 'Values', label: 'Compare', value: 'bool', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['≥', '≤', '=', '>', '<', '≠'], '≥', 'is')] },
   and: { cat: 'Values', label: 'And', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: true }, { key: 'b', type: 'bool', default: true }] },
   or: { cat: 'Values', label: 'Or', value: 'bool', inputs: [{ key: 'a', type: 'bool', default: false }, { key: 'b', type: 'bool', default: false }] },
@@ -5366,6 +5633,12 @@ export const NODE_TYPES = {
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
   isMoving: { cat: 'Values', label: 'Is Moving', value: 'bool' },
+  isTweening: { cat: 'Tween', label: 'Is Tweening', value: 'bool', params: [txt('id', '', 'tween ID (blank = this object)')] },
+  choose: { cat: 'Math', label: 'Choose (if)', value: 'number', inputs: [{ key: 'condition', type: 'bool', default: true }, { key: 'yes', type: 'number', default: 1 }, { key: 'no', type: 'number', default: 0 }] },
+  wave: { cat: 'Math', label: 'Wave', value: 'number', inputs: [{ key: 'size', type: 'number', default: 1 }, { key: 'speed', type: 'number', default: 1 }], params: [opt('shape', ['sine', 'triangle', 'square'], 'sine', 'shape')] },
+  remap: { cat: 'Math', label: 'Remap', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0.5 }, { key: 'fromMin', type: 'number', default: 0 }, { key: 'fromMax', type: 'number', default: 1 }, { key: 'toMin', type: 'number', default: 0 }, { key: 'toMax', type: 'number', default: 100 }] },
+  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  deltaTime: { cat: 'Values', label: 'Frame Time', value: 'number' },
   isHolding: { cat: 'Values', label: 'Finger On Screen', value: 'bool' },
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
@@ -5626,7 +5899,7 @@ registerBehavior('graph', {
         case 'number': return +P('value') || 0;
         case 'getVar': return +s.vars[P('name')] || 0;
         case 'random': { const a = +P('min') || 0, b = +P('max') || 0; return Number.isInteger(a) && Number.isInteger(b) ? Math.min(b, Math.floor(rand(a, b + 1))) : rand(a, b); }
-        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b) }[P('op')] ?? 0; }
+        case 'math': { const a = +I('a') || 0, b = +I('b') || 0; return { '+': a + b, '−': a - b, '×': a * b, '÷': b ? a / b : 0, min: Math.min(a, b), max: Math.max(a, b), mod: b ? ((a % b) + b) % b : 0, power: a ** b }[P('op')] ?? 0; }
         case 'compare': { const a = +I('a') || 0, b = +I('b') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')] ?? false; }
         case 'and': return !!I('a') && !!I('b');
         case 'or': return !!I('a') || !!I('b');
@@ -5651,6 +5924,12 @@ registerBehavior('graph', {
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
         case 'isMoving': { const v = e.body?.vel; if (v) return Math.hypot(v.x, v.y, v.z) > (s.mode === '3d' ? 0.2 : 10); const m = state.get('_moved'); return !!m && s.time - m < 0.1; }
+        case 'isTweening': return s.isTweening(P('id') || e);
+        case 'choose': return I('condition') ? +I('yes') || 0 : +I('no') || 0;
+        case 'wave': { const t = s.time * (+I('speed') || 0), k = +I('size') || 0, f = t - Math.floor(t); return k * (P('shape') === 'square' ? (f < 0.5 ? 1 : -1) : P('shape') === 'triangle' ? 1 - 4 * Math.abs(f - 0.5) : Math.sin(t * PI * 2)); }
+        case 'remap': { const a = +I('fromMin') || 0, b = +I('fromMax') || 0, t = b === a ? 0 : ((+I('value') || 0) - a) / (b - a); return (+I('toMin') || 0) + ((+I('toMax') || 0) - (+I('toMin') || 0)) * t; }
+        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null); return t ? t[P('axis')] || 0 : 0; }
+        case 'deltaTime': return ctx.dt ?? 1 / 60;
         case 'isHolding': return s.engine.input.pointers.size > 0;
         case 'touchPos': {
           const inp = s.engine.input, pt = [...inp.pointers.values()][0] || inp.taps[0] || inp.ups[0];
@@ -5740,7 +6019,42 @@ registerBehavior('graph', {
           s.punch(t, P('what') === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : P('what') === 'rotation' ? (three ? { ry: a * 90 } : { rz: a * 90 }) : { y: three ? a : -a * 60 }, d);
           break;
         }
-        case 'killTweens': s.killTweens(e); break;
+        case 'killTweens': s.killTweens(P('id') || e, P('mode') === 'jump to end'); break;
+        case 'tweenMove': {
+          const m = P('mode'), v = { x: +I('x') || 0, y: +I('y') || 0, ...(s.mode === '3d' ? { z: +I('z') || 0 } : {}) };
+          const tw = s.to(e, v, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease'), relative: m !== 'to', from: m === 'from', id: P('id') || undefined });
+          tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break;
+        }
+        case 'tweenToObj': { const k = P('object'), t = s.find(k) || nearest(s, e, k); if (!t) break; const tw = s.to(e, { x: t.x, y: t.y, ...(s.mode === '3d' ? { z: t.z } : {}) }, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'jumpTo': { const tw = s.jumpTo(e, { x: +I('x') || 0, y: +I('y') || 0, z: 0 }, +I('height') || 0, Math.max(1, +P('jumps') || 1), Math.max(0.01, +I('seconds') || 0.01), { relative: true }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'shakeTw': {
+          const a = +I('strength') || 0, w = P('what'), three = s.mode === '3d';
+          const amt = w === 'rotation' ? { [three ? 'ry' : 'rz']: a } : w === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : (three ? { x: a, y: a, z: a } : { x: a, y: a });
+          const tw = s.shakeProps(e, amt, Math.max(0.01, +I('seconds') || 0.01), { vibrato: Math.max(1, +P('vibrato') || 18) }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break;
+        }
+        case 'spin': { const k = s.mode === '3d' ? 'ry' : 'rz', fe = P('repeat') === 'forever'; const tw = s.to(e, { [k]: +I('degrees') || 0 }, Math.max(0.01, +I('seconds') || 0.01), { ease: fe ? 'linear' : P('ease'), relative: true, loops: fe ? -1 : 0, loopType: 'incremental' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'pulse': { const k = +I('amount') || 1, fe = P('repeat') === 'forever', three = s.mode === '3d'; if (P('id')) s.killTweens(P('id')); s.to(e, three ? { sx: e.sx * k, sy: e.sy * k, sz: e.sz * k } : { sx: e.sx * k, sy: e.sy * k }, Math.max(0.01, +I('seconds') || 0.01), { ease: 'inOutSine', loops: fe ? -1 : 1, loopType: 'yoyo', id: P('id') || undefined }); break; }
+        case 'tweenColor': { const key = e.mesh ? 'mesh.color' : e.text && !e.shape ? 'text.color' : 'shape.fill', r = P('repeat'); if (key === 'shape.fill' && !e.shape) break; const tw = s.to(e, { [key]: P('color') }, Math.max(0.01, +I('seconds') || 0.01), { ease: 'inOutSine', loops: r === 'forever' ? -1 : r === 'there and back' ? 1 : 0, loopType: 'yoyo' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'tweenVar': { const k = P('name') || 'score', tw = s.counter(k, +s.vars[k] || 0, +I('to') || 0, Math.max(0.01, +I('seconds') || 0.01), { ease: P('ease') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'typeText': { const t = P('object') ? s.find(P('object')) : e; if (!t) break; const tw = s.typeText(t, fillTemplate(P('text'), s.vars), Math.max(0.01, +I('seconds') || 0.01), { scramble: !!P('scramble') }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'spiralTw': { const tw = s.spiral(e, Math.max(0.01, +I('seconds') || 0.01), { radius: +I('radius') || 0, turns: +I('turns') || 0 }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'lookAtTw': { const k = P('tag'), t = s.find(k) !== e && s.find(k) || nearest(s, e, k); const tw = t && s.lookAtTween(e, t, Math.max(0.01, +I('seconds') || 0.01)); tw?.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'pauseTw': { const who = P('id') || e; if (P('mode') === 'pause') s.pauseTweens(who); else if (P('mode') === 'resume') s.playTweens(who); else for (const t of s.tweensOf(who)) t.togglePause(); break; }
+        case 'reverseTw': { const who = P('id') || e, m = P('mode'); if (m === 'backwards') s.reverseTweens(who); else if (m === 'forwards') for (const t of s.tweensOf(who)) t.playForward(); else if (m === 'restart') s.restartTweens(who); else for (const t of s.tweensOf(who)) t.flip(); break; }
+        case 'tweenSpeed': s.tweenSpeed(P('id') || e, +I('speed') || 0); break;
+        case 'playTween': for (const b of e.behaviors) if ((b.type === 'tween' && P('which') !== 'Tween Sequence') || (b.type === 'tweenSequence' && P('which') !== 'Tween')) b.play(e, s); break;
+        case 'delayedCall': { const tw = s.delayedCall(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'later', { ...ctx, steps: 0 }); }, { id: P('id') || undefined }); tw.target = e; break; }
+        case 'popText': popText(s, e.x, e.y, fillTemplate(P('text'), s.vars), P('color') || '#ffd23d', +P('size') || 26); break;
+        case 'flashScreen': s.flashScreen(P('color') || '#ffffff', Math.max(0.01, +I('seconds') || 0.3)); break;
+        case 'randomVar': { const a = Math.round(+I('min') || 0), b = Math.round(+I('max') || 0); s.setVar(P('name') || 'roll', Math.min(a, b) + Math.floor(Math.random() * (Math.abs(b - a) + 1))); break; }
+        case 'goToLevel': s.engine.goToLevel?.(+I('level') || 1); return;
+        case 'toggleComp': { const t = P('object') ? s.find(P('object')) : e, k = String(P('component') || '').trim().toLowerCase(); if (!t || !k) break; for (const b of t.behaviors) if ((b.type || '').toLowerCase() === k || (Behaviors[b.type]?.label || '').toLowerCase() === k) b.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !b.off; break; }
+        case 'waitUntil': {
+          const start = s.time, limit = +P('timeout') || 0, c2 = { ...ctx, steps: 0 };
+          const check = () => { if (e.dead || s.engine.scene !== s) return; if (input(n, 'condition', c2)) follow(n, 'then', { ...c2, steps: 0 }); else if (limit > 0 && s.time - start >= limit) return; else s.after(0, check); };
+          check(); return;
+        }
+        case 'randomWait': { const a = +I('min') || 0, b = +I('max') || 0; s.after(Math.max(0, rand(Math.min(a, b), Math.max(a, b))), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
         case 'playAnim': { const lp = P('loop'), loop = lp === 'loop' ? true : lp === 'once' ? false : undefined; playClip(e, P('clip'), loop); break; }
         case 'stopAnim': for (const a of anims(e)) a.stop(); break;
         case 'animSpeed': for (const a of anims(e)) a.setSpeed(+I('speed') || 0); break;
@@ -5918,6 +6232,13 @@ export class Engine {
   }
 
   hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+  /** Jump to a level by number (1 = first), keeping variables like score. */
+  goToLevel(n) {
+    if (!this.levels) return;
+    const i = clamp(Math.round(n) - 1, 0, this.levels.length - 1), carry = { ...this.scene.vars };
+    delete carry.best; delete carry.level; delete carry.time;
+    this.carry = carry; this.levelIndex = i; this.setScene(this.factory()); this.saveProgress();
+  }
 
   nextLevel() {
     if (!this.hasNextLevel()) return;
@@ -5997,7 +6318,7 @@ export class Engine {
     for (const e of s.entities) {
       if (!e.ui || e.dead) continue;
       if (!e.started) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
-      for (const b of e.behaviors) if (b.uiAlways) b.update?.(e, dt, s);
+      for (const b of e.behaviors) if (b.uiAlways && !b.off) b.update?.(e, dt, s);
     }
     s.flush();
   }
@@ -6152,7 +6473,7 @@ export class Engine {
     for (const e of s.entities) {
       if (e.dead) continue;
       if (e.data.invuln > 0) e.data.invuln -= dt;
-      for (const b of e.behaviors) { if (e.dead) break; b.update?.(e, dt, s); }
+      for (const b of e.behaviors) { if (e.dead) break; if (!b.off) b.update?.(e, dt, s); }
     }
     s.update(dt, this);
     if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {

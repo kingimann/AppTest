@@ -983,3 +983,24 @@ body.playing #attachBar { display: none !important; }
 #dockTabs button { min-width: 0; }
 @media (max-width: 430px) { #dockTabs { gap: 3px; padding-left: 6px; padding-right: 6px; } #dockTabs button { font-size: 12px; } }
 .sc-nth { color: var(--muted); font-weight: 600; font-size: 14px; }
+/* Tween Sequence steps */
+.steps-card { display: flex; flex-direction: column; gap: 8px; }
+.st-sum { color: var(--muted); font-size: 13px; }
+.st-card { border: 1px solid #2c2c2c; border-left: 4px solid #2c6cb0; border-radius: 12px; background: var(--field); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.st-card.with { border-left-color: #7e57c2; margin-left: 14px; }
+.st-card.wait { border-left-color: #777; }
+.st-top, .st-row { display: flex; gap: 6px; align-items: center; }
+.st-top select { flex: 1; min-width: 0; }
+.st-row select { flex: 1; min-width: 0; }
+.st-n { width: 26px; height: 26px; border-radius: 13px; background: #333; display: grid; place-items: center; font-weight: 700; font-size: 13px; flex: none; }
+.st-b { width: 38px; height: 38px; flex: none; border: 1px solid #1f1f1f; border-radius: 10px; background: #3a3a3a; display: grid; place-items: center; }
+.st-b:disabled { opacity: .35; }
+.st-b svg.i { width: 17px; height: 17px; }
+.st-b[title="Move up"] svg.i { transform: rotate(180deg); }
+.st-b.del { color: #ef9a9a; }
+.st-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 6px; }
+.st-f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.st-f.wide { grid-column: 1 / -1; }
+.st-f input { width: 100%; min-width: 0; }
+.st-add { display: flex; gap: 8px; }
+.st-add .btn { flex: 1; }

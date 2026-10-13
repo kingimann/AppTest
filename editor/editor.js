@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -1878,6 +1878,8 @@ function control(target, path, spec) {
       return logicCard(target, path, spec.type);
     case 'graph':
       return graphCard(target, path);
+    case 'tweenSteps':
+      return stepsCard(target, path);
     case 'template': {
       const names = project.entities.filter((e) => e.template).map((e) => e.name);
       el = h('select', { onchange: (e) => set(e.target.value) },
@@ -2062,6 +2064,61 @@ function addSavedScript(j, s) {
   (j.behaviors ||= []).push({ type: 'graph', graph: clone(sc.graph), scriptRef: sc.id });
   if (sc.graph.nodes.some((n) => ['touch', 'touchEnd', 'touching'].includes(n.type)) && !j.ui && !j.body && !j.collider) j.collider = fitCollider(j, 'box');
 }
+
+/** Tween Sequence steps: one card per step, in order, each playing after the last, together with it, or as a pause. */
+const STEP_FIELDS = {
+  vec: ['move by', 'move to', 'move from', 'jump to', 'punch position'], angle: ['rotate by', 'rotate to', 'spin'],
+  amount: ['scale to', 'scale by', 'fade to', 'punch scale', 'punch rotation', 'shake position', 'shake rotation', 'shake scale'],
+};
+function stepsCard(target, path) {
+  const get = () => getPath(target(), path) || [];
+  const save = (list, structure) => { setPath(target(), path, list); changed({ inspector: structure }); if (structure) pushHistory(); };
+  const steps = get(), three = is3D() && !target().ui;
+  const num = (st, k, label, def) => h('label', { class: 'st-f' }, h('span', {}, label), h('input', { type: 'text', inputMode: 'decimal', value: st[k] ?? def ?? 0,
+    oninput: (ev) => { const v = parseFloat(ev.target.value); if (!Number.isNaN(v)) { st[k] = v; save(get()); } } }));
+  const sel = (val, options, on) => h('select', { onchange: (ev) => on(ev.target.value) }, options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: v === val }, l); }));
+  const cards = steps.map((st, i) => {
+    const wait = st.with === 'wait', fx = st.effect || 'move by';
+    const fields = [];
+    if (!wait) {
+      if (STEP_FIELDS.vec.includes(fx)) fields.push(num(st, 'x', 'X'), num(st, 'y', 'Y'), three ? num(st, 'z', 'Z') : null);
+      if (STEP_FIELDS.angle.includes(fx)) fields.push(num(st, 'angle', 'Degrees', 360));
+      if (STEP_FIELDS.amount.includes(fx)) fields.push(num(st, 'amount', fx === 'fade to' ? 'Opacity' : fx.startsWith('scale') ? 'Size' : 'Amount', 0.3));
+      if (fx === 'jump to') fields.push(num(st, 'height', 'Height', three ? 2 : 80));
+      if (fx === 'spiral') fields.push(num(st, 'radius', 'Radius', three ? 3 : 120), num(st, 'turns', 'Turns', 3));
+      if (fx === 'blink') fields.push(num(st, 'times', 'Blinks', 6));
+      if (fx === 'count up') fields.push(num(st, 'to', 'Count to', 100));
+      if (fx === 'color to') fields.push(h('label', { class: 'st-f' }, h('span', {}, 'Colour'), h('input', { type: 'color', value: st.color || '#ff5252', oninput: (ev) => { st.color = ev.target.value; save(get()); } })));
+      if (fx === 'type text' || fx === 'look at' || fx === 'count up') {
+        const k = fx === 'type text' ? 'text' : fx === 'look at' ? 'target' : 'var';
+        fields.push(h('label', { class: 'st-f wide' }, h('span', {}, fx === 'type text' ? 'Text' : fx === 'look at' ? 'Object or tag' : 'Variable (blank = text)'),
+          h('input', { type: 'text', value: st[k] ?? (k === 'target' ? 'player' : ''), autocapitalize: 'off', oninput: (ev) => { st[k] = ev.target.value; save(get()); } })));
+      }
+    }
+    fields.push(num(st, 'duration', wait ? 'Seconds' : 'Duration', 0.4));
+    const move = (d) => { const L = get(), j = i + d; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; save(L, true); };
+    return h('div', { class: 'st-card' + (wait ? ' wait' : st.with === 'with' ? ' with' : '') },
+      h('div', { class: 'st-top' },
+        h('span', { class: 'st-n' }, String(i + 1)),
+        sel(st.with || 'after', [['after', 'Then'], ['with', 'Together'], ['wait', 'Pause']], (v) => { st.with = v; save(get(), true); }),
+        h('button', { class: 'st-b', title: 'Move up', disabled: i === 0, onclick: () => move(-1) }, icon('chevron')),
+        h('button', { class: 'st-b down', title: 'Move down', disabled: i === steps.length - 1, onclick: () => move(1) }, icon('chevron')),
+        h('button', { class: 'st-b', title: 'Duplicate', onclick: () => { const L = get(); L.splice(i + 1, 0, clone(st)); save(L, true); } }, icon('copy')),
+        h('button', { class: 'st-b del', title: 'Remove step', onclick: () => { const L = get(); L.splice(i, 1); save(L, true); } }, icon('trash'))),
+      wait ? null : h('div', { class: 'st-row' }, sel(fx, TWEEN_EFFECTS.filter((x) => x !== 'path'), (v) => { st.effect = v; save(get(), true); }),
+        sel(st.ease || 'outQuad', EASES, (v) => { st.ease = v; save(get()); })),
+      h('div', { class: 'st-fields' }, fields));
+  });
+  const total = (() => { let t = 0, last = 0; for (const st of steps) { const d = +st.duration || 0; if (st.with === 'with') t = Math.max(t, last + d); else { last = t; t += d; } } return t; })();
+  return h('div', { class: 'row full steps-card' },
+    h('div', { class: 'st-sum' }, `${steps.length} step${steps.length === 1 ? '' : 's'} · ${round(total, 2)} s`),
+    ...cards,
+    h('div', { class: 'st-add' },
+      h('button', { class: 'btn', onclick: () => { const L = get(); L.push({ ...SEQ_STEP_DEFAULT, ...(three ? { y: 1 } : {}) }); save(L, true); } }, icon('plus'), 'Add Step'),
+      h('button', { class: 'btn', onclick: () => { const L = get(); L.push({ ...SEQ_STEP_DEFAULT, with: 'wait', duration: 0.3 }); save(L, true); } }, icon('clock'), 'Add Pause')));
+}
+/** How long a Tween Sequence plays once (for Preview). */
+const seqLength = (b) => { let t = 0, last = 0; for (const st of b.steps || []) { const d = +st.duration || 0; if (st.with === 'with') t = Math.max(t, last + d); else { last = t; t += d; } } return (+b.delay || 0) + t * (+b.loops < 0 ? 2 : (+b.loops || 0) + 1) + 0.3; };
 
 /** Visual logic: WHEN … IF … DO … cards. */
 function rulesEditor(target, path) {
@@ -2728,7 +2785,7 @@ const BEH_META = {
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
-  tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
@@ -2736,6 +2793,7 @@ const BEH_META = {
 /** Odin-style [Button]s shown at the top of a component. */
 const BEH_BUTTONS = {
   tween: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b) }],
+  tweenSequence: [{ label: 'Preview', icon: 'play', primary: true, fn: (j, i, b) => previewBehavior(j, b, Math.min(8, seqLength(b))) }],
   flipbook: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 3) }],
   animator: [{ label: 'Open Animation Timeline', icon: 'clock', primary: true, fn: (j, i) => openAnim(j, i) }],
   camera: [{ label: 'Look Through Camera', icon: 'camera', fn: (j, i, b) => lookThrough(j, b) }],
@@ -2859,7 +2917,7 @@ function componentsFor(j) {
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
-      ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
+      ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'tweenSequence', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
   return list;
 }

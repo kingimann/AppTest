@@ -5,23 +5,24 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Move', 'Looks', 'Animation', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus' };
+const CATS = ['Events', 'Flow', 'Actions', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'update', 'every', 'button', 'swipe', 'onMessage'],
-  _exec: ['addVar', 'sound', 'playAnim', 'punch', 'branch', 'wait', 'message', 'destroy'],
+  _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'destroy'],
   _bool: ['compare', 'touching', 'grounded', 'isMoving', 'coinFlip', 'and', 'not'],
   _number: ['number', 'getVar', 'random', 'math', 'distance', 'position'],
-  tap: ['addVar', 'punch', 'sound', 'playAnim', 'particles', 'countTo', 'destroy'],
+  tap: ['addVar', 'punch', 'popText', 'sound', 'pulse', 'playAnim', 'particles', 'destroy'],
   touch: ['destroy', 'damage', 'addVar', 'sound', 'particles', 'playAnim', 'blink'],
   update: ['branch', 'moveToward', 'lookAt', 'rotateBy', 'cooldown'],
   every: ['spawn', 'spawnAt', 'chance', 'randomBranch', 'addVar'],
   start: ['setVar', 'playAnim', 'message', 'loadGame', 'loop'],
   damaged: ['blink', 'playAnim', 'impulse', 'sound'], death: ['playAnim', 'fadeTo', 'particles', 'destroy', 'gameOver'],
   animEnd: ['playAnim', 'destroy', 'sendMessage'], playAnim: ['wait', 'sound', 'particles'],
+  tweenMove: ['punch', 'sound', 'particles'], tweenVar: ['popText', 'sound'], delayedCall: ['destroy', 'tweenMove', 'message'],
   branch: ['playAnim', 'addVar', 'sound', 'message'], wait: ['playAnim', 'destroy', 'spawn', 'showHide'],
 };
 const RECENT_KEY = 'pocket.recentNodes';
@@ -33,6 +34,7 @@ const CAT_HELP = {
   Move: 'Position, rotation and size.',
   Looks: 'Text, colour and effects.',
   Animation: 'Play clips, sprite frames, fades and flips.',
+  Tween: 'Smooth moves like DOTween: move, jump, shake, spin, pulse, count up, type text; pause, reverse or speed them up.',
   Objects: 'Create, remove and tag objects.',
   Game: 'Health, items and time.',
   Flow: 'Decide, wait, repeat, count.',
@@ -53,7 +55,7 @@ export const NODE_HELP = {
   zoomCamera: 'Smoothly zoom in or out', setLight: 'Turn a light on/off or dim it', setDarkness: 'How dark the 2D scene is (0–1)',
   hasSave: 'Is there a saved game?', grounded: 'Standing on something?', velocity: 'How fast this moves', touching: 'Touching something with a tag right now?', canSee: 'Nothing solid in between?',
   onMessage: 'When a message is sent (Send Message, buttons, tweens)', tweenTo: 'Smoothly animate a property with easing', punch: 'Pop, bump or wobble for juicy feedback',
-  killTweens: 'Stop all tweens on this object', playAnim: 'Play a clip (Animator or Sprite Sheet)', stopAnim: 'Stop the animation', sendMessage: 'Tell other objects something happened',
+  killTweens: 'Stop tweens on this object (or by tween ID)', playAnim: 'Play a clip (Animator or Sprite Sheet)', stopAnim: 'Stop the animation', sendMessage: 'Tell other objects something happened',
   impulse: 'Shake the camera from this spot (weaker far away)',
   varChanged: 'When a variable (score, hp…) changes', damaged: 'When this object loses health', death: 'When this object\'s health reaches 0', holding: 'Every frame while a finger is on the screen',
   loop: 'Run “each” several times, then “done” (use Loop Index)', flipFlop: 'Alternate: A, then B, then A…', cooldown: 'Let it through at most once every N seconds',
@@ -71,6 +73,15 @@ export const NODE_HELP = {
   toggleVar: 'Switch a variable between 0 and 1', setBackground: 'Change the background colour', setAlpha: 'See-through amount (0–1)', stopMoving: 'Set speed to zero',
   gravityScale: 'How much gravity pulls this (0 = floats)', isMoving: 'Moving right now?', isHolding: 'Is a finger on the screen?', touchPos: 'Where the finger is (in the world, 2D)',
   coinFlip: 'Randomly true or false', level: 'Which level this is (1, 2, 3…)', animPlaying: 'Is a clip playing right now?', spriteFrame: 'Which sprite sheet frame is showing',
+  tweenMove: 'Glide to (or by, or from) a point with easing', tweenToObj: 'Glide to where another object is', jumpTo: 'Hop in an arc', shakeTw: 'Jitter position, rotation or size',
+  spin: 'Turn round once or forever', pulse: 'Grow and shrink like a heartbeat', tweenColor: 'Fade to another colour', tweenVar: 'Count a variable up or down smoothly (score counters)',
+  typeText: 'Type a text letter by letter', spiralTw: 'Spiral outward', lookAtTw: 'Turn smoothly to face something', pauseTw: 'Pause or resume tweens (by ID or on this object)',
+  reverseTw: 'Play tweens backwards, forwards, flipped or from the start', tweenSpeed: 'Make tweens faster or slower (1 = normal)', playTween: 'Play this object\'s Tween / Tween Sequence',
+  delayedCall: '“later” runs after a delay; cancel it with Stop Tweens and its ID', isTweening: 'Is something still animating?',
+  popText: 'Floating text like “+10”', flashScreen: 'Flash the whole screen a colour', randomVar: 'Roll a random whole number into a variable', goToLevel: 'Jump to a level by number',
+  toggleComp: 'Turn a component (patrol, spawner…) on or off', waitUntil: 'Wait until something is true', randomWait: 'Wait a random time',
+  choose: 'Pick “yes” if the condition is true, else “no”', wave: 'A value that swings back and forth over time', remap: 'Convert a number from one range to another',
+  objPos: 'Where another object is', deltaTime: 'Seconds since the last frame',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
 
@@ -85,6 +96,8 @@ const GRAPH_TEMPLATES = [
   { label: 'Tap 5 times → win', nodes: [{ id: 'a', type: 'tap', x: 0, y: 0 }, { id: 'b', type: 'countTo', x: 300, y: 0, params: { times: 5 } }, { id: 'c', type: 'particles', x: 620, y: -40 }, { id: 'd', type: 'win', x: 620, y: 140 }], links: [['a', 'then', 'b'], ['b', 'not yet', 'c'], ['b', 'reached', 'd']] },
   { label: 'Hit → blink + hurt animation', nodes: [{ id: 'a', type: 'touch', x: 0, y: 0, params: { tag: 'enemy' } }, { id: 'b', type: 'playAnim', x: 300, y: 0, params: { clip: 'hurt', loop: 'once' } }, { id: 'c', type: 'blink', x: 600, y: 0, params: { seconds: 1 } }, { id: 'd', type: 'animEnd', x: 0, y: 220, params: { clip: 'hurt' } }, { id: 'e', type: 'playAnim', x: 300, y: 220, params: { clip: 'idle', loop: 'loop' } }], links: [['a', 'then', 'b'], ['b', 'then', 'c'], ['d', 'then', 'e']] },
   { label: 'Run / idle by speed', nodes: [{ id: 'a', type: 'update', x: 0, y: 0 }, { id: 'b', type: 'branch', x: 300, y: 0 }, { id: 'c', type: 'isMoving', x: 0, y: 150 }, { id: 'd', type: 'playAnim', x: 620, y: -60, params: { clip: 'run', loop: 'loop' } }, { id: 'e', type: 'playAnim', x: 620, y: 160, params: { clip: 'idle', loop: 'loop' } }], links: [['a', 'then', 'b'], ['c', 'value', 'b', 'condition'], ['b', 'true', 'd'], ['b', 'false', 'e']] },
+  { label: 'Collect: hop, fade, remove', nodes: [{ id: 'a', type: 'touch', x: 0, y: 0, params: { tag: 'player' } }, { id: 'b', type: 'popText', x: 300, y: 0, params: { text: '+10' } }, { id: 'c', type: 'jumpTo', x: 600, y: 0, params: { x: 0, y: 0, height: 60, seconds: 0.4 } }, { id: 'd', type: 'fadeTo', x: 900, y: 0, params: { alpha: 0, seconds: 0.4 } }, { id: 'e', type: 'destroy', x: 1200, y: 60 }], links: [['a', 'then', 'b'], ['b', 'then', 'c'], ['c', 'then', 'd'], ['d', 'finished', 'e']] },
+  { label: 'Tap → score counts up', nodes: [{ id: 'a', type: 'tap', x: 0, y: 0 }, { id: 'b', type: 'math', x: 0, y: 180, params: { op: '+', b: 10 } }, { id: 'g', type: 'getVar', x: -300, y: 180, params: { name: 'score' } }, { id: 'c', type: 'tweenVar', x: 300, y: 0, params: { name: 'score', seconds: 0.6 } }, { id: 'd', type: 'pulse', x: 620, y: 0, params: { amount: 1.2, seconds: 0.15, repeat: 'once' } }], links: [['a', 'then', 'c'], ['g', 'value', 'b', 'a'], ['b', 'value', 'c', 'to'], ['c', 'then', 'd']] },
   { label: 'Spawn a ring of 8', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'loop', x: 300, y: 0, params: { count: 8 } }, { id: 'c', type: 'spawn', x: 620, y: 0, params: { template: '' } }], links: [['a', 'then', 'b'], ['b', 'each', 'c']] },
 ];
 const def = (n) => NODE_TYPES[n.type] || { label: n.type, cat: 'Actions' };

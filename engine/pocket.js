@@ -440,14 +440,13 @@ function collide(e, other, m) {
 }
 
 // ============================================================================
-// Input: touch, mouse, keyboard, virtual joystick & buttons
+// Input: touch — virtual joystick, buttons, taps, drags, swipes and tilt
 // ============================================================================
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
     this.el = el;
     this.enabled = true;
-    this.keys = new Set();
     this.justPressed = new Set();
     this.pointers = new Map();
     this.taps = [];
@@ -462,14 +461,6 @@ export class Input {
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e, true));
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('keydown', (e) => {
-      if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
-      if (!this.keys.has(e.code)) this.justPressed.add(e.code);
-      this.keys.add(e.code);
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && this.enabled) e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
   }
 
   local(e) { const r = this.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
@@ -541,14 +532,9 @@ export class Input {
 
   get stickRadius() { return Math.min(70, this.engine.width * 0.15); }
 
-  /** Movement axis in [-1, 1] from joystick or keyboard. y is down/forward-negative. */
+  /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
-    const k = this.keys;
-    if (k.has('ArrowLeft') || k.has('KeyA')) x -= 1;
-    if (k.has('ArrowRight') || k.has('KeyD')) x += 1;
-    if (k.has('ArrowUp') || k.has('KeyW')) y -= 1;
-    if (k.has('ArrowDown') || k.has('KeyS')) y += 1;
     if (this.stick) { x += (this.stick.x - this.stick.bx) / this.stickRadius; y += (this.stick.y - this.stick.by) / this.stickRadius; }
     if (this.useTilt && this.tiltAxis) {
       const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
@@ -559,26 +545,25 @@ export class Input {
     return { x, y };
   }
 
-  /** Is an action held? Actions: 'jump', 'action', or any KeyboardEvent.code */
+  /** Is a touch button held? Actions: 'jump', 'action' */
   isDown(action) {
-    if (action === 'jump') return this.keys.has('Space') || this.keys.has('ArrowUp') || this.keys.has('KeyW') || this.buttons.some((b) => b.action === 'jump' && b.id != null);
-    if (action === 'action') return this.keys.has('KeyE') || this.keys.has('Enter') || this.buttons.some((b) => b.action === 'action' && b.id != null);
-    return this.keys.has(action);
+    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null);
+    return false;
   }
   /** Was an action pressed this frame? */
   pressed(action) {
     const j = this.justPressed;
     if (action === 'jump') {
       const hasBtn = this.buttons.some((b) => b.action === 'jump');
-      return j.has('Space') || j.has('ArrowUp') || j.has('KeyW') || j.has('btn:jump') || (!hasBtn && j.has('tap'));
+      return j.has('btn:jump') || (!hasBtn && (j.has('tap') || j.has('swipe:up')));
     }
-    if (action === 'action') return j.has('KeyE') || j.has('Enter') || j.has('btn:action');
+    if (action === 'action') return j.has('btn:action');
     return j.has(action);
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
   endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
-  reset() { this.pointers.clear(); this.stick = null; this.keys.clear(); this.useTilt = false; this.tiltBase = null; this.endFrame(); }
+  reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
 // ============================================================================
@@ -641,10 +626,17 @@ export function loadImage(src) {
 // ============================================================================
 // 2D renderer (Canvas 2D)
 // ============================================================================
+/** 1234 → "1234", 12345 → "12.3K", 4500000 → "4.5M" */
+export function formatNumber(v) {
+  const a = Math.abs(v);
+  if (a < 10000) return String(Math.floor(v));
+  for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return (Math.floor(v / n * 10) / 10) + u;
+  return String(Math.floor(v));
+}
 const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
   if (typeof v !== 'number') return v ?? '';
-  return String(k === 'time' ? Math.ceil(v) : Math.floor(v));
+  return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
 
 function drawEntity2D(ctx, e, vars, time) {
@@ -686,7 +678,7 @@ function drawEntity2D(ctx, e, vars, time) {
     const t = e.text;
     ctx.font = `${t.weight} ${t.size}px ${t.font}`;
     ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    ctx.fillText(fillTemplate(t.value, vars), 0, 0);
+    ctx.fillText(fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars), 0, 0);
   }
   ctx.restore();
 }
@@ -1074,7 +1066,7 @@ function respawnOrEnd(player, s, action) {
 }
 
 registerBehavior('move', {
-  label: 'Move', description: 'Player movement with joystick, keyboard, or dragging.',
+  label: 'Move', description: 'Player movement with the joystick, dragging, or tilting the phone.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
     { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both' },
@@ -1210,6 +1202,7 @@ registerBehavior('spawner', {
     { key: 'relative', label: 'Relative to this object', type: 'bool', default: false },
     { key: 'ramp', label: 'Speed-up per 10s', type: 'number', default: 0.1 },
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
+    { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -1222,7 +1215,8 @@ registerBehavior('spawner', {
         for (let i = alive.length - 1; i >= 0; i--) if (alive[i].dead) alive.splice(i, 1);
         if (alive.length >= p.max) return;
         const ox = p.relative ? e.x : 0, oy = p.relative ? e.y : 0, oz = p.relative ? e.z : 0;
-        const c = s.spawn(p.template, { x: ox + pick(p.x), y: oy + pick(p.y), z: oz + pick(p.z) });
+        const sn = (v) => (p.snap ? Math.round(v / p.snap) * p.snap : v);
+        const c = s.spawn(p.template, { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) });
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
     };
@@ -1234,17 +1228,26 @@ registerBehavior('shooter', {
   params: [
     { key: 'template', label: 'Bullet template', type: 'template', default: '' },
     { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 0.25 },
-    { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button'], default: 'auto' },
+    { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button', 'tap'], default: 'auto' },
   ],
   create(p) {
     let t = 0;
     return {
+      start(e, s) { if (p.trigger === 'action button') { s.settings.actionButton = true; s.engine.layoutButtons(); } },
       update(e, dt, s) {
         t -= dt;
         if (t > 0) return;
-        if (p.trigger !== 'auto' && !s.engine.input.isDown('action')) return;
+        const inp = s.engine.input;
+        if (p.trigger === 'action button' && !inp.isDown('action')) return;
+        if (p.trigger === 'tap' && !inp.pressed('tap')) return;
         t = p.every;
-        s.spawn(p.template, { x: e.x, y: e.y, z: e.z, ry: e.ry });
+        // bullets leave from the eye (first person) and face where the shooter faces
+        const o = { x: e.x, y: e.y + (e.data.eyeY || 0), z: e.z, rx: e.data.aimPitch || 0, ry: e.ry, rz: e.rz };
+        if (is3D(e)) { // start a little in front so the bullet doesn't fill the camera
+          const ry = (e.ry || 0) * DEG, rx = o.rx * DEG;
+          o.x += -Math.sin(ry) * Math.cos(rx) * 0.9; o.y += Math.sin(rx) * 0.9; o.z += -Math.cos(ry) * Math.cos(rx) * 0.9;
+        }
+        s.spawn(p.template, o);
       },
     };
   },
@@ -1549,6 +1552,8 @@ registerBehavior('tappable', {
   label: 'Tap Target', description: 'The player taps it on screen to score (clicker, whack-a-mole, bubble games).',
   params: [
     { key: 'points', label: 'Points', type: 'number', default: 10 },
+    { key: 'var', label: 'Adds to variable', type: 'text', default: 'score' },
+    { key: 'bonusVar', label: 'Extra points from variable', type: 'text', default: '' },
     { key: 'destroy', label: 'Disappear when tapped', type: 'bool', default: true },
     { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'power', 'click', 'hit', 'none'], default: 'coin' },
   ],
@@ -1557,7 +1562,7 @@ registerBehavior('tappable', {
       update(e, dt, s) {
         for (const t of s.engine.input.taps) {
           if (e.dead || !hitTest(s, e, t.x, t.y)) continue;
-          s.addVar('score', p.points);
+          s.addVar(p.var || 'score', p.points + (p.bonusVar ? +s.vars[p.bonusVar] || 0 : 0));
           if (p.sound !== 'none') s.engine.audio.sfx(p.sound);
           s.engine.vibrate(10);
           s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ffd23d', 14, 0.8);
@@ -1618,9 +1623,9 @@ registerBehavior('swipeMove', {
       start(e) { home = e.x; },
       update(e, dt, s) {
         const inp = s.engine.input, max = Math.floor((p.lanes - 1) / 2);
-        if (inp.pressed('swipe:left') || inp.pressed('ArrowLeft')) lane = Math.max(-max, lane - 1);
-        if (inp.pressed('swipe:right') || inp.pressed('ArrowRight')) lane = Math.min(max, lane + 1);
-        if (p.jump && e.body && e.body.grounded && (inp.pressed('swipe:up') || inp.pressed('ArrowUp') || inp.pressed('Space'))) {
+        if (inp.pressed('swipe:left')) lane = Math.max(-max, lane - 1);
+        if (inp.pressed('swipe:right')) lane = Math.min(max, lane + 1);
+        if (p.jump && e.body && e.body.grounded && inp.pressed('swipe:up')) {
           e.body.vel.y = is3D(e) ? p.jump : -p.jump; s.engine.audio.sfx('jump');
         }
         e.x += (home + lane * p.distance - e.x) * Math.min(1, dt * 14);
@@ -1716,6 +1721,197 @@ registerBehavior('destructible', {
         s.camera.shake = Math.max(s.camera.shake, 6);
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
         e.destroy();
+      },
+    };
+  },
+});
+
+// ---- camera & vehicle controllers for different game types ----
+const fwd3 = (yaw) => ({ x: -Math.sin(yaw), z: -Math.cos(yaw) });   // facing direction for a yaw (radians); yaw 0 looks toward -z
+const right3 = (yaw) => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
+
+registerBehavior('firstPerson', {
+  label: 'First Person', description: 'First-person controls: joystick to walk, drag the screen to look around. Pair with Shooter for an FPS.',
+  params: [
+    { key: 'speed', label: 'Walk speed', type: 'number', default: 6 },
+    { key: 'look', label: 'Look sensitivity', type: 'number', default: 0.25 },
+    { key: 'eye', label: 'Eye height above center', type: 'number', default: 0.6 },
+    { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 9 },
+  ],
+  create(p) {
+    let yaw = 0, pitch = 0;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        if (!s.gravity) s.gravity = -25;
+        yaw = (e.ry || 0) * DEG; e.visible = false; e.data.eyeY = p.eye;
+        s.settings.joystick = true; s.engine.layoutButtons();
+        s.camera.near = 0.05;
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, a = inp.axis(), b = e.body;
+        yaw -= inp.drag.dx * p.look * DEG; pitch = clamp(pitch - inp.drag.dy * p.look * DEG, -1.4, 1.4);
+        const f = fwd3(yaw), r = right3(yaw);
+        b.vel.x = (f.x * -a.y + r.x * a.x) * p.speed;
+        b.vel.z = (f.z * -a.y + r.z * a.x) * p.speed;
+        if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        e.ry = yaw / DEG; e.data.aimPitch = pitch / DEG;
+        const eye = { x: e.x, y: e.y + p.eye, z: e.z }, cp = Math.cos(pitch);
+        s.camera.position = eye;
+        s.camera.target = { x: eye.x + f.x * cp, y: eye.y + Math.sin(pitch), z: eye.z + f.z * cp };
+        if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+      },
+    };
+  },
+});
+
+registerBehavior('thirdPerson', {
+  label: 'Third Person', description: 'Over-the-shoulder controls: joystick moves relative to the camera, drag the screen to turn the camera.',
+  params: [
+    { key: 'speed', label: 'Run speed', type: 'number', default: 6 },
+    { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 10 },
+    { key: 'distance', label: 'Camera distance', type: 'number', default: 7 },
+    { key: 'height', label: 'Camera height angle', type: 'number', default: 25 },
+    { key: 'look', label: 'Turn sensitivity', type: 'number', default: 0.3 },
+  ],
+  create(p) {
+    let yaw = 0, tilt = 0, cam = null;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        if (!s.gravity) s.gravity = -25;
+        yaw = (e.ry || 0) * DEG; tilt = p.height * DEG;
+        s.settings.joystick = true; s.engine.layoutButtons();
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, a = inp.axis(), b = e.body;
+        yaw -= inp.drag.dx * p.look * DEG; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6, 0.05, 1.3);
+        const f = fwd3(yaw), r = right3(yaw);
+        const vx = (f.x * -a.y + r.x * a.x) * p.speed, vz = (f.z * -a.y + r.z * a.x) * p.speed;
+        b.vel.x = vx; b.vel.z = vz;
+        if (Math.hypot(vx, vz) > 0.3) {
+          const target = Math.atan2(-vx, -vz) / DEG, diff = ((target - e.ry + 540) % 360) - 180;
+          e.ry += diff * Math.min(1, dt * 12);
+        }
+        if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        const tgt = { x: e.x, y: e.y + 1, z: e.z }, d = p.distance;
+        const want = { x: tgt.x - f.x * d * Math.cos(tilt), y: tgt.y + d * Math.sin(tilt), z: tgt.z - f.z * d * Math.cos(tilt) };
+        const k = cam ? 1 - Math.exp(-10 * dt) : 1;
+        cam = cam || { ...want };
+        cam.x += (want.x - cam.x) * k; cam.y += (want.y - cam.y) * k; cam.z += (want.z - cam.z) * k;
+        s.camera.position = { ...cam }; s.camera.target = tgt;
+        if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+      },
+    };
+  },
+});
+
+registerBehavior('car', {
+  label: 'Car', description: 'Drive with the joystick: up = gas, down = brake/reverse, left/right = steer. 3D cars get a chase camera.',
+  params: [
+    { key: 'maxSpeed', label: 'Top speed', type: 'number', default: 320, default3d: 16 },
+    { key: 'accel', label: 'Acceleration', type: 'number', default: 260, default3d: 12 },
+    { key: 'turn', label: 'Steering (deg/sec)', type: 'number', default: 160, default3d: 110 },
+    { key: 'autoGas', label: 'Always accelerate', type: 'bool', default: false },
+    { key: 'chaseCam', label: 'Chase camera (3D)', type: 'bool', default: true },
+  ],
+  create(p) {
+    let v = 0, cam = null;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
+        s.settings.joystick = true; s.engine.layoutButtons();
+      },
+      update(e, dt, s) {
+        const a = s.engine.input.axis(), b = e.body;
+        const gas = p.autoGas ? 1 : -a.y;
+        v += gas * p.accel * dt;
+        v -= v * Math.min(1, (gas ? 0.6 : 1.8) * dt);
+        v = clamp(v, -p.maxSpeed * 0.4, p.maxSpeed);
+        const grip = clamp(Math.abs(v) / (p.maxSpeed * 0.25), 0, 1) * Math.sign(v || 1);
+        if (is3D(e)) {
+          e.ry -= a.x * p.turn * grip * dt;
+          const f = fwd3(e.ry * DEG);
+          b.vel.x = f.x * v; b.vel.z = f.z * v;
+          if (p.chaseCam) {
+            const want = { x: e.x - f.x * 7, y: e.y + 3.2, z: e.z - f.z * 7 }, k = cam ? 1 - Math.exp(-6 * dt) : 1;
+            cam = cam || { ...want };
+            cam.x += (want.x - cam.x) * k; cam.y += (want.y - cam.y) * k; cam.z += (want.z - cam.z) * k;
+            s.camera.position = { ...cam }; s.camera.target = { x: e.x + f.x * 3, y: e.y + 0.8, z: e.z + f.z * 3 };
+          }
+          if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+        } else {
+          e.rz += a.x * p.turn * grip * dt;
+          b.vel.x = Math.sin(e.rz * DEG) * v; b.vel.y = -Math.cos(e.rz * DEG) * v;
+        }
+        // hitting a wall bleeds speed
+        if (Math.hypot(b.vel.x, is3D(e) ? b.vel.z : b.vel.y) < Math.abs(v) * 0.3) v *= 0.9;
+      },
+    };
+  },
+});
+
+registerBehavior('projectile', {
+  label: 'Projectile', description: 'Flies straight the way it faces (use on bullet templates fired by a Shooter).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 650, default3d: 30 },
+    { key: 'life', label: 'Lifetime (sec)', type: 'number', default: 2 },
+  ],
+  create(p) {
+    let d, t = 0;
+    return {
+      start(e) {
+        if (is3D(e)) {
+          const ry = (e.ry || 0) * DEG, rx = (e.rx || 0) * DEG;
+          d = { x: -Math.sin(ry) * Math.cos(rx), y: Math.sin(rx), z: -Math.cos(ry) * Math.cos(rx) };
+        } else d = { x: Math.sin((e.rz || 0) * DEG), y: -Math.cos((e.rz || 0) * DEG), z: 0 };
+      },
+      update(e, dt) {
+        e.x += d.x * p.speed * dt; e.y += d.y * p.speed * dt; e.z += d.z * p.speed * dt;
+        if ((t += dt) > p.life) e.destroy();
+      },
+    };
+  },
+});
+
+// ---- clicker / idle game pieces ----
+registerBehavior('income', {
+  label: 'Income', description: 'Adds a variable to another every second (idle/clicker "per second" earnings).',
+  params: [
+    { key: 'var', label: 'Earns into', type: 'text', default: 'score' },
+    { key: 'rateVar', label: 'Rate variable (per sec)', type: 'text', default: 'perSecond' },
+  ],
+  create(p) { return { update(e, dt, s) { const r = +s.vars[p.rateVar] || 0; if (r) s.addVar(p.var, r * dt); } }; },
+});
+
+registerBehavior('upgrade', {
+  label: 'Upgrade Button', description: 'Tap to buy: spends a variable to raise another. The price grows each time. Show the price in text with {cost}.',
+  params: [
+    { key: 'cost', label: 'Starting price', type: 'number', default: 10 },
+    { key: 'costVar', label: 'Pay with', type: 'text', default: 'score' },
+    { key: 'addVar', label: 'Raises', type: 'text', default: 'perSecond' },
+    { key: 'amount', label: 'By', type: 'number', default: 1 },
+    { key: 'growth', label: 'Price growth (x)', type: 'number', default: 1.15 },
+  ],
+  create(p) {
+    return {
+      start(e) { e.data.cost = p.cost; e.data.owned = 0; },
+      update(e, dt, s) {
+        for (const t of s.engine.input.taps) {
+          if (!hitTest(s, e, t.x, t.y)) continue;
+          const have = +s.vars[p.costVar] || 0;
+          if (have < e.data.cost) {
+            s.engine.audio.sfx('click'); s.engine.vibrate(30);
+            s.message(`Need ${formatNumber(e.data.cost - have)} more`, 1);
+            continue;
+          }
+          s.addVar(p.costVar, -e.data.cost);
+          s.addVar(p.addVar, p.amount);
+          e.data.owned++;
+          e.data.cost = Math.ceil(e.data.cost * p.growth);
+          s.engine.audio.sfx('power'); s.engine.vibrate(12);
+          const k = e.sx; e.sx = e.sy = k * 1.08; s.tween(e, { sx: k, sy: k }, 0.18);
+        }
       },
     };
   },
@@ -1921,18 +2117,18 @@ export class Engine {
   update(dt) {
     const s = this.scene, inp = this.input;
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
-    if (inp.pressed('btn:mute') || inp.pressed('KeyM')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
+    if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
-    if (this.paused) { if (inp.pressed('tap') || inp.pressed('Escape') || inp.pressed('btn:pause')) this.paused = false; return; }
-    if (inp.pressed('btn:pause') || inp.pressed('Escape') || inp.pressed('KeyP')) { if (s.state === 'play') { this.paused = true; return; } }
+    if (this.paused) { if (inp.pressed('tap') || inp.pressed('btn:pause')) this.paused = false; return; }
+    if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
-      if (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter')) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap')) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
-      if (s.time - s.endTime > 0.8 && (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter'))) {
+      if (s.time - s.endTime > 0.8 && inp.pressed('tap')) {
         if (s.levelComplete) this.nextLevel(); else this.restart();
       }
       return;
@@ -1999,6 +2195,6 @@ export class Engine {
 /** Everything, for scripts: `P.Entity`, `P.rand`, ... */
 export const Pocket = {
   VERSION, Engine, Scene, Entity, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
-  Behaviors, registerBehavior, paramDefault, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
+  Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
 };
 export default Pocket;

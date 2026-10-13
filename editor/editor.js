@@ -498,7 +498,7 @@ surface.addEventListener('pointerdown', (ev) => {
     const giz = !panBtn && hitGizmo(x, y);
     if (giz) {
       beginTransform(giz, x, y);
-      if (giz.handle === 'free' && ev.pointerType !== 'mouse') armLongPress(() => { if (gesture && !gesture.moved) { const id = gesture.id; gesture = null; buzz(15); openObjectMenu(id, x, y); } });
+      if (giz.handle === 'free') armLongPress(() => { if (gesture && !gesture.moved) { const id = gesture.id; gesture = null; buzz(15); openObjectMenu(id, x, y); } });
       return;
     }
     const hit = panBtn || tool === 'hand' ? null : pick(x, y);
@@ -508,7 +508,7 @@ surface.addEventListener('pointerdown', (ev) => {
       const j = ent(hit.id);
       if (tool === 'rotate' || tool === 'scale') { gesture = { type: 'tap', id: hit.id, sx: x, sy: y, moved: false, was }; return; }
       gesture = { type: 'free', id: hit.id, sx: x, sy: y, orig: { x: j.x || 0, y: j.y || 0, z: j.z || 0 }, ui: !!j.ui, moved: false };
-      if (ev.pointerType !== 'mouse') armLongPress(() => { if (gesture?.id === hit.id && !gesture.moved) { gesture = null; buzz(15); openObjectMenu(hit.id, x, y); } });
+      armLongPress(() => { if (gesture?.id === hit.id && !gesture.moved) { gesture = null; buzz(15); openObjectMenu(hit.id, x, y); } });
       if (is3D() && !j.ui) {
         const p = rayPlaneY(engine.renderer.screenRay(engine.scene, x, y), gesture.orig.y);
         gesture.grab = p ? { x: p.x - gesture.orig.x, z: p.z - gesture.orig.z } : { x: 0, z: 0 };
@@ -516,7 +516,7 @@ surface.addEventListener('pointerdown', (ev) => {
     } else {
       const orbitMode = is3D() && !panBtn && !ev.shiftKey;
       gesture = { type: orbitMode ? 'orbit' : 'pan', lx: x, ly: y, sx: x, sy: y, moved: false };
-      if (ev.pointerType !== 'mouse') armLongPress(() => { if (gesture && !gesture.moved && (gesture.type === 'pan' || gesture.type === 'orbit')) { gesture = null; buzz(15); openSpaceMenu(x, y); } });
+      armLongPress(() => { if (gesture && !gesture.moved && (gesture.type === 'pan' || gesture.type === 'orbit')) { gesture = null; buzz(15); openSpaceMenu(x, y); } });
     }
   } else if (ptrs.size === 2) {
     if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
@@ -524,12 +524,7 @@ surface.addEventListener('pointerdown', (ev) => {
     gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, zoom0: cam2d.zoom, dist0: orbit.dist };
   }
 });
-surface.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  if (playing) return;
-  const { x, y } = localXY(e), hit = pick(x, y);
-  if (hit) { select(hit.id); openObjectMenu(hit.id, x, y); } else openSpaceMenu(x, y);
-});
+surface.addEventListener('contextmenu', (e) => e.preventDefault()); // long-press menus are handled above
 
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
@@ -665,20 +660,6 @@ const endPointer = (ev) => {
 };
 surface.addEventListener('pointerup', endPointer);
 surface.addEventListener('pointercancel', endPointer);
-surface.addEventListener('wheel', (ev) => {
-  if (playing) return;
-  ev.preventDefault();
-  const k = Math.exp(-ev.deltaY * 0.0015);
-  if (is3D()) orbit.dist = Math.min(300, Math.max(2, orbit.dist / k));
-  else {
-    const { x, y } = localXY(ev), s = engine.scene;
-    const before = engine.renderer.screenToWorld(s, x, y);
-    cam2d.zoom = Math.min(8, Math.max(0.08, cam2d.zoom * k)); applyCamera();
-    const after = engine.renderer.screenToWorld(s, x, y);
-    cam2d.x += before.x - after.x; cam2d.y += before.y - after.y;
-  }
-  applyCamera();
-}, { passive: false });
 
 let objClipboard = null;
 /** Turn a Scene-view point into an "at" position for addEntity. */
@@ -688,7 +669,7 @@ function worldAt(sx, sy) {
   const hit = rayPlaneY(engine.renderer.screenRay(s, sx, sy), 0);
   return hit ? { x: hit.x, z: hit.z } : undefined;
 }
-const pointRect = (sx, sy) => { const r = surface.getBoundingClientRect(); return { left: r.left + sx, right: r.left + sx, top: r.top + sy, bottom: r.top + sy }; };
+const pointRect = (sx, sy) => { const r = surface.getBoundingClientRect(); return { left: r.left + sx + 12, right: r.left + sx + 12, top: r.top + sy + 12, bottom: r.top + sy - 12, guard: true }; };
 function openObjectMenu(id, sx, sy) {
   const j = ent(id); if (!j) return;
   select(id);
@@ -725,19 +706,6 @@ function frameSelected() {
   applyCamera();
 }
 
-window.addEventListener('keydown', (ev) => {
-  if (playing) { if (ev.key === 'Escape') stop(); return; }
-  if (/input|textarea|select/i.test(ev.target.tagName)) return;
-  const k = ev.key.toLowerCase(), mod = ev.ctrlKey || ev.metaKey;
-  if (mod && k === 'z') { ev.preventDefault(); undoRedo(ev.shiftKey ? 1 : -1); }
-  else if (mod && k === 'y') { ev.preventDefault(); undoRedo(1); }
-  else if (mod && k === 'd' && ent(selectedId)) { ev.preventDefault(); duplicateEntity(selectedId); }
-  else if (mod && k === 'p') { ev.preventDefault(); play(); }
-  else if ((k === 'delete' || k === 'backspace') && ent(selectedId)) deleteEntity(selectedId);
-  else if (!mod && ({ q: 'hand', w: 'move', e: 'rotate', r: 'scale', b: 'paint' })[k]) setTool(({ q: 'hand', w: 'move', e: 'rotate', r: 'scale', b: 'paint' })[k]);
-  else if (!mod && k === 'f') frameSelected();
-});
-
 // ============================================================================
 // Tools, dock panels
 // ============================================================================
@@ -759,7 +727,7 @@ function setDock(name, { fromTab = false } = {}) {
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
-const isDesktop = () => matchMedia('(min-width: 1000px)').matches;
+const isDesktop = () => false; // phones and tablets only
 
 // ---- bottom sheet (phones): peek / half / full ----
 function setSheet(state) {
@@ -1225,15 +1193,17 @@ function renderSceneSettings(box) {
 // Components (Add Component list + Project panel)
 // ============================================================================
 const BEH_META = {
-  move: ['Movement', 'player'], platformer: ['Movement', 'jumper'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
+  move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
   rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
-  spawner: ['Spawning', 'spawner'], shooter: ['Spawning', 'bolt'], script: ['Scripting', 'script'],
+  spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
   chase: ['Movement', 'ghost'], float: ['Movement', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
   unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
   tappable: ['Touch', 'hand'], draggable: ['Touch', 'move'], swipeMove: ['Touch', 'arrow'],
-  orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Gameplay', 'bolt'],
+  orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Combat', 'bolt'],
+  firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
+  projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1312,6 +1282,10 @@ const PREFABS_2D = [
   { icon: 'bolt', label: 'Shooter Ship', props: { name: 'Ship', tags: ['player'], shape: { type: 'triangle', w: 34, h: 40, fill: '#4fc3f7' }, behaviors: [{ type: 'move', control: 'both', speed: 280, axes: 'horizontal' }, { type: 'shooter', template: 'Bullet', every: 0.25, trigger: 'auto' }] },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 60, y: 0 }, shape: { type: 'rect', w: 6, h: 16, radius: 3, fill: '#fff59d' }, behaviors: [{ type: 'velocity', vx: 0, vy: -600, vz: 0 }, { type: 'destroyOffscreen', margin: 60 }] }] },
   { icon: 'square', label: 'Target', props: { name: 'Target', shape: { type: 'rect', w: 50, h: 50, radius: 8, fill: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
+  { icon: 'car', label: 'Car', props: { name: 'Car', tags: ['player'], shape: { type: 'rect', w: 26, h: 44, radius: 8, fill: '#e53935' }, behaviors: [{ type: 'car', maxSpeed: 320, accel: 260, turn: 160, autoGas: false }, { type: 'cameraFollow', axes: 'both', smooth: 5 }] } },
+  { icon: 'hand', label: 'Clicker', props: { name: 'Big Button', shape: { type: 'circle', r: 80, fill: '#ffb74d', stroke: '#e65100', lineWidth: 6 }, behaviors: [{ type: 'tappable', points: 1, var: 'score', bonusVar: 'perTap', destroy: false, sound: 'click' }] }, vars: { perTap: 0 } },
+  { icon: 'plus', label: 'Upgrade', props: { name: 'Upgrade Button', ui: true, anchor: 'bottom', x: 0, y: -100, shape: { type: 'rect', w: 320, h: 60, radius: 14, fill: '#5d4037' }, text: { value: 'Upgrade +1/s  ·  {cost}', size: 18, color: '#fff3e0' }, behaviors: [{ type: 'upgrade', cost: 15, costVar: 'score', addVar: 'perSecond', amount: 1, growth: 1.15 }] }, vars: { perSecond: 0 },
+    extra: [{ name: 'Income', offset: { x: -150, y: -300 }, behaviors: [{ type: 'income', var: 'score', rateVar: 'perSecond' }] }] },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -1333,7 +1307,15 @@ const PREFABS_3D = [
   { icon: 'arrow', label: 'Lane Runner', props: { name: 'Runner', tags: ['player'], y: 0.5, mesh: { geometry: 'box', w: 0.8, h: 1, d: 0.8, color: '#4fc3f7' }, behaviors: [{ type: 'swipeMove', distance: 2.5, lanes: 3, jump: 9 }, { type: 'cameraFollow', oy: 5, oz: 8, smooth: 5 }] } },
   { icon: 'flag', label: 'Checkpoint', props: { name: 'Checkpoint', y: 0.75, mesh: { geometry: 'cylinder', r: 0.15, h: 1.5, color: '#90a4ae' }, behaviors: [{ type: 'checkpoint', text: 'Checkpoint!', tag: 'player' }] } },
   { icon: 'rotate', label: 'Orbiter', props: { name: 'Orbiter', y: 0.5, mesh: { geometry: 'sphere', r: 0.4, color: '#e53935' }, behaviors: [{ type: 'orbit', radius: 3, speed: 90 }, { type: 'hazard', action: 'damage' }] } },
-  { icon: 'square', label: 'Target', props: { name: 'Target', y: 0.75, mesh: { geometry: 'box', w: 1.5, h: 1.5, d: 0.3, color: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
+  { icon: 'square', label: 'Target', props: { name: 'Target', y: 0.75, mesh: { geometry: 'box', w: 1.5, h: 1.5, d: 0.4, color: '#ff8a65' }, behaviors: [{ type: 'destructible', hp: 3, hitBy: 'bullet', points: 10, removeHitter: true }] } },
+  { icon: 'crosshair', label: 'FPS Player', props: { name: 'FPS Player', tags: ['player'], y: 1, mesh: { geometry: 'box', w: 0.8, h: 1.8, d: 0.8, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 6, look: 0.25, eye: 0.6, jump: 9 }, { type: 'shooter', template: 'Bullet', every: 0.18, trigger: 'action button' }] },
+    scene: { settings: { joystick: true, actionButton: true, jumpButton: true } },
+    extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 2, y: 1 }, mesh: { geometry: 'sphere', r: 0.15, color: '#fff59d', emissive: 1 }, behaviors: [{ type: 'projectile', speed: 30, life: 1.5 }] },
+      { name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 34, color: '#ffffff' } }] },
+  { icon: 'player', label: 'TPS Player', props: { name: 'Hero', tags: ['player'], y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 1.4, color: '#ff8a3d' }, behaviors: [{ type: 'thirdPerson', speed: 6, jump: 10, distance: 7, height: 25, look: 0.3 }] },
+    scene: { settings: { joystick: true, jumpButton: true } } },
+  { icon: 'car', label: 'Car', props: { name: 'Car', tags: ['player'], y: 0.5, mesh: { geometry: 'box', w: 1.4, h: 0.8, d: 2.4, color: '#e53935' }, behaviors: [{ type: 'car', maxSpeed: 16, accel: 12, turn: 110, autoGas: false, chaseCam: true }] },
+    scene: { settings: { joystick: true } } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -1385,9 +1367,8 @@ const ghost = $('#dragGhost');
 function draggable(el, payload) {
   el.addEventListener('pointerdown', (e) => {
     if (playing || e.button > 0) return;
-    const mouse = e.pointerType === 'mouse';
     dnd = { payload, el, id: e.pointerId, sx: e.clientX, sy: e.clientY, started: false, cancelled: false };
-    dnd.timer = setTimeout(() => { if (dnd && !dnd.cancelled) startDrag(e.clientX, e.clientY); }, mouse ? 1e9 : 220);
+    dnd.timer = setTimeout(() => { if (dnd && !dnd.cancelled) startDrag(e.clientX, e.clientY); }, 220); // press & hold to pick up
   });
 }
 function startDrag(x, y) {
@@ -1419,8 +1400,7 @@ window.addEventListener('pointermove', (e) => {
   if (!dnd || e.pointerId !== dnd.id) return;
   if (!dnd.started) {
     const d = Math.hypot(e.clientX - dnd.sx, e.clientY - dnd.sy);
-    if (e.pointerType === 'mouse' ? d > 4 : false) startDrag(e.clientX, e.clientY);
-    else if (e.pointerType !== 'mouse' && d > 10) { dnd.cancelled = true; clearTimeout(dnd.timer); }
+    if (d > 10) { dnd.cancelled = true; clearTimeout(dnd.timer); } // finger moved first: it's a scroll
     return;
   }
   moveDrag(e.clientX, e.clientY);
@@ -1486,10 +1466,10 @@ function addPrefab(def, at) {
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   for (const x of def.extra || []) {
-    if (project.entities.some((e) => e.name === x.name && e.template)) continue;
+    if (project.entities.some((e) => e.name === x.name)) continue;
     const { offset, ...props } = x;
     const base = at || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
-    addEntity(props, { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
+    addEntity(props, props.ui ? undefined : { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
   }
   const j = addEntity(def.props, at);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
@@ -1553,6 +1533,13 @@ function popMenu(anchor, items) {
   const m = h('div', { class: 'menu' }, items.filter(Boolean).map((it) => it === '-' ? h('hr') : it.cap ? h('div', { class: 'cap' }, it.cap)
     : h('button', { onclick: () => { closeLayer(); it.fn(); } }, it.icon ? icon(it.icon) : h('span', { style: 'width:16px' }), it.label, it.k && h('span', { class: 'k' }, it.k))));
   layer.replaceChildren(m); layer.className = ''; layer.hidden = false;
+  if (anchor.guard) { // opened by a long-press: the finger lifting must not tap a menu item
+    layer.style.pointerEvents = 'none';
+    const release = () => setTimeout(() => { layer.style.pointerEvents = ''; }, 80);
+    window.addEventListener('pointerup', release, { once: true });
+    window.addEventListener('pointercancel', release, { once: true });
+    setTimeout(() => { layer.style.pointerEvents = ''; }, 1500);
+  }
   const mw = m.offsetWidth, mh = m.offsetHeight;
   let x = Math.min(r.left, window.innerWidth - mw - 8), y = r.bottom + 2;
   if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 2);
@@ -1565,10 +1552,11 @@ function openDialog(title, kids) {
 
 function openFileMenu() {
   popMenu($('#fileBtn'), [
-    { icon: 'newfile', label: 'New Project…', fn: openNewDialog },
+    { icon: 'home', label: 'Home', fn: showHome },
+    { icon: 'newfile', label: 'New Game…', fn: openNewDialog },
     { icon: 'folder', label: 'Open Project…', fn: openProjectsDialog },
-    { icon: 'undo', label: 'Undo', k: 'Ctrl+Z', fn: () => undoRedo(-1) },
-    { icon: 'redo', label: 'Redo', k: 'Ctrl+Y', fn: () => undoRedo(1) },
+    { icon: 'undo', label: 'Undo', k: '2-finger tap', fn: () => undoRedo(-1) },
+    { icon: 'redo', label: 'Redo', k: '3-finger tap', fn: () => undoRedo(1) },
     '-',
     { icon: 'save', label: 'Save', k: 'auto', fn: () => { saveNow(); toast('Saved'); } },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
@@ -1576,7 +1564,7 @@ function openFileMenu() {
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
     '-',
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
-    { icon: 'play', label: 'Play', k: 'Ctrl+P', fn: play },
+    { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
     '-',
     { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
@@ -1590,13 +1578,49 @@ function openFileMenu() {
 }
 
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
-function openNewDialog() {
-  openDialog('New Project', [
-    h('div', { class: 'tpl-grid' }, templateInfo.map((t) => h('button', { class: 'tpl', onclick: () => { closeLayer(); newFromTemplate(t.key); toast(`Created ${project.name}`); } },
-      h('div', { class: 'pv', style: `background:${TPL_COLORS[t.key] || '#2b2b2b'}` }, icon(templates[t.key].mode === '3d' ? 'cube' : 'grid')),
-      h('b', {}, t.title), h('small', {}, `${templates[t.key].mode.toUpperCase()} · ${t.blurb}`)))),
-  ]);
+function typeCards(onPick) {
+  return h('div', { class: 'types' }, templateInfo.map((t) => h('button', { class: 'type', onclick: () => onPick(t) },
+    h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube')),
+    h('b', {}, t.title), h('small', {}, `${templates[t.key].mode.toUpperCase()} · ${t.blurb}`))));
 }
+function startGame(t) {
+  closeLayer(); hideHome();
+  if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
+  newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : undefined);
+  toast(`Created ${root.name}. Tap ▶ Play to try it!`);
+}
+function openNewDialog() {
+  openDialog('New Game', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type. Each one is a working game you can change any way you like.'), typeCards(startGame)]);
+}
+
+// ---- Home screen: continue, new game by type, my games ----
+function showHome() {
+  closeLayer();
+  const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
+  const cur = root && all.find(([id]) => id === projectId);
+  home.replaceChildren(
+    h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('h1', {}, 'Pocket Engine')),
+    h('p', { class: 'sub' }, 'Make 2D and 3D games on your phone.'),
+    cur && h('button', { class: 'continue', onclick: hideHome },
+      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
+    h('h2', {}, 'New game'),
+    typeCards(startGame),
+    all.length ? [h('h2', {}, 'My games'), h('div', { class: 'mine' }, all.map(([id, pr]) => h('div', { class: 'proj-row' },
+      icon(pr.json.mode === '3d' ? 'cube' : 'grid'),
+      h('span', { class: 'nm', onclick: () => { saveNow(); openProject(pr.json, id); hideHome(); } }, pr.name),
+      h('small', {}, new Date(pr.updated).toLocaleDateString()),
+      id !== projectId && h('button', { title: 'Delete', onclick: () => {
+        if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return;
+        const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); showHome();
+      } }, icon('trash')))))] : null,
+    h('div', { class: 'home-actions' },
+      h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
+      !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App')),
+  );
+  home.hidden = false;
+  home.scrollTop = 0;
+}
+function hideHome() { $('#home').hidden = true; requestAnimationFrame(() => engine.resize()); }
 function openProjectsDialog() {
   const all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
   openDialog('Open Project', all.length ? all.map(([id, p]) => h('div', { class: 'proj-row' },
@@ -1610,7 +1634,7 @@ function openProjectsDialog() {
 }
 const TOUR = [
   ['cube', 'Welcome to Pocket Editor', 'Build 2D and 3D games right on your phone. Here is a quick tour; it takes 30 seconds.'],
-  ['folder', 'Add things', 'Open the Project tab, then press and hold a tile and drag it into the Scene. A quick tap adds it in the middle.'],
+  ['plus', 'Add things', 'Tap the blue + button (or the Project tab). Tap a tile to add it, or press, hold and drag it to the exact spot in the Scene.'],
   ['move', 'Arrange', 'Tap an object to select it and drag to move it. The tools at the top rotate, scale, and paint copies.'],
   ['info', 'Customize', 'The Inspector lists the selected object\'s components. Change any value, or tap Add Component for movement, scoring, enemies, doors and more.'],
   ['layers', 'Levels & settings', 'The level button above the Scene adds and switches levels. Tap the game name at the top of the Hierarchy for game settings like controls and time limits.'],
@@ -1649,9 +1673,8 @@ function openHelp() {
     row('Object menu', 'Long-press an object (or empty space to paste/add)'),
     row('Undo / Redo', 'Two-finger tap / three-finger tap'),
     row('Reset view', 'Double-tap empty space'),
-    row('Pan / Orbit', 'Drag empty space'), row('Zoom', 'Pinch, or mouse wheel'), row('Add objects', 'Drag from Project into the Scene'),
+    row('Pan / Orbit', 'Drag empty space'), row('Zoom', 'Pinch with two fingers'), row('Add objects', 'Drag from Project into the Scene'),
     row('Add components', 'Drag onto an object, or Add Component'), row('Edit numbers', 'Drag a field label left/right'),
-    row('Keyboard', 'Q W E R B tools · F frame · Ctrl+Z undo · Ctrl+D duplicate · Del delete'),
   ]);
 }
 
@@ -1671,7 +1694,7 @@ function importJSON() {
       const json = JSON.parse(await f.text());
       if (!Array.isArray(json.entities)) throw new Error('not a Pocket project');
       for (const e of json.entities) e.id ||= uid();
-      openProject(json); toast(`Imported ${json.name || 'project'}`);
+      openProject(json); hideHome(); toast(`Imported ${json.name || 'project'}`);
     } catch (err) { toast('Could not import: ' + err.message); }
   };
   fi.click();
@@ -1719,7 +1742,7 @@ function play() {
   engine.input.enabled = true;
   engine.timeScale = 1;
   const json = clone(root);
-  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false };
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any' };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
@@ -1765,6 +1788,8 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
 }
 $('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
 $('#panelsFab').append(icon('list'));
+$('#addFab').append(icon('plus'));
+$('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {
   const b = $(`#ctxBar [data-act="${act}"]`);
@@ -1793,13 +1818,14 @@ setTool('move');
   const all = loadProjects(), cur = store.get(CURRENT_KEY, '');
   const q = new URLSearchParams(location.search);
   if (q.get('template') && templates[q.get('template')]) newFromTemplate(q.get('template'));
-  else if (all[cur]) openProject(all[cur].json, cur);
   else {
-    newFromTemplate('sky-dodge', 'My First Game');
-    if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 300);
-    const hint = $('#hint');
-    hint.textContent = 'Drag items from Project into the Scene · Tap to select';
-    hint.hidden = false;
-    setDock('project');
+    if (all[cur]) openProject(all[cur].json, cur);
+    else newFromTemplate('sky-dodge', 'My First Game');
+    showHome();
+    if (store.get('pocket.editor.toured', '') !== '1') {
+      const hint = $('#hint');
+      hint.textContent = 'Tap + to add things · tap an object to edit it';
+      hint.hidden = false;
+    }
   }
 }

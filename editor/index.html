@@ -38,13 +38,14 @@
     </div>
     <div id="viewport">
       <div id="toolRail">
-        <button data-tool="hand" title="Hand tool (Q): pan the view"></button>
-        <button data-tool="move" title="Move tool (W)"></button>
-        <button data-tool="rotate" title="Rotate tool (E)"></button>
-        <button data-tool="scale" title="Scale tool (R)"></button>
-        <button data-tool="paint" title="Paint tool (B): tap or drag to place copies of the selected object"></button>
+        <button data-tool="hand" title="Hand: pan the view"></button>
+        <button data-tool="move" title="Move"></button>
+        <button data-tool="rotate" title="Rotate"></button>
+        <button data-tool="scale" title="Scale"></button>
+        <button data-tool="paint" title="Paint: tap or drag to place copies of the selected object"></button>
       </div>
       <button id="panelsFab" title="Show panels"></button>
+      <button id="addFab" title="Add objects and components"></button>
       <div id="hint" hidden></div>
       <div id="ctxBar" hidden>
         <button data-act="inspect"></button>
@@ -82,6 +83,7 @@
   <button id="pbPlay" class="tb on" title="Stop"></button>
   <button id="pbPause" class="tb" title="Pause"></button>
 </div>
+<div id="home" hidden></div>
 <div id="menuLayer" hidden></div>
 <div id="dragGhost" hidden></div>
 <input type="file" id="fileInput" hidden>

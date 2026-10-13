@@ -68,6 +68,9 @@ const P = {
   left: 'M15 6l-6 6 6 6',
   right: 'M9 6l6 6-6 6',
   paste: 'M9 3h6v3H9zM7 4.5H5V21h14V4.5h-2',
+  crosshair: 'M12 3v5M12 16v5M3 12h5M16 12h5M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z',
+  car: 'M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2.5h2.5V16M16.5 16v2.5H19V16M3.5 11h17M8 13.5h.01M16 13.5h.01',
+  home: 'M4 11l8-7 8 7M6 9.5V20h12V9.5M10 20v-6h4v6',
   ghost: 'M5 20V10a7 7 0 0 1 14 0v10l-2.3-1.8-2.4 1.8-2.3-1.8-2.3 1.8-2.4-1.8zM9.5 10.5h.01M14.5 10.5h.01',
 };
 const FILLED = { play: 'M7 4.5v15l12.5-7.5z', pause: 'M6 4h4.5v16H6zM13.5 4H18v16h-4.5z', stop: 'M6 6h12v12H6z' };

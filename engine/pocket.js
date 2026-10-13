@@ -155,6 +155,9 @@ export class Entity {
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
+    this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
+    this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -238,6 +241,7 @@ export class Entity {
     }
     if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity, ...this.rot2D() };
     if (this.bar) return { sphere: false, hx: this.bar.w * sx / 2, hy: this.bar.h * sy / 2, hz: Infinity };
+    if (this.minimap) return { sphere: false, hx: this.minimap.w * sx / 2, hy: this.minimap.h * sy / 2, hz: Infinity };
     if (this.text) {
       const len = String(this.text.value).length;
       return { sphere: false, hx: this.text.size * len * 0.3 * sx, hy: this.text.size * 0.6 * sy, hz: Infinity };
@@ -503,6 +507,24 @@ export class Sequence {
 }
 const catmull = (p0, p1, p2, p3, t) => { const t2 = t * t, t3 = t2 * t; return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3); };
 
+/** A point in a parent's local space → world space (parent position, rotation, scale). */
+export function localToWorld(p, x, y, z, mode) {
+  if (mode !== '3d' && !p.mesh && !p.model && !p.voxels) { const a = (p.rz || 0) * DEG, c = Math.cos(a), sn = Math.sin(a), lx = x * p.sx, ly = y * p.sy; return [p.x + lx * c - ly * sn, p.y + lx * sn + ly * c, p.z + z * p.sz]; }
+  const q = M4.transformPoint(M4.trs(p.x, p.y, p.z, p.rx * DEG, p.ry * DEG, p.rz * DEG, p.sx, p.sy, p.sz), x, y, z);
+  return [q.x, q.y, q.z];
+}
+/** A world point → a parent's local space. */
+export function worldToLocal(p, x, y, z, mode) {
+  if (mode !== '3d' && !p.mesh && !p.model && !p.voxels) { const a = -(p.rz || 0) * DEG, c = Math.cos(a), sn = Math.sin(a), dx = x - p.x, dy = y - p.y; return [(dx * c - dy * sn) / (p.sx || 1), (dx * sn + dy * c) / (p.sy || 1), (z - p.z) / (p.sz || 1)]; }
+  const q = M4.transformPoint(M4.invert(M4.trs(p.x, p.y, p.z, p.rx * DEG, p.ry * DEG, p.rz * DEG, p.sx, p.sy, p.sz)), x, y, z);
+  return [q.x, q.y, q.z];
+}
+/** A world-space movement → the same movement in a parent's local space. */
+export function localDelta(p, dx, dy, dz, mode) {
+  const a = worldToLocal(p, p.x, p.y, p.z, mode), b = worldToLocal(p, p.x + dx, p.y + dy, p.z + dz, mode);
+  return [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+}
+
 // ============================================================================
 // Scene
 // ============================================================================
@@ -538,6 +560,8 @@ export class Scene {
       : new Camera2D({ x: this.view.width / 2, y: this.view.height / 2, ...(opts.camera || {}) });
     this.entities = [];
     this.templates = {};
+    this.templateKids = {}; // template id → child descriptions
+    this.kids = []; // entities that have a parent, parents first
     this.particles = [];
     this.timers = [];
     this.tweens = [];
@@ -622,7 +646,9 @@ export class Scene {
   /** Build a scene from a plain JSON description (what the editor saves). */
   static fromJSON(json, { editing = false } = {}) {
     const s = new Scene({ ...json, json });
+    const tplIds = new Set((json.entities || []).filter((q) => q.template).map((q) => q.id)), inTpl = (ep) => { let q = ep, n = 0; const byId = s._jsonIds ||= new Map((json.entities || []).map((x) => [x.id, x])); while (q?.parent && n++ < 50) { if (tplIds.has(q.parent)) return true; q = byId.get(q.parent); } return false; };
     for (const ep of json.entities || []) {
+      if (!editing && !ep.template && inTpl(ep)) { (s.templateKids[ep.parent] ||= []).push(ep); continue; } // children of templates spawn with them
       if (ep.template && !editing) { s.templates[ep.name] = ep; continue; }
       const e = s.add(new Entity(editing ? { ...ep, behaviors: [] } : ep));
       if (ep.template) { e.template = true; e.alpha = 0.45; }
@@ -642,16 +668,59 @@ export class Scene {
   spawn(templateOrProps, overrides = {}) {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
     if (!base) { console.warn(`[pocket] no template "${templateOrProps}"`); return null; }
-    return this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
+    if (base.id) spawnKids(base.id, e);
+    return e;
   }
 
   flush() {
-    if (this.pending.length) { this.entities.push(...this.pending); this.pending.length = 0; this.entities.sort((a, b) => a.layer - b.layer); }
+    if (this.pending.length) {
+      const linked = this.pending.some((e) => e.parentId) || this.kids.length;
+      this.entities.push(...this.pending); this.pending.length = 0; this.entities.sort((a, b) => a.layer - b.layer);
+      if (linked) this.linkHierarchy();
+    }
     if (this.entities.some((e) => e.dead)) {
       for (const e of this.entities) if (e.dead) for (const b of e.behaviors) b.destroy?.(e, this);
       this.entities = this.entities.filter((e) => !e.dead);
     }
   }
+
+  /** Connect children to parents (by id) and remember each child's local transform. */
+  linkHierarchy() {
+    const byId = new Map(this.entities.map((e) => [e.id, e]));
+    const depth = (e) => { let n = 0, q = e; while (q.parentEnt && n < 50) { q = q.parentEnt; n++; } return n; };
+    for (const e of this.entities) {
+      const p = e.parentId ? byId.get(e.parentId) || null : null;
+      e.parentEnt = p && p !== e ? p : null;
+      if (e.parentEnt && !e.local) { e.local = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz, visible: e.visible }; e._lw = null; }
+    }
+    this.kids = this.entities.filter((e) => e.parentEnt).sort((a, b) => depth(a) - depth(b));
+    this.syncHierarchy(true);
+  }
+  /** Children follow their parents (position, rotation, scale, visibility). Moves made to a child this frame are kept. */
+  syncHierarchy(edit = false) {
+    for (const e of this.kids) {
+      const p = e.parentEnt;
+      if (e.dead || !p) continue;
+      if (p.dead) { if (!edit) e.destroy(); continue; }
+      e._parentHidden = p.visible === false || !!p._parentHidden;
+      if (e.ui) continue; // UI children are positioned inside their parent's box (uiOrigin)
+      const L = e.local;
+      if (!edit && e._lw) { // a behaviour or physics moved the child: fold that into its local transform
+        const dx = e.x - e._lw.x, dy = e.y - e._lw.y, dz = e.z - e._lw.z;
+        if (dx || dy || dz) { const d = localDelta(p, dx, dy, dz, this.mode); L.x += d[0]; L.y += d[1]; L.z += d[2]; }
+        for (const k of ['rx', 'ry', 'rz']) L[k] += e[k] - e._lw[k];
+        for (const k of ['sx', 'sy', 'sz']) if (e._lw[k]) L[k] *= e[k] / e._lw[k];
+      }
+      const w = localToWorld(p, L.x, L.y, L.z, this.mode);
+      e.x = w[0]; e.y = w[1]; e.z = w[2];
+      e.rx = p.rx + L.rx; e.ry = p.ry + L.ry; e.rz = p.rz + L.rz;
+      e.sx = p.sx * L.sx; e.sy = p.sy * L.sy; e.sz = p.sz * L.sz;
+      e._lw = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz };
+    }
+  }
+  childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
 
   find(name) { return this.entities.find((e) => e.name === name && !e.dead) || this.pending.find((e) => e.name === name); }
   findAll(tag) { return this.entities.filter((e) => !e.dead && (e.tags.has(tag) || e.name === tag)); }
@@ -1065,7 +1134,7 @@ export class Input {
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
-    const btn = this.buttons.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3);
+    const btn = this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
     const stickSide = st.joystickSide === 'right' ? p.x > this.engine.width * 0.5 : p.x < this.engine.width * 0.5;
@@ -1179,7 +1248,7 @@ export class Input {
 // Audio: tiny WebAudio synth for sound effects, plus file playback
 // ============================================================================
 export class Audio {
-  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); }
+  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); this.volume = 1; }
   unlock() {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; } }
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -1189,7 +1258,8 @@ export class Audio {
     if (this.muted || !this.ctx) return;
     const t = this.ctx.currentTime + delay, o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(Math.max(1, to), t + dur);
-    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    if (this.volume <= 0.001) return;
+    g.gain.setValueAtTime(vol * this.volume, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + dur + 0.02);
   }
   sfx(name) {
@@ -1214,7 +1284,7 @@ export class Audio {
     if (this.muted) return;
     const buf = await this.load(url); if (!buf) return;
     const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
-    s.buffer = buf; g.gain.value = vol; s.connect(g).connect(this.ctx.destination); s.start();
+    s.buffer = buf; g.gain.value = vol * this.volume; s.connect(g).connect(this.ctx.destination); s.start();
   }
 }
 
@@ -1313,7 +1383,14 @@ function drawEntity2D(ctx, e, vars, time) {
     const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
     const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
     const k = clamp((+src[key] || 0) / max, 0, 1);
-    if (b.icon) { // hearts-style: one icon per point, empty ones faded
+    if (b.style === 'ring') { // radial / circular progress
+      const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * 0.22);
+      e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
+      ctx.lineWidth = lw; ctx.lineCap = 'round';
+      ctx.strokeStyle = b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, 0, Math.PI * 2); ctx.stroke();
+      if (e.data._barK > 0.001) { ctx.strokeStyle = b.fill; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * e.data._barK); ctx.stroke(); }
+      if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${Math.round(k * 100)}%`, 0, 1); }
+    } else if (b.icon) { // hearts-style: one icon per point, empty ones faded
       const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
       ctx.font = `${Math.round(sz)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
@@ -1368,7 +1445,7 @@ export class Renderer2D {
     ctx.translate(-c.x, -c.y);
     if (engine.editing && engine.drawGrid) engine.drawGrid(ctx, scene, z);
     for (const e of scene.entities) { const L = e.data._line; if (L && !e.dead) { ctx.strokeStyle = L[6]; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(L[3], L[4]); ctx.stroke(); } }
-    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead) drawEntity2D(ctx, e, scene.vars, scene.time);
+    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead && !e._parentHidden) drawEntity2D(ctx, e, scene.vars, scene.time);
     for (const p of scene.particles) {
       ctx.globalAlpha = Math.max(0, p.life) * (p.alpha ?? 1);
       ctx.fillStyle = p.color;
@@ -1836,14 +1913,14 @@ export class Renderer3D {
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
 
     const transparent = [], shadows = [];
-    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead) this.drawVoxels(e);
+    for (const e of scene.entities) if (e.voxels && e.visible && !e.dead && !e._parentHidden) this.drawVoxels(e);
     for (const e of scene.entities) {
-      if (!e.model || !e.visible || e.dead) continue;
+      if (!e.model || !e.visible || e.dead || e._parentHidden) continue;
       this.drawModel(e, e.data.invuln > 0 && Math.floor(scene.time * 12) % 2 ? 0.3 : 1);
       if (e.body && e.body.type !== 'static' && !e.body.sensor) shadows.push(e);
     }
     for (const e of scene.entities) {
-      if (!e.mesh || !e.visible || e.dead) continue;
+      if (!e.mesh || !e.visible || e.dead || e._parentHidden) continue;
       let op = e.mesh.opacity * e.alpha;
       if (e.data.invuln > 0 && Math.floor(scene.time * 12) % 2) op *= 0.3;
       if (op < 1) { transparent.push([e, op]); } else this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive);
@@ -1928,12 +2005,57 @@ function drawMessage(ctx, scene, W, H, engine) {
   ctx.globalAlpha = 1;
 }
 
+const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
+/** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
+export function uiOrigin(e, W, H, safe) {
+  const p = e.parentEnt;
+  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
+  return anchorPoint(e.anchor, W, H, safe);
+}
+/** Screen box of a UI element: centre x/y, width, height. */
+export function uiBox(e, W, H, safe) {
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy;
+  return { x: o.x + e.x + (ex.ox || 0), y: o.y + e.y + (ex.oy || 0), w: hw * 2, h: hh * 2 };
+}
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
   const x = a.includes('left') ? safe.left : a.includes('right') ? W - safe.right : W / 2;
   const y = a.startsWith('top') ? safe.top : a.startsWith('bottom') ? H - safe.bottom : H / 2;
   return { x, y };
 }
+
+/** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
+function applyStretch(e, W, H, safe) {
+  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null;
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: safe.left, t: safe.top, w: W - safe.left - safe.right, h: H - safe.top - safe.bottom };
+  const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w - m * 2)); e.x = box.l + box.w / 2 - ao.x; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h - m * 2)); e.y = box.t + box.h / 2 - ao.y; }
+}
+/** Minimap: a small overview of the level around the player (or the whole view in 2D). */
+function drawMinimap(ctx, e, s) {
+  const M = e.minimap, w = M.w * e.sx, h = M.h * e.sy, three = s.mode === '3d';
+  const center = s.findAll(M.follow || 'player')[0] || { x: three ? s.camera.target.x : s.camera.x, y: three ? s.camera.target.z : s.camera.y, z: 0 };
+  const cx = center.x, cy = three ? center.z : center.y, range = +M.range || 800, k = Math.min(w, h) / range;
+  ctx.save();
+  ctx.beginPath(); if (M.round) ctx.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2); else if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, 10); else ctx.rect(-w / 2, -h / 2, w, h);
+  ctx.fillStyle = M.bg; ctx.fill(); ctx.save(); ctx.clip();
+  for (const q of s.entities) {
+    if (q.ui || q.dead || !q.visible || q.minimap || q.template) continue;
+    const px = (q.x - cx) * k, py = ((three ? q.z : q.y) - cy) * k;
+    if (Math.abs(px) > w / 2 + 6 || Math.abs(py) > h / 2 + 6) continue;
+    const isP = q.has('player'), isE = q.has('enemy');
+    const ex = q.extents(), sw = Math.max(isP || isE ? 6 : 2, (ex.sphere ? ex.r * 2 : (ex.bx ?? ex.hx) * 2) * k), sh = Math.max(isP || isE ? 6 : 2, (ex.sphere ? ex.r * 2 : three ? ex.hz * 2 : (ex.by ?? ex.hy) * 2) * k);
+    ctx.fillStyle = isP ? (M.playerColor || '#4fc3f7') : isE ? (M.enemyColor || '#ff5252') : q.body?.type === 'static' ? 'rgba(255,255,255,0.55)' : q.getBehavior?.('collectible') ? '#ffd54f' : 'rgba(255,255,255,0.25)';
+    if (isP || isE) { ctx.beginPath(); ctx.arc(px, py, Math.max(sw, sh) / 2, 0, Math.PI * 2); ctx.fill(); }
+    else ctx.fillRect(px - sw / 2, py - sh / 2, Math.min(sw, w), Math.min(sh, h));
+  }
+  ctx.restore();
+  ctx.strokeStyle = M.border; ctx.lineWidth = 2; ctx.beginPath(); if (M.round) ctx.arc(0, 0, Math.min(w, h) / 2, 0, Math.PI * 2); else if (ctx.roundRect) ctx.roundRect(-w / 2, -h / 2, w, h, 10); else ctx.rect(-w / 2, -h / 2, w, h); ctx.stroke();
+  ctx.restore();
+}
+/** Screen rectangle of a UI element: { x, y (center), w, h }. */
+function uiRect(s, e) { const eng = s.engine; return uiBox(e, eng.width, eng.height, eng.safe); }
 
 /** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
 function ownScreen(scene, screen) {
@@ -1948,14 +2070,19 @@ function renderUI(engine, scene) {
   if (!scene) return;
   engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
-    const screen = engine.paused ? 'paused' : scene.state;
+    const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
+    if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
     for (const e of scene.entities) {
-      if (!e.ui || !e.visible || e.dead) continue;
+      if (!e.ui || !e.visible || e.dead || e._parentHidden) continue;
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
-      const o = anchorPoint(e.anchor, W, H, engine.safe);
-      ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time); ctx.restore();
+      if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
+      const o = uiOrigin(e, W, H, engine.safe);
+      ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time);
+      if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
+      ctx.restore();
     }
+    if (V) ctx.restore();
   }
   if (engine.editing) return;
 
@@ -1988,6 +2115,7 @@ function renderUI(engine, scene) {
       ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
     for (const b of inp.buttons) {
+      if (b.hidden) continue; // UI Touch Buttons draw themselves
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
@@ -2933,8 +3061,9 @@ registerBehavior('sound', {
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
+  if (e._parentHidden) return false;
   if (e.ui) {
-    const o = anchorPoint(e.anchor, eng.width, eng.height, eng.safe), ex = e.extents();
+    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents();
     const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
     return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
   }
@@ -3135,6 +3264,204 @@ registerBehavior('destructible', {
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
         e.destroy();
       },
+    };
+  },
+});
+
+// ---- UI components ----
+/** Slider: drag along a bar to set a variable (volume, difficulty, size…). */
+registerBehavior('uiSlider', {
+  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. A slider for {volume} (0–100) controls the game’s sound.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'volume', suggest: 'vars' },
+    { key: 'min', label: 'Minimum', type: 'number', default: 0 },
+    { key: 'max', label: 'Maximum', type: 'number', default: 100 },
+    { key: 'step', label: 'Step (0 = smooth)', type: 'number', default: 1 },
+    { key: 'start', label: 'Starting value', type: 'number', default: 80 },
+  ],
+  create(p) {
+    let dragging = null;
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (s.vars[p.var] == null) s.setVar(p.var, +p.start);
+        if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max - +p.min || 1; if (+p.min) e.bar.var = p.var; }
+      },
+      update(e, dt, s) {
+        if (!e.visible) return;
+        const inp = s.engine.input, r = uiRect(s, e);
+        if (!dragging) for (const d of inp.downs) if (Math.abs(d.x - r.x) < r.w / 2 + 12 && Math.abs(d.y - r.y) < Math.max(22, r.h / 2 + 10)) dragging = d.id;
+        const ptr = dragging != null && inp.pointers.get(dragging);
+        if (!ptr) { dragging = null; return; }
+        let v = +p.min + clamp((ptr.x - (r.x - r.w / 2)) / (r.w || 1), 0, 1) * (+p.max - +p.min);
+        if (+p.step > 0) v = Math.round(v / p.step) * p.step;
+        if (v !== s.vars[p.var]) s.setVar(p.var, +v.toFixed(3));
+      },
+    };
+  },
+});
+
+/** Toggle: tap to switch a variable between on (1) and off (0); changes its text and color. */
+registerBehavior('uiToggle', {
+  label: 'Toggle', description: 'A switch or checkbox: tap to turn a variable on (1) or off (0). Shows different text and color for each state (e.g. Sound: ON / OFF).',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'music', suggest: 'vars' },
+    { key: 'start', label: 'Starts on', type: 'bool', default: true },
+    { key: 'onText', label: 'Text when on', type: 'text', default: 'ON' },
+    { key: 'offText', label: 'Text when off', type: 'text', default: 'OFF' },
+    { key: 'onColor', label: 'Color when on', type: 'color', default: '#43a047' },
+    { key: 'offColor', label: 'Color when off', type: 'color', default: '#616161' },
+  ],
+  create(p) {
+    const show = (e, s) => { const on = !!+s.vars[p.var]; if (e.text) e.text.value = on ? p.onText : p.offText; if (e.shape) e.shape.fill = on ? p.onColor : p.offColor; };
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var] == null) s.setVar(p.var, p.start ? 1 : 0); show(e, s); },
+      update(e, dt, s) {
+        if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) { s.setVar(p.var, +s.vars[p.var] ? 0 : 1); s.engine.audio.sfx('click'); s.punch(e, { sx: 0.12, sy: 0.12 }, 0.25, { add: true }); }
+        show(e, s);
+      },
+    };
+  },
+});
+
+/** Layout Group (like Unity's Horizontal / Vertical / Grid Layout): lines up UI elements with a tag inside this one. */
+registerBehavior('uiLayout', {
+  label: 'Layout Group', description: 'Lines up other UI elements in a row, a column or a grid inside this one, with even spacing. Give the elements a tag and enter it here.',
+  params: [
+    { key: 'tag', label: 'Arrange UI tagged', type: 'text', default: 'menu', suggest: 'tags' },
+    { key: 'direction', label: 'Direction', type: 'select', options: ['vertical', 'horizontal', 'grid'], default: 'vertical' },
+    { key: 'spacing', label: 'Spacing', type: 'number', default: 12 },
+    { key: 'columns', label: 'Columns (grid)', type: 'number', default: 3, showIf: { direction: ['grid'] } },
+    { key: 'align', label: 'Align', type: 'select', options: ['center', 'start', 'end'], default: 'center' },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.has(p.tag) && q.visible);
+        if (!items.length) return;
+        const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
+        const eng = s.engine, place = (q, cx, cy) => { const o = uiOrigin(q, eng.width, eng.height, eng.safe), ex = q.extents(); q.x = cx - o.x - (ex.ox || 0); q.y = cy - o.y - (ex.oy || 0); };
+        if (p.direction === 'grid') {
+          const cols = Math.max(1, +p.columns || 1), cw = Math.max(...sizes.map((z) => z[0])), ch = Math.max(...sizes.map((z) => z[1])), rows = Math.ceil(items.length / cols);
+          const W = cols * cw + (cols - 1) * gap, H = rows * ch + (rows - 1) * gap;
+          items.forEach((q, i) => place(q, box.x - W / 2 + cw / 2 + (i % cols) * (cw + gap), box.y - H / 2 + ch / 2 + Math.floor(i / cols) * (ch + gap)));
+          return;
+        }
+        const v = p.direction === 'vertical', total = sizes.reduce((a, z) => a + (v ? z[1] : z[0]), 0) + gap * (items.length - 1);
+        let at = (v ? box.y : box.x) - total / 2;
+        items.forEach((q, i) => {
+          const [w, h] = sizes[i], len = v ? h : w, cross = v ? w : h, room = v ? box.w : box.h;
+          const off = p.align === 'start' ? -room / 2 + cross / 2 : p.align === 'end' ? room / 2 - cross / 2 : 0;
+          if (v) place(q, box.x + off, at + len / 2); else place(q, at + len / 2, box.y + off);
+          at += len + gap;
+        });
+      },
+    };
+  },
+});
+
+/** Animated Counter: shows a variable that counts up/down smoothly, like a slot machine score. */
+registerBehavior('uiCounter', {
+  label: 'Animated Counter', description: 'Shows a variable in this text and makes it count up (or down) smoothly when it changes, with a little pop. Great for scores and coins.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'score', suggest: 'vars' },
+    { key: 'prefix', label: 'Before', type: 'text', default: '' },
+    { key: 'suffix', label: 'After', type: 'text', default: '' },
+    { key: 'speed', label: 'Counting speed', type: 'number', default: 8, range: [1, 30], step: 1 },
+    { key: 'pop', label: 'Pop when it changes', type: 'bool', default: true },
+  ],
+  create(p) {
+    let shown = null, last = null;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const v = +s.vars[p.var] || 0;
+        if (shown === null) shown = v;
+        if (last !== null && v > last && p.pop) s.punch(e, { sx: 0.18, sy: 0.18 }, 0.3, { add: false });
+        last = v;
+        shown += (v - shown) * Math.min(1, dt * (+p.speed || 8));
+        if (Math.abs(v - shown) < 0.5) shown = v;
+        e.text ||= { ...TEXT_DEFAULTS };
+        e.text.value = `${p.prefix}${formatNumber(Math.round(shown))}${p.suffix}`;
+      },
+    };
+  },
+});
+
+/** Typewriter: reveals this text one letter at a time. */
+registerBehavior('typewriter', {
+  label: 'Typewriter Text', description: 'Reveals this text one letter at a time, like a story or a hint. Can start on a message and repeat.',
+  params: [
+    { key: 'speed', label: 'Letters per second', type: 'number', default: 30, range: [2, 120], step: 1 },
+    { key: 'startOn', label: 'Start', type: 'select', options: ['start', 'message'], default: 'start' },
+    { key: 'message', label: 'Message', type: 'text', default: 'story', suggest: 'messages', showIf: { startOn: ['message'] } },
+    { key: 'sound', label: 'Typing sound', type: 'bool', default: true },
+  ],
+  create(p) {
+    let full = '', n = 0, on = false;
+    return {
+      uiAlways: true,
+      start(e, s) { full = e.text?.value || ''; if (e.text) e.text.value = ''; on = p.startOn === 'start'; s.on('message', (m) => { if (m === p.message) { n = 0; on = true; } }); },
+      update(e, dt, s) {
+        if (!on || !e.text) return;
+        const before = Math.floor(n); n = Math.min(full.length, n + dt * (+p.speed || 30));
+        if (p.sound && Math.floor(n) > before && full[Math.floor(n) - 1] !== ' ' && Math.floor(n) % 2 === 0) s.engine.audio.tone({ freq: 900 + Math.random() * 200, dur: 0.02, vol: 0.03 });
+        e.text.value = full.slice(0, Math.floor(n));
+        if (n >= full.length) on = false;
+      },
+    };
+  },
+});
+
+/** Text Input: tap to type a name or answer into a variable. */
+registerBehavior('uiInput', {
+  label: 'Text Input', description: 'Tap to type something (a player name, an answer) into a variable. Show it anywhere with {name}.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'name', suggest: 'vars' },
+    { key: 'question', label: 'Question', type: 'text', default: 'What is your name?' },
+    { key: 'placeholder', label: 'Shown when empty', type: 'text', default: 'Tap to type…' },
+    { key: 'maxLength', label: 'Max letters', type: 'number', default: 16 },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
+          s.engine.input.reset();
+          const v = typeof prompt === 'function' ? prompt(p.question, s.vars[p.var] || '') : null;
+          if (v != null) s.setVar(p.var, String(v).slice(0, +p.maxLength || 16));
+        }
+        e.text ||= { ...TEXT_DEFAULTS };
+        e.text.value = s.vars[p.var] ? String(s.vars[p.var]) : p.placeholder;
+      },
+    };
+  },
+});
+
+/** Touch Button: your own on-screen control, placed and sized anywhere (left, right, jump, fire…). */
+registerBehavior('touchButton', {
+  label: 'Touch Button', description: 'Make this UI element a game control you can place and size anywhere: move left/right/up/down, jump, fire, or send a message while held. Lights up while pressed.',
+  params: [
+    { key: 'action', label: 'Does', type: 'select', options: ['jump', 'fire', 'left', 'right', 'up', 'down', 'message'], default: 'jump' },
+    { key: 'message', label: 'Message when pressed', type: 'text', default: 'boost', suggest: 'messages', showIf: { action: ['message'] } },
+  ],
+  create(p) {
+    const ACT = { jump: 'jump', fire: 'action', left: 'dleft', right: 'dright', up: 'dup', down: 'ddown', message: 'msg' };
+    let btn = null, was = false;
+    return {
+      update(e, dt, s) {
+        const inp = s.engine.input, r = uiRect(s, e);
+        if (!btn || !inp.buttons.includes(btn)) { btn = { action: ACT[p.action] || 'jump', label: '', hidden: true, id: null }; inp.buttons.push(btn); }
+        Object.assign(btn, { x: r.x, y: r.y, w: r.w + 16, h: r.h + 16, r: Math.max(r.w, r.h) / 2 });
+        const held = btn.id != null && e.visible;
+        if (!e.visible) btn.x = -9999;
+        e.alpha = held ? 1 : 0.75;
+        if (held && !was) { s.punch(e, { sx: -0.1, sy: -0.1 }, 0.15, { add: true }); if (p.action === 'message') s.send(p.message); }
+        was = held;
+      },
+      destroy(e, s) { const inp = s.engine.input; inp.buttons = inp.buttons.filter((b) => b !== btn); },
     };
   },
 });
@@ -5058,6 +5385,7 @@ export class Engine {
     const s = this.scene, inp = this.input;
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
+    if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     if (this.paused) {
@@ -5109,6 +5437,7 @@ export class Engine {
     }
     this.stepEffects(dt);
     s.flush();
+    if (s.kids.length) s.syncHierarchy(false);
   }
 
   stepEffects(dt) {
@@ -5136,6 +5465,7 @@ export class Engine {
 
   render() {
     if (!this.scene || !this.renderer) return;
+    if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.renderer.render(this.scene, this);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);

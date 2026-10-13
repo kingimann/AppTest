@@ -135,6 +135,37 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
+### Rect tool and UI components
+
+- **Rect tool** (like Unity's T tool; the corner-squares button on the tool rail, and the default in the UI editor):
+  - Drag any of the **8 handles** to resize a UI element or a 2D object. The opposite edge stays put; circles and rings stay round.
+  - Drag the middle to move. A live **W × H** label shows the size, and the magnet snaps to 4 px.
+  - The UI Element inspector has **Size (W × H)** fields and **Stretch to screen** (full width / full height / fill, with a margin), like Unity's stretch anchors.
+- **New UI components**:
+  - **Slider** (drag to set a variable; one bound to `{volume}` 0–100 controls the game's sound).
+  - **Toggle** (on/off variable with its own text and colour).
+  - **Layout Group** (vertical / horizontal / grid of tagged UI with spacing and alignment).
+  - **Animated Counter** (scores count up with a pop).
+  - **Typewriter Text**, and **Text Input** (tap to type a name into `{name}`).
+  - **Touch Button** (your own on-screen control placed and sized anywhere: left, right, up, down, jump, fire or a message while held).
+  - **Minimap** (player, enemies, walls and coins around the player), and **Ring** progress bars.
+- **New UI widgets**: Volume Slider, Toggle, Progress Ring, Minimap, Animated Score, Typewriter Text, Name Input, Touch Controls (◀ ▶ JUMP; replaces the built-in joystick), Vertical Menu (Play / Continue / Restart in a layout group), Top Bar (full-width).
+
+### Parenting, UI anchoring and UI zoom
+
+- **Make an object a child** (it then moves, turns, scales and hides with its parent, in the editor and in play):
+  - In the Hierarchy, drag an object's **grip** (the move handle on its row) onto another object.
+  - Or long-press an object and pick **Make Child Of…**, or choose a **Parent** at the top of the Inspector.
+  - **Add Child Object** (long-press menu, or the **+** next to Parent) creates a new object inside the selected one.
+- **Take it out again**: drag the grip onto the top (scene) row, pick **Unparent (top level)**, or set Parent to *none*. It stays where it is on screen.
+- The Hierarchy shows children indented under their parent with a fold arrow. Duplicating or deleting a parent includes its children. Children of templates are spawned along with them.
+- **UI anchoring** (like Unity's anchor presets): the UI Element inspector has a 4 × 4 grid (top / middle / bottom / stretch × left / centre / right / stretch). Picking one keeps the element where it is.
+  - A UI element inside another one (a label inside a panel) is anchored and stretched to its **parent's box** instead of the screen.
+  - The selected element shows its anchor marker, a dashed line to it, and its parent's box.
+- **Zoom in the UI editor**: pinch, or use the − / + buttons; drag with two fingers (or the hand tool) to pan; the frame button resets the view.
+
+Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are relative to the parent. `scene.childrenOf(e)` lists them. Destroying a parent destroys its children.
+
 ### View modes: Scene, Top and UI editor · 2D and 3D levels
 
 - **Scene / Top / UI**: tap the view button above the Scene.
@@ -280,6 +311,7 @@ For more control, subclass `Scene` and override `init(engine)` and `update(dt, e
   body:   { type: 'static'|'dynamic'|'kinematic', sensor, gravityScale, bounce, shape: 'auto'|'box'|'circle'|'sphere', w, h, d, r },
   behaviors: [{ type: 'collectible', score: 10 }, { update(e, dt, scene) { /* plain hooks work too */ } }],
   ui: true, anchor: 'top-right',           // HUD element in screen space (works in 3D games too)
+  parent: 'id',                            // child of another entity: transform is relative to it
   template: true,                          // hidden; spawned by name with scene.spawn('Name', { x, y })
 }
 ```

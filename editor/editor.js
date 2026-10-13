@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -212,7 +212,16 @@ const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels 
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
+/** UI editor zoom / pan (only changes how the screen is shown while editing). */
+const uiView = { z: 1, x: 0, y: 0 };
+const uiv = (x, y) => { const cx = engine.width / 2, cy = engine.height / 2; return { x: (x - cx) * uiView.z + cx + uiView.x, y: (y - cy) * uiView.z + cy + uiView.y }; };
+function zoomUI(k, mx = engine.width / 2, my = engine.height / 2) {
+  const z = Math.min(5, Math.max(0.25, uiView.z * k)), cx = engine.width / 2, cy = engine.height / 2;
+  const ux = (mx - cx - uiView.x) / uiView.z + cx, uy = (my - cy - uiView.y) / uiView.z + cy; // the point under the fingers stays put
+  uiView.z = z; uiView.x = mx - cx - (ux - cx) * z; uiView.y = my - cy - (uy - cy) * z;
+}
 function resetCamera() {
+  Object.assign(uiView, { z: 1, x: 0, y: 0 });
   const v = project.view || { width: 400, height: 700 };
   cam2d = { x: v.width / 2, y: v.height / 2, zoom: 0.85 };
   orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
@@ -260,9 +269,9 @@ function boundsOf(e) {
   if (e.text && !e.shape && !e.sprite) x += e.text.align === 'left' ? hx : e.text.align === 'right' ? -hx : 0;
   return { x, y: e.y, hx, hy, sphere: ex.sphere, r: ex.r };
 }
-function uiBounds(e) {
-  const o = anchorPoint(e.anchor, engine.width, engine.height, engine.safe), b = boundsOf(e);
-  return { ...b, x: o.x + b.x, y: o.y + b.y };
+function uiBounds(e) { // on screen, with the UI editor's zoom applied
+  const o = uiOrigin(e, engine.width, engine.height, engine.safe), b = boundsOf(e), z = uiView.z, v = uiv(o.x + b.x, o.y + b.y);
+  return { ...b, x: v.x, y: v.y, hx: b.hx * z, hy: b.hy * z, r: (b.r || 0) * z };
 }
 /** Screen-space center of an entity, for gizmos. */
 function screenCenter(e) {
@@ -362,6 +371,14 @@ engine.onRenderUI = (ctx, s) => {
     ctx.fillText(e.name, p.x, p.y + 22);
   }
   const sel = s.byId(selectedId);
+  if (sel?.ui && !playing) { // Unity-style anchor marker: where the element is pinned, and its parent's box
+    const o = uiOrigin(sel, engine.width, engine.height, engine.safe), a = uiv(o.x, o.y), b0 = uiBounds(sel);
+    if (sel.parentEnt?.ui) { const pb = uiBounds(sel.parentEnt); ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(126,200,255,0.8)'; ctx.lineWidth = 1.5; ctx.strokeRect(pb.x - pb.hx, pb.y - pb.hy, pb.hx * 2, pb.hy * 2); ctx.restore(); }
+    ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b0.x, b0.y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#2f6db5'; ctx.lineWidth = 1.5;
+    for (const [dx, dy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { ctx.beginPath(); ctx.moveTo(a.x + dx * 2, a.y + dy * 2); ctx.lineTo(a.x + dx * 11, a.y + dy * 5); ctx.lineTo(a.x + dx * 5, a.y + dy * 11); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
   if (sel?.ui) {
     const b = uiBounds(sel);
     ctx.strokeStyle = ORANGE; ctx.lineWidth = 2;
@@ -379,10 +396,37 @@ engine.onRenderUI = (ctx, s) => {
 // ============================================================================
 const GIZ = 84;
 /** Screen-space axes for the selected entity: [{ k, dx, dy, ppu, sign }] */
+// ---- Rect tool (like Unity's): resize UI and 2D objects by their edges and corners ----
+const RECT_HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+/** Screen rectangle of an entity for the Rect tool: centre, half sizes and pixels per unit. */
+function rectFrame(e) {
+  if (e.ui) { const b = uiBounds(e); return { cx: b.x, cy: b.y, hw: b.sphere ? b.r : b.hx, hh: b.sphere ? b.r : b.hy, k: uiView.z }; }
+  if (is3D()) return null;
+  const b = boundsOf(e), z = engine.renderer.zoomFor(engine.scene), p = engine.renderer.worldToScreen(engine.scene, b.x, b.y);
+  return { cx: p.x, cy: p.y, hw: (b.sphere ? b.r : b.hx) * z, hh: (b.sphere ? b.r : b.hy) * z, k: z };
+}
+/** Editable size of an object: [width, height, square?] (shape, image, bar, minimap; text by font size). */
+function sizeOf(j) {
+  if (j.minimap) return [j.minimap.w ?? 120, j.minimap.h ?? 120, false];
+  if (j.shape) return ['circle', 'ring'].includes(j.shape.type) ? [(j.shape.r ?? 20) * 2, (j.shape.r ?? 20) * 2, true] : [j.shape.w ?? 40, j.shape.h ?? 40, false];
+  if (j.sprite) return [j.sprite.w ?? 64, j.sprite.h ?? 64, false];
+  if (j.bar) return [j.bar.w ?? 160, j.bar.h ?? 16, j.bar.style === 'ring'];
+  if (j.text) { const sz = j.text.size ?? 24; return [String(j.text.value || '').length * sz * 0.6, sz * 1.2, true]; }
+  return null;
+}
+function setSize(j, w, hgt) {
+  w = Math.max(4, Math.round(w)); hgt = Math.max(4, Math.round(hgt));
+  if (j.minimap) Object.assign(j.minimap, { w, h: hgt });
+  if (j.shape) { if (['circle', 'ring'].includes(j.shape.type)) j.shape.r = Math.round(Math.min(w, hgt) / 2); else Object.assign(j.shape, { w, h: hgt }); }
+  if (j.sprite) Object.assign(j.sprite, { w, h: hgt });
+  if (j.bar) Object.assign(j.bar, { w, h: hgt });
+  if (j.text && !j.shape && !j.sprite && !j.bar && !j.minimap) j.text.size = Math.max(6, Math.round(hgt / 1.2));
+}
+
 function gizmoAxes(e) {
   const s = engine.scene, o = screenCenter(e);
   if (!o) return null;
-  if (e.ui) return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: 1, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: 1, sign: -1 }] };
+  if (e.ui) return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: uiView.z, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: uiView.z, sign: -1 }] };
   if (s.mode === '2d') {
     const z = engine.renderer.zoomFor(s);
     return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: z, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: z, sign: -1 }] };
@@ -398,6 +442,7 @@ function gizmoAxes(e) {
 }
 
 function drawGizmo(ctx, e) {
+  if (tool === 'rect') { const f = rectFrame(e); if (f) { drawRectGizmo(ctx, f, e); return; } }
   const g = gizmoAxes(e); if (!g) return;
   const { o } = g, active = gesture?.handle;
   ctx.lineCap = 'round';
@@ -427,10 +472,39 @@ function drawGizmo(ctx, e) {
   ctx.fillRect(o.x - 8, o.y - 8, 16, 16); ctx.strokeRect(o.x - 8, o.y - 8, 16, 16);
 }
 
+function drawRectGizmo(ctx, f) {
+  const { cx, cy, hw, hh } = f, live = gesture?.type === 'rect';
+  ctx.save();
+  ctx.strokeStyle = '#4c8bd6'; ctx.lineWidth = 2; ctx.setLineDash([]);
+  ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+  for (const [i, j] of RECT_HANDLES) {
+    const x = cx + i * hw, y = cy + j * hh, hot = live && gesture.dir[0] === i && gesture.dir[1] === j;
+    ctx.fillStyle = hot ? HOT : '#ffffff'; ctx.strokeStyle = '#2f6db5'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.rect(x - 7, y - 7, 14, 14); ctx.fill(); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(76,139,214,0.85)'; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  if (live && gesture.label) {
+    ctx.font = '700 13px system-ui, sans-serif'; const tw = ctx.measureText(gesture.label).width + 16, ly = cy - hh - 30 < 110 ? cy + hh + 30 : cy - hh - 30;
+    ctx.fillStyle = 'rgba(20,20,26,0.9)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(cx - tw / 2, ly - 12, tw, 24, 8); else ctx.rect(cx - tw / 2, ly - 12, tw, 24); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(gesture.label, cx, ly);
+  }
+  ctx.restore();
+}
+
 /** Which gizmo handle is under a screen point, if any. */
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
   if (!sel || tool === 'hand') return null;
+  if (tool === 'rect') {
+    const f = rectFrame(sel);
+    if (f) {
+      let best = null, bd = 26;
+      for (const dir of RECT_HANDLES) { const d = Math.hypot(x - (f.cx + dir[0] * f.hw), y - (f.cy + dir[1] * f.hh)); if (d < bd) { bd = d; best = dir; } }
+      if (best) return { handle: 'rect', dir: best, f, g: { o: { x: f.cx, y: f.cy } } };
+      if (Math.abs(x - f.cx) < f.hw && Math.abs(y - f.cy) < f.hh) return { handle: 'free', g: { o: { x: f.cx, y: f.cy } } };
+      return null;
+    }
+  }
   const g = gizmoAxes(sel); if (!g) return null;
   const { o } = g, d = Math.hypot(x - o.x, y - o.y);
   if (tool === 'rotate') return Math.abs(d - GIZ * 0.8) < 22 ? { handle: 'rot', g } : null;
@@ -579,6 +653,11 @@ surface.addEventListener('contextmenu', (e) => e.preventDefault()); // long-pres
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
   const o = giz.g.o;
+  if (giz.handle === 'rect') {
+    const sz = sizeOf(j); if (!sz) return;
+    gesture = { type: 'rect', dir: giz.dir, id: selectedId, sx: x, sy: y, f: giz.f, size0: sz, square: sz[2], ui: !!j.ui, moved: false, orig: { x: j.x || 0, y: j.y || 0 } };
+    return;
+  }
   gesture = { type: tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : giz.handle === 'free' ? 'free' : 'axis', handle: giz.handle, axis: giz.axis,
     id: selectedId, sx: x, sy: y, o, ui: !!j.ui, moved: false,
     orig: { x: j.x || 0, y: j.y || 0, z: j.z || 0, rx: j.rx || 0, ry: j.ry || 0, rz: j.rz || 0, sx: j.sx ?? 1, sy: j.sy ?? 1, sz: j.sz ?? 1 } };
@@ -597,22 +676,29 @@ surface.addEventListener('pointermove', (ev) => {
   if (Math.hypot(x - p.sx, y - p.sy) > 10) { if (tapTrack) tapTrack.moved = true; cancelLongPress(); }
   const s = engine.scene, g = gesture;
   const dx = x - (g.sx ?? x), dy = y - (g.sy ?? y);
-  if (['free', 'axis', 'rotate', 'scale', 'tap'].includes(g.type)) {
+  if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
     g.moved = true;
     if (g.type === 'tap') return;
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { j.x = Math.round(g.orig.x + dx); j.y = Math.round(g.orig.y + dy); if (uiMode) snapUI(j); }
-      else if (!is3D()) { const z = engine.renderer.zoomFor(s); j.x = snapV(g.orig.x + dx / z, 10); j.y = snapV(g.orig.y + dy / z, 10); }
+      if (g.ui) { j.x = Math.round(g.orig.x + dx / uiView.z); j.y = Math.round(g.orig.y + dy / uiView.z); if (uiMode) snapUI(j); }
+      else if (childOf(g)) { // a child: move it in the world, store the result relative to its parent
+        let W;
+        if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
+        else { const hit = rayPlaneY(engine.renderer.screenRay(s, x, y), g.origW.y); if (hit) W = [snapV(hit.x - g.grabW.x, 0.5), g.origW.y, snapV(hit.z - g.grabW.z, 0.5)]; }
+        if (W) { const l = worldToLocal(g.par, W[0], W[1], W[2], s.mode); j.x = round(l[0], 3); j.y = round(l[1], 3); if (is3D()) j.z = round(l[2], 3); }
+      } else if (!is3D()) { const z = engine.renderer.zoomFor(s); j.x = snapV(g.orig.x + dx / z, 10); j.y = snapV(g.orig.y + dy / z, 10); }
       else {
         const hit = rayPlaneY(engine.renderer.screenRay(s, x, y), g.orig.y);
         if (hit) { j.x = snapV(hit.x - g.grab.x, 0.5); j.z = snapV(hit.z - g.grab.z, 0.5); }
       }
     } else if (g.type === 'axis') {
       const a = g.axis, along = dx * a.dx + dy * a.dy, step = g.ui ? 1 : is3D() ? 0.5 : 10;
-      j[a.k] = g.ui ? Math.round(g.orig[a.k] + along * a.sign) : snapV(g.orig[a.k] + along / a.ppu * a.sign, step);
+      if (g.ui) j[a.k] = Math.round(g.orig[a.k] + along / a.ppu * a.sign);
+      else if (childOf(g)) { const v = { x: 0, y: 0, z: 0 }; v[a.k] = snapV(along / a.ppu * a.sign, step); const d = localDelta(g.par, v.x, v.y, v.z, engine.scene.mode); j.x = round(g.orig.x + d[0], 3); j.y = round(g.orig.y + d[1], 3); if (is3D()) j.z = round(g.orig.z + d[2], 3); }
+      else j[a.k] = snapV(g.orig[a.k] + along / a.ppu * a.sign, step);
     } else if (g.type === 'rotate') {
       g.a1 = Math.atan2(y - g.o.y, x - g.o.x);
       let deg = (g.a1 - g.a0) * 180 / Math.PI;
@@ -620,13 +706,27 @@ surface.addEventListener('pointermove', (ev) => {
       let v = key === 'ry' ? g.orig.ry - deg : g.orig.rz + deg;
       v = snap ? Math.round(v / 15) * 15 : round(v, 1);
       j[key] = v;
+    } else if (g.type === 'rect') {
+      const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
+      let w = w0 + hx * dx / k / scX, hgt = h0 + hy * dy / k / scY;
+      if (!hx) w = w0; if (!hy) hgt = h0;
+      if (g.square) { const m = hx && hy ? Math.max(w, hgt) : hx ? w : hgt; w = hgt = m; }
+      if (snap) { const st = g.ui ? 4 : 5; w = Math.round(w / st) * st; hgt = Math.round(hgt / st) * st; }
+      w = Math.max(4, w); hgt = Math.max(4, hgt);
+      setSize(j, w, hgt);
+      if (!(j.text && !j.shape && !j.sprite && !j.bar && !j.minimap)) { // the opposite edge stays put
+        j.x = round(g.orig.x + (g.square && !hx ? 0 : hx) * (w - w0) * scX / 2, 2);
+        j.y = round(g.orig.y + (g.square && !hy ? 0 : hy) * (hgt - h0) * scY / 2, 2);
+      }
+      g.label = `${Math.round(w)} × ${Math.round(hgt)}`;
+      requestRebuild();
     } else if (g.type === 'scale') {
       const keys = g.handle === 'free' ? (is3D() && !g.ui ? ['sx', 'sy', 'sz'] : ['sx', 'sy']) : ['s' + g.handle];
       const along = g.handle === 'free' ? (dx - dy) / Math.SQRT2 : dx * g.axis.dx + dy * g.axis.dy;
       const f = Math.max(0.05, 1 + along / GIZ);
       for (const k of keys) j[k] = snap ? Math.max(0.1, Math.round(g.orig[k] * f * 10) / 10) : round(g.orig[k] * f, 3);
     }
-    if (live) Object.assign(live, { x: j.x || 0, y: j.y || 0, z: j.z || 0, rx: j.rx || 0, ry: j.ry || 0, rz: j.rz || 0, sx: j.sx ?? 1, sy: j.sy ?? 1, sz: j.sz ?? 1 });
+    if (live) { const T = { x: j.x || 0, y: j.y || 0, z: j.z || 0, rx: j.rx || 0, ry: j.ry || 0, rz: j.rz || 0, sx: j.sx ?? 1, sy: j.sy ?? 1, sz: j.sz ?? 1 }; if (live.parentEnt && !live.ui && live.local) Object.assign(live.local, T); else Object.assign(live, T); }
     syncTransformInputs();
   } else if (g.type === 'paint') {
     paintAt(x, y);
@@ -636,6 +736,7 @@ surface.addEventListener('pointermove', (ev) => {
     const mx = x - g.lx, my = y - g.ly;
     g.lx = x; g.ly = y;
     if (Math.hypot(x - g.sx, y - g.sy) > 5) g.moved = true;
+    if (uiMode) { uiView.x += mx; uiView.y += my; return; }
     if (!is3D()) { const z = engine.renderer.zoomFor(s); cam2d.x -= mx / z; cam2d.y -= my / z; }
     else if (viewMode === 'top') { const k = orbit.dist / engine.height; orbit.target.x -= mx * k; orbit.target.z -= my * k; }
     else if (g.type === 'orbit') { orbit.yaw -= mx * 0.008; orbit.pitch = Math.min(1.5, Math.max(0.05, orbit.pitch + my * 0.008)); }
@@ -644,6 +745,7 @@ surface.addEventListener('pointermove', (ev) => {
   } else if (g.type === 'pinch' && ptrs.size >= 2) {
     const [a, b] = [...ptrs.values()];
     const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1, mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (uiMode) { zoomUI(dist / g.d0, mx, my); uiView.x += mx - g.mx; uiView.y += my - g.my; g.mx = mx; g.my = my; g.d0 = dist; return; }
     if (!is3D()) {
       const before = engine.renderer.screenToWorld(s, g.mx, g.my);
       cam2d.zoom = Math.min(8, Math.max(0.08, cam2d.zoom * dist / g.d0));
@@ -658,6 +760,20 @@ surface.addEventListener('pointermove', (ev) => {
     applyCamera();
   }
 });
+
+/** For a drag on a child object: its live parent, and where it started in the world. */
+function childOf(g) {
+  if (g.par === undefined) {
+    const live = engine.scene.byId(g.id);
+    g.par = (!g.ui && live?.parentEnt) || null;
+    if (g.par) {
+      g.origW = { x: live.x, y: live.y, z: live.z };
+      const hit = is3D() ? rayPlaneY(engine.renderer.screenRay(engine.scene, g.sx, g.sy), live.y) : null;
+      g.grabW = hit ? { x: hit.x - live.x, z: hit.z - live.z } : { x: 0, z: 0 };
+    }
+  }
+  return g.par;
+}
 
 /** Paint tool on a voxel world: add or remove blocks where the finger is. */
 function voxelPaint(sx, sy) {
@@ -725,7 +841,7 @@ const endPointer = (ev) => {
   }
   const g = gesture;
   if (!g) return;
-  if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
+  if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
   uiGuide = null;
   if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
@@ -759,6 +875,10 @@ function openObjectMenu(id, sx, sy) {
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
     { icon: 'clock', label: 'Animate…', fn: () => openAnim(j, (j.behaviors || []).findIndex((b) => b.type === 'animator')) },
+    { icon: 'layers', label: 'Make Child Of…', fn: () => parentMenu(j) },
+    j.parent && { icon: 'upload', label: 'Unparent (top level)', fn: () => setParent(j.id, null) },
+    { icon: 'plus', label: 'Add Child Object', fn: () => addChild(j.id) },
+    j.parent && { icon: 'right', label: 'Select Parent', fn: () => select(j.parent) },
     { icon: 'folder', label: j.folder ? `Folder: ${j.folder}…` : 'Put in Folder…', fn: () => moveToFolder(j) },
     { icon: 'upload', label: 'Bring to Front', fn: () => { const L = project.entities; L.push(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
     { icon: 'download', label: 'Send to Back', fn: () => { const L = project.entities; L.unshift(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
@@ -795,6 +915,7 @@ function setTool(t) {
   const was = tool;
   tool = t;
   for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  if (t === 'rect' && was !== 'rect') toast(is3D() && !ent(selectedId)?.ui ? 'Rect tool works on UI and 2D objects. In 3D use Scale.' : 'Rect: drag the edges and corners to resize. Drag the middle to move.');
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
 }
@@ -923,6 +1044,30 @@ function kindOf(e) {
 const H_FILTERS = [['all', 'All'], ['player', 'Player'], ['logic', 'Logic'], ['physics', 'Physics'], ['ui', 'UI'], ['template', 'Templates']];
 let hKind = 'all';
 const closedFolders = new Set();
+const closedKids = new Set(); // parents whose children are folded away in the Hierarchy
+/** Drag an object's grip onto another row to put it inside, or onto the top row to take it out. */
+function startRowDrag(ev, id) {
+  ev.stopPropagation(); ev.preventDefault();
+  const grip = ev.currentTarget, j = ent(id); if (!j) return;
+  grip.setPointerCapture(ev.pointerId);
+  const ghost = h('div', { class: 'h-ghost' }, icon('layers'), j.name || 'Object');
+  document.body.append(ghost);
+  let over = null;
+  const at = (e) => { ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px'; };
+  const target = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.h-row, .h-folder'); return el && el.dataset.id !== id ? el : null; };
+  at(ev); buzz(8);
+  const move = (e) => { at(e); const t = target(e); if (t !== over) { over?.classList.remove('drop'); over = t; over?.classList.add('drop'); } };
+  const up = (e) => {
+    grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up);
+    ghost.remove(); over?.classList.remove('drop');
+    const t = e.type === 'pointerup' ? target(e) : null;
+    if (!t) return;
+    if (t.classList.contains('scene')) { if (j.parent) setParent(id, null); return; }
+    if (t.dataset.folder) { if (j.parent) setParent(id, null); j.folder = t.dataset.folder; changed({ structure: true }); pushHistory(); return; }
+    if (t.dataset.id) setParent(id, t.dataset.id);
+  };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+}
 function hMatch(e) {
   if (uiMode && !e.ui) return false;
   if (hFilter && !(e.name || '').toLowerCase().includes(hFilter) && !(e.tags || []).some((t) => t.includes(hFilter)) && !compBadges(e).some((c) => c.toLowerCase().includes(hFilter))) return false;
@@ -942,44 +1087,109 @@ function renderHierarchy() {
   if (gs) box.append(gs);
   const rows = h('div');
   box.append(rows);
-  const row = (e) => {
-    const badges = compBadges(e), kind = kindOf(e);
+  const row = (e, depth = 0) => {
+    const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
+    const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
-      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder ? ' in-folder' : ''),
-      'data-id': e.id,
+      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
+      'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
       onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
+    depth ? h('span', { class: 'h-branch' }) : '',
+    kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
     h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
     h('span', { class: 'h-txt' },
       h('span', { class: 'nm' }, e.name || 'Object', e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
-      badges.length ? h('span', { class: 'h-sub' }, badges.slice(0, 4).join(' · ') + (badges.length > 4 ? ` +${badges.length - 4}` : '')) : ''),
+      (badges.length || kids || parentName) ? h('span', { class: 'h-sub' }, [parentName && `in ${parentName}`, kids && `${kids} child${kids > 1 ? 'ren' : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
-    h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')));
+    h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
+    h('button', { class: 'eye h-grip', title: 'Drag onto another object to make it a child', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
+  };
+  const tree = (list) => { // parents with their children folded underneath
+    const inList = new Set(list.map((e) => e.id)), out = [];
+    const walk = (e, d) => { out.push([e, d]); if (!closedKids.has(e.id)) for (const k of kidsOf(e.id)) if (inList.has(k.id)) walk(k, d + 1); };
+    for (const e of list) if (!e.parent || !inList.has(e.parent)) walk(e, 0);
+    return out;
   };
   function renderRows() {
-    const list = project.entities.filter(hMatch), folders = [...new Set(list.map((e) => e.folder).filter(Boolean))];
+    const list = project.entities.filter(hMatch), flat = !!hFilter || hKind !== 'all';
+    const topOf = (e) => { let q = e, n = 0; while (q.parent && ent(q.parent) && n++ < 60) q = ent(q.parent); return q; }, folderOf = (e) => (flat ? e.folder : topOf(e).folder);
+    const folders = [...new Set(list.map(folderOf).filter(Boolean))];
     rows.replaceChildren(...[
       h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, h('span', { class: 'h-ico' }, icon('scene')),
         h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
           h('span', { class: 'h-sub' }, `${project.entities.length} objects · ${is3D() ? '3D' : '2D'} · tap for game settings`))),
       uiMode && h('div', { class: 'h-cap' }, 'UI editor: screen elements only'),
       ...folders.flatMap((f) => {
-        const items = list.filter((e) => e.folder === f), shut = closedFolders.has(f);
-        return [h('div', { class: 'h-folder' + (shut ? ' shut' : ''), onclick: () => { shut ? closedFolders.delete(f) : closedFolders.add(f); renderRows(); } },
+        const items = list.filter((e) => folderOf(e) === f), shut = closedFolders.has(f);
+        return [h('div', { class: 'h-folder' + (shut ? ' shut' : ''), 'data-folder': f, onclick: () => { shut ? closedFolders.delete(f) : closedFolders.add(f); renderRows(); } },
           icon('chevron'), icon('folder'), h('span', { class: 'nm' }, f), h('span', { class: 'h-count' }, items.length),
           h('button', { class: 'eye', title: 'Folder options', onclick: (ev) => { ev.stopPropagation(); popMenu(ev.currentTarget, [
             { icon: 'edit', label: 'Rename Folder…', fn: () => { const n = prompt('Folder name', f); if (n == null) return; for (const e of project.entities) if (e.folder === f) e.folder = n.trim() || undefined; changed({ structure: true }); } },
             { icon: 'eyeoff', label: 'Hide / Show All', fn: () => { const vis = items.some((e) => e.visible !== false); for (const e of items) e.visible = !vis; changed({ structure: true }); } },
             { icon: 'close', label: 'Remove Folder (keep objects)', fn: () => { for (const e of project.entities) if (e.folder === f) delete e.folder; changed({ structure: true }); } },
           ]); } }, icon('more'))),
-        ...(shut ? [] : items.map(row))];
+        ...(shut ? [] : tree(items).map(([e, d]) => row(e, d)))];
       }),
-      ...list.filter((e) => !e.folder).map(row),
+      ...(flat ? list.filter((e) => !e.folder).map((e) => row(e, 0)) : tree(list.filter((e) => !folderOf(e))).map(([e, d]) => row(e, d))),
       !list.length && h('div', { class: 'empty' }, hFilter || hKind !== 'all' ? 'Nothing matches.' : 'No objects yet. Tap Create or the blue + button.'),
     ].filter(Boolean));
   }
   renderRows();
   box.scrollTop = scroll;
+}
+
+// ---- parenting (make one object a child of another) ----
+const kidsOf = (id) => project.entities.filter((e) => e.parent === id);
+function isInside(id, ancestorId) { let q = ent(id), n = 0; while (q?.parent && n++ < 60) { if (q.parent === ancestorId) return true; q = ent(q.parent); } return false; }
+function subtree(id) { const out = [id]; for (const k of kidsOf(id)) out.push(...subtree(k.id)); return out; }
+/** Objects that `j` could be put inside (not itself or its own children; UI only inside UI). */
+const parentChoices = (j) => project.entities.filter((e) => e.id !== j.id && !isInside(e.id, j.id) && !!e.ui === !!j.ui && !e.template);
+/** Make `id` a child of `pid` (or move it back to the top level with null), keeping where it is on screen. */
+function setParent(id, pid) {
+  const j = ent(id); if (!j) return;
+  const pj = pid ? ent(pid) : null;
+  if (pid && (pid === id || isInside(pid, id))) { toast('An object can’t go inside its own child'); return; }
+  if (pj && !!pj.ui !== !!j.ui) { toast(j.ui ? 'UI can only go inside other UI' : 'Game objects can’t go inside UI'); return; }
+  const live = engine.scene.byId(id), lp = pid ? engine.scene.byId(pid) : null, mode = engine.scene.mode, r3 = (v) => round(v, 3);
+  if (j.ui) {
+    const before = live ? uiBox(live, engine.width, engine.height, engine.safe) : null;
+    if (pid) j.parent = pid; else delete j.parent;
+    rebuild();
+    const nl = engine.scene.byId(id);
+    if (before && nl) { const o = uiOrigin(nl, engine.width, engine.height, engine.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); }
+  } else if (live) {
+    const W = [live.x, live.y, live.z], rot = [live.rx, live.ry, live.rz], sc = [live.sx, live.sy, live.sz];
+    const L = lp ? worldToLocal(lp, W[0], W[1], W[2], mode) : W;
+    j.x = r3(L[0]); j.y = r3(L[1]); if (is3D()) j.z = r3(L[2]);
+    ['rx', 'ry', 'rz'].forEach((k, i) => { const v = r3(rot[i] - (lp ? lp[k] : 0)); if (v || j[k] != null) j[k] = v; });
+    ['sx', 'sy', 'sz'].forEach((k, i) => { const v = r3(sc[i] / (lp ? lp[k] || 1 : 1)); if (v !== 1 || j[k] != null) j[k] = v; });
+    if (pid) j.parent = pid; else delete j.parent;
+  } else if (pid) j.parent = pid; else delete j.parent;
+  if (pid) { // keep children listed (and drawn) right after their parent
+    const L = project.entities, ids = subtree(id), moving = L.filter((e) => ids.includes(e.id));
+    for (const m of moving) L.splice(L.indexOf(m), 1);
+    const at = L.indexOf(pj) + 1 + subtree(pid).filter((x) => x !== pid && L.some((e) => e.id === x)).length;
+    L.splice(at, 0, ...moving);
+    closedKids.delete(pid);
+  }
+  changed({ structure: true }); pushHistory();
+  toast(pid ? `${j.name} is now inside ${pj.name}` : `${j.name} moved to the top level`);
+}
+function addChild(pid) {
+  const pj = ent(pid); if (!pj) return;
+  const c = { id: uid(), name: pj.ui ? 'Child UI' : 'Child', parent: pid, x: pj.ui ? 0 : is3D() ? 0 : 0, y: is3D() ? 1 : pj.ui ? 0 : -50, ...(pj.ui ? { ui: true, anchor: 'center', text: { value: 'Text', size: 18, color: '#ffffff' } } : is3D() ? { mesh: { geometry: 'box', w: 0.5, h: 0.5, d: 0.5, color: '#90caf9' } } : { shape: { type: 'rect', w: 30, h: 30, fill: '#90caf9' } }) };
+  const L = project.entities; L.splice(L.indexOf(pj) + subtree(pid).length, 0, c);
+  closedKids.delete(pid); selectedId = c.id;
+  changed({ structure: true }); pushHistory(); toast(`Added a child to ${pj.name}`);
+}
+function parentMenu(j, anchor) {
+  const opts = parentChoices(j);
+  popMenu(anchor || { left: window.innerWidth / 2 - 110, top: window.innerHeight / 3, bottom: window.innerHeight / 3 }, [
+    { cap: `Put “${j.name}” inside…` },
+    ...(opts.length ? opts.map((e) => ({ icon: iconFor(e), label: e.name || 'Object', fn: () => setParent(j.id, e.id) })) : [{ cap: j.ui ? 'Add another UI element first' : 'Add another object first' }]),
+    j.parent && '-', j.parent && { icon: 'upload', label: 'Move to Top Level', fn: () => setParent(j.id, null) },
+  ]);
 }
 
 function moveToFolder(j) {
@@ -1422,6 +1632,37 @@ function pasteComponent(j) {
   toast('Component pasted');
 }
 /** A collapsible component block. opts: { icon, key, enabled, onToggle, menu: [{label, fn}], desc } */
+/** Unity-style anchor presets: 3×3 positions plus stretch row / column; changing them keeps the element where it is. */
+function anchorPresets(j, inParent) {
+  const cur = j.anchor || 'top-left', st = j.stretch || 'none';
+  const rowOf = st === 'height' || st === 'both' ? 3 : cur.startsWith('top') ? 0 : cur.startsWith('bottom') ? 2 : 1;
+  const colOf = st === 'width' || st === 'both' ? 3 : cur.includes('left') ? 0 : cur.includes('right') ? 2 : 1;
+  const apply = (r, c) => {
+    const live = engine.scene.byId(j.id), before = live ? uiBox(live, engine.width, engine.height, engine.safe) : null;
+    const v = r === 0 ? 'top' : r === 2 ? 'bottom' : '', hz = c === 0 ? 'left' : c === 2 ? 'right' : '';
+    j.anchor = v && hz ? `${v}-${hz}` : v || hz || 'center';
+    j.stretch = r === 3 && c === 3 ? 'both' : r === 3 ? 'height' : c === 3 ? 'width' : 'none';
+    if (j.stretch === 'none') delete j.stretch;
+    rebuild();
+    const nl = engine.scene.byId(j.id);
+    if (before && nl) { const o = uiOrigin(nl, engine.width, engine.height, engine.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); } // stays where it was
+    changed({ inspector: true }); pushHistory();
+  };
+  const cells = [];
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const dot = h('i', { class: 'ap-dot', style: `left:${c === 3 ? 50 : [12, 50, 88][c]}%;top:${r === 3 ? 50 : [12, 50, 88][r]}%` });
+    cells.push(h('button', { class: 'ap' + (r === rowOf && c === colOf ? ' on' : '') + (r === 3 ? ' sv' : '') + (c === 3 ? ' sh' : ''), title: `${['Top', 'Middle', 'Bottom', 'Stretch'][r]} · ${['Left', 'Centre', 'Right', 'Stretch'][c]}`, onclick: () => apply(r, c) }, h('span', { class: 'ap-box' }, dot)));
+  }
+  return h('div', { class: 'row' }, h('label', {}, inParent ? 'Anchor (in parent)' : 'Anchor'), h('div', { class: 'ap-wrap' }, h('div', { class: 'ap-grid' }, cells),
+    h('div', { class: 'ap-help' }, h('b', {}, `${['Top', 'Middle', 'Bottom', 'Stretch'][rowOf]} · ${['Left', 'Centre', 'Right', 'Stretch'][colOf]}`), h('span', {}, 'Last row / column stretches across. It keeps its place when you change the anchor.'))));
+}
+/** Width / height of a UI element (what the Rect tool changes). */
+function sizeRow(j) {
+  const sz = sizeOf(j); if (!sz) return null;
+  const inp = (i) => h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: Math.round(sz[i]),
+    onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; const n = [...sizeOf(j)]; n[i] = v; if (n[2]) n[1 - i] = v; setSize(j, n[0], n[1]); changed({ inspector: true }); pushHistory(); } });
+  return h('div', { class: 'row' }, h('label', {}, 'Size (W × H)'), h('div', { class: 'pair' }, h('span', {}, 'W'), inp(0), h('span', {}, 'H'), inp(1)));
+}
 const INSP_CATS = [['all', 'All'], ['visual', 'Visual'], ['physics', 'Physics'], ['logic', 'Logic'], ['anim', 'Animation'], ['game', 'Gameplay']];
 const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim: '#ab47bc', game: '#ef5350', other: '#777' };
 let inspCat = 'all';
@@ -1517,6 +1758,9 @@ function renderInspector() {
       h('span', {}, 'Tags'),
       h('input', { type: 'text', value: (j.tags || []).join(', '), placeholder: 'player, enemy', autocapitalize: 'off',
         onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
+    h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
+      h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
+      h('button', { class: 'btn', title: 'Add a child object', onclick: () => addChild(j.id) }, icon('plus'))),
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
@@ -1539,11 +1783,13 @@ function renderInspector() {
   { icon: 'move', key: 'transform', menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
 
   if (j.ui) {
-    const ANCH = [['top-left', '↖'], ['top', '↑'], ['top-right', '↗'], ['left', '←'], ['center', '•'], ['right', '→'], ['bottom-left', '↙'], ['bottom', '↓'], ['bottom-right', '↘']];
+    const inParent = j.parent && ent(j.parent)?.ui;
     box.append(comp('UI Element', [
-      h('p', { class: 'desc' }, 'UI stays fixed on the screen. Pin it to a corner or edge so it fits every phone.'),
-      h('div', { class: 'row' }, h('label', {}, 'Pin to screen'), h('div', { class: 'anchor-grid' }, ANCH.map(([a, ic]) => h('button', {
-        class: (j.anchor || 'top-left') === a ? 'on' : '', title: a, onclick: () => { j.anchor = a; changed({ inspector: true }); } }, ic)))),
+      h('p', { class: 'desc' }, inParent ? `Anchored inside its parent “${ent(j.parent).name}”: it moves and stretches with it.` : 'UI stays fixed on the screen. Anchor it to a corner, edge or the centre so it fits every phone, or stretch it across.'),
+      anchorPresets(j, inParent),
+      sizeRow(j),
+      C('stretch', { label: inParent ? 'Stretch inside parent' : 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill']], def: 'none', structure: true }),
+      j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
     ], { icon: 'hud', key: 'uiel' }));
@@ -1605,8 +1851,9 @@ function renderInspector() {
       h('p', { class: 'desc' }, 'Shows a variable as a bar: health, energy, progress. Use "self.hp" for this object\'s own health (Health component).'),
       C('bar.var', { label: 'Variable', type: 'text', def: 'hp' }),
       h('div', { class: 'row' }, h('label', {}, 'Style'), h('div', { class: 'pair' },
-        h('button', { class: 'btn' + (!j.bar.icon ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; changed({ inspector: true }); } }, 'Bar'),
-        h('button', { class: 'btn' + (j.bar.icon ? ' primary' : ''), style: 'flex:1;font-size:20px', onclick: () => pickEmoji((em) => { j.bar.icon = em; if (j.bar.h < 22) j.bar.h = 28; changed({ inspector: true }); }) }, j.bar.icon || '❤️', h('span', { style: 'font-size:15px' }, 'Icons')))),
+        h('button', { class: 'btn' + (!j.bar.icon && j.bar.style !== 'ring' ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; delete j.bar.style; changed({ inspector: true }); } }, 'Bar'),
+        h('button', { class: 'btn' + (j.bar.style === 'ring' ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; j.bar.style = 'ring'; const m = Math.max(j.bar.w, j.bar.h, 60); j.bar.w = j.bar.h = Math.min(m, 120); changed({ inspector: true }); } }, 'Ring'),
+        h('button', { class: 'btn' + (j.bar.icon ? ' primary' : ''), style: 'flex:1;font-size:20px', onclick: () => pickEmoji((em) => { j.bar.icon = em; delete j.bar.style; if (j.bar.h < 22) j.bar.h = 28; changed({ inspector: true }); }) }, j.bar.icon || '❤️', h('span', { style: 'font-size:15px' }, 'Icons')))),
       C('bar.max', { label: 'Maximum', type: 'number', def: 100 }),
       showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
       C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
@@ -1632,6 +1879,16 @@ function renderInspector() {
       C('voxels.gen.trees', { label: 'Trees', type: 'bool', def: true }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
     ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
+  }
+  if (j.minimap) {
+    box.append(comp('Minimap', [
+      h('p', { class: 'desc' }, 'A small map of the level: the player (blue), enemies (red), walls and coins. Resize it with the Rect tool.'),
+      C('minimap.follow', { label: 'Centre on tag', type: 'text', def: 'player', suggest: 'tags' }),
+      C('minimap.range', { label: 'How much it shows', type: 'number', def: 800, step: threeD ? 5 : 50 }),
+      C('minimap.round', { label: 'Round', type: 'bool', def: false }),
+      C('minimap.bg', { label: 'Background', type: 'color' }), C('minimap.border', { label: 'Border', type: 'color' }),
+      C('minimap.playerColor', { label: 'Player dot', type: 'color', def: '#4fc3f7' }), C('minimap.enemyColor', { label: 'Enemy dots', type: 'color', def: '#ff5252' }),
+    ], { icon: 'grid', key: 'minimap', menu: removeMenu(() => { delete j.minimap; changed({ structure: true }); }, 'minimap') }));
   }
   if (j.light) {
     box.append(comp('Light', [
@@ -1833,6 +2090,7 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
@@ -1942,12 +2200,13 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'model', label: '3D Model', icon: 'cube', desc: 'Build a model out of shapes (3D modeling)', ok: (e) => threeD && !e.model && !e.ui, add: (e) => { e.model = { parts: [{ geometry: 'box', x: 0, y: 0.5, z: 0, w: 1, h: 1, d: 1, color: '#90caf9' }] }; } },
     { cat: 'UI', key: 'bar', label: 'Progress Bar', icon: 'hud', desc: 'Health, energy or progress shown as a bar', ok: (e) => !e.bar && (e.ui || !threeD), add: (e) => { e.bar = { var: 'hp', max: 100, w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8 }; } },
     { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
+    { cat: 'UI', key: 'minimap', label: 'Minimap', icon: 'grid', desc: 'A small map of the level on screen', ok: (e) => e.ui && !e.minimap, add: (e) => { e.minimap = { w: 120, h: 120, range: is3D() ? 40 : 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false }; } },
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
-      ok: (e) => !e.ui || ['script', 'graph', 'rules', 'button'].includes(type), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
+      ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
   return list;
 }
@@ -1960,6 +2219,9 @@ function addComponentTo(id, key) {
   c.add(j);
   if (key === 'b:platformer' && !project.gravity) project.gravity = is3D() ? -25 : 1600;
   if (key === 'b:platformer') Object.assign(project.settings, { joystick: true, jumpButton: true });
+  if (key === 'b:uiSlider' && !j.bar) j.bar = { var: j.behaviors.at(-1).var || 'volume', max: 100, w: 200, h: 18, fill: '#4c8bd6', bg: 'rgba(0,0,0,0.45)', radius: 9, label: true };
+  if ((key === 'b:uiToggle' || key === 'b:touchButton' || key === 'b:uiInput') && !j.shape && !j.sprite) j.shape = { type: 'rect', w: 140, h: 52, radius: 14, fill: '#3a6ea5' };
+  if ((key === 'b:uiToggle' || key === 'b:uiInput' || key === 'b:uiCounter') && !j.text) j.text = { value: 'Text', size: 20, color: '#ffffff' };
   selectedId = id;
   changed({ structure: true }); pushHistory();
   toast(`Added ${c.label} to ${j.name}`);
@@ -2274,6 +2536,7 @@ function addPrefab(def, at) {
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
+  if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {
     if (project.entities.some((e) => e.name === x.name)) continue;
     const { offset, ...props } = x;
@@ -2295,19 +2558,21 @@ function placePrefab(def, sx, sy) {
 
 function duplicateEntity(id) {
   const j = ent(id); if (!j) return;
-  const c = clone(j); c.id = uid(); c.name = (j.name || 'Object') + ' (copy)';
+  const ids = subtree(id), map = new Map(ids.map((x) => [x, uid()])); // copies children too
+  const copies = ids.map((x) => { const c = clone(ent(x)); c.id = map.get(x); if (c.parent && map.has(c.parent)) c.parent = map.get(c.parent); return c; });
+  const c = copies[0]; c.name = (j.name || 'Object') + ' (copy)';
   if (j.ui) c.y = (c.y || 0) + 30; else if (is3D()) c.x = (c.x || 0) + 1.5; else { c.x = (c.x || 0) + 30; c.y = (c.y || 0) + 30; }
-  project.entities.splice(project.entities.indexOf(j) + 1, 0, c);
+  project.entities.splice(project.entities.indexOf(j) + ids.length, 0, ...copies);
   selectedId = c.id;
   changed({ structure: true }); pushHistory();
 }
 function deleteEntity(id) {
-  const i = project.entities.findIndex((e) => e.id === id); if (i < 0) return;
-  const name = project.entities[i].name;
-  project.entities.splice(i, 1);
-  if (selectedId === id) selectedId = null;
+  const j = ent(id); if (!j) return;
+  const ids = new Set(subtree(id)); // children go with their parent
+  project.entities = project.entities.filter((e) => !ids.has(e.id));
+  if (ids.has(selectedId)) selectedId = null;
   changed({ structure: true }); pushHistory(); updateCtxBar();
-  toast(`Deleted ${name}. Undo to restore.`);
+  toast(ids.size > 1 ? `Deleted ${j.name} and ${ids.size - 1} child object${ids.size > 2 ? 's' : ''}. Undo to restore.` : `Deleted ${j.name}. Undo to restore.`);
 }
 
 function pickImage(cb) {
@@ -2622,7 +2887,7 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
+    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
   }, { passive: true });
   $('#sheet').addEventListener('touchend', (e) => {
     if (!st) return;
@@ -2659,6 +2924,7 @@ for (const [z, ic] of [['out', 'minus'], ['in', 'plus'], ['reset', 'frame']]) {
   b.addEventListener('click', () => {
     if (z === 'reset') { resetCamera(); applyCamera(); return; }
     const k = z === 'in' ? 1.35 : 1 / 1.35;
+    if (uiMode) { zoomUI(k); buzz(4); return; }
     if (is3D()) orbit.dist = Math.min(300, Math.max(2, orbit.dist / k)); else cam2d.zoom = Math.min(8, Math.max(0.08, cam2d.zoom * k));
     applyCamera(); buzz(4);
   });
@@ -2681,7 +2947,7 @@ function setViewMode(m) {
   $('#uiBtn').classList.toggle('on', uiMode);
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
-  if (uiMode) { projectTab = 'ui'; renderProject(); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
+  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   refreshAll(); applyCamera();
 }
@@ -2691,22 +2957,27 @@ const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paus
   $('#scenePanel').append(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
+engine.uiView = uiView; // the engine draws UI with the editor's zoom while editing
 engine.screenFilter = (e) => e.id === selectedId || (uiMode && (uiScreen === 'all' || e.showWhen === uiScreen));
 engine.onBeforeUI = (ctx) => {
   if (!uiMode || playing) return;
   const W = engine.width, H = engine.height, sf = engine.safe;
-  ctx.fillStyle = '#14151b'; ctx.fillRect(0, 0, W, H); // UI editor: the world steps away, only the screen is left
+  ctx.fillStyle = '#0d0e12'; ctx.fillRect(0, 0, W, H); // UI editor: the world steps away, only the screen is left
+  ctx.save(); ctx.translate(W / 2 + uiView.x, H / 2 + uiView.y); ctx.scale(uiView.z, uiView.z); ctx.translate(-W / 2, -H / 2);
+  ctx.fillStyle = '#16171d'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5 / uiView.z; ctx.strokeRect(0, 0, W, H); // the phone screen
   ctx.strokeStyle = 'rgba(120,170,255,0.35)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
   ctx.strokeRect(sf.left + 0.5, sf.top + 0.5, W - sf.left - sf.right - 1, H - sf.top - sf.bottom - 1);
   ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(120,170,255,0.6)';
   for (const a of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) { const p = anchorPoint(a, W, H, sf); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
-  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
+  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5 / uiView.z; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
+  ctx.restore();
 };
 let uiGuide = null;
 /** UI drags snap to the screen centre and to the element's anchor point. */
 function snapUI(j) {
-  const W = engine.width, H = engine.height, a = anchorPoint(j.anchor || 'top-left', W, H, engine.safe), T = 10;
+  const live = engine.scene.byId(j.id), W = engine.width, H = engine.height, a = live ? uiOrigin(live, W, H, engine.safe) : anchorPoint(j.anchor || 'top-left', W, H, engine.safe), T = 10 / uiView.z;
   uiGuide = {};
   const sx = a.x + j.x, sy = a.y + j.y;
   if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;

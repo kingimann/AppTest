@@ -6,6 +6,8 @@ import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 import { openNodeEditor } from './nodes.js';
+import { openModeler } from './modeler.js';
+import { makeCube } from './meshops.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -955,6 +957,7 @@ function openCreateMenu(anchor) {
     { cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
     '-', { cap: 'Prefabs' }, ...groups.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) })),
     '-', { cap: 'Logic' }, { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
+    is3D() && { icon: 'cube', label: 'New 3D Model (Modeler)', fn: newModel },
   ]);
 }
 
@@ -1150,6 +1153,15 @@ function modelSection(j) {
   const parts = j.model.parts;
   const partDims = (q, i) => {
     const P = () => ent(selectedId)?.model?.parts[i] || {}, C = (path, spec) => control(P, path, spec), g = q.geometry || 'box';
+    if (g === 'mesh') return [
+      h('p', { class: 'desc' }, `Editable mesh: ${q.verts?.length || 0} vertices, ${q.faces?.length || 0} faces.`),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => editModel(j) }, icon('cube'), 'Edit in 3D Modeler')),
+      vecRow(P, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.05),
+      vecRow(P, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 5),
+      vecRow(P, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05),
+      C('color', { label: 'Color', type: 'color' }),
+      C('smooth', { label: 'Smooth shading', type: 'bool', def: false }),
+    ];
     return [
       C('geometry', { label: 'Shape', type: 'select', options: GEO_OPTIONS, structure: true }),
       vecRow(P, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.05),
@@ -1162,10 +1174,11 @@ function modelSection(j) {
     ];
   };
   const body = [
-    h('p', { class: 'desc' }, 'Build a 3D model out of parts. Tap a part to highlight it in the Scene. The collider fits around all parts.'),
+    h('button', { class: 'btn primary gc-open', onclick: () => editModel(j) }, icon('cube'), 'Open 3D Modeler'),
+    h('p', { class: 'desc' }, 'Model like in Blender: reshape meshes by vertex or face (extrude, inset, subdivide…), or build from parts below. The collider fits around everything.'),
     ...parts.map((q, i) => h('div', { class: 'part' + (selectedPart === i ? ' sel' : ' closed') },
       h('div', { class: 'part-h', onclick: (e) => { if (e.target.closest('button')) return; selectedPart = selectedPart === i ? -1 : i; renderInspector(); } },
-        h('span', { class: 'dot', style: `background:${q.color || '#ccc'}` }), h('span', { class: 't' }, `${i + 1}. ${(GEO_OPTIONS.find((g) => g[0] === (q.geometry || 'box')) || ['', 'Part'])[1]}`),
+        h('span', { class: 'dot', style: `background:${q.color || '#ccc'}` }), h('span', { class: 't' }, `${i + 1}. ${q.geometry === 'mesh' ? 'Mesh' : (GEO_OPTIONS.find((g) => g[0] === (q.geometry || 'box')) || ['', 'Part'])[1]}`),
         h('button', { class: 'more', title: 'Part options', onclick: (e) => popMenu(e.currentTarget, [
           { icon: 'copy', label: 'Duplicate Part', fn: () => { parts.splice(i + 1, 0, { ...clone(q), x: (q.x || 0) + 0.3 }); selectedPart = i + 1; changed({ inspector: true }); pushHistory(); } },
           i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { parts.splice(i - 1, 0, parts.splice(i, 1)[0]); selectedPart = i - 1; changed({ inspector: true }); } },
@@ -1179,6 +1192,22 @@ function modelSection(j) {
     } }, h('option', { value: '' }, '+ Choose a shape…'), GEO_OPTIONS.map(([v, l]) => h('option', { value: v }, l)))),
   ];
   return comp('3D Model', body, { icon: 'cube', key: 'model', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.model; changed({ structure: true }); } }] });
+}
+
+/** Full-screen 3D Modeler for an object's model. */
+function editModel(j, { edit = false } = {}) {
+  const id = j.id;
+  const back = () => mo.close();
+  const mo = openModeler({
+    model: j.model, title: j.name, h, popMenu, toast, buzz, edit,
+    onChange: (m) => { const e = ent(id); if (e) { e.model = m; requestRebuild(); saveSoon(); } },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+  });
+  pushBack(back);
+}
+function newModel() {
+  const j = addEntity({ name: 'Model', y: 0, model: { parts: [{ geometry: 'mesh', ...makeCube(), x: 0, y: 0.5, z: 0, color: '#b0bec5' }] } });
+  editModel(j, { edit: true });
 }
 
 const closedComps = new Set();

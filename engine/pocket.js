@@ -211,10 +211,10 @@ export class Entity {
     if (this.model && this.model.parts?.length) { // box around all the parts
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (const q of this.model.parts) {
-        const [gx, gy, gz] = partSize(q);
-        x0 = Math.min(x0, (q.x || 0) - gx / 2); x1 = Math.max(x1, (q.x || 0) + gx / 2);
-        y0 = Math.min(y0, (q.y || 0) - gy / 2); y1 = Math.max(y1, (q.y || 0) + gy / 2);
-        z0 = Math.min(z0, (q.z || 0) - gz / 2); z1 = Math.max(z1, (q.z || 0) + gz / 2);
+        const { c: [ox, oy, oz], s: [gx, gy, gz] } = partBounds(q), px = (q.x || 0) + ox, py = (q.y || 0) + oy, pz = (q.z || 0) + oz;
+        x0 = Math.min(x0, px - gx / 2); x1 = Math.max(x1, px + gx / 2);
+        y0 = Math.min(y0, py - gy / 2); y1 = Math.max(y1, py + gy / 2);
+        z0 = Math.min(z0, pz - gz / 2); z1 = Math.max(z1, pz + gz / 2);
       }
       return { sphere: false, hx: (x1 - x0) * sx / 2, hy: (y1 - y0) * sy / 2, hz: (z1 - z0) * sz / 2, ox: (x0 + x1) / 2 * sx + (off?.ox || 0), oy: (y0 + y1) / 2 * sy + (off?.oy || 0), oz: (z0 + z1) / 2 * sz + (off?.oz || 0) };
     }
@@ -1223,10 +1223,11 @@ precision mediump float;
 varying vec3 vN; varying vec3 vW; varying vec3 vCol;
 uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos, uSky, uGround;
 uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
-uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount;
+uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount; uniform float uDouble;
 void main() {
   vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
+  if (uDouble > 0.5 && !gl_FrontFacing) n = -n;
   vec3 l = normalize(-uLightDir);
   float d = max(dot(n, l), 0.0);
   vec3 v = normalize(uCamPos - vW);
@@ -1245,6 +1246,7 @@ void main() {
   gl_FragColor = vec4(mix(c, uFogColor, f), uOpacity);
 }`;
 
+export { geometry as geometryArrays };
 export const GEOMETRIES = ['box', 'sphere', 'cylinder', 'cone', 'plane', 'capsule', 'pyramid', 'wedge', 'prism', 'gem', 'dome', 'torus'];
 
 /** Extra shapes built from triangles; each fits a unit box and is oriented outward automatically. */
@@ -1314,7 +1316,20 @@ function extraGeometry(kind) {
 }
 
 /** Size [x, y, z] of a mesh or model part from its geometry and dimensions. */
+/** Bounding box of an editable mesh part, in its local (scaled) space: { min: [x,y,z], max: [x,y,z] }. */
+export function meshBounds(m) {
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity], sc = [m.sx ?? 1, m.sy ?? 1, m.sz ?? 1];
+  for (const v of m.verts || []) for (let i = 0; i < 3; i++) { const c = v[i] * sc[i]; if (c < min[i]) min[i] = c; if (c > max[i]) max[i] = c; }
+  if (min[0] === Infinity) return { min: [-0.5, -0.5, -0.5], max: [0.5, 0.5, 0.5] };
+  return { min, max };
+}
+/** Part box: center offset (local) and size. Primitives are centered; meshes may not be. */
+export function partBounds(m) {
+  if (m.geometry === 'mesh') { const b = meshBounds(m); return { c: [0, 1, 2].map((i) => (b.min[i] + b.max[i]) / 2), s: [0, 1, 2].map((i) => Math.max(0.02, b.max[i] - b.min[i])) }; }
+  return { c: [0, 0, 0], s: partSize(m) };
+}
 export function partSize(m) {
+  if (m.geometry === 'mesh') return partBounds(m).s;
   const g = m.geometry || 'box', w = m.w ?? 1, hh = m.h ?? 1, d = m.d ?? 1, r = m.r ?? 0.5;
   if (g === 'sphere') return [r * 2, r * 2, r * 2];
   if (g === 'cylinder' || g === 'cone') return [r * 2, hh, r * 2];
@@ -1367,6 +1382,36 @@ function geometry(kind) {
   return { P: new Float32Array(P), N: new Float32Array(N), I: new Uint16Array(I) };
 }
 
+/** Newell normal of a polygon (un-normalized: length = 2 × area). */
+export function faceNormal(verts, idx) {
+  let x = 0, y = 0, z = 0;
+  for (let i = 0; i < idx.length; i++) {
+    const a = verts[idx[i]], b = verts[idx[(i + 1) % idx.length]];
+    x += (a[1] - b[1]) * (a[2] + b[2]); y += (a[2] - b[2]) * (a[0] + b[0]); z += (a[0] - b[0]) * (a[1] + b[1]);
+  }
+  return [x, y, z];
+}
+/** Triangles (fan) for an editable mesh: interleaved position / normal / color. */
+function buildMeshData(q) {
+  const V = q.verts, out = [], base = hexToRgb(q.color || '#cccccc');
+  const fns = q.faces.map((f) => faceNormal(V, f.v));
+  let vn = null;
+  if (q.smooth) {
+    vn = V.map(() => [0, 0, 0]);
+    q.faces.forEach((f, i) => { for (const k of f.v) if (vn[k]) { vn[k][0] += fns[i][0]; vn[k][1] += fns[i][1]; vn[k][2] += fns[i][2]; } });
+    vn = vn.map((n) => { const l = Math.hypot(...n) || 1; return [n[0] / l, n[1] / l, n[2] / l]; });
+  }
+  q.faces.forEach((f, i) => {
+    if (f.v.length < 3 || f.v.some((k) => !V[k])) return;
+    const l = Math.hypot(...fns[i]) || 1, fn = [fns[i][0] / l, fns[i][1] / l, fns[i][2] / l], col = f.c ? hexToRgb(f.c) : base;
+    for (let t = 1; t < f.v.length - 1; t++) for (const k of [f.v[0], f.v[t], f.v[t + 1]]) {
+      const p = V[k], n = vn ? vn[k] : fn;
+      out.push(p[0], p[1], p[2], n[0], n[1], n[2], col[0], col[1], col[2]);
+    }
+  });
+  return new Float32Array(out);
+}
+
 export class Renderer3D {
   constructor(canvas) {
     this.canvas = canvas; this.kind = '3d';
@@ -1380,8 +1425,9 @@ export class Renderer3D {
     this.a = { pos: 0, normal: 1, color: 2 };
     gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
     this.voxelCache = new WeakMap();
+    this.meshCache = new Map(); // editable mesh parts (by their verts array) → GPU buffers, oldest dropped first
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount', 'uDouble']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
     for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
@@ -1502,10 +1548,51 @@ export class Renderer3D {
     return M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx * gx, e.sy * gy, e.sz * gz);
   }
 
+  /** Editable mesh part (verts + polygon faces with their own colors), drawn double-sided. */
+  drawEditableMesh(q, model, opacity = 1) {
+    const gl = this.gl;
+    if (!q.verts?.length || !q.faces?.length) return;
+    let h = (q.verts.length * 31 + q.faces.length * 17) | 0;
+    for (const v of q.verts) h = (h * 31 + ((v[0] * 997 + v[1] * 991 + v[2] * 983) * 1000 | 0)) | 0;
+    for (const f of q.faces) { h = (h * 31 + f.v.length) | 0; for (const i of f.v) h = (h * 7 + i) | 0; if (f.c) h = (h * 13 + f.c.charCodeAt(1) + f.c.charCodeAt(6)) | 0; }
+    const key = h + '|' + (q.color || '') + '|' + (q.smooth ? 1 : 0);
+    let c = this.meshCache.get(q.verts);
+    if (!c || c.key !== key) {
+      const data = buildMeshData(q);
+      if (!c) {
+        c = { buf: gl.createBuffer() }; this.meshCache.set(q.verts, c);
+        if (this.meshCache.size > 160) { const [k0, old] = this.meshCache.entries().next().value; gl.deleteBuffer(old.buf); this.meshCache.delete(k0); }
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, c.buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+      c.count = data.length / 9; c.key = key;
+    }
+    const nm = M4.invert(model);
+    gl.uniformMatrix4fv(this.u.uModel, false, model);
+    gl.uniformMatrix3fv(this.u.uNormalMat, false, [nm[0], nm[4], nm[8], nm[1], nm[5], nm[9], nm[2], nm[6], nm[10]]);
+    gl.uniform3f(this.u.uColor, 1, 1, 1); gl.uniform1f(this.u.uEmissive, q.emissive || 0); gl.uniform1f(this.u.uOpacity, opacity); gl.uniform1f(this.u.uVColor, 1); gl.uniform1f(this.u.uDouble, 1);
+    gl.disable(gl.CULL_FACE);
+    if (opacity < 1) gl.enable(gl.BLEND);
+    gl.enableVertexAttribArray(2);
+    gl.bindBuffer(gl.ARRAY_BUFFER, c.buf);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 36, 0); gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 36, 12); gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 36, 24);
+    gl.drawArrays(gl.TRIANGLES, 0, c.count);
+    gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
+    gl.uniform1f(this.u.uVColor, 0); gl.uniform1f(this.u.uDouble, 0);
+    gl.enable(gl.CULL_FACE);
+    if (opacity < 1) gl.disable(gl.BLEND);
+  }
+
   /** Draw a model: each part is a primitive placed relative to the object. */
   drawModel(e, opacityMul = 1) {
     const base = M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx, e.sy, e.sz);
     for (const q of e.model.parts) {
+      if (q.geometry === 'mesh') {
+        const local = M4.trs(q.x || 0, q.y || 0, q.z || 0, (q.rx || 0) * DEG, (q.ry || 0) * DEG, (q.rz || 0) * DEG, q.sx ?? 1, q.sy ?? 1, q.sz ?? 1);
+        this.drawEditableMesh(q, M4.mul(base, local), (q.opacity ?? 1) * e.alpha * opacityMul);
+        continue;
+      }
       const [gx, gy0, gz] = partSize(q), gy = q.geometry === 'plane' ? 1 : gy0;
       const local = M4.trs(q.x || 0, q.y || 0, q.z || 0, (q.rx || 0) * DEG, (q.ry || 0) * DEG, (q.rz || 0) * DEG, gx, gy, gz);
       this.drawMesh(q.geometry || 'box', M4.mul(base, local), q.color || '#cccccc', q.emissive || 0, (q.opacity ?? 1) * e.alpha * opacityMul);

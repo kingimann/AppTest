@@ -82,6 +82,30 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
+### 3D Modeler (Blender-style modeling)
+
+Open it with **Open 3D Modeler** on any 3D Model component, or *Create → New 3D Model (Modeler)*. It fills the screen with its own 3D view:
+
+- **Object mode** works on whole parts:
+  - Add editable meshes (cube, plane, cylinder, cone, UV sphere, ico sphere, torus) or simple shapes.
+  - Duplicate, mirror across X, colour, smooth/flat shading, delete.
+  - **Make Editable** turns any simple shape into a mesh.
+- **Edit mode** reshapes a mesh by **Vertex** or **Face**:
+  - Tap to select (taps toggle). All / None / Grow change the selection.
+  - **Extrude**, **Inset**, **Subdivide**, **Smooth**, **Merge**, **Fill**, **Flip** and **Delete**.
+  - **Paint** colours faces.
+  - **Mirror X** edits both sides at once.
+- **Transform**:
+  - Pick Move, Rotate or Scale and an axis (X, Y, Z, Free, or Normal for faces).
+  - Drag the selection or its round handle to apply it. The magnet snaps (0.25 units, 15°, ×0.25).
+  - Double-tap a mesh in Object mode to edit it.
+- **View**:
+  - Drag empty space to orbit; pinch to zoom; two fingers to pan.
+  - Persp, Front, Side and Top buttons, and Frame everything / selection.
+- **Undo and files**: undo and redo. **Import / Export OBJ** to move models to and from Blender and other tools.
+
+Meshes are saved as `{ geometry: 'mesh', verts: [[x,y,z]…], faces: [{ v: [i,j,k,…], c: '#color' }…], smooth }` parts inside `model.parts`. They render double-sided with per-face colours, and the object's collider fits around them.
+
 ### Saving, lighting, physics and cameras
 
 - **Saving.** A save keeps variables, the level, where objects are and what was collected or destroyed. You can save with any of these:

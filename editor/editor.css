@@ -419,3 +419,30 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .ne-pitem small { color: var(--muted); font-size: 12.5px; line-height: 1.3; }
 #dockTabs, #dockTabs * { touch-action: none; }
 .pair label.chk { display: flex; align-items: center; gap: 8px; flex: 1; height: 50px; padding: 0 12px; background: var(--field); border: 1px solid var(--field-b); border-radius: 8px; font-weight: 600; }
+
+/* ---------- 3D Modeler (full screen) ---------- */
+.mo { position: fixed; inset: 0; z-index: 45; background: #1f2023; display: flex; flex-direction: column; touch-action: none; }
+.mo-stage { flex: 1; position: relative; min-height: 0; }
+.mo-view { position: absolute; inset: 0; touch-action: none; }
+.mo-views { position: absolute; top: 10px; right: 10px; display: flex; gap: 4px; padding: 4px; background: rgba(25,25,28,.85); border: 1px solid #111; border-radius: 12px; }
+.mo-views button { height: 38px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: #ddd; font-weight: 600; font-size: 13px; }
+.mo-views button:active { background: #444; }
+.mo-hint { position: absolute; left: 10px; right: 10px; bottom: 8px; color: rgba(255,255,255,.55); font-size: 12.5px; text-align: center; pointer-events: none; text-shadow: 0 1px 2px #000; }
+.mo-panel { flex: none; background: var(--panel); border-top: 1px solid #111; padding: 8px 0 calc(env(safe-area-inset-bottom) + 8px); }
+.mo-info { padding: 2px 14px 8px; color: var(--muted); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mo-row { display: flex; gap: 8px; padding: 0 10px 8px; align-items: center; overflow-x: auto; -webkit-overflow-scrolling: touch; touch-action: pan-x; scrollbar-width: none; }
+.mo-row::-webkit-scrollbar { display: none; }
+.mo-seg { display: flex; flex: none; background: #262626; border: 1px solid #111; border-radius: 12px; padding: 3px; gap: 2px; }
+.mo-seg button { height: 42px; min-width: 44px; padding: 0 12px; border: 0; border-radius: 9px; background: transparent; color: #cfcfcf; font-weight: 600; font-size: 14.5px; }
+.mo-seg button.on { background: #3a6ea5; color: #fff; }
+.mo-tog { flex: none; height: 48px; min-width: 48px; padding: 0 12px; border: 1px solid #111; border-radius: 12px; background: #3a3a3a; color: #ddd; font-weight: 600; display: grid; place-items: center; }
+.mo-tog.on { background: #f7a02c; color: #1b1b1b; }
+.mo-acts { padding-bottom: 2px; }
+.mo-act { flex: none; width: 76px; height: 68px; border: 1px solid #1c1c1c; border-radius: 14px; background: #464646; color: #eee; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 12.5px; font-weight: 600; }
+.mo-act svg.i { width: 24px; height: 24px; }
+.mo-act.primary { background: #3a6ea5; }
+.mo-act.danger { color: #ff8a80; }
+.mo-pal { display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); gap: 10px; padding: 6px 0 14px; }
+.mo-pal button { height: 56px; border-radius: 14px; border: 2px solid rgba(255,255,255,.15); }
+.mo-custom { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; font-weight: 600; }
+.mo-custom input { flex: 1; height: 50px; }

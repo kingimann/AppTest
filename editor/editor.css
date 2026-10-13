@@ -5,7 +5,7 @@
   --text: #dedede; --muted: #a3a3a3; --dim: #777; --sel: #2c5d87; --accent: #4c8bd6; --orange: #f7a02c;
   --x: #e8453c; --y: #8bd347; --z: #3d7bf2;
   --top: calc(env(safe-area-inset-top) + 58px);
-  --peek: calc(env(safe-area-inset-bottom) + 92px);
+  --peek: calc(env(safe-area-inset-bottom) + 98px);
   --sheet-h: 50%;
   --side-w: 44%;
 }
@@ -1140,3 +1140,20 @@ body.playing #attachBar { display: none !important; }
 .ld-full-frame { width: 100%; height: 100%; border: 0; }
 .ld-full-btns { position: absolute; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 12px); display: flex; gap: 10px; z-index: 2; }
 .ld-full-btns .btn { flex: 1; }
+
+/* ---------- bottom navigation: tabs stay at the bottom edge (thumb reach); the panel opens above them ---------- */
+#sheetHandle { order: 0; height: 30px; }
+#sheetHandle span { width: 52px; height: 6px; }
+.panel.dock { order: 1; }
+#dockTabs { order: 2; border-bottom: 0; border-top: 1px solid var(--line); padding: 4px 8px 6px; }
+#dockTabs button { height: 58px; }
+#app[data-sheet=peek] #dockTabs { border-top: 0; padding-top: 0; }
+#dockTabs button.active::before { content: ''; position: absolute; top: -5px; left: 30%; right: 30%; height: 3px; border-radius: 2px; background: var(--accent); }
+#app[data-sheet=peek] #dockTabs button.active::before { display: none; }
+#dockTabs button .sel-dot { position: absolute; top: 7px; right: calc(50% - 20px); width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--panel); }
+#dockTabs button.active .sel-dot { display: none; }
+@media (max-width: 999px) and (max-height: 540px) and (orientation: landscape) {
+  #dockTabs { order: 0; border-top: 0; border-bottom: 1px solid var(--line); padding: 8px 10px 8px; }
+  #dockTabs button { height: 46px; }
+  #dockTabs button.active::before { display: none; }
+}

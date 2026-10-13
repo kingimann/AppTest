@@ -1348,8 +1348,10 @@ export class Input {
 // ============================================================================
 // Audio: tiny WebAudio synth for sound effects, plus file playback
 // ============================================================================
+/** Sound names every picker offers: the built-in synth sounds, then the game's imported sounds (the editor adds those). */
+export const SOUNDS = ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'];
 export class Audio {
-  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); this.volume = 1; }
+  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); this.volume = 1; this.clips = {}; }
   unlock() {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; } }
     if (this.ctx.state === 'suspended') this.ctx.resume();
@@ -1373,7 +1375,7 @@ export class Audio {
       case 'win': [523, 659, 784, 1047].forEach((f, i) => T({ freq: f, dur: 0.18, delay: i * 0.1, vol: 0.1, type: 'triangle' })); break;
       case 'lose': [392, 330, 262].forEach((f, i) => T({ freq: f, to: f * 0.9, dur: 0.22, delay: i * 0.14, vol: 0.12, type: 'sawtooth' })); break;
       case 'click': T({ freq: 1200, dur: 0.04, vol: 0.05 }); break;
-      default: if (name) this.play(name);
+      default: if (name) this.play(this.clips[name] || name); // an imported sound by name, or a URL
     }
   }
   async load(url) {
@@ -3167,7 +3169,7 @@ registerBehavior('unlock', {
 registerBehavior('sound', {
   label: 'Sound', description: 'Plays a sound when the game starts or when touched.',
   params: [
-    { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], default: 'power' },
+    { key: 'sound', label: 'Sound', type: 'select', options: SOUNDS, default: 'power' },
     { key: 'when', label: 'When', type: 'select', options: ['touched', 'start'], default: 'touched' },
     { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player' },
   ],
@@ -4586,7 +4588,7 @@ registerBehavior('turnAction', {
     { key: 'costVar', label: 'Costs variable', type: 'text', default: '' },
     { key: 'cost', label: 'Cost', type: 'number', default: 0 },
     { key: 'text', label: 'Message ({n} = amount)', type: 'text', default: 'You hit for {n}!' },
-    { key: 'sound', label: 'Sound', type: 'select', options: ['hit', 'power', 'coin', 'jump', 'click'], default: 'hit' },
+    { key: 'sound', label: 'Sound', type: 'select', options: SOUNDS, default: 'hit' },
   ],
   create(p) {
     return {
@@ -4797,7 +4799,7 @@ export const NODE_TYPES = {
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
   message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
   log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text')] },
-  sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')] },
+  sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', SOUNDS, 'coin', 'sound')] },
   spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
   destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveBy: { cat: 'Actions', label: 'Move By', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
@@ -4920,7 +4922,7 @@ export const LOGIC_ACTIONS = {
   // game
   message: { cat: 'Game', label: 'Show message', icon: 'sign', params: [txt('text', 'Hello! {score}', 'text'), num('seconds', 2, 'seconds')], run: (c, p) => c.s.message(fillTemplate(p.text, c.s.vars), +p.seconds || 2), say: (p) => `Say “${p.text}”` },
   log: { cat: 'Game', label: 'Debug log', icon: 'list', params: [txt('text', 'score is {score}', 'text')], run: (c, p) => Log.add('info', fillTemplate(p.text, c.s.vars), c.e?.name), say: (p) => `Log “${p.text}”` },
-  sound: { cat: 'Game', label: 'Play sound', icon: 'bolt', params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')], run: (c, p) => c.s.engine.audio.sfx(p.sound), say: (p) => `Sound: ${p.sound}` },
+  sound: { cat: 'Game', label: 'Play sound', icon: 'bolt', params: [opt('sound', SOUNDS, 'coin', 'sound')], run: (c, p) => c.s.engine.audio.sfx(p.sound), say: (p) => `Sound: ${p.sound}` },
   vibrate: { cat: 'Game', label: 'Vibrate', icon: 'gamepad', run: (c) => c.s.engine.vibrate([30, 30, 30]), say: () => 'Vibrate' },
   shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
   switchCamera: { cat: 'Game', label: 'Switch camera', icon: 'camera', params: [sug(txt('camera', 'Camera', 'camera object'), 'objects')], run: (c, p) => c.s.setCamera(p.camera), say: (p) => `Camera → ${p.camera}` },
@@ -5293,6 +5295,7 @@ export class Engine {
    */
   start(source, opts = {}) {
     this.levels = null; this.carry = null;
+    if (source && typeof source === 'object' && !(source instanceof Scene)) this.audio.clips = { ...(source.sounds || {}) }; // imported sounds
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;
     else {

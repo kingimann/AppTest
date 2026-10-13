@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -137,6 +137,7 @@ function openProject(json, id = uid('p')) {
   (root.levels || []).forEach(normalize);
   project = root; levelIdx = 0;
   projectId = id;
+  syncSoundNames();
   selectedId = null;
   history = []; hIndex = -1; pushHistory();
   resetCamera();
@@ -238,6 +239,7 @@ function undoRedo(step) {
   levelIdx = Math.min(levelIdx, levelList().length - 1);
   project = levelList()[levelIdx];
   if (selectedId !== SCENE_ID && !ent(selectedId)) selectedId = null;
+  syncSoundNames();
   rebuild(); refreshAll(); saveSoon(); updateUndoButtons(); updateCtxBar();
 }
 function updateUndoButtons() { $('#undoBtn').disabled = hIndex <= 0; $('#redoBtn').disabled = hIndex >= history.length - 1; }
@@ -2754,10 +2756,11 @@ let projectTab = 'prefabs';
 function renderProject() {
   const box = $('#project');
   box.replaceChildren();
-  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['components', 'Components', 'folder']];
+  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
   if (!tabs.some((t) => t[0] === projectTab)) projectTab = 'prefabs';
   box.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
   box.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
+  if (projectTab === 'sounds') { box.append(...soundsTab()); return; }
   let items;
   if (projectTab === 'components') {
     items = componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
@@ -3032,6 +3035,55 @@ function deleteEntity(id) {
   if (ids.has(selectedId)) selectedId = null;
   changed({ structure: true }); pushHistory(); updateCtxBar();
   toast(ids.size > 1 ? `Deleted ${j.name} and ${ids.size - 1} child object${ids.size > 2 ? 's' : ''}. Undo to restore.` : `Deleted ${j.name}. Undo to restore.`);
+}
+
+// ---- Sounds (Unity AudioClips): imported files, usable everywhere a sound is picked ----
+const BUILTIN_SOUNDS = SOUNDS.slice();
+/** Keep the engine's shared sound list (every Sound picker) in step with this project's imported sounds. */
+function syncSoundNames() { SOUNDS.splice(0, SOUNDS.length, ...BUILTIN_SOUNDS, ...Object.keys(root.sounds || {})); engine.audio.clips = { ...(root.sounds || {}) }; }
+function previewSound(name) { engine.audio.unlock(); engine.audio.sfx(name); buzz(4); }
+function importSound() {
+  const fi = $('#fileInput');
+  fi.accept = 'audio/*';
+  fi.onchange = () => {
+    const f = fi.files[0]; fi.value = '';
+    if (!f) return;
+    if (f.size > 600 * 1024 && !confirm(`${f.name} is ${Math.round(f.size / 1024)} KB. Big sounds fill up the phone's project storage. Use it anyway? (Short clips under 200 KB work best.)`)) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let base = f.name.replace(/\.[^.]+$/, '').replace(/[^\w -]+/g, '').trim().slice(0, 24) || 'sound', name = base, n = 2;
+      while (SOUNDS.includes(name)) name = `${base} ${n++}`;
+      (root.sounds ||= {})[name] = rd.result;
+      syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); previewSound(name);
+      toast(`Imported “${name}”. Pick it in any Sound setting.`);
+    };
+    rd.readAsDataURL(f);
+  };
+  fi.click();
+}
+function soundsTab() {
+  const mine = Object.keys(root.sounds || {});
+  const row = (name, own) => h('div', { class: 'snd-row' },
+    h('button', { class: 'snd-play', title: 'Play', onclick: () => previewSound(name) }, icon('play')),
+    h('span', { class: 'snd-nm' }, name, h('small', {}, own ? `${Math.round((root.sounds[name].length * 3) / 4 / 1024)} KB · imported` : 'built-in')),
+    own && h('button', { class: 'eye', title: 'Sound options', onclick: (ev) => popMenu(ev.currentTarget, [
+      { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Sound name', name)?.trim(); if (!n || n === name) return; if (SOUNDS.includes(n)) { toast('That name is taken'); return; }
+        root.sounds = Object.fromEntries(Object.entries(root.sounds).map(([k, v]) => [k === name ? n : k, v])); renameSoundUses(name, n); syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); } },
+      { icon: 'trash', label: 'Delete', fn: () => { if (!confirm(`Delete “${name}”? Anything that plays it goes quiet.`)) return; delete root.sounds[name]; syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); } },
+    ]) }, icon('more')));
+  return [
+    h('div', { class: 'snd-tools' }, h('button', { class: 'btn primary', onclick: importSound }, icon('download'), 'Import Sound'),
+      h('p', { class: 'p-note' }, 'MP3, WAV, OGG or M4A from your phone. Then choose it in a Sound component, a Play Sound action or node, or from code with s.engine.audio.sfx("name").')),
+    h('div', { class: 'p-sec' }, 'My Sounds'),
+    mine.length ? h('div', { class: 'snd-list' }, mine.map((n) => row(n, true))) : h('p', { class: 'p-note' }, 'No imported sounds yet.'),
+    h('div', { class: 'p-sec' }, 'Built-in'),
+    h('div', { class: 'snd-list' }, BUILTIN_SOUNDS.map((n) => row(n, false))),
+  ];
+}
+/** Point every Sound setting that used the old name at the new one. */
+function renameSoundUses(from, to) {
+  const fix = (o) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if (k === 'sound' && v === from) o[k] = to; else if (v && typeof v === 'object') fix(v); } };
+  for (const lv of levelList()) fix(lv.entities);
 }
 
 function pickImage(cb) {

@@ -195,6 +195,11 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
 ```
 
+### Sounds
+
+- **Project › Sounds › Import Sound** brings in MP3, WAV, OGG or M4A files from your phone (short clips work best: they're saved inside the project). Tap ▶ to preview; ⋯ renames (everything using it follows) or deletes.
+- Imported sounds appear in every Sound picker: the Sound component, Turret, the Play Sound action and node. From code: `s.engine.audio.sfx('name')`.
+
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.

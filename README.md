@@ -267,6 +267,15 @@ The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while
 - While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
 - A custom script that crashes is reported once and the game keeps running.
 
+### Safe area and UI scaling (fits every phone)
+
+- **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.
+  - Tick **Ignore safe area** on a UI element (UI Element card) for full-screen backgrounds that should go under the notch.
+  - *Game Settings → Screen & Safe Area*: turn the safe area off, or add **extra edge space** on every side.
+- **UI scaling (like Unity's Canvas Scaler):** UI grows or shrinks with the screen, using the game's design size (*view width × height*) as the reference. **Match width ↔ height** picks what to follow (0 = width, 1 = height, 0.5 = both), **UI size multiplier** makes everything bigger or smaller, and *Same size on every screen* turns scaling off. Taps, sliders, buttons and layouts all follow the scale.
+- **Preview phones in the UI editor:** the phone button on the screen bar shows an iPhone notch, Dynamic Island, Android camera hole, a sideways iPhone, no notch, or this device. The safe area is outlined, the unsafe edges are tinted, and the preview also applies when you press Play.
+- From code: `uiBox(e, W, H, engine.safe)` gives an element's on-screen box, `placeUI(e, x, y, W, H, engine.safe)` moves it to a screen point, `engine.safe` holds the insets and the scale `k`, and `engine.safeOverride` fakes insets for testing.
+
 ### Parenting, UI anchoring and UI zoom
 
 - **Make an object a child** (it then moves, turns, scales and hides with its parent, in the editor and in play):

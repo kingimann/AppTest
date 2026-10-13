@@ -186,6 +186,7 @@ export class Entity {
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
     this.collider = props.collider ? { ...props.collider } : null; // Unity-style collider: alone it makes a solid (static) object
     this.body = null;
@@ -2301,12 +2302,29 @@ const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('rig
 export function uiOrigin(e, W, H, safe) {
   const p = e.parentEnt;
   if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
-  return anchorPoint(e.anchor, W, H, safe);
+  return anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe);
 }
-/** Screen box of a UI element: centre x/y, width, height. */
+/** UI scale (Canvas Scaler): screen pixels per UI unit. It rides along on the safe-area object. */
+export const uiK = (safe) => safe?.k || 1;
+/** Screen box of a UI element: centre x/y, width, height (in screen pixels, UI scale applied). */
 export function uiBox(e, W, H, safe) {
-  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy;
-  return { x: o.x + e.x + (ex.ox || 0), y: o.y + e.y + (ex.oy || 0), w: hw * 2, h: hh * 2 };
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy, k = uiK(safe);
+  return { x: o.x + (e.x + (ex.ox || 0)) * k, y: o.y + (e.y + (ex.oy || 0)) * k, w: hw * 2 * k, h: hh * 2 * k };
+}
+/** Put a UI element's centre at a screen point (the inverse of uiBox). */
+export function placeUI(e, sx, sy, W, H, safe) {
+  const o = uiOrigin(e, W, H, safe), ex = e.extents(), k = uiK(safe);
+  e.x = (sx - o.x) / k - (ex.ox || 0); e.y = (sy - o.y) / k - (ex.oy || 0);
+}
+/**
+ * How big UI should be on this screen (like Unity's Canvas Scaler "Scale With Screen Size"):
+ * the game's design size (view width × height) is the reference; match 0 = by width, 1 = by height, 0.5 = both.
+ */
+export function uiScaleFor(W, H, settings = {}, view = {}) {
+  if (settings.uiScale === 'constant') return clamp(+settings.uiScaleFactor || 1, 0.25, 4);
+  const rw = +view.width || 400, rh = +view.height || 700, m = clamp(settings.uiMatch ?? 0.5, 0, 1);
+  const k = Math.exp((1 - m) * Math.log(W / rw) + m * Math.log(H / rh));
+  return clamp(k * (+settings.uiScaleFactor || 1), +settings.uiMinScale || 0.6, +settings.uiMaxScale || 2.5);
 }
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
@@ -2317,11 +2335,12 @@ export function anchorPoint(anchor, W, H, safe) {
 
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
-  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null;
-  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: safe.left, t: safe.top, w: W - safe.left - safe.right, h: H - safe.top - safe.bottom };
+  const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
+  const sf = e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe;
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: sf.left, t: sf.top, w: W - sf.left - sf.right, h: H - sf.top - sf.bottom };
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w - m * 2)); e.x = box.l + box.w / 2 - ao.x; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h - m * 2)); e.y = box.t + box.h / 2 - ao.y; }
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -2368,8 +2387,8 @@ function renderUI(engine, scene) {
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
-      const o = uiOrigin(e, W, H, engine.safe);
-      ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time);
+      const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
+      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       ctx.restore();
     }
@@ -3554,9 +3573,9 @@ function hitTest(s, e, sx, sy) {
   const eng = s.engine;
   if (e._parentHidden) return false;
   if (e.ui) {
-    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents();
-    const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
-    return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
+    const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
+    const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
+    return Math.abs(sx - o.x - e.x * k) <= hx + 8 && Math.abs(sy - o.y - e.y * k) <= hy + 8;
   }
   const ex = e.extents();
   if (s.mode === '2d') {
@@ -3833,7 +3852,7 @@ registerBehavior('uiLayout', {
         const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.has(p.tag) && q.visible);
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
-        const eng = s.engine, place = (q, cx, cy) => { const o = uiOrigin(q, eng.width, eng.height, eng.safe), ex = q.extents(); q.x = cx - o.x - (ex.ox || 0); q.y = cy - o.y - (ex.oy || 0); };
+        const eng = s.engine, place = (q, cx, cy) => placeUI(q, cx, cy, eng.width, eng.height, eng.safe);
         if (p.direction === 'grid') {
           const cols = Math.max(1, +p.columns || 1), cw = Math.max(...sizes.map((z) => z[0])), ch = Math.max(...sizes.map((z) => z[1])), rows = Math.ceil(items.length / cols);
           const W = cols * cw + (cols - 1) * gap, H = rows * ch + (rows - 1) * gap;
@@ -5202,7 +5221,7 @@ registerBehavior('button', {
 // ---- tap & click components ----
 /** Float a text up from a screen point (clicker "+10" feedback). */
 export function popText(s, x, y, text, color = '#ffd23d', size = 26) { (s.popups ||= []).push({ x: x + rand(-18, 18), y, text: String(text), color, size, t: s.time, life: 0.9, rise: 60 }); }
-const screenOf = (s, e) => (e.ui ? (() => { const o = uiOrigin(e, s.engine.width, s.engine.height, s.engine.safe); return { x: o.x + e.x, y: o.y + e.y }; })() : s.engine.renderer.worldToScreen(s, e.x, e.y, e.z));
+const screenOf = (s, e) => (e.ui ? (() => { const o = uiOrigin(e, s.engine.width, s.engine.height, s.engine.safe), k = uiK(s.engine.safe); return { x: o.x + e.x * k, y: o.y + e.y * k }; })() : s.engine.renderer.worldToScreen(s, e.x, e.y, e.z));
 const tapsOn = (s, e) => s.engine.input.taps.filter((t) => e.visible && !e.dead && hitTest(s, e, t.x, t.y));
 const squash = (s, e, k = 0.88) => { const b = e.data.baseScale ??= e.sx; e.sx = e.sy = b * k; s.tween(e, { sx: b, sy: b }, 0.18); };
 
@@ -6154,7 +6173,9 @@ export class Engine {
     this.safeProbe = document.createElement('div');
     this.safeProbe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);';
     this.root.appendChild(this.safeProbe);
-    this.safe = { top: 0, right: 0, bottom: 0, left: 0 };
+    this.deviceSafe = { top: 0, right: 0, bottom: 0, left: 0 };
+    this.safe = { top: 0, right: 0, bottom: 0, left: 0, k: 1 };
+    this.safeOverride = null; // the editor's phone preview: pretend there is a notch / home bar
 
     this.input = new Input(this, this.uiCanvas);
     this.audio = new Audio();
@@ -6188,7 +6209,8 @@ export class Engine {
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
     for (const c of [this.uiCanvas, this.canvas]) if (c) { c.width = Math.round(this.width * this.dpr); c.height = Math.round(this.height * this.dpr); }
     const cs = getComputedStyle(this.safeProbe);
-    this.safe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+    this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+    this.updateSafe();
     if (this.scene && !this.editing) this.render();
   }
 
@@ -6260,7 +6282,7 @@ export class Engine {
 
   setScene(scene, { skipRestore = false } = {}) {
     scene.engine = this;
-    this.scene = scene;
+    this.scene = scene; this.updateSafe();
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });
@@ -6516,8 +6538,22 @@ export class Engine {
     if (s.msg && (s.msg.t -= dt) <= 0) s.msg = null;
   }
 
+  /**
+   * The safe area UI keeps inside (away from notches, rounded corners and the home bar) and the UI scale for this screen.
+   * Settings: safeArea ('device' | 'off'), safeMargin (extra space on every side), uiScale ('scale with screen' | 'constant'), uiMatch, uiScaleFactor.
+   */
+  updateSafe() {
+    const st = this.scene?.settings || {}, d = this.safeOverride || this.deviceSafe, off = st.safeArea === 'off', m = Math.max(0, +st.safeMargin || 0);
+    const side = (k) => (off ? 0 : d[k] || 0) + m;
+    const k = this.editing && !this.safeOverride?.scale ? 1 : uiScaleFor(this.width, this.height, st, this.scene?.view);
+    const S = this.safe;
+    S.top = side('top'); S.right = side('right'); S.bottom = side('bottom'); S.left = side('left'); S.k = k;
+    return S;
+  }
+
   render() {
     if (!this.scene || !this.renderer) return;
+    this.updateSafe();
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.scene.syncLights();
     this.renderer.render(this.scene, this);

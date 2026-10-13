@@ -2416,6 +2416,8 @@ function renderInspector() {
       sizeRow(j),
       C('stretch', { label: inParent ? 'Stretch inside parent' : 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill']], def: 'none', structure: true }),
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
+      !inParent && C('ignoreSafe', { label: 'Ignore safe area (go under the notch)', type: 'bool', def: false, structure: true }),
+      !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
     ], { icon: 'hud', key: 'uiel' }));
@@ -2724,6 +2726,15 @@ function renderSceneSettings(box) {
     C('settings.controlSize', { label: 'Control Size', type: 'select', options: [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], def: 'medium' }),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
+  box.append(comp('Screen & Safe Area', [
+    h('p', { class: 'desc' }, 'Phones come in many sizes, and many have a notch, rounded corners or a home bar. UI anchored to corners and edges stays inside the safe area, and grows or shrinks to suit the screen.'),
+    C('settings.safeArea', { label: 'Safe area', type: 'select', options: [['device', 'Keep UI clear of notches & home bar'], ['off', 'Use the whole screen']], def: 'device' }),
+    C('settings.safeMargin', { label: 'Extra edge space', type: 'number', def: 0, range: [0, 48], step: 2, infoText: 'Space between the UI and every screen edge, on top of the safe area.' }),
+    C('settings.uiScale', { label: 'UI size', type: 'select', options: [['scale with screen', 'Scale with screen size'], ['constant', 'Same size on every screen']], def: 'scale with screen', structure: true }),
+    (project.settings?.uiScale || 'scale with screen') === 'scale with screen' && C('settings.uiMatch', { label: 'Match width ↔ height', type: 'number', def: 0.5, range: [0, 1], step: 0.1, infoText: `Your design size is ${project.view?.width || 400} × ${project.view?.height || 700}. 0 = scale by width, 1 = by height, 0.5 = a mix (good for portrait and landscape).` }),
+    C('settings.uiScaleFactor', { label: 'UI size multiplier', type: 'number', def: 1, range: [0.5, 2], step: 0.05 }),
+    h('p', { class: 'desc' }, 'Check it in the UI editor: the Phone button shows a notch, Dynamic Island or home bar.'),
+  ], { icon: 'hud', key: 's-safe' }));
   box.append(comp('Mobile', [
     C('settings.orientation', { label: 'Screen Orientation', type: 'select', options: [['any', 'Any'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], def: 'any' }),
     h('p', { class: 'desc' }, 'Players holding the phone the wrong way see a "turn your device" screen.'),
@@ -3978,9 +3989,39 @@ function setViewMode(m) {
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   refreshAll(); applyCamera();
 }
+/** Pretend the screen has a notch / island / home bar while editing, to see the safe area at work. */
+const PHONES = {
+  device: { label: 'This device', short: 'Phone', safe: null },
+  plain: { label: 'No notch', short: 'No notch', safe: { top: 0, right: 0, bottom: 0, left: 0 } },
+  notch: { label: 'iPhone with notch', short: 'Notch', safe: { top: 47, right: 0, bottom: 34, left: 0 }, cut: 'notch' },
+  island: { label: 'iPhone with Dynamic Island', short: 'Island', safe: { top: 59, right: 0, bottom: 34, left: 0 }, cut: 'island' },
+  android: { label: 'Android (camera hole)', short: 'Android', safe: { top: 32, right: 0, bottom: 24, left: 0 }, cut: 'hole' },
+  sideways: { label: 'iPhone sideways', short: 'Sideways', safe: { top: 0, right: 47, bottom: 21, left: 47 }, cut: 'side' },
+};
+let phone = PHONES[store.get('pocket.editor.phone', 'device')] ? store.get('pocket.editor.phone', 'device') : 'device';
+function setPhone(k) {
+  phone = k; store.set('pocket.editor.phone', k);
+  engine.safeOverride = PHONES[k].safe; engine.updateSafe();
+  const b = $('.phone-btn span'); if (b) b.textContent = PHONES[k].short;
+  rebuild(); toast(PHONES[k].safe ? `Previewing: ${PHONES[k].label}` : 'Using this device’s real safe area');
+}
+engine.safeOverride = PHONES[phone].safe;
+/** Draw the pretend notch / island / camera hole / home bar on the UI editor's screen. */
+function drawPhoneCutouts(ctx, W, H) {
+  const ph = PHONES[phone]; if (!ph?.cut) return;
+  ctx.save(); ctx.fillStyle = '#000';
+  const pill = (x, y, w, hh) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hh, hh / 2); else ctx.rect(x, y, w, hh); ctx.fill(); };
+  if (ph.cut === 'notch') { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(W / 2 - 80, -12, 160, 42, 16); else ctx.rect(W / 2 - 80, 0, 160, 30); ctx.fill(); }
+  if (ph.cut === 'island') pill(W / 2 - 62, 11, 124, 36);
+  if (ph.cut === 'hole') { ctx.beginPath(); ctx.arc(W / 2, 16, 9, 0, Math.PI * 2); ctx.fill(); }
+  if (ph.cut === 'side') { pill(-14, H / 2 - 80, 44, 160); }
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'; pill(W / 2 - 67, H - 13, 134, 5); // home bar
+  ctx.restore();
+}
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
-  const bar = h('div', { id: 'uiScreens', hidden: true }, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
+  const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));
+  const bar = h('div', { id: 'uiScreens', hidden: true }, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
   $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
@@ -3998,6 +4039,11 @@ engine.onBeforeUI = (ctx) => {
   ctx.save(); ctx.translate(W / 2 + uiView.x, H / 2 + uiView.y); ctx.scale(uiView.z, uiView.z); ctx.translate(-W / 2, -H / 2);
   ctx.fillStyle = '#16171d'; ctx.fillRect(0, 0, W, H);
   ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5 / uiView.z; ctx.strokeRect(0, 0, W, H); // the phone screen
+  if (sf.top || sf.bottom || sf.left || sf.right) { // shade what is outside the safe area
+    ctx.fillStyle = 'rgba(255,90,90,0.10)';
+    ctx.fillRect(0, 0, W, sf.top); ctx.fillRect(0, H - sf.bottom, W, sf.bottom); ctx.fillRect(0, sf.top, sf.left, H - sf.top - sf.bottom); ctx.fillRect(W - sf.right, sf.top, sf.right, H - sf.top - sf.bottom);
+  }
+  drawPhoneCutouts(ctx, W, H);
   ctx.strokeStyle = 'rgba(120,170,255,0.35)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
   ctx.strokeRect(sf.left + 0.5, sf.top + 0.5, W - sf.left - sf.right - 1, H - sf.top - sf.bottom - 1);
   ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); ctx.setLineDash([]);

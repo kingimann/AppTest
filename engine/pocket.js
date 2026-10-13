@@ -1525,6 +1525,8 @@ export class Input {
     }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
+    const askMotion = () => { if (!this.enabled) return; if (this.useTilt && !this.tiltOn) this.enableTilt(); if (this.wantMotion) { if (!this.tiltOn) this.enableTilt(); this.enableShake(); } };
+    el.addEventListener('touchend', askMotion); el.addEventListener('pointerup', askMotion); // iPhone only lets a page ask for motion access when a finger lifts
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e, true));
@@ -1587,9 +1589,9 @@ export class Input {
 
   /** Tilt-to-move using the device's motion sensors (asks permission on iOS). */
   enableTilt() {
-    if (this.tiltOn) return;
+    if (this.tiltOn || this.tiltAsking) return;
     const listen = () => {
-      this.tiltOn = true;
+      this.tiltOn = true; this.tiltAsking = false;
       window.addEventListener('deviceorientation', (e) => {
         if (e.gamma == null) return;
         const angle = screen.orientation?.angle ?? window.orientation ?? 0;
@@ -1600,7 +1602,7 @@ export class Input {
       });
     };
     const D = window.DeviceOrientationEvent;
-    if (D && typeof D.requestPermission === 'function') D.requestPermission().then((r) => r === 'granted' && listen()).catch(() => {});
+    if (D && typeof D.requestPermission === 'function') { this.tiltAsking = true; D.requestPermission().then((r) => { this.tiltAsking = false; if (r === 'granted') listen(); else this.engine.scene?.message?.('Tilt needs motion access: allow it in Settings › Safari', 2.5); }).catch(() => { this.tiltAsking = false; }); }
     else if (D) listen();
   }
 
@@ -1643,6 +1645,7 @@ export class Input {
       const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
       x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
     }
+    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); y += (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); } // arrow keys / WASD on a computer
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
@@ -3061,7 +3064,7 @@ registerBehavior('move', {
   label: 'Move', description: 'Player movement with the joystick, dragging, or tilting the phone.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
-    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both' },
+    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both', info: { joystick: 'A joystick appears where you touch the left half of the screen (it switches the game\'s joystick on). Arrow keys / WASD work on a computer.', both: 'Joystick on the left half, drag anywhere else.', tilt: 'Tilt the phone to steer. On iPhone the game asks for motion access when you first tap the screen.', drag: 'Drag a finger anywhere to move it.' } },
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
@@ -3071,6 +3074,8 @@ registerBehavior('move', {
       start(e, s) {
         e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
         if (p.control === 'tilt') s.engine.input.useTilt = true;
+        // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
+        if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis();

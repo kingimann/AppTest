@@ -339,6 +339,22 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
 - **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
 - **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.
 
+### Online: PlayFab and Photon
+
+Each game uses **your own free accounts**: Game Settings › **Online (PlayFab & Photon)** takes a PlayFab **Title ID** and a Photon **App ID** (with *Test PlayFab* / *Test Photon* buttons). Nothing goes online until you add one, and the rest of the game keeps working offline.
+
+**PlayFab** (accounts, leaderboards, cloud saves, remote config), using its Client API directly (no SDK):
+- Players are signed in automatically with a private ID kept on their device (*Sign players in when the game starts*), so there's no password screen. **Set Player Name** sets the name on leaderboards.
+- **Online Leaderboard** widget / component: shows the top players (or the ones around you) in a text, refreshing on start, on the message `leaderboard`, and after posting. **Post Score** (node or the *submit score online* button action) sends a variable to a leaderboard. In PlayFab, turn on *Title settings › API Features › Allow client to post player statistics*.
+- **Cloud Save / Cloud Load** keep the game's variables in the player's account. **Load Remote Config** turns Title Data into variables, so you can tune a live game. **Track Event** records analytics events. Virtual currencies show up as variables like `{pfGC}`.
+
+**Photon** (real-time multiplayer), loading the official Photon Realtime library (`photon-realtime` from npm via jsDelivr) when it's first needed:
+- **Join Room** (by name, or any open room; it connects first), **Leave Room**, or *Join a room when the game starts*. **Multiplayer Lobby** widget: status, *Play Online* and *Leave* buttons.
+- **Network Sync** component: put it on your player. Everyone else in the room sees a copy that follows you (position, turning, facing, animation clip), with your name over it in 2D. Copies are tagged `remote` and are left out of the camera and the player tag; *solid* makes them bump.
+- **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
+- Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
+- Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.
+
 ### Saving, restore points and backups
 
 - **Autosave** to the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.

@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -2979,6 +2979,35 @@ function renderSceneSettings(box) {
       h('button', { class: 'btn primary', onclick: () => { const ui = levelList().flatMap((lv) => lv.entities.filter((e) => e.ui)); applyTheme(ui); changed({ structure: true }); pushHistory(); toast(`Theme applied to ${ui.length} UI elements`); } }, icon('brush'), 'Apply to my UI'),
       Object.keys(custom).length ? h('button', { class: 'btn', onclick: () => setTheme(root.settings.uiTheme || 'Default') }, icon('undo'), 'Reset colours') : null),
   ], { icon: 'brush', key: 's-theme' }));
+  // ---- online services: each game brings its own PlayFab Title ID and Photon App ID ----
+  const pf = root.settings.playfab || {}, ph = root.settings.photon || {};
+  const testOnline = async (what) => {
+    engine.scene.settings.playfab = clone(root.settings.playfab || {}); engine.scene.settings.photon = clone(root.settings.photon || {});
+    const O = engine.online;
+    if (what === 'playfab') { toast('Signing in to PlayFab…'); const ok = await O.pfLogin(); toast(ok ? `PlayFab works ✓ player ${O.pf.id}` : `PlayFab: ${engine.scene.vars.onlineError || 'could not sign in'}`); return; }
+    toast('Connecting to Photon…'); O.disconnect(); await O.connect();
+    const t0 = Date.now(); while (Date.now() - t0 < 8000 && !['lobby', 'offline'].includes(O.state)) await new Promise((r) => setTimeout(r, 200));
+    toast(O.state === 'lobby' ? `Photon works ✓ connected to region ${ph.region || 'eu'}` : `Photon: ${engine.scene.vars.onlineError || 'could not connect'}`); O.disconnect();
+  };
+  box.append(comp('Online (PlayFab & Photon)', [
+    h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),
+    h('h5', { class: 'sub-head' }, 'PlayFab'),
+    R('settings.playfab.titleId', { label: 'Title ID', type: 'text', def: '', infoText: 'From developer.playfab.com: create a title, then copy its Title ID (like 1A2B3).' }),
+    R('settings.playfab.autoLogin', { label: 'Sign players in when the game starts', type: 'bool', def: true }),
+    pf.titleId && h('p', { class: 'desc' }, 'For leaderboards, turn on Title settings › API Features › "Allow client to post player statistics" in PlayFab.'),
+    pf.titleId && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => testOnline('playfab') }, icon('check'), 'Test PlayFab')),
+    h('h5', { class: 'sub-head' }, 'Photon (multiplayer)'),
+    R('settings.photon.appId', { label: 'App ID (Realtime)', type: 'text', def: '', infoText: 'From dashboard.photonengine.com: create a "Realtime" app (free for 20 players at once) and copy its App ID.' }),
+    ph.appId && [
+      R('settings.photon.region', { label: 'Region', type: 'select', options: PHOTON_REGIONS.map((r) => [r, { eu: 'Europe', us: 'USA East', usw: 'USA West', asia: 'Asia', jp: 'Japan', kr: 'South Korea', in: 'India', au: 'Australia', sa: 'South America', cae: 'Canada East', za: 'South Africa', uae: 'UAE', tr: 'Turkey' }[r] || r]), def: 'eu' }),
+      R('settings.photon.maxPlayers', { label: 'Players per room', type: 'number', def: 4, range: [2, 16], step: 1 }),
+      R('settings.photon.autoJoin', { label: 'Join a room when the game starts', type: 'bool', def: false, infoText: 'Otherwise use a "join online room" button or the Join Room node.' }),
+      R('settings.photon.room', { label: 'Room name (blank = any open room)', type: 'text', def: '' }),
+      R('settings.photon.appVersion', { label: 'Game version (players only meet the same version)', type: 'text', def: '1.0' }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => testOnline('photon') }, icon('check'), 'Test Photon')),
+    ],
+    h('p', { class: 'desc' }, 'Then: put Network Sync on your player, add an Online Leaderboard or Multiplayer Lobby from Project › UI › Online, or use the Online nodes. Variables you can show in text: {netState}, {netPlayers}, {netRoom}, {pfName}, {pfRank}, {onlineError}.'),
+  ], { icon: 'globe', key: 's-online' }));
   box.append(comp('Mobile', [
     h('p', { class: 'desc' }, 'Portrait or landscape: see Orientation above.'),
     orientationOf() === 'any' && C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
@@ -3041,6 +3070,7 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
   navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],

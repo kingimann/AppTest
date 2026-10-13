@@ -2802,7 +2802,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -5408,6 +5408,12 @@ function runAction(s, e, p, other) {
     case 'send message': s.send(v); break;
     case 'go to page': { const [a, b] = String(v || 'home').split('='); if (b !== undefined) s.navTo(b.trim(), a.trim()); else s.navTo(a.trim(), 'page'); break; } // "shop", or "tab = weekly" for another variable
     case 'go back': s.navBack(); break;
+    case 'join online room': s.engine.online.join(v && v !== 'Hello!' ? v : ''); break; // value: a room name, or blank for any open room
+    case 'leave online room': s.engine.online.leave(); break;
+    case 'send network message': s.engine.online.sendMessage(v, p.amount); break;
+    case 'submit score online': s.engine.online.pfSubmit(v && v !== 'Hello!' ? v : 'score', s.vars[v && v !== 'Hello!' ? v : 'score'] ?? s.vars.score); break; // value: the statistic (and variable) name
+    case 'cloud save': s.engine.online.pfSave(); break;
+    case 'cloud load': s.engine.online.pfLoad(); break;
     case 'play animation': playClip(e, v); break;
     default: break;
   }
@@ -6467,6 +6473,29 @@ export const NODE_TYPES = {
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
   level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  // online: Photon multiplayer and PlayFab services
+  netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
+  netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
+  netLeave: { cat: 'Online', label: 'Leave Room', exec: true, outs: ['then'] },
+  netSend: { cat: 'Online', label: 'Send Network Message', exec: true, outs: ['then'], params: [txt('message', 'boom', 'message')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  netShared: { cat: 'Online', label: 'Set Shared Variable', exec: true, outs: ['then'], params: [txt('name', 'roundScore', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  onNetJoined: { cat: 'Online', label: 'On Joined Room', outs: ['then'] },
+  onPlayerJoined: { cat: 'Online', label: 'On Player Joined', outs: ['then'] },
+  onPlayerLeft: { cat: 'Online', label: 'On Player Left', outs: ['then'] },
+  onNetMessage: { cat: 'Online', label: 'On Network Message', outs: ['then'], params: [txt('message', 'boom', 'message (blank = any)')] },
+  netPlayers: { cat: 'Online', label: 'Players In Room', value: 'number' },
+  netIsMaster: { cat: 'Online', label: 'Is Room Host', value: 'bool' },
+  netInRoom: { cat: 'Online', label: 'Is In Room', value: 'bool' },
+  netValue: { cat: 'Online', label: 'Network Message Value', value: 'number' },
+  pfLogin: { cat: 'Online', label: 'PlayFab Log In', exec: true, outs: ['logged in', 'failed'] },
+  pfSubmit: { cat: 'Online', label: 'Post Score (PlayFab)', exec: true, outs: ['then', 'posted', 'failed'], params: [txt('stat', 'score', 'leaderboard')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  pfName: { cat: 'Online', label: 'Set Player Name (PlayFab)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('name', '{playerName}', 'name (variables in braces)')] },
+  pfSave: { cat: 'Online', label: 'Cloud Save (PlayFab)', exec: true, outs: ['then', 'saved', 'failed'], params: [txt('keys', '', 'variables (blank = all)')] },
+  pfLoad: { cat: 'Online', label: 'Cloud Load (PlayFab)', exec: true, outs: ['loaded', 'no save', 'failed'] },
+  pfTitle: { cat: 'Online', label: 'Load Remote Config (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'], params: [txt('keys', '', 'title data keys (blank = all)')] },
+  pfEventN: { cat: 'Online', label: 'Track Event (PlayFab)', exec: true, outs: ['then'], params: [txt('name', 'level_complete', 'event name')] },
+  onPfLogin: { cat: 'Online', label: 'On PlayFab Logged In', outs: ['then'] },
+  onOnlineError: { cat: 'Online', label: 'On Online Error', outs: ['then'] },
   // UI navigation
   goToPage: { cat: 'Objects', label: 'Go To Page', exec: true, outs: ['then'], params: [txt('page', 'shop', 'page'), txt('var', 'page', 'variable'), opt('history', ['open (Back returns)', 'switch (no history)', 'start over (clear history)'], 'open (Back returns)', 'history')] },
   goBack: { cat: 'Objects', label: 'Go Back', exec: true, outs: ['then', 'nowhere to go'], params: [txt('var', '', 'variable (blank = any)')] },
@@ -6893,6 +6922,10 @@ registerBehavior('graph', {
         case 'hasOther': return !!ctx.other && !ctx.other.dead;
         case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
         case 'canGoBack': return s.canGoBack();
+        case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
+        case 'netIsMaster': return s.engine.online.isMaster();
+        case 'netInRoom': return s.engine.online.inRoom();
+        case 'netValue': return +(ctx.netValue ?? s.engine.online.lastValue) || 0;
         default: return 0;
       }
     };
@@ -7042,6 +7075,18 @@ registerBehavior('graph', {
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
         case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
+        case 'netConnect': s.engine.online.connect(); break;
+        case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
+        case 'netLeave': s.engine.online.leave(); break;
+        case 'netSend': s.engine.online.sendMessage(P('message'), +I('value') || 0); break;
+        case 'netShared': s.engine.online.setShared(P('name') || 'shared', +I('value') || 0); break;
+        case 'pfLogin': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLogin().then((ok) => { if (!e.dead) follow(n, ok ? 'logged in' : 'failed', later); }); return; }
+        case 'pfSubmit': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSubmit(P('stat'), +I('value') || 0).then((ok) => { if (!e.dead) follow(n, ok ? 'posted' : 'failed', later); }); break; }
+        case 'pfName': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSetName(fillTemplate(P('name'), s.vars)).then((ok) => { if (!e.dead) follow(n, ok ? 'done' : 'failed', later); }); break; }
+        case 'pfSave': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSave(P('keys')).then((ok) => { if (!e.dead) follow(n, ok ? 'saved' : 'failed', later); }); break; }
+        case 'pfLoad': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLoad().then((r) => { if (!e.dead) follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'no save' : 'failed', later); }); return; }
+        case 'pfTitle': { const later = { ...ctx, steps: 0 }; s.engine.online.pfTitleData(P('keys')).then((ok) => { if (!e.dead) follow(n, ok ? 'loaded' : 'failed', later); }); break; }
+        case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
         case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
@@ -7077,6 +7122,12 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onNetJoined', 'onPlayerJoined', 'onPlayerLeft', 'onPfLogin', 'onOnlineError')) s.on('online', (what) => {
+          if (e.dead) return;
+          const t = { joined: 'onNetJoined', playerJoined: 'onPlayerJoined', playerLeft: 'onPlayerLeft', login: 'onPfLogin', error: 'onOnlineError' }[what];
+          if (t) fire(t, e, s);
+        });
+        if (has('onNetMessage')) s.on('netMessage', (m, v) => { if (!e.dead) fire('onNetMessage', e, s, null, (n) => !param(n, 'message') || param(n, 'message') === m, null, { netValue: v }); });
         if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
         if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
         if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
@@ -7164,6 +7215,308 @@ registerBehavior('script', {
 // ============================================================================
 // Engine
 // ============================================================================
+// ============================================================================
+// Online services: PlayFab (accounts, leaderboards, cloud saves, remote config) and Photon (real-time multiplayer).
+// Each game uses its own PlayFab Title ID and Photon App ID (Game Settings › Online). Nothing is sent anywhere until one is set.
+// ============================================================================
+export const PHOTON_SDK = 'https://cdn.jsdelivr.net/npm/photon-realtime@4.4.0/photon-realtime-module.js';
+export const PHOTON_REGIONS = ['eu', 'us', 'usw', 'asia', 'jp', 'kr', 'in', 'au', 'sa', 'cae', 'za', 'uae', 'tr'];
+const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6 }; // Photon event codes this engine uses
+const NET_VISUAL = ['animator', 'spriteSheet', 'flipbook']; // components a remote copy keeps (looks only, no control)
+
+export class Online {
+  constructor(engine) {
+    this.engine = engine;
+    this.pf = { ticket: null, id: null, name: '', login: null };
+    this.lbc = null; this.state = 'offline'; this.pendingJoin = null; this.loading = null;
+    this.local = new Map(); // netId → { e, p } objects this player owns and sends
+    this.proxies = new Map(); // `${actor}:${netId}` → { e, to, anim }
+    this.shared = {}; this.sendT = 0; this.sceneRef = null; this.lastValue = 0;
+  }
+  get scene() { return this.engine.scene; }
+  cfg(k) { return this.scene?.settings?.[k] || {}; }
+  setVar(k, v) { const s = this.scene; if (s && s.vars[k] !== v) s.setVar(k, v); }
+  fail(where, err) { const m = String(err?.message || err || 'failed'); Log.add('warn', `${where}: ${m}`); this.setVar('onlineError', m); this.scene?.emit('online', 'error', m); return null; }
+  playerName() { return this.pf.name || store.get('pocket.netName', '') || 'Player ' + (this.myNr() || Math.floor(rand(100, 999))); }
+
+  // ---------------- PlayFab (Client REST API) ----------------
+  titleId() { return String(this.cfg('playfab').titleId || '').trim(); }
+  async pfCall(api, body = {}, auth = true) {
+    const title = this.titleId();
+    if (!title) throw new Error('add your PlayFab Title ID in Game Settings › Online');
+    if (auth && !this.pf.ticket) await this.pfLogin();
+    const r = await fetch(`https://${title.toLowerCase()}.playfabapi.com/Client/${api}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { 'X-Authorization': this.pf.ticket } : {}) }, body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || j.code !== 200) throw new Error(j?.errorMessage || `${api} failed (${r.status})`);
+    return j.data;
+  }
+  /** Sign in without a password: a private ID kept on this device (one PlayFab player per device and game). */
+  pfLogin() {
+    if (this.pf.title !== this.titleId()) this.pf = { ticket: null, id: null, name: '', login: null, title: this.titleId() }; // a different game / Title ID
+    if (this.pf.ticket) return Promise.resolve(true);
+    if (this.pf.login) return this.pf.login;
+    const title = this.titleId(), key = 'pocket.pf.' + title;
+    let id = store.get(key, '');
+    if (!id) { id = globalThis.crypto?.randomUUID?.() || 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2); store.set(key, id); }
+    this.pf.login = this.pfCall('LoginWithCustomID', { TitleId: title, CustomId: id, CreateAccount: true, InfoRequestParameters: { GetPlayerProfile: true, GetUserVirtualCurrency: true } }, false)
+      .then((d) => {
+        this.pf.ticket = d.SessionTicket; this.pf.id = d.PlayFabId; this.pf.name = d.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+        this.setVar('pfOnline', 1); this.setVar('pfPlayerId', d.PlayFabId); if (this.pf.name) this.setVar('pfName', this.pf.name);
+        for (const [c, v] of Object.entries(d.InfoResultPayload?.UserVirtualCurrency || {})) this.setVar('pf' + c, v);
+        this.scene?.emit('online', 'login', d.NewlyCreated);
+        return true;
+      })
+      .catch((e) => { this.fail('PlayFab login', e); return false; })
+      .finally(() => { this.pf.login = null; });
+    return this.pf.login;
+  }
+  async pfSetName(name) {
+    name = String(name || '').trim().slice(0, 25);
+    try { await this.pfCall('UpdateUserTitleDisplayName', { DisplayName: name }); this.pf.name = name; this.setVar('pfName', name); store.set('pocket.netName', name); return true; } catch (e) { return !!this.fail('PlayFab name', e); }
+  }
+  /** Post a score to a leaderboard (statistic). PlayFab: Title settings › API Features › "Allow client to post player statistics". */
+  async pfSubmit(stat, value) {
+    try { await this.pfCall('UpdatePlayerStatistics', { Statistics: [{ StatisticName: String(stat || 'score'), Value: Math.round(+value || 0) }] }); this.scene?.emit('online', 'score', stat); return true; } catch (e) { return !!this.fail('PlayFab score', e); }
+  }
+  /** Leaderboard rows: [{ rank, name, value, me }] — the top, or the players around you. */
+  async pfLeaderboard(stat, count = 10, around = false) {
+    try {
+      const body = { StatisticName: String(stat || 'score'), MaxResultsCount: clamp(Math.round(+count || 10), 1, 100), ...(around ? {} : { StartPosition: 0 }) };
+      const d = await this.pfCall(around ? 'GetLeaderboardAroundPlayer' : 'GetLeaderboard', body);
+      const rows = (d.Leaderboard || []).map((r) => ({ rank: r.Position + 1, name: r.DisplayName || 'Player ' + String(r.PlayFabId).slice(-4), value: r.StatValue, me: r.PlayFabId === this.pf.id }));
+      const mine = rows.find((r) => r.me); if (mine) this.setVar('pfRank', mine.rank);
+      return rows;
+    } catch (e) { this.fail('PlayFab leaderboard', e); return null; }
+  }
+  /** Cloud save: the game's variables (or just the listed ones) go to the player's PlayFab data. */
+  async pfSave(keys) {
+    const s = this.scene; if (!s) return false;
+    const pick = String(keys || '').split(',').map((k) => k.trim()).filter(Boolean), vars = {};
+    for (const [k, v] of Object.entries(s.vars)) if ((pick.length ? pick.includes(k) : !/^(pf|net|online)/.test(k) && k !== 'time') && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) vars[k] = v;
+    try { await this.pfCall('UpdateUserData', { Data: { pocket_vars: JSON.stringify({ vars, level: this.engine.levelIndex || 0 }) } }); return true; } catch (e) { return !!this.fail('PlayFab save', e); }
+  }
+  async pfLoad() {
+    try {
+      const d = await this.pfCall('GetUserData', { Keys: ['pocket_vars'] }), raw = d.Data?.pocket_vars?.Value;
+      if (!raw) return 'none';
+      const j = JSON.parse(raw); for (const [k, v] of Object.entries(j.vars || {})) this.scene?.setVar(k, v);
+      return 'loaded';
+    } catch (e) { this.fail('PlayFab load', e); return 'failed'; }
+  }
+  /** Remote config: Title Data values become variables (numbers stay numbers), so you can tune a live game. */
+  async pfTitleData(keys) {
+    try {
+      const list = String(keys || '').split(',').map((k) => k.trim()).filter(Boolean);
+      const d = await this.pfCall('GetTitleData', list.length ? { Keys: list } : {});
+      for (const [k, v] of Object.entries(d.Data || {})) this.scene?.setVar(k, v !== '' && Number.isFinite(+v) ? +v : v);
+      return true;
+    } catch (e) { return !!this.fail('PlayFab title data', e); }
+  }
+  async pfEvent(name, body = {}) { try { await this.pfCall('WritePlayerEvent', { EventName: String(name || 'game_event').replace(/[^\w]/g, '_').slice(0, 64), Body: body }); return true; } catch (e) { return !!this.fail('PlayFab event', e); } }
+  async pfCurrency() {
+    try { const d = await this.pfCall('GetUserInventory', {}); for (const [c, v] of Object.entries(d.VirtualCurrency || {})) this.setVar('pf' + c, v); return true; } catch (e) { return !!this.fail('PlayFab currency', e); }
+  }
+
+  // ---------------- Photon Realtime ----------------
+  async photonSDK() {
+    if (globalThis.Photon?.LoadBalancing) return globalThis.Photon;
+    this.loading ||= (async () => {
+      const code = await (await fetch(this.cfg('photon').sdkUrl || PHOTON_SDK)).text();
+      const m = { exports: {} };
+      new Function('module', 'exports', 'require', code)(m, m.exports, (n) => (n === 'ws' ? globalThis.WebSocket : undefined)); // the npm build expects Node; the browser's WebSocket fits
+      return (globalThis.Photon = m.exports);
+    })().catch((e) => { this.loading = null; throw e; });
+    return this.loading;
+  }
+  myNr() { return this.lbc?.myActor?.()?.actorNr || 0; }
+  inRoom() { return !!this.lbc?.isJoinedToRoom?.(); }
+  isMaster() { return this.inRoom() && this.lbc.myRoomMasterActorNr() === this.myNr(); }
+  setState(st) { this.state = st; this.setVar('netState', st); this.setVar('netOnline', st === 'room' ? 1 : 0); }
+  counts() {
+    if (!this.inRoom()) { this.setVar('netPlayers', 0); this.setVar('netMaster', 0); return; }
+    this.setVar('netPlayers', this.lbc.myRoomActorCount()); this.setVar('netMaster', this.isMaster() ? 1 : 0); this.setVar('netActor', this.myNr());
+  }
+  async connect() {
+    const c = this.cfg('photon');
+    if (!String(c.appId || '').trim()) return this.fail('Photon', 'add your Photon App ID in Game Settings › Online');
+    if (this.lbc && this.state !== 'offline') return true;
+    try {
+      this.setState('connecting');
+      const P = await this.photonSDK(), L = P.LoadBalancing.LoadBalancingClient, S = L.State;
+      const lbc = this.lbc = new L(P.ConnectionProtocol.Wss, String(c.appId).trim(), String(c.appVersion || '1.0'));
+      this.P = P;
+      lbc.setUserId?.(this.pf.id || store.get('pocket.netId', '') || (() => { const id = 'u' + Math.random().toString(36).slice(2, 10); store.set('pocket.netId', id); return id; })());
+      lbc.onStateChange = (st) => {
+        if (st === S.JoinedLobby) { this.setState('lobby'); this.scene?.emit('online', 'connected'); if (this.pendingJoin) { const j = this.pendingJoin; this.pendingJoin = null; this.join(j.name, j.max); } }
+        else if (st === S.Joined) { this.setState('room'); }
+        else if (st === S.Disconnected || st === S.Error) { this.setState('offline'); this.clearProxies(); this.counts(); this.scene?.emit('online', 'disconnected'); }
+        else if (st === S.ConnectingToGameserver || st === S.ConnectedToGameserver) this.setState('joining');
+      };
+      lbc.onJoinRoom = () => {
+        this.setState('room'); this.setVar('netRoom', lbc.myRoom()?.name || ''); this.counts();
+        this.announce(); this.scene?.emit('online', 'joined', lbc.myRoom()?.name);
+      };
+      lbc.onActorJoin = (a) => { this.counts(); if (a.actorNr !== this.myNr()) { this.announce([a.actorNr]); if (this.isMaster() && Object.keys(this.shared).length) this.raise(NET.SHARED, { all: this.shared }, [a.actorNr]); this.scene?.emit('online', 'playerJoined', a.actorNr); } };
+      lbc.onActorLeave = (a) => { this.counts(); this.dropActor(a.actorNr); this.scene?.emit('online', 'playerLeft', a.actorNr); };
+      lbc.onEvent = (code, data, actor) => this.receive(code, data, actor);
+      lbc.onError = (code, msg) => this.fail('Photon', `${msg} (${code})`);
+      lbc.connectToRegionMaster(c.region || 'eu');
+      return true;
+    } catch (e) { this.setState('offline'); return this.fail('Photon', e); }
+  }
+  /** Join a room by name (made if it doesn't exist), or any open room when the name is blank. Connects first if needed. */
+  async join(name = '', max) {
+    max = clamp(Math.round(+max || +this.cfg('photon').maxPlayers || 4), 2, 32);
+    if (!this.lbc || this.state === 'offline' || this.state === 'connecting') { this.pendingJoin = { name, max }; if (!this.lbc || this.state === 'offline') await this.connect(); return true; }
+    if (this.inRoom()) return true;
+    this.setState('joining');
+    if (name) this.lbc.joinRoom(String(name), { createIfNotExists: true }, { maxPlayers: max });
+    else this.lbc.joinRandomOrCreateRoom({}, null, { maxPlayers: max });
+    return true;
+  }
+  leave() { if (this.inRoom()) { this.lbc.leaveRoom(); this.clearProxies(); this.setState('lobby'); this.counts(); this.setVar('netRoom', ''); } }
+  disconnect() { this.pendingJoin = null; try { this.lbc?.disconnect(); } catch { /* already closed */ } this.lbc = null; this.setState('offline'); this.clearProxies(); this.counts(); }
+  raise(code, data, to) {
+    if (!this.inRoom()) return false;
+    const R = this.P?.LoadBalancing?.Constants?.ReceiverGroup || { Others: 0 };
+    this.lbc.raiseEvent(code, data, to ? { targetActors: to } : { receivers: R.Others });
+    return true;
+  }
+  /** A message to everyone else in the room (they get it as a game message, plus On Network Message). */
+  sendMessage(name, value = 0) { return this.raise(NET.MESSAGE, { m: String(name), v: value }); }
+  setShared(k, v) { this.shared[k] = v; this.scene?.setVar(k, v); this.raise(NET.SHARED, { k, v }); }
+
+  // synced objects: the local player's copy sends where it is; everyone else draws a copy that follows
+  register(e, p) { this.local.set(e.data.netId || e.id, { e, p }); if (this.inRoom()) this.announce(null, e); }
+  unregister(e) { const id = e.data.netId || e.id; if (this.local.get(id)?.e === e) { this.local.delete(id); this.raise(NET.DESPAWN, { i: id }); } }
+  spawnInfo(e) {
+    const s = this.scene, all = [s?.json, ...(s?.json?.levels || [])].filter(Boolean).flatMap((lv) => lv.entities || []);
+    const src = all.find((j) => j.id === e.id) || { name: e.name, shape: e.shape, sprite: e.sprite, mesh: e.mesh, model: e.model, text: e.text, sx: e.sx, sy: e.sy, sz: e.sz };
+    const strip = (j) => ({ ...JSON.parse(JSON.stringify(j)), id: undefined, behaviors: (j.behaviors || []).filter((b) => NET_VISUAL.includes(b.type)), tags: [] });
+    const kids = []; const walk = (id) => { for (const k of all) if (k.parent === id && !k.ui) { kids.push({ ...strip(k), _id: k.id, _parent: k.parent }); walk(k.id); } };
+    walk(e.id);
+    return { j: strip(src), k: kids, n: this.playerName() };
+  }
+  announce(to, only) {
+    if (!this.inRoom()) return;
+    for (const [id, { e, p }] of this.local) if (!only || only === e) this.raise(NET.SPAWN, { i: id, ...this.spawnInfo(e), solid: !!p.solid }, to);
+  }
+  clearProxies() { for (const q of this.proxies.values()) q.e.destroy(); this.proxies.clear(); this.setVar('netPlayers', this.inRoom() ? this.lbc.myRoomActorCount() : 0); }
+  dropActor(nr) { for (const [k, q] of this.proxies) if (k.startsWith(nr + ':')) { q.e.destroy(); this.proxies.delete(k); } }
+  makeProxy(actor, d) {
+    const s = this.scene; if (!s) return null;
+    const key = actor + ':' + d.i; this.proxies.get(key)?.e.destroy();
+    const three = s.mode === '3d', j = d.j || {};
+    const e = s.add(new Entity({ ...j, name: `${j.name || 'Player'} (${d.n || 'remote'})`, tags: ['remote', 'netPlayer'], x: j.x || 0, y: j.y || 0, z: j.z || 0 }));
+    if (e.body) { e.body.type = 'kinematic'; e.body.sensor = !d.solid; }
+    e.data.netActor = actor; e.data.netName = d.n || '';
+    const ids = { [d.i]: e };
+    for (const k of d.k || []) { const c = s.add(new Entity({ ...k, parent: (ids[k._parent] || e).id })); ids[k._id] = c; }
+    if (!three && d.n) s.add(new Entity({ name: e.name + ' Name', parent: e.id, x: 0, y: -(e.extents().hy || 20) - 14, text: { ...TEXT_DEFAULTS, value: d.n, size: 13, weight: '700', shadow: true } }));
+    const q = { e, to: null, anim: '' }; this.proxies.set(key, q);
+    return q;
+  }
+  receive(code, data, actor) {
+    const s = this.scene; if (!s || actor === this.myNr()) return;
+    switch (code) {
+      case NET.STATE: for (const r of data || []) {
+        const key = actor + ':' + r[0], q = this.proxies.get(key);
+        if (!q) { if (!this.asked?.has(key)) { (this.asked ||= new Set()).add(key); this.raise(NET.NEED, {}, [actor]); } continue; }
+        const first = !q.to; q.to = { x: r[1], y: r[2], z: r[3], ry: r[4], rz: r[5] };
+        if (first) Object.assign(q.e, q.to);
+        q.e.data.flipX = !!r[6]; if (q.e.sprite) q.e.sprite.flip = !!r[6];
+        if (r[7] && r[7] !== q.anim) { q.anim = r[7]; for (const t of NET_VISUAL) { const b = q.e.getBehavior(t); if (b?.play && b.current !== r[7]) b.play(r[7]); } }
+      } break;
+      case NET.SPAWN: this.asked?.delete(actor + ':' + data.i); this.makeProxy(actor, data); break;
+      case NET.DESPAWN: { const k = actor + ':' + data.i; this.proxies.get(k)?.e.destroy(); this.proxies.delete(k); break; }
+      case NET.NEED: this.announce([actor]); break;
+      case NET.SHARED: if (data.all) for (const [k, v] of Object.entries(data.all)) { this.shared[k] = v; s.setVar(k, v); } else { this.shared[data.k] = data.v; s.setVar(data.k, data.v); } break;
+      case NET.MESSAGE: this.lastValue = data.v; s.emit('netMessage', data.m, data.v, actor); s.send(data.m, data.v); break;
+      default: s.emit('netEvent', code, data, actor);
+    }
+  }
+  update(dt) {
+    const s = this.scene; if (!s) return;
+    if (this.sceneRef !== s) { // a new level or restart: old copies went with the old scene
+      this.sceneRef = s; this.proxies.clear();
+      const pf = this.cfg('playfab'), ph = this.cfg('photon');
+      if (pf.autoLogin && this.titleId() && !this.pf.ticket) this.pfLogin();
+      if (ph.autoJoin && String(ph.appId || '').trim() && this.state === 'offline') this.join(ph.room || '', ph.maxPlayers);
+      this.setVar('netState', this.state); this.counts();
+      if (this.inRoom()) setTimeout(() => this.announce(), 0);
+    }
+    for (const [k, q] of this.proxies) { // smooth the copies toward the last place we heard
+      if (q.e.dead) { this.proxies.delete(k); continue; }
+      if (!q.to) continue;
+      const a = Math.min(1, dt * 12);
+      q.e.x += (q.to.x - q.e.x) * a; q.e.y += (q.to.y - q.e.y) * a; q.e.z += (q.to.z - q.e.z) * a;
+      const turn = (from, to) => from + ((((to - from) % 360) + 540) % 360 - 180) * a;
+      q.e.ry = turn(q.e.ry || 0, q.to.ry || 0); q.e.rz = turn(q.e.rz || 0, q.to.rz || 0);
+    }
+    if (!this.inRoom() || !this.local.size) return;
+    const rate = Math.max(...[...this.local.values()].map((l) => +l.p.rate || 12));
+    if ((this.sendT += dt) < 1 / clamp(rate, 2, 30)) return;
+    this.sendT = 0;
+    const rows = [];
+    for (const [id, { e }] of this.local) {
+      if (e.dead) { this.local.delete(id); continue; }
+      const anim = NET_VISUAL.map((t) => e.getBehavior(t)?.current).find(Boolean) || '';
+      const r2 = (v) => Math.round((v || 0) * 100) / 100;
+      rows.push([id, r2(e.x), r2(e.y), r2(e.z), Math.round(e.ry || 0), Math.round(e.rz || 0), e.data.flipX || e.sprite?.flip ? 1 : 0, anim]);
+    }
+    if (rows.length) this.raise(NET.STATE, rows);
+  }
+}
+
+registerBehavior('netSync', {
+  label: 'Network Sync (Photon)', description: 'Multiplayer: put it on your player. Everyone else in the room sees a copy of it that follows where you go (position, turning, facing and animation). Needs a Photon App ID in Game Settings › Online.',
+  params: [
+    { key: 'rate', label: 'Updates per second', type: 'number', default: 12, range: [2, 30], step: 1 },
+    { key: 'solid', label: 'Other players\' copies are solid', type: 'bool', default: false },
+  ],
+  create(p) {
+    return {
+      start(e, s) { e.data.netId ||= e.id; s.engine.online?.register(e, p); },
+      destroy(e, s) { s.engine.online?.unregister(e); },
+    };
+  },
+});
+
+registerBehavior('pfLeaderboard', {
+  label: 'Online Leaderboard (PlayFab)', description: 'Shows a PlayFab leaderboard in this text: the top players, or the players around you. Refreshes when the game starts, on a message, and after you post a score. Needs a PlayFab Title ID in Game Settings › Online.',
+  params: [
+    { key: 'stat', label: 'Statistic (leaderboard name)', type: 'text', default: 'score' },
+    { key: 'count', label: 'How many rows', type: 'number', default: 10, range: [1, 50], step: 1 },
+    { key: 'around', label: 'Show the players around me', type: 'bool', default: false },
+    { key: 'refreshOn', label: 'Refresh on message', type: 'text', default: 'leaderboard', suggest: 'messages' },
+    { key: 'format', label: 'Row format', type: 'text', default: '{rank}. {name}  {value}' },
+  ],
+  create(p) {
+    let busy = false;
+    const load = async (e, s) => {
+      if (busy || !s.engine.online) return; busy = true;
+      e.text ||= { ...TEXT_DEFAULTS, size: 18, align: 'left' };
+      if (!s.engine.online.titleId()) { e.text.value = 'Add a PlayFab Title ID\nin Game Settings › Online'; busy = false; return; }
+      e.text.value = 'Loading…';
+      const rows = await s.engine.online.pfLeaderboard(p.stat, p.count, p.around);
+      busy = false;
+      if (e.dead) return;
+      e.text.value = !rows ? 'Leaderboard unavailable' : !rows.length ? 'No scores yet — be the first!' : rows.map((r) => String(p.format || '{rank}. {name}  {value}').replace('{rank}', r.rank).replace('{name}', r.name + (r.me ? ' (you)' : '')).replace('{value}', formatNumber(r.value))).join('\n');
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (s.engine.editing) return;
+        load(e, s);
+        s.on('message', (m) => { if (!e.dead && m === (p.refreshOn || 'leaderboard')) load(e, s); });
+        s.on('online', (what, stat) => { if (!e.dead && what === 'score' && (stat || 'score') === (p.stat || 'score')) load(e, s); });
+      },
+    };
+  },
+});
+
 export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
@@ -7196,6 +7549,7 @@ export class Engine {
     window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !this.editing && this.scene?.state === 'play' && this.scene.canGoBack()) { ev.preventDefault(); this.scene.navBack(); } });
 
     this.input = new Input(this, this.uiCanvas);
+    this.online = new Online(this);
     this.audio = new Audio();
     this.physics = new Physics();
     this.scene = null;
@@ -7262,7 +7616,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts } }; // the UI theme and fonts are game-wide
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon } }; // the UI theme, fonts and online services are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -7536,6 +7890,7 @@ export class Engine {
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     this.navTick(s);
+    this.online.update(dt);
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {

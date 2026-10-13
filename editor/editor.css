@@ -1083,3 +1083,4 @@ body.playing #attachBar { display: none !important; }
 .safe-card .btns .btn { flex: 1; }
 .snap-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
 .snap-list .nm small { color: #9a9a9a; }
+.comp .sub-head { margin: 14px 0 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: #8fb4e8; }

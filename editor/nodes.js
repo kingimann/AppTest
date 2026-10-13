@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Physics', 'Sensing', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair' };
+const CATS = ['Events', 'Flow', 'Actions', 'Physics', 'Sensing', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -45,9 +45,17 @@ const CAT_HELP = {
   Values: 'Numbers and true/false to plug into inputs.',
   Math: 'Work numbers out.',
   Physics: 'Triggers, collisions, landing, forces and bodies.',
+  Online: 'Multiplayer rooms (Photon) and accounts, leaderboards and cloud saves (PlayFab). Set them up in Game Settings › Online.',
   Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  netConnect: 'Connect to Photon (Join Room does this for you)', netJoin: 'Join a room by name, or any open room; “joined” runs once you are in', netLeave: 'Leave the multiplayer room',
+  netSend: 'Tell everyone else in the room something (they get it as a message)', netShared: 'A variable everyone in the room shares (late joiners get it too)',
+  onNetJoined: 'When you join a room', onPlayerJoined: 'When someone else joins your room', onPlayerLeft: 'When someone leaves your room', onNetMessage: 'When another player sends a network message',
+  netPlayers: 'How many players are in the room', netIsMaster: 'Are you the room host (the first player)?', netInRoom: 'Are you in a multiplayer room?', netValue: 'The number sent with the last network message',
+  pfLogin: 'Sign in to PlayFab (automatic on this device, no password)', pfSubmit: 'Post a score to a PlayFab leaderboard', pfName: 'Set the name shown on leaderboards',
+  pfSave: 'Save variables to the player\'s PlayFab account', pfLoad: 'Load the saved variables back (any device, same player)', pfTitle: 'Load Title Data from PlayFab as variables (tune your live game)',
+  pfEventN: 'Record an event for PlayFab analytics', onPfLogin: 'When the player is signed in to PlayFab', onOnlineError: 'When something online goes wrong ({onlineError} says what)',
   goToPage: 'Show a UI page (sets the page variable). “open” lets Back return here; “start over” clears the history', goBack: 'Go back a page (closes a popup or side bar first); “nowhere to go” runs when there is no history',
   onPage: 'When a page opens (the page variable changes to it)', onBack: 'When the player goes back (Back button, phone back gesture, Esc, edge swipe)',
   pageIs: 'Is this page showing?', canGoBack: 'Is there a page (or popup) to go back from?',

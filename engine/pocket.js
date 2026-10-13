@@ -4300,31 +4300,58 @@ registerBehavior('destructible', {
 // ---- UI components ----
 /** Slider: drag along a bar to set a variable (volume, difficulty, size…). */
 registerBehavior('uiSlider', {
-  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. A slider for {volume} (0–100) controls the game’s sound.',
+  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. Optional knob, vertical sliders, steps with a click, and the value shown above the knob (the knob appears when you press Play).',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'volume', suggest: 'vars' },
     { key: 'min', label: 'Minimum', type: 'number', default: 0 },
     { key: 'max', label: 'Maximum', type: 'number', default: 100 },
     { key: 'step', label: 'Step (0 = smooth)', type: 'number', default: 1 },
     { key: 'start', label: 'Starting value', type: 'number', default: 80 },
+    { key: 'direction', label: 'Direction', type: 'select', options: ['horizontal', 'vertical'], default: 'horizontal' },
+    { key: 'knob', label: 'Knob', type: 'select', options: ['circle', 'square', 'none'], default: 'circle', group: 'Look' },
+    { key: 'knobColor', label: 'Knob colour', type: 'color', default: '#ffffff', group: 'Look', showIf: (b) => b.knob !== 'none' },
+    { key: 'knobSize', label: 'Knob size (0 = auto)', type: 'number', default: 0, group: 'Look', showIf: (b) => b.knob !== 'none' },
+    { key: 'showValue', label: 'Show the value', type: 'select', options: ['no', 'above the knob', 'while dragging', 'at the end'], default: 'no', group: 'Look' },
+    { key: 'format', label: 'Value text', type: 'text', default: '{value}', group: 'Look', info: '{value}, e.g. "{value}%"', showIf: (b) => b.showValue !== 'no' },
+    { key: 'ticks', label: 'Click on each step', type: 'bool', default: true, group: 'Feel' },
+    { key: 'message', label: 'Message when let go', type: 'text', default: '', suggest: 'messages', group: 'Feel' },
   ],
   create(p) {
-    let dragging = null;
+    let dragging = null, knob = null, label = null, lastStep = null, grab = 0;
+    const vert = () => p.direction === 'vertical';
+    const frac = (s) => clamp(((+s.vars[p.var] || 0) - +p.min) / ((+p.max - +p.min) || 1), 0, 1);
     return {
       uiAlways: true,
       start(e, s) {
         if (s.vars[p.var] == null) s.setVar(p.var, +p.start);
-        if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max - +p.min || 1; if (+p.min) e.bar.var = p.var; }
+        if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max - +p.min || 1; if (vert()) e.bar.dir = 'up'; }
+        const ex = e.extents(), W = (ex.hx || 80) * 2, H = (ex.hy || 10) * 2, ks = +p.knobSize || Math.max(22, Math.min(vert() ? W : H, 40) * 1.6);
+        if (p.knob !== 'none') knob = s.add({ name: e.name + ' knob', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 1, shape: p.knob === 'square' ? { type: 'rect', w: ks, h: ks, radius: 6, fill: p.knobColor, shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } : { type: 'circle', r: ks / 2, fill: p.knobColor, shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } });
+        if (p.showValue !== 'no') label = s.add({ name: e.name + ' value', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 2, text: { ...TEXT_DEFAULTS, value: '', size: 15, color: '#ffffff', weight: '800', shadow: true } });
       },
       update(e, dt, s) {
         if (!e.visible) return;
-        const inp = s.engine.input, r = uiRect(s, e);
-        if (!dragging) for (const d of inp.downs) if (Math.abs(d.x - r.x) < r.w / 2 + 12 && Math.abs(d.y - r.y) < Math.max(22, r.h / 2 + 10)) dragging = d.id;
+        const inp = s.engine.input, r = uiRect(s, e), V = vert();
+        if (!dragging) for (const d of inp.downs) if (Math.abs(d.x - r.x) < r.w / 2 + 14 && Math.abs(d.y - r.y) < r.h / 2 + 14) { dragging = d.id; grab = 1; }
         const ptr = dragging != null && inp.pointers.get(dragging);
-        if (!ptr) { dragging = null; return; }
-        let v = +p.min + clamp((ptr.x - (r.x - r.w / 2)) / (r.w || 1), 0, 1) * (+p.max - +p.min);
-        if (+p.step > 0) v = Math.round(v / p.step) * p.step;
-        if (v !== s.vars[p.var]) s.setVar(p.var, +v.toFixed(3));
+        if (!ptr && dragging != null) { dragging = null; if (p.message) s.send(p.message); }
+        if (ptr) {
+          const f = V ? clamp(((r.y + r.h / 2) - ptr.y) / (r.h || 1), 0, 1) : clamp((ptr.x - (r.x - r.w / 2)) / (r.w || 1), 0, 1);
+          let v = +p.min + f * (+p.max - +p.min);
+          if (+p.step > 0) v = Math.round(v / p.step) * p.step;
+          v = +v.toFixed(3);
+          if (v !== s.vars[p.var]) { s.setVar(p.var, v); if (p.ticks && +p.step > 0 && v !== lastStep) { s.engine.vibrate?.(4); lastStep = v; } }
+        }
+        grab += ((ptr ? 1.25 : 1) - grab) * Math.min(1, dt * 14);
+        const ex = e.extents(), W = (ex.hx || 80) * 2, H = (ex.hy || 10) * 2, f = frac(s);
+        const kx = V ? 0 : -W / 2 + f * W, ky = V ? H / 2 - f * H : 0;
+        if (knob) { knob.x = kx; knob.y = ky; knob.sx = knob.sy = grab; if (knob.local) { knob.local.x = kx; knob.local.y = ky; knob.local.sx = knob.local.sy = grab; } }
+        if (label) {
+          const show = p.showValue === 'above the knob' || (p.showValue === 'while dragging' && ptr) || p.showValue === 'at the end';
+          label.visible = show; label.text.value = String(p.format || '{value}').replace(/\{value\}/g, formatNumber(+s.vars[p.var] || 0));
+          const lx = p.showValue === 'at the end' ? (V ? 0 : W / 2 + 30) : kx, ly = p.showValue === 'at the end' ? (V ? -H / 2 - 18 : 0) : (V ? ky : ky - 30);
+          label.x = V && p.showValue !== 'at the end' ? kx + 34 : lx; label.y = ly; if (label.local) { label.local.x = label.x; label.local.y = label.y; label.local.visible = show; }
+        }
       },
     };
   },
@@ -4342,6 +4369,38 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
   const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
+  const R = (e._animBase.rz ??= e.rz || 0);
+  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; if (!ok) e.visible = false; done?.(); };
+  switch (anim) { // the newer entrances / exits
+    case 'drop in': // falls from above and bounces
+      if (show) { e.visible = true; e.alpha = 1; e.y = base.y - dist; s.to(e, { y: base.y }, dur * 2.2, { ease: 'outBounce', onComplete: () => fin(true) }); }
+      else s.to(e, { y: base.y + dist, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+    case 'flip': // turns over like a card
+      if (show) { e.visible = true; e.alpha = 1; e.sx = 0.001; s.to(e, { sx: base.sx }, dur * 1.3, { ease: 'outBack', onComplete: () => fin(true) }); }
+      else s.to(e, { sx: 0.001 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+    case 'spin in':
+      if (show) { e.visible = true; e.alpha = 0; e.rz = R - 180; e.sx = base.sx * 0.3; e.sy = base.sy * 0.3; s.to(e, { rz: R, sx: base.sx, sy: base.sy, alpha: 1 }, dur * 1.6, { ease: 'outBack', onComplete: () => fin(true) }); }
+      else s.to(e, { rz: R + 180, sx: base.sx * 0.3, sy: base.sy * 0.3, alpha: 0 }, dur * 1.2, { ease: 'inBack', onComplete: () => fin(false) });
+      return;
+    case 'elastic pop':
+      if (show) { e.visible = true; e.alpha = 1; e.sx = base.sx * 0.2; e.sy = base.sy * 0.2; s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'outElastic', onComplete: () => fin(true) }); }
+      else s.to(e, { sx: base.sx * 1.15, sy: base.sy * 1.15, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+    case 'swing in': // hangs from the top and swings into place
+      if (show) { e.visible = true; e.alpha = 0; e.rz = R - 25; e.y = base.y - 30; s.to(e, { rz: R, y: base.y, alpha: 1 }, dur * 2.4, { ease: 'outElastic', onComplete: () => fin(true) }); }
+      else s.to(e, { rz: R + 20, y: base.y + 40, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+    case 'rise': // drifts up a little while fading in
+      if (show) { e.visible = true; e.alpha = 0; e.y = base.y + 24; s.to(e, { y: base.y, alpha: 1 }, dur * 1.3, { ease: 'outCubic', onComplete: () => fin(true) }); }
+      else s.to(e, { y: base.y - 24, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+    case 'stretch': // squash and stretch into place
+      if (show) { e.visible = true; e.alpha = 1; e.sx = base.sx * 1.6; e.sy = base.sy * 0.2; s.to(e, { sx: base.sx, sy: base.sy }, dur * 2.2, { ease: 'outElastic', onComplete: () => fin(true) }); }
+      else s.to(e, { sx: base.sx * 1.5, sy: base.sy * 0.1, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      return;
+  }
   if (anim === 'zoom') { // pages that grow in and fade out a little larger
     if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.92; e.sy = base.sy * 0.92; s.to(e, { sx: base.sx, sy: base.sy, alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => done?.() }); }
     else s.to(e, { sx: base.sx * 1.06, sy: base.sy * 1.06, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.sx = base.sx; e.sy = base.sy; done?.(); } });
@@ -4358,7 +4417,7 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
     s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
 
 registerBehavior('navItem', {
   label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
@@ -4742,14 +4801,29 @@ registerBehavior('uiToggle', {
     { key: 'offText', label: 'Text when off', type: 'text', default: 'OFF' },
     { key: 'onColor', label: 'Color when on', type: 'color', default: '#43a047' },
     { key: 'offColor', label: 'Color when off', type: 'color', default: '#616161' },
+    { key: 'style', label: 'Looks like', type: 'select', options: ['button', 'switch', 'checkbox'], default: 'button', info: { switch: 'A sliding knob (iPhone style). Make the element a wide pill.', checkbox: 'A tick appears when on. Make the element a small square.' } },
+    { key: 'message', label: 'Message when it changes', type: 'text', default: '', suggest: 'messages' },
   ],
   create(p) {
-    const show = (e, s) => { const on = !!+s.vars[p.var]; if (e.text) e.text.value = on ? p.onText : p.offText; if (e.shape) e.shape.fill = on ? p.onColor : p.offColor; };
+    let knob = null, tick = null, kx = null;
+    const show = (e, s) => { const on = !!+s.vars[p.var]; if (e.text && p.style === 'button') e.text.value = on ? p.onText : p.offText; if (e.shape) e.shape.fill = on ? p.onColor : p.offColor; if (tick) { tick.visible = on; if (tick.local) tick.local.visible = on; } };
     return {
       uiAlways: true,
-      start(e, s) { if (s.vars[p.var] == null) s.setVar(p.var, p.start ? 1 : 0); show(e, s); },
+      start(e, s) {
+        if (s.vars[p.var] == null) s.setVar(p.var, p.start ? 1 : 0);
+        const ex = e.extents(), W = (ex.hx || 30) * 2, H = (ex.hy || 16) * 2;
+        if (p.style === 'switch') { knob = s.add({ name: e.name + ' knob', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 1, shape: { type: 'circle', r: H / 2 - 3, fill: '#ffffff', shadow: 'rgba(0,0,0,0.3)', shadowBlur: 4, shadowY: 1 } }); kx = (+s.vars[p.var] ? 1 : -1) * (W / 2 - H / 2); }
+        if (p.style === 'checkbox') tick = s.add({ name: e.name + ' tick', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 1, text: { ...TEXT_DEFAULTS, value: '✓', size: Math.round(H * 0.8), color: '#ffffff', weight: '900' } });
+        if (p.style !== 'button' && e.text && !e.text.value) delete e.text;
+        show(e, s);
+      },
       update(e, dt, s) {
-        if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) { s.setVar(p.var, +s.vars[p.var] ? 0 : 1); s.engine.audio.sfx('click'); s.punch(e, { sx: 0.12, sy: 0.12 }, 0.25, { add: true }); }
+        if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
+          s.setVar(p.var, +s.vars[p.var] ? 0 : 1); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
+          if (p.style === 'checkbox' && tick) s.punch(tick, { sx: 0.4, sy: 0.4 }, 0.3, { add: true }); else s.punch(e, { sx: 0.12, sy: 0.12 }, 0.25, { add: true });
+          if (p.message) s.send(p.message);
+        }
+        if (knob) { const ex = e.extents(), W = (ex.hx || 30) * 2, H = (ex.hy || 16) * 2, want = (+s.vars[p.var] ? 1 : -1) * (W / 2 - H / 2); kx += (want - kx) * Math.min(1, dt * 16); knob.x = kx; if (knob.local) knob.local.x = kx; }
         show(e, s);
       },
     };
@@ -4856,24 +4930,276 @@ registerBehavior('typewriter', {
 
 /** Text Input: tap to type a name or answer into a variable. */
 registerBehavior('uiInput', {
-  label: 'Text Input', description: 'Tap to type something (a player name, an answer) into a variable. Show it anywhere with {name}.',
+  label: 'Text Input', description: 'An input bar: tap it and type right there (the phone keyboard opens) into a variable. Text, numbers, passwords or e-mail. Show it anywhere with {name}.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'name', suggest: 'vars' },
-    { key: 'question', label: 'Question', type: 'text', default: 'What is your name?' },
+    { key: 'kind', label: 'Type of input', type: 'select', options: ['text', 'number', 'password', 'email', 'search'], default: 'text' },
     { key: 'placeholder', label: 'Shown when empty', type: 'text', default: 'Tap to type…' },
     { key: 'maxLength', label: 'Max letters', type: 'number', default: 16 },
+    { key: 'style', label: 'Typing happens', type: 'select', options: ['right in the bar', 'in a pop-up box'], default: 'right in the bar' },
+    { key: 'question', label: 'Question (pop-up)', type: 'text', default: 'What is your name?', showIf: { style: ['in a pop-up box'] } },
+    { key: 'placeholderColor', label: 'Hint colour', type: 'color', default: '#8a93a8', group: 'Look' },
+    { key: 'focusColor', label: 'Outline while typing', type: 'color', default: '#3a8dff', group: 'Look' },
+    { key: 'live', label: 'Update the variable while typing', type: 'bool', default: true, group: 'Feel' },
+    { key: 'message', label: 'Message when done (Enter)', type: 'text', default: '', suggest: 'messages', group: 'Feel' },
   ],
   create(p) {
+    let box = null, color0 = null, stroke0 = null;
+    const valOf = (s) => (s.vars[p.var] == null ? '' : String(s.vars[p.var]));
+    const commit = (s, v) => s.setVar(p.var, p.kind === 'number' ? (v === '' ? 0 : +v || 0) : String(v).slice(0, +p.maxLength || 16));
+    const close = (e, s, done) => {
+      if (!box) return; const b = box, v = b.value; box = null; b.remove(); // (clear first: removing it fires blur, which calls close again)
+      commit(s, v); if (e.shape) { e.shape.stroke = stroke0; } s.engine.input.reset();
+      if (done && p.message) s.send(p.message);
+    };
+    const open = (e, s) => {
+      const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, t = e.text || TEXT_DEFAULTS;
+      const inp = box = document.createElement('input');
+      inp.type = { number: 'text', password: 'password', email: 'email', search: 'search' }[p.kind] || 'text';
+      if (p.kind === 'number') inp.inputMode = 'decimal';
+      inp.maxLength = Math.max(1, +p.maxLength || 16); inp.placeholder = p.placeholder || ''; inp.value = valOf(s); inp.enterKeyHint = 'done'; inp.autocapitalize = p.kind === 'text' ? 'sentences' : 'off';
+      const pad = 12 * k;
+      inp.style.cssText = `position:absolute;left:${r.x - r.w / 2 + pad}px;top:${r.y - r.h / 2}px;width:${Math.max(20, r.w - pad * 2)}px;height:${r.h}px;z-index:30;border:0;outline:0;background:transparent;` +
+        `color:${t.color || '#fff'};font:${t.weight || '600'} ${Math.round((t.size || 18) * k)}px ${fontOf(t.font)};text-align:${t.align === 'left' ? 'left' : t.align === 'right' ? 'right' : 'center'};padding:0;margin:0;caret-color:${p.focusColor};touch-action:auto;`;
+      ['pointerdown', 'pointerup', 'touchstart'].forEach((ev) => inp.addEventListener(ev, (x) => x.stopPropagation()));
+      inp.addEventListener('input', () => { if (p.live) commit(s, inp.value); });
+      inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { close(e, s, true); } else if (ev.key === 'Escape') close(e, s, false); });
+      inp.addEventListener('blur', () => close(e, s, false));
+      s.engine.root.appendChild(inp);
+      if (e.shape) { stroke0 = e.shape.stroke; e.shape.stroke = p.focusColor; e.shape.lineWidth = Math.max(2, e.shape.lineWidth || 2); }
+      setTimeout(() => inp.focus(), 30);
+    };
     return {
       uiAlways: true,
+      start(e) { e.text ||= { ...TEXT_DEFAULTS, size: 18 }; color0 = e.text.color; },
       update(e, dt, s) {
-        if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
-          s.engine.input.reset();
-          const v = typeof prompt === 'function' ? prompt(p.question, s.vars[p.var] || '') : null;
-          if (v != null) s.setVar(p.var, String(v).slice(0, +p.maxLength || 16));
+        if (box) { const r = uiRect(s, e), k = uiK(s.engine.safe) || 1; box.style.left = (r.x - r.w / 2 + 12 * k) + 'px'; box.style.top = (r.y - r.h / 2) + 'px'; if (!e.visible || e._parentHidden) close(e, s, false); }
+        else if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
+          if (p.style === 'in a pop-up box') { s.engine.input.reset(); askTextBox(s, { question: p.question, placeholder: p.placeholder, max: p.maxLength, value: valOf(s) }, (v) => { if (v != null) { commit(s, v); if (p.message) s.send(p.message); } }); }
+          else open(e, s);
         }
-        e.text ||= { ...TEXT_DEFAULTS };
-        e.text.value = s.vars[p.var] ? String(s.vars[p.var]) : p.placeholder;
+        const v = valOf(s), empty = v === '' || (p.kind === 'number' && s.vars[p.var] == null);
+        e.text.value = box ? '' : empty ? p.placeholder : p.kind === 'password' ? '•'.repeat(v.length) : (p.kind === 'search' ? '🔍 ' : '') + v;
+        e.text.color = empty && !box ? p.placeholderColor : color0;
+      },
+      destroy(e, s) { if (box) { box.remove(); box = null; } },
+    };
+  },
+});
+
+/** List View: rows made from text, a list variable or numbers; scroll by dragging, tap a row to pick it. */
+registerBehavior('uiList', {
+  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The rows appear when you press Play.',
+  params: [
+    { key: 'source', label: 'Rows from', type: 'select', options: ['these items', 'a list variable', 'numbers 1 to N'], default: 'these items' },
+    { key: 'items', label: 'Items (comma separated)', type: 'text', default: 'Sword, Shield, Potion, Map, Key, Bow, Lantern', showIf: { source: ['these items'] } },
+    { key: 'listVar', label: 'List variable', type: 'text', default: 'list', suggest: 'vars', showIf: { source: ['a list variable'] } },
+    { key: 'count', label: 'How many', type: 'number', default: 10, showIf: { source: ['numbers 1 to N'] } },
+    { key: 'row', label: 'Row text', type: 'text', default: '{item}', info: '{item} = the row\'s item, {i} = its position (1, 2, 3…), plus any {variable}.' },
+    { key: 'selectVar', label: 'Picked position goes in', type: 'text', default: 'picked', suggest: 'vars' },
+    { key: 'selectText', label: 'Picked text goes in', type: 'text', default: 'pickedItem', suggest: 'vars' },
+    { key: 'message', label: 'Message when picked', type: 'text', default: 'picked', suggest: 'messages' },
+    { key: 'rowHeight', label: 'Row height', type: 'number', default: 52, group: 'Look' },
+    { key: 'spacing', label: 'Gap between rows', type: 'number', default: 6, group: 'Look' },
+    { key: 'padding', label: 'Padding', type: 'number', default: 8, group: 'Look' },
+    { key: 'rowColor', label: 'Row colour', type: 'color', default: '#2a3046', group: 'Look' },
+    { key: 'altColor', label: 'Every other row', type: 'color', default: '', optional: true, group: 'Look' },
+    { key: 'pickColor', label: 'Picked row colour', type: 'color', default: '#3a8dff', group: 'Look' },
+    { key: 'textColor', label: 'Text colour', type: 'color', default: '#ffffff', group: 'Look' },
+    { key: 'textSize', label: 'Text size', type: 'number', default: 17, group: 'Look' },
+    { key: 'align', label: 'Text', type: 'select', options: ['left', 'center'], default: 'left', group: 'Look' },
+    { key: 'radius', label: 'Row roundness', type: 'number', default: 10, group: 'Look' },
+    { key: 'numbered', label: 'Number the rows (1. 2. 3.)', type: 'bool', default: false, group: 'Look' },
+    { key: 'arrow', label: 'Arrow on the right ›', type: 'bool', default: false, group: 'Look' },
+    { key: 'appear', label: 'Rows appear', type: 'select', options: ['one after another', 'all at once'], default: 'one after another', group: 'Look' },
+  ],
+  create(p) {
+    let rows = [], sig = null, off = 0, vel = 0, drag = null, last = 0, moved = 0, picked = 0;
+    const itemsOf = (s) => p.source === 'a list variable' ? (Array.isArray(s.vars[p.listVar]) ? s.vars[p.listVar] : String(s.vars[p.listVar] ?? '').split(',').map((x) => x.trim()).filter(Boolean))
+      : p.source === 'numbers 1 to N' ? Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => i + 1) : String(p.items || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const geo = (e) => { const ex = e.extents(); return { W: (ex.hx || 150) * 2, H: (ex.hy || 150) * 2, rh: Math.max(16, +p.rowHeight || 52), gap: +p.spacing || 0, pad: +p.padding || 0 }; };
+    const fillOf = (i) => (i + 1 === picked ? p.pickColor : p.altColor && i % 2 ? p.altColor : p.rowColor);
+    const build = (e, s, items) => {
+      for (const r of rows) { r.label?.destroy(); r.chev?.destroy(); r.destroy(); }
+      rows = [];
+      const { W, rh, gap, pad } = geo(e), L = (e.layer || 0) + 1;
+      items.forEach((it, i) => {
+        const vars = Object.assign(Object.create(s.vars), { item: it, i: i + 1 });
+        const txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars);
+        const row = s.add({ name: `${e.name} row ${i + 1}`, ui: true, parent: e.id, anchor: 'top', x: 0, y: pad + rh / 2 + i * (rh + gap), layer: L, shape: { type: 'rect', w: W - pad * 2, h: rh, radius: +p.radius || 0, fill: fillOf(i) } });
+        const left = p.align === 'left';
+        row.label = s.add({ name: `${e.name} row ${i + 1} text`, ui: true, parent: row.id, anchor: left ? 'left' : 'center', x: left ? 16 : 0, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: txt, size: +p.textSize || 17, color: p.textColor, weight: '600', align: left ? 'left' : 'center', fit: W - pad * 2 - 44 } });
+        if (p.arrow) row.chev = s.add({ name: `${e.name} row ${i + 1} arrow`, ui: true, parent: row.id, anchor: 'right', x: -18, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: '›', size: (+p.textSize || 17) + 8, color: p.textColor, weight: '500' } });
+        row.baseY = row.y; row.item = it;
+        if (p.appear !== 'all at once' && i < 14) { row.alpha = 0; row.y += 16; s.to(row, { alpha: 1, y: row.baseY }, 0.28, { delay: i * 0.04, ease: 'outCubic' }); }
+        rows.push(row);
+      });
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); }; },
+      update(e, dt, s) {
+        const refs = [...String(p.row || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => k !== 'item' && k !== 'i'); // variables the rows show: rebuild when they change
+        const items = itemsOf(s), key = JSON.stringify(items) + '|' + p.row + '|' + JSON.stringify(refs.map((k) => s.vars[k]));
+        if (key !== sig) { sig = key; build(e, s, items); }
+        if (!e.visible || e._parentHidden) return;
+        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, { H, rh, gap, pad } = geo(e);
+        const content = pad * 2 + rows.length * rh + Math.max(0, rows.length - 1) * gap, mn = Math.min(0, H - content);
+        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = d.y; moved = 0; vel = 0; }
+        const ptr = drag != null && inp.pointers.get(drag);
+        if (ptr) { const dd = (ptr.y - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = ptr.y; moved += Math.abs(dd); off = clamp(off, mn - 60, 60); }
+        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); if (off > 0) { off += (0 - off) * Math.min(1, dt * 12); vel = 0; } else if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } }
+        // tap a row (not a drag) to pick it
+        if (moved < 8) for (const t of inp.taps) {
+          if (Math.abs(t.x - r.x) > r.w / 2 || Math.abs(t.y - r.y) > r.h / 2) continue;
+          const i = rows.findIndex((q) => !q._clipHidden && hitTest(s, q, t.x, t.y));
+          if (i < 0) continue;
+          picked = i + 1; rows.forEach((q, j) => { q.shape.fill = fillOf(j); });
+          s.setVar(p.selectVar || 'picked', picked); s.setVar(p.selectText || 'pickedItem', rows[i].item);
+          s.punch(rows[i], { sx: -0.04, sy: -0.08 }, 0.25, { add: true }); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
+          if (p.message) s.send(p.message);
+        }
+        if (moved >= 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2));
+        for (const q of rows) {
+          if (s.tweensOf(q).length) { q.baseY ??= q.y; } else q.y = q.baseY + off;
+          if (q.local) q.local.y = q.y;
+          const top = q.y - rh / 2, bot = q.y + rh / 2;
+          q._clipHidden = bot < rh * 0.5 || top > H - rh * 0.5; // more than half outside the list: hidden
+        }
+      },
+      destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
+    };
+  },
+});
+
+/** Segmented control: a row of options with a sliding highlight (Easy | Normal | Hard). */
+registerBehavior('uiSegmented', {
+  label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The options appear when you press Play.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'mode', suggest: 'vars' },
+    { key: 'options', label: 'Options (comma separated)', type: 'text', default: 'Easy, Normal, Hard' },
+    { key: 'start', label: 'Starts on option #', type: 'number', default: 2, step: 1 },
+    { key: 'store', label: 'Variable gets', type: 'select', options: ['the option text', 'its position (1, 2, 3…)'], default: 'the option text' },
+    { key: 'pillColor', label: 'Highlight colour', type: 'color', default: '#3a8dff' },
+    { key: 'textColor', label: 'Text colour', type: 'color', default: '#c9d1e3' },
+    { key: 'pickedText', label: 'Picked text colour', type: 'color', default: '#ffffff' },
+    { key: 'message', label: 'Message when it changes', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let pill = null, labels = [], i = 0, px = null;
+    const opts = () => String(p.options || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const geo = (e) => { const ex = e.extents(), n = Math.max(1, opts().length); return { W: (ex.hx || 150) * 2, H: (ex.hy || 22) * 2, n, seg: ((ex.hx || 150) * 2) / n }; };
+    const setI = (e, s, j, tell) => { const o = opts(); i = clamp(j, 0, o.length - 1); s.setVar(p.var, p.store === 'its position (1, 2, 3…)' ? i + 1 : o[i]); labels.forEach((l, k) => { l.text.color = k === i ? p.pickedText : p.textColor; }); if (tell && p.message) s.send(p.message); };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        const o = opts(), { W, H, seg } = geo(e), L = (e.layer || 0) + 1, cur = s.vars[p.var];
+        const r0 = Math.min(e.shape?.radius ?? 12, H / 2);
+        pill = s.add({ name: e.name + ' highlight', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, shape: { type: 'rect', w: seg - 6, h: H - 6, radius: Math.max(0, r0 - 3), fill: p.pillColor, shadow: 'rgba(0,0,0,0.25)', shadowBlur: 4, shadowY: 1 } });
+        labels = o.map((t, k) => s.add({ name: `${e.name} ${t}`, ui: true, parent: e.id, anchor: 'center', x: -W / 2 + seg * (k + 0.5), y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: t, size: Math.min(17, Math.round(H * 0.4)), color: p.textColor, weight: '700', fit: seg - 10 } }));
+        if (e.text) e.text.value = '';
+        const j = cur == null ? Math.round(+p.start || 1) - 1 : p.store === 'its position (1, 2, 3…)' ? Math.round(+cur) - 1 : o.indexOf(String(cur));
+        setI(e, s, j < 0 ? 0 : j, false); px = -W / 2 + seg * (i + 0.5);
+      },
+      update(e, dt, s) {
+        const { W, seg } = geo(e);
+        if (e.visible) for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { const r = uiRect(s, e), j = Math.floor(clamp((t.x - (r.x - r.w / 2)) / (r.w || 1), 0, 0.999) * opts().length); if (j !== i) { setI(e, s, j, true); s.engine.audio.sfx('click'); s.engine.vibrate?.(6); } }
+        const want = -W / 2 + seg * (i + 0.5); px += (want - px) * Math.min(1, dt * 16);
+        if (pill) { pill.x = px; if (pill.local) pill.local.x = px; }
+      },
+    };
+  },
+});
+
+/** Stepper: − value + to change a number in steps; hold to repeat. */
+registerBehavior('uiStepper', {
+  label: 'Stepper', description: 'A − and + with the value in the middle (amounts, quantities, players). Hold a button to keep counting. The − and + appear when you press Play.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'amount', suggest: 'vars' },
+    { key: 'min', label: 'Minimum', type: 'number', default: 0 },
+    { key: 'max', label: 'Maximum', type: 'number', default: 10 },
+    { key: 'step', label: 'Step', type: 'number', default: 1 },
+    { key: 'start', label: 'Starting value', type: 'number', default: 1 },
+    { key: 'format', label: 'Value text', type: 'text', default: '{value}', info: '{value}, e.g. "x{value}"' },
+    { key: 'buttonColor', label: 'Button colour', type: 'color', default: '#3a8dff' },
+    { key: 'textColor', label: 'Text colour', type: 'color', default: '#ffffff' },
+    { key: 'message', label: 'Message when it changes', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let minus = null, plus = null, label = null, held = null, next = 0;
+    const change = (s, d, b) => { const v = clamp(+((+s.vars[p.var] || 0) + d).toFixed(4), +p.min, +p.max); if (v !== +s.vars[p.var]) { s.setVar(p.var, v); s.engine.audio.sfx('click'); s.engine.vibrate?.(4); s.punch(b, { sx: -0.15, sy: -0.15 }, 0.2, { add: true }); if (p.message) s.send(p.message); } };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (s.vars[p.var] == null) s.setVar(p.var, +p.start);
+        const ex = e.extents(), W = (ex.hx || 70) * 2, H = (ex.hy || 22) * 2, L = (e.layer || 0) + 1, bs = H - 8;
+        const btn = (t, x) => s.add({ name: `${e.name} ${t === '−' ? 'minus' : 'plus'}`, ui: true, parent: e.id, anchor: 'center', x, y: 0, layer: L, shape: { type: 'rect', w: bs, h: bs, radius: Math.min(bs / 2, (e.shape?.radius ?? 10)), fill: p.buttonColor }, text: { ...TEXT_DEFAULTS, value: t, size: Math.round(bs * 0.6), color: '#ffffff', weight: '900' } });
+        minus = btn('−', -W / 2 + bs / 2 + 4); plus = btn('+', W / 2 - bs / 2 - 4);
+        label = s.add({ name: e.name + ' value', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, text: { ...TEXT_DEFAULTS, value: '', size: Math.round(H * 0.45), color: p.textColor, weight: '800', fit: W - bs * 2 - 16 } });
+        if (e.text) e.text.value = '';
+      },
+      update(e, dt, s) {
+        const v = +s.vars[p.var] || 0, inp = s.engine.input;
+        if (label) label.text.value = String(p.format || '{value}').replace(/\{value\}/g, formatNumber(v));
+        if (minus) { minus.alpha = v <= +p.min ? 0.4 : 1; plus.alpha = v >= +p.max ? 0.4 : 1; }
+        if (!e.visible) return;
+        for (const d of inp.downs) for (const [b, dir] of [[minus, -1], [plus, 1]]) if (b && hitTest(s, b, d.x, d.y)) { held = { id: d.id, b, dir }; change(s, dir * (+p.step || 1), b); next = s.time + 0.45; }
+        if (held) { const ptr = inp.pointers.get(held.id); if (!ptr || !hitTest(s, held.b, ptr.x, ptr.y)) held = null; else if (s.time >= next) { change(s, held.dir * (+p.step || 1), held.b); next = s.time + 0.09; } }
+      },
+    };
+  },
+});
+
+/** UI Animation: an entrance (when the game starts, when it's shown, or on a message) and a gentle idle loop. */
+registerBehavior('uiAnim', {
+  label: 'UI Animation', description: 'Makes UI come alive: an entrance animation (pop, drop in, flip, spin in, elastic, swing…) when the game starts, whenever it appears, or on a message, optionally one child after another. Plus an idle loop: float, pulse, breathe, wiggle, heartbeat, bounce, spin, glow or an attention shake.',
+  params: [
+    { key: 'entrance', label: 'Entrance', type: 'select', options: SHOW_ANIMS.filter((a) => a !== 'slide (follows navigation)'), default: 'pop' },
+    { key: 'playOn', label: 'Plays', type: 'select', options: ['when the game starts', 'every time it appears', 'on a message'], default: 'when the game starts' },
+    { key: 'message', label: 'Message', type: 'text', default: 'show', suggest: 'messages', showIf: { playOn: ['on a message'] } },
+    { key: 'delay', label: 'Delay (sec)', type: 'number', default: 0, step: 0.05 },
+    { key: 'duration', label: 'Speed (sec)', type: 'number', default: 0.3, step: 0.05 },
+    { key: 'stagger', label: 'Animate its children one by one', type: 'bool', default: false },
+    { key: 'gap', label: 'Time between children', type: 'number', default: 0.08, step: 0.02, showIf: (b) => !!b.stagger },
+    { key: 'idle', label: 'Idle loop', type: 'select', options: ['none', 'float', 'pulse', 'breathe', 'wiggle', 'heartbeat', 'bounce', 'spin', 'glow', 'attention shake'], default: 'none', group: 'Idle' },
+    { key: 'idleSpeed', label: 'Idle speed', type: 'number', default: 1, step: 0.1, group: 'Idle', showIf: (b) => b.idle !== 'none' },
+    { key: 'idleAmount', label: 'Idle amount', type: 'number', default: 1, step: 0.1, group: 'Idle', showIf: (b) => b.idle !== 'none' },
+  ],
+  create(p) {
+    let t = 0, base = null, wasShown = false, busy = 0, nextAttn = 2;
+    const play = (e, s) => {
+      const d = Math.max(0.05, +p.duration || 0.3), list = p.stagger ? uiKids(s, e) : [e];
+      busy = (+p.delay || 0) + d * 3 + (p.stagger ? list.length * (+p.gap || 0) : 0); base = null;
+      if (p.stagger) { e.visible = true; for (const q of list) { q._animBase = null; q.visible = false; } }
+      list.forEach((q, i) => s.after((+p.delay || 0) + (p.stagger ? i * (+p.gap || 0) : 0), () => { if (!q.dead) { q._animBase = null; uiAnimate(s, q, true, p.entrance, d); } }));
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (p.playOn === 'when the game starts') { if (!p.stagger) e.visible = false; play(e, s); }
+        if (p.playOn === 'on a message') s.on('message', (m) => { if (!e.dead && m === p.message) play(e, s); });
+        wasShown = e.visible && !e._parentHidden;
+      },
+      update(e, dt, s) {
+        const shown = e.visible && !e._parentHidden;
+        if (p.playOn === 'every time it appears' && shown && !wasShown) play(e, s);
+        wasShown = shown;
+        if (busy > 0) { busy -= dt; return; }
+        if (p.idle === 'none' || !shown) return;
+        if (!base) base = { x: e.x, y: e.y, sx: e.sx, sy: e.sy, rz: e.rz || 0, glow: e.shape?.glow || 0 };
+        t += dt * (+p.idleSpeed || 1); const A = +p.idleAmount || 1;
+        switch (p.idle) {
+          case 'float': e.y = base.y + Math.sin(t * 2) * 6 * A; break;
+          case 'pulse': { const k = 1 + Math.sin(t * 4) * 0.05 * A; e.sx = base.sx * k; e.sy = base.sy * k; break; }
+          case 'breathe': { const k = 1 + Math.sin(t * 1.6) * 0.03 * A; e.sx = base.sx * k; e.sy = base.sy * k; e.alpha = 0.85 + Math.sin(t * 1.6) * 0.15; break; }
+          case 'wiggle': e.rz = base.rz + Math.sin(t * 9) * 3 * A; break;
+          case 'heartbeat': { const c = t % 1.2, k = 1 + (c < 0.12 ? c / 0.12 : c < 0.24 ? (0.24 - c) / 0.12 : c < 0.36 ? (c - 0.24) / 0.12 * 0.7 : c < 0.48 ? (0.48 - c) / 0.12 * 0.7 : 0) * 0.1 * A; e.sx = base.sx * k; e.sy = base.sy * k; break; }
+          case 'bounce': e.y = base.y - Math.abs(Math.sin(t * 3)) * 10 * A; break;
+          case 'spin': e.rz = (e.rz || 0) + 90 * (+p.idleSpeed || 1) * dt; break;
+          case 'glow': if (e.shape) { e.shape.glow = base.glow + (10 + Math.sin(t * 3) * 8) * A; if (!e.shape.stroke) e.shape.stroke = e.shape.fill; } break;
+          case 'attention shake': if (s.time >= nextAttn) { nextAttn = s.time + 3 / (+p.idleSpeed || 1); s.tweens.push?.(new Tween(e, { rz: base.rz }, 0.6, { custom: (q, k) => { e.rz = base.rz + Math.sin(k * Math.PI * 8) * 10 * A * (1 - k); } })); } break;
+        }
+        if (e.local && p.idle !== 'glow' && p.idle !== 'attention shake') Object.assign(e.local, { x: e.x, y: e.y, sx: e.sx, sy: e.sy, rz: e.rz });
       },
     };
   },

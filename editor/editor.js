@@ -1,7 +1,8 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG } from '../engine/pocket.js';
+import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 
@@ -52,6 +53,7 @@ let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
 let tool = 'move';
+let uiMode = false;
 let playing = false;
 
 function saveNow() {
@@ -195,7 +197,7 @@ window.engine = engine;
 
 const ent = (id) => project?.entities.find((e) => e.id === id);
 const is3D = () => project.mode === '3d';
-const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels);
+const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.model || e.bar);
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
@@ -291,10 +293,18 @@ engine.onRenderWorld = (r, s, z) => {
       r.drawLines([-30, 0.02, 0, 30, 0.02, 0], AXIS.x, 0.55);
       r.drawLines([0, 0.02, -30, 0, 0.02, 30], AXIS.z, 0.55);
     }
+    if (sel?.model && selectedPart >= 0 && sel.model.parts[selectedPart]) { // highlight the part being edited
+      const q = sel.model.parts[selectedPart], [gx, gy, gz] = partSize(q);
+      const M = M4.mul(M4.trs(sel.x, sel.y, sel.z, sel.rx * DEG, sel.ry * DEG, sel.rz * DEG, sel.sx, sel.sy, sel.sz), M4.trs(q.x || 0, q.y || 0, q.z || 0, (q.rx || 0) * DEG, (q.ry || 0) * DEG, (q.rz || 0) * DEG, gx * 1.06, Math.max(gy, 0.02) * 1.06, gz * 1.06));
+      const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => { const p = M4.transformPoint(M, a / 2, b / 2, d / 2); return [p.x, p.y, p.z]; });
+      const pts = [];
+      for (const [i, k] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) pts.push(...c[i], ...c[k]);
+      const gl = r.gl; gl.disable(gl.DEPTH_TEST); r.drawLines(pts, '#ffeb3b'); gl.enable(gl.DEPTH_TEST);
+    }
     for (const [e, col] of [[hover, '#4c8bd6'], [sel, ORANGE]]) {
-      if (!e || e.ui || !e.mesh) continue;
-      const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz;
-      const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => [e.x + a * hx * 1.04, e.y + b * hy * 1.04, e.z + d * hz * 1.04]);
+      if (!e || e.ui || !(e.mesh || e.model)) continue;
+      const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0), cz = e.z + (ex.oz || 0);
+      const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => [cx + a * hx * 1.04, cy + b * hy * 1.04, cz + d * hz * 1.04]);
       const pts = [];
       for (const [i, j] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) pts.push(...c[i], ...c[j]);
       r.drawLines(pts, col);
@@ -407,7 +417,7 @@ function hitGizmo(x, y) {
 // Picking
 // ============================================================================
 function pick(sx, sy) {
-  const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked);
+  const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui));
   for (const e of list) {
     if (!e.ui) continue;
     const b = uiBounds(e);
@@ -430,15 +440,18 @@ function pick(sx, sy) {
   const ray = engine.renderer.screenRay(s, sx, sy);
   let best = null, bestT = Infinity;
   for (const e of list) {
-    if (e.voxels) { const hv = e.voxels.raycast(e, ray.origin, ray.dir, 400); if (hv && hv.dist < bestT) { bestT = hv.dist; best = e; } continue; }
-    if (e.ui || !e.mesh) continue;
+    if (e.voxels) { // huge terrain: only grab it with the brush, so dragging the view still orbits
+      if (tool !== 'paint') continue;
+      const hv = e.voxels.raycast(e, ray.origin, ray.dir, 400); if (hv && hv.dist < bestT) { bestT = hv.dist; best = e; } continue;
+    }
+    if (e.ui || !(e.mesh || e.model)) continue;
     const t = rayHit(ray, e);
     if (t != null && t < bestT) { bestT = t; best = e; }
   }
   return best;
 }
-function rayHit({ origin: o, dir: d }, e) {
-  const ex = e.extents();
+function rayHit({ origin: o, dir: d }, e0) {
+  const ex = e0.extents(), e = { x: e0.x + (ex.ox || 0), y: e0.y + (ex.oy || 0), z: e0.z + (ex.oz || 0) };
   if (ex.sphere) {
     const ox = o.x - e.x, oy = o.y - e.y, oz = o.z - e.z;
     const b = ox * d.x + oy * d.y + oz * d.z, c = ox * ox + oy * oy + oz * oz - ex.r * ex.r, disc = b * b - c;
@@ -840,6 +853,8 @@ let hFilter = '';
 function iconFor(e) {
   if (!e) return 'scene';
   if (e.voxels) return 'grid';
+  if (e.model) return 'cube';
+  if (e.bar) return 'hud';
   if (e.ui) return 'hud';
   if (e.mesh) return ({ box: 'cube', sphere: 'sphere', cylinder: 'cylinder', cone: 'cone', plane: 'plane' })[e.mesh.geometry] || 'cube';
   if (e.shape) return ({ rect: 'square', circle: 'circle', triangle: 'triangle', star: 'star' })[e.shape.type] || 'square';
@@ -970,6 +985,8 @@ function control(target, path, spec) {
       el = h('textarea', { spellcheck: false, value: JSON.stringify(val ?? {}, null, 1), style: 'min-height:64px',
         oninput: (e) => { try { set(JSON.parse(e.target.value)); e.target.style.borderColor = ''; } catch { e.target.style.borderColor = '#c0392b'; } } });
       break;
+    case 'rules':
+      return rulesEditor(target, path);
     case 'template': {
       const names = project.entities.filter((e) => e.template).map((e) => e.name);
       el = h('select', { onchange: (e) => set(e.target.value) },
@@ -981,6 +998,45 @@ function control(target, path, spec) {
       el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', oninput: (e) => set(e.target.value) });
   }
   return h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+}
+
+/** Visual logic: WHEN … IF … DO … cards. */
+function rulesEditor(target, path) {
+  const get = () => getPath(target(), path) || [];
+  const save = (rules, structure) => { setPath(target(), path, rules); changed({ inspector: structure }); if (structure) pushHistory(); };
+  const rules = get();
+  const sel = (val, opts, on) => h('select', { onchange: (e) => on(e.target.value) }, opts.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: v === val }, l); }));
+  const txt = (val, ph, on) => h('input', { type: 'text', value: val ?? '', placeholder: ph, autocapitalize: 'off', oninput: (e) => on(e.target.value) });
+  const num = (val, on) => h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, oninput: (e) => on(e.target.value.includes(',') ? e.target.value : parseFloat(e.target.value) || 0) });
+  const OPS = [['>=', '≥'], ['<=', '≤'], ['==', '='], ['>', '>'], ['<', '<']];
+  const out = h('div', { class: 'row full' });
+  rules.forEach((r, i) => {
+    const upd = (k, v, structure) => { const rs = clone(get()); rs[i][k] = v; save(rs, structure); };
+    out.append(h('div', { class: 'rule' },
+      h('div', { class: 'rule-h' }, h('span', {}, `Rule ${i + 1}`), h('button', { class: 'more', title: 'Delete rule', onclick: () => { const rs = clone(get()); rs.splice(i, 1); save(rs, true); } }, icon('trash'))),
+      h('span', { class: 'kw when' }, 'WHEN'),
+      sel(r.when, RULE_EVENTS, (v) => upd('when', v, true)),
+      r.when === 'touched by tag' && txt(r.tag, 'tag, e.g. player', (v) => upd('tag', v)),
+      r.when === 'every few seconds' && num(r.seconds, (v) => upd('seconds', v)),
+      r.when === 'swipe' && sel(r.dir || 'up', ['up', 'down', 'left', 'right'], (v) => upd('dir', v)),
+      h('span', { class: 'kw if' }, r.when === 'variable reaches' ? 'VARIABLE' : 'IF (optional)'),
+      h('div', { class: 'pair' }, txt(r.ifVar, r.when === 'variable reaches' ? 'score' : 'variable', (v) => upd('ifVar', v)), sel(r.ifOp || '>=', OPS, (v) => upd('ifOp', v)), num(r.ifValue, (v) => upd('ifValue', v))),
+      h('label', { class: 'adv-toggle', style: 'margin-top:10px' }, h('input', { type: 'checkbox', checked: !!r.once, onchange: (e) => upd('once', e.target.checked) }), 'Only once'),
+      h('span', { class: 'kw do' }, 'DO'),
+      ...(r.do || []).map((a, k) => {
+        const updA = (key, v, structure) => { const rs = clone(get()); rs[i].do[k][key] = v; save(rs, structure); };
+        const needsValue = !['win', 'game over', 'next level', 'vibrate', 'start game', 'restart game', 'pause game', 'resume game', 'add score', 'destroy other', 'camera shake'].includes(a.action);
+        const needsAmount = ['add score', 'add to variable', 'set variable', 'camera shake', 'jump', 'move by'].includes(a.action);
+        return h('div', { class: 'act-row' }, h('div', { class: 'fields' },
+          sel(a.action, ACTIONS, (v) => updA('action', v, true)),
+          needsValue && txt(a.value, a.action === 'message' ? 'message text' : a.action === 'play sound' ? 'coin, jump, hit, power, win…' : a.action.includes('variable') ? 'variable name' : a.action === 'spawn template' ? 'template name' : 'object name (empty = this)', (v) => updA('value', v)),
+          needsAmount && num(a.amount, (v) => updA('amount', v))),
+        h('button', { title: 'Remove action', onclick: () => { const rs = clone(get()); rs[i].do.splice(k, 1); save(rs, true); } }, icon('close')));
+      }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const rs = clone(get()); (rs[i].do ||= []).push({ action: 'message', value: 'Hello!', amount: 1 }); save(rs, true); } }, icon('plus'), 'Add action'))));
+  });
+  out.append(h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => { const rs = clone(get()); rs.push({ when: 'touched by tag', tag: 'player', seconds: 1, dir: 'up', ifVar: '', ifOp: '>=', ifValue: 0, once: false, do: [{ action: 'add score', value: '', amount: 1 }] }); save(rs, true); } }, icon('plus'), 'Add rule')));
+  return out;
 }
 
 /** "Position  X[ ] Y[ ] Z[ ]" row. */
@@ -997,7 +1053,51 @@ function vecRow(target, label, keys, defs, step) {
   return h('div', { class: 'row' }, h('label', {}, label), h('div', { class: 'vec', style: `--n:${keys.length}` }, fields));
 }
 
+const GEO_OPTIONS = [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['capsule', 'Capsule'], ['pyramid', 'Pyramid'], ['wedge', 'Ramp / Wedge'], ['prism', 'Prism'], ['gem', 'Gem'], ['dome', 'Dome'], ['torus', 'Ring / Torus'], ['plane', 'Plane']];
+
+function pickEmoji(cb) {
+  openDialog('Choose a sprite', Object.entries(EMOJI).flatMap(([cat, list]) => [h('div', { class: 'ac-cat' }, cat),
+    h('div', { class: 'emoji-grid' }, list.map((em) => h('button', { onclick: () => { closeLayer(); cb(em); } }, em)))]));
+}
+
+/** 3D modeling: a model is a list of parts (primitive shapes) placed relative to the object. */
+function modelSection(j) {
+  const parts = j.model.parts;
+  const partDims = (q, i) => {
+    const P = () => ent(selectedId)?.model?.parts[i] || {}, C = (path, spec) => control(P, path, spec), g = q.geometry || 'box';
+    return [
+      C('geometry', { label: 'Shape', type: 'select', options: GEO_OPTIONS, structure: true }),
+      vecRow(P, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.05),
+      vecRow(P, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 5),
+      g === 'sphere' ? C('r', { label: 'Radius', type: 'number', def: 0.5, step: 0.05 })
+        : g === 'cylinder' || g === 'cone' ? [C('r', { label: 'Radius', type: 'number', def: 0.5, step: 0.05 }), C('h', { label: 'Height', type: 'number', def: 1, step: 0.05 })]
+          : vecRow(P, 'Size', ['w', 'h', 'd'], [1, 1, 1], 0.05),
+      C('color', { label: 'Color', type: 'color' }),
+      showAdvanced && C('emissive', { label: 'Glow', type: 'number', def: 0, step: 0.1 }),
+    ];
+  };
+  const body = [
+    h('p', { class: 'desc' }, 'Build a 3D model out of parts. Tap a part to highlight it in the Scene. The collider fits around all parts.'),
+    ...parts.map((q, i) => h('div', { class: 'part' + (selectedPart === i ? ' sel' : ' closed') },
+      h('div', { class: 'part-h', onclick: (e) => { if (e.target.closest('button')) return; selectedPart = selectedPart === i ? -1 : i; renderInspector(); } },
+        h('span', { class: 'dot', style: `background:${q.color || '#ccc'}` }), h('span', { class: 't' }, `${i + 1}. ${(GEO_OPTIONS.find((g) => g[0] === (q.geometry || 'box')) || ['', 'Part'])[1]}`),
+        h('button', { class: 'more', title: 'Part options', onclick: (e) => popMenu(e.currentTarget, [
+          { icon: 'copy', label: 'Duplicate Part', fn: () => { parts.splice(i + 1, 0, { ...clone(q), x: (q.x || 0) + 0.3 }); selectedPart = i + 1; changed({ inspector: true }); pushHistory(); } },
+          i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { parts.splice(i - 1, 0, parts.splice(i, 1)[0]); selectedPart = i - 1; changed({ inspector: true }); } },
+          { icon: 'trash', label: 'Delete Part', fn: () => { parts.splice(i, 1); selectedPart = -1; changed({ inspector: true }); pushHistory(); } },
+        ]) }, icon('more'))),
+      selectedPart === i && h('div', { class: 'part-b' }, partDims(q, i)))),
+    h('div', { class: 'row' }, h('label', {}, 'Add a part'), h('select', { onchange: (e) => {
+      if (!e.target.value) return;
+      parts.push({ geometry: e.target.value, x: 0, y: 0.5 + parts.length * 0.2, z: 0, w: 0.6, h: 0.6, d: 0.6, r: 0.3, color: '#90caf9' });
+      selectedPart = parts.length - 1; changed({ inspector: true }); pushHistory();
+    } }, h('option', { value: '' }, '+ Choose a shape…'), GEO_OPTIONS.map(([v, l]) => h('option', { value: v }, l)))),
+  ];
+  return comp('3D Model', body, { icon: 'cube', key: 'model', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.model; changed({ structure: true }); } }] });
+}
+
 const closedComps = new Set();
+let showAdvanced = store.get('pocket.editor.advanced', '0') === '1', lastInspected = null, selectedPart = -1;
 const voxelBrush = { mode: 'add', block: 1 };
 let compClipboard = null;
 function pasteComponent(j) {
@@ -1044,6 +1144,12 @@ function renderInspector() {
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
   const idx = project.entities.indexOf(j);
+  if (lastInspected !== j.id) { // new selection: keep long component lists tidy
+    lastInspected = j.id; selectedPart = -1;
+    closedComps.clear();
+    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels'].filter((k) => j[k]).length;
+    if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
+  }
 
   box.append(h('div', { class: 'nav-strip' },
     h('button', { class: 'btn back', onclick: () => setDock('hierarchy') }, icon('left'), 'Hierarchy'),
@@ -1051,6 +1157,8 @@ function renderInspector() {
     h('span', { class: 'sp' }),
     h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
     h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
+  box.append(h('div', { class: 'nav-strip' }, h('label', { class: 'adv-toggle' },
+    h('input', { type: 'checkbox', checked: showAdvanced, onchange: (e) => { showAdvanced = e.target.checked; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); } }), 'Show advanced options')));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -1061,7 +1169,7 @@ function renderInspector() {
       h('span', {}, 'Tags'),
       h('input', { type: 'text', value: (j.tags || []).join(', '), placeholder: 'player, enemy', autocapitalize: 'off',
         onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
-    h('div', { class: 'sub' },
+    showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
@@ -1071,21 +1179,32 @@ function renderInspector() {
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
     ? [vecRow(T, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.1), vecRow(T, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(T, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)]
     : [
-      j.ui && C('anchor', { label: 'Anchor', type: 'select', options: ['top-left', 'top', 'top-right', 'center', 'bottom-left', 'bottom', 'bottom-right'], def: 'top-left' }),
       vecRow(T, j.ui ? 'Offset' : 'Position', ['x', 'y'], [0, 0], 1), vecRow(T, 'Rotation', ['rz'], [0], 1), vecRow(T, 'Scale', ['sx', 'sy'], [1, 1], 0.05)],
   { icon: 'move', key: 'transform', menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
+
+  if (j.ui) {
+    const ANCH = [['top-left', '↖'], ['top', '↑'], ['top-right', '↗'], ['left', '←'], ['center', '•'], ['right', '→'], ['bottom-left', '↙'], ['bottom', '↓'], ['bottom-right', '↘']];
+    box.append(comp('UI Element', [
+      h('p', { class: 'desc' }, 'UI stays fixed on the screen. Pin it to a corner or edge so it fits every phone.'),
+      h('div', { class: 'row' }, h('label', {}, 'Pin to screen'), h('div', { class: 'anchor-grid' }, ANCH.map(([a, ic]) => h('button', {
+        class: (j.anchor || 'top-left') === a ? 'on' : '', title: a, onclick: () => { j.anchor = a; changed({ inspector: true }); } }, ic)))),
+      C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
+      h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
+    ], { icon: 'hud', key: 'uiel' }));
+  }
 
   const copyItem = (kind, get) => ({ icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind, data: clone(get()) }; toast('Component copied'); } });
   const removeMenu = (fn, kind) => [kind && copyItem(kind, () => j[kind]), { icon: 'trash', label: 'Remove Component', fn }].filter(Boolean);
   if (j.shape) {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
-      C('shape.type', { label: 'Shape', type: 'select', options: [['rect', 'Rectangle'], ['circle', 'Circle'], ['triangle', 'Triangle'], ['star', 'Star']], structure: true }),
-      t === 'circle' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: 'Height', type: 'number', def: 40 })],
+      C('shape.type', { label: 'Shape', type: 'select', options: [['emoji', 'Sprite (emoji)'], ['rect', 'Rectangle'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['triangle', 'Triangle'], ['star', 'Star'], ['heart', 'Heart'], ['diamond', 'Diamond'], ['hexagon', 'Hexagon'], ['pentagon', 'Pentagon'], ['octagon', 'Octagon'], ['capsule', 'Capsule'], ['ring', 'Ring'], ['arrow', 'Arrow'], ['cloud', 'Cloud']], structure: true }),
+      t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
+      t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
-      C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
-      C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
-      j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
+      t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
+      t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
+      t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
       C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
     ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
@@ -1109,8 +1228,8 @@ function renderInspector() {
   if (j.mesh) {
     const g = j.mesh.geometry;
     box.append(comp('Mesh Renderer', [
-      C('mesh.geometry', { label: 'Mesh', type: 'select', options: [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['plane', 'Plane']], structure: true }),
-      g === 'box' && [C('mesh.w', { label: 'Width', type: 'number', def: 1, step: 0.1 }), C('mesh.h', { label: 'Height', type: 'number', def: 1, step: 0.1 }), C('mesh.d', { label: 'Depth', type: 'number', def: 1, step: 0.1 })],
+      C('mesh.geometry', { label: 'Mesh', type: 'select', options: GEO_OPTIONS, structure: true }),
+      !['sphere', 'cylinder', 'cone', 'plane'].includes(g) && [C('mesh.w', { label: 'Width', type: 'number', def: 1, step: 0.1 }), C('mesh.h', { label: 'Height', type: 'number', def: 1, step: 0.1 }), C('mesh.d', { label: 'Depth', type: 'number', def: 1, step: 0.1 })],
       g === 'sphere' && C('mesh.r', { label: 'Radius', type: 'number', def: 0.5, step: 0.05 }),
       (g === 'cylinder' || g === 'cone') && [C('mesh.r', { label: 'Radius', type: 'number', def: 0.5, step: 0.05 }), C('mesh.h', { label: 'Height', type: 'number', def: 1, step: 0.1 })],
       g === 'plane' && [C('mesh.w', { label: 'Width', type: 'number', def: 1, step: 0.1 }), C('mesh.d', { label: 'Depth', type: 'number', def: 1, step: 0.1 })],
@@ -1118,6 +1237,19 @@ function renderInspector() {
       C('mesh.emissive', { label: 'Emission', type: 'number', def: 0, step: 0.05 }),
       C('mesh.opacity', { label: 'Opacity', type: 'number', def: 1, step: 0.05 }),
     ], { icon: 'cube', key: 'mesh', menu: removeMenu(() => { delete j.mesh; changed({ structure: true }); }, 'mesh') }));
+  }
+  if (j.model) box.append(modelSection(j));
+  if (j.bar) {
+    box.append(comp('Progress Bar', [
+      h('p', { class: 'desc' }, 'Shows a variable as a bar: health, energy, progress. Use "self.hp" for this object\'s own health (Health component).'),
+      C('bar.var', { label: 'Variable', type: 'text', def: 'hp' }),
+      C('bar.max', { label: 'Maximum', type: 'number', def: 100 }),
+      showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
+      C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
+      C('bar.fill', { label: 'Bar color', type: 'color' }), C('bar.bg', { label: 'Background', type: 'color' }),
+      C('bar.radius', { label: 'Roundness', type: 'number', def: 8 }),
+      C('bar.label', { label: 'Show numbers', type: 'bool', def: false }),
+    ], { icon: 'hud', key: 'bar', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.bar; changed({ structure: true }); } }] }));
   }
   if (j.voxels) {
     const V = engine.scene.byId(j.id)?.voxels, pal = V?.palette || [];
@@ -1146,6 +1278,14 @@ function renderInspector() {
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
       (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
+      j.body.type !== 'dynamic' && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
+      showAdvanced && vecRow(() => (T().body ||= {}), 'Collider Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], threeD ? 0.05 : 1),
+      showAdvanced && j.body.type === 'dynamic' && [
+        C('body.mass', { label: 'Mass (who pushes whom)', type: 'number', def: 1, step: 0.5 }),
+        C('body.friction', { label: 'Friction on ground', type: 'number', def: 0, step: 0.1 }),
+        C('body.drag', { label: 'Air drag', type: 'number', def: 0, step: 0.1 }),
+        C('body.maxFall', { label: 'Max fall speed (0 = none)', type: 'number', def: 0 })],
+      showAdvanced && j.body.type !== 'dynamic' && C('body.friction', { label: 'Surface friction', type: 'number', def: 0, step: 0.1 }),
     ], { icon: 'body', key: 'body', desc: 'Static: walls and ground. Dynamic: pushed by physics. Kinematic: moves on its own.',
       menu: removeMenu(() => { delete j.body; changed({ structure: true }); }, 'body') }));
   }
@@ -1160,7 +1300,7 @@ function renderInspector() {
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
-    box.append(comp(def.label, def.params.map((p) => C(`behaviors.${i}.${p.key}`, { ...p, def: paramDefault(p, threeD) })), {
+    box.append(comp(def.label, def.params.filter((p) => showAdvanced || !p.advanced).map((p) => C(`behaviors.${i}.${p.key}`, { ...p, def: paramDefault(p, threeD) })), {
       icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu,
       enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); },
     }));
@@ -1197,6 +1337,8 @@ function renderSceneSettings(box) {
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
     C('settings.title', { label: 'Title', type: 'text', def: '' }),
     C('settings.subtitle', { label: 'Subtitle', type: 'text', def: '' }),
+    C('settings.customScreens', { label: 'Custom Screens (my own UI)', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'Hides the built-in title, pause and game-over screens. Add UI with "Show when" set to Title / Game over, and Buttons that start or restart the game (Project → UI has ready-made menus).'),
     h('p', { class: 'desc' }, 'Leave Title empty to start the game right away.'),
   ], { icon: 'hud', key: 's-start' }));
   box.append(comp('Touch Controls', [
@@ -1205,6 +1347,11 @@ function renderSceneSettings(box) {
     C('settings.actionButton', { label: 'Fire Button', type: 'bool', def: false }),
     C('settings.pauseButton', { label: 'Pause Button', type: 'bool', def: true }),
     C('settings.muteButton', { label: 'Mute Button', type: 'bool', def: true }),
+    C('settings.controls', { label: 'Movement Controls', type: 'select', options: [['auto', 'Joystick (when turned on)'], ['dpad', 'D-pad (4 arrows)'], ['arrows', 'Left / right arrows'], ['joystick', 'Joystick']], def: 'auto' }),
+    C('settings.joystickMode', { label: 'Joystick Style', type: 'select', options: [['floating', 'Appears where you touch'], ['fixed', 'Fixed in the corner']], def: 'floating' }),
+    C('settings.controlsOpacity', { label: 'Controls Opacity (0.2–1)', type: 'number', def: 1, step: 0.1 }),
+    C('settings.jumpLabel', { label: 'Jump Button Text', type: 'text', def: 'JUMP' }),
+    C('settings.actionLabel', { label: 'Fire Button Text', type: 'text', def: 'FIRE' }),
     C('settings.joystickSide', { label: 'Joystick Side', type: 'select', options: [['left', 'Left (buttons on right)'], ['right', 'Right (left-handed)']], def: 'left' }),
     C('settings.controlSize', { label: 'Control Size', type: 'select', options: [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], def: 'medium' }),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
@@ -1266,11 +1413,11 @@ const BEH_META = {
   firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
   projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
   follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
-  bounce: ['Movement', 'circle'], trigger: ['Events', 'bolt'], timer: ['Events', 'clock'], dropItem: ['Gameplay', 'coin'],
+  bounce: ['Movement', 'circle'], trigger: ['Logic', 'bolt'], timer: ['Logic', 'clock'], dropItem: ['Gameplay', 'coin'],
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
-  turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Events', 'bolt'],
-  voxelBuilder: ['Voxel', 'cube'],
+  turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
+  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1285,6 +1432,8 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'mesh', label: 'Mesh Renderer', icon: 'cube', desc: 'Cube, sphere, cylinder, cone or plane', ok: (e) => threeD && !e.mesh, add: (e) => { e.mesh = { geometry: 'box', w: 1, h: 1, d: 1, color: '#4c8bd6' }; } },
     { cat: 'Rendering', key: 'text', label: 'Text', icon: 'text', desc: 'Words and live variables like {score}', ok: (e) => !e.text, add: (e) => { e.text = { value: 'Text', size: 24, color: '#ffffff' }; } },
     { cat: 'Rendering', key: 'sprite', label: 'Image', icon: 'image', desc: 'A picture from your device', ok: (e) => !threeD && !e.sprite, add: (e) => { e.sprite = { src: '', w: 64, h: 64 }; } },
+    { cat: 'Rendering', key: 'model', label: '3D Model', icon: 'cube', desc: 'Build a model out of shapes (3D modeling)', ok: (e) => threeD && !e.model && !e.ui, add: (e) => { e.model = { parts: [{ geometry: 'box', x: 0, y: 0.5, z: 0, w: 1, h: 1, d: 1, color: '#90caf9' }] }; } },
+    { cat: 'UI', key: 'bar', label: 'Progress Bar', icon: 'hud', desc: 'Health, energy or progress shown as a bar', ok: (e) => !e.bar && (e.ui || !threeD), add: (e) => { e.bar = { var: 'hp', max: 100, w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8 }; } },
     { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
   ];
@@ -1423,6 +1572,15 @@ const OBJECTS_2D = [
   { icon: 'circle', label: 'Circle', props: { name: 'Circle', shape: { type: 'circle', r: 30, fill: '#e57373' } } },
   { icon: 'triangle', label: 'Triangle', props: { name: 'Triangle', shape: { type: 'triangle', w: 60, h: 60, fill: '#9575cd' } } },
   { icon: 'star', label: 'Star', props: { name: 'Star', shape: { type: 'star', w: 60, h: 60, fill: '#ffca28' } } },
+  { icon: 'heart', label: 'Heart', props: { name: 'Heart', shape: { type: 'heart', w: 50, h: 46, fill: '#ef5350' } } },
+  { icon: 'gem', label: 'Diamond', props: { name: 'Diamond', shape: { type: 'diamond', w: 40, h: 56, fill: '#4dd0e1' } } },
+  { icon: 'circle', label: 'Hexagon', props: { name: 'Hexagon', shape: { type: 'hexagon', w: 60, h: 60, fill: '#7e57c2' } } },
+  { icon: 'circle', label: 'Ellipse', props: { name: 'Ellipse', shape: { type: 'ellipse', w: 80, h: 50, fill: '#26a69a' } } },
+  { icon: 'square', label: 'Capsule', props: { name: 'Capsule', shape: { type: 'capsule', w: 90, h: 36, fill: '#5c6bc0' } } },
+  { icon: 'circle', label: 'Ring', props: { name: 'Ring', shape: { type: 'ring', r: 30, fill: '#ffca28' } } },
+  { icon: 'arrow', label: 'Arrow', props: { name: 'Arrow', shape: { type: 'arrow', w: 60, h: 40, fill: '#ffffff' } } },
+  { icon: 'star', label: 'Cloud', props: { name: 'Cloud', shape: { type: 'cloud', w: 100, h: 60, fill: '#ffffff' } } },
+  { icon: 'star', label: 'Sprite', props: { name: 'Sprite', shape: { type: 'emoji', emoji: '🐱', w: 56, h: 56 } } },
   { icon: 'text', label: 'Text', props: { name: 'Text', text: { value: 'Hello', size: 32, color: '#ffffff' } } },
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
@@ -1432,9 +1590,17 @@ const OBJECTS_3D = [
   { icon: 'grid', label: 'Voxel World', props: { name: 'Voxel World', y: 0, voxels: { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} } } },
   { icon: 'grid', label: 'Empty Voxels', props: { name: 'Voxel Build', y: 0, voxels: { size: 1, gen: { type: 'flat', w: 16, d: 16, h: 1, seed: 1, trees: false }, edits: {} } } },
   { icon: 'cube', label: 'Cube', props: { name: 'Cube', mesh: { geometry: 'box', w: 1, h: 1, d: 1, color: '#4c8bd6' } } },
+  { icon: 'cube', label: 'Empty Model', props: { name: 'Model', model: { parts: [{ geometry: 'box', x: 0, y: 0.5, z: 0, w: 1, h: 1, d: 1, color: '#90caf9' }] } } },
   { icon: 'sphere', label: 'Sphere', props: { name: 'Sphere', mesh: { geometry: 'sphere', r: 0.5, color: '#e57373' } } },
   { icon: 'cylinder', label: 'Cylinder', props: { name: 'Cylinder', mesh: { geometry: 'cylinder', r: 0.5, h: 1, color: '#9575cd' } } },
   { icon: 'cone', label: 'Cone', props: { name: 'Cone', mesh: { geometry: 'cone', r: 0.5, h: 1, color: '#ffca28' } } },
+  { icon: 'player', label: 'Capsule', props: { name: 'Capsule', mesh: { geometry: 'capsule', w: 0.6, h: 1.2, d: 0.6, color: '#4db6ac' } } },
+  { icon: 'triangle', label: 'Pyramid', props: { name: 'Pyramid', mesh: { geometry: 'pyramid', w: 1, h: 1, d: 1, color: '#ffb74d' } } },
+  { icon: 'plane', label: 'Ramp', props: { name: 'Ramp', mesh: { geometry: 'wedge', w: 2, h: 1, d: 2, color: '#a1887f' }, body: { type: 'static' } } },
+  { icon: 'triangle', label: 'Prism', props: { name: 'Prism', mesh: { geometry: 'prism', w: 1, h: 1, d: 1, color: '#9575cd' } } },
+  { icon: 'star', label: 'Gem', props: { name: 'Gem', mesh: { geometry: 'gem', w: 0.6, h: 1, d: 0.6, color: '#4dd0e1', emissive: 0.3 } } },
+  { icon: 'circle', label: 'Dome', props: { name: 'Dome', mesh: { geometry: 'dome', w: 1.5, h: 0.75, d: 1.5, color: '#e57373' } } },
+  { icon: 'circle', label: 'Torus', props: { name: 'Torus', mesh: { geometry: 'torus', w: 1, h: 1, d: 1, color: '#f06292' } } },
   { icon: 'plane', label: 'Plane', props: { name: 'Plane', y: 0.01, mesh: { geometry: 'plane', w: 4, d: 4, color: '#8d8d9a' } } },
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
 ];
@@ -1443,18 +1609,22 @@ let projectTab = 'prefabs';
 function renderProject() {
   const box = $('#project');
   box.replaceChildren();
-  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], ['components', 'Components', 'folder']];
+  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['components', 'Components', 'folder']];
+  if (!tabs.some((t) => t[0] === projectTab)) projectTab = 'prefabs';
   box.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
   box.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
   let items;
   if (projectTab === 'components') {
     items = componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
   } else {
-    const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D) : (is3D() ? OBJECTS_3D : OBJECTS_2D);
-    items = src.map((o) => ({ icon: o.icon, label: o.label, payload: { kind: 'prefab', def: o, label: o.label, icon: o.icon } }));
+    const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
+      : projectTab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
+        : projectTab === 'sprites' ? Object.entries(EMOJI).flatMap(([cat, list]) => { const one = { Characters: 'Character', Enemies: 'Enemy', Items: 'Item', Vehicles: 'Vehicle', Places: 'Prop' }[cat] || cat; return list.map((em) => ({ emoji: em, label: one, props: { name: one, shape: { type: 'emoji', emoji: em, w: 56, h: 56 } } })); })
+          : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
+    items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'star' } }));
   }
   box.append(h('div', { class: 'tiles' }, items.map((it) => {
-    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
+    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
     draggable(t, it.payload);
     return t;
   })));
@@ -1892,6 +2062,25 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
 $('#dockTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
 $('#panelsFab').append(icon('list'));
 $('#addFab').append(icon('plus'));
+for (const [z, ic] of [['out', 'minus'], ['in', 'plus'], ['reset', 'frame']]) {
+  const b = $(`#zoomBar [data-zoom="${z}"]`);
+  b.append(icon(ic));
+  b.addEventListener('click', () => {
+    if (z === 'reset') { resetCamera(); applyCamera(); return; }
+    const k = z === 'in' ? 1.35 : 1 / 1.35;
+    if (is3D()) orbit.dist = Math.min(300, Math.max(2, orbit.dist / k)); else cam2d.zoom = Math.min(8, Math.max(0.08, cam2d.zoom * k));
+    applyCamera(); buzz(4);
+  });
+}
+// stop the browser from zooming the whole page (pinch or double tap); pinch inside the Scene zooms the view instead
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 && !e.target.closest('canvas')) e.preventDefault(); }, { passive: false });
+$('#uiBtn').addEventListener('click', () => {
+  uiMode = !uiMode;
+  $('#uiBtn').classList.toggle('on', uiMode);
+  if (uiMode) { projectTab = 'ui'; renderProject(); toast('UI mode: only screen UI can be selected. Add widgets from Project → UI.'); }
+});
+engine.onBeforeUI = (ctx) => { if (uiMode && !playing) { ctx.fillStyle = 'rgba(10,10,20,0.55)'; ctx.fillRect(0, 0, engine.width, engine.height); } };
 $('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {

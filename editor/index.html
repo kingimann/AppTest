@@ -31,6 +31,7 @@
     <div class="panel-tabs">
       <div class="ptab active" id="sceneTab"></div>
       <button class="level-btn" id="levelBtn" title="Levels"></button>
+      <button class="pt-btn ui-toggle" id="uiBtn" title="Edit the on-screen UI">UI</button>
       <span class="sp"></span>
       <button class="pt-btn" id="snapBtn" title="Snap to grid"></button>
       <button class="pt-btn" id="gridBtn" title="Show grid"></button>
@@ -43,6 +44,11 @@
         <button data-tool="rotate" title="Rotate"></button>
         <button data-tool="scale" title="Scale"></button>
         <button data-tool="paint" title="Paint: tap or drag to place copies of the selected object"></button>
+      </div>
+      <div id="zoomBar">
+        <button data-zoom="out" title="Zoom out"></button>
+        <button data-zoom="in" title="Zoom in"></button>
+        <button data-zoom="reset" title="Reset view"></button>
       </div>
       <button id="panelsFab" title="Show panels"></button>
       <button id="addFab" title="Add objects and components"></button>

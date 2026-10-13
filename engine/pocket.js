@@ -110,11 +110,17 @@ export { store as storage };
 // ============================================================================
 // Entities
 // ============================================================================
-export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null };
+export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null, emoji: '' };
+export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false };
 export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center' };
 export const MESH_DEFAULTS = { geometry: 'box', w: 1, h: 1, d: 1, r: 0.5, color: '#33f0ff', emissive: 0, opacity: 1 };
 export const SPRITE_DEFAULTS = { src: '', w: 64, h: 64 };
-export const BODY_DEFAULTS = { type: 'dynamic', shape: 'auto', w: 0, h: 0, d: 0, r: 0, sensor: false, gravityScale: 1, bounce: 0, vx: 0, vy: 0, vz: 0 };
+export const BODY_DEFAULTS = {
+  type: 'dynamic', shape: 'auto', w: 0, h: 0, d: 0, r: 0, sensor: false, gravityScale: 1, bounce: 0, vx: 0, vy: 0, vz: 0,
+  ox: 0, oy: 0, oz: 0, // collider offset from the object's center
+  oneWay: false, // platforms you can jump up through and land on
+  mass: 1, friction: 0, drag: 0, maxFall: 0,
+};
 
 const TRANSFORM_KEYS = ['x', 'y', 'z', 'rx', 'ry', 'rz'];
 
@@ -134,7 +140,10 @@ export class Entity {
     this.text = props.text ? { ...TEXT_DEFAULTS, ...props.text } : null;
     this.sprite = props.sprite ? { ...SPRITE_DEFAULTS, ...props.sprite } : null;
     this.mesh = props.mesh ? { ...MESH_DEFAULTS, ...props.mesh } : null;
+    this.bar = props.bar ? { ...BAR_DEFAULTS, ...props.bar } : null;
+    this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
+    this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -180,10 +189,22 @@ export class Entity {
     }
     const b = this.body, is2D = !this.mesh;
     const sx = Math.abs(this.sx), sy = Math.abs(this.sy), sz = Math.abs(this.sz);
+    const off = b && (b.ox || b.oy || b.oz) ? { ox: b.ox * sx, oy: b.oy * sy, oz: (b.oz || 0) * sz } : null;
     if (b && b.shape !== 'auto') {
-      if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz) };
-      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2 };
+      if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz), ...off };
+      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2, ...off };
     }
+    if (this.model && this.model.parts?.length) { // box around all the parts
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (const q of this.model.parts) {
+        const [gx, gy, gz] = partSize(q);
+        x0 = Math.min(x0, (q.x || 0) - gx / 2); x1 = Math.max(x1, (q.x || 0) + gx / 2);
+        y0 = Math.min(y0, (q.y || 0) - gy / 2); y1 = Math.max(y1, (q.y || 0) + gy / 2);
+        z0 = Math.min(z0, (q.z || 0) - gz / 2); z1 = Math.max(z1, (q.z || 0) + gz / 2);
+      }
+      return { sphere: false, hx: (x1 - x0) * sx / 2, hy: (y1 - y0) * sy / 2, hz: (z1 - z0) * sz / 2, ox: (x0 + x1) / 2 * sx + (off?.ox || 0), oy: (y0 + y1) / 2 * sy + (off?.oy || 0), oz: (z0 + z1) / 2 * sz + (off?.oz || 0) };
+    }
+    if (off) { const r = this.extents.call({ ...this, body: { ...b, ox: 0, oy: 0, oz: 0 } }); return { ...r, ...off }; }
     if (this.mesh) {
       const m = this.mesh;
       switch (m.geometry) {
@@ -195,10 +216,11 @@ export class Entity {
     }
     if (this.shape) {
       const s = this.shape;
-      if (s.type === 'circle') return { sphere: true, r: s.r * Math.max(sx, sy) };
+      if (s.type === 'circle' || s.type === 'ring') return { sphere: true, r: s.r * Math.max(sx, sy) };
       return { sphere: false, hx: s.w * sx / 2, hy: s.h * sy / 2, hz: Infinity };
     }
     if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity };
+    if (this.bar) return { sphere: false, hx: this.bar.w * sx / 2, hy: this.bar.h * sy / 2, hz: Infinity };
     if (this.text) {
       const len = String(this.text.value).length;
       return { sphere: false, hx: this.text.size * len * 0.3 * sx, hy: this.text.size * 0.6 * sy, hz: Infinity };
@@ -342,6 +364,7 @@ const DEFAULT_SETTINGS = {
   joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
   muteButton: true, orientation: 'any', fullscreen: false,
   joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
+  controls: 'auto', joystickMode: 'floating', controlsOpacity: 1, jumpLabel: 'JUMP', actionLabel: 'FIRE', customScreens: false,
   turnBased: false, turnDelay: 0.3,
 };
 const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
@@ -493,6 +516,11 @@ export class Scene {
 // Physics (arcade: axis-aligned boxes & spheres, shared by 2D and 3D)
 // ============================================================================
 function overlap(a, ea, b, eb) {
+  if (ea.ox || ea.oy || ea.oz) a = { x: a.x + (ea.ox || 0), y: a.y + (ea.oy || 0), z: a.z + (ea.oz || 0) };
+  if (eb.ox || eb.oy || eb.oz) b = { x: b.x + (eb.ox || 0), y: b.y + (eb.oy || 0), z: b.z + (eb.oz || 0) };
+  return overlapRaw(a, ea, b, eb);
+}
+function overlapRaw(a, ea, b, eb) {
   if (!ea.sphere && !eb.sphere) {
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const ox = ea.hx + eb.hx - Math.abs(dx); if (ox <= 0) return null;
@@ -508,13 +536,13 @@ function overlap(a, ea, b, eb) {
     if (d < 1e-6) return { nx: 0, ny: 1, nz: 0, depth: rs };
     return { nx: dx / d, ny: dy / d, nz: dz / d, depth: rs - d };
   }
-  if (!ea.sphere) { const m = overlap(b, eb, a, ea); if (m) { m.nx = -m.nx; m.ny = -m.ny; m.nz = -m.nz; } return m; }
+  if (!ea.sphere) { const m = overlapRaw(b, eb, a, ea); if (m) { m.nx = -m.nx; m.ny = -m.ny; m.nz = -m.nz; } return m; }
   // a = sphere, b = box
   const cx = clamp(a.x, b.x - eb.hx, b.x + eb.hx), cy = clamp(a.y, b.y - eb.hy, b.y + eb.hy), cz = clamp(a.z, b.z - eb.hz, b.z + eb.hz);
   const dx = a.x - cx, dy = a.y - cy, dz = a.z - cz, d = Math.hypot(dx, dy, dz);
   if (d >= ea.r) return null;
   if (d > 1e-6) return { nx: -dx / d, ny: -dy / d, nz: -dz / d, depth: ea.r - d };
-  return overlap(a, { sphere: false, hx: ea.r, hy: ea.r, hz: Number.isFinite(eb.hz) ? ea.r : Infinity }, b, eb);
+  return overlapRaw(a, { sphere: false, hx: ea.r, hy: ea.r, hz: Number.isFinite(eb.hz) ? ea.r : Infinity }, b, eb);
 }
 
 export class Physics {
@@ -531,10 +559,17 @@ export class Physics {
     const list = scene.entities.filter((e) => e.body && !e.dead);
     for (const e of list) {
       const b = e.body;
+      if (b.type !== 'dynamic') { // how far moving platforms travelled since last step (to carry riders)
+        b.dx = e.x - (b.px ?? e.x); b.dy = e.y - (b.py ?? e.y); b.dz = e.z - (b.pz ?? e.z);
+      }
       if (b.type === 'static') continue;
-      if (b.type === 'dynamic') b.vel.y += g * b.gravityScale * dt;
+      if (b.type === 'dynamic') {
+        b.vel.y += g * b.gravityScale * dt;
+        if (b.drag) { const k = Math.max(0, 1 - b.drag * dt); b.vel.x *= k; b.vel.z *= k; if (!g || !b.gravityScale) b.vel.y *= k; }
+        if (b.maxFall && gd && b.vel.y * gd > b.maxFall) b.vel.y = b.maxFall * gd;
+      }
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.grounded = false;
+      b.grounded = false; b.groundedOn = null;
     }
     // dynamic bodies collide with voxel worlds block by block
     const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
@@ -577,22 +612,39 @@ export class Physics {
         if (ba.sensor || bb.sensor) continue;
         const ma = ba.type === 'dynamic', mb = bb.type === 'dynamic';
         if (!ma && !mb) continue;
-        const share = ma && mb ? 0.5 : 1;
+        // one-way platforms: only solid for something landing on top while falling
+        if (ba.oneWay || bb.oneWay) {
+          const [dyn, plat, n] = ma && !mb ? [a, b, m.ny] : mb && !ma ? [b, a, -m.ny] : [null];
+          if (!dyn || !(gd && n * gd > 0.5) || dyn.body.vel.y * gd < -0.01) continue;
+          const dex = dyn.extents(), hh = dex.sphere ? dex.r : dex.hy;
+          if (m.depth > Math.max(hh * 0.5, 0.0001)) continue;
+        }
+        const share = ma && mb ? bb.mass / ((ba.mass + bb.mass) || 1) : 1, shareB = ma && mb ? 1 - share : 1;
+        const fr = Math.max(ba.friction || 0, bb.friction || 0);
         if (ma) {
           a.x -= m.nx * m.depth * share; a.y -= m.ny * m.depth * share; a.z -= m.nz * m.depth * share;
           const vn = ba.vel.x * m.nx + ba.vel.y * m.ny + ba.vel.z * m.nz;
           if (vn > 0) { const k = vn * (1 + ba.bounce); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
-          if (gd && m.ny * gd > 0.5) ba.grounded = true;
+          if (gd && m.ny * gd > 0.5) {
+            ba.grounded = true; ba.groundedOn = b;
+            if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
+            if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
+          }
         }
         if (mb) {
-          b.x += m.nx * m.depth * share; b.y += m.ny * m.depth * share; b.z += m.nz * m.depth * share;
+          b.x += m.nx * m.depth * shareB; b.y += m.ny * m.depth * shareB; b.z += m.nz * m.depth * shareB;
           const vn = bb.vel.x * m.nx + bb.vel.y * m.ny + bb.vel.z * m.nz;
           if (vn < 0) { const k = vn * (1 + bb.bounce); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
-          if (gd && m.ny * gd < -0.5) bb.grounded = true;
+          if (gd && m.ny * gd < -0.5) {
+            bb.grounded = true; bb.groundedOn = a;
+            if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
+            if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
+          }
         }
       }
     }
     this.contacts = now;
+    for (const e of list) if (e.body.type !== 'dynamic') { e.body.px = e.x; e.body.py = e.y; e.body.pz = e.z; }
   }
 }
 
@@ -639,8 +691,10 @@ export class Input {
     const st = this.engine.scene?.settings || {};
     const stickSide = st.joystickSide === 'right' ? p.x > this.engine.width * 0.5 : p.x < this.engine.width * 0.5;
     if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
-    else if (st.joystick && this.engine.scene.state === 'play' && stickSide && !this.stick) {
-      ptr.role = 'stick'; this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
+    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
+      ptr.role = 'stick';
+      const f = st.joystickMode === 'fixed' ? this.fixedStick() : null;
+      this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     }
     this.pointers.set(e.pointerId, ptr);
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
@@ -654,7 +708,7 @@ export class Input {
     ptr.x = p.x; ptr.y = p.y;
     if (this.stick && this.stick.id === e.pointerId) {
       const max = this.stickRadius, dx = p.x - this.stick.bx, dy = p.y - this.stick.by, d = Math.hypot(dx, dy);
-      if (d > max) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
+      if (d > max && !this.stick.fixed) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
       this.stick.x = p.x; this.stick.y = p.y;
     }
   }
@@ -694,12 +748,24 @@ export class Input {
     else if (D) listen();
   }
 
+  /** Where a fixed joystick sits. */
+  fixedStick() {
+    const eng = this.engine, r = this.stickRadius, right = eng.scene?.settings.joystickSide === 'right';
+    return { x: right ? eng.width - eng.safe.right - 30 - r : eng.safe.left + 30 + r, y: eng.height - eng.safe.bottom - 30 - r };
+  }
   get stickRadius() { return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[this.engine.scene?.settings.controlSize] || 1); }
 
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
-    if (this.stick) { x += (this.stick.x - this.stick.bx) / this.stickRadius; y += (this.stick.y - this.stick.by) / this.stickRadius; }
+    if (this.stick) {
+      const sx = (this.stick.x - this.stick.bx) / this.stickRadius, sy = (this.stick.y - this.stick.by) / this.stickRadius, l = Math.hypot(sx, sy);
+      if (l > 0.12) { x += sx / Math.max(1, l); y += sy / Math.max(1, l); } // small dead zone
+    }
+    for (const b of this.buttons) {
+      if (b.id == null) continue;
+      if (b.action === 'dleft') x -= 1; else if (b.action === 'dright') x += 1; else if (b.action === 'dup') y -= 1; else if (b.action === 'ddown') y += 1;
+    }
     if (this.useTilt && this.tiltAxis) {
       const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
       x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
@@ -826,17 +892,56 @@ function drawEntity2D(ctx, e, vars, time) {
         ctx.closePath(); break;
       }
       case 'polygon': (s.points || []).forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); ctx.closePath(); break;
+      case 'ellipse': ctx.ellipse(0, 0, s.w / 2, s.h / 2, 0, 0, Math.PI * 2); break;
+      case 'hexagon': case 'pentagon': case 'octagon': {
+        const n = { pentagon: 5, hexagon: 6, octagon: 8 }[s.type];
+        for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i / n * Math.PI * 2; ctx.lineTo(Math.cos(a) * s.w / 2, Math.sin(a) * s.h / 2); }
+        ctx.closePath(); break;
+      }
+      case 'diamond': ctx.moveTo(0, -s.h / 2); ctx.lineTo(s.w / 2, 0); ctx.lineTo(0, s.h / 2); ctx.lineTo(-s.w / 2, 0); ctx.closePath(); break;
+      case 'heart': {
+        const w = s.w / 2, hh = s.h / 2;
+        ctx.moveTo(0, hh); ctx.bezierCurveTo(-w * 1.3, hh * 0.2, -w * 0.9, -hh * 1.1, 0, -hh * 0.4);
+        ctx.bezierCurveTo(w * 0.9, -hh * 1.1, w * 1.3, hh * 0.2, 0, hh); ctx.closePath(); break;
+      }
+      case 'capsule': if (ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, Math.min(s.w, s.h) / 2); else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h); break;
+      case 'ring': ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.arc(0, 0, s.r * 0.6, 0, Math.PI * 2, true); break;
+      case 'arrow': ctx.moveTo(s.w / 2, 0); ctx.lineTo(0, -s.h / 2); ctx.lineTo(0, -s.h / 5); ctx.lineTo(-s.w / 2, -s.h / 5); ctx.lineTo(-s.w / 2, s.h / 5); ctx.lineTo(0, s.h / 5); ctx.lineTo(0, s.h / 2); ctx.closePath(); break;
+      case 'cloud':
+        for (const [cx, cy, cr] of [[-0.25, 0.1, 0.25], [0, -0.1, 0.32], [0.27, 0.08, 0.24], [0, 0.18, 0.22]]) { ctx.moveTo(cx * s.w + cr * s.w, cy * s.h); ctx.arc(cx * s.w, cy * s.h, cr * s.w, 0, Math.PI * 2); }
+        break;
+      case 'emoji': break;
       default:
         if (s.radius && ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, s.radius);
         else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h);
     }
-    if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(); }
-    if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+    if (s.type === 'emoji') { // emoji sprites: thousands of ready-made characters, items and props
+      ctx.font = `${Math.round(s.h * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      if (e.data.flipX) ctx.scale(-1, 1);
+      ctx.fillText(s.emoji || '⭐', 0, s.h * 0.06);
+    } else {
+      if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
+      if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+    }
     ctx.shadowBlur = 0;
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
     if (img.complete && img.naturalWidth) ctx.drawImage(img, -e.sprite.w / 2, -e.sprite.h / 2, e.sprite.w, e.sprite.h);
+  }
+  if (e.bar) { // progress / health bar bound to a variable (or this object's own value with "self.hp")
+    const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
+    const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
+    const k = clamp((+src[key] || 0) / max, 0, 1);
+    e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w, b.h);
+    ctx.fillStyle = b.bg; ctx.fill();
+    if (e.data._barK > 0.001) {
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h);
+      ctx.fillStyle = b.fill; ctx.fill();
+    }
+    if (b.label) { ctx.font = `800 ${Math.round(b.h * 0.7)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${formatNumber(+src[key] || 0)} / ${formatNumber(max)}`, 0, 1); }
   }
   if (e.text) {
     const t = e.text;
@@ -910,7 +1015,85 @@ void main() {
   gl_FragColor = vec4(mix(c, uFogColor, f), uOpacity);
 }`;
 
+export const GEOMETRIES = ['box', 'sphere', 'cylinder', 'cone', 'plane', 'capsule', 'pyramid', 'wedge', 'prism', 'gem', 'dome', 'torus'];
+
+/** Extra shapes built from triangles; each fits a unit box and is oriented outward automatically. */
+function extraGeometry(kind) {
+  const P = [], N = [];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = (v) => { const l = Math.hypot(...v) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  /** Add a triangle. Normals: one flat vector, or one per vertex (smooth). `out` points away from the surface. */
+  const tri = (a, b, c, ns, out) => {
+    const fn = norm(cross(sub(b, a), sub(c, a)));
+    const ref = out || (ns && Array.isArray(ns[0]) ? norm([ns[0][0] + ns[1][0] + ns[2][0], ns[0][1] + ns[1][1] + ns[2][1], ns[0][2] + ns[1][2] + ns[2][2]]) : [(a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3]);
+    let v = [a, b, c], n = ns && Array.isArray(ns[0]) ? ns : [fn, fn, fn];
+    if (dot(fn, ref) < 0) { v = [a, c, b]; n = n === ns ? [ns[0], ns[2], ns[1]] : [[-fn[0], -fn[1], -fn[2]], [-fn[0], -fn[1], -fn[2]], [-fn[0], -fn[1], -fn[2]]]; }
+    for (let i = 0; i < 3; i++) { P.push(...v[i]); N.push(...n[i]); }
+  };
+  const quad = (a, b, c, d, out) => { tri(a, b, c, null, out); tri(a, c, d, null, out); };
+  const h = 0.5, seg = 24;
+  if (kind === 'pyramid') {
+    const t = [0, h, 0], c = [[-h, -h, -h], [h, -h, -h], [h, -h, h], [-h, -h, h]];
+    for (let i = 0; i < 4; i++) tri(c[i], c[(i + 1) % 4], t);
+    quad(c[0], c[1], c[2], c[3]);
+  } else if (kind === 'wedge') { // a ramp: high at the back (-z), low at the front (+z)
+    const b0 = [-h, -h, -h], b1 = [h, -h, -h], b2 = [h, -h, h], b3 = [-h, -h, h], t0 = [-h, h, -h], t1 = [h, h, -h];
+    quad(b0, b1, b2, b3, [0, -1, 0]); quad(b0, b1, t1, t0, [0, 0, -1]); quad(t0, t1, b2, b3, [0, 1, 1]); // the slope passes through the center, so say which way is out
+    tri(b0, t0, b3, null, [-1, 0, 0]); tri(b1, t1, b2, null, [1, 0, 0]);
+  } else if (kind === 'prism') {
+    const f = [[-h, -h, h], [h, -h, h], [0, h, h]], k = [[-h, -h, -h], [h, -h, -h], [0, h, -h]];
+    tri(f[0], f[1], f[2]); tri(k[0], k[1], k[2]);
+    for (let i = 0; i < 3; i++) quad(f[i], f[(i + 1) % 3], k[(i + 1) % 3], k[i]);
+  } else if (kind === 'gem') {
+    const v = [[h, 0, 0], [-h, 0, 0], [0, h, 0], [0, -h, 0], [0, 0, h], [0, 0, -h]];
+    for (const x of [0, 1]) for (const y of [2, 3]) for (const z of [4, 5]) tri(v[x], v[y], v[z]);
+  } else if (kind === 'dome' || kind === 'capsule') {
+    // dome: half an ellipsoid sitting on y = -0.5; capsule: cylinder with rounded ends (shape is right when height = 2 × width)
+    const ring = 10, pts = [];
+    const prof = kind === 'dome'
+      ? Array.from({ length: ring + 1 }, (_, i) => { const v = i / ring * Math.PI / 2; return [Math.sin(v) * h, -h + Math.cos(v) * 1, Math.sin(v), Math.cos(v) * 0.25]; })
+      : [...Array.from({ length: ring + 1 }, (_, i) => { const v = i / ring * Math.PI / 2; return [Math.sin(v) * h, 0.25 + Math.cos(v) * 0.25, Math.sin(v), Math.cos(v)]; }),
+        ...Array.from({ length: ring + 1 }, (_, i) => { const v = Math.PI / 2 + i / ring * Math.PI / 2; return [Math.sin(v) * h, -0.25 + Math.cos(v) * 0.25, Math.sin(v), Math.cos(v)]; })];
+    for (let r = 0; r < prof.length; r++) for (let i = 0; i <= seg; i++) {
+      const u = i / seg * Math.PI * 2, [rad, y, nr, ny] = prof[r];
+      pts.push({ p: [Math.cos(u) * rad, y, Math.sin(u) * rad], n: norm([Math.cos(u) * nr, ny, Math.sin(u) * nr]) });
+    }
+    const W = seg + 1;
+    for (let r = 0; r < prof.length - 1; r++) for (let i = 0; i < seg; i++) {
+      const a = pts[r * W + i], b = pts[r * W + i + 1], c = pts[(r + 1) * W + i + 1], d = pts[(r + 1) * W + i];
+      tri(a.p, b.p, c.p, [a.n, b.n, c.n]); tri(a.p, c.p, d.p, [a.n, c.n, d.n]);
+    }
+    if (kind === 'dome') for (let i = 0; i < seg; i++) {
+      const u0 = i / seg * Math.PI * 2, u1 = (i + 1) / seg * Math.PI * 2;
+      tri([0, -h, 0], [Math.cos(u0) * h, -h, Math.sin(u0) * h], [Math.cos(u1) * h, -h, Math.sin(u1) * h], null, [0, -1, 0]);
+    }
+  } else if (kind === 'torus') {
+    const R = 0.35, r = 0.15, tube = 14, ptAt = (i, j) => {
+      const u = i / seg * Math.PI * 2, v = j / tube * Math.PI * 2;
+      return { p: [(R + r * Math.cos(v)) * Math.cos(u), r * Math.sin(v), (R + r * Math.cos(v)) * Math.sin(u)], n: [Math.cos(v) * Math.cos(u), Math.sin(v), Math.cos(v) * Math.sin(u)] };
+    };
+    for (let i = 0; i < seg; i++) for (let j = 0; j < tube; j++) {
+      const a = ptAt(i, j), b = ptAt(i + 1, j), c = ptAt(i + 1, j + 1), d = ptAt(i, j + 1);
+      tri(a.p, b.p, c.p, [a.n, b.n, c.n]); tri(a.p, c.p, d.p, [a.n, c.n, d.n]);
+    }
+  }
+  const n = P.length / 3;
+  return { P: new Float32Array(P), N: new Float32Array(N), I: new Uint16Array(Array.from({ length: n }, (_, i) => i)) };
+}
+
+/** Size [x, y, z] of a mesh or model part from its geometry and dimensions. */
+export function partSize(m) {
+  const g = m.geometry || 'box', w = m.w ?? 1, hh = m.h ?? 1, d = m.d ?? 1, r = m.r ?? 0.5;
+  if (g === 'sphere') return [r * 2, r * 2, r * 2];
+  if (g === 'cylinder' || g === 'cone') return [r * 2, hh, r * 2];
+  if (g === 'plane') return [w, 0.02, d];
+  return [w, hh, d];
+}
+
 function geometry(kind) {
+  if (!['box', 'plane', 'sphere', 'cylinder', 'cone'].includes(kind)) return extraGeometry(kind);
   const P = [], N = [], I = [];
   const quad = (a, b, c, d, n) => { const o = P.length / 3; P.push(...a, ...b, ...c, ...d); for (let i = 0; i < 4; i++) N.push(...n); I.push(o, o + 1, o + 2, o, o + 2, o + 3); };
   if (kind === 'box') {
@@ -970,7 +1153,7 @@ export class Renderer3D {
     this.u = {};
     for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
-    for (const k of ['box', 'plane', 'sphere', 'cylinder', 'cone']) {
+    for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
       b.pos = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b.pos); gl.bufferData(gl.ARRAY_BUFFER, g.P, gl.STATIC_DRAW);
       b.norm = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b.norm); gl.bufferData(gl.ARRAY_BUFFER, g.N, gl.STATIC_DRAW);
@@ -1085,11 +1268,18 @@ export class Renderer3D {
   }
 
   meshModel(e) {
-    const m = e.mesh; let gx = m.w, gy = m.h, gz = m.d;
-    if (m.geometry === 'sphere') gx = gy = gz = m.r * 2;
-    else if (m.geometry === 'cylinder' || m.geometry === 'cone') { gx = gz = m.r * 2; }
-    else if (m.geometry === 'plane') gy = 1;
+    const m = e.mesh, [gx, gy0, gz] = partSize(m), gy = m.geometry === 'plane' ? 1 : gy0;
     return M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx * gx, e.sy * gy, e.sz * gz);
+  }
+
+  /** Draw a model: each part is a primitive placed relative to the object. */
+  drawModel(e, opacityMul = 1) {
+    const base = M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx, e.sy, e.sz);
+    for (const q of e.model.parts) {
+      const [gx, gy0, gz] = partSize(q), gy = q.geometry === 'plane' ? 1 : gy0;
+      const local = M4.trs(q.x || 0, q.y || 0, q.z || 0, (q.rx || 0) * DEG, (q.ry || 0) * DEG, (q.rz || 0) * DEG, gx, gy, gz);
+      this.drawMesh(q.geometry || 'box', M4.mul(base, local), q.color || '#cccccc', q.emissive || 0, (q.opacity ?? 1) * e.alpha * opacityMul);
+    }
   }
 
   render(scene, engine) {
@@ -1116,6 +1306,11 @@ export class Renderer3D {
     const transparent = [], shadows = [];
     for (const e of scene.entities) if (e.voxels && e.visible && !e.dead) this.drawVoxels(e);
     for (const e of scene.entities) {
+      if (!e.model || !e.visible || e.dead) continue;
+      this.drawModel(e, e.data.invuln > 0 && Math.floor(scene.time * 12) % 2 ? 0.3 : 1);
+      if (e.body && e.body.type !== 'static' && !e.body.sensor) shadows.push(e);
+    }
+    for (const e of scene.entities) {
       if (!e.mesh || !e.visible || e.dead) continue;
       let op = e.mesh.opacity * e.alpha;
       if (e.data.invuln > 0 && Math.floor(scene.time * 12) % 2) op *= 0.3;
@@ -1124,7 +1319,7 @@ export class Renderer3D {
     }
     // blob shadows onto the highest static surface below each moving body
     gl.enable(gl.BLEND); gl.depthMask(false);
-    const statics = scene.entities.filter((e) => e.body && e.body.type === 'static' && e.mesh);
+    const statics = scene.entities.filter((e) => e.body && e.body.type === 'static' && (e.mesh || e.model));
     for (const e of shadows) {
       const ex = e.extents(), r = ex.sphere ? ex.r : Math.max(ex.hx, ex.hz);
       const bottom = e.y - (ex.sphere ? ex.r : ex.hy);
@@ -1182,9 +1377,12 @@ function renderUI(engine, scene) {
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
+  engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
+    const screen = engine.paused ? 'paused' : scene.state;
     for (const e of scene.entities) {
       if (!e.ui || !e.visible || e.dead) continue;
+      if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
       const o = anchorPoint(e.anchor, W, H, engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time); ctx.restore();
     }
@@ -1200,13 +1398,22 @@ function renderUI(engine, scene) {
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
   if (scene.state === 'play' && !engine.paused) {
+    ctx.save();
+    ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
+    const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
+    if (useStick && st.joystickMode === 'fixed' && !inp.stick) {
+      const f = inp.fixedStick(), r = inp.stickRadius;
+      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
+    }
     if (inp.stick) {
       const s = inp.stick, r = inp.stickRadius;
       ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(s.bx, s.by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       ctx.fillStyle = 'rgba(255,255,255,0.5)';
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
-    } else if (scene.settings.joystick && scene.time < 4) {
+    } else if (useStick && st.joystickMode !== 'fixed' && scene.time < 4) {
       ctx.fillStyle = `rgba(255,255,255,${0.25 * pulse})`; ctx.font = '600 14px system-ui, sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
@@ -1222,6 +1429,7 @@ function renderUI(engine, scene) {
         ctx.beginPath(); ctx.moveTo(b.x - b.r * 0.5, b.y - b.r * 0.5); ctx.lineTo(b.x + b.r * 0.5, b.y + b.r * 0.5); ctx.stroke();
       }
     }
+    ctx.restore();
   }
   if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
     ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
@@ -1235,6 +1443,7 @@ function renderUI(engine, scene) {
     big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
     return;
   }
+  if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -1277,7 +1486,7 @@ export const Behaviors = {};
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
-const is3D = (e) => !!(e.mesh || e.voxels || e.scene?.mode === '3d');
+const is3D = (e) => !!(e.mesh || e.voxels || e.model || e.scene?.mode === '3d');
 
 function respawnOrEnd(player, s, action) {
   if (action === 'respawn' || (action === 'damage' && s.vars.lives > 1)) {
@@ -1355,9 +1564,13 @@ registerBehavior('platformer', {
     { key: 'jump', label: 'Jump power', type: 'number', default: 620, default3d: 10 },
     { key: 'doubleJump', label: 'Double jump', type: 'bool', default: false },
     { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn' },
+    { key: 'accel', label: 'Acceleration (0 = instant)', type: 'number', default: 0, default3d: 0, advanced: true },
+    { key: 'airControl', label: 'Air control (0–1)', type: 'number', default: 1, advanced: true },
+    { key: 'variableJump', label: 'Short hop when tapping jump', type: 'bool', default: true, advanced: true },
+    { key: 'faceDirection', label: 'Flip to face movement (2D)', type: 'bool', default: true, advanced: true },
   ],
   create(p) {
-    let coyote = 0, jumps = 0;
+    let coyote = 0, jumps = 0, rising = false;
     return {
       start(e, s) {
         e.ensureBody({ type: 'dynamic' });
@@ -1365,14 +1578,22 @@ registerBehavior('platformer', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = inp.axis(), b = e.body, up = is3D(e) ? 1 : -1;
-        b.vel.x = a.x * p.speed;
-        if (is3D(e)) b.vel.z = a.y * p.speed;
+        const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
+        const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
+        b.vel.x = steer(b.vel.x, a.x * p.speed);
+        if (is3D(e)) b.vel.z = steer(b.vel.z, a.y * p.speed);
         if (b.grounded) { coyote = 0.12; jumps = 0; } else coyote -= dt;
         if (inp.pressed('jump') && (coyote > 0 || (p.doubleJump && jumps < 2))) {
-          b.vel.y = p.jump * up; coyote = 0; jumps = jumps ? jumps + 1 : 1;
+          b.vel.y = p.jump * up; coyote = 0; jumps = jumps ? jumps + 1 : 1; rising = true;
           s.engine.audio.sfx('jump');
         }
-        if (!is3D(e) && a.x) e.sx = Math.abs(e.sx) * (a.x < 0 && e.data.flip ? -1 : 1);
+        // let go of the jump button early for a shorter hop
+        const hasBtn = inp.buttons.some((q) => q.action === 'jump'); // tap-to-jump fires on release, so only with a button
+        if (rising && p.variableJump && hasBtn && !inp.isDown('jump') && b.vel.y * up > 0) { b.vel.y *= 0.5; rising = false; }
+        if (b.vel.y * up <= 0) rising = false;
+        if (!is3D(e) && a.x && p.faceDirection !== false) {
+          if (e.shape?.type === 'emoji') e.data.flipX = a.x > 0; else if (e.sprite) e.sx = Math.abs(e.sx) * (a.x < 0 ? -1 : 1);
+        }
         const fell = is3D(e) ? e.y < -25 : e.y > s.view.height + 600;
         if (fell) respawnOrEnd(e, s, p.onFall);
       },
@@ -1954,11 +2175,11 @@ registerBehavior('destructible', {
   create(p) {
     let hp;
     return {
-      start(e, s) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.hitBy); },
+      start(e, s) { hp = p.hp; e.data.hp = hp; e.data.hpMax = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.hitBy); },
       collide(e, other, s) {
         if (!other.has(p.hitBy) || e.dead) return;
         if (p.removeHitter) other.destroy();
-        hp--;
+        hp--; e.data.hp = hp;
         e.data.invuln = 0.15;
         s.engine.audio.sfx(hp > 0 ? 'click' : 'hit');
         if (hp > 0) return;
@@ -2314,10 +2535,25 @@ registerBehavior('bounce', {
 });
 
 // ---- events & effects ----
-/** Shared actions for Trigger and Timer. */
+export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game'];
+/** Shared actions for Trigger, Timer, Condition, Button and Rules. */
 function runAction(s, e, p, other) {
-  const v = p.value;
+  const v = p.value, obj = (name) => (name ? s.find(name) || s.findAll(name)[0] : e);
   switch (p.action) {
+    case 'set variable': s.setVar(v || 'score', p.amount); break;
+    case 'hide object': { const t = obj(v); if (t) t.visible = false; break; }
+    case 'toggle object': { const t = obj(v); if (t) t.visible = !t.visible; break; }
+    case 'destroy other': if (other) { s.burst(other.x, other.y, other.z, '#fff', 12); other.destroy(); } break;
+    case 'play sound': s.engine.audio.sfx(p.sound && p.sound !== 'none' ? p.sound : v || 'click'); return;
+    case 'camera shake': s.camera.shake = Math.max(s.camera.shake, p.amount * 4 || 10); break;
+    case 'jump': { const t = obj(v) || e; if (t?.body) t.body.vel.y = (s.mode === '3d' ? 1 : -1) * (p.amount > 50 || s.mode === '3d' ? p.amount : p.amount * 60); break; }
+    case 'move by': { const t = obj(v) || e; const [dx, dy, dz] = String(p.amount).split(',').map(Number); if (t) { t.x += dx || 0; t.y += dy || 0; t.z += dz || 0; } break; }
+    case 'start game': if (s.state === 'title') s.state = 'play'; break;
+    case 'restart game': s.engine.restart(); return;
+    case 'pause game': s.engine.paused = !s.engine.paused; break;
+    case 'resume game': s.engine.paused = false; break;
+    case 'add score': s.addVar('score', p.amount); break;
     case 'win': s.win(); break;
     case 'game over': s.gameOver(); break;
     case 'message': s.message(v || '…', 2.5); break;
@@ -2332,7 +2568,7 @@ function runAction(s, e, p, other) {
   if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
 }
 const ACTION_PARAMS = [
-  { key: 'action', label: 'Do', type: 'select', options: ['message', 'add to variable', 'spawn template', 'destroy object', 'show object', 'win', 'game over', 'next level', 'vibrate'], default: 'message' },
+  { key: 'action', label: 'Do', type: 'select', options: ACTIONS, default: 'message' },
   { key: 'value', label: 'Message / variable / template / object name', type: 'text', default: 'Hello!' },
   { key: 'amount', label: 'Amount (for variables)', type: 'number', default: 1 },
   { key: 'sound', label: 'Sound', type: 'select', options: ['none', 'coin', 'power', 'jump', 'hit', 'click', 'win', 'lose'], default: 'none' },
@@ -2711,6 +2947,73 @@ registerBehavior('voxelBuilder', {
   },
 });
 
+registerBehavior('button', {
+  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game.',
+  params: [...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q))],
+  create(p) {
+    return {
+      uiAlways: true, // keeps working on title and end screens
+      update(e, dt, s) {
+        if (!e.visible) return;
+        for (const t of s.engine.input.taps) {
+          if (!hitTest(s, e, t.x, t.y)) continue;
+          s.engine.vibrate(10);
+          const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
+          if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
+          runAction(s, e, p);
+          break;
+        }
+      },
+    };
+  },
+});
+
+/** Rules: WHEN something happens, IF a condition holds, DO a list of actions. */
+export const RULE_EVENTS = ['game starts', 'every few seconds', 'touched by tag', 'tapped', 'jump button', 'fire button', 'swipe', 'variable reaches', 'destroyed'];
+registerBehavior('rules', {
+  label: 'Rules', description: 'Build logic without code: WHEN something happens, IF a condition is true, DO one or more actions.',
+  params: [{ key: 'rules', label: 'Rules', type: 'rules', default: [{ when: 'tapped', tag: 'player', seconds: 1, dir: 'up', ifVar: '', ifOp: '>=', ifValue: 0, once: false, do: [{ action: 'add score', value: '', amount: 1 }] }] }],
+  create(p) {
+    const rules = (p.rules || []).map((r) => ({ ...r, t: 0, fired: false, wasTrue: false }));
+    const check = (r, s) => {
+      if (!r.ifVar) return true;
+      const v = +s.vars[r.ifVar] || 0, n = +r.ifValue || 0;
+      return r.ifOp === '<=' ? v <= n : r.ifOp === '==' ? v === n : r.ifOp === '<' ? v < n : r.ifOp === '>' ? v > n : v >= n;
+    };
+    const fire = (r, e, s, other) => {
+      if ((r.once && r.fired) || !check(r, s)) return;
+      r.fired = true;
+      for (const a of r.do || []) runAction(s, e, { sound: 'none', ...a }, other);
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        for (const r of rules) {
+          if (r.when === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(r.tag || 'player'); }
+          if (r.when === 'game starts') fire(r, e, s);
+        }
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, playing = s.state === 'play';
+        for (const r of rules) {
+          if (!playing && !(r.when === 'tapped' && e.ui)) continue;
+          switch (r.when) {
+            case 'every few seconds': if ((r.t += dt) >= Math.max(0.05, +r.seconds || 1)) { r.t = 0; fire(r, e, s); } break;
+            case 'tapped': if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) fire(r, e, s); break;
+            case 'jump button': if (inp.pressed('jump')) fire(r, e, s); break;
+            case 'fire button': if (inp.pressed('action')) fire(r, e, s); break;
+            case 'swipe': if (inp.pressed('swipe:' + (r.dir || 'up'))) fire(r, e, s); break;
+            case 'variable reaches': { const now = check({ ...r, ifVar: r.ifVar || 'score' }, s); if (now && !r.wasTrue) { r.wasTrue = true; for (const a of r.do || []) runAction(s, e, { sound: 'none', ...a }); } else if (!now) r.wasTrue = false; break; }
+            default: break;
+          }
+        }
+      },
+      collide(e, other, s) { for (const r of rules) if (r.when === 'touched by tag' && other.has(r.tag || 'player')) fire(r, e, s, other); },
+      destroy(e, s) { for (const r of rules) if (r.when === 'destroyed') fire(r, e, s); },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -2872,8 +3175,20 @@ export class Engine {
       // buttons go on the side opposite the joystick (left-handed players can swap)
       const left = s.settings.joystickSide === 'right';
       const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
-      if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: X(0), y: bottom, r, id: null });
-      if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      if (s.settings.jumpButton) b.push({ action: 'jump', label: s.settings.jumpLabel || 'JUMP', x: X(0), y: bottom, r, id: null });
+      if (s.settings.actionButton) b.push({ action: 'action', label: s.settings.actionLabel || 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
+      // D-pad or left/right arrows instead of a joystick
+      const c = s.settings.controls, DX = (off) => (left ? this.width - this.safe.right - m - off : this.safe.left + m + off);
+      if (c === 'arrows') {
+        b.push({ action: 'dleft', label: '◀', x: DX(r), y: bottom, r, id: null });
+        b.push({ action: 'dright', label: '▶', x: DX(r * 3.4), y: bottom, r, id: null });
+      } else if (c === 'dpad') {
+        const cx = DX(r * 2.2), cy = bottom - r * 1.1, dr = r * 0.78;
+        b.push({ action: 'dup', label: '▲', x: cx, y: cy - dr * 1.9, r: dr, id: null });
+        b.push({ action: 'ddown', label: '▼', x: cx, y: cy + dr * 1.9, r: dr, id: null });
+        b.push({ action: 'dleft', label: '◀', x: cx - dr * 1.9, y: cy, r: dr, id: null });
+        b.push({ action: 'dright', label: '▶', x: cx + dr * 1.9, y: cy, r: dr, id: null });
+      }
       // extra buttons that components add (e.g. the block builder's mode and block pickers), stacked above
       (s.customButtons || []).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
@@ -2881,6 +3196,16 @@ export class Engine {
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
     this.input.buttons = b;
+  }
+
+  /** Outside of play (title / end screens) only UI buttons keep working, so custom menus can be tapped. */
+  runUIOnly(s, dt) {
+    for (const e of s.entities) {
+      if (!e.ui || e.dead) continue;
+      if (!e.started) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
+      for (const b of e.behaviors) if (b.uiAlways) b.update?.(e, dt, s);
+    }
+    s.flush();
   }
 
   /** Share the score with the phone's share sheet (or copy it). */
@@ -2958,15 +3283,21 @@ export class Engine {
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
-    if (this.paused) { if (inp.pressed('tap') || inp.pressed('btn:pause')) this.paused = false; return; }
+    if (this.paused) {
+      this.runUIOnly(s, dt);
+      if ((inp.pressed('tap') && !s.settings.customScreens) || inp.pressed('btn:pause')) this.paused = false;
+      return;
+    }
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
-      if (inp.pressed('tap')) { s.state = 'play'; this.audio.sfx('click'); }
+      this.runUIOnly(s, dt);
+      if (inp.pressed('tap') && !s.settings.customScreens) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
-      if (s.time - s.endTime > 0.8 && inp.pressed('tap')) {
+      this.runUIOnly(s, dt);
+      if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !s.settings.customScreens) {
         const t = inp.taps[0], r = this.shareRect;
         if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
         else if (s.levelComplete) this.nextLevel(); else this.restart();
@@ -3038,7 +3369,7 @@ export class Engine {
 
 /** Everything, for scripts: `P.Entity`, `P.rand`, ... */
 export const Pocket = {
-  VERSION, Engine, Scene, Entity, VoxelWorld, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
+  VERSION, Engine, Scene, Entity, VoxelWorld, GEOMETRIES, partSize, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
   Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
 };
 export default Pocket;

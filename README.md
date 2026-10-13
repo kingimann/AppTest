@@ -58,6 +58,8 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
 | Two-finger tap / three-finger tap | Undo / Redo |
 | Double-tap empty space | Reset the view |
 | Drag a field's label | Scrub its number |
+| − / + / ⟲ buttons over the Scene | Zoom out, zoom in, reset the view (the page itself never zooms) |
+| **UI** button above the Scene | UI mode: only on-screen UI can be selected; Project → UI has panels, buttons, bars and ready-made menus |
 
 The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears when something is selected. The level button above the Scene adds and switches levels.
 
@@ -163,6 +165,8 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |
 | `condition` | When a variable passes a value, do an action (win when enemyHp ≤ 0, lose when hp ≤ 0…). | `var`, `op`, `target`, `action`, … |
 | `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
+| `button` | Tap it (UI or game object) to do an action: start/restart/pause the game, show/hide menus, change variables, jump… Keeps working on title and end screens. | `action`, `value`, `amount`, `sound` |
+| `rules` | Visual logic: WHEN (game starts, every few seconds, touched by tag, tapped, jump/fire button, swipe, variable reaches, destroyed) IF (variable compare, optional) DO (a list of actions). | `rules` |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
 Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.
@@ -204,6 +208,18 @@ registerBehavior('blink', {
 `settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. More phone settings: `joystickSide` (`'left'`/`'right'` for left-handed players; buttons move to the other side), `controlSize` (`'small'`/`'medium'`/`'large'`), `saveProgress` (variables and level survive closing the game; reset on game over), `shareButton` (a *Share score* button on the end screen using the phone's share sheet). Buttons vibrate when pressed, audio recovers after calls or app switches, and the engine lowers its resolution automatically if a phone can't hold a smooth frame rate. With `timeLimit`, `{time}` counts down and the game ends at zero.
 
 **Turn-based games:** set `settings.turnBased`. Grid Move, Turn Button and Board Cell end the player's turn; then every component with a `turn(e, scene)` hook acts (Turn Enemy, Enemy Turn, the board's computer player) after `turnDelay` seconds. Texts can show `{turnText}` and `{turn}`; `scene.endTurn()` ends a turn from scripts. `messageTop` moves message banners to the top of the screen.
+
+**Actions** (Trigger, Timer, Condition, Button, Rules): message, add score, add to variable, set variable, spawn template, destroy object/other, show/hide/toggle object, play sound, vibrate, camera shake, jump, move by, win, game over, next level, start/restart/pause/resume game.
+
+**Custom UI:** UI entities can have a `bar: { var, max, maxVar, w, h, fill, bg, radius, label }` (health/progress bar; `var: "self.hp"` reads an object's own health from the Health component) and `showWhen: 'always' | 'play' | 'title' | 'paused' | 'over' | 'win'`. `settings.customScreens` turns off the built-in title/pause/end screens so your own UI and Buttons run them. Anchors include `left`, `center` and `right` edges.
+
+**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` or `'fixed'`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
+
+**Physics:** bodies support `oneWay` platforms (jump up through, land on top), riding moving (kinematic) platforms, `mass` (heavier pushes lighter), `friction`, `drag`, `maxFall`, and collider offsets `ox/oy/oz`.
+
+**3D shapes and models:** meshes come in box, sphere, cylinder, cone, capsule, pyramid, wedge (ramp), prism, gem, dome, torus and plane. `model: { parts: [{ geometry, x, y, z, rx, ry, rz, w, h, d, r, color, emissive }] }` builds a model from parts (the editor's 3D Model component edits parts and highlights the selected one; Project → Models has 17 ready-made models). The collider fits around all parts.
+
+**2D sprites:** shapes include rect, circle, ellipse, triangle, star, heart, diamond, hexagon, pentagon, octagon, capsule, ring, arrow, cloud, and `emoji` sprites (`shape: { type: 'emoji', emoji: '🐱', w, h }`; Project → Sprites has a library of characters, enemies, items, nature, food, vehicles and props).
 
 **Voxels:** give an entity `voxels: { size, gen: { type: 'hills' | 'flat' | 'empty', w, d, h, seed, trees }, edits: { "i,j,k": block } }` for a Minecraft-style block world (12-block palette: grass, dirt, stone, wood, leaves, sand, water, brick, snow, obsidian, gold, crystal). It is drawn as merged chunks (only visible faces), dynamic bodies walk on it and bump into it, projectiles stop at blocks, and `entity.voxels.get/set(i, j, k)` / `raycast(entity, origin, dir)` let scripts dig and build. In the editor, select the world, pick the brush (Paint tool), choose Add/Remove and a block, then tap or drag to build.
 

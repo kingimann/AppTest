@@ -23,6 +23,16 @@ Or use the live version: **https://kingimann.github.io/AppTest/editor/**
 
 ## The editor
 
+**Finding your way around (phones):**
+- **Bottom bar:** works like an app's navigation bar: **Scene · Hierarchy · Inspector · Scripts · Project · Console**.
+  - **Scene** gives the Scene view the whole screen.
+  - The other tabs open full size, so nothing is cramped. Drag the handle to make them half height (remembered), or tap the open tab again to go back to the Scene.
+  - Pressing Play always shows the game, and Stop brings your panel back.
+- **+ Add opens the Create screen:** a full-screen place for everything you can add.
+  - A search box and **Quick add** (player, platform, coin, enemy, goal, score).
+  - Big folders: Gameplay, Characters & Sprites, Shapes & Objects, 3D Models, UI & Menus, Logic & Scripts, Camera & Lights, My Prefabs.
+  - The Hierarchy's **Create** button and the Project tab open it too.
+
 Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Install App* adds it to your home screen, and it works offline.
 
 1. **Home screen**: continue your last game, or pick a **game type**. Each one is a complete, playable starter you change any way you like:

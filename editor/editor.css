@@ -1021,3 +1021,42 @@ body.playing #attachBar { display: none !important; }
 .art-grid img.uiic, .tile .th.uiic { background: #3a6ea5; border-radius: 10px; }
 .tile .th.art { background: #2c3140; padding: 6px; }
 .tile .th.art img { width: 100%; height: 100%; object-fit: contain; }
+/* Create screen */
+.cs { position: fixed; inset: 0; z-index: 60; background: var(--panel); display: flex; flex-direction: column; padding: calc(env(safe-area-inset-top) + 8px) 16px 0; }
+.cs-top { display: flex; align-items: center; gap: 10px; min-height: 56px; }
+.cs-top b { flex: 1; font-size: 24px; font-weight: 800; }
+.cs-btn { width: 48px; height: 48px; border-radius: 14px; border: 1px solid #1f1f1f; background: #3a3a3a; display: grid; place-items: center; flex: none; }
+.cs-btn[hidden] { display: none; }
+.cs-search { flex: none; height: 52px; font-size: 17px; margin: 6px 0 4px; border-radius: 14px; }
+.cs-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
+.cs-sec { margin: 22px 2px 12px; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.cs-quick { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.cs-quick::-webkit-scrollbar { display: none; }
+.cs-chip { flex: none; height: 54px; padding: 0 18px 0 12px; border-radius: 27px; border: 1px solid #2a2a2a; background: #2f3446; color: #fff; font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.cs-chip img, .cs-chip svg.i { width: 30px; height: 30px; }
+.cs-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.cs-cat { position: relative; text-align: left; min-height: 132px; padding: 16px; border-radius: 20px; border: 1px solid #222; background: color-mix(in srgb, var(--c) 20%, var(--card)); color: #fff; display: flex; flex-direction: column; gap: 6px; }
+.cs-cat b { font-size: 18px; line-height: 1.2; }
+.cs-cat small { color: var(--muted); font-size: 13.5px; line-height: 1.35; }
+.cs-cat em { position: absolute; top: 14px; right: 14px; font-style: normal; font-size: 13px; font-weight: 800; min-width: 28px; height: 26px; line-height: 26px; text-align: center; border-radius: 13px; background: var(--c); }
+.cs-ic { width: 44px; height: 44px; border-radius: 13px; background: var(--c); display: grid; place-items: center; }
+.cs-ic svg.i { width: 24px; height: 24px; color: #fff; }
+.cs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; }
+.cs-tile { text-align: center; padding: 12px 8px 14px; border-radius: 18px; border: 1px solid #262626; background: var(--card); color: #fff; display: flex; flex-direction: column; align-items: center; gap: 6px; min-height: 130px; }
+.cs-tile:active { background: #3a3f52; }
+.cs-pv { width: 64px; height: 64px; border-radius: 16px; background: #2c3140; display: grid; place-items: center; padding: 6px; }
+.cs-pv img { width: 100%; height: 100%; object-fit: contain; }
+.cs-pv svg.i { width: 30px; height: 30px; color: #cfd8e3; }
+.cs-pv.uiic { background: #3a6ea5; }
+.cs-tile b { font-size: 14.5px; line-height: 1.25; }
+.cs-tile small { color: var(--muted); font-size: 12px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-width: 430px) { #dockTabs button { font-size: 11px; letter-spacing: -0.01em; } #dockTabs button svg.i { width: 22px; height: 22px; } }
+/* Project: one scrolling row of categories, content right below */
+.p-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.p-tabs::-webkit-scrollbar { display: none; }
+.p-path { display: none; }
+.p-create { margin: 14px 16px 4px; width: calc(100% - 32px); height: 54px; font-size: 17px; font-weight: 700; }
+#addFab { width: auto; min-width: 62px; padding: 0 20px 0 16px; display: flex; align-items: center; gap: 6px; font-size: 18px; font-weight: 800; color: #fff; }
+#viewport.short #addFab { width: auto; padding: 0 14px; }
+#zoomBar { left: 12px; right: auto; }
+.cs-top b { font-size: 22px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

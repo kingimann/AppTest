@@ -1246,15 +1246,18 @@ function showToolName(t) {
 }
 
 let dockTab = 'hierarchy';
+/** How big panels open: the size you last dragged them to (full screen at first, so nothing is cramped). */
+const panelSize = () => (store.get('pocket.editor.panel', 'full') === 'half' ? 'half' : 'full');
 function setDock(name, { fromTab = false } = {}) {
+  if (name === 'scene') { setSheet('peek'); return; } // the Scene tab: the panel steps aside
   if (!isDesktop()) {
-    if (fromTab && name === dockTab) setSheet(sheetState() === 'peek' ? 'half' : 'peek');
-    else if (sheetState() === 'peek') setSheet('half');
+    if (fromTab && name === dockTab && sheetState() !== 'peek') { setSheet('peek'); return; } // tap the open tab again: back to the Scene
+    if (sheetState() === 'peek') setSheet(panelSize());
   }
   dockTab = name;
   if (name === 'console') { consoleSeen = Log.entries.length; renderConsole(); }
   if (name === 'scripts') renderScripts();
-  for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
+  markTabs();
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
 const isDesktop = () => false; // phones and tablets only
@@ -1411,7 +1414,10 @@ function setSheet(state) {
   const app = $('#app');
   if (app.dataset.sheet === state) return;
   app.dataset.sheet = state;
+  markTabs();
 }
+/** The bottom tabs work like an app's navigation bar: Scene is lit while the panel is down. */
+function markTabs() { const st = $('#app').dataset.sheet; for (const b of $$('#dockTabs button')) b.classList.toggle('active', st === 'peek' ? b.dataset.dock === 'scene' : b.dataset.dock === dockTab); }
 const sheetState = () => $('#app').dataset.sheet || 'half';
 {
   const handle = $('#sheetHandle'), app = $('#app');
@@ -1434,7 +1440,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
     const hgt = parseFloat(app.style.getPropertyValue('--sheet-h')) || drag.h, H = window.innerHeight;
     app.style.removeProperty('--sheet-h');
     if (!drag.moved) setSheet(sheetState() === 'peek' ? 'half' : sheetState() === 'half' ? 'full' : 'peek');
-    else setSheet(hgt < H * 0.25 ? 'peek' : hgt < H * 0.66 ? 'half' : 'full');
+    else { const st = hgt < H * 0.25 ? 'peek' : hgt < H * 0.66 ? 'half' : 'full'; setSheet(st); if (st !== 'peek') store.set('pocket.editor.panel', st); }
     drag = null;
   };
   handle.addEventListener('pointerup', end);
@@ -1584,7 +1590,7 @@ function renderHierarchy() {
     onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
     icon('list'), hKind === 'all' ? '' : kindLabel);
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
-  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn, selBtn));
+  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn));
   if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
   const rows = h('div');
   box.append(rows);
@@ -1811,6 +1817,79 @@ function addVisualScript() {
   editGraph(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.graph`);
 }
 
+/** The Create screen: everything you can add, in big, easy groups. Search, quick picks, then folders. */
+function openCreate(startCat) {
+  $('.cs')?.remove();
+  const three = is3D(), objs = three ? OBJECTS_3D : OBJECTS_2D, prefabs = three ? PREFABS_3D : PREFABS_2D;
+  const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light'];
+  const artOf = (o) => { const src = o.props?.sprite?.src; return typeof src === 'string' && src.startsWith('art:') ? src : null; };
+  const fromDef = (o, kind) => ({ label: o.label, icon: o.icon, art: o.art || artOf(o), desc: o.desc || o.note || '', group: o.group, fn: () => (kind === 'entity' ? addEntity(o.props) : addPrefab(o)) });
+  const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons').flatMap(([g, list]) => list.map((k) => {
+    const nm = k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+    return { label: nm, art: 'art:' + k, group: g, fn: () => addEntity({ name: nm, sprite: { src: 'art:' + k, w: 56, h: 56 } }) };
+  }));
+  const logicItems = [
+    { label: 'Visual Script', icon: 'nodes', desc: 'Connect nodes: On Tap → Add Score…', fn: addVisualScript },
+    { label: 'Triggers', icon: 'bolt', desc: 'When … if … do …, in plain words', fn: () => addLogic('triggers') },
+    { label: 'State Machine', icon: 'nodes', desc: 'Idle, chase, attack… and what switches them', fn: () => addLogic('fsm') },
+    ...userScripts().map((sc) => ({ label: sc.name, icon: 'link', desc: 'Your saved script: added to the selected object', fn: () => { const j = ent(selectedId) || project.entities.find((e) => (e.tags || []).includes('player')); if (!j) { toast('Select an object first'); return; } addSavedScript(j, sc); changed({ structure: true }); pushHistory(); toast(`Added “${sc.name}” to ${j.name}`); } })),
+  ];
+  const cats = [
+    { key: 'gameplay', title: 'Gameplay', icon: 'player', color: '#3a6ea5', desc: 'Players, enemies, coins, goals…', items: prefabs.map((o) => fromDef(o)) },
+    !three && { key: 'sprites', title: 'Characters & Sprites', icon: 'image', color: '#8e44ad', desc: 'Drawn characters, items, nature, blocks', items: spriteItems },
+    { key: 'objects', title: three ? 'Shapes' : 'Shapes & Objects', icon: 'square', color: '#2e7d5b', desc: three ? 'Cube, sphere, plane, text…' : 'Boxes, circles, text, images…', items: objs.filter((o) => !CAMLIGHT.includes(o.label)).map((o) => fromDef(o, 'entity')) },
+    three && { key: 'models', title: '3D Models', icon: 'cube', color: '#2e7d5b', desc: 'Trees, houses, cars… or build your own', items: [{ label: 'New Model (Modeler)', icon: 'edit', desc: 'Model it like in Blender', fn: newModel }, ...MODELS_3D.map((m) => ({ label: m.label, icon: m.icon, fn: () => addEntity({ name: m.label, y: 0, model: { parts: clone(m.parts) } }) }))] },
+    { key: 'ui', title: 'UI & Menus', icon: 'hud', color: '#c2185b', desc: 'Buttons, nav bars, side bars, popups…', items: UI_WIDGETS.map((o) => fromDef(o)) },
+    { key: 'logic', title: 'Logic & Scripts', icon: 'bolt', color: '#e67e22', desc: 'Make things happen: nodes or triggers', items: logicItems },
+    { key: 'camera', title: 'Camera & Lights', icon: 'camera', color: '#00897b', desc: 'What the player sees, and how it is lit', items: objs.filter((o) => CAMLIGHT.includes(o.label)).map((o) => fromDef({ ...o, label: o.label === 'Light' ? 'Point Light' : o.label }, 'entity')) },
+    userPrefabs().length && { key: 'mine', title: 'My Prefabs', icon: 'cube', color: '#5d4037', desc: 'Things you saved to reuse', items: userPrefabs().map((pf) => ({ label: pf.name, icon: iconFor(pf.entities[0]), fn: () => instantiatePrefab(pf.id) })) },
+  ].filter(Boolean);
+  const quick = (three ? ['Player (3rd person)', 'Player', 'Platform', 'Coin', 'Enemy', 'Goal'] : ['Player', 'Jumper', 'Platform', 'Coin', 'Enemy', 'Goal'])
+    .map((l) => prefabs.find((o) => o.label === l)).filter(Boolean).slice(0, 5).map((o) => fromDef(o));
+  const scoreUI = UI_WIDGETS.find((o) => o.label === 'Score'); if (scoreUI) quick.push(fromDef(scoreUI));
+  let cat = startCat || (uiMode ? 'ui' : null);
+  const body = h('div', { class: 'cs-body' });
+  const search = h('input', { type: 'search', class: 'cs-search', placeholder: 'Search everything you can add', autocapitalize: 'off', oninput: () => draw() });
+  const title = h('b', {}, 'Create');
+  const backBtn = h('button', { class: 'cs-btn', 'aria-label': 'Back', onclick: () => { cat = null; search.value = ''; draw(); } }, icon('left'));
+  const close = () => { root.remove(); dropBack(close); };
+  const pick = (it) => { close(); it.fn(); buzz(8); };
+  const tile = (it) => h('button', { class: 'cs-tile', onclick: () => pick(it) },
+    h('span', { class: 'cs-pv' + (it.art?.startsWith('art:ui-') ? ' uiic' : '') }, it.art ? h('img', { src: artURL(it.art), alt: '' }) : icon(it.icon || 'cube')),
+    h('b', {}, it.label), it.desc ? h('small', {}, it.desc) : null);
+  const grid = (items) => h('div', { class: 'cs-grid' }, items.map(tile));
+  function draw() {
+    const q = search.value.trim().toLowerCase();
+    backBtn.hidden = !cat && !q;
+    if (q) {
+      const hits = cats.flatMap((c) => c.items.map((it) => ({ ...it, cat: c.title }))).filter((it) => (it.label + ' ' + (it.desc || '') + ' ' + it.cat + ' ' + (it.group || '')).toLowerCase().includes(q));
+      title.textContent = 'Search';
+      body.replaceChildren(hits.length ? grid(hits.slice(0, 60)) : h('div', { class: 'empty' }, `Nothing called “${search.value}”.`));
+      return;
+    }
+    if (cat) {
+      const c = cats.find((x) => x.key === cat); if (!c) { cat = null; return draw(); }
+      title.textContent = c.title;
+      const groups = [...new Set(c.items.map((it) => it.group).filter(Boolean))];
+      body.replaceChildren(...(groups.length > 1 ? groups.flatMap((g) => [h('div', { class: 'cs-sec' }, g), grid(c.items.filter((it) => it.group === g))]) : [grid(c.items)]));
+      body.scrollTop = 0;
+      return;
+    }
+    title.textContent = 'Create';
+    body.replaceChildren(
+      h('div', { class: 'cs-sec' }, 'Quick add'),
+      h('div', { class: 'cs-quick' }, quick.map((it) => h('button', { class: 'cs-chip', onclick: () => pick(it) }, it.art ? h('img', { src: artURL(it.art), alt: '' }) : icon(it.icon || 'cube'), it.label))),
+      h('div', { class: 'cs-sec' }, 'Browse'),
+      h('div', { class: 'cs-cats' }, cats.map((c) => h('button', { class: 'cs-cat', style: `--c:${c.color}`, onclick: () => { cat = c.key; draw(); } },
+        h('span', { class: 'cs-ic' }, icon(c.icon)), h('b', {}, c.title), h('small', {}, c.desc), h('em', {}, String(c.items.length))))));
+  }
+  const root = h('div', { class: 'cs' },
+    h('div', { class: 'cs-top' }, backBtn, title, h('button', { class: 'cs-btn', 'aria-label': 'Close', onclick: close }, icon('close'))),
+    search, body);
+  document.body.append(root);
+  pushBack(close);
+  draw();
+}
 function openCreateMenu(anchor) {
   if (uiMode) { popMenu(anchor, UI_GROUPS.flatMap((g) => [{ cap: g }, ...UI_WIDGETS.filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
@@ -3275,10 +3354,10 @@ function renderProject() {
     items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
   }
   const mine = projectTab === 'prefabs' ? userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode) : [];
-  if (projectTab === 'prefabs') {
+  if (projectTab !== 'components') box.append(h('button', { class: 'btn primary p-create', onclick: () => openCreate({ prefabs: 'gameplay', objects: 'objects', sprites: 'sprites', ui: 'ui', models: 'models' }[projectTab]) }, icon('plus'), 'Open the Create screen'));
+  if (projectTab === 'prefabs' && mine.length) {
     box.append(h('div', { class: 'p-sec' }, 'My Prefabs'));
-    if (!mine.length) box.append(h('p', { class: 'p-note' }, 'Make your own: long-press an object (or its ⋯ menu) and pick Make Prefab. Change one copy, tap Apply, and every copy updates.'));
-    else box.append(h('div', { class: 'tiles' }, mine.map((pf) => {
+    box.append(h('div', { class: 'tiles' }, mine.map((pf) => {
       const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
         h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
       draggable(t, { kind: 'prefab', def: { userPrefab: pf.id, label: pf.name }, label: pf.name, icon: iconFor(pf.entities[0]) });
@@ -3296,7 +3375,7 @@ function renderProject() {
   else box.append(h('div', { class: 'tiles' }, items.map(tileOf)));
   box.append(h('p', { class: 'p-note' }, projectTab === 'components'
     ? 'Drag a component onto an object in the Scene or Hierarchy, or tap to add it to the selected object.'
-    : 'Drag into the Scene to place, or tap to add at the center of the view.'));
+    : 'Drag into the Scene to place, or tap to add at the center of the view.' + (projectTab === 'prefabs' && !mine.length ? ' Make your own prefabs: long-press an object (or its ⋯ menu) and pick Make Prefab.' : '')));
 }
 
 // ---- drag & drop ----
@@ -3886,11 +3965,13 @@ new Engine().start(${game});
 // ============================================================================
 // Play mode
 // ============================================================================
+let sheetBeforePlay = null;
 function play() {
   if (playing) return;
   closeLayer();
   document.activeElement?.blur?.();
   playing = true;
+  sheetBeforePlay = sheetState(); if (!isDesktop() && sheetBeforePlay !== 'peek') setSheet('peek'); // the game gets the whole screen
   updateCtxBar();
   document.body.classList.add('playing');
   $('#playBar').hidden = false;
@@ -3914,6 +3995,7 @@ function stop() {
   if (!playing) return;
   playing = false;
   dropBack(stop);
+  if (sheetBeforePlay && sheetBeforePlay !== 'peek' && !isDesktop()) setSheet(sheetBeforePlay); sheetBeforePlay = null;
   document.body.classList.remove('playing');
   $('#playBar').hidden = true; $('#playConsole').hidden = true;
   engine.inspecting = false; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer);
@@ -4013,9 +4095,9 @@ $('#pbStats').addEventListener('click', toggleStats);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
-for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['scripts', 'nodes', 'Scripts'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
+for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['scripts', 'nodes', 'Scripts'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
-  $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
+  $(`.ptab[data-title="${name}"]`)?.append(icon(ic), label);
 }
 { // swipe left / right across a panel to move between Hierarchy, Inspector and Project
   const order = ['hierarchy', 'inspector', 'scripts', 'project', 'console'];
@@ -4052,7 +4134,7 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   tabs.addEventListener('click', (e) => { if (swiped) { swiped = false; return; } const b = e.target.closest('button'); if (b) setDock(b.dataset.dock, { fromTab: true }); });
 }
 $('#panelsFab').append(icon('list'));
-$('#addFab').append(icon('plus'));
+$('#addFab').append(icon('plus'), h('span', {}, 'Add'));
 for (const [z, ic] of [['out', 'minus'], ['in', 'plus'], ['reset', 'frame']]) {
   const b = $(`#zoomBar [data-zoom="${z}"]`);
   b.append(icon(ic));
@@ -4184,7 +4266,7 @@ function snapUI(j) {
   if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;
   if (Math.abs(sy - H / 2) < T) { j.y = Math.round(H / 2 - a.y); uiGuide.y = H / 2; } else if (Math.abs(j.y) < T) { j.y = 0; uiGuide.y = a.y; } else if (snap) j.y = Math.round(j.y / 4) * 4;
 }
-$('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
+$('#addFab').addEventListener('click', () => openCreate());
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
 $('#attachBar button').addEventListener('click', () => endAttach(null));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['attach', 'link', 'Attach'], ['detach', 'unlink', 'Detach'], ['delete', 'trash', 'Delete']]) {

@@ -379,6 +379,33 @@ engine.onRenderUI = (ctx, s) => {
 // ============================================================================
 const GIZ = 84;
 /** Screen-space axes for the selected entity: [{ k, dx, dy, ppu, sign }] */
+// ---- Rect tool (like Unity's): resize UI and 2D objects by their edges and corners ----
+const RECT_HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
+/** Screen rectangle of an entity for the Rect tool: centre, half sizes and pixels per unit. */
+function rectFrame(e) {
+  if (e.ui) { const b = uiBounds(e); return { cx: b.x, cy: b.y, hw: b.sphere ? b.r : b.hx, hh: b.sphere ? b.r : b.hy, k: 1 }; }
+  if (is3D()) return null;
+  const b = boundsOf(e), z = engine.renderer.zoomFor(engine.scene), p = engine.renderer.worldToScreen(engine.scene, b.x, b.y);
+  return { cx: p.x, cy: p.y, hw: (b.sphere ? b.r : b.hx) * z, hh: (b.sphere ? b.r : b.hy) * z, k: z };
+}
+/** Editable size of an object: [width, height, square?] (shape, image, bar, minimap; text by font size). */
+function sizeOf(j) {
+  if (j.minimap) return [j.minimap.w ?? 120, j.minimap.h ?? 120, false];
+  if (j.shape) return ['circle', 'ring'].includes(j.shape.type) ? [(j.shape.r ?? 20) * 2, (j.shape.r ?? 20) * 2, true] : [j.shape.w ?? 40, j.shape.h ?? 40, false];
+  if (j.sprite) return [j.sprite.w ?? 64, j.sprite.h ?? 64, false];
+  if (j.bar) return [j.bar.w ?? 160, j.bar.h ?? 16, j.bar.style === 'ring'];
+  if (j.text) { const sz = j.text.size ?? 24; return [String(j.text.value || '').length * sz * 0.6, sz * 1.2, true]; }
+  return null;
+}
+function setSize(j, w, hgt) {
+  w = Math.max(4, Math.round(w)); hgt = Math.max(4, Math.round(hgt));
+  if (j.minimap) Object.assign(j.minimap, { w, h: hgt });
+  if (j.shape) { if (['circle', 'ring'].includes(j.shape.type)) j.shape.r = Math.round(Math.min(w, hgt) / 2); else Object.assign(j.shape, { w, h: hgt }); }
+  if (j.sprite) Object.assign(j.sprite, { w, h: hgt });
+  if (j.bar) Object.assign(j.bar, { w, h: hgt });
+  if (j.text && !j.shape && !j.sprite && !j.bar && !j.minimap) j.text.size = Math.max(6, Math.round(hgt / 1.2));
+}
+
 function gizmoAxes(e) {
   const s = engine.scene, o = screenCenter(e);
   if (!o) return null;
@@ -398,6 +425,7 @@ function gizmoAxes(e) {
 }
 
 function drawGizmo(ctx, e) {
+  if (tool === 'rect') { const f = rectFrame(e); if (f) { drawRectGizmo(ctx, f, e); return; } }
   const g = gizmoAxes(e); if (!g) return;
   const { o } = g, active = gesture?.handle;
   ctx.lineCap = 'round';
@@ -427,10 +455,39 @@ function drawGizmo(ctx, e) {
   ctx.fillRect(o.x - 8, o.y - 8, 16, 16); ctx.strokeRect(o.x - 8, o.y - 8, 16, 16);
 }
 
+function drawRectGizmo(ctx, f) {
+  const { cx, cy, hw, hh } = f, live = gesture?.type === 'rect';
+  ctx.save();
+  ctx.strokeStyle = '#4c8bd6'; ctx.lineWidth = 2; ctx.setLineDash([]);
+  ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+  for (const [i, j] of RECT_HANDLES) {
+    const x = cx + i * hw, y = cy + j * hh, hot = live && gesture.dir[0] === i && gesture.dir[1] === j;
+    ctx.fillStyle = hot ? HOT : '#ffffff'; ctx.strokeStyle = '#2f6db5'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.rect(x - 7, y - 7, 14, 14); ctx.fill(); ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(76,139,214,0.85)'; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+  if (live && gesture.label) {
+    ctx.font = '700 13px system-ui, sans-serif'; const tw = ctx.measureText(gesture.label).width + 16, ly = cy - hh - 30 < 110 ? cy + hh + 30 : cy - hh - 30;
+    ctx.fillStyle = 'rgba(20,20,26,0.9)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(cx - tw / 2, ly - 12, tw, 24, 8); else ctx.rect(cx - tw / 2, ly - 12, tw, 24); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(gesture.label, cx, ly);
+  }
+  ctx.restore();
+}
+
 /** Which gizmo handle is under a screen point, if any. */
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
   if (!sel || tool === 'hand') return null;
+  if (tool === 'rect') {
+    const f = rectFrame(sel);
+    if (f) {
+      let best = null, bd = 26;
+      for (const dir of RECT_HANDLES) { const d = Math.hypot(x - (f.cx + dir[0] * f.hw), y - (f.cy + dir[1] * f.hh)); if (d < bd) { bd = d; best = dir; } }
+      if (best) return { handle: 'rect', dir: best, f, g: { o: { x: f.cx, y: f.cy } } };
+      if (Math.abs(x - f.cx) < f.hw && Math.abs(y - f.cy) < f.hh) return { handle: 'free', g: { o: { x: f.cx, y: f.cy } } };
+      return null;
+    }
+  }
   const g = gizmoAxes(sel); if (!g) return null;
   const { o } = g, d = Math.hypot(x - o.x, y - o.y);
   if (tool === 'rotate') return Math.abs(d - GIZ * 0.8) < 22 ? { handle: 'rot', g } : null;
@@ -579,6 +636,11 @@ surface.addEventListener('contextmenu', (e) => e.preventDefault()); // long-pres
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
   const o = giz.g.o;
+  if (giz.handle === 'rect') {
+    const sz = sizeOf(j); if (!sz) return;
+    gesture = { type: 'rect', dir: giz.dir, id: selectedId, sx: x, sy: y, f: giz.f, size0: sz, square: sz[2], ui: !!j.ui, moved: false, orig: { x: j.x || 0, y: j.y || 0 } };
+    return;
+  }
   gesture = { type: tool === 'rotate' ? 'rotate' : tool === 'scale' ? 'scale' : giz.handle === 'free' ? 'free' : 'axis', handle: giz.handle, axis: giz.axis,
     id: selectedId, sx: x, sy: y, o, ui: !!j.ui, moved: false,
     orig: { x: j.x || 0, y: j.y || 0, z: j.z || 0, rx: j.rx || 0, ry: j.ry || 0, rz: j.rz || 0, sx: j.sx ?? 1, sy: j.sy ?? 1, sz: j.sz ?? 1 } };
@@ -597,7 +659,7 @@ surface.addEventListener('pointermove', (ev) => {
   if (Math.hypot(x - p.sx, y - p.sy) > 10) { if (tapTrack) tapTrack.moved = true; cancelLongPress(); }
   const s = engine.scene, g = gesture;
   const dx = x - (g.sx ?? x), dy = y - (g.sy ?? y);
-  if (['free', 'axis', 'rotate', 'scale', 'tap'].includes(g.type)) {
+  if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
     g.moved = true;
     if (g.type === 'tap') return;
@@ -620,6 +682,20 @@ surface.addEventListener('pointermove', (ev) => {
       let v = key === 'ry' ? g.orig.ry - deg : g.orig.rz + deg;
       v = snap ? Math.round(v / 15) * 15 : round(v, 1);
       j[key] = v;
+    } else if (g.type === 'rect') {
+      const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
+      let w = w0 + hx * dx / k / scX, hgt = h0 + hy * dy / k / scY;
+      if (!hx) w = w0; if (!hy) hgt = h0;
+      if (g.square) { const m = hx && hy ? Math.max(w, hgt) : hx ? w : hgt; w = hgt = m; }
+      if (snap) { const st = g.ui ? 4 : 5; w = Math.round(w / st) * st; hgt = Math.round(hgt / st) * st; }
+      w = Math.max(4, w); hgt = Math.max(4, hgt);
+      setSize(j, w, hgt);
+      if (!(j.text && !j.shape && !j.sprite && !j.bar && !j.minimap)) { // the opposite edge stays put
+        j.x = round(g.orig.x + (g.square && !hx ? 0 : hx) * (w - w0) * scX / 2, 2);
+        j.y = round(g.orig.y + (g.square && !hy ? 0 : hy) * (hgt - h0) * scY / 2, 2);
+      }
+      g.label = `${Math.round(w)} × ${Math.round(hgt)}`;
+      requestRebuild();
     } else if (g.type === 'scale') {
       const keys = g.handle === 'free' ? (is3D() && !g.ui ? ['sx', 'sy', 'sz'] : ['sx', 'sy']) : ['s' + g.handle];
       const along = g.handle === 'free' ? (dx - dy) / Math.SQRT2 : dx * g.axis.dx + dy * g.axis.dy;
@@ -725,7 +801,7 @@ const endPointer = (ev) => {
   }
   const g = gesture;
   if (!g) return;
-  if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
+  if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
   uiGuide = null;
   if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
@@ -795,6 +871,7 @@ function setTool(t) {
   const was = tool;
   tool = t;
   for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  if (t === 'rect' && was !== 'rect') toast(is3D() && !ent(selectedId)?.ui ? 'Rect tool works on UI and 2D objects. In 3D use Scale.' : 'Rect: drag the edges and corners to resize. Drag the middle to move.');
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
 }
@@ -1422,6 +1499,13 @@ function pasteComponent(j) {
   toast('Component pasted');
 }
 /** A collapsible component block. opts: { icon, key, enabled, onToggle, menu: [{label, fn}], desc } */
+/** Width / height of a UI element (what the Rect tool changes). */
+function sizeRow(j) {
+  const sz = sizeOf(j); if (!sz) return null;
+  const inp = (i) => h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: Math.round(sz[i]),
+    onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; const n = [...sizeOf(j)]; n[i] = v; if (n[2]) n[1 - i] = v; setSize(j, n[0], n[1]); changed({ inspector: true }); pushHistory(); } });
+  return h('div', { class: 'row' }, h('label', {}, 'Size (W × H)'), h('div', { class: 'pair' }, h('span', {}, 'W'), inp(0), h('span', {}, 'H'), inp(1)));
+}
 const INSP_CATS = [['all', 'All'], ['visual', 'Visual'], ['physics', 'Physics'], ['logic', 'Logic'], ['anim', 'Animation'], ['game', 'Gameplay']];
 const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim: '#ab47bc', game: '#ef5350', other: '#777' };
 let inspCat = 'all';
@@ -1544,6 +1628,9 @@ function renderInspector() {
       h('p', { class: 'desc' }, 'UI stays fixed on the screen. Pin it to a corner or edge so it fits every phone.'),
       h('div', { class: 'row' }, h('label', {}, 'Pin to screen'), h('div', { class: 'anchor-grid' }, ANCH.map(([a, ic]) => h('button', {
         class: (j.anchor || 'top-left') === a ? 'on' : '', title: a, onclick: () => { j.anchor = a; changed({ inspector: true }); } }, ic)))),
+      sizeRow(j),
+      C('stretch', { label: 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill screen']], def: 'none', structure: true }),
+      j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
     ], { icon: 'hud', key: 'uiel' }));
@@ -1605,8 +1692,9 @@ function renderInspector() {
       h('p', { class: 'desc' }, 'Shows a variable as a bar: health, energy, progress. Use "self.hp" for this object\'s own health (Health component).'),
       C('bar.var', { label: 'Variable', type: 'text', def: 'hp' }),
       h('div', { class: 'row' }, h('label', {}, 'Style'), h('div', { class: 'pair' },
-        h('button', { class: 'btn' + (!j.bar.icon ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; changed({ inspector: true }); } }, 'Bar'),
-        h('button', { class: 'btn' + (j.bar.icon ? ' primary' : ''), style: 'flex:1;font-size:20px', onclick: () => pickEmoji((em) => { j.bar.icon = em; if (j.bar.h < 22) j.bar.h = 28; changed({ inspector: true }); }) }, j.bar.icon || '❤️', h('span', { style: 'font-size:15px' }, 'Icons')))),
+        h('button', { class: 'btn' + (!j.bar.icon && j.bar.style !== 'ring' ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; delete j.bar.style; changed({ inspector: true }); } }, 'Bar'),
+        h('button', { class: 'btn' + (j.bar.style === 'ring' ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; j.bar.style = 'ring'; const m = Math.max(j.bar.w, j.bar.h, 60); j.bar.w = j.bar.h = Math.min(m, 120); changed({ inspector: true }); } }, 'Ring'),
+        h('button', { class: 'btn' + (j.bar.icon ? ' primary' : ''), style: 'flex:1;font-size:20px', onclick: () => pickEmoji((em) => { j.bar.icon = em; delete j.bar.style; if (j.bar.h < 22) j.bar.h = 28; changed({ inspector: true }); }) }, j.bar.icon || '❤️', h('span', { style: 'font-size:15px' }, 'Icons')))),
       C('bar.max', { label: 'Maximum', type: 'number', def: 100 }),
       showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
       C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
@@ -1632,6 +1720,16 @@ function renderInspector() {
       C('voxels.gen.trees', { label: 'Trees', type: 'bool', def: true }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
     ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
+  }
+  if (j.minimap) {
+    box.append(comp('Minimap', [
+      h('p', { class: 'desc' }, 'A small map of the level: the player (blue), enemies (red), walls and coins. Resize it with the Rect tool.'),
+      C('minimap.follow', { label: 'Centre on tag', type: 'text', def: 'player', suggest: 'tags' }),
+      C('minimap.range', { label: 'How much it shows', type: 'number', def: 800, step: threeD ? 5 : 50 }),
+      C('minimap.round', { label: 'Round', type: 'bool', def: false }),
+      C('minimap.bg', { label: 'Background', type: 'color' }), C('minimap.border', { label: 'Border', type: 'color' }),
+      C('minimap.playerColor', { label: 'Player dot', type: 'color', def: '#4fc3f7' }), C('minimap.enemyColor', { label: 'Enemy dots', type: 'color', def: '#ff5252' }),
+    ], { icon: 'grid', key: 'minimap', menu: removeMenu(() => { delete j.minimap; changed({ structure: true }); }, 'minimap') }));
   }
   if (j.light) {
     box.append(comp('Light', [
@@ -1833,6 +1931,7 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
@@ -1942,12 +2041,13 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'model', label: '3D Model', icon: 'cube', desc: 'Build a model out of shapes (3D modeling)', ok: (e) => threeD && !e.model && !e.ui, add: (e) => { e.model = { parts: [{ geometry: 'box', x: 0, y: 0.5, z: 0, w: 1, h: 1, d: 1, color: '#90caf9' }] }; } },
     { cat: 'UI', key: 'bar', label: 'Progress Bar', icon: 'hud', desc: 'Health, energy or progress shown as a bar', ok: (e) => !e.bar && (e.ui || !threeD), add: (e) => { e.bar = { var: 'hp', max: 100, w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8 }; } },
     { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
+    { cat: 'UI', key: 'minimap', label: 'Minimap', icon: 'grid', desc: 'A small map of the level on screen', ok: (e) => e.ui && !e.minimap, add: (e) => { e.minimap = { w: 120, h: 120, range: is3D() ? 40 : 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false }; } },
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
-      ok: (e) => !e.ui || ['script', 'graph', 'rules', 'button'].includes(type), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
+      ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
   return list;
 }
@@ -1960,6 +2060,9 @@ function addComponentTo(id, key) {
   c.add(j);
   if (key === 'b:platformer' && !project.gravity) project.gravity = is3D() ? -25 : 1600;
   if (key === 'b:platformer') Object.assign(project.settings, { joystick: true, jumpButton: true });
+  if (key === 'b:uiSlider' && !j.bar) j.bar = { var: j.behaviors.at(-1).var || 'volume', max: 100, w: 200, h: 18, fill: '#4c8bd6', bg: 'rgba(0,0,0,0.45)', radius: 9, label: true };
+  if ((key === 'b:uiToggle' || key === 'b:touchButton' || key === 'b:uiInput') && !j.shape && !j.sprite) j.shape = { type: 'rect', w: 140, h: 52, radius: 14, fill: '#3a6ea5' };
+  if ((key === 'b:uiToggle' || key === 'b:uiInput' || key === 'b:uiCounter') && !j.text) j.text = { value: 'Text', size: 20, color: '#ffffff' };
   selectedId = id;
   changed({ structure: true }); pushHistory();
   toast(`Added ${c.label} to ${j.name}`);
@@ -2274,6 +2377,7 @@ function addPrefab(def, at) {
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
+  if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {
     if (project.entities.some((e) => e.name === x.name)) continue;
     const { offset, ...props } = x;
@@ -2681,7 +2785,7 @@ function setViewMode(m) {
   $('#uiBtn').classList.toggle('on', uiMode);
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
-  if (uiMode) { projectTab = 'ui'; renderProject(); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
+  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   refreshAll(); applyCamera();
 }

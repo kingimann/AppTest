@@ -135,6 +135,22 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
+### Rect tool and UI components
+
+- **Rect tool** (like Unity's T tool; the corner-squares button on the tool rail, and the default in the UI editor):
+  - Drag any of the **8 handles** to resize a UI element or a 2D object. The opposite edge stays put; circles and rings stay round.
+  - Drag the middle to move. A live **W × H** label shows the size, and the magnet snaps to 4 px.
+  - The UI Element inspector has **Size (W × H)** fields and **Stretch to screen** (full width / full height / fill, with a margin), like Unity's stretch anchors.
+- **New UI components**:
+  - **Slider** (drag to set a variable; one bound to `{volume}` 0–100 controls the game's sound).
+  - **Toggle** (on/off variable with its own text and colour).
+  - **Layout Group** (vertical / horizontal / grid of tagged UI with spacing and alignment).
+  - **Animated Counter** (scores count up with a pop).
+  - **Typewriter Text**, and **Text Input** (tap to type a name into `{name}`).
+  - **Touch Button** (your own on-screen control placed and sized anywhere: left, right, up, down, jump, fire or a message while held).
+  - **Minimap** (player, enemies, walls and coins around the player), and **Ring** progress bars.
+- **New UI widgets**: Volume Slider, Toggle, Progress Ring, Minimap, Animated Score, Typewriter Text, Name Input, Touch Controls (◀ ▶ JUMP; replaces the built-in joystick), Vertical Menu (Play / Continue / Restart in a layout group), Top Bar (full-width).
+
 ### View modes: Scene, Top and UI editor · 2D and 3D levels
 
 - **Scene / Top / UI**: tap the view button above the Scene.

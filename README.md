@@ -421,6 +421,8 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 
 The editor, home page and player check for a new release when they open, when you come back to them, when the phone goes online and every 10 minutes. A bar says *A new version is ready*: **Update** saves your project, clears the old cached files and reloads. Home → **Updates** checks by hand and shows the version you're on. This matters most for the home-screen app, which a phone can keep open for days.
 
+**Pull down to refresh** on the home page and the editor's home screen. Drag down from the top and let go once it says *Release to refresh*. If a new version is out, it installs it. Otherwise it saves your project and reloads. It only works when the page is scrolled to the top, and a short pull or a sideways swipe does nothing.
+
 ### Safe area and UI scaling (fits every phone)
 
 - **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.

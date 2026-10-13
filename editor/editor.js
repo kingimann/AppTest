@@ -1079,7 +1079,7 @@ function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  const search = h('input', { type: 'text', placeholder: 'Search names, tags, components', value: hFilter, autocapitalize: 'off',
+  const search = h('input', { type: 'text', placeholder: 'Search objects', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
   box.append(h('div', { class: 'h-filters' }, H_FILTERS.map(([k, l]) => h('button', { class: hKind === k ? 'on' : '', onclick: () => { hKind = k; renderHierarchy(); } }, l))));

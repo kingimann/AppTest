@@ -1,11 +1,12 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
+import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB } from './storage.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
@@ -50,8 +51,8 @@ function toast(msg) {
 // ============================================================================
 // Projects (saved in localStorage)
 // ============================================================================
-const PROJECTS_KEY = 'pocket.editor.projects', CURRENT_KEY = 'pocket.editor.current';
-const loadProjects = () => { try { return JSON.parse(store.get(PROJECTS_KEY, '{}')) || {}; } catch { return {}; } };
+const CURRENT_KEY = 'pocket.editor.current'; // projects themselves live in IndexedDB (storage.js)
+const loadProjects = () => allProjects(); // every project, kept in memory by storage.js (IndexedDB underneath)
 const SCENE_ID = '__scene';
 
 // root = the whole game (level 1 plus root.levels[]); project = the level being edited
@@ -68,10 +69,19 @@ let playing = false;
 
 function saveNow() {
   if (!project) return;
-  const all = loadProjects();
-  all[projectId] = { name: root.name, updated: Date.now(), json: root };
-  if (!store.set(PROJECTS_KEY, JSON.stringify(all))) toast('Could not save: browser storage is full');
+  const rec = { name: root.name, updated: Date.now(), json: root };
+  saveProject(projectId, rec).then((ok) => { if (!ok) storageFull(); });
   store.set(CURRENT_KEY, projectId);
+}
+/** Leaving the app (switching apps, locking the phone, closing the tab): save, plus an instant safety copy. */
+function saveOnLeave() { if (!project) return; saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
+let fullWarned = 0;
+function storageFull() {
+  if (Date.now() - fullWarned < 60000) return; fullWarned = Date.now();
+  openDialog('Storage is full', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
+    h('h4', {}, 'Your latest changes could not be saved'),
+    h('p', {}, 'The phone has run out of space for this app. Back up your games to a file now, then delete games you no longer need or remove big imported pictures and sounds.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => { closeLayer(); backupAll(); } }, icon('download'), 'Back Up Now'), h('button', { class: 'btn', onclick: closeLayer }, 'Later')))]);
 }
 let saveTimer;
 /** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
@@ -281,7 +291,8 @@ function changed({ structure = false, inspector = false } = {}) {
 // ============================================================================
 // Engine in edit mode
 // ============================================================================
-const engine = new Engine({ parent: $('#viewport') });
+const engine = new Engine({ parent: $('#viewport'), systemBack: false }); // the editor handles the phone's Back itself
+engine.recordGraphs = true; // remember which Visual Script nodes ran, for the node editor's badges
 engine.editing = true;
 engine.showUI = true;
 engine.input.enabled = false;
@@ -1824,7 +1835,7 @@ function openCreate(startCat) {
   const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light'];
   const artOf = (o) => { const src = o.props?.sprite?.src; return typeof src === 'string' && src.startsWith('art:') ? src : null; };
   const fromDef = (o, kind) => ({ label: o.label, icon: o.icon, art: o.art || artOf(o), desc: o.desc || o.note || '', group: o.group, fn: () => (kind === 'entity' ? addEntity(o.props) : addPrefab(o)) });
-  const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons').flatMap(([g, list]) => list.map((k) => {
+  const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons' && g !== 'UI Frames').flatMap(([g, list]) => list.map((k) => {
     const nm = k.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
     return { label: nm, art: 'art:' + k, group: g, fn: () => addEntity({ name: nm, sprite: { src: 'art:' + k, w: 56, h: 56 } }) };
   }));
@@ -2161,6 +2172,7 @@ function editGraph(target, path) {
   const back = () => ed.close();
   const ed = openNodeEditor({
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
+    stats: (nodeId) => engine.graphStats?.get(e.id + '|' + nodeId), // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
@@ -2567,6 +2579,10 @@ function renderInspector() {
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => { styleClipboard = styleOf(j); toast('Style copied'); } }, icon('copy'), 'Copy Style'),
+        h('button', { class: 'btn', onclick: () => { if (!styleClipboard) return toast('Copy a style first'); pasteStyle(j, styleClipboard); changed({ inspector: true }); pushHistory(); toast('Style pasted'); } }, icon('paste'), 'Paste Style'),
+        h('button', { class: 'btn', onclick: () => { applyTheme([j]); changed({ inspector: true }); pushHistory(); } }, icon('brush'), 'Use Theme')),
     ], { icon: 'hud', key: 'uiel' }));
   }
 
@@ -2583,17 +2599,25 @@ function renderInspector() {
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
       t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
-      C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
+      t !== 'emoji' && j.shape.stroke && C('shape.dash', { label: 'Dashed outline', type: 'number', def: 0, range: [0, 30], step: 1 }),
+      t !== 'emoji' && j.shape.fill && C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
+      t !== 'emoji' && j.shape.fill2 && C('shape.gradDir', { label: 'Gradient direction', type: 'select', options: [['down', 'Top to bottom'], ['right', 'Left to right'], ['diagonal', 'Diagonal'], ['radial', 'From the centre']], def: 'down' }),
+      C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
+      j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 })],
+      !j.shape.shadow && C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
     ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
     box.append(comp('Image', [
       C('sprite.src', { label: 'Source URL', type: 'text' }),
       j.sprite.src ? h('div', { class: 'row side' }, h('label', {}, 'Picture'), h('img', { class: 'img-thumb', src: artURL(j.sprite.src), alt: '' })) : null,
-      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; if (frameSlice(url) && !j.sprite.slice) j.sprite.slice = frameSlice(url); changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
         h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'From device')),
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
+      C('sprite.radius', { label: 'Round corners', type: 'number', def: 0, range: [0, 100], step: 1 }),
+      C('sprite.slice', { label: '9-slice border (px)', type: 'number', def: 0, range: [0, 128], step: 1, structure: true, infoText: 'For framed panels and buttons: the picture\'s corners stay sharp and only the middle stretches, so one image fits any size. 0 = stretch the whole picture.' }),
+      j.sprite.slice > 0 && C('sprite.sliceScale', { label: 'Border size', type: 'number', def: 1, range: [0.25, 4], step: 0.25 }),
     ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }, 'sprite') }));
   }
   if (j.text) {
@@ -2603,11 +2627,19 @@ function renderInspector() {
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
-      C('text.font', { label: 'Font', type: 'select', options: [['system-ui, -apple-system, sans-serif', 'Clean'], ['"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', 'Rounded'], ['Georgia, "Times New Roman", serif', 'Classic'], ['ui-monospace, Menlo, Consolas, monospace', 'Retro (mono)'], ['Impact, "Arial Black", sans-serif', 'Bold poster']], def: 'system-ui, -apple-system, sans-serif' }),
+      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
+      C('text.font', { label: 'Font', type: 'select', options: fontOptions(j.text.font), def: 'theme' }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openFontPicker((f) => { j.text.font = f; changed({ inspector: true }); pushHistory(); }) }, icon('text'), 'More fonts…')),
       C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+      C('text.italic', { label: 'Italic', type: 'bool', def: false }),
+      C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase']], def: '' }),
+      C('text.spacing', { label: 'Letter spacing', type: 'number', def: 0, range: [-4, 20], step: 0.5 }),
+      C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
+      C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
-      C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false }),
+      C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
+      j.text.shadow && C('text.shadowColor', { label: 'Shadow color', type: 'color', def: '#000000' }),
     ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
@@ -2790,6 +2822,48 @@ function materialOf(b) {
   return hit ? hit[0] + ' ✓' : 'Custom';
 }
 
+// ---- UI styling: fonts, themes, copy / paste style ----
+const GOOGLE_FONTS = ['Press Start 2P', 'Bangers', 'Luckiest Guy', 'Fredoka', 'Lilita One', 'Bungee', 'Orbitron', 'Russo One', 'Silkscreen', 'Pixelify Sans', 'VT323',
+  'Permanent Marker', 'Creepster', 'Cinzel', 'Baloo 2', 'Titan One', 'Chewy', 'Audiowide', 'Black Ops One', 'Patrick Hand'];
+const fontOptions = (cur) => {
+  const list = [...FONTS, ...(root?.settings?.fonts || []).map((n) => [googleFont(n), n])];
+  if (cur && !list.some(([v]) => v === cur)) list.push([cur, String(cur).split(',')[0].replace(/"/g, '')]);
+  return list;
+};
+/** Pick a font: the built-in ones, or any Google Font (added to the game and loaded). */
+function openFontPicker(onPick) {
+  loadFonts(GOOGLE_FONTS);
+  const row = (fam, name, add) => h('button', { class: 'font-row', style: `font-family:${fam === 'theme' ? themeOf(root.settings).font : fam}`, onclick: () => {
+    if (add) { root.settings.fonts = [...new Set([...(root.settings.fonts || []), name])]; loadFonts([name]); }
+    closeLayer(); onPick(fam);
+  } }, name, h('small', {}, add ? 'Google Font' : fam === 'theme' ? 'follows the UI theme' : 'built in'));
+  const inp = h('input', { type: 'text', placeholder: 'Any Google Font name, e.g. Roboto Slab' });
+  openDialog('Fonts', [
+    h('p', { class: 'desc' }, 'Google Fonts download the first time a player opens the game (they need the internet once).'),
+    h('div', { class: 'row' }, inp, h('button', { class: 'btn primary', onclick: () => { const n = inp.value.trim(); if (!n) return; root.settings.fonts = [...new Set([...(root.settings.fonts || []), n])]; loadFonts([n]); closeLayer(); onPick(googleFont(n)); } }, 'Add')),
+    h('div', { class: 'font-list' }, FONTS.map(([v, n]) => row(v, n, false)), GOOGLE_FONTS.map((n) => row(googleFont(n), n, true))),
+  ]);
+}
+const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'lineWidth', 'dash', 'radius', 'glow', 'shadow', 'shadowBlur', 'shadowY'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
+let styleClipboard = null;
+function styleOf(j) { const out = {}; for (const [k, keys] of Object.entries(STYLE_KEYS)) if (j[k]) out[k] = Object.fromEntries(keys.filter((q) => j[k][q] !== undefined).map((q) => [q, j[k][q]])); return clone(out); }
+function pasteStyle(j, st) { for (const [k, v] of Object.entries(st)) if (j[k]) Object.assign(j[k], clone(v)); }
+const isLight = (hex) => { const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16) || 0; return ((n >> 16 & 255) * 0.299 + (n >> 8 & 255) * 0.587 + (n & 255) * 0.114) > 160; };
+/** Restyle UI elements with the game's theme: font, text colours, panel and button colours, corner radius. */
+function applyTheme(list) {
+  const T = themeOf(root.settings), btn = (e) => (e.behaviors || []).some((b) => ['button', 'navItem', 'touchButton'].includes(b.type));
+  const byId = new Map(list.map((e) => [e.id, e])), onButton = (e) => btn(e) || (e.parent && btn(byId.get(e.parent) || ent(e.parent) || {}));
+  for (const e of list) {
+    if (e.text) { e.text.font = 'theme'; e.text.color = onButton(e) ? (isLight(T.accent) ? '#1b1b1b' : '#ffffff') : T.text; delete e.text.color2; }
+    if (e.shape && e.shape.type !== 'emoji' && e.shape.fill) {
+      e.shape.fill = btn(e) ? T.accent : T.panel; delete e.shape.fill2;
+      if (e.shape.type === 'rect' || e.shape.type === 'capsule') e.shape.radius = T.radius;
+      if (e.shape.stroke) e.shape.stroke = T.text;
+    }
+    if (e.bar) e.bar.radius = Math.min(T.radius, (e.bar.h || 16) / 2);
+  }
+}
+
 // ---- scene settings (shown when the scene root is selected) ----
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
@@ -2892,10 +2966,55 @@ function renderSceneSettings(box) {
     C('settings.uiScaleFactor', { label: 'UI size multiplier', type: 'number', def: 1, range: [0.5, 2], step: 0.05 }),
     h('p', { class: 'desc' }, 'Check it in the UI editor: the Phone button shows a notch, Dynamic Island or home bar.'),
   ], { icon: 'hud', key: 's-safe' }));
+  const R = (path, spec) => control(() => root, path, spec), T = themeOf(root.settings), custom = root.settings.theme || {};
+  const setTheme = (name) => { root.settings.uiTheme = name; delete root.settings.theme; changed({ inspector: true }); pushHistory(); };
+  box.append(comp('UI Theme', [
+    h('p', { class: 'desc' }, 'One look for the whole game: the title, pause and game-over screens, touch controls, messages, and any text set to "Theme font". Tap Apply to restyle the UI you already made.'),
+    h('div', { class: 'theme-grid' }, Object.entries(UI_THEMES).map(([name, th]) => h('button', {
+      class: 'theme-card' + ((root.settings.uiTheme || 'Default') === name ? ' on' : ''), style: `background:${th.overlay};color:${th.text};font-family:${th.font};border-radius:${Math.min(th.radius, 14)}px`, onclick: () => setTheme(name),
+    }, h('b', {}, name), h('span', { class: 'chipline' }, h('i', { style: `background:${th.accent}` }), h('i', { style: `background:${th.panel}` }), h('i', { style: `background:${th.good}` }), h('i', { style: `background:${th.bad}` }))))),
+    h('div', { class: 'row' }, h('label', {}, 'Font'), h('button', { class: 'btn', style: `font-family:${T.font};flex:1`, onclick: () => openFontPicker((f) => { (root.settings.theme ||= {}).font = f === 'theme' ? UI_THEMES[root.settings.uiTheme || 'Default'].font : f; changed({ inspector: true }); pushHistory(); }) }, fontOptions(T.font).find(([v]) => v === T.font)?.[1] || 'Custom', ' ▾')),
+    [['text', 'Text'], ['accent', 'Accent (score, buttons)'], ['panel', 'Panels'], ['overlay', 'Screen dimming'], ['button', 'Touch controls'], ['good', 'Win colour'], ['bad', 'Lose colour']].map(([k, label]) =>
+      R(`settings.theme.${k}`, { label: label + (custom[k] ? ' •' : ''), type: 'color', def: T[k] })),
+    R('settings.theme.radius', { label: 'Corner roundness', type: 'number', def: T.radius, range: [0, 30], step: 1 }),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => { const ui = levelList().flatMap((lv) => lv.entities.filter((e) => e.ui)); applyTheme(ui); changed({ structure: true }); pushHistory(); toast(`Theme applied to ${ui.length} UI elements`); } }, icon('brush'), 'Apply to my UI'),
+      Object.keys(custom).length ? h('button', { class: 'btn', onclick: () => setTheme(root.settings.uiTheme || 'Default') }, icon('undo'), 'Reset colours') : null),
+  ], { icon: 'brush', key: 's-theme' }));
+  // ---- online services: each game brings its own PlayFab Title ID and Photon App ID ----
+  const pf = root.settings.playfab || {}, ph = root.settings.photon || {};
+  const testOnline = async (what) => {
+    engine.scene.settings.playfab = clone(root.settings.playfab || {}); engine.scene.settings.photon = clone(root.settings.photon || {});
+    const O = engine.online;
+    if (what === 'playfab') { toast('Signing in to PlayFab…'); const ok = await O.pfLogin(); toast(ok ? `PlayFab works ✓ player ${O.pf.id}` : `PlayFab: ${engine.scene.vars.onlineError || 'could not sign in'}`); return; }
+    toast('Connecting to Photon…'); O.disconnect(); await O.connect();
+    const t0 = Date.now(); while (Date.now() - t0 < 8000 && !['lobby', 'offline'].includes(O.state)) await new Promise((r) => setTimeout(r, 200));
+    toast(O.state === 'lobby' ? `Photon works ✓ connected to region ${ph.region || 'eu'}` : `Photon: ${engine.scene.vars.onlineError || 'could not connect'}`); O.disconnect();
+  };
+  box.append(comp('Online (PlayFab & Photon)', [
+    h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),
+    h('h5', { class: 'sub-head' }, 'PlayFab'),
+    R('settings.playfab.titleId', { label: 'Title ID', type: 'text', def: '', infoText: 'From developer.playfab.com: create a title, then copy its Title ID (like 1A2B3).' }),
+    R('settings.playfab.autoLogin', { label: 'Sign players in when the game starts', type: 'bool', def: true }),
+    pf.titleId && h('p', { class: 'desc' }, 'For leaderboards, turn on Title settings › API Features › "Allow client to post player statistics" in PlayFab.'),
+    pf.titleId && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => testOnline('playfab') }, icon('check'), 'Test PlayFab')),
+    h('h5', { class: 'sub-head' }, 'Photon (multiplayer)'),
+    R('settings.photon.appId', { label: 'App ID (Realtime)', type: 'text', def: '', infoText: 'From dashboard.photonengine.com: create a "Realtime" app (free for 20 players at once) and copy its App ID.' }),
+    ph.appId && [
+      R('settings.photon.region', { label: 'Region', type: 'select', options: PHOTON_REGIONS.map((r) => [r, { eu: 'Europe', us: 'USA East', usw: 'USA West', asia: 'Asia', jp: 'Japan', kr: 'South Korea', in: 'India', au: 'Australia', sa: 'South America', cae: 'Canada East', za: 'South Africa', uae: 'UAE', tr: 'Turkey' }[r] || r]), def: 'eu' }),
+      R('settings.photon.maxPlayers', { label: 'Players per room', type: 'number', def: 4, range: [2, 16], step: 1 }),
+      R('settings.photon.autoJoin', { label: 'Join a room when the game starts', type: 'bool', def: false, infoText: 'Otherwise use a "join online room" button or the Join Room node.' }),
+      R('settings.photon.room', { label: 'Room name (blank = any open room)', type: 'text', def: '' }),
+      R('settings.photon.appVersion', { label: 'Game version (players only meet the same version)', type: 'text', def: '1.0' }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => testOnline('photon') }, icon('check'), 'Test Photon')),
+    ],
+    h('p', { class: 'desc' }, 'Then: put Network Sync on your player, add an Online Leaderboard or Multiplayer Lobby from Project › UI › Online, or use the Online nodes. Variables you can show in text: {netState}, {netPlayers}, {netRoom}, {pfName}, {pfRank}, {onlineError}.'),
+  ], { icon: 'globe', key: 's-online' }));
   box.append(comp('Mobile', [
     h('p', { class: 'desc' }, 'Portrait or landscape: see Orientation above.'),
     orientationOf() === 'any' && C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
     C('settings.shareButton', { label: 'Share Score Button', type: 'bool', def: true }),
+    C('settings.edgeSwipeBack', { label: 'Swipe from the left edge goes Back', type: 'bool', def: true, infoText: 'In menus with pages: a swipe in from the left edge goes back, like an iPhone app. The phone\'s back gesture and Esc always do.' }),
     h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
   ], { icon: 'gamepad', key: 's-mobile' }));
   box.append(comp('Rules', [
@@ -2953,6 +3072,7 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
   navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
@@ -3265,7 +3385,7 @@ const PREFABS_3D = [
     scene: { settings: { joystick: true, actionButton: true, jumpButton: true } },
     extra: [{ name: 'Bullet', template: true, tags: ['bullet'], offset: { x: 2, y: 1 }, mesh: { geometry: 'sphere', r: 0.15, color: '#fff59d', emissive: 1 }, behaviors: [{ type: 'projectile', speed: 30, life: 1.5 }] },
       { name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 34, color: '#ffffff' } }] },
-  { icon: 'cube', label: 'Block Builder', props: { name: 'Builder', tags: ['player'], y: 10, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 5, look: 0.25, eye: 0.65, jump: 8.5 }, { type: 'voxelBuilder', reach: 6, block: 3, mode: 'break' }] },
+  { icon: 'cube', label: 'Block Builder', props: { name: 'Builder', tags: ['player'], y: 10, mesh: { geometry: 'box', w: 0.6, h: 1.7, d: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'firstPerson', speed: 4.3, look: 0.3, eye: 0.65, jump: 8.5, autoJump: true }, { type: 'voxelBuilder', reach: 5, controls: 'hold to mine', inventory: 'creative' }] },
     scene: { settings: { joystick: true, jumpButton: true } }, extra: [{ name: 'Crosshair', ui: true, anchor: 'center', x: 0, y: 0, text: { value: '+', size: 30, color: '#ffffff' } }] },
   { icon: 'player', label: 'TPS Player', props: { name: 'Hero', tags: ['player'], y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 1.4, color: '#ff8a3d' }, behaviors: [{ type: 'thirdPerson', speed: 6, jump: 10, distance: 7, height: 25, look: 0.3 }] },
     scene: { settings: { joystick: true, jumpButton: true } } },
@@ -3349,7 +3469,7 @@ function renderProject() {
   } else {
     const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
       : projectTab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
-        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
+        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
           : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
     items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
   }
@@ -3499,8 +3619,10 @@ function addPrefab(def, at) {
     return k;
   };
   for (const b of def.before || []) addTree(b, null, at);
-  const j = def.children ? addTree({ ...def.props, children: def.children }, null, at) : addEntity(def.props, at);
-  if (def.children || def.before) { selectedId = j.id; changed({ structure: true }); }
+  const kids = def.children || def.props.children; // children can sit on the widget or inside its props
+  const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
+  for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
+  if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
   if (def.note) setTimeout(() => toast(def.note), 900);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
@@ -3772,8 +3894,10 @@ function openFileMenu() {
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
     '-',
-    { icon: 'download', label: 'Export Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
-    { icon: 'upload', label: 'Import Project…', fn: importJSON },
+    { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
+    { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
+    { icon: 'upload', label: 'Restore Backup / Import…', fn: importJSON },
+    { icon: 'download', label: 'Export This Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     '-',
     !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
@@ -3847,11 +3971,14 @@ function showHome() {
       h('small', {}, new Date(pr.updated).toLocaleDateString()),
       id !== projectId && h('button', { title: 'Delete', onclick: () => {
         if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return;
-        const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); showHome();
+        deleteProject(id); showHome();
       } }, icon('trash'))))] : null,
+    safetyCard(all.length),
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
-      !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App')),
+      !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App'),
+      window.pocketUpdate && h('button', { class: 'btn', onclick: () => { saveNow(); window.pocketUpdate.available ? window.pocketUpdate.apply() : window.pocketUpdate.check(); } }, icon('download'), 'Updates')),
+    window.pocketUpdate && h('p', { class: 'sub' }, `Pocket Engine ${window.pocketUpdate.version}`),
   ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
   home.scrollTop = 0;
@@ -3865,7 +3992,7 @@ function openProjectsDialog() {
     h('small', {}, new Date(p.updated).toLocaleDateString()),
     id !== projectId && h('button', { title: 'Delete', onclick: () => {
       if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
-      const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); openProjectsDialog();
+      deleteProject(id); openProjectsDialog();
     } }, icon('trash')))) : h('div', { class: 'empty' }, 'No saved projects.'));
 }
 const TOUR = [
@@ -3920,15 +4047,63 @@ function download(name, text, type) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
+/** Every game (and saved scripts) in one file: shared to Files / iCloud / Drive / email, or downloaded. */
+async function backupAll() {
+  saveNow();
+  const data = JSON.stringify(makeBackup()), d = new Date(), name = `pocket-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
+  const file = typeof File === 'function' ? new File([data], name, { type: 'application/json' }) : null;
+  if (file && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: 'Pocket Engine backup' }); markBackedUp(); toast('Backup saved'); if (!$('#home').hidden) showHome(); return; }
+    catch (e) { if (e?.name === 'AbortError') return; } // cancelled: nothing saved
+  }
+  download(name, data, 'application/json'); markBackedUp(); toast('Backup downloaded'); if (!$('#home').hidden) showHome();
+}
+const ago = (t) => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+/** Restore points: earlier versions of the open game, taken every few minutes while you work. */
+async function openRestorePoints() {
+  saveNow();
+  const list = await listSnapshots(projectId);
+  const count = (j) => [j, ...(j.levels || [])].reduce((n, lv) => n + (lv.entities?.length || 0), 0);
+  openDialog('Earlier Versions', [
+    h('p', { class: 'desc' }, usingIndexedDB() ? `A version of “${root.name}” is kept every few minutes while you work (the last 12). Restoring one keeps your current version here too, so you can always go back.` : 'Earlier versions need more storage than this browser allows (private browsing?).'),
+    list.length ? h('div', { class: 'snap-list' }, list.map((sn) => h('div', { class: 'proj-row' },
+      h('span', { class: 'nm' }, h('b', {}, new Date(sn.time).toLocaleString()), h('small', {}, ` ${ago(sn.time)} · ${count(sn.json)} objects · ${(sn.json.levels?.length || 0) + 1} level${sn.json.levels?.length ? 's' : ''}${sn.reason !== 'auto' ? ' · ' + sn.reason : ''}`)),
+      h('button', { class: 'btn', onclick: async () => {
+        await snapshot(projectId, { name: root.name, updated: Date.now(), json: clone(root) }, 'before restore');
+        closeLayer(); openProject(clone(sn.json), projectId); saveNow(); toast('Earlier version restored');
+      } }, 'Restore')))) : h('div', { class: 'empty' }, 'No earlier versions yet: they appear after a few minutes of editing.'),
+  ]);
+}
+/** Home: how safe your games are, with a nudge to back up. */
+function safetyCard(count) {
+  if (!count) return null;
+  const last = lastBackup(), stale = !last || Date.now() - last > 7 * 86400000;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  const info = h('small', { class: 'safe-info' }, `Saved on this phone · ${count} game${count === 1 ? '' : 's'}`);
+  storageUse().then((u) => isPersisted().then((p) => { if (u) info.textContent = `Saved on this phone · ${count} game${count === 1 ? '' : 's'} · ${u.used < 1048576 ? Math.max(1, Math.round(u.used / 1024)) + ' KB' : (u.used / 1048576).toFixed(1) + ' MB'}${p ? ' · kept safe ✓' : ''}`; }));
+  return h('div', { class: 'safe-card' + (stale ? ' warn' : '') },
+    h('div', { class: 'safe-top' }, icon(stale ? 'info' : 'check'), h('b', {}, stale ? (last ? `Last backup ${ago(last)}` : 'Your games aren\'t backed up yet') : `Backed up ${ago(last)}`)),
+    info,
+    stale && h('p', {}, ios && !standalone ? 'Safari can clear a website\'s data if you don\'t visit for a week. Back up to Files or iCloud, and add the app to your Home Screen.' : 'A backup file keeps your games safe if the phone is lost, reset, or the browser is cleared.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn' + (stale ? ' primary' : ''), onclick: backupAll }, icon('save'), 'Back Up'),
+      h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Restore')));
+}
 function importJSON() {
   const fi = $('#fileInput');
-  fi.accept = 'application/json,.json';
+  fi.accept = 'application/json,.json,.pocket';
   fi.onchange = async () => {
     const f = fi.files[0]; fi.value = '';
     if (!f) return;
     try {
       const json = JSON.parse(await f.text());
-      if (!Array.isArray(json.entities)) throw new Error('not a Pocket project');
+      if (json.pocketBackup) { // a full backup: bring every game back
+        saveNow();
+        const r = await restoreBackup(json);
+        toast(`Backup restored: ${r.added} added, ${r.updated} updated${r.kept ? `, ${r.kept} kept (yours were newer)` : ''}`);
+        if (r.updated && allProjects()[projectId]) openProject(clone(allProjects()[projectId].json), projectId);
+        showHome(); return;
+      }
+      if (!Array.isArray(json.entities)) throw new Error('not a Pocket project or backup');
       for (const e of json.entities) e.id ||= uid();
       openProject(json); hideHome(); toast(`Imported ${json.name || 'project'}`);
     } catch (err) { toast('Could not import: ' + err.message); }
@@ -4287,11 +4462,16 @@ $('#snapBtn').classList.toggle('on', snap);
 $('#gridBtn').classList.toggle('on', showGrid);
 $('#snapBtn').addEventListener('click', () => { snap = !snap; store.set('pocket.editor.snap', snap ? '1' : '0'); $('#snapBtn').classList.toggle('on', snap); toast(snap ? 'Snapping on' : 'Snapping off'); });
 $('#gridBtn').addEventListener('click', () => { showGrid = !showGrid; store.set('pocket.editor.grid', showGrid ? '1' : '0'); $('#gridBtn').classList.toggle('on', showGrid); });
-window.addEventListener('beforeunload', saveNow);
-document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+window.addEventListener('beforeunload', saveOnLeave);
+window.addEventListener('pagehide', saveOnLeave);
+window.pocketBeforeUpdate = saveOnLeave; // the update bar saves before it reloads
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveOnLeave(); });
 $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to open the panel
 setTool('move');
 
+await initStorage();
+askPersist(); // ask the browser to keep our data (Android / Chrome say yes for installed or often-used apps)
+storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('Storage is almost full: back up your games'); });
 {
   const all = loadProjects(), cur = store.get(CURRENT_KEY, '');
   const q = new URLSearchParams(location.search);

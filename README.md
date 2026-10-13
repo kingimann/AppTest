@@ -49,7 +49,8 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    | Endless Runner | Lane Rush | swipe lanes, jump |
    | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second, saved progress |
    | Breakout | Brick Breaker | bouncing ball, paddle, breakable bricks |
-   | Voxel Sandbox | Block Craft | Minecraft-style terrain, first-person break & build |
+   | Online Coin Rush | Online Coin Rush | Multiplayer coin race (Photon) with an online leaderboard (PlayFab); plays solo until you add your IDs |
+   | Voxel Sandbox | Block Craft | Minecraft-style terrain: hold to mine, tap to place, hotbar, auto-jump |
    | Turn-Based RPG | Slime Battle | attack/heal/spell buttons, enemy turns, HP & MP |
    | Dungeon Crawler | Tiny Dungeon | turn-based grid movement, bump combat, goblins |
    | Board Game | Tic-Tac-Toe | tap cells, play the computer |
@@ -155,6 +156,14 @@ The editor fills the screen:
 
 - **Add Node** opens like Add Component: a search box, **Suggested next** (nodes that usually follow the selected one, or events to start with), **Recently used**, and a folder per category with how many nodes it holds. Tap a folder to open it, ‹ to go back:
   - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**, **On Finger Lifted**, **On Win**, **On Game Over**, **On State Entered**.
+  - **Math, more:** **Formula** (type any math with up to four inputs a–d and game variables: `a * 2 + b`, `sqrt(a^2 + b^2)`, `score / 10`, `max(a, lives)`; + − × ÷ % ^, comparisons, and sin cos tan asin acos atan atan2 abs floor ceil round sqrt pow min max clamp lerp sign log exp mod random; no code is run, a typo just gives 0 and a Console warning), **Random Between** (with inputs, whole numbers or not), **Random Pick**, **Smooth Noise** (drifting random for wobbles and flicker), **Inverse Lerp**, **Move Towards Value**, **Angle Difference**, **Wrap Around**, **Round To Decimals**, **Percent Of**, **Ease Curve** (any easing), **Vector Length**, **Distance / Angle between points**, **Min / Max / Average / Sum**, **Is Between**, **Is Even**; **Math (one value)** adds tan, square, cube root, reciprocal, fraction, log and exp.
+  - **Game, more:** **Add Score** (with a "+10" pop-up), **Lose a Life** (*no lives left* → game over if you like), **Gain a Life** (up to a maximum), **Check Best Score** (*new best* saves it), **Add / Set Time**, **Restart Level**, **Set Checkpoint** + **Respawn Player**, **Use Item** (*used* / *not enough*) and **Has Item**, **Add Combo** (`{combo}` resets after a pause), **Unlock Achievement** (once per device, with a 🏆 message; *first time* / *already*) and **Is Unlocked**, **Hit Stop** (a freeze-frame on big hits), **Set Game Speed**, **Say** (a dialogue box with a *closed* output), **Game Value** (score, lives, best, time left, combo, level, levels) and **Game State Is**.
+  - **Variables** (gold): **Set / Add To My Variable** and **My Variable** (each object keeps its own, so every enemy has its own hp; text on the object shows it with `{hp}`), **Set Other's Variable / Other's Variable**, **Variable Of Object**, and **When Variable Reaches** (runs once when, say, score ≥ 100).
+  - **Functions** (indigo): **Custom Event** + **Call Custom Event** (on this object, *other*, everything with a tag, or everywhere, with a number read by **Event Value**), and **Comment** sticky notes.
+  - **More flow:** **For Range** (from → to by step), **Repeat Every** (every N seconds, N times or forever, with **Stop Repeat**), **Cycle** (1, 2, 3, 1…), **Weighted Random**, **Gate** + **Open / Close Gate**, **Wait Frames**. **Touch:** **On Long Press**, **On Double Tap** (on this object). **Objects:** **Attach To** / **Detach** (carry things, ride platforms), **Spawn & Launch** (facing, up, down, toward the finger, toward a tag, random). **Move:** **Move To Finger**, **Look At Finger**. **Game:** **Pause / Resume**. **Values / Math:** **Direction To**, **Distance Between**, **Snap To Step**, **Ping Pong**, **Sign**, **Smooth**, **Chance %**, **Fingers On Screen**, **Is Paused**, **Child Count**; **Position Of** also gives rotation, scale and opacity.
+  - **Physics** (rust): **On Trigger Enter / Exit**, **While In Trigger**, **On Collision Enter** (with an optional *only harder than* speed) / **Exit**, **While Colliding**, **On Landed**, **On Left Ground**; **Add Force** (steady force, one-off impulse or velocity change; mass-aware), **Explosion Force** (blasts nearby physics objects away, stronger close up), **Set Body Type**, **Make Trigger / Solid**, **Set Collision Layer**, **Set Bounce & Friction** (and mass); values **Impact Speed**, **Is In Trigger**, **Is Colliding**. Trigger and collision events work on any object: one without a collider gets a trigger (or a solid body for collision events).
+  - **Sensing** (blue): **Raycast** (forward, up, down, left, right, *ahead & down* for ledges, toward a tag, or a custom direction; only a tag, or also triggers; it hits voxel blocks in 3D; *show the ray* draws it, green on a hit) with **hit** / **miss** outputs, **Ray Hits** (the same as a true/false value), **Hit Info** (distance, hit point, surface normal; also filled by On Collision Enter), **Find In Radius** (runs *each* for every match, then *found* with the nearest), **Count In Radius**, **For Each With Tag**, **Pick Nearest**, **Pick Object**, **Line of Sight** (*visible* / *blocked*), **On Object Near** (*near* / *left*), **On Enter Screen**, **On Leave Screen**, and the values **Is On Screen**, **Other Object** (x, y, z, speed, distance, angle, health), **Other Has Tag**, **Has Other Object**.
+  - **“Other”:** whatever a trigger, collision, raycast or search found becomes *other*, so the nodes with a *who: other* choice (Destroy, Damage, Push, Add Force, Set Colour, Punch, Stop Moving…) act on it.
   - **Tween** (teal): Tween, Punch, Stop Tweens (by object or ID, optionally jumping to the end), **Tween Move To** (to / by / from), **Tween To Object**, **Jump Tween**, **Shake**, **Spin**, **Pulse**, **Tween Colour**, **Tween Variable** (smooth score counters), **Type Text**, **Spiral**, **Turn To Face**, **Pause / Resume**, **Play Backwards / Flip / Restart**, **Tween Speed**, **Play Tween Component**, **Delayed Call**, and the value **Is Tweening**. Most have a **finished** output for what happens when they end.
   - **Animation** (pink): **Play Animation** (loop / once / the clip's setting), Stop Animation, **Set Animation Speed**, **Show Sprite Frame**, **Flip Sprite**, **Fade To**, **Blink**, **On Animation End**, and the values **Is Animation Playing** and **Sprite Frame**. They work with both the Animator and the Sprite Sheet Animator.
   - **Flow** (purple): If, Wait, Random Chance, Do Once, Sequence, **Repeat N Times** (with Loop Index), **Flip Flop**, **Cooldown**, **Count To**, **Random Branch**, **Switch on Number**, **Compare Branch**.
@@ -163,6 +172,10 @@ The editor fills the screen:
   - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**, **Is Moving**, **Finger On Screen**, **Finger Position**, **Coin Flip**, **Level Number**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
 - ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, Run / idle by speed, Collect: hop, fade, remove, and Tap → score counts up.
 - **Reusable scripts.** The 💾 button (or *Save as Reusable Script* on the component) names and saves the graph. Add it to any other object from **Add Component → My Scripts**. Copies stay **linked**: edit any of them and every copy updates (the component shows the script's name and how many objects use it; ⋮ → *Unlink* to change one copy on its own, or *Rename*). Saved scripts are also kept on your device, so **My Scripts** and ★ list the ones from your other games too.
+- **Live debug:** after you Play, each node shows how often it ran (**×12**) and value nodes show their last value (**= 3.5**); nodes that never ran are faded, so you can see at a glance which part of a script didn't happen.
+- **Copy / paste:** ⋮ → *Copy* (one node) or *Copy From Here* (the node, everything it leads to and the values feeding them); paste from the top of **Add Node**, in this script, another object's, or another game. Pasted nodes go below the others.
+- **Turn Off** (⋮): skip a node without deleting it (the script passes straight through), handy for testing. **Comment** nodes are yellow sticky notes.
+- More ★ templates: *Enemy with its own HP (3 hits)*, *Custom event: explode on call*, *Wave: 5 enemies, one every 0.8 s*.
 - If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
 - Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
@@ -311,11 +324,62 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Layout Group** can now arrange its own children and spread them evenly.
 - **In the UI editor:** the **Pages** button previews one page at a time.
 
+Everything inside a panel that has *Show when* (title, game over, paused…) now belongs to that screen too: it's only drawn, and can only be tapped, on that screen.
+
+**Advanced navigation (pages with history, like an app):**
+- **Menu with Pages:** a main menu whose buttons open Levels, Settings and Credits pages (Levels has a World 2 page inside it). Each page slides in from the right; Back slides it out to the left and returns to the exact page you came from.
+- **Back Button:** goes back one page, closing an open popup or side bar first, and hides itself when there's nowhere to go back to (or goes to a *fallback* page). The **phone's back gesture / browser Back**, **Esc**, and a **swipe in from the left edge** (Game Settings › Mobile, on by default) do the same in played and exported games.
+- **Sliding Page:** a ready page with a Back button. **Show If** has two new animations: **slide (follows navigation)** (forward slides in from the right, Back from the left, and tabs slide toward the side you tapped) and **zoom**.
+- **Swipe Pages:** swipe between cards (onboarding, shop carousel, worlds) with dots, rubber-band ends, optional loop and auto-advance; the page number is in a variable (`slide`), and the messages `slide next`, `slide prev` and `slide 2` move it.
+- **Sliding Tab Bar:** a pill (**Tab Indicator**) slides and resizes to the selected tab.
+- **Nav Item** can *switch tab* (no history) or *open page (Back returns)*. Buttons, triggers and rules have the actions **go to page** (`shop`, or `tab = weekly` for another variable) and **go back**.
+- **Nodes:** **Go To Page** (open / switch / start over), **Go Back** (*then* / *nowhere to go*), **On Page Opened**, **On Back**, and the values **Page Is** and **Can Go Back**.
+- Scripts: `scene.navTo(page, variable, { history, dir, clear })`, `scene.navBack()`, `scene.canGoBack()`.
+
 ### Sprites (drawn art, no emoji)
 
 - *Project › Sprites* is a library of about 100 drawn sprites (as of v0.1): characters, enemies, items, nature, vehicles, blocks and white UI icons. They are vector art, so they stay sharp at any size and add almost nothing to a project (`sprite: { src: 'art:slime' }`).
 - The Image component has **Sprite library** and **From device** buttons. A shape can be turned into a sprite with *Use a sprite picture instead*.
 - Built-in prefabs (NPC, guard, torch, key, bird…) and UI widgets use these sprites instead of emoji. Hearts and star ratings can use sprites as their icons (`icon: 'art:heart'`), and Sprite Animation frames can be sprites (`art:bird,art:bird2`).
+
+### UI themes, fonts and styling
+
+- **UI Theme** (Game Settings): pick a ready-made look (Default, Neon, Candy, Retro, Fantasy, Ocean, Light) or set your own font, text, accent, panel, dimming, touch-control, win and lose colours and corner roundness. The built-in title, pause and game-over screens, touch buttons, joystick, messages and dialogs all follow it, as does any text whose font is **Theme font** (the default for new text). **Apply to my UI** restyles everything you already made; **Use Theme** does one element.
+- **Fonts:** eleven built-in fonts plus any **Google Font** (*More fonts…*; it downloads the first time a player opens the game). The theme can use one too.
+- **Text:** gradient colour, italic, UPPERCASE / lowercase, letter spacing, wrap width with line spacing (type `\n` for a line break), outline, and a drop shadow with its own colour.
+- **Shapes:** gradient fill (down, across, diagonal or from the centre), soft drop shadow with distance, dashed outlines.
+- **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
+- **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.
+
+### Online: PlayFab and Photon
+
+Each game uses **your own free accounts**: Game Settings › **Online (PlayFab & Photon)** takes a PlayFab **Title ID** and a Photon **App ID** (with *Test PlayFab* / *Test Photon* buttons). Nothing goes online until you add one, and the rest of the game keeps working offline.
+
+**PlayFab** (accounts, leaderboards, cloud saves, remote config), using its Client API directly (no SDK):
+- Players are signed in automatically with a private ID kept on their device (*Sign players in when the game starts*), so there's no password screen. **Set Player Name** sets the name on leaderboards.
+- **Online Leaderboard** widget / component: shows the top players (or the ones around you) in a text, refreshing on start, on the message `leaderboard`, and after posting. **Post Score** (node or the *submit score online* button action) sends a variable to a leaderboard. In PlayFab, turn on *Title settings › API Features › Allow client to post player statistics*.
+- **Cloud Save / Cloud Load** keep the game's variables in the player's account. **Load Remote Config** turns Title Data into variables, so you can tune a live game. **Track Event** records analytics events. Virtual currencies show up as variables like `{pfGC}`.
+
+**Photon** (real-time multiplayer), loading the official Photon Realtime library (`photon-realtime` from npm via jsDelivr) when it's first needed:
+- **Join Room** (by name, or any open room; it connects first), **Leave Room**, or *Join a room when the game starts*. **Multiplayer Lobby** widget: status, *Play Online* and *Leave* buttons.
+- **Network Sync** component: put it on your player. Everyone else in the room sees a copy that follows you (position, turning, facing, animation clip), with your name over it in 2D. Copies are tagged `remote` and are left out of the camera and the player tag; *solid* makes them bump.
+- **Spawn For Everyone** (node), Spawner's *room host spawns for everyone* and Shooter's *bullets appear for everyone*: the object appears for every player, and when it's collected or destroyed anywhere it disappears everywhere. Players who join later get the objects that are already there.
+- **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
+- Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
+- Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.
+
+### Saving, restore points and backups
+
+- **Autosave** to the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.
+- **Safety copy:** when you switch apps, lock the phone or close the tab, the open game is also copied instantly, so a phone freezing the page mid-save can't lose the last edits.
+- **Earlier versions** (☰ → *Restore Earlier Version…*): a restore point every few minutes while you work (the last 12 per game). Restoring keeps your current version as a restore point too.
+- **Back Up All Games** (☰ or the Home card) puts every game and your saved scripts in one file and opens the share sheet (Files, iCloud Drive, Google Drive, email…). **Restore** brings them back on any phone or browser: missing games are added, older copies updated, and newer ones on the phone kept.
+- The Home screen shows how your games are kept (size, *kept safe ✓* when the browser promises not to clear them) and nudges you to back up after a week. On iPhone it explains that Safari can clear a website's data after a week without a visit and suggests adding the app to the Home Screen, which avoids that.
+- If storage runs out, a dialog says so and offers a backup straight away.
+
+### Updates
+
+The editor, home page and player check for a new release when they open, when you come back to them, when the phone goes online and every 10 minutes. A bar says *A new version is ready*: **Update** saves your project, clears the old cached files and reloads. Home → **Updates** checks by hand and shows the version you're on. This matters most for the home-screen app, which a phone can keep open for days.
 
 ### Safe area and UI scaling (fits every phone)
 
@@ -537,7 +601,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `pulse` | Grows and shrinks to draw attention. | `amount` (0.15), `period` (0.8) |
 | `checkpoint` | The player respawns here after falling or getting hurt. | `text`, `tag` ("player") |
 | `destructible` | Health: takes hits from objects with a tag (like bullets) and breaks when health runs out. | `hp` (3), `hitBy` ("bullet"), `points` (10), `removeHitter` (true) |
-| `firstPerson` | First-person controls: joystick to walk, drag the screen to look. | `speed` (6), `look` (0.25), `eye` (0.6), `jump` (9) |
+| `firstPerson` | First-person controls: joystick to walk, drag the screen to look. In a voxel world it hops up one-block steps on its own (auto-jump). | `speed` (6), `look` (0.25), `eye` (0.6), `jump` (9), `autoJump` (on) |
 | `thirdPerson` | Over-the-shoulder controls: joystick moves relative to the camera, drag to turn it. | `speed` (6), `jump` (10), `distance` (7), `height` (25), `look` (0.3) |
 | `car` | Drive with the joystick (up = gas). 3D cars get a chase camera. | `maxSpeed` (320 / 3D 16), `accel` (260 / 3D 12), `turn` (160 / 3D 110), `autoGas`, `chaseCam` |
 | `projectile` | Flies straight the way it faces (bullet templates fired by a Shooter). | `speed` (650 / 3D 30), `life` (2) |
@@ -559,7 +623,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
 | `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |
 | `condition` | When a variable passes a value, do an action (win when enemyHp ≤ 0, lose when hp ≤ 0…). | `var`, `op`, `target`, `action`, … |
-| `voxelBuilder` | Block Builder: tap blocks to break them, or switch to place mode; on-screen buttons change mode and block. | `reach` (6), `block`, `mode` |
+| `voxelBuilder` | Block Builder, with Minecraft-style touch controls: hold a finger still on a block to mine it (a ring fills; stone takes longer than dirt, leaves break fast), tap to place the block picked in the hotbar on the face you tapped, and drag to look. The targeted block gets a dark outline. Survival inventory collects what you mine and counts it in the hotbar. `controls: 'mode buttons'` keeps the old tap-to-break with BREAK/PLACE buttons. | `reach` (6), `controls` (hold to mine / mode buttons), `aim` (finger / crosshair), `hotbar` (`'1,2,3,4,5,6,8,9,12'`), `inventory` (creative / survival), `mineSpeed` (1) |
 | `button` | Tap it (UI or game object) to do an action: start/restart/pause the game, show/hide menus, change variables, jump… Keeps working on title and end screens. | `action`, `value`, `amount`, `sound` |
 | `rules` | Visual logic: WHEN (game starts, every few seconds, touched by tag, tapped, jump/fire button, swipe, variable reaches, destroyed) IF (variable compare, optional) DO (a list of actions). | `rules` |
 | `graph` | Visual Script: node-based logic built in the Node Editor. Events start a chain of actions; value nodes feed numbers and true/false into inputs. | `graph` |

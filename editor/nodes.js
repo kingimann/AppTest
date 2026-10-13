@@ -5,15 +5,15 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Functions: '#6a5acd' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus' };
+const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Functions', 'Physics', 'Sensing', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'list', Functions: 'script' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
-  _events: ['start', 'tap', 'touch', 'update', 'every', 'button', 'swipe', 'onMessage'],
-  _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'destroy'],
-  _bool: ['compare', 'touching', 'grounded', 'isMoving', 'coinFlip', 'and', 'not'],
+  _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
+  _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'goToPage', 'destroy'],
+  _bool: ['compare', 'touching', 'grounded', 'rayHits', 'inTrigger', 'isMoving', 'coinFlip', 'and', 'not'],
   _number: ['number', 'getVar', 'random', 'math', 'distance', 'position'],
   tap: ['addVar', 'punch', 'popText', 'sound', 'pulse', 'playAnim', 'particles', 'destroy'],
   touch: ['destroy', 'damage', 'addVar', 'sound', 'particles', 'playAnim', 'blink'],
@@ -23,6 +23,10 @@ const NEXT = {
   damaged: ['blink', 'playAnim', 'impulse', 'sound'], death: ['playAnim', 'fadeTo', 'particles', 'destroy', 'gameOver'],
   animEnd: ['playAnim', 'destroy', 'sendMessage'], playAnim: ['wait', 'sound', 'particles'],
   tweenMove: ['punch', 'sound', 'particles'], tweenVar: ['popText', 'sound'], delayedCall: ['destroy', 'tweenMove', 'message'],
+  triggerEnter: ['addVar', 'destroy', 'sound', 'particles', 'damage', 'setText'], triggerExit: ['message', 'sound', 'showHide'],
+  collisionEnter: ['branch', 'damage', 'sound', 'impulse', 'particles', 'punch'], landed: ['particles', 'sound', 'punch', 'impulse'],
+  raycast: ['destroy', 'damage', 'push', 'particles', 'setColor'], overlap: ['damage', 'push', 'setColor', 'destroy'], forEachTag: ['setColor', 'push', 'destroy', 'damage'],
+  pickNearest: ['moveToward', 'lookAt', 'damage', 'tweenToObj'], objectNear: ['message', 'playAnim', 'sound', 'lookAt'], explosion: ['particles', 'sound', 'destroy'],
   branch: ['playAnim', 'addVar', 'sound', 'message'], wait: ['playAnim', 'destroy', 'spawn', 'showHide'],
 };
 const RECENT_KEY = 'pocket.recentNodes';
@@ -36,12 +40,67 @@ const CAT_HELP = {
   Animation: 'Play clips, sprite frames, fades and flips.',
   Tween: 'Smooth moves like DOTween: move, jump, shake, spin, pulse, count up, type text; pause, reverse or speed them up.',
   Objects: 'Create, remove and tag objects.',
-  Game: 'Health, items and time.',
+  Game: 'Score, lives, best score, time, items, checkpoints, combos, achievements, dialogue.',
   Flow: 'Decide, wait, repeat, count.',
   Values: 'Numbers and true/false to plug into inputs.',
-  Math: 'Work numbers out.',
+  Math: 'Work numbers out: formulas, random, noise, angles, easing, rounding…',
+  Physics: 'Triggers, collisions, landing, forces and bodies.',
+  Variables: 'Values each object keeps for itself (an enemy\'s hp), and “when a variable reaches…”.',
+  Functions: 'Your own events: name a Custom Event, then Call it from anywhere. Comments keep scripts tidy.',
+  Online: 'Multiplayer rooms (Photon) and accounts, leaderboards and cloud saves (PlayFab). Set them up in Game Settings › Online.',
+  Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  formula: 'Type any math: a * 2 + b, sqrt(a^2 + b^2), score / 10, max(a, lives)… a–d are the inputs; other names are game variables',
+  randomRange: 'A random number between min and max (inputs, so they can be wired)', randomPick: 'Picks one of the inputs at random', noise: 'Smooth random that drifts over time (−1…1): wobbles, flickers, wandering',
+  invLerp: 'Where a value sits between a and b, as 0…1 (50 between 0 and 100 → 0.5)', moveTowards: 'Steps a value toward a target, never past it', angleDiff: 'The shortest turn from angle a to angle b (−180…180)',
+  wrap: 'Keeps a value in a range by wrapping around (370° → 10°)', roundTo: 'Round to some decimal places (3.14159 → 3.14)', percent: 'Part of a total as a percent',
+  easeVal: 'Bend a 0…1 value with an easing curve', vecLength: 'Length of an arrow (x, y, z)', distPoints: 'Distance between two points', anglePoints: 'Angle from one point to another (degrees)',
+  minMax3: 'Smallest, largest, average or total of up to four numbers', between: 'Is a value between min and max?', isEven: 'Is the number even?',
+  addScore: 'Add points, with a “+10” popping up here', loseLife: 'Take a life away; “no lives left” runs at 0 (game over if you like)', gainLife: 'Give lives back, up to a maximum',
+  checkBest: 'Is this score a new best? Saves it if so', addTime: 'Add seconds to the time limit (or set it)', restartLevel: 'Start this level again',
+  setCheckpoint: 'Players come back here when they respawn', respawn: 'Put the player back at their checkpoint', useItem: 'Spend items from the inventory (if there are enough)', hasItem: 'Does the player have enough of an item?',
+  combo: 'Count hits in a row; {combo} drops to 0 after a pause', unlock: 'Unlock an achievement once (kept on this device) with a 🏆 message', isUnlocked: 'Has an achievement been unlocked?',
+  hitStop: 'Freeze the game for a split second on a big hit: makes impacts feel strong', gameSpeed: 'Make the whole game faster or slower (1 = normal)', sayLine: 'Show a dialogue box; “closed” runs when the player taps it away',
+  gameValue: 'Score, lives, best, time left, combo, level number or number of levels', gameStateIs: 'Is the game playing, on the title, over, won or paused?',
+  setMyVar: 'A variable only this object has (each enemy its own hp). Text on it can show {hp}', addMyVar: 'Add to this object\'s own variable', getMyVar: 'Read this object\'s own variable',
+  setOtherVar: 'Set a variable on “other” (what you touched, hit or found)', getOtherVar: 'Read a variable from “other”', varAt: 'Read a named object\'s own variable',
+  onVarReaches: 'Runs once when a variable crosses a value (score ≥ 100), not every frame',
+  customEvent: 'Your own event: runs when a Call Custom Event with the same name happens', callEvent: 'Run a Custom Event here, on “other”, on everything with a tag, or everywhere (with a number)',
+  eventValue: 'The number sent with Call Custom Event', comment: 'A sticky note: explain what a part of the script does',
+  forRange: 'Count from one number to another (Loop Index is the current number)', repeatEvery: 'Run “each” every few seconds, a number of times (0 = forever)', stopRepeat: 'Stop a Repeat Every',
+  cycle: 'Each time it runs, take the next output: 1, 2, 3, 1, 2…', weighted: 'Pick A, B or C at random; bigger numbers are picked more often',
+  gate: 'Lets the script through only while the gate is open', setGate: 'Open, close or flip a named Gate', waitFrames: 'Wait a number of frames (1 = next frame)',
+  onLongPress: 'When the player holds a finger on this object', onDoubleTap: 'When the player taps this object twice quickly',
+  attachTo: 'Stick to another object and move with it (pick up, ride, carry)', detach: 'Let go: stop moving with the parent', spawnLaunch: 'Create a template here and throw it (bullets, balls, sparks)',
+  moveToFinger: 'Move to where the finger is (speed 0 = jump there)', lookAtFinger: 'Turn to face the finger', pauseGame: 'Pause or resume the game',
+  directionTo: 'Which way a tagged object is (−1…1 on each axis)', distBetween: 'How far apart two objects are', snapTo: 'Round to a grid step (32 → 0, 32, 64…)',
+  pingPong: 'Goes 0 → length → 0 as the value grows', sign: 'Is the number negative (−1), zero (0) or positive (1)?', smooth: 'Glides toward the target instead of jumping (for cameras, bars, counters)',
+  chanceOf: 'True some of the time (25 = a quarter of the time)', fingers: 'How many fingers are touching the screen', isPaused: 'Is the game paused?', childCount: 'How many objects are inside this one',
+  netSpawn: 'Create a template for everyone in the room (bullets, pickups); destroying it anywhere removes it for everyone',
+  netConnect: 'Connect to Photon (Join Room does this for you)', netJoin: 'Join a room by name, or any open room; “joined” runs once you are in', netLeave: 'Leave the multiplayer room',
+  netSend: 'Tell everyone else in the room something (they get it as a message)', netShared: 'A variable everyone in the room shares (late joiners get it too)',
+  onNetJoined: 'When you join a room', onPlayerJoined: 'When someone else joins your room', onPlayerLeft: 'When someone leaves your room', onNetMessage: 'When another player sends a network message',
+  netPlayers: 'How many players are in the room', netIsMaster: 'Are you the room host (the first player)?', netInRoom: 'Are you in a multiplayer room?', netValue: 'The number sent with the last network message',
+  pfLogin: 'Sign in to PlayFab (automatic on this device, no password)', pfSubmit: 'Post a score to a PlayFab leaderboard', pfName: 'Set the name shown on leaderboards',
+  pfSave: 'Save variables to the player\'s PlayFab account', pfLoad: 'Load the saved variables back (any device, same player)', pfTitle: 'Load Title Data from PlayFab as variables (tune your live game)',
+  pfEventN: 'Record an event for PlayFab analytics', onPfLogin: 'When the player is signed in to PlayFab', onOnlineError: 'When something online goes wrong ({onlineError} says what)',
+  goToPage: 'Show a UI page (sets the page variable). “open” lets Back return here; “start over” clears the history', goBack: 'Go back a page (closes a popup or side bar first); “nowhere to go” runs when there is no history',
+  onPage: 'When a page opens (the page variable changes to it)', onBack: 'When the player goes back (Back button, phone back gesture, Esc, edge swipe)',
+  pageIs: 'Is this page showing?', canGoBack: 'Is there a page (or popup) to go back from?',
+  triggerEnter: 'When something enters this trigger (or this enters one); it becomes “other”', triggerExit: 'When something leaves the trigger', triggerStay: 'Every frame while something is inside the trigger',
+  collisionEnter: 'When something solid bumps into this; set a speed to ignore soft touches', collisionExit: 'When a solid contact ends', collisionStay: 'Every frame while two solid things touch',
+  landed: 'When this lands on the ground', leftGround: 'When this jumps or falls off the ground',
+  addForce: 'Push with physics: a steady force (use with Every Frame), a one-off impulse, or a straight speed change; heavier things move less',
+  explosion: 'Blast nearby physics objects away, stronger close up', setBodyType: 'Dynamic falls and gets pushed, kinematic only moves by script, static never moves',
+  setTrigger: 'Trigger: things pass through but it still detects them. Solid: they bump.', setLayer: 'Which collision layer this is on (see the layer matrix)', physMaterial: 'Bounciness, slipperiness and weight',
+  impactSpeed: 'How hard the last collision was', inTrigger: 'Is something inside this trigger right now?', isColliding: 'Is this touching something solid right now?',
+  raycast: 'Shoot an invisible line; “hit” runs with what it hit as “other” (blocks too). Turn on “show the ray” to see it', rayHits: 'Does a line hit something? “ahead & down” checks for a ledge in front',
+  hitInfo: 'Where the last ray or collision hit: distance, point, and the surface direction (normal)', overlap: 'Find things within a radius: runs “each” for every one (as “other”), then “found” with the nearest',
+  countRadius: 'How many things with a tag are within a radius', forEachTag: 'Run something for every object with a tag (each one is “other”)',
+  pickNearest: 'Make the nearest object with a tag “other”, then use any “other” node', pickObject: 'Make a named object “other”', lineOfSight: 'Is the nearest tagged object visible, with nothing solid in between?',
+  objectNear: 'When a tagged object comes within range (“near”) and when it goes away (“left”)', screenEnter: 'When this comes onto the screen', screenExit: 'When this goes off the screen',
+  onScreen: 'Is this on the screen?', otherInfo: 'Facts about “other”: position, speed, distance, angle or health', otherHasTag: 'Does “other” have a tag?', hasOther: 'Is there an “other” object here?',
   start: 'When the game starts', update: 'Runs every frame', every: 'Repeats on a timer', touch: 'When something with a tag touches this',
   tap: 'When the player taps this object', button: 'When an on-screen button is pressed', swipe: 'When the player swipes', destroyed: 'When this object is removed',
   branch: 'Go one way if true, another if false', wait: 'Pause, then continue', chance: 'Pick a random path', once: 'Only the first time', sequence: 'Run up to three things in order',
@@ -87,6 +146,9 @@ export const NODE_HELP = {
 
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
+  { label: 'Enemy with its own HP (3 hits)', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'setMyVar', x: 300, y: 0, params: { name: 'hp', value: 3 } }, { id: 'c', type: 'triggerEnter', x: 0, y: 200, params: { tag: 'bullet' } }, { id: 'd', type: 'addMyVar', x: 300, y: 200, params: { name: 'hp', amount: -1 } }, { id: 'e', type: 'punch', x: 600, y: 200, params: { what: 'scale', amount: 0.25 } }, { id: 'f', type: 'compareBranch', x: 900, y: 200, params: { op: '≤', b: 0 } }, { id: 'g', type: 'getMyVar', x: 600, y: 560, params: { name: 'hp' } }, { id: 'h', type: 'particles', x: 1200, y: 160 }, { id: 'i', type: 'destroy', x: 1500, y: 160 }, { id: 'n', type: 'comment', x: -320, y: 0, params: { text: 'Each copy of this enemy keeps its own hp. Bullets need the tag "bullet".' } }], links: [['a', 'then', 'b'], ['c', 'then', 'd'], ['d', 'then', 'e'], ['e', 'then', 'f'], ['g', 'value', 'f', 'a'], ['f', 'yes', 'h'], ['h', 'then', 'i']] },
+  { label: 'Custom event: explode on call', nodes: [{ id: 'a', type: 'customEvent', x: 0, y: 0, params: { name: 'explode' } }, { id: 'b', type: 'particles', x: 300, y: 0, params: { color: '#ff7043' } }, { id: 'c', type: 'impulse', x: 600, y: 0, params: { strength: 14 } }, { id: 'd', type: 'destroy', x: 900, y: 0 }, { id: 'e', type: 'onLongPress', x: 0, y: 220, params: { seconds: 0.6 } }, { id: 'f', type: 'callEvent', x: 300, y: 220, params: { name: 'explode', on: 'all with tag', tag: 'bomb' } }], links: [['a', 'then', 'b'], ['b', 'then', 'c'], ['c', 'then', 'd'], ['e', 'then', 'f']] },
+  { label: 'Wave: 5 enemies, one every 0.8 s', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'repeatEvery', x: 300, y: 0, params: { seconds: 0.8, times: 5 } }, { id: 'c', type: 'weighted', x: 620, y: -40, params: { A: 70, B: 30, C: 0 } }, { id: 'd', type: 'spawn', x: 940, y: -80, params: { template: '' } }, { id: 'e', type: 'spawn', x: 940, y: 120, params: { template: '' } }, { id: 'f', type: 'message', x: 620, y: 240, params: { text: 'That was the last one!', seconds: 1.5 } }], links: [['a', 'then', 'b'], ['b', 'each', 'c'], ['c', 'A', 'd'], ['c', 'B', 'e'], ['b', 'done', 'f']] },
   { label: 'Tap → score + pop', nodes: [{ id: 'a', type: 'tap', x: 0, y: 0 }, { id: 'b', type: 'addVar', x: 300, y: 0, params: { name: 'score', amount: 1 } }, { id: 'c', type: 'punch', x: 600, y: 0, params: { what: 'scale', amount: 0.3, seconds: 0.4 } }], links: [['a', 'then', 'b'], ['b', 'then', 'c']] },
   { label: 'Touch player → hurt + shake', nodes: [{ id: 'a', type: 'touch', x: 0, y: 0, params: { tag: 'player' } }, { id: 'b', type: 'addVar', x: 300, y: 0, params: { name: 'lives', amount: -1 } }, { id: 'c', type: 'impulse', x: 600, y: 0, params: { strength: 14 } }], links: [['a', 'then', 'b'], ['b', 'then', 'c']] },
   { label: 'Every 2s → spawn', nodes: [{ id: 'a', type: 'every', x: 0, y: 0, params: { seconds: 2 } }, { id: 'b', type: 'spawn', x: 300, y: 0, params: { template: '' } }], links: [['a', 'then', 'b']] },
@@ -133,6 +195,8 @@ export function openNodeEditor(opts) {
     const prev = JSON.parse(undo.pop()); g.nodes = prev.nodes; g.links = prev.links;
     undoBtn.disabled = !undo.length; pending = null; render(); emit();
   } }, icon('undo'));
+  const fmtStat = (v) => (typeof v === 'boolean' ? (v ? 'true' : 'false') : typeof v === 'number' ? String(Math.round(v * 100) / 100) : v == null ? '—' : String(v).slice(0, 8));
+  const hasStats = () => g.nodes.some((q) => opts.stats?.(q.id)?.runs);
   const root = h('div', { class: 'ne' },
     h('div', { class: 'ne-top' },
       h('button', { class: 'ne-btn done', onclick: () => close() }, icon('check'), 'Done'),
@@ -232,6 +296,7 @@ export function openNodeEditor(opts) {
   function updateHint() {
     hint.replaceChildren(...(pending
       ? [h('span', {}, 'Now tap a glowing dot to connect'), h('button', { onclick: () => setPending(null) }, 'Cancel')]
+      : hasStats() ? [h('span', {}, 'From your last Play: ×N = times a node ran, = its last value. Faded nodes never ran.')]
       : [h('span', {}, g.nodes.length ? 'Tap a dot, then another dot to wire them · tap a wire to delete it' : 'Events (green) start a script · Actions (blue) do things')]));
   }
 
@@ -245,6 +310,7 @@ export function openNodeEditor(opts) {
     if (n.type === 'showHide' && spec.key === 'object') return pick((opts.objects || []).filter(Boolean), 'this object');
     if (spec.type === 'select') return h('select', { onchange: (e) => set(e.target.value) }, spec.options.map((o) => h('option', { value: o, selected: o === val }, o)));
     if (spec.type === 'bool') return h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
+    if (spec.type === 'longtext') return h('textarea', { rows: 3, spellcheck: true, oninput: (e) => set(e.target.value) }, val ?? '');
     if (spec.type === 'color') return h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value) });
     if (spec.type === 'number') return h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, oninput: (e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) set(v); } });
     const inp = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value) });
@@ -253,11 +319,19 @@ export function openNodeEditor(opts) {
   }
   const port = (n, name, dir, kind, label) => h('span', { class: `port ${dir} k-${kind}`, 'data-node': n.id, 'data-port': name, 'data-dir': dir, 'data-kind': kind, title: label || name },
     h('i', { style: `--c:${KIND_COLOR[kind]}` }));
+  const statOf = (n) => opts.stats?.(n.id);
   function nodeEl(n) {
     const d = def(n), linkedIn = (key) => g.links.some((l) => l.to.node === n.id && l.to.port === key);
+    if (d.comment) { // a sticky note: no wires, just text
+      return h('div', { class: 'ne-node ne-comment' + (selected === n.id ? ' sel' : ''), 'data-id': n.id, style: `left:${n.x}px;top:${n.y}px;width:${NODE_W}px` },
+        h('div', { class: 'ne-head' }, h('span', { class: 'ne-name' }, '📝 Note'), h('button', { class: 'ne-more', title: 'Node menu', onclick: (e) => nodeMenu(n, e.currentTarget) }, icon('more'))),
+        h('div', { class: 'ne-body' }, field(n, d.params[0])));
+    }
+    const st = statOf(n);
     const head = h('div', { class: 'ne-head', style: `background:${CAT_COLOR[d.cat] || '#555'}` },
       d.exec ? port(n, 'in', 'in', 'exec', 'in') : h('span', { class: 'port-sp' }),
       h('span', { class: 'ne-name' }, d.label),
+      st?.runs ? h('span', { class: 'ne-stat', title: 'Times this ran in your last Play' }, d.value ? '= ' + fmtStat(st.value) : '×' + (st.runs > 999 ? Math.round(st.runs / 1000) + 'k' : st.runs)) : null,
       h('button', { class: 'ne-more', title: 'Node menu', onclick: (e) => nodeMenu(n, e.currentTarget) }, icon('more')));
     const rows = [];
     for (const o of d.outs || []) {
@@ -272,7 +346,8 @@ export function openNodeEditor(opts) {
     }
     for (const p of d.params || []) rows.push(h('div', { class: 'ne-row param' }, h('span', { class: 'lbl' }, p.label || p.key), field(n, p)));
     if (!rows.length) rows.push(h('div', { class: 'ne-row note' }, NODE_HELP[n.type] || ''));
-    return h('div', { class: 'ne-node' + (selected === n.id ? ' sel' : ''), 'data-id': n.id, style: `left:${n.x}px;top:${n.y}px;width:${NODE_W}px` }, head, h('div', { class: 'ne-body' }, rows));
+    if (n.off) rows.unshift(h('div', { class: 'ne-row note off-note' }, 'Turned off: the script passes straight through'));
+    return h('div', { class: 'ne-node' + (selected === n.id ? ' sel' : '') + (n.off ? ' off' : '') + (opts.stats && !st?.runs && !d.comment && hasStats() ? ' idle' : ''), 'data-id': n.id, style: `left:${n.x}px;top:${n.y}px;width:${NODE_W}px` }, head, h('div', { class: 'ne-body' }, rows));
   }
   function render() {
     for (const el of world.querySelectorAll('.ne-node')) el.remove();
@@ -285,12 +360,40 @@ export function openNodeEditor(opts) {
     popMenu(anchor, [
       { cap: def(n).label },
       { icon: 'copy', label: 'Duplicate', fn: () => { snap(); const c = JSON.parse(JSON.stringify(n)); c.id = nid(); c.x += 30; c.y += 40; g.nodes.push(c); selected = c.id; emit(); render(); } },
+      { icon: 'copy', label: 'Copy', fn: () => copyNodes([n]) },
+      def(n).outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
+      !def(n).comment && { icon: n.off ? 'eye' : 'eyeoff', label: n.off ? 'Turn On' : 'Turn Off (skip it)', fn: () => { snap(); n.off = !n.off; if (!n.off) delete n.off; emit(); render(); } },
       { icon: 'close', label: 'Remove Wires', fn: () => { snap(); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); emit(); render(); } },
       '-',
       { icon: 'trash', label: 'Delete Node', fn: () => { snap(); g.nodes = g.nodes.filter((q) => q !== n); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); if (selected === n.id) selected = null; emit(); render(); } },
     ]);
   }
 
+  // ---------- copy / paste nodes (works between scripts and games on this device) ----------
+  const CLIP = 'pocket.nodeClip';
+  const clip = () => { try { const c = JSON.parse(localStorage.getItem(CLIP) || 'null'); return c?.nodes?.length ? c : null; } catch { return null; } };
+  /** A node, everything its white wires lead to, and the value nodes feeding them. */
+  function chainFrom(n) {
+    const set = new Set([n.id]), queue = [n.id];
+    while (queue.length) { const id = queue.shift(); for (const l of g.links) if (l.from.node === id && !set.has(l.to.node)) { set.add(l.to.node); queue.push(l.to.node); } }
+    let grew = true; while (grew) { grew = false; for (const l of g.links) if (set.has(l.to.node) && !set.has(l.from.node) && def(g.nodes.find((q) => q.id === l.from.node) || {}).value) { set.add(l.from.node); grew = true; } }
+    return g.nodes.filter((q) => set.has(q.id));
+  }
+  function copyNodes(list) {
+    const ids = new Set(list.map((q) => q.id));
+    try { localStorage.setItem(CLIP, JSON.stringify({ nodes: list, links: g.links.filter((l) => ids.has(l.from.node) && ids.has(l.to.node)) })); } catch { /* storage full */ }
+    toast(list.length === 1 ? 'Node copied: paste it from Add Node' : `${list.length} nodes copied: paste them from Add Node`);
+  }
+  function paste() {
+    const c = clip(); if (!c) return;
+    snap();
+    const A = area.getBoundingClientRect(), minX = Math.min(...c.nodes.map((q) => q.x)), minY = Math.min(...c.nodes.map((q) => q.y)), map = {};
+    const cx = g.nodes.length ? Math.min(...g.nodes.map((q) => q.x)) : (A.width / 2 - tx) / k, cy = g.nodes.length ? Math.max(...g.nodes.map((q) => q.y)) + 260 : (A.height / 3 - ty) / k; // below everything, so nothing overlaps
+    for (const q of c.nodes) { const id = nid(); map[q.id] = id; g.nodes.push({ ...JSON.parse(JSON.stringify(q)), id, x: Math.round(cx + q.x - minX), y: Math.round(cy + q.y - minY) }); }
+    for (const l of c.links) g.links.push({ from: { node: map[l.from.node], port: l.from.port }, to: { node: map[l.to.node], port: l.to.port } });
+    selected = map[c.nodes[0].id]; emit(); render(); toast(`Pasted ${c.nodes.length} node${c.nodes.length > 1 ? 's' : ''}`);
+    const n0 = g.nodes.find((q) => q.id === selected); if (n0) { tx = A.width / 2 - (n0.x + NODE_W / 2) * k; ty = A.height / 3 - n0.y * k; applyView(); drawLinks(); } // show them
+  }
   function templateMenu(anchor) {
     const mine = opts.scripts?.() || [];
     popMenu(anchor, [
@@ -407,8 +510,9 @@ export function openNodeEditor(opts) {
         list.scrollTop = 0;
         return;
       }
-      const recent = recentNodes();
+      const recent = recentNodes(), c = clip();
       list.replaceChildren(
+        ...(c ? [h('button', { class: 'ne-paste', onclick: () => { closePicker(); paste(); } }, icon('paste'), h('b', {}, `Paste ${c.nodes.length} copied node${c.nodes.length > 1 ? 's' : ''}`), h('small', {}, c.nodes.slice(0, 3).map((q) => NODE_TYPES[q.type]?.label).filter(Boolean).join(' → ') + (c.nodes.length > 3 ? ' …' : '')))] : []),
         ...section(sd ? 'Suggested next' : 'Start with an event', suggestions(), true, sd ? `after “${sd.label}”` : 'green nodes start a script'),
         ...section('Recently used', recent, true),
         h('div', { class: 'ne-pcat' }, 'All nodes', h('small', {}, 'by category')),

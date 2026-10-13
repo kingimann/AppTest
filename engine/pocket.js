@@ -131,7 +131,79 @@ export { store as storage };
 // ============================================================================
 export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null, emoji: '' };
 export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false, icon: '' }; // icon: show the value as repeated emoji (hearts)
-export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'theme', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+/** Fonts the font pickers offer: [CSS font-family, name]. 'theme' uses the game's UI theme font; games can add Google Fonts (settings.fonts). */
+export const FONTS = [
+  ['theme', 'Theme font'], ['system-ui, -apple-system, sans-serif', 'Clean'], ['"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', 'Rounded'],
+  ['Georgia, "Times New Roman", serif', 'Classic'], ['ui-monospace, Menlo, Consolas, monospace', 'Retro (mono)'], ['Impact, "Arial Black", sans-serif', 'Bold poster'],
+  ['"Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive', 'Comic'], ['"Courier New", Courier, monospace', 'Typewriter'],
+  ['"Palatino Linotype", Palatino, "Book Antiqua", serif', 'Storybook'], ['"Avenir Next Condensed", "Arial Narrow", sans-serif-condensed, sans-serif', 'Condensed'],
+  ['"Brush Script MT", "Snell Roundhand", "Segoe Script", cursive', 'Handwriting'],
+];
+/** CSS font-family for a Google Font name. */
+export const googleFont = (name) => `"${name}", system-ui, sans-serif`;
+/** Load Google Fonts by name. They need the internet the first time; the browser keeps them after that. */
+export function loadFonts(names) {
+  if (typeof document === 'undefined') return;
+  for (const n of names || []) {
+    const name = String(n || '').trim(), id = 'gf-' + name.replace(/\W+/g, '-');
+    if (!name || document.getElementById(id)) continue;
+    const l = document.createElement('link');
+    l.id = id; l.rel = 'stylesheet'; l.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(name).replace(/%20/g, '+')}&display=swap`;
+    l.onload = () => document.fonts?.load(`16px "${name}"`).catch(() => {}); // canvas text doesn't start a font download by itself
+    document.head.append(l);
+  }
+}
+/** Ready-made looks for the built-in screens, touch controls and any UI that uses the theme font. */
+export const UI_THEMES = {
+  Default: { font: 'system-ui, -apple-system, sans-serif', text: '#ffffff', accent: '#ffd23d', good: '#5dff8a', bad: '#ff5d8f', panel: '#1c2333', overlay: '#05050f', button: '#ffffff', radius: 12 },
+  Neon: { font: '"Avenir Next Condensed", "Arial Narrow", sans-serif-condensed, sans-serif', text: '#e8fbff', accent: '#33f0ff', good: '#7dff5d', bad: '#ff3df0', panel: '#0d0b24', overlay: '#07041a', button: '#33f0ff', radius: 6 },
+  Candy: { font: '"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', text: '#ffffff', accent: '#ffcf4a', good: '#7ee081', bad: '#ff6f91', panel: '#ff8fb8', overlay: '#5b2a6e', button: '#fff0f6', radius: 22 },
+  Retro: { font: 'ui-monospace, Menlo, Consolas, monospace', text: '#f4f4e8', accent: '#ffb000', good: '#41ff00', bad: '#ff4040', panel: '#1a1a1a', overlay: '#000000', button: '#f4f4e8', radius: 0 },
+  Fantasy: { font: '"Palatino Linotype", Palatino, "Book Antiqua", serif', text: '#fff4d6', accent: '#e8b84a', good: '#9be37b', bad: '#e0503c', panel: '#4a2f1b', overlay: '#1f130a', button: '#ffe9b8', radius: 10 },
+  Ocean: { font: 'system-ui, -apple-system, sans-serif', text: '#eaf8ff', accent: '#4fd1ff', good: '#5dffc4', bad: '#ff7a7a', panel: '#0f3a5a', overlay: '#031522', button: '#bfeaff', radius: 16 },
+  Light: { font: 'system-ui, -apple-system, sans-serif', text: '#1d2333', accent: '#3a6ef5', good: '#1f9d55', bad: '#e0364f', panel: '#ffffff', overlay: '#f2f4f8', button: '#1d2333', radius: 14 },
+};
+/** The theme of the scene being drawn (set once per frame). */
+let THEME = UI_THEMES.Default;
+export const themeOf = (settings) => ({ ...UI_THEMES.Default, ...(UI_THEMES[settings?.uiTheme] || {}), ...(settings?.theme || {}) });
+const fontOf = (f) => (!f || f === 'theme' ? THEME.font : f);
+/** '#rrggbb' + alpha → rgba() */
+export function withAlpha(hex, a) { const [r, g, b] = hexToRgb(hex); return `rgba(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)},${a})`; }
+/** A fill: one colour, or a gradient to a second colour across a w × h box centred on 0,0. */
+function paintOf(ctx, c1, c2, dir, w, h) {
+  if (!c2 || !c1) return c1;
+  let g;
+  if (dir === 'radial') g = ctx.createRadialGradient(0, 0, 0, 0, 0, Math.max(w, h) / 2);
+  else if (dir === 'right') g = ctx.createLinearGradient(-w / 2, 0, w / 2, 0);
+  else if (dir === 'diagonal') g = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+  else g = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+  g.addColorStop(0, c1); g.addColorStop(1, c2);
+  return g;
+}
+/** 9-slice: corners stay sharp, edges and middle stretch (for framed panels and buttons from one picture). */
+function drawNine(ctx, img, border, x, y, w, h, k = 1) {
+  const iw = img.naturalWidth, ih = img.naturalHeight, b = Math.max(1, Math.min(border, iw / 2 - 1, ih / 2 - 1)), d = Math.min(b * k, w / 2, h / 2);
+  const sx = [0, b, iw - b, iw], sy = [0, b, ih - b, ih], dx = [x, x + d, x + w - d, x + w], dy = [y, y + d, y + h - d, y + h];
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+    const sw = sx[i + 1] - sx[i], sh = sy[j + 1] - sy[j], dw = dx[i + 1] - dx[i], dh = dy[j + 1] - dy[j];
+    if (sw > 0 && sh > 0 && dw > 0 && dh > 0) ctx.drawImage(img, sx[i], sy[j], sw, sh, dx[i], dy[j], dw, dh);
+  }
+}
+/** Split text into lines: on line breaks ("\n" typed in a text box works too), and to fit a width when given. */
+function textLines(ctx, str, wrap) {
+  const out = [];
+  for (const para of String(str).split(/\n|\\n/)) {
+    if (!(wrap > 0)) { out.push(para); continue; }
+    let line = '';
+    for (const word of para.split(' ')) {
+      const t = line ? line + ' ' + word : word;
+      if (line && ctx.measureText(t).width > wrap) { out.push(line); line = word; } else line = t;
+    }
+    out.push(line);
+  }
+  return out;
+}
 export const LIGHT_DEFAULTS = { color: '#ffd9a0', intensity: 1, range: 160, flicker: 0 }; // 2D range in px, 3D range in units
 export const MESH_DEFAULTS = { geometry: 'box', w: 1, h: 1, d: 1, r: 0.5, color: '#33f0ff', emissive: 0, opacity: 1 };
 export const SPRITE_DEFAULTS = { src: '', w: 64, h: 64 };
@@ -883,6 +955,20 @@ export class Scene {
     if (gl && this.mode !== '3d' && !this.light._driven) { this.light.darkness = clamp(1 - (+gl.globalLight.brightness), 0, 1); this.light.ambientColor = gl.globalLight.color; }
   }
   childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
+  /** Make `c` a child of `p` where it is now (it then moves with p), or free it again with p = null. */
+  attach(c, p) {
+    if (!c || c === p || c.ui) return;
+    for (let q = p; q; q = q.parentEnt) if (q === c) return; // can't hold your own parent
+    if (!p) { c.parentId = null; c.parentEnt = null; c.local = null; c._lw = null; c._parentHidden = false; }
+    else {
+      const l = worldToLocal(p, c.x, c.y, c.z, this.mode);
+      c.parentId = p.id; c.parentEnt = p; c._lw = null;
+      c.local = { x: l[0], y: l[1], z: l[2], rx: (c.rx || 0) - (p.rx || 0), ry: (c.ry || 0) - (p.ry || 0), rz: (c.rz || 0) - (p.rz || 0), sx: c.sx / (p.sx || 1), sy: c.sy / (p.sy || 1), sz: c.sz / (p.sz || 1), visible: c.visible };
+      if (c.body && c.body.type === 'dynamic') c.body.vel = { x: 0, y: 0, z: 0 };
+    }
+    const depth = (e) => { let n = 0, q = e; while (q.parentEnt && n < 50) { q = q.parentEnt; n++; } return n; };
+    this.kids = this.entities.filter((e) => e.parentEnt).sort((a, b) => depth(a) - depth(b));
+  }
 
   find(name) { return this.entities.find((e) => e.name === name && !e.dead) || this.pending.find((e) => e.name === name); }
   findAll(tag) { return this.entities.filter((e) => !e.dead && (e.tags.has(tag) || e.name === tag)); }
@@ -905,6 +991,42 @@ export class Scene {
   itemCount(name) { return this.inventory?.[name]?.n || 0; }
   /** Broadcast a message by name; Tween / Animator / Sprite Animation components and "On Message" nodes can react. */
   send(name, data) { if (name) this.emit('message', String(name), data); }
+
+  // ---- UI navigation: pages with a history, like an app (Back returns to where you were) ----
+  /** Show a page: sets the page variable; with history, Back returns to the page you came from. */
+  navTo(page, v = 'page', o = {}) {
+    page = String(page ?? ''); v = v || 'page';
+    const cur = this.vars[v], st = ((this.navStacks ||= {})[v] ||= []);
+    this.navVar = v;
+    if (o.clear) st.length = 0;
+    if (sameVal(cur, page)) return false;
+    if (o.history !== false && cur != null && cur !== '') { st.push(cur); if (st.length > 50) st.shift(); }
+    this.navDir = o.dir ?? 1; this.navAt = this.time;
+    this.setVar(v, page);
+    this.emit('page', v, page, this.navDir);
+    return true;
+  }
+  /** Go back: closes an open popup or side bar first, then returns to the previous page. False if there's nowhere to go. */
+  navBack(v) {
+    if (this.modal && !this.modal.dead && this.modal.visible && this.modal._dismiss) { this.modal._dismiss(); this.emit('back', null, null); return true; }
+    const stacks = this.navStacks || {};
+    const key = v || (stacks[this.navVar]?.length ? this.navVar : Object.keys(stacks).find((k) => stacks[k].length));
+    const st = stacks[key]; if (!st?.length) return false;
+    const page = st.pop();
+    this.navVar = key; this.navDir = -1; this.navAt = this.time;
+    this.setVar(key, page);
+    this.emit('page', key, page, -1); this.emit('back', key, page);
+    return true;
+  }
+  canGoBack(v) {
+    if (this.modal && !this.modal.dead && this.modal.visible) return true;
+    const st = this.navStacks || {};
+    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length);
+  }
+  /** How many steps Back can take (pages in the history plus an open popup). */
+  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0); }
+  /** Which way the last page change went: 1 forward, -1 back (only for changes made this moment). */
+  navDirection() { return this.navAt === this.time ? this.navDir || 1 : 1; }
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
 
   after(sec, fn) { this.timers.push({ t: sec, fn, every: 0 }); }
@@ -1562,7 +1684,21 @@ const artO = (w = 3) => `stroke="${ART_O}" stroke-width="${w}" stroke-linejoin="
 const artEyes = (y = 26, dx = 6, cx = 32, r = 2.6) => `<circle cx="${cx - dx}" cy="${y}" r="${r}" fill="${ART_O}"/><circle cx="${cx + dx}" cy="${y}" r="${r}" fill="${ART_O}"/>`;
 const artShine = (x, y, r = 3) => `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" opacity=".7"/>`;
 const artIcon = (d, extra = '') => `<path d="${d}" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${extra}`;
+// ---- UI frames: panels and buttons drawn for 9-slice (border 24 px), so they stretch to any size with sharp corners ----
+const artBtn = (c, dark) => `<rect x="2" y="7" width="60" height="55" rx="12" fill="${dark}" ${artO(2)}/><rect x="2" y="2" width="60" height="54" rx="12" fill="${c}" ${artO(2)}/><rect x="9" y="6" width="46" height="4" rx="2" fill="#fff" opacity=".35"/>`;
+const UI_FRAME_ART = {
+  panelDark: `<rect x="2" y="2" width="60" height="60" rx="10" fill="#1d2333" stroke="#5b6b8c" stroke-width="3"/><rect x="7" y="7" width="50" height="50" rx="6" fill="none" stroke="#2c3550" stroke-width="2"/>`,
+  panelWood: `<rect x="2" y="2" width="60" height="60" rx="8" fill="#8a5427" stroke="#3f230c" stroke-width="3"/><rect x="8" y="8" width="48" height="48" rx="4" fill="#c58a4e" stroke="#6e4018" stroke-width="2"/><circle cx="5.5" cy="5.5" r="1.8" fill="#3f230c"/><circle cx="58.5" cy="5.5" r="1.8" fill="#3f230c"/><circle cx="5.5" cy="58.5" r="1.8" fill="#3f230c"/><circle cx="58.5" cy="58.5" r="1.8" fill="#3f230c"/>`,
+  panelStone: `<rect x="2" y="2" width="60" height="60" rx="4" fill="#7d8590" stroke="#30343b" stroke-width="3"/><path d="M5.5 58.5v-53h53" fill="none" stroke="#b3bac4" stroke-width="2.5"/><path d="M5.5 58.5h53v-53" fill="none" stroke="#535a63" stroke-width="2.5"/>`,
+  panelGlass: `<rect x="2" y="2" width="60" height="60" rx="12" fill="#ffffff" fill-opacity=".16" stroke="#ffffff" stroke-opacity=".6" stroke-width="2"/>`,
+  panelParchment: `<rect x="3" y="3" width="58" height="58" rx="6" fill="#f3e2b8" stroke="#7d5a2c" stroke-width="3"/><rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#c9a86a" stroke-width="1.5" stroke-dasharray="3 2"/>`,
+  panelGold: `<rect x="2" y="2" width="60" height="60" rx="6" fill="#2a1b3d" stroke="#e8b84a" stroke-width="4"/><rect x="8" y="8" width="48" height="48" rx="3" fill="none" stroke="#b8862a" stroke-width="1.5"/><path d="M2 8l6-6M56 2l6 6M2 56l6 6M62 56l-6 6" stroke="#ffe08a" stroke-width="2"/>`,
+  panelNeon: `<rect x="3" y="3" width="58" height="58" rx="8" fill="#0d0b24" stroke="#33f0ff" stroke-width="3"/><rect x="7" y="7" width="50" height="50" rx="5" fill="none" stroke="#ff3df0" stroke-width="1.5" opacity=".8"/>`,
+  btnBlue: artBtn('#3a8dff', '#1f4f99'), btnGreen: artBtn('#4cc463', '#23733a'), btnRed: artBtn('#ef5350', '#8e2321'),
+  btnYellow: artBtn('#ffc93d', '#a87310'), btnPurple: artBtn('#9b5cff', '#56279e'), btnGrey: artBtn('#c9ced6', '#6e747d'),
+};
 export const SPRITE_ART = {
+  ...UI_FRAME_ART,
   // characters
   hero: `<rect x="20" y="34" width="24" height="21" rx="6" fill="#3f7fd8" ${artO()}/><rect x="22" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><rect x="35" y="53" width="7" height="7" rx="2" fill="${ART_O}"/><circle cx="32" cy="24" r="14" fill="#ffd3a8" ${artO()}/><path d="M18 23c0-10 7-15 14-15s14 5 14 15c-4-4-9-6-14-6s-10 2-14 6z" fill="#6b3f1f" ${artO()}/>${artEyes(26, 5.5)}<path d="M28 32q4 3 8 0" fill="none" ${artO(2)}/>`,
   girl: `<path d="M20 56l4-22h16l4 22z" fill="#e45c9b" ${artO()}/><path d="M16 40c-2-18 4-32 16-32s18 14 16 32c-4-2-6-8-6-14H22c0 6-2 12-6 14z" fill="#9b4a1c" ${artO()}/><circle cx="32" cy="25" r="12" fill="#ffd3a8" ${artO()}/><path d="M20 22c4-8 20-8 24 0-8-3-16-3-24 0z" fill="#9b4a1c"/>${artEyes(26, 5)}<path d="M29 31q3 2 6 0" fill="none" ${artO(2)}/>`,
@@ -1679,7 +1815,10 @@ export const SPRITE_GROUPS = {
   Vehicles: ['car', 'rocket', 'ufo', 'plane', 'boat'],
   Blocks: ['brick', 'crate', 'grassBlock', 'stone', 'spikes', 'door', 'ladder', 'portal', 'sign', 'torch', 'house', 'castle'],
   Icons: Object.keys(SPRITE_ART).filter((k) => k.startsWith('ui-')),
+  'UI Frames': Object.keys(UI_FRAME_ART),
 };
+/** Built-in UI frames are drawn for 9-slice: use this border so their corners stay sharp. */
+export const frameSlice = (src) => (typeof src === 'string' && /^art:(panel|btn)[A-Z]/.test(src) ? 24 : 0);
 const artCache = new Map();
 /** 'art:slime' → an SVG data URL (other sources pass through). */
 export function artURL(src) {
@@ -1745,7 +1884,8 @@ function drawEntity2D(ctx, e, vars, time) {
   ctx.globalAlpha = alpha;
   const s = e.shape;
   if (s) {
-    if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
+    if (s.shadow) { ctx.shadowColor = s.shadow; ctx.shadowBlur = s.shadowBlur ?? 10; ctx.shadowOffsetX = s.shadowX || 0; ctx.shadowOffsetY = s.shadowY ?? 4; }
+    else if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
     ctx.beginPath();
     switch (s.type) {
       case 'circle': ctx.arc(0, 0, s.r, 0, Math.PI * 2); break;
@@ -1787,20 +1927,29 @@ function drawEntity2D(ctx, e, vars, time) {
       if (e.data.flipX) ctx.scale(-1, 1);
       ctx.fillText(s.emoji || '⭐', 0, s.h * 0.06);
     } else {
-      if (s.fill) { ctx.fillStyle = s.fill; ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
-      if (s.stroke) { ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); }
+      const bw = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.w, bh = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.h;
+      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
+      if (s.shadow) { ctx.shadowColor = 'transparent'; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; } // shadow under the fill only
+      if (s.stroke) {
+        if (s.dash) ctx.setLineDash([s.dash, s.dash * 0.75]);
+        ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke();
+        if (s.dash) ctx.setLineDash([]);
+      }
     }
-    ctx.shadowBlur = 0;
+    ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
     if (img.complete && img.naturalWidth) {
       const S = e.sprite, cols = Math.max(1, S.cols | 0 || 1), rows = Math.max(1, S.rows | 0 || 1);
       if (S.flip) ctx.scale(-1, 1);
+      if (S.radius > 0) { ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-S.w / 2, -S.h / 2, S.w, S.h, S.radius); else ctx.rect(-S.w / 2, -S.h / 2, S.w, S.h); ctx.clip(); }
       if (cols > 1 || rows > 1) { // sprite sheet: draw one cell of the grid
         const fw = img.naturalWidth / cols, fh = img.naturalHeight / rows, f = ((S.frame | 0) % (cols * rows) + cols * rows) % (cols * rows);
         ctx.drawImage(img, (f % cols) * fw, Math.floor(f / cols) * fh, fw, fh, -S.w / 2, -S.h / 2, S.w, S.h);
-      } else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      } else if (S.slice > 0) drawNine(ctx, img, S.slice, -S.w / 2, -S.h / 2, S.w, S.h, S.sliceScale || 1);
+      else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      if (S.radius > 0) ctx.restore();
       if (S.flip) ctx.scale(-1, 1);
     }
   }
@@ -1834,13 +1983,21 @@ function drawEntity2D(ctx, e, vars, time) {
   }
   if (e.text) {
     const t = e.text;
-    ctx.font = `${t.weight} ${t.size}px ${t.font}`;
-    ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    const str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
-    if (t.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
-    if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(str, 0, 0); ctx.shadowColor = 'transparent'; }
-    ctx.fillText(str, 0, 0);
+    ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${t.size}px ${fontOf(t.font)}`;
+    ctx.textAlign = t.align; ctx.textBaseline = 'middle';
+    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
+    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
+    const lines = textLines(ctx, str, +t.wrap || 0), lh = t.size * (+t.lineHeight || 1.2), y0 = -(lines.length - 1) * lh / 2;
+    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, lines.length * lh);
+    lines.forEach((ln, i) => {
+      const y = y0 + i * lh;
+      if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
+      if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); ctx.shadowColor = 'transparent'; }
+      ctx.fillText(ln, 0, y);
+    });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
   ctx.restore();
 }
@@ -2373,6 +2530,7 @@ export class Renderer3D {
     for (const [e, op] of transparent) this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive, op);
     for (const p of scene.particles) this.drawMesh(p.round ? 'sphere' : 'box', M4.trs(p.x, p.y, p.z, 0, 0, 0, p.size, p.size * (p.stretch || 1), p.size), p.color, 1, Math.max(0, p.life) * (p.alpha ?? 1));
     for (const e of scene.entities) if (e.data._line && !e.dead) { const L = e.data._line; this.drawLines(L.slice(0, 6), L[6]); }
+    for (const f of scene.worldDraws || []) f(this, scene); // components that draw in the 3D world (block selection box)
     gl.depthMask(true); gl.disable(gl.BLEND);
     engine.onRenderWorld?.(this, scene);
   }
@@ -2393,7 +2551,7 @@ function drawDialog(ctx, scene, W, H, engine) {
     ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
     ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
   }
-  ctx.fillStyle = '#fff'; ctx.font = '600 17px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.fillStyle = '#fff'; ctx.font = `600 17px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
   const text = line.text.slice(0, Math.floor(d.chars)), words = text.split(' '); let row = '', ty = y + 26;
   for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 && row) { ctx.fillText(row, x + 18, ty); row = w; ty += 24; } else row = t; }
   ctx.fillText(row, x + 18, ty);
@@ -2415,7 +2573,7 @@ function drawMessage(ctx, scene, W, H, engine) {
   const m = scene.msg;
   if (!m) return;
   const maxW = Math.min(W - 40, 460), size = 18, lines = [];
-  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`;
+  ctx.font = `700 ${size}px ${THEME.font}`;
   let line = '';
   for (const word of m.text.split(/\s+/)) {
     const test = line ? line + ' ' + word : word;
@@ -2514,6 +2672,7 @@ function renderUI(engine, scene) {
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
+  THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
   engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
@@ -2521,7 +2680,7 @@ function renderUI(engine, scene) {
     for (const e of scene.entities) {
       if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
       if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
-      if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
+      if (!engine.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== screen) continue; }
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
@@ -2539,19 +2698,20 @@ function renderUI(engine, scene) {
     scene.popups = scene.popups.filter((q) => now - q.t < q.life);
     for (const q of scene.popups) {
       const k = (now - q.t) / q.life;
-      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px system-ui, -apple-system, sans-serif`;
+      ctx.globalAlpha = Math.min(1, (1 - k) * 2); ctx.font = `900 ${Math.round(q.size * (k < 0.15 ? 0.7 + k * 2 : 1))}px ${THEME.font}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.fillStyle = q.color;
       const y = q.y - k * q.rise; ctx.strokeText(q.text, q.x, y); ctx.fillText(q.text, q.x, y);
     }
     ctx.globalAlpha = 1;
   }
 
-  const big = (txt, y, size, color = '#fff') => {
-    ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
+  const TH = THEME, tint = (a) => withAlpha(TH.button, a);
+  const big = (txt, y, size, color = TH.text) => {
+    ctx.font = `900 ${size}px ${TH.font}`;
     ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(txt, W / 2, y);
   };
-  const dim = (a = 0.6) => { ctx.fillStyle = `rgba(5,5,15,${a})`; ctx.fillRect(0, 0, W, H); };
+  const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
   if (scene.state === 'play' && !engine.paused) {
@@ -2560,27 +2720,37 @@ function renderUI(engine, scene) {
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
     if (useStick && st.joystickMode === 'fixed' && !inp.stick) {
       const f = inp.fixedStick(), r = inp.stickRadius;
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = tint(0.4); ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
     }
     if (inp.stick) {
       const s = inp.stick, r = inp.stickRadius;
-      ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2;
+      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(s.bx, s.by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillStyle = tint(0.5);
       ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
     } else if (useStick && st.joystickMode !== 'fixed' && scene.time < 4) {
-      ctx.fillStyle = `rgba(255,255,255,${0.25 * pulse})`; ctx.font = '600 14px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = tint(0.25 * pulse); ctx.font = `600 14px ${TH.font}`; ctx.textAlign = 'center';
       ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
     }
     for (const b of inp.buttons) {
       if (b.hidden) continue; // UI Touch Buttons draw themselves
-      ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
+      if (b.hotbar) { // square inventory slot: block colour, white frame when picked, count in the corner
+        const x = b.x - b.w / 2, y = b.y - b.h / 2;
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, b.w, b.h);
+        ctx.fillStyle = b.color || '#fff'; ctx.fillRect(x + b.w * 0.2, y + b.h * 0.2, b.w * 0.6, b.h * 0.6);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x + b.w * 0.2, y + b.h * 0.62, b.w * 0.6, b.h * 0.18);
+        ctx.strokeStyle = b.selected ? '#ffffff' : 'rgba(255,255,255,0.3)'; ctx.lineWidth = b.selected ? 3 : 1.5;
+        ctx.strokeRect(x, y, b.w, b.h);
+        if (b.label) { ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(b.h * 0.3)}px system-ui, sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(b.label, x + b.w - 3, y + b.h - 1); }
+        continue;
+      }
+      ctx.fillStyle = tint(b.id != null ? 0.35 : 0.12);
+      ctx.strokeStyle = tint(0.4); ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
       if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.stroke(); }
-      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
+      ctx.fillStyle = TH.button; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px ${TH.font}`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
       if (b.action === 'mute' && engine.audio.muted) {
         ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 2.5;
@@ -2609,29 +2779,29 @@ function renderUI(engine, scene) {
   } else if (scene.state === 'title') {
     dim(0.55);
     const t = scene.settings.title;
-    big(t, H * 0.38, Math.min(64, W * 0.9 / Math.max(4, t.length) * 1.6), '#ffffff');
-    if (scene.settings.subtitle) big(scene.settings.subtitle, H * 0.47, 17, 'rgba(220,225,255,0.85)');
-    if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, 'rgba(220,225,255,0.7)');
-    big('Tap to start', H * 0.66, 22, `rgba(255,255,255,${pulse})`);
+    big(t, H * 0.38, Math.min(64, W * 0.9 / Math.max(4, t.length) * 1.6), TH.text);
+    if (scene.settings.subtitle) big(scene.settings.subtitle, H * 0.47, 17, withAlpha(TH.text, 0.85));
+    if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, withAlpha(TH.text, 0.7));
+    big('Tap to start', H * 0.66, 22, withAlpha(TH.text, pulse));
   } else if (scene.state === 'over' || scene.state === 'win') {
     if (scene.time - (scene.endTime ?? scene.time) < 0.5) { drawMessage(ctx, scene, W, H, engine); return; }
     dim(0.65);
     if (scene.levelComplete) {
-      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), '#5dff8a');
-      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
-      big('Tap for the next level', H * 0.62, 20, `rgba(255,255,255,${pulse})`);
+      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), TH.good);
+      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
+      big('Tap for the next level', H * 0.62, 20, withAlpha(TH.text, pulse));
       return;
     }
-    big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? '#5dff8a' : '#ff5d8f');
-    big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
-    if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
-    else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, 'rgba(220,225,255,0.7)');
-    big('Tap to play again', H * 0.66, 20, `rgba(255,255,255,${pulse})`);
+    big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? TH.good : TH.bad);
+    big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
+    if (scene.newBest) big('NEW BEST!', H * 0.54, 16, TH.good);
+    else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, withAlpha(TH.text, 0.7));
+    big('Tap to play again', H * 0.66, 20, withAlpha(TH.text, pulse));
     if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
       const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
       engine.shareRect = { x, y, w, h };
-      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 2;
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, 23); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
       big('Share score', y + h / 2, 17);
     } else engine.shareRect = null;
   }
@@ -2646,7 +2816,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -2826,6 +2996,7 @@ registerBehavior('spawner', {
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
     { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
     { key: 'clear', label: 'Keep clear of others (0 = off)', type: 'number', default: 0 },
+    { key: 'online', label: 'Multiplayer', type: 'select', options: ['each player spawns their own', 'room host spawns for everyone'], default: 'each player spawns their own' },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -2842,7 +3013,9 @@ registerBehavior('spawner', {
         const pos = { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) };
         // don't drop things on top of each other (e.g. a coin inside a barrier)
         if (p.clear && s.entities.some((o) => o.spawned && !o.dead && Math.abs(o.x - pos.x) < p.clear && Math.abs(o.y - pos.y) < p.clear * (s.mode === '3d' ? 2 : 1) && Math.abs(o.z - pos.z) < p.clear)) return;
-        const c = s.spawn(p.template, pos);
+        const O = s.engine.online, shared = p.online === 'room host spawns for everyone' && O?.inRoom();
+        if (shared && !O.isMaster()) return; // the host spawns; everyone else gets the copies
+        const c = shared ? O.spawnForAll(p.template, pos) : s.spawn(p.template, pos);
         if (c) c.spawned = true;
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
@@ -2856,6 +3029,7 @@ registerBehavior('shooter', {
     { key: 'template', label: 'Bullet template', type: 'template', default: '' },
     { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 0.25 },
     { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button', 'tap'], default: 'auto' },
+    { key: 'online', label: 'Multiplayer: bullets appear for everyone', type: 'bool', default: false },
   ],
   create(p) {
     let t = 0;
@@ -2874,7 +3048,7 @@ registerBehavior('shooter', {
           const ry = (e.ry || 0) * DEG, rx = o.rx * DEG;
           o.x += -Math.sin(ry) * Math.cos(rx) * 0.9; o.y += Math.sin(rx) * 0.9; o.z += -Math.cos(ry) * Math.cos(rx) * 0.9;
         }
-        s.spawn(p.template, o);
+        if (p.online && s.engine.online?.inRoom()) s.engine.online.spawnForAll(p.template, o); else s.spawn(p.template, o);
       },
     };
   },
@@ -3707,9 +3881,12 @@ registerBehavior('sound', {
 });
 
 /** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
+/** Which screen a UI element shows on: its own "Show when", or the nearest parent's (things inside a game-over panel belong to game over). */
+function uiScreenOf(e) { for (let q = e, n = 0; q && n < 20; q = q.parentEnt, n++) if (q.showWhen && q.showWhen !== 'always') return q.showWhen; return 'always'; }
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
   if (e._parentHidden || e._clipHidden) return false;
+  if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
@@ -3955,12 +4132,17 @@ const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
 const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
 /** Show or hide a UI element with a little animation. */
-function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
+function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
   const k = 1;
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
-  const off = { 'slide from right': { x: 220 }, 'slide from left': { x: -220 }, 'slide from bottom': { y: 220 }, 'slide from top': { y: -220 } }[anim];
+  const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
+  if (anim === 'zoom') { // pages that grow in and fade out a little larger
+    if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.92; e.sy = base.sy * 0.92; s.to(e, { sx: base.sx, sy: base.sy, alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => done?.() }); }
+    else s.to(e, { sx: base.sx * 1.06, sy: base.sy * 1.06, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    return;
+  }
   if (show) {
     e.visible = true; e.alpha = 0;
     if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
@@ -3972,7 +4154,7 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
     s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
 
 registerBehavior('navItem', {
   label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
@@ -3984,14 +4166,24 @@ registerBehavior('navItem', {
     { key: 'idleColor', label: 'Normal colour', type: 'color', default: '', optional: true },
     { key: 'dimIdle', label: 'Fade when not selected', type: 'bool', default: true },
     { key: 'message', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab' },
   ],
   create(p) {
     let kids = [], was = null;
     return {
-      uiAlways: true,
+      uiAlways: true, page: p.page, var: p.var,
       start(e, s) { if (p.startHere && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, p.page); },
       update(e, dt, s) {
-        if (uiTapped(s, e)) { s.setVar(p.var, p.page); s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message); }
+        if (uiTapped(s, e)) {
+          const open = p.mode === 'open page (Back returns)';
+          let dir = 1;
+          if (!open) { // tabs: slide toward the side the tapped tab is on
+            const cur = s.entities.find((q) => q !== e && !q.dead && q.ui && (() => { const b = q.getBehavior('navItem'); return b && b.var === p.var && sameVal(s.vars[p.var], b.page); })());
+            if (cur) { const a = uiRect(s, e), b = uiRect(s, cur); dir = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y) ? (a.x >= b.x ? 1 : -1) : (a.y >= b.y ? 1 : -1); }
+          }
+          s.navTo(p.page, p.var, { history: open, dir });
+          s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message);
+        }
         const on = sameVal(s.vars[p.var], p.page);
         if (on !== was) { kids = uiKids(s, e); was = on; }
         if (e.shape) e.shape.fill = on ? p.activeColor || '' : p.idleColor || '';
@@ -4028,7 +4220,131 @@ registerBehavior('uiShowIf', {
       start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; },
       update(e, dt, s) {
         const want = test(s.vars[p.var]);
-        if (want !== shown) { shown = want; uiAnimate(s, e, want, p.anim, 0.22); }
+        if (want !== shown) {
+          shown = want;
+          if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
+            const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
+            uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
+          } else uiAnimate(s, e, want, p.anim, 0.22);
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiBack', {
+  label: 'Back Button', description: 'Goes back to the page you came from, closing an open popup or side bar first. It hides itself when there is nowhere to go back to. The phone\'s back gesture, the Esc key and a swipe in from the left edge do the same.',
+  params: [
+    { key: 'var', label: 'Page variable (blank = any)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'hide', label: 'Hide when there is nowhere to go back', type: 'bool', default: true },
+    { key: 'fallback', label: 'Otherwise go to page', type: 'text', default: '' },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const can = s.canGoBack(p.var || undefined) || !!p.fallback;
+        if (p.hide && e.visible !== can && !e._parentHidden) e.visible = can;
+        if (uiTapped(s, e)) {
+          if (!s.navBack(p.var || undefined) && p.fallback) s.navTo(p.fallback, p.var || 'page', { history: false, dir: -1 });
+          s.engine.audio.sfx('click'); s.punch(e, { sx: -0.1, sy: -0.1 }, 0.2, { add: true });
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiPager', {
+  label: 'Swipe Pages', description: 'Swipe left and right between the UI inside it: onboarding screens, a shop carousel, level worlds. Dots show where you are, the page number goes into a variable, and messages like "slide next" move it.',
+  params: [
+    { key: 'var', label: 'Page number variable', type: 'text', default: 'slide', suggest: 'vars' },
+    { key: 'dots', label: 'Show dots', type: 'bool', default: true },
+    { key: 'dotColor', label: 'Dot colour', type: 'color', default: '#ffffff' },
+    { key: 'loop', label: 'Loop around', type: 'bool', default: false },
+    { key: 'auto', label: 'Auto-advance every (sec, 0 = off)', type: 'number', default: 0, range: [0, 10], step: 0.5 },
+    { key: 'message', label: 'Message name', type: 'text', default: 'slide', suggest: 'messages' },
+  ],
+  create(p) {
+    let kids = [], i = 0, off = 0, drag = null, sx = 0, from = 0, vel = 0, lastX = 0, timer = 0, moved = false, ref = null;
+    const width = (s, e) => uiRect(s, e).w / (uiK(s.engine.safe) || 1);
+    const go = (s, j) => {
+      const n = kids.length; if (!n) return;
+      j = p.loop ? ((j % n) + n) % n : clamp(j, 0, n - 1);
+      if (j !== i) { i = j; s.setVar(p.var, i + 1); s.engine.audio.sfx('click'); }
+      timer = 0;
+    };
+    return {
+      uiAlways: true,
+      get index() { return i; },
+      start(e, s) {
+        kids = uiKids(s, e).sort((a, b) => a.x - b.x);
+        for (const q of kids) q._pagerY = q.y;
+        i = clamp(Math.round(+s.vars[p.var] || 1) - 1, 0, Math.max(0, kids.length - 1));
+        off = -i * width(s, e); s.setVar(p.var, i + 1);
+        const pre = p.message || 'slide';
+        s.on('message', (m) => {
+          if (e.dead) return;
+          if (m === pre + ' next') go(s, i + 1); else if (m === pre + ' prev' || m === pre + ' back') go(s, i - 1);
+          else if (m.startsWith(pre + ' ') && Number.isFinite(+m.slice(pre.length + 1))) go(s, +m.slice(pre.length + 1) - 1);
+        });
+        s.on('var', (k, v) => { if (k === p.var && !e.dead) { const j = Math.round(+v || 1) - 1; if (j !== i && j >= 0 && j < kids.length) { i = j; timer = 0; } } });
+        if (p.dots !== false) (s.overlays ||= []).push(ref = (ctx) => {
+          if (e.dead || !e.visible || e._parentHidden || kids.length < 2 || s.engine.editing) return;
+          const r = uiRect(s, e), gap = 16, x0 = r.x - (kids.length - 1) * gap / 2, y = r.y + r.h / 2 - 14;
+          ctx.save(); ctx.globalAlpha = e.alpha ?? 1; ctx.fillStyle = p.dotColor || '#fff';
+          kids.forEach((_, j) => { ctx.globalAlpha = (e.alpha ?? 1) * (j === i ? 1 : 0.35); ctx.beginPath(); ctx.arc(x0 + j * gap, y, j === i ? 4.5 : 3.5, 0, Math.PI * 2); ctx.fill(); });
+          ctx.restore();
+        });
+      },
+      update(e, dt, s) {
+        if (!kids.length) return;
+        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, w = r.w / k;
+        const inside = (q) => Math.abs(q.x - r.x) <= r.w / 2 && Math.abs(q.y - r.y) <= r.h / 2;
+        const live = e.visible && !e._parentHidden;
+        if (live && drag == null) for (const d of inp.downs) if (inside(d)) { drag = d.id; sx = lastX = d.x; from = off; vel = 0; moved = false; }
+        const ptr = drag != null && inp.pointers.get(drag);
+        if (ptr) {
+          const dx = (ptr.x - sx) / k, edge = !p.loop && ((i === 0 && dx > 0) || (i === kids.length - 1 && dx < 0));
+          off = from + (edge ? dx * 0.35 : dx); // rubber-band at the ends
+          vel = vel * 0.6 + ((ptr.x - lastX) / k / Math.max(dt, 1e-3)) * 0.4; lastX = ptr.x;
+          if (Math.abs(ptr.x - sx) > 10) moved = true;
+        } else if (drag != null) {
+          const dx = off - from; drag = null;
+          if (dx < -w * 0.2 || vel < -400) go(s, i + 1); else if (dx > w * 0.2 || vel > 400) go(s, i - 1);
+        } else {
+          off += (-i * w - off) * Math.min(1, dt * 12);
+          if (+p.auto > 0 && live && kids.length > 1 && (timer += dt) >= +p.auto) go(s, p.loop || i < kids.length - 1 ? i + 1 : 0);
+        }
+        if (moved) inp.taps = inp.taps.filter((t) => !inside(t)); // a swipe isn't a tap on what's inside
+        kids.forEach((q, j) => {
+          q.x = j * w + off; q.y = q._pagerY;
+          const qr = uiRect(s, q);
+          q._clipHidden = qr.x + qr.w / 2 <= r.x - r.w / 2 + 1 || qr.x - qr.w / 2 >= r.x + r.w / 2 - 1;
+        });
+      },
+      destroy(e, s) { if (ref) s.overlays = (s.overlays || []).filter((f) => f !== ref); },
+    };
+  },
+});
+
+registerBehavior('uiTabIndicator', {
+  label: 'Tab Indicator', description: 'A bar or pill that slides under the selected tab. Put it inside the tab bar, next to its Nav Item tabs.',
+  params: [
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'matchWidth', label: 'Grow to the tab\'s width', type: 'bool', default: true },
+    { key: 'speed', label: 'Slide speed', type: 'number', default: 14, range: [2, 40], step: 1 },
+  ],
+  create(p) {
+    let first = true;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const tab = s.entities.find((q) => q !== e && !q.dead && q.ui && q.parentEnt === e.parentEnt && (() => { const b = q.getBehavior('navItem'); return b && b.var === p.var && sameVal(s.vars[p.var], b.page); })());
+        if (!tab) return;
+        const k = first ? 1 : Math.min(1, dt * (+p.speed || 14)), tw = tab.shape ? (tab.shape.type === 'circle' ? tab.shape.r * 2 : tab.shape.w) : (tab.extents().hx || 40) * 2;
+        e.x += (tab.x - e.x) * k;
+        if (p.matchWidth !== false && e.shape && e.shape.type !== 'circle') e.shape.w += (tw - e.shape.w) * k;
+        first = false;
       },
     };
   },
@@ -4237,7 +4553,7 @@ registerBehavior('uiLayout', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && (p.tag ? q.has(p.tag) : q.parentEnt === e));
+        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && !q.getBehavior('uiTabIndicator') && (p.tag ? q.has(p.tag) : q.parentEnt === e));
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
         const eng = s.engine, place = (q, cx, cy) => placeUI(q, cx, cy, eng.width, eng.height, eng.safe);
@@ -4729,9 +5045,23 @@ registerBehavior('firstPerson', {
     { key: 'look', label: 'Look sensitivity', type: 'number', default: 0.25 },
     { key: 'eye', label: 'Eye height above center', type: 'number', default: 0.6 },
     { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 9 },
+    { key: 'autoJump', label: 'Auto-jump up blocks', type: 'bool', default: true },
   ],
   create(p) {
     let yaw = 0, pitch = 0;
+    /** Walking into a one-block step of a voxel world with room above it: hop up, like Minecraft's auto-jump. */
+    const stepAhead = (e, s, b) => {
+      const l = Math.hypot(b.vel.x, b.vel.z);
+      if (l < 0.5) return false;
+      const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
+      for (const w of s.entities) {
+        if (!w.voxels || w.dead) continue;
+        const V = w.voxels, sz = V.size, ax = e.x + b.vel.x / l * (hx + 0.2), az = e.z + b.vel.z / l * (hx + 0.2);
+        const [i, j, k] = V.cell(w, ax, e.y - hy + sz * 0.5, az), [pi, pj, pk] = V.cell(w, e.x, e.y + hy + sz * 0.5, e.z);
+        if (V.get(i, j, k) && !V.get(i, j + 1, k) && !V.get(i, j + 2, k) && !V.get(pi, pj, pk)) return true;
+      }
+      return false;
+    };
     return {
       start(e, s) {
         e.ensureBody({ type: 'dynamic' });
@@ -4747,6 +5077,7 @@ registerBehavior('firstPerson', {
         b.vel.x = (f.x * -a.y + r.x * a.x) * p.speed;
         b.vel.z = (f.z * -a.y + r.z * a.x) * p.speed;
         if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        else if (p.jump && p.autoJump !== false && b.grounded && stepAhead(e, s, b)) b.vel.y = Math.max(p.jump, Math.sqrt(-2 * (s.gravity || -25) * 1.25));
         e.ry = yaw / DEG; e.data.aimPitch = pitch / DEG;
         const eye = { x: e.x, y: e.y + p.eye, z: e.z }, cp = Math.cos(pitch);
         s.camera.position = eye;
@@ -5096,6 +5427,14 @@ function runAction(s, e, p, other) {
     case 'set gravity': s.gravity = +p.amount || 0; break;
     case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
     case 'send message': s.send(v); break;
+    case 'go to page': { const [a, b] = String(v || 'home').split('='); if (b !== undefined) s.navTo(b.trim(), a.trim()); else s.navTo(a.trim(), 'page'); break; } // "shop", or "tab = weekly" for another variable
+    case 'go back': s.navBack(); break;
+    case 'join online room': s.engine.online.join(v && v !== 'Hello!' ? v : ''); break; // value: a room name, or blank for any open room
+    case 'leave online room': s.engine.online.leave(); break;
+    case 'send network message': s.engine.online.sendMessage(v, p.amount); break;
+    case 'submit score online': s.engine.online.pfSubmit(v && v !== 'Hello!' ? v : 'score', s.vars[v && v !== 'Hello!' ? v : 'score'] ?? s.vars.score); break; // value: the statistic (and variable) name
+    case 'cloud save': s.engine.online.pfSave(); break;
+    case 'cloud load': s.engine.online.pfLoad(); break;
     case 'play animation': playClip(e, v); break;
     default: break;
   }
@@ -5543,49 +5882,148 @@ registerBehavior('condition', {
   },
 });
 
+// seconds to mine each block (by palette slot) and the pitch of its break sound
+const VOXEL_HARDNESS = [0, 0.5, 0.45, 1.1, 0.8, 0.2, 0.45, 0.35, 1.1, 0.3, 2.5, 1.3, 0.9];
+const VOXEL_PITCH = [0, 150, 130, 230, 170, 260, 200, 320, 210, 280, 110, 360, 420];
+
 registerBehavior('voxelBuilder', {
-  label: 'Block Builder', description: 'Minecraft-style building: tap a block to break it, or switch to Place and tap to add blocks. Buttons swap mode and block.',
+  label: 'Block Builder', description: 'Minecraft-style building: hold on a block to mine it, tap to place the block picked in the hotbar. Survival mode collects the blocks you mine.',
   params: [
     { key: 'reach', label: 'Reach (blocks)', type: 'number', default: 6 },
-    { key: 'block', label: 'Starting block (1–12)', type: 'number', default: 3 },
-    { key: 'mode', label: 'Starting mode', type: 'select', options: ['break', 'place'], default: 'break' },
+    { key: 'controls', label: 'Controls', type: 'select', options: ['hold to mine', 'mode buttons'], default: 'hold to mine' },
+    { key: 'aim', label: 'Aim with', type: 'select', options: ['finger', 'crosshair'], default: 'finger' },
+    { key: 'hotbar', label: 'Hotbar blocks (1–12)', type: 'text', default: '1,2,3,4,5,6,8,9,12' },
+    { key: 'inventory', label: 'Inventory', type: 'select', options: ['creative', 'survival'], default: 'creative' },
+    { key: 'mineSpeed', label: 'Mining speed', type: 'number', default: 1 },
+    { key: 'block', label: 'Starting block (mode buttons)', type: 'number', default: 3 },
+    { key: 'mode', label: 'Starting mode (mode buttons)', type: 'select', options: ['break', 'place'], default: 'break' },
   ],
   create(p) {
-    let mode = p.mode, block = p.block;
+    const classic = p.controls === 'mode buttons', survival = p.inventory === 'survival';
+    let mode = p.mode, block = p.block, sel = 0, touch = null, target = null, mine = null, refO, refW;
+    const inv = {}, got = []; // survival: block counts, in the order they were first collected
+    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    const slots = (V) => (survival ? got.filter((c) => inv[c] > 0) : String(p.hotbar ?? '').split(',').map(Number).filter((c) => c >= 1 && c <= V.palette.length));
     const syncButtons = (s, V) => {
-      const col = V?.palette[(block - 1) % V.palette.length] || '#fff';
-      s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      if (!V) return;
+      if (classic) {
+        const col = V.palette[(block - 1) % V.palette.length] || '#fff';
+        s.customButtons = [{ action: 'vmode', label: mode === 'break' ? 'BREAK' : 'PLACE' }, { action: 'vblock', label: '', color: col }];
+      } else {
+        const list = slots(V); sel = clamp(sel, 0, Math.max(0, list.length - 1));
+        s.customButtons = list.map((c, i) => ({ action: 'hb' + i, hotbar: true, label: survival ? String(inv[c]) : '', color: V.palette[c - 1], selected: i === sel }));
+      }
       s.engine.layoutButtons();
     };
-    const world = (s) => s.entities.find((w) => w.voxels && !w.dead);
+    const cast = (s, W, e, x, y) => {
+      const ray = s.engine.renderer.screenRay(s, x, y), cam = s.camera.position;
+      if (!ray) return null;
+      return W.voxels.raycast(W, ray.origin, ray.dir, p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z));
+    };
+    const center = (s) => ({ x: s.engine.width / 2, y: s.engine.height / 2 });
+    const breakBlock = (e, s, W, hit) => {
+      const V = W.voxels, sz = V.size, c = V.get(hit.i, hit.j, hit.k), col = V.palette[(c - 1) % V.palette.length];
+      V.set(hit.i, hit.j, hit.k, 0);
+      s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
+      const f = VOXEL_PITCH[c] || 180;
+      s.engine.audio.tone({ freq: f, to: f / 2, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
+      s.addVar('blocks', 1);
+      if (survival) { if (!got.includes(c)) got.push(c); const had = slots(V).length; inv[c] = (inv[c] || 0) + 1; if (slots(V).length === 1 && !had) sel = 0; syncButtons(s, V); }
+    };
+    const placeBlock = (e, s, W, hit, c) => {
+      const V = W.voxels, sz = V.size;
+      const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
+      const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
+      const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
+      if (inside || V.get(ni, nj, nk)) return false; // don't build inside yourself
+      V.set(ni, nj, nk, c);
+      s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+      if (survival) { inv[c]--; syncButtons(s, V); }
+      return true;
+    };
     return {
-      start(e, s) { syncButtons(s, world(s)?.voxels); },
+      start(e, s) {
+        const W = world(s);
+        syncButtons(s, W?.voxels);
+        if (classic) return;
+        // the block under your finger gets a dark outline, like Minecraft's selection box
+        (s.worldDraws ||= []).push(refW = (r) => {
+          if (!target || !target.W || target.W.dead) return;
+          const V = target.W.voxels, sz = V.size, g = 0.004;
+          const x0 = target.W.x + target.i * sz - g, y0 = target.W.y + target.j * sz - g, z0 = target.W.z + target.k * sz - g, x1 = x0 + sz + 2 * g, y1 = y0 + sz + 2 * g, z1 = z0 + sz + 2 * g;
+          const P = [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [x0, y1, z0], [x1, y1, z0], [x1, y1, z1], [x0, y1, z1]], pts = [];
+          for (const [a, b] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) pts.push(...P[a], ...P[b]);
+          r.drawLines(pts, '#000000', 0.75);
+        });
+        // a ring that fills while you mine
+        (s.overlays ||= []).push(refO = (ctx) => {
+          if (!mine || !mine.at || mine.prog <= 0) return;
+          const x = mine.at.x, y = mine.at.y - (p.aim === 'crosshair' ? 0 : 64), R = 22, k = clamp(mine.prog / mine.need, 0, 1);
+          ctx.save(); ctx.lineWidth = 6; ctx.lineCap = 'round';
+          ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = '#ffffff'; ctx.beginPath(); ctx.arc(x, y, R, -Math.PI / 2, -Math.PI / 2 + k * Math.PI * 2); ctx.stroke();
+          ctx.restore();
+        });
+      },
       update(e, dt, s) {
         const inp = s.engine.input, W = world(s);
         if (!W) return;
-        if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, W.voxels); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
-        if (inp.pressed('btn:vblock')) { block = block % W.voxels.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, W.voxels); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
-        for (const t of inp.taps) {
-          const ray = s.engine.renderer.screenRay(s, t.x, t.y), cam = s.camera.position;
-          const max = p.reach * W.voxels.size + Math.hypot(cam.x - e.x, cam.y - e.y, cam.z - e.z);
-          const hit = W.voxels.raycast(W, ray.origin, ray.dir, max);
-          if (!hit) continue;
-          const V = W.voxels, sz = V.size;
-          if (mode === 'break') {
-            const col = V.palette[(V.get(hit.i, hit.j, hit.k) - 1) % V.palette.length];
-            V.set(hit.i, hit.j, hit.k, 0);
-            s.burst(W.x + (hit.i + 0.5) * sz, W.y + (hit.j + 0.5) * sz, W.z + (hit.k + 0.5) * sz, col, 14, 0.6);
-            s.engine.audio.tone({ freq: 180, to: 90, dur: 0.12, type: 'square', vol: 0.08 }); s.engine.vibrate(10);
-            s.addVar('blocks', 1);
-          } else {
-            const ni = hit.i + hit.n[0], nj = hit.j + hit.n[1], nk = hit.k + hit.n[2];
-            const cx = W.x + (ni + 0.5) * sz, cy = W.y + (nj + 0.5) * sz, cz = W.z + (nk + 0.5) * sz, ex = e.extents();
-            const inside = Math.abs(cx - e.x) < (ex.hx || ex.r) + sz / 2 && Math.abs(cy - e.y) < (ex.hy || ex.r) + sz / 2 && Math.abs(cz - e.z) < (ex.hz || ex.r) + sz / 2;
-            if (inside) continue; // don't build inside yourself
-            V.set(ni, nj, nk, block);
-            s.engine.audio.tone({ freq: 300, to: 420, dur: 0.08, type: 'triangle', vol: 0.08 }); s.engine.vibrate(8);
+        const V = W.voxels;
+        if (classic) {
+          if (inp.pressed('btn:vmode')) { mode = mode === 'break' ? 'place' : 'break'; syncButtons(s, V); s.message(mode === 'break' ? 'Tap a block to break it' : `Placing ${VOXEL_NAMES[(block - 1) % 12] || 'blocks'}`, 1); }
+          if (inp.pressed('btn:vblock')) { block = block % V.palette.length + 1; if (mode !== 'place') mode = 'place'; syncButtons(s, V); s.message(VOXEL_NAMES[block - 1] || `Block ${block}`, 0.8); }
+          for (const t of inp.taps) {
+            const hit = cast(s, W, e, t.x, t.y);
+            if (!hit) continue;
+            if (mode === 'break') breakBlock(e, s, W, hit); else placeBlock(e, s, W, hit, block);
           }
+          return;
         }
+        // hotbar: tap a slot to pick that block
+        const list = slots(V);
+        for (let i = 0; i < list.length; i++) if (inp.pressed('btn:hb' + i) && sel !== i) {
+          sel = i; for (const b of inp.buttons) if (b.hotbar) b.selected = b.action === 'hb' + i;
+          s.message(VOXEL_NAMES[list[i] - 1] || `Block ${list[i]}`, 0.7);
+        }
+        // one finger on the look side: hold still to mine, quick tap to place, drag to look around
+        if (!touch) { const d = inp.downs[0]; if (d) touch = { id: d.id, sx: d.x, sy: d.y, lx: d.x, ly: d.y, held: 0, still: 0, moved: false, mining: false }; }
+        const ptr = touch && inp.pointers.get(touch.id);
+        target = null;
+        if (touch && ptr) {
+          touch.held += dt;
+          const step = Math.hypot(ptr.x - touch.lx, ptr.y - touch.ly); touch.lx = ptr.x; touch.ly = ptr.y;
+          if (Math.hypot(ptr.x - touch.sx, ptr.y - touch.sy) > 14) touch.moved = true;
+          touch.still = step > 2.5 ? 0 : touch.still + dt;
+          if (touch.still >= 0.3) touch.mining = true; // a pause after looking around starts mining too
+          const at = p.aim === 'crosshair' ? center(s) : ptr, hit = cast(s, W, e, at.x, at.y);
+          if (hit) target = { ...hit, W };
+          if (touch.mining && hit) {
+            const key = `${hit.i},${hit.j},${hit.k}`, c = V.get(hit.i, hit.j, hit.k);
+            if (!mine || mine.key !== key) mine = { key, prog: 0, need: Math.max(0.15, VOXEL_HARDNESS[c] ?? 0.6) / Math.max(0.05, p.mineSpeed || 1), chip: 0 };
+            mine.at = { x: at.x, y: at.y }; mine.prog += dt; mine.chip -= dt;
+            if (mine.chip <= 0) { // little chips fly off while you dig
+              mine.chip = 0.18; const sz = V.size;
+              s.burst(W.x + (hit.i + 0.5 + hit.n[0] * 0.5) * sz, W.y + (hit.j + 0.5 + hit.n[1] * 0.5) * sz, W.z + (hit.k + 0.5 + hit.n[2] * 0.5) * sz, V.palette[(c - 1) % V.palette.length], 3, 0.3);
+              s.engine.audio.tone({ freq: (VOXEL_PITCH[c] || 180) * 1.5, to: VOXEL_PITCH[c] || 180, dur: 0.04, type: 'square', vol: 0.03 });
+            }
+            if (mine.prog >= mine.need) { breakBlock(e, s, W, hit); mine = null; }
+          } else if (!hit) mine = null;
+        } else if (touch) {
+          // finger lifted: a quick tap (not a look drag) places the picked block on the face you touched
+          const up = inp.ups.find((u) => u.id === touch.id);
+          if (up && !touch.moved && !touch.mining && touch.held < 0.3) {
+            const at = p.aim === 'crosshair' ? center(s) : up, hit = cast(s, W, e, at.x, at.y), c = slots(V)[sel];
+            if (hit && c) placeBlock(e, s, W, hit, c);
+            else if (hit && survival) s.message('Mine some blocks first', 1);
+          }
+          touch = null; mine = null;
+        }
+        if (!touch && p.aim === 'crosshair') { const c = center(s), hit = cast(s, W, e, c.x, c.y); if (hit) target = { ...hit, W }; }
+      },
+      destroy(e, s) {
+        s.overlays = (s.overlays || []).filter((f) => f !== refO);
+        s.worldDraws = (s.worldDraws || []).filter((f) => f !== refW);
+        s.customButtons = []; s.engine.layoutButtons();
       },
     };
   },
@@ -6034,7 +6472,7 @@ export const NODE_TYPES = {
   velocity: { cat: 'Values', label: 'My Velocity', value: 'number', params: [opt('axis', ['x', 'y', 'z', 'speed'], 'x', 'axis')] },
   touching: { cat: 'Values', label: 'Is Touching', value: 'bool', params: [txt('tag', 'player', 'tag')] },
   canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
-  math1: { cat: 'Math', label: 'Math (one value)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }], params: [opt('op', ['abs', 'round', 'floor', 'ceil', 'sqrt', 'negate', 'sin', 'cos'], 'abs', 'operation')] },
+  math1: { cat: 'Math', label: 'Math (one value)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }], params: [opt('op', ['abs', 'round', 'floor', 'ceil', 'sqrt', 'negate', 'sin', 'cos', 'tan', 'square', 'cube root', 'reciprocal', 'fraction', 'log', 'exp'], 'abs', 'operation')] },
   clamp: { cat: 'Math', label: 'Clamp', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 10 }] },
   lerp: { cat: 'Math', label: 'Lerp (blend)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 10 }, { key: 't', type: 'number', default: 0.5 }] },
   loopIndex: { cat: 'Math', label: 'Loop Index', value: 'number' },
@@ -6050,12 +6488,158 @@ export const NODE_TYPES = {
   choose: { cat: 'Math', label: 'Choose (if)', value: 'number', inputs: [{ key: 'condition', type: 'bool', default: true }, { key: 'yes', type: 'number', default: 1 }, { key: 'no', type: 'number', default: 0 }] },
   wave: { cat: 'Math', label: 'Wave', value: 'number', inputs: [{ key: 'size', type: 'number', default: 1 }, { key: 'speed', type: 'number', default: 1 }], params: [opt('shape', ['sine', 'triangle', 'square'], 'sine', 'shape')] },
   remap: { cat: 'Math', label: 'Remap', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0.5 }, { key: 'fromMin', type: 'number', default: 0 }, { key: 'fromMax', type: 'number', default: 1 }, { key: 'toMin', type: 'number', default: 0 }, { key: 'toMax', type: 'number', default: 100 }] },
-  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z', 'rotation', 'scale', 'opacity'], 'x', 'axis')] },
   deltaTime: { cat: 'Values', label: 'Frame Time', value: 'number' },
   isHolding: { cat: 'Values', label: 'Finger On Screen', value: 'bool' },
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
   level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  // per-object variables (each copy keeps its own: an enemy's hp, a door's state). Text on the object can show them: {hp}
+  setMyVar: { cat: 'Variables', label: 'Set My Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  addMyVar: { cat: 'Variables', label: 'Add To My Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
+  getMyVar: { cat: 'Variables', label: 'My Variable', value: 'number', params: [txt('name', 'hp', 'variable')] },
+  setOtherVar: { cat: 'Variables', label: 'Set Other\'s Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  getOtherVar: { cat: 'Variables', label: 'Other\'s Variable', value: 'number', params: [txt('name', 'hp', 'variable')] },
+  varAt: { cat: 'Variables', label: 'Variable Of Object', value: 'number', params: [txt('object', 'Player', 'object or tag'), txt('name', 'hp', 'variable')] },
+  onVarReaches: { cat: 'Variables', label: 'When Variable Reaches', outs: ['then'], params: [txt('name', 'score', 'variable'), opt('op', ['≥', '≤', '=', '>', '<'], '≥', 'is'), num('value', 100, 'value')] },
+  // functions: custom events you call by name (here, on the other object, on everything with a tag, or everywhere)
+  customEvent: { cat: 'Functions', label: 'Custom Event', outs: ['then'], params: [txt('name', 'explode', 'event name')] },
+  callEvent: { cat: 'Functions', label: 'Call Custom Event', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'other', 'all with tag', 'everything'], 'this object', 'on'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  eventValue: { cat: 'Functions', label: 'Event Value', value: 'number' },
+  comment: { cat: 'Functions', label: 'Comment', comment: true, outs: [], params: [{ key: 'text', type: 'longtext', default: 'What this part of the script does…', label: 'note' }] },
+  // more flow
+  forRange: { cat: 'Flow', label: 'For Range', exec: true, outs: ['each', 'done'], inputs: [{ key: 'from', type: 'number', default: 1 }, { key: 'to', type: 'number', default: 5 }, { key: 'step', type: 'number', default: 1 }] },
+  repeatEvery: { cat: 'Flow', label: 'Repeat Every', exec: true, outs: ['each', 'done'], inputs: [{ key: 'seconds', type: 'number', default: 0.5 }, { key: 'times', type: 'number', default: 5 }], params: [txt('id', '', 'stop with Stop Repeat (id)')] },
+  stopRepeat: { cat: 'Flow', label: 'Stop Repeat', exec: true, outs: ['then'], params: [txt('id', '', 'id (blank = all on this object)')] },
+  cycle: { cat: 'Flow', label: 'Cycle', exec: true, outs: ['1', '2', '3', '4'], params: [num('count', 3, 'outputs used (2–4)')] },
+  weighted: { cat: 'Flow', label: 'Weighted Random', exec: true, outs: ['A', 'B', 'C'], inputs: [{ key: 'A', type: 'number', default: 60 }, { key: 'B', type: 'number', default: 30 }, { key: 'C', type: 'number', default: 10 }] },
+  gate: { cat: 'Flow', label: 'Gate', exec: true, outs: ['open', 'closed'], params: [txt('name', 'door', 'gate name'), { key: 'startOpen', type: 'bool', default: true, label: 'starts open' }] },
+  setGate: { cat: 'Flow', label: 'Open / Close Gate', exec: true, outs: ['then'], params: [txt('name', 'door', 'gate name'), opt('mode', ['open', 'close', 'toggle'], 'close', 'make it')] },
+  waitFrames: { cat: 'Flow', label: 'Wait Frames', exec: true, outs: ['then'], inputs: [{ key: 'frames', type: 'number', default: 1 }] },
+  // touch on this object
+  onLongPress: { cat: 'Events', label: 'On Long Press', outs: ['then'], params: [num('seconds', 0.5, 'hold for (sec)')] },
+  onDoubleTap: { cat: 'Events', label: 'On Double Tap', outs: ['then'] },
+  // more actions
+  attachTo: { cat: 'Objects', label: 'Attach To', exec: true, outs: ['then'], params: [opt('to', ['other', 'object'], 'other', 'attach to'), txt('object', 'Player', 'object (if "object")'), opt('who', ['self', 'other'], 'self', 'who')] },
+  detach: { cat: 'Objects', label: 'Detach', exec: true, outs: ['then'], params: [opt('who', ['self', 'other'], 'self', 'who')] },
+  spawnLaunch: { cat: 'Objects', label: 'Spawn & Launch', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('dir', ['facing', 'up', 'down', 'toward finger', 'toward tag', 'random'], 'facing', 'direction'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'speed', type: 'number', default: 500 }] },
+  moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
+  lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
+  pauseGame: { cat: 'Game', label: 'Pause / Resume', exec: true, outs: ['then'], params: [opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
+  // more values
+  directionTo: { cat: 'Math', label: 'Direction To', value: 'number', params: [txt('tag', 'player', 'tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  distBetween: { cat: 'Values', label: 'Distance Between', value: 'number', params: [txt('a', 'Player', 'object'), txt('b', 'Goal', 'object')] },
+  snapTo: { cat: 'Math', label: 'Snap To Step', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'step', type: 'number', default: 32 }] },
+  pingPong: { cat: 'Math', label: 'Ping Pong', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'length', type: 'number', default: 1 }] },
+  sign: { cat: 'Math', label: 'Sign (−1, 0, 1)', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  smooth: { cat: 'Math', label: 'Smooth', value: 'number', inputs: [{ key: 'target', type: 'number', default: 0 }, { key: 'speed', type: 'number', default: 5 }] },
+  chanceOf: { cat: 'Values', label: 'Chance %', value: 'bool', inputs: [{ key: 'percent', type: 'number', default: 25 }] },
+  fingers: { cat: 'Values', label: 'Fingers On Screen', value: 'number' },
+  isPaused: { cat: 'Values', label: 'Is Paused', value: 'bool' },
+  childCount: { cat: 'Values', label: 'Child Count', value: 'number' },
+  // more math
+  formula: { cat: 'Math', label: 'Formula', value: 'number', params: [txt('expr', 'a * 2 + b', 'formula')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }] },
+  randomRange: { cat: 'Math', label: 'Random Between', value: 'number', inputs: [{ key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 1 }], params: [{ key: 'whole', type: 'bool', default: false, label: 'whole numbers' }] },
+  randomPick: { cat: 'Math', label: 'Random Pick', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }], params: [num('count', 4, 'how many inputs (2–4)')] },
+  noise: { cat: 'Math', label: 'Smooth Noise', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'scale', type: 'number', default: 1 }], params: [opt('by', ['game time', 'input value'], 'game time', 'changes with')] },
+  invLerp: { cat: 'Math', label: 'Inverse Lerp (0–1)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 100 }, { key: 'value', type: 'number', default: 50 }] },
+  moveTowards: { cat: 'Math', label: 'Move Towards Value', value: 'number', inputs: [{ key: 'current', type: 'number', default: 0 }, { key: 'target', type: 'number', default: 10 }, { key: 'step', type: 'number', default: 1 }] },
+  angleDiff: { cat: 'Math', label: 'Angle Difference', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 90 }] },
+  wrap: { cat: 'Math', label: 'Wrap Around', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 360 }] },
+  roundTo: { cat: 'Math', label: 'Round To Decimals', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'decimals', type: 'number', default: 1 }] },
+  percent: { cat: 'Math', label: 'Percent Of', value: 'number', inputs: [{ key: 'part', type: 'number', default: 25 }, { key: 'total', type: 'number', default: 100 }] },
+  easeVal: { cat: 'Math', label: 'Ease Curve', value: 'number', inputs: [{ key: 't', type: 'number', default: 0.5 }], params: [opt('ease', EASES, 'outQuad', 'ease')] },
+  vecLength: { cat: 'Math', label: 'Vector Length', value: 'number', inputs: [{ key: 'x', type: 'number', default: 3 }, { key: 'y', type: 'number', default: 4 }, { key: 'z', type: 'number', default: 0 }] },
+  distPoints: { cat: 'Math', label: 'Distance (points)', value: 'number', inputs: [{ key: 'x1', type: 'number', default: 0 }, { key: 'y1', type: 'number', default: 0 }, { key: 'x2', type: 'number', default: 3 }, { key: 'y2', type: 'number', default: 4 }] },
+  anglePoints: { cat: 'Math', label: 'Angle (points)', value: 'number', inputs: [{ key: 'x1', type: 'number', default: 0 }, { key: 'y1', type: 'number', default: 0 }, { key: 'x2', type: 'number', default: 1 }, { key: 'y2', type: 'number', default: 1 }] },
+  minMax3: { cat: 'Math', label: 'Min / Max / Average', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }, { key: 'd', type: 'number', default: 0 }], params: [opt('op', ['min', 'max', 'average', 'sum'], 'max', 'give'), num('count', 3, 'how many inputs (2–4)')] },
+  between: { cat: 'Math', label: 'Is Between', value: 'bool', inputs: [{ key: 'value', type: 'number', default: 5 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 10 }] },
+  isEven: { cat: 'Math', label: 'Is Even', value: 'bool', inputs: [{ key: 'value', type: 'number', default: 2 }] },
+  // more game
+  addScore: { cat: 'Game', label: 'Add Score', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 10 }], params: [{ key: 'pop', type: 'bool', default: true, label: 'pop "+10" here' }] },
+  loseLife: { cat: 'Game', label: 'Lose a Life', exec: true, outs: ['then', 'no lives left'], params: [{ key: 'end', type: 'bool', default: true, label: 'game over at 0' }] },
+  gainLife: { cat: 'Game', label: 'Gain a Life', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1 }], params: [num('max', 0, 'most lives (0 = no limit)')] },
+  checkBest: { cat: 'Game', label: 'Check Best Score', exec: true, outs: ['new best', 'not'] },
+  addTime: { cat: 'Game', label: 'Add Time', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 5 }], params: [opt('mode', ['add', 'set'], 'add', 'mode')] },
+  restartLevel: { cat: 'Game', label: 'Restart Level', exec: true, outs: [] },
+  setCheckpoint: { cat: 'Game', label: 'Set Checkpoint', exec: true, outs: ['then'], params: [opt('at', ['this object', 'where the player is'], 'this object', 'at')] },
+  respawn: { cat: 'Game', label: 'Respawn Player', exec: true, outs: ['then'] },
+  useItem: { cat: 'Game', label: 'Use Item', exec: true, outs: ['used', 'not enough'], params: [txt('item', 'key', 'item')], inputs: [{ key: 'count', type: 'number', default: 1 }] },
+  hasItem: { cat: 'Game', label: 'Has Item', value: 'bool', params: [txt('item', 'key', 'item')], inputs: [{ key: 'count', type: 'number', default: 1 }] },
+  combo: { cat: 'Game', label: 'Add Combo', exec: true, outs: ['then'], params: [num('window', 1.5, 'resets after (sec)')] },
+  unlock: { cat: 'Game', label: 'Unlock Achievement', exec: true, outs: ['first time', 'already'], params: [txt('name', 'First Win', 'achievement'), { key: 'show', type: 'bool', default: true, label: 'show a message' }] },
+  isUnlocked: { cat: 'Game', label: 'Is Unlocked', value: 'bool', params: [txt('name', 'First Win', 'achievement')] },
+  hitStop: { cat: 'Game', label: 'Hit Stop (freeze frame)', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 0.08 }] },
+  gameSpeed: { cat: 'Game', label: 'Set Game Speed', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 1 }] },
+  sayLine: { cat: 'Game', label: 'Say (dialogue box)', exec: true, outs: ['then', 'closed'], params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello! Score: {score}', 'text'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  gameValue: { cat: 'Game', label: 'Game Value', value: 'number', params: [opt('what', ['score', 'lives', 'best', 'time left', 'combo', 'level', 'levels'], 'score', 'what')] },
+  gameStateIs: { cat: 'Game', label: 'Game State Is', value: 'bool', params: [opt('state', ['playing', 'title', 'game over', 'won', 'paused'], 'playing', 'state')] },
+  // online: Photon multiplayer and PlayFab services
+  netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
+  netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
+  netLeave: { cat: 'Online', label: 'Leave Room', exec: true, outs: ['then'] },
+  netSend: { cat: 'Online', label: 'Send Network Message', exec: true, outs: ['then'], params: [txt('message', 'boom', 'message')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  netSpawn: { cat: 'Online', label: 'Spawn For Everyone', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('at', ['this object', 'position'], 'this object', 'at')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  netShared: { cat: 'Online', label: 'Set Shared Variable', exec: true, outs: ['then'], params: [txt('name', 'roundScore', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  onNetJoined: { cat: 'Online', label: 'On Joined Room', outs: ['then'] },
+  onPlayerJoined: { cat: 'Online', label: 'On Player Joined', outs: ['then'] },
+  onPlayerLeft: { cat: 'Online', label: 'On Player Left', outs: ['then'] },
+  onNetMessage: { cat: 'Online', label: 'On Network Message', outs: ['then'], params: [txt('message', 'boom', 'message (blank = any)')] },
+  netPlayers: { cat: 'Online', label: 'Players In Room', value: 'number' },
+  netIsMaster: { cat: 'Online', label: 'Is Room Host', value: 'bool' },
+  netInRoom: { cat: 'Online', label: 'Is In Room', value: 'bool' },
+  netValue: { cat: 'Online', label: 'Network Message Value', value: 'number' },
+  pfLogin: { cat: 'Online', label: 'PlayFab Log In', exec: true, outs: ['logged in', 'failed'] },
+  pfSubmit: { cat: 'Online', label: 'Post Score (PlayFab)', exec: true, outs: ['then', 'posted', 'failed'], params: [txt('stat', 'score', 'leaderboard')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  pfName: { cat: 'Online', label: 'Set Player Name (PlayFab)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('name', '{playerName}', 'name (variables in braces)')] },
+  pfSave: { cat: 'Online', label: 'Cloud Save (PlayFab)', exec: true, outs: ['then', 'saved', 'failed'], params: [txt('keys', '', 'variables (blank = all)')] },
+  pfLoad: { cat: 'Online', label: 'Cloud Load (PlayFab)', exec: true, outs: ['loaded', 'no save', 'failed'] },
+  pfTitle: { cat: 'Online', label: 'Load Remote Config (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'], params: [txt('keys', '', 'title data keys (blank = all)')] },
+  pfEventN: { cat: 'Online', label: 'Track Event (PlayFab)', exec: true, outs: ['then'], params: [txt('name', 'level_complete', 'event name')] },
+  onPfLogin: { cat: 'Online', label: 'On PlayFab Logged In', outs: ['then'] },
+  onOnlineError: { cat: 'Online', label: 'On Online Error', outs: ['then'] },
+  // UI navigation
+  goToPage: { cat: 'Objects', label: 'Go To Page', exec: true, outs: ['then'], params: [txt('page', 'shop', 'page'), txt('var', 'page', 'variable'), opt('history', ['open (Back returns)', 'switch (no history)', 'start over (clear history)'], 'open (Back returns)', 'history')] },
+  goBack: { cat: 'Objects', label: 'Go Back', exec: true, outs: ['then', 'nowhere to go'], params: [txt('var', '', 'variable (blank = any)')] },
+  onPage: { cat: 'Events', label: 'On Page Opened', outs: ['then'], params: [txt('page', 'shop', 'page (blank = any)'), txt('var', 'page', 'variable')] },
+  onBack: { cat: 'Events', label: 'On Back', outs: ['then'] },
+  pageIs: { cat: 'Values', label: 'Page Is', value: 'bool', params: [txt('page', 'home', 'page'), txt('var', 'page', 'variable')] },
+  canGoBack: { cat: 'Values', label: 'Can Go Back', value: 'bool' },
+  // physics: triggers, collisions, forces and bodies
+  triggerEnter: { cat: 'Physics', label: 'On Trigger Enter', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  triggerExit: { cat: 'Physics', label: 'On Trigger Exit', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  triggerStay: { cat: 'Physics', label: 'While In Trigger', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  collisionEnter: { cat: 'Physics', label: 'On Collision Enter', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)'), num('minSpeed', 0, 'only harder than (speed)')] },
+  collisionExit: { cat: 'Physics', label: 'On Collision Exit', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  collisionStay: { cat: 'Physics', label: 'While Colliding', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  landed: { cat: 'Physics', label: 'On Landed', outs: ['then'] },
+  leftGround: { cat: 'Physics', label: 'On Left Ground', outs: ['then'] },
+  addForce: { cat: 'Physics', label: 'Add Force', exec: true, outs: ['then'], params: [opt('mode', ['force (every frame)', 'impulse (once)', 'velocity change'], 'force (every frame)', 'mode'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  explosion: { cat: 'Physics', label: 'Explosion Force', exec: true, outs: ['then'], params: [txt('tag', '', 'push tag (blank = anything)')], inputs: [{ key: 'force', type: 'number', default: 0 }, { key: 'radius', type: 'number', default: 0 }] },
+  setBodyType: { cat: 'Physics', label: 'Set Body Type', exec: true, outs: ['then'], params: [opt('type', ['dynamic', 'kinematic', 'static'], 'dynamic', 'type'), opt('target', ['self', 'other'], 'self', 'who')] },
+  setTrigger: { cat: 'Physics', label: 'Make Trigger / Solid', exec: true, outs: ['then'], params: [opt('mode', ['trigger', 'solid', 'toggle'], 'trigger', 'make it'), opt('target', ['self', 'other'], 'self', 'who')] },
+  setLayer: { cat: 'Physics', label: 'Set Collision Layer', exec: true, outs: ['then'], params: [opt('layer', PHYSICS_LAYERS, 'Default', 'layer'), opt('target', ['self', 'other'], 'self', 'who')] },
+  physMaterial: { cat: 'Physics', label: 'Set Bounce & Friction', exec: true, outs: ['then'], inputs: [{ key: 'bounce', type: 'number', default: 0.5 }, { key: 'friction', type: 'number', default: 0.2 }, { key: 'mass', type: 'number', default: 1 }] },
+  impactSpeed: { cat: 'Physics', label: 'Impact Speed', value: 'number' },
+  inTrigger: { cat: 'Physics', label: 'Is In Trigger', value: 'bool', params: [txt('tag', '', 'tag (blank = any)')] },
+  isColliding: { cat: 'Physics', label: 'Is Colliding', value: 'bool', params: [txt('tag', '', 'tag (blank = any)')] },
+  // sensing: raycasts, overlaps, finding objects, the screen
+  raycast: { cat: 'Sensing', label: 'Raycast', exec: true, outs: ['hit', 'miss'], params: [opt('dir', ['forward', 'up', 'down', 'left', 'right', 'ahead & down', 'toward tag', 'custom'], 'forward', 'direction'), txt('tag', '', 'only tag (blank = any)'), txt('toward', 'player', 'toward tag'), { key: 'triggers', type: 'bool', default: false, label: 'also hit triggers' }, { key: 'debug', type: 'bool', default: false, label: 'show the ray' }], inputs: [{ key: 'distance', type: 'number', default: 0 }, { key: 'dx', type: 'number', default: 1 }, { key: 'dy', type: 'number', default: 0 }, { key: 'dz', type: 'number', default: 0 }] },
+  rayHits: { cat: 'Sensing', label: 'Ray Hits', value: 'bool', params: [opt('dir', ['forward', 'up', 'down', 'left', 'right', 'ahead & down', 'toward tag', 'custom'], 'ahead & down', 'direction'), txt('tag', '', 'only tag (blank = any)'), txt('toward', 'player', 'toward tag')], inputs: [{ key: 'distance', type: 'number', default: 0 }] },
+  hitInfo: { cat: 'Sensing', label: 'Hit Info', value: 'number', params: [opt('what', ['distance', 'point x', 'point y', 'point z', 'normal x', 'normal y', 'normal z'], 'distance', 'what')] },
+  overlap: { cat: 'Sensing', label: 'Find In Radius', exec: true, outs: ['each', 'found', 'none'], params: [txt('tag', 'enemy', 'tag (blank = anything)')], inputs: [{ key: 'radius', type: 'number', default: 0 }] },
+  countRadius: { cat: 'Sensing', label: 'Count In Radius', value: 'number', params: [txt('tag', 'enemy', 'tag (blank = anything)')], inputs: [{ key: 'radius', type: 'number', default: 0 }] },
+  forEachTag: { cat: 'Sensing', label: 'For Each With Tag', exec: true, outs: ['each', 'done'], params: [txt('tag', 'enemy', 'tag')] },
+  pickNearest: { cat: 'Sensing', label: 'Pick Nearest', exec: true, outs: ['found', 'none'], params: [txt('tag', 'enemy', 'tag')], inputs: [{ key: 'maxDistance', type: 'number', default: 0 }] },
+  pickObject: { cat: 'Sensing', label: 'Pick Object', exec: true, outs: ['found', 'none'], params: [txt('object', 'Player', 'object name or tag')] },
+  lineOfSight: { cat: 'Sensing', label: 'Line of Sight', exec: true, outs: ['visible', 'blocked'], params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
+  objectNear: { cat: 'Sensing', label: 'On Object Near', outs: ['near', 'left'], params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = auto)')] },
+  screenEnter: { cat: 'Sensing', label: 'On Enter Screen', outs: ['then'] },
+  screenExit: { cat: 'Sensing', label: 'On Leave Screen', outs: ['then'] },
+  onScreen: { cat: 'Sensing', label: 'Is On Screen', value: 'bool' },
+  otherInfo: { cat: 'Sensing', label: 'Other Object', value: 'number', params: [opt('what', ['x', 'y', 'z', 'speed', 'distance', 'angle', 'health'], 'x', 'what')] },
+  otherHasTag: { cat: 'Sensing', label: 'Other Has Tag', value: 'bool', params: [txt('tag', 'enemy', 'tag')] },
+  hasOther: { cat: 'Sensing', label: 'Has Other Object', value: 'bool' },
   animPlaying: { cat: 'Animation', label: 'Is Animation Playing', value: 'bool', params: [txt('clip', '', 'clip (blank = any)')] },
   spriteFrame: { cat: 'Animation', label: 'Sprite Frame', value: 'number' },
 };
@@ -6289,6 +6873,117 @@ registerBehavior('fsm', {
   },
 });
 
+/** Graph raycast helpers: which way a node's ray points, and the closest thing it hits (bodies, voxel blocks). */
+function rayDir(s, e, dir, toward, custom) {
+  const three = s.mode === '3d';
+  if (dir === 'toward tag') { const t = nearest(s, e, toward); if (!t) return null; return { x: t.x - e.x, y: t.y - e.y, z: three ? t.z - e.z : 0 }; }
+  if (dir === 'custom') return { x: custom.x, y: custom.y, z: three ? custom.z : 0 };
+  if (dir === 'up') return { x: 0, y: three ? 1 : -1, z: 0 };
+  if (dir === 'down' || dir === 'ahead & down') return { x: 0, y: three ? -1 : 1, z: 0 };
+  if (three) {
+    const yaw = (e.ry || 0) * DEG, f = fwd3(yaw), r = right3(yaw);
+    if (dir === 'left') return { x: -r.x, y: 0, z: -r.z };
+    if (dir === 'right') return { x: r.x, y: 0, z: r.z };
+    return { x: f.x, y: 0, z: f.z };
+  }
+  if (dir === 'left') return { x: -1, y: 0, z: 0 };
+  if (dir === 'right') return { x: 1, y: 0, z: 0 };
+  return facing2D(e);
+}
+/** The way a 2D object faces: flipped sprites look left, and its rotation turns it. */
+function facing2D(e) {
+  const k = e.data.flipX || e.sprite?.flip || e.sx < 0 ? -1 : 1, a = (e.rz || 0) * DEG;
+  return { x: Math.cos(a) * k, y: Math.sin(a) * k, z: 0 };
+}
+function castRay(s, e, o, d, max, opts = {}) {
+  const l = Math.hypot(d.x, d.y, d.z) || 1, n = { x: d.x / l, y: d.y / l, z: d.z / l };
+  let hit = s.raycast(o, n, max, { ignore: e, tag: opts.tag || undefined, any: !!opts.tag, solidOnly: !opts.triggers });
+  if (hit) {
+    const ex = hit.entity.extents(), c = { x: hit.entity.x + (ex.ox || 0), y: hit.entity.y + (ex.oy || 0), z: hit.entity.z + (ex.oz || 0) };
+    if (ex.sphere) { const dx = hit.point.x - c.x, dy = hit.point.y - c.y, dz = s.mode === '3d' ? hit.point.z - c.z : 0, m = Math.hypot(dx, dy, dz) || 1; hit.normal = { x: dx / m, y: dy / m, z: dz / m }; }
+    else { // the face the ray went in through: the axis where the point sits furthest out, relative to the box size
+      const q = [['x', (hit.point.x - c.x) / (ex.hx || 1)], ['y', (hit.point.y - c.y) / (ex.hy || 1)], ['z', Number.isFinite(ex.hz) ? (hit.point.z - c.z) / (ex.hz || 1) : 0]].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+      hit.normal = { x: 0, y: 0, z: 0 }; hit.normal[q[0]] = Math.sign(q[1]) || 1;
+    }
+  }
+  if (!opts.tag && s.mode === '3d') for (const w of s.entities) { // voxel blocks count as solid too
+    if (!w.voxels || w.dead) continue;
+    const v = w.voxels.raycast(w, o, n, Math.min(max, 200));
+    if (v && (!hit || v.dist < hit.dist)) hit = { entity: null, voxel: w, block: [v.i, v.j, v.k], dist: v.dist, point: { x: o.x + n.x * v.dist, y: o.y + n.y * v.dist, z: o.z + n.z * v.dist }, normal: { x: v.n[0], y: v.n[1], z: v.n[2] } };
+  }
+  return hit;
+}
+/**
+ * Formula node: a tiny, safe math language (no eval). Numbers, a b c d (the inputs), any game variable by name, pi, e, time;
+ * + − × ÷ % ^, comparisons (< > <= >= == !=) giving 1 / 0, parentheses, and functions:
+ * sin cos tan (degrees), asin acos atan atan2 (give degrees), abs floor ceil round sqrt pow min max clamp lerp sign log exp mod random(lo, hi).
+ */
+const FORMULA_FN = {
+  sin: (a) => Math.sin(a * DEG), cos: (a) => Math.cos(a * DEG), tan: (a) => Math.tan(a * DEG),
+  asin: (a) => Math.asin(a) / DEG, acos: (a) => Math.acos(a) / DEG, atan: (a) => Math.atan(a) / DEG, atan2: (y, x) => Math.atan2(y, x) / DEG,
+  abs: Math.abs, floor: Math.floor, ceil: Math.ceil, round: Math.round, sqrt: (a) => Math.sqrt(Math.max(0, a)), pow: Math.pow, sign: Math.sign, log: Math.log, exp: Math.exp,
+  min: Math.min, max: Math.max, clamp: (v, lo, hi) => clamp(v, lo, hi), lerp: (a, b, t) => a + (b - a) * t, mod: (a, b) => (b ? ((a % b) + b) % b : 0),
+  random: (lo = 0, hi = 1) => lo + Math.random() * (hi - lo),
+};
+const formulaCache = new Map();
+export function compileFormula(src) {
+  if (formulaCache.has(src)) return formulaCache.get(src);
+  const toks = String(src).match(/\d*\.?\d+(?:e[+-]?\d+)?|[A-Za-z_][A-Za-z0-9_]*|<=|>=|==|!=|[-+*\/%^(),<>×÷−]/g) || [];
+  let i = 0;
+  const peek = () => toks[i], next = () => toks[i++];
+  const expect = (t) => { if (next() !== t) throw new Error(`expected ${t}`); };
+  const cmp = () => { let a = add(); for (;;) { const o = peek(); if (!['<', '>', '<=', '>=', '==', '!='].includes(o)) return a; next(); const l = a, r = add(); a = (env) => { const x = l(env), y = r(env); return +({ '<': x < y, '>': x > y, '<=': x <= y, '>=': x >= y, '==': x === y, '!=': x !== y }[o]); }; } };
+  const add = () => { let a = mul(); for (;;) { const o = peek(); if (o !== '+' && o !== '-' && o !== '−') return a; next(); const l = a, r = mul(); a = o === '+' ? (env) => l(env) + r(env) : (env) => l(env) - r(env); } };
+  const mul = () => { let a = pow(); for (;;) { const o = peek(); if (!['*', '/', '%', '×', '÷'].includes(o)) return a; next(); const l = a, r = pow(); a = o === '%' ? (env) => { const y = r(env); return y ? ((l(env) % y) + y) % y : 0; } : o === '/' || o === '÷' ? (env) => { const y = r(env); return y ? l(env) / y : 0; } : (env) => l(env) * r(env); } };
+  const pow = () => { const a = unary(); if (peek() !== '^') return a; next(); const b = pow(); return (env) => Math.pow(a(env), b(env)); };
+  const unary = () => { if (peek() === '-' || peek() === '−') { next(); const a = unary(); return (env) => -a(env); } if (peek() === '+') { next(); return unary(); } return atom(); };
+  const atom = () => {
+    const t = next();
+    if (t == null) throw new Error('unfinished formula');
+    if (t === '(') { const a = cmp(); expect(')'); return a; }
+    if (/^[\d.]/.test(t)) { const v = parseFloat(t); return () => v; }
+    if (/^[A-Za-z_]/.test(t)) {
+      if (peek() === '(') { // a function call
+        const fn = FORMULA_FN[t.toLowerCase()]; if (!fn) throw new Error(`unknown function ${t}`);
+        next(); const args = [];
+        if (peek() !== ')') { args.push(cmp()); while (peek() === ',') { next(); args.push(cmp()); } }
+        expect(')'); return (env) => +fn(...args.map((f) => f(env))) || 0;
+      }
+      const k = t.toLowerCase();
+      if (k === 'pi') return () => Math.PI; if (k === 'e') return () => Math.E;
+      return (env) => { const v = env(t); return Number.isFinite(+v) ? +v : 0; };
+    }
+    throw new Error(`unexpected ${t}`);
+  };
+  let f;
+  try { f = cmp(); if (i < toks.length) throw new Error(`unexpected ${toks[i]}`); } catch (err) { f = Object.assign(() => 0, { error: err.message }); }
+  formulaCache.set(src, f);
+  return f;
+}
+const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
+const achieved = (s, name) => store.get(achKey(s, name), '') === '1';
+/** Smooth 1D noise in −1…1: like random, but it drifts instead of jumping (wobbling lights, drifting clouds). */
+function noise1(x) {
+  const h = (n) => { const v = Math.sin(n * 127.1 + 311.7) * 43758.5453; return (v - Math.floor(v)) * 2 - 1; };
+  const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f);
+  return h(i) * (1 - u) + h(i + 1) * u;
+}
+
+/** Where the finger is in the world (2D: the point under it; 3D: where it meets the ground plane y = 0). */
+function fingerWorld(s) {
+  const inp = s.engine.input, pt = [...inp.pointers.values()].find((q) => q.role === 'free') || inp.taps[0] || inp.ups[0];
+  if (!pt) return null;
+  if (s.mode !== '3d') return s.engine.renderer.screenToWorld(s, pt.x, pt.y);
+  const r = s.engine.renderer.screenRay?.(s, pt.x, pt.y); if (!r || Math.abs(r.dir.y) < 1e-4) return null;
+  const k = -r.origin.y / r.dir.y; return k < 0 ? null : { x: r.origin.x + r.dir.x * k, y: 0, z: r.origin.z + r.dir.z * k };
+}
+/** Is a point on screen (with a small margin)? */
+function onScreen(s, e, margin = 0) {
+  const r = s.engine?.renderer; if (!r?.worldToScreen) return true;
+  const p = s.mode === '3d' ? r.worldToScreen(s, e.x, e.y, e.z) : r.worldToScreen(s, e.x, e.y);
+  return !p.behind && p.x >= -margin && p.y >= -margin && p.x <= s.engine.width + margin && p.y <= s.engine.height + margin;
+}
+
 registerBehavior('graph', {
   label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
   params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
@@ -6305,7 +7000,30 @@ registerBehavior('graph', {
       const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
       return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
     };
-    const value = (n, ctx, depth) => {
+    const tagOk = (o, tag) => !tag || o.has(tag);
+    const defRange = (s) => (s.mode === '3d' ? 5 : 150);
+    /** Everything this object overlaps right now: [other, is a trigger contact] */
+    const contactsOf = (e, s) => { const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead) out.push([o, !!(e.body?.sensor || o.body?.sensor)]); } return out; };
+    const ray = (n, ctx, P, I) => {
+      const s = ctx.s, e = ctx.e, three = s.mode === '3d';
+      const d = rayDir(s, e, P('dir'), P('toward'), { x: +I('dx') || 0, y: +I('dy') || 0, z: +I('dz') || 0 }); if (!d || !(d.x || d.y || d.z)) return null;
+      let o = { x: e.x, y: e.y, z: e.z };
+      if (P('dir') === 'ahead & down') { // a ledge check: start just in front of the object's feet side
+        const f = three ? fwd3((e.ry || 0) * DEG) : facing2D(e), ex = e.extents(), w = ex.sphere ? ex.r : Math.max(ex.hx || 0, three ? ex.hz || 0 : 0), pad = three ? 0.15 : 6;
+        o = { x: e.x + f.x * (w + pad), y: e.y + (three ? 0 : f.y * (w + pad)), z: e.z + (three ? f.z * (w + pad) : 0) };
+      }
+      const ex = e.extents(), hy = ex.sphere ? ex.r : ex.hy || 0, max = +I('distance') || (P('dir') === 'ahead & down' ? hy + (three ? 0.6 : 24) : three ? 10 : 400);
+      const hit = castRay(s, e, o, d, max, { tag: P('tag'), triggers: !!P('triggers') });
+      if (P('debug')) { const l = Math.hypot(d.x, d.y, d.z), len = hit ? hit.dist : max; debugRays.push({ a: o, b: { x: o.x + d.x / l * len, y: o.y + d.y / l * len, z: o.z + d.z / l * len }, hit: !!hit, t: s.time }); }
+      return hit;
+    };
+    const debugRays = [], repeats = new Map(), frameQueue = [], press = new Map(); let lastTapT = -9, varWas = new Map();
+    const value = (n, ctx, depth) => { // remember the last value for the editor's live debug badges
+      const v = valueOf(n, ctx, depth), st = ctx.s?.engine?.graphStats;
+      if (st && n) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
+      return v;
+    };
+    const valueOf = (n, ctx, depth) => {
       if (!n) return 0;
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
       switch (n.type) {
@@ -6325,7 +7043,7 @@ registerBehavior('graph', {
         case 'velocity': { const v = e.body?.vel || { x: 0, y: 0, z: 0 }; return P('axis') === 'speed' ? Math.hypot(v.x, v.y, v.z) : v[P('axis')] || 0; }
         case 'touching': return s.engine.physics.touching(e, P('tag'));
         case 'canSee': { const t = s.findAll(P('tag')).find((q) => q !== e); return !!t && s.canSee(e, t, +P('range') || Infinity); }
-        case 'math1': { const a = +I('a') || 0; return { abs: Math.abs(a), round: Math.round(a), floor: Math.floor(a), ceil: Math.ceil(a), sqrt: Math.sqrt(Math.max(0, a)), negate: -a, sin: Math.sin(a * DEG), cos: Math.cos(a * DEG) }[P('op')] ?? a; }
+        case 'math1': { const a = +I('a') || 0; return { abs: Math.abs(a), round: Math.round(a), floor: Math.floor(a), ceil: Math.ceil(a), sqrt: Math.sqrt(Math.max(0, a)), negate: -a, sin: Math.sin(a * DEG), cos: Math.cos(a * DEG), tan: Math.tan(a * DEG), square: a * a, 'cube root': Math.cbrt(a), reciprocal: a ? 1 / a : 0, fraction: a - Math.floor(a), log: a > 0 ? Math.log(a) : 0, exp: Math.exp(a) }[P('op')] ?? a; }
         case 'clamp': return clamp(+I('value') || 0, +I('min') || 0, +I('max') || 0);
         case 'lerp': return lerp(+I('a') || 0, +I('b') || 0, +I('t') || 0);
         case 'loopIndex': return ctx.index ?? 0;
@@ -6341,7 +7059,7 @@ registerBehavior('graph', {
         case 'choose': return I('condition') ? +I('yes') || 0 : +I('no') || 0;
         case 'wave': { const t = s.time * (+I('speed') || 0), k = +I('size') || 0, f = t - Math.floor(t); return k * (P('shape') === 'square' ? (f < 0.5 ? 1 : -1) : P('shape') === 'triangle' ? 1 - 4 * Math.abs(f - 0.5) : Math.sin(t * PI * 2)); }
         case 'remap': { const a = +I('fromMin') || 0, b = +I('fromMax') || 0, t = b === a ? 0 : ((+I('value') || 0) - a) / (b - a); return (+I('toMin') || 0) + ((+I('toMax') || 0) - (+I('toMin') || 0)) * t; }
-        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null); return t ? t[P('axis')] || 0 : 0; }
+        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null), a = P('axis'); if (!t) return 0; return a === 'rotation' ? (s.mode === '3d' ? t.ry : t.rz) || 0 : a === 'scale' ? t.sx : a === 'opacity' ? t.alpha ?? 1 : t[a] || 0; }
         case 'deltaTime': return ctx.dt ?? 1 / 60;
         case 'isHolding': return s.engine.input.pointers.size > 0;
         case 'touchPos': {
@@ -6353,12 +7071,80 @@ registerBehavior('graph', {
         case 'level': return (s.engine.levelIndex ?? 0) + 1;
         case 'animPlaying': { const c = anims(e).map((a) => a.current).find(Boolean) || ''; return P('clip') ? c === P('clip') : !!c; }
         case 'spriteFrame': return e.sprite?.frame | 0;
+        case 'impactSpeed': return ctx.impact ?? 0;
+        case 'inTrigger': return contactsOf(e, s).some(([o, sensor]) => sensor && tagOk(o, P('tag')));
+        case 'isColliding': return contactsOf(e, s).some(([o, sensor]) => !sensor && tagOk(o, P('tag')));
+        case 'rayHits': return !!ray(n, ctx, P, I);
+        case 'hitInfo': {
+          const h = ctx.hit; if (!h) return 0; const w = P('what');
+          if (w === 'distance') return h.dist; const [k, ax] = w.split(' '); return (k === 'point' ? h.point : h.normal)?.[ax] ?? 0;
+        }
+        case 'countRadius': { const r = +I('radius') || defRange(s); return s.entities.filter((q) => q !== e && !q.dead && !q.ui && tagOk(q, P('tag')) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r).length; }
+        case 'onScreen': return onScreen(s, e);
+        case 'otherInfo': {
+          const o = ctx.other; if (!o) return 0; const w = P('what');
+          if (w === 'speed') { const v = o.body?.vel; return v ? Math.hypot(v.x, v.y, v.z) : 0; }
+          if (w === 'distance') return Math.hypot(o.x - e.x, o.y - e.y, o.z - e.z);
+          if (w === 'angle') return s.mode === '3d' ? Math.atan2(o.x - e.x, o.z - e.z) / DEG : Math.atan2(o.y - e.y, o.x - e.x) / DEG;
+          if (w === 'health') return o.getBehavior('health')?.hp ?? o.data.hp ?? 0;
+          return o[w] || 0;
+        }
+        case 'otherHasTag': return !!ctx.other?.has(P('tag'));
+        case 'hasOther': return !!ctx.other && !ctx.other.dead;
+        case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
+        case 'getMyVar': return +e.data[P('name')] || 0;
+        case 'getOtherVar': return +ctx.other?.data?.[P('name')] || 0;
+        case 'varAt': { const k = P('object'), t = s.find(k) || nearest(s, e, k); return +t?.data?.[P('name')] || 0; }
+        case 'eventValue': return +ctx.eventValue || 0;
+        case 'directionTo': { const t = nearest(s, e, P('tag')); if (!t) return 0; const dx = t.x - e.x, dy = t.y - e.y, dz = t.z - e.z, l = Math.hypot(dx, dy, dz) || 1; return { x: dx, y: dy, z: dz }[P('axis')] / l; }
+        case 'distBetween': { const a = s.find(P('a')) || s.findAll(P('a'))[0], b = s.find(P('b')) || s.findAll(P('b'))[0]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) : 0; }
+        case 'snapTo': { const st = Math.abs(+I('step') || 0); return st ? Math.round((+I('value') || 0) / st) * st : +I('value') || 0; }
+        case 'pingPong': { const L = Math.abs(+I('length') || 1), t = ((+I('value') || 0) % (2 * L) + 2 * L) % (2 * L); return t <= L ? t : 2 * L - t; }
+        case 'sign': return Math.sign(+I('value') || 0);
+        case 'smooth': { const key = 'sm:' + n.id, t = +I('target') || 0, cur = state.has(key) ? state.get(key) : t, k = Math.min(1, (ctx.dt ?? 1 / 60) * (+I('speed') || 5)); const v = cur + (t - cur) * k; state.set(key, v); return v; }
+        case 'chanceOf': return Math.random() * 100 < (+I('percent') || 0);
+        case 'fingers': return s.engine.input.pointers.size;
+        case 'isPaused': return !!s.engine.paused;
+        case 'childCount': return s.childrenOf(e).length;
+        case 'formula': { const f = compileFormula(P('expr') || '0'), inp = { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0, d: +I('d') || 0 }; if (f.error && !state.has('fe:' + n.id)) { state.set('fe:' + n.id, 1); Log.add('warn', `Formula "${P('expr')}": ${f.error}`); } return f((k) => (k in inp ? inp[k] : k === 'time' ? s.time : k === 'dt' ? ctx.dt ?? 1 / 60 : s.vars[k] ?? e.data[k] ?? 0)); }
+        case 'randomRange': { const a = +I('min') || 0, b = +I('max') || 0; return P('whole') ? Math.floor(rand(Math.min(a, b), Math.max(a, b) + 1)) : rand(a, b); }
+        case 'randomPick': { const c = clamp(Math.round(+P('count') || 4), 2, 4); return +I('abcd'[Math.floor(Math.random() * c)]) || 0; }
+        case 'noise': { const sc = +I('scale') || 1; return noise1((P('by') === 'input value' ? +I('value') || 0 : s.time + (+I('value') || 0)) * sc); }
+        case 'invLerp': { const a = +I('a') || 0, b = +I('b') || 0; return b === a ? 0 : ((+I('value') || 0) - a) / (b - a); }
+        case 'moveTowards': { const c = +I('current') || 0, t = +I('target') || 0, st = Math.abs(+I('step') || 0); return Math.abs(t - c) <= st ? t : c + Math.sign(t - c) * st; }
+        case 'angleDiff': return ((((+I('b') || 0) - (+I('a') || 0)) % 360) + 540) % 360 - 180;
+        case 'wrap': { const lo = +I('min') || 0, hi = +I('max') || 0, r = hi - lo; return r ? lo + ((((+I('value') || 0) - lo) % r) + r) % r : lo; }
+        case 'roundTo': { const k = 10 ** clamp(Math.round(+I('decimals') || 0), 0, 8); return Math.round((+I('value') || 0) * k) / k; }
+        case 'percent': { const t = +I('total') || 0; return t ? (+I('part') || 0) / t * 100 : 0; }
+        case 'easeVal': return (Ease[P('ease')] || Ease.linear)(clamp(+I('t') || 0, 0, 1));
+        case 'vecLength': return Math.hypot(+I('x') || 0, +I('y') || 0, +I('z') || 0);
+        case 'distPoints': return Math.hypot((+I('x2') || 0) - (+I('x1') || 0), (+I('y2') || 0) - (+I('y1') || 0));
+        case 'anglePoints': return Math.atan2((+I('y2') || 0) - (+I('y1') || 0), (+I('x2') || 0) - (+I('x1') || 0)) / DEG;
+        case 'minMax3': { const c = clamp(Math.round(+P('count') || 3), 2, 4), v = 'abcd'.slice(0, c).split('').map((k) => +I(k) || 0); const o = P('op'); return o === 'min' ? Math.min(...v) : o === 'average' ? v.reduce((x, y) => x + y, 0) / v.length : o === 'sum' ? v.reduce((x, y) => x + y, 0) : Math.max(...v); }
+        case 'between': { const v = +I('value') || 0, a = +I('min') || 0, b = +I('max') || 0; return v >= Math.min(a, b) && v <= Math.max(a, b); }
+        case 'isEven': return Math.round(+I('value') || 0) % 2 === 0;
+        case 'hasItem': return s.itemCount(P('item')) >= Math.max(1, +I('count') || 1);
+        case 'isUnlocked': return achieved(s, P('name'));
+        case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
+        case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
+        case 'canGoBack': return s.canGoBack();
+        case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
+        case 'netIsMaster': return s.engine.online.isMaster();
+        case 'netInRoom': return s.engine.online.inRoom();
+        case 'netValue': return +(ctx.netValue ?? s.engine.online.lastValue) || 0;
         default: return 0;
       }
     };
-    const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
+    const follow = (n, port, ctx) => {
+      const st = ctx.s?.engine?.graphStats, d = def(n);
+      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
+      for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
+    };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
+      const st = ctx.s.engine.graphStats;
+      if (st) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
+      if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
@@ -6482,14 +7268,152 @@ registerBehavior('graph', {
         case 'gravityScale': { const b = e.ensureBody({ type: 'dynamic' }); b.gravityScale = +I('scale') || 0; break; }
         case 'sendMessage': s.send(P('message')); break;
         case 'impulse': s.impulse(+I('strength') || 10, e); break;
+        case 'addForce': {
+          const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (!b) break;
+          const m = P('mode'), k = m === 'velocity change' ? 1 : 1 / Math.max(0.01, b.mass || 1), dtk = m === 'force (every frame)' ? (ctx.dt ?? 1 / 60) : 1;
+          b.vel.x += (+I('x') || 0) * k * dtk; b.vel.y += (+I('y') || 0) * k * dtk; if (s.mode === '3d') b.vel.z += (+I('z') || 0) * k * dtk; break;
+        }
+        case 'explosion': {
+          const r = +I('radius') || defRange(s) * 2, f = +I('force') || (s.mode === '3d' ? 18 : 900);
+          for (const q of s.entities) {
+            if (q === e || q.dead || q.ui || !q.body || q.body.type !== 'dynamic' || !tagOk(q, P('tag'))) continue;
+            const dx = q.x - e.x, dy = q.y - e.y, dz = s.mode === '3d' ? q.z - e.z : 0, d = Math.hypot(dx, dy, dz);
+            if (d > r) continue;
+            const k = f * (1 - d / r) / Math.max(0.01, q.body.mass || 1) / (d || 1);
+            q.body.vel.x += dx * k; q.body.vel.y += (dy || (s.mode === '3d' ? 0.3 : -0.3) * d) * k; q.body.vel.z += dz * k;
+          }
+          s.impulse(Math.min(20, f / (s.mode === '3d' ? 2 : 80)), e); break;
+        }
+        case 'setBodyType': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: P('type') }); b.type = P('type'); if (b.type !== 'dynamic') b.vel = { x: 0, y: 0, z: 0 }; break; }
+        case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
+        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
+        case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
+        case 'setMyVar': e.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'addMyVar': { const k = P('name') || 'hp'; e.data[k] = (+e.data[k] || 0) + (+I('amount') || 0); break; }
+        case 'setOtherVar': if (ctx.other) ctx.other.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'callEvent': {
+          const on = P('on'), name = P('name'), v = +I('value') || 0, tag = P('tag');
+          const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : (q) => q === e;
+          s.emit('graphCall', name, who, e, v); break;
+        }
+        case 'forRange': {
+          const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
+          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps });
+          return follow(n, 'done', ctx);
+        }
+        case 'repeatEvery': {
+          const sec = Math.max(0.02, +I('seconds') || 0.5), times = Math.floor(+I('times') || 0), id = P('id') || '', token = {};
+          (repeats.get(id) || repeats.set(id, new Set()).get(id)).add(token);
+          let i = 0; const later = { ...ctx, steps: 0 };
+          const tick = () => {
+            if (e.dead || !repeats.get(id)?.has(token)) return;
+            follow(n, 'each', { ...later, index: i, steps: 0 }); i++;
+            if (times > 0 && i >= times) { repeats.get(id)?.delete(token); follow(n, 'done', { ...later, steps: 0 }); return; }
+            s.after(sec, tick);
+          };
+          tick(); return;
+        }
+        case 'stopRepeat': { const id = P('id'); if (id) repeats.delete(id); else repeats.clear(); break; }
+        case 'cycle': { const c = clamp(Math.round(+P('count') || 3), 2, 4), i = state.get(n.id) || 0; state.set(n.id, (i + 1) % c); return follow(n, String(i + 1), ctx); }
+        case 'weighted': { const w = ['A', 'B', 'C'].map((k) => Math.max(0, +I(k) || 0)), tot = w[0] + w[1] + w[2]; if (!tot) return; let r = Math.random() * tot; for (const [i, k] of ['A', 'B', 'C'].entries()) { if ((r -= w[i]) < 0) return follow(n, k, ctx); } return follow(n, 'C', ctx); }
+        case 'gate': { const key = 'gate:' + P('name'); if (!state.has(key)) state.set(key, P('startOpen') !== false); return follow(n, state.get(key) ? 'open' : 'closed', ctx); }
+        case 'setGate': {
+          const key = 'gate:' + P('name'), cur = state.has(key) ? state.get(key) : (g.nodes.find((q) => q.type === 'gate' && param(q, 'name') === P('name')) ? param(g.nodes.find((q) => q.type === 'gate' && param(q, 'name') === P('name')), 'startOpen') !== false : true);
+          state.set(key, P('mode') === 'open' ? true : P('mode') === 'close' ? false : !cur); break;
+        }
+        case 'waitFrames': { frameQueue.push({ left: Math.max(1, Math.round(+I('frames') || 1)), fn: () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); } }); return; }
+        case 'attachTo': {
+          const who = P('who') === 'other' ? ctx.other : e, to = P('to') === 'object' ? (s.find(P('object')) || nearest(s, e, P('object'))) : (P('who') === 'other' ? e : ctx.other);
+          if (who && to) s.attach(who, to); break;
+        }
+        case 'detach': { const who = P('who') === 'other' ? ctx.other : e; if (who) s.attach(who, null); break; }
+        case 'spawnLaunch': {
+          const c = s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); if (!c) break;
+          const three = s.mode === '3d', sp = +I('speed') || 0, dir = P('dir');
+          let d = dir === 'up' ? { x: 0, y: three ? 1 : -1, z: 0 } : dir === 'down' ? { x: 0, y: three ? -1 : 1, z: 0 } : dir === 'random' ? (() => { const a = rand(0, Math.PI * 2); return three ? { x: Math.cos(a), y: 0, z: Math.sin(a) } : { x: Math.cos(a), y: Math.sin(a), z: 0 }; })() : null;
+          if (dir === 'toward tag') { const t = nearest(s, e, P('tag')); if (t) d = { x: t.x - e.x, y: t.y - e.y, z: three ? t.z - e.z : 0 }; }
+          if (dir === 'toward finger') { const f = fingerWorld(s); if (f) d = { x: f.x - e.x, y: f.y - e.y, z: three ? (f.z ?? e.z) - e.z : 0 }; }
+          if (!d) d = three ? (() => { const f = fwd3((e.ry || 0) * DEG); return { x: f.x, y: 0, z: f.z }; })() : facing2D(e);
+          const l = Math.hypot(d.x, d.y, d.z) || 1, b = c.ensureBody({ type: 'dynamic', gravityScale: three ? 1 : 0 });
+          b.vel = { x: d.x / l * sp, y: d.y / l * sp, z: d.z / l * sp };
+          if (!three) c.rz = Math.atan2(d.y, d.x) / DEG; else c.ry = Math.atan2(-d.x, -d.z) / DEG;
+          ctx = { ...ctx, other: c }; break;
+        }
+        case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
+        case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
+        case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
+        case 'addScore': { const a = +I('amount') || 0; s.addVar('score', a); if (P('pop') !== false && a) popText(s, e.x, e.y, (a > 0 ? '+' : '') + formatNumber(a), '#ffd23d', 26); break; }
+        case 'loseLife': {
+          const left = Math.max(0, (+s.vars.lives || 0) - 1); s.setVar('lives', left); s.engine.vibrate(40);
+          if (left <= 0) { follow(n, 'no lives left', ctx); if (P('end') !== false) s.gameOver(); return; }
+          break;
+        }
+        case 'gainLife': { const mx = +P('max') || 0, v = (+s.vars.lives || 0) + (+I('amount') || 1); s.setVar('lives', mx > 0 ? Math.min(mx, v) : v); break; }
+        case 'checkBest': {
+          const sc = Math.floor(+s.vars.score || 0), best = +s.vars.best || 0;
+          if (sc > best) { s.setVar('best', sc); if (s.settings.saveBest) store.set('pocket.best.' + s.settings.saveBest, String(sc)); s.newBest = true; return follow(n, 'new best', ctx); }
+          return follow(n, 'not', ctx);
+        }
+        case 'addTime': s.setVar('time', Math.max(0, (P('mode') === 'set' ? 0 : +s.vars.time || 0) + (+I('seconds') || 0))); break;
+        case 'restartLevel': s.engine.goToLevel?.(s.level || 1); return;
+        case 'setCheckpoint': { const pl = s.findAll('player')[0]; if (pl) { const at = P('at') === 'this object' ? e : pl; pl.data.respawn = { x: at.x, y: at.y, z: at.z }; } break; }
+        case 'respawn': { const pl = s.findAll('player')[0]; if (pl) respawnOrEnd(pl, s, 'respawn'); break; }
+        case 'useItem': { const c = Math.max(1, +I('count') || 1), it = P('item'); if (s.itemCount(it) >= c) { s.addItem(it, -c); return follow(n, 'used', ctx); } return follow(n, 'not enough', ctx); }
+        case 'combo': {
+          const w = Math.max(0.1, +P('window') || 1.5), now = s.time; s.setVar('combo', (now - (s._comboT ?? -99) <= w ? +s.vars.combo || 0 : 0) + 1); s._comboT = now;
+          s.after(w + 0.01, () => { if (s._comboT === now) s.setVar('combo', 0); }); break;
+        }
+        case 'unlock': {
+          const nm = P('name') || 'Achievement';
+          if (achieved(s, nm)) return follow(n, 'already', ctx);
+          store.set(achKey(s, nm), '1'); s.setVar('ach_' + nm.replace(/\W+/g, '_'), 1); s.emit('achievement', nm);
+          if (P('show') !== false) { s.message(`🏆 ${nm}`, 2); s.engine.audio.sfx('win'); }
+          return follow(n, 'first time', ctx);
+        }
+        case 'hitStop': { const eng = s.engine, k = eng.timeScale; eng.timeScale = 0.02; setTimeout(() => { if (eng.timeScale === 0.02) eng.timeScale = k || 1; }, Math.max(10, (+I('seconds') || 0.08) * 1000)); break; }
+        case 'gameSpeed': s.engine.timeScale = clamp(+I('speed') || 0, 0.05, 4); break;
+        case 'sayLine': {
+          if (!s.dialog) s.dialog = { lines: [{ who: P('who'), text: fillTemplate(P('text'), s.vars) }], i: 0, chars: 0, pause: P('pause') !== false };
+          const later = { ...ctx, steps: 0 }, wait = () => { if (e.dead) return; if (s.dialog) setTimeout(wait, 100); else follow(n, 'closed', later); };
+          setTimeout(wait, 100); break; // real time: the game may be paused while the box is open
+        }
+        case 'netConnect': s.engine.online.connect(); break;
+        case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
+        case 'netLeave': s.engine.online.leave(); break;
+        case 'netSend': s.engine.online.sendMessage(P('message'), +I('value') || 0); break;
+        case 'netSpawn': { const at = P('at') === 'position' ? { x: +I('x') || 0, y: +I('y') || 0, z: +I('z') || 0 } : { x: e.x, y: e.y, z: e.z }; const c = s.engine.online.spawnForAll(P('template'), at); if (c) ctx = { ...ctx, other: c }; break; }
+        case 'netShared': s.engine.online.setShared(P('name') || 'shared', +I('value') || 0); break;
+        case 'pfLogin': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLogin().then((ok) => { if (!e.dead) follow(n, ok ? 'logged in' : 'failed', later); }); return; }
+        case 'pfSubmit': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSubmit(P('stat'), +I('value') || 0).then((ok) => { if (!e.dead) follow(n, ok ? 'posted' : 'failed', later); }); break; }
+        case 'pfName': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSetName(fillTemplate(P('name'), s.vars)).then((ok) => { if (!e.dead) follow(n, ok ? 'done' : 'failed', later); }); break; }
+        case 'pfSave': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSave(P('keys')).then((ok) => { if (!e.dead) follow(n, ok ? 'saved' : 'failed', later); }); break; }
+        case 'pfLoad': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLoad().then((r) => { if (!e.dead) follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'no save' : 'failed', later); }); return; }
+        case 'pfTitle': { const later = { ...ctx, steps: 0 }; s.engine.online.pfTitleData(P('keys')).then((ok) => { if (!e.dead) follow(n, ok ? 'loaded' : 'failed', later); }); break; }
+        case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
+        case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
+        case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
+        case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
+        case 'overlap': case 'forEachTag': {
+          const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
+          const list = s.entities.filter((q) => q !== e && !q.dead && !q.ui && !q.template && (n.type === 'overlap' ? tagOk(q, tag) : tag && q.has(tag)) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r)
+            .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z)).slice(0, 100);
+          list.forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 }));
+          if (n.type === 'forEachTag') return follow(n, 'done', ctx);
+          return list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx);
+        }
+        case 'pickNearest': { const t = nearest(s, e, P('tag')), mx = +I('maxDistance') || Infinity; return t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= mx ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
+        case 'pickObject': { const k = P('object'), t = s.find(k) && !s.find(k).dead ? s.find(k) : nearest(s, e, k); return t ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
+        case 'lineOfSight': { const t = nearest(s, e, P('tag')); return t && s.canSee(e, t, +P('range') || Infinity) ? follow(n, 'visible', { ...ctx, other: t }) : follow(n, 'blocked', { ...ctx, other: t || ctx.other }); }
         default: break;
       }
       follow(n, 'then', ctx);
     };
-    const fire = (type, e, s, other, filter, dt) => {
+    const fire = (type, e, s, other, filter, dt, extra) => {
       if (e.dead && type !== 'destroyed') return;
-      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt });
+      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt, ...extra });
     };
+    const has = (...types) => g.nodes.some((n) => types.includes(n.type));
+    const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null;
     const timers = new Map();
     return {
       uiAlways: true,
@@ -6499,10 +7423,42 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
+        if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
+        if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('customEvent')) s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
+        if (has('onVarReaches')) {
+          const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
+          for (const n of g.nodes) if (n.type === 'onVarReaches') varWas.set(n.id, test(n, s.vars[param(n, 'name')]));
+          s.on('var', (k, v) => { if (e.dead) return; for (const n of g.nodes) if (n.type === 'onVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !varWas.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); varWas.set(n.id, now); } });
+        }
+        if (has('onNetJoined', 'onPlayerJoined', 'onPlayerLeft', 'onPfLogin', 'onOnlineError')) s.on('online', (what) => {
+          if (e.dead) return;
+          const t = { joined: 'onNetJoined', playerJoined: 'onPlayerJoined', playerLeft: 'onPlayerLeft', login: 'onPfLogin', error: 'onOnlineError' }[what];
+          if (t) fire(t, e, s);
+        });
+        if (has('onNetMessage')) s.on('netMessage', (m, v) => { if (!e.dead) fire('onNetMessage', e, s, null, (n) => !param(n, 'message') || param(n, 'message') === m, null, { netValue: v }); });
         if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
         if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
         if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
         if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
+        // trigger events need a body to overlap with: a trigger if it has none; collision events a solid one
+        if (has('triggerEnter', 'triggerExit', 'triggerStay', 'inTrigger') && !e.body) e.ensureBody({ type: 'kinematic', sensor: true });
+        if (has('collisionEnter', 'collisionExit', 'collisionStay', 'isColliding') && !e.body) e.ensureBody({ type: 'kinematic' });
+        for (const n of g.nodes) if (['triggerEnter', 'triggerExit', 'triggerStay', 'collisionEnter', 'collisionExit', 'collisionStay', 'inTrigger', 'isColliding'].includes(n.type)) s.want(param(n, 'tag'));
+        if (g.nodes.some((n) => (n.type === 'raycast') && param(n, 'debug'))) { // rays drawn for a moment, green when they hit something
+          (s.overlays ||= []).push(rayOverlay = (ctx) => {
+            const r = s.engine.renderer, three = s.mode === '3d';
+            for (let i = debugRays.length - 1; i >= 0; i--) if (s.time - debugRays[i].t > 0.5 || debugRays.length > 40) debugRays.splice(i, 1);
+            ctx.save(); ctx.lineWidth = 2.5;
+            for (const q of debugRays) {
+              const A = three ? r.worldToScreen(s, q.a.x, q.a.y, q.a.z) : r.worldToScreen(s, q.a.x, q.a.y), Bp = three ? r.worldToScreen(s, q.b.x, q.b.y, q.b.z) : r.worldToScreen(s, q.b.x, q.b.y);
+              if (A.behind || Bp.behind) continue;
+              ctx.strokeStyle = q.hit ? '#5dff8a' : '#ff5d8f'; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(Bp.x, Bp.y); ctx.stroke();
+              if (q.hit) { ctx.fillStyle = '#5dff8a'; ctx.beginPath(); ctx.arc(Bp.x, Bp.y, 4, 0, Math.PI * 2); ctx.fill(); }
+            }
+            ctx.restore();
+          });
+        }
         fire('start', e, s);
       },
       update(e, dt, s) {
@@ -6512,6 +7468,23 @@ registerBehavior('graph', {
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
         if (g.nodes.some((n) => n.type === 'released') && inp.ups?.length) fire('released', e, s);
+        for (let i = frameQueue.length - 1; i >= 0; i--) if (--frameQueue[i].left <= 0) frameQueue.splice(i, 1)[0].fn();
+        if (has('onLongPress', 'onDoubleTap') && e.visible) {
+          for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) press.set(d.id, { t: s.time, x: d.x, y: d.y, done: false });
+          for (const [id, q] of press) {
+            const ptr = inp.pointers.get(id);
+            if (!ptr || Math.hypot(ptr.x - q.x, ptr.y - q.y) > 14) { press.delete(id); continue; }
+            for (const n of g.nodes) if (n.type === 'onLongPress' && !q.done && s.time - q.t >= Math.max(0.1, +param(n, 'seconds') || 0.5)) { q.done = true; follow(n, 'then', { s, e, steps: 0 }); }
+          }
+          if (has('onDoubleTap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { if (s.time - lastTapT < 0.35) { lastTapT = -9; fire('onDoubleTap', e, s); } else lastTapT = s.time; }
+        }
+        if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
+        if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
+        if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
+        for (const n of g.nodes) if (n.type === 'objectNear') {
+          const t = nearest(s, e, param(n, 'tag')), r = +param(n, 'range') || defRange(s), isNear = !!t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= r;
+          if (isNear !== !!near.get(n.id)) { follow(n, isNear ? 'near' : 'left', { s, e, other: t || near.get(n.id + 'o') || null, steps: 0, dt }); near.set(n.id, isNear); if (t) near.set(n.id + 'o', t); }
+        }
         if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
@@ -6519,9 +7492,20 @@ registerBehavior('graph', {
           else if (n.type === 'swipe' && inp.pressed('swipe:' + param(n, 'dir'))) follow(n, 'then', { s, e, steps: 0 });
         }
       },
-      collide(e, other, s) { fire('touch', e, s, other, (n) => other.has(param(n, 'tag'))); },
-      separate(e, other, s) { fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag'))); },
-      destroy(e, s) { fire('destroyed', e, s); },
+      collide(e, other, s, m) {
+        fire('touch', e, s, other, (n) => other.has(param(n, 'tag')));
+        if (e.body?.sensor || other.body?.sensor) { fire('triggerEnter', e, s, other, (n) => tagOk(other, param(n, 'tag'))); return; }
+        if (!has('collisionEnter')) return;
+        // how hard they hit: how fast they were closing in along the contact normal
+        const va = e.body?.vel || { x: 0, y: 0, z: 0 }, vb = other.body?.vel || { x: 0, y: 0, z: 0 }, nrm = m || { nx: 0, ny: 0, nz: 0 };
+        const impact = Math.abs((va.x - vb.x) * nrm.nx + (va.y - vb.y) * nrm.ny + (va.z - vb.z) * nrm.nz);
+        fire('collisionEnter', e, s, other, (n) => tagOk(other, param(n, 'tag')) && impact >= (+param(n, 'minSpeed') || 0), null, { impact, hit: { dist: 0, point: { x: e.x, y: e.y, z: e.z }, normal: { x: -nrm.nx, y: -nrm.ny, z: -nrm.nz } } });
+      },
+      separate(e, other, s) {
+        fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag')));
+        fire(e.body?.sensor || other.body?.sensor ? 'triggerExit' : 'collisionExit', e, s, other, (n) => tagOk(other, param(n, 'tag')));
+      },
+      destroy(e, s) { fire('destroyed', e, s); if (rayOverlay) s.overlays = (s.overlays || []).filter((f) => f !== rayOverlay); },
     };
   },
 });
@@ -6550,6 +7534,323 @@ registerBehavior('script', {
 // ============================================================================
 // Engine
 // ============================================================================
+// ============================================================================
+// Online services: PlayFab (accounts, leaderboards, cloud saves, remote config) and Photon (real-time multiplayer).
+// Each game uses its own PlayFab Title ID and Photon App ID (Game Settings › Online). Nothing is sent anywhere until one is set.
+// ============================================================================
+export const PHOTON_SDK = 'https://cdn.jsdelivr.net/npm/photon-realtime@4.4.0/photon-realtime-module.js';
+export const PHOTON_REGIONS = ['eu', 'us', 'usw', 'asia', 'jp', 'kr', 'in', 'au', 'sa', 'cae', 'za', 'uae', 'tr'];
+const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6, SPAWNT: 7, KILL: 8 }; // Photon event codes this engine uses
+const NET_VISUAL = ['animator', 'spriteSheet', 'flipbook']; // components a remote copy keeps (looks only, no control)
+
+export class Online {
+  constructor(engine) {
+    this.engine = engine;
+    this.pf = { ticket: null, id: null, name: '', login: null };
+    this.lbc = null; this.state = 'offline'; this.pendingJoin = null; this.loading = null;
+    this.local = new Map(); // netId → { e, p } objects this player owns and sends
+    this.proxies = new Map(); // `${actor}:${netId}` → { e, to, anim }
+    this.shared = {}; this.sendT = 0; this.sceneRef = null; this.lastValue = 0;
+    this.objs = new Map(); this.objSeq = 0; // objects spawned for everyone: netObj id → { e, t }
+  }
+  get scene() { return this.engine.scene; }
+  cfg(k) { return this.scene?.settings?.[k] || {}; }
+  setVar(k, v) { const s = this.scene; if (s && s.vars[k] !== v) s.setVar(k, v); }
+  fail(where, err) { const m = String(err?.message || err || 'failed'); Log.add('warn', `${where}: ${m}`); this.setVar('onlineError', m); this.scene?.emit('online', 'error', m); return null; }
+  playerName() { return this.pf.name || store.get('pocket.netName', '') || 'Player ' + (this.myNr() || Math.floor(rand(100, 999))); }
+
+  // ---------------- PlayFab (Client REST API) ----------------
+  titleId() { return String(this.cfg('playfab').titleId || '').trim(); }
+  async pfCall(api, body = {}, auth = true) {
+    const title = this.titleId();
+    if (!title) throw new Error('add your PlayFab Title ID in Game Settings › Online');
+    if (auth && !this.pf.ticket) await this.pfLogin();
+    const r = await fetch(`https://${title.toLowerCase()}.playfabapi.com/Client/${api}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...(auth ? { 'X-Authorization': this.pf.ticket } : {}) }, body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(() => null);
+    if (!j || j.code !== 200) throw new Error(j?.errorMessage || `${api} failed (${r.status})`);
+    return j.data;
+  }
+  /** Sign in without a password: a private ID kept on this device (one PlayFab player per device and game). */
+  pfLogin() {
+    if (this.pf.title !== this.titleId()) this.pf = { ticket: null, id: null, name: '', login: null, title: this.titleId() }; // a different game / Title ID
+    if (this.pf.ticket) return Promise.resolve(true);
+    if (this.pf.login) return this.pf.login;
+    const title = this.titleId(), key = 'pocket.pf.' + title;
+    let id = store.get(key, '');
+    if (!id) { id = globalThis.crypto?.randomUUID?.() || 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2); store.set(key, id); }
+    this.pf.login = this.pfCall('LoginWithCustomID', { TitleId: title, CustomId: id, CreateAccount: true, InfoRequestParameters: { GetPlayerProfile: true, GetUserVirtualCurrency: true } }, false)
+      .then((d) => {
+        this.pf.ticket = d.SessionTicket; this.pf.id = d.PlayFabId; this.pf.name = d.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+        this.setVar('pfOnline', 1); this.setVar('pfPlayerId', d.PlayFabId); if (this.pf.name) this.setVar('pfName', this.pf.name);
+        for (const [c, v] of Object.entries(d.InfoResultPayload?.UserVirtualCurrency || {})) this.setVar('pf' + c, v);
+        this.scene?.emit('online', 'login', d.NewlyCreated);
+        return true;
+      })
+      .catch((e) => { this.fail('PlayFab login', e); return false; })
+      .finally(() => { this.pf.login = null; });
+    return this.pf.login;
+  }
+  async pfSetName(name) {
+    name = String(name || '').trim().slice(0, 25);
+    try { await this.pfCall('UpdateUserTitleDisplayName', { DisplayName: name }); this.pf.name = name; this.setVar('pfName', name); store.set('pocket.netName', name); return true; } catch (e) { return !!this.fail('PlayFab name', e); }
+  }
+  /** Post a score to a leaderboard (statistic). PlayFab: Title settings › API Features › "Allow client to post player statistics". */
+  async pfSubmit(stat, value) {
+    try { await this.pfCall('UpdatePlayerStatistics', { Statistics: [{ StatisticName: String(stat || 'score'), Value: Math.round(+value || 0) }] }); this.scene?.emit('online', 'score', stat); return true; } catch (e) { return !!this.fail('PlayFab score', e); }
+  }
+  /** Leaderboard rows: [{ rank, name, value, me }] — the top, or the players around you. */
+  async pfLeaderboard(stat, count = 10, around = false) {
+    try {
+      const body = { StatisticName: String(stat || 'score'), MaxResultsCount: clamp(Math.round(+count || 10), 1, 100), ...(around ? {} : { StartPosition: 0 }) };
+      const d = await this.pfCall(around ? 'GetLeaderboardAroundPlayer' : 'GetLeaderboard', body);
+      const rows = (d.Leaderboard || []).map((r) => ({ rank: r.Position + 1, name: r.DisplayName || 'Player ' + String(r.PlayFabId).slice(-4), value: r.StatValue, me: r.PlayFabId === this.pf.id }));
+      const mine = rows.find((r) => r.me); if (mine) this.setVar('pfRank', mine.rank);
+      return rows;
+    } catch (e) { this.fail('PlayFab leaderboard', e); return null; }
+  }
+  /** Cloud save: the game's variables (or just the listed ones) go to the player's PlayFab data. */
+  async pfSave(keys) {
+    const s = this.scene; if (!s) return false;
+    const pick = String(keys || '').split(',').map((k) => k.trim()).filter(Boolean), vars = {};
+    for (const [k, v] of Object.entries(s.vars)) if ((pick.length ? pick.includes(k) : !/^(pf|net|online)/.test(k) && k !== 'time') && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) vars[k] = v;
+    try { await this.pfCall('UpdateUserData', { Data: { pocket_vars: JSON.stringify({ vars, level: this.engine.levelIndex || 0 }) } }); return true; } catch (e) { return !!this.fail('PlayFab save', e); }
+  }
+  async pfLoad() {
+    try {
+      const d = await this.pfCall('GetUserData', { Keys: ['pocket_vars'] }), raw = d.Data?.pocket_vars?.Value;
+      if (!raw) return 'none';
+      const j = JSON.parse(raw); for (const [k, v] of Object.entries(j.vars || {})) this.scene?.setVar(k, v);
+      return 'loaded';
+    } catch (e) { this.fail('PlayFab load', e); return 'failed'; }
+  }
+  /** Remote config: Title Data values become variables (numbers stay numbers), so you can tune a live game. */
+  async pfTitleData(keys) {
+    try {
+      const list = String(keys || '').split(',').map((k) => k.trim()).filter(Boolean);
+      const d = await this.pfCall('GetTitleData', list.length ? { Keys: list } : {});
+      for (const [k, v] of Object.entries(d.Data || {})) this.scene?.setVar(k, v !== '' && Number.isFinite(+v) ? +v : v);
+      return true;
+    } catch (e) { return !!this.fail('PlayFab title data', e); }
+  }
+  async pfEvent(name, body = {}) { try { await this.pfCall('WritePlayerEvent', { EventName: String(name || 'game_event').replace(/[^\w]/g, '_').slice(0, 64), Body: body }); return true; } catch (e) { return !!this.fail('PlayFab event', e); } }
+  async pfCurrency() {
+    try { const d = await this.pfCall('GetUserInventory', {}); for (const [c, v] of Object.entries(d.VirtualCurrency || {})) this.setVar('pf' + c, v); return true; } catch (e) { return !!this.fail('PlayFab currency', e); }
+  }
+
+  // ---------------- Photon Realtime ----------------
+  async photonSDK() {
+    if (globalThis.Photon?.LoadBalancing) return globalThis.Photon;
+    this.loading ||= (async () => {
+      const code = await (await fetch(this.cfg('photon').sdkUrl || PHOTON_SDK)).text();
+      const m = { exports: {} };
+      new Function('module', 'exports', 'require', code)(m, m.exports, (n) => (n === 'ws' ? globalThis.WebSocket : undefined)); // the npm build expects Node; the browser's WebSocket fits
+      return (globalThis.Photon = m.exports);
+    })().catch((e) => { this.loading = null; throw e; });
+    return this.loading;
+  }
+  myNr() { return this.lbc?.myActor?.()?.actorNr || 0; }
+  inRoom() { return !!this.lbc?.isJoinedToRoom?.(); }
+  isMaster() { return this.inRoom() && this.lbc.myRoomMasterActorNr() === this.myNr(); }
+  setState(st) { this.state = st; this.setVar('netState', st); this.setVar('netOnline', st === 'room' ? 1 : 0); }
+  counts() {
+    if (!this.inRoom()) { this.setVar('netPlayers', 0); this.setVar('netMaster', 0); return; }
+    this.setVar('netPlayers', this.lbc.myRoomActorCount()); this.setVar('netMaster', this.isMaster() ? 1 : 0); this.setVar('netActor', this.myNr());
+  }
+  async connect() {
+    const c = this.cfg('photon');
+    if (!String(c.appId || '').trim()) return this.fail('Photon', 'add your Photon App ID in Game Settings › Online');
+    if (this.lbc && this.state !== 'offline') return true;
+    try {
+      this.setState('connecting');
+      const P = await this.photonSDK(), L = P.LoadBalancing.LoadBalancingClient, S = L.State;
+      const lbc = this.lbc = new L(P.ConnectionProtocol.Wss, String(c.appId).trim(), String(c.appVersion || '1.0'));
+      this.P = P;
+      lbc.setUserId?.(this.pf.id || store.get('pocket.netId', '') || (() => { const id = 'u' + Math.random().toString(36).slice(2, 10); store.set('pocket.netId', id); return id; })());
+      lbc.onStateChange = (st) => {
+        if (st === S.JoinedLobby) { this.setState('lobby'); this.scene?.emit('online', 'connected'); if (this.pendingJoin) { const j = this.pendingJoin; this.pendingJoin = null; this.join(j.name, j.max); } }
+        else if (st === S.Joined) { this.setState('room'); }
+        else if (st === S.Disconnected || st === S.Error) { this.setState('offline'); this.clearProxies(); this.counts(); this.scene?.emit('online', 'disconnected'); }
+        else if (st === S.ConnectingToGameserver || st === S.ConnectedToGameserver) this.setState('joining');
+      };
+      lbc.onJoinRoom = () => {
+        this.setState('room'); this.setVar('netRoom', lbc.myRoom()?.name || ''); this.counts();
+        this.announce(); this.scene?.emit('online', 'joined', lbc.myRoom()?.name);
+      };
+      lbc.onActorJoin = (a) => { this.counts(); if (a.actorNr !== this.myNr()) { this.announce([a.actorNr]); if (this.isMaster() && Object.keys(this.shared).length) this.raise(NET.SHARED, { all: this.shared }, [a.actorNr]); for (const [o, q] of this.objs) if (!q.e.dead && o.startsWith(this.myNr() + '-')) this.raise(NET.SPAWNT, { t: q.t, o, a: { x: q.e.x, y: q.e.y, z: q.e.z, rx: q.e.rx, ry: q.e.ry, rz: q.e.rz } }, [a.actorNr]); this.scene?.emit('online', 'playerJoined', a.actorNr); } };
+      lbc.onActorLeave = (a) => { this.counts(); this.dropActor(a.actorNr); this.scene?.emit('online', 'playerLeft', a.actorNr); };
+      lbc.onEvent = (code, data, actor) => this.receive(code, data, actor);
+      lbc.onError = (code, msg) => this.fail('Photon', `${msg} (${code})`);
+      lbc.connectToRegionMaster(c.region || 'eu');
+      return true;
+    } catch (e) { this.setState('offline'); return this.fail('Photon', e); }
+  }
+  /** Join a room by name (made if it doesn't exist), or any open room when the name is blank. Connects first if needed. */
+  async join(name = '', max) {
+    max = clamp(Math.round(+max || +this.cfg('photon').maxPlayers || 4), 2, 32);
+    if (!this.lbc || this.state === 'offline' || this.state === 'connecting') { this.pendingJoin = { name, max }; if (!this.lbc || this.state === 'offline') await this.connect(); return true; }
+    if (this.inRoom()) return true;
+    this.setState('joining');
+    if (name) this.lbc.joinRoom(String(name), { createIfNotExists: true }, { maxPlayers: max });
+    else this.lbc.joinRandomOrCreateRoom({}, null, { maxPlayers: max });
+    return true;
+  }
+  leave() { if (this.inRoom()) { this.lbc.leaveRoom(); this.clearProxies(); this.setState('lobby'); this.counts(); this.setVar('netRoom', ''); } }
+  disconnect() { this.pendingJoin = null; try { this.lbc?.disconnect(); } catch { /* already closed */ } this.lbc = null; this.setState('offline'); this.clearProxies(); this.counts(); }
+  raise(code, data, to) {
+    if (!this.inRoom()) return false;
+    const R = this.P?.LoadBalancing?.Constants?.ReceiverGroup || { Others: 0 };
+    this.lbc.raiseEvent(code, data, to ? { targetActors: to } : { receivers: R.Others });
+    return true;
+  }
+  /** A message to everyone else in the room (they get it as a game message, plus On Network Message). */
+  sendMessage(name, value = 0) { return this.raise(NET.MESSAGE, { m: String(name), v: value }); }
+  setShared(k, v) { this.shared[k] = v; this.scene?.setVar(k, v); this.raise(NET.SHARED, { k, v }); }
+  /** Spawn a template for everyone in the room (just here when offline). Destroying it anywhere removes it everywhere. */
+  spawnForAll(tpl, at = {}) {
+    const s = this.scene; if (!s) return null;
+    const e = s.spawn(tpl, at); if (!e) return null;
+    if (this.inRoom()) {
+      const id = this.myNr() + '-' + (++this.objSeq);
+      e.data.netObj = id; this.objs.set(id, { e, t: tpl });
+      this.raise(NET.SPAWNT, { t: tpl, o: id, a: { ...at, x: e.x, y: e.y, z: e.z } }); // with its turn, so bullets fly the same way
+    }
+    return e;
+  }
+
+  // synced objects: the local player's copy sends where it is; everyone else draws a copy that follows
+  register(e, p) { this.local.set(e.data.netId || e.id, { e, p }); if (this.inRoom()) this.announce(null, e); }
+  unregister(e) { const id = e.data.netId || e.id; if (this.local.get(id)?.e === e) { this.local.delete(id); this.raise(NET.DESPAWN, { i: id }); } }
+  spawnInfo(e) {
+    const s = this.scene, all = [s?.json, ...(s?.json?.levels || [])].filter(Boolean).flatMap((lv) => lv.entities || []);
+    const src = all.find((j) => j.id === e.id) || { name: e.name, shape: e.shape, sprite: e.sprite, mesh: e.mesh, model: e.model, text: e.text, sx: e.sx, sy: e.sy, sz: e.sz };
+    const strip = (j) => ({ ...JSON.parse(JSON.stringify(j)), id: undefined, behaviors: (j.behaviors || []).filter((b) => NET_VISUAL.includes(b.type)), tags: [] });
+    const kids = []; const walk = (id) => { for (const k of all) if (k.parent === id && !k.ui) { kids.push({ ...strip(k), _id: k.id, _parent: k.parent }); walk(k.id); } };
+    walk(e.id);
+    return { j: strip(src), k: kids, n: this.playerName() };
+  }
+  announce(to, only) {
+    if (!this.inRoom()) return;
+    for (const [id, { e, p }] of this.local) if (!only || only === e) this.raise(NET.SPAWN, { i: id, ...this.spawnInfo(e), solid: !!p.solid }, to);
+  }
+  clearProxies() { for (const q of this.proxies.values()) q.e.destroy(); this.proxies.clear(); this.setVar('netPlayers', this.inRoom() ? this.lbc.myRoomActorCount() : 0); }
+  dropActor(nr) { for (const [k, q] of this.proxies) if (k.startsWith(nr + ':')) { q.e.destroy(); this.proxies.delete(k); } }
+  makeProxy(actor, d) {
+    const s = this.scene; if (!s) return null;
+    const key = actor + ':' + d.i; this.proxies.get(key)?.e.destroy();
+    const three = s.mode === '3d', j = d.j || {};
+    const e = s.add(new Entity({ ...j, name: `${j.name || 'Player'} (${d.n || 'remote'})`, tags: ['remote', 'netPlayer'], x: j.x || 0, y: j.y || 0, z: j.z || 0 }));
+    if (e.body) { e.body.type = 'kinematic'; e.body.sensor = !d.solid; }
+    e.data.netActor = actor; e.data.netName = d.n || '';
+    const ids = { [d.i]: e };
+    for (const k of d.k || []) { const c = s.add(new Entity({ ...k, parent: (ids[k._parent] || e).id })); ids[k._id] = c; }
+    if (!three && d.n) s.add(new Entity({ name: e.name + ' Name', parent: e.id, x: 0, y: -(e.extents().hy || 20) - 14, text: { ...TEXT_DEFAULTS, value: d.n, size: 13, weight: '700', shadow: true } }));
+    const q = { e, to: null, anim: '' }; this.proxies.set(key, q);
+    return q;
+  }
+  receive(code, data, actor) {
+    const s = this.scene; if (!s || actor === this.myNr()) return;
+    switch (code) {
+      case NET.STATE: for (const r of data || []) {
+        const key = actor + ':' + r[0], q = this.proxies.get(key);
+        if (!q) { if (!this.asked?.has(key)) { (this.asked ||= new Set()).add(key); this.raise(NET.NEED, {}, [actor]); } continue; }
+        const first = !q.to; q.to = { x: r[1], y: r[2], z: r[3], ry: r[4], rz: r[5] };
+        if (first) Object.assign(q.e, q.to);
+        q.e.data.flipX = !!r[6]; if (q.e.sprite) q.e.sprite.flip = !!r[6];
+        if (r[7] && r[7] !== q.anim) { q.anim = r[7]; for (const t of NET_VISUAL) { const b = q.e.getBehavior(t); if (b?.play && b.current !== r[7]) b.play(r[7]); } }
+      } break;
+      case NET.SPAWN: this.asked?.delete(actor + ':' + data.i); this.makeProxy(actor, data); break;
+      case NET.DESPAWN: { const k = actor + ':' + data.i; this.proxies.get(k)?.e.destroy(); this.proxies.delete(k); break; }
+      case NET.NEED: this.announce([actor]); break;
+      case NET.SHARED: if (data.all) for (const [k, v] of Object.entries(data.all)) { this.shared[k] = v; s.setVar(k, v); } else { this.shared[data.k] = data.v; s.setVar(data.k, data.v); } break;
+      case NET.SPAWNT: { if (this.objs.has(data.o)) break; const e = s.spawn(data.t, data.a || { x: data.x, y: data.y, z: data.z }); if (e) { e.data.netObj = data.o; e.spawned = true; this.objs.set(data.o, { e, t: data.t }); } break; }
+      case NET.KILL: { const q = this.objs.get(data.o); if (q) { q.e.data.netKilled = true; if (!q.e.dead) q.e.destroy(); this.objs.delete(data.o); } break; }
+      case NET.MESSAGE: this.lastValue = data.v; s.emit('netMessage', data.m, data.v, actor); s.send(data.m, data.v); break;
+      default: s.emit('netEvent', code, data, actor);
+    }
+  }
+  update(dt) {
+    const s = this.scene; if (!s) return;
+    if (this.sceneRef !== s) { // a new level or restart: old copies went with the old scene
+      this.sceneRef = s; this.proxies.clear(); this.objs.clear();
+      const pf = this.cfg('playfab'), ph = this.cfg('photon');
+      if (pf.autoLogin && this.titleId() && !this.pf.ticket) this.pfLogin();
+      if (ph.autoJoin && String(ph.appId || '').trim() && this.state === 'offline') this.join(ph.room || '', ph.maxPlayers);
+      this.setVar('netState', this.state); this.counts();
+      if (this.inRoom()) setTimeout(() => this.announce(), 0);
+    }
+    for (const [id, q] of this.objs) if (q.e.dead) { if (!q.e.data.netKilled) this.raise(NET.KILL, { o: id }); this.objs.delete(id); } // collected / destroyed here: gone for everyone
+    for (const [k, q] of this.proxies) { // smooth the copies toward the last place we heard
+      if (q.e.dead) { this.proxies.delete(k); continue; }
+      if (!q.to) continue;
+      const a = Math.min(1, dt * 12);
+      q.e.x += (q.to.x - q.e.x) * a; q.e.y += (q.to.y - q.e.y) * a; q.e.z += (q.to.z - q.e.z) * a;
+      const turn = (from, to) => from + ((((to - from) % 360) + 540) % 360 - 180) * a;
+      q.e.ry = turn(q.e.ry || 0, q.to.ry || 0); q.e.rz = turn(q.e.rz || 0, q.to.rz || 0);
+    }
+    if (!this.inRoom() || !this.local.size) return;
+    const rate = Math.max(...[...this.local.values()].map((l) => +l.p.rate || 12));
+    if ((this.sendT += dt) < 1 / clamp(rate, 2, 30)) return;
+    this.sendT = 0;
+    const rows = [];
+    for (const [id, { e }] of this.local) {
+      if (e.dead) { this.local.delete(id); continue; }
+      const anim = NET_VISUAL.map((t) => e.getBehavior(t)?.current).find(Boolean) || '';
+      const r2 = (v) => Math.round((v || 0) * 100) / 100;
+      rows.push([id, r2(e.x), r2(e.y), r2(e.z), Math.round(e.ry || 0), Math.round(e.rz || 0), e.data.flipX || e.sprite?.flip ? 1 : 0, anim]);
+    }
+    if (rows.length) this.raise(NET.STATE, rows);
+  }
+}
+
+registerBehavior('netSync', {
+  label: 'Network Sync (Photon)', description: 'Multiplayer: put it on your player. Everyone else in the room sees a copy of it that follows where you go (position, turning, facing and animation). Needs a Photon App ID in Game Settings › Online.',
+  params: [
+    { key: 'rate', label: 'Updates per second', type: 'number', default: 12, range: [2, 30], step: 1 },
+    { key: 'solid', label: 'Other players\' copies are solid', type: 'bool', default: false },
+  ],
+  create(p) {
+    return {
+      start(e, s) { e.data.netId ||= e.id; s.engine.online?.register(e, p); },
+      destroy(e, s) { s.engine.online?.unregister(e); },
+    };
+  },
+});
+
+registerBehavior('pfLeaderboard', {
+  label: 'Online Leaderboard (PlayFab)', description: 'Shows a PlayFab leaderboard in this text: the top players, or the players around you. Refreshes when the game starts, on a message, and after you post a score. Needs a PlayFab Title ID in Game Settings › Online.',
+  params: [
+    { key: 'stat', label: 'Statistic (leaderboard name)', type: 'text', default: 'score' },
+    { key: 'count', label: 'How many rows', type: 'number', default: 10, range: [1, 50], step: 1 },
+    { key: 'around', label: 'Show the players around me', type: 'bool', default: false },
+    { key: 'refreshOn', label: 'Refresh on message', type: 'text', default: 'leaderboard', suggest: 'messages' },
+    { key: 'format', label: 'Row format', type: 'text', default: '{rank}. {name}  {value}' },
+  ],
+  create(p) {
+    let busy = false;
+    const load = async (e, s) => {
+      if (busy || !s.engine.online) return; busy = true;
+      e.text ||= { ...TEXT_DEFAULTS, size: 18, align: 'left' };
+      if (!s.engine.online.titleId()) { e.text.value = 'Add a PlayFab Title ID\nin Game Settings › Online'; busy = false; return; }
+      e.text.value = 'Loading…';
+      const rows = await s.engine.online.pfLeaderboard(p.stat, p.count, p.around);
+      busy = false;
+      if (e.dead) return;
+      e.text.value = !rows ? 'Leaderboard unavailable' : !rows.length ? 'No scores yet — be the first!' : rows.map((r) => String(p.format || '{rank}. {name}  {value}').replace('{rank}', r.rank).replace('{name}', r.name + (r.me ? ' (you)' : '')).replace('{value}', formatNumber(r.value))).join('\n');
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (s.engine.editing) return;
+        load(e, s);
+        s.on('message', (m) => { if (!e.dead && m === (p.refreshOn || 'leaderboard')) load(e, s); });
+        s.on('online', (what, stat) => { if (!e.dead && what === 'score' && (stat || 'score') === (p.stat || 'score')) load(e, s); });
+      },
+    };
+  },
+});
+
 export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
@@ -6572,8 +7873,17 @@ export class Engine {
     this.deviceSafe = { top: 0, right: 0, bottom: 0, left: 0 };
     this.safe = { top: 0, right: 0, bottom: 0, left: 0, k: 1 };
     this.safeOverride = null; // the editor's phone preview: pretend there is a notch / home bar
+    // the phone's back gesture / browser Back and Esc go back in the game's UI (the editor turns this off: it has its own Back)
+    this.systemBack = opts.systemBack !== false; this.histDepth = 0; this.histSkip = 0;
+    window.addEventListener('popstate', () => {
+      if (!this.systemBack) return;
+      if (this.histSkip) { this.histSkip--; return; } // our own history.back() after the game went back by itself
+      if (this.histDepth > 0) { this.histDepth--; this.scene?.navBack(); }
+    });
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !this.editing && this.scene?.state === 'play' && this.scene.canGoBack()) { ev.preventDefault(); this.scene.navBack(); } });
 
     this.input = new Input(this, this.uiCanvas);
+    this.online = new Online(this);
     this.audio = new Audio();
     this.physics = new Physics();
     this.scene = null;
@@ -6626,6 +7936,7 @@ export class Engine {
    */
   start(source, opts = {}) {
     this.levels = null; this.carry = null;
+    if (!this.editing && this.recordGraphs) this.graphStats = new Map(); // the node editor's live debug: what ran in this play
     if (source && typeof source === 'object' && !(source instanceof Scene)) this.audio.clips = { ...(source.sounds || {}) }; // imported sounds
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;
@@ -6640,7 +7951,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon } }; // the UI theme, fonts and online services are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -6693,6 +8004,7 @@ export class Engine {
       if (saved?.vars) Object.assign(scene.vars, saved.vars);
     }
     this.useRenderer(scene.mode);
+    loadFonts(scene.settings.fonts);
     this.physics.contacts.clear();
     this.input.reset();
     this.paused = false;
@@ -6723,7 +8035,15 @@ export class Engine {
         b.push({ action: 'dright', label: '▶', x: cx + dr * 1.9, y: cy, r: dr, id: null });
       }
       // extra buttons that components add (e.g. the block builder's mode and block pickers), stacked above
-      (s.customButtons || []).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
+      (s.customButtons || []).filter((cb) => !cb.hotbar).forEach((cb, i) => b.push({ ...cb, x: X(0), y: bottom - (i + 1) * r * 2.3 - (s.settings.actionButton && !s.settings.jumpButton ? r * 2.3 : 0), r: r * 0.9, id: null }));
+      // a hotbar row of square slots along the bottom middle (the block builder's blocks); it moves up when the screen is too narrow
+      const hb = (s.customButtons || []).filter((cb) => cb.hotbar);
+      if (hb.length) {
+        const side = m + r * 2 + 12, room = this.width - this.safe.left - this.safe.right - side * 2, fits = room / hb.length >= 34;
+        const size = Math.min(48, fits ? room / hb.length : (this.width - this.safe.left - this.safe.right - 16) / hb.length), cx = (this.safe.left + this.width - this.safe.right) / 2;
+        const y = fits ? this.height - this.safe.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
+        hb.forEach((cb, i) => b.push({ ...cb, x: cx + (i - (hb.length - 1) / 2) * size, y, w: size - 4, h: size - 4, r: size / 2, id: null }));
+      }
       const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
@@ -6824,6 +8144,20 @@ export class Engine {
   }
 
   /** An open side bar or popup takes the taps: one outside it closes it and goes no further. */
+  /** Keep the browser history in step with the game's pages, and go back on a swipe in from the left edge. */
+  navTick(s) {
+    const inp = this.input;
+    if (s.settings.edgeSwipeBack !== false && s.canGoBack()) {
+      for (const u of inp.ups) if (u.sx < 28 && u.x - u.sx > 70 && Math.abs(u.y - u.sy) < 90 && u.time < 0.7) { s.navBack(); inp.taps.length = 0; break; }
+    }
+    if (!this.systemBack || this.editing || typeof history === 'undefined') return;
+    const want = Math.min(s.navDepth(), 20);
+    try {
+      if (want > this.histDepth) { history.pushState({ pocketNav: this.histDepth + 1 }, ''); this.histDepth++; }
+      else if (want < this.histDepth && !this.histSkip) { this.histSkip++; this.histDepth--; history.back(); }
+    } catch { /* sandboxed frames can't change history */ }
+  }
+
   modalTaps(s) {
     const m = s.modal;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
@@ -6890,6 +8224,8 @@ export class Engine {
     if (!this.editing) this.fitScreen();
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
+    this.navTick(s);
+    this.online.update(dt);
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {

@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -124,6 +124,7 @@ function multiGroup(list) {
 const openDups = new Set(); // Hierarchy "Gem ×8" groups the user opened
 let hRevealed = null; // last selection the Hierarchy scrolled to
 let attachFor = null;
+let colliderEdit = null; // object whose 2D collider is being edited with handles
 let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
@@ -137,6 +138,7 @@ function openProject(json, id = uid('p')) {
   (root.levels || []).forEach(normalize);
   project = root; levelIdx = 0;
   projectId = id;
+  syncSoundNames();
   selectedId = null;
   history = []; hIndex = -1; pushHistory();
   resetCamera();
@@ -238,6 +240,7 @@ function undoRedo(step) {
   levelIdx = Math.min(levelIdx, levelList().length - 1);
   project = levelList()[levelIdx];
   if (selectedId !== SCENE_ID && !ent(selectedId)) selectedId = null;
+  syncSoundNames();
   rebuild(); refreshAll(); saveSoon(); updateUndoButtons(); updateCtxBar();
 }
 function updateUndoButtons() { $('#undoBtn').disabled = hIndex <= 0; $('#redoBtn').disabled = hIndex >= history.length - 1; }
@@ -426,7 +429,31 @@ engine.onRenderWorld = (r, s, z) => {
 };
 
 engine.onRenderUI = (ctx, s) => {
-  if (playing) return;
+  if (playing) { // play-mode Inspect: ring the inspected object
+    const e = inspectId && s.byId(inspectId);
+    if (e && !e.dead) {
+      const p = e.ui ? uiBounds(e) : toScreen(e); if (!p) return;
+      let hx = 24, hy = 24;
+      if (!is3D() && !e.ui) { const b = boundsOf(e), z = engine.renderer.zoomFor(s); hx = (b.sphere ? b.r : b.hx) * z + 6; hy = (b.sphere ? b.r : b.hy) * z + 6; }
+      ctx.save(); ctx.strokeStyle = ORANGE; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]); ctx.strokeRect(p.x - hx, p.y - hy, hx * 2, hy * 2); ctx.restore();
+    }
+    return;
+  }
+  const ce = colliderEdit === selectedId && s.byId(colliderEdit);
+  if (ce?.body && !is3D()) { // Edit Collider: green outline with handles
+    const f = colliderFrame(ce);
+    ctx.save(); ctx.strokeStyle = '#69f0ae'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(105,240,174,0.12)';
+    ctx.beginPath();
+    if (f.sphere) ctx.arc(f.c.x, f.c.y, f.r, 0, Math.PI * 2);
+    else { const p = [f.at(-f.hx, -f.hy), f.at(f.hx, -f.hy), f.at(f.hx, f.hy), f.at(-f.hx, f.hy)]; ctx.moveTo(p[0].x, p[0].y); for (const q of p.slice(1)) ctx.lineTo(q.x, q.y); ctx.closePath(); }
+    ctx.fill(); ctx.stroke();
+    for (const [part, q] of f.handles) {
+      ctx.beginPath();
+      if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
+      else { ctx.rect(q.x - 8, q.y - 8, 16, 16); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
+    }
+    ctx.restore();
+  }
   // invisible logic objects
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const e of s.entities) {
@@ -569,9 +596,23 @@ function drawRectGizmo(ctx, f) {
 }
 
 /** Which gizmo handle is under a screen point, if any. */
+/** The selected object's 2D collider on screen: centre, half sizes (or radius) and angle, plus its handles. */
+function colliderFrame(e) {
+  const ex = e.extents(), z = engine.renderer.zoomFor(engine.scene), c = engine.renderer.worldToScreen(engine.scene, e.x + (ex.ox || 0), e.y + (ex.oy || 0));
+  const rot = ex.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), at = (lx, ly) => ({ x: c.x + (lx * cs - ly * sn), y: c.y + (lx * sn + ly * cs) });
+  if (ex.sphere) { const r = ex.r * z; return { c, sphere: true, r, rot, handles: [['rad', at(r, 0)], ['c', c]] }; }
+  const hx = ex.hx * z, hy = ex.hy * z;
+  return { c, hx, hy, rot, at, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
+}
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
   if (!sel || tool === 'hand') return null;
+  if (colliderEdit === selectedId && sel.body && !is3D()) { // Edit Collider: its handles come first
+    const f = colliderFrame(sel);
+    let best = null, bd = 28;
+    for (const [part, q] of f.handles) { const d = Math.hypot(x - q.x, y - q.y); if (d < bd) { bd = d; best = part; } }
+    if (best) return { handle: 'collider', part: best, g: { o: f.c } };
+  }
   if (tool === 'rect') {
     const f = rectFrame(sel);
     if (f) {
@@ -742,6 +783,16 @@ surface.addEventListener('contextmenu', (e) => e.preventDefault()); // long-pres
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
   const o = giz.g.o;
+  if (giz.handle === 'collider') {
+    const live = engine.scene.byId(selectedId), ex = live.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1;
+    if ((j.body.shape || 'auto') === 'auto') { // fitted collider: becomes an explicit box / circle the first time you drag it
+      if (ex.sphere) Object.assign(j.body, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(j.body, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
+      Object.assign(live.body, { shape: j.body.shape, r: j.body.r, w: j.body.w, h: j.body.h });
+    }
+    gesture = { type: 'collider', part: giz.part, id: selectedId, sx: x, sy: y, moved: false, rot: ex.rot || 0, scale: [sx, sy],
+      orig: { w: j.body.w || 1, h: j.body.h || 1, r: j.body.r || 10, ox: j.body.ox || 0, oy: j.body.oy || 0 } };
+    return;
+  }
   if (giz.handle === 'rect') {
     const sz = sizeOf(j); if (!sz) return;
     gesture = { type: 'rect', dir: giz.dir, id: selectedId, sx: x, sy: y, f: giz.f, size0: sz, square: sz[2], ui: !!j.ui, moved: false, orig: { x: j.x || 0, y: j.y || 0 } };
@@ -765,6 +816,20 @@ surface.addEventListener('pointermove', (ev) => {
   if (Math.hypot(x - p.sx, y - p.sy) > 10) { if (tapTrack) tapTrack.moved = true; cancelLongPress(); }
   const s = engine.scene, g = gesture;
   const dx = x - (g.sx ?? x), dy = y - (g.sy ?? y);
+  if (g.type === 'collider') {
+    if (!g.moved && Math.hypot(dx, dy) < 4) return;
+    g.moved = true;
+    const j = ent(g.id), live = s.byId(g.id); if (!j?.body || !live) return;
+    const z = engine.renderer.zoomFor(s), wx = dx / z, wy = dy / z, cs = Math.cos(-g.rot), sn = Math.sin(-g.rot);
+    const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.body, r1 = (v) => Math.round(v);
+    const shift = (lxx, lyy) => { const c2 = Math.cos(g.rot), s2 = Math.sin(g.rot); B.ox = r1(o.ox + (lxx * c2 - lyy * s2) / scx); B.oy = r1(o.oy + (lxx * s2 + lyy * c2) / scy); };
+    if (g.part === 'c') { B.ox = r1(o.ox + wx / scx); B.oy = r1(o.oy + wy / scy); }
+    else if (g.part === 'rad') B.r = Math.max(2, r1(o.r + lx / Math.max(scx, scy)));
+    else if (g.part === 'r' || g.part === 'l') { const d = g.part === 'r' ? lx : -lx; B.w = Math.max(2, r1(o.w + d / scx)); const real = (B.w - o.w) * scx; shift((g.part === 'r' ? 1 : -1) * real / 2, 0); B.oy = r1(B.oy); }
+    else { const d = g.part === 'b' ? ly : -ly; B.h = Math.max(2, r1(o.h + d / scy)); const real = (B.h - o.h) * scy; shift(0, (g.part === 'b' ? 1 : -1) * real / 2); }
+    for (const k of ['w', 'h', 'r', 'ox', 'oy']) if (B[k] !== undefined) live.body[k] = B[k];
+    return;
+  }
   if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
     g.moved = true;
@@ -1008,6 +1073,7 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
+  if (g.type === 'collider' && g.moved) { pushHistory(); saveSoon(); renderInspector(); }
   uiGuide = null;
   if ((g.type === 'voxel' || g.type === 'tile') && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
@@ -1194,6 +1260,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 
 function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
+  if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   renderHierarchy();
   renderInspector();
   updateCtxBar();
@@ -2237,6 +2304,10 @@ function renderInspector() {
       C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
+      !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
+        colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
+        if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
+      } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider')),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
       (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
       j.body.type !== 'dynamic' && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
@@ -2270,7 +2341,7 @@ function renderInspector() {
 
   if (quickRow) box.append(quickRow);
   box.append(h('div', { class: 'add-comp', style: 'flex-direction:column;align-items:center;gap:10px' },
-    h('button', { class: 'btn wide', onclick: openAddComponent }, icon('plus'), 'Add Component'),
+    h('button', { class: 'btn wide', onclick: () => openAddComponent() }, icon('plus'), 'Add Component'),
     compClipboard && h('button', { class: 'btn wide', onclick: () => pasteComponent(j) }, icon('paste'), `Paste ${compClipboard.kind === 'behavior' ? Behaviors[compClipboard.data.type]?.label || 'Component' : compClipboard.kind}`)));
   box.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
     h('button', { class: 'btn', onclick: () => duplicateEntity(j.id) }, icon('copy'), 'Duplicate'),
@@ -2562,7 +2633,7 @@ function addComponentTo(id, key) {
   const c = componentsFor(j).find((x) => x.key === key);
   if (!c) return false;
   if (!c.ok(j)) { toast(`${c.label} can't be added to ${j.name}`); return false; }
-  c.add(j);
+  c.add(j); rememberComp(key);
   if (key === 'b:platformer' && !project.gravity) project.gravity = is3D() ? -25 : 1600;
   if (key === 'b:platformer') Object.assign(project.settings, { joystick: true, jumpButton: true });
   if (key === 'b:uiSlider' && !j.bar) j.bar = { var: j.behaviors.at(-1).var || 'volume', max: 100, w: 200, h: 18, fill: '#4c8bd6', bg: 'rgba(0,0,0,0.45)', radius: 9, label: true };
@@ -2574,17 +2645,58 @@ function addComponentTo(id, key) {
   return true;
 }
 
-function openAddComponent() {
+/** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
+const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
+  Animation: 'clock', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
+const CAT_ORDER = ['Rendering', 'Physics', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
+function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
+/** A few components that usually make sense next for this object. */
+function suggestComps(j, list) {
+  const has = (t) => (j.behaviors || []).some((b) => b.type === t), keys = [];
+  const isPlayer = (j.tags || []).includes('player'), logic = ['triggers', 'graph', 'fsm', 'rules', 'script'].some(has);
+  if (j.ui) keys.push('b:button', 'b:tween', 'b:triggers', 'b:uiCounter');
+  else {
+    if (!j.body) keys.push('body');
+    if (isPlayer) keys.push(is3D() ? 'b:thirdPerson' : 'b:platformer', 'b:move', 'b:health', 'b:cameraFollow');
+    else keys.push('b:collectible', 'b:hazard', 'b:patrol', 'b:health');
+    if (!logic) keys.push('b:triggers');
+    keys.push('b:tween');
+  }
+  return keys.filter((k) => !(k.startsWith('b:') && has(k.slice(2)))).map((k) => list.find((c) => c.key === k)).filter(Boolean).slice(0, 6);
+}
+function openAddComponent(startCat) {
   const j = ent(selectedId); if (!j) return;
   const list = componentsFor(j).filter((c) => c.ok(j));
-  const body = h('div');
-  const search = h('input', { class: 'ac-search', type: 'search', placeholder: 'Search components', autocapitalize: 'off', oninput: () => draw() });
+  let cat = startCat || null;
+  const body = h('div', { class: 'ac-body' });
+  const search = h('input', { class: 'ac-search', type: 'search', placeholder: `Search ${list.length} components`, autocapitalize: 'off', oninput: () => draw() });
+  const add = (c) => { closeLayer(); addComponentTo(j.id, c.key); };
+  const item = (c, showCat) => h('button', { class: 'ac-item', onclick: () => add(c) }, h('span', { class: 'ac-ic' }, icon(c.icon)),
+    h('span', {}, c.label, h('small', {}, showCat ? `${c.cat} · ${c.desc || ''}` : c.desc)));
+  const chip = (c) => h('button', { class: 'ac-chip', onclick: () => add(c) }, icon(c.icon), c.label.replace(/ \(.*\)$/, ''));
   function draw() {
-    const q = search.value.toLowerCase();
-    const cats = {};
-    for (const c of list) if (!q || c.label.toLowerCase().includes(q) || c.cat.toLowerCase().includes(q)) (cats[c.cat] ||= []).push(c);
-    body.replaceChildren(...Object.entries(cats).flatMap(([cat, items]) => [h('div', { class: 'ac-cat' }, cat),
-      ...items.map((c) => h('button', { class: 'ac-item', onclick: () => { closeLayer(); addComponentTo(j.id, c.key); } }, icon(c.icon, 'ci'), h('span', {}, c.label, h('small', {}, c.desc))))]));
+    const q = search.value.trim().toLowerCase();
+    if (q) { // search everything, best matches first
+      const score = (c) => { const l = c.label.toLowerCase(); return l.startsWith(q) ? 0 : l.includes(q) ? 1 : c.cat.toLowerCase().includes(q) ? 2 : 3; };
+      const hits = list.filter((c) => (c.label + ' ' + c.cat + ' ' + (c.desc || '')).toLowerCase().includes(q)).sort((a, b) => score(a) - score(b));
+      body.replaceChildren(hits.length ? h('div', { class: 'ac-list' }, hits.map((c) => item(c, true))) : h('div', { class: 'empty' }, `Nothing called “${search.value}”. Try another word, like “move” or “health”.`));
+      return;
+    }
+    if (cat) { // inside a folder
+      const items = list.filter((c) => c.cat === cat);
+      body.replaceChildren(h('button', { class: 'ac-back', onclick: () => { cat = null; draw(); } }, icon('left'), 'All categories'),
+        h('div', { class: 'ac-cat' }, cat, ` · ${items.length}`), h('div', { class: 'ac-list' }, items.map((c) => item(c))));
+      return;
+    }
+    const cats = [...new Set(list.map((c) => c.cat))].sort((a, b) => (CAT_ORDER.indexOf(a) + 99) % 99 - (CAT_ORDER.indexOf(b) + 99) % 99);
+    const recent = recentComps().map((k) => list.find((c) => c.key === k)).filter(Boolean), sugg = suggestComps(j, list);
+    body.replaceChildren(
+      sugg.length ? h('div', { class: 'ac-cat' }, `Suggested for ${j.name || 'this object'}`) : '', sugg.length ? h('div', { class: 'ac-chips' }, sugg.map(chip)) : '',
+      recent.length ? h('div', { class: 'ac-cat' }, 'Recently used') : '', recent.length ? h('div', { class: 'ac-chips' }, recent.map(chip)) : '',
+      h('div', { class: 'ac-cat' }, 'Browse'),
+      h('div', { class: 'ac-folders' }, cats.map((k) => h('button', { class: 'ac-folder', onclick: () => { cat = k; draw(); body.parentElement?.scrollTo?.(0, 0); } },
+        icon(CAT_ICON[k] || 'folder'), h('b', {}, k), h('small', {}, `${list.filter((c) => c.cat === k).length}`)))));
   }
   draw();
   openDialog('Add Component', [search, body]);
@@ -2754,10 +2866,11 @@ let projectTab = 'prefabs';
 function renderProject() {
   const box = $('#project');
   box.replaceChildren();
-  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['components', 'Components', 'folder']];
+  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
   if (!tabs.some((t) => t[0] === projectTab)) projectTab = 'prefabs';
   box.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
   box.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
+  if (projectTab === 'sounds') { box.append(...soundsTab()); return; }
   let items;
   if (projectTab === 'components') {
     items = componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
@@ -3032,6 +3145,55 @@ function deleteEntity(id) {
   if (ids.has(selectedId)) selectedId = null;
   changed({ structure: true }); pushHistory(); updateCtxBar();
   toast(ids.size > 1 ? `Deleted ${j.name} and ${ids.size - 1} child object${ids.size > 2 ? 's' : ''}. Undo to restore.` : `Deleted ${j.name}. Undo to restore.`);
+}
+
+// ---- Sounds (Unity AudioClips): imported files, usable everywhere a sound is picked ----
+const BUILTIN_SOUNDS = SOUNDS.slice();
+/** Keep the engine's shared sound list (every Sound picker) in step with this project's imported sounds. */
+function syncSoundNames() { SOUNDS.splice(0, SOUNDS.length, ...BUILTIN_SOUNDS, ...Object.keys(root.sounds || {})); engine.audio.clips = { ...(root.sounds || {}) }; }
+function previewSound(name) { engine.audio.unlock(); engine.audio.sfx(name); buzz(4); }
+function importSound() {
+  const fi = $('#fileInput');
+  fi.accept = 'audio/*';
+  fi.onchange = () => {
+    const f = fi.files[0]; fi.value = '';
+    if (!f) return;
+    if (f.size > 600 * 1024 && !confirm(`${f.name} is ${Math.round(f.size / 1024)} KB. Big sounds fill up the phone's project storage. Use it anyway? (Short clips under 200 KB work best.)`)) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      let base = f.name.replace(/\.[^.]+$/, '').replace(/[^\w -]+/g, '').trim().slice(0, 24) || 'sound', name = base, n = 2;
+      while (SOUNDS.includes(name)) name = `${base} ${n++}`;
+      (root.sounds ||= {})[name] = rd.result;
+      syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); previewSound(name);
+      toast(`Imported “${name}”. Pick it in any Sound setting.`);
+    };
+    rd.readAsDataURL(f);
+  };
+  fi.click();
+}
+function soundsTab() {
+  const mine = Object.keys(root.sounds || {});
+  const row = (name, own) => h('div', { class: 'snd-row' },
+    h('button', { class: 'snd-play', title: 'Play', onclick: () => previewSound(name) }, icon('play')),
+    h('span', { class: 'snd-nm' }, name, h('small', {}, own ? `${Math.round((root.sounds[name].length * 3) / 4 / 1024)} KB · imported` : 'built-in')),
+    own && h('button', { class: 'eye', title: 'Sound options', onclick: (ev) => popMenu(ev.currentTarget, [
+      { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Sound name', name)?.trim(); if (!n || n === name) return; if (SOUNDS.includes(n)) { toast('That name is taken'); return; }
+        root.sounds = Object.fromEntries(Object.entries(root.sounds).map(([k, v]) => [k === name ? n : k, v])); renameSoundUses(name, n); syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); } },
+      { icon: 'trash', label: 'Delete', fn: () => { if (!confirm(`Delete “${name}”? Anything that plays it goes quiet.`)) return; delete root.sounds[name]; syncSoundNames(); changed({ structure: true }); pushHistory(); renderProject(); } },
+    ]) }, icon('more')));
+  return [
+    h('div', { class: 'snd-tools' }, h('button', { class: 'btn primary', onclick: importSound }, icon('download'), 'Import Sound'),
+      h('p', { class: 'p-note' }, 'MP3, WAV, OGG or M4A from your phone. Then choose it in a Sound component, a Play Sound action or node, or from code with s.engine.audio.sfx("name").')),
+    h('div', { class: 'p-sec' }, 'My Sounds'),
+    mine.length ? h('div', { class: 'snd-list' }, mine.map((n) => row(n, true))) : h('p', { class: 'p-note' }, 'No imported sounds yet.'),
+    h('div', { class: 'p-sec' }, 'Built-in'),
+    h('div', { class: 'snd-list' }, BUILTIN_SOUNDS.map((n) => row(n, false))),
+  ];
+}
+/** Point every Sound setting that used the old name at the new one. */
+function renameSoundUses(from, to) {
+  const fix = (o) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if (k === 'sound' && v === from) o[k] = to; else if (v && typeof v === 'object') fix(v); } };
+  for (const lv of levelList()) fix(lv.entities);
 }
 
 function pickImage(cb) {
@@ -3318,6 +3480,8 @@ function stop() {
   dropBack(stop);
   document.body.classList.remove('playing');
   $('#playBar').hidden = true; $('#playConsole').hidden = true;
+  engine.inspecting = false; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer);
+  if (!$('#playStats').hidden) toggleStats();
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
   engine.editing = true;
   engine.paused = false;
@@ -3330,11 +3494,73 @@ function stop() {
   renderHierarchy();
   requestAnimationFrame(() => { engine.resize(); rebuild(); });
 }
-function togglePause() { if (!playing) return; engine.paused = !engine.paused; updatePauseButtons(); }
+function togglePause() { if (!playing) return; engine.paused = !engine.paused; if (!engine.paused) setInspecting(false); updatePauseButtons(); }
 function updatePauseButtons() {
   $('#pauseBtn').disabled = !playing;
   for (const b of [$('#pauseBtn'), $('#pbPause')]) b.classList.toggle('on', playing && engine.paused);
+  $('#pbStep').disabled = !(playing && engine.paused);
+  $('#pbInspect').classList.toggle('on', !!engine.inspecting);
 }
+
+// ---- play mode tools (Unity's Step, Stats and play-mode Inspector) ----
+let inspectId = null, statsTimer = 0, inspectTimer = 0;
+function setInspecting(on) {
+  engine.inspecting = on;
+  if (on) { engine.paused = true; engine.input.enabled = false; engine.input.reset(); toast('Paused. Tap an object to inspect it.'); }
+  else { engine.input.enabled = playing; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer); }
+  updatePauseButtons();
+}
+function toggleStats() {
+  const el = $('#playStats'); el.hidden = !el.hidden; $('#pbStats').classList.toggle('on', !el.hidden);
+  clearInterval(statsTimer);
+  if (el.hidden) return;
+  const draw = () => {
+    const s = engine.scene; if (!s) return;
+    const live = s.entities.filter((e) => !e.dead), vars = Object.entries(s.vars).filter(([, v]) => typeof v !== 'object').slice(0, 8);
+    el.replaceChildren(...[['FPS', Math.round(engine.fps)], ['Objects', live.length], ['Bodies', live.filter((e) => e.body).length], ['State', engine.paused ? 'paused' : s.state], ['Time', s.time.toFixed(1) + 's'], ['Pixels', `×${engine.dpr}`], ...vars.map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 100) / 100 : String(v)])]
+      .map(([k, v]) => h('div', {}, h('span', {}, k), h('b', { class: k === 'FPS' && v < 40 ? 'bad' : '' }, v))));
+  };
+  draw(); statsTimer = setInterval(draw, 250);
+}
+/** Live values of the inspected object, refreshed while you look (fields you're typing in are left alone). */
+function renderInspectCard() {
+  const box = $('#playInspect'), s = engine.scene, e = inspectId && s.byId(inspectId);
+  if (!e || e.dead) { box.hidden = true; return; }
+  box.hidden = false;
+  const r = (v) => Math.round((+v || 0) * 100) / 100, three = s.mode === '3d';
+  const num = (label, get, set) => h('label', { class: 'pi-f' }, h('span', {}, label), h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: r(get()), 'data-live': label,
+    oninput: (ev) => { const n = parseFloat(ev.target.value); if (!Number.isNaN(n)) { set(n); engine.render(); } } }));
+  const fields = [num('X', () => e.x, (v) => (e.x = v)), num('Y', () => e.y, (v) => (e.y = v)), three && num('Z', () => e.z, (v) => (e.z = v)),
+    num(three ? 'Rot Y' : 'Rot', () => (three ? e.ry : e.rz), (v) => (three ? (e.ry = v) : (e.rz = v))),
+    e.body && num('Vel X', () => e.body.vel.x, (v) => (e.body.vel.x = v)), e.body && num('Vel Y', () => e.body.vel.y, (v) => (e.body.vel.y = v))].filter(Boolean);
+  const comps = (e.props?.behaviors || []).map((b) => Behaviors[b.type]?.label?.replace(/ \(.*\)$/, '') || b.type).filter(Boolean);
+  const pj = project.entities.find((q) => q.id === e.id);
+  box.replaceChildren(
+    h('div', { class: 'pi-h' }, icon('target'), h('span', {}, h('b', {}, e.name), h('small', {}, [pj ? 'in the level' : 'spawned while playing', [...e.tags].join(', ')].filter(Boolean).join(' · '))),
+      h('button', { title: 'Close', onclick: () => { inspectId = null; box.hidden = true; } }, icon('close'))),
+    h('div', { class: 'pi-grid' }, fields),
+    h('div', { class: 'pi-row' }, h('label', { class: 'pi-chk' }, h('input', { type: 'checkbox', checked: e.visible, onchange: (ev) => { e.visible = ev.target.checked; engine.render(); } }), 'Visible'),
+      e.body && h('span', { class: 'pi-tag' }, e.body.type + (e.body.grounded ? ' · grounded' : '')),
+      h('button', { class: 'btn', onclick: () => { e.destroy(); engine.scene.flush?.(); engine.render(); renderInspectCard(); } }, icon('trash'), 'Destroy')),
+    comps.length ? h('p', { class: 'pi-comps' }, comps.join(' · ')) : null,
+    h('p', { class: 'pi-note' }, 'Changes here last until you stop playing.'));
+  clearInterval(inspectTimer);
+  inspectTimer = setInterval(() => { // keep the numbers live (Step moves things)
+    if (!inspectId || box.hidden) return clearInterval(inspectTimer);
+    const ee = engine.scene.byId(inspectId); if (!ee || ee.dead) return renderInspectCard();
+    for (const inp of box.querySelectorAll('input[data-live]')) if (document.activeElement !== inp) {
+      const k = inp.dataset.live, v = { X: ee.x, Y: ee.y, Z: ee.z, Rot: ee.rz, 'Rot Y': ee.ry, 'Vel X': ee.body?.vel.x, 'Vel Y': ee.body?.vel.y }[k];
+      inp.value = r(v);
+    }
+  }, 200);
+}
+$('#viewport').addEventListener('pointerdown', (ev) => { // Inspect mode: a tap on the running game picks an object
+  if (!playing || !engine.inspecting) return;
+  const r = $('#viewport').getBoundingClientRect(), hit = pick(ev.clientX - r.left, ev.clientY - r.top);
+  inspectId = hit ? hit.id : null; buzz(6);
+  if (hit) renderInspectCard(); else { $('#playInspect').hidden = true; toast('Nothing there. Tap an object.'); }
+  engine.render();
+}, true);
 setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can unpause itself on tap
 
 // ============================================================================
@@ -3344,6 +3570,10 @@ $('#fileBtn').append(icon('menu'));
 for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
+$('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));
+$('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) return; engine.stepFrames = 1; buzz(4); setTimeout(() => { if (inspectId) renderInspectCard(); }, 60); });
+$('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
+$('#pbStats').addEventListener('click', toggleStats);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));

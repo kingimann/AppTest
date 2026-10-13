@@ -81,6 +81,16 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
 
+**Build Settings** (*☰ → Build Settings…*, or **Build…** at the bottom of Scene Settings) decide what that file becomes:
+- **App:** name, version, author, description and file name.
+- **Icon:** your own picture, or an emoji on a colour. It shows on the Home Screen, in the browser tab and on the loading screen.
+- **Loading screen:** icon and name, text only, or nothing; its colour, a minimum time, and **Tap to Start** (so music can play straight away).
+- **Levels:** untick unfinished levels to leave them out, and pick the level to start at (handy for testing).
+- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, blocking long-press menus, and whether it can be added to the Home Screen as an app.
+- **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
+- **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
+- **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.
+
 ### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
 
 Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.

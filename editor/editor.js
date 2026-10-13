@@ -3057,7 +3057,7 @@ function renderSceneSettings(box) {
   }
   box.append(h('div', { class: 'btns', style: 'padding:12px 8px 24px' },
     h('button', { class: 'btn primary', onclick: play }, icon('play'), 'Play'),
-    h('button', { class: 'btn', onclick: exportHTML }, icon('download'), 'Build HTML')));
+    h('button', { class: 'btn', onclick: openBuildSettings }, icon('download'), 'Build…')));
 }
 
 // ============================================================================
@@ -3905,6 +3905,7 @@ function openFileMenu() {
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
+    { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
     { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
@@ -4122,31 +4123,233 @@ function importJSON() {
   };
   fi.click();
 }
-/** One self-contained HTML file: engine source + game JSON. */
-async function exportHTML() {
-  try {
-    const src = await (await fetch(new URL('../engine/pocket.js', import.meta.url))).text();
-    const game = JSON.stringify(root).replace(/</g, '\\u003c');
-    const title = String(root.name).replace(/[<&"]/g, (c) => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' })[c]);
-    const bg = /^#[0-9a-f]{3,8}$/i.test(root.background || '') ? root.background : '#000000';
-    const html = `<!doctype html>
+// ---- Build Settings: everything about the playable file a game becomes ----
+const BUILD_DEFAULTS = {
+  title: '', version: '1.0', author: '', description: '', file: '',
+  icon: '', iconEmoji: '🎮', iconBg: '#3a8dff',
+  splash: 'logo', splashText: '', splashBg: '', splashTime: 1.2, tapToStart: false,
+  startLevel: '1', quality: 'balanced', backGesture: true, installable: true, compress: true,
+  noMenu: true, showFps: false, showErrors: false,
+};
+const QUALITY = { battery: 1, balanced: 2, sharp: 3 };
+const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
+const buildOpts = () => ({ ...BUILD_DEFAULTS, ...(root.build || {}) });
+const kb = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + ' MB');
+const escHTML = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+const hexOr = (c, d) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : d);
+let engineSrc = null;
+const loadEngineSrc = async () => (engineSrc ||= await (await fetch(new URL('../engine/pocket.js', import.meta.url))).text());
+
+/** The app icon as a PNG data URL: the chosen picture (cropped to a square), or an emoji on a colour. */
+function makeIcon(o, size = 512) {
+  return new Promise((ok) => {
+    const c = h('canvas', { width: size, height: size }), x = c.getContext('2d');
+    x.fillStyle = hexOr(o.iconBg, '#3a8dff'); x.fillRect(0, 0, size, size);
+    const emoji = () => { x.font = `${size * 0.6}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(o.iconEmoji || '🎮', size / 2, size * 0.54); ok(c.toDataURL('image/png')); };
+    if (!o.icon) return emoji();
+    const img = new Image();
+    img.onload = () => { const s = Math.min(img.width, img.height); x.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size); ok(c.toDataURL('image/png')); };
+    img.onerror = emoji; img.src = o.icon;
+  });
+}
+async function gzip64(text) {
+  const buf = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+/** The game data that goes in the build: levels left out are dropped, editor-only notes removed. */
+function buildGameJSON() {
+  const g = clone(root), o = buildOpts();
+  const all = [g, ...(g.levels || [])];
+  g.levels = (g.levels || []).filter((lv) => !lv.buildSkip);
+  for (const lv of all) delete lv.buildSkip;
+  delete g.build;
+  const kept = [g, ...g.levels], wanted = all[clampN(Math.round(+o.startLevel || 1), 1, all.length) - 1];
+  return { game: g, start: Math.max(0, kept.indexOf(wanted)), levels: kept.length, dropped: all.length - kept.length };
+}
+/** Where the size goes: the engine, the game, and its biggest pictures and sounds. */
+function sizeReport(game) {
+  const assets = [];
+  const walk = (v, where) => {
+    if (typeof v === 'string') { if (v.startsWith('data:')) assets.push({ where, kind: /^data:audio/.test(v) ? 'sound' : /^data:image/.test(v) ? 'picture' : 'file', size: v.length }); return; }
+    if (Array.isArray(v)) v.forEach((x) => walk(x, where));
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, v.name && typeof v.name === 'string' && v.entities === undefined ? v.name : where === 'game' && k === 'sounds' ? 'Sounds' : where);
+  };
+  walk(game, 'game');
+  const sum = (k) => assets.filter((a) => a.kind === k).reduce((n, a) => n + a.size, 0);
+  return { pictures: sum('picture'), sounds: sum('sound'), top: assets.sort((a, b) => b.size - a.size).slice(0, 5) };
+}
+/** One self-contained HTML file: engine + game + app icon, splash screen and player options. */
+async function buildHTML() {
+  const o = buildOpts(), src = await loadEngineSrc(), { game, start } = buildGameJSON();
+  const title = o.title || root.name || 'My Game', bg = hexOr(root.background, '#000000'), splashBg = hexOr(o.splashBg, bg);
+  const iconURL = await makeIcon(o, 512), small = await makeIcon(o, 180);
+  const orient = { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any';
+  const manifest = { name: title, short_name: title.slice(0, 12), description: o.description || undefined, display: 'fullscreen', orientation: orient,
+    background_color: splashBg, theme_color: bg, start_url: '.', icons: [{ src: iconURL, sizes: '512x512', type: 'image/png', purpose: 'any' }] };
+  const json = JSON.stringify(game);
+  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, splash: o.splash, text: o.splashText, time: +o.splashTime || 0, tap: !!o.tapToStart, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author });
+  let payload, engineBytes, gameBytes;
+  if (o.compress && typeof CompressionStream === 'function') {
+    const [E, G] = await Promise.all([gzip64(src), gzip64(json)]);
+    engineBytes = E.length; gameBytes = G.length;
+    payload = `const un = async (b) => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); };
+const [src, game] = await Promise.all([un("${E}"), un("${G}")]);
+const { Engine } = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+boot(Engine, JSON.parse(game));`;
+  } else {
+    const code = src.replace(/<\/script/gi, '<\\/script'), data = json.replace(/</g, '\\u003c');
+    engineBytes = code.length; gameBytes = data.length;
+    payload = `${code}\nboot(Engine, ${data});`;
+  }
+  const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="${escHTML(title.slice(0, 20))}">
 <meta name="theme-color" content="${bg}">
-<title>${title}</title>
-<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none}</style>
+${o.description ? `<meta name="description" content="${escHTML(o.description)}">\n` : ''}${o.author ? `<meta name="author" content="${escHTML(o.author)}">\n` : ''}<meta name="generator" content="Pocket Engine">
+<title>${escHTML(title)}</title>
+<link rel="icon" type="image/png" href="${small}"><link rel="apple-touch-icon" href="${small}">
+${o.installable !== false ? `<link rel="manifest" href="data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}">\n` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+#splash{position:fixed;inset:0;z-index:99;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:${splashBg};color:#fff;font:600 20px -apple-system,system-ui,sans-serif;text-align:center;transition:opacity .4s}
+#splash img{width:96px;height:96px;border-radius:22px;box-shadow:0 8px 30px rgba(0,0,0,.35)}#splash small{font-weight:400;opacity:.7;font-size:14px;padding:0 24px}
+#splash .tap{margin-top:18px;font-size:16px;opacity:.9;animation:pk 1.2s ease-in-out infinite}@keyframes pk{50%{opacity:.35}}
+#splash .bar{width:120px;height:4px;border-radius:2px;background:rgba(255,255,255,.18);overflow:hidden}#splash .bar i{display:block;height:100%;width:40%;background:#fff;animation:ld 1s ease-in-out infinite}@keyframes ld{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+#fps{position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:98;font:12px monospace;color:#0f0;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;pointer-events:none}
+#err{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);z-index:100;background:#b3261e;color:#fff;font:13px/1.4 monospace;padding:10px 12px;border-radius:10px;white-space:pre-wrap;max-height:40%;overflow:auto}</style>
 </head><body>
+<div id="splash"${o.splash === 'none' && !o.tapToStart ? ' hidden' : ''}>${o.splash === 'logo' ? `<img src="${small}" alt=""><div>${escHTML(title)}</div>` : ''}${o.splashText ? `<small>${escHTML(o.splashText)}</small>` : ''}<div class="bar"><i></i></div></div>
+<script>window.POCKET_BUILD = ${cfg.replace(/</g, '\\u003c')};</script>
 <script type="module">
-${src.replace(/<\/script/gi, '<\\/script')}
-new Engine().start(${game});
+const C = window.POCKET_BUILD, t0 = performance.now();
+if (C.noMenu) { addEventListener('contextmenu', (e) => e.preventDefault()); document.documentElement.style.webkitUserSelect = 'none'; }
+if (C.errors) { const show = (m) => { let d = document.getElementById('err'); if (!d) { d = document.createElement('div'); d.id = 'err'; d.onclick = () => d.remove(); document.body.appendChild(d); } d.textContent = (d.textContent ? d.textContent + '\\n' : '') + m; };
+  addEventListener('error', (e) => show(e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''))); addEventListener('unhandledrejection', (e) => show(String(e.reason && e.reason.message || e.reason))); }
+function boot(Engine, game) {
+  const sp = document.getElementById('splash'), wait = Math.max(0, C.splash === 'none' ? 0 : C.time * 1000 - (performance.now() - t0));
+  const go = () => {
+    window.engine = new Engine({ maxPixelRatio: C.dpr, systemBack: C.back });
+    window.engine.start(game, { level: C.start });
+    if (sp && !sp.hidden) { sp.style.opacity = 0; setTimeout(() => sp.remove(), 450); }
+    if (C.fps) { const f = document.createElement('div'); f.id = 'fps'; document.body.appendChild(f); let n = 0, last = performance.now(); const tick = (now) => { n++; if (now - last >= 500) { f.textContent = Math.round(n * 1000 / (now - last)) + ' fps'; n = 0; last = now; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+  };
+  setTimeout(() => {
+    if (!C.tap) return go();
+    const bar = sp.querySelector('.bar'); if (bar) bar.remove();
+    const t = document.createElement('div'); t.className = 'tap'; t.textContent = 'Tap to start'; sp.appendChild(t);
+    sp.addEventListener('pointerup', go, { once: true });
+  }, wait);
+}
+${payload}
 </script>
 </body></html>`;
-    download(slug(root.name) + '.html', html, 'text/html');
-    toast('Build complete: open the HTML file in any browser');
-  } catch (err) {
-    toast('Build failed: ' + err.message);
-  }
+  return { html, title, engineBytes, gameBytes };
+}
+function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
+async function exportHTML() {
+  try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
+  catch (err) { toast('Build failed: ' + err.message); }
+}
+async function shareBuild() {
+  try {
+    const b = await buildHTML(), file = new File([b.html], buildFileName(), { type: 'text/html' });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: b.title }); } catch { /* cancelled */ } return; }
+    download(buildFileName(), b.html, 'text/html'); toast('Sharing files isn\'t available here, so it was downloaded');
+  } catch (err) { toast('Build failed: ' + err.message); }
+}
+async function testBuild() {
+  const w = window.open('', '_blank');
+  try { const b = await buildHTML(), url = URL.createObjectURL(new Blob([b.html], { type: 'text/html' })); if (w) w.location = url; else location.assign(url); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  catch (err) { w?.close(); toast('Build failed: ' + err.message); }
+}
+
+function openBuildSettings() {
+  saveNow();
+  const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
+  const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
+  const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
+  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
+  const report = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Working out the size…'));
+  const lvls = levelList();
+
+  const updateReport = async () => {
+    try {
+      const { game } = buildGameJSON(), r = sizeReport(game), b = await buildHTML();
+      const row = (l, v, cls = '') => h('div', { class: 'br-row ' + cls }, h('span', {}, l), h('b', {}, v));
+      report.replaceChildren(...[
+        row('Total file size', kb(b.html.length), 'total'),
+        row('Engine', kb(b.engineBytes)),
+        row('Game data', kb(b.gameBytes)),
+        r.pictures ? row('· pictures', kb(r.pictures)) : null,
+        r.sounds ? row('· sounds', kb(r.sounds)) : null,
+        r.top.length ? h('div', { class: 'br-sub' }, 'Biggest files: ' + r.top.map((a) => `${a.where === 'game' ? root.name : a.where} (${a.kind}, ${kb(a.size)})`).join(', ')) : null,
+        b.html.length > 15 * 1048576 ? h('p', { class: 'desc warn' }, 'This is a big file. Smaller pictures and shorter sounds make it load faster.') : null,
+        !o.compress ? h('p', { class: 'desc' }, 'Tip: turn on Compress to make the file about 3× smaller.') : null].filter(Boolean));
+    } catch (err) { report.replaceChildren(h('div', { class: 'muted' }, 'Could not measure: ' + err.message)); }
+  };
+
+  openDialog('Build Settings', [
+    h('p', { class: 'desc' }, 'Your game becomes one HTML file that plays in any phone or computer browser, offline, and can be added to the Home Screen like an app.'),
+    sec('App', 'phone', [
+      h('div', { class: 'build-app' }, preview, h('div', { class: 'build-app-t' }, h('b', {}, o.title || root.name), h('small', {}, [o.version && 'Version ' + o.version, o.author].filter(Boolean).join(' · ') || 'Pocket Engine game'))),
+      C('title', { label: 'Name', def: root.name }),
+      C('version', { label: 'Version' }),
+      C('author', { label: 'Made by' }),
+      C('description', { label: 'Description' }),
+      C('file', { label: 'File name', def: slug(o.title || root.name) }),
+    ]),
+    sec('Icon', 'image', [
+      h('div', { class: 'row full' }, h('label', {}, 'Picture'), h('div', { class: 'pair img-pick' },
+        o.icon ? h('img', { class: 'img-thumb', src: o.icon, alt: '' }) : h('span', { class: 'muted' }, 'Emoji'),
+        h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { B().icon = url; changed(); redo(); }, 512) }, o.icon ? 'Change' : 'Choose image'),
+        o.icon ? h('button', { type: 'button', class: 'btn', onclick: () => { B().icon = ''; changed(); redo(); } }, 'Clear') : null)),
+      !o.icon && h('div', { class: 'row' }, h('label', {}, 'Emoji'), h('input', { type: 'text', value: o.iconEmoji, maxLength: 8, onchange: (e) => { B().iconEmoji = e.target.value.trim() || '🎮'; changed(); redo(); } })),
+      h('div', { class: 'row' }, h('label', {}, 'Background'), h('input', { type: 'color', value: hexOr(o.iconBg, '#3a8dff').slice(0, 7), onchange: (e) => { B().iconBg = e.target.value; changed(); redo(); } })),
+      h('p', { class: 'desc' }, 'Shown on the Home Screen, in the browser tab and on the loading screen.'),
+    ]),
+    sec('Loading screen', 'clock', [
+      C('splash', { label: 'Show', type: 'select', options: [['logo', 'Icon and name'], ['text', 'Text only'], ['none', 'Nothing']] }),
+      C('splashText', { label: 'Text', def: '' }),
+      C('splashBg', { label: 'Colour', type: 'color', optional: true }),
+      C('splashTime', { label: 'At least (sec)', type: 'number', step: 0.5, range: [0, 5] }),
+      C('tapToStart', { label: 'Tap to Start', type: 'bool' }),
+      h('p', { class: 'desc' }, 'Tap to Start waits for a tap before the game begins, so sounds and music can play straight away (phones need a tap first).'),
+    ]),
+    sec('Levels', 'layers', [
+      lvls.length > 1 ? h('div', { class: 'build-lvls' }, lvls.map((lv, i) => h('label', { class: 'build-lvl' },
+        h('input', { type: 'checkbox', checked: !lv.buildSkip, disabled: i === 0, onchange: (e) => { if (e.target.checked) delete lv.buildSkip; else lv.buildSkip = true; changed(); updateReport(); } }),
+        h('span', {}, `${i + 1}. ${levelName(lv, i)}`), i === 0 ? h('small', {}, 'always included') : null))) : h('p', { class: 'desc' }, 'One level. Add more with ☰ → Levels.'),
+      lvls.length > 1 && C('startLevel', { label: 'Start at level', type: 'select', def: '1', options: lvls.map((lv, i) => [String(i + 1), `${i + 1}. ${levelName(lv, i)}`]) }),
+      lvls.length > 1 && h('p', { class: 'desc' }, 'Untick a level to leave it out (unfinished levels). Starting at a later level is handy for testing it.'),
+    ]),
+    sec('Player', 'gamepad', [
+      C('quality', { label: 'Graphics', type: 'select', options: [['battery', 'Battery saver (fastest)'], ['balanced', 'Balanced'], ['sharp', 'Sharpest (slower)']] }),
+      C('backGesture', { label: 'Back gesture goes back in menus', type: 'bool' }),
+      C('noMenu', { label: 'Block long-press menus and text selection', type: 'bool' }),
+      C('installable', { label: 'Can be added to the Home Screen', type: 'bool' }),
+      h('p', { class: 'desc' }, `Plays ${{ portrait: 'in portrait', landscape: 'in landscape', any: 'either way up' }[orientationOf()]} (change it in Scene Settings). Fullscreen, pause, mute and save options are in Scene Settings too.`),
+    ]),
+    sec('File size', 'download', [
+      C('compress', { label: 'Compress (much smaller file)', type: 'bool' }),
+      h('p', { class: 'desc' }, 'Needs a browser from 2023 or later (iOS 16.4+). Turn it off for very old phones.'),
+      report,
+    ]),
+    sec('Testing', 'bulb', [
+      C('showFps', { label: 'Show frame rate', type: 'bool' }),
+      C('showErrors', { label: 'Show errors on screen', type: 'bool' }),
+      h('p', { class: 'desc' }, 'Handy while testing on another phone. Turn them off for the finished game.'),
+    ]),
+    h('div', { class: 'btns build-btns' },
+      h('button', { class: 'btn primary', onclick: exportHTML }, icon('download'), 'Build'),
+      h('button', { class: 'btn', onclick: shareBuild }, icon('external'), 'Share'),
+      h('button', { class: 'btn', onclick: testBuild }, icon('play'), 'Test')),
+  ]);
+  // settings that change the look or size refresh the report when edited
+  $('.dialog .db').addEventListener('change', () => { if (root.build && !root.build.title) delete root.build.title; updateReport(); });
+  updateReport();
 }
 
 // ============================================================================

@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -1088,10 +1088,55 @@ function setDock(name, { fromTab = false } = {}) {
     else if (sheetState() === 'peek') setSheet('half');
   }
   dockTab = name;
+  if (name === 'console') { consoleSeen = Log.entries.length; renderConsole(); }
   for (const b of $$('#dockTabs button')) b.classList.toggle('active', b.dataset.dock === name);
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
 }
 const isDesktop = () => false; // phones and tablets only
+
+// ---- Console (Unity-style): Debug Log messages, warnings and errors from the game ----
+let consoleSeen = 0, consoleLevel = 'all', consoleFrame = 0;
+const LOG_ICON = { info: 'info', warn: 'help', error: 'close' };
+const clearOnPlay = () => store.get('pocket.editor.clearOnPlay', '1') === '1';
+function logRow(x) {
+  const obj = x.source && project.entities.find((e) => e.name === x.source.replace(/ script$/, ''));
+  return h('div', { class: 'log-row ' + x.level + (obj ? ' link' : ''), onclick: obj ? () => { if (playing) return; select(obj.id); setDock('inspector'); } : null },
+    h('span', { class: 'log-ic' }, icon(LOG_ICON[x.level] || 'info')),
+    h('span', { class: 'log-txt' }, h('span', {}, x.text), h('small', {}, [x.source, new Date(x.t).toLocaleTimeString()].filter(Boolean).join(' · '))),
+    x.count > 1 && h('span', { class: 'log-n' }, x.count > 999 ? '999+' : x.count));
+}
+function renderConsole() {
+  const box = $('#console'); if (!box) return;
+  const E = Log.entries, n = (lv) => E.filter((x) => x.level === lv).reduce((a, x) => a + x.count, 0);
+  const shown = consoleLevel === 'all' ? E : E.filter((x) => x.level === consoleLevel);
+  box.replaceChildren(
+    h('div', { class: 'log-tools' },
+      ...[['all', 'All', E.reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
+        h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; renderConsole(); } }, l, h('b', {}, c))),
+      h('span', { class: 'sp' }),
+      h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash'))),
+    h('label', { class: 'log-opt' }, h('input', { type: 'checkbox', checked: clearOnPlay(), onchange: (e) => store.set('pocket.editor.clearOnPlay', e.target.checked ? '1' : '') }), 'Clear when you press Play'),
+    shown.length ? h('div', { class: 'log-list' }, shown.slice().reverse().map(logRow))
+      : h('div', { class: 'empty' }, E.length ? 'Nothing of this kind.' : 'Messages from your game appear here while it runs: the Debug Log action and node, P.log() in scripts, warnings and errors.'));
+  updateConsoleBadge();
+}
+function updateConsoleBadge() {
+  const fresh = Log.entries.slice(consoleSeen), errs = fresh.filter((x) => x.level === 'error').length, warns = fresh.filter((x) => x.level === 'warn').length;
+  const tab = $('#dockTabs [data-dock="console"]'); if (!tab) return;
+  tab.querySelector('.dock-badge')?.remove();
+  if (dockTab !== 'console' && (errs || warns)) tab.append(h('span', { class: 'dock-badge' + (errs ? ' err' : '') }, String(errs || warns)));
+  const pb = $('#pbLog'); if (pb) { pb.querySelector('.dock-badge')?.remove(); const all = Log.entries.filter((x) => x.level === 'error').length; if (all) pb.append(h('span', { class: 'dock-badge err' }, String(all))); }
+  if (!$('#playConsole').hidden) renderPlayConsole();
+}
+function renderPlayConsole() {
+  $('#playConsole').replaceChildren(h('div', { class: 'pc-h' }, h('b', {}, 'Console'), h('button', { onclick: () => { $('#playConsole').hidden = true; } }, icon('close'))),
+    h('div', { class: 'pc-list' }, Log.entries.slice(-40).reverse().map(logRow)));
+}
+Log.listeners.add(() => { // batch redraws to once a frame
+  if (consoleFrame) return;
+  consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(); } else updateConsoleBadge(); });
+});
+window.addEventListener('error', (e) => { if (playing) Log.add('error', e.message || 'Error', 'game'); });
 
 // ---- bottom sheet (phones): peek / half / full ----
 function setSheet(state) {
@@ -3216,12 +3261,13 @@ function play() {
   engine.editing = false;
   engine.input.enabled = true;
   engine.timeScale = 1;
+  if (clearOnPlay()) { Log.clear(); consoleSeen = 0; }
   const json = clone(root);
   for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false, loadOnStart: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
-  } catch (err) { console.error(err); toast('Error: ' + err.message); stop(); return; }
+  } catch (err) { Log.add('error', `The game couldn't start: ${err.message}`, 'game'); toast('Error: ' + err.message + ' (see Console)'); stop(); return; }
   updatePauseButtons();
   pushBack(stop);
   store.set('pocket.editor.played.' + projectId, '1');
@@ -3232,7 +3278,7 @@ function stop() {
   playing = false;
   dropBack(stop);
   document.body.classList.remove('playing');
-  $('#playBar').hidden = true;
+  $('#playBar').hidden = true; $('#playConsole').hidden = true;
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
   engine.editing = true;
   engine.paused = false;
@@ -3258,15 +3304,16 @@ setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can 
 $('#fileBtn').append(icon('menu'));
 for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
-$('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause'));
+$('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
+$('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
-for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['project', 'folder', 'Project']]) {
+for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
 { // swipe left / right across a panel to move between Hierarchy, Inspector and Project
-  const order = ['hierarchy', 'inspector', 'project'];
+  const order = ['hierarchy', 'inspector', 'project', 'console'];
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];

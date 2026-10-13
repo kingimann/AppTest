@@ -8,6 +8,19 @@
  */
 export const VERSION = '0.1.0';
 
+/** The game's console: messages from logic and scripts, warnings and errors (shown in the editor's Console). */
+export const Log = {
+  entries: [], listeners: new Set(), max: 500,
+  add(level, text, source) {
+    const last = this.entries[this.entries.length - 1], msg = String(text);
+    if (last && last.level === level && last.text === msg && last.source === source) { last.count++; last.t = Date.now(); } // repeats collapse into one line
+    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), count: 1 }); if (this.entries.length > this.max) this.entries.shift(); }
+    (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[pocket]', source ? source + ':' : '', msg);
+    for (const f of this.listeners) { try { f(); } catch { /* a listener failing must not break the game */ } }
+  },
+  clear() { this.entries.length = 0; for (const f of this.listeners) f(); },
+};
+
 // ============================================================================
 // Utilities & math
 // ============================================================================
@@ -181,7 +194,7 @@ export class Entity {
     let inst = b;
     if (b && typeof b.type === 'string') {
       const def = Behaviors[b.type];
-      if (!def) { console.warn(`[pocket] unknown behavior "${b.type}"`); return null; }
+      if (!def) { Log.add('warn', `Unknown component "${b.type}"`, this.name); return null; }
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       inst = def.create(params, this) || {};
@@ -712,7 +725,7 @@ export class Scene {
   /** Spawn a copy of a template (by name) or a new entity from props. */
   spawn(templateOrProps, overrides = {}) {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
-    if (!base) { console.warn(`[pocket] no template "${templateOrProps}"`); return null; }
+    if (!base) { Log.add('warn', `Spawn: there is no template called "${templateOrProps}"`); return null; }
     const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
     const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
     if (base.id) spawnKids(base.id, e);
@@ -4774,6 +4787,7 @@ export const NODE_TYPES = {
   setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
   message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
+  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text')] },
   sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')] },
   spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
   destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
@@ -4896,6 +4910,7 @@ export const LOGIC_ACTIONS = {
   setState: { cat: 'Flow', label: 'Go to state', icon: 'nodes', params: [txt('state', 'Idle', 'state')], run: (c, p) => c.e.getBehavior('fsm')?.goTo(p.state), say: (p) => `Go to ${p.state}` },
   // game
   message: { cat: 'Game', label: 'Show message', icon: 'sign', params: [txt('text', 'Hello! {score}', 'text'), num('seconds', 2, 'seconds')], run: (c, p) => c.s.message(fillTemplate(p.text, c.s.vars), +p.seconds || 2), say: (p) => `Say “${p.text}”` },
+  log: { cat: 'Game', label: 'Debug log', icon: 'list', params: [txt('text', 'score is {score}', 'text')], run: (c, p) => Log.add('info', fillTemplate(p.text, c.s.vars), c.e?.name), say: (p) => `Log “${p.text}”` },
   sound: { cat: 'Game', label: 'Play sound', icon: 'bolt', params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')], run: (c, p) => c.s.engine.audio.sfx(p.sound), say: (p) => `Sound: ${p.sound}` },
   vibrate: { cat: 'Game', label: 'Vibrate', icon: 'gamepad', run: (c) => c.s.engine.vibrate([30, 30, 30]), say: () => 'Vibrate' },
   shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
@@ -4918,7 +4933,7 @@ export function runInstructions(list, ctx, done) {
       const it = list[i++], def = LOGIC_ACTIONS[it?.type];
       if (!def || it.off) continue;
       let r;
-      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { console.warn('[pocket] instruction failed', it.type, err); }
+      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name); }
       if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
       if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
     }
@@ -5101,6 +5116,7 @@ registerBehavior('graph', {
         case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
         case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
         case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
+        case 'log': Log.add('info', fillTemplate(P('text'), s.vars), e?.name); break;
         case 'sound': s.engine.audio.sfx(P('sound')); break;
         case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
         case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
@@ -5182,9 +5198,13 @@ registerBehavior('script', {
         start: typeof start === 'function' ? start : undefined,
         update: typeof update === 'function' ? update : undefined,
         collide: typeof collide === 'function' ? collide : undefined };`);
-      return f(Pocket);
+      const hooks = f(Pocket), out = {};
+      for (const [k, fn] of Object.entries(hooks)) if (fn) out[k] = (e, ...a) => { // a crash in one script is logged, not fatal
+        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script'); } }
+      };
+      return out;
     } catch (err) {
-      console.error('[pocket] script error:', err);
+      Log.add('error', `Script can't run: ${err.message}`, 'Custom script');
       return {};
     }
   },
@@ -5583,5 +5603,6 @@ export class Engine {
 export const Pocket = {
   VERSION, Engine, Scene, Entity, VoxelWorld, GEOMETRIES, partSize, VOXEL_PALETTE, VOXEL_NAMES, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
   Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
+  Log, log: (...a) => Log.add('info', a.join(' '), 'script'), warn: (...a) => Log.add('warn', a.join(' '), 'script'),
 };
 export default Pocket;

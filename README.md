@@ -169,6 +169,19 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 { name: 'Level', x: 0, y: 400, tiles: { size: 40, palette: [{ fill: '#6d4c41', top: '#7cb342', kind: 'solid' }], cells: { '0,0': 1, '1,0': 1 } } }
 ```
 
+### Prefabs
+
+- Long-press an object (or its ⋯ menu) → **Make Prefab**. It appears in **Project › Prefabs › My Prefabs**; tap or drag it to place copies.
+- Each copy keeps its own position, rotation, scale and name; everything else (look, components, children) comes from the prefab. Copies are blue in the Hierarchy.
+- Change a copy and its banner turns amber: **Apply to all** updates the prefab and every copy in every level, **Revert** goes back to the prefab, **⋯** selects all copies or **Unpacks** this one into a plain object.
+
+### Console
+
+- The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.
+- Repeated messages fold into one line with a count. Filter by Log / Warn / Error, clear it, and choose whether Play clears it. Tap a message from an object to jump to it.
+- While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
+- A custom script that crashes is reported once and the game keeps running.
+
 ### Parenting, UI anchoring and UI zoom
 
 - **Make an object a child** (it then moves, turns, scales and hides with its parent, in the editor and in play):

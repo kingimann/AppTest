@@ -249,6 +249,10 @@ function changed({ structure = false, inspector = false } = {}) {
   pushHistorySoon();
   if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); }
   else if (inspector) renderInspector();
+  else { // a field changed: keep the prefab banner's "changed here" state current
+    const j = ent(selectedId), old = j?.prefab && $('#inspector .pf-banner');
+    if (old) old.replaceWith(prefabBanner(j) || '');
+  }
 }
 
 // ============================================================================
@@ -1017,6 +1021,7 @@ function openObjectMenu(id, sx, sy, anchor) {
     { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
+    j.prefab ? { icon: 'upload', label: 'Apply to Prefab', fn: () => applyPrefab(id) } : { icon: 'cube', label: 'Make Prefab', fn: () => makePrefab(id) },
     { icon: 'clock', label: 'Animate…', fn: () => openAnim(j, (j.behaviors || []).findIndex((b) => b.type === 'animator')) },
     { icon: 'layers', label: 'Make Child Of…', fn: () => parentMenu(j) },
     j.parent && { icon: 'upload', label: 'Unparent (top level)', fn: () => setParent(j.id, null) },
@@ -1273,7 +1278,7 @@ function renderHierarchy() {
     const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
-      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
+      class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
       onclick: () => { if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); } else if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
@@ -2020,6 +2025,7 @@ function renderInspector() {
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
+  const pfb = prefabBanner(j); if (pfb) box.append(pfb);
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
@@ -2678,6 +2684,18 @@ function renderProject() {
           : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
     items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'star' } }));
   }
+  const mine = projectTab === 'prefabs' ? userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode) : [];
+  if (projectTab === 'prefabs') {
+    box.append(h('div', { class: 'p-sec' }, 'My Prefabs'));
+    if (!mine.length) box.append(h('p', { class: 'p-note' }, 'Make your own: long-press an object (or its ⋯ menu) and pick Make Prefab. Change one copy, tap Apply, and every copy updates.'));
+    else box.append(h('div', { class: 'tiles' }, mine.map((pf) => {
+      const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
+        h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
+      draggable(t, { kind: 'prefab', def: { userPrefab: pf.id, label: pf.name }, label: pf.name, icon: iconFor(pf.entities[0]) });
+      return t;
+    })));
+    box.append(h('div', { class: 'p-sec' }, 'Built-in'));
+  }
   box.append(h('div', { class: 'tiles' }, items.map((it) => {
     const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
     draggable(t, it.payload);
@@ -2785,6 +2803,7 @@ function addEntity(props, at) {
   return j;
 }
 function addPrefab(def, at) {
+  if (def.userPrefab) { instantiatePrefab(def.userPrefab, at); return; }
   if (def.scene) {
     if (def.scene.gravity != null && !project.gravity) project.gravity = def.scene.gravity;
     Object.assign(project.settings, def.scene.settings || {});
@@ -2811,11 +2830,105 @@ function addPrefab(def, at) {
 }
 function placePrefab(def, sx, sy) {
   const s = engine.scene;
-  if (def.props.ui) { addPrefab(def); return; }
+  if (def.props?.ui || (def.userPrefab && userPrefabs().find((p) => p.id === def.userPrefab)?.entities[0].ui)) { addPrefab(def); return; }
   if (is3D()) {
     const hit = rayPlaneY(engine.renderer.screenRay(s, sx, sy), 0);
     addPrefab(def, hit ? { x: hit.x, z: hit.z } : undefined);
   } else addPrefab(def, engine.renderer.screenToWorld(s, sx, sy));
+}
+
+// ---- Prefabs (Unity-style): an object saved once; its copies in every level update together ----
+/** Per-copy fields: everything else comes from the prefab. */
+const OVERRIDES = ['id', 'name', 'x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'parent', 'folder', 'prefab', 'locked', 'visible', 'anchor'];
+const userPrefabs = () => (root.prefabs ||= []);
+const prefabOf = (j) => (j?.prefab ? userPrefabs().find((p) => p.id === j.prefab) : null);
+/** An object and its children in prefab form: root 'r', children 'c1', 'c2'… with per-copy fields left out of the root. */
+function prefabSnapshot(id) {
+  const ids = subtree(id), local = new Map(ids.map((x, i) => [x, i ? 'c' + i : 'r']));
+  return ids.map((x, i) => {
+    const c = clone(ent(x)); c.id = local.get(x);
+    if (i === 0) { for (const k of OVERRIDES) if (k !== 'id') delete c[k]; }
+    else { c.parent = local.get(c.parent) || 'r'; delete c.prefab; }
+    return c;
+  });
+}
+/** Rebuild one copy from its prefab, keeping its own position, name and other per-copy fields. */
+function syncInstance(inst, pf, lv) {
+  const L = lv.entities, inLevel = (q) => L.find((e) => e.id === q);
+  const old = new Set(); const walk = (pid) => { for (const e of L) if (e.parent === pid) { old.add(e.id); walk(e.id); } }; walk(inst.id);
+  lv.entities = L.filter((e) => !old.has(e.id));
+  const keep = {}; for (const k of OVERRIDES) if (inst[k] !== undefined) keep[k] = inst[k];
+  for (const k of Object.keys(inst)) delete inst[k];
+  const [r, ...kids] = clone(pf.entities); delete r.id;
+  Object.assign(inst, r, keep);
+  const map = new Map(kids.map((c) => [c.id, uid()])); map.set('r', inst.id);
+  const copies = kids.map((c) => ({ ...c, id: map.get(c.id), parent: map.get(c.parent) || inst.id }));
+  lv.entities.splice(lv.entities.indexOf(inLevel(inst.id) || inst) + 1, 0, ...copies);
+}
+/** Rotation, scale and anchor a new copy starts with (each copy can change its own). */
+const prefabBase = (j) => Object.fromEntries(['rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'anchor'].filter((k) => j[k] !== undefined).map((k) => [k, j[k]]));
+function eachInstance(pid, fn) { for (const lv of levelList()) for (const e of [...lv.entities]) if (e.prefab === pid) fn(e, lv); }
+function makePrefab(id) {
+  const j = ent(id); if (!j) return;
+  if (j.prefab) { toast(`${j.name} is already a copy of a prefab`); return; }
+  const pf = { id: uid('pf'), name: j.name || 'Prefab', entities: prefabSnapshot(id), base: prefabBase(j) };
+  userPrefabs().push(pf); j.prefab = pf.id;
+  changed({ structure: true }); pushHistory(); renderProject();
+  toast(`Saved “${pf.name}” as a prefab. Find it in Project › Prefabs.`);
+}
+function applyPrefab(id) {
+  const j = ent(id), pf = prefabOf(j); if (!pf) return;
+  pf.entities = prefabSnapshot(id); pf.base = prefabBase(j);
+  let n = 0; eachInstance(pf.id, (e, lv) => { if (e !== j) { syncInstance(e, pf, lv); n++; } });
+  changed({ structure: true }); pushHistory(); renderProject();
+  toast(n ? `Updated the prefab and ${n} other cop${n === 1 ? 'y' : 'ies'}` : 'Updated the prefab');
+}
+function revertPrefab(id) {
+  const j = ent(id), pf = prefabOf(j); if (!pf) return;
+  syncInstance(j, pf, project);
+  changed({ structure: true }); pushHistory(); toast('Back to the prefab');
+}
+function unpackPrefab(id) { const j = ent(id); if (!j) return; delete j.prefab; changed({ structure: true }); pushHistory(); toast(`${j.name} is now a plain object`); }
+/** Same content regardless of key order. */
+const canon = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((q) => [q, x[q]])) : x));
+const prefabChanged = (j) => { const pf = prefabOf(j); return !!pf && canon(prefabSnapshot(j.id)) !== canon(pf.entities); };
+/** Place a new copy of a prefab. */
+function instantiatePrefab(pid, at) {
+  const pf = userPrefabs().find((p) => p.id === pid); if (!pf) return;
+  const r = pf.entities[0], j = addEntity({ name: pf.name, prefab: pid, ...(pf.base || {}), ...(r.ui ? { ui: true, x: 0, y: 0 } : {}) }, at);
+  if (!at && !j.ui) { // don't stack a new copy exactly on another one
+    const step = is3D() ? 1.5 : 40, taken = (q) => project.entities.some((e) => e !== j && e.prefab === pid && Math.abs((e.x || 0) - q.x) < step / 2 && Math.abs((is3D() ? e.z || 0 : e.y || 0) - (is3D() ? q.z : q.y)) < step / 2);
+    for (let n = 0; n < 40 && taken(j); n++) { j.x = (j.x || 0) + step; if (is3D()) j.z = j.z || 0; }
+  }
+  syncInstance(j, pf, project); j.name = pf.name; // copies share the prefab's name (the Hierarchy folds them into one row)
+  changed({ structure: true }); pushHistory(); toast(`Added ${pf.name}`);
+}
+function prefabAssetMenu(pf, anchor) {
+  let count = 0; eachInstance(pf.id, () => count++);
+  popMenu(anchor, [
+    { cap: `${pf.name} · ${count} cop${count === 1 ? 'y' : 'ies'}` },
+    { icon: 'plus', label: 'Add a Copy', fn: () => instantiatePrefab(pf.id) },
+    { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Prefab name', pf.name); if (!n?.trim()) return; pf.name = n.trim(); changed(); renderProject(); } },
+    { icon: 'trash', label: 'Delete Prefab', fn: () => {
+      if (!confirm(`Delete the prefab “${pf.name}”? Its ${count} cop${count === 1 ? 'y stays' : 'ies stay'} as plain objects.`)) return;
+      eachInstance(pf.id, (e) => delete e.prefab); root.prefabs = userPrefabs().filter((p) => p !== pf);
+      changed({ structure: true }); pushHistory(); renderProject();
+    } },
+  ]);
+}
+/** Inspector banner on a prefab copy. */
+function prefabBanner(j) {
+  const pf = prefabOf(j); if (!pf) return null;
+  const dirty = prefabChanged(j); let count = 0; eachInstance(pf.id, () => count++);
+  return h('div', { class: 'pf-banner' + (dirty ? ' dirty' : '') },
+    h('div', { class: 'pf-t' }, icon('cube'), h('span', {}, h('b', {}, pf.name), h('small', {}, dirty ? 'Changed here — apply to update every copy' : `Prefab · ${count} cop${count === 1 ? 'y' : 'ies'}`))),
+    h('div', { class: 'pf-acts' },
+      h('button', { class: 'btn' + (dirty ? ' primary' : ''), disabled: !dirty, onclick: () => applyPrefab(j.id) }, icon('upload'), 'Apply to all'),
+      h('button', { class: 'btn', disabled: !dirty, onclick: () => revertPrefab(j.id) }, icon('undo'), 'Revert'),
+      h('button', { class: 'btn', title: 'More', onclick: (ev) => popMenu(ev.currentTarget, [
+        { icon: 'list', label: 'Select All Copies', fn: () => { const ids = []; eachInstance(pf.id, (e, lv) => { if (lv === project) ids.push(e.id); }); multi = new Set(ids); setDock('hierarchy'); renderHierarchy(); } },
+        { icon: 'unlink', label: 'Unpack (make a plain object)', fn: () => unpackPrefab(j.id) },
+      ]) }, icon('more'))));
 }
 
 function duplicateEntity(id) {

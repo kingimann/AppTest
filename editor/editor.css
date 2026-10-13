@@ -811,3 +811,22 @@ body.playing #attachBar { display: none !important; }
 .mb-acts button.danger { color: #ff8a80; }
 .h-tools .h-filter-btn:not(.on) { width: 50px; padding: 0; justify-content: center; }
 #hierarchy.multi-on .h-row .eye { display: none; }
+
+/* ---------- prefabs ---------- */
+.h-row.pf .nm { color: #8fc3ff; }
+.h-row.pf.sel .nm { color: #fff; }
+.pf-banner { margin: 14px 14px 0; padding: 12px; border-radius: 14px; background: #24364a; border: 1px solid #2f4b68; }
+.pf-banner.dirty { background: #3a3220; border-color: #6b5a2a; }
+.pf-t { display: flex; align-items: center; gap: 10px; color: #8fc3ff; }
+.pf-banner.dirty .pf-t { color: #ffd28a; }
+.pf-t span { display: flex; flex-direction: column; line-height: 1.25; }
+.pf-t b { color: var(--text); }
+.pf-t small { color: var(--muted); font-size: 13px; }
+.pf-acts { display: flex; gap: 8px; margin-top: 10px; }
+.pf-acts .btn { height: 46px; padding: 0 12px; font-size: 14px; flex: 1; }
+.pf-acts .btn:last-child { flex: none; width: 46px; padding: 0; }
+.pf-acts .btn:disabled { opacity: .4; }
+.p-sec { padding: 14px 18px 0; font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.tile.mine { position: relative; border-color: #2f4b68; background: #263546; }
+.tile.mine .th { color: #8fc3ff; }
+.tile-more { position: absolute; top: 2px; right: 2px; width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); display: grid; place-items: center; }

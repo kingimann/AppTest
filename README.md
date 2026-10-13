@@ -70,6 +70,59 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
 
+### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
+
+Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
+
+- **Triggers** are friendly cards: **ON** something happens → **IF** conditions are true → **DO** instructions, top to bottom.
+  - **14 events**: game starts, every N seconds, tapped, touched / stops touching a tag, jump/fire button, swipe, message, variable reaches, destroyed, animation finished, and more.
+  - **12 conditions**, each flippable with NOT: compare variable, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
+  - **34 instructions** in 6 groups:
+    - Variables: change variable, give/use item.
+    - Objects: show/hide, destroy, spawn, set text, set colour, move to, damage/heal.
+    - Motion: move/rotate/scale/fade with easing and "wait until done", punch, play animation.
+    - Physics: push, set velocity, jump, gravity.
+    - Flow: **wait**, send message, go to state.
+    - Game: show message, dialogue, sound, vibrate, camera shake/switch, save/load, win, game over, next level, restart.
+  - Tap a row to edit it in place; ⋮ moves, duplicates, disables or deletes it.
+  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, talk to an NPC.
+- **State Machine**:
+  - The object is always in one state (Patrol, Look Around, Alert…). States are cards on a map with arrows between them.
+  - Tap a state to edit what it does **when entering**, **every frame** and **when leaving**.
+  - Each state also has its **transitions**: "ON event, IF conditions → go to another state". Two FSM-only events: "after N seconds in this state" and "when this state's actions finish".
+  - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
+  - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
+- **Node scripts** now have **Templates** too (★ in the Node Editor).
+
+### Advanced components
+
+| Component | What it does |
+| --- | --- |
+| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, message) |
+| **Enemy AI** | Patrols, chases when it sees the target (walls block its view), attacks in range (damaging Health), gives up and returns home |
+| **Pathfinding (Navigator)** | A* around walls to a tag or object, for smart chasers, pets and NPCs (2D and 3D) |
+| **Joint** | Spring, rope (pendulums, swings) or rod to another object, with a drawn rope |
+| **Wave Spawner** | Waves of a template with breaks, `{wave}` counter, win / message / loop when beaten |
+| **Dialogue** | Conversation box with speaker names and typewriter text; tap to continue; can pause the game |
+| **Day / Night Cycle** | Moves the sun, changes light and sky colours; 2D gets dark at night; `{hour}` |
+| **Particle System** | Fire, smoke, rain, snow, sparkle, confetti, magic, bubbles (rain and snow fill the screen) |
+| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction |
+
+Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
+
+### Hierarchy and Inspector
+
+- **Hierarchy**:
+  - Each row shows a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing its components.
+  - Filter chips: All, Player, Logic, Physics, UI, Templates. Search also matches tags and components.
+  - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - Bring to front / send to back; a lock button on locked objects.
+- **Inspector**:
+  - The object header stays at the top.
+  - **Quick add** chips for common components.
+  - Category filters: Visual, Physics, Logic, Animation, Gameplay. Collapse all / expand all.
+  - Components have a coloured edge by category.
+
 ### Node coding (Visual Script)
 
 Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
@@ -81,6 +134,83 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 - Drag nodes to move them, drag empty space to pan, pinch to zoom. ⟲ undoes, ⛶ fits everything on screen, and **Done** or the back gesture closes the editor.
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
+
+### View modes: Scene, Top and UI editor · 2D and 3D levels
+
+- **Scene / Top / UI**: tap the view button above the Scene.
+  - **Top view** lays out a 3D level from straight above with no perspective, like a 2D map. Drag pans; pinch zooms.
+  - The **UI editor** (also the **UI** button) shows only the screen:
+    - safe-area and centre guides, plus the 9 anchor points;
+    - drags snap to the centre and to the element's anchor;
+    - the Hierarchy lists only UI, and Create offers UI widgets;
+    - screen chips (All, Playing, Title, Paused, Game Over, Win) preview what each screen shows.
+- **Mix 2D and 3D**: each level has its own mode. *Levels → New 2D Level / New 3D Level*, so a game can go from a 2D menu world into a 3D level. UI carries over to the new level.
+
+### Animation (Animator, Tween, Sprite Animation)
+
+- **Animator + Animation timeline.** Open it from *long-press an object → Animate…* or the Animator's button.
+  - Scrub the time bar, pose the object in the Scene, and tap **◆ Key**. With **Auto** on, every change is keyed for you.
+  - Tap a key to set its time, value and ease, or delete it. ▶ previews the clip.
+  - Clips can loop, ping-pong or play once; you can have several clips per object, with one playing on start.
+  - Keys are offsets from the object's rest pose, so clips work wherever the object is (even while physics moves it).
+  - Play clips with the *play animation* action, the Play Animation node, or a message with the clip's name.
+- **Tween** component (like DOTween Animation):
+  - Effects: move by/to, rotate, scale, fade, colour, punch scale/position, shake position/rotation, path, jump.
+  - 28 eases with a curve preview, loops (−1 = forever), yoyo/restart/incremental, delay.
+  - Play on start, tap, touch or message, and **when finished, do** an action. **Preview** plays it right in the Scene.
+- **Sprite Animation** (flipbook): emoji or image frames at any fps; loop, ping-pong or once; always, only while moving, or on a message.
+- **From code** (DOTween style):
+  - `scene.to(obj, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' })` returns a tween you can chain: `.setDelay()`, `.onComplete()`, `.kill()`.
+  - `scene.sequence().append(scene.make(…)).join(…).appendInterval(0.2).appendCallback(fn)`.
+  - `scene.punch`, `scene.shakeProps`, `scene.path`, `scene.jumpTo`, `scene.killTweens`.
+  - `Ease.outBounce` and friends.
+- **Messages:** `scene.send('door-open')`, the *send message* action, and the Send Message / On Message nodes let objects trigger each other.
+- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Send Message, On Message, Camera Impulse.
+
+### Inspector superpowers (Odin-style)
+
+- Sliders under ranged numbers.
+- Fields that only appear when relevant (e.g. a Tween's Amount shows for Fade but not Move).
+- Foldout groups ("Timing & trigger", "Framing", …) and info boxes that explain the current choice.
+- Pick-lists of the tags, templates, objects, variables, clips and messages already in your game.
+- A curve preview for every ease, and a row of recently used colours.
+- Warnings when something is wrong (a missing template, a camera with nothing to follow, a script with no event).
+- Buttons on components: Preview, Open Animation Timeline, Look Through Camera.
+- **Search settings** at the top of the Inspector finds any field.
+- Swipe left or right across the bottom panel to move between Hierarchy, Inspector and Project.
+
+### Cameras (Cinemachine-style)
+
+The Camera component is a virtual camera:
+- **Modes:** follow, fixed, side scroller, top down, orbit, **group** (frames every object with a tag and zooms out to fit) and **dolly** (rides a track of points, staying as close as it can to the target).
+- **Framing:** a separate **look-at** target, **screen X/Y** offsets to put the target off-centre, damping, look-ahead, a dead zone, and a 2D confiner.
+- **Noise and impulse:** handheld **noise**, and **impulse** shakes that are weaker far away (`scene.impulse(strength, at)`, Camera Impulse node).
+- **Orthographic 3D** for isometric games.
+- **Switching:** with several cameras the highest priority starts. Switching (action, node or `scene.setCamera(name)`) **blends** smoothly over the new camera's blend time and ease.
+
+### 3D Modeler (Blender-style modeling)
+
+Open it with **Open 3D Modeler** on any 3D Model component, or *Create → New 3D Model (Modeler)*. It fills the screen with its own 3D view:
+
+- **Object mode** works on whole parts:
+  - Add editable meshes (cube, plane, cylinder, cone, UV sphere, ico sphere, torus) or simple shapes.
+  - Duplicate, mirror across X, colour, smooth/flat shading, delete.
+  - **Make Editable** turns any simple shape into a mesh.
+- **Edit mode** reshapes a mesh by **Vertex** or **Face**:
+  - Tap to select (taps toggle). All / None / Grow change the selection.
+  - **Extrude**, **Inset**, **Subdivide**, **Smooth**, **Merge**, **Fill**, **Flip** and **Delete**.
+  - **Paint** colours faces.
+  - **Mirror X** edits both sides at once.
+- **Transform**:
+  - Pick Move, Rotate or Scale and an axis (X, Y, Z, Free, or Normal for faces).
+  - Drag the selection or its round handle to apply it. The magnet snaps (0.25 units, 15°, ×0.25).
+  - Double-tap a mesh in Object mode to edit it.
+- **View**:
+  - Drag empty space to orbit; pinch to zoom; two fingers to pan.
+  - Persp, Front, Side and Top buttons, and Frame everything / selection.
+- **Undo and files**: undo and redo. **Import / Export OBJ** to move models to and from Blender and other tools.
+
+Meshes are saved as `{ geometry: 'mesh', verts: [[x,y,z]…], faces: [{ v: [i,j,k,…], c: '#color' }…], smooth }` parts inside `model.parts`. They render double-sided with per-face colours, and the object's collider fits around them.
 
 ### Saving, lighting, physics and cameras
 

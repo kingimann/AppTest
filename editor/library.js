@@ -85,6 +85,8 @@ export const UI_WIDGETS = [
       { name: 'Title Label', ui: true, anchor: 'center', x: 0, y: -60, showWhen: 'title', text: { value: 'MY GAME', size: 48, color: '#ffffff' } },
       { name: 'Start Button', ui: true, anchor: 'center', x: 0, y: 60, showWhen: 'title', shape: { type: 'rect', w: 220, h: 64, radius: 18, fill: '#43a047' }, text: { value: 'NEW GAME', size: 24, color: '#ffffff' }, behaviors: [{ type: 'button', action: 'start game', value: '', amount: 1, sound: 'none' }] },
     ], settings: { title: 'MY GAME' } },
+  { icon: 'star', label: 'Bouncing Title', props: { name: 'Bouncing Title', ui: true, anchor: 'top', x: 0, y: 160, text: { value: 'READY?', size: 48, color: '#ffffff', outline: '#4a148c', outlineWidth: 8, weight: '900' },
+    behaviors: [{ type: 'tween', effect: 'punch scale', amount: 0.25, duration: 0.8, ease: 'outQuad', loops: -1, loopType: 'restart', delay: 0, playOn: 'start' }] } },
   { icon: 'sign', label: 'Dialog Box', props: { name: 'Dialog Box', ui: true, anchor: 'bottom', x: 0, y: -150, shape: { type: 'rect', w: 340, h: 150, radius: 18, fill: 'rgba(15,15,30,0.9)', stroke: '#ffe082', lineWidth: 3 },
     text: { value: 'Welcome, hero! Tap to continue.', size: 18, color: '#ffffff', weight: '600' }, behaviors: [{ type: 'button', action: 'hide object', value: '', amount: 1, sound: 'click' }] } },
 ];

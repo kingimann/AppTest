@@ -1,11 +1,15 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 import { openNodeEditor } from './nodes.js';
+import { openModeler } from './modeler.js';
+import { openTimeline } from './timeline.js';
+import { openLogic } from './logic.js';
+import { makeCube } from './meshops.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -54,7 +58,9 @@ let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
 let tool = 'move';
-let uiMode = false;
+let uiMode = false; // UI editor view
+let viewMode = 'scene'; // scene | top (3D levels laid out from above, no perspective) | ui
+let uiScreen = 'all'; // which screen's UI the UI editor previews
 let playing = false;
 
 function saveNow() {
@@ -95,15 +101,17 @@ function newFromTemplate(key, name) {
 function setLevel(i) {
   levelIdx = Math.max(0, Math.min(i, levelList().length - 1));
   project = levelList()[levelIdx];
+  project.mode ||= root.mode;
   selectedId = null;
+  if (viewMode === 'top' && project.mode !== '3d') { viewMode = 'scene'; $('#app').dataset.view = 'scene'; }
   resetCamera(); rebuild(); refreshAll();
 }
-function addLevel(duplicate) {
-  const n = levelList().length + 1;
+function addLevel(duplicate, mode) {
+  const n = levelList().length + 1, m = mode || project.mode || root.mode, same = m === project.mode;
   const lv = duplicate ? clone(project) : {
-    mode: root.mode, background: project.background, view: clone(project.view || { width: 400, height: 700 }), gravity: project.gravity,
+    mode: m, background: same ? project.background : m === '3d' ? '#87b8e8' : '#0b0b1a', view: clone(project.view || { width: 400, height: 700 }), gravity: same ? project.gravity : m === '3d' ? -25 : 0,
     settings: { joystick: !!project.settings.joystick, jumpButton: !!project.settings.jumpButton }, vars: {},
-    camera: project.camera ? clone(project.camera) : undefined, entities: project.entities.filter((e) => e.ui).map(clone),
+    camera: same && project.camera ? clone(project.camera) : undefined, entities: project.entities.filter((e) => e.ui).map(clone),
   };
   if (duplicate) { delete lv.levels; delete lv.name; delete lv.version; for (const e of lv.entities) e.id = uid(); }
   lv.levelName = duplicate ? `${levelName(project, levelIdx)} (copy)` : `Level ${n}`;
@@ -140,9 +148,11 @@ function openLevelMenu() {
   const list = levelList();
   popMenu($('#levelBtn'), [
     { cap: 'Levels' },
-    ...list.map((lv, i) => ({ icon: i === levelIdx ? 'right' : 'layers', label: `${i + 1}. ${levelName(lv, i)}`, fn: () => setLevel(i) })),
+    ...list.map((lv, i) => ({ icon: i === levelIdx ? 'right' : 'layers', label: `${i + 1}. ${levelName(lv, i)} · ${(lv.mode || root.mode) === '3d' ? '3D' : '2D'}`, fn: () => setLevel(i) })),
     '-',
     { icon: 'plus', label: 'New Level', fn: () => addLevel(false) },
+    { icon: 'grid', label: 'New 2D Level', fn: () => addLevel(false, '2d') },
+    { icon: 'cube', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
     { icon: 'copy', label: 'Duplicate This Level', fn: () => addLevel(true) },
     { icon: 'edit', label: 'Rename Level…', fn: () => { const n = prompt('Level name', levelName(project, levelIdx)); if (n) { project.levelName = n; changed(); refreshAll(); } } },
     levelIdx > 1 && { icon: 'upload', label: 'Move Earlier', fn: () => moveLevel(-1) },
@@ -222,8 +232,15 @@ function applyCamera() {
   const s = engine.scene;
   if (!s || playing) return;
   if (s.mode === '2d') Object.assign(s.camera, { x: cam2d.x, y: cam2d.y, zoom: cam2d.zoom });
-  else {
+  else if (viewMode === 'top') { // straight down, no perspective: lay a 3D level out like a 2D map
+    const o = orbit;
+    s.camera.target = { ...o.target };
+    s.camera.position = { x: o.target.x, y: o.target.y + 200, z: o.target.z };
+    s.camera.ortho = true; s.camera.orthoSize = o.dist; s.camera.far = 1000;
+    s.fog = { near: 400, far: 1000 };
+  } else {
     const o = orbit, cp = Math.cos(o.pitch);
+    s.camera.ortho = false;
     s.camera.target = { ...o.target };
     s.camera.position = { x: o.target.x + o.dist * cp * Math.sin(o.yaw), y: o.target.y + o.dist * Math.sin(o.pitch), z: o.target.z + o.dist * cp * Math.cos(o.yaw) };
     s.camera.far = 1000;
@@ -587,7 +604,7 @@ surface.addEventListener('pointermove', (ev) => {
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { j.x = Math.round(g.orig.x + dx); j.y = Math.round(g.orig.y + dy); }
+      if (g.ui) { j.x = Math.round(g.orig.x + dx); j.y = Math.round(g.orig.y + dy); if (uiMode) snapUI(j); }
       else if (!is3D()) { const z = engine.renderer.zoomFor(s); j.x = snapV(g.orig.x + dx / z, 10); j.y = snapV(g.orig.y + dy / z, 10); }
       else {
         const hit = rayPlaneY(engine.renderer.screenRay(s, x, y), g.orig.y);
@@ -620,6 +637,7 @@ surface.addEventListener('pointermove', (ev) => {
     g.lx = x; g.ly = y;
     if (Math.hypot(x - g.sx, y - g.sy) > 5) g.moved = true;
     if (!is3D()) { const z = engine.renderer.zoomFor(s); cam2d.x -= mx / z; cam2d.y -= my / z; }
+    else if (viewMode === 'top') { const k = orbit.dist / engine.height; orbit.target.x -= mx * k; orbit.target.z -= my * k; }
     else if (g.type === 'orbit') { orbit.yaw -= mx * 0.008; orbit.pitch = Math.min(1.5, Math.max(0.05, orbit.pitch + my * 0.008)); }
     else panOrbit(mx, my);
     applyCamera();
@@ -634,7 +652,7 @@ surface.addEventListener('pointermove', (ev) => {
       cam2d.x += before.x - after.x; cam2d.y += before.y - after.y;
     } else {
       orbit.dist = Math.min(300, Math.max(2, orbit.dist * g.d0 / dist));
-      panOrbit(mx - g.mx, my - g.my);
+      if (viewMode === 'top') { const k = orbit.dist / engine.height; orbit.target.x -= (mx - g.mx) * k; orbit.target.z -= (my - g.my) * k; } else panOrbit(mx - g.mx, my - g.my);
     }
     g.mx = mx; g.my = my; g.d0 = dist;
     applyCamera();
@@ -708,6 +726,7 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); }
+  uiGuide = null;
   if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
@@ -739,6 +758,10 @@ function openObjectMenu(id, sx, sy) {
     { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
+    { icon: 'clock', label: 'Animate…', fn: () => openAnim(j, (j.behaviors || []).findIndex((b) => b.type === 'animator')) },
+    { icon: 'folder', label: j.folder ? `Folder: ${j.folder}…` : 'Put in Folder…', fn: () => moveToFolder(j) },
+    { icon: 'upload', label: 'Bring to Front', fn: () => { const L = project.entities; L.push(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
+    { icon: 'download', label: 'Send to Back', fn: () => { const L = project.entities; L.unshift(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
     { icon: j.visible === false ? 'eye' : 'eyeoff', label: j.visible === false ? 'Show' : 'Hide', fn: () => { j.visible = j.visible === false; changed({ structure: true }); } },
     { icon: 'gear', label: j.locked ? 'Unlock' : 'Lock', fn: () => { j.locked = !j.locked; changed({ structure: true }); } },
     '-',
@@ -853,7 +876,7 @@ function stepSelection(d) {
 }
 
 function refreshAll() {
-  $('#sceneTab').replaceChildren(icon(is3D() ? 'cube' : 'grid'), is3D() ? '3D' : '2D');
+  $('#sceneTab').replaceChildren(icon(uiMode ? 'hud' : is3D() ? 'cube' : 'grid'), uiMode ? 'UI' : viewMode === 'top' ? 'Top' : is3D() ? '3D' : '2D', icon('chevron'));
   $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
   const n = levelList().length;
   $('#levelBtn').replaceChildren(...[icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
@@ -878,36 +901,95 @@ function iconFor(e) {
   if (e.sprite) return 'image';
   return 'gear';
 }
+/** Short component names shown under each object in the Hierarchy. */
+function compBadges(e) {
+  const out = [];
+  if (e.body) out.push(e.body.type === 'static' ? 'Static' : e.body.sensor ? 'Trigger' : 'Rigidbody');
+  if (e.light) out.push('Light');
+  if (e.model) out.push('Model');
+  for (const b of e.behaviors || []) { const d = Behaviors[b.type]; if (d) out.push(d.label.replace(/ \(.*\)$/, '')); }
+  return out;
+}
+const KIND_TINT = { player: '#4fc3f7', ui: '#ce93d8', logic: '#ffca28', camera: '#80cbc4', light: '#fff59d', template: '#9e9e9e' };
+function kindOf(e) {
+  if (e.template) return 'template';
+  if ((e.tags || []).includes('player')) return 'player';
+  if (e.ui) return 'ui';
+  if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
+  if (e.light && !hasVisual(e)) return 'light';
+  if ((e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules', 'script'].includes(b.type))) return 'logic';
+  return '';
+}
+const H_FILTERS = [['all', 'All'], ['player', 'Player'], ['logic', 'Logic'], ['physics', 'Physics'], ['ui', 'UI'], ['template', 'Templates']];
+let hKind = 'all';
+const closedFolders = new Set();
+function hMatch(e) {
+  if (uiMode && !e.ui) return false;
+  if (hFilter && !(e.name || '').toLowerCase().includes(hFilter) && !(e.tags || []).some((t) => t.includes(hFilter)) && !compBadges(e).some((c) => c.toLowerCase().includes(hFilter))) return false;
+  if (hKind === 'physics') return !!e.body;
+  if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
+  return hKind === 'all' || kindOf(e) === hKind;
+}
 function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
+  const search = h('input', { type: 'text', placeholder: 'Search names, tags, components', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
+  box.append(h('div', { class: 'h-filters' }, H_FILTERS.map(([k, l]) => h('button', { class: hKind === k ? 'on' : '', onclick: () => { hKind = k; renderHierarchy(); } }, l))));
   const gs = gettingStarted();
   if (gs) box.append(gs);
   const rows = h('div');
   box.append(rows);
+  const row = (e) => {
+    const badges = compBadges(e), kind = kindOf(e);
+    return h('div', {
+      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder ? ' in-folder' : ''),
+      'data-id': e.id,
+      onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+    },
+    h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
+    h('span', { class: 'h-txt' },
+      h('span', { class: 'nm' }, e.name || 'Object', e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
+      badges.length ? h('span', { class: 'h-sub' }, badges.slice(0, 4).join(' · ') + (badges.length > 4 ? ` +${badges.length - 4}` : '')) : ''),
+    e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
+    h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')));
+  };
   function renderRows() {
+    const list = project.entities.filter(hMatch), folders = [...new Set(list.map((e) => e.folder).filter(Boolean))];
     rows.replaceChildren(...[
-      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, icon('scene', 'ico'),
-        h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
-        h('span', { class: 'tagchip' }, 'settings')),
-      project.entities.filter((e) => !hFilter || (e.name || '').toLowerCase().includes(hFilter)).map((e) => h('div', {
-        class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : ''),
-        'data-id': e.id, style: '--indent: 14px',
-        onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
-      },
-      icon(iconFor(e), 'ico'),
-      h('span', { class: 'nm' }, e.name || 'Object'),
-      e.template && h('span', { class: 'tagchip' }, 'template'),
-      (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player'),
-      e.locked && h('span', { class: 'tagchip' }, 'locked'),
-      h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye'))))].flat());
+      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, h('span', { class: 'h-ico' }, icon('scene')),
+        h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
+          h('span', { class: 'h-sub' }, `${project.entities.length} objects · ${is3D() ? '3D' : '2D'} · tap for game settings`))),
+      uiMode && h('div', { class: 'h-cap' }, 'UI editor: screen elements only'),
+      ...folders.flatMap((f) => {
+        const items = list.filter((e) => e.folder === f), shut = closedFolders.has(f);
+        return [h('div', { class: 'h-folder' + (shut ? ' shut' : ''), onclick: () => { shut ? closedFolders.delete(f) : closedFolders.add(f); renderRows(); } },
+          icon('chevron'), icon('folder'), h('span', { class: 'nm' }, f), h('span', { class: 'h-count' }, items.length),
+          h('button', { class: 'eye', title: 'Folder options', onclick: (ev) => { ev.stopPropagation(); popMenu(ev.currentTarget, [
+            { icon: 'edit', label: 'Rename Folder…', fn: () => { const n = prompt('Folder name', f); if (n == null) return; for (const e of project.entities) if (e.folder === f) e.folder = n.trim() || undefined; changed({ structure: true }); } },
+            { icon: 'eyeoff', label: 'Hide / Show All', fn: () => { const vis = items.some((e) => e.visible !== false); for (const e of items) e.visible = !vis; changed({ structure: true }); } },
+            { icon: 'close', label: 'Remove Folder (keep objects)', fn: () => { for (const e of project.entities) if (e.folder === f) delete e.folder; changed({ structure: true }); } },
+          ]); } }, icon('more'))),
+        ...(shut ? [] : items.map(row))];
+      }),
+      ...list.filter((e) => !e.folder).map(row),
+      !list.length && h('div', { class: 'empty' }, hFilter || hKind !== 'all' ? 'Nothing matches.' : 'No objects yet. Tap Create or the blue + button.'),
+    ].filter(Boolean));
   }
   renderRows();
   box.scrollTop = scroll;
+}
+
+function moveToFolder(j) {
+  const existing = [...new Set(project.entities.map((e) => e.folder).filter(Boolean))];
+  const pick = (f) => { if (f) j.folder = f; else delete j.folder; changed({ structure: true }); pushHistory(); };
+  popMenu({ left: window.innerWidth / 2 - 110, top: window.innerHeight / 3, bottom: window.innerHeight / 3 }, [
+    { cap: 'Folder' }, ...existing.map((f) => ({ icon: 'folder', label: f, fn: () => pick(f) })),
+    { icon: 'plus', label: 'New Folder…', fn: () => { const n = prompt('Folder name', is3D() ? 'Environment' : 'Level'); if (n?.trim()) pick(n.trim()); } },
+    j.folder && { icon: 'close', label: 'No Folder', fn: () => pick('') },
+  ]);
 }
 
 /** A short checklist that walks new users through making a playable game. */
@@ -920,7 +1002,7 @@ function gettingStarted() {
     { done: has((e) => (e.tags || []).includes('player')), label: 'Add a player', btn: 'Player', fn: () => addPrefab(pf('Player')) },
     { done: has((e) => e.body?.type === 'static' || e.voxels), label: 'Add ground to stand on', btn: 'Platform', fn: () => addPrefab(pf('Platform')) },
     { done: has((e) => ['collectible', 'hazard', 'tappable', 'goal'].some((t) => beh(e, t))), label: 'Add something to collect', btn: is3D() ? 'Gem' : 'Coin', fn: () => addPrefab(pf('Coin', 'Gem')) },
-    { done: has((e) => beh(e, 'graph') || beh(e, 'rules')), label: 'Add logic with nodes', btn: 'Script', fn: addVisualScript },
+    { done: has((e) => ['graph', 'rules', 'triggers', 'fsm'].some((t) => beh(e, t))), label: 'Add some logic', btn: 'Triggers', fn: () => addLogic('triggers') },
     { done: store.get('pocket.editor.played.' + projectId, '') === '1', label: 'Press Play to test', btn: 'Play', fn: play },
   ];
   const n = steps.filter((x) => x.done).length;
@@ -950,11 +1032,16 @@ function addVisualScript() {
 }
 
 function openCreateMenu(anchor) {
+  if (uiMode) { popMenu(anchor, [{ cap: 'UI widgets' }, ...UI_WIDGETS.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))]); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
   popMenu(anchor, [
     { cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
     '-', { cap: 'Prefabs' }, ...groups.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) })),
-    '-', { cap: 'Logic' }, { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
+    '-', { cap: 'Logic' },
+    { icon: 'bolt', label: 'Triggers (On → If → Do)', fn: () => addLogic('triggers') },
+    { icon: 'nodes', label: 'State Machine', fn: () => addLogic('fsm') },
+    { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
+    is3D() && { icon: 'cube', label: 'New 3D Model (Modeler)', fn: newModel },
   ]);
 }
 
@@ -996,20 +1083,28 @@ function control(target, path, spec) {
   switch (spec.type) {
     case 'number': {
       const step = spec.step || (is3D() ? 0.1 : 1);
+      let slider = null;
+      const lazy = () => { if (spec.lazy) renderInspector(); }; // other fields depend on this one: refresh when done typing
       const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path,
-        oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) set(n); } });
-      const bump = (d) => { const v = round((+get() || 0) + d * step, 3); inp.value = v; set(v); buzz(4); };
+        oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) { set(n); if (slider) slider.value = n; } }, onchange: lazy });
+      const bump = (d) => { let v = round((+get() || 0) + d * step, 3); if (spec.range) v = Math.min(spec.range[1], Math.max(spec.range[0], v)); inp.value = v; if (slider) slider.value = v; set(v); buzz(4); lazy(); };
       el = h('div', { class: 'num' }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), inp,
         h('button', { type: 'button', 'aria-label': 'Increase', onclick: () => bump(1) }, '+'));
       scrubber(label, inp, get, set, step);
+      if (spec.range) { // Odin-style [Range] slider under the number
+        slider = h('input', { type: 'range', class: 'slider', min: spec.range[0], max: spec.range[1], step: spec.step || 'any', value: val ?? spec.range[0],
+          oninput: (e) => { const n = parseFloat(e.target.value); inp.value = n; set(n); }, onchange: lazy });
+        el = h('div', { class: 'num-wrap' }, el, slider);
+      }
       break;
     }
     case 'bool':
       el = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
       return h('div', { class: 'row inline' }, label, el);
     case 'select':
-      el = h('select', { onchange: (e) => set(e.target.value) },
+      el = h('select', { onchange: (e) => { set(e.target.value); if (spec.ease) drawEase(cv, e.target.value); } },
         spec.options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: v === val }, l); }));
+      if (spec.ease) { var cv = h('canvas', { class: 'ease-cv', width: 96, height: 60 }); drawEase(cv, val); el = h('div', { class: 'ease-row' }, el, cv); }
       break;
     case 'color': {
       const norm = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : /^#[0-9a-f]{3}$/i.test(c || '') ? '#' + c.slice(1).split('').map((d) => d + d).join('') : '#ffffff');
@@ -1017,7 +1112,10 @@ function control(target, path, spec) {
         const cb = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked ? col.value : '') });
         const col = h('input', { type: 'color', value: norm(val), oninput: (e) => { cb.checked = true; set(e.target.value); } });
         el = h('div', { class: 'pair' }, cb, col);
-      } else el = h('input', { type: 'color', value: norm(val), oninput: (e) => set(e.target.value) });
+      } else el = h('input', { type: 'color', value: norm(val), oninput: (e) => set(e.target.value), onchange: (e) => rememberColor(e.target.value) });
+      // Odin-style color palette: recently used colors, one tap to reuse
+      const sw = recentColors.slice(0, 8).map((c) => h('button', { type: 'button', class: 'csw', style: `background:${c}`, title: c, onclick: () => { set(c); renderInspector(); } }));
+      if (sw.length) el = h('div', { class: 'color-wrap' }, el, h('div', { class: 'csws' }, sw));
       break;
     }
     case 'range': {
@@ -1045,6 +1143,10 @@ function control(target, path, spec) {
       break;
     case 'rules':
       return rulesEditor(target, path);
+    case 'clips':
+      return clipsCard(target, path);
+    case 'triggers': case 'fsm':
+      return logicCard(target, path, spec.type);
     case 'graph':
       return graphCard(target, path);
     case 'template': {
@@ -1054,10 +1156,111 @@ function control(target, path, spec) {
         names.map((n) => h('option', { value: n, selected: n === val }, n)));
       break;
     }
-    default:
+    default: {
       el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', oninput: (e) => set(e.target.value) });
+      const list = spec.suggest && suggestions(spec.suggest);
+      if (list?.length) { // Odin-style [ValueDropdown]: type or pick from what exists in the game
+        const id = 'dl-' + spec.suggest + '-' + Math.random().toString(36).slice(2, 7);
+        el.setAttribute('list', id);
+        el = h('div', { class: 'sugg' }, el, h('datalist', { id }, list.map((v) => h('option', { value: v }))),
+          h('button', { type: 'button', class: 'sugg-btn', title: 'Pick', onclick: (e) => popMenu(e.currentTarget, list.map((v) => ({ label: v, fn: () => { set(v); renderInspector(); } }))) }, icon('chevron')));
+      }
+    }
   }
-  return h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+  if (spec.infoText) row.append(h('div', { class: 'obox info' }, spec.infoText));
+  return row;
+}
+
+// ---- Odin-style inspector helpers ----
+const openGroups = new Set();
+/** A component's fields: validation messages, buttons, then params (hidden by showIf, folded into groups, with sliders and info boxes). */
+function behaviorBody(def, b, i, j, threeD, C) {
+  const params = def.params.map((p) => ({ ...p, def: paramDefault(p, threeD) })), deps = showIfDeps(params);
+  const out = validate(b, j).map(([lvl, txt]) => h('div', { class: 'obox ' + lvl }, txt));
+  const btns = (BEH_BUTTONS[b.type] || []).filter((x) => !x.when || x.when(b, threeD));
+  if (btns.length) out.push(h('div', { class: 'btns' }, btns.map((x) => h('button', { class: 'btn' + (x.primary ? ' primary' : ''), onclick: () => x.fn(j, i, b) }, icon(x.icon || 'play'), x.label))));
+  const groups = new Map();
+  for (const p of params) {
+    if ((!showAdvanced && p.advanced) || !shown(p, b, threeD)) continue;
+    let infoText = typeof p.info === 'string' ? p.info : null;
+    if (p.info && typeof p.info === 'object') { const k = Object.keys(p.info).find((v) => Object.values(b).includes(v)); if (k) infoText = p.info[k]; }
+    const dep = deps.has(p.key), el = C(`behaviors.${i}.${p.key}`, { ...p, infoText, structure: dep && p.type !== 'number', lazy: dep && p.type === 'number' });
+    if (!p.group) { out.push(el); continue; }
+    if (!groups.has(p.group)) {
+      const key = b.type + ':' + p.group, body = h('div', { class: 'og-b' });
+      const g = h('div', { class: 'og' + (openGroups.has(key) ? ' open' : '') },
+        h('button', { class: 'og-h', onclick: () => { g.classList.toggle('open'); if (g.classList.contains('open')) openGroups.add(key); else openGroups.delete(key); } }, icon('chevron'), p.group), body);
+      groups.set(p.group, body); out.push(g);
+    }
+    groups.get(p.group).append(el);
+  }
+  return out;
+}
+let recentColors = (() => { try { return JSON.parse(store.get('pocket.editor.colors', '[]')); } catch { return []; } })();
+function rememberColor(c) { recentColors = [c, ...recentColors.filter((x) => x !== c)].slice(0, 12); store.set('pocket.editor.colors', JSON.stringify(recentColors)); }
+function drawEase(cv, name) {
+  const g = cv.getContext('2d'), W = cv.width, H = cv.height, f = Ease[name] || Ease.linear, pad = 12;
+  g.clearRect(0, 0, W, H); g.strokeStyle = 'rgba(255,255,255,0.12)'; g.strokeRect(pad, pad, W - 2 * pad, H - 2 * pad);
+  g.strokeStyle = '#7fb5ff'; g.lineWidth = 2; g.beginPath();
+  for (let i = 0; i <= 40; i++) { const t = i / 40, x = pad + t * (W - 2 * pad), y = H - pad - f(t) * (H - 2 * pad); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.stroke();
+}
+/** Values that already exist in the game, for dropdown suggestions. */
+function suggestions(kind) {
+  const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
+  if (kind === 'tags') return uniq(['player', 'enemy', ...all.flatMap((e) => e.tags || []), ...all.map((e) => e.name)]);
+  if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
+  if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
+  if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
+  if (kind === 'clips') return uniq((ent(selectedId)?.behaviors || []).filter((b) => b.type === 'animator').flatMap((b) => (b.clips || []).map((c) => c.name)));
+  if (kind === 'messages') {
+    const out = [];
+    for (const e of all) for (const b of e.behaviors || []) {
+      if (b.message) out.push(b.message);
+      if (b.action === 'send message' || b.thenDo === 'send message') out.push(b.value || b.thenValue);
+      for (const n of b.graph?.nodes || []) if (n.params?.message) out.push(n.params.message);
+      for (const r of b.rules || []) for (const d of r.do || []) if (d.action === 'send message') out.push(d.value);
+    }
+    return uniq(['go', ...out]);
+  }
+  return [];
+}
+/** showIf: { key: [values] } or (behavior) => bool */
+function shown(p, b, threeD) {
+  if (p.only3d && !threeD) return false;
+  if (p.only2d && threeD) return false;
+  if (!p.showIf) return true;
+  if (typeof p.showIf === 'function') { try { return !!p.showIf(b); } catch { return true; } }
+  return Object.entries(p.showIf).every(([k, vals]) => vals.includes(b[k] ?? p.def));
+}
+/** Which params other params' showIf depends on (those refresh the inspector when changed). */
+function showIfDeps(params) {
+  const deps = new Set();
+  for (const p of params) {
+    if (!p.showIf) continue;
+    if (typeof p.showIf === 'function') for (const m of String(p.showIf).matchAll(/b\.(\w+)/g)) deps.add(m[1]);
+    else Object.keys(p.showIf).forEach((k) => deps.add(k));
+  }
+  return deps;
+}
+/** Problems with a component's settings (Odin-style validation). */
+function validate(b, j) {
+  const out = [], all = project.entities, has = (n) => all.some((e) => e.name === n), tagged = (t) => all.some((e) => e.name === t || (e.tags || []).includes(t));
+  if ((b.type === 'spawner' || b.type === 'shooter') && b.template && !all.some((e) => e.template && e.name === b.template)) out.push(['error', `No template named “${b.template}”. Tick “Template” on the object to spawn.`]);
+  if ((b.type === 'spawner' || b.type === 'shooter') && !b.template) out.push(['warn', 'Pick a template to spawn.']);
+  if (b.type === 'teleport' && b.target && !has(b.target)) out.push(['error', `No object named “${b.target}”.`]);
+  if (b.type === 'camera' && b.mode !== 'fixed' && b.target && !tagged(b.target)) out.push(['warn', `Nothing is tagged “${b.target}” yet: the camera will stay put.`]);
+  if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
+  if (b.type === 'flipbook' && !String(b.frames || '').trim()) out.push(['warn', 'Add some frames, separated by commas.']);
+  if (b.type === 'graph' && !(b.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push(['warn', 'This script has no Event node, so it never runs.']);
+  if (b.type === 'fsm' && !(b.fsm?.states || []).length) out.push(['warn', 'Add at least one state.']);
+  if (b.type === 'joint' && b.connectTo && !has(b.connectTo)) out.push(['error', `No object named “${b.connectTo}”.`]);
+  if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
+  if (b.type === 'waveSpawner' && (b.waves || []).some((w) => !all.some((e) => e.template && e.name === w.template))) out.push(['error', 'A wave uses a template that does not exist. Tick “Template” on the enemy object.']);
+  if (b.type === 'tween' && b.effect === 'path' && !(Array.isArray(b.points) && b.points.length)) out.push(['error', 'The path needs at least one point.']);
+  if (['move', 'platformer', 'firstPerson', 'thirdPerson'].includes(b.type) && !(j.tags || []).includes('player')) out.push(['info', 'Tip: tag this object “player” so enemies, coins and cameras find it.']);
+  return out;
 }
 
 /** Node-based coding: a summary card that opens the full-screen Node Editor. */
@@ -1150,6 +1353,15 @@ function modelSection(j) {
   const parts = j.model.parts;
   const partDims = (q, i) => {
     const P = () => ent(selectedId)?.model?.parts[i] || {}, C = (path, spec) => control(P, path, spec), g = q.geometry || 'box';
+    if (g === 'mesh') return [
+      h('p', { class: 'desc' }, `Editable mesh: ${q.verts?.length || 0} vertices, ${q.faces?.length || 0} faces.`),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => editModel(j) }, icon('cube'), 'Edit in 3D Modeler')),
+      vecRow(P, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.05),
+      vecRow(P, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 5),
+      vecRow(P, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05),
+      C('color', { label: 'Color', type: 'color' }),
+      C('smooth', { label: 'Smooth shading', type: 'bool', def: false }),
+    ];
     return [
       C('geometry', { label: 'Shape', type: 'select', options: GEO_OPTIONS, structure: true }),
       vecRow(P, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.05),
@@ -1162,10 +1374,11 @@ function modelSection(j) {
     ];
   };
   const body = [
-    h('p', { class: 'desc' }, 'Build a 3D model out of parts. Tap a part to highlight it in the Scene. The collider fits around all parts.'),
+    h('button', { class: 'btn primary gc-open', onclick: () => editModel(j) }, icon('cube'), 'Open 3D Modeler'),
+    h('p', { class: 'desc' }, 'Model like in Blender: reshape meshes by vertex or face (extrude, inset, subdivide…), or build from parts below. The collider fits around everything.'),
     ...parts.map((q, i) => h('div', { class: 'part' + (selectedPart === i ? ' sel' : ' closed') },
       h('div', { class: 'part-h', onclick: (e) => { if (e.target.closest('button')) return; selectedPart = selectedPart === i ? -1 : i; renderInspector(); } },
-        h('span', { class: 'dot', style: `background:${q.color || '#ccc'}` }), h('span', { class: 't' }, `${i + 1}. ${(GEO_OPTIONS.find((g) => g[0] === (q.geometry || 'box')) || ['', 'Part'])[1]}`),
+        h('span', { class: 'dot', style: `background:${q.color || '#ccc'}` }), h('span', { class: 't' }, `${i + 1}. ${q.geometry === 'mesh' ? 'Mesh' : (GEO_OPTIONS.find((g) => g[0] === (q.geometry || 'box')) || ['', 'Part'])[1]}`),
         h('button', { class: 'more', title: 'Part options', onclick: (e) => popMenu(e.currentTarget, [
           { icon: 'copy', label: 'Duplicate Part', fn: () => { parts.splice(i + 1, 0, { ...clone(q), x: (q.x || 0) + 0.3 }); selectedPart = i + 1; changed({ inspector: true }); pushHistory(); } },
           i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { parts.splice(i - 1, 0, parts.splice(i, 1)[0]); selectedPart = i - 1; changed({ inspector: true }); } },
@@ -1181,6 +1394,22 @@ function modelSection(j) {
   return comp('3D Model', body, { icon: 'cube', key: 'model', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.model; changed({ structure: true }); } }] });
 }
 
+/** Full-screen 3D Modeler for an object's model. */
+function editModel(j, { edit = false } = {}) {
+  const id = j.id;
+  const back = () => mo.close();
+  const mo = openModeler({
+    model: j.model, title: j.name, h, popMenu, toast, buzz, edit,
+    onChange: (m) => { const e = ent(id); if (e) { e.model = m; requestRebuild(); saveSoon(); } },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+  });
+  pushBack(back);
+}
+function newModel() {
+  const j = addEntity({ name: 'Model', y: 0, model: { parts: [{ geometry: 'mesh', ...makeCube(), x: 0, y: 0.5, z: 0, color: '#b0bec5' }] } });
+  editModel(j, { edit: true });
+}
+
 const closedComps = new Set();
 let showAdvanced = store.get('pocket.editor.advanced', '0') === '1', lastInspected = null, selectedPart = -1;
 const voxelBrush = { mode: 'add', block: 1 };
@@ -1193,9 +1422,24 @@ function pasteComponent(j) {
   toast('Component pasted');
 }
 /** A collapsible component block. opts: { icon, key, enabled, onToggle, menu: [{label, fn}], desc } */
+const INSP_CATS = [['all', 'All'], ['visual', 'Visual'], ['physics', 'Physics'], ['logic', 'Logic'], ['anim', 'Animation'], ['game', 'Gameplay']];
+const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim: '#ab47bc', game: '#ef5350', other: '#777' };
+let inspCat = 'all';
+/** Which inspector filter a component belongs to. */
+function compCat(key) {
+  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'light', 'uiel'].includes(key)) return 'visual';
+  if (key === 'body') return 'physics';
+  const type = String(key).replace(/^b\d+/, ''), c = BEH_META[type]?.[0];
+  if (!c) return 'other';
+  if (['Logic', 'Scripting', 'AI', 'Turn-Based'].includes(c)) return 'logic';
+  if (['Animation', 'Effects'].includes(c)) return 'anim';
+  if (['Physics', 'Movement', 'Controllers', 'Camera'].includes(c)) return 'physics';
+  return 'game';
+}
 function comp(title, kids, opts = {}) {
   const key = opts.key || title;
-  const el = h('div', { class: 'comp' + (closedComps.has(key) ? ' closed' : '') });
+  const cat = opts.cat || compCat(key);
+  const el = h('div', { class: 'comp' + (closedComps.has(key) ? ' closed' : ''), 'data-key': key, 'data-cat': cat, style: `--cc:${CAT_TINT[cat] || '#555'}` });
   const head = h('div', { class: 'comp-h', onclick: (e) => {
     if (e.target.closest('input,button')) return;
     el.classList.toggle('closed');
@@ -1210,6 +1454,23 @@ function comp(title, kids, opts = {}) {
   return el;
 }
 
+let inspQuery = '';
+/** Odin-style inspector search: keep only matching fields (and open their components). */
+function applyInspSearch(box) {
+  const q = inspQuery.trim().toLowerCase();
+  for (const c of box.querySelectorAll('.comp')) {
+    const title = (c.querySelector('.comp-h .t')?.textContent || '').toLowerCase();
+    let any = !q || title.includes(q);
+    for (const r of c.querySelectorAll('.row')) {
+      const lab = (r.querySelector(':scope > label')?.textContent || r.textContent || '').toLowerCase(), hit = !!q && lab.includes(q);
+      r.classList.toggle('hit', hit);
+      r.style.display = !q || hit || title.includes(q) ? '' : 'none';
+      if (hit) { any = true; r.closest('.og')?.classList.add('open'); }
+    }
+    c.style.display = any ? '' : 'none';
+    if (q && any) c.classList.remove('closed');
+  }
+}
 function syncTransformInputs() {
   const j = ent(selectedId); if (!j) return;
   for (const k of ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz']) {
@@ -1244,6 +1505,8 @@ function renderInspector() {
     h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
   box.append(h('div', { class: 'nav-strip' }, h('label', { class: 'adv-toggle' },
     h('input', { type: 'checkbox', checked: showAdvanced, onchange: (e) => { showAdvanced = e.target.checked; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); } }), 'Show advanced options')));
+  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings (e.g. speed, color)', value: inspQuery, autocapitalize: 'off',
+    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } })));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -1259,6 +1522,14 @@ function renderInspector() {
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
+
+  // quick add + component filters (Odin-style tidy inspector)
+  const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
+  if (quick.length) box.append(h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))));
+  box.append(h('div', { class: 'comp-tools' },
+    h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
+    h('button', { class: 'ct', title: 'Collapse all', onclick: () => { for (const el of box.querySelectorAll('.comp')) closedComps.add(el.dataset.key); renderInspector(); } }, icon('upload')),
+    h('button', { class: 'ct', title: 'Expand all', onclick: () => { closedComps.clear(); renderInspector(); } }, icon('download'))));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -1408,7 +1679,7 @@ function renderInspector() {
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
-    box.append(comp(def.label, def.params.filter((p) => showAdvanced || !p.advanced).map((p) => C(`behaviors.${i}.${p.key}`, { ...p, def: paramDefault(p, threeD) })), {
+    box.append(comp(def.label, behaviorBody(def, b, i, j, threeD, C), {
       icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu,
       enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); },
     }));
@@ -1420,6 +1691,8 @@ function renderInspector() {
   box.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
     h('button', { class: 'btn', onclick: () => duplicateEntity(j.id) }, icon('copy'), 'Duplicate'),
     h('button', { class: 'btn', onclick: () => deleteEntity(j.id) }, icon('trash'), 'Delete')));
+  if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
+  if (inspQuery) applyInspSearch(box);
   box.scrollTop = scroll;
 }
 
@@ -1559,7 +1832,100 @@ const BEH_META = {
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
+  tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
+/** Odin-style [Button]s shown at the top of a component. */
+const BEH_BUTTONS = {
+  tween: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b) }],
+  flipbook: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 3) }],
+  animator: [{ label: 'Open Animation Timeline', icon: 'clock', primary: true, fn: (j, i) => openAnim(j, i) }],
+  camera: [{ label: 'Look Through Camera', icon: 'camera', fn: (j, i, b) => lookThrough(j, b) }],
+  particles: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 2.5) }],
+};
+let previewing = null;
+/** Run a Tween / Sprite Animation on the Scene view for a few seconds, then put everything back. */
+function previewBehavior(j, b, seconds) {
+  cancelPreview();
+  const s = engine.scene, e = s.byId(j.id), def = Behaviors[b.type]; if (!e || !def) return;
+  const params = {}; for (const p of def.params) params[p.key] = b[p.key] ?? paramDefault(p, is3D() && !j.ui);
+  const inst = def.create(params, e);
+  if (inst.play) inst.play(e, s); else inst.start?.(e, s);
+  const dur = seconds || Math.min(6, (+b.delay || 0) + (+b.duration || 1) * (+b.loops < 0 ? 2 : (+b.loops || 0) + 1) + 0.3);
+  let last = performance.now(); const t0 = last;
+  const step = (now) => {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    if (!inst.play) inst.update?.(e, dt, s);
+    for (const tw of s.tweens) tw.update(dt);
+    for (let k = s.particles.length - 1; k >= 0; k--) { const q = s.particles[k]; q.x += q.vx * dt; q.y += q.vy * dt; q.vy += (q.g ?? 0) * dt; if (q.shrink) q.size *= 1 - dt * 1.2; if ((q.life -= q.decay * dt) <= 0) s.particles.splice(k, 1); }
+    if (now - t0 < dur * 1000 && previewing) previewing.raf = requestAnimationFrame(step); else cancelPreview();
+  };
+  previewing = { raf: requestAnimationFrame(step) };
+  toast('Previewing…');
+}
+function cancelPreview() { if (!previewing) return; cancelAnimationFrame(previewing.raf); previewing = null; engine.scene.tweens = []; engine.scene.particles = []; rebuild(); }
+function lookThrough(j, b) {
+  if (is3D() && !j.ui) { orbit.target = { x: j.x || 0, y: j.y || 0, z: j.z || 0 }; orbit.dist = Math.max(4, Math.hypot(b.ox || 0, b.oy || 0, b.oz || 0)); }
+  else cam2d = { x: j.x || 0, y: j.y || 0, zoom: (+b.zoom || 1) * 0.85 };
+  applyCamera(); toast('Scene view moved to the camera');
+}
+/** Animator clips summary + button. */
+function clipsCard(target, path) {
+  const clips = getPath(target(), path) || [];
+  const i = +path.split('.')[1];
+  return h('div', { class: 'row full graph-card' },
+    h('div', { class: 'gc-sum' }, icon('clock'), h('div', {}, h('b', {}, `${clips.length} clip${clips.length === 1 ? '' : 's'}`),
+      h('small', {}, clips.map((c) => `${c.name} (${c.length}s, ${Object.keys(c.tracks || {}).length} tracks)`).join(' · ') || 'No clips yet'))),
+    h('button', { class: 'btn primary gc-open', onclick: () => openAnim(target(), i) }, icon('clock'), 'Open Animation Timeline'));
+}
+/** Summary card for State Machine / Triggers, with a button to the full-screen Logic editor. */
+function logicCard(target, path, kind) {
+  const v = getPath(target(), path) || (kind === 'fsm' ? { states: [] } : []);
+  const sum = kind === 'fsm' ? `${(v.states || []).length} states · ${(v.states || []).reduce((n, s) => n + (s.transitions || []).length, 0) + (v.any || []).length} transitions`
+    : `${v.length} trigger${v.length === 1 ? '' : 's'}`;
+  const sub = kind === 'fsm' ? (v.states || []).map((s) => s.name + (s.id === v.start ? ' ★' : '')).join(' → ') : v.map((t) => logicSay(LOGIC_EVENTS, t.event)).join(' · ');
+  return h('div', { class: 'row full graph-card' },
+    h('div', { class: 'gc-sum' }, icon(kind === 'fsm' ? 'nodes' : 'bolt'), h('div', {}, h('b', {}, sum), h('small', {}, sub || 'Empty: open the editor to add some'))),
+    h('button', { class: 'btn primary gc-open', onclick: () => editLogic(target, path, kind) }, icon(kind === 'fsm' ? 'nodes' : 'bolt'), kind === 'fsm' ? 'Open State Machine' : 'Open Triggers'));
+}
+function editLogic(target, path, kind) {
+  const e = target(), id = e.id, T = () => ent(id) || e;
+  const back = () => ed.close();
+  const ed = openLogic({
+    kind, data: getPath(e, path), title: e.name, h, popMenu, toast, buzz, suggest: suggestions,
+    onChange: (d) => { setPath(T(), path, d); requestRebuild(); saveSoon(); },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+  });
+  pushBack(back);
+}
+/** Add a State Machine or Triggers component to the selected object (or a new Logic object) and open it. */
+function addLogic(kind) {
+  let j = ent(selectedId);
+  if (!j || j.template) j = addEntity({ name: kind === 'fsm' ? 'Brain' : 'Logic', ...(is3D() ? { y: 0.5 } : {}) });
+  const b = defaultBehavior(kind, is3D() && !j.ui);
+  (j.behaviors ||= []).push(b);
+  selectedId = j.id; changed({ structure: true }); pushHistory();
+  editLogic(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.${kind === 'fsm' ? 'fsm' : 'triggers'}`, kind);
+}
+
+let timeline = null;
+function openAnim(j, i) {
+  if (timeline) return;
+  if (i == null || j.behaviors?.[i]?.type !== 'animator') { (j.behaviors ||= []).push(defaultBehavior('animator', is3D() && !j.ui)); i = j.behaviors.length - 1; j.behaviors[i].clips = [{ name: 'Clip 1', length: 1, loop: 'loop', tracks: {} }]; j.behaviors[i].autoplay = 'Clip 1'; }
+  const id = j.id, b = j.behaviors[i];
+  setSheet('half');
+  document.body.classList.add('animating');
+  const back = () => timeline?.close();
+  timeline = openTimeline({
+    get: () => ent(id), behavior: b, threeD: is3D() && !j.ui, h, popMenu, toast, buzz, parent: $('#app'),
+    onPose: () => { requestRebuild(); syncTransformInputs(); },
+    onChange: () => { saveSoon(); },
+    onClose: () => { timeline = null; document.body.classList.remove('animating'); dropBack(back); changed({ structure: true }); pushHistory(); },
+  });
+  pushBack(back);
+}
+
 function defaultBehavior(type, threeD) {
   const b = { type };
   for (const p of Behaviors[type].params) b[p.key] = clone(paramDefault(p, threeD));
@@ -1671,6 +2037,21 @@ const PREFABS_2D = [
   { icon: 'save', label: 'Save Point', props: { name: 'Save Point', shape: { type: 'emoji', emoji: '💾', w: 40, h: 40 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'float', amount: 6, period: 1.6 }] } },
   { icon: 'bulb', label: 'Torch', props: { name: 'Torch', shape: { type: 'emoji', emoji: '🔥', w: 36, h: 36 }, light: { color: '#ffb056', intensity: 1, range: 180, flicker: 0.5 } }, scene: { light: { darkness: 0.85 } } },
   { icon: 'rotate', label: 'Spinning Bar', props: { name: 'Spinning Bar', shape: { type: 'rect', w: 160, h: 16, radius: 8, fill: '#e53935' }, body: { type: 'kinematic' }, behaviors: [{ type: 'rotate', speed: 90 }, { type: 'hazard', action: 'damage' }] } },
+  { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', shape: { type: 'rect', w: 140, h: 24, radius: 6, fill: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 160, y: 0, duration: 2, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'image', label: 'Animated Sprite', props: { name: 'Bird', shape: { type: 'emoji', emoji: '🐥', w: 56, h: 56 }, behaviors: [{ type: 'flipbook', frames: '🐥,🐤,🐣,🐤', fps: 6, mode: 'loop', when: 'always' }, { type: 'tween', effect: 'move by', x: 0, y: -20, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'camera', label: 'Group Camera', props: { name: 'Group Camera', behaviors: [{ type: 'camera', mode: 'group', target: 'player', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: 0 }] } },
+  { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], shape: { type: 'emoji', emoji: '👹', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
+  { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', shape: { type: 'emoji', emoji: '🧙', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
+  { icon: 'key', label: 'Inventory Key', props: { name: 'Key Pickup', shape: { type: 'emoji', emoji: '🔑', w: 36, h: 36 }, behaviors: [{ type: 'inventoryItem', item: 'Key', icon: '🔑', amount: 1, tag: 'player' }, { type: 'tween', effect: 'move by', x: 0, y: -8, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'star', label: 'Rain', props: { name: 'Rain', behaviors: [{ type: 'particles', preset: 'rain', rate: 0, size: 0, playing: true }] } },
+  { icon: 'sun', label: 'Day & Night', props: { name: 'Day & Night', behaviors: [{ type: 'dayNight', dayLength: 60, start: 8, dayColor: '#87b8e8', nightColor: '#0b1030', maxDark: 0.8 }] } },
+  { icon: 'spawner', label: 'Wave Spawner', props: { name: 'Wave Spawner', y: -40, behaviors: [{ type: 'waveSpawner', waves: [{ template: 'Wave Enemy', count: 4, every: 1 }, { template: 'Wave Enemy', count: 7, every: 0.7 }], pause: 3, area: 300, areaH: 0, whenDone: 'win' }] },
+    extra: [{ name: 'Wave Enemy', template: true, tags: ['enemy'], offset: { x: 0, y: 0 }, shape: { type: 'emoji', emoji: '👾', w: 36, h: 36 }, behaviors: [{ type: 'velocity', vx: 0, vy: 120, vz: 0 }, { type: 'health', hp: 1, hurtBy: 'bullet', damage: 1, invuln: 0, knockback: 0, onDeath: 'destroy', points: 5 }, { type: 'destroyOffscreen', margin: 80 }] }] },
+  { icon: 'nodes', label: 'Patrol Guard (FSM)', props: { name: 'Guard', tags: ['enemy'], shape: { type: 'emoji', emoji: '💂', w: 44, h: 44 }, behaviors: [{ type: 'fsm', fsm: { start: 'p', any: [], states: [
+    { id: 'p', name: 'Patrol', x: 30, y: 40, enter: [{ type: 'moveBy', x: 120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }, { type: 'moveBy', x: -120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }], stay: [], exit: [], transitions: [{ event: { type: 'finished' }, conditions: [], to: 'p2' }, { event: { type: 'always' }, conditions: [{ type: 'near', tag: 'player', op: '<', value: 150 }], to: 'a' }] },
+    { id: 'p2', name: 'Look Around', x: 30, y: 170, enter: [{ type: 'rotateBy', degrees: 20, seconds: 0.3 }, { type: 'wait', seconds: 0.4 }, { type: 'rotateBy', degrees: -20, seconds: 0.3 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 1.2 }, conditions: [], to: 'p' }] },
+    { id: 'a', name: 'Alert', x: 260, y: 100, enter: [{ type: 'punch', what: 'scale', amount: 0.4, seconds: 0.4 }, { type: 'message', text: 'Hey! Stop!', seconds: 1.2 }, { type: 'shake', strength: 8 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 2 }, conditions: [{ type: 'near', tag: 'player', op: '>', value: 220 }], to: 'p' }] },
+  ] } }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -1713,6 +2094,8 @@ const PREFABS_3D = [
     scene: { settings: { joystick: true } } },
   { icon: 'arrow', label: 'Wind Zone', props: { name: 'Wind Zone', y: 1.5, mesh: { geometry: 'box', w: 3, h: 3, d: 3, color: '#78c8ff', opacity: 0.2 }, behaviors: [{ type: 'forceZone', mode: 'direction', fx: 0, fy: 1, fz: 0, strength: 45, tag: '', hidden: false }] } },
   { icon: 'save', label: 'Save Point', props: { name: 'Save Point', y: 0.6, mesh: { geometry: 'gem', w: 0.6, h: 1, d: 0.6, color: '#7cf7a0', emissive: 0.5 }, light: { color: '#7cf7a0', intensity: 1, range: 4 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'rotate', axis: 'y', speed: 90 }] } },
+  { icon: 'coin', label: 'Spinning Coin', props: { name: 'Spinning Coin', y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 0.1, color: '#ffca28', emissive: 0.3 }, rx: 90, behaviors: [{ type: 'tween', effect: 'rotate by', angle: 360, duration: 1.5, ease: 'linear', loops: -1, loopType: 'restart', playOn: 'start' }, { type: 'collectible', score: 10 }] } },
+  { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', y: 1, mesh: { geometry: 'box', w: 3, h: 0.4, d: 3, color: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 5, y: 0, z: 0, duration: 3, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -2234,6 +2617,23 @@ for (const [name, ic, label] of [['hierarchy', 'list', 'Hierarchy'], ['inspector
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);
   $(`.ptab[data-title="${name}"]`).append(icon(ic), label);
 }
+{ // swipe left / right across a panel to move between Hierarchy, Inspector and Project
+  const order = ['hierarchy', 'inspector', 'project'];
+  let st = null;
+  $('#sheet').addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
+  }, { passive: true });
+  $('#sheet').addEventListener('touchend', (e) => {
+    if (!st) return;
+    const t = e.changedTouches[0], dx = t.clientX - st.x, dy = t.clientY - st.y;
+    if (Math.abs(dx) > 90 && Math.abs(dy) < 45 && performance.now() - st.t < 600) {
+      const i = order.indexOf(dockTab), n = order[i + (dx < 0 ? 1 : -1)];
+      if (n) { setDock(n); buzz(6); }
+    }
+    st = null;
+  }, { passive: true });
+}
 { // tabs: tap to switch, swipe up/down on them to open or close the panel
   const tabs = $('#dockTabs');
   let sw = null, swiped = false;
@@ -2266,13 +2666,52 @@ for (const [z, ic] of [['out', 'minus'], ['in', 'plus'], ['reset', 'frame']]) {
 // stop the browser from zooming the whole page (pinch or double tap); pinch inside the Scene zooms the view instead
 document.addEventListener('gesturestart', (e) => e.preventDefault());
 document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 && !e.target.closest('canvas')) e.preventDefault(); }, { passive: false });
-$('#uiBtn').addEventListener('click', () => {
-  uiMode = !uiMode;
+$('#uiBtn').addEventListener('click', () => setViewMode(viewMode === 'ui' ? 'scene' : 'ui'));
+$('#sceneTab').addEventListener('click', (e) => popMenu(e.currentTarget, [
+  { cap: `This level is ${is3D() ? '3D' : '2D'}` },
+  { icon: is3D() ? 'cube' : 'grid', label: is3D() ? 'Scene view (3D)' : 'Scene view (2D)', fn: () => setViewMode('scene') },
+  is3D() && { icon: 'grid', label: 'Top view (2D layout)', fn: () => setViewMode('top') },
+  { icon: 'hud', label: 'UI editor (screen only)', fn: () => setViewMode('ui') },
+  '-', { icon: 'plus', label: 'New 2D Level', fn: () => addLevel(false, '2d') }, { icon: 'plus', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
+]));
+/** Scene / Top / UI editor. */
+function setViewMode(m) {
+  if (m === 'top' && !is3D()) m = 'scene';
+  viewMode = m; uiMode = m === 'ui';
   $('#uiBtn').classList.toggle('on', uiMode);
-  if (uiMode) { projectTab = 'ui'; renderProject(); toast('UI mode: only screen UI can be selected. Add widgets from Project → UI.'); }
-});
-engine.screenFilter = (e) => uiMode || e.id === selectedId; // title / pause / game-over UI shows in UI mode or when selected
-engine.onBeforeUI = (ctx) => { if (uiMode && !playing) { ctx.fillStyle = 'rgba(10,10,20,0.55)'; ctx.fillRect(0, 0, engine.width, engine.height); } };
+  $('#app').dataset.view = m;
+  $('#uiScreens').hidden = !uiMode;
+  if (uiMode) { projectTab = 'ui'; renderProject(); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
+  if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
+  refreshAll(); applyCamera();
+}
+const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
+{
+  const bar = h('div', { id: 'uiScreens', hidden: true }, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
+  $('#scenePanel').append(bar);
+}
+// title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
+engine.screenFilter = (e) => e.id === selectedId || (uiMode && (uiScreen === 'all' || e.showWhen === uiScreen));
+engine.onBeforeUI = (ctx) => {
+  if (!uiMode || playing) return;
+  const W = engine.width, H = engine.height, sf = engine.safe;
+  ctx.fillStyle = '#14151b'; ctx.fillRect(0, 0, W, H); // UI editor: the world steps away, only the screen is left
+  ctx.strokeStyle = 'rgba(120,170,255,0.35)'; ctx.setLineDash([6, 6]); ctx.lineWidth = 1;
+  ctx.strokeRect(sf.left + 0.5, sf.top + 0.5, W - sf.left - sf.right - 1, H - sf.top - sf.bottom - 1);
+  ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(120,170,255,0.6)';
+  for (const a of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) { const p = anchorPoint(a, W, H, sf); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
+  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
+};
+let uiGuide = null;
+/** UI drags snap to the screen centre and to the element's anchor point. */
+function snapUI(j) {
+  const W = engine.width, H = engine.height, a = anchorPoint(j.anchor || 'top-left', W, H, engine.safe), T = 10;
+  uiGuide = {};
+  const sx = a.x + j.x, sy = a.y + j.y;
+  if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;
+  if (Math.abs(sy - H / 2) < T) { j.y = Math.round(H / 2 - a.y); uiGuide.y = H / 2; } else if (Math.abs(j.y) < T) { j.y = 0; uiGuide.y = a.y; } else if (snap) j.y = Math.round(j.y / 4) * 4;
+}
 $('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {

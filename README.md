@@ -155,6 +155,19 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
   - **Minimap** (player, enemies, walls and coins around the player), and **Ring** progress bars.
 - **New UI widgets**: Volume Slider, Toggle, Progress Ring, Minimap, Animated Score, Typewriter Text, Name Input, Touch Controls (◀ ▶ JUMP; replaces the built-in joystick), Vertical Menu (Play / Continue / Restart in a layout group), Top Bar (full-width).
 
+### Tilemaps (2D)
+
+- Add **Objects → Tilemap**. The Paint tool turns on: drag on the Scene to paint tiles on a grid (a faint grid shows while painting).
+- The **Tilemap** card in the Inspector:
+  - **Paint** / **Erase** brush and a palette of tile types (tap one to paint with it, **New** adds a type).
+  - Each type has a colour, an optional grass-style top edge, an optional emoji, and what it **does**: **Solid** (walls and ground), **One-way platform** (jump up through it, land on top), **Hazard** (hurts the player) or **Decoration** (no collision).
+  - Tile size and **Erase all**.
+- Bodies slide smoothly along rows of solid tiles (no snagging on the seams). Grid-based games treat solid tiles as walls.
+
+```js
+{ name: 'Level', x: 0, y: 400, tiles: { size: 40, palette: [{ fill: '#6d4c41', top: '#7cb342', kind: 'solid' }], cells: { '0,0': 1, '1,0': 1 } } }
+```
+
 ### Parenting, UI anchoring and UI zoom
 
 - **Make an object a child** (it then moves, turns, scales and hides with its parent, in the editor and in play):

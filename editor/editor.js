@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
@@ -211,7 +211,7 @@ window.engine = engine;
 
 const ent = (id) => project?.entities.find((e) => e.id === id);
 const is3D = () => project.mode === '3d';
-const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.model || e.bar);
+const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.tiles || e.model || e.bar);
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
@@ -270,6 +270,7 @@ function boundsOf(e) {
   const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
   let x = e.x;
   if (e.text && !e.shape && !e.sprite) x += e.text.align === 'left' ? hx : e.text.align === 'right' ? -hx : 0;
+  if (ex.tiles) return { x: e.x + ex.ox, y: e.y + ex.oy, hx, hy, sphere: false };
   return { x, y: e.y, hx, hy, sphere: ex.sphere, r: ex.r };
 }
 function uiBounds(e) { // on screen, with the UI editor's zoom applied
@@ -313,6 +314,17 @@ engine.onRenderWorld = (r, s, z) => {
       const zm = +cam.zoom || 1, w = s.view.width / zm, hgt = s.view.height / zm;
       ctx.save(); ctx.setLineDash([8 / z, 6 / z]); ctx.strokeStyle = pe.id === selectedId ? ORANGE : 'rgba(140,200,255,0.7)'; ctx.lineWidth = 1.5 / z;
       ctx.strokeRect((pe.x || 0) - w / 2, (pe.y || 0) - hgt / 2, w, hgt); ctx.restore();
+    }
+    if (sel?.tiles && tool === 'paint') { // the tile grid while painting
+      const T = sel.tiles, sz = T.size, inv = ctx.getTransform().inverse(), W = ctx.canvas.width, H = ctx.canvas.height;
+      const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: W, y: H });
+      const i0 = Math.floor((Math.min(p0.x, p1.x) - sel.x) / sz), i1 = Math.ceil((Math.max(p0.x, p1.x) - sel.x) / sz), j0 = Math.floor((Math.min(p0.y, p1.y) - sel.y) / sz), j1 = Math.ceil((Math.max(p0.y, p1.y) - sel.y) / sz);
+      if ((i1 - i0) * (j1 - j0) < 40000) {
+        ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.13)'; ctx.lineWidth = 1 / z; ctx.beginPath();
+        for (let i = i0; i <= i1; i++) { ctx.moveTo(sel.x + i * sz, sel.y + j0 * sz); ctx.lineTo(sel.x + i * sz, sel.y + j1 * sz); }
+        for (let j = j0; j <= j1; j++) { ctx.moveTo(sel.x + i0 * sz, sel.y + j * sz); ctx.lineTo(sel.x + i1 * sz, sel.y + j * sz); }
+        ctx.stroke(); ctx.restore();
+      }
     }
     if (sel?.light) { ctx.save(); ctx.setLineDash([5 / z, 5 / z]); ctx.strokeStyle = 'rgba(255,220,140,0.8)'; ctx.lineWidth = 1.5 / z; ctx.beginPath(); ctx.arc(sel.x, sel.y, sel.light.range, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     for (const [e, col] of [[hover, '#4c8bd6'], [sel, ORANGE]]) {
@@ -540,6 +552,7 @@ function pick(sx, sy) {
     const w = engine.renderer.screenToWorld(s, sx, sy), pad = 6 / engine.renderer.zoomFor(s);
     for (const e of list) {
       if (e.ui || !hasVisual(e)) continue;
+      if (e.tiles) { if (e.tiles.at(e, w.x, w.y) || (tool === 'paint' && e.id === selectedId)) return e; continue; } // empty cells don't grab the finger
       const b = boundsOf(e);
       if (b.sphere ? Math.hypot(w.x - b.x, w.y - b.y) <= b.r + pad : Math.abs(w.x - b.x) <= b.hx + pad && Math.abs(w.y - b.y) <= b.hy + pad) return e;
     }
@@ -608,6 +621,11 @@ surface.addEventListener('pointerdown', (ev) => {
   else if (tapTrack) tapTrack.max = Math.max(tapTrack.max, ptrs.size);
   if (ptrs.size > 1) cancelLongPress();
   $('#hint').hidden = true;
+  if (ptrs.size === 1 && tool === 'paint' && ent(selectedId)?.tiles && !is3D()) {
+    gesture = { type: 'tile', id: selectedId, last: '', count: 0 };
+    tilePaint(x, y);
+    return;
+  }
   if (ptrs.size === 1 && tool === 'paint' && ent(selectedId)?.voxels) {
     gesture = { type: 'voxel', id: selectedId, last: '', count: 0 };
     voxelPaint(x, y);
@@ -741,6 +759,8 @@ surface.addEventListener('pointermove', (ev) => {
     paintAt(x, y);
   } else if (g.type === 'voxel') {
     voxelPaint(x, y);
+  } else if (g.type === 'tile') {
+    tilePaint(x, y);
   } else if (g.type === 'pan' || g.type === 'orbit') {
     const mx = x - g.lx, my = y - g.ly;
     g.lx = x; g.ly = y;
@@ -782,6 +802,62 @@ function childOf(g) {
     }
   }
   return g.par;
+}
+
+/** Inspector card for a 2D tilemap: brush, tile types, and the selected type's look and behaviour. */
+function tilemapCard(j, C) {
+  const T = j.tiles, pal = T.palette ||= TILE_PALETTE.map((t) => ({ ...t })), cur = Math.min(tileBrush.tile, pal.length), t = pal[cur - 1];
+  const live = engine.scene.byId(j.id), count = Object.keys(T.cells || {}).length;
+  const pick = (n) => { tileBrush.tile = n; tileBrush.mode = 'paint'; setTool('paint'); renderInspector(); };
+  const swatch = (q, n) => h('button', { class: 'tile-sw' + (tileBrush.mode === 'paint' && cur === n ? ' on' : ''), title: (TILE_KINDS.find(([k]) => k === (q.kind || 'solid')) || [])[1], onclick: () => pick(n) },
+    h('i', { style: `background:${q.fill || 'transparent'};${q.top && (q.kind || 'solid') === 'solid' ? `border-top:6px solid ${q.top}` : ''}${q.kind === 'platform' ? ';height:40%;align-self:start' : ''}` }), q.emoji ? h('b', {}, q.emoji) : null,
+    h('small', {}, { solid: 'Solid', platform: 'Platform', hazard: 'Hazard', decor: 'Decor' }[q.kind || 'solid']));
+  const set = (k, v) => { t[k] = v; if (!v && k !== 'kind') delete t[k]; changed({ inspector: false }); if (live) live.tiles.palette[cur - 1] = { ...t }; };
+  return comp('Tilemap', [
+    h('p', { class: 'desc' }, `${count} tile${count === 1 ? '' : 's'}. Pick a tile below, then drag on the Scene to paint. Solid tiles are walls and ground; platforms can be jumped through from below; hazards hurt the player.`),
+    h('div', { class: 'row' }, h('label', {}, 'Brush'), h('div', { class: 'pair' },
+      h('button', { class: 'btn' + (tileBrush.mode === 'paint' && tool === 'paint' ? ' primary' : ''), style: 'flex:1', onclick: () => { tileBrush.mode = 'paint'; setTool('paint'); renderInspector(); } }, icon('brush'), 'Paint'),
+      h('button', { class: 'btn' + (tileBrush.mode === 'erase' && tool === 'paint' ? ' primary' : ''), style: 'flex:1', onclick: () => { tileBrush.mode = 'erase'; setTool('paint'); renderInspector(); } }, icon('trash'), 'Erase'))),
+    h('div', { class: 'tile-pal' }, pal.map((q, i) => swatch(q, i + 1)),
+      h('button', { class: 'tile-sw add', title: 'New tile type', onclick: () => { pal.push({ fill: '#90a4ae', kind: 'solid' }); changed({ structure: true }); pick(pal.length); } }, icon('plus'), h('small', {}, 'New'))),
+    t && h('div', { class: 'tile-edit' },
+      h('div', { class: 'row side' }, h('label', {}, 'Does'), h('select', { onchange: (e) => { set('kind', e.target.value); renderInspector(); } }, TILE_KINDS.map(([k, l]) => h('option', { value: k, selected: (t.kind || 'solid') === k }, l)))),
+      h('div', { class: 'row side' }, h('label', {}, 'Colour'), h('input', { type: 'color', value: t.fill || '#888888', oninput: (e) => set('fill', e.target.value), onchange: () => renderInspector() })),
+      (t.kind || 'solid') === 'solid' && h('div', { class: 'row side' }, h('label', {}, 'Top edge'), h('div', { class: 'pair' },
+        h('input', { type: 'checkbox', checked: !!t.top, onchange: (e) => { set('top', e.target.checked ? '#7cb342' : ''); renderInspector(); } }),
+        t.top && h('input', { type: 'color', value: t.top, oninput: (e) => set('top', e.target.value), onchange: () => renderInspector() }))),
+      h('div', { class: 'row side' }, h('label', {}, 'Emoji'), h('div', { class: 'pair' },
+        h('button', { class: 'btn', style: 'flex:1', onclick: () => pickEmoji((em) => { set('emoji', em); renderInspector(); }) }, t.emoji || 'Choose…'),
+        t.emoji && h('button', { class: 'btn', title: 'No emoji', onclick: () => { set('emoji', ''); renderInspector(); } }, icon('close')))),
+      pal.length > 1 && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => {
+        const used = Object.values(T.cells || {}).filter((v) => v === cur).length;
+        if (used && !confirm(`Remove this tile type and its ${used} painted tile${used === 1 ? '' : 's'}?`)) return;
+        pal.splice(cur - 1, 1);
+        for (const [k, v] of Object.entries(T.cells || {})) { if (v === cur) delete T.cells[k]; else if (v > cur) T.cells[k] = v - 1; }
+        tileBrush.tile = Math.max(1, cur - 1); changed({ structure: true }); pushHistory();
+      } }, icon('trash'), 'Remove this tile type'))),
+    C('tiles.size', { label: 'Tile size', type: 'number', def: 40, step: 4, structure: true }),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Erase every tile?')) return; T.cells = {}; changed({ structure: true }); pushHistory(); } }, icon('trash'), 'Erase all')),
+  ], { icon: 'grid', key: 'tiles', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.tiles; changed({ structure: true }); } }] });
+}
+
+/** Paint tool on a tilemap: paint or erase the cell under the finger (dragging fills a line, so fast strokes leave no gaps). */
+function tilePaint(sx, sy) {
+  const g = gesture, j = ent(g.id), live = engine.scene.byId(g.id);
+  if (!j || !live?.tiles) return;
+  const T = live.tiles, w = engine.renderer.screenToWorld(engine.scene, sx, sy), [ci, cj] = T.cell(live, w.x, w.y);
+  const n = tileBrush.mode === 'erase' ? 0 : Math.min(tileBrush.tile, T.palette.length);
+  const from = g.lastCell || [ci, cj], steps = Math.max(Math.abs(ci - from[0]), Math.abs(cj - from[1]), 1);
+  for (let t = 1; t <= steps; t++) {
+    const i = Math.round(from[0] + (ci - from[0]) * t / steps), jj = Math.round(from[1] + (cj - from[1]) * t / steps), key = i + ',' + jj;
+    if (T.get(i, jj) === n) continue;
+    T.set(i, jj, n);
+    j.tiles.cells ||= {};
+    if (n) j.tiles.cells[key] = n; else delete j.tiles.cells[key];
+    g.count++;
+  }
+  if (g.lastCell?.[0] !== ci || g.lastCell?.[1] !== cj) buzz(4);
+  g.lastCell = [ci, cj];
 }
 
 /** Paint tool on a voxel world: add or remove blocks where the finger is. */
@@ -852,7 +928,7 @@ const endPointer = (ev) => {
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
   uiGuide = null;
-  if (g.type === 'voxel' && g.count) { pushHistory(); saveSoon(); renderInspector(); }
+  if ((g.type === 'voxel' || g.type === 'tile') && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
     const now = performance.now();
@@ -1052,7 +1128,7 @@ function refreshAll() {
 let hFilter = '';
 function iconFor(e) {
   if (!e) return 'scene';
-  if (e.voxels) return 'grid';
+  if (e.voxels || e.tiles) return 'grid';
   if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
   if (e.light && !e.shape && !e.mesh && !e.model) return 'bulb';
   if (e.model) return 'cube';
@@ -1070,6 +1146,7 @@ function compBadges(e) {
   if (e.body) out.push(e.body.type === 'static' ? 'Static' : e.body.sensor ? 'Trigger' : 'Rigidbody');
   if (e.light) out.push('Light');
   if (e.model) out.push('Model');
+  if (e.tiles) out.push('Tilemap');
   for (const b of e.behaviors || []) { const d = Behaviors[b.type]; if (d) out.push(d.label.replace(/ \(.*\)$/, '')); }
   return out;
 }
@@ -1731,6 +1808,7 @@ function newModel() {
 const closedComps = new Set();
 let showAdvanced = store.get('pocket.editor.advanced', '0') === '1', lastInspected = null, selectedPart = -1;
 const voxelBrush = { mode: 'add', block: 1 };
+const tileBrush = { mode: 'paint', tile: 1 };
 let compClipboard = null;
 function pasteComponent(j) {
   const c = compClipboard; if (!c) return;
@@ -1776,7 +1854,7 @@ const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim
 let inspCat = 'all';
 /** Which inspector filter a component belongs to. */
 function compCat(key) {
-  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'light', 'uiel'].includes(key)) return 'visual';
+  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'tiles', 'light', 'uiel'].includes(key)) return 'visual';
   if (key === 'body') return 'physics';
   const type = String(key).replace(/^b\d+/, ''), c = BEH_META[type]?.[0];
   if (!c) return 'other';
@@ -1842,7 +1920,7 @@ function renderInspector() {
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
     lastInspected = j.id; selectedPart = -1;
     closedComps.clear();
-    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels'].filter((k) => j[k]).length;
+    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
   }
 
@@ -1989,6 +2067,7 @@ function renderInspector() {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
     ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
   }
+  if (j.tiles) box.append(tilemapCard(j, C));
   if (j.minimap) {
     box.append(comp('Minimap', [
       h('p', { class: 'desc' }, 'A small map of the level: the player (blue), enemies (red), walls and coins. Resize it with the Rect tool.'),
@@ -2489,6 +2568,7 @@ const OBJECTS_2D = [
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
+  { icon: 'grid', label: 'Tilemap', props: { name: 'Tilemap', x: 0, y: 520, tiles: { size: 40, palette: TILE_PALETTE.map((t) => ({ ...t })), cells: Object.fromEntries([...Array(10)].map((_, i) => [i + ',0', 1])) } }, tilemap: true },
 ];
 const OBJECTS_3D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -2655,6 +2735,11 @@ function addPrefab(def, at) {
   }
   const j = addEntity(def.props, at);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
+  if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
+    const sz = j.tiles.size; j.x = Math.round((j.x - 5 * sz) / sz) * sz; j.y = Math.round((j.y + 2 * sz) / sz) * sz;
+    tileBrush.mode = 'paint'; tileBrush.tile = 1; changed({ structure: true }); setTool('paint');
+    toast('Tilemap added: drag on the Scene to paint tiles'); return;
+  }
   toast(`Added ${j.name}`);
 }
 function placePrefab(def, sx, sy) {

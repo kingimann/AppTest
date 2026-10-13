@@ -782,3 +782,14 @@ body.playing #attachBar { display: none !important; }
 #toolTip.show { opacity: 1; }
 /* touch screens: 16px text in fields stops iOS zooming the page when you type */
 @media (pointer: coarse) { input:not([type=checkbox]):not([type=range]):not([type=color]), select, textarea { font-size: 16px !important; } }
+
+/* ---------- tilemap card ---------- */
+.tile-pal { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; margin-top: 16px; }
+.tile-sw { position: relative; height: 74px; border: 2px solid #1f1f1f; border-radius: 12px; background: #2a2a2a; padding: 6px 6px 20px; display: flex; flex-direction: column; overflow: hidden; }
+.tile-sw i { flex: 1; width: 100%; border-radius: 6px; display: block; }
+.tile-sw b { position: absolute; left: 0; right: 0; top: 10px; font-size: 26px; text-align: center; line-height: 1; }
+.tile-sw small { position: absolute; left: 0; right: 0; bottom: 3px; font-size: 11px; color: var(--muted); text-align: center; }
+.tile-sw.on { border-color: var(--orange); box-shadow: 0 0 0 2px rgba(247,160,44,.35); }
+.tile-sw.add { align-items: center; justify-content: center; color: var(--muted); border-style: dashed; padding-bottom: 6px; }
+.tile-sw.add small { position: static; }
+.tile-edit { margin-top: 10px; padding: 4px 12px 12px; background: #333; border-radius: 12px; }

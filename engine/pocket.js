@@ -153,6 +153,7 @@ export class Entity {
     this.bar = props.bar ? { ...BAR_DEFAULTS, ...props.bar } : null;
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
+    this.tiles = props.tiles ? new TileMap(props.tiles) : null; // 2D tilemap
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
@@ -203,6 +204,10 @@ export class Entity {
     return x;
   }
   rawExtents() {
+    if (this.tiles) { // box around the painted cells; the entity sits at the top-left of cell (0, 0)
+      const b = this.tiles.bounds, s = this.tiles.size, w = (b.i1 - b.i0 + 1) * s, hgt = (b.j1 - b.j0 + 1) * s;
+      return { sphere: false, hx: w / 2, hy: hgt / 2, hz: Infinity, ox: b.i0 * s + w / 2, oy: b.j0 * s + hgt / 2, tiles: true };
+    }
     if (this.voxels) {
       const b = this.voxels.bounds, s = this.voxels.size;
       return { sphere: false, hx: (b.i1 - b.i0 + 1) * s / 2, hy: (b.j1 - b.j0 + 1) * s / 2, hz: (b.k1 - b.k0 + 1) * s / 2, voxel: true };
@@ -269,6 +274,46 @@ export class Entity {
 export const VOXEL_PALETTE = ['#6aa84f', '#8d6e63', '#9e9e9e', '#6d4c41', '#3d8b37', '#e3cf8f', '#4fa3e0', '#c0392b', '#f5f5f5', '#2b2b2b', '#f1c40f', '#8e44ad'];
 export const VOXEL_NAMES = ['Grass', 'Dirt', 'Stone', 'Wood', 'Leaves', 'Sand', 'Water', 'Brick', 'Snow', 'Obsidian', 'Gold', 'Crystal'];
 const CHUNK = 16;
+
+/** 2D tile types: what a painted cell does. */
+export const TILE_KINDS = [['solid', 'Solid (walls, ground)'], ['platform', 'One-way platform'], ['hazard', 'Hazard (hurts the player)'], ['decor', 'Decoration (no collision)']];
+export const TILE_PALETTE = [
+  { fill: '#6d4c41', top: '#7cb342', kind: 'solid' }, // grass
+  { fill: '#8d6e63', kind: 'solid' },                  // dirt
+  { fill: '#78909c', kind: 'solid' },                  // stone
+  { fill: '#a1887f', kind: 'platform' },               // plank
+  { fill: '#b0bec5', emoji: '🔺', kind: 'hazard' },     // spikes
+  { fill: '#4fc3f7', kind: 'decor' },                  // water / sky decor
+];
+/** A 2D grid of painted tiles. Cell (i, j) fills [i, i+1) × size from the owning entity's position (its top-left corner). */
+export class TileMap {
+  constructor(o = {}) {
+    this.size = o.size || 40;
+    this.palette = (o.palette && o.palette.length ? o.palette : TILE_PALETTE).map((t) => ({ ...t }));
+    this.cells = new Map();
+    for (const [k, v] of Object.entries(o.cells || {})) if (v) this.cells.set(k, v);
+    this.version = 0;
+  }
+  get(i, j) { return this.cells.get(i + ',' + j) || 0; }
+  set(i, j, n) { const k = i + ',' + j; if (n) this.cells.set(k, n); else this.cells.delete(k); this.version++; this._b = null; }
+  kindOf(n) { return n ? this.palette[n - 1]?.kind || 'solid' : null; }
+  cell(e, x, y) { return [Math.floor((x - e.x) / this.size), Math.floor((y - e.y) / this.size)]; }
+  /** The tile type at a world point (0 when empty). */
+  at(e, x, y) { const [i, j] = this.cell(e, x, y); return this.get(i, j); }
+  solidAtWorld(e, x, y) { const n = this.at(e, x, y); return !!n && this.kindOf(n) === 'solid'; }
+  get count() { return this.cells.size; }
+  get bounds() {
+    if (this._b) return this._b;
+    let i0 = 0, i1 = 0, j0 = 0, j1 = 0, first = true;
+    for (const k of this.cells.keys()) {
+      const [i, j] = k.split(',').map(Number);
+      if (first) { i0 = i1 = i; j0 = j1 = j; first = false; continue; }
+      i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j);
+    }
+    return (this._b = { i0, i1, j0, j1 });
+  }
+  toJSON() { return { size: this.size, palette: this.palette, cells: Object.fromEntries(this.cells) }; }
+}
 
 /** A grid of colored blocks. Block (i, j, k) fills [i, i+1) × size from the owning entity's position. */
 export class VoxelWorld {
@@ -1019,6 +1064,40 @@ export class Physics {
         }
       }
     }
+    // dynamic bodies collide with 2D tilemaps cell by cell
+    const maps = scene.mode === '3d' ? [] : scene.entities.filter((e) => e.tiles && !e.dead && e.visible !== false);
+    if (maps.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of maps) {
+          const T = w.tiles, sz = T.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: Infinity };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
+          const [i0, j0] = T.cell(w, cx - hx, cy - hy), [i1, j1] = T.cell(w, cx + hx - 1e-6, cy + hy - 1e-6);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+            const n = T.get(i, j), kind = T.kindOf(n);
+            if (!kind || kind === 'decor') continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: e.z };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            if (kind === 'hazard') { if (e.has('player') && scene.state === 'play' && !(e.data.invuln > 0)) respawnOrEnd(e, scene, 'damage'); continue; }
+            if (kind === 'platform') { // only solid for something landing on top while falling
+              if (!(gd && m.ny * gd > 0.5) || b.vel.y * gd < -0.01) continue;
+              const top = gd > 0 ? w.y + j * sz : w.y + (j + 1) * sz, was = (b.ly ?? e.y) + (ex.oy || 0) + hy * gd; // where its feet were last step
+              if ((was - top) * gd > 1) continue; // it was already below the top: let it pass
+              if (T.get(i, j - gd) && T.kindOf(T.get(i, j - gd)) === 'platform') continue; // only the top of a stack
+            } else if (Math.abs(m.nx) > 0.5 && T.kindOf(T.get(i - Math.sign(m.nx), j)) === 'solid') continue; // inner seam between two solid cells: don't snag
+            else if (Math.abs(m.ny) > 0.5 && T.kindOf(T.get(i, j - Math.sign(m.ny))) === 'solid') continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; }
+          }
+        }
+      }
+    }
     // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
     const items = list.map((e) => { const ex = e.extents(), cx = e.x + (ex.ox || 0), w = spanX(ex); return { e, ex, l: cx - w, r: cx + w }; });
     items.sort((p, q) => p.l - q.l);
@@ -1318,7 +1397,27 @@ const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => 
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
 
+/** Paint a tilemap's cells (only the ones on screen). */
+function drawTiles2D(ctx, e) {
+  const T = e.tiles, sz = T.size, m = ctx.getTransform(), inv = m.inverse(), W = ctx.canvas.width, H = ctx.canvas.height;
+  const p0 = inv.transformPoint({ x: 0, y: 0 }), p1 = inv.transformPoint({ x: W, y: H });
+  const xa = Math.min(p0.x, p1.x) - e.x, xb = Math.max(p0.x, p1.x) - e.x, ya = Math.min(p0.y, p1.y) - e.y, yb = Math.max(p0.y, p1.y) - e.y;
+  ctx.save(); ctx.translate(e.x, e.y); ctx.globalAlpha = e.alpha;
+  for (const [k, n] of T.cells) {
+    const c = k.indexOf(','), i = +k.slice(0, c), j = +k.slice(c + 1), x = i * sz, y = j * sz;
+    if (x + sz < xa || x > xb || y + sz < ya || y > yb) continue;
+    const t = T.palette[n - 1]; if (!t) continue;
+    const kind = t.kind || 'solid', above = T.get(i, j - 1);
+    if (kind === 'platform') { ctx.fillStyle = t.fill; ctx.fillRect(x, y, sz, sz * 0.3); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(x, y + sz * 0.3 - 3, sz, 3); }
+    else if (t.fill && !(kind === 'hazard' && t.emoji)) { ctx.fillStyle = t.fill; ctx.fillRect(x, y, sz + 0.5, sz + 0.5); }
+    if (t.top && kind === 'solid' && (!above || T.kindOf(above) !== 'solid')) { ctx.fillStyle = t.top; ctx.fillRect(x, y, sz + 0.5, sz * 0.22); }
+    if (kind === 'solid' && !t.top) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, y, sz, 2); ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x, y + sz - 2, sz, 2); }
+    if (t.emoji) { ctx.font = `${Math.round(sz * 0.8)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.emoji, x + sz / 2, y + sz / 2 + sz * 0.04); }
+  }
+  ctx.restore();
+}
 function drawEntity2D(ctx, e, vars, time) {
+  if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
   ctx.translate(e.x, e.y);
   if (e.rz) ctx.rotate(e.rz * DEG);
@@ -4299,6 +4398,7 @@ function blockerAt(s, x, y, z, except) {
   for (const o of s.entities) {
     if (o === except || o.dead || o.ui) continue;
     if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
+    if (o.tiles) { if (s.mode !== '3d' && o.tiles.solidAtWorld(o, x, y)) return o; continue; }
     const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable');
     if (!solid) continue;
     const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;

@@ -134,13 +134,15 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
 
-- **Add Node** opens a list with category chips to jump between sections, and a search:
-  - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**.
+- **Add Node** opens like Add Component: a search box, **Suggested next** (nodes that usually follow the selected one, or events to start with), **Recently used**, and a folder per category with how many nodes it holds. Tap a folder to open it, ‹ to go back:
+  - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**, **On Finger Lifted**, **On Win**, **On Game Over**, **On State Entered**.
+  - **Animation** (pink): **Play Animation** (loop / once / the clip's setting), Stop Animation, **Set Animation Speed**, **Show Sprite Frame**, **Flip Sprite**, **Fade To**, **Blink**, **On Animation End**, and the values **Is Animation Playing** and **Sprite Frame**. They work with both the Animator and the Sprite Sheet Animator.
   - **Flow** (purple): If, Wait, Random Chance, Do Once, Sequence, **Repeat N Times** (with Loop Index), **Flip Flop**, **Cooldown**, **Count To**, **Random Branch**, **Switch on Number**, **Compare Branch**.
   - **Actions** (blue): variables, messages, Debug Log, sounds, spawn, destroy, velocity, jump, show/hide, camera, lights, tweens, animation, saving, win / game over.
-  - **Move**: **Set Position**, **Move Toward** (a tag), **Look At**, **Rotate By**, **Set Scale**, **Teleport To**. **Looks**: **Set Text**, **Set Colour**, **Particle Burst**. **Objects**: **Spawn At**, **Destroy All With Tag**, **Add / Remove Tag**. **Game**: **Slow Motion**, **Damage**, **Heal**, **Give Item**.
-  - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
-- ★ Templates include Chase the player, Tap 5 times → win, and Spawn a ring of 8.
+  - **Move**: **Set Position**, **Move Toward** (a tag), **Look At**, **Rotate By**, **Set Scale**, **Teleport To**. **Looks**: **Set Text**, **Set Colour**, **Particle Burst**, **Set Background**, **Set Opacity**. More moves: **Stop Moving**, **Set Gravity Scale**; **Toggle Variable** flips a variable between 0 and 1. **Objects**: **Spawn At**, **Destroy All With Tag**, **Add / Remove Tag**. **Game**: **Slow Motion**, **Damage**, **Heal**, **Give Item**.
+  - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**, **Is Moving**, **Finger On Screen**, **Finger Position**, **Coin Flip**, **Level Number**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
+- ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, and Run / idle by speed.
+- **Reusable scripts.** The 💾 button (or *Save as Reusable Script* on the component) names and saves the graph. Add it to any other object from **Add Component → My Scripts**. Copies stay **linked**: edit any of them and every copy updates (the component shows the script's name and how many objects use it; ⋮ → *Unlink* to change one copy on its own, or *Rename*). Saved scripts are also kept on your device, so **My Scripts** and ★ list the ones from your other games too.
 - If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
 - Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
@@ -296,13 +298,15 @@ Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are rel
   - 28 eases with a curve preview, loops (−1 = forever), yoyo/restart/incremental, delay.
   - Play on start, tap, touch or message, and **when finished, do** an action. **Preview** plays it right in the Scene.
 - **Sprite Animation** (flipbook): emoji or image frames at any fps; loop, ping-pong or once; always, only while moving, or on a message.
+- **Sprite Sheet Animator**: pick one picture holding a grid of frames, set columns and rows, and name clips by frame range (`idle: 0-3, run: 4-9, jump: 10`). It plays the start clip, can switch **idle / run / jump by itself**, and faces the way it moves. Play clips from nodes, triggers or messages; a clip played *once* finishes before the automatic switching takes over again, and fires **On Animation End**.
+- **Animator auto states**: fill *clip when standing still / moving / in the air* and the Animator picks the clip itself, like Unity's Animator.
 - **From code** (DOTween style):
   - `scene.to(obj, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' })` returns a tween you can chain: `.setDelay()`, `.onComplete()`, `.kill()`.
   - `scene.sequence().append(scene.make(…)).join(…).appendInterval(0.2).appendCallback(fn)`.
   - `scene.punch`, `scene.shakeProps`, `scene.path`, `scene.jumpTo`, `scene.killTweens`.
   - `Ease.outBounce` and friends.
 - **Messages:** `scene.send('door-open')`, the *send message* action, and the Send Message / On Message nodes let objects trigger each other.
-- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Send Message, On Message, Camera Impulse.
+- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Animation Speed, Sprite Frame, Flip, Fade, Blink, On Animation End, Send Message, On Message, Camera Impulse.
 
 ### Inspector superpowers (Odin-style)
 

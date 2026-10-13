@@ -1748,6 +1748,13 @@ function control(target, path, spec) {
       el = h('div', { class: 'pair' }, h('span', {}, 'min'), lo, h('span', {}, 'max'), hi);
       break;
     }
+    case 'image': { // picture picker: thumbnail + choose / clear
+      const thumb = val ? h('img', { class: 'img-thumb', src: val, alt: '' }) : h('span', { class: 'muted' }, 'None');
+      el = h('div', { class: 'pair img-pick' }, thumb,
+        h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { set(url); renderInspector(); }, spec.maxSize || 1024) }, val ? 'Change' : 'Choose image'),
+        val ? h('button', { type: 'button', class: 'btn', onclick: () => { set(''); renderInspector(); } }, 'Clear') : null);
+      break;
+    }
     case 'code':
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
       break;
@@ -1885,27 +1892,71 @@ function validate(b, j) {
 
 /** Node-based coding: a summary card that opens the full-screen Node Editor. */
 function graphCard(target, path) {
-  const g = getPath(target(), path) || { nodes: [], links: [] };
+  const g = getPath(target(), path) || { nodes: [], links: [] }, beh = getPath(target(), path.replace(/\.graph$/, '')), sc = scriptOf(beh);
   const events = [...new Set((g.nodes || []).filter((n) => NODE_TYPES[n.type]?.cat === 'Events').map((n) => NODE_TYPES[n.type].label))];
+  let uses = 0; if (sc) eachScriptUse(sc.id, () => uses++);
   return h('div', { class: 'row full graph-card' },
+    sc ? h('div', { class: 'gc-link' }, icon('link'), h('span', {}, h('b', {}, sc.name), h('small', {}, `Saved script · used ${uses} time${uses === 1 ? '' : 's'} · edits update every copy`)),
+      h('button', { class: 'btn', title: 'Script options', onclick: (ev) => popMenu(ev.currentTarget, [
+        { cap: sc.name },
+        { icon: 'edit', label: 'Rename Script…', fn: () => { const n = prompt('Script name', sc.name); if (!n?.trim()) return; sc.name = n.trim(); saveScriptToLibrary(sc); changed(); renderInspector(); } },
+        { icon: 'unlink', label: 'Unlink (edit this copy only)', fn: () => { delete beh.scriptRef; changed(); pushHistory(); renderInspector(); toast('Unlinked: this copy changes on its own now'); } },
+      ]) }, icon('more'))) : null,
     h('div', { class: 'gc-sum' }, icon('nodes'), h('div', {},
       h('b', {}, `${(g.nodes || []).length} nodes · ${(g.links || []).length} wires`),
       h('small', {}, events.length ? 'Runs: ' + events.join(', ') : 'No event yet. Add a green Event node to start.'))),
-    h('button', { class: 'btn primary gc-open', onclick: () => editGraph(target, path) }, icon('nodes'), 'Open Node Editor'));
+    h('button', { class: 'btn primary gc-open', onclick: () => editGraph(target, path) }, icon('nodes'), 'Open Node Editor'),
+    !sc && (g.nodes || []).length ? h('button', { class: 'btn gc-save', onclick: () => { const n = prompt('Name this script so you can reuse it', target().name ? `${target().name} script` : 'My script'); if (n?.trim()) { saveScript(beh, g, n.trim()); renderInspector(); } } }, icon('save'), 'Save as Reusable Script') : null);
 }
 function editGraph(target, path) {
   const e = target(), id = e.id;
   const T = () => ent(id) || e;
+  const B = () => getPath(T(), path.replace(/\.graph$/, ''));
   const back = () => ed.close();
   const ed = openNodeEditor({
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
-    onChange: (g) => { setPath(T(), path, g); requestRebuild(); saveSoon(); },
+    scripts: () => allScripts().filter((q) => q.id !== B()?.scriptRef),
+    linked: () => { const sc = scriptOf(B()); if (!sc) return null; let n = 0; eachScriptUse(sc.id, () => n++); return { name: sc.name, uses: n }; },
+    saveScript: (name, g) => saveScript(B(), g, name),
+    unlink: () => { delete B().scriptRef; changed(); },
+    onChange: (g) => { setPath(T(), path, g); const b = B(); if (b?.scriptRef) syncScript(b.scriptRef, g, b); requestRebuild(); saveSoon(); },
     onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
   });
   pushBack(back);
+}
+
+// ---- Saved Visual Scripts: save a graph once, reuse it on any object; linked copies update together ----
+const userScripts = () => (root.scripts ||= []);
+const SCRIPT_LIB = 'pocket.scriptLibrary'; // also kept on this device so other games can use them
+const scriptLibrary = () => { try { return JSON.parse(store.get(SCRIPT_LIB, '[]')).filter((q) => q?.graph?.nodes); } catch { return []; } };
+function saveScriptToLibrary(sc) { store.set(SCRIPT_LIB, JSON.stringify([{ id: sc.id, name: sc.name, graph: sc.graph }, ...scriptLibrary().filter((q) => q.id !== sc.id)].slice(0, 40))); }
+/** This game's scripts, then ones saved in your other games. */
+const allScripts = () => { const mine = userScripts(); return [...mine.map((q) => ({ ...q, here: true })), ...scriptLibrary().filter((q) => !mine.some((m) => m.id === q.id))]; };
+const scriptOf = (b) => (b?.scriptRef ? userScripts().find((q) => q.id === b.scriptRef) || null : null);
+function eachScriptUse(sid, fn) { for (const lv of levelList()) for (const e of lv.entities) for (const b of e.behaviors || []) if (b.type === 'graph' && b.scriptRef === sid) fn(b, e, lv); }
+function saveScript(beh, graph, name) {
+  const sc = { id: uid('sc'), name, graph: clone(graph) };
+  userScripts().push(sc); if (beh) beh.scriptRef = sc.id;
+  saveScriptToLibrary(sc); changed(); pushHistory();
+  toast(`Saved “${name}”. Add it to any object from Add Component › My Scripts.`);
+  return sc;
+}
+/** A linked copy changed: update the saved script and every other copy. */
+function syncScript(sid, graph, from) {
+  const sc = userScripts().find((q) => q.id === sid); if (!sc) return;
+  sc.graph = clone(graph);
+  eachScriptUse(sid, (b) => { if (b !== from) b.graph = clone(graph); });
+  saveScriptToLibrary(sc);
+}
+/** Give an object a linked copy of a saved script (importing it into this game if it came from another one). */
+function addSavedScript(j, s) {
+  let sc = userScripts().find((q) => q.id === s.id);
+  if (!sc) { sc = { id: s.id, name: s.name, graph: clone(s.graph) }; userScripts().push(sc); }
+  (j.behaviors ||= []).push({ type: 'graph', graph: clone(sc.graph), scriptRef: sc.id });
+  if (sc.graph.nodes.some((n) => ['touch', 'touchEnd', 'touching'].includes(n.type)) && !j.ui && !j.body && !j.collider) j.collider = fitCollider(j, 'box');
 }
 
 /** Visual logic: WHEN … IF … DO … cards. */
@@ -2573,7 +2624,7 @@ const BEH_META = {
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
-  tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
@@ -2699,6 +2750,7 @@ function componentsFor(j) {
     ...(threeD ? [['box', 'Box Collider', 'square'], ['sphere', 'Sphere Collider', 'sphere']] : [['box', 'Box Collider 2D', 'square'], ['circle', 'Circle Collider 2D', 'circle']]).map(([shape, label, ic]) => ({
       cat: 'Physics', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
   ];
+  for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
@@ -2727,8 +2779,8 @@ function addComponentTo(id, key) {
 
 /** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
 const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
-  Animation: 'clock', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
-const CAT_ORDER = ['Rendering', 'Physics', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+  Animation: 'clock', 'My Scripts': 'nodes', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
+const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
 const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
 function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
 /** A few components that usually make sense next for this object. */
@@ -3285,7 +3337,7 @@ function renameSoundUses(from, to) {
   for (const lv of levelList()) fix(lv.entities);
 }
 
-function pickImage(cb) {
+function pickImage(cb, max = 256) {
   const fi = $('#fileInput');
   fi.accept = 'image/*';
   fi.onchange = () => {
@@ -3293,7 +3345,7 @@ function pickImage(cb) {
     if (!f) return;
     const img = new Image(), url = URL.createObjectURL(f);
     img.onload = () => { // downscale so projects fit in local storage
-      const k = Math.min(1, 256 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
       c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       URL.revokeObjectURL(url);

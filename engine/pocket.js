@@ -913,7 +913,7 @@ export class Scene {
   win() { this.endWith('win'); }
   endWith(state) {
     if (this.state !== 'play') return;
-    this.state = state;
+    this.state = state; this.emit(state === 'win' ? 'win' : 'gameover');
     this.endTime = this.time;
     const key = this.settings.saveBest;
     if (key && (+this.vars.score || 0) > (+this.vars.best || 0)) {
@@ -1529,7 +1529,15 @@ function drawEntity2D(ctx, e, vars, time) {
   }
   if (e.sprite && e.sprite.src) {
     const img = loadImage(e.sprite.src);
-    if (img.complete && img.naturalWidth) ctx.drawImage(img, -e.sprite.w / 2, -e.sprite.h / 2, e.sprite.w, e.sprite.h);
+    if (img.complete && img.naturalWidth) {
+      const S = e.sprite, cols = Math.max(1, S.cols | 0 || 1), rows = Math.max(1, S.rows | 0 || 1);
+      if (S.flip) ctx.scale(-1, 1);
+      if (cols > 1 || rows > 1) { // sprite sheet: draw one cell of the grid
+        const fw = img.naturalWidth / cols, fh = img.naturalHeight / rows, f = ((S.frame | 0) % (cols * rows) + cols * rows) % (cols * rows);
+        ctx.drawImage(img, (f % cols) * fw, Math.floor(f / cols) * fh, fw, fh, -S.w / 2, -S.h / 2, S.w, S.h);
+      } else ctx.drawImage(img, -S.w / 2, -S.h / 2, S.w, S.h);
+      if (S.flip) ctx.scale(-1, 1);
+    }
   }
   if (e.bar) { // progress / health bar bound to a variable (or this object's own value with "self.hp")
     const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
@@ -2989,18 +2997,24 @@ registerBehavior('animator', {
       default3d: [{ name: 'Bounce', length: 1, loop: 'loop', tracks: { y: [[0, 0, 'outQuad'], [0.5, 1, 'inQuad'], [1, 0]], ry: [[0, 0], [1, 360]] } }] },
     { key: 'autoplay', label: 'Play on start', type: 'text', default: 'Bounce', suggest: 'clips' },
     { key: 'speed', label: 'Speed', type: 'number', default: 1, range: [0, 4], step: 0.1 },
+    { key: 'idleClip', label: 'Auto: clip when standing still', type: 'text', default: '', suggest: 'clips', group: 'Auto states', info: 'Fill these and it switches clips by itself, like Unity\'s Animator: idle, moving, in the air.' },
+    { key: 'moveClip', label: 'Auto: clip when moving', type: 'text', default: '', suggest: 'clips', group: 'Auto states' },
+    { key: 'airClip', label: 'Auto: clip in the air', type: 'text', default: '', suggest: 'clips', group: 'Auto states' },
   ],
   create(p) {
-    let clip = null, t = 0, dir = 1, playing = false, last = {};
+    let clip = null, t = 0, dir = 1, playing = false, last = {}, rate = 1, px = null, py = null, pz = null, mode = 'once', manual = false;
     const clips = Array.isArray(p.clips) ? p.clips : [];
     const inst = {
       uiAlways: true,
-      play(name) {
+      play(name, loop, auto = false) { // loop: undefined = the clip's own setting, true / false to override
         const e = inst.entity;
         if (e && clip) inst.apply(e, true); // undo the current clip's offsets
         clip = clips.find((c) => c.name === name) || null; t = 0; dir = 1; playing = !!clip; last = {};
+        mode = loop === undefined ? clip?.loop : loop ? 'loop' : 'once'; manual = !auto;
+        return !!clip;
       },
       stop() { const e = inst.entity; if (e && clip) inst.apply(e, true); playing = false; clip = null; },
+      setSpeed(k) { rate = +k || 0; },
       get current() { return playing ? clip?.name : ''; },
       apply(e, reset = false) {
         for (const [prop, tr] of Object.entries(clip.tracks || {})) {
@@ -3016,15 +3030,84 @@ registerBehavior('animator', {
         s.on('message', (n) => { if (!e.dead && clips.some((c) => c.name === n)) inst.play(n); });
       },
       update(e, dt, s) {
+        if ((p.idleClip || p.moveClip || p.airClip) && !(manual && playing && mode !== 'loop')) { // auto states (a one-shot clip played by a node finishes first)
+          const moved = px !== null && Math.hypot(e.x - px, e.y - py, e.z - pz) > 0.5 * dt * (s.mode === '3d' ? 1 : 30); px = e.x; py = e.y; pz = e.z;
+          const want = e.body && !e.body.grounded && (s.gravity || 0) !== 0 && e.body.gravityScale !== 0 && p.airClip ? p.airClip : moved && p.moveClip ? p.moveClip : p.idleClip;
+          if (want && (clip?.name !== want || !playing)) inst.play(want, undefined, true);
+        }
         if (!playing || !clip) return;
         const L = Math.max(0.01, +clip.length || 1);
-        t += dt * (+p.speed || 0) * dir;
+        t += dt * (+p.speed || 0) * rate * dir;
         if (t >= L || t < 0) {
-          if (clip.loop === 'loop') t = ((t % L) + L) % L;
-          else if (clip.loop === 'ping-pong') { dir = -dir; t = clamp(t, 0, L); }
+          if (mode === 'loop') t = ((t % L) + L) % L;
+          else if (mode === 'ping-pong') { dir = -dir; t = clamp(t, 0, L); }
           else { t = L; inst.apply(e); playing = false; s.emit('animationEnd', e, clip.name); return; }
         }
         inst.apply(e);
+      },
+    };
+    return inst;
+  },
+});
+
+/** Play a clip on whichever animator the object has (keyframe Animator or Sprite Sheet). */
+export function playClip(e, name, loop) {
+  for (const t of ['animator', 'spriteSheet']) { const a = e?.getBehavior(t); if (a?.play(name, loop)) return true; }
+  return false;
+}
+/** Sprite sheet animation: one image cut into a grid of frames, played as named clips. */
+export function parseSheetClips(text) {
+  const out = {};
+  for (const part of String(text || '').split(',')) {
+    const m = part.match(/^\s*([^:]+?)\s*:\s*(\d+)\s*(?:-\s*(\d+))?\s*$/); if (!m) continue;
+    const a = +m[2], b = m[3] != null ? +m[3] : a; out[m[1]] = a <= b ? [a, b] : [b, a];
+  }
+  return out;
+}
+registerBehavior('spriteSheet', {
+  label: 'Sprite Sheet Animator', description: 'Animate with a sprite sheet: one picture cut into a grid of frames. Name clips by frame range (idle: 0-3, run: 4-9) and it can switch idle / run / jump by itself.',
+  params: [
+    { key: 'image', label: 'Sprite sheet', type: 'image', default: '' },
+    { key: 'cols', label: 'Columns', type: 'number', default: 4, step: 1, range: [1, 32] },
+    { key: 'rows', label: 'Rows', type: 'number', default: 1, step: 1, range: [1, 32] },
+    { key: 'size', label: 'Size on screen', type: 'number', default: 64, step: 4 },
+    { key: 'fps', label: 'Frames per second', type: 'number', default: 8, step: 1, range: [1, 30] },
+    { key: 'clips', label: 'Clips (name: first-last, …)', type: 'text', default: 'idle: 0-3', info: 'Frames count from 0, left to right, then the next row. e.g. idle: 0-3, run: 4-9, jump: 10-11' },
+    { key: 'autoplay', label: 'Play on start', type: 'text', default: 'idle' },
+    { key: 'auto', label: 'Switch idle / run / jump by itself', type: 'bool', default: false },
+    { key: 'runClip', label: 'Run clip', type: 'text', default: 'run', showIf: { auto: [true] } },
+    { key: 'jumpClip', label: 'Jump clip', type: 'text', default: 'jump', showIf: { auto: [true] } },
+    { key: 'flip', label: 'Face the way it moves (2D)', type: 'bool', default: true },
+  ],
+  create(p) {
+    const clips = parseSheetClips(p.clips); let cur = null, t = 0, playing = false, once = false, rate = 1, px = null, py = null, manual = false;
+    const inst = {
+      uiAlways: true,
+      play(name, loop, auto = false) { loop ??= true; if (!clips[name]) return false; if (cur !== name) t = 0; cur = name; playing = true; once = !loop; manual = !auto; return true; },
+      stop() { playing = false; },
+      setSpeed(k) { rate = +k || 0; },
+      get current() { return playing ? cur : ''; },
+      start(e, s) {
+        inst.entity = e;
+        e.sprite = { ...SPRITE_DEFAULTS, ...(e.sprite || {}), src: p.image || e.sprite?.src || '', w: p.size, h: p.size, cols: p.cols, rows: p.rows, frame: 0 };
+        if (p.image) { const img = loadImage(p.image); const fit = () => { if (img.naturalWidth) e.sprite.h = p.size * (img.naturalHeight / p.rows) / (img.naturalWidth / p.cols); }; if (img.complete) fit(); else img.addEventListener('load', fit, { once: true }); }
+        if (p.autoplay) inst.play(p.autoplay);
+        s.on('message', (n) => { if (!e.dead && clips[n]) inst.play(n); });
+      },
+      update(e, dt, s) {
+        if (!e.sprite) return;
+        const dx = px === null ? 0 : e.x - px, moved = px !== null && Math.hypot(dx, e.y - py) > 15 * dt; px = e.x; py = e.y;
+        if (p.flip && Math.abs(dx) > 0.5 * dt) e.sprite.flip = dx < 0;
+        if (p.auto && !(manual && playing && once)) { // a clip played once by a node/trigger finishes first
+          const air = e.body && !e.body.grounded && (s.gravity || 0) !== 0 && e.body.gravityScale !== 0;
+          const want = air && clips[p.jumpClip] ? p.jumpClip : moved && clips[p.runClip] ? p.runClip : p.autoplay;
+          if (want && (want !== cur || !playing)) inst.play(want, true, true);
+        }
+        if (!playing || !clips[cur]) return;
+        const [a, b] = clips[cur], n = b - a + 1;
+        t += dt * p.fps * rate;
+        if (t >= n) { if (once) { t = n - 1e-6; playing = false; s.emit('animationEnd', e, cur); } else t %= n; }
+        e.sprite.frame = a + Math.floor(t);
       },
     };
     return inst;
@@ -4356,7 +4439,7 @@ function runAction(s, e, p, other) {
     case 'set gravity': s.gravity = +p.amount || 0; break;
     case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
     case 'send message': s.send(v); break;
-    case 'play animation': e.getBehavior('animator')?.play(v); break;
+    case 'play animation': playClip(e, v); break;
     default: break;
   }
   if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
@@ -5176,6 +5259,11 @@ export const NODE_TYPES = {
   damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'] },
   death: { cat: 'Events', label: 'On Death', outs: ['then'] },
   holding: { cat: 'Events', label: 'While Touching Screen', outs: ['then'] },
+  released: { cat: 'Events', label: 'On Finger Lifted', outs: ['then'] },
+  onWin: { cat: 'Events', label: 'On Win', outs: ['then'] },
+  onGameOver: { cat: 'Events', label: 'On Game Over', outs: ['then'] },
+  stateEntered: { cat: 'Events', label: 'On State Entered', outs: ['then'], params: [txt('state', 'Idle', 'state (blank = any)')] },
+  animEnd: { cat: 'Animation', label: 'On Animation End', outs: ['then'], params: [txt('clip', '', 'clip (blank = any)')] },
   // flow
   branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
   wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
@@ -5208,7 +5296,7 @@ export const NODE_TYPES = {
   nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
   restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
   saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message')] },
-  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['no save'], params: [num('slot', 1, 'slot')] },
+  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['then', 'no save'], params: [num('slot', 1, 'slot')] },
   deleteSave: { cat: 'Actions', label: 'Delete Save', exec: true, outs: ['then'], params: [num('slot', 1, 'slot')] },
   push: { cat: 'Actions', label: 'Push (add velocity)', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: -400 }, { key: 'z', type: 'number', default: 0 }] },
   setGravity: { cat: 'Actions', label: 'Set Gravity', exec: true, outs: ['then'], inputs: [{ key: 'y', type: 'number', default: 1600 }, { key: 'x', type: 'number', default: 0 }] },
@@ -5218,10 +5306,20 @@ export const NODE_TYPES = {
   tweenTo: { cat: 'Actions', label: 'Tween', exec: true, outs: ['then', 'finished'], params: [opt('prop', ['x', 'y', 'z', 'rz', 'ry', 'scale', 'alpha'], 'y', 'property'), opt('mode', ['by', 'to'], 'by', 'mode'), opt('ease', EASES, 'outQuad', 'ease')], inputs: [{ key: 'value', type: 'number', default: -40 }, { key: 'seconds', type: 'number', default: 0.5 }] },
   punch: { cat: 'Actions', label: 'Punch', exec: true, outs: ['then'], params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'amount', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 0.4 }] },
   killTweens: { cat: 'Actions', label: 'Stop Tweens', exec: true, outs: ['then'] },
-  playAnim: { cat: 'Actions', label: 'Play Animation', exec: true, outs: ['then'], params: [txt('clip', 'Bounce', 'clip')] },
-  stopAnim: { cat: 'Actions', label: 'Stop Animation', exec: true, outs: ['then'] },
+  playAnim: { cat: 'Animation', label: 'Play Animation', exec: true, outs: ['then'], params: [txt('clip', 'Bounce', 'clip'), opt('loop', ['clip setting', 'loop', 'once'], 'clip setting', 'repeat')] },
+  stopAnim: { cat: 'Animation', label: 'Stop Animation', exec: true, outs: ['then'] },
+  animSpeed: { cat: 'Animation', label: 'Set Animation Speed', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 2 }] },
+  setFrame: { cat: 'Animation', label: 'Show Sprite Frame', exec: true, outs: ['then'], inputs: [{ key: 'frame', type: 'number', default: 0 }] },
+  flipX: { cat: 'Animation', label: 'Flip Sprite', exec: true, outs: ['then'], params: [opt('mode', ['face left', 'face right', 'toggle'], 'toggle', 'make it')] },
+  fadeTo: { cat: 'Animation', label: 'Fade To', exec: true, outs: ['then', 'finished'], inputs: [{ key: 'alpha', type: 'number', default: 0 }, { key: 'seconds', type: 'number', default: 0.5 }] },
+  blink: { cat: 'Animation', label: 'Blink', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
   sendMessage: { cat: 'Actions', label: 'Send Message', exec: true, outs: ['then'], params: [txt('message', 'go', 'message')] },
   impulse: { cat: 'Actions', label: 'Camera Impulse', exec: true, outs: ['then'], inputs: [{ key: 'strength', type: 'number', default: 12 }] },
+  toggleVar: { cat: 'Actions', label: 'Toggle Variable (0 ↔ 1)', exec: true, outs: ['then'], params: [txt('name', 'on', 'variable')] },
+  setBackground: { cat: 'Looks', label: 'Set Background', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#20304a', label: 'colour' }] },
+  setAlpha: { cat: 'Looks', label: 'Set Opacity', exec: true, outs: ['then'], inputs: [{ key: 'alpha', type: 'number', default: 0.5 }] },
+  stopMoving: { cat: 'Move', label: 'Stop Moving', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  gravityScale: { cat: 'Move', label: 'Set Gravity Scale', exec: true, outs: ['then'], inputs: [{ key: 'scale', type: 'number', default: 0 }] },
   setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
@@ -5267,6 +5365,13 @@ export const NODE_TYPES = {
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
+  isMoving: { cat: 'Values', label: 'Is Moving', value: 'bool' },
+  isHolding: { cat: 'Values', label: 'Finger On Screen', value: 'bool' },
+  touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
+  coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
+  level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  animPlaying: { cat: 'Animation', label: 'Is Animation Playing', value: 'bool', params: [txt('clip', '', 'clip (blank = any)')] },
+  spriteFrame: { cat: 'Animation', label: 'Sprite Frame', value: 'number' },
 };
 
 // ---- Logic library (PlayMaker / Game Creator style): events → conditions → instructions ----
@@ -5331,7 +5436,7 @@ export const LOGIC_ACTIONS = {
   scaleTo: { cat: 'Motion', label: 'Scale to', icon: 'scale', params: [num('scale', 1.5, 'scale'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outBack', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { scale: +p.scale || 1 }, d, { ease: p.ease }); return p.wait ? d : 0; }, say: (p) => `Scale to ${p.scale}` },
   fade: { cat: 'Motion', label: 'Fade', icon: 'eye', params: [num('alpha', 0, 'opacity (0–1)'), num('seconds', 0.5, 'over seconds'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { alpha: clamp(+p.alpha, 0, 1) }, d); return p.wait ? d : 0; }, say: (p) => `Fade to ${p.alpha}` },
   punch: { cat: 'Motion', label: 'Punch (juice)', icon: 'star', params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), num('amount', 0.3, 'amount'), num('seconds', 0.4, 'seconds')], run: (c, p) => { const a = +p.amount || 0.3, three = c.s.mode === '3d'; c.s.punch(c.e, p.what === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : p.what === 'rotation' ? (three ? { ry: a * 90 } : { rz: a * 90 }) : { y: three ? a : -a * 60 }, +p.seconds || 0.4); }, say: (p) => `Punch ${p.what}` },
-  playAnim: { cat: 'Motion', label: 'Play animation', icon: 'clock', params: [sug(txt('clip', 'Bounce', 'clip'), 'clips')], run: (c, p) => c.e.getBehavior('animator')?.play(p.clip), say: (p) => `Play “${p.clip}”` },
+  playAnim: { cat: 'Motion', label: 'Play animation', icon: 'clock', params: [sug(txt('clip', 'Bounce', 'clip'), 'clips')], run: (c, p) => playClip(c.e, p.clip), say: (p) => `Play “${p.clip}”` },
   // physics
   push: { cat: 'Physics', label: 'Push (add velocity)', icon: 'arrow', params: [opt('who', ['self', 'other'], 'self', 'who'), num('x', 0, 'x'), num('y', -500, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const t = p.who === 'other' ? c.other : c.e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +p.x || 0; b.vel.y += +p.y || 0; b.vel.z += +p.z || 0; } }, say: (p) => `Push ${p.who} ${p.x}, ${p.y}` },
   setVelocity: { cat: 'Physics', label: 'Set velocity', icon: 'arrow', params: [num('x', 0, 'x'), num('y', 0, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const b = c.e.ensureBody({ type: 'dynamic' }); b.vel.x = +p.x || 0; b.vel.y = +p.y || 0; b.vel.z = +p.z || 0; }, say: (p) => `Velocity ${p.x}, ${p.y}` },
@@ -5508,6 +5613,7 @@ registerBehavior('graph', {
   create(p) {
     const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
     const def = (n) => NODE_TYPES[n.type] || {};
+    const anims = (e) => ['animator', 'spriteSheet'].map((t) => e.getBehavior(t)).filter(Boolean);
     const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
     const input = (n, key, ctx, depth = 0) => {
       const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
@@ -5544,12 +5650,23 @@ registerBehavior('graph', {
         case 'itemCount': return s.itemCount(P('item'));
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
+        case 'isMoving': { const v = e.body?.vel; if (v) return Math.hypot(v.x, v.y, v.z) > (s.mode === '3d' ? 0.2 : 10); const m = state.get('_moved'); return !!m && s.time - m < 0.1; }
+        case 'isHolding': return s.engine.input.pointers.size > 0;
+        case 'touchPos': {
+          const inp = s.engine.input, pt = [...inp.pointers.values()][0] || inp.taps[0] || inp.ups[0];
+          if (pt) state.set('_finger', s.mode === '2d' ? s.engine.renderer.screenToWorld(s, pt.x, pt.y) : { x: pt.x, y: pt.y });
+          return state.get('_finger')?.[P('axis') === 'y' ? 'y' : 'x'] ?? 0;
+        }
+        case 'coinFlip': return Math.random() < 0.5;
+        case 'level': return (s.engine.levelIndex ?? 0) + 1;
+        case 'animPlaying': { const c = anims(e).map((a) => a.current).find(Boolean) || ''; return P('clip') ? c === P('clip') : !!c; }
+        case 'spriteFrame': return e.sprite?.frame | 0;
         default: return 0;
       }
     };
     const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
     const run = (n, ctx) => {
-      if (!n || ++ctx.steps > 300 || ctx.e.dead && n.type !== 'destroyed') return;
+      if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
@@ -5561,7 +5678,7 @@ registerBehavior('graph', {
         case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
         case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
         case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
-        case 'randomBranch': { const ports = ['1', '2', '3'].filter((pt) => g.links.some((l) => l.from.node === n.id && l.from.port === pt)); return ports.length ? follow(n, pick(ports), ctx) : undefined; }
+        case 'randomBranch': { const ports = ['1', '2', '3'].filter((pt) => g.links.some((l) => l.from.node === n.id && l.from.port === pt)); return ports.length ? follow(n, ports[Math.floor(Math.random() * ports.length)], ctx) : undefined; }
         case 'switchNum': { const v = Math.round(+I('value') || 0); return follow(n, v >= 0 && v <= 3 ? String(v) : 'other', ctx); }
         case 'compareBranch': { const a = +I('a') || 0, b = +I('b') || 0, ok = { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')]; return follow(n, ok ? 'yes' : 'no', ctx); }
         case 'setPosition': { const t = P('target') === 'other' ? ctx.other : e; if (t) { t.x = +I('x') || 0; t.y = +I('y') || 0; if (s.mode === '3d') t.z = +I('z') || 0; if (t.body) t.body.vel = { x: 0, y: 0, z: 0 }; } break; }
@@ -5603,7 +5720,7 @@ registerBehavior('graph', {
         case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
         case 'restart': s.engine.restart(); return;
         case 'saveGame': if (s.saveGame(+P('slot') || 1) && P('text')) s.message(P('text'), 1.5); break;
-        case 'loadGame': if (!s.loadGame(+P('slot') || 1)) follow(n, 'no save', ctx); return;
+        case 'loadGame': follow(n, s.loadGame(+P('slot') || 1) ? 'then' : 'no save', ctx); return;
         case 'deleteSave': s.deleteSave(+P('slot') || 1); break;
         case 'push': { const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +I('x') || 0; b.vel.y += +I('y') || 0; b.vel.z += +I('z') || 0; } break; }
         case 'setGravity': s.gravity = +I('y') || 0; s.gravityX = +I('x') || 0; break;
@@ -5624,8 +5741,18 @@ registerBehavior('graph', {
           break;
         }
         case 'killTweens': s.killTweens(e); break;
-        case 'playAnim': e.getBehavior('animator')?.play(P('clip')); break;
-        case 'stopAnim': e.getBehavior('animator')?.stop(); break;
+        case 'playAnim': { const lp = P('loop'), loop = lp === 'loop' ? true : lp === 'once' ? false : undefined; playClip(e, P('clip'), loop); break; }
+        case 'stopAnim': for (const a of anims(e)) a.stop(); break;
+        case 'animSpeed': for (const a of anims(e)) a.setSpeed(+I('speed') || 0); break;
+        case 'setFrame': { e.getBehavior('spriteSheet')?.stop(); if (e.sprite) e.sprite.frame = Math.max(0, Math.round(+I('frame') || 0)); break; }
+        case 'flipX': if (e.sprite) e.sprite.flip = P('mode') === 'face left' ? true : P('mode') === 'face right' ? false : !e.sprite.flip; else if (P('mode') !== 'toggle') e.sx = Math.abs(e.sx) * (P('mode') === 'face left' ? -1 : 1); else e.sx = -e.sx; break;
+        case 'fadeTo': { const tw = s.to(e, { alpha: clamp(+I('alpha') || 0, 0, 1) }, Math.max(0.01, +I('seconds') || 0.5), { ease: 'outQuad' }); tw.onComplete(() => follow(n, 'finished', { ...ctx, steps: 0 })); break; }
+        case 'blink': { const end = s.time + Math.max(0.05, +I('seconds') || 1), id = e.data._blink = (e.data._blink || 0) + 1, tick = () => { if (e.dead || e.data._blink !== id) return; if (s.time >= end) { e.visible = true; return; } e.visible = !e.visible; s.after(0.08, tick); }; tick(); break; }
+        case 'toggleVar': s.setVar(P('name') || 'on', +s.vars[P('name') || 'on'] ? 0 : 1); break;
+        case 'setBackground': s.background = P('color') || s.background; break;
+        case 'setAlpha': e.alpha = clamp(+I('alpha') || 0, 0, 1); break;
+        case 'stopMoving': { const t = P('target') === 'other' ? ctx.other : e; if (t?.body) { t.body.vel.x = t.body.vel.y = t.body.vel.z = 0; if (t.body.angVel != null) t.body.angVel = 0; } break; }
+        case 'gravityScale': { const b = e.ensureBody({ type: 'dynamic' }); b.gravityScale = +I('scale') || 0; break; }
         case 'sendMessage': s.send(P('message')); break;
         case 'impulse': s.impulse(+I('strength') || 10, e); break;
         default: break;
@@ -5633,6 +5760,7 @@ registerBehavior('graph', {
       follow(n, 'then', ctx);
     };
     const fire = (type, e, s, other, filter, dt) => {
+      if (e.dead && type !== 'destroyed') return;
       for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt });
     };
     const timers = new Map();
@@ -5643,6 +5771,10 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
+        if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
+        if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
+        if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
+        if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
         if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
         fire('start', e, s);
       },
@@ -5652,6 +5784,8 @@ registerBehavior('graph', {
         if (!playing) return;
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
+        if (g.nodes.some((n) => n.type === 'released') && inp.ups?.length) fire('released', e, s);
+        if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
           else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });

@@ -144,6 +144,7 @@ select { appearance: none; -webkit-appearance: none; padding-right: 34px;
 .row.inline { grid-template-columns: 1fr auto; align-items: center; min-height: 52px; }
 .row.inline > label { color: var(--text); font-size: 16px; }
 .pair { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.img-thumb { width: 48px; height: 48px; object-fit: contain; border-radius: 6px; background: repeating-conic-gradient(#0003 0 25%, #0000 0 50%) 0 0/12px 12px; image-rendering: pixelated; flex: none; }
 .pair span { color: var(--muted); font-size: 13px; flex: none; }
 .num { display: flex; gap: 6px; min-width: 0; }
 .num button { width: 54px; height: 50px; flex: none; border: 1px solid #1f1f1f; background: #4a4a4a; border-radius: 8px; font-size: 22px; line-height: 1; display: grid; place-items: center; }
@@ -330,6 +331,12 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .gc-sum b { display: block; font-size: 16px; }
 .gc-sum small { color: var(--muted); font-size: 14px; }
 .gc-open { width: 100%; height: 58px; font-size: 17px; font-weight: 600; }
+.gc-save { width: 100%; height: 48px; }
+.gc-link { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, #7e57c2 22%, var(--field)); border: 1px solid #7e57c2; }
+.gc-link > svg.i { color: #b39ddb; flex: none; }
+.gc-link > span { flex: 1; min-width: 0; }
+.gc-link b { display: block; }
+.gc-link small { color: var(--muted); font-size: 13px; }
 
 /* ---------- Getting started checklist (Hierarchy) ---------- */
 .gs { margin: 12px; padding: 14px 14px 8px; background: linear-gradient(180deg, #33415a, #2d3442); border: 1px solid #1d2533; border-radius: 16px; }
@@ -352,7 +359,7 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .ne { position: fixed; inset: 0; z-index: 45; background: #1b1d22; display: flex; flex-direction: column; touch-action: none; }
 .ne-top { flex: none; display: flex; align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 8px) 10px 8px; background: var(--toolbar); border-bottom: 1px solid #000; }
 .ne-title { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
-.ne-title b { font-size: 16px; }
+.ne-title b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ne-title small { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ne-btn { height: 48px; min-width: 48px; padding: 0 12px; border: 1px solid #111; border-radius: 12px; background: #3a3a3a; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600; }
 .ne-btn:disabled { opacity: .4; }
@@ -934,3 +941,14 @@ body.playing #attachBar { display: none !important; }
 .type.blank { border-style: dashed; }
 .mode-badge { flex: none; min-width: 34px; height: 26px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 800; display: grid; place-items: center; }
 .mode-badge.m2 { background: #2c4a6e; color: #bfdcff; } .mode-badge.m3 { background: #2f5a3a; color: #c5f0c8; }
+.ne-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.ne-folder { position: relative; text-align: left; min-height: 84px; padding: 10px 12px; border: 1px solid #222; border-radius: 14px; background: color-mix(in srgb, var(--c) 18%, var(--card)); display: flex; flex-direction: column; gap: 3px; color: inherit; }
+.ne-folder b { font-size: 16px; }
+.ne-folder small { color: var(--muted); font-size: 12.5px; line-height: 1.3; padding-right: 26px; }
+.ne-folder em { position: absolute; top: 10px; right: 10px; font-style: normal; font-size: 12px; font-weight: 700; min-width: 24px; height: 22px; line-height: 22px; text-align: center; border-radius: 11px; background: var(--c); color: #fff; }
+.ne-ficon { width: 28px; height: 28px; border-radius: 8px; background: var(--c); display: grid; place-items: center; color: #fff; }
+.ne-ficon svg { width: 18px; height: 18px; }
+.ne-pcatname { font-style: normal; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.ne-pnone { padding: 30px 10px; text-align: center; color: var(--muted); }
+.ne-phead .ne-btn[hidden] { display: none; }
+@media (max-width: 430px) { .ne-top { gap: 6px; padding-left: 8px; padding-right: 8px; } .ne-top .ne-btn:not(.done) { min-width: 42px; padding: 0 8px; } .ne-btn.done { padding: 0 12px; } }

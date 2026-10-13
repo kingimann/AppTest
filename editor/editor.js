@@ -124,6 +124,7 @@ function multiGroup(list) {
 const openDups = new Set(); // Hierarchy "Gem ×8" groups the user opened
 let hRevealed = null; // last selection the Hierarchy scrolled to
 let attachFor = null;
+let colliderEdit = null; // object whose 2D collider is being edited with handles
 let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
@@ -438,6 +439,21 @@ engine.onRenderUI = (ctx, s) => {
     }
     return;
   }
+  const ce = colliderEdit === selectedId && s.byId(colliderEdit);
+  if (ce?.body && !is3D()) { // Edit Collider: green outline with handles
+    const f = colliderFrame(ce);
+    ctx.save(); ctx.strokeStyle = '#69f0ae'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(105,240,174,0.12)';
+    ctx.beginPath();
+    if (f.sphere) ctx.arc(f.c.x, f.c.y, f.r, 0, Math.PI * 2);
+    else { const p = [f.at(-f.hx, -f.hy), f.at(f.hx, -f.hy), f.at(f.hx, f.hy), f.at(-f.hx, f.hy)]; ctx.moveTo(p[0].x, p[0].y); for (const q of p.slice(1)) ctx.lineTo(q.x, q.y); ctx.closePath(); }
+    ctx.fill(); ctx.stroke();
+    for (const [part, q] of f.handles) {
+      ctx.beginPath();
+      if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
+      else { ctx.rect(q.x - 8, q.y - 8, 16, 16); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
+    }
+    ctx.restore();
+  }
   // invisible logic objects
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const e of s.entities) {
@@ -580,9 +596,23 @@ function drawRectGizmo(ctx, f) {
 }
 
 /** Which gizmo handle is under a screen point, if any. */
+/** The selected object's 2D collider on screen: centre, half sizes (or radius) and angle, plus its handles. */
+function colliderFrame(e) {
+  const ex = e.extents(), z = engine.renderer.zoomFor(engine.scene), c = engine.renderer.worldToScreen(engine.scene, e.x + (ex.ox || 0), e.y + (ex.oy || 0));
+  const rot = ex.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), at = (lx, ly) => ({ x: c.x + (lx * cs - ly * sn), y: c.y + (lx * sn + ly * cs) });
+  if (ex.sphere) { const r = ex.r * z; return { c, sphere: true, r, rot, handles: [['rad', at(r, 0)], ['c', c]] }; }
+  const hx = ex.hx * z, hy = ex.hy * z;
+  return { c, hx, hy, rot, at, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
+}
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
   if (!sel || tool === 'hand') return null;
+  if (colliderEdit === selectedId && sel.body && !is3D()) { // Edit Collider: its handles come first
+    const f = colliderFrame(sel);
+    let best = null, bd = 28;
+    for (const [part, q] of f.handles) { const d = Math.hypot(x - q.x, y - q.y); if (d < bd) { bd = d; best = part; } }
+    if (best) return { handle: 'collider', part: best, g: { o: f.c } };
+  }
   if (tool === 'rect') {
     const f = rectFrame(sel);
     if (f) {
@@ -753,6 +783,16 @@ surface.addEventListener('contextmenu', (e) => e.preventDefault()); // long-pres
 function beginTransform(giz, x, y) {
   const j = ent(selectedId);
   const o = giz.g.o;
+  if (giz.handle === 'collider') {
+    const live = engine.scene.byId(selectedId), ex = live.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1;
+    if ((j.body.shape || 'auto') === 'auto') { // fitted collider: becomes an explicit box / circle the first time you drag it
+      if (ex.sphere) Object.assign(j.body, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(j.body, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
+      Object.assign(live.body, { shape: j.body.shape, r: j.body.r, w: j.body.w, h: j.body.h });
+    }
+    gesture = { type: 'collider', part: giz.part, id: selectedId, sx: x, sy: y, moved: false, rot: ex.rot || 0, scale: [sx, sy],
+      orig: { w: j.body.w || 1, h: j.body.h || 1, r: j.body.r || 10, ox: j.body.ox || 0, oy: j.body.oy || 0 } };
+    return;
+  }
   if (giz.handle === 'rect') {
     const sz = sizeOf(j); if (!sz) return;
     gesture = { type: 'rect', dir: giz.dir, id: selectedId, sx: x, sy: y, f: giz.f, size0: sz, square: sz[2], ui: !!j.ui, moved: false, orig: { x: j.x || 0, y: j.y || 0 } };
@@ -776,6 +816,20 @@ surface.addEventListener('pointermove', (ev) => {
   if (Math.hypot(x - p.sx, y - p.sy) > 10) { if (tapTrack) tapTrack.moved = true; cancelLongPress(); }
   const s = engine.scene, g = gesture;
   const dx = x - (g.sx ?? x), dy = y - (g.sy ?? y);
+  if (g.type === 'collider') {
+    if (!g.moved && Math.hypot(dx, dy) < 4) return;
+    g.moved = true;
+    const j = ent(g.id), live = s.byId(g.id); if (!j?.body || !live) return;
+    const z = engine.renderer.zoomFor(s), wx = dx / z, wy = dy / z, cs = Math.cos(-g.rot), sn = Math.sin(-g.rot);
+    const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.body, r1 = (v) => Math.round(v);
+    const shift = (lxx, lyy) => { const c2 = Math.cos(g.rot), s2 = Math.sin(g.rot); B.ox = r1(o.ox + (lxx * c2 - lyy * s2) / scx); B.oy = r1(o.oy + (lxx * s2 + lyy * c2) / scy); };
+    if (g.part === 'c') { B.ox = r1(o.ox + wx / scx); B.oy = r1(o.oy + wy / scy); }
+    else if (g.part === 'rad') B.r = Math.max(2, r1(o.r + lx / Math.max(scx, scy)));
+    else if (g.part === 'r' || g.part === 'l') { const d = g.part === 'r' ? lx : -lx; B.w = Math.max(2, r1(o.w + d / scx)); const real = (B.w - o.w) * scx; shift((g.part === 'r' ? 1 : -1) * real / 2, 0); B.oy = r1(B.oy); }
+    else { const d = g.part === 'b' ? ly : -ly; B.h = Math.max(2, r1(o.h + d / scy)); const real = (B.h - o.h) * scy; shift(0, (g.part === 'b' ? 1 : -1) * real / 2); }
+    for (const k of ['w', 'h', 'r', 'ox', 'oy']) if (B[k] !== undefined) live.body[k] = B[k];
+    return;
+  }
   if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
     g.moved = true;
@@ -1019,6 +1073,7 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
+  if (g.type === 'collider' && g.moved) { pushHistory(); saveSoon(); renderInspector(); }
   uiGuide = null;
   if ((g.type === 'voxel' || g.type === 'tile') && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
@@ -1205,6 +1260,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 
 function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
+  if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   renderHierarchy();
   renderInspector();
   updateCtxBar();
@@ -2248,6 +2304,10 @@ function renderInspector() {
       C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
+      !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
+        colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
+        if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
+      } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider')),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
       (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
       j.body.type !== 'dynamic' && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),

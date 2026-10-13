@@ -200,6 +200,10 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 - **Project › Sounds › Import Sound** brings in MP3, WAV, OGG or M4A files from your phone (short clips work best: they're saved inside the project). Tap ▶ to preview; ⋯ renames (everything using it follows) or deletes.
 - Imported sounds appear in every Sound picker: the Sound component, Turret, the Play Sound action and node. From code: `s.engine.audio.sfx('name')`.
 
+### Edit Collider (2D)
+
+- On a Rigidbody 2D, tap **Edit Collider**. A green outline shows the collider: drag an edge handle to resize it (the opposite edge stays put), the middle handle to move it off-centre, or a circle's rim handle to change its radius. A "fit to shape" collider becomes an explicit box or circle the first time you drag it. Works on rotated and scaled objects.
+
 ### Play mode tools
 
 The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**.

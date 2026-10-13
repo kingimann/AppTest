@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Functions: '#6a5acd' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Lists: '#8d6e63', Functions: '#6a5acd' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Functions', 'Physics', 'Sensing', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'list', Functions: 'script' };
+const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Lists', 'Functions', 'Physics', 'Sensing', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', Lists: 'list', Functions: 'script' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -45,12 +45,26 @@ const CAT_HELP = {
   Values: 'Numbers and true/false to plug into inputs.',
   Math: 'Work numbers out: formulas, random, noise, angles, easing, rounding…',
   Physics: 'Triggers, collisions, landing, forces and bodies.',
-  Variables: 'Values each object keeps for itself (an enemy\'s hp), and “when a variable reaches…”.',
-  Functions: 'Your own events: name a Custom Event, then Call it from anywhere. Comments keep scripts tidy.',
+  Variables: 'Game and per-object variables: change, clamp, text, saved on the device, “when it reaches…”.',
+  Lists: 'Lists of numbers: add, remove, shuffle, sort, pick at random, sum, for each (decks, waypoints, high scores).',
+  Functions: 'Functions with inputs and a result, your own events (now or later) and Comments.',
   Online: 'Multiplayer rooms (Photon) and accounts, leaderboards and cloud saves (PlayFab). Set them up in Game Settings › Online.',
   Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  changeVar: 'Change a variable any way: set, add, subtract, multiply, divide, min, max, power or mod; the game\'s, this object\'s or other\'s', clampVar: 'Keep a variable between a min and max',
+  copyVar: 'Copy one variable into another', toggleMyVar: 'Flip this object\'s variable between 0 and 1', resetVars: 'Put variables back to how they started (blank = all)',
+  setTextVar: 'Put words in a variable ({braces} work): names, messages, choices', textIs: 'Check a text variable: equals, contains, starts with, or empty',
+  saveVar: 'Keep a variable on this device between plays (coins, settings, unlocked levels)', loadVar: 'Get a saved variable back; “not saved yet” the first time', deleteSavedVar: 'Forget a saved variable',
+  onMyVarChanged: 'When this object\'s own variable changes (update a health bar, flash red…)', whenMyVarReaches: 'Runs once when this object\'s variable crosses a value: hp ≤ 0 → die',
+  listAdd: 'Add a number to a list (lists show in text as 1, 2, 3)', listRemove: 'Remove the last, first, a position, or a value from a list', listSet: 'Change the number at a position (1 = first)',
+  listClear: 'Empty a list', listOrder: 'Shuffle, sort or reverse a list', listFill: 'Make a list of numbers from … to (e.g. 1–10, then shuffle for a deck)',
+  forEachList: 'Run “each” for every item (Loop Item is the number, Loop Index its position)', listGet: 'The number at a position (1 = first)', listLen: 'How many items a list has',
+  listHas: 'Is the number in the list?', listFind: 'Where the number is in the list (0 = not there)', listRandom: 'A random item from the list', listStat: 'Sum, smallest, biggest or average of a list',
+  loopItem: 'The current item in List: For Each',
+  funcDef: 'A named piece of script you can run from anywhere with Call / Run Function', funcArg: 'Read the a, b or c given to this Function', funcReturn: 'Give back a value from a Function (ends it)',
+  callFunc: 'Run a Function now and use its result as a number', runFunc: 'Run a Function now (optionally keep the result in a variable)', callLater: 'Run a Custom Event after a delay',
+  callerIs: 'In a Custom Event: does the object that called it have a tag?',
   formula: 'Type any math: a * 2 + b, sqrt(a^2 + b^2), score / 10, max(a, lives)… a–d are the inputs; other names are game variables',
   randomRange: 'A random number between min and max (inputs, so they can be wired)', randomPick: 'Picks one of the inputs at random', noise: 'Smooth random that drifts over time (−1…1): wobbles, flickers, wandering',
   invLerp: 'Where a value sits between a and b, as 0…1 (50 between 0 and 100 → 0.5)', moveTowards: 'Steps a value toward a target, never past it', angleDiff: 'The shortest turn from angle a to angle b (−180…180)',
@@ -146,6 +160,13 @@ export const NODE_HELP = {
 
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
+  { label: 'Function: damage with armour', nodes: [{ id: 'f', type: 'funcDef', x: 0, y: 0, params: { name: 'hurt' } }, { id: 'r', type: 'funcReturn', x: 620, y: 0 }, { id: 'm', type: 'formula', x: 300, y: 120, params: { expr: 'max(1, a - armour)' } }, { id: 'a', type: 'funcArg', x: 0, y: 200, params: { which: 'a' } },
+    { id: 't', type: 'triggerEnter', x: 0, y: 380, params: { tag: 'bullet' } }, { id: 'c', type: 'changeVar', x: 620, y: 380, params: { name: 'hp', op: 'subtract', scope: 'this object' } }, { id: 'k', type: 'callFunc', x: 300, y: 480, params: { name: 'hurt', a: 5 } },
+    { id: 'w', type: 'whenMyVarReaches', x: 0, y: 700, params: { name: 'hp', op: '≤', value: 0 } }, { id: 'd', type: 'destroy', x: 300, y: 700 }, { id: 'n', type: 'comment', x: -320, y: 0, params: { text: 'A Function returns the damage after armour; hits subtract it from this object\'s own hp, and at 0 it is destroyed. Set a game variable "armour".' } }],
+    links: [['f', 'then', 'r'], ['m', 'value', 'r', 'value'], ['a', 'value', 'm', 'a'], ['t', 'then', 'c'], ['k', 'value', 'c', 'value'], ['w', 'then', 'd']] },
+  { label: 'Shuffled deck: draw a card', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'f', type: 'listFill', x: 300, y: 0, params: { name: 'deck', from: 1, to: 10 } }, { id: 'o', type: 'listOrder', x: 620, y: 0, params: { name: 'deck', mode: 'shuffle' } },
+    { id: 't', type: 'tap', x: 0, y: 260 }, { id: 'v', type: 'setVar', x: 620, y: 260, params: { name: 'card' } }, { id: 'g', type: 'listGet', x: 300, y: 380, params: { name: 'deck', position: 1 } }, { id: 'r', type: 'listRemove', x: 940, y: 260, params: { name: 'deck', mode: 'first' } }, { id: 'e', type: 'message', x: 1260, y: 330, params: { text: 'The deck is empty!' } }],
+    links: [['s', 'then', 'f'], ['f', 'then', 'o'], ['t', 'then', 'v'], ['g', 'value', 'v', 'value'], ['v', 'then', 'r'], ['r', 'nothing removed', 'e']] },
   { label: 'Enemy with its own HP (3 hits)', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'setMyVar', x: 300, y: 0, params: { name: 'hp', value: 3 } }, { id: 'c', type: 'triggerEnter', x: 0, y: 200, params: { tag: 'bullet' } }, { id: 'd', type: 'addMyVar', x: 300, y: 200, params: { name: 'hp', amount: -1 } }, { id: 'e', type: 'punch', x: 600, y: 200, params: { what: 'scale', amount: 0.25 } }, { id: 'f', type: 'compareBranch', x: 900, y: 200, params: { op: '≤', b: 0 } }, { id: 'g', type: 'getMyVar', x: 600, y: 560, params: { name: 'hp' } }, { id: 'h', type: 'particles', x: 1200, y: 160 }, { id: 'i', type: 'destroy', x: 1500, y: 160 }, { id: 'n', type: 'comment', x: -320, y: 0, params: { text: 'Each copy of this enemy keeps its own hp. Bullets need the tag "bullet".' } }], links: [['a', 'then', 'b'], ['c', 'then', 'd'], ['d', 'then', 'e'], ['e', 'then', 'f'], ['g', 'value', 'f', 'a'], ['f', 'yes', 'h'], ['h', 'then', 'i']] },
   { label: 'Custom event: explode on call', nodes: [{ id: 'a', type: 'customEvent', x: 0, y: 0, params: { name: 'explode' } }, { id: 'b', type: 'particles', x: 300, y: 0, params: { color: '#ff7043' } }, { id: 'c', type: 'impulse', x: 600, y: 0, params: { strength: 14 } }, { id: 'd', type: 'destroy', x: 900, y: 0 }, { id: 'e', type: 'onLongPress', x: 0, y: 220, params: { seconds: 0.6 } }, { id: 'f', type: 'callEvent', x: 300, y: 220, params: { name: 'explode', on: 'all with tag', tag: 'bomb' } }], links: [['a', 'then', 'b'], ['b', 'then', 'c'], ['c', 'then', 'd'], ['e', 'then', 'f']] },
   { label: 'Wave: 5 enemies, one every 0.8 s', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'repeatEvery', x: 300, y: 0, params: { seconds: 0.8, times: 5 } }, { id: 'c', type: 'weighted', x: 620, y: -40, params: { A: 70, B: 30, C: 0 } }, { id: 'd', type: 'spawn', x: 940, y: -80, params: { template: '' } }, { id: 'e', type: 'spawn', x: 940, y: 120, params: { template: '' } }, { id: 'f', type: 'message', x: 620, y: 240, params: { text: 'That was the last one!', seconds: 1.5 } }], links: [['a', 'then', 'b'], ['b', 'each', 'c'], ['c', 'A', 'd'], ['c', 'B', 'e'], ['b', 'done', 'f']] },

@@ -1848,8 +1848,22 @@ export function formatNumber(v) {
   for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return (Math.floor(v / n * 10) / 10) + u;
   return String(Math.floor(v));
 }
-const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
+/** Numbers in text: how a Text component wants them shown. */
+function fmtNumber(v, fmt, k) {
+  switch (fmt) {
+    case 'short (1.2K)': { const a = Math.abs(v); return a >= 1e9 ? (v / 1e9).toFixed(1).replace(/\.0$/, '') + 'B' : a >= 1e6 ? (v / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : a >= 1e3 ? (v / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : String(Math.round(v)); }
+    case 'whole number': return String(Math.round(v));
+    case '2 decimals': return v.toFixed(2);
+    case 'time (m:ss)': { const t = Math.max(0, Math.ceil(v)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; }
+    case 'percent': return Math.round(v * (Math.abs(v) <= 1 ? 100 : 1)) + '%';
+    case 'plain': return String(Math.round(v * 1000) / 1000);
+    default: return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
+  }
+}
+const fillTemplate = (str, vars, fmt) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
+  if (fmt && typeof v === 'number') return fmtNumber(v, fmt, k);
+  if (Array.isArray(v)) return v.map((q) => (typeof q === 'number' ? formatNumber(q) : q)).join(', ') || '—'; // lists read "1, 2, 3"
   if (typeof v !== 'number') return v ?? '';
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
@@ -1872,6 +1886,95 @@ function drawTiles2D(ctx, e) {
     if (t.emoji) { ctx.font = `${Math.round(sz * 0.8)}px system-ui, "Apple Color Emoji", "Segoe UI Emoji", sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.emoji, x + sz / 2, y + sz / 2 + sz * 0.04); }
   }
   ctx.restore();
+}
+/** Smoothed fill (and the delayed "damage" trail) of a progress bar, kept on the entity. */
+function barSmooth(e, b, k, time) {
+  const D = e.data, sp = { instant: 1, snappy: 0.4, smooth: 0.18, slow: 0.06 }[b.smooth] ?? 0.25;
+  D._barK = D._barK == null ? k : D._barK + (k - D._barK) * sp;
+  if (b.trail) {
+    if (D._barT == null || k >= D._barT) { D._barT = Math.max(k, D._barK); D._barHold = 0; }
+    else { if (!D._barHold) D._barHold = time + 0.45; if (time > D._barHold) D._barT += (k - D._barT) * 0.07; }
+  }
+  return D._barK;
+}
+/** The bar's colour: its low-value colour (pulsing) when nearly empty. */
+function barColor(b, k, time) {
+  if (+b.lowAt > 0 && k <= +b.lowAt && b.lowColor) return b.lowColor;
+  return b.fill;
+}
+/** Label text: {value}, {max}, {percent} and {left} (what's missing). */
+function barLabel(b, v, max, k, def) {
+  const t = b.labelText || def;
+  return t.replace(/\{(value|max|percent|left)\}/g, (_, n) => (n === 'value' ? formatNumber(Math.round(v * 10) / 10) : n === 'max' ? formatNumber(max) : n === 'left' ? formatNumber(Math.max(0, Math.round((max - v) * 10) / 10)) : String(Math.round(k * 100))));
+}
+/** A straight progress bar: direction, gradient, stripes / segments / gloss / glow, border, trail, low warning, busy (unknown progress) and label. */
+function drawBar(ctx, e, b, k, v, max, time, alpha) {
+  const W = b.w, H = b.h, x0 = -W / 2, y0 = -H / 2, R = Math.min(+b.radius || 0, H / 2, W / 2), dir = b.dir || 'right', vert = dir === 'up' || dir === 'down';
+  const kk = barSmooth(e, b, k, time), col = barColor(b, k, time);
+  const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), Math.max(0, Math.min(r, w / 2, h / 2))); else ctx.rect(x, y, w, h); };
+  const span = (a, f) => { // the part of the track from a to f (0..1) along the bar's direction
+    switch (dir) {
+      case 'left': return [x0 + W * (1 - f), y0, W * (f - a), H];
+      case 'up': return [x0, y0 + H * (1 - f), W, H * (f - a)];
+      case 'down': return [x0, y0 + H * a, W, H * (f - a)];
+      case 'center': return [-W * f / 2, y0, W * f, H];
+      default: return [x0 + W * a, y0, W * (f - a), H];
+    }
+  };
+  const paint = () => {
+    if (!b.fill2) return col;
+    const g = vert ? ctx.createLinearGradient(0, dir === 'up' ? y0 + H : y0, 0, dir === 'up' ? y0 : y0 + H) : ctx.createLinearGradient(dir === 'left' ? x0 + W : x0, 0, dir === 'left' ? x0 : x0 + W, 0);
+    g.addColorStop(0, col); g.addColorStop(1, b.fill2); return g;
+  };
+  const lowPulse = +b.lowAt > 0 && k <= +b.lowAt ? 0.7 + 0.3 * Math.sin(time * 10) : 1;
+  if (b.look === 'segments') { // blocks with gaps, like a battery or a retro loader
+    const n = clamp(Math.round(+b.segments || 10), 2, 60), gap = Math.max(2, (vert ? H : W) * 0.02), len = ((vert ? H : W) - gap * (n - 1)) / n, lit = kk * n;
+    for (let i = 0; i < n; i++) {
+      const o = i * (len + gap), rev = dir === 'left' || dir === 'up';
+      const [x, y, w, h] = vert ? [x0, rev ? y0 + H - o - len : y0 + o, W, len] : [rev ? x0 + W - o - len : x0 + o, y0, len, H];
+      rr(x, y, w, h, Math.min(R, 4)); ctx.fillStyle = b.bg; ctx.fill();
+      const f = clamp(lit - i, 0, 1);
+      if (f > 0) { ctx.globalAlpha = alpha * (f < 1 ? 0.35 + 0.65 * f : 1) * lowPulse; if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = H * 0.6; } ctx.fillStyle = paint(); rr(x, y, w, h, Math.min(R, 4)); ctx.fill(); ctx.shadowBlur = 0; ctx.globalAlpha = alpha; }
+      if (b.border) { ctx.strokeStyle = b.border; ctx.lineWidth = +b.borderWidth || 2; rr(x, y, w, h, Math.min(R, 4)); ctx.stroke(); }
+    }
+  } else {
+    rr(x0, y0, W, H, R); ctx.fillStyle = b.bg; ctx.fill();
+    if (b.look === 'glow' && !b.busy && kk > 0.001) { const [x, y, w, h] = span(0, kk); ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = Math.max(8, H); ctx.fillStyle = col; rr(x, y, w, h, R); ctx.fill(); ctx.restore(); } // the glow spills outside the track
+    ctx.save(); rr(x0, y0, W, H, R); ctx.clip();
+    if (b.busy) { // unknown progress: a piece sweeps across, again and again
+      const p0 = ((time * 0.9) % 1.4) - 0.4, a = clamp(p0, 0, 1), f = clamp(p0 + 0.4, 0, 1);
+      const [x, y, w, h] = dir === 'center' ? span(0, 1) : span(a, f);
+      if (w > 0 && h > 0) { ctx.fillStyle = paint(); if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = H; } rr(x, y, w, h, R); ctx.fill(); ctx.shadowBlur = 0; }
+    } else {
+      if (b.trail && e.data._barT > kk + 0.002) { const [x, y, w, h] = span(0, e.data._barT); ctx.fillStyle = b.trail; rr(x, y, w, h, R); ctx.fill(); }
+      if (kk > 0.001) {
+        const [x, y, w, h] = span(0, kk);
+        ctx.globalAlpha = alpha * lowPulse;
+        if (b.look === 'glow') { ctx.shadowColor = col; ctx.shadowBlur = Math.max(6, H * 0.8); }
+        ctx.fillStyle = paint(); rr(x, y, w, h, R); ctx.fill(); ctx.shadowBlur = 0;
+        if (b.look === 'striped') { // moving diagonal stripes
+          ctx.save(); rr(x, y, w, h, R); ctx.clip(); ctx.fillStyle = 'rgba(255,255,255,0.22)';
+          const st = Math.max(8, Math.min(W, H) * 0.9), off = (time * st * 1.5) % (st * 2), L = Math.max(W, H);
+          ctx.beginPath(); for (let q = -L - st * 2 + off; q < L + st * 2; q += st * 2) { ctx.moveTo(x0 + q, y0 + H); ctx.lineTo(x0 + q + st, y0 + H); ctx.lineTo(x0 + q + st + H, y0); ctx.lineTo(x0 + q + H, y0); ctx.closePath(); }
+          ctx.fill(); ctx.restore();
+        }
+        if (b.look === 'glossy') { ctx.fillStyle = 'rgba(255,255,255,0.28)'; if (vert) ctx.fillRect(x, y, w * 0.45, h); else ctx.fillRect(x, y, w, h * 0.45); }
+        ctx.globalAlpha = alpha;
+      }
+    }
+    ctx.restore();
+    if (b.border) { ctx.strokeStyle = b.border; ctx.lineWidth = +b.borderWidth || 2; rr(x0, y0, W, H, R); ctx.stroke(); }
+  }
+  if (b.label) {
+    const sz = Math.round(+b.labelSize || Math.min(vert ? W : H, 40) * 0.7);
+    ctx.font = `800 ${sz}px ${fontOf(b.font)}`; ctx.fillStyle = b.labelColor || '#fff'; ctx.textBaseline = 'middle';
+    const txt = b.busy ? (b.labelText || '').replace(/\{(value|max|percent|left)\}/g, '') : barLabel(b, v, max, k, '{value} / {max}');
+    const pos = b.labelPos || 'inside';
+    if (pos === 'above') { ctx.textAlign = 'center'; ctx.fillText(txt, 0, y0 - sz * 0.75); }
+    else if (pos === 'below') { ctx.textAlign = 'center'; ctx.fillText(txt, 0, y0 + H + sz * 0.75); }
+    else if (pos === 'right') { ctx.textAlign = 'left'; ctx.fillText(txt, x0 + W + 8, 1); }
+    else { ctx.textAlign = 'center'; ctx.fillText(txt, 0, 1); }
+  }
 }
 function drawEntity2D(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
@@ -1958,43 +2061,86 @@ function drawEntity2D(ctx, e, vars, time) {
     const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
     const k = clamp((+src[key] || 0) / max, 0, 1);
     if (b.style === 'ring') { // radial / circular progress
-      const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * 0.22);
-      e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
-      ctx.lineWidth = lw; ctx.lineCap = 'round';
-      ctx.strokeStyle = b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, 0, Math.PI * 2); ctx.stroke();
-      if (e.data._barK > 0.001) { ctx.strokeStyle = b.fill; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * e.data._barK); ctx.stroke(); }
-      if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${Math.round(k * 100)}%`, 0, 1); }
+      const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * (+b.thick || 0.22)), kk = barSmooth(e, b, k, time), a0 = -Math.PI / 2;
+      ctx.lineWidth = lw; ctx.lineCap = b.look === 'segments' ? 'butt' : 'round';
+      if (b.look === 'segments') { const n = clamp(Math.round(+b.segments || 10), 2, 60), gap = 0.06; ctx.setLineDash([]); for (let i = 0; i < n; i++) { const s0 = a0 + (i / n) * Math.PI * 2 + gap / 2, s1 = a0 + ((i + 1) / n) * Math.PI * 2 - gap / 2; ctx.strokeStyle = i < Math.round(kk * n) ? barColor(b, k, time) : b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, s0, s1); ctx.stroke(); } }
+      else {
+        ctx.strokeStyle = b.bg; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, 0, Math.PI * 2); ctx.stroke();
+        if (b.busy) { const p0 = (time * 1.4) % 1; ctx.strokeStyle = barColor(b, k, time); ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0 + p0 * Math.PI * 2, a0 + (p0 + 0.28) * Math.PI * 2); ctx.stroke(); }
+        else {
+          if (b.trail && e.data._barT > kk + 0.002) { ctx.strokeStyle = b.trail; ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0, a0 + Math.PI * 2 * e.data._barT); ctx.stroke(); }
+          if (kk > 0.001) { if (b.look === 'glow') { ctx.shadowColor = barColor(b, k, time); ctx.shadowBlur = lw; } ctx.strokeStyle = barColor(b, k, time); ctx.beginPath(); ctx.arc(0, 0, r - lw / 2, a0, a0 + Math.PI * 2 * kk); ctx.stroke(); ctx.shadowBlur = 0; }
+        }
+      }
+      if (b.label) { ctx.font = `800 ${Math.round(r * 0.5)}px ${fontOf(b.font)}`; ctx.fillStyle = b.labelColor || '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(barLabel(b, +src[key] || 0, max, k, '{percent}%'), 0, 1); }
     } else if (b.icon) { // hearts-style: one icon per point, empty ones faded
       const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
       const img = /^(art:|https?:|data:|blob:|\.?\/)/.test(b.icon) ? loadImage(b.icon) : null; // a sprite (art:heart) or a text symbol (★)
       ctx.font = `900 ${Math.round(sz)}px system-ui, sans-serif, "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji"`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = b.color || b.fill || '#ffffff';
       for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); if (img) { if (img.complete && img.naturalWidth) ctx.drawImage(img, x0 + i * gap - sz / 2, -sz / 2, sz, sz); } else ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
       ctx.globalAlpha = alpha;
-    } else {
-    e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
-    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w, b.h);
-    ctx.fillStyle = b.bg; ctx.fill();
-    if (e.data._barK > 0.001) {
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w * e.data._barK, b.h);
-      ctx.fillStyle = b.fill; ctx.fill();
-    }
-    if (b.label) { ctx.font = `800 ${Math.round(b.h * 0.7)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${formatNumber(+src[key] || 0)} / ${formatNumber(max)}`, 0, 1); }
-    }
+    } else drawBar(ctx, e, b, k, +src[key] || 0, max, time, alpha);
   }
   if (e.text) {
     const t = e.text;
-    ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${t.size}px ${fontOf(t.font)}`;
+    let size = t.size;
+    const setFont = () => { ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${size}px ${fontOf(t.font)}`; };
+    setFont();
     ctx.textAlign = t.align; ctx.textBaseline = 'middle';
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
-    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars, t.format);
     if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
-    const lines = textLines(ctx, str, +t.wrap || 0), lh = t.size * (+t.lineHeight || 1.2), y0 = -(lines.length - 1) * lh / 2;
-    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, lines.length * lh);
+    let lines = textLines(ctx, str, +t.wrap || 0);
+    if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
+      if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); setFont(); }
+    }
+    const lh = size * (+t.lineHeight || 1.2), block = lines.length * lh;
+    const vy = t.valign === 'top' ? block / 2 - lh / 2 : t.valign === 'bottom' ? -block / 2 + lh / 2 : 0; // top: the first line sits at the object's position
+    const y0 = -(lines.length - 1) * lh / 2 + vy;
+    const widths = lines.map((l) => ctx.measureText(l).width), maxW = Math.max(...widths, 0);
+    const leftOf = (w) => (t.align === 'left' ? 0 : t.align === 'right' ? -w : -w / 2);
+    if (t.bg) { // a label box behind the text
+      const pad = +t.bgPad || 8, x = leftOf(maxW) - pad, y = y0 - lh / 2 - pad * 0.6, w = maxW + pad * 2, hgt = block + pad * 1.2;
+      ctx.fillStyle = t.bg; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hgt, +t.bgRadius || 0); else ctx.rect(x, y, w, hgt); ctx.fill();
+    }
+    const fx = t.effect || 'none', perLetter = ['wave', 'shake', 'rainbow', 'bounce'].includes(fx);
+    let pulseK = 1;
+    if (fx === 'pulse') { pulseK = 1 + Math.sin(time * 5) * 0.06; ctx.scale(pulseK, pulseK); }
+    if (fx === 'float') ctx.translate(0, Math.sin(time * 2.5) * size * 0.12);
+    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, block);
+    const shade = () => {
+      if (t.glow) { ctx.shadowColor = t.glow; ctx.shadowBlur = size * 0.6; ctx.shadowOffsetY = 0; }
+      else if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = size * 0.25; ctx.shadowOffsetY = size * 0.08; }
+    };
     lines.forEach((ln, i) => {
       const y = y0 + i * lh;
-      if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
-      if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); ctx.shadowColor = 'transparent'; }
-      ctx.fillText(ln, 0, y);
+      shade();
+      if (!perLetter) {
+        if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); if (!t.glow) ctx.shadowColor = 'transparent'; }
+        ctx.fillText(ln, 0, y);
+      } else { // each letter moves on its own
+        const align = ctx.textAlign; ctx.textAlign = 'left';
+        let x = leftOf(widths[i]);
+        [...ln].forEach((ch, j) => {
+          const cw = ctx.measureText(ch).width, ph = time * 6 - j * 0.5;
+          let dx = 0, dy = 0;
+          if (fx === 'wave') dy = Math.sin(ph) * size * 0.15;
+          else if (fx === 'bounce') dy = -Math.abs(Math.sin(ph * 0.8)) * size * 0.25;
+          else if (fx === 'shake') { const r = Math.sin((j + 1) * 99.1 + Math.floor(time * 20) * 7.3); dx = r * size * 0.05; dy = Math.cos(r * 13) * size * 0.05; }
+          if (fx === 'rainbow') ctx.fillStyle = `hsl(${(time * 120 + j * 25) % 360}, 90%, 62%)`;
+          if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ch, x + dx, y + dy); }
+          ctx.fillText(ch, x + dx, y + dy);
+          x += cw;
+        });
+        ctx.textAlign = align;
+      }
+      if (t.underline || t.strike) { // lines under / through the text, in the text colour
+        ctx.shadowColor = 'transparent'; ctx.fillStyle = typeof ctx.fillStyle === 'string' ? ctx.fillStyle : t.color;
+        const x = leftOf(widths[i]), th = Math.max(1, size * 0.07);
+        if (t.underline) ctx.fillRect(x, y + size * 0.42, widths[i], th);
+        if (t.strike) ctx.fillRect(x, y + size * 0.02, widths[i], th);
+      }
     });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
@@ -2714,7 +2860,7 @@ function renderUI(engine, scene) {
   const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
-  if (scene.state === 'play' && !engine.paused) {
+  if (scene.state === 'play' && !engine.paused && !scene.loading) { // (a Loading Screen hides the touch controls)
     ctx.save();
     ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
@@ -2759,12 +2905,13 @@ function renderUI(engine, scene) {
     }
     ctx.restore();
   }
-  if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
-    ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
+  const lt = scene.time - (scene.loadedAt || 0); // the level banner shows once a Loading Screen is gone
+  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading) {
+    ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2);
     big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
     ctx.globalAlpha = 1;
   }
-  drawMessage(ctx, scene, W, H, engine);
+  if (!scene.loading) drawMessage(ctx, scene, W, H, engine);
   if (scene.dialog) drawDialog(ctx, scene, W, H, engine);
   if (scene.rotateNeeded) {
     dim(0.9);
@@ -2772,6 +2919,7 @@ function renderUI(engine, scene) {
     big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
     return;
   }
+  if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && engine.inspecting)) return; // the editor's Inspect keeps the view clear
   if (engine.paused) {
@@ -5447,6 +5595,101 @@ const ACTION_PARAMS = [
   { key: 'sound', label: 'Sound', type: 'select', options: ['none', 'coin', 'power', 'jump', 'hit', 'click', 'win', 'lose'], default: 'none' },
 ];
 
+/** Loading Screen: fills a variable 0 → 100 like a real loader, shows tips, waits for pictures and fonts, then hides the screen and does something. */
+registerBehavior('loader', {
+  label: 'Loading Screen', description: 'Fills a variable from 0 to 100 like a loading bar, shows tips, then fades this screen (and everything in it) away and does something. Put it on a full-screen panel with a Progress Bar set to the same variable and a text showing {loading}% or {tip}.',
+  params: [
+    { key: 'var', label: 'Progress variable (0–100)', type: 'text', default: 'loading', suggest: 'vars' },
+    { key: 'seconds', label: 'Takes (seconds)', type: 'number', default: 2.5 },
+    { key: 'pace', label: 'Pace', type: 'select', options: ['realistic (stops and starts)', 'steady', 'fast then slow', 'slow then fast', 'steps'], default: 'realistic (stops and starts)' },
+    { key: 'waitAssets', label: 'Wait for pictures and fonts', type: 'bool', default: true },
+    { key: 'startOn', label: 'Starts', type: 'select', options: ['when the game starts', 'on a message'], default: 'when the game starts' },
+    { key: 'message', label: 'Message that starts it', type: 'text', default: 'loading', suggest: 'messages', showIf: { startOn: ['on a message'] } },
+    { key: 'pauseGame', label: 'Pause the game while loading', type: 'bool', default: true },
+    { key: 'tips', label: 'Tips (separate with |)', type: 'text', default: 'Tip: jump on enemies to beat them | Tip: collect coins for extra lives', group: 'Tips' },
+    { key: 'tipVar', label: 'Tip variable', type: 'text', default: 'tip', group: 'Tips' },
+    { key: 'tipEvery', label: 'Next tip every (sec)', type: 'number', default: 3, group: 'Tips' },
+    { key: 'tapToContinue', label: 'Wait for a tap at 100%', type: 'bool', default: false, group: 'When it\'s done' },
+    { key: 'tapText', label: 'Tap text (shown as the tip)', type: 'text', default: 'Tap to continue', group: 'When it\'s done', showIf: { tapToContinue: [true] } },
+    { key: 'hideSelf', label: 'Hide this screen', type: 'bool', default: true, group: 'When it\'s done' },
+    { key: 'exit', label: 'Hide with', type: 'select', options: ['fade', 'slide up', 'slide down', 'zoom', 'instant'], default: 'fade', group: 'When it\'s done', showIf: { hideSelf: [true] } },
+    { key: 'fade', label: 'Hide time (sec)', type: 'number', default: 0.4, group: 'When it\'s done', showIf: { hideSelf: [true] } },
+    { ...ACTION_PARAMS[0], default: 'send message', group: 'When it\'s done' },
+    { ...ACTION_PARAMS[1], default: 'loaded', group: 'When it\'s done' },
+    { ...ACTION_PARAMS[2], group: 'When it\'s done' },
+    { ...ACTION_PARAMS[3], group: 'When it\'s done' },
+  ],
+  create(p) {
+    let t = 0, running = false, waiting = false, shown = 0, tipI = 0, tipT = 0, pts = null, home = null, wasPaused = false;
+    const tips = () => String(p.tips || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const assetsReady = () => { for (const img of images.values()) if (!img.complete) return false; return typeof document === 'undefined' || !document.fonts || document.fonts.status === 'loaded'; };
+    const realistic = () => { // a few bursts with stalls in between, different every time
+      const out = [[0, 0]]; let tv = 0, vv = 0; const n = 5;
+      for (let i = 0; i < n; i++) { tv += 0.5 + Math.random(); vv += Math.random() < 0.3 ? 0.15 : 0.5 + Math.random(); out.push([tv, vv]); }
+      return out.map(([a, b]) => [a / tv, b / vv]);
+    };
+    const curve = (f) => {
+      switch (p.pace) {
+        case 'steady': return f;
+        case 'fast then slow': return 1 - (1 - f) ** 3;
+        case 'slow then fast': return f ** 2.2;
+        case 'steps': return f >= 1 ? 1 : Math.floor(f * 5) / 5;
+        default: { for (let i = 1; i < pts.length; i++) if (f <= pts[i][0]) { const [a, va] = pts[i - 1], [b, vb] = pts[i], q = (f - a) / Math.max(1e-6, b - a); return va + (vb - va) * clamp(q * 1.6 - 0.3, 0, 1); } return 1; }
+      }
+    };
+    const all = (e, s) => [e, ...s.entities.filter((q) => { for (let a = q.parentEnt; a; a = a.parentEnt) if (a === e) return true; return false; })];
+    const inst = {
+      uiAlways: true,
+      begin(e, s) {
+        t = 0; shown = 0; tipT = 0; running = true; waiting = false; pts = realistic(); home ||= { x: e.x, y: e.y };
+        e.x = home.x; e.y = home.y; e.sx = e.sy = 1;
+        for (const q of all(e, s)) { s.killTweens(q); q.alpha = q._loaderAlpha ?? q.alpha; }
+        e.visible = true; s.modal = e; s.setVar(p.var, 0);
+        const T = tips(); if (T.length && p.tipVar) s.setVar(p.tipVar, T[tipI++ % T.length]);
+        if (p.pauseGame !== false) { wasPaused = s.loading; s.loading = true; }
+      },
+      finish(e, s) {
+        running = false; waiting = false; s.setVar(p.var, 100); s.loadedAt = s.time;
+        if (s.modal === e) s.modal = null;
+        if (p.pauseGame !== false) s.loading = wasPaused || false;
+        if (p.action) runAction(s, e, p);
+        s.emit('loaded', e);
+        if (p.hideSelf === false) return;
+        const d = Math.max(0, +p.fade || 0), list = all(e, s);
+        if (!d || p.exit === 'instant') { e.visible = false; return; }
+        for (const q of list) { q._loaderAlpha ??= q.alpha; s.to(q, { alpha: 0 }, d, { ease: 'outQuad' }); }
+        const H = s.engine?.height || 800, k = uiK(s.engine?.safe) || 1;
+        if (p.exit === 'slide up') s.to(e, { y: home.y - H / k }, d, { ease: 'inCubic' });
+        else if (p.exit === 'slide down') s.to(e, { y: home.y + H / k }, d, { ease: 'inCubic' });
+        else if (p.exit === 'zoom') s.to(e, { sx: 1.25, sy: 1.25 }, d, { ease: 'outQuad' });
+        s.after(d + 0.02, () => { if (running) return; for (const q of list) s.killTweens(q); e.visible = false; for (const q of list) q.alpha = q._loaderAlpha ?? 1; e.x = home.x; e.y = home.y; e.sx = e.sy = 1; });
+      },
+      start(e, s) {
+        if (p.startOn === 'on a message') { e.visible = false; s.on('message', (m) => { if (!e.dead && m === p.message) inst.begin(e, s); }); }
+        else inst.begin(e, s);
+      },
+      update(e, dt, s) {
+        if (!running) return;
+        const T = tips();
+        if (!waiting && T.length > 1 && p.tipVar) { tipT += dt; if (tipT >= (+p.tipEvery || 3)) { tipT = 0; s.setVar(p.tipVar, T[tipI++ % T.length]); } }
+        if (waiting) { if (s.engine.input.taps.length) inst.finish(e, s); return; }
+        t += dt;
+        let f = curve(clamp(t / Math.max(0.1, +p.seconds || 2.5), 0, 1));
+        if (p.waitAssets !== false && !assetsReady()) f = Math.min(f, 0.9);
+        shown = Math.max(shown, f);
+        const pct = Math.round(shown * 100);
+        if (s.vars[p.var] !== pct) s.setVar(p.var, pct);
+        if (shown >= 1) {
+          if (p.tapToContinue) { waiting = true; if (p.tipVar) s.setVar(p.tipVar, p.tapText || 'Tap to continue'); }
+          else inst.finish(e, s);
+        }
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; if (running && p.pauseGame !== false) s.loading = false; },
+    };
+    return inst;
+  },
+});
+
 registerBehavior('trigger', {
   label: 'Trigger Zone', description: 'When the player touches it, do something: show a message, change a variable, spawn, destroy, win…',
   params: [
@@ -6030,22 +6273,88 @@ registerBehavior('voxelBuilder', {
 });
 
 registerBehavior('button', {
-  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game.',
-  params: [...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q))],
+  label: 'Button', description: 'Tap it to do something: start/restart the game, pause, show or hide menus, change variables, jump… Works on UI and on objects in the game. It can fire on press, repeat while held, cost something, cool down, or only work when a variable allows it.',
+  params: [
+    ...ACTION_PARAMS.map((q) => (q.key === 'action' ? { ...q, default: 'restart game' } : q)),
+    { key: 'also', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'when', label: 'Fires', type: 'select', options: ['on tap', 'on press', 'while held (repeats)', 'on long press'], default: 'on tap', group: 'When it fires' },
+    { key: 'repeat', label: 'Repeat every (sec)', type: 'number', default: 0.15, range: [0.05, 1], step: 0.05, group: 'When it fires', showIf: { when: ['while held (repeats)'] } },
+    { key: 'holdTime', label: 'Hold for (sec)', type: 'number', default: 0.6, range: [0.2, 3], step: 0.1, group: 'When it fires', showIf: { when: ['on long press'] } },
+    { key: 'once', label: 'Only works once', type: 'bool', default: false, group: 'When it fires' },
+    { key: 'pressScale', label: 'Squash when pressed', type: 'number', default: 0.92, range: [0.6, 1.1], step: 0.02, group: 'Look & feel' },
+    { key: 'pressColor', label: 'Colour while pressed', type: 'color', default: '', optional: true, group: 'Look & feel' },
+    { key: 'haptic', label: 'Buzz the phone', type: 'bool', default: true, group: 'Look & feel' },
+    { key: 'enableVar', label: 'Only works when variable', type: 'text', default: '', suggest: 'vars', group: 'Only works when…' },
+    { key: 'enableOp', label: 'is', type: 'select', options: ['≥', '>', '=', '≠', '<', '≤'], default: '≥', group: 'Only works when…', showIf: (b) => !!b.enableVar },
+    { key: 'enableValue', label: 'value', type: 'number', default: 1, group: 'Only works when…', showIf: (b) => !!b.enableVar },
+    { key: 'costVar', label: 'Costs (variable)', type: 'text', default: '', suggest: 'vars', group: 'Cost & cooldown' },
+    { key: 'cost', label: 'Cost', type: 'number', default: 10, group: 'Cost & cooldown', showIf: (b) => !!b.costVar },
+    { key: 'cooldown', label: 'Cooldown (sec)', type: 'number', default: 0, range: [0, 30], step: 0.5, group: 'Cost & cooldown' },
+    { key: 'disabledAlpha', label: 'Look when it can\'t be used (opacity)', type: 'number', default: 0.45, range: [0, 1], step: 0.05, group: 'Cost & cooldown' },
+    { key: 'denied', label: 'Message when it can\'t be used', type: 'text', default: '', group: 'Cost & cooldown' },
+  ],
   create(p) {
+    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null;
+    const gated = () => !!(p.enableVar || p.costVar || p.once || +p.cooldown > 0);
+    const allowed = (s) => {
+      if (p.once && used) return false;
+      if (p.enableVar) { const a = +s.vars[p.enableVar] || 0, b = +p.enableValue || 0; if (!({ '≥': a >= b, '>': a > b, '=': a === b, '≠': a !== b, '<': a < b, '≤': a <= b }[p.enableOp || '≥'])) return false; }
+      if (p.costVar && (+s.vars[p.costVar] || 0) < (+p.cost || 0)) return false;
+      return true;
+    };
+    const fireIt = (e, s) => {
+      if (s.time < cdUntil) return;
+      if (!allowed(s)) { // can't: a little "no" shake
+        s.punch(e, { x: 8 }, 0.3, { add: true }); s.engine.audio.sfx('hit');
+        if (p.denied) s.message(fillTemplate(p.denied, s.vars), 1.3);
+        return;
+      }
+      if (p.costVar) s.addVar(p.costVar, -(+p.cost || 0));
+      if (p.haptic !== false) s.engine.vibrate(10);
+      if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
+      runAction(s, e, p);
+      if (p.also) s.send(p.also);
+      used = true; if (+p.cooldown > 0) cdUntil = s.time + +p.cooldown;
+    };
     return {
       uiAlways: true, // keeps working on title and end screens
-      update(e, dt, s) {
-        if (!e.visible) return;
-        for (const t of s.engine.input.taps) {
-          if (!hitTest(s, e, t.x, t.y)) continue;
-          s.engine.vibrate(10);
-          const k = e.sx; e.sx = e.sy = k * 0.92; s.tween(e, { sx: k, sy: k }, 0.15);
-          if (p.action !== 'play sound' && (!p.sound || p.sound === 'none')) s.engine.audio.sfx('click');
-          runAction(s, e, p);
-          break;
-        }
+      start(e, s) {
+        if (!(+p.cooldown > 0)) return;
+        (s.overlays ||= []).push(ring = (ctx) => { // a dark sweep over the button while it cools down
+          if (e.dead || !e.visible || e._parentHidden || s.time >= cdUntil) return;
+          const c = screenOf(s, e), ex = e.extents(), k = e.ui ? uiK(s.engine.safe) || 1 : 1, r = Math.max(10, (ex.sphere ? ex.r : Math.min(ex.hx, ex.hy)) * k);
+          const f = (cdUntil - s.time) / (+p.cooldown || 1), round = ex.sphere || e.shape?.type === 'circle';
+          ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath();
+          if (round) { ctx.moveTo(c.x, c.y); ctx.arc(c.x, c.y, r, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.closePath(); }
+          else { const w = ex.hx * 2 * k, hh = ex.hy * 2 * k, rad = Math.min((e.shape?.radius || 0) * k, hh / 2), x0 = c.x - w / 2; ctx.save(); if (ctx.roundRect) ctx.roundRect(x0, c.y - hh / 2, w, hh, rad); else ctx.rect(x0, c.y - hh / 2, w, hh); ctx.clip(); ctx.fillRect(x0, c.y - hh / 2, w * f, hh); ctx.restore(); } // a band that shrinks as it cools down
+          if (round) ctx.fill();
+          ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(r * 0.6)}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(Math.ceil(cdUntil - s.time), c.x, c.y + 1); ctx.restore();
+        });
       },
+      update(e, dt, s) {
+        if (!e.visible) { held = null; return; }
+        base ??= { sx: e.sx, sy: e.sy };
+        const inp = s.engine.input, mode = p.when || 'on tap';
+        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) { held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s); break; }
+        const ptr = held != null && inp.pointers.get(held);
+        if (ptr) {
+          heldT += dt;
+          if (mode === 'while held (repeats)' && heldT >= nextRep) { fireIt(e, s); nextRep = heldT + Math.max(0.05, +p.repeat || 0.15) + (nextRep === 0 ? 0.25 : 0); } // first right away, a short pause, then steady repeats
+          if (mode === 'on long press' && !longDone && heldT >= (+p.holdTime || 0.6)) { longDone = true; fireIt(e, s); }
+        } else held = null;
+        if (mode === 'on tap') for (const t of inp.taps) if (hitTest(s, e, t.x, t.y)) { fireIt(e, s); break; }
+        // feel: squash while the finger is on it, optional pressed colour
+        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y);
+        if (down || e.data._btnSq) {
+          const k = down ? +p.pressScale || 0.92 : 1, a = Math.min(1, dt * 25);
+          e.sx += (base.sx * k - e.sx) * a; e.sy += (base.sy * k - e.sy) * a;
+          e.data._btnSq = down || Math.abs(e.sx - base.sx) > 0.002; if (!e.data._btnSq) { e.sx = base.sx; e.sy = base.sy; }
+        }
+        if (p.pressColor && e.shape) { if (fill0 === undefined) fill0 = e.shape.fill; e.shape.fill = down ? p.pressColor : fill0; }
+        // look disabled when it can't be used (only if something can disable it)
+        if (gated()) { const off = !allowed(s) || s.time < cdUntil; if (off !== lastOff) { e.alpha = off ? +p.disabledAlpha : 1; lastOff = off; } }
+      },
+      destroy(e, s) { if (ring) s.overlays = (s.overlays || []).filter((f) => f !== ring); },
     };
   },
 });
@@ -6574,6 +6883,41 @@ export const NODE_TYPES = {
   sayLine: { cat: 'Game', label: 'Say (dialogue box)', exec: true, outs: ['then', 'closed'], params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello! Score: {score}', 'text'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
   gameValue: { cat: 'Game', label: 'Game Value', value: 'number', params: [opt('what', ['score', 'lives', 'best', 'time left', 'combo', 'level', 'levels'], 'score', 'what')] },
   gameStateIs: { cat: 'Game', label: 'Game State Is', value: 'bool', params: [opt('state', ['playing', 'title', 'game over', 'won', 'paused'], 'playing', 'state')] },
+  // more variables: change with any operation, text, saved on the device, per-object events, lists
+  changeVar: { cat: 'Variables', label: 'Change Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable'), opt('op', ['set', 'add', 'subtract', 'multiply', 'divide', 'min', 'max', 'power', 'mod'], 'add', 'do'), opt('scope', ['game', 'this object', 'other'], 'game', 'whose')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  clampVar: { cat: 'Variables', label: 'Clamp Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable'), opt('scope', ['game', 'this object', 'other'], 'game', 'whose')], inputs: [{ key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 100 }] },
+  copyVar: { cat: 'Variables', label: 'Copy Variable', exec: true, outs: ['then'], params: [txt('from', 'score', 'from'), txt('to', 'lastScore', 'to')] },
+  toggleMyVar: { cat: 'Variables', label: 'Toggle My Variable (0 ↔ 1)', exec: true, outs: ['then'], params: [txt('name', 'open', 'variable')] },
+  resetVars: { cat: 'Variables', label: 'Reset Variables', exec: true, outs: ['then'], params: [txt('names', 'score, combo', 'variables (comma list, blank = all)')] },
+  setTextVar: { cat: 'Variables', label: 'Set Text Variable', exec: true, outs: ['then'], params: [txt('name', 'playerName', 'variable'), txt('text', 'Hero {level}', 'text ({braces} work)')] },
+  textIs: { cat: 'Variables', label: 'Text Variable Is', value: 'bool', params: [txt('name', 'playerName', 'variable'), opt('op', ['equals', 'contains', 'starts with', 'is empty'], 'equals', 'test'), txt('text', 'Hero', 'text')] },
+  saveVar: { cat: 'Variables', label: 'Save Variable (device)', exec: true, outs: ['then'], params: [txt('name', 'coins', 'variable')] },
+  loadVar: { cat: 'Variables', label: 'Load Variable (device)', exec: true, outs: ['loaded', 'not saved yet'], params: [txt('name', 'coins', 'variable')] },
+  deleteSavedVar: { cat: 'Variables', label: 'Forget Saved Variable', exec: true, outs: ['then'], params: [txt('name', 'coins', 'variable')] },
+  onMyVarChanged: { cat: 'Variables', label: 'On My Variable Changed', outs: ['then'], params: [txt('name', 'hp', 'variable (blank = any)')] },
+  whenMyVarReaches: { cat: 'Variables', label: 'When My Variable Reaches', outs: ['then'], params: [txt('name', 'hp', 'variable'), opt('op', ['≤', '≥', '=', '<', '>'], '≤', 'is'), num('value', 0, 'value')] },
+  listAdd: { cat: 'Lists', label: 'List: Add', exec: true, outs: ['then'], params: [txt('name', 'list', 'list'), opt('where', ['at the end', 'at the start'], 'at the end', 'where')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listRemove: { cat: 'Lists', label: 'List: Remove', exec: true, outs: ['then', 'nothing removed'], params: [txt('name', 'list', 'list'), opt('mode', ['last', 'first', 'at position', 'this value'], 'last', 'remove')], inputs: [{ key: 'n', type: 'number', default: 1 }] },
+  listSet: { cat: 'Lists', label: 'List: Set At', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')], inputs: [{ key: 'position', type: 'number', default: 1 }, { key: 'value', type: 'number', default: 0 }] },
+  listClear: { cat: 'Lists', label: 'List: Clear', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')] },
+  listOrder: { cat: 'Lists', label: 'List: Shuffle / Sort', exec: true, outs: ['then'], params: [txt('name', 'list', 'list'), opt('mode', ['shuffle', 'sort small → big', 'sort big → small', 'reverse'], 'shuffle', 'do')] },
+  listFill: { cat: 'Lists', label: 'List: Fill With Numbers', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')], inputs: [{ key: 'from', type: 'number', default: 1 }, { key: 'to', type: 'number', default: 10 }] },
+  forEachList: { cat: 'Lists', label: 'List: For Each', exec: true, outs: ['each', 'done'], params: [txt('name', 'list', 'list')] },
+  listGet: { cat: 'Lists', label: 'List: Item At', value: 'number', params: [txt('name', 'list', 'list')], inputs: [{ key: 'position', type: 'number', default: 1 }] },
+  listLen: { cat: 'Lists', label: 'List: Length', value: 'number', params: [txt('name', 'list', 'list')] },
+  listHas: { cat: 'Lists', label: 'List: Contains', value: 'bool', params: [txt('name', 'list', 'list')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listFind: { cat: 'Lists', label: 'List: Position Of', value: 'number', params: [txt('name', 'list', 'list')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listRandom: { cat: 'Lists', label: 'List: Random Item', value: 'number', params: [txt('name', 'list', 'list')] },
+  listStat: { cat: 'Lists', label: 'List: Sum / Min / Max', value: 'number', params: [txt('name', 'list', 'list'), opt('op', ['sum', 'min', 'max', 'average'], 'sum', 'give')] },
+  loopItem: { cat: 'Lists', label: 'Loop Item', value: 'number' },
+  // functions: named pieces of script with inputs and a result
+  funcDef: { cat: 'Functions', label: 'Function', outs: ['then'], params: [txt('name', 'double', 'function name')] },
+  funcArg: { cat: 'Functions', label: 'Function Input', value: 'number', params: [opt('which', ['a', 'b', 'c'], 'a', 'input')] },
+  funcReturn: { cat: 'Functions', label: 'Return Value', exec: true, outs: [], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  callFunc: { cat: 'Functions', label: 'Call Function', value: 'number', params: [txt('name', 'double', 'function name')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  runFunc: { cat: 'Functions', label: 'Run Function', exec: true, outs: ['then'], params: [txt('name', 'double', 'function name'), txt('store', '', 'put the result in variable (optional)')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  callLater: { cat: 'Functions', label: 'Call Event Later', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'everything'], 'this object', 'on')], inputs: [{ key: 'seconds', type: 'number', default: 1 }, { key: 'value', type: 'number', default: 0 }] },
+  callerIs: { cat: 'Functions', label: 'Caller Has Tag', value: 'bool', params: [txt('tag', 'player', 'tag')] },
   // online: Photon multiplayer and PlayFab services
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
@@ -6960,6 +7304,11 @@ export function compileFormula(src) {
   formulaCache.set(src, f);
   return f;
 }
+/** Lists live in game variables as arrays (text shows them as 1, 2, 3). Positions start at 1. */
+const listOf = (s, name) => { const v = s.vars[name]; return Array.isArray(v) ? v : v == null || v === '' || v === 0 ? [] : [v]; };
+const listSave = (s, name, arr) => s.setVar(name, arr);
+const savedVarKey = (s, name) => `pocket.var.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
+const OPS_CHANGE = { set: (a, b) => b, add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => (b ? a / b : a), min: Math.min, max: Math.max, power: (a, b) => a ** b, mod: (a, b) => (b ? ((a % b) + b) % b : a) };
 const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
 const achieved = (s, name) => store.get(achKey(s, name), '') === '1';
 /** Smooth 1D noise in −1…1: like random, but it drifts instead of jumping (wobbling lights, drifting clouds). */
@@ -7001,6 +7350,8 @@ registerBehavior('graph', {
       return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
     };
     const tagOk = (o, tag) => !tag || o.has(tag);
+    /** Set an object's own variable and tell its scripts (On My Variable Changed / When My Variable Reaches). */
+    const setMy = (s, who, k, v) => { if (!who) return; const old = who.data[k]; who.data[k] = v; if (old !== v) s.emit('myvar', who, k, v); };
     const defRange = (s) => (s.mode === '3d' ? 5 : 150);
     /** Everything this object overlaps right now: [other, is a trigger contact] */
     const contactsOf = (e, s) => { const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead) out.push([o, !!(e.body?.sensor || o.body?.sensor)]); } return out; };
@@ -7093,6 +7444,17 @@ registerBehavior('graph', {
         case 'hasOther': return !!ctx.other && !ctx.other.dead;
         case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
         case 'getMyVar': return +e.data[P('name')] || 0;
+        case 'textIs': { const v = String(s.vars[P('name')] ?? ''), t = String(P('text') ?? ''), op = P('op'); return op === 'contains' ? v.toLowerCase().includes(t.toLowerCase()) : op === 'starts with' ? v.toLowerCase().startsWith(t.toLowerCase()) : op === 'is empty' ? !v.trim() : v === t; }
+        case 'listGet': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1) - 1; return +a[i] || 0; }
+        case 'listLen': return listOf(s, P('name')).length;
+        case 'listHas': { const v = +I('value') || 0; return listOf(s, P('name')).some((q) => +q === v); }
+        case 'listFind': { const v = +I('value') || 0; return listOf(s, P('name')).findIndex((q) => +q === v) + 1; }
+        case 'listRandom': { const a = listOf(s, P('name')); return a.length ? +a[Math.floor(Math.random() * a.length)] || 0 : 0; }
+        case 'listStat': { const a = listOf(s, P('name')).map((q) => +q || 0); if (!a.length) return 0; const o = P('op'), sum = a.reduce((x, y) => x + y, 0); return o === 'min' ? Math.min(...a) : o === 'max' ? Math.max(...a) : o === 'average' ? sum / a.length : sum; }
+        case 'loopItem': return +ctx.item || 0;
+        case 'funcArg': return +ctx.args?.[P('which') || 'a'] || 0;
+        case 'callFunc': return callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 });
+        case 'callerIs': return !!ctx.other?.has?.(P('tag'));
         case 'getOtherVar': return +ctx.other?.data?.[P('name')] || 0;
         case 'varAt': { const k = P('object'), t = s.find(k) || nearest(s, e, k); return +t?.data?.[P('name')] || 0; }
         case 'eventValue': return +ctx.eventValue || 0;
@@ -7139,6 +7501,13 @@ registerBehavior('graph', {
       const st = ctx.s?.engine?.graphStats, d = def(n);
       if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
+    };
+    /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
+    const callFunction = (s, e, ctx, name, args) => {
+      const depth = (ctx.callDepth || 0) + 1; if (depth > 20) { Log.add('warn', `Function "${name}" calls itself too deeply`); return 0; }
+      const ret = { v: 0, done: false };
+      for (const fn of g.nodes) if (fn.type === 'funcDef' && param(fn, 'name') === name) { follow(fn, 'then', { s, e, other: ctx.other, steps: 0, dt: ctx.dt, args, ret, callDepth: depth }); if (ret.done) break; }
+      return ret.v;
     };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
@@ -7288,13 +7657,54 @@ registerBehavior('graph', {
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
         case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
-        case 'setMyVar': e.data[P('name') || 'hp'] = +I('value') || 0; break;
-        case 'addMyVar': { const k = P('name') || 'hp'; e.data[k] = (+e.data[k] || 0) + (+I('amount') || 0); break; }
-        case 'setOtherVar': if (ctx.other) ctx.other.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'setMyVar': setMy(s, e, P('name') || 'hp', +I('value') || 0); break;
+        case 'addMyVar': { const k = P('name') || 'hp'; setMy(s, e, k, (+e.data[k] || 0) + (+I('amount') || 0)); break; }
+        case 'setOtherVar': setMy(s, ctx.other, P('name') || 'hp', +I('value') || 0); break;
         case 'callEvent': {
           const on = P('on'), name = P('name'), v = +I('value') || 0, tag = P('tag');
           const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : (q) => q === e;
           s.emit('graphCall', name, who, e, v); break;
+        }
+        case 'changeVar': case 'clampVar': {
+          const k = P('name') || 'score', sc = P('scope'), who = sc === 'this object' ? e : sc === 'other' ? ctx.other : null;
+          if (sc === 'other' && !who) break;
+          const cur = +(who ? who.data[k] : s.vars[k]) || 0;
+          const v = n.type === 'clampVar' ? clamp(cur, Math.min(+I('min') || 0, +I('max') || 0), Math.max(+I('min') || 0, +I('max') || 0)) : (OPS_CHANGE[P('op')] || OPS_CHANGE.add)(cur, +I('value') || 0);
+          if (who) setMy(s, who, k, v); else s.setVar(k, v); break;
+        }
+        case 'copyVar': s.setVar(P('to') || 'copy', Array.isArray(s.vars[P('from')]) ? [...s.vars[P('from')]] : s.vars[P('from')] ?? 0); break;
+        case 'toggleMyVar': { const k = P('name') || 'on'; setMy(s, e, k, +e.data[k] ? 0 : 1); break; }
+        case 'resetVars': {
+          const start = s.json?.vars || {}, names = String(P('names') || '').split(',').map((q) => q.trim()).filter(Boolean);
+          for (const k of names.length ? names : Object.keys(s.vars).filter((q) => !/^(time|best|level|net|pf|online|item_|inventory)/.test(q))) s.setVar(k, Array.isArray(start[k]) ? [...start[k]] : start[k] ?? (Array.isArray(s.vars[k]) ? [] : 0));
+          break;
+        }
+        case 'setTextVar': s.setVar(P('name') || 'text', fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data))); break;
+        case 'saveVar': { const k = P('name') || 'coins'; store.set(savedVarKey(s, k), JSON.stringify(s.vars[k] ?? 0)); break; }
+        case 'loadVar': { const k = P('name') || 'coins', raw = store.get(savedVarKey(s, k), ''); if (raw === '') return follow(n, 'not saved yet', ctx); try { s.setVar(k, JSON.parse(raw)); } catch { s.setVar(k, raw); } return follow(n, 'loaded', ctx); }
+        case 'deleteSavedVar': try { localStorage.removeItem(savedVarKey(s, P('name') || 'coins')); } catch { /* storage unavailable */ } break;
+        case 'listAdd': { const a = [...listOf(s, P('name'))], v = +I('value') || 0; if (P('where') === 'at the start') a.unshift(v); else a.push(v); listSave(s, P('name'), a); break; }
+        case 'listRemove': {
+          const a = [...listOf(s, P('name'))], m = P('mode'), v = +I('n') || 0;
+          const i = m === 'last' ? a.length - 1 : m === 'first' ? 0 : m === 'at position' ? Math.round(v) - 1 : a.findIndex((q) => +q === v);
+          if (i < 0 || i >= a.length) return follow(n, 'nothing removed', ctx);
+          a.splice(i, 1); listSave(s, P('name'), a); break;
+        }
+        case 'listSet': { const a = [...listOf(s, P('name'))], i = Math.round(+I('position') || 1) - 1; if (i >= 0 && i < 1000) { while (a.length < i) a.push(0); a[i] = +I('value') || 0; listSave(s, P('name'), a); } break; }
+        case 'listClear': listSave(s, P('name'), []); break;
+        case 'listOrder': {
+          const a = [...listOf(s, P('name'))], m = P('mode');
+          if (m === 'shuffle') for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+          else if (m === 'reverse') a.reverse(); else a.sort((x, y) => (m === 'sort big → small' ? y - x : x - y));
+          listSave(s, P('name'), a); break;
+        }
+        case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
+        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); a.forEach((v, i) => follow(n, 'each', { ...ctx, index: i + 1, item: v, steps: ctx.steps })); return follow(n, 'done', ctx); }
+        case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
+        case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
+        case 'callLater': {
+          const name = P('name'), v = +I('value') || 0, all = P('on') === 'everything';
+          s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead || all) s.emit('graphCall', name, all ? () => true : (q) => q === e, e, v); }); break;
         }
         case 'forRange': {
           const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
@@ -7425,6 +7835,15 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onMyVarChanged', 'whenMyVarReaches')) {
+          const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
+          const was = new Map(g.nodes.filter((n) => n.type === 'whenMyVarReaches').map((n) => [n.id, test(n, e.data[param(n, 'name')])]));
+          s.on('myvar', (who, k, v) => {
+            if (who !== e || e.dead) return;
+            fire('onMyVarChanged', e, s, null, (n) => !param(n, 'name') || param(n, 'name') === k);
+            for (const n of g.nodes) if (n.type === 'whenMyVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !was.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); was.set(n.id, now); }
+          });
+        }
         if (has('customEvent')) s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
         if (has('onVarReaches')) {
           const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
@@ -8236,7 +8655,7 @@ export class Engine {
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
       this.runUIOnly(s, dt);
-      if (inp.pressed('tap') && !ownScreen(s, 'title')) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap') && !ownScreen(s, 'title') && !s.loading) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
@@ -8249,6 +8668,7 @@ export class Engine {
       }
       return;
     }
+    if (s.loading) { s.time += dt; this.stepEffects(dt); this.runUIOnly(s, dt); return; } // a Loading Screen is up: the game waits
     if (s.dialog) { // conversations: taps go to the dialogue; optionally the game waits
       const used = stepDialog(s, dt, inp.taps.length > 0);
       if (used) inp.taps.length = 0;

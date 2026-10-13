@@ -4,12 +4,13 @@
 import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
-const UI_GROUPS = ['Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
+const UI_GROUPS = ['Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB } from './storage.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
+import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { makeCube } from './meshops.js';
@@ -2039,7 +2040,7 @@ function control(target, path, spec) {
       break;
     }
     default: {
-      el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', oninput: (e) => set(e.target.value) });
+      el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', placeholder: spec.placeholder, oninput: (e) => set(e.target.value) });
       const list = spec.suggest && suggestions(spec.suggest);
       if (list?.length) { // Odin-style [ValueDropdown]: type or pick from what exists in the game
         const id = 'dl-' + spec.suggest + '-' + Math.random().toString(36).slice(2, 7);
@@ -2640,6 +2641,18 @@ function renderInspector() {
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
       C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
       j.text.shadow && C('text.shadowColor', { label: 'Shadow color', type: 'color', def: '#000000' }),
+      C('text.glow', { label: 'Glow', type: 'color', optional: true }),
+      C('text.underline', { label: 'Underline', type: 'bool', def: false }),
+      C('text.strike', { label: 'Strikethrough', type: 'bool', def: false }),
+      h('h5', { class: 'sub-head' }, 'Numbers & fitting'),
+      C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
+      C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
+      C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
+      h('h5', { class: 'sub-head' }, 'Label box'),
+      C('text.bg', { label: 'Box behind the text', type: 'color', optional: true, structure: true }),
+      j.text.bg && [C('text.bgPad', { label: 'Box padding', type: 'number', def: 8, range: [0, 40], step: 1 }), C('text.bgRadius', { label: 'Box roundness', type: 'number', def: 8, range: [0, 40], step: 1 })],
+      h('h5', { class: 'sub-head' }, 'Animation'),
+      C('text.effect', { label: 'Effect', type: 'select', options: [['', 'None'], ['wave', 'Wave (letters)'], ['bounce', 'Bounce (letters)'], ['shake', 'Shake (letters)'], ['rainbow', 'Rainbow (letters)'], ['pulse', 'Pulse'], ['float', 'Float up and down']], def: '' }),
     ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
@@ -2668,8 +2681,32 @@ function renderInspector() {
       showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
       C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
       C('bar.fill', { label: 'Bar color', type: 'color' }), C('bar.bg', { label: 'Background', type: 'color' }),
-      C('bar.radius', { label: 'Roundness', type: 'number', def: 8 }),
-      C('bar.label', { label: 'Show numbers', type: 'bool', def: false }),
+      !j.bar.icon && j.bar.style !== 'ring' && C('bar.radius', { label: 'Roundness', type: 'number', def: 8 }),
+      !j.bar.icon && [
+        h('h5', { class: 'sub-head' }, 'Look'),
+        h('div', { class: 'bar-looks' }, [['', 'Flat'], ['striped', 'Striped'], ['segments', 'Blocks'], ['glossy', 'Glossy'], ['glow', 'Glow']].map(([v, l]) =>
+          h('button', { type: 'button', class: 'btn' + ((j.bar.look || '') === v ? ' primary' : ''), onclick: () => { if (v) j.bar.look = v; else delete j.bar.look; changed({ inspector: true }); } }, l))),
+        j.bar.look === 'segments' && C('bar.segments', { label: 'Blocks', type: 'number', def: 10, step: 1, range: [2, 30] }),
+        j.bar.style === 'ring' ? C('bar.thick', { label: 'Thickness', type: 'number', def: 0.22, step: 0.02, range: [0.05, 0.5] })
+          : C('bar.dir', { label: 'Fills', type: 'select', options: [['right', 'Left → right'], ['left', 'Right → left'], ['up', 'Bottom → top'], ['down', 'Top → bottom'], ['center', 'From the middle']], def: 'right' }),
+        j.bar.style !== 'ring' && C('bar.fill2', { label: 'Gradient to', type: 'color', optional: true }),
+        C('bar.border', { label: 'Border', type: 'color', optional: true }),
+        C('bar.borderWidth', { label: 'Border width', type: 'number', def: 2, step: 1 }),
+        h('h5', { class: 'sub-head' }, 'Motion'),
+        C('bar.smooth', { label: 'Changes', type: 'select', options: [['', 'Smoothly (default)'], ['instant', 'Instantly'], ['snappy', 'Quickly'], ['smooth', 'Gently'], ['slow', 'Slowly']], def: '' }),
+        C('bar.trail', { label: 'Damage trail', type: 'color', optional: true, infoText: 'When the value drops, the lost part stays in this colour for a moment, then slides away (fighting-game health bars).' }),
+        C('bar.lowAt', { label: 'Warn below (0–1)', type: 'number', def: 0, step: 0.05, range: [0, 1], lazy: true }),
+        +j.bar.lowAt > 0 && C('bar.lowColor', { label: 'Warning colour', type: 'color', def: '#ff5252' }),
+        C('bar.busy', { label: 'Busy (unknown progress)', type: 'bool', def: false, infoText: 'A piece sweeps across again and again: for waiting when you don\'t know how long it takes.' }),
+      ],
+      h('h5', { class: 'sub-head' }, 'Label'),
+      C('bar.label', { label: 'Show numbers', type: 'bool', def: false, structure: true }),
+      j.bar.label && [
+        C('bar.labelText', { label: 'Text', def: '', placeholder: j.bar.style === 'ring' ? '{percent}%' : '{value} / {max}', infoText: 'Use {value}, {max}, {percent} and {left}. Empty: ' + (j.bar.style === 'ring' ? '{percent}%' : '{value} / {max}') + '.' }),
+        j.bar.style !== 'ring' && C('bar.labelPos', { label: 'Where', type: 'select', options: [['inside', 'Inside'], ['above', 'Above'], ['below', 'Below'], ['right', 'To the right']], def: 'inside' }),
+        C('bar.labelColor', { label: 'Colour', type: 'color', def: '#ffffff' }),
+        j.bar.style !== 'ring' && C('bar.labelSize', { label: 'Size (0 = auto)', type: 'number', def: 0, step: 1 }),
+      ],
     ], { icon: 'hud', key: 'bar', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.bar; changed({ structure: true }); } }] }));
   }
   if (j.voxels) {
@@ -3045,7 +3082,7 @@ function renderSceneSettings(box) {
   }
   box.append(h('div', { class: 'btns', style: 'padding:12px 8px 24px' },
     h('button', { class: 'btn primary', onclick: play }, icon('play'), 'Play'),
-    h('button', { class: 'btn', onclick: exportHTML }, icon('download'), 'Build HTML')));
+    h('button', { class: 'btn', onclick: openBuildSettings }, icon('download'), 'Build…')));
 }
 
 // ============================================================================
@@ -3073,7 +3110,7 @@ const BEH_META = {
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
+  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
@@ -3893,6 +3930,7 @@ function openFileMenu() {
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
+    { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
     { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
@@ -4110,31 +4148,322 @@ function importJSON() {
   };
   fi.click();
 }
-/** One self-contained HTML file: engine source + game JSON. */
-async function exportHTML() {
-  try {
-    const src = await (await fetch(new URL('../engine/pocket.js', import.meta.url))).text();
-    const game = JSON.stringify(root).replace(/</g, '\\u003c');
-    const title = String(root.name).replace(/[<&"]/g, (c) => ({ '<': '&lt;', '&': '&amp;', '"': '&quot;' })[c]);
-    const bg = /^#[0-9a-f]{3,8}$/i.test(root.background || '') ? root.background : '#000000';
-    const html = `<!doctype html>
+// ---- Build Settings: everything about the playable file a game becomes ----
+const BUILD_DEFAULTS = {
+  title: '', version: '1.0', author: '', description: '', file: '',
+  icon: '', iconEmoji: '🎮', iconBg: '#3a8dff', ...LOADING_DEFAULTS,
+  startLevel: '1', quality: 'balanced', backGesture: true, installable: true, compress: true,
+  noMenu: true, showFps: false, showErrors: false,
+};
+const QUALITY = { battery: 1, balanced: 2, sharp: 3 };
+const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
+const buildOpts = () => ({ ...BUILD_DEFAULTS, ...(root.build || {}) });
+const kb = (n) => (n < 1024 ? n + ' B' : n < 1048576 ? Math.round(n / 1024) + ' KB' : (n / 1048576).toFixed(n < 10485760 ? 2 : 1) + ' MB');
+const escHTML = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+const hexOr = (c, d) => (/^#[0-9a-f]{3,8}$/i.test(c || '') ? c : d);
+let engineSrc = null;
+const loadEngineSrc = async () => (engineSrc ||= await (await fetch(new URL('../engine/pocket.js', import.meta.url))).text());
+
+/** The app icon as a PNG data URL: the chosen picture (cropped to a square), or an emoji on a colour. */
+function makeIcon(o, size = 512) {
+  return new Promise((ok) => {
+    const c = h('canvas', { width: size, height: size }), x = c.getContext('2d');
+    x.fillStyle = hexOr(o.iconBg, '#3a8dff'); x.fillRect(0, 0, size, size);
+    const emoji = () => { x.font = `${size * 0.6}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(o.iconEmoji || '🎮', size / 2, size * 0.54); ok(c.toDataURL('image/png')); };
+    if (!o.icon) return emoji();
+    const img = new Image();
+    img.onload = () => { const s = Math.min(img.width, img.height); x.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size); ok(c.toDataURL('image/png')); };
+    img.onerror = emoji; img.src = o.icon;
+  });
+}
+async function gzip64(text) {
+  const buf = new Uint8Array(await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  let s = ''; for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+/** The game data that goes in the build: levels left out are dropped, editor-only notes removed. */
+function buildGameJSON() {
+  const g = clone(root), o = buildOpts();
+  const all = [g, ...(g.levels || [])];
+  g.levels = (g.levels || []).filter((lv) => !lv.buildSkip);
+  for (const lv of all) delete lv.buildSkip;
+  delete g.build;
+  const kept = [g, ...g.levels], wanted = all[clampN(Math.round(+o.startLevel || 1), 1, all.length) - 1];
+  return { game: g, start: Math.max(0, kept.indexOf(wanted)), levels: kept.length, dropped: all.length - kept.length };
+}
+/** Where the size goes: the engine, the game, and its biggest pictures and sounds. */
+function sizeReport(game) {
+  const assets = [];
+  const walk = (v, where) => {
+    if (typeof v === 'string') { if (v.startsWith('data:')) assets.push({ where, kind: /^data:audio/.test(v) ? 'sound' : /^data:image/.test(v) ? 'picture' : 'file', size: v.length }); return; }
+    if (Array.isArray(v)) v.forEach((x) => walk(x, where));
+    else if (v && typeof v === 'object') for (const [k, x] of Object.entries(v)) walk(x, v.name && typeof v.name === 'string' && v.entities === undefined ? v.name : where === 'game' && k === 'sounds' ? 'Sounds' : where);
+  };
+  walk(game, 'game');
+  const sum = (k) => assets.filter((a) => a.kind === k).reduce((n, a) => n + a.size, 0);
+  return { pictures: sum('picture'), sounds: sum('sound'), top: assets.sort((a, b) => b.size - a.size).slice(0, 5) };
+}
+/** One self-contained HTML file: engine + game + app icon, splash screen and player options. */
+async function buildHTML() {
+  const o = buildOpts(), src = await loadEngineSrc(), { game, start } = buildGameJSON();
+  const title = o.title || root.name || 'My Game', bg = hexOr(root.background, '#000000'), splashBg = hexOr(o.splashBg, bg);
+  const iconURL = await makeIcon(o, 512), small = await makeIcon(o, 180);
+  const orient = { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any';
+  const manifest = { name: title, short_name: title.slice(0, 12), description: o.description || undefined, display: 'fullscreen', orientation: orient,
+    background_color: splashBg, theme_color: bg, start_url: '.', icons: [{ src: iconURL, sizes: '512x512', type: 'image/png', purpose: 'any' }] };
+  const json = JSON.stringify(game);
+  const L = loadingParts(o, { title, icon: small, bg, font: themeOf(root.settings).font });
+  const gf = (root.settings?.fonts || []).filter(Boolean), nameGF = /^"([^"]+)", system-ui, sans-serif$/.exec(o.nameFont || '')?.[1];
+  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author, fonts: gf });
+  let payload, engineBytes, gameBytes;
+  if (o.compress && typeof CompressionStream === 'function') {
+    const [E, G] = await Promise.all([gzip64(src), gzip64(json)]);
+    engineBytes = E.length; gameBytes = G.length;
+    payload = `const un = async (b) => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); };
+LD.set(0.08);
+const src = await un("${E}"); LD.set(0.45);
+const { Engine } = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))); LD.set(0.6);
+const game = JSON.parse(await un("${G}")); LD.set(0.66);
+boot(Engine, game);`;
+  } else {
+    const code = src.replace(/<\/script/gi, '<\\/script'), data = json.replace(/</g, '\\u003c');
+    engineBytes = code.length; gameBytes = data.length;
+    payload = `${code}\nLD.set(0.6);\nboot(Engine, ${data});`;
+  }
+  const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="${escHTML(title.slice(0, 20))}">
 <meta name="theme-color" content="${bg}">
-<title>${title}</title>
-<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none}</style>
+${o.description ? `<meta name="description" content="${escHTML(o.description)}">\n` : ''}${o.author ? `<meta name="author" content="${escHTML(o.author)}">\n` : ''}<meta name="generator" content="Pocket Engine">
+<title>${escHTML(title)}</title>
+<link rel="icon" type="image/png" href="${small}"><link rel="apple-touch-icon" href="${small}">
+${o.installable !== false ? `<link rel="manifest" href="data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}">\n` : ''}${nameGF ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(nameGF).replace(/%20/g, '+')}&display=swap">\n` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+${L.css}
+#fps{position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:98;font:12px monospace;color:#0f0;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;pointer-events:none}
+#err{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);z-index:100;background:#b3261e;color:#fff;font:13px/1.4 monospace;padding:10px 12px;border-radius:10px;white-space:pre-wrap;max-height:40%;overflow:auto}</style>
 </head><body>
+${L.html}
+<script>window.POCKET_BUILD = ${cfg.replace(/</g, '\\u003c')};
+${L.js}</script>
 <script type="module">
-${src.replace(/<\/script/gi, '<\\/script')}
-new Engine().start(${game});
+const C = window.POCKET_BUILD, LD = window.PocketLoading;
+if (C.noMenu) { addEventListener('contextmenu', (e) => e.preventDefault()); document.documentElement.style.webkitUserSelect = 'none'; }
+if (C.errors) { const show = (m) => { let d = document.getElementById('err'); if (!d) { d = document.createElement('div'); d.id = 'err'; d.onclick = () => d.remove(); document.body.appendChild(d); } d.textContent = (d.textContent ? d.textContent + '\\n' : '') + m; };
+  addEventListener('error', (e) => show(e.message + (e.lineno ? ' (line ' + e.lineno + ')' : ''))); addEventListener('unhandledrejection', (e) => show(String(e.reason && e.reason.message || e.reason))); }
+/** Real progress: the pictures the game uses and its fonts (up to a few seconds), then the loading screen leaves. */
+async function preload(game) {
+  const pics = new Set();
+  const walk = (v) => { if (typeof v === 'string') { if (/^data:image\\//.test(v) || /^https?:.*\\.(png|jpe?g|gif|webp|svg)(\\?|$)/i.test(v)) pics.add(v); } else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') for (const k in v) walk(v[k]); };
+  walk(game);
+  const jobs = [...pics].map((u) => new Promise((ok) => { const i = new Image(); i.onload = i.onerror = ok; i.src = u; }));
+  for (const f of C.fonts || []) { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(f).replace(/%20/g, '+') + '&display=swap'; jobs.push(new Promise((ok) => { l.onload = () => (document.fonts ? document.fonts.load('16px "' + f + '"').then(ok, ok) : ok()); l.onerror = ok; })); document.head.appendChild(l); }
+  let n = 0; const all = jobs.length;
+  if (!all) return;
+  await Promise.race([Promise.all(jobs.map((j) => j.then(() => LD.set(0.66 + 0.32 * (++n / all))))), new Promise((ok) => setTimeout(ok, 6000))]);
+}
+async function boot(Engine, game) {
+  await preload(game); LD.set(1);
+  LD.done(() => {
+    window.engine = new Engine({ maxPixelRatio: C.dpr, systemBack: C.back });
+    window.engine.start(game, { level: C.start });
+    if (C.fps) { const f = document.createElement('div'); f.id = 'fps'; document.body.appendChild(f); let n = 0, last = performance.now(); const tick = (now) => { n++; if (now - last >= 500) { f.textContent = Math.round(n * 1000 / (now - last)) + ' fps'; n = 0; last = now; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+  });
+}
+${payload}
 </script>
 </body></html>`;
-    download(slug(root.name) + '.html', html, 'text/html');
-    toast('Build complete: open the HTML file in any browser');
-  } catch (err) {
-    toast('Build failed: ' + err.message);
-  }
+  return { html, title, engineBytes, gameBytes };
+}
+function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
+async function exportHTML() {
+  try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
+  catch (err) { toast('Build failed: ' + err.message); }
+}
+async function shareBuild() {
+  try {
+    const b = await buildHTML(), file = new File([b.html], buildFileName(), { type: 'text/html' });
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], title: b.title }); } catch { /* cancelled */ } return; }
+    download(buildFileName(), b.html, 'text/html'); toast('Sharing files isn\'t available here, so it was downloaded');
+  } catch (err) { toast('Build failed: ' + err.message); }
+}
+async function testBuild() {
+  const w = window.open('', '_blank');
+  try { const b = await buildHTML(), url = URL.createObjectURL(new Blob([b.html], { type: 'text/html' })); if (w) w.location = url; else location.assign(url); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+  catch (err) { w?.close(); toast('Build failed: ' + err.message); }
+}
+
+const ldOpen = new Set(['Background']); // which loading-screen groups are unfolded
+/** Build Settings → Loading screen: presets, a live phone preview and every setting, in folding groups. */
+function loadingDesigner(B, C, o, redo) {
+  const frame = h('iframe', { class: 'ld-frame', title: 'Loading screen preview', sandbox: 'allow-scripts' });
+  const doc = async (preview) => {
+    const cur = buildOpts(), title = cur.title || root.name || 'My Game', bg = hexOr(root.background, '#000000');
+    const L = loadingParts(cur, { title, icon: await makeIcon(cur, 180), bg, font: themeOf(root.settings).font, preview });
+    const gfName = /^"([^"]+)", system-ui, sans-serif$/.exec(cur.nameFont || '')?.[1];
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${gfName ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(gfName).replace(/%20/g, '+')}&display=swap">` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden}${L.css}</style></head><body>${L.html}<div style="position:fixed;inset:0;display:grid;place-items:center;color:#fff8;font:600 15px system-ui;z-index:0">Your game starts here</div><script>${L.js}</script></body></html>`;
+  };
+  let tm = 0;
+  const refresh = () => { clearTimeout(tm); tm = setTimeout(async () => { frame.srcdoc = await doc(true); }, 150); };
+  refresh();
+  const full = async () => { // the real thing, full screen: fills up, waits, leaves, then offers to replay
+    const f = h('iframe', { class: 'ld-full-frame', sandbox: 'allow-scripts' });
+    const play = async () => { const d = await doc(false); f.srcdoc = d.replace('</body>', `<script>var s=[0.2,0.45,0.5,0.75,0.9,1],i=0;var iv=setInterval(function(){PocketLoading.set(s[i++]);if(i>=s.length){clearInterval(iv);PocketLoading.done(function(){})}},400);</script></body>`); };
+    const wrap = h('div', { class: 'ld-full' }, f, h('div', { class: 'ld-full-btns' },
+      h('button', { class: 'btn', onclick: play }, icon('redo'), 'Replay'), h('button', { class: 'btn primary', onclick: () => wrap.remove() }, icon('close'), 'Close')));
+    document.body.append(wrap); play();
+  };
+  const fonts = [['', 'Game font'], ...FONTS.filter(([v]) => v !== 'theme'), ...(root.settings?.fonts || []).filter(Boolean).map((n) => [googleFont(n), n + ' (Google)'])];
+  const pic = (key, label, max) => h('div', { class: 'row full' }, h('label', {}, label), h('div', { class: 'pair img-pick' },
+    o[key] ? h('img', { class: 'img-thumb', src: o[key], alt: '' }) : h('span', { class: 'muted' }, 'None'),
+    h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { B()[key] = url; changed(); redo(); }, max) }, o[key] ? 'Change' : 'Choose image'),
+    o[key] ? h('button', { type: 'button', class: 'btn', onclick: () => { B()[key] = ''; changed(); redo(); } }, 'Clear') : null));
+  const R = C;
+  const sel = (path, spec) => { const el = C(path, spec); el.querySelector('select')?.addEventListener('change', redo); return el; };
+  const group = (title, kids) => h('details', { class: 'ld-group', open: ldOpen.has(title), ontoggle: (e) => { if (e.target.open) ldOpen.add(title); else ldOpen.delete(title); } }, h('summary', {}, title), kids);
+  const hasAmount = !['dots', 'spinner', 'none'].includes(o.bar);
+  const wrap = h('div', { class: 'ld' },
+    h('div', { class: 'ld-top' },
+      h('div', { class: 'ld-phone' }, frame),
+      h('div', { class: 'ld-side' },
+        h('div', { class: 'ld-presets' }, Object.keys(LOADING_PRESETS).map((n) => h('button', { type: 'button', class: 'btn', onclick: () => { Object.assign(B(), LOADING_PRESETS[n]); changed(); redo(); toast(n + ' look'); } }, n))),
+        h('button', { type: 'button', class: 'btn', onclick: full }, icon('play'), 'Preview'))),
+    sel('splash', { label: 'Show', type: 'select', options: [['logo', 'Picture and name'], ['text', 'Name and text only'], ['none', 'Nothing (start right away)']] }),
+    o.splash !== 'none' && [
+      group('Background', [
+        R('splashBg', { label: 'Colour', type: 'color', optional: true }),
+        R('splashBg2', { label: 'Second colour', type: 'color', optional: true }),
+        o.splashBg2 && R('splashGrad', { label: 'Blend', type: 'select', options: [['down', 'Top to bottom'], ['across', 'Left to right'], ['diagonal', 'Diagonal'], ['glow', 'Glow from the middle']] }),
+        pic('splashImage', 'Picture', 1280),
+        o.splashImage && [R('splashFit', { label: 'Picture fits', type: 'select', options: [['cover', 'Fill the screen'], ['contain', 'Whole picture'], ['tile', 'Repeat (tiles)']] }),
+          R('splashDim', { label: 'Darken picture', type: 'number', step: 0.05, range: [0, 0.9] })],
+      ]),
+      group('Logo and name', [
+        o.splash === 'logo' && [
+          sel('logo', { label: 'Picture', type: 'select', options: [['icon', 'The app icon'], ['picture', 'Another picture'], ['none', 'None']] }),
+          o.logo === 'picture' && pic('logoImage', 'Logo picture', 512),
+          o.logo !== 'none' && [R('logoSize', { label: 'Size', type: 'number', step: 8, range: [40, 220] }),
+            R('logoShape', { label: 'Shape', type: 'select', options: [['rounded', 'Rounded square'], ['circle', 'Circle'], ['square', 'Square'], ['none', 'As it is (no frame)']] }),
+            R('logoAnim', { label: 'Animation', type: 'select', options: [['none', 'None'], ['pulse', 'Pulse'], ['bounce', 'Bounce'], ['float', 'Float'], ['spin', 'Spin'], ['glow', 'Glow']] })],
+        ],
+        R('showName', { label: 'Show the name', type: 'bool' }),
+        R('nameFont', { label: 'Font', type: 'select', options: fonts }),
+        R('nameColor', { label: 'Colour', type: 'color' }),
+        R('nameSize', { label: 'Size', type: 'number', step: 2, range: [12, 60] }),
+      ]),
+      group('Loading bar', [
+        h('div', { class: 'ld-bars' }, BAR_STYLES.map(([v, l]) => h('button', { type: 'button', class: 'btn' + (o.bar === v ? ' primary' : ''), onclick: () => { B().bar = v; changed(); redo(); } }, l))),
+        o.bar !== 'none' && [
+          R('barColor', { label: 'Colour', type: 'color' }),
+          hasAmount && o.bar !== 'ring' && o.bar !== 'blocks' && R('barColor2', { label: 'Blend to', type: 'color', optional: true }),
+          R('barTrack', { label: 'Empty part', def: '', placeholder: 'rgba(255,255,255,0.18)' }),
+          hasAmount && R('barWidth', { label: 'Width', type: 'number', step: 10, range: [60, 340] }),
+          R('barPos', { label: 'Where', type: 'select', options: [['under', 'Under the name'], ['bottom', 'Near the bottom']] }),
+          hasAmount && R('barLabel', { label: 'Label', def: '', placeholder: o.bar === 'thick' || o.bar === 'ring' ? '{percent}%' : 'e.g. Loading… {percent}%' }),
+          hasAmount && h('p', { class: 'desc' }, 'The bar follows the real loading: unpacking the game, then its pictures and fonts. {percent} shows the amount.'),
+        ],
+      ]),
+      group('Text and tips', [
+        R('splashText', { label: 'Text', def: '' }),
+        R('textColor', { label: 'Text colour', type: 'color', optional: true }),
+        R('tips', { label: 'Tips (separate with |)', def: '', placeholder: 'Tip: jump twice to fly | Tip: coins buy hats' }),
+        R('tipEvery', { label: 'Next tip every (sec)', type: 'number', step: 0.5, range: [1, 10] }),
+        R('credit', { label: '“Made with Pocket Engine”', type: 'bool' }),
+      ]),
+    ],
+    group('Finish', [
+      R('splashTime', { label: 'Show for at least (sec)', type: 'number', step: 0.5, range: [0, 6] }),
+      R('tapToStart', { label: 'Tap to Start', type: 'bool' }),
+      R('tapText', { label: 'Tap text', def: 'Tap to start' }),
+      R('exit', { label: 'Leaves with', type: 'select', options: [['fade', 'Fade'], ['slide up', 'Slide up'], ['zoom', 'Zoom'], ['wipe', 'Circle wipe'], ['none', 'Cut']] }),
+      h('p', { class: 'desc' }, 'Tap to Start waits for a tap before the game begins, so sounds and music can play straight away (phones need a tap first).'),
+    ]),
+  );
+  wrap.addEventListener('input', refresh);
+  wrap.addEventListener('change', (e) => { refresh(); if (e.target.matches('input[type=checkbox], select') && !e.target.closest('.ld-top')) redo(); }); // fields that show or hide other fields
+  return wrap;
+}
+
+function openBuildSettings() {
+  saveNow();
+  const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
+  const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
+  const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
+  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
+  const report = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Working out the size…'));
+  const lvls = levelList();
+
+  const updateReport = async () => {
+    try {
+      const { game } = buildGameJSON(), r = sizeReport(game), b = await buildHTML();
+      const row = (l, v, cls = '') => h('div', { class: 'br-row ' + cls }, h('span', {}, l), h('b', {}, v));
+      report.replaceChildren(...[
+        row('Total file size', kb(b.html.length), 'total'),
+        row('Engine', kb(b.engineBytes)),
+        row('Game data', kb(b.gameBytes)),
+        r.pictures ? row('· pictures', kb(r.pictures)) : null,
+        r.sounds ? row('· sounds', kb(r.sounds)) : null,
+        r.top.length ? h('div', { class: 'br-sub' }, 'Biggest files: ' + r.top.map((a) => `${a.where === 'game' ? root.name : a.where} (${a.kind}, ${kb(a.size)})`).join(', ')) : null,
+        b.html.length > 15 * 1048576 ? h('p', { class: 'desc warn' }, 'This is a big file. Smaller pictures and shorter sounds make it load faster.') : null,
+        !o.compress ? h('p', { class: 'desc' }, 'Tip: turn on Compress to make the file about 3× smaller.') : null].filter(Boolean));
+    } catch (err) { report.replaceChildren(h('div', { class: 'muted' }, 'Could not measure: ' + err.message)); }
+  };
+
+  openDialog('Build Settings', [
+    h('p', { class: 'desc' }, 'Your game becomes one HTML file that plays in any phone or computer browser, offline, and can be added to the Home Screen like an app.'),
+    sec('App', 'phone', [
+      h('div', { class: 'build-app' }, preview, h('div', { class: 'build-app-t' }, h('b', {}, o.title || root.name), h('small', {}, [o.version && 'Version ' + o.version, o.author].filter(Boolean).join(' · ') || 'Pocket Engine game'))),
+      C('title', { label: 'Name', def: root.name }),
+      C('version', { label: 'Version' }),
+      C('author', { label: 'Made by' }),
+      C('description', { label: 'Description' }),
+      C('file', { label: 'File name', def: slug(o.title || root.name) }),
+    ]),
+    sec('Icon', 'image', [
+      h('div', { class: 'row full' }, h('label', {}, 'Picture'), h('div', { class: 'pair img-pick' },
+        o.icon ? h('img', { class: 'img-thumb', src: o.icon, alt: '' }) : h('span', { class: 'muted' }, 'Emoji'),
+        h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { B().icon = url; changed(); redo(); }, 512) }, o.icon ? 'Change' : 'Choose image'),
+        o.icon ? h('button', { type: 'button', class: 'btn', onclick: () => { B().icon = ''; changed(); redo(); } }, 'Clear') : null)),
+      !o.icon && h('div', { class: 'row' }, h('label', {}, 'Emoji'), h('input', { type: 'text', value: o.iconEmoji, maxLength: 8, onchange: (e) => { B().iconEmoji = e.target.value.trim() || '🎮'; changed(); redo(); } })),
+      h('div', { class: 'row' }, h('label', {}, 'Background'), h('input', { type: 'color', value: hexOr(o.iconBg, '#3a8dff').slice(0, 7), onchange: (e) => { B().iconBg = e.target.value; changed(); redo(); } })),
+      h('p', { class: 'desc' }, 'Shown on the Home Screen, in the browser tab and on the loading screen.'),
+    ]),
+    sec('Loading screen', 'clock', loadingDesigner(B, C, o, redo)),
+    sec('Levels', 'layers', [
+      lvls.length > 1 ? h('div', { class: 'build-lvls' }, lvls.map((lv, i) => h('label', { class: 'build-lvl' },
+        h('input', { type: 'checkbox', checked: !lv.buildSkip, disabled: i === 0, onchange: (e) => { if (e.target.checked) delete lv.buildSkip; else lv.buildSkip = true; changed(); updateReport(); } }),
+        h('span', {}, `${i + 1}. ${levelName(lv, i)}`), i === 0 ? h('small', {}, 'always included') : null))) : h('p', { class: 'desc' }, 'One level. Add more with ☰ → Levels.'),
+      lvls.length > 1 && C('startLevel', { label: 'Start at level', type: 'select', def: '1', options: lvls.map((lv, i) => [String(i + 1), `${i + 1}. ${levelName(lv, i)}`]) }),
+      lvls.length > 1 && h('p', { class: 'desc' }, 'Untick a level to leave it out (unfinished levels). Starting at a later level is handy for testing it.'),
+    ]),
+    sec('Player', 'gamepad', [
+      C('quality', { label: 'Graphics', type: 'select', options: [['battery', 'Battery saver (fastest)'], ['balanced', 'Balanced'], ['sharp', 'Sharpest (slower)']] }),
+      C('backGesture', { label: 'Back gesture goes back in menus', type: 'bool' }),
+      C('noMenu', { label: 'Block long-press menus and text selection', type: 'bool' }),
+      C('installable', { label: 'Can be added to the Home Screen', type: 'bool' }),
+      h('p', { class: 'desc' }, `Plays ${{ portrait: 'in portrait', landscape: 'in landscape', any: 'either way up' }[orientationOf()]} (change it in Scene Settings). Fullscreen, pause, mute and save options are in Scene Settings too.`),
+    ]),
+    sec('File size', 'download', [
+      C('compress', { label: 'Compress (much smaller file)', type: 'bool' }),
+      h('p', { class: 'desc' }, 'Needs a browser from 2023 or later (iOS 16.4+). Turn it off for very old phones.'),
+      report,
+    ]),
+    sec('Testing', 'bulb', [
+      C('showFps', { label: 'Show frame rate', type: 'bool' }),
+      C('showErrors', { label: 'Show errors on screen', type: 'bool' }),
+      h('p', { class: 'desc' }, 'Handy while testing on another phone. Turn them off for the finished game.'),
+    ]),
+    h('div', { class: 'btns build-btns' },
+      h('button', { class: 'btn primary', onclick: exportHTML }, icon('download'), 'Build'),
+      h('button', { class: 'btn', onclick: shareBuild }, icon('external'), 'Share'),
+      h('button', { class: 'btn', onclick: testBuild }, icon('play'), 'Test')),
+  ]);
+  // settings that change the look or size refresh the report when edited
+  $('.dialog .db').addEventListener('change', () => { if (root.build && !root.build.title) delete root.build.title; updateReport(); });
+  updateReport();
 }
 
 // ============================================================================

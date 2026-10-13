@@ -81,6 +81,22 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
 
+**Build Settings** (*☰ → Build Settings…*, or **Build…** at the bottom of Scene Settings) decide what that file becomes:
+- **App:** name, version, author, description and file name.
+- **Icon:** your own picture, or an emoji on a colour. It shows on the Home Screen, in the browser tab and on the loading screen.
+- **Loading screen designer**, with a live phone preview and a full-screen **Preview**:
+  - **Presets:** Classic, Minimal, Neon, Retro, Candy, Cinematic, Storybook and Arcade, set in one tap.
+  - **Background:** a colour, a second colour blended in (top to bottom, across, diagonal or a glow from the middle), and your own picture (fill, whole or tiled, with darkening).
+  - **Logo and name:** the app icon, another picture or none; size, shape (rounded, circle, square, as it is) and animation (pulse, bounce, float, spin, glow); the name's font (including the game's Google Fonts), colour and size.
+  - **Loading bar:** thin line, rounded, thick with %, striped (moving), retro blocks, glowing, ring, bouncing dots, spinner or none. Set its colours (with a blend), the empty part, width, position and a label with `{percent}`. The bar follows the real loading: unpacking the engine and game, then the game's pictures and fonts.
+  - **Text and tips:** extra text, rotating tips (separate with `|`) and an optional "Made with Pocket Engine" line.
+  - **Finish:** minimum time, **Tap to Start** with your own text (so music can play straight away), and how it leaves (fade, slide up, zoom, circle wipe or cut).
+- **Levels:** untick unfinished levels to leave them out, and pick the level to start at (handy for testing).
+- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, blocking long-press menus, and whether it can be added to the Home Screen as an app.
+- **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
+- **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
+- **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.
+
 ### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
 
 Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
@@ -159,6 +175,9 @@ The editor fills the screen:
   - **Math, more:** **Formula** (type any math with up to four inputs a–d and game variables: `a * 2 + b`, `sqrt(a^2 + b^2)`, `score / 10`, `max(a, lives)`; + − × ÷ % ^, comparisons, and sin cos tan asin acos atan atan2 abs floor ceil round sqrt pow min max clamp lerp sign log exp mod random; no code is run, a typo just gives 0 and a Console warning), **Random Between** (with inputs, whole numbers or not), **Random Pick**, **Smooth Noise** (drifting random for wobbles and flicker), **Inverse Lerp**, **Move Towards Value**, **Angle Difference**, **Wrap Around**, **Round To Decimals**, **Percent Of**, **Ease Curve** (any easing), **Vector Length**, **Distance / Angle between points**, **Min / Max / Average / Sum**, **Is Between**, **Is Even**; **Math (one value)** adds tan, square, cube root, reciprocal, fraction, log and exp.
   - **Game, more:** **Add Score** (with a "+10" pop-up), **Lose a Life** (*no lives left* → game over if you like), **Gain a Life** (up to a maximum), **Check Best Score** (*new best* saves it), **Add / Set Time**, **Restart Level**, **Set Checkpoint** + **Respawn Player**, **Use Item** (*used* / *not enough*) and **Has Item**, **Add Combo** (`{combo}` resets after a pause), **Unlock Achievement** (once per device, with a 🏆 message; *first time* / *already*) and **Is Unlocked**, **Hit Stop** (a freeze-frame on big hits), **Set Game Speed**, **Say** (a dialogue box with a *closed* output), **Game Value** (score, lives, best, time left, combo, level, levels) and **Game State Is**.
   - **Variables** (gold): **Set / Add To My Variable** and **My Variable** (each object keeps its own, so every enemy has its own hp; text on the object shows it with `{hp}`), **Set Other's Variable / Other's Variable**, **Variable Of Object**, and **When Variable Reaches** (runs once when, say, score ≥ 100).
+  - **Variables, more:** **Change Variable** (set, add, subtract, multiply, divide, min, max, power or mod; for the game, this object, or *other*), **Clamp Variable**, **Copy Variable**, **Toggle My Variable**, **Reset Variables** (back to their starting values), **Set Text Variable** (words, with `{braces}`) and **Text Variable Is** (equals / contains / starts with / empty), **Save / Load / Forget Variable** on the device (coins, settings, unlocked levels; *loaded* / *not saved yet*), and per-object events **On My Variable Changed** and **When My Variable Reaches** (hp ≤ 0 → die).
+  - **Lists** (brown): lists of numbers kept in a variable and shown in text as `1, 2, 3`. **Add** (end or start), **Remove** (last, first, a position or a value; *nothing removed*), **Set At**, **Clear**, **Shuffle / Sort / Reverse**, **Fill With Numbers** (1–10 → a deck), **For Each** (with **Loop Item**); values **Item At**, **Length**, **Contains**, **Position Of**, **Random Item**, **Sum / Min / Max / Average**. Positions start at 1.
+  - **Functions, more:** **Function** (a named piece of script) with **Function Input** (a, b, c) and **Return Value**, used through **Call Function** (as a number, e.g. inside a Formula) or **Run Function** (as a step, optionally storing the result); functions can call each other and themselves (20 deep). **Call Event Later** runs a Custom Event after a delay; **Caller Has Tag** checks who called a Custom Event.
   - **Functions** (indigo): **Custom Event** + **Call Custom Event** (on this object, *other*, everything with a tag, or everywhere, with a number read by **Event Value**), and **Comment** sticky notes.
   - **More flow:** **For Range** (from → to by step), **Repeat Every** (every N seconds, N times or forever, with **Stop Repeat**), **Cycle** (1, 2, 3, 1…), **Weighted Random**, **Gate** + **Open / Close Gate**, **Wait Frames**. **Touch:** **On Long Press**, **On Double Tap** (on this object). **Objects:** **Attach To** / **Detach** (carry things, ride platforms), **Spawn & Launch** (facing, up, down, toward the finger, toward a tag, random). **Move:** **Move To Finger**, **Look At Finger**. **Game:** **Pause / Resume**. **Values / Math:** **Direction To**, **Distance Between**, **Snap To Step**, **Ping Pong**, **Sign**, **Smooth**, **Chance %**, **Fingers On Screen**, **Is Paused**, **Child Count**; **Position Of** also gives rotation, scale and opacity.
   - **Physics** (rust): **On Trigger Enter / Exit**, **While In Trigger**, **On Collision Enter** (with an optional *only harder than* speed) / **Exit**, **While Colliding**, **On Landed**, **On Left Ground**; **Add Force** (steady force, one-off impulse or velocity change; mass-aware), **Explosion Force** (blasts nearby physics objects away, stronger close up), **Set Body Type**, **Make Trigger / Solid**, **Set Collision Layer**, **Set Bounce & Friction** (and mass); values **Impact Speed**, **Is In Trigger**, **Is Colliding**. Trigger and collision events work on any object: one without a collider gets a trigger (or a solid body for collision events).
@@ -259,12 +278,26 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 
 - One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle) and Grid steps. Only the settings that matter for the chosen type are shown, with a tip for each.
 
+### Progress bars and in-game loading screens
+
+- **Progress Bar** looks: flat, striped (moving), blocks, glossy or glowing. Bars can fill left to right, right to left, bottom to top, top to bottom or from the middle, blend to a second colour and have a border.
+- **Motion:** how fast it follows the value, a **damage trail** (the lost part lingers, then slides away), a **warning colour** that pulses below a set amount, and **Busy** for waiting when you don't know how long it takes.
+- **Label:** your own text with `{value}`, `{max}`, `{percent}` and `{left}`, placed inside, above, below or to the right, with its colour and size. Rings get a thickness, blocks and glow too.
+- **Loading Screen** component (on a full-screen panel): fills a variable (`loading`) from 0 to 100 with a pace (realistic stops and starts, steady, fast then slow, slow then fast, or steps), waits for pictures and fonts, rotates tips into `{tip}`, pauses the game and hides touch controls while it shows, can wait for a tap at 100%, then hides with a fade, slide or zoom and does an action (by default it sends the message `loaded`). It can start with the game or when a message arrives.
+- **Project → UI → Loading:** ready-made Classic, Retro and Ring loading screens, a **Level Loading** screen that appears on the message `loading` and then goes to the next level, plus Striped Loading Bar, Busy Bar, Battery Blocks, Boss Health with a damage trail, Vertical Gauge and Loading Ring.
+
 ### Tap and click components
 
 - **Click Popup**: a floating "+1" (any text, with `{score}` etc.) rises where the object is tapped.
 - **Combo Clicker**: tap for points; quick taps build a combo multiplier (`{combo}`), with critical hits, popups, squash and sparkles.
 - **Long Press**: hold a finger on it for a moment (a ring fills up) to do any Button action.
 - **Double Tap**: two quick taps do any Button action.
+- **Button** settings:
+  - **When it fires**: on tap (finger lifted on it), on press (finger lands), while held (repeats every N seconds, after a short pause) or on long press (hold for N seconds). **Only once** makes a one-shot button.
+  - **Look & feel**: how far it squashes while pressed, an optional pressed colour, and a buzz.
+  - **Only works when…**: a variable check such as `level ≥ 3`. Until then the button fades out and does nothing.
+  - **Cost & cooldown**: spend a variable (for example 10 `coins`) each time; it fades out when you can't afford it, shakes and sends an optional "denied" message. A cooldown dims it with a sweep and a countdown.
+  - **Also send message**: send a message as well as doing the action.
 - **Tap Toggle**: each tap switches on/off: a 0/1 variable, its colour, another object's visibility, and an "on/off" message.
 - **Press Feedback**: squashes the moment a finger lands, springs back on release, with sound, buzz and optional sparkles (great on UI buttons).
 - **Tap to Spawn**: tapping empty space (or anywhere) creates a template there; cooldown, max count and an optional cost.
@@ -347,6 +380,13 @@ Everything inside a panel that has *Show when* (title, game over, paused…) now
 - **UI Theme** (Game Settings): pick a ready-made look (Default, Neon, Candy, Retro, Fantasy, Ocean, Light) or set your own font, text, accent, panel, dimming, touch-control, win and lose colours and corner roundness. The built-in title, pause and game-over screens, touch buttons, joystick, messages and dialogs all follow it, as does any text whose font is **Theme font** (the default for new text). **Apply to my UI** restyles everything you already made; **Use Theme** does one element.
 - **Fonts:** eleven built-in fonts plus any **Google Font** (*More fonts…*; it downloads the first time a player opens the game). The theme can use one too.
 - **Text:** gradient colour, italic, UPPERCASE / lowercase, letter spacing, wrap width with line spacing (type `\n` for a line break), outline, and a drop shadow with its own colour.
+- **More text options:**
+  - **Glow**, **underline** and **strikethrough**.
+  - **Number format** for `{variables}`: short (1.2K, 3.4M), whole number, 2 decimals, time (m:ss), percent, or plain.
+  - **Shrink to fit**: the text gets smaller so it never runs wider than a set width.
+  - **Lines grow**: from the middle, downward or upward.
+  - **Label box**: a rounded background behind the text, with padding and corner settings.
+  - **Animation**: wave, bounce, shake, rainbow (moving letter by letter), pulse or float.
 - **Shapes:** gradient fill (down, across, diagonal or from the centre), soft drop shadow with distance, dashed outlines.
 - **Images:** rounded corners (round avatars) and **9-slice** (corners stay sharp while the middle stretches). The new **UI Frames** sprites (wood, stone, glass, parchment, gold and neon panels; blue, green, red, yellow, purple and grey buttons) are drawn for it and set it up by themselves.
 - **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.

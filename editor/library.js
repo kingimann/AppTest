@@ -257,4 +257,48 @@ export const UI_WIDGETS_MORE = [
   { icon: 'clock', label: 'Loading Spinner', group: 'Text & HUD', props: { name: 'Spinner', ui: true, anchor: 'center', x: 0, y: 0, shape: { type: 'ring', r: 22, fill: '', stroke: '#4fa3ff', lineWidth: 5 },
     behaviors: [{ type: 'tween', effect: 'spin', angle: 360, duration: 1, ease: 'linear', loops: -1, loopType: 'incremental', delay: 0, playOn: 'start' }],
     children: [{ name: 'Spinner Gap', ui: true, anchor: 'center', x: 0, y: -22, shape: { type: 'circle', r: 7, fill: '#0b0b1a' } }] } },
+
+  // ---- Loading screens (in the game) and loading bars ----
+  ...loadingScreens(),
+  { icon: 'hud', label: 'Striped Loading Bar', group: 'Loading', props: { name: 'Loading Bar', ui: true, anchor: 'center', x: 0, y: 0, bar: { var: 'loading', max: 100, w: 260, h: 22, fill: '#4fa3ff', fill2: '#7c4dff', bg: 'rgba(255,255,255,0.12)', radius: 11, look: 'striped', label: true, labelText: '{percent}%', labelPos: 'below' } }, vars: { loading: 40 } },
+  { icon: 'hud', label: 'Busy Bar (unknown time)', group: 'Loading', props: { name: 'Busy Bar', ui: true, anchor: 'center', x: 0, y: 0, bar: { var: 'loading', max: 100, w: 220, h: 6, fill: '#ffffff', bg: 'rgba(255,255,255,0.15)', radius: 3, busy: true } } },
+  { icon: 'hud', label: 'Battery Blocks', group: 'Loading', props: { name: 'Battery', ui: true, anchor: 'top-left', x: 100, y: 80, bar: { var: 'energy', max: 100, w: 150, h: 24, fill: '#5dff8a', bg: 'rgba(0,0,0,0.45)', radius: 4, look: 'segments', segments: 8, border: '#ffffff', borderWidth: 1, lowAt: 0.25, lowColor: '#ff5252' } }, vars: { energy: 70 } },
+  { icon: 'hud', label: 'Boss Health (damage trail)', group: 'Loading', props: { name: 'Boss Health', ui: true, anchor: 'top', x: 0, y: 70, bar: { var: 'bossHp', max: 500, w: 320, h: 18, fill: '#ff3d57', fill2: '#ff9a3d', bg: 'rgba(0,0,0,0.6)', radius: 4, trail: '#fff3b0', border: '#ffffff', borderWidth: 2, look: 'glossy', label: true, labelText: 'BOSS', labelPos: 'above', smooth: 'snappy' } }, vars: { bossHp: 500 } },
+  { icon: 'hud', label: 'Vertical Gauge', group: 'Loading', props: { name: 'Gauge', ui: true, anchor: 'right', x: -40, y: 0, bar: { var: 'power', max: 100, w: 22, h: 200, fill: '#ffd23d', fill2: '#ff5d8f', bg: 'rgba(0,0,0,0.45)', radius: 11, dir: 'up', look: 'glow' } }, vars: { power: 60 } },
+  { icon: 'clock', label: 'Loading Ring', group: 'Loading', props: { name: 'Loading Ring', ui: true, anchor: 'center', x: 0, y: 0, bar: { var: 'loading', max: 100, w: 110, h: 110, fill: '#33f0ff', bg: 'rgba(255,255,255,0.1)', radius: 0, style: 'ring', thick: 0.14, look: 'glow', label: true } }, vars: { loading: 65 } },
 ];
+
+/** Ready-made in-game loading screens: a full-screen panel with a Loading Screen component, a bar, the percent and tips. */
+function loadingScreens() {
+  const screen = (label, name, bg, kids, loader, note) => ({ icon: 'clock', label, group: 'Loading', note,
+    props: { name, ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, ignoreSafe: true, shape: { type: 'rect', w: 400, h: 800, radius: 0, fill: bg },
+      behaviors: [{ type: 'loader', var: 'loading', seconds: 2.5, pace: 'realistic (stops and starts)', waitAssets: true, startOn: 'when the game starts', message: 'loading', pauseGame: true,
+        tips: 'Tip: jump on enemies to beat them | Tip: collect coins for extra lives | Tip: hold the button to charge up', tipVar: 'tip', tipEvery: 3,
+        tapToContinue: false, tapText: 'Tap to continue', hideSelf: true, exit: 'fade', fade: 0.4, action: 'send message', value: 'loaded', amount: 1, sound: 'none', ...loader }] },
+    children: kids, vars: { loading: 0, tip: '' } });
+  const T = (name, y, value, size, color, extra = {}) => ({ name, ui: true, anchor: 'center', x: 0, y, text: { value, size, color, weight: '800', ...extra } });
+  const B = (name, y, bar) => ({ name, ui: true, anchor: 'center', x: 0, y, bar: { var: 'loading', max: 100, radius: 0, ...bar } });
+  return [
+    screen('Loading Screen (classic)', 'Loading Screen', '#0e1222', [
+      T('Loading Title', -90, 'MY GAME', 40, '#ffffff', { weight: '900' }),
+      B('Loading Screen Bar', 10, { w: 260, h: 18, fill: '#4fa3ff', fill2: '#7c4dff', bg: 'rgba(255,255,255,0.12)', radius: 9, look: 'striped' }),
+      T('Loading Percent', 46, 'Loading… {loading}%', 16, '#b8c4e0', { weight: '600' }),
+      T('Loading Tip', 150, '{tip}', 15, '#8a96b4', { weight: '500', wrap: 300 }),
+    ], {}, 'Covers the game while it starts. The bar and text use the variable loading; tips show with {tip}. Sends the message "loaded" when it hides.'),
+    screen('Loading Screen (retro)', 'Retro Loading', '#000000', [
+      T('Retro Title', -80, 'LOADING', 30, '#41ff00', { font: 'ui-monospace, Menlo, Consolas, monospace', spacing: 6 }),
+      B('Retro Bar', 0, { w: 260, h: 26, fill: '#41ff00', bg: 'rgba(65,255,0,0.12)', look: 'segments', segments: 12, border: '#41ff00', borderWidth: 1 }),
+      T('Retro Percent', 42, '{loading}%', 18, '#41ff00', { font: 'ui-monospace, Menlo, Consolas, monospace' }),
+      T('Retro Tip', 140, '{tip}', 14, '#2fae00', { font: 'ui-monospace, Menlo, Consolas, monospace', wrap: 300 }),
+    ], { pace: 'steps', tapToContinue: true, tapText: 'PRESS TO START' }, 'A pixel-style loader that waits for a tap at 100%.'),
+    screen('Loading Screen (ring)', 'Ring Loading', '#140a24', [
+      B('Ring Loader', -20, { w: 130, h: 130, fill: '#ff5df0', bg: 'rgba(255,255,255,0.08)', style: 'ring', thick: 0.12, look: 'glow', label: true, labelColor: '#ffffff' }),
+      T('Ring Tip', 110, '{tip}', 15, '#c9b6e8', { weight: '500', wrap: 300 }),
+    ], { exit: 'zoom' }, 'A glowing ring with the percent inside. Zooms away when done.'),
+    screen('Level Loading (between levels)', 'Level Loading', '#0b0b1a', [
+      T('Level Loading Title', -40, 'Level {level} complete!', 26, '#ffd23d', { weight: '900' }),
+      B('Level Loading Bar', 20, { w: 240, h: 10, fill: '#ffd23d', bg: 'rgba(255,255,255,0.12)', radius: 5 }),
+      T('Level Loading Tip', 80, '{tip}', 15, '#a9b2c8', { weight: '500', wrap: 300 }),
+    ], { startOn: 'on a message', message: 'loading', seconds: 1.5, pace: 'fast then slow', action: 'next level', value: '' }, 'Hidden until something sends the message "loading" (e.g. a Goal Flag or a node). It fills up, then goes to the next level.'),
+  ];
+}

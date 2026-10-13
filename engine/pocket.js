@@ -1850,6 +1850,7 @@ export function formatNumber(v) {
 }
 const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
+  if (Array.isArray(v)) return v.map((q) => (typeof q === 'number' ? formatNumber(q) : q)).join(', ') || '—'; // lists read "1, 2, 3"
   if (typeof v !== 'number') return v ?? '';
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
@@ -6574,6 +6575,41 @@ export const NODE_TYPES = {
   sayLine: { cat: 'Game', label: 'Say (dialogue box)', exec: true, outs: ['then', 'closed'], params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello! Score: {score}', 'text'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
   gameValue: { cat: 'Game', label: 'Game Value', value: 'number', params: [opt('what', ['score', 'lives', 'best', 'time left', 'combo', 'level', 'levels'], 'score', 'what')] },
   gameStateIs: { cat: 'Game', label: 'Game State Is', value: 'bool', params: [opt('state', ['playing', 'title', 'game over', 'won', 'paused'], 'playing', 'state')] },
+  // more variables: change with any operation, text, saved on the device, per-object events, lists
+  changeVar: { cat: 'Variables', label: 'Change Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable'), opt('op', ['set', 'add', 'subtract', 'multiply', 'divide', 'min', 'max', 'power', 'mod'], 'add', 'do'), opt('scope', ['game', 'this object', 'other'], 'game', 'whose')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  clampVar: { cat: 'Variables', label: 'Clamp Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable'), opt('scope', ['game', 'this object', 'other'], 'game', 'whose')], inputs: [{ key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 100 }] },
+  copyVar: { cat: 'Variables', label: 'Copy Variable', exec: true, outs: ['then'], params: [txt('from', 'score', 'from'), txt('to', 'lastScore', 'to')] },
+  toggleMyVar: { cat: 'Variables', label: 'Toggle My Variable (0 ↔ 1)', exec: true, outs: ['then'], params: [txt('name', 'open', 'variable')] },
+  resetVars: { cat: 'Variables', label: 'Reset Variables', exec: true, outs: ['then'], params: [txt('names', 'score, combo', 'variables (comma list, blank = all)')] },
+  setTextVar: { cat: 'Variables', label: 'Set Text Variable', exec: true, outs: ['then'], params: [txt('name', 'playerName', 'variable'), txt('text', 'Hero {level}', 'text ({braces} work)')] },
+  textIs: { cat: 'Variables', label: 'Text Variable Is', value: 'bool', params: [txt('name', 'playerName', 'variable'), opt('op', ['equals', 'contains', 'starts with', 'is empty'], 'equals', 'test'), txt('text', 'Hero', 'text')] },
+  saveVar: { cat: 'Variables', label: 'Save Variable (device)', exec: true, outs: ['then'], params: [txt('name', 'coins', 'variable')] },
+  loadVar: { cat: 'Variables', label: 'Load Variable (device)', exec: true, outs: ['loaded', 'not saved yet'], params: [txt('name', 'coins', 'variable')] },
+  deleteSavedVar: { cat: 'Variables', label: 'Forget Saved Variable', exec: true, outs: ['then'], params: [txt('name', 'coins', 'variable')] },
+  onMyVarChanged: { cat: 'Variables', label: 'On My Variable Changed', outs: ['then'], params: [txt('name', 'hp', 'variable (blank = any)')] },
+  whenMyVarReaches: { cat: 'Variables', label: 'When My Variable Reaches', outs: ['then'], params: [txt('name', 'hp', 'variable'), opt('op', ['≤', '≥', '=', '<', '>'], '≤', 'is'), num('value', 0, 'value')] },
+  listAdd: { cat: 'Lists', label: 'List: Add', exec: true, outs: ['then'], params: [txt('name', 'list', 'list'), opt('where', ['at the end', 'at the start'], 'at the end', 'where')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listRemove: { cat: 'Lists', label: 'List: Remove', exec: true, outs: ['then', 'nothing removed'], params: [txt('name', 'list', 'list'), opt('mode', ['last', 'first', 'at position', 'this value'], 'last', 'remove')], inputs: [{ key: 'n', type: 'number', default: 1 }] },
+  listSet: { cat: 'Lists', label: 'List: Set At', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')], inputs: [{ key: 'position', type: 'number', default: 1 }, { key: 'value', type: 'number', default: 0 }] },
+  listClear: { cat: 'Lists', label: 'List: Clear', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')] },
+  listOrder: { cat: 'Lists', label: 'List: Shuffle / Sort', exec: true, outs: ['then'], params: [txt('name', 'list', 'list'), opt('mode', ['shuffle', 'sort small → big', 'sort big → small', 'reverse'], 'shuffle', 'do')] },
+  listFill: { cat: 'Lists', label: 'List: Fill With Numbers', exec: true, outs: ['then'], params: [txt('name', 'list', 'list')], inputs: [{ key: 'from', type: 'number', default: 1 }, { key: 'to', type: 'number', default: 10 }] },
+  forEachList: { cat: 'Lists', label: 'List: For Each', exec: true, outs: ['each', 'done'], params: [txt('name', 'list', 'list')] },
+  listGet: { cat: 'Lists', label: 'List: Item At', value: 'number', params: [txt('name', 'list', 'list')], inputs: [{ key: 'position', type: 'number', default: 1 }] },
+  listLen: { cat: 'Lists', label: 'List: Length', value: 'number', params: [txt('name', 'list', 'list')] },
+  listHas: { cat: 'Lists', label: 'List: Contains', value: 'bool', params: [txt('name', 'list', 'list')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listFind: { cat: 'Lists', label: 'List: Position Of', value: 'number', params: [txt('name', 'list', 'list')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  listRandom: { cat: 'Lists', label: 'List: Random Item', value: 'number', params: [txt('name', 'list', 'list')] },
+  listStat: { cat: 'Lists', label: 'List: Sum / Min / Max', value: 'number', params: [txt('name', 'list', 'list'), opt('op', ['sum', 'min', 'max', 'average'], 'sum', 'give')] },
+  loopItem: { cat: 'Lists', label: 'Loop Item', value: 'number' },
+  // functions: named pieces of script with inputs and a result
+  funcDef: { cat: 'Functions', label: 'Function', outs: ['then'], params: [txt('name', 'double', 'function name')] },
+  funcArg: { cat: 'Functions', label: 'Function Input', value: 'number', params: [opt('which', ['a', 'b', 'c'], 'a', 'input')] },
+  funcReturn: { cat: 'Functions', label: 'Return Value', exec: true, outs: [], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  callFunc: { cat: 'Functions', label: 'Call Function', value: 'number', params: [txt('name', 'double', 'function name')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  runFunc: { cat: 'Functions', label: 'Run Function', exec: true, outs: ['then'], params: [txt('name', 'double', 'function name'), txt('store', '', 'put the result in variable (optional)')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  callLater: { cat: 'Functions', label: 'Call Event Later', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'everything'], 'this object', 'on')], inputs: [{ key: 'seconds', type: 'number', default: 1 }, { key: 'value', type: 'number', default: 0 }] },
+  callerIs: { cat: 'Functions', label: 'Caller Has Tag', value: 'bool', params: [txt('tag', 'player', 'tag')] },
   // online: Photon multiplayer and PlayFab services
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
@@ -6960,6 +6996,11 @@ export function compileFormula(src) {
   formulaCache.set(src, f);
   return f;
 }
+/** Lists live in game variables as arrays (text shows them as 1, 2, 3). Positions start at 1. */
+const listOf = (s, name) => { const v = s.vars[name]; return Array.isArray(v) ? v : v == null || v === '' || v === 0 ? [] : [v]; };
+const listSave = (s, name, arr) => s.setVar(name, arr);
+const savedVarKey = (s, name) => `pocket.var.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
+const OPS_CHANGE = { set: (a, b) => b, add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => (b ? a / b : a), min: Math.min, max: Math.max, power: (a, b) => a ** b, mod: (a, b) => (b ? ((a % b) + b) % b : a) };
 const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
 const achieved = (s, name) => store.get(achKey(s, name), '') === '1';
 /** Smooth 1D noise in −1…1: like random, but it drifts instead of jumping (wobbling lights, drifting clouds). */
@@ -7001,6 +7042,8 @@ registerBehavior('graph', {
       return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
     };
     const tagOk = (o, tag) => !tag || o.has(tag);
+    /** Set an object's own variable and tell its scripts (On My Variable Changed / When My Variable Reaches). */
+    const setMy = (s, who, k, v) => { if (!who) return; const old = who.data[k]; who.data[k] = v; if (old !== v) s.emit('myvar', who, k, v); };
     const defRange = (s) => (s.mode === '3d' ? 5 : 150);
     /** Everything this object overlaps right now: [other, is a trigger contact] */
     const contactsOf = (e, s) => { const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead) out.push([o, !!(e.body?.sensor || o.body?.sensor)]); } return out; };
@@ -7093,6 +7136,17 @@ registerBehavior('graph', {
         case 'hasOther': return !!ctx.other && !ctx.other.dead;
         case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
         case 'getMyVar': return +e.data[P('name')] || 0;
+        case 'textIs': { const v = String(s.vars[P('name')] ?? ''), t = String(P('text') ?? ''), op = P('op'); return op === 'contains' ? v.toLowerCase().includes(t.toLowerCase()) : op === 'starts with' ? v.toLowerCase().startsWith(t.toLowerCase()) : op === 'is empty' ? !v.trim() : v === t; }
+        case 'listGet': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1) - 1; return +a[i] || 0; }
+        case 'listLen': return listOf(s, P('name')).length;
+        case 'listHas': { const v = +I('value') || 0; return listOf(s, P('name')).some((q) => +q === v); }
+        case 'listFind': { const v = +I('value') || 0; return listOf(s, P('name')).findIndex((q) => +q === v) + 1; }
+        case 'listRandom': { const a = listOf(s, P('name')); return a.length ? +a[Math.floor(Math.random() * a.length)] || 0 : 0; }
+        case 'listStat': { const a = listOf(s, P('name')).map((q) => +q || 0); if (!a.length) return 0; const o = P('op'), sum = a.reduce((x, y) => x + y, 0); return o === 'min' ? Math.min(...a) : o === 'max' ? Math.max(...a) : o === 'average' ? sum / a.length : sum; }
+        case 'loopItem': return +ctx.item || 0;
+        case 'funcArg': return +ctx.args?.[P('which') || 'a'] || 0;
+        case 'callFunc': return callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 });
+        case 'callerIs': return !!ctx.other?.has?.(P('tag'));
         case 'getOtherVar': return +ctx.other?.data?.[P('name')] || 0;
         case 'varAt': { const k = P('object'), t = s.find(k) || nearest(s, e, k); return +t?.data?.[P('name')] || 0; }
         case 'eventValue': return +ctx.eventValue || 0;
@@ -7139,6 +7193,13 @@ registerBehavior('graph', {
       const st = ctx.s?.engine?.graphStats, d = def(n);
       if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
+    };
+    /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
+    const callFunction = (s, e, ctx, name, args) => {
+      const depth = (ctx.callDepth || 0) + 1; if (depth > 20) { Log.add('warn', `Function "${name}" calls itself too deeply`); return 0; }
+      const ret = { v: 0, done: false };
+      for (const fn of g.nodes) if (fn.type === 'funcDef' && param(fn, 'name') === name) { follow(fn, 'then', { s, e, other: ctx.other, steps: 0, dt: ctx.dt, args, ret, callDepth: depth }); if (ret.done) break; }
+      return ret.v;
     };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
@@ -7288,13 +7349,54 @@ registerBehavior('graph', {
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
         case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
-        case 'setMyVar': e.data[P('name') || 'hp'] = +I('value') || 0; break;
-        case 'addMyVar': { const k = P('name') || 'hp'; e.data[k] = (+e.data[k] || 0) + (+I('amount') || 0); break; }
-        case 'setOtherVar': if (ctx.other) ctx.other.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'setMyVar': setMy(s, e, P('name') || 'hp', +I('value') || 0); break;
+        case 'addMyVar': { const k = P('name') || 'hp'; setMy(s, e, k, (+e.data[k] || 0) + (+I('amount') || 0)); break; }
+        case 'setOtherVar': setMy(s, ctx.other, P('name') || 'hp', +I('value') || 0); break;
         case 'callEvent': {
           const on = P('on'), name = P('name'), v = +I('value') || 0, tag = P('tag');
           const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : (q) => q === e;
           s.emit('graphCall', name, who, e, v); break;
+        }
+        case 'changeVar': case 'clampVar': {
+          const k = P('name') || 'score', sc = P('scope'), who = sc === 'this object' ? e : sc === 'other' ? ctx.other : null;
+          if (sc === 'other' && !who) break;
+          const cur = +(who ? who.data[k] : s.vars[k]) || 0;
+          const v = n.type === 'clampVar' ? clamp(cur, Math.min(+I('min') || 0, +I('max') || 0), Math.max(+I('min') || 0, +I('max') || 0)) : (OPS_CHANGE[P('op')] || OPS_CHANGE.add)(cur, +I('value') || 0);
+          if (who) setMy(s, who, k, v); else s.setVar(k, v); break;
+        }
+        case 'copyVar': s.setVar(P('to') || 'copy', Array.isArray(s.vars[P('from')]) ? [...s.vars[P('from')]] : s.vars[P('from')] ?? 0); break;
+        case 'toggleMyVar': { const k = P('name') || 'on'; setMy(s, e, k, +e.data[k] ? 0 : 1); break; }
+        case 'resetVars': {
+          const start = s.json?.vars || {}, names = String(P('names') || '').split(',').map((q) => q.trim()).filter(Boolean);
+          for (const k of names.length ? names : Object.keys(s.vars).filter((q) => !/^(time|best|level|net|pf|online|item_|inventory)/.test(q))) s.setVar(k, Array.isArray(start[k]) ? [...start[k]] : start[k] ?? (Array.isArray(s.vars[k]) ? [] : 0));
+          break;
+        }
+        case 'setTextVar': s.setVar(P('name') || 'text', fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data))); break;
+        case 'saveVar': { const k = P('name') || 'coins'; store.set(savedVarKey(s, k), JSON.stringify(s.vars[k] ?? 0)); break; }
+        case 'loadVar': { const k = P('name') || 'coins', raw = store.get(savedVarKey(s, k), ''); if (raw === '') return follow(n, 'not saved yet', ctx); try { s.setVar(k, JSON.parse(raw)); } catch { s.setVar(k, raw); } return follow(n, 'loaded', ctx); }
+        case 'deleteSavedVar': try { localStorage.removeItem(savedVarKey(s, P('name') || 'coins')); } catch { /* storage unavailable */ } break;
+        case 'listAdd': { const a = [...listOf(s, P('name'))], v = +I('value') || 0; if (P('where') === 'at the start') a.unshift(v); else a.push(v); listSave(s, P('name'), a); break; }
+        case 'listRemove': {
+          const a = [...listOf(s, P('name'))], m = P('mode'), v = +I('n') || 0;
+          const i = m === 'last' ? a.length - 1 : m === 'first' ? 0 : m === 'at position' ? Math.round(v) - 1 : a.findIndex((q) => +q === v);
+          if (i < 0 || i >= a.length) return follow(n, 'nothing removed', ctx);
+          a.splice(i, 1); listSave(s, P('name'), a); break;
+        }
+        case 'listSet': { const a = [...listOf(s, P('name'))], i = Math.round(+I('position') || 1) - 1; if (i >= 0 && i < 1000) { while (a.length < i) a.push(0); a[i] = +I('value') || 0; listSave(s, P('name'), a); } break; }
+        case 'listClear': listSave(s, P('name'), []); break;
+        case 'listOrder': {
+          const a = [...listOf(s, P('name'))], m = P('mode');
+          if (m === 'shuffle') for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+          else if (m === 'reverse') a.reverse(); else a.sort((x, y) => (m === 'sort big → small' ? y - x : x - y));
+          listSave(s, P('name'), a); break;
+        }
+        case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
+        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); a.forEach((v, i) => follow(n, 'each', { ...ctx, index: i + 1, item: v, steps: ctx.steps })); return follow(n, 'done', ctx); }
+        case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
+        case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
+        case 'callLater': {
+          const name = P('name'), v = +I('value') || 0, all = P('on') === 'everything';
+          s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead || all) s.emit('graphCall', name, all ? () => true : (q) => q === e, e, v); }); break;
         }
         case 'forRange': {
           const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
@@ -7425,6 +7527,15 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onMyVarChanged', 'whenMyVarReaches')) {
+          const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
+          const was = new Map(g.nodes.filter((n) => n.type === 'whenMyVarReaches').map((n) => [n.id, test(n, e.data[param(n, 'name')])]));
+          s.on('myvar', (who, k, v) => {
+            if (who !== e || e.dead) return;
+            fire('onMyVarChanged', e, s, null, (n) => !param(n, 'name') || param(n, 'name') === k);
+            for (const n of g.nodes) if (n.type === 'whenMyVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !was.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); was.set(n.id, now); }
+          });
+        }
         if (has('customEvent')) s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
         if (has('onVarReaches')) {
           const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };

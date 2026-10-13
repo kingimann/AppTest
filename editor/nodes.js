@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: '#8bd347' };
-const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone' };
+const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -31,6 +31,7 @@ const NEXT = {
   onKey: ['jump', 'addVar', 'setVelocity', 'sound'], onShake: ['particles', 'shake', 'addVar', 'randomWord'], onTimerDone: ['gameOver', 'message', 'sound', 'timerStart'],
   dailyCheck: ['addVar', 'message', 'sound'], timerStart: ['message', 'sound'], chase: ['damage', 'sound', 'message'], patrol: ['sound', 'particles'],
   _text: ['textJoin', 'numText', 'textFill', 'getText', 'randomWord'],
+  onUiTap: ['uiShow', 'openPopup', 'confirm', 'toast', 'goToPage', 'sound'], confirm: ['restart', 'toast', 'uiShow'], askText: ['toast', 'setText', 'uiShow'], alert: ['nextLevel', 'restart', 'uiShow'],
 };
 const RECENT_KEY = 'pocket.recentNodes';
 const recentNodes = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((t) => NODE_TYPES[t]); } catch { return []; } };
@@ -60,8 +61,17 @@ const CAT_HELP = {
   Audio: 'Background music from your imported sounds, volume, mute, and musical notes.',
   AI: 'Simple behaviours to run every frame: chase, run away, wander, orbit, keep a distance, patrol.',
   Device: 'Share, copy to the clipboard, open a website, and check portrait, touch screen, online, dark mode…',
+  UI: 'Menus and screens: show / hide with animations, popups, toasts, alerts, yes / no questions, typing a name, badges, enabling buttons, images, bars, themes, scrolling.',
 };
 export const NODE_HELP = {
+  onUiTap: 'When a named UI element (or anything with that tag) is tapped, from any script. It becomes “other”', uiShow: 'Show or hide a panel with an animation (fade, pop, zoom, slide); “done” when it finishes',
+  openPopup: 'Open or close a Popup or Side Bar component', closeTop: 'Close whatever popup or side bar is open (like the back gesture)',
+  toast: 'A short message that slides in and disappears', alert: 'A message box with one button; “closed” when it is tapped', confirm: 'A question with two buttons: “yes” or “no”',
+  askText: 'A text box with the keyboard (player names, codes); stores what was typed in a variable', uiEnable: 'Grey out a button so it can\'t be tapped, or turn it back on',
+  setImage: 'Change a picture (built-in art:name or a link)', setBadge: 'A red bubble with a number on a button (0 hides it)', setBar: 'Change a progress bar\'s variable, maximum or colour',
+  uiTheme: 'Switch the whole game\'s UI theme (fonts, colours, built-in screens)', uiOrder: 'Draw a UI element above or below the others', uiSize: 'Resize a UI element, smoothly if seconds > 0',
+  scrollTo: 'Scroll a Scroll View to the top, bottom or part of the way', popupOpen: 'Is a popup or side bar open', uiVisible: 'Is an element showing', uiEnabled: 'Is an element tappable',
+  safeArea: 'How much room the notch / home bar takes on each side',
   textJoin: 'Put up to three pieces of text (or numbers) together, with something between them', textFill: 'Text with {variables} filled in, plus {a} and {b} from the inputs',
   numText: 'A number as words: 1,234 · 1.2K · 1:05 · 42% · 1st · XII · +5', textLen: 'How many letters', textCase: 'UPPER, lower, Title Case, reversed or tidied spaces',
   textReplace: 'Swap every “find” for “with”', textPart: 'Some letters from a position (1 = first)', textCheck: 'Equals, contains, starts / ends with or is empty (ignores case except “equals”)',
@@ -190,6 +200,16 @@ export const NODE_HELP = {
 
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
+  { label: 'UI: ask the player\'s name', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'c', type: 'textCheck', x: 0, y: 200, params: { op: 'is empty' } }, { id: 'g', type: 'getText', x: -300, y: 200, params: { name: 'playerName' } }, { id: 'b', type: 'branch', x: 300, y: 0 },
+    { id: 'a', type: 'askText', x: 620, y: 0, params: { question: 'What\'s your name?', name: 'playerName', placeholder: 'Hero', max: 16 } }, { id: 't', type: 'toast', x: 960, y: 0, params: { text: 'Welcome, {playerName}!', where: 'top' } }, { id: 'v', type: 'saveVar', x: 1280, y: 0, params: { name: 'playerName' } }, { id: 'l', type: 'loadVar', x: -300, y: -40, params: { name: 'playerName' } }],
+    links: [['s', 'then', 'l'], ['l', 'loaded', 'b'], ['l', 'not saved yet', 'b'], ['g', 'value', 'c', 'text'], ['c', 'value', 'b', 'condition'], ['b', 'true', 'a'], ['a', 'entered', 't'], ['t', 'then', 'v']] },
+  { label: 'UI: Restart button asks first', nodes: [{ id: 'u', type: 'onUiTap', x: 0, y: 0, params: { object: 'Restart Button' } }, { id: 'c', type: 'confirm', x: 300, y: 0, params: { title: 'Restart?', text: 'Your progress on this level will be lost.', yes: 'Restart', no: 'Keep playing' } }, { id: 'r', type: 'restart', x: 640, y: -40 }],
+    links: [['u', 'then', 'c'], ['c', 'yes', 'r']] },
+  { label: 'UI: menu button opens a panel', nodes: [{ id: 'u', type: 'onUiTap', x: 0, y: 0, params: { object: 'Menu Button' } }, { id: 'h', type: 'uiShow', x: 300, y: 0, params: { object: 'Menu Panel', mode: 'toggle', anim: 'slide from left', seconds: 0.25 } }, { id: 'p', type: 'sound', x: 640, y: 0, params: { sound: 'click' } }],
+    links: [['u', 'then', 'h'], ['h', 'then', 'p']] },
+  { label: 'UI: shop badge counts new items', nodes: [{ id: 'v', type: 'varChanged', x: 0, y: 0, params: { name: 'newItems' } }, { id: 'b', type: 'setBadge', x: 300, y: 0, params: { object: 'Shop Button' } }, { id: 'g', type: 'getVar', x: 0, y: 200, params: { name: 'newItems' } },
+    { id: 'u', type: 'onUiTap', x: 0, y: 360, params: { object: 'Shop Button' } }, { id: 'z', type: 'setVar', x: 300, y: 360, params: { name: 'newItems', value: 0 } }],
+    links: [['v', 'then', 'b'], ['g', 'value', 'b', 'number'], ['u', 'then', 'z']] },
   { label: 'Daily reward with streak', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'd', type: 'dailyCheck', x: 300, y: 0, params: { key: 'daily', streak: 'streak' } }, { id: 'a', type: 'addVar', x: 640, y: -60, params: { name: 'coins' } },
     { id: 'f', type: 'formula', x: 300, y: 220, params: { expr: 'min(streak, 7) * 10' } }, { id: 'm', type: 'message', x: 960, y: -60, params: { text: 'Day {streak} in a row! +coins', seconds: 2.5 } }],
     links: [['s', 'then', 'd'], ['d', 'new day', 'a'], ['f', 'value', 'a', 'amount'], ['a', 'then', 'm']] },

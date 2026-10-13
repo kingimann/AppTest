@@ -3239,6 +3239,7 @@ function componentsFor(j) {
   ];
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
+    if (def.hidden) continue; // engine-internal helpers
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,

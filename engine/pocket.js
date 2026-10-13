@@ -2194,6 +2194,13 @@ function drawEntity2D(ctx, e, vars, time) {
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
   }
+  if (e.data.badge != null && e.data.badge !== '' && e.data.badge !== 0) { // Set Badge node: a red bubble with a number on the top-right corner
+    const ex = e.extents(), hx = ex.sphere ? ex.r * 0.75 : ex.hx || 12, hy = ex.sphere ? ex.r * 0.75 : ex.hy || 12, txt = String(typeof e.data.badge === 'number' && e.data.badge > 99 ? '99+' : e.data.badge);
+    ctx.globalAlpha = 1; ctx.font = `800 12px system-ui, sans-serif`; const w = Math.max(20, ctx.measureText(txt).width + 10);
+    ctx.fillStyle = e.data.badgeColor || '#ff3b30'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(hx - w / 2, -hy - 10, w, 20, 10); else ctx.rect(hx - w / 2, -hy - 10, w, 20); ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, hx, -hy + 0.5);
+  }
   ctx.restore();
 }
 
@@ -4082,7 +4089,7 @@ registerBehavior('sound', {
 function uiScreenOf(e) { for (let q = e, n = 0; q && n < 20; q = q.parentEnt, n++) if (q.showWhen && q.showWhen !== 'always') return q.showWhen; return 'always'; }
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
-  if (e._parentHidden || e._clipHidden) return false;
+  if (e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (Enable / Disable UI node)
   if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
@@ -4623,6 +4630,20 @@ registerBehavior('uiPopup', {
   },
 });
 
+/** (Internal) taps on the buttons of a dialog made by a Visual Script node (Show Alert, Ask Yes / No). */
+registerBehavior('_nodeDialog', {
+  label: 'Node dialog', hidden: true, params: [],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        if (!e.visible || (p.t = (p.t || 0) + dt) < 0.25) return; // ignore the tap that opened it
+        for (const t of s.engine.input.taps) for (const [b, v] of p.buttons || []) if (b.visible && !b.dead && hitTest(s, b, t.x, t.y)) { s.engine.input.taps.length = 0; p.pick?.(v); return; }
+      },
+    };
+  },
+});
+
 registerBehavior('uiSelector', {
   label: 'Option Picker', description: 'Pick one of several options with ‹ and › (e.g. Easy / Normal / Hard). Tap the left half for the previous one, the right half for the next. The choice goes into a variable.',
   params: [
@@ -4656,7 +4677,7 @@ registerBehavior('uiScroll', {
     { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
   ],
   create(p) {
-    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0;
+    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0, goal = null;
     const v = p.direction !== 'horizontal';
     const bounds = (s, e) => { // how far the content can move
       const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
@@ -4669,12 +4690,13 @@ registerBehavior('uiScroll', {
     };
     return {
       uiAlways: true,
-      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); },
+      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); e._scrollTo = (f) => { goal = clamp(+f || 0, 0, 1); vel = 0; }; },
       update(e, dt, s) {
         const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
+        if (goal != null) { const [a, b] = bounds(s, e), want = b + (a - b) * goal; off += (want - off) * Math.min(1, dt * 10); if (Math.abs(want - off) < 0.5) { off = want; goal = null; } } // Scroll To node (0 = top, 1 = bottom)
         if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
         const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
+        if (ptr) { goal = null; const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
         else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
         const [mn, mx] = bounds(s, e);
         if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
@@ -7112,6 +7134,75 @@ function numAsText(v, f) {
   return fmtNumber(v, f === 'normal (1,234)' ? '' : f);
 }
 const wordsOf = (w) => String(w || '').split('|').map((x) => x.trim()).filter(Boolean);
+// ---- UI nodes ----
+Object.assign(NODE_TYPES, {
+  onUiTap: { cat: 'UI', label: 'On UI Tapped', outs: ['then'], params: [txt('object', 'Play Button', 'object (name or tag)')] },
+  uiShow: { cat: 'UI', label: 'Show / Hide UI', exec: true, outs: ['then', 'done'], params: [txt('object', 'Panel', 'object'), opt('mode', ['show', 'hide', 'toggle'], 'show', 'make it'), opt('anim', SHOW_ANIMS.filter((a) => a !== 'slide (follows navigation)'), 'pop', 'animation')], inputs: [N_IN('seconds', 0.25)] },
+  openPopup: { cat: 'UI', label: 'Open / Close Popup', exec: true, outs: ['then'], params: [txt('object', 'Popup', 'popup or side bar'), opt('mode', ['open', 'close', 'toggle'], 'open', 'make it')] },
+  closeTop: { cat: 'UI', label: 'Close Top Popup', exec: true, outs: ['then', 'nothing open'] },
+  toast: { cat: 'UI', label: 'Show Toast', exec: true, outs: ['then'], params: [txt('text', 'Saved!', 'text ({braces} work)'), opt('where', ['bottom', 'top', 'middle'], 'bottom', 'where'), { key: 'color', type: 'color', default: '#1f2433', label: 'colour' }], inputs: [N_IN('seconds', 2)] },
+  alert: { cat: 'UI', label: 'Show Alert', exec: true, outs: ['closed'], params: [txt('title', 'Level complete!', 'title'), txt('text', 'You scored {score}.', 'text'), txt('ok', 'OK', 'button'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  confirm: { cat: 'UI', label: 'Ask Yes / No', exec: true, outs: ['yes', 'no'], params: [txt('title', 'Restart?', 'title'), txt('text', 'Your progress on this level will be lost.', 'text'), txt('yes', 'Yes', 'yes button'), txt('no', 'No', 'no button'), { key: 'pause', type: 'bool', default: true, label: 'pause the game' }] },
+  askText: { cat: 'UI', label: 'Ask For Text', exec: true, outs: ['entered', 'cancelled'], params: [txt('question', 'What\'s your name?', 'question'), txt('name', 'playerName', 'store in variable'), txt('placeholder', 'Hero', 'hint'), num('max', 16, 'max letters')] },
+  uiEnable: { cat: 'UI', label: 'Enable / Disable UI', exec: true, outs: ['then'], params: [txt('object', 'Shop Button', 'object'), opt('mode', ['disable', 'enable', 'toggle'], 'disable', 'make it')] },
+  setImage: { cat: 'UI', label: 'Set Image', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)'), txt('image', 'art:star', 'picture (art:name or URL)')] },
+  setBadge: { cat: 'UI', label: 'Set Badge', exec: true, outs: ['then'], params: [txt('object', 'Shop Button', 'object (blank = this)'), { key: 'color', type: 'color', default: '#ff3b30', label: 'colour' }], inputs: [N_IN('number', 3)] },
+  setBar: { cat: 'UI', label: 'Set Progress Bar', exec: true, outs: ['then'], params: [txt('object', 'Health Bar', 'bar'), txt('var', '', 'show variable (blank = keep)'), { key: 'color', type: 'color', default: '', label: 'colour (blank = keep)' }], inputs: [N_IN('max', 100)] },
+  uiTheme: { cat: 'UI', label: 'Set UI Theme', exec: true, outs: ['then'], params: [opt('theme', Object.keys(UI_THEMES), 'Neon', 'theme')] },
+  uiOrder: { cat: 'UI', label: 'Bring To Front / Back', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)'), opt('mode', ['to front', 'to back'], 'to front', 'move it')] },
+  uiSize: { cat: 'UI', label: 'Set UI Size', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = this)')], inputs: [N_IN('width', 200), N_IN('height', 60), N_IN('seconds', 0)] },
+  scrollTo: { cat: 'UI', label: 'Scroll To', exec: true, outs: ['then'], params: [txt('object', 'Scroll View', 'scroll view'), opt('where', ['top', 'bottom', 'part of the way'], 'top', 'where')], inputs: [N_IN('fraction', 0.5)] },
+  popupOpen: { cat: 'UI', label: 'Is A Popup Open', value: 'bool' },
+  uiVisible: { cat: 'UI', label: 'Is Shown', value: 'bool', params: [txt('object', 'Panel', 'object')] },
+  uiEnabled: { cat: 'UI', label: 'Is Enabled', value: 'bool', params: [txt('object', 'Shop Button', 'object')] },
+  safeArea: { cat: 'UI', label: 'Safe Area', value: 'number', params: [opt('side', ['top', 'bottom', 'left', 'right'], 'top', 'side')] },
+});
+/** A ready-made dialog for Show Alert / Ask Yes / No: a dimmed backdrop, a themed panel, title, text and buttons. */
+function nodeDialog(s, o, onPick) {
+  const TH = themeOf(s.settings), btnW = o.buttons.length > 1 ? 120 : 200;
+  const back = s.add({ name: '(dialog)', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, ignoreSafe: true, layer: 9000, shape: { type: 'rect', w: 400, h: 800, radius: 0, fill: 'rgba(0,0,0,0.55)' } });
+  const parts = [back];
+  const add = (j) => { const q = s.add(j); parts.push(q); return q; };
+  const panel = add({ name: '(dialog panel)', ui: true, parent: back.id, anchor: 'center', x: 0, y: 0, layer: 9001, shape: { type: 'rect', w: 300, h: o.text ? 200 : 150, radius: TH.radius || 14, fill: TH.panel, stroke: 'rgba(255,255,255,0.12)', lineWidth: 2 } });
+  const h = o.text ? 200 : 150;
+  add({ name: '(dialog title)', ui: true, parent: back.id, anchor: 'center', x: 0, y: -h / 2 + 34, layer: 9002, text: { ...TEXT_DEFAULTS, value: o.title || '', size: 20, color: TH.text, weight: '800', fit: 270 } });
+  if (o.text) add({ name: '(dialog text)', ui: true, parent: back.id, anchor: 'center', x: 0, y: -8, layer: 9002, text: { ...TEXT_DEFAULTS, value: o.text, size: 15, color: TH.text, weight: '500', wrap: 260, lineHeight: 1.25 } });
+  const btns = o.buttons.map(([label, v, main], i) => {
+    const x = o.buttons.length > 1 ? (i === 0 ? -68 : 68) : 0;
+    const b = add({ name: '(dialog button)', ui: true, parent: back.id, anchor: 'center', x, y: h / 2 - 36, layer: 9003, shape: { type: 'rect', w: btnW, h: 44, radius: Math.min(22, (TH.radius || 12) + 4), fill: main ? TH.accent : 'rgba(255,255,255,0.12)' }, text: { ...TEXT_DEFAULTS, value: label, size: 16, color: main ? '#111' : TH.text, weight: '800', fit: btnW - 16 } });
+    return [b, v];
+  });
+  const dp = { buttons: btns, pick: null };
+  back.behaviors.push(Behaviors._nodeDialog.create(dp)); // (addBehavior would rebuild it from a definition and lose the buttons)
+  back.visible = true; uiAnimate(s, panel, true, 'pop', 0.2);
+  const wasLoading = s.loading; if (o.pause) s.loading = true;
+  s.modal = back; back._dismiss = () => dp.pick(o.cancel);
+  dp.pick = (v) => { dp.pick = () => {}; if (o.pause) s.loading = wasLoading || false; if (s.modal === back) s.modal = null; for (const q of parts) q.destroy(); onPick(v); };
+  return back;
+}
+/** Ask For Text: a real text box over the game (the phone's keyboard opens), OK / Cancel. */
+function askTextBox(s, o, done) {
+  const root = s.engine.root, TH = themeOf(s.settings);
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-family:system-ui,-apple-system,sans-serif;touch-action:auto;';
+  const box = document.createElement('div');
+  box.style.cssText = `width:min(320px,86%);padding:18px;border-radius:${TH.radius || 14}px;background:${TH.panel};color:${TH.text};box-shadow:0 10px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px;`;
+  const q = document.createElement('div'); q.textContent = o.question; q.style.cssText = 'font-weight:800;font-size:18px;text-align:center;';
+  const inp = document.createElement('input'); inp.type = 'text'; inp.maxLength = Math.max(1, +o.max || 16); inp.placeholder = o.placeholder || ''; inp.value = o.value || '';
+  inp.style.cssText = 'font-size:17px;padding:12px;border-radius:10px;border:2px solid rgba(255,255,255,.2);background:rgba(0,0,0,.3);color:inherit;outline:none;';
+  const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:10px;';
+  const mk = (label, main) => { const b = document.createElement('button'); b.textContent = label; b.style.cssText = `flex:1;height:44px;border:0;border-radius:10px;font-weight:800;font-size:16px;background:${main ? TH.accent : 'rgba(255,255,255,.14)'};color:${main ? '#111' : TH.text};`; return b; };
+  const cancel = mk('Cancel', false), ok = mk('OK', true);
+  row.append(cancel, ok); box.append(q, inp, row); wrap.append(box); root.appendChild(wrap);
+  const wasLoading = s.loading; s.loading = true;
+  const finish = (v) => { wrap.remove(); s.loading = wasLoading || false; s.engine.input.reset(); done(v); };
+  ok.onclick = () => finish(inp.value.trim() || null); cancel.onclick = () => finish(null);
+  inp.onkeydown = (ev) => { if (ev.key === 'Enter') finish(inp.value.trim() || null); else if (ev.key === 'Escape') finish(null); ev.stopPropagation(); };
+  ['pointerdown', 'pointerup', 'touchstart'].forEach((t) => wrap.addEventListener(t, (ev) => ev.stopPropagation()));
+  setTimeout(() => inp.focus(), 50);
+}
+const uiFind = (s, e, k) => (k ? s.find(k) || s.findAll(k)[0] || null : e);
+
 const localDay = (t = new Date()) => `${t.getFullYear()}-${t.getMonth() + 1}-${t.getDate()}`;
 
 const OPS6 = ['=', '≠', '>', '<', '≥', '≤'];
@@ -7643,6 +7734,10 @@ registerBehavior('graph', {
         case 'camValue': { const c = s.camera, w = P('what'); return w === 'zoom' ? (s.mode === '3d' ? 60 / (c.fov || 60) : c.zoom || 1) : s.mode === '3d' ? c.position?.[w] || 0 : c[w] || 0; }
         case 'isMuted': return !!s.engine.audio.muted;
         case 'deviceIs': { const mm = (q) => typeof matchMedia === 'function' && matchMedia(q).matches; switch (P('is')) { case 'landscape': return s.engine.width > s.engine.height; case 'touch screen': return mm('(pointer: coarse)') || 'ontouchstart' in window; case 'online': return navigator.onLine !== false; case 'installed app': return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || !!navigator.standalone; case 'dark mode': return mm('(prefers-color-scheme: dark)'); case 'reduced motion': return mm('(prefers-reduced-motion: reduce)'); default: return s.engine.height >= s.engine.width; } }
+        case 'popupOpen': return !!(s.modal && !s.modal.dead && s.modal.visible);
+        case 'uiVisible': { const t = uiFind(s, null, P('object')); return !!t && t.visible && !t._parentHidden; }
+        case 'uiEnabled': { const t = uiFind(s, null, P('object')); return !!t && !t.data.uiDisabled; }
+        case 'safeArea': return s.engine.safe?.[P('side') || 'top'] || 0;
         default: return 0;
       }
     };
@@ -8029,6 +8124,54 @@ registerBehavior('graph', {
         case 'share': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)); if (navigator.share) navigator.share({ text }).catch(() => {}); else navigator.clipboard?.writeText(text).then(() => s.message('Copied to clipboard', 1.5)).catch(() => {}); break; }
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
+        case 'uiShow': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };
+          uiAnimate(s, t, show, P('anim') || 'fade', Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'done', later); });
+          break;
+        }
+        case 'openPopup': {
+          const t = uiFind(s, e, P('object')), b = t?.behaviors.find((q) => typeof q.set === 'function' && 'open' in q); if (!b) break;
+          const m = P('mode'); b.set(t, s, m === 'toggle' ? !b.open : m !== 'close'); break;
+        }
+        case 'closeTop': { const m = s.modal; if (m && !m.dead && m.visible && m._dismiss) { m._dismiss(); break; } return follow(n, 'nothing open', ctx); }
+        case 'toast': {
+          s._toast?.destroy();
+          const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), where = P('where') || 'bottom', TH = themeOf(s.settings);
+          const t = s._toast = s.add({ name: '(toast)', ui: true, anchor: where === 'top' ? 'top' : where === 'middle' ? 'center' : 'bottom', x: 0, y: where === 'top' ? 90 : where === 'middle' ? 0 : -120, layer: 8000,
+            shape: { type: 'rect', w: Math.min(360, 40 + text.length * 9), h: 46, radius: 23, fill: P('color') || '#1f2433', stroke: 'rgba(255,255,255,0.12)', lineWidth: 1.5 }, text: { ...TEXT_DEFAULTS, value: text, size: 16, color: TH.text, weight: '700', fit: 330 } });
+          uiAnimate(s, t, true, where === 'top' ? 'slide from top' : where === 'middle' ? 'pop' : 'slide from bottom', 0.22, null, 60);
+          s.after(Math.max(0.3, +I('seconds') || 2), () => { if (!t.dead) uiAnimate(s, t, false, 'fade', 0.25, () => t.destroy()); });
+          break;
+        }
+        case 'alert': case 'confirm': {
+          const fill = (x) => fillTemplate(String(x ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 };
+          const buttons = n.type === 'alert' ? [[P('ok') || 'OK', 'closed', true]] : [[P('no') || 'No', 'no', false], [P('yes') || 'Yes', 'yes', true]];
+          nodeDialog(s, { title: fill(P('title')), text: fill(P('text')), buttons, pause: P('pause') !== false, cancel: n.type === 'alert' ? 'closed' : 'no' }, (v) => follow(n, v, later));
+          return;
+        }
+        case 'askText': {
+          const later = { ...ctx, steps: 0 }, name = P('name') || 'playerName';
+          askTextBox(s, { question: P('question'), placeholder: P('placeholder'), max: P('max'), value: typeof s.vars[name] === 'string' ? s.vars[name] : '' }, (v) => { if (v != null) { s.setVar(name, v); follow(n, 'entered', later); } else follow(n, 'cancelled', later); });
+          return;
+        }
+        case 'uiEnable': { const t = uiFind(s, e, P('object')); if (!t) break; const m = P('mode'), off = m === 'toggle' ? !t.data.uiDisabled : m !== 'enable'; t.data.uiDisabled = off; t.alpha = off ? 0.45 : 1; break; }
+        case 'setImage': { const t = uiFind(s, e, P('object')), src = String(P('image') || '').trim(); if (!t || !src) break; if (t.sprite) t.sprite.src = src; else { const ex = t.extents(); t.sprite = { src, w: (ex.hx || 24) * 2, h: (ex.hy || 24) * 2 }; } break; }
+        case 'setBadge': { const t = uiFind(s, e, P('object')); if (!t) break; t.data.badge = Math.round(+I('number') || 0); t.data.badgeColor = P('color') || ''; break; }
+        case 'setBar': { const t = uiFind(s, e, P('object')); if (!t?.bar) break; if (P('var')) t.bar.var = P('var'); if (+I('max') > 0) { t.bar.max = +I('max'); t.bar.maxVar = ''; } if (P('color')) t.bar.fill = P('color'); break; }
+        case 'uiTheme': s.settings.uiTheme = P('theme') || 'Default'; break;
+        case 'uiOrder': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const front = P('mode') !== 'to back', others = s.entities.filter((q) => q !== t && q.ui === t.ui).map((q) => q.layer || 0);
+          t.layer = others.length ? (front ? Math.max(...others) + 1 : Math.min(...others) - 1) : 0;
+          s.entities.sort((a, b) => a.layer - b.layer); break;
+        }
+        case 'uiSize': {
+          const t = uiFind(s, e, P('object')); if (!t) break;
+          const w = Math.max(1, +I('width') || 1), h = Math.max(1, +I('height') || 1), sec = +I('seconds') || 0, tg = t.shape || t.sprite || t.bar; if (!tg) break;
+          if (sec > 0) s.to(tg, { w, h }, sec, { ease: 'outCubic' }); else { tg.w = w; tg.h = h; } break;
+        }
+        case 'scrollTo': { const t = uiFind(s, e, P('object')); const w = P('where'); t?._scrollTo?.(w === 'bottom' ? 1 : w === 'top' ? 0 : +I('fraction') || 0); break; }
         case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
         case 'overlap': case 'forEachTag': {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
@@ -8134,6 +8277,11 @@ registerBehavior('graph', {
           if (isNear !== !!near.get(n.id)) { follow(n, isNear ? 'near' : 'left', { s, e, other: t || near.get(n.id + 'o') || null, steps: 0, dt }); near.set(n.id, isNear); if (t) near.set(n.id + 'o', t); }
         }
         if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
+        if (has('onUiTap') && inp.taps.length) for (const n of g.nodes) if (n.type === 'onUiTap') {
+          const k = param(n, 'object'), list = k ? [s.find(k), ...s.findAll(k)].filter(Boolean) : [];
+          const hit = list.find((q) => q.visible && inp.taps.some((t) => hitTest(s, q, t.x, t.y)));
+          if (hit) follow(n, 'then', { s, e, other: hit, steps: 0 });
+        }
         if (has('onKey', 'onShake', 'onScreenTouch')) {
           for (const n of g.nodes) {
             if (n.type === 'onKey') { const k = keyName(param(n, 'key')), w = param(n, 'when'); if (w === 'held' ? inp.keys.has(k) : (w === 'released' ? inp.keysUp : inp.keysDown).includes(k)) follow(n, 'then', { s, e, steps: 0, dt }); }

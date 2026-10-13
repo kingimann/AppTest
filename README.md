@@ -114,13 +114,17 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 - **Hierarchy**:
   - Each row shows a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing its components.
-  - Filter chips: All, Player, Logic, Physics, UI, Templates. Search also matches tags and components.
+  - Three or more objects with the same name fold into one row (**Gem ×8**). Tap to open or fold it; its eye shows or hides them all.
+  - **Filter** button next to search: Player, Logic, Physics, UI or Templates only. Search also matches tags and components.
+  - Selecting an object in the Scene scrolls the Hierarchy to it, opening its folder, group or parent.
   - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - **Getting started** is a one-line strip with the next step (tap to see all steps).
   - Bring to front / send to back; a lock button on locked objects.
 - **Inspector**:
-  - The object header stays at the top.
-  - **Quick add** chips for common components.
-  - Category filters: Visual, Physics, Logic, Animation, Gameplay. Collapse all / expand all.
+  - Short fields (numbers, dropdowns, colours, text) sit beside their label; component headers stay pinned while you scroll.
+  - Only fields for the game's mode (2D or 3D) are shown. **Advanced** next to search shows the rarely used ones.
+  - Category filters: Visual, Physics, Logic, Animation, Gameplay, and one fold / unfold-all button.
+  - **Quick add** chips for common components, next to Add Component.
   - Components have a coloured edge by category.
 
 ### Node coding (Visual Script)

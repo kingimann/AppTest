@@ -744,3 +744,23 @@ body.playing #attachBar { display: none !important; }
 .adv-btn { flex: none; height: 50px; padding: 0 14px; border: 1px solid #1f1f1f; border-radius: 10px; background: #3a3a3a; color: var(--muted); display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
 .adv-btn.on { background: #46607c; color: #fff; border-color: #46607c; }
 .nav-strip { padding-bottom: 10px; }
+
+/* ---------- easier hierarchy ---------- */
+.h-group .nm { display: flex; align-items: center; gap: 8px; }
+.h-group .h-count { font-size: 13px; font-weight: 700; color: #cfe0f0; background: #2c5d87; border-radius: 10px; padding: 1px 8px; }
+.h-group.has-sel { box-shadow: inset 4px 0 0 var(--accent); }
+.h-group .h-twisty { margin-right: -6px; }
+.gs.mini { display: flex; align-items: center; gap: 12px; padding: 10px 8px 10px 12px; cursor: pointer; }
+.gs.mini .gs-l { flex: 1; min-width: 0; font-size: 15px; line-height: 1.25; }
+.gs.mini .gs-l small { display: block; color: #b9cdf0; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.gs-ring { width: 46px; height: 46px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 12.5px; font-weight: 700; color: #fff;
+  background: radial-gradient(closest-side, #2f3a4e 76%, transparent 78%), conic-gradient(#66bb6a var(--p), rgba(0,0,0,.35) 0); }
+.gs-hd { cursor: pointer; }
+.gs-hd > svg.i { width: 18px; height: 18px; color: var(--muted); }
+.h-tools .h-filter-btn { padding: 0 12px; background: #3a3a3a; color: var(--muted); }
+.h-tools .h-filter-btn.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.h-active { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #2c3e52; color: #cfe0f0; font-size: 14px; font-weight: 600; }
+.h-active button { margin-left: auto; height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: rgba(255,255,255,.14); color: #fff; display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; }
+.h-active button svg.i { width: 16px; height: 16px; }
+.h-row.scene { min-height: 58px; }
+.h-group .h-twisty { width: 24px; }

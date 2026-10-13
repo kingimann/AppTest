@@ -1157,3 +1157,26 @@ body.playing #attachBar { display: none !important; }
   #dockTabs button { height: 46px; }
   #dockTabs button.active::before { display: none; }
 }
+
+/* ---------- slimmer top bars: more room for the Scene ---------- */
+:root { --top: calc(env(safe-area-inset-top) + 48px); }
+#toolbar { gap: 6px; padding: env(safe-area-inset-top) 8px 0; }
+#toolbar .tb { height: 36px; min-width: 40px; padding: 0 7px; }
+#toolbar .tb svg.i { width: 20px; height: 20px; }
+#toolbar .tb-group { padding: 2px; border-radius: 9px; }
+#fileBtn { height: 40px; min-width: 40px; border-radius: 9px; }
+#playBtn { padding: 0 12px; font-size: 15px; }
+#projectTitle { font-size: 15px; }
+#scenePanel .panel-tabs { height: 44px; padding: 0 8px; gap: 5px; }
+#scenePanel .pt-btn, #scenePanel .level-btn { height: 34px; }
+#scenePanel .pt-btn:not(.ui-toggle) { width: 38px; }
+#scenePanel .pt-btn svg.i { width: 19px; height: 19px; }
+#scenePanel .ptab { height: 34px; padding: 0 9px; font-size: 13px; }
+#scenePanel .ptab svg.i:first-child { width: 18px; height: 18px; }
+#scenePanel .level-btn { font-size: 13px; padding: 0 9px; }
+#app[data-sheet=full] { --sheet-h: calc(100% - var(--top) - 32px); }
+@media (max-width: 999px) and (max-height: 540px) and (orientation: landscape) {
+  :root { --top: calc(env(safe-area-inset-top) + 44px); }
+  #toolbar .tb { height: 34px; }
+  #scenePanel .panel-tabs { height: 40px; }
+}

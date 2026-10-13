@@ -924,3 +924,13 @@ body.playing #attachBar { display: none !important; }
 .ac-list { display: flex; flex-direction: column; gap: 2px; }
 .ac-ic { width: 40px; height: 40px; flex: none; border-radius: 10px; background: #2a2f37; display: grid; place-items: center; color: #9cc3ea; }
 .ac-item small { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ---------- 2D / 3D split on Home and New Game ---------- */
+.seg { display: flex; gap: 6px; background: #1e1e1e; border: 1px solid #111; border-radius: 16px; padding: 4px; margin-bottom: 14px; }
+.seg button { flex: 1; height: 50px; border: 0; border-radius: 12px; background: transparent; color: var(--muted); font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.seg button small { font-size: 12px; font-weight: 600; background: rgba(255,255,255,.1); border-radius: 10px; padding: 1px 7px; }
+.seg button.on { background: #3a6ea5; color: #fff; }
+.seg.small button { height: 42px; font-size: 14px; }
+.type.blank { border-style: dashed; }
+.mode-badge { flex: none; min-width: 34px; height: 26px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 800; display: grid; place-items: center; }
+.mode-badge.m2 { background: #2c4a6e; color: #bfdcff; } .mode-badge.m3 { background: #2f5a3a; color: #c5f0c8; }

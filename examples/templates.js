@@ -344,7 +344,7 @@ export const templates = {
   },
 
   'empty-2d': {
-    version: 1, name: 'Empty 2D', mode: '2d', background: '#0b0b1a', view: { width: 400, height: 700 }, gravity: 0,
+    version: 1, name: 'Empty 2D', mode: '2d', background: '#0b0b1a', view: { width: 400, height: 700 }, gravity: 1600,
     settings: {}, vars: { score: 0 }, entities: [],
   },
   'empty-3d': {

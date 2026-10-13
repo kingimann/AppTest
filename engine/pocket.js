@@ -145,6 +145,14 @@ export const BODY_DEFAULTS = {
   ignore: '', // comma-separated tags this body passes through
   layer: 0, // physics layer (0-7): which others it collides with comes from the scene's layer matrix
 };
+/** A collider component's shape as body settings (sizes left out = fit the visible shape). */
+export function colliderBody(c) {
+  if (!c) return null;
+  const sized = c.w || c.h || c.r || c.d, shape = c.shape === 'circle' || c.shape === 'sphere' ? c.shape : 'box';
+  const out = { shape: sized ? shape : 'auto', sensor: !!c.trigger };
+  for (const k of ['w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'bounce', 'friction', 'layer', 'oneWay']) if (c[k] !== undefined && c[k] !== '') out[k] = c[k];
+  return out;
+}
 /** Physics layers (Unity-style). matrix[i] is a bit mask of the layers layer i collides with. */
 export const PHYSICS_LAYERS = ['Default', 'Player', 'Enemy', 'Bullet', 'Ground', 'Pickup', 'Layer 6', 'Layer 7'];
 export const layerMatrix = (pl) => (Array.isArray(pl?.matrix) && pl.matrix.length === 8 ? pl.matrix : Array(8).fill(255));
@@ -171,14 +179,18 @@ export class Entity {
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.tiles = props.tiles ? new TileMap(props.tiles) : null; // 2D tilemap
+    this.sun = props.sun ? { color: '#ffffff', intensity: 1, ambient: 0.45, shadows: true, ...props.sun } : null; // Directional Light (3D): its rotation aims the sunlight
+    this.globalLight = props.globalLight ? { brightness: 1, color: '#0a0a1e', ...props.globalLight } : null; // Global Light 2D: how bright the whole scene is
     this.tileLayer = props.tiles?.layer ?? 4; // tilemaps collide as the Ground physics layer
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
+    this.collider = props.collider ? { ...props.collider } : null; // Unity-style collider: alone it makes a solid (static) object
     this.body = null;
-    if (props.body) this.setBody(props.body);
+    const col = colliderBody(props.collider);
+    if (props.body || col) { this.setBody({ ...(props.body ? {} : { type: 'static' }), ...(props.body || {}), ...(col || {}) }); if (!props.body) this.body._colliderOnly = true; }
     this.data = { ...(props.data || {}) };
     this.behaviors = [];
     this.scene = null;
@@ -282,6 +294,10 @@ export class Entity {
   /** Give this entity a body sized to its visuals if it has none. */
   ensureBody(opts = {}) {
     if (!this.body) this.setBody(opts);
+    else if (this.body._colliderOnly && opts.type) { // a component needs this collider to move or be a trigger (coins, hazards)
+      this.body.type = opts.type; if (opts.sensor) this.body.sensor = true; if (opts.gravityScale != null) this.body.gravityScale = opts.gravityScale;
+      this.body._colliderOnly = false;
+    }
     return this.body;
   }
 }
@@ -784,6 +800,17 @@ export class Scene {
       e.sx = p.sx * L.sx; e.sy = p.sy * L.sy; e.sz = p.sz * L.sz;
       e._lw = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz };
     }
+  }
+  /** Light objects (Unity's Directional Light / Global Light 2D) drive the scene lighting. */
+  syncLights() {
+    let sun = null, gl = null;
+    for (const e of this.entities) { if (e.dead || e.visible === false) continue; if (e.sun && !sun) sun = e; if (e.globalLight && !gl) gl = e; }
+    if (sun && this.mode === '3d' && !this.light._driven) { // (a Day/Night Cycle component drives the sun itself)
+      const rx = (sun.rx || 0) * DEG, ry = (sun.ry || 0) * DEG, L = this.light, S = sun.sun;
+      L.dir = { x: Math.cos(rx) * Math.sin(ry), y: -Math.sin(rx), z: Math.cos(rx) * Math.cos(ry) };
+      L.color = S.color; L.intensity = +S.intensity; L.ambient = +S.ambient; L.shadows = !!S.shadows;
+    }
+    if (gl && this.mode !== '3d' && !this.light._driven) { this.light.darkness = clamp(1 - (+gl.globalLight.brightness), 0, 1); this.light.ambientColor = gl.globalLight.color; }
   }
   childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
 
@@ -2613,7 +2640,7 @@ registerBehavior('hazard', {
   ],
   create(p) {
     return {
-      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
       collide(e, other, s) {
         if (!other.has(p.tag) || other.dead || s.state !== 'play' || e.data.blinkOff) return;
         if (other.data.invuln > 0) return;
@@ -3877,7 +3904,7 @@ registerBehavior('dayNight', {
       update(e, dt, s) {
         hour = (hour + dt * 24 / Math.max(1, +p.dayLength || 60)) % 24;
         const sun = Math.sin((hour - 6) / 24 * Math.PI * 2), day = clamp(sun * 1.6 + 0.3, 0, 1);
-        s.background = mixColor(p.nightColor, p.dayColor, day);
+        s.background = mixColor(p.nightColor, p.dayColor, day); s.light._driven = true;
         if (s.mode === '3d') {
           s.light.sunAngle = hour * 15; const h = clamp(sun, 0.05, 1) * 80 + 5, a = s.light.sunAngle * DEG, hh = h * DEG;
           s.light.dir = { x: -Math.cos(hh) * Math.sin(a), y: -Math.sin(hh), z: -Math.cos(hh) * Math.cos(a) };
@@ -4455,7 +4482,7 @@ registerBehavior('gridMove', {
   create(p) {
     let busy = 0, armed = true;
     return {
-      start(e, s) { if (!e.body) e.setBody({ type: 'kinematic' }); s.want('player'); },
+      start(e, s) { e.ensureBody({ type: 'kinematic' }); s.want('player'); },
       update(e, dt, s) {
         if ((busy -= dt) > 0 || s.state !== 'play' || (s.settings.turnBased && !s.isPlayerTurn)) return;
         const inp = s.engine.input, a = inp.axis();
@@ -4486,6 +4513,115 @@ registerBehavior('gridMove', {
         s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
         busy = 0.14;
         if (s.settings.turnBased) s.endTurn();
+      },
+    };
+  },
+});
+
+// ---- Character Controller 2D: one component, many kinds of 2D movement ----
+const withParamDefaults = (type, extra) => { const d = Behaviors[type]; const o = {}; for (const q of d.params || []) o[q.key] = paramDefault(q, false); return { ...o, ...extra }; };
+registerBehavior('controller2d', {
+  label: 'Character Controller 2D', description: 'Pick how the player moves: top-down, platformer, runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle or grid steps.',
+  params: [
+    { key: 'mode', label: 'Movement type', type: 'select', default: 'topdown8', options: [
+      ['topdown8', 'Top-down (8 directions)'], ['topdown4', 'Top-down (4 directions)'], ['platformer', 'Platformer (run & jump)'], ['runner', 'Auto-runner (tap to jump)'],
+      ['flappy', 'Flappy (tap to fly up)'], ['car', 'Car (steer & drive)'], ['spaceship', 'Spaceship (turn & thrust)'], ['tank', 'Tank (turn & roll)'],
+      ['tapToMove', 'Tap to move (point & click)'], ['followFinger', 'Follow finger'], ['sideToSide', 'Side to side (paddle)'], ['grid', 'Grid steps (one tile per swipe)']],
+      info: { topdown8: 'Joystick or drag moves it in any direction.', topdown4: 'Up, down, left or right only (classic RPG).', platformer: 'Needs gravity. Joystick to run, jump button or tap to jump.',
+        runner: 'Runs forward on its own; tap to jump. Needs gravity and ground.', flappy: 'Each tap pushes it up; gravity pulls it down.', car: 'Joystick left/right steers, up drives (or always drives).',
+        spaceship: 'Turn with the joystick, push forward to thrust. Drifts in space.', tank: 'Joystick left/right turns, up/down drives forward and back.', tapToMove: 'Tap anywhere and it walks there.',
+        followFinger: 'Sticks to your finger while you touch the screen.', sideToSide: 'Left and right only, like a paddle or shooter ship.', grid: 'One tile per swipe or joystick push.' } },
+    { key: 'speed', label: 'Speed', type: 'number', default: 240, step: 10 },
+    { key: 'jump', label: 'Jump / flap power', type: 'number', default: 620, step: 20, showIf: { mode: ['platformer', 'runner', 'flappy'] } },
+    { key: 'turn', label: 'Turn speed (°/s)', type: 'number', default: 200, step: 10, showIf: { mode: ['car', 'spaceship', 'tank'] } },
+    { key: 'accel', label: 'Acceleration', type: 'number', default: 600, step: 50, showIf: { mode: ['car', 'spaceship'] } },
+    { key: 'friction', label: 'Slow down (0 = slide forever)', type: 'number', default: 2, step: 0.25, showIf: { mode: ['car', 'spaceship', 'topdown8', 'topdown4'] } },
+    { key: 'autoDrive', label: 'Always drive forward', type: 'bool', default: false, showIf: { mode: ['car'] } },
+    { key: 'faceMove', label: 'Turn to face movement', type: 'bool', default: false, showIf: { mode: ['topdown8', 'topdown4', 'tapToMove'] } },
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, showIf: { mode: ['grid'] } },
+    { key: 'keepInView', label: 'Keep on screen', type: 'bool', default: true, showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'followFinger', 'spaceship', 'flappy'] } },
+    { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn', showIf: { mode: ['platformer', 'runner', 'flappy'] } },
+  ],
+  create(p) {
+    // movements the engine already does well
+    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'all', keepInView: p.keepInView })),
+      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'horizontal', keepInView: p.keepInView })),
+      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { speed: p.speed, jump: p.jump, onFall: p.onFall })),
+      grid: () => Behaviors.gridMove.create(withParamDefaults('gridMove', { tile: p.tile })) }[p.mode];
+    if (delegate) {
+      const inner = delegate();
+      return { ...inner, start(e, s) { if (['topdown8', 'sideToSide', 'platformer'].includes(p.mode)) { s.settings.joystick = true; if (p.mode === 'platformer') s.settings.jumpButton = true; s.engine.layoutButtons?.(); } inner.start?.(e, s); } };
+    }
+    let heading = 0, target = null, speed = 0;
+    const keep = (e, s) => { if (!p.keepInView) return; const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; e.x = clamp(e.x, v.left + hx, v.right - hx); e.y = clamp(e.y, v.top + hy, v.bottom - hy); };
+    const fell = (e, s) => { const v = s.viewBounds(); if (e.y > v.bottom + 300) respawnOrEnd(e, s, p.onFall); };
+    const face = (e, vx, vy) => { if (p.faceMove && Math.hypot(vx, vy) > 5) e.rz = Math.atan2(vy, vx) / DEG; };
+    return {
+      start(e, s) {
+        const gravity = ['runner', 'flappy'].includes(p.mode);
+        e.ensureBody({ type: 'dynamic', gravityScale: gravity ? 1 : 0 });
+        if (!gravity) e.body.gravityScale = 0;
+        heading = (e.rz || 0) * DEG; e.data.respawn ||= { x: e.x, y: e.y, z: e.z };
+        if (['topdown4', 'car', 'spaceship', 'tank'].includes(p.mode)) { s.settings.joystick = true; s.engine.layoutButtons?.(); }
+        if (p.mode === 'runner') { s.settings.jumpButton = true; s.engine.layoutButtons?.(); }
+      },
+      update(e, dt, s) {
+        if (s.state !== 'play') return;
+        const inp = s.engine.input, a = inp.axis(), b = e.body, damp = Math.max(0, 1 - (+p.friction || 0) * dt);
+        switch (p.mode) {
+          case 'topdown4': {
+            let ax = a.x, ay = a.y; if (Math.abs(ax) > Math.abs(ay)) ay = 0; else ax = 0;
+            const d = inp.drag; let dx = d.dx, dy = d.dy; if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0;
+            const z = s.engine.renderer.zoomFor(s);
+            b.vel.x = Math.sign(ax) * (Math.abs(ax) > 0.3 ? p.speed : 0); b.vel.y = Math.sign(ay) * (Math.abs(ay) > 0.3 ? p.speed : 0);
+            e.x += dx / z; e.y += dy / z; face(e, b.vel.x || dx, b.vel.y || dy); keep(e, s); break;
+          }
+          case 'runner': {
+            b.vel.x = p.speed;
+            if ((inp.pressed('tap') || inp.pressed('btn:jump') || inp.pressed('swipe:up')) && b.grounded) { b.vel.y = -p.jump; s.engine.audio.sfx('jump'); }
+            fell(e, s); break;
+          }
+          case 'flappy': {
+            if (inp.pressed('tap') || inp.pressed('btn:jump')) { b.vel.y = -p.jump * 0.6; s.engine.audio.sfx('jump'); }
+            e.rz = clamp(b.vel.y / 12, -30, 70); if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = 0; } }
+            fell(e, s); break;
+          }
+          case 'car': {
+            const thr = p.autoDrive ? 1 : Math.max(0, -a.y) + (a.y > 0.3 ? -0.5 : 0);
+            speed = speed * damp + thr * p.accel * dt; speed = clamp(speed, -p.speed * 0.4, p.speed);
+            heading += a.x * (p.turn * DEG) * dt * clamp(Math.abs(speed) / (p.speed * 0.3), 0, 1) * Math.sign(speed || 1);
+            b.vel.x = Math.cos(heading) * speed; b.vel.y = Math.sin(heading) * speed; e.rz = heading / DEG; break;
+          }
+          case 'spaceship': {
+            heading += a.x * (p.turn * DEG) * dt;
+            const thrust = Math.max(0, -a.y) + (inp.pointers.size && !inp.stick ? 1 : 0);
+            b.vel.x = b.vel.x * damp + Math.cos(heading) * thrust * p.accel * dt; b.vel.y = b.vel.y * damp + Math.sin(heading) * thrust * p.accel * dt;
+            const v = Math.hypot(b.vel.x, b.vel.y); if (v > p.speed) { b.vel.x *= p.speed / v; b.vel.y *= p.speed / v; }
+            e.rz = heading / DEG;
+            if (p.keepInView) { const vb = s.viewBounds(); if (e.x < vb.left) e.x = vb.right; else if (e.x > vb.right) e.x = vb.left; if (e.y < vb.top) e.y = vb.bottom; else if (e.y > vb.bottom) e.y = vb.top; }
+            break;
+          }
+          case 'tank': {
+            heading += a.x * (p.turn * DEG) * dt; const fwd = -a.y * p.speed;
+            b.vel.x = Math.cos(heading) * fwd; b.vel.y = Math.sin(heading) * fwd; e.rz = heading / DEG; break;
+          }
+          case 'tapToMove': {
+            const t = inp.taps[0] || [...inp.pointers.values()][0];
+            if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y); target = { x: w.x, y: w.y }; }
+            if (target) {
+              const dx = target.x - e.x, dy = target.y - e.y, d = Math.hypot(dx, dy);
+              if (d < 4) { b.vel.x = b.vel.y = 0; target = null; } else { const v = Math.min(p.speed, d / Math.max(dt, 1e-3)); b.vel.x = dx / d * v; b.vel.y = dy / d * v; face(e, dx, dy); }
+            }
+            break;
+          }
+          case 'followFinger': {
+            const t = [...inp.pointers.values()].find((q) => q.role === 'free');
+            if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y), dx = w.x - e.x, dy = w.y - e.y, k = Math.min(1, dt * (p.speed / 20)); b.vel.x = dx * k / Math.max(dt, 1e-3); b.vel.y = dy * k / Math.max(dt, 1e-3); }
+            else { b.vel.x = 0; b.vel.y = 0; }
+            keep(e, s); break;
+          }
+          default: break;
+        }
       },
     };
   },
@@ -5928,6 +6064,7 @@ export class Engine {
   render() {
     if (!this.scene || !this.renderer) return;
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
+    this.scene.syncLights();
     this.renderer.render(this.scene, this);
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);

@@ -112,6 +112,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 
 ### Hierarchy and Inspector
 
+- **Home** and **New Game** split game types into **2D games** and **3D games** (with Blank first), and **My games** has All / 2D / 3D tabs with a 2D/3D badge on each.
 - **Hierarchy**:
   - Each row shows a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing its components.
   - Three or more objects with the same name fold into one row (**Gem ×8**). Tap to open or fold it; its eye shows or hides them all.
@@ -201,6 +202,24 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 ```js
 { physicsLayers: { names: [...], matrix: [255, 251, 253, 255, 255, 255, 255, 255] } } // on the project; body: { layer: 1 }
 ```
+
+### Colliders and Rigidbody (Unity-style)
+
+- **Colliders** are their own components: **Box Collider 2D**, **Circle Collider 2D** (2D) and **Box Collider**, **Sphere Collider** (3D). New Squares, Circles, Cubes, Spheres… come with one, like Unity's primitives.
+  - A collider on its own makes a solid object that never moves (walls, ground, obstacles). Add a **Rigidbody** to make it fall and get pushed.
+  - **Is Trigger** detects touches without blocking. Coins, hazards and other "touch" components turn a plain collider into a trigger for you.
+  - **Size** / **Radius**, **Offset**, **Set Size / Fit to Shape**, **Shape** (box ↔ circle), **Material** (bounce, friction), and **Edit Collider** handles in the 2D Scene.
+- **Rigidbody 2D / Rigidbody**: Body Type (Dynamic / Kinematic / Static), Mass, Gravity Scale, Linear Drag, Bounciness, Friction, Material, Freeze Position, Start Velocity, Max Speed, Max Fall Speed, Collision Detection (Continuous for fast objects), Physics layer and pass-through tags.
+- New blank 2D games have gravity on (like Unity). If a level's gravity is off, a Rigidbody shows a **Turn on gravity** button. Top-down movers set their own Gravity Scale to 0.
+
+### Camera and lights in the scene
+
+- New games start, like a Unity scene, with a **Main Camera** object (follows the player, or stays put if there isn't one) and a light object: **Directional Light** in 3D (its rotation aims the sun and the shadows; colour, intensity, ambient, shadows) or **Global Light 2D** (how bright the level is; Point Lights shine through the dark).
+- Create → **Camera & lights** adds more: Camera, Directional Light / Global Light 2D, Point Light. While a light object exists, the level's Lighting settings defer to it.
+
+### Character Controller 2D
+
+- One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle) and Grid steps. Only the settings that matter for the chosen type are shown, with a tip for each.
 
 ### Tap and click components
 

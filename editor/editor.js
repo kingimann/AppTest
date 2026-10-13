@@ -150,8 +150,25 @@ function openProject(json, id = uid('p')) {
 function newFromTemplate(key, name) {
   const json = clone(templates[key]);
   json.name = name || (key.startsWith('empty') ? 'New Game' : json.name);
-  for (const e of json.entities) e.id ||= uid();
+  for (const lv of [json, ...(json.levels || [])]) { for (const e of lv.entities || []) e.id ||= uid(); addSceneEssentials(lv, json.mode); }
   openProject(json);
+}
+/** Like a new Unity scene: a Main Camera and the level's light as objects you can select and change. */
+function addSceneEssentials(lv, mode) {
+  const three = (lv.mode || mode) === '3d', E = (lv.entities ||= []), L = lv.light || {};
+  const hasCam = E.some((e) => (e.behaviors || []).some((b) => b.type === 'camera' || b.type === 'cameraFollow' || b.type === 'firstPerson' || b.type === 'thirdPerson'));
+  const add = [];
+  if (!hasCam) add.push(three
+    ? { id: uid(), name: 'Main Camera', x: 0, y: 8, z: 12, rx: -34, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, fov: 60, ox: 0, oy: 7, oz: 11, priority: 0 }] }
+    : { id: uid(), name: 'Main Camera', x: (lv.view?.width || 400) / 2, y: (lv.view?.height || 700) / 2, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, ox: 0, oy: 0, priority: 0 }] });
+  if (three && !E.some((e) => e.sun)) {
+    let rx = 68, ry = -127; // aim the sun the way the level was already lit (these match the engine's default sunlight)
+    if (L.sunAngle != null || L.sunHeight != null) { rx = +(L.sunHeight ?? 60); ry = 180 + (+L.sunAngle || 0); }
+    else if (L.dir) { const d = L.dir, n = Math.hypot(d.x, d.y, d.z) || 1; rx = Math.asin(-d.y / n) / DEG; ry = Math.atan2(d.x, d.z) / DEG; }
+    add.push({ id: uid(), name: 'Directional Light', x: 0, y: 6, z: 0, rx: Math.round(rx), ry: Math.round(ry), sun: { color: L.color || '#ffffff', intensity: L.intensity ?? 1, ambient: L.ambient ?? 0.45, shadows: L.shadows !== false } });
+  }
+  if (!three && !E.some((e) => e.globalLight)) add.push({ id: uid(), name: 'Global Light 2D', x: 40, y: 40, globalLight: { brightness: Math.round((1 - (+L.darkness || 0)) * 100) / 100, color: L.ambientColor || '#0a0a1e' } });
+  E.unshift(...add);
 }
 
 function setLevel(i) {
@@ -463,7 +480,7 @@ engine.onRenderUI = (ctx, s) => {
     ctx.fillStyle = isSel ? 'rgba(247,160,44,0.25)' : 'rgba(30,30,30,0.6)';
     ctx.strokeStyle = isSel ? ORANGE : 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.rect(p.x - 12, p.y - 12, 24, 24); ctx.fill(); ctx.stroke();
-    const pe = ent(e.id), glyph = (pe?.behaviors || []).some((b) => b.type === 'camera') ? '🎥' : e.light ? '💡' : '';
+    const pe = ent(e.id), glyph = (pe?.behaviors || []).some((b) => b.type === 'camera') ? '🎥' : e.sun || e.globalLight ? '☀️' : e.light ? '💡' : '';
     if (glyph) { ctx.font = '15px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.fillText(glyph, p.x, p.y + 1); }
     else {
       ctx.strokeStyle = isSel ? ORANGE : '#cfcfcf'; ctx.lineWidth = 1.5;
@@ -785,12 +802,13 @@ function beginTransform(giz, x, y) {
   const o = giz.g.o;
   if (giz.handle === 'collider') {
     const live = engine.scene.byId(selectedId), ex = live.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1;
-    if ((j.body.shape || 'auto') === 'auto') { // fitted collider: becomes an explicit box / circle the first time you drag it
-      if (ex.sphere) Object.assign(j.body, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(j.body, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
-      Object.assign(live.body, { shape: j.body.shape, r: j.body.r, w: j.body.w, h: j.body.h });
+    const C0 = j.collider || j.body, fitted = j.collider ? !(C0.w || C0.h || C0.r) : (C0.shape || 'auto') === 'auto';
+    if (fitted) { // fitted collider: becomes an explicit box / circle the first time you drag it
+      if (ex.sphere) Object.assign(C0, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(C0, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
+      Object.assign(live.body, { shape: C0.shape, r: C0.r, w: C0.w, h: C0.h });
     }
     gesture = { type: 'collider', part: giz.part, id: selectedId, sx: x, sy: y, moved: false, rot: ex.rot || 0, scale: [sx, sy],
-      orig: { w: j.body.w || 1, h: j.body.h || 1, r: j.body.r || 10, ox: j.body.ox || 0, oy: j.body.oy || 0 } };
+      orig: { w: C0.w || 1, h: C0.h || 1, r: C0.r || 10, ox: C0.ox || 0, oy: C0.oy || 0 } };
     return;
   }
   if (giz.handle === 'rect') {
@@ -819,9 +837,9 @@ surface.addEventListener('pointermove', (ev) => {
   if (g.type === 'collider') {
     if (!g.moved && Math.hypot(dx, dy) < 4) return;
     g.moved = true;
-    const j = ent(g.id), live = s.byId(g.id); if (!j?.body || !live) return;
+    const j = ent(g.id), live = s.byId(g.id); if (!(j?.collider || j?.body) || !live) return;
     const z = engine.renderer.zoomFor(s), wx = dx / z, wy = dy / z, cs = Math.cos(-g.rot), sn = Math.sin(-g.rot);
-    const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.body, r1 = (v) => Math.round(v);
+    const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.collider || j.body, r1 = (v) => Math.round(v);
     const shift = (lxx, lyy) => { const c2 = Math.cos(g.rot), s2 = Math.sin(g.rot); B.ox = r1(o.ox + (lxx * c2 - lyy * s2) / scx); B.oy = r1(o.oy + (lxx * s2 + lyy * c2) / scy); };
     if (g.part === 'c') { B.ox = r1(o.ox + wx / scx); B.oy = r1(o.oy + wy / scy); }
     else if (g.part === 'rad') B.r = Math.max(2, r1(o.r + lx / Math.max(scx, scy)));
@@ -1324,6 +1342,7 @@ function iconFor(e) {
   if (!e) return 'scene';
   if (e.voxels || e.tiles) return 'grid';
   if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
+  if (e.sun || e.globalLight) return 'sun';
   if (e.light && !e.shape && !e.mesh && !e.model) return 'bulb';
   if (e.model) return 'cube';
   if (e.bar) return 'hud';
@@ -1341,6 +1360,7 @@ function compBadges(e) {
   if (e.light) out.push('Light');
   if (e.model) out.push('Model');
   if (e.tiles) out.push('Tilemap');
+  if (e.collider && !e.body) out.push(e.collider.trigger ? 'Trigger' : 'Collider');
   for (const b of e.behaviors || []) { const d = Behaviors[b.type]; if (d) out.push(d.label.replace(/ \(.*\)$/, '')); }
   return out;
 }
@@ -1350,7 +1370,7 @@ function kindOf(e) {
   if ((e.tags || []).includes('player')) return 'player';
   if (e.ui) return 'ui';
   if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
-  if (e.light && !hasVisual(e)) return 'light';
+  if ((e.light || e.sun || e.globalLight) && !hasVisual(e)) return 'light';
   if ((e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules', 'script'].includes(b.type))) return 'logic';
   return '';
 }
@@ -1629,8 +1649,10 @@ function addVisualScript() {
 function openCreateMenu(anchor) {
   if (uiMode) { popMenu(anchor, [{ cap: 'UI widgets' }, ...UI_WIDGETS.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))]); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
+  const sceneObj = (label) => objs.find((o) => o.label === label);
   popMenu(anchor, [
-    { cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
+    { cap: 'Camera & lights' }, ...['Camera', is3D() ? 'Directional Light' : 'Global Light 2D', 'Light'].map(sceneObj).filter(Boolean).map((o) => ({ icon: o.icon, label: o.label === 'Light' ? 'Point Light' : o.label, fn: () => addEntity(o.props) })),
+    '-', { cap: 'Objects' }, ...objs.filter((o) => !['Camera', 'Directional Light', 'Global Light 2D', 'Light'].includes(o.label)).map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
     '-', { cap: 'Prefabs' }, ...groups.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) })),
     '-', { cap: 'Logic' },
     { icon: 'bolt', label: 'Triggers (On → If → Do)', fn: () => addLogic('triggers') },
@@ -2057,7 +2079,8 @@ const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim
 let inspCat = 'all';
 /** Which inspector filter a component belongs to. */
 function compCat(key) {
-  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'tiles', 'light', 'uiel'].includes(key)) return 'visual';
+  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'tiles', 'light', 'sun', 'globalLight', 'uiel'].includes(key)) return 'visual';
+  if (key === 'collider') return 'physics';
   if (key === 'body') return 'physics';
   const type = String(key).replace(/^b\d+/, ''), c = BEH_META[type]?.[0];
   if (!c) return 'other';
@@ -2291,35 +2314,75 @@ function renderInspector() {
       C('light.flicker', { label: 'Flicker (0–1, like a torch)', type: 'number', def: 0, step: 0.1 }),
     ], { icon: 'bulb', key: 'light', menu: removeMenu(() => { delete j.light; changed({ structure: true }); }, 'light') }));
   }
+  if (j.sun) box.append(comp('Directional Light', [
+    h('p', { class: 'desc' }, 'Sunlight for the whole level. Turn it with Rotation (X tilts it down, Y swings it around) to move the shadows.'),
+    C('sun.color', { label: 'Colour', type: 'color', def: '#ffffff' }),
+    C('sun.intensity', { label: 'Intensity', type: 'number', def: 1, step: 0.1, range: [0, 3] }),
+    C('sun.ambient', { label: 'Ambient (shadow fill)', type: 'number', def: 0.45, step: 0.05, range: [0, 1] }),
+    C('sun.shadows', { label: 'Shadows', type: 'bool', def: true }),
+  ], { icon: 'sun', key: 'sun', menu: removeMenu(() => { delete j.sun; changed({ structure: true }); }, 'sun') }));
+  if (j.globalLight) box.append(comp('Global Light 2D', [
+    h('p', { class: 'desc' }, 'How bright the whole level is. Turn Brightness down for night or caves; objects with a Light shine through the dark.'),
+    C('globalLight.brightness', { label: 'Brightness', type: 'number', def: 1, step: 0.05, range: [0, 1] }),
+    C('globalLight.color', { label: 'Darkness colour', type: 'color', def: '#0a0a1e' }),
+  ], { icon: 'sun', key: 'globalLight', menu: removeMenu(() => { delete j.globalLight; changed({ structure: true }); }, 'globalLight') }));
+  const editColliderBtn = () => !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
+    colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
+    if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
+  } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider'));
+  if (j.collider && !j.ui) { // Unity-style collider component
+    const cs = j.collider.shape || 'box', round_ = cs === 'circle' || cs === 'sphere', fitted = !(j.collider.w || j.collider.h || j.collider.r);
+    const title = (cs === 'sphere' ? 'Sphere Collider' : cs === 'circle' ? 'Circle Collider 2D' : threeD ? 'Box Collider' : 'Box Collider 2D');
+    box.append(comp(title, [
+      C('collider.trigger', { label: 'Is Trigger (detect, don\'t block)', type: 'bool', def: false, structure: true }),
+      fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
+        : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step: threeD ? 0.05 : 1 })
+          : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], threeD ? 0.05 : 1),
+      vecRow(() => T().collider, 'Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], threeD ? 0.05 : 1),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => { const f = fitCollider(j, cs); Object.assign(j.collider, f); changed({ inspector: true }); pushHistory(); } }, icon('frame'), fitted ? 'Set Size' : 'Fit to Shape'),
+        h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Collider shape' }, ...(threeD ? [['box', 'Box'], ['sphere', 'Sphere']] : [['box', 'Box'], ['circle', 'Circle']]).map(([k, l]) => ({ icon: k === 'box' ? 'square' : 'circle', label: l, fn: () => { j.collider = { ...fitCollider(j, k), trigger: j.collider.trigger }; changed({ structure: true }); pushHistory(); } }))]) }, icon('square'), 'Shape')),
+      editColliderBtn(),
+      h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { j.collider.bounce = m.bounce; j.collider.friction = m.friction; changed({ inspector: true }); pushHistory(); } } },
+        h('option', { value: '' }, materialOf({ bounce: j.collider.bounce || 0, friction: j.collider.friction || 0, drag: 0 })), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
+      !j.body && C('collider.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
+      !j.body && C('collider.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
+      !j.body && h('p', { class: 'desc' }, 'On its own it\'s solid but never moves. Add a Rigidbody to make it fall and get pushed.'),
+    ], { icon: round_ ? 'circle' : 'square', key: 'collider', desc: 'The shape physics uses for this object.',
+      menu: removeMenu(() => { delete j.collider; changed({ structure: true }); }, 'collider') }));
+  }
   if (j.body && !j.ui) {
-    const shp = j.body.shape || 'auto';
+    const shp = j.body.shape || 'auto', dyn = j.body.type === 'dynamic', g = +project.gravity || 0;
     box.append(comp(threeD ? 'Rigidbody' : 'Rigidbody 2D', [
-      C('body.type', { label: 'Body Type', type: 'select', options: [['static', 'Static'], ['dynamic', 'Dynamic'], ['kinematic', 'Kinematic']], def: 'dynamic', structure: true }),
-      C('body.sensor', { label: 'Is Trigger', type: 'bool', def: false }),
-      h('div', { class: 'row' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { Object.assign(j.body, m); changed({ inspector: true }); pushHistory(); } } },
+      C('body.type', { label: 'Body Type', type: 'select', options: [['dynamic', 'Dynamic (falls, gets pushed)'], ['kinematic', 'Kinematic (moved by code)'], ['static', 'Static (never moves)']], def: 'dynamic', structure: true }),
+      dyn && !g && (+j.body.gravityScale || 1) && h('div', { class: 'obox warn' }, 'Gravity is off in this level, so it won\'t fall. ',
+        h('button', { class: 'btn', style: 'margin-top:8px;width:100%', onclick: () => { project.gravity = threeD ? -25 : 1600; changed({ inspector: true }); pushHistory(); toast('Gravity on (level settings › Physics). Objects with Gravity Scale 0 stay put.'); } }, icon('download'), 'Turn on gravity')),
+      dyn && [
+        C('body.mass', { label: 'Mass', type: 'number', def: 1, step: 0.5 }),
+        C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }),
+        C('body.drag', { label: 'Linear Drag (air)', type: 'number', def: 0, step: 0.1 }),
+        C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05, range: [0, 1.2] }),
+        C('body.friction', { label: 'Friction', type: 'number', def: 0, step: 0.1 }),
+      ],
+      h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { Object.assign(j.body, m); changed({ inspector: true }); pushHistory(); } } },
         h('option', { value: '' }, materialOf(j.body)), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
-      j.body.type === 'dynamic' && [C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }), C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05 })],
-      j.body.type === 'dynamic' && h('div', { class: 'row' }, h('label', {}, 'Freeze'), h('div', { class: 'pair' }, (threeD ? ['X', 'Y', 'Z'] : ['X', 'Y']).map((a) =>
+      dyn && h('div', { class: 'row' }, h('label', {}, 'Freeze Position'), h('div', { class: 'pair' }, (threeD ? ['X', 'Y', 'Z'] : ['X', 'Y']).map((a) =>
         h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.body['lock' + a], onchange: (e) => { if (e.target.checked) j.body['lock' + a] = true; else delete j.body['lock' + a]; changed(); } }), a)))),
+      dyn && vecRow(() => T().body, 'Start Velocity', threeD ? ['vx', 'vy', 'vz'] : ['vx', 'vy'], [0, 0, 0], threeD ? 0.5 : 10),
+      dyn && [C('body.maxSpeed', { label: 'Max Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 }), C('body.maxFall', { label: 'Max Fall Speed (0 = none)', type: 'number', def: 0, step: threeD ? 1 : 50 })],
+      dyn && C('body.ccd', { label: 'Collision Detection', type: 'select', options: [['', 'Discrete'], ['1', 'Continuous (fast objects)']], def: '' }),
       C('body.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
-      C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
-      C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
-      !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
-        colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
-        if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
-      } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider')),
-      shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
-      (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
-      j.body.type !== 'dynamic' && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
-      showAdvanced && vecRow(() => (T().body ||= {}), 'Collider Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], threeD ? 0.05 : 1),
-      showAdvanced && j.body.type === 'dynamic' && [
-        C('body.mass', { label: 'Mass (who pushes whom)', type: 'number', def: 1, step: 0.5 }),
-        C('body.friction', { label: 'Friction on ground', type: 'number', def: 0, step: 0.1 }),
-        C('body.drag', { label: 'Air drag', type: 'number', def: 0, step: 0.1 }),
-        C('body.maxFall', { label: 'Max fall speed (0 = none)', type: 'number', def: 0 }),
-        C('body.maxSpeed', { label: 'Max speed (0 = none)', type: 'number', def: 0 })],
-      showAdvanced && j.body.type !== 'dynamic' && C('body.friction', { label: 'Surface friction', type: 'number', def: 0, step: 0.1 }),
-    ], { icon: 'body', key: 'body', desc: 'Static: walls and ground. Dynamic: pushed by physics. Kinematic: moves on its own.',
+      C('body.ignore', { label: 'Pass through tags', type: 'text', def: '', suggest: 'tags' }),
+      !dyn && C('body.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
+      ...(j.collider ? [] : [ // no collider component: the body fits the visible shape (older projects can size it here)
+        h('div', { class: 'obox info' }, 'No collider: it uses its shape. Add a collider to control the exact shape.',
+          h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { j.collider = { ...fitCollider(j, threeD ? 'box' : 'box'), ...(j.body.sensor ? { trigger: true } : {}) }; for (const k of ['shape', 'w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'sensor']) delete j.body[k]; changed({ structure: true }); pushHistory(); } }, icon('plus'), threeD ? 'Add Box Collider' : 'Add Box Collider 2D'))),
+        C('body.sensor', { label: 'Is Trigger', type: 'bool', def: false }),
+        shp !== 'auto' && C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
+        shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
+        (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
+        editColliderBtn()]),
+    ], { icon: 'body', key: 'body', desc: 'Makes it move with physics: gravity, pushes, bounces.',
       menu: removeMenu(() => { delete j.body; changed({ structure: true }); }, 'body') }));
   }
 
@@ -2404,7 +2467,9 @@ function renderSceneSettings(box) {
     threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
     h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
   ], { icon: 'body', key: 's-phys' }));
-  box.append(comp('Lighting', threeD ? [
+  const lightObj = project.entities.find((e) => (threeD ? e.sun : e.globalLight));
+  if (lightObj) box.append(h('div', { class: 'obox info', style: 'margin:16px 14px 0' }, `Lighting comes from “${lightObj.name}”. `, h('button', { class: 'btn', style: 'margin-top:8px;width:100%', onclick: () => select(lightObj.id) }, icon('sun'), `Select ${lightObj.name}`)));
+  else box.append(comp('Lighting', threeD ? [
     C('light.color', { label: 'Sun Color', type: 'color', def: '#ffffff' }),
     C('light.intensity', { label: 'Sun Brightness', type: 'number', def: 1, step: 0.1 }),
     C('light.sunAngle', { label: 'Sun Direction (°)', type: 'number', def: 20, step: 15 }),
@@ -2489,7 +2554,7 @@ function renderSceneSettings(box) {
 // Components (Add Component list + Project panel)
 // ============================================================================
 const BEH_META = {
-  move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
+  move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
   rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
@@ -2609,6 +2674,15 @@ function defaultBehavior(type, threeD) {
   return b;
 }
 /** Every component that can be added to the object j. */
+/** A collider sized to the object's visible shape (unscaled units, like the body settings). */
+function fitCollider(j, shape) {
+  const live = engine.scene.byId(j.id), ex = live?.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1, sz = Math.abs(j.sz ?? 1) || 1;
+  if (!ex || ex.hx === Infinity || (!ex.sphere && !ex.hx)) return { shape };
+  const r1 = (v) => round(v, is3D() ? 2 : 0), rad = ex.sphere ? ex.r : Math.max(ex.hx, ex.hy);
+  if (shape === 'circle' || shape === 'sphere') return { shape, r: r1(rad / Math.max(sx, sy)) };
+  return ex.sphere ? { shape, w: r1(ex.r * 2 / sx), h: r1(ex.r * 2 / sy), ...(is3D() ? { d: r1(ex.r * 2 / sz) } : {}) }
+    : { shape, w: r1(ex.hx * 2 / sx), h: r1(ex.hy * 2 / sy), ...(is3D() ? { d: r1((ex.hz === Infinity ? 1 : ex.hz) * 2 / sz) } : {}) };
+}
 function componentsFor(j) {
   const threeD = is3D() && !(j && j.ui);
   const list = [
@@ -2621,9 +2695,13 @@ function componentsFor(j) {
     { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
     { cat: 'UI', key: 'minimap', label: 'Minimap', icon: 'grid', desc: 'A small map of the level on screen', ok: (e) => e.ui && !e.minimap, add: (e) => { e.minimap = { w: 120, h: 120, range: is3D() ? 40 : 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false }; } },
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
-    { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
+    { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Falls, gets pushed and bounces (needs gravity; uses its collider)', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
+    ...(threeD ? [['box', 'Box Collider', 'square'], ['sphere', 'Sphere Collider', 'sphere']] : [['box', 'Box Collider 2D', 'square'], ['circle', 'Circle Collider 2D', 'circle']]).map(([shape, label, ic]) => ({
+      cat: 'Physics', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
+    if (type === 'controller2d' && threeD) continue; // 2D only
+    if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
     list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
       ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
@@ -2661,7 +2739,7 @@ function suggestComps(j, list) {
   else if (has('tappable') || has('comboClicker') || has('upgrade')) keys.push('b:clickPopup', 'b:pressFeedback', 'b:comboClicker', 'b:longPress');
   else {
     if (!j.body) keys.push('body');
-    if (isPlayer) keys.push(is3D() ? 'b:thirdPerson' : 'b:platformer', 'b:move', 'b:health', 'b:cameraFollow');
+    if (isPlayer) keys.push(...(is3D() ? ['b:thirdPerson', 'b:move'] : has('move') || has('platformer') ? [] : ['b:controller2d']), 'b:health', 'b:cameraFollow');
     else keys.push('b:collectible', 'b:hazard', 'b:patrol', 'b:health');
     if (!logic) keys.push('b:triggers');
     keys.push('b:tween');
@@ -2687,7 +2765,7 @@ function openAddComponent(startCat) {
       return;
     }
     if (cat) { // inside a folder
-      const items = list.filter((c) => c.cat === cat);
+      const items = list.filter((c) => c.cat === cat).sort((x, y) => (y.key === 'b:controller2d') - (x.key === 'b:controller2d'));
       body.replaceChildren(h('button', { class: 'ac-back', onclick: () => { cat = null; draw(); } }, icon('left'), 'All categories'),
         h('div', { class: 'ac-cat' }, cat, ` · ${items.length}`), h('div', { class: 'ac-list' }, items.map((c) => item(c))));
       return;
@@ -2843,8 +2921,11 @@ const OBJECTS_2D = [
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
+  { icon: 'sun', label: 'Global Light 2D', props: { name: 'Global Light 2D', globalLight: { brightness: 1, color: '#0a0a1e' } } },
   { icon: 'grid', label: 'Tilemap', props: { name: 'Tilemap', x: 0, y: 520, tiles: { size: 40, palette: TILE_PALETTE.map((t) => ({ ...t })), cells: Object.fromEntries([...Array(10)].map((_, i) => [i + ',0', 1])) } }, tilemap: true },
 ];
+const ROUND_2D = ['circle', 'ring', 'ellipse'];
+for (const o of OBJECTS_2D) { const sh = o.props.shape; if (sh && sh.type !== 'emoji' && sh.type !== 'cloud' && !o.props.body) o.props.collider = { shape: ROUND_2D.includes(sh.type) ? 'circle' : 'box' }; } // like Unity's 2D primitives
 const OBJECTS_3D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
   { icon: 'grid', label: 'Voxel World', props: { name: 'Voxel World', y: 0, voxels: { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} } } },
@@ -2866,7 +2947,9 @@ const OBJECTS_3D = [
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', y: 4, z: 8, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 7, oz: 11, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', y: 2, light: { color: '#ffd9a0', intensity: 1.5, range: 8 } } },
   { icon: 'bulb', label: 'Lamp', props: { name: 'Lamp', model: { parts: [{ geometry: 'cylinder', x: 0, y: 1, z: 0, r: 0.06, h: 2, color: '#455a64' }, { geometry: 'sphere', x: 0, y: 2.1, z: 0, r: 0.22, color: '#fff3c4', emissive: 1 }] }, light: { color: '#ffd9a0', intensity: 1.6, range: 7 } } },
+  { icon: 'sun', label: 'Directional Light', props: { name: 'Directional Light', y: 6, rx: 50, ry: -30, sun: { color: '#fff4e0', intensity: 1, ambient: 0.45, shadows: true } } },
 ];
+for (const o of OBJECTS_3D) { const m = o.props.mesh; if (m && !o.props.body) o.props.collider = { shape: m.geometry === 'sphere' ? 'sphere' : 'box' }; } // Unity's 3D primitives come with colliders
 
 let projectTab = 'prefabs';
 function renderProject() {
@@ -3304,11 +3387,36 @@ function openFileMenu() {
 }
 
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
+/** Game types to start from, split into 2D and 3D (Blank first) with a switch between them. */
 function typeCards(onPick) {
-  return h('div', { class: 'types' }, templateInfo.map((t) => h('button', { class: 'type', onclick: () => onPick(t) },
-    h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube')),
-    h('b', {}, t.title), h('small', {}, `${templates[t.key].mode.toUpperCase()} · ${t.blurb}`))));
+  let mode = store.get('pocket.editor.newMode', '2d') === '3d' ? '3d' : '2d';
+  const wrap = h('div', { class: 'type-wrap' });
+  const draw = () => {
+    const list = templateInfo.filter((t) => templates[t.key].mode === mode).sort((a, b) => (b.key.startsWith('empty') ? 1 : 0) - (a.key.startsWith('empty') ? 1 : 0));
+    wrap.replaceChildren(
+      h('div', { class: 'seg' }, ['2d', '3d'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
+        icon(m === '3d' ? 'cube' : 'grid'), `${m.toUpperCase()} games`, h('small', {}, String(templateInfo.filter((t) => templates[t.key].mode === m).length))))),
+      h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t) },
+        h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube')),
+        h('b', {}, t.title), h('small', {}, t.blurb)))));
+  };
+  draw();
+  return wrap;
 }
+/** Saved games with All / 2D / 3D tabs and a 2D/3D badge on each. */
+function projectList(all, row) {
+  let f = store.get('pocket.editor.projFilter', 'all');
+  const wrap = h('div');
+  const draw = () => {
+    const n = (m) => all.filter(([, p]) => (p.json.mode === '3d' ? '3d' : '2d') === m).length, shown = all.filter(([, p]) => f === 'all' || (p.json.mode === '3d' ? '3d' : '2d') === f);
+    wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')]].map(([k, l, c]) =>
+      h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))),
+      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, `No ${f.toUpperCase()} games yet.`));
+  };
+  draw();
+  return wrap;
+}
+const modeBadge = (json) => h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D');
 function startGame(t) {
   closeLayer(); hideHome();
   if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
@@ -3332,14 +3440,14 @@ function showHome() {
       h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
     h('h2', {}, 'New game'),
     typeCards(startGame),
-    all.length ? [h('h2', {}, 'My games'), h('div', { class: 'mine' }, all.map(([id, pr]) => h('div', { class: 'proj-row' },
-      icon(pr.json.mode === '3d' ? 'cube' : 'grid'),
+    all.length ? [h('h2', {}, 'My games'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
+      modeBadge(pr.json),
       h('span', { class: 'nm', onclick: () => { saveNow(); openProject(pr.json, id); hideHome(); } }, pr.name),
       h('small', {}, new Date(pr.updated).toLocaleDateString()),
       id !== projectId && h('button', { title: 'Delete', onclick: () => {
         if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return;
         const a = loadProjects(); delete a[id]; store.set(PROJECTS_KEY, JSON.stringify(a)); showHome();
-      } }, icon('trash')))))] : null,
+      } }, icon('trash'))))] : null,
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
       !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App')),
@@ -3350,8 +3458,8 @@ function showHome() {
 function hideHome() { $('#home').hidden = true; requestAnimationFrame(() => engine.resize()); }
 function openProjectsDialog() {
   const all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
-  openDialog('Open Project', all.length ? all.map(([id, p]) => h('div', { class: 'proj-row' },
-    icon(p.json.mode === '3d' ? 'cube' : 'grid'),
+  openDialog('Open Project', all.length ? projectList(all, ([id, p]) => h('div', { class: 'proj-row' },
+    modeBadge(p.json),
     h('span', { class: 'nm', onclick: () => { closeLayer(); saveNow(); openProject(p.json, id); } }, p.name, id === projectId ? ' (open)' : ''),
     h('small', {}, new Date(p.updated).toLocaleDateString()),
     id !== projectId && h('button', { title: 'Delete', onclick: () => {

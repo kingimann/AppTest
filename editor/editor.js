@@ -3028,3 +3028,4 @@ setTool('move');
     }
   }
 }
+window.pocketReady = true; // boot finished (index.html recovers from a half-updated cache otherwise)

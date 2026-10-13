@@ -94,6 +94,33 @@
 <div id="menuLayer" hidden></div>
 <div id="dragGhost" hidden></div>
 <input type="file" id="fileInput" hidden>
+<script>
+// If the editor fails to start (usually old and new files mixed in the browser cache right after an update),
+// re-download its files and reload once; if that still fails, show a message with a button.
+(function () {
+  var FILES = ['editor.js', 'editor.css', 'icons.js', 'library.js', 'logic.js', 'meshops.js', 'modeler.js', 'nodes.js', 'timeline.js', '../engine/pocket.js', '../examples/templates.js'];
+  function fresh() {
+    try { sessionStorage.setItem('pocket.boot', String(Date.now())); } catch (e) {}
+    var sw = navigator.serviceWorker ? navigator.serviceWorker.getRegistration().then(function (r) { return r && r.update(); }).catch(function () {}) : Promise.resolve();
+    sw.then(function () {
+      // re-download every file, replacing whatever the browser cached, then start again
+      return Promise.all(FILES.map(function (f) { return fetch(f, { cache: 'reload' }).catch(function () {}); }));
+    }).then(function () { location.reload(); });
+  }
+  addEventListener('load', function () { setTimeout(check, 2500); });
+  function check() {
+    if (window.pocketReady) return;
+    var last = 0; try { last = +sessionStorage.getItem('pocket.boot') || 0; } catch (e) {}
+    if (Date.now() - last > 60000) return fresh();
+    var d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;z-index:999;background:#232323;color:#dedede;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;text-align:center;font:17px -apple-system,sans-serif';
+    d.innerHTML = '<b style="font-size:20px">The editor could not start</b><span style="color:#a3a3a3">Your projects are safe. Try loading it again.</span>';
+    var b = document.createElement('button'); b.textContent = 'Reload';
+    b.style.cssText = 'height:52px;padding:0 28px;border:0;border-radius:12px;background:#3a6ea5;color:#fff;font:600 17px -apple-system,sans-serif';
+    b.onclick = fresh; d.appendChild(b); document.body.appendChild(d);
+  }
+})();
+</script>
 <script type="module" src="editor.js"></script>
 </body>
 </html>

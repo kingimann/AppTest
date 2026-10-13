@@ -1084,3 +1084,16 @@ body.playing #attachBar { display: none !important; }
 .snap-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
 .snap-list .nm small { color: #9a9a9a; }
 .comp .sub-head { margin: 14px 0 4px; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: #8fb4e8; }
+/* node editor: live debug badges, switched-off nodes, sticky notes */
+.ne-stat { flex: none; padding: 2px 8px; margin-right: 2px; border-radius: 10px; background: rgba(0,0,0,.35); color: #b9ffcb; font: 700 12px ui-monospace, Menlo, monospace; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ne-node.idle { opacity: .55; }
+.ne-node.off { opacity: .45; filter: grayscale(.8); border-style: dashed; }
+.ne-row.off-note { color: #f2c14e; font-size: 12px; padding: 4px 10px; min-height: 0; }
+.ne-comment { background: #f6e58d; border-color: #c9b458; }
+.ne-comment .ne-head { background: #e8d26a; color: #3b3200; min-height: 40px; padding-left: 12px; }
+.ne-comment .ne-more { color: #3b3200; }
+.ne-comment textarea { width: 100%; box-sizing: border-box; min-height: 74px; border: 0; background: transparent; color: #2b2400; font: 15px/1.35 -apple-system, system-ui, sans-serif; resize: vertical; padding: 10px 12px; }
+.ne-row textarea { flex: 1; }
+.ne-paste { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; width: 100%; margin: 4px 0 10px; padding: 12px 14px; border: 1px dashed #6b8cc7; border-radius: 14px; background: rgba(58,110,165,.18); color: #fff; font-size: 16px; text-align: left; }
+.ne-paste small { flex-basis: 100%; color: #a9b9d6; font-size: 13px; }
+.ne-paste svg { width: 20px; height: 20px; }

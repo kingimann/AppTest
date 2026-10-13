@@ -292,6 +292,7 @@ function changed({ structure = false, inspector = false } = {}) {
 // Engine in edit mode
 // ============================================================================
 const engine = new Engine({ parent: $('#viewport'), systemBack: false }); // the editor handles the phone's Back itself
+engine.recordGraphs = true; // remember which Visual Script nodes ran, for the node editor's badges
 engine.editing = true;
 engine.showUI = true;
 engine.input.enabled = false;
@@ -2171,6 +2172,7 @@ function editGraph(target, path) {
   const back = () => ed.close();
   const ed = openNodeEditor({
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
+    stats: (nodeId) => engine.graphStats?.get(e.id + '|' + nodeId), // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],

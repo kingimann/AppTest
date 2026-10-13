@@ -955,6 +955,20 @@ export class Scene {
     if (gl && this.mode !== '3d' && !this.light._driven) { this.light.darkness = clamp(1 - (+gl.globalLight.brightness), 0, 1); this.light.ambientColor = gl.globalLight.color; }
   }
   childrenOf(e) { return this.entities.filter((q) => q.parentEnt === e && !q.dead); }
+  /** Make `c` a child of `p` where it is now (it then moves with p), or free it again with p = null. */
+  attach(c, p) {
+    if (!c || c === p || c.ui) return;
+    for (let q = p; q; q = q.parentEnt) if (q === c) return; // can't hold your own parent
+    if (!p) { c.parentId = null; c.parentEnt = null; c.local = null; c._lw = null; c._parentHidden = false; }
+    else {
+      const l = worldToLocal(p, c.x, c.y, c.z, this.mode);
+      c.parentId = p.id; c.parentEnt = p; c._lw = null;
+      c.local = { x: l[0], y: l[1], z: l[2], rx: (c.rx || 0) - (p.rx || 0), ry: (c.ry || 0) - (p.ry || 0), rz: (c.rz || 0) - (p.rz || 0), sx: c.sx / (p.sx || 1), sy: c.sy / (p.sy || 1), sz: c.sz / (p.sz || 1), visible: c.visible };
+      if (c.body && c.body.type === 'dynamic') c.body.vel = { x: 0, y: 0, z: 0 };
+    }
+    const depth = (e) => { let n = 0, q = e; while (q.parentEnt && n < 50) { q = q.parentEnt; n++; } return n; };
+    this.kids = this.entities.filter((e) => e.parentEnt).sort((a, b) => depth(a) - depth(b));
+  }
 
   find(name) { return this.entities.find((e) => e.name === name && !e.dead) || this.pending.find((e) => e.name === name); }
   findAll(tag) { return this.entities.filter((e) => !e.dead && (e.tags.has(tag) || e.name === tag)); }
@@ -6474,12 +6488,55 @@ export const NODE_TYPES = {
   choose: { cat: 'Math', label: 'Choose (if)', value: 'number', inputs: [{ key: 'condition', type: 'bool', default: true }, { key: 'yes', type: 'number', default: 1 }, { key: 'no', type: 'number', default: 0 }] },
   wave: { cat: 'Math', label: 'Wave', value: 'number', inputs: [{ key: 'size', type: 'number', default: 1 }, { key: 'speed', type: 'number', default: 1 }], params: [opt('shape', ['sine', 'triangle', 'square'], 'sine', 'shape')] },
   remap: { cat: 'Math', label: 'Remap', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0.5 }, { key: 'fromMin', type: 'number', default: 0 }, { key: 'fromMax', type: 'number', default: 1 }, { key: 'toMin', type: 'number', default: 0 }, { key: 'toMax', type: 'number', default: 100 }] },
-  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  objPos: { cat: 'Values', label: 'Position Of', value: 'number', params: [txt('object', 'Player', 'object or tag'), opt('axis', ['x', 'y', 'z', 'rotation', 'scale', 'opacity'], 'x', 'axis')] },
   deltaTime: { cat: 'Values', label: 'Frame Time', value: 'number' },
   isHolding: { cat: 'Values', label: 'Finger On Screen', value: 'bool' },
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
   level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  // per-object variables (each copy keeps its own: an enemy's hp, a door's state). Text on the object can show them: {hp}
+  setMyVar: { cat: 'Variables', label: 'Set My Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  addMyVar: { cat: 'Variables', label: 'Add To My Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
+  getMyVar: { cat: 'Variables', label: 'My Variable', value: 'number', params: [txt('name', 'hp', 'variable')] },
+  setOtherVar: { cat: 'Variables', label: 'Set Other\'s Variable', exec: true, outs: ['then'], params: [txt('name', 'hp', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  getOtherVar: { cat: 'Variables', label: 'Other\'s Variable', value: 'number', params: [txt('name', 'hp', 'variable')] },
+  varAt: { cat: 'Variables', label: 'Variable Of Object', value: 'number', params: [txt('object', 'Player', 'object or tag'), txt('name', 'hp', 'variable')] },
+  onVarReaches: { cat: 'Variables', label: 'When Variable Reaches', outs: ['then'], params: [txt('name', 'score', 'variable'), opt('op', ['≥', '≤', '=', '>', '<'], '≥', 'is'), num('value', 100, 'value')] },
+  // functions: custom events you call by name (here, on the other object, on everything with a tag, or everywhere)
+  customEvent: { cat: 'Functions', label: 'Custom Event', outs: ['then'], params: [txt('name', 'explode', 'event name')] },
+  callEvent: { cat: 'Functions', label: 'Call Custom Event', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'other', 'all with tag', 'everything'], 'this object', 'on'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  eventValue: { cat: 'Functions', label: 'Event Value', value: 'number' },
+  comment: { cat: 'Functions', label: 'Comment', comment: true, outs: [], params: [{ key: 'text', type: 'longtext', default: 'What this part of the script does…', label: 'note' }] },
+  // more flow
+  forRange: { cat: 'Flow', label: 'For Range', exec: true, outs: ['each', 'done'], inputs: [{ key: 'from', type: 'number', default: 1 }, { key: 'to', type: 'number', default: 5 }, { key: 'step', type: 'number', default: 1 }] },
+  repeatEvery: { cat: 'Flow', label: 'Repeat Every', exec: true, outs: ['each', 'done'], inputs: [{ key: 'seconds', type: 'number', default: 0.5 }, { key: 'times', type: 'number', default: 5 }], params: [txt('id', '', 'stop with Stop Repeat (id)')] },
+  stopRepeat: { cat: 'Flow', label: 'Stop Repeat', exec: true, outs: ['then'], params: [txt('id', '', 'id (blank = all on this object)')] },
+  cycle: { cat: 'Flow', label: 'Cycle', exec: true, outs: ['1', '2', '3', '4'], params: [num('count', 3, 'outputs used (2–4)')] },
+  weighted: { cat: 'Flow', label: 'Weighted Random', exec: true, outs: ['A', 'B', 'C'], inputs: [{ key: 'A', type: 'number', default: 60 }, { key: 'B', type: 'number', default: 30 }, { key: 'C', type: 'number', default: 10 }] },
+  gate: { cat: 'Flow', label: 'Gate', exec: true, outs: ['open', 'closed'], params: [txt('name', 'door', 'gate name'), { key: 'startOpen', type: 'bool', default: true, label: 'starts open' }] },
+  setGate: { cat: 'Flow', label: 'Open / Close Gate', exec: true, outs: ['then'], params: [txt('name', 'door', 'gate name'), opt('mode', ['open', 'close', 'toggle'], 'close', 'make it')] },
+  waitFrames: { cat: 'Flow', label: 'Wait Frames', exec: true, outs: ['then'], inputs: [{ key: 'frames', type: 'number', default: 1 }] },
+  // touch on this object
+  onLongPress: { cat: 'Events', label: 'On Long Press', outs: ['then'], params: [num('seconds', 0.5, 'hold for (sec)')] },
+  onDoubleTap: { cat: 'Events', label: 'On Double Tap', outs: ['then'] },
+  // more actions
+  attachTo: { cat: 'Objects', label: 'Attach To', exec: true, outs: ['then'], params: [opt('to', ['other', 'object'], 'other', 'attach to'), txt('object', 'Player', 'object (if "object")'), opt('who', ['self', 'other'], 'self', 'who')] },
+  detach: { cat: 'Objects', label: 'Detach', exec: true, outs: ['then'], params: [opt('who', ['self', 'other'], 'self', 'who')] },
+  spawnLaunch: { cat: 'Objects', label: 'Spawn & Launch', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('dir', ['facing', 'up', 'down', 'toward finger', 'toward tag', 'random'], 'facing', 'direction'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'speed', type: 'number', default: 500 }] },
+  moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
+  lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
+  pauseGame: { cat: 'Game', label: 'Pause / Resume', exec: true, outs: ['then'], params: [opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
+  // more values
+  directionTo: { cat: 'Math', label: 'Direction To', value: 'number', params: [txt('tag', 'player', 'tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
+  distBetween: { cat: 'Values', label: 'Distance Between', value: 'number', params: [txt('a', 'Player', 'object'), txt('b', 'Goal', 'object')] },
+  snapTo: { cat: 'Math', label: 'Snap To Step', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'step', type: 'number', default: 32 }] },
+  pingPong: { cat: 'Math', label: 'Ping Pong', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'length', type: 'number', default: 1 }] },
+  sign: { cat: 'Math', label: 'Sign (−1, 0, 1)', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  smooth: { cat: 'Math', label: 'Smooth', value: 'number', inputs: [{ key: 'target', type: 'number', default: 0 }, { key: 'speed', type: 'number', default: 5 }] },
+  chanceOf: { cat: 'Values', label: 'Chance %', value: 'bool', inputs: [{ key: 'percent', type: 'number', default: 25 }] },
+  fingers: { cat: 'Values', label: 'Fingers On Screen', value: 'number' },
+  isPaused: { cat: 'Values', label: 'Is Paused', value: 'bool' },
+  childCount: { cat: 'Values', label: 'Child Count', value: 'number' },
   // online: Photon multiplayer and PlayFab services
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
@@ -6819,6 +6876,14 @@ function castRay(s, e, o, d, max, opts = {}) {
   }
   return hit;
 }
+/** Where the finger is in the world (2D: the point under it; 3D: where it meets the ground plane y = 0). */
+function fingerWorld(s) {
+  const inp = s.engine.input, pt = [...inp.pointers.values()].find((q) => q.role === 'free') || inp.taps[0] || inp.ups[0];
+  if (!pt) return null;
+  if (s.mode !== '3d') return s.engine.renderer.screenToWorld(s, pt.x, pt.y);
+  const r = s.engine.renderer.screenRay?.(s, pt.x, pt.y); if (!r || Math.abs(r.dir.y) < 1e-4) return null;
+  const k = -r.origin.y / r.dir.y; return k < 0 ? null : { x: r.origin.x + r.dir.x * k, y: 0, z: r.origin.z + r.dir.z * k };
+}
 /** Is a point on screen (with a small margin)? */
 function onScreen(s, e, margin = 0) {
   const r = s.engine?.renderer; if (!r?.worldToScreen) return true;
@@ -6859,8 +6924,13 @@ registerBehavior('graph', {
       if (P('debug')) { const l = Math.hypot(d.x, d.y, d.z), len = hit ? hit.dist : max; debugRays.push({ a: o, b: { x: o.x + d.x / l * len, y: o.y + d.y / l * len, z: o.z + d.z / l * len }, hit: !!hit, t: s.time }); }
       return hit;
     };
-    const debugRays = [];
-    const value = (n, ctx, depth) => {
+    const debugRays = [], repeats = new Map(), frameQueue = [], press = new Map(); let lastTapT = -9, varWas = new Map();
+    const value = (n, ctx, depth) => { // remember the last value for the editor's live debug badges
+      const v = valueOf(n, ctx, depth), st = ctx.s?.engine?.graphStats;
+      if (st && n) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
+      return v;
+    };
+    const valueOf = (n, ctx, depth) => {
       if (!n) return 0;
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
       switch (n.type) {
@@ -6896,7 +6966,7 @@ registerBehavior('graph', {
         case 'choose': return I('condition') ? +I('yes') || 0 : +I('no') || 0;
         case 'wave': { const t = s.time * (+I('speed') || 0), k = +I('size') || 0, f = t - Math.floor(t); return k * (P('shape') === 'square' ? (f < 0.5 ? 1 : -1) : P('shape') === 'triangle' ? 1 - 4 * Math.abs(f - 0.5) : Math.sin(t * PI * 2)); }
         case 'remap': { const a = +I('fromMin') || 0, b = +I('fromMax') || 0, t = b === a ? 0 : ((+I('value') || 0) - a) / (b - a); return (+I('toMin') || 0) + ((+I('toMax') || 0) - (+I('toMin') || 0)) * t; }
-        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null); return t ? t[P('axis')] || 0 : 0; }
+        case 'objPos': { const k = P('object'), t = s.find(k) || nearest(s, e, k) || (e.has?.(k) ? e : null), a = P('axis'); if (!t) return 0; return a === 'rotation' ? (s.mode === '3d' ? t.ry : t.rz) || 0 : a === 'scale' ? t.sx : a === 'opacity' ? t.alpha ?? 1 : t[a] || 0; }
         case 'deltaTime': return ctx.dt ?? 1 / 60;
         case 'isHolding': return s.engine.input.pointers.size > 0;
         case 'touchPos': {
@@ -6929,6 +6999,20 @@ registerBehavior('graph', {
         case 'otherHasTag': return !!ctx.other?.has(P('tag'));
         case 'hasOther': return !!ctx.other && !ctx.other.dead;
         case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
+        case 'getMyVar': return +e.data[P('name')] || 0;
+        case 'getOtherVar': return +ctx.other?.data?.[P('name')] || 0;
+        case 'varAt': { const k = P('object'), t = s.find(k) || nearest(s, e, k); return +t?.data?.[P('name')] || 0; }
+        case 'eventValue': return +ctx.eventValue || 0;
+        case 'directionTo': { const t = nearest(s, e, P('tag')); if (!t) return 0; const dx = t.x - e.x, dy = t.y - e.y, dz = t.z - e.z, l = Math.hypot(dx, dy, dz) || 1; return { x: dx, y: dy, z: dz }[P('axis')] / l; }
+        case 'distBetween': { const a = s.find(P('a')) || s.findAll(P('a'))[0], b = s.find(P('b')) || s.findAll(P('b'))[0]; return a && b ? Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z) : 0; }
+        case 'snapTo': { const st = Math.abs(+I('step') || 0); return st ? Math.round((+I('value') || 0) / st) * st : +I('value') || 0; }
+        case 'pingPong': { const L = Math.abs(+I('length') || 1), t = ((+I('value') || 0) % (2 * L) + 2 * L) % (2 * L); return t <= L ? t : 2 * L - t; }
+        case 'sign': return Math.sign(+I('value') || 0);
+        case 'smooth': { const key = 'sm:' + n.id, t = +I('target') || 0, cur = state.has(key) ? state.get(key) : t, k = Math.min(1, (ctx.dt ?? 1 / 60) * (+I('speed') || 5)); const v = cur + (t - cur) * k; state.set(key, v); return v; }
+        case 'chanceOf': return Math.random() * 100 < (+I('percent') || 0);
+        case 'fingers': return s.engine.input.pointers.size;
+        case 'isPaused': return !!s.engine.paused;
+        case 'childCount': return s.childrenOf(e).length;
         case 'canGoBack': return s.canGoBack();
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
@@ -6937,9 +7021,16 @@ registerBehavior('graph', {
         default: return 0;
       }
     };
-    const follow = (n, port, ctx) => { for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx); };
+    const follow = (n, port, ctx) => {
+      const st = ctx.s?.engine?.graphStats, d = def(n);
+      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
+      for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
+    };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
+      const st = ctx.s.engine.graphStats;
+      if (st) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
+      if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
@@ -7083,6 +7174,60 @@ registerBehavior('graph', {
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
         case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
+        case 'setMyVar': e.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'addMyVar': { const k = P('name') || 'hp'; e.data[k] = (+e.data[k] || 0) + (+I('amount') || 0); break; }
+        case 'setOtherVar': if (ctx.other) ctx.other.data[P('name') || 'hp'] = +I('value') || 0; break;
+        case 'callEvent': {
+          const on = P('on'), name = P('name'), v = +I('value') || 0, tag = P('tag');
+          const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : (q) => q === e;
+          s.emit('graphCall', name, who, e, v); break;
+        }
+        case 'forRange': {
+          const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
+          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps });
+          return follow(n, 'done', ctx);
+        }
+        case 'repeatEvery': {
+          const sec = Math.max(0.02, +I('seconds') || 0.5), times = Math.floor(+I('times') || 0), id = P('id') || '', token = {};
+          (repeats.get(id) || repeats.set(id, new Set()).get(id)).add(token);
+          let i = 0; const later = { ...ctx, steps: 0 };
+          const tick = () => {
+            if (e.dead || !repeats.get(id)?.has(token)) return;
+            follow(n, 'each', { ...later, index: i, steps: 0 }); i++;
+            if (times > 0 && i >= times) { repeats.get(id)?.delete(token); follow(n, 'done', { ...later, steps: 0 }); return; }
+            s.after(sec, tick);
+          };
+          tick(); return;
+        }
+        case 'stopRepeat': { const id = P('id'); if (id) repeats.delete(id); else repeats.clear(); break; }
+        case 'cycle': { const c = clamp(Math.round(+P('count') || 3), 2, 4), i = state.get(n.id) || 0; state.set(n.id, (i + 1) % c); return follow(n, String(i + 1), ctx); }
+        case 'weighted': { const w = ['A', 'B', 'C'].map((k) => Math.max(0, +I(k) || 0)), tot = w[0] + w[1] + w[2]; if (!tot) return; let r = Math.random() * tot; for (const [i, k] of ['A', 'B', 'C'].entries()) { if ((r -= w[i]) < 0) return follow(n, k, ctx); } return follow(n, 'C', ctx); }
+        case 'gate': { const key = 'gate:' + P('name'); if (!state.has(key)) state.set(key, P('startOpen') !== false); return follow(n, state.get(key) ? 'open' : 'closed', ctx); }
+        case 'setGate': {
+          const key = 'gate:' + P('name'), cur = state.has(key) ? state.get(key) : (g.nodes.find((q) => q.type === 'gate' && param(q, 'name') === P('name')) ? param(g.nodes.find((q) => q.type === 'gate' && param(q, 'name') === P('name')), 'startOpen') !== false : true);
+          state.set(key, P('mode') === 'open' ? true : P('mode') === 'close' ? false : !cur); break;
+        }
+        case 'waitFrames': { frameQueue.push({ left: Math.max(1, Math.round(+I('frames') || 1)), fn: () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); } }); return; }
+        case 'attachTo': {
+          const who = P('who') === 'other' ? ctx.other : e, to = P('to') === 'object' ? (s.find(P('object')) || nearest(s, e, P('object'))) : (P('who') === 'other' ? e : ctx.other);
+          if (who && to) s.attach(who, to); break;
+        }
+        case 'detach': { const who = P('who') === 'other' ? ctx.other : e; if (who) s.attach(who, null); break; }
+        case 'spawnLaunch': {
+          const c = s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); if (!c) break;
+          const three = s.mode === '3d', sp = +I('speed') || 0, dir = P('dir');
+          let d = dir === 'up' ? { x: 0, y: three ? 1 : -1, z: 0 } : dir === 'down' ? { x: 0, y: three ? -1 : 1, z: 0 } : dir === 'random' ? (() => { const a = rand(0, Math.PI * 2); return three ? { x: Math.cos(a), y: 0, z: Math.sin(a) } : { x: Math.cos(a), y: Math.sin(a), z: 0 }; })() : null;
+          if (dir === 'toward tag') { const t = nearest(s, e, P('tag')); if (t) d = { x: t.x - e.x, y: t.y - e.y, z: three ? t.z - e.z : 0 }; }
+          if (dir === 'toward finger') { const f = fingerWorld(s); if (f) d = { x: f.x - e.x, y: f.y - e.y, z: three ? (f.z ?? e.z) - e.z : 0 }; }
+          if (!d) d = three ? (() => { const f = fwd3((e.ry || 0) * DEG); return { x: f.x, y: 0, z: f.z }; })() : facing2D(e);
+          const l = Math.hypot(d.x, d.y, d.z) || 1, b = c.ensureBody({ type: 'dynamic', gravityScale: three ? 1 : 0 });
+          b.vel = { x: d.x / l * sp, y: d.y / l * sp, z: d.z / l * sp };
+          if (!three) c.rz = Math.atan2(d.y, d.x) / DEG; else c.ry = Math.atan2(-d.x, -d.z) / DEG;
+          ctx = { ...ctx, other: c }; break;
+        }
+        case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
+        case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
+        case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
         case 'netConnect': s.engine.online.connect(); break;
         case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
         case 'netLeave': s.engine.online.leave(); break;
@@ -7131,6 +7276,12 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('customEvent')) s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
+        if (has('onVarReaches')) {
+          const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
+          for (const n of g.nodes) if (n.type === 'onVarReaches') varWas.set(n.id, test(n, s.vars[param(n, 'name')]));
+          s.on('var', (k, v) => { if (e.dead) return; for (const n of g.nodes) if (n.type === 'onVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !varWas.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); varWas.set(n.id, now); } });
+        }
         if (has('onNetJoined', 'onPlayerJoined', 'onPlayerLeft', 'onPfLogin', 'onOnlineError')) s.on('online', (what) => {
           if (e.dead) return;
           const t = { joined: 'onNetJoined', playerJoined: 'onPlayerJoined', playerLeft: 'onPlayerLeft', login: 'onPfLogin', error: 'onOnlineError' }[what];
@@ -7168,6 +7319,16 @@ registerBehavior('graph', {
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
         if (g.nodes.some((n) => n.type === 'released') && inp.ups?.length) fire('released', e, s);
+        for (let i = frameQueue.length - 1; i >= 0; i--) if (--frameQueue[i].left <= 0) frameQueue.splice(i, 1)[0].fn();
+        if (has('onLongPress', 'onDoubleTap') && e.visible) {
+          for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) press.set(d.id, { t: s.time, x: d.x, y: d.y, done: false });
+          for (const [id, q] of press) {
+            const ptr = inp.pointers.get(id);
+            if (!ptr || Math.hypot(ptr.x - q.x, ptr.y - q.y) > 14) { press.delete(id); continue; }
+            for (const n of g.nodes) if (n.type === 'onLongPress' && !q.done && s.time - q.t >= Math.max(0.1, +param(n, 'seconds') || 0.5)) { q.done = true; follow(n, 'then', { s, e, steps: 0 }); }
+          }
+          if (has('onDoubleTap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { if (s.time - lastTapT < 0.35) { lastTapT = -9; fire('onDoubleTap', e, s); } else lastTapT = s.time; }
+        }
         if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
         if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
         if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
@@ -7626,6 +7787,7 @@ export class Engine {
    */
   start(source, opts = {}) {
     this.levels = null; this.carry = null;
+    if (!this.editing && this.recordGraphs) this.graphStats = new Map(); // the node editor's live debug: what ran in this play
     if (source && typeof source === 'object' && !(source instanceof Scene)) this.audio.clips = { ...(source.sounds || {}) }; // imported sounds
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;

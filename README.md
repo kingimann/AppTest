@@ -217,6 +217,9 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 
 ### Colliders and Rigidbody (Unity-style)
 
+- **2D games:** Box Collider 2D and Circle Collider 2D. **3D games:** Box Collider and Sphere Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).
+- **See them like Unity:** every collider is outlined in green in the Scene view (2D outlines, 3D wireframes; triggers are dashed / lighter). Turn it off with *2D/3D menu → Show All Colliders* or the checkbox on a collider; the selected object's collider always shows.
+
 - **Colliders** are their own components: **Box Collider 2D**, **Circle Collider 2D** (2D) and **Box Collider**, **Sphere Collider** (3D). New Squares, Circles, Cubes, Spheres… come with one, like Unity's primitives.
   - A collider on its own makes a solid object that never moves (walls, ground, obstacles). Add a **Rigidbody** to make it fall and get pushed.
   - **Is Trigger** detects touches without blocking. Coins, hazards and other "touch" components turn a plain collider into a trigger for you.

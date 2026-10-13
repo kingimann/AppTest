@@ -57,6 +57,7 @@ let root = null, project = null, projectId = null, selectedId = null, levelIdx =
 let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
+let showColliders = store.get('pocket.editor.colliders', '1') === '1'; // Unity-style green collider outlines on every object
 let tool = 'move';
 let uiMode = false; // UI editor view
 let viewMode = 'scene'; // scene | top (3D levels laid out from above, no perspective) | ui
@@ -402,11 +403,24 @@ engine.drawGrid = (ctx, s, z) => {
 
 const GRID3D = (() => { const p = []; for (let i = -30; i <= 30; i++) p.push(i, 0.01, -30, i, 0.01, 30, -30, 0.01, i, 30, 0.01, i); return p; })();
 
+function toggleColliders(on = !showColliders) { showColliders = on; store.set('pocket.editor.colliders', on ? '1' : ''); engine.render(); renderInspector(); toast(on ? 'Showing every collider (green)' : 'Collider outlines only on the selected object'); }
+const COLLIDER_GREEN = '#39ff8f', TRIGGER_GREEN = '#b9f6ca';
+/** Objects whose collider outline shows: all of them with "Show colliders" on, otherwise only the selected one. */
+const colliderShown = (s, sel) => s.entities.filter((e) => e.body && !e.ui && !e.dead && !e._parentHidden && (showColliders || e === sel) && !(e === sel && colliderEdit === selectedId && !is3D()));
+const BOX_EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
 engine.onRenderWorld = (r, s, z) => {
   if (playing) return;
   const sel = s.byId(selectedId), hover = s.byId(dropHoverId);
   if (s.mode === '2d') {
     const ctx = r;
+    for (const e of colliderShown(s, sel)) { // collider outlines (green; triggers dashed)
+      const ex = e.extents(); if (!Number.isFinite(ex.hx ?? ex.r)) continue;
+      ctx.save(); ctx.strokeStyle = e.body.sensor ? TRIGGER_GREEN : COLLIDER_GREEN; ctx.globalAlpha = e === sel ? 1 : 0.85; ctx.lineWidth = (e === sel ? 2.5 : 1.75) / z;
+      if (e.body.sensor) ctx.setLineDash([5 / z, 4 / z]);
+      ctx.translate(e.x + (ex.ox || 0), e.y + (ex.oy || 0)); ctx.beginPath();
+      if (ex.sphere) ctx.arc(0, 0, ex.r, 0, Math.PI * 2); else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
+      ctx.stroke(); ctx.restore();
+    }
     // game camera frame
     ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5 / z;
     ctx.strokeRect(0, 0, s.view.width, s.view.height);
@@ -461,6 +475,23 @@ engine.onRenderWorld = (r, s, z) => {
       const pts = [];
       for (const [i, k] of [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]) pts.push(...c[i], ...c[k]);
       const gl = r.gl; gl.disable(gl.DEPTH_TEST); r.drawLines(pts, '#ffeb3b'); gl.enable(gl.DEPTH_TEST);
+    }
+    for (const e of colliderShown(s, sel)) { // 3D collider wireframes
+      const ex = e.extents(), cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0), cz = e.z + (ex.oz || 0), pts = [], grow = 1.03; // a hair bigger so the lines don't hide in the faces
+      if (ex.voxel || !Number.isFinite(ex.sphere ? ex.r : ex.hz)) continue;
+      if (ex.sphere) {
+        const R = ex.r * grow, N = 32;
+        for (let i = 0; i < N; i++) {
+          const a = (i / N) * Math.PI * 2, b = ((i + 1) / N) * Math.PI * 2, ca = Math.cos(a) * R, sa = Math.sin(a) * R, cb = Math.cos(b) * R, sb = Math.sin(b) * R;
+          pts.push(cx + ca, cy + sa, cz, cx + cb, cy + sb, cz, cx + ca, cy, cz + sa, cx + cb, cy, cz + sb, cx, cy + ca, cz + sa, cx, cy + cb, cz + sb);
+        }
+      } else {
+        const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => [cx + a * (ex.hx * grow + 0.01), cy + b * (ex.hy * grow + 0.01), cz + d * (ex.hz * grow + 0.01)]);
+        for (const [i, k] of BOX_EDGES) pts.push(...c[i], ...c[k]);
+      }
+      const gl = r.gl; if (e === sel) gl.disable(gl.DEPTH_TEST);
+      r.drawLines(pts, e.body.sensor ? TRIGGER_GREEN : COLLIDER_GREEN, e === sel ? 1 : 0.75);
+      if (e === sel) gl.enable(gl.DEPTH_TEST);
     }
     for (const [e, col] of [[hover, '#4c8bd6'], [sel, ORANGE]]) {
       if (!e || e.ui || !(e.mesh || e.model)) continue;
@@ -2577,6 +2608,7 @@ function renderInspector() {
     const title = (cs === 'sphere' ? 'Sphere Collider' : cs === 'circle' ? 'Circle Collider 2D' : threeD ? 'Box Collider' : 'Box Collider 2D');
     box.append(comp(title, [
       C('collider.trigger', { label: 'Is Trigger (detect, don\'t block)', type: 'bool', def: false, structure: true }),
+      h('label', { class: 'row inline' }, h('span', {}, 'Show all colliders in the Scene'), h('input', { type: 'checkbox', checked: showColliders, onchange: (ev) => toggleColliders(ev.target.checked) })),
       fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
         : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step: threeD ? 0.05 : 1 })
           : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], threeD ? 0.05 : 1),
@@ -2954,7 +2986,7 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Falls, gets pushed and bounces (needs gravity; uses its collider)', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
     ...(threeD ? [['box', 'Box Collider', 'square'], ['sphere', 'Sphere Collider', 'sphere']] : [['box', 'Box Collider 2D', 'square'], ['circle', 'Circle Collider 2D', 'circle']]).map(([shape, label, ic]) => ({
-      cat: 'Physics', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
+      cat: 'Colliders', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
   ];
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
@@ -2985,8 +3017,8 @@ function addComponentTo(id, key) {
 
 /** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
 const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
-  Animation: 'clock', 'My Scripts': 'nodes', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
-const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+  Animation: 'clock', 'My Scripts': 'nodes', Colliders: 'square', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
+const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
 const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
 function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
 /** A few components that usually make sense next for this object. */
@@ -2996,6 +3028,7 @@ function suggestComps(j, list) {
   if (j.ui) keys.push('b:button', 'b:pressFeedback', 'b:tween', 'b:triggers', 'b:uiCounter');
   else if (has('tappable') || has('comboClicker') || has('upgrade')) keys.push('b:clickPopup', 'b:pressFeedback', 'b:comboClicker', 'b:longPress');
   else {
+    if (!j.collider) keys.push('col:box');
     if (!j.body) keys.push('body');
     if (isPlayer) keys.push(...(is3D() ? ['b:thirdPerson', 'b:move'] : has('move') || has('platformer') ? [] : ['b:controller2d']), 'b:health', 'b:cameraFollow');
     else keys.push('b:collectible', 'b:hazard', 'b:patrol', 'b:health');
@@ -4014,6 +4047,7 @@ $('#sceneTab').addEventListener('click', (e) => popMenu(e.currentTarget, [
   { icon: is3D() ? 'cube' : 'grid', label: is3D() ? 'Scene view (3D)' : 'Scene view (2D)', fn: () => setViewMode('scene') },
   is3D() && { icon: 'grid', label: 'Top view (2D layout)', fn: () => setViewMode('top') },
   { icon: 'hud', label: 'UI editor (screen only)', fn: () => setViewMode('ui') },
+  '-', { icon: showColliders ? 'check' : 'square', label: 'Show All Colliders', k: 'green outlines', fn: () => toggleColliders() },
   '-', { icon: 'plus', label: 'New 2D Level', fn: () => addLevel(false, '2d') }, { icon: 'plus', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
 ]));
 /** Scene / Top / UI editor. */

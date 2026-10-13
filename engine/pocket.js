@@ -2046,9 +2046,11 @@ export class Renderer3D {
     gl.uniformMatrix4fv(this.u.uModel, false, M4.identity());
     gl.uniformMatrix3fv(this.u.uNormalMat, false, [1, 0, 0, 0, 1, 0, 0, 0, 1]);
     gl.uniform3fv(this.u.uColor, hexToRgb(color)); gl.uniform1f(this.u.uEmissive, 1); gl.uniform1f(this.u.uOpacity, opacity);
+    if (this.u.uVColor) gl.uniform1f(this.u.uVColor, 0); // plain colour, not the last mesh's vertex colours
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuf); gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
     gl.vertexAttribPointer(this.a.pos, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.pos);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineNorm); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr.length), gl.DYNAMIC_DRAW);
+    const nrm = new Float32Array(arr.length); for (let i = 1; i < nrm.length; i += 3) nrm[i] = 1; // a real normal: a zero one turns the shader's colour into NaN (black lines)
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.lineNorm); gl.bufferData(gl.ARRAY_BUFFER, nrm, gl.DYNAMIC_DRAW);
     gl.vertexAttribPointer(this.a.normal, 3, gl.FLOAT, false, 0, 0); gl.enableVertexAttribArray(this.a.normal);
     if (opacity < 1) gl.enable(gl.BLEND);
     gl.drawArrays(gl.LINES, 0, arr.length / 3);

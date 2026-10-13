@@ -82,6 +82,59 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
+### View modes: Scene, Top and UI editor · 2D and 3D levels
+
+- **Scene / Top / UI**: tap the view button above the Scene.
+  - **Top view** lays out a 3D level from straight above with no perspective, like a 2D map. Drag pans; pinch zooms.
+  - The **UI editor** (also the **UI** button) shows only the screen:
+    - safe-area and centre guides, plus the 9 anchor points;
+    - drags snap to the centre and to the element's anchor;
+    - the Hierarchy lists only UI, and Create offers UI widgets;
+    - screen chips (All, Playing, Title, Paused, Game Over, Win) preview what each screen shows.
+- **Mix 2D and 3D**: each level has its own mode. *Levels → New 2D Level / New 3D Level*, so a game can go from a 2D menu world into a 3D level. UI carries over to the new level.
+
+### Animation (Animator, Tween, Sprite Animation)
+
+- **Animator + Animation timeline.** Open it from *long-press an object → Animate…* or the Animator's button.
+  - Scrub the time bar, pose the object in the Scene, and tap **◆ Key**. With **Auto** on, every change is keyed for you.
+  - Tap a key to set its time, value and ease, or delete it. ▶ previews the clip.
+  - Clips can loop, ping-pong or play once; you can have several clips per object, with one playing on start.
+  - Keys are offsets from the object's rest pose, so clips work wherever the object is (even while physics moves it).
+  - Play clips with the *play animation* action, the Play Animation node, or a message with the clip's name.
+- **Tween** component (like DOTween Animation):
+  - Effects: move by/to, rotate, scale, fade, colour, punch scale/position, shake position/rotation, path, jump.
+  - 28 eases with a curve preview, loops (−1 = forever), yoyo/restart/incremental, delay.
+  - Play on start, tap, touch or message, and **when finished, do** an action. **Preview** plays it right in the Scene.
+- **Sprite Animation** (flipbook): emoji or image frames at any fps; loop, ping-pong or once; always, only while moving, or on a message.
+- **From code** (DOTween style):
+  - `scene.to(obj, { x: 100, 'shape.fill': '#f00' }, 0.5, { ease: 'outBack', loops: -1, loopType: 'yoyo' })` returns a tween you can chain: `.setDelay()`, `.onComplete()`, `.kill()`.
+  - `scene.sequence().append(scene.make(…)).join(…).appendInterval(0.2).appendCallback(fn)`.
+  - `scene.punch`, `scene.shakeProps`, `scene.path`, `scene.jumpTo`, `scene.killTweens`.
+  - `Ease.outBounce` and friends.
+- **Messages:** `scene.send('door-open')`, the *send message* action, and the Send Message / On Message nodes let objects trigger each other.
+- **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Send Message, On Message, Camera Impulse.
+
+### Inspector superpowers (Odin-style)
+
+- Sliders under ranged numbers.
+- Fields that only appear when relevant (e.g. a Tween's Amount shows for Fade but not Move).
+- Foldout groups ("Timing & trigger", "Framing", …) and info boxes that explain the current choice.
+- Pick-lists of the tags, templates, objects, variables, clips and messages already in your game.
+- A curve preview for every ease, and a row of recently used colours.
+- Warnings when something is wrong (a missing template, a camera with nothing to follow, a script with no event).
+- Buttons on components: Preview, Open Animation Timeline, Look Through Camera.
+- **Search settings** at the top of the Inspector finds any field.
+- Swipe left or right across the bottom panel to move between Hierarchy, Inspector and Project.
+
+### Cameras (Cinemachine-style)
+
+The Camera component is a virtual camera:
+- **Modes:** follow, fixed, side scroller, top down, orbit, **group** (frames every object with a tag and zooms out to fit) and **dolly** (rides a track of points, staying as close as it can to the target).
+- **Framing:** a separate **look-at** target, **screen X/Y** offsets to put the target off-centre, damping, look-ahead, a dead zone, and a 2D confiner.
+- **Noise and impulse:** handheld **noise**, and **impulse** shakes that are weaker far away (`scene.impulse(strength, at)`, Camera Impulse node).
+- **Orthographic 3D** for isometric games.
+- **Switching:** with several cameras the highest priority starts. Switching (action, node or `scene.setCamera(name)`) **blends** smoothly over the new camera's blend time and ease.
+
 ### 3D Modeler (Blender-style modeling)
 
 Open it with **Open 3D Modeler** on any 3D Model component, or *Create → New 3D Model (Modeler)*. It fills the screen with its own 3D view:

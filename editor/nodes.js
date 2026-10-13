@@ -27,6 +27,9 @@ export const NODE_HELP = {
   deleteSave: 'Erase a save slot', push: 'Add speed: knockback, dash, boost', setGravity: 'Change gravity (flip it, zero-g…)', switchCamera: 'Make another Camera object active',
   zoomCamera: 'Smoothly zoom in or out', setLight: 'Turn a light on/off or dim it', setDarkness: 'How dark the 2D scene is (0–1)',
   hasSave: 'Is there a saved game?', grounded: 'Standing on something?', velocity: 'How fast this moves', touching: 'Touching something with a tag right now?', canSee: 'Nothing solid in between?',
+  onMessage: 'When a message is sent (Send Message, buttons, tweens)', tweenTo: 'Smoothly animate a property with easing', punch: 'Pop, bump or wobble for juicy feedback',
+  killTweens: 'Stop all tweens on this object', playAnim: 'Play an Animator clip', stopAnim: 'Stop the Animator', sendMessage: 'Tell other objects something happened',
+  impulse: 'Shake the camera from this spot (weaker far away)',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
 

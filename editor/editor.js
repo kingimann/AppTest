@@ -71,6 +71,7 @@ function saveNow() {
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
+let attachFor = null; // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
 const levelList = () => [root, ...(root.levels || [])];
@@ -193,7 +194,7 @@ function changed({ structure = false, inspector = false } = {}) {
   requestRebuild();
   saveSoon();
   pushHistorySoon();
-  if (structure) { renderHierarchy(); renderInspector(); }
+  if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); }
   else if (inspector) renderInspector();
 }
 
@@ -617,6 +618,12 @@ surface.addEventListener('pointerdown', (ev) => {
     paintAt(x, y);
     return;
   }
+  if (ptrs.size === 1 && attachFor) { // Attach mode: this tap picks the new parent (empty space cancels)
+    const hit = pick(x, y);
+    endAttach(hit ? hit.id : null);
+    gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: true };
+    return;
+  }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
     const giz = !panBtn && hitGizmo(x, y);
@@ -978,8 +985,26 @@ function select(id, { fromScene = false } = {}) {
 /** Quick actions for the selected object, floating over the Scene view. */
 function updateCtxBar() {
   const bar = $('#ctxBar'), j = ent(selectedId);
-  bar.hidden = !j || playing;
+  bar.hidden = !j || playing || !!attachFor;
   if (j) $('#hint').hidden = true;
+  if (j) { $('#ctxBar [data-act="detach"]').hidden = !j.parent; $('#ctxBar [data-act="attach"]').hidden = !parentChoices(j).length; }
+}
+// ---- Attach mode: tap "Attach", then tap the object (in the scene or the Hierarchy) it should go inside ----
+function startAttach(id) {
+  const j = ent(id); if (!j) return;
+  if (!parentChoices(j).length) { toast(j.ui ? 'Add another UI element first' : 'Add another object first'); return; }
+  attachFor = id;
+  const bar = $('#attachBar');
+  bar.querySelector('span').textContent = `Tap the object to put “${j.name || 'Object'}” inside`;
+  bar.hidden = false; buzz(8); updateCtxBar(); renderHierarchy();
+}
+function endAttach(targetId) {
+  const id = attachFor; if (!id) return false;
+  attachFor = null; $('#attachBar').hidden = true;
+  if (targetId && targetId !== id) setParent(id, targetId);
+  else if (targetId === id) toast('Pick a different object');
+  updateCtxBar(); renderHierarchy();
+  return true;
 }
 function ctxAction(act) {
   const j = ent(selectedId); if (!j) return;
@@ -987,6 +1012,8 @@ function ctxAction(act) {
   else if (act === 'duplicate') duplicateEntity(j.id);
   else if (act === 'focus') frameSelected();
   else if (act === 'delete') deleteEntity(j.id);
+  else if (act === 'attach') startAttach(j.id);
+  else if (act === 'detach') setParent(j.id, null);
 }
 /** Step through objects in the Inspector with ‹ ›. */
 function stepSelection(d) {
@@ -1093,7 +1120,7 @@ function renderHierarchy() {
     return h('div', {
       class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
-      onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+      onclick: () => { if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
     depth ? h('span', { class: 'h-branch' }) : '',
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
@@ -1182,6 +1209,27 @@ function addChild(pid) {
   const L = project.entities; L.splice(L.indexOf(pj) + subtree(pid).length, 0, c);
   closedKids.delete(pid); selectedId = c.id;
   changed({ structure: true }); pushHistory(); toast(`Added a child to ${pj.name}`);
+}
+/** Objects that could be put inside `j` (not its parents or children, same kind: UI with UI). */
+const childChoices = (j) => project.entities.filter((e) => e.id !== j.id && e.parent !== j.id && !isInside(j.id, e.id) && !!e.ui === !!j.ui && !e.template);
+/** Inspector card: the object's children, each with a one-tap remove, plus New Child / Add Existing. */
+function kidsCard(j) {
+  const kids = kidsOf(j.id);
+  return h('div', { class: 'kids' },
+    h('div', { class: 'kids-h' }, icon('child'), h('b', {}, 'Children'), h('small', {}, kids.length ? String(kids.length) : 'none')),
+    kids.map((k) => h('div', { class: 'kid' },
+      h('button', { class: 'kid-nm', onclick: () => select(k.id) }, icon(iconFor(k)), h('span', {}, k.name || 'Object')),
+      h('button', { class: 'kid-x', title: `Take ${k.name} out of ${j.name}`, onclick: () => setParent(k.id, null) }, icon('unlink'), 'Remove'))),
+    h('div', { class: 'kids-btns' },
+      h('button', { class: 'btn', onclick: () => addChild(j.id) }, icon('plus'), 'New Child'),
+      h('button', { class: 'btn', onclick: (ev) => addExistingMenu(j, ev.currentTarget) }, icon('link'), 'Add Existing')));
+}
+function addExistingMenu(j, anchor) {
+  const opts = childChoices(j);
+  popMenu(anchor, [
+    { cap: `Put inside “${j.name}”…` },
+    ...(opts.length ? opts.map((e) => ({ icon: iconFor(e), label: e.name || 'Object', fn: () => setParent(e.id, j.id) })) : [{ cap: j.ui ? 'No other UI to add' : 'No other objects to add' }]),
+  ]);
 }
 function parentMenu(j, anchor) {
   const opts = parentChoices(j);
@@ -1288,7 +1336,8 @@ function control(target, path, spec) {
     changed({ structure: spec.structure || ['name', 'tags', 'template', 'locked'].includes(path) });
   };
   const val = get();
-  const label = h('label', { title: spec.label }, spec.label);
+  const text = String(spec.label ?? '').replace(/ \((2D|3D)\)$/, ''); // the other mode's fields are hidden, so no need to say which
+  const label = h('label', { title: text }, text);
   let el;
   switch (spec.type) {
     case 'number': {
@@ -1377,7 +1426,8 @@ function control(target, path, spec) {
       }
     }
   }
-  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+  const side = ['number', 'select', 'color', 'template', undefined, 'text'].includes(spec.type) && !spec.ease; // label left, control right
+  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : side ? ' side' : '') }, label, el);
   if (spec.infoText) row.append(h('div', { class: 'obox info' }, spec.infoText));
   return row;
 }
@@ -1440,6 +1490,7 @@ function suggestions(kind) {
 function shown(p, b, threeD) {
   if (p.only3d && !threeD) return false;
   if (p.only2d && threeD) return false;
+  if (/\((2D|3D)\)$/.test(p.label || '') && p.label.endsWith(threeD ? '(2D)' : '(3D)')) return false; // e.g. "Offset Z (3D)" in a 2D game
   if (!p.showIf) return true;
   if (typeof p.showIf === 'function') { try { return !!p.showIf(b); } catch { return true; } }
   return Object.entries(p.showIf).every(([k, vals]) => vals.includes(b[k] ?? p.def));
@@ -1544,11 +1595,11 @@ function vecRow(target, label, keys, defs, step) {
     const set = (v) => { target()[k] = v; changed(); };
     const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: get(), 'data-path': k,
       oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) set(n); } });
-    const b = h('b', { class: 'xyz'[i] }, 'XYZ'[i]);
+    const one = keys.length === 1, b = h('b', { class: one ? 'deg' : 'xyz'[i] }, one ? (label === 'Rotation' ? '°' : '⇆') : 'XYZ'[i]);
     scrubber(b, inp, get, set, step);
     return h('div', { class: 'vf' }, b, inp);
   });
-  return h('div', { class: 'row' }, h('label', {}, label), h('div', { class: 'vec', style: `--n:${keys.length}` }, fields));
+  return h('div', { class: 'row' + (keys.length === 1 ? ' side' : '') }, h('label', {}, label), h('div', { class: 'vec', style: `--n:${keys.length}` }, fields));
 }
 
 const GEO_OPTIONS = [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['capsule', 'Capsule'], ['pyramid', 'Pyramid'], ['wedge', 'Ramp / Wedge'], ['prism', 'Prism'], ['gem', 'Gem'], ['dome', 'Dome'], ['torus', 'Ring / Torus'], ['plane', 'Plane']];
@@ -1744,10 +1795,10 @@ function renderInspector() {
     h('span', { class: 'sp' }),
     h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
     h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
-  box.append(h('div', { class: 'nav-strip' }, h('label', { class: 'adv-toggle' },
-    h('input', { type: 'checkbox', checked: showAdvanced, onchange: (e) => { showAdvanced = e.target.checked; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); } }), 'Show advanced options')));
-  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings (e.g. speed, color)', value: inspQuery, autocapitalize: 'off',
-    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } })));
+  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings', value: inspQuery, autocapitalize: 'off',
+    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
+    h('button', { class: 'adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
+      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear'), 'Advanced')));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -1760,7 +1811,8 @@ function renderInspector() {
         onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
     h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
       h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
-      h('button', { class: 'btn', title: 'Add a child object', onclick: () => addChild(j.id) }, icon('plus'))),
+      j.parent && h('button', { class: 'btn', title: 'Take it out of its parent', onclick: () => setParent(j.id, null) }, icon('unlink'))),
+    kidsCard(j),
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
@@ -1769,11 +1821,11 @@ function renderInspector() {
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
-  if (quick.length) box.append(h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))));
+  const quickRow = quick.length && h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))); // shown by Add Component below
   box.append(h('div', { class: 'comp-tools' },
     h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
-    h('button', { class: 'ct', title: 'Collapse all', onclick: () => { for (const el of box.querySelectorAll('.comp')) closedComps.add(el.dataset.key); renderInspector(); } }, icon('upload')),
-    h('button', { class: 'ct', title: 'Expand all', onclick: () => { closedComps.clear(); renderInspector(); } }, icon('download'))));
+    h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
+      if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -1942,6 +1994,7 @@ function renderInspector() {
     }));
   });
 
+  if (quickRow) box.append(quickRow);
   box.append(h('div', { class: 'add-comp', style: 'flex-direction:column;align-items:center;gap:10px' },
     h('button', { class: 'btn wide', onclick: openAddComponent }, icon('plus'), 'Add Component'),
     compClipboard && h('button', { class: 'btn wide', onclick: () => pasteComponent(j) }, icon('paste'), `Paste ${compClipboard.kind === 'behavior' ? Behaviors[compClipboard.data.type]?.label || 'Component' : compClipboard.kind}`)));
@@ -2947,16 +3000,21 @@ function setViewMode(m) {
   $('#uiBtn').classList.toggle('on', uiMode);
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
-  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: only screen UI. Drag to place, it snaps to the centre and anchors.'); }
+  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: drag to move, pull edges to resize, pinch to zoom.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   refreshAll(); applyCamera();
 }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const bar = h('div', { id: 'uiScreens', hidden: true }, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
-  $('#scenePanel').append(bar);
+  $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
+new ResizeObserver(() => { // short view: smaller zoom buttons and the tool rail folds into two columns
+  const v = $('#viewport'), rail = $('#toolRail');
+  v.classList.toggle('short', v.clientHeight < 260);
+  rail.classList.toggle('two', v.clientHeight - 20 < rail.children.length * (rail.firstElementChild.offsetHeight + 4) + 10);
+}).observe($('#viewport'));
 engine.uiView = uiView; // the engine draws UI with the editor's zoom while editing
 engine.screenFilter = (e) => e.id === selectedId || (uiMode && (uiScreen === 'all' || e.showWhen === uiScreen));
 engine.onBeforeUI = (ctx) => {
@@ -2985,7 +3043,8 @@ function snapUI(j) {
 }
 $('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
-for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {
+$('#attachBar button').addEventListener('click', () => endAttach(null));
+for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['attach', 'link', 'Attach'], ['detach', 'unlink', 'Detach'], ['delete', 'trash', 'Delete']]) {
   const b = $(`#ctxBar [data-act="${act}"]`);
   b.append(icon(ic), label);
   b.addEventListener('click', () => ctxAction(act));
@@ -3023,3 +3082,4 @@ setTool('move');
     }
   }
 }
+window.pocketReady = true; // boot finished (index.html recovers from a half-updated cache otherwise)

@@ -154,10 +154,12 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 ### Parenting, UI anchoring and UI zoom
 
 - **Make an object a child** (it then moves, turns, scales and hides with its parent, in the editor and in play):
+  - Select it, tap **Attach** in the bar over the Scene, then tap the object it should go inside (in the Scene or the Hierarchy).
+  - In the Inspector of the parent, the **Children** card has **Add Existing** (pick from a list) and **New Child**.
   - In the Hierarchy, drag an object's **grip** (the move handle on its row) onto another object.
   - Or long-press an object and pick **Make Child Of…**, or choose a **Parent** at the top of the Inspector.
   - **Add Child Object** (long-press menu, or the **+** next to Parent) creates a new object inside the selected one.
-- **Take it out again**: drag the grip onto the top (scene) row, pick **Unparent (top level)**, or set Parent to *none*. It stays where it is on screen.
+- **Take it out again**: tap **Detach** in the bar over the Scene, tap **Remove** next to it in its parent's **Children** card or next to **Parent** in its own Inspector, drag the grip onto the top (scene) row, or set Parent to *none*. It stays where it is on screen.
 - The Hierarchy shows children indented under their parent with a fold arrow. Duplicating or deleting a parent includes its children. Children of templates are spawned along with them.
 - **UI anchoring** (like Unity's anchor presets): the UI Element inspector has a 4 × 4 grid (top / middle / bottom / stretch × left / centre / right / stretch). Picking one keeps the element where it is.
   - A UI element inside another one (a label inside a panel) is anchored and stretched to its **parent's box** instead of the screen.

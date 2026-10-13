@@ -1258,3 +1258,12 @@ body.playing #attachBar { display: none !important; }
 .insp-bar .ib:nth-last-child(2) svg.i { transform: rotate(90deg); }
 .insp-bar .ib.next svg.i { transform: rotate(-90deg); }
 .insp-bar .ib.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* Polygon / Edge collider points */
+.pts-ed .row.side .btns { margin: 0; }
+.pts-ed .row.side .btns .btn { padding: 6px 10px; min-height: 34px; }
+.pt-row { display: flex; align-items: center; gap: 6px; }
+.pt-row > .row { flex: 1; min-width: 0; margin-top: 6px; grid-template-columns: 22px 1fr; align-items: center; }
+.pt-row > .row > label { min-width: 22px; color: var(--muted); }
+.pt-row .icon-btn { flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line, rgba(255,255,255,.12)); background: transparent; color: inherit; display: grid; place-items: center; margin-top: 6px; }
+.pt-row .icon-btn:disabled { opacity: .35; }
+.pt-row .icon-btn svg { width: 16px; height: 16px; }

@@ -432,7 +432,9 @@ engine.onRenderWorld = (r, s, z) => {
       ctx.save(); ctx.strokeStyle = e.body.sensor ? TRIGGER_GREEN : COLLIDER_GREEN; ctx.globalAlpha = e === sel ? 1 : 0.85; ctx.lineWidth = (e === sel ? 2.5 : 1.75) / z;
       if (e.body.sensor) ctx.setLineDash([5 / z, 4 / z]);
       ctx.translate(e.x + (ex.ox || 0), e.y + (ex.oy || 0)); ctx.beginPath();
-      if (ex.sphere) ctx.arc(0, 0, ex.r, 0, Math.PI * 2); else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
+      if (ex.sphere) ctx.arc(0, 0, ex.r, 0, Math.PI * 2);
+      else if (ex.kind) { ctx.rotate(ex.rot || 0); ex.pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); if (ex.kind !== 'edge') ctx.closePath(); else for (const [px, py] of ex.pts) { ctx.moveTo(px + 3 / z, py); ctx.arc(px, py, 3 / z, 0, Math.PI * 2); } }
+      else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
       ctx.stroke(); ctx.restore();
     }
     // game camera frame
@@ -499,6 +501,14 @@ engine.onRenderWorld = (r, s, z) => {
           const a = (i / N) * Math.PI * 2, b = ((i + 1) / N) * Math.PI * 2, ca = Math.cos(a) * R, sa = Math.sin(a) * R, cb = Math.cos(b) * R, sb = Math.sin(b) * R;
           pts.push(cx + ca, cy + sa, cz, cx + cb, cy + sb, cz, cx + ca, cy, cz + sa, cx + cb, cy, cz + sb, cx, cy + ca, cz + sa, cx, cy + cb, cz + sb);
         }
+      } else if (ex.kind === 'capsule' || ex.kind === 'cylinder') { // rings at the ends (domes for a capsule) joined by four lines
+        const R = ex.r * grow + 0.01, N = 32, top = ex.kind === 'capsule' ? ex.half : ex.hy * grow + 0.01, ring = (y) => { for (let i = 0; i < N; i++) { const a = i / N * Math.PI * 2, b = (i + 1) / N * Math.PI * 2; pts.push(cx + Math.cos(a) * R, y, cz + Math.sin(a) * R, cx + Math.cos(b) * R, y, cz + Math.sin(b) * R); } };
+        ring(cy + top); ring(cy - top);
+        for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) pts.push(cx + dx * R, cy - top, cz + dz * R, cx + dx * R, cy + top, cz + dz * R);
+        if (ex.kind === 'capsule') for (const sgn of [1, -1]) for (const [ux, uz] of [[1, 0], [0, 1]]) for (let i = 0; i < N / 2; i++) { // half circles over each end
+          const a = i / N * Math.PI * 2, b = (i + 1) / N * Math.PI * 2;
+          pts.push(cx + Math.cos(a) * R * ux, cy + sgn * (top + Math.sin(a) * R), cz + Math.cos(a) * R * uz, cx + Math.cos(b) * R * ux, cy + sgn * (top + Math.sin(b) * R), cz + Math.cos(b) * R * uz);
+        }
       } else {
         const c = [[-1, -1, -1], [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]].map(([a, b, d]) => [cx + a * (ex.hx * grow + 0.01), cy + b * (ex.hy * grow + 0.01), cz + d * (ex.hz * grow + 0.01)]);
         for (const [i, k] of BOX_EDGES) pts.push(...c[i], ...c[k]);
@@ -535,11 +545,13 @@ engine.onRenderUI = (ctx, s) => {
     ctx.save(); ctx.strokeStyle = '#69f0ae'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(105,240,174,0.12)';
     ctx.beginPath();
     if (f.sphere) ctx.arc(f.c.x, f.c.y, f.r, 0, Math.PI * 2);
+    else if (f.pts) { f.pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); if (f.closed) ctx.closePath(); }
     else { const p = [f.at(-f.hx, -f.hy), f.at(f.hx, -f.hy), f.at(f.hx, f.hy), f.at(-f.hx, f.hy)]; ctx.moveTo(p[0].x, p[0].y); for (const q of p.slice(1)) ctx.lineTo(q.x, q.y); ctx.closePath(); }
     ctx.fill(); ctx.stroke();
     for (const [part, q] of f.handles) {
       ctx.beginPath();
-      if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
+      if (part[0] === 'p') { ctx.arc(q.x, q.y, 8, 0, Math.PI * 2); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
+      else if (part === 'c') { ctx.arc(q.x, q.y, 9, 0, Math.PI * 2); ctx.fillStyle = 'rgba(105,240,174,0.35)'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(q.x - 5, q.y); ctx.lineTo(q.x + 5, q.y); ctx.moveTo(q.x, q.y - 5); ctx.lineTo(q.x, q.y + 5); ctx.stroke(); }
       else { ctx.rect(q.x - 8, q.y - 8, 16, 16); ctx.fillStyle = '#69f0ae'; ctx.fill(); ctx.strokeStyle = '#0b3d27'; ctx.stroke(); ctx.strokeStyle = '#69f0ae'; }
     }
     ctx.restore();
@@ -691,8 +703,9 @@ function colliderFrame(e) {
   const ex = e.extents(), z = engine.renderer.zoomFor(engine.scene), c = engine.renderer.worldToScreen(engine.scene, e.x + (ex.ox || 0), e.y + (ex.oy || 0));
   const rot = ex.rot || 0, cs = Math.cos(rot), sn = Math.sin(rot), at = (lx, ly) => ({ x: c.x + (lx * cs - ly * sn), y: c.y + (lx * sn + ly * cs) });
   if (ex.sphere) { const r = ex.r * z; return { c, sphere: true, r, rot, handles: [['rad', at(r, 0)], ['c', c]] }; }
-  const hx = ex.hx * z, hy = ex.hy * z;
-  return { c, hx, hy, rot, at, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
+  const hx = ex.hx * z, hy = ex.hy * z, pts = ex.kind ? ex.pts.map(([px, py]) => at(px * z, py * z)) : null, closed = ex.kind !== 'edge';
+  if (ex.kind && e.body.shape !== 'capsule') return { c, hx, hy, rot, at, pts, closed, handles: [...pts.map((q, i) => ['p' + i, q]), ['c', c]] }; // polygon / edge: drag the corners
+  return { c, hx, hy, rot, at, pts, closed, handles: [['r', at(hx, 0)], ['l', at(-hx, 0)], ['b', at(0, hy)], ['t', at(0, -hy)], ['c', c]] };
 }
 function hitGizmo(x, y) {
   const sel = engine.scene?.byId(selectedId);
@@ -875,13 +888,13 @@ function beginTransform(giz, x, y) {
   const o = giz.g.o;
   if (giz.handle === 'collider') {
     const live = engine.scene.byId(selectedId), ex = live.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1;
-    const C0 = j.collider || j.body, fitted = j.collider ? !(C0.w || C0.h || C0.r) : (C0.shape || 'auto') === 'auto';
+    const C0 = j.collider || j.body, fitted = j.collider ? !(C0.w || C0.h || C0.r || C0.points?.length) : (C0.shape || 'auto') === 'auto';
     if (fitted) { // fitted collider: becomes an explicit box / circle the first time you drag it
       if (ex.sphere) Object.assign(C0, { shape: 'circle', r: round(ex.r / Math.max(sx, sy), 1) }); else Object.assign(C0, { shape: 'box', w: round(ex.hx * 2 / sx, 1), h: round(ex.hy * 2 / sy, 1) });
       Object.assign(live.body, { shape: C0.shape, r: C0.r, w: C0.w, h: C0.h });
     }
     gesture = { type: 'collider', part: giz.part, id: selectedId, sx: x, sy: y, moved: false, rot: ex.rot || 0, scale: [sx, sy],
-      orig: { w: C0.w || 1, h: C0.h || 1, r: C0.r || 10, ox: C0.ox || 0, oy: C0.oy || 0 } };
+      flip: [Math.sign(j.sx ?? 1) || 1, Math.sign(j.sy ?? 1) || 1], orig: { w: C0.w || 1, h: C0.h || 1, r: C0.r || 10, ox: C0.ox || 0, oy: C0.oy || 0, points: (C0.points || []).map((q) => [...q]) } };
     return;
   }
   if (giz.handle === 'rect') {
@@ -914,6 +927,7 @@ surface.addEventListener('pointermove', (ev) => {
     const z = engine.renderer.zoomFor(s), wx = dx / z, wy = dy / z, cs = Math.cos(-g.rot), sn = Math.sin(-g.rot);
     const lx = wx * cs - wy * sn, ly = wx * sn + wy * cs, [scx, scy] = g.scale, o = g.orig, B = j.collider || j.body, r1 = (v) => Math.round(v);
     const shift = (lxx, lyy) => { const c2 = Math.cos(g.rot), s2 = Math.sin(g.rot); B.ox = r1(o.ox + (lxx * c2 - lyy * s2) / scx); B.oy = r1(o.oy + (lxx * s2 + lyy * c2) / scy); };
+    if (g.part[0] === 'p') { const i = +g.part.slice(1), q = o.points[i]; if (!q) return; B.points = o.points.map((v) => [...v]); B.points[i] = [r1(q[0] + lx / scx * g.flip[0]), r1(q[1] + ly / scy * g.flip[1])]; live.body.points = B.points.map((v) => [...v]); return; }
     if (g.part === 'c') { B.ox = r1(o.ox + wx / scx); B.oy = r1(o.oy + wy / scy); }
     else if (g.part === 'rad') B.r = Math.max(2, r1(o.r + lx / Math.max(scx, scy)));
     else if (g.part === 'r' || g.part === 'l') { const d = g.part === 'r' ? lx : -lx; B.w = Math.max(2, r1(o.w + d / scx)); const real = (B.w - o.w) * scx; shift((g.part === 'r' ? 1 : -1) * real / 2, 0); B.oy = r1(B.oy); }
@@ -2856,28 +2870,54 @@ function renderInspector() {
   ], { icon: 'sun', key: 'globalLight', menu: removeMenu(() => { delete j.globalLight; changed({ structure: true }); }, 'globalLight') }));
   const editColliderBtn = () => !threeD && h('div', { class: 'btns' }, h('button', { class: 'btn' + (colliderEdit === j.id ? ' primary' : ''), onclick: () => {
     colliderEdit = colliderEdit === j.id ? null : j.id; renderInspector(); engine.render();
-    if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast('Drag the green handles: edges resize, the middle moves the collider'); }
+    if (colliderEdit) { if (!isDesktop() && sheetState() === 'full') setSheet('half'); toast(['polygon', 'edge'].includes(j.collider?.shape) ? 'Drag the green dots to move the corners; the middle moves it all' : 'Drag the green handles: edges resize, the middle moves the collider'); }
   } }, icon('body'), colliderEdit === j.id ? 'Done Editing Collider' : 'Edit Collider'));
   if (j.collider && !j.ui) { // Unity-style collider component
-    const cs = j.collider.shape || 'box', round_ = cs === 'circle' || cs === 'sphere', fitted = !(j.collider.w || j.collider.h || j.collider.r);
-    const title = (cs === 'sphere' ? 'Sphere Collider' : cs === 'circle' ? 'Circle Collider 2D' : threeD ? 'Box Collider' : 'Box Collider 2D');
-    box.append(comp(title, [
+    const cs = j.collider.shape || 'box', round_ = cs === 'circle' || cs === 'sphere', pointy = cs === 'polygon' || cs === 'edge';
+    const fitted = !(j.collider.w || j.collider.h || j.collider.r || j.collider.points?.length), info = colliderInfo(cs, threeD), step = threeD ? 0.05 : 1;
+    const setPts = (fn) => { const np = (j.collider.points || []).map((q) => [...q]); fn(np); j.collider.points = np; changed({ inspector: true }); pushHistory(); };
+    const presetMenu = (ev) => popMenu(ev.currentTarget, [{ cap: cs === 'edge' ? 'Edge shape' : 'Polygon shape' },
+      ...(cs === 'polygon' && shapeOutline(j) ? [{ icon: 'frame', label: 'Match the drawn shape', fn: () => setPts((np) => np.splice(0, np.length, ...shapeOutline(j))) }] : []),
+      ...(cs === 'edge' ? EDGE_PRESETS : POLY_PRESETS).map(([k, l]) => ({ icon: cs, label: l, fn: () => { const f = fitCollider(j, 'box'), hx = (f.w || 40) / 2, hy = (f.h || 40) / 2; setPts((np) => np.splice(0, np.length, ...colliderPreset(cs, k, hx, hy))); } })),
+      { cap: 'Change' },
+      { icon: 'move', label: 'Flip left ↔ right', fn: () => setPts((np) => { for (const q of np) q[0] = -q[0]; np.reverse(); }) },
+      { icon: 'move', label: 'Flip upside down', fn: () => setPts((np) => { for (const q of np) q[1] = -q[1]; np.reverse(); }) },
+      { icon: 'scale', label: 'Bigger (×1.25)', fn: () => setPts((np) => { for (const q of np) { q[0] = round(q[0] * 1.25, 2); q[1] = round(q[1] * 1.25, 2); } }) },
+      { icon: 'scale', label: 'Smaller (×0.8)', fn: () => setPts((np) => { for (const q of np) { q[0] = round(q[0] * 0.8, 2); q[1] = round(q[1] * 0.8, 2); } }) }]);
+    const pointsEditor = () => {
+      const P = j.collider.points || [], min = cs === 'edge' ? 2 : 3;
+      return h('div', { class: 'pts-ed' },
+        h('div', { class: 'row side' }, h('label', {}, `Points (${P.length})`), h('div', { class: 'btns' },
+          h('button', { class: 'btn', onclick: presetMenu }, icon(cs), 'Presets'),
+          h('button', { class: 'btn', onclick: () => setPts((np) => { // a new corner halfway along the last side (an edge grows at its end)
+            const n = np.length, a = np[n - 1] || [0, 0], b = cs === 'edge' ? null : np[0], prev = np[n - 2] || [a[0] - 20, a[1]];
+            np.push(b ? [round((a[0] + b[0]) / 2, 2), round((a[1] + b[1]) / 2, 2)] : [round(a[0] + (a[0] - prev[0] || 20), 2), round(a[1] + (a[1] - prev[1]), 2)]);
+          }) }, icon('plus'), 'Point'))),
+        P.map((q, i) => h('div', { class: 'pt-row' }, vecRow(() => j.collider.points[i], String(i + 1), ['0', '1'], [0, 0], step),
+          h('button', { class: 'icon-btn', title: 'Remove point', disabled: P.length <= min, onclick: () => setPts((np) => np.splice(i, 1)) }, icon('minus')))),
+        cs === 'polygon' && h('p', { class: 'desc' }, 'Corners go around the outline. Dents are fine: they\'re split into pieces automatically.'),
+        cs === 'edge' && h('p', { class: 'desc' }, 'A path things stand on. It has no inside, so keep it under the ground or along walls.'));
+    };
+    const sizeFields = fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
+      : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step })
+        : threeD && (cs === 'capsule' || cs === 'cylinder') ? [C('collider.r', { label: 'Radius', type: 'number', def: 0.5, step }), C('collider.h', { label: 'Height', type: 'number', def: cs === 'capsule' ? 2 : 1, step })]
+          : pointy ? pointsEditor()
+            : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], step);
+    box.append(comp(info[1], [
       C('collider.trigger', { label: 'Is Trigger (detect, don\'t block)', type: 'bool', def: false, structure: true }),
       h('label', { class: 'row inline' }, h('span', {}, 'Show all colliders in the Scene'), h('input', { type: 'checkbox', checked: showColliders, onchange: (ev) => toggleColliders(ev.target.checked) })),
-      fitted ? h('p', { class: 'desc' }, 'Fits the object\'s shape. Drag the handles or tap Set Size to change it.')
-        : round_ ? C('collider.r', { label: 'Radius', type: 'number', def: threeD ? 0.5 : 20, step: threeD ? 0.05 : 1 })
-          : vecRow(() => T().collider, 'Size', threeD ? ['w', 'h', 'd'] : ['w', 'h'], [1, 1, 1], threeD ? 0.05 : 1),
-      vecRow(() => T().collider, 'Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], threeD ? 0.05 : 1),
+      sizeFields,
+      vecRow(() => T().collider, 'Offset', threeD ? ['ox', 'oy', 'oz'] : ['ox', 'oy'], [0, 0, 0], step),
       h('div', { class: 'btns' },
-        h('button', { class: 'btn', onclick: () => { const f = fitCollider(j, cs); Object.assign(j.collider, f); changed({ inspector: true }); pushHistory(); } }, icon('frame'), fitted ? 'Set Size' : 'Fit to Shape'),
-        h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Collider shape' }, ...(threeD ? [['box', 'Box'], ['sphere', 'Sphere']] : [['box', 'Box'], ['circle', 'Circle']]).map(([k, l]) => ({ icon: k === 'box' ? 'square' : 'circle', label: l, fn: () => { j.collider = { ...fitCollider(j, k), trigger: j.collider.trigger }; changed({ structure: true }); pushHistory(); } }))]) }, icon('square'), 'Shape')),
+        !pointy && h('button', { class: 'btn', onclick: () => { const f = fitCollider(j, cs); Object.assign(j.collider, f); changed({ inspector: true }); pushHistory(); } }, icon('frame'), fitted ? 'Set Size' : 'Fit to Shape'),
+        h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Collider shape' }, ...COLLIDER_TYPES[threeD ? '3d' : '2d'].map(([k, l, ic]) => ({ icon: ic, label: l.replace(/ Collider( 2D)?$/, ''), fn: () => { j.collider = { ...fitCollider(j, k), ...(j.collider.trigger ? { trigger: true } : {}), ...(j.collider.ox ? { ox: j.collider.ox } : {}), ...(j.collider.oy ? { oy: j.collider.oy } : {}) }; changed({ structure: true }); pushHistory(); } }))]) }, icon(info[2]), 'Shape')),
       editColliderBtn(),
       h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { j.collider.bounce = m.bounce; j.collider.friction = m.friction; changed({ inspector: true }); pushHistory(); } } },
         h('option', { value: '' }, materialOf({ bounce: j.collider.bounce || 0, friction: j.collider.friction || 0, drag: 0 })), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
       !j.body && C('collider.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       !j.body && C('collider.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
       !j.body && h('p', { class: 'desc' }, 'On its own it\'s solid but never moves. Add a Rigidbody to make it fall and get pushed.'),
-    ], { icon: round_ ? 'circle' : 'square', key: 'collider', desc: 'The shape physics uses for this object.',
+    ], { icon: info[2], key: 'collider', desc: info[3], summary: pointy ? `${(j.collider.points || []).length} points` : fitted ? 'Fits the shape' : round_ ? `r ${j.collider.r}` : threeD && j.collider.r ? `r ${j.collider.r} · h ${j.collider.h}` : `${j.collider.w ?? '–'} × ${j.collider.h ?? '–'}`,
       menu: removeMenu(() => { delete j.collider; changed({ structure: true }); }, 'collider') }));
   }
   if (j.body && !j.ui) {
@@ -3311,13 +3351,75 @@ function defaultBehavior(type, threeD) {
 /** Every component that can be added to the object j. */
 /** A collider sized to the object's visible shape (unscaled units, like the body settings). */
 function fitCollider(j, shape) {
-  const live = engine.scene.byId(j.id), ex = live?.extents(), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1, sz = Math.abs(j.sz ?? 1) || 1;
-  if (!ex || ex.hx === Infinity || (!ex.sphere && !ex.hx)) return { shape };
+  const live = engine.scene.byId(j.id), ex = live && visualExtents(live), sx = Math.abs(j.sx ?? 1) || 1, sy = Math.abs(j.sy ?? 1) || 1, sz = Math.abs(j.sz ?? 1) || 1;
+  if (!ex || ex.hx === Infinity || (!ex.sphere && !ex.hx)) return shape === 'polygon' || shape === 'edge' ? { shape, points: colliderPreset(shape, shape === 'edge' ? 'flat' : 'box', 40, 40) } : { shape };
   const r1 = (v) => round(v, is3D() ? 2 : 0), rad = ex.sphere ? ex.r : Math.max(ex.hx, ex.hy);
+  const hx = (ex.sphere ? ex.r : ex.hx) / sx, hy = (ex.sphere ? ex.r : ex.hy) / sy, hz = (ex.sphere ? ex.r : ex.hz === Infinity ? 0.5 : ex.hz) / sz;
   if (shape === 'circle' || shape === 'sphere') return { shape, r: r1(rad / Math.max(sx, sy)) };
-  return ex.sphere ? { shape, w: r1(ex.r * 2 / sx), h: r1(ex.r * 2 / sy), ...(is3D() ? { d: r1(ex.r * 2 / sz) } : {}) }
-    : { shape, w: r1(ex.hx * 2 / sx), h: r1(ex.hy * 2 / sy), ...(is3D() ? { d: r1((ex.hz === Infinity ? 1 : ex.hz) * 2 / sz) } : {}) };
+  if (shape === 'capsule' && is3D()) return { shape, r: r1(Math.max(hx, hz)), h: r1(Math.max(hy, hx) * 2) };
+  if (shape === 'cylinder') return { shape, r: r1(Math.max(hx, hz)), h: r1(hy * 2) };
+  if (shape === 'polygon') return { shape, points: shapeOutline(j) || colliderPreset('polygon', 'box', hx, hy) };
+  if (shape === 'edge') return { shape, points: colliderPreset('edge', 'flat', hx, hy) };
+  return { shape, w: r1(hx * 2), h: r1(hy * 2), ...(is3D() && shape === 'box' ? { d: r1(hz * 2) } : {}) };
 }
+/** An object's size from what it draws, ignoring its current collider (falls back to the collider when it draws nothing). */
+function visualExtents(live) {
+  const bare = Object.assign(Object.create(Object.getPrototypeOf(live)), live, { body: null }), ex = bare.extents();
+  return hasVisual(live) && ex && (ex.sphere ? ex.r : ex.hx) && Number.isFinite(ex.sphere ? ex.r : ex.hx) ? ex : live.extents();
+}
+/** Ready-made polygon / edge outlines, hx × hy half size, centred on the object. */
+const POLY_PRESETS = [['box', 'Box'], ['triangle', 'Triangle'], ['slopeR', 'Slope ◢'], ['slopeL', 'Slope ◣'], ['diamond', 'Diamond'], ['pentagon', 'Pentagon'], ['hexagon', 'Hexagon'], ['octagon', 'Octagon'], ['star', 'Star'], ['ramp', 'Ramp (rounded)']];
+const EDGE_PRESETS = [['flat', 'Flat line'], ['slopeUp', 'Slope up'], ['slopeDown', 'Slope down'], ['hill', 'Hill'], ['valley', 'Valley'], ['bowl', 'Bowl ◡'], ['zigzag', 'Zigzag'], ['steps', 'Steps'], ['wave', 'Wave']];
+function colliderPreset(shape, kind, hx, hy) {
+  const R = (v) => Math.round(v * 100) / 100, P = (list) => list.map(([x, y]) => [R(x), R(y)]), ring = (n, a0 = -Math.PI / 2) => P(Array.from({ length: n }, (_, i) => [Math.cos(a0 + i / n * Math.PI * 2) * hx, Math.sin(a0 + i / n * Math.PI * 2) * hy]));
+  if (shape === 'edge') {
+    const curve = (f, n = 9) => P(Array.from({ length: n }, (_, i) => { const t = i / (n - 1); return [-hx + t * hx * 2, f(t)]; }));
+    switch (kind) {
+      case 'slopeUp': return P([[-hx, hy], [hx, -hy]]);
+      case 'slopeDown': return P([[-hx, -hy], [hx, hy]]);
+      case 'hill': return curve((t) => hy - Math.sin(t * Math.PI) * hy * 2);
+      case 'valley': return P([[-hx, -hy], [0, hy], [hx, -hy]]);
+      case 'bowl': return curve((t) => -hy + Math.sin(t * Math.PI) * hy * 2);
+      case 'zigzag': return P([[-hx, hy], [-hx / 2, -hy], [0, hy], [hx / 2, -hy], [hx, hy]]);
+      case 'steps': return P([[-hx, hy], [-hx / 3, hy], [-hx / 3, 0], [hx / 3, 0], [hx / 3, -hy], [hx, -hy]]);
+      case 'wave': return curve((t) => Math.sin(t * Math.PI * 4) * hy, 17);
+      default: return P([[-hx, -hy], [hx, -hy]]); // the top of the object
+    }
+  }
+  switch (kind) {
+    case 'triangle': return P([[0, -hy], [hx, hy], [-hx, hy]]);
+    case 'slopeR': return P([[-hx, hy], [hx, hy], [hx, -hy]]);
+    case 'slopeL': return P([[-hx, hy], [hx, hy], [-hx, -hy]]);
+    case 'diamond': return P([[0, -hy], [hx, 0], [0, hy], [-hx, 0]]);
+    case 'pentagon': return ring(5);
+    case 'hexagon': return ring(6);
+    case 'octagon': return ring(8, -Math.PI / 2 + Math.PI / 8);
+    case 'star': return P(Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, k = i % 2 ? 0.4 : 1; return [Math.cos(a) * hx * k, Math.sin(a) * hy * k]; }));
+    case 'ramp': return P([[-hx, hy], ...Array.from({ length: 7 }, (_, i) => { const t = (i + 1) / 8 * Math.PI / 2; return [-hx + Math.sin(t) * hx * 2, hy - (1 - Math.cos(t)) * hy * 2]; }), [hx, -hy], [hx, hy]]);
+    default: return P([[-hx, -hy], [hx, -hy], [hx, hy], [-hx, hy]]);
+  }
+}
+/** The object's drawn shape as polygon points (unscaled), when it has a matching outline. */
+function shapeOutline(j) {
+  const s = j.shape; if (!s || is3D()) return null;
+  const hx = (s.w || 40) / 2, hy = (s.h || 40) / 2;
+  if (s.type === 'polygon' && s.points?.length >= 3) return s.points.map(([x, y]) => [x, y]);
+  if (s.type === 'triangle') return colliderPreset('polygon', 'triangle', hx, hy);
+  if (s.type === 'diamond' || s.type === 'star' || s.type === 'pentagon' || s.type === 'hexagon' || s.type === 'octagon') {
+    if (s.type === 'octagon') return Array.from({ length: 8 }, (_, i) => { const a = -Math.PI / 2 + i / 8 * Math.PI * 2; return [Math.round(Math.cos(a) * hx * 100) / 100, Math.round(Math.sin(a) * hy * 100) / 100]; });
+    if (s.type === 'star') return Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s.w * 0.2 : s.w / 2; return [Math.round(Math.cos(a) * r * 100) / 100, Math.round(Math.sin(a) * r * (s.h / s.w) * 100) / 100]; });
+    return colliderPreset('polygon', s.type, hx, hy);
+  }
+  if (s.type === 'arrow') return [[hx, 0], [0, -hy], [0, -hy * 0.4], [-hx, -hy * 0.4], [-hx, hy * 0.4], [0, hy * 0.4], [0, hy]];
+  return null;
+}
+/** Collider types per mode: [shape, label, icon, what it's for]. */
+const COLLIDER_TYPES = {
+  '2d': [['box', 'Box Collider 2D', 'square', 'A rectangle. Best for most things.'], ['circle', 'Circle Collider 2D', 'circle', 'Round: balls, coins, wheels.'], ['capsule', 'Capsule Collider 2D', 'capsule', 'A pill: great for characters (slides over bumps).'],
+    ['polygon', 'Polygon Collider 2D', 'polygon', 'Any outline: triangles, slopes, stars. Edit the points.'], ['edge', 'Edge Collider 2D', 'edge', 'A line (or path) to stand on: ground, hills, slopes.']],
+  '3d': [['box', 'Box Collider', 'square', 'A box. Best for most things.'], ['sphere', 'Sphere Collider', 'sphere', 'Round: balls, coins, planets.'], ['capsule', 'Capsule Collider', 'capsule', 'An upright pill: great for characters.'], ['cylinder', 'Cylinder Collider', 'cylinder', 'An upright column: pillars, barrels, towers.']],
+};
+const colliderInfo = (shape, threeD) => COLLIDER_TYPES[threeD ? '3d' : '2d'].find((t) => t[0] === shape) || COLLIDER_TYPES[threeD ? '3d' : '2d'][0];
 function componentsFor(j) {
   const threeD = is3D() && !(j && j.ui);
   const list = [
@@ -3331,8 +3433,8 @@ function componentsFor(j) {
     { cat: 'UI', key: 'minimap', label: 'Minimap', icon: 'grid', desc: 'A small map of the level on screen', ok: (e) => e.ui && !e.minimap, add: (e) => { e.minimap = { w: 120, h: 120, range: is3D() ? 40 : 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false }; } },
     { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Falls, gets pushed and bounces (needs gravity; uses its collider)', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
-    ...(threeD ? [['box', 'Box Collider', 'square'], ['sphere', 'Sphere Collider', 'sphere']] : [['box', 'Box Collider 2D', 'square'], ['circle', 'Circle Collider 2D', 'circle']]).map(([shape, label, ic]) => ({
-      cat: 'Colliders', key: 'col:' + shape, label, icon: ic, desc: 'A solid shape other things bump into. Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
+    ...COLLIDER_TYPES[threeD ? '3d' : '2d'].map(([shape, label, ic, desc]) => ({
+      cat: 'Colliders', key: 'col:' + shape, label, icon: ic, desc: desc + ' Tick Is Trigger to detect touches without blocking.', ok: (e) => !e.ui && !e.collider, add: (e) => { e.collider = fitCollider(e, shape); } })),
   ];
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {

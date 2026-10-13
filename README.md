@@ -288,13 +288,29 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Colliders and Rigidbody (Unity-style)
 
-- **2D games:** Box Collider 2D and Circle Collider 2D. **3D games:** Box Collider and Sphere Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).
+- **2D games:** Box, Circle, Capsule, Polygon and Edge Collider 2D. **3D games:** Box, Sphere, Capsule and Cylinder Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).
 - **See them like Unity:** every collider is outlined in green in the Scene view (2D outlines, 3D wireframes; triggers are dashed / lighter). Turn it off with *2D/3D menu → Show All Colliders* or the checkbox on a collider; the selected object's collider always shows.
 
-- **Colliders** are their own components: **Box Collider 2D**, **Circle Collider 2D** (2D) and **Box Collider**, **Sphere Collider** (3D). New Squares, Circles, Cubes, Spheres… come with one, like Unity's primitives.
+- **Colliders** are their own components. New Squares, Circles, Cubes, Spheres… come with one, like Unity's primitives.
   - A collider on its own makes a solid object that never moves (walls, ground, obstacles). Add a **Rigidbody** to make it fall and get pushed.
   - **Is Trigger** detects touches without blocking. Coins, hazards and other "touch" components turn a plain collider into a trigger for you.
-  - **Size** / **Radius**, **Offset**, **Set Size / Fit to Shape**, **Shape** (box ↔ circle), **Material** (bounce, friction), and **Edit Collider** handles in the 2D Scene.
+  - **Size** / **Radius**, **Offset**, **Set Size / Fit to Shape**, **Shape** (switch to any other collider type), **Material** (bounce, friction), and **Edit Collider** handles in the 2D Scene.
+  - **Collider shapes:**
+
+    | Shape | Mode | Good for | Settings |
+    |---|---|---|---|
+    | Box | 2D, 3D | most things | Size |
+    | Circle / Sphere | 2D / 3D | balls, coins, wheels | Radius |
+    | Capsule | 2D, 3D | characters (they slide over bumps) | 2D: width × height (rounded along its long side); 3D: radius + height, upright |
+    | Polygon | 2D | triangles, slopes, stars, any outline | Points |
+    | Edge | 2D | ground lines, hills, slopes, walls | Points (an open path with no inside) |
+    | Cylinder | 3D | pillars, barrels, towers | radius + height, upright |
+  - **Points** (Polygon and Edge): edit each corner's X/Y, **+ Point** adds a corner, − removes one. **Presets**:
+    - Polygon: Box, Triangle, Slope ◢ / ◣, Diamond, Pentagon, Hexagon, Octagon, Star, Ramp, and **Match the drawn shape** (triangles, diamonds, stars, polygons, arrows…).
+    - Edge: Flat line, Slope up / down, Hill, Valley, Bowl, Zigzag, Steps, Wave.
+    - Both: flip left ↔ right, flip upside down, bigger, smaller.
+  - Polygons with dents (like a star or a cup) are split into convex pieces automatically. Polygon, Edge and Capsule colliders turn with the object (Rotation Z) and follow its scale.
+  - 3D capsules and cylinders draw as green wireframes in the Scene.
 - **Rigidbody 2D / Rigidbody**: Body Type (Dynamic / Kinematic / Static), Mass, Gravity Scale, Linear Drag, Bounciness, Friction, Material, Freeze Position, Start Velocity, Max Speed, Max Fall Speed, Collision Detection (Continuous for fast objects), Physics layer and pass-through tags.
 - New blank 2D games have gravity on (like Unity). If a level's gravity is off, a Rigidbody shows a **Turn on gravity** button. Top-down movers set their own Gravity Scale to 0.
 
@@ -340,7 +356,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Edit Collider (2D)
 
-- On a Rigidbody 2D, tap **Edit Collider**. A green outline shows the collider: drag an edge handle to resize it (the opposite edge stays put), the middle handle to move it off-centre, or a circle's rim handle to change its radius. A "fit to shape" collider becomes an explicit box or circle the first time you drag it. Works on rotated and scaled objects.
+- On a Rigidbody 2D, tap **Edit Collider**. A green outline shows the collider: drag an edge handle to resize it (the opposite edge stays put), the middle handle to move it off-centre, or a circle's rim handle to change its radius. A "fit to shape" collider becomes an explicit box or circle the first time you drag it. On a **Polygon** or **Edge** collider every corner gets a green dot: drag it to move that corner. Works on rotated and scaled objects.
 
 ### Play mode tools
 
@@ -799,6 +815,8 @@ registerBehavior('blink', {
 **Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` or `'fixed'`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
 
 **Physics:** bodies support `oneWay` platforms (jump up through, land on top), riding moving (kinematic) platforms, `mass` (heavier pushes lighter), `friction`, `drag`, `maxFall`, and collider offsets `ox/oy/oz`.
+
+**Collider shapes:** `collider: { shape, … }` takes `box` (`w, h, d`), `circle` / `sphere` (`r`), `capsule` (2D `w, h`; 3D `r, h`), `cylinder` (3D `r, h`), `polygon` and `edge` (2D `points: [[x, y], …]` around the object's centre). Concave polygons are split into convex pieces (ear clipping); an edge is a chain of two-sided segments. Every shape also takes `trigger`, `ox/oy/oz`, `bounce`, `friction`, `layer` and `oneWay`.
 
 **3D shapes and models:** meshes come in box, sphere, cylinder, cone, capsule, pyramid, wedge (ramp), prism, gem, dome, torus and plane. `model: { parts: [{ geometry, x, y, z, rx, ry, rz, w, h, d, r, color, emissive }] }` builds a model from parts (the editor's 3D Model component edits parts and highlights the selected one; Project → Models has 17 ready-made models). The collider fits around all parts.
 

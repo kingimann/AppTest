@@ -226,7 +226,8 @@ export class Camera3D {
 // Scene
 // ============================================================================
 const DEFAULT_SETTINGS = {
-  joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true,
+  joystick: false, jumpButton: false, title: '', subtitle: '', saveBest: '', pauseButton: true, timeLimit: 0,
+  muteButton: true, orientation: 'any', fullscreen: false,
 };
 
 export class Scene {
@@ -256,7 +257,13 @@ export class Scene {
     this.engine = null;
     this.json = opts.json || null;
     if (this.settings.saveBest) this.vars.best = +store.get('pocket.best.' + this.settings.saveBest, 0) || 0;
+    if (this.settings.timeLimit) this.vars.time = +this.settings.timeLimit;
+    this.msg = null;
+    this.level = 1; this.levelCount = 1;
   }
+
+  /** Show a message banner over the game for a few seconds. */
+  message(text, seconds = 2.5) { this.msg = { text: String(text), t: seconds }; }
 
   /** Build a scene from a plain JSON description (what the editor saves). */
   static fromJSON(json, { editing = false } = {}) {
@@ -332,6 +339,7 @@ export class Scene {
       this.vars.best = Math.floor(this.vars.score); this.newBest = true;
       store.set('pocket.best.' + key, String(this.vars.best));
     }
+    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
     this.emit(state);
@@ -432,35 +440,27 @@ function collide(e, other, m) {
 }
 
 // ============================================================================
-// Input: touch, mouse, keyboard, virtual joystick & buttons
+// Input: touch — virtual joystick, buttons, taps, drags, swipes and tilt
 // ============================================================================
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
     this.el = el;
     this.enabled = true;
-    this.keys = new Set();
     this.justPressed = new Set();
     this.pointers = new Map();
     this.taps = [];
     this.drag = { dx: 0, dy: 0 };
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
-    this.tilt = null;
+    this.downs = []; // pointers pressed this frame: { id, x, y }
+    this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
 
     el.addEventListener('pointerdown', (e) => this.down(e));
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e, true));
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    window.addEventListener('keydown', (e) => {
-      if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
-      if (!this.keys.has(e.code)) this.justPressed.add(e.code);
-      this.keys.add(e.code);
-      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code) && this.enabled) e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
   }
 
   local(e) { const r = this.el.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
@@ -468,6 +468,8 @@ export class Input {
   down(e) {
     this.engine.audio.unlock();
     if (!this.enabled) return;
+    if (this.useTilt && !this.tiltOn) this.enableTilt();
+    this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.buttons.find((b) => Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3);
@@ -477,6 +479,7 @@ export class Input {
       ptr.role = 'stick'; this.stick = { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
     }
     this.pointers.set(e.pointerId, ptr);
+    if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
   }
 
   move(e) {
@@ -498,48 +501,69 @@ export class Input {
     this.pointers.delete(e.pointerId);
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
-    if (!cancelled && ptr.role === 'free' && performance.now() - ptr.t < 350 && Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) < 14) {
+    const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
+    if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
       this.taps.push({ x: ptr.x, y: ptr.y });
       this.justPressed.add('tap');
+    } else if (!cancelled && ptr.role === 'free' && dt < 500 && dist > 40) {
+      const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+      this.justPressed.add('swipe:' + dir); this.justPressed.add('swipe');
     }
+  }
+
+  /** Tilt-to-move using the device's motion sensors (asks permission on iOS). */
+  enableTilt() {
+    if (this.tiltOn) return;
+    const listen = () => {
+      this.tiltOn = true;
+      window.addEventListener('deviceorientation', (e) => {
+        if (e.gamma == null) return;
+        const angle = screen.orientation?.angle ?? window.orientation ?? 0;
+        let x = e.gamma, y = e.beta;
+        if (angle === 90) { x = e.beta; y = -e.gamma; } else if (angle === -90 || angle === 270) { x = -e.beta; y = e.gamma; }
+        if (this.tiltBase == null) this.tiltBase = y;
+        this.tiltAxis = { x: clamp(x / 25, -1, 1), y: clamp((y - this.tiltBase) / 25, -1, 1) };
+      });
+    };
+    const D = window.DeviceOrientationEvent;
+    if (D && typeof D.requestPermission === 'function') D.requestPermission().then((r) => r === 'granted' && listen()).catch(() => {});
+    else if (D) listen();
   }
 
   get stickRadius() { return Math.min(70, this.engine.width * 0.15); }
 
-  /** Movement axis in [-1, 1] from joystick or keyboard. y is down/forward-negative. */
+  /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
-    const k = this.keys;
-    if (k.has('ArrowLeft') || k.has('KeyA')) x -= 1;
-    if (k.has('ArrowRight') || k.has('KeyD')) x += 1;
-    if (k.has('ArrowUp') || k.has('KeyW')) y -= 1;
-    if (k.has('ArrowDown') || k.has('KeyS')) y += 1;
     if (this.stick) { x += (this.stick.x - this.stick.bx) / this.stickRadius; y += (this.stick.y - this.stick.by) / this.stickRadius; }
+    if (this.useTilt && this.tiltAxis) {
+      const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
+      x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
+    }
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
   }
 
-  /** Is an action held? Actions: 'jump', 'action', or any KeyboardEvent.code */
+  /** Is a touch button held? Actions: 'jump', 'action' */
   isDown(action) {
-    if (action === 'jump') return this.keys.has('Space') || this.keys.has('ArrowUp') || this.keys.has('KeyW') || this.buttons.some((b) => b.action === 'jump' && b.id != null);
-    if (action === 'action') return this.keys.has('KeyE') || this.keys.has('Enter') || this.buttons.some((b) => b.action === 'action' && b.id != null);
-    return this.keys.has(action);
+    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null);
+    return false;
   }
   /** Was an action pressed this frame? */
   pressed(action) {
     const j = this.justPressed;
     if (action === 'jump') {
       const hasBtn = this.buttons.some((b) => b.action === 'jump');
-      return j.has('Space') || j.has('ArrowUp') || j.has('KeyW') || j.has('btn:jump') || (!hasBtn && j.has('tap'));
+      return j.has('btn:jump') || (!hasBtn && (j.has('tap') || j.has('swipe:up')));
     }
-    if (action === 'action') return j.has('KeyE') || j.has('Enter') || j.has('btn:action');
+    if (action === 'action') return j.has('btn:action');
     return j.has(action);
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
-  reset() { this.pointers.clear(); this.stick = null; this.keys.clear(); this.endFrame(); }
+  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.drag.dx = 0; this.drag.dy = 0; }
+  reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
 // ============================================================================
@@ -602,9 +626,17 @@ export function loadImage(src) {
 // ============================================================================
 // 2D renderer (Canvas 2D)
 // ============================================================================
+/** 1234 → "1234", 12345 → "12.3K", 4500000 → "4.5M" */
+export function formatNumber(v) {
+  const a = Math.abs(v);
+  if (a < 10000) return String(Math.floor(v));
+  for (const [n, u] of [[1e12, 'T'], [1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return (Math.floor(v / n * 10) / 10) + u;
+  return String(Math.floor(v));
+}
 const fillTemplate = (str, vars) => String(str).replace(/\{(\w+)\}/g, (_, k) => {
   const v = vars[k];
-  return typeof v === 'number' ? String(Math.floor(v)) : v ?? '';
+  if (typeof v !== 'number') return v ?? '';
+  return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
 
 function drawEntity2D(ctx, e, vars, time) {
@@ -646,7 +678,7 @@ function drawEntity2D(ctx, e, vars, time) {
     const t = e.text;
     ctx.font = `${t.weight} ${t.size}px ${t.font}`;
     ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    ctx.fillText(fillTemplate(t.value, vars), 0, 0);
+    ctx.fillText(fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars), 0, 0);
   }
   ctx.restore();
 }
@@ -887,6 +919,28 @@ export class Renderer3D {
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
+function drawMessage(ctx, scene, W, H, engine) {
+  const m = scene.msg;
+  if (!m) return;
+  const maxW = Math.min(W - 40, 460), size = 18, lines = [];
+  ctx.font = `700 ${size}px system-ui, -apple-system, sans-serif`;
+  let line = '';
+  for (const word of m.text.split(/\s+/)) {
+    const test = line ? line + ' ' + word : word;
+    if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
+  }
+  if (line) lines.push(line);
+  const h = lines.length * (size + 6) + 24, y = H - engine.safe.bottom - 130 - h;
+  ctx.globalAlpha = Math.min(1, m.t * 3);
+  ctx.fillStyle = 'rgba(15,15,25,0.85)';
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect((W - maxW) / 2, y, maxW, h, 12); else ctx.rect((W - maxW) / 2, y, maxW, h);
+  ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + 12 + (size + 6) * i + (size + 6) / 2));
+  ctx.globalAlpha = 1;
+}
+
 export function anchorPoint(anchor, W, H, safe) {
   const a = anchor || 'top-left';
   const x = a.includes('left') ? safe.left : a.includes('right') ? W - safe.right : W / 2;
@@ -931,9 +985,25 @@ function renderUI(engine, scene) {
       ctx.fillStyle = b.id != null ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.12)';
       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' ? 0.6 : 0.42)}px system-ui, sans-serif`;
+      ctx.fillStyle = '#fff'; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
+      if (b.action === 'mute' && engine.audio.muted) {
+        ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(b.x - b.r * 0.5, b.y - b.r * 0.5); ctx.lineTo(b.x + b.r * 0.5, b.y + b.r * 0.5); ctx.stroke();
+      }
     }
+  }
+  if (scene.state === 'play' && scene.levelCount > 1 && scene.time < 1.6) {
+    ctx.globalAlpha = Math.min(1, (1.6 - scene.time) * 2);
+    big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
+    ctx.globalAlpha = 1;
+  }
+  drawMessage(ctx, scene, W, H, engine);
+  if (scene.rotateNeeded) {
+    dim(0.9);
+    big('⟳', H * 0.4, 64);
+    big(`Turn your device to ${scene.settings.orientation}`, H * 0.52, 18);
+    return;
   }
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
@@ -945,8 +1015,14 @@ function renderUI(engine, scene) {
     if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, 'rgba(220,225,255,0.7)');
     big('Tap to start', H * 0.66, 22, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'over' || scene.state === 'win') {
-    if (scene.time - (scene.endTime ?? scene.time) < 0.5) return;
+    if (scene.time - (scene.endTime ?? scene.time) < 0.5) { drawMessage(ctx, scene, W, H, engine); return; }
     dim(0.65);
+    if (scene.levelComplete) {
+      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), '#5dff8a');
+      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
+      big('Tap for the next level', H * 0.62, 20, `rgba(255,255,255,${pulse})`);
+      return;
+    }
     big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? '#5dff8a' : '#ff5d8f');
     big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, '#ffd23d');
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, '#5dff8a');
@@ -972,7 +1048,8 @@ function respawnOrEnd(player, s, action) {
     s.engine.audio.sfx('hit'); s.engine.vibrate(60); s.camera.shake = is3D(player) ? 12 : 10;
     s.burst(player.x, player.y, player.z, player.mesh?.color || player.shape?.fill || '#fff', 14);
     if (action === 'respawn' || player.data.respawnOnHit) {
-      player.x = player.props.x || 0; player.y = player.props.y || 0; player.z = player.props.z || 0;
+      const sp = player.data.respawn || player.props;
+      player.x = sp.x || 0; player.y = sp.y || 0; player.z = sp.z || 0;
       if (player.body) player.body.vel = { x: 0, y: 0, z: 0 };
     }
     player.data.invuln = 1.2;
@@ -989,21 +1066,24 @@ function respawnOrEnd(player, s, action) {
 }
 
 registerBehavior('move', {
-  label: 'Move', description: 'Player movement with joystick, keyboard, or dragging.',
+  label: 'Move', description: 'Player movement with the joystick, dragging, or tilting the phone.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
-    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both'], default: 'both' },
+    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both' },
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
   ],
   create(p) {
     return {
-      start(e) { e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 }); },
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
+        if (p.control === 'tilt') s.engine.input.useTilt = true;
+      },
       update(e, dt, s) {
         const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis();
         const ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y, b = e.body;
-        const d = p.control !== 'joystick' ? inp.drag : { dx: 0, dy: 0 };
+        const d = p.control === 'drag' || p.control === 'both' ? inp.drag : { dx: 0, dy: 0 };
         if (is3D(e)) {
           b.vel.x = ax * p.speed; b.vel.z = ay * p.speed;
           const k = 0.025 * p.speed / 7;
@@ -1122,6 +1202,7 @@ registerBehavior('spawner', {
     { key: 'relative', label: 'Relative to this object', type: 'bool', default: false },
     { key: 'ramp', label: 'Speed-up per 10s', type: 'number', default: 0.1 },
     { key: 'max', label: 'Max alive', type: 'number', default: 60 },
+    { key: 'snap', label: 'Snap positions to (0 = off)', type: 'number', default: 0 },
   ],
   create(p) {
     let t = 0.5; const alive = [];
@@ -1134,7 +1215,8 @@ registerBehavior('spawner', {
         for (let i = alive.length - 1; i >= 0; i--) if (alive[i].dead) alive.splice(i, 1);
         if (alive.length >= p.max) return;
         const ox = p.relative ? e.x : 0, oy = p.relative ? e.y : 0, oz = p.relative ? e.z : 0;
-        const c = s.spawn(p.template, { x: ox + pick(p.x), y: oy + pick(p.y), z: oz + pick(p.z) });
+        const sn = (v) => (p.snap ? Math.round(v / p.snap) * p.snap : v);
+        const c = s.spawn(p.template, { x: ox + sn(pick(p.x)), y: oy + pick(p.y), z: oz + sn(pick(p.z)) });
         if (c) { c.data.speedMul = Math.min(3, mul); alive.push(c); }
       },
     };
@@ -1146,17 +1228,26 @@ registerBehavior('shooter', {
   params: [
     { key: 'template', label: 'Bullet template', type: 'template', default: '' },
     { key: 'every', label: 'Fire rate (sec)', type: 'number', default: 0.25 },
-    { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button'], default: 'auto' },
+    { key: 'trigger', label: 'Fire when', type: 'select', options: ['auto', 'action button', 'tap'], default: 'auto' },
   ],
   create(p) {
     let t = 0;
     return {
+      start(e, s) { if (p.trigger === 'action button') { s.settings.actionButton = true; s.engine.layoutButtons(); } },
       update(e, dt, s) {
         t -= dt;
         if (t > 0) return;
-        if (p.trigger !== 'auto' && !s.engine.input.isDown('action')) return;
+        const inp = s.engine.input;
+        if (p.trigger === 'action button' && !inp.isDown('action')) return;
+        if (p.trigger === 'tap' && !inp.pressed('tap')) return;
         t = p.every;
-        s.spawn(p.template, { x: e.x, y: e.y, z: e.z, ry: e.ry });
+        // bullets leave from the eye (first person) and face where the shooter faces
+        const o = { x: e.x, y: e.y + (e.data.eyeY || 0), z: e.z, rx: e.data.aimPitch || 0, ry: e.ry, rz: e.rz };
+        if (is3D(e)) { // start a little in front so the bullet doesn't fill the camera
+          const ry = (e.ry || 0) * DEG, rx = o.rx * DEG;
+          o.x += -Math.sin(ry) * Math.cos(rx) * 0.9; o.y += Math.sin(rx) * 0.9; o.z += -Math.cos(ry) * Math.cos(rx) * 0.9;
+        }
+        s.spawn(p.template, o);
       },
     };
   },
@@ -1311,6 +1402,521 @@ registerBehavior('timeScore', {
   create(p) { return { update(e, dt, s) { s.addVar('score', p.rate * dt); } }; },
 });
 
+registerBehavior('chase', {
+  label: 'Chase', description: 'Moves toward the player when it gets close.',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 110, default3d: 3.5 },
+    { key: 'range', label: 'Notice range (0 = always)', type: 'number', default: 320, default3d: 10 },
+    { key: 'tag', label: 'Chase tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let target = null;
+    return {
+      update(e, dt, s) {
+        if (!target || target.dead) target = s.findAll(p.tag)[0];
+        if (!target) return;
+        const dx = target.x - e.x, dy = is3D(e) ? 0 : target.y - e.y, dz = is3D(e) ? target.z - e.z : 0;
+        const d = Math.hypot(dx, dy, dz);
+        if (d < 1e-3 || (p.range && d > p.range)) return;
+        const k = Math.min(d, p.speed * dt) / d;
+        e.x += dx * k; e.y += dy * k; e.z += dz * k;
+        if (is3D(e)) e.ry = Math.atan2(dx, dz) / DEG;
+      },
+    };
+  },
+});
+
+registerBehavior('float', {
+  label: 'Float', description: 'Bobs gently up and down.',
+  params: [
+    { key: 'amount', label: 'Height', type: 'number', default: 8, default3d: 0.25 },
+    { key: 'period', label: 'Seconds per bob', type: 'number', default: 1.6 },
+  ],
+  create(p) {
+    let t = Math.random() * 10, base = null;
+    return {
+      start(e) { base = e.y; },
+      update(e, dt) { t += dt; e.y = base + Math.sin(t / Math.max(0.1, p.period) * Math.PI * 2) * p.amount * (is3D(e) ? 1 : -1); },
+    };
+  },
+});
+
+registerBehavior('message', {
+  label: 'Message', description: 'Shows a message when the player touches it (signs, hints, story).',
+  params: [
+    { key: 'text', label: 'Message', type: 'text', default: 'Hello there!' },
+    { key: 'seconds', label: 'Show for (sec)', type: 'number', default: 3 },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'tag', label: 'Shown to tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let shown = false;
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (p.once && shown)) return;
+        shown = true; s.message(p.text, p.seconds); s.engine.audio.sfx('click');
+      },
+    };
+  },
+});
+
+registerBehavior('teleport', {
+  label: 'Teleport', description: 'Sends the player to another object (by name).',
+  params: [
+    { key: 'target', label: 'Destination name', type: 'text', default: '' },
+    { key: 'tag', label: 'Teleports tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || (other.data.tpUntil || 0) > s.time) return;
+        const dest = s.find(p.target);
+        if (!dest || dest === e) return;
+        s.burst(other.x, other.y, other.z, '#a77bff', 16);
+        other.x = dest.x; other.y = dest.y; other.z = dest.z;
+        if (other.body) other.body.vel = { x: 0, y: 0, z: 0 };
+        other.data.tpUntil = s.time + 0.8;
+        s.burst(dest.x, dest.y, dest.z, '#a77bff', 16);
+        s.engine.audio.sfx('power');
+      },
+    };
+  },
+});
+
+registerBehavior('unlock', {
+  label: 'Unlock', description: 'Disappears once a variable reaches an amount, e.g. a door that opens with keys.',
+  params: [
+    { key: 'var', label: 'Variable', type: 'text', default: 'keys' },
+    { key: 'amount', label: 'Needed', type: 'number', default: 1 },
+    { key: 'text', label: 'Message when opened', type: 'text', default: 'Unlocked!' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        if ((+s.vars[p.var] || 0) < p.amount) return;
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#fff', 30, 1.2);
+        if (p.text) s.message(p.text, 2);
+        s.engine.audio.sfx('power');
+        e.destroy();
+      },
+    };
+  },
+});
+
+registerBehavior('sound', {
+  label: 'Sound', description: 'Plays a sound when the game starts or when touched.',
+  params: [
+    { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], default: 'power' },
+    { key: 'when', label: 'When', type: 'select', options: ['touched', 'start'], default: 'touched' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    return {
+      start(e, s) { if (p.when === 'start') s.engine.audio.sfx(p.sound); else e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) { if (p.when === 'touched' && other.has(p.tag)) s.engine.audio.sfx(p.sound); },
+    };
+  },
+});
+
+/** Is a screen point (CSS px) on this entity? Used by tap and drag components. */
+function hitTest(s, e, sx, sy) {
+  const eng = s.engine;
+  if (e.ui) {
+    const o = anchorPoint(e.anchor, eng.width, eng.height, eng.safe), ex = e.extents();
+    const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
+    return Math.abs(sx - o.x - e.x) <= hx + 8 && Math.abs(sy - o.y - e.y) <= hy + 8;
+  }
+  const ex = e.extents();
+  if (s.mode === '2d') {
+    const w = eng.renderer.screenToWorld(s, sx, sy), pad = 10 / eng.renderer.zoomFor(s);
+    return ex.sphere ? Math.hypot(w.x - e.x, w.y - e.y) <= ex.r + pad : Math.abs(w.x - e.x) <= ex.hx + pad && Math.abs(w.y - e.y) <= ex.hy + pad;
+  }
+  const p = eng.renderer.worldToScreen(s, e.x, e.y, e.z);
+  if (p.behind) return false;
+  const edge = eng.renderer.worldToScreen(s, e.x + (ex.sphere ? ex.r : Math.max(ex.hx, ex.hz)), e.y, e.z);
+  return Math.hypot(sx - p.x, sy - p.y) <= Math.max(24, Math.hypot(edge.x - p.x, edge.y - p.y) * 1.2);
+}
+/** World point under a screen point (2D), or on the horizontal plane at height y (3D). */
+function screenToWorldAt(s, sx, sy, y) {
+  const eng = s.engine;
+  if (s.mode === '2d') return eng.renderer.screenToWorld(s, sx, sy);
+  const r = eng.renderer.screenRay(s, sx, sy);
+  if (Math.abs(r.dir.y) < 1e-6) return null;
+  const t = (y - r.origin.y) / r.dir.y;
+  return t < 0 ? null : { x: r.origin.x + r.dir.x * t, y, z: r.origin.z + r.dir.z * t };
+}
+
+registerBehavior('tappable', {
+  label: 'Tap Target', description: 'The player taps it on screen to score (clicker, whack-a-mole, bubble games).',
+  params: [
+    { key: 'points', label: 'Points', type: 'number', default: 10 },
+    { key: 'var', label: 'Adds to variable', type: 'text', default: 'score' },
+    { key: 'bonusVar', label: 'Extra points from variable', type: 'text', default: '' },
+    { key: 'destroy', label: 'Disappear when tapped', type: 'bool', default: true },
+    { key: 'sound', label: 'Sound', type: 'select', options: ['coin', 'power', 'click', 'hit', 'none'], default: 'coin' },
+  ],
+  create(p) {
+    return {
+      update(e, dt, s) {
+        for (const t of s.engine.input.taps) {
+          if (e.dead || !hitTest(s, e, t.x, t.y)) continue;
+          s.addVar(p.var || 'score', p.points + (p.bonusVar ? +s.vars[p.bonusVar] || 0 : 0));
+          if (p.sound !== 'none') s.engine.audio.sfx(p.sound);
+          s.engine.vibrate(10);
+          s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ffd23d', 14, 0.8);
+          if (p.destroy) e.destroy(); else { const k = e.sx; e.sx = e.sy = k * 1.25; s.tween(e, { sx: k, sy: k }, 0.2); }
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('draggable', {
+  label: 'Draggable', description: 'The player can pick it up and move it with a finger (puzzles, sorting games).',
+  params: [
+    { key: 'snap', label: 'Snap to grid', type: 'number', default: 0 },
+    { key: 'lift', label: 'Grow while held', type: 'bool', default: true },
+  ],
+  create(p) {
+    let grab = null;
+    return {
+      update(e, dt, s) {
+        const inp = s.engine.input;
+        if (!grab) {
+          const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y));
+          if (!d) return;
+          const w = screenToWorldAt(s, d.x, d.y, e.y);
+          if (!w) return;
+          grab = { id: d.id, ox: e.x - w.x, oy: e.y - w.y, oz: e.z - (w.z || 0), sx: e.sx, sy: e.sy };
+          inp.downs.splice(inp.downs.indexOf(d), 1);
+          if (p.lift) { e.sx *= 1.12; e.sy *= 1.12; }
+          s.engine.vibrate(8);
+        }
+        const ptr = inp.pointers.get(grab.id);
+        if (!ptr) {
+          if (p.snap) { e.x = Math.round(e.x / p.snap) * p.snap; e.y = Math.round(e.y / p.snap) * p.snap; if (is3D(e)) e.z = Math.round(e.z / p.snap) * p.snap; }
+          e.sx = grab.sx; e.sy = grab.sy; grab = null;
+          return;
+        }
+        inp.drag.dx = 0; inp.drag.dy = 0; // don't also steer the player
+        const w = screenToWorldAt(s, ptr.x, ptr.y, e.y);
+        if (!w) return;
+        if (is3D(e)) { e.x = w.x + grab.ox; e.z = w.z + grab.oz; } else { e.x = w.x + grab.ox; e.y = w.y + grab.oy; }
+        if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+      },
+    };
+  },
+});
+
+registerBehavior('swipeMove', {
+  label: 'Swipe Lanes', description: 'Swipe left/right to change lanes, swipe up to jump (endless-runner controls).',
+  params: [
+    { key: 'distance', label: 'Lane width', type: 'number', default: 110, default3d: 2.5 },
+    { key: 'lanes', label: 'Lanes', type: 'number', default: 3 },
+    { key: 'jump', label: 'Swipe-up jump power (0 = off)', type: 'number', default: 0, default3d: 9 },
+  ],
+  create(p) {
+    let lane = 0, home = 0;
+    return {
+      start(e) { home = e.x; },
+      update(e, dt, s) {
+        const inp = s.engine.input, max = Math.floor((p.lanes - 1) / 2);
+        if (inp.pressed('swipe:left')) lane = Math.max(-max, lane - 1);
+        if (inp.pressed('swipe:right')) lane = Math.min(max, lane + 1);
+        if (p.jump && e.body && e.body.grounded && inp.pressed('swipe:up')) {
+          e.body.vel.y = is3D(e) ? p.jump : -p.jump; s.engine.audio.sfx('jump');
+        }
+        e.x += (home + lane * p.distance - e.x) * Math.min(1, dt * 14);
+      },
+    };
+  },
+});
+
+registerBehavior('orbit', {
+  label: 'Orbit', description: 'Circles around its starting point.',
+  params: [
+    { key: 'radius', label: 'Radius', type: 'number', default: 80, default3d: 3 },
+    { key: 'speed', label: 'Degrees / sec', type: 'number', default: 90 },
+  ],
+  create(p) {
+    let cx, cy, cz, a = 0;
+    return {
+      start(e) { cx = e.x; cy = e.y; cz = e.z; },
+      update(e, dt) {
+        a += p.speed * dt * DEG;
+        e.x = cx + Math.cos(a) * p.radius;
+        if (is3D(e)) e.z = cz + Math.sin(a) * p.radius; else e.y = cy + Math.sin(a) * p.radius;
+      },
+    };
+  },
+});
+
+registerBehavior('pulse', {
+  label: 'Pulse', description: 'Grows and shrinks to draw attention.',
+  params: [
+    { key: 'amount', label: 'Size change', type: 'number', default: 0.15 },
+    { key: 'period', label: 'Seconds per pulse', type: 'number', default: 0.8 },
+  ],
+  create(p) {
+    let t = 0, base;
+    return {
+      start(e) { base = { x: e.sx, y: e.sy, z: e.sz }; },
+      update(e, dt) {
+        t += dt; const k = 1 + Math.sin(t / Math.max(0.1, p.period) * Math.PI * 2) * p.amount;
+        e.sx = base.x * k; e.sy = base.y * k; e.sz = base.z * k;
+      },
+    };
+  },
+});
+
+registerBehavior('checkpoint', {
+  label: 'Checkpoint', description: 'The player respawns here after falling or getting hurt.',
+  params: [
+    { key: 'text', label: 'Message', type: 'text', default: 'Checkpoint!' },
+    { key: 'tag', label: 'Saved by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let hit = false;
+    return {
+      start(e) { e.ensureBody({ type: 'kinematic', sensor: true }); },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || hit) return;
+        hit = true;
+        other.data.respawn = { x: e.x, y: is3D(e) ? e.y + 1 : e.y - 20, z: e.z };
+        other.data.respawnOnHit = true;
+        if (e.shape) e.shape.fill = '#5dff8a'; if (e.mesh) e.mesh.color = '#5dff8a';
+        if (p.text) s.message(p.text, 1.5);
+        s.engine.audio.sfx('power');
+        s.burst(e.x, e.y, e.z, '#5dff8a', 18);
+      },
+    };
+  },
+});
+
+registerBehavior('destructible', {
+  label: 'Health', description: 'Takes hits from objects with a tag (like bullets) and breaks when health runs out.',
+  params: [
+    { key: 'hp', label: 'Health', type: 'number', default: 3 },
+    { key: 'hitBy', label: 'Hurt by tag', type: 'text', default: 'bullet' },
+    { key: 'points', label: 'Points when destroyed', type: 'number', default: 10 },
+    { key: 'removeHitter', label: 'Remove what hit it', type: 'bool', default: true },
+  ],
+  create(p) {
+    let hp;
+    return {
+      start(e) { hp = p.hp; e.ensureBody({ type: 'kinematic', sensor: true }); },
+      update(e, dt, s) { // make sure whatever can hit us takes part in collisions
+        for (const o of s.entities) if (!o.body && o.tags.has(p.hitBy)) o.setBody({ type: 'kinematic', sensor: true });
+      },
+      collide(e, other, s) {
+        if (!other.has(p.hitBy) || e.dead) return;
+        if (p.removeHitter) other.destroy();
+        hp--;
+        e.data.invuln = 0.15;
+        s.engine.audio.sfx(hp > 0 ? 'click' : 'hit');
+        if (hp > 0) return;
+        s.addVar('score', p.points);
+        s.camera.shake = Math.max(s.camera.shake, 6);
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
+        e.destroy();
+      },
+    };
+  },
+});
+
+// ---- camera & vehicle controllers for different game types ----
+const fwd3 = (yaw) => ({ x: -Math.sin(yaw), z: -Math.cos(yaw) });   // facing direction for a yaw (radians); yaw 0 looks toward -z
+const right3 = (yaw) => ({ x: Math.cos(yaw), z: -Math.sin(yaw) });
+
+registerBehavior('firstPerson', {
+  label: 'First Person', description: 'First-person controls: joystick to walk, drag the screen to look around. Pair with Shooter for an FPS.',
+  params: [
+    { key: 'speed', label: 'Walk speed', type: 'number', default: 6 },
+    { key: 'look', label: 'Look sensitivity', type: 'number', default: 0.25 },
+    { key: 'eye', label: 'Eye height above center', type: 'number', default: 0.6 },
+    { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 9 },
+  ],
+  create(p) {
+    let yaw = 0, pitch = 0;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        if (!s.gravity) s.gravity = -25;
+        yaw = (e.ry || 0) * DEG; e.visible = false; e.data.eyeY = p.eye;
+        s.settings.joystick = true; s.engine.layoutButtons();
+        s.camera.near = 0.05;
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, a = inp.axis(), b = e.body;
+        yaw -= inp.drag.dx * p.look * DEG; pitch = clamp(pitch - inp.drag.dy * p.look * DEG, -1.4, 1.4);
+        const f = fwd3(yaw), r = right3(yaw);
+        b.vel.x = (f.x * -a.y + r.x * a.x) * p.speed;
+        b.vel.z = (f.z * -a.y + r.z * a.x) * p.speed;
+        if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        e.ry = yaw / DEG; e.data.aimPitch = pitch / DEG;
+        const eye = { x: e.x, y: e.y + p.eye, z: e.z }, cp = Math.cos(pitch);
+        s.camera.position = eye;
+        s.camera.target = { x: eye.x + f.x * cp, y: eye.y + Math.sin(pitch), z: eye.z + f.z * cp };
+        if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+      },
+    };
+  },
+});
+
+registerBehavior('thirdPerson', {
+  label: 'Third Person', description: 'Over-the-shoulder controls: joystick moves relative to the camera, drag the screen to turn the camera.',
+  params: [
+    { key: 'speed', label: 'Run speed', type: 'number', default: 6 },
+    { key: 'jump', label: 'Jump power (0 = off)', type: 'number', default: 10 },
+    { key: 'distance', label: 'Camera distance', type: 'number', default: 7 },
+    { key: 'height', label: 'Camera height angle', type: 'number', default: 25 },
+    { key: 'look', label: 'Turn sensitivity', type: 'number', default: 0.3 },
+  ],
+  create(p) {
+    let yaw = 0, tilt = 0, cam = null;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic' });
+        if (!s.gravity) s.gravity = -25;
+        yaw = (e.ry || 0) * DEG; tilt = p.height * DEG;
+        s.settings.joystick = true; s.engine.layoutButtons();
+      },
+      update(e, dt, s) {
+        const inp = s.engine.input, a = inp.axis(), b = e.body;
+        yaw -= inp.drag.dx * p.look * DEG; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6, 0.05, 1.3);
+        const f = fwd3(yaw), r = right3(yaw);
+        const vx = (f.x * -a.y + r.x * a.x) * p.speed, vz = (f.z * -a.y + r.z * a.x) * p.speed;
+        b.vel.x = vx; b.vel.z = vz;
+        if (Math.hypot(vx, vz) > 0.3) {
+          const target = Math.atan2(-vx, -vz) / DEG, diff = ((target - e.ry + 540) % 360) - 180;
+          e.ry += diff * Math.min(1, dt * 12);
+        }
+        if (p.jump && b.grounded && inp.pressed('jump')) { b.vel.y = p.jump; s.engine.audio.sfx('jump'); }
+        const tgt = { x: e.x, y: e.y + 1, z: e.z }, d = p.distance;
+        const want = { x: tgt.x - f.x * d * Math.cos(tilt), y: tgt.y + d * Math.sin(tilt), z: tgt.z - f.z * d * Math.cos(tilt) };
+        const k = cam ? 1 - Math.exp(-10 * dt) : 1;
+        cam = cam || { ...want };
+        cam.x += (want.x - cam.x) * k; cam.y += (want.y - cam.y) * k; cam.z += (want.z - cam.z) * k;
+        s.camera.position = { ...cam }; s.camera.target = tgt;
+        if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+      },
+    };
+  },
+});
+
+registerBehavior('car', {
+  label: 'Car', description: 'Drive with the joystick: up = gas, down = brake/reverse, left/right = steer. 3D cars get a chase camera.',
+  params: [
+    { key: 'maxSpeed', label: 'Top speed', type: 'number', default: 320, default3d: 16 },
+    { key: 'accel', label: 'Acceleration', type: 'number', default: 260, default3d: 12 },
+    { key: 'turn', label: 'Steering (deg/sec)', type: 'number', default: 160, default3d: 110 },
+    { key: 'autoGas', label: 'Always accelerate', type: 'bool', default: false },
+    { key: 'chaseCam', label: 'Chase camera (3D)', type: 'bool', default: true },
+  ],
+  create(p) {
+    let v = 0, cam = null;
+    return {
+      start(e, s) {
+        e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
+        s.settings.joystick = true; s.engine.layoutButtons();
+      },
+      update(e, dt, s) {
+        const a = s.engine.input.axis(), b = e.body;
+        const gas = p.autoGas ? 1 : -a.y;
+        v += gas * p.accel * dt;
+        v -= v * Math.min(1, (gas ? 0.6 : 1.8) * dt);
+        v = clamp(v, -p.maxSpeed * 0.4, p.maxSpeed);
+        const grip = clamp(Math.abs(v) / (p.maxSpeed * 0.25), 0, 1) * Math.sign(v || 1);
+        if (is3D(e)) {
+          e.ry -= a.x * p.turn * grip * dt;
+          const f = fwd3(e.ry * DEG);
+          b.vel.x = f.x * v; b.vel.z = f.z * v;
+          if (p.chaseCam) {
+            const want = { x: e.x - f.x * 7, y: e.y + 3.2, z: e.z - f.z * 7 }, k = cam ? 1 - Math.exp(-6 * dt) : 1;
+            cam = cam || { ...want };
+            cam.x += (want.x - cam.x) * k; cam.y += (want.y - cam.y) * k; cam.z += (want.z - cam.z) * k;
+            s.camera.position = { ...cam }; s.camera.target = { x: e.x + f.x * 3, y: e.y + 0.8, z: e.z + f.z * 3 };
+          }
+          if (e.y < -25) respawnOrEnd(e, s, 'respawn');
+        } else {
+          e.rz += a.x * p.turn * grip * dt;
+          b.vel.x = Math.sin(e.rz * DEG) * v; b.vel.y = -Math.cos(e.rz * DEG) * v;
+        }
+        // hitting a wall bleeds speed
+        if (Math.hypot(b.vel.x, is3D(e) ? b.vel.z : b.vel.y) < Math.abs(v) * 0.3) v *= 0.9;
+      },
+    };
+  },
+});
+
+registerBehavior('projectile', {
+  label: 'Projectile', description: 'Flies straight the way it faces (use on bullet templates fired by a Shooter).',
+  params: [
+    { key: 'speed', label: 'Speed', type: 'number', default: 650, default3d: 30 },
+    { key: 'life', label: 'Lifetime (sec)', type: 'number', default: 2 },
+  ],
+  create(p) {
+    let d, t = 0;
+    return {
+      start(e) {
+        if (is3D(e)) {
+          const ry = (e.ry || 0) * DEG, rx = (e.rx || 0) * DEG;
+          d = { x: -Math.sin(ry) * Math.cos(rx), y: Math.sin(rx), z: -Math.cos(ry) * Math.cos(rx) };
+        } else d = { x: Math.sin((e.rz || 0) * DEG), y: -Math.cos((e.rz || 0) * DEG), z: 0 };
+      },
+      update(e, dt) {
+        e.x += d.x * p.speed * dt; e.y += d.y * p.speed * dt; e.z += d.z * p.speed * dt;
+        if ((t += dt) > p.life) e.destroy();
+      },
+    };
+  },
+});
+
+// ---- clicker / idle game pieces ----
+registerBehavior('income', {
+  label: 'Income', description: 'Adds a variable to another every second (idle/clicker "per second" earnings).',
+  params: [
+    { key: 'var', label: 'Earns into', type: 'text', default: 'score' },
+    { key: 'rateVar', label: 'Rate variable (per sec)', type: 'text', default: 'perSecond' },
+  ],
+  create(p) { return { update(e, dt, s) { const r = +s.vars[p.rateVar] || 0; if (r) s.addVar(p.var, r * dt); } }; },
+});
+
+registerBehavior('upgrade', {
+  label: 'Upgrade Button', description: 'Tap to buy: spends a variable to raise another. The price grows each time. Show the price in text with {cost}.',
+  params: [
+    { key: 'cost', label: 'Starting price', type: 'number', default: 10 },
+    { key: 'costVar', label: 'Pay with', type: 'text', default: 'score' },
+    { key: 'addVar', label: 'Raises', type: 'text', default: 'perSecond' },
+    { key: 'amount', label: 'By', type: 'number', default: 1 },
+    { key: 'growth', label: 'Price growth (x)', type: 'number', default: 1.15 },
+  ],
+  create(p) {
+    return {
+      start(e) { e.data.cost = p.cost; e.data.owned = 0; },
+      update(e, dt, s) {
+        for (const t of s.engine.input.taps) {
+          if (!hitTest(s, e, t.x, t.y)) continue;
+          const have = +s.vars[p.costVar] || 0;
+          if (have < e.data.cost) {
+            s.engine.audio.sfx('click'); s.engine.vibrate(30);
+            s.message(`Need ${formatNumber(e.data.cost - have)} more`, 1);
+            continue;
+          }
+          s.addVar(p.costVar, -e.data.cost);
+          s.addVar(p.addVar, p.amount);
+          e.data.owned++;
+          e.data.cost = Math.ceil(e.data.cost * p.growth);
+          s.engine.audio.sfx('power'); s.engine.vibrate(12);
+          const k = e.sx; e.sx = e.sy = k * 1.08; s.tween(e, { sx: k, sy: k }, 0.18);
+        }
+      },
+    };
+  },
+});
+
 registerBehavior('script', {
   label: 'Custom script', description: 'Write JavaScript. Define start(e, scene), update(e, dt, scene) and/or collide(e, other, scene).',
   params: [{ key: 'code', label: 'Code', type: 'code', default: 'function update(e, dt, scene) {\n  // e.x += 50 * dt;\n}\n' }],
@@ -1363,7 +1969,10 @@ export class Engine {
     this.resize();
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
-    this.onVis = () => { if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true; };
+    this.onVis = () => {
+      if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true;
+      if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
+    };
     document.addEventListener('visibilitychange', this.onVis);
     this.last = performance.now();
     this.running = true;
@@ -1391,17 +2000,48 @@ export class Engine {
     this.renderer = kind === '3d' ? new Renderer3D(this.canvas) : new Renderer2D(this.canvas);
   }
 
-  /** Start a game. Pass a function that builds a fresh Scene (used for restarts), a Scene, or scene JSON. */
-  start(source) {
+  /**
+   * Start a game. Pass a function that builds a fresh Scene (used for restarts), a Scene, or scene JSON.
+   * Scene JSON may carry more levels in `levels: [sceneJson, ...]`; opts.level picks the starting one.
+   */
+  start(source, opts = {}) {
+    this.levels = null; this.carry = null;
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;
-    else this.factory = () => Scene.fromJSON(source);
+    else {
+      this.levels = [source, ...(source.levels || [])];
+      this.levelIndex = clamp(opts.level || 0, 0, this.levels.length - 1);
+      this.factory = () => this.buildLevel();
+    }
     this.setScene(this.factory());
     return this.scene;
   }
 
+  buildLevel() {
+    const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
+    const json = i === 0 ? lv : { ...lv, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '' } };
+    const s = Scene.fromJSON(json);
+    s.level = i + 1; s.levelCount = this.levels.length;
+    if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
+    if (s.settings.timeLimit) s.vars.time = +s.settings.timeLimit;
+    s.vars.level = s.level;
+    return s;
+  }
+
+  hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+
+  nextLevel() {
+    if (!this.hasNextLevel()) return;
+    const carry = { ...this.scene.vars };
+    delete carry.best; delete carry.level; delete carry.time;
+    this.carry = carry;
+    this.levelIndex++;
+    this.setScene(this.factory());
+  }
+
   restart(skipTitle = true) {
     if (!this.factory) return;
+    if (this.levels && this.scene?.state === 'win') { this.levelIndex = 0; this.carry = null; } // finished the last level
     const s = this.factory();
     if (skipTitle && s.state === 'title') s.state = 'play';
     this.setScene(s);
@@ -1425,10 +2065,39 @@ export class Engine {
       const r = Math.min(44, this.width * 0.11), bottom = this.height - this.safe.bottom - m - r;
       if (s.settings.jumpButton) b.push({ action: 'jump', label: 'JUMP', x: this.width - this.safe.right - m - r, y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: 'FIRE', x: this.width - this.safe.right - m - r - (s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
-      if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2, y: this.safe.top + 30, r: 20, id: null });
+      const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
+      if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
+      if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
     this.input.buttons = b;
   }
+
+  /** True when the game wants portrait/landscape and a phone is held the other way. */
+  wrongOrientation(s) {
+    const o = s.settings.orientation;
+    if (!o || o === 'any' || !matchMedia('(pointer: coarse)').matches) return false;
+    return o === 'portrait' ? this.width > this.height * 1.1 : this.height > this.width * 1.1;
+  }
+
+  /** First touch: go fullscreen if the game asks for it, and keep the screen awake while playing. */
+  onFirstGesture() {
+    const s = this.scene;
+    if (!s || this.editing) return;
+    if (s.settings.fullscreen && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().then(() => {
+        if (s.settings.orientation !== 'any') screen.orientation?.lock?.(s.settings.orientation).catch(() => {});
+      }).catch(() => {});
+    }
+    this.keepAwake();
+  }
+  async keepAwake() {
+    if (this.wakeLock || !navigator.wakeLock || this.editing) return;
+    try {
+      this.wakeLock = await navigator.wakeLock.request('screen');
+      this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });
+    } catch { /* not allowed right now */ }
+  }
+  releaseAwake() { this.wakeLock?.release().catch(() => {}); this.wakeLock = null; }
 
   vibrate(p) { try { if (!this.audio.muted) navigator.vibrate?.(p); } catch { /* unsupported */ } }
 
@@ -1448,15 +2117,20 @@ export class Engine {
   update(dt) {
     const s = this.scene, inp = this.input;
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
-    if (this.paused) { if (inp.pressed('tap') || inp.pressed('Escape') || inp.pressed('btn:pause')) this.paused = false; return; }
-    if (inp.pressed('btn:pause') || inp.pressed('Escape') || inp.pressed('KeyP')) { if (s.state === 'play') { this.paused = true; return; } }
+    if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
+    s.rotateNeeded = this.wrongOrientation(s);
+    if (s.rotateNeeded) return;
+    if (this.paused) { if (inp.pressed('tap') || inp.pressed('btn:pause')) this.paused = false; return; }
+    if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
-      if (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter')) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap')) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
-      if (s.time - s.endTime > 0.8 && (inp.pressed('tap') || inp.pressed('Space') || inp.pressed('Enter'))) this.restart();
+      if (s.time - s.endTime > 0.8 && inp.pressed('tap')) {
+        if (s.levelComplete) this.nextLevel(); else this.restart();
+      }
       return;
     }
     for (const e of s.entities) {
@@ -1472,6 +2146,10 @@ export class Engine {
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();
+    if (s.settings.timeLimit && s.state === 'play') {
+      s.vars.time = Math.max(0, (s.vars.time ?? s.settings.timeLimit) - dt);
+      if (s.vars.time <= 0) { s.message("Time's up!", 3); s.gameOver(); }
+    }
     this.stepEffects(dt);
     s.flush();
   }
@@ -1496,6 +2174,7 @@ export class Engine {
       if ((p.life -= p.decay * dt) <= 0) s.particles.splice(i, 1);
     }
     s.camera.shake = Math.max(0, s.camera.shake - dt * 40);
+    if (s.msg && (s.msg.t -= dt) <= 0) s.msg = null;
   }
 
   render() {
@@ -1516,6 +2195,6 @@ export class Engine {
 /** Everything, for scripts: `P.Entity`, `P.rand`, ... */
 export const Pocket = {
   VERSION, Engine, Scene, Entity, Camera2D, Camera3D, Physics, Input, Audio, Renderer2D, Renderer3D, anchorPoint,
-  Behaviors, registerBehavior, paramDefault, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
+  Behaviors, registerBehavior, paramDefault, formatNumber, M4, uid, clamp, lerp, rand, pick, DEG, hexToRgb, loadImage, storage: store,
 };
 export default Pocket;

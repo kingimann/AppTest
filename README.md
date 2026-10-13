@@ -1,6 +1,8 @@
 # Pocket Engine
 
-A small **2D + 3D game engine for mobile web browsers**, plus a **visual editor that works on your phone**.
+A **2D + 3D game engine for phones**, plus a **visual editor you use on your phone**. It is touch-only by design: no keyboard or mouse controls.
+
+Make any kind of game: platformers, first-person shooters, third-person adventures, top-down games, racing, endless runners, clicker/idle games, space shooters, tap games and puzzles.
 Plain JavaScript ES modules. No dependencies and no build step.
 
 - `engine/pocket.js`: the engine, one file
@@ -17,26 +19,46 @@ python3 -m http.server 8000
 # open http://localhost:8000, or http://<your-computer-ip>:8000 on your phone
 ```
 
-Or turn on **GitHub Pages** for the repo (Settings → Pages → deploy from branch) to get a public link you can open on any phone.
+Or use the live version: **https://kingimann.github.io/AppTest/editor/**
 
 ## The editor
 
-Open `editor/` on your phone (or a desktop browser). The layout follows desktop game engines: a toolbar, the **Scene** view, and **Hierarchy**, **Inspector** and **Project** panels (tabs at the bottom on phones, docked around the scene on wide screens).
+Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Install App* adds it to your home screen, and it works offline.
 
-| Do this | How |
+1. **Home screen**: continue your last game, or pick a **game type**. Each one is a complete, playable starter you change any way you like:
+
+   | Type | Starter | What it shows |
+   | --- | --- | --- |
+   | Platformer | Jump Quest | run & jump, 2 levels, keys and doors |
+   | Third Person | Sky Islands | 3D follow camera, jumping between islands |
+   | First Person | Target Range | look by dragging, aim and fire |
+   | Top Down 3D | Gem Garden | joystick, collect, enemies |
+   | Top Down 2D | Sky Dodge | dodge and collect, spawners |
+   | Space Shooter | Star Defender | waves, bosses with health |
+   | Racing | Desert Rally | car controls, chase camera, time limit |
+   | Endless Runner | Lane Rush | swipe lanes, jump |
+   | Clicker / Idle | Cookie Tap | tap to earn, upgrades, income per second |
+   | Tap Arcade | Tap Frenzy | tap targets against the clock |
+   | Blank 2D / 3D | | start from nothing |
+
+2. **Scene** fills the screen. Tap an object to select it; drag to move it. The tool rail on the left has Hand, Move, Rotate, Scale and **Paint** (stamp copies by tapping or dragging). Pinch to zoom; drag empty space to pan (2D) or orbit (3D).
+3. **Blue + button**: add things. Tap a tile to add it, or press, hold and drag it to the exact spot.
+4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). Drag the handle or tap the open tab for peek, half or full height. Held sideways, the panels move to the right.
+5. **▶ Play** tests the game instantly; **■ Stop** returns to editing.
+
+| Gesture | Does |
 | --- | --- |
-| Add objects | **Project → Prefabs / Objects**: drag a tile into the Scene (press and hold briefly on touch), or tap it to add at the center. Also **Hierarchy → Create** |
-| Add components | **Project → Components**: drag onto an object in the Scene or Hierarchy, or use **Add Component** in the Inspector |
-| Select | Tap an object in the Scene or Hierarchy. Tap the scene name at the top of the Hierarchy for game settings |
-| Move / Rotate / Scale | Toolbar tools (Q W E R). Drag the object, or drag the gizmo handles to lock an axis |
-| Pan / Orbit / Zoom | Drag empty space (2D pans, 3D orbits), pinch to zoom. Hand tool always pans. Desktop: wheel zooms, shift-drag pans |
-| Edit numbers | Type in the field, or drag the field's label left and right |
-| Test | **▶** in the toolbar. **▶** again (or the floating bar) stops |
-| Save / share | Saving is automatic. **☰** menu: New/Open Project, Build HTML (one offline file), JSON export/import |
+| Long-press an object | Object menu: Inspect, Duplicate, Copy, Paint copies, Focus, Hide, Lock, Delete |
+| Long-press empty space | Paste here, Add object here, Reset view, Game settings |
+| Two-finger tap / three-finger tap | Undo / Redo |
+| Double-tap empty space | Reset the view |
+| Drag a field's label | Scrub its number |
 
-Other shortcuts: undo/redo arrows (Ctrl/Cmd+Z), F frames the selection, Ctrl+D duplicates, Delete removes.
+The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears when something is selected. The level button above the Scene adds and switches levels.
 
-**Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** component then creates copies of it by name. Sky Dodge shows how.
+**Templates and spawners.** Tick *Template* on an object to hide it during play. A **Spawner** or **Shooter** component then creates copies of it by name.
+
+**Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
 
 ## Using the engine from code
 
@@ -84,13 +106,13 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 
 | Type | What it does | Params (defaults) |
 | --- | --- | --- |
-| `move` | Player movement with joystick, keyboard, or dragging. | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true) |
+| `move` | Player movement with the joystick, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true) |
 | `platformer` | Run & jump. Uses gravity; tap or the jump button to jump. | `speed` (240 / 3D 7), `jump` (620 / 3D 10), `doubleJump` (false), `onFall` ("respawn") |
 | `rotate` | Spin continuously. | `speed` (90), `axis` ("z" / 3D "y") |
 | `patrol` | Move back and forth from the start point. | `dx` (120 / 3D 4), `dy` (0), `dz` (0), `duration` (2) |
 | `velocity` | Move at a constant speed. Give a min–max range for random speeds. | `vx` (0), `vy` (200 / 3D 0), `vz` (0 / 3D 6) |
 | `spawner` | Spawn copies of a template object over time, at random positions in a range. | `template` (""), `every` (1), `x` ([20,380] / 3D [-8,8]), `y` (-40 / 3D 1), `z` (0 / 3D -40), `relative` (false), `ramp` (0.1), `max` (60) |
-| `shooter` | Fire copies of a template (give the template a Velocity). | `template` (""), `every` (0.25), `trigger` ("auto") |
+| `shooter` | Fire copies of a template in the direction the shooter faces (give it a Projectile). | `template` (""), `every` (0.25), `trigger` ("auto" / "action button" / "tap") |
 | `destroyOffscreen` | Remove the object once it leaves the view. | `margin` (120 / 3D 60) |
 | `lifetime` | Remove the object after some seconds. | `seconds` (3) |
 | `collectible` | Adds to the score when the player touches it. | `score` (10), `var` ("score"), `tag` ("player"), `sound` ("coin") |
@@ -100,9 +122,28 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `cameraFollow` | The camera tracks this object. | `smooth` (6), `axes` ("both"), `ox` (0), `oy` (0 / 3D 7), `oz` (0 / 3D 11) |
 | `wrap` | Leaving one edge brings it back on the other (2D). | — |
 | `timeScore` | Adds points every second while playing. | `rate` (10) |
+| `chase` | Moves toward the player when it gets close. | `speed` (110 / 3D 3.5), `range` (320 / 3D 10), `tag` ("player") |
+| `float` | Bobs gently up and down. | `amount` (8 / 3D 0.25), `period` (1.6) |
+| `message` | Shows a message when the player touches it (signs, hints, story). | `text`, `seconds` (3), `once` (true), `tag` ("player") |
+| `teleport` | Sends the player to another object (by name). | `target` (""), `tag` ("player") |
+| `unlock` | Disappears once a variable reaches an amount, e.g. a door that opens with keys. | `var` ("keys"), `amount` (1), `text` |
+| `sound` | Plays a sound when the game starts or when touched. | `sound` ("power"), `when` ("touched"), `tag` ("player") |
+| `tappable` | The player taps it on screen to score (clicker, whack-a-mole, bubble games). | `points` (10), `destroy` (true), `sound` ("coin") |
+| `draggable` | The player can pick it up and move it with a finger (puzzles, sorting games). | `snap` (0), `lift` (true) |
+| `swipeMove` | Swipe left/right to change lanes, swipe up to jump (endless-runner controls). | `distance` (110 / 3D 2.5), `lanes` (3), `jump` (0 / 3D 9) |
+| `orbit` | Circles around its starting point. | `radius` (80 / 3D 3), `speed` (90) |
+| `pulse` | Grows and shrinks to draw attention. | `amount` (0.15), `period` (0.8) |
+| `checkpoint` | The player respawns here after falling or getting hurt. | `text`, `tag` ("player") |
+| `destructible` | Health: takes hits from objects with a tag (like bullets) and breaks when health runs out. | `hp` (3), `hitBy` ("bullet"), `points` (10), `removeHitter` (true) |
+| `firstPerson` | First-person controls: joystick to walk, drag the screen to look. | `speed` (6), `look` (0.25), `eye` (0.6), `jump` (9) |
+| `thirdPerson` | Over-the-shoulder controls: joystick moves relative to the camera, drag to turn it. | `speed` (6), `jump` (10), `distance` (7), `height` (25), `look` (0.3) |
+| `car` | Drive with the joystick (up = gas). 3D cars get a chase camera. | `maxSpeed` (320 / 3D 16), `accel` (260 / 3D 12), `turn` (160 / 3D 110), `autoGas`, `chaseCam` |
+| `projectile` | Flies straight the way it faces (bullet templates fired by a Shooter). | `speed` (650 / 3D 30), `life` (2) |
+| `income` | Adds a "per second" variable into another every second (idle games). | `var` ("score"), `rateVar` ("perSecond") |
+| `upgrade` | Tap to buy: spends one variable to raise another; price grows. Show it with `{cost}`. | `cost` (10), `costVar`, `addVar`, `amount`, `growth` (1.15) |
 | `script` | Custom JavaScript: define `start(e, scene)`, `update(e, dt, scene)` and/or `collide(e, other, scene)`. | `code` |
 
-Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`).
+Number params can be `[min, max]` for a random value where it makes sense (`velocity`, `spawner`). Texts show variables with `{name}`; big numbers display as 12.3K / 4.5M.
 
 Add your own behavior, and it shows up in the editor too, with a form built from `params`:
 
@@ -123,20 +164,24 @@ registerBehavior('blink', {
 | `scene.vars`, `scene.setVar(k, v)`, `scene.addVar(k, d)` | game variables, shown in text with `{name}` |
 | `scene.gameOver()`, `scene.win()` | end screens (tap to play again) |
 | `scene.after(sec, fn)`, `scene.every(sec, fn)`, `scene.tween(obj, {x: 10}, 0.3)` | timing |
+| `scene.message('Hi!', 3)` | message banner over the game |
 | `scene.burst(x, y, z, color, count)` | particle burst |
 | `scene.camera` | 2D: `{x, y, zoom, shake}`. 3D: `{position, target, fov, shake}` |
 | `scene.on('collide' \| 'var' \| 'over' \| 'win', fn)` | events |
 
 | | |
 | --- | --- |
-| `engine.input.axis()` | `{x, y}` from joystick or keys |
-| `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'KeyX')`, `isDown(...)` | buttons, taps, keys |
+| `engine.input.axis()` | `{x, y}` from the joystick or tilt |
+| `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'swipe:left')`, `isDown('jump' \| 'action')` | touch buttons, taps, swipes |
+| `engine.input.taps`, `engine.input.pointers`, `engine.input.useTilt = true` | raw touches, tilt controls |
 | `engine.audio.sfx('coin' \| 'jump' \| 'hit' \| 'power' \| 'win' \| 'lose')`, `audio.play(url)` | sound |
 | `engine.vibrate(ms)`, `engine.timeScale`, `engine.paused`, `engine.restart()` | misc |
 
 ### Scene settings
 
-`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, winScore, saveBest }`. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
+`settings: { title, subtitle, joystick, jumpButton, actionButton, pauseButton, muteButton, winScore, timeLimit, saveBest, orientation, fullscreen }`. `orientation` (`'portrait'`/`'landscape'`) shows a "turn your device" screen when a phone is held the wrong way; `fullscreen` goes fullscreen on the first tap. Games keep the screen awake while playing and have a mute button. With `timeLimit`, `{time}` counts down and the game ends at zero.
+
+**Levels:** put more scenes in `levels: [sceneJson, ...]` on the first scene. Winning a level shows "Level complete" and continues to the next one, carrying variables like score and lives over; `{level}` shows the level number. `engine.start(json, { level: 1 })` starts at the second level. Also `background`, `gravity` (2D: positive is down, e.g. `1600` for a platformer; 3D: e.g. `-25`), `view` (2D design size), `camera`, `light: { dir, color, ambient }` and `fog: { near, far }` for 3D.
 
 ## Limitations (v0.1)
 

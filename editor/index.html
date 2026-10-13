@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#191919">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -16,38 +16,48 @@
 <div id="app">
   <header id="toolbar">
     <button id="fileBtn" class="tb" title="Menu"></button>
-    <div class="tb-group" id="tools">
-      <button class="tb" data-tool="hand" title="Hand tool (Q)"></button>
-      <button class="tb" data-tool="move" title="Move tool (W)"></button>
-      <button class="tb" data-tool="rotate" title="Rotate tool (E)"></button>
-      <button class="tb" data-tool="scale" title="Scale tool (R)"></button>
-    </div>
-    <div class="tb-spacer"></div>
-    <div class="tb-group" id="playGroup">
-      <button class="tb" id="playBtn" title="Play"></button>
-      <button class="tb" id="pauseBtn" title="Pause" disabled></button>
-    </div>
-    <div class="tb-spacer"></div>
+    <div id="projectTitle"></div>
     <div class="tb-group">
       <button class="tb" id="undoBtn" title="Undo"></button>
       <button class="tb" id="redoBtn" title="Redo"></button>
+    </div>
+    <div class="tb-group" id="playGroup">
+      <button class="tb" id="playBtn" title="Play"></button>
+      <button class="tb" id="pauseBtn" title="Pause" disabled></button>
     </div>
   </header>
 
   <section id="scenePanel" class="panel">
     <div class="panel-tabs">
       <div class="ptab active" id="sceneTab"></div>
+      <button class="level-btn" id="levelBtn" title="Levels"></button>
       <span class="sp"></span>
       <button class="pt-btn" id="snapBtn" title="Snap to grid"></button>
       <button class="pt-btn" id="gridBtn" title="Show grid"></button>
       <button class="pt-btn" id="frameBtn" title="Frame selected (F)"></button>
     </div>
     <div id="viewport">
+      <div id="toolRail">
+        <button data-tool="hand" title="Hand: pan the view"></button>
+        <button data-tool="move" title="Move"></button>
+        <button data-tool="rotate" title="Rotate"></button>
+        <button data-tool="scale" title="Scale"></button>
+        <button data-tool="paint" title="Paint: tap or drag to place copies of the selected object"></button>
+      </div>
+      <button id="panelsFab" title="Show panels"></button>
+      <button id="addFab" title="Add objects and components"></button>
       <div id="hint" hidden></div>
+      <div id="ctxBar" hidden>
+        <button data-act="inspect"></button>
+        <button data-act="duplicate"></button>
+        <button data-act="focus"></button>
+        <button data-act="delete"></button>
+      </div>
     </div>
   </section>
 
-  <div id="splitter"><span></span></div>
+  <section id="sheet">
+  <div id="sheetHandle"><span></span></div>
   <nav id="dockTabs">
     <button data-dock="hierarchy" class="active"></button>
     <button data-dock="inspector"></button>
@@ -66,12 +76,14 @@
     <div class="panel-tabs desk"><div class="ptab active" data-title="project"></div></div>
     <div class="panel-body" id="project"></div>
   </section>
+  </section>
 </div>
 
 <div id="playBar" hidden>
   <button id="pbPlay" class="tb on" title="Stop"></button>
   <button id="pbPause" class="tb" title="Pause"></button>
 </div>
+<div id="home" hidden></div>
 <div id="menuLayer" hidden></div>
 <div id="dragGhost" hidden></div>
 <input type="file" id="fileInput" hidden>

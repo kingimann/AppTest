@@ -4776,6 +4776,14 @@ const opt = (k, options, d, label) => ({ key: k, type: 'select', options, defaul
  * Node types. Events start a flow (white "exec" wires); actions run in order; values feed numbers/booleans
  * into inputs (blue/orange wires). Unwired inputs use the value typed on the node.
  */
+/** The closest live object with this name or tag (not `e` itself). */
+function nearest(s, e, key) {
+  if (!key) return null;
+  const named = s.find(key); if (named && named !== e && !named.dead) return named;
+  let best = null, bd = Infinity;
+  for (const q of s.findAll(key)) { if (q === e || q.dead) continue; const d = Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z); if (d < bd) { bd = d; best = q; } }
+  return best;
+}
 export const NODE_TYPES = {
   // events
   start: { cat: 'Events', label: 'On Start', outs: ['then'] },
@@ -4788,12 +4796,23 @@ export const NODE_TYPES = {
   destroyed: { cat: 'Events', label: 'On Destroyed', outs: ['then'] },
   onMessage: { cat: 'Events', label: 'On Message', outs: ['then'], params: [txt('message', 'go', 'message')] },
   touchEnd: { cat: 'Events', label: 'On Touch End', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
+  varChanged: { cat: 'Events', label: 'On Variable Changed', outs: ['then'], params: [txt('name', 'score', 'variable')] },
+  damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'] },
+  death: { cat: 'Events', label: 'On Death', outs: ['then'] },
+  holding: { cat: 'Events', label: 'While Touching Screen', outs: ['then'] },
   // flow
   branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
   wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
   chance: { cat: 'Flow', label: 'Random Chance', exec: true, outs: ['yes', 'no'], inputs: [{ key: 'percent', type: 'number', default: 50 }] },
   once: { cat: 'Flow', label: 'Do Once', exec: true, outs: ['then'] },
   sequence: { cat: 'Flow', label: 'Sequence', exec: true, outs: ['first', 'second', 'third'] },
+  loop: { cat: 'Flow', label: 'Repeat N Times', exec: true, outs: ['each', 'done'], inputs: [{ key: 'count', type: 'number', default: 3 }] },
+  flipFlop: { cat: 'Flow', label: 'Flip Flop', exec: true, outs: ['A', 'B'] },
+  cooldown: { cat: 'Flow', label: 'Cooldown', exec: true, outs: ['then', 'blocked'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
+  countTo: { cat: 'Flow', label: 'Count To', exec: true, outs: ['reached', 'not yet'], inputs: [{ key: 'times', type: 'number', default: 3 }], params: [opt('after', ['start over', 'stay done'], 'start over', 'then')] },
+  randomBranch: { cat: 'Flow', label: 'Random Branch', exec: true, outs: ['1', '2', '3'] },
+  switchNum: { cat: 'Flow', label: 'Switch on Number', exec: true, outs: ['0', '1', '2', '3', 'other'], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  compareBranch: { cat: 'Flow', label: 'Compare Branch', exec: true, outs: ['yes', 'no'], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }], params: [opt('op', ['≥', '≤', '=', '>', '<', '≠'], '≥', 'is')] },
   // actions
   setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
@@ -4828,6 +4847,22 @@ export const NODE_TYPES = {
   sendMessage: { cat: 'Actions', label: 'Send Message', exec: true, outs: ['then'], params: [txt('message', 'go', 'message')] },
   impulse: { cat: 'Actions', label: 'Camera Impulse', exec: true, outs: ['then'], inputs: [{ key: 'strength', type: 'number', default: 12 }] },
   setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
+  setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
+  lookAt: { cat: 'Move', label: 'Look At', exec: true, outs: ['then'], params: [txt('tag', 'player', 'tag')] },
+  rotateBy: { cat: 'Move', label: 'Rotate By', exec: true, outs: ['then'], inputs: [{ key: 'degrees', type: 'number', default: 15 }] },
+  setScale: { cat: 'Move', label: 'Set Scale', exec: true, outs: ['then'], inputs: [{ key: 'scale', type: 'number', default: 1 }] },
+  teleport: { cat: 'Move', label: 'Teleport To', exec: true, outs: ['then'], params: [txt('object', '', 'object or tag')] },
+  setText: { cat: 'Looks', label: 'Set Text', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = me)'), txt('text', 'Score: {score}', 'text')] },
+  setColor: { cat: 'Looks', label: 'Set Colour', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#ff5252', label: 'colour' }, opt('target', ['self', 'other'], 'self', 'who')] },
+  particles: { cat: 'Looks', label: 'Particle Burst', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#ffd54f', label: 'colour' }], inputs: [{ key: 'count', type: 'number', default: 20 }] },
+  spawnAt: { cat: 'Objects', label: 'Spawn At', exec: true, outs: ['then'], params: [txt('template', '', 'template'), txt('at', 'player', 'at object or tag')] },
+  destroyTag: { cat: 'Objects', label: 'Destroy All With Tag', exec: true, outs: ['then'], params: [txt('tag', 'enemy', 'tag')] },
+  tagOp: { cat: 'Objects', label: 'Add / Remove Tag', exec: true, outs: ['then'], params: [txt('tag', 'marked', 'tag'), opt('mode', ['add', 'remove'], 'add', 'do')] },
+  slowMo: { cat: 'Game', label: 'Slow Motion', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0.3 }, { key: 'seconds', type: 'number', default: 1 }] },
+  damage: { cat: 'Game', label: 'Damage', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1 }], params: [opt('target', ['self', 'other'], 'other', 'who')] },
+  heal: { cat: 'Game', label: 'Heal', exec: true, outs: ['then'], inputs: [{ key: 'amount', type: 'number', default: 1 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
+  giveItem: { cat: 'Game', label: 'Give Item', exec: true, outs: ['then'], params: [txt('item', 'key', 'item')], inputs: [{ key: 'count', type: 'number', default: 1 }] },
   // values
   number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
   getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
@@ -4845,6 +4880,17 @@ export const NODE_TYPES = {
   velocity: { cat: 'Values', label: 'My Velocity', value: 'number', params: [opt('axis', ['x', 'y', 'z', 'speed'], 'x', 'axis')] },
   touching: { cat: 'Values', label: 'Is Touching', value: 'bool', params: [txt('tag', 'player', 'tag')] },
   canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
+  math1: { cat: 'Math', label: 'Math (one value)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }], params: [opt('op', ['abs', 'round', 'floor', 'ceil', 'sqrt', 'negate', 'sin', 'cos'], 'abs', 'operation')] },
+  clamp: { cat: 'Math', label: 'Clamp', value: 'number', inputs: [{ key: 'value', type: 'number', default: 0 }, { key: 'min', type: 'number', default: 0 }, { key: 'max', type: 'number', default: 10 }] },
+  lerp: { cat: 'Math', label: 'Lerp (blend)', value: 'number', inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 10 }, { key: 't', type: 'number', default: 0.5 }] },
+  loopIndex: { cat: 'Math', label: 'Loop Index', value: 'number' },
+  angleTo: { cat: 'Values', label: 'Angle To', value: 'number', params: [txt('tag', 'player', 'tag')] },
+  countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
+  exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
+  health: { cat: 'Values', label: 'My Health', value: 'number' },
+  itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
+  joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
+  screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
 };
 
 // ---- Logic library (PlayMaker / Game Creator style): events → conditions → instructions ----
@@ -5111,6 +5157,17 @@ registerBehavior('graph', {
         case 'velocity': { const v = e.body?.vel || { x: 0, y: 0, z: 0 }; return P('axis') === 'speed' ? Math.hypot(v.x, v.y, v.z) : v[P('axis')] || 0; }
         case 'touching': return s.engine.physics.touching(e, P('tag'));
         case 'canSee': { const t = s.findAll(P('tag')).find((q) => q !== e); return !!t && s.canSee(e, t, +P('range') || Infinity); }
+        case 'math1': { const a = +I('a') || 0; return { abs: Math.abs(a), round: Math.round(a), floor: Math.floor(a), ceil: Math.ceil(a), sqrt: Math.sqrt(Math.max(0, a)), negate: -a, sin: Math.sin(a * DEG), cos: Math.cos(a * DEG) }[P('op')] ?? a; }
+        case 'clamp': return clamp(+I('value') || 0, +I('min') || 0, +I('max') || 0);
+        case 'lerp': return lerp(+I('a') || 0, +I('b') || 0, +I('t') || 0);
+        case 'loopIndex': return ctx.index ?? 0;
+        case 'angleTo': { const t = nearest(s, e, P('tag')); if (!t) return 0; return s.mode === '3d' ? Math.atan2(t.x - e.x, t.z - e.z) / DEG : Math.atan2(t.y - e.y, t.x - e.x) / DEG; }
+        case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
+        case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
+        case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'itemCount': return s.itemCount(P('item'));
+        case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
+        case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
         default: return 0;
       }
     };
@@ -5124,6 +5181,34 @@ registerBehavior('graph', {
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
         case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
+        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))); for (let i = 0; i < c; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps }); return follow(n, 'done', ctx); }
+        case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
+        case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
+        case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
+        case 'randomBranch': { const ports = ['1', '2', '3'].filter((pt) => g.links.some((l) => l.from.node === n.id && l.from.port === pt)); return ports.length ? follow(n, pick(ports), ctx) : undefined; }
+        case 'switchNum': { const v = Math.round(+I('value') || 0); return follow(n, v >= 0 && v <= 3 ? String(v) : 'other', ctx); }
+        case 'compareBranch': { const a = +I('a') || 0, b = +I('b') || 0, ok = { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b, '≠': a !== b }[P('op')]; return follow(n, ok ? 'yes' : 'no', ctx); }
+        case 'setPosition': { const t = P('target') === 'other' ? ctx.other : e; if (t) { t.x = +I('x') || 0; t.y = +I('y') || 0; if (s.mode === '3d') t.z = +I('z') || 0; if (t.body) t.body.vel = { x: 0, y: 0, z: 0 }; } break; }
+        case 'moveToward': {
+          const t = nearest(s, e, P('tag')); if (!t) break;
+          const dx = t.x - e.x, dy = s.mode === '3d' ? 0 : t.y - e.y, dz = s.mode === '3d' ? t.z - e.z : 0, d = Math.hypot(dx, dy, dz), step = (+I('speed') || 0) * (ctx.dt ?? 1 / 60);
+          if (d <= step || d < 1e-6) { e.x = t.x; if (s.mode === '3d') e.z = t.z; else e.y = t.y; follow(n, 'arrived', ctx); break; }
+          e.x += dx / d * step; e.y += dy / d * step; e.z += dz / d * step; break;
+        }
+        case 'lookAt': { const t = nearest(s, e, P('tag')); if (t) { if (s.mode === '3d') e.ry = Math.atan2(t.x - e.x, t.z - e.z) / DEG; else e.rz = Math.atan2(t.y - e.y, t.x - e.x) / DEG; } break; }
+        case 'rotateBy': if (s.mode === '3d') e.ry += +I('degrees') || 0; else e.rz += +I('degrees') || 0; break;
+        case 'setScale': { const k = +I('scale') || 0; e.sx = e.sy = k; if (s.mode === '3d') e.sz = k; break; }
+        case 'teleport': { const k = P('object'), t = s.find(k) || s.findAll(k).find((q) => q !== e); if (t) { e.x = t.x; e.y = t.y; e.z = t.z; if (e.body) e.body.vel = { x: 0, y: 0, z: 0 }; } break; }
+        case 'setText': { const t = P('object') ? s.find(P('object')) : e; if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = P('text'); } break; }
+        case 'setColor': { const t = P('target') === 'other' ? ctx.other : e, c = P('color'); if (t) { if (t.shape) t.shape.fill = c; if (t.mesh) t.mesh.color = c; if (t.text && !t.shape && !t.mesh) t.text.color = c; } break; }
+        case 'particles': s.burst(e.x, e.y, e.z, P('color') || '#ffd54f', Math.min(200, Math.max(1, +I('count') || 20))); break;
+        case 'spawnAt': { const k = P('at'), at = (k && (s.find(k) || nearest(s, e, k))) || e; if (P('template')) s.spawn(P('template'), { x: at.x, y: at.y, z: at.z }); break; }
+        case 'destroyTag': for (const t of s.findAll(P('tag'))) if (!t.dead) { s.burst(t.x, t.y, t.z, '#fff', 8); t.destroy(); } break;
+        case 'tagOp': if (P('tag')) { if (P('mode') === 'remove') e.tags.delete(P('tag')); else e.tags.add(P('tag')); } break;
+        case 'slowMo': { const eng = s.engine, k = clamp(+I('speed') || 0, 0.05, 4); eng.timeScale = k; const secs = +I('seconds') || 0; if (secs > 0) setTimeout(() => { if (eng.timeScale === k) eng.timeScale = 1; }, secs * 1000); break; }
+        case 'damage': { const t = P('target') === 'self' ? e : ctx.other; t?.getBehavior('health')?.damage(+I('amount') || 0, t, e); break; }
+        case 'heal': { const t = P('target') === 'other' ? ctx.other : e; t?.getBehavior('health')?.heal(+I('amount') || 0, t); break; }
+        case 'giveItem': s.addItem(P('item') || 'item', Math.round(+I('count') || 1)); break;
         case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
         case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
         case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
@@ -5171,14 +5256,17 @@ registerBehavior('graph', {
       }
       follow(n, 'then', ctx);
     };
-    const fire = (type, e, s, other, filter) => {
-      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0 });
+    const fire = (type, e, s, other, filter, dt) => {
+      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt });
     };
     const timers = new Map();
     return {
       uiAlways: true,
       start(e, s) {
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name); });
+        if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
+        if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
+        if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
         fire('start', e, s);
       },
@@ -5186,7 +5274,8 @@ registerBehavior('graph', {
         const inp = s.engine.input, playing = s.state === 'play';
         if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
         if (!playing) return;
-        fire('update', e, s);
+        fire('update', e, s, null, null, dt);
+        if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
           else if (n.type === 'button' && inp.pressed(param(n, 'button') === 'fire' ? 'action' : 'jump')) follow(n, 'then', { s, e, steps: 0 });

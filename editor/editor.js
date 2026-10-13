@@ -2341,7 +2341,7 @@ function renderInspector() {
 
   if (quickRow) box.append(quickRow);
   box.append(h('div', { class: 'add-comp', style: 'flex-direction:column;align-items:center;gap:10px' },
-    h('button', { class: 'btn wide', onclick: openAddComponent }, icon('plus'), 'Add Component'),
+    h('button', { class: 'btn wide', onclick: () => openAddComponent() }, icon('plus'), 'Add Component'),
     compClipboard && h('button', { class: 'btn wide', onclick: () => pasteComponent(j) }, icon('paste'), `Paste ${compClipboard.kind === 'behavior' ? Behaviors[compClipboard.data.type]?.label || 'Component' : compClipboard.kind}`)));
   box.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
     h('button', { class: 'btn', onclick: () => duplicateEntity(j.id) }, icon('copy'), 'Duplicate'),
@@ -2633,7 +2633,7 @@ function addComponentTo(id, key) {
   const c = componentsFor(j).find((x) => x.key === key);
   if (!c) return false;
   if (!c.ok(j)) { toast(`${c.label} can't be added to ${j.name}`); return false; }
-  c.add(j);
+  c.add(j); rememberComp(key);
   if (key === 'b:platformer' && !project.gravity) project.gravity = is3D() ? -25 : 1600;
   if (key === 'b:platformer') Object.assign(project.settings, { joystick: true, jumpButton: true });
   if (key === 'b:uiSlider' && !j.bar) j.bar = { var: j.behaviors.at(-1).var || 'volume', max: 100, w: 200, h: 18, fill: '#4c8bd6', bg: 'rgba(0,0,0,0.45)', radius: 9, label: true };
@@ -2645,17 +2645,58 @@ function addComponentTo(id, key) {
   return true;
 }
 
-function openAddComponent() {
+/** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
+const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
+  Animation: 'clock', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
+const CAT_ORDER = ['Rendering', 'Physics', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
+function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
+/** A few components that usually make sense next for this object. */
+function suggestComps(j, list) {
+  const has = (t) => (j.behaviors || []).some((b) => b.type === t), keys = [];
+  const isPlayer = (j.tags || []).includes('player'), logic = ['triggers', 'graph', 'fsm', 'rules', 'script'].some(has);
+  if (j.ui) keys.push('b:button', 'b:tween', 'b:triggers', 'b:uiCounter');
+  else {
+    if (!j.body) keys.push('body');
+    if (isPlayer) keys.push(is3D() ? 'b:thirdPerson' : 'b:platformer', 'b:move', 'b:health', 'b:cameraFollow');
+    else keys.push('b:collectible', 'b:hazard', 'b:patrol', 'b:health');
+    if (!logic) keys.push('b:triggers');
+    keys.push('b:tween');
+  }
+  return keys.filter((k) => !(k.startsWith('b:') && has(k.slice(2)))).map((k) => list.find((c) => c.key === k)).filter(Boolean).slice(0, 6);
+}
+function openAddComponent(startCat) {
   const j = ent(selectedId); if (!j) return;
   const list = componentsFor(j).filter((c) => c.ok(j));
-  const body = h('div');
-  const search = h('input', { class: 'ac-search', type: 'search', placeholder: 'Search components', autocapitalize: 'off', oninput: () => draw() });
+  let cat = startCat || null;
+  const body = h('div', { class: 'ac-body' });
+  const search = h('input', { class: 'ac-search', type: 'search', placeholder: `Search ${list.length} components`, autocapitalize: 'off', oninput: () => draw() });
+  const add = (c) => { closeLayer(); addComponentTo(j.id, c.key); };
+  const item = (c, showCat) => h('button', { class: 'ac-item', onclick: () => add(c) }, h('span', { class: 'ac-ic' }, icon(c.icon)),
+    h('span', {}, c.label, h('small', {}, showCat ? `${c.cat} · ${c.desc || ''}` : c.desc)));
+  const chip = (c) => h('button', { class: 'ac-chip', onclick: () => add(c) }, icon(c.icon), c.label.replace(/ \(.*\)$/, ''));
   function draw() {
-    const q = search.value.toLowerCase();
-    const cats = {};
-    for (const c of list) if (!q || c.label.toLowerCase().includes(q) || c.cat.toLowerCase().includes(q)) (cats[c.cat] ||= []).push(c);
-    body.replaceChildren(...Object.entries(cats).flatMap(([cat, items]) => [h('div', { class: 'ac-cat' }, cat),
-      ...items.map((c) => h('button', { class: 'ac-item', onclick: () => { closeLayer(); addComponentTo(j.id, c.key); } }, icon(c.icon, 'ci'), h('span', {}, c.label, h('small', {}, c.desc))))]));
+    const q = search.value.trim().toLowerCase();
+    if (q) { // search everything, best matches first
+      const score = (c) => { const l = c.label.toLowerCase(); return l.startsWith(q) ? 0 : l.includes(q) ? 1 : c.cat.toLowerCase().includes(q) ? 2 : 3; };
+      const hits = list.filter((c) => (c.label + ' ' + c.cat + ' ' + (c.desc || '')).toLowerCase().includes(q)).sort((a, b) => score(a) - score(b));
+      body.replaceChildren(hits.length ? h('div', { class: 'ac-list' }, hits.map((c) => item(c, true))) : h('div', { class: 'empty' }, `Nothing called “${search.value}”. Try another word, like “move” or “health”.`));
+      return;
+    }
+    if (cat) { // inside a folder
+      const items = list.filter((c) => c.cat === cat);
+      body.replaceChildren(h('button', { class: 'ac-back', onclick: () => { cat = null; draw(); } }, icon('left'), 'All categories'),
+        h('div', { class: 'ac-cat' }, cat, ` · ${items.length}`), h('div', { class: 'ac-list' }, items.map((c) => item(c))));
+      return;
+    }
+    const cats = [...new Set(list.map((c) => c.cat))].sort((a, b) => (CAT_ORDER.indexOf(a) + 99) % 99 - (CAT_ORDER.indexOf(b) + 99) % 99);
+    const recent = recentComps().map((k) => list.find((c) => c.key === k)).filter(Boolean), sugg = suggestComps(j, list);
+    body.replaceChildren(
+      sugg.length ? h('div', { class: 'ac-cat' }, `Suggested for ${j.name || 'this object'}`) : '', sugg.length ? h('div', { class: 'ac-chips' }, sugg.map(chip)) : '',
+      recent.length ? h('div', { class: 'ac-cat' }, 'Recently used') : '', recent.length ? h('div', { class: 'ac-chips' }, recent.map(chip)) : '',
+      h('div', { class: 'ac-cat' }, 'Browse'),
+      h('div', { class: 'ac-folders' }, cats.map((k) => h('button', { class: 'ac-folder', onclick: () => { cat = k; draw(); body.parentElement?.scrollTo?.(0, 0); } },
+        icon(CAT_ICON[k] || 'folder'), h('b', {}, k), h('small', {}, `${list.filter((c) => c.cat === k).length}`)))));
   }
   draw();
   openDialog('Add Component', [search, body]);

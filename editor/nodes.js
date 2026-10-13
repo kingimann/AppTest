@@ -5,14 +5,19 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Values: '#a86b16' };
+const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Actions', 'Flow', 'Values'];
+const CATS = ['Events', 'Flow', 'Actions', 'Move', 'Looks', 'Objects', 'Game', 'Values', 'Math'];
 const CAT_HELP = {
   Events: 'Start here: when something happens…',
   Actions: '…do something.',
-  Flow: 'Decide, wait, repeat.',
+  Move: 'Position, rotation and size.',
+  Looks: 'Text, colour and effects.',
+  Objects: 'Create, remove and tag objects.',
+  Game: 'Health, items and time.',
+  Flow: 'Decide, wait, repeat, count.',
   Values: 'Numbers and true/false to plug into inputs.',
+  Math: 'Work numbers out.',
 };
 export const NODE_HELP = {
   start: 'When the game starts', update: 'Runs every frame', every: 'Repeats on a timer', touch: 'When something with a tag touches this',
@@ -30,6 +35,16 @@ export const NODE_HELP = {
   onMessage: 'When a message is sent (Send Message, buttons, tweens)', tweenTo: 'Smoothly animate a property with easing', punch: 'Pop, bump or wobble for juicy feedback',
   killTweens: 'Stop all tweens on this object', playAnim: 'Play an Animator clip', stopAnim: 'Stop the Animator', sendMessage: 'Tell other objects something happened',
   impulse: 'Shake the camera from this spot (weaker far away)',
+  varChanged: 'When a variable (score, hp…) changes', damaged: 'When this object loses health', death: 'When this object\'s health reaches 0', holding: 'Every frame while a finger is on the screen',
+  loop: 'Run “each” several times, then “done” (use Loop Index)', flipFlop: 'Alternate: A, then B, then A…', cooldown: 'Let it through at most once every N seconds',
+  countTo: 'Count runs; go to “reached” on the Nth', randomBranch: 'Pick one wired path at random', switchNum: 'Go down the path matching the number', compareBranch: 'Compare two numbers and branch',
+  setPosition: 'Put an object at an exact spot', moveToward: 'Step toward the nearest tagged object (use with Every Frame)', lookAt: 'Turn to face the nearest tagged object',
+  rotateBy: 'Turn by some degrees', setScale: 'Make bigger or smaller', teleport: 'Jump to another object', setText: 'Change a text (use {score} etc.)',
+  setColor: 'Change the colour', particles: 'A burst of particles here', spawnAt: 'Create a copy of a template at another object', destroyTag: 'Remove every object with a tag',
+  tagOp: 'Add or remove a tag on this object', slowMo: 'Slow the whole game down for a moment', damage: 'Hurt something with Health', heal: 'Give health back', giveItem: 'Add to the inventory',
+  math1: 'abs, round, square root, sin…', clamp: 'Keep a number between min and max', lerp: 'Blend from A to B (t from 0 to 1)', loopIndex: 'Which repeat this is (0, 1, 2…)',
+  angleTo: 'Direction to the nearest tagged object, in degrees', countTag: 'How many objects have a tag', exists: 'Is that object (or tag) still around?', health: 'This object\'s health',
+  itemCount: 'How many of an item you have', joystick: 'Joystick direction (−1 to 1)', screen: 'Screen width or height',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
 
@@ -40,6 +55,9 @@ const GRAPH_TEMPLATES = [
   { label: 'Every 2s → spawn', nodes: [{ id: 'a', type: 'every', x: 0, y: 0, params: { seconds: 2 } }, { id: 'b', type: 'spawn', x: 300, y: 0, params: { template: '' } }], links: [['a', 'then', 'b']] },
   { label: 'Score ≥ 10 → win', nodes: [{ id: 'a', type: 'update', x: 0, y: 0 }, { id: 'b', type: 'branch', x: 300, y: 0 }, { id: 'c', type: 'compare', x: 0, y: 150, params: { op: '≥', b: 10 } }, { id: 'd', type: 'getVar', x: -300, y: 150, params: { name: 'score' } }, { id: 'e', type: 'win', x: 600, y: 0 }], links: [['a', 'then', 'b'], ['b', 'true', 'e'], ['c', 'value', 'b', 'condition'], ['d', 'value', 'c', 'a']] },
   { label: 'Swipe up → jump', nodes: [{ id: 'a', type: 'swipe', x: 0, y: 0, params: { dir: 'up' } }, { id: 'b', type: 'jump', x: 300, y: 0, params: { power: 650 } }], links: [['a', 'then', 'b']] },
+  { label: 'Chase the player', nodes: [{ id: 'a', type: 'update', x: 0, y: 0 }, { id: 'b', type: 'moveToward', x: 300, y: 0, params: { tag: 'player', speed: 90 } }, { id: 'c', type: 'lookAt', x: 600, y: 0, params: { tag: 'player' } }], links: [['a', 'then', 'b'], ['b', 'then', 'c']] },
+  { label: 'Tap 5 times → win', nodes: [{ id: 'a', type: 'tap', x: 0, y: 0 }, { id: 'b', type: 'countTo', x: 300, y: 0, params: { times: 5 } }, { id: 'c', type: 'particles', x: 620, y: -40 }, { id: 'd', type: 'win', x: 620, y: 140 }], links: [['a', 'then', 'b'], ['b', 'not yet', 'c'], ['b', 'reached', 'd']] },
+  { label: 'Spawn a ring of 8', nodes: [{ id: 'a', type: 'start', x: 0, y: 0 }, { id: 'b', type: 'loop', x: 300, y: 0, params: { count: 8 } }, { id: 'c', type: 'spawn', x: 620, y: 0, params: { template: '' } }], links: [['a', 'then', 'b'], ['b', 'each', 'c']] },
 ];
 const def = (n) => NODE_TYPES[n.type] || { label: n.type, cat: 'Actions' };
 const outKind = (d) => d.value || 'exec';
@@ -185,6 +203,7 @@ export function openNodeEditor(opts) {
     if (n.type === 'showHide' && spec.key === 'object') return pick((opts.objects || []).filter(Boolean), 'this object');
     if (spec.type === 'select') return h('select', { onchange: (e) => set(e.target.value) }, spec.options.map((o) => h('option', { value: o, selected: o === val }, o)));
     if (spec.type === 'bool') return h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
+    if (spec.type === 'color') return h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value) });
     if (spec.type === 'number') return h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, oninput: (e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) set(v); } });
     const inp = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value) });
     if (spec.key === 'name' && opts.vars?.length) { inp.setAttribute('list', 'ne-vars'); }
@@ -292,12 +311,13 @@ export function openNodeEditor(opts) {
     const sel = g.nodes.find((n) => n.id === selected);
     const list = h('div', { class: 'ne-plist' });
     const search = h('input', { type: 'search', placeholder: 'Search nodes', autocapitalize: 'off', oninput: () => draw() });
+    const chips = h('div', { class: 'ne-chips' }, CATS.map((cat) => h('button', { style: `--c:${CAT_COLOR[cat]}`, onclick: () => { search.value = ''; draw(); list.querySelector(`[data-cat="${cat}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); } }, cat)));
     function draw() {
       const q = search.value.toLowerCase();
       list.replaceChildren(...CATS.flatMap((cat) => {
         const items = Object.entries(NODE_TYPES).filter(([t, d]) => d.cat === cat && (!q || d.label.toLowerCase().includes(q) || (NODE_HELP[t] || '').toLowerCase().includes(q)));
         if (!items.length) return [];
-        return [h('div', { class: 'ne-pcat' }, h('i', { style: `background:${CAT_COLOR[cat]}` }), cat, h('small', {}, CAT_HELP[cat])),
+        return [h('div', { class: 'ne-pcat', 'data-cat': cat }, h('i', { style: `background:${CAT_COLOR[cat]}` }), cat, h('small', {}, CAT_HELP[cat])),
           h('div', { class: 'ne-pgrid' }, items.map(([t, d]) => h('button', { class: 'ne-pitem', style: `--c:${CAT_COLOR[cat]}`, onclick: () => { closePicker(); addNode(t); } },
             h('b', {}, d.label), h('small', {}, NODE_HELP[t] || ''))))];
       }));
@@ -306,7 +326,7 @@ export function openNodeEditor(opts) {
     picker = h('div', { class: 'ne-picker', onpointerdown: (e) => { if (e.target === picker) closePicker(); } },
       h('div', { class: 'ne-psheet' },
         h('div', { class: 'ne-phead' }, h('b', {}, 'Add Node'), sel ? h('small', {}, `wires to “${def(sel).label}”`) : null, h('button', { class: 'ne-btn', onclick: closePicker }, icon('close'))),
-        search, list));
+        search, chips, list));
     root.append(picker);
   }
   function closePicker() { picker?.remove(); picker = null; }

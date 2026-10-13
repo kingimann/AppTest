@@ -126,13 +126,20 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - Only fields for the game's mode (2D or 3D) are shown. **Advanced** next to search shows the rarely used ones.
   - Category filters: Visual, Physics, Logic, Animation, Gameplay, and one fold / unfold-all button.
   - **Quick add** chips for common components, next to Add Component.
+  - **Add Component** opens with suggestions for the selected object (e.g. Rigidbody, Health, Triggers for a player that lacks them), your recently used components, and category folders with counts (Physics, Controllers, Combat, AI, Logic…). Tap a folder to browse it, or search everything at once.
   - Components have a coloured edge by category.
 
 ### Node coding (Visual Script)
 
 Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:
 
-- **Add Node** opens a list grouped into **Events** (green: On Start, On Tap, On Touch, Every N Seconds, On Button, On Swipe, Every Frame, On Destroyed), **Actions** (blue: change variables, show messages, sounds, spawn, destroy, move, jump, show/hide, shake, vibrate, win, game over, next level), **Flow** (purple: If, Wait, Random Chance, Do Once, Sequence) and **Values** (orange: numbers, variables, random, math, compare, and/or/not, position, distance, time).
+- **Add Node** opens a list with category chips to jump between sections, and a search:
+  - **Events** (green): On Start, On Tap, On Touch / Touch End, Every N Seconds, Every Frame, On Button, On Swipe, On Destroyed, On Message, **On Variable Changed**, **On Damaged**, **On Death**, **While Touching Screen**.
+  - **Flow** (purple): If, Wait, Random Chance, Do Once, Sequence, **Repeat N Times** (with Loop Index), **Flip Flop**, **Cooldown**, **Count To**, **Random Branch**, **Switch on Number**, **Compare Branch**.
+  - **Actions** (blue): variables, messages, Debug Log, sounds, spawn, destroy, velocity, jump, show/hide, camera, lights, tweens, animation, saving, win / game over.
+  - **Move**: **Set Position**, **Move Toward** (a tag), **Look At**, **Rotate By**, **Set Scale**, **Teleport To**. **Looks**: **Set Text**, **Set Colour**, **Particle Burst**. **Objects**: **Spawn At**, **Destroy All With Tag**, **Add / Remove Tag**. **Game**: **Slow Motion**, **Damage**, **Heal**, **Give Item**.
+  - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
+- ★ Templates include Chase the player, Tap 5 times → win, and Spawn a ring of 8.
 - If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
 - Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.

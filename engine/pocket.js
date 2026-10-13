@@ -6290,6 +6290,41 @@ export const NODE_TYPES = {
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
   level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  // physics: triggers, collisions, forces and bodies
+  triggerEnter: { cat: 'Physics', label: 'On Trigger Enter', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  triggerExit: { cat: 'Physics', label: 'On Trigger Exit', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  triggerStay: { cat: 'Physics', label: 'While In Trigger', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  collisionEnter: { cat: 'Physics', label: 'On Collision Enter', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)'), num('minSpeed', 0, 'only harder than (speed)')] },
+  collisionExit: { cat: 'Physics', label: 'On Collision Exit', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  collisionStay: { cat: 'Physics', label: 'While Colliding', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
+  landed: { cat: 'Physics', label: 'On Landed', outs: ['then'] },
+  leftGround: { cat: 'Physics', label: 'On Left Ground', outs: ['then'] },
+  addForce: { cat: 'Physics', label: 'Add Force', exec: true, outs: ['then'], params: [opt('mode', ['force (every frame)', 'impulse (once)', 'velocity change'], 'force (every frame)', 'mode'), opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
+  explosion: { cat: 'Physics', label: 'Explosion Force', exec: true, outs: ['then'], params: [txt('tag', '', 'push tag (blank = anything)')], inputs: [{ key: 'force', type: 'number', default: 0 }, { key: 'radius', type: 'number', default: 0 }] },
+  setBodyType: { cat: 'Physics', label: 'Set Body Type', exec: true, outs: ['then'], params: [opt('type', ['dynamic', 'kinematic', 'static'], 'dynamic', 'type'), opt('target', ['self', 'other'], 'self', 'who')] },
+  setTrigger: { cat: 'Physics', label: 'Make Trigger / Solid', exec: true, outs: ['then'], params: [opt('mode', ['trigger', 'solid', 'toggle'], 'trigger', 'make it'), opt('target', ['self', 'other'], 'self', 'who')] },
+  setLayer: { cat: 'Physics', label: 'Set Collision Layer', exec: true, outs: ['then'], params: [opt('layer', PHYSICS_LAYERS, 'Default', 'layer'), opt('target', ['self', 'other'], 'self', 'who')] },
+  physMaterial: { cat: 'Physics', label: 'Set Bounce & Friction', exec: true, outs: ['then'], inputs: [{ key: 'bounce', type: 'number', default: 0.5 }, { key: 'friction', type: 'number', default: 0.2 }, { key: 'mass', type: 'number', default: 1 }] },
+  impactSpeed: { cat: 'Physics', label: 'Impact Speed', value: 'number' },
+  inTrigger: { cat: 'Physics', label: 'Is In Trigger', value: 'bool', params: [txt('tag', '', 'tag (blank = any)')] },
+  isColliding: { cat: 'Physics', label: 'Is Colliding', value: 'bool', params: [txt('tag', '', 'tag (blank = any)')] },
+  // sensing: raycasts, overlaps, finding objects, the screen
+  raycast: { cat: 'Sensing', label: 'Raycast', exec: true, outs: ['hit', 'miss'], params: [opt('dir', ['forward', 'up', 'down', 'left', 'right', 'ahead & down', 'toward tag', 'custom'], 'forward', 'direction'), txt('tag', '', 'only tag (blank = any)'), txt('toward', 'player', 'toward tag'), { key: 'triggers', type: 'bool', default: false, label: 'also hit triggers' }, { key: 'debug', type: 'bool', default: false, label: 'show the ray' }], inputs: [{ key: 'distance', type: 'number', default: 0 }, { key: 'dx', type: 'number', default: 1 }, { key: 'dy', type: 'number', default: 0 }, { key: 'dz', type: 'number', default: 0 }] },
+  rayHits: { cat: 'Sensing', label: 'Ray Hits', value: 'bool', params: [opt('dir', ['forward', 'up', 'down', 'left', 'right', 'ahead & down', 'toward tag', 'custom'], 'ahead & down', 'direction'), txt('tag', '', 'only tag (blank = any)'), txt('toward', 'player', 'toward tag')], inputs: [{ key: 'distance', type: 'number', default: 0 }] },
+  hitInfo: { cat: 'Sensing', label: 'Hit Info', value: 'number', params: [opt('what', ['distance', 'point x', 'point y', 'point z', 'normal x', 'normal y', 'normal z'], 'distance', 'what')] },
+  overlap: { cat: 'Sensing', label: 'Find In Radius', exec: true, outs: ['each', 'found', 'none'], params: [txt('tag', 'enemy', 'tag (blank = anything)')], inputs: [{ key: 'radius', type: 'number', default: 0 }] },
+  countRadius: { cat: 'Sensing', label: 'Count In Radius', value: 'number', params: [txt('tag', 'enemy', 'tag (blank = anything)')], inputs: [{ key: 'radius', type: 'number', default: 0 }] },
+  forEachTag: { cat: 'Sensing', label: 'For Each With Tag', exec: true, outs: ['each', 'done'], params: [txt('tag', 'enemy', 'tag')] },
+  pickNearest: { cat: 'Sensing', label: 'Pick Nearest', exec: true, outs: ['found', 'none'], params: [txt('tag', 'enemy', 'tag')], inputs: [{ key: 'maxDistance', type: 'number', default: 0 }] },
+  pickObject: { cat: 'Sensing', label: 'Pick Object', exec: true, outs: ['found', 'none'], params: [txt('object', 'Player', 'object name or tag')] },
+  lineOfSight: { cat: 'Sensing', label: 'Line of Sight', exec: true, outs: ['visible', 'blocked'], params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
+  objectNear: { cat: 'Sensing', label: 'On Object Near', outs: ['near', 'left'], params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = auto)')] },
+  screenEnter: { cat: 'Sensing', label: 'On Enter Screen', outs: ['then'] },
+  screenExit: { cat: 'Sensing', label: 'On Leave Screen', outs: ['then'] },
+  onScreen: { cat: 'Sensing', label: 'Is On Screen', value: 'bool' },
+  otherInfo: { cat: 'Sensing', label: 'Other Object', value: 'number', params: [opt('what', ['x', 'y', 'z', 'speed', 'distance', 'angle', 'health'], 'x', 'what')] },
+  otherHasTag: { cat: 'Sensing', label: 'Other Has Tag', value: 'bool', params: [txt('tag', 'enemy', 'tag')] },
+  hasOther: { cat: 'Sensing', label: 'Has Other Object', value: 'bool' },
   animPlaying: { cat: 'Animation', label: 'Is Animation Playing', value: 'bool', params: [txt('clip', '', 'clip (blank = any)')] },
   spriteFrame: { cat: 'Animation', label: 'Sprite Frame', value: 'number' },
 };
@@ -6523,6 +6558,53 @@ registerBehavior('fsm', {
   },
 });
 
+/** Graph raycast helpers: which way a node's ray points, and the closest thing it hits (bodies, voxel blocks). */
+function rayDir(s, e, dir, toward, custom) {
+  const three = s.mode === '3d';
+  if (dir === 'toward tag') { const t = nearest(s, e, toward); if (!t) return null; return { x: t.x - e.x, y: t.y - e.y, z: three ? t.z - e.z : 0 }; }
+  if (dir === 'custom') return { x: custom.x, y: custom.y, z: three ? custom.z : 0 };
+  if (dir === 'up') return { x: 0, y: three ? 1 : -1, z: 0 };
+  if (dir === 'down' || dir === 'ahead & down') return { x: 0, y: three ? -1 : 1, z: 0 };
+  if (three) {
+    const yaw = (e.ry || 0) * DEG, f = fwd3(yaw), r = right3(yaw);
+    if (dir === 'left') return { x: -r.x, y: 0, z: -r.z };
+    if (dir === 'right') return { x: r.x, y: 0, z: r.z };
+    return { x: f.x, y: 0, z: f.z };
+  }
+  if (dir === 'left') return { x: -1, y: 0, z: 0 };
+  if (dir === 'right') return { x: 1, y: 0, z: 0 };
+  return facing2D(e);
+}
+/** The way a 2D object faces: flipped sprites look left, and its rotation turns it. */
+function facing2D(e) {
+  const k = e.data.flipX || e.sprite?.flip || e.sx < 0 ? -1 : 1, a = (e.rz || 0) * DEG;
+  return { x: Math.cos(a) * k, y: Math.sin(a) * k, z: 0 };
+}
+function castRay(s, e, o, d, max, opts = {}) {
+  const l = Math.hypot(d.x, d.y, d.z) || 1, n = { x: d.x / l, y: d.y / l, z: d.z / l };
+  let hit = s.raycast(o, n, max, { ignore: e, tag: opts.tag || undefined, any: !!opts.tag, solidOnly: !opts.triggers });
+  if (hit) {
+    const ex = hit.entity.extents(), c = { x: hit.entity.x + (ex.ox || 0), y: hit.entity.y + (ex.oy || 0), z: hit.entity.z + (ex.oz || 0) };
+    if (ex.sphere) { const dx = hit.point.x - c.x, dy = hit.point.y - c.y, dz = s.mode === '3d' ? hit.point.z - c.z : 0, m = Math.hypot(dx, dy, dz) || 1; hit.normal = { x: dx / m, y: dy / m, z: dz / m }; }
+    else { // the face the ray went in through: the axis where the point sits furthest out, relative to the box size
+      const q = [['x', (hit.point.x - c.x) / (ex.hx || 1)], ['y', (hit.point.y - c.y) / (ex.hy || 1)], ['z', Number.isFinite(ex.hz) ? (hit.point.z - c.z) / (ex.hz || 1) : 0]].sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+      hit.normal = { x: 0, y: 0, z: 0 }; hit.normal[q[0]] = Math.sign(q[1]) || 1;
+    }
+  }
+  if (!opts.tag && s.mode === '3d') for (const w of s.entities) { // voxel blocks count as solid too
+    if (!w.voxels || w.dead) continue;
+    const v = w.voxels.raycast(w, o, n, Math.min(max, 200));
+    if (v && (!hit || v.dist < hit.dist)) hit = { entity: null, voxel: w, block: [v.i, v.j, v.k], dist: v.dist, point: { x: o.x + n.x * v.dist, y: o.y + n.y * v.dist, z: o.z + n.z * v.dist }, normal: { x: v.n[0], y: v.n[1], z: v.n[2] } };
+  }
+  return hit;
+}
+/** Is a point on screen (with a small margin)? */
+function onScreen(s, e, margin = 0) {
+  const r = s.engine?.renderer; if (!r?.worldToScreen) return true;
+  const p = s.mode === '3d' ? r.worldToScreen(s, e.x, e.y, e.z) : r.worldToScreen(s, e.x, e.y);
+  return !p.behind && p.x >= -margin && p.y >= -margin && p.x <= s.engine.width + margin && p.y <= s.engine.height + margin;
+}
+
 registerBehavior('graph', {
   label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
   params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
@@ -6539,6 +6621,24 @@ registerBehavior('graph', {
       const l = g.links.find((q) => q.to.node === n.id && q.to.port === key);
       return l && depth < 50 ? value(byId.get(l.from.node), ctx, depth + 1) : param(n, key);
     };
+    const tagOk = (o, tag) => !tag || o.has(tag);
+    const defRange = (s) => (s.mode === '3d' ? 5 : 150);
+    /** Everything this object overlaps right now: [other, is a trigger contact] */
+    const contactsOf = (e, s) => { const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead) out.push([o, !!(e.body?.sensor || o.body?.sensor)]); } return out; };
+    const ray = (n, ctx, P, I) => {
+      const s = ctx.s, e = ctx.e, three = s.mode === '3d';
+      const d = rayDir(s, e, P('dir'), P('toward'), { x: +I('dx') || 0, y: +I('dy') || 0, z: +I('dz') || 0 }); if (!d || !(d.x || d.y || d.z)) return null;
+      let o = { x: e.x, y: e.y, z: e.z };
+      if (P('dir') === 'ahead & down') { // a ledge check: start just in front of the object's feet side
+        const f = three ? fwd3((e.ry || 0) * DEG) : facing2D(e), ex = e.extents(), w = ex.sphere ? ex.r : Math.max(ex.hx || 0, three ? ex.hz || 0 : 0), pad = three ? 0.15 : 6;
+        o = { x: e.x + f.x * (w + pad), y: e.y + (three ? 0 : f.y * (w + pad)), z: e.z + (three ? f.z * (w + pad) : 0) };
+      }
+      const ex = e.extents(), hy = ex.sphere ? ex.r : ex.hy || 0, max = +I('distance') || (P('dir') === 'ahead & down' ? hy + (three ? 0.6 : 24) : three ? 10 : 400);
+      const hit = castRay(s, e, o, d, max, { tag: P('tag'), triggers: !!P('triggers') });
+      if (P('debug')) { const l = Math.hypot(d.x, d.y, d.z), len = hit ? hit.dist : max; debugRays.push({ a: o, b: { x: o.x + d.x / l * len, y: o.y + d.y / l * len, z: o.z + d.z / l * len }, hit: !!hit, t: s.time }); }
+      return hit;
+    };
+    const debugRays = [];
     const value = (n, ctx, depth) => {
       if (!n) return 0;
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
@@ -6587,6 +6687,26 @@ registerBehavior('graph', {
         case 'level': return (s.engine.levelIndex ?? 0) + 1;
         case 'animPlaying': { const c = anims(e).map((a) => a.current).find(Boolean) || ''; return P('clip') ? c === P('clip') : !!c; }
         case 'spriteFrame': return e.sprite?.frame | 0;
+        case 'impactSpeed': return ctx.impact ?? 0;
+        case 'inTrigger': return contactsOf(e, s).some(([o, sensor]) => sensor && tagOk(o, P('tag')));
+        case 'isColliding': return contactsOf(e, s).some(([o, sensor]) => !sensor && tagOk(o, P('tag')));
+        case 'rayHits': return !!ray(n, ctx, P, I);
+        case 'hitInfo': {
+          const h = ctx.hit; if (!h) return 0; const w = P('what');
+          if (w === 'distance') return h.dist; const [k, ax] = w.split(' '); return (k === 'point' ? h.point : h.normal)?.[ax] ?? 0;
+        }
+        case 'countRadius': { const r = +I('radius') || defRange(s); return s.entities.filter((q) => q !== e && !q.dead && !q.ui && tagOk(q, P('tag')) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r).length; }
+        case 'onScreen': return onScreen(s, e);
+        case 'otherInfo': {
+          const o = ctx.other; if (!o) return 0; const w = P('what');
+          if (w === 'speed') { const v = o.body?.vel; return v ? Math.hypot(v.x, v.y, v.z) : 0; }
+          if (w === 'distance') return Math.hypot(o.x - e.x, o.y - e.y, o.z - e.z);
+          if (w === 'angle') return s.mode === '3d' ? Math.atan2(o.x - e.x, o.z - e.z) / DEG : Math.atan2(o.y - e.y, o.x - e.x) / DEG;
+          if (w === 'health') return o.getBehavior('health')?.hp ?? o.data.hp ?? 0;
+          return o[w] || 0;
+        }
+        case 'otherHasTag': return !!ctx.other?.has(P('tag'));
+        case 'hasOther': return !!ctx.other && !ctx.other.dead;
         default: return 0;
       }
     };
@@ -6716,14 +6836,48 @@ registerBehavior('graph', {
         case 'gravityScale': { const b = e.ensureBody({ type: 'dynamic' }); b.gravityScale = +I('scale') || 0; break; }
         case 'sendMessage': s.send(P('message')); break;
         case 'impulse': s.impulse(+I('strength') || 10, e); break;
+        case 'addForce': {
+          const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (!b) break;
+          const m = P('mode'), k = m === 'velocity change' ? 1 : 1 / Math.max(0.01, b.mass || 1), dtk = m === 'force (every frame)' ? (ctx.dt ?? 1 / 60) : 1;
+          b.vel.x += (+I('x') || 0) * k * dtk; b.vel.y += (+I('y') || 0) * k * dtk; if (s.mode === '3d') b.vel.z += (+I('z') || 0) * k * dtk; break;
+        }
+        case 'explosion': {
+          const r = +I('radius') || defRange(s) * 2, f = +I('force') || (s.mode === '3d' ? 18 : 900);
+          for (const q of s.entities) {
+            if (q === e || q.dead || q.ui || !q.body || q.body.type !== 'dynamic' || !tagOk(q, P('tag'))) continue;
+            const dx = q.x - e.x, dy = q.y - e.y, dz = s.mode === '3d' ? q.z - e.z : 0, d = Math.hypot(dx, dy, dz);
+            if (d > r) continue;
+            const k = f * (1 - d / r) / Math.max(0.01, q.body.mass || 1) / (d || 1);
+            q.body.vel.x += dx * k; q.body.vel.y += (dy || (s.mode === '3d' ? 0.3 : -0.3) * d) * k; q.body.vel.z += dz * k;
+          }
+          s.impulse(Math.min(20, f / (s.mode === '3d' ? 2 : 80)), e); break;
+        }
+        case 'setBodyType': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: P('type') }); b.type = P('type'); if (b.type !== 'dynamic') b.vel = { x: 0, y: 0, z: 0 }; break; }
+        case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
+        case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
+        case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
+        case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
+        case 'overlap': case 'forEachTag': {
+          const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
+          const list = s.entities.filter((q) => q !== e && !q.dead && !q.ui && !q.template && (n.type === 'overlap' ? tagOk(q, tag) : tag && q.has(tag)) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r)
+            .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z)).slice(0, 100);
+          list.forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 }));
+          if (n.type === 'forEachTag') return follow(n, 'done', ctx);
+          return list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx);
+        }
+        case 'pickNearest': { const t = nearest(s, e, P('tag')), mx = +I('maxDistance') || Infinity; return t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= mx ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
+        case 'pickObject': { const k = P('object'), t = s.find(k) && !s.find(k).dead ? s.find(k) : nearest(s, e, k); return t ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
+        case 'lineOfSight': { const t = nearest(s, e, P('tag')); return t && s.canSee(e, t, +P('range') || Infinity) ? follow(n, 'visible', { ...ctx, other: t }) : follow(n, 'blocked', { ...ctx, other: t || ctx.other }); }
         default: break;
       }
       follow(n, 'then', ctx);
     };
-    const fire = (type, e, s, other, filter, dt) => {
+    const fire = (type, e, s, other, filter, dt, extra) => {
       if (e.dead && type !== 'destroyed') return;
-      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt });
+      for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt, ...extra });
     };
+    const has = (...types) => g.nodes.some((n) => types.includes(n.type));
+    const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null;
     const timers = new Map();
     return {
       uiAlways: true,
@@ -6737,6 +6891,24 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
         if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
         if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
+        // trigger events need a body to overlap with: a trigger if it has none; collision events a solid one
+        if (has('triggerEnter', 'triggerExit', 'triggerStay', 'inTrigger') && !e.body) e.ensureBody({ type: 'kinematic', sensor: true });
+        if (has('collisionEnter', 'collisionExit', 'collisionStay', 'isColliding') && !e.body) e.ensureBody({ type: 'kinematic' });
+        for (const n of g.nodes) if (['triggerEnter', 'triggerExit', 'triggerStay', 'collisionEnter', 'collisionExit', 'collisionStay', 'inTrigger', 'isColliding'].includes(n.type)) s.want(param(n, 'tag'));
+        if (g.nodes.some((n) => (n.type === 'raycast') && param(n, 'debug'))) { // rays drawn for a moment, green when they hit something
+          (s.overlays ||= []).push(rayOverlay = (ctx) => {
+            const r = s.engine.renderer, three = s.mode === '3d';
+            for (let i = debugRays.length - 1; i >= 0; i--) if (s.time - debugRays[i].t > 0.5 || debugRays.length > 40) debugRays.splice(i, 1);
+            ctx.save(); ctx.lineWidth = 2.5;
+            for (const q of debugRays) {
+              const A = three ? r.worldToScreen(s, q.a.x, q.a.y, q.a.z) : r.worldToScreen(s, q.a.x, q.a.y), Bp = three ? r.worldToScreen(s, q.b.x, q.b.y, q.b.z) : r.worldToScreen(s, q.b.x, q.b.y);
+              if (A.behind || Bp.behind) continue;
+              ctx.strokeStyle = q.hit ? '#5dff8a' : '#ff5d8f'; ctx.beginPath(); ctx.moveTo(A.x, A.y); ctx.lineTo(Bp.x, Bp.y); ctx.stroke();
+              if (q.hit) { ctx.fillStyle = '#5dff8a'; ctx.beginPath(); ctx.arc(Bp.x, Bp.y, 4, 0, Math.PI * 2); ctx.fill(); }
+            }
+            ctx.restore();
+          });
+        }
         fire('start', e, s);
       },
       update(e, dt, s) {
@@ -6746,6 +6918,13 @@ registerBehavior('graph', {
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
         if (g.nodes.some((n) => n.type === 'released') && inp.ups?.length) fire('released', e, s);
+        if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
+        if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
+        if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
+        for (const n of g.nodes) if (n.type === 'objectNear') {
+          const t = nearest(s, e, param(n, 'tag')), r = +param(n, 'range') || defRange(s), isNear = !!t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= r;
+          if (isNear !== !!near.get(n.id)) { follow(n, isNear ? 'near' : 'left', { s, e, other: t || near.get(n.id + 'o') || null, steps: 0, dt }); near.set(n.id, isNear); if (t) near.set(n.id + 'o', t); }
+        }
         if (g.nodes.some((n) => n.type === 'isMoving')) { const m = state.get('_pos'); if (m && Math.hypot(e.x - m.x, e.y - m.y, e.z - m.z) > (s.mode === '3d' ? 0.2 : 10) * dt) state.set('_moved', s.time); state.set('_pos', { x: e.x, y: e.y, z: e.z }); }
         for (const n of g.nodes) {
           if (n.type === 'every') { const t = (timers.get(n.id) || 0) + dt; if (t >= Math.max(0.05, +param(n, 'seconds') || 1)) { timers.set(n.id, 0); follow(n, 'then', { s, e, steps: 0 }); } else timers.set(n.id, t); }
@@ -6753,9 +6932,20 @@ registerBehavior('graph', {
           else if (n.type === 'swipe' && inp.pressed('swipe:' + param(n, 'dir'))) follow(n, 'then', { s, e, steps: 0 });
         }
       },
-      collide(e, other, s) { fire('touch', e, s, other, (n) => other.has(param(n, 'tag'))); },
-      separate(e, other, s) { fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag'))); },
-      destroy(e, s) { fire('destroyed', e, s); },
+      collide(e, other, s, m) {
+        fire('touch', e, s, other, (n) => other.has(param(n, 'tag')));
+        if (e.body?.sensor || other.body?.sensor) { fire('triggerEnter', e, s, other, (n) => tagOk(other, param(n, 'tag'))); return; }
+        if (!has('collisionEnter')) return;
+        // how hard they hit: how fast they were closing in along the contact normal
+        const va = e.body?.vel || { x: 0, y: 0, z: 0 }, vb = other.body?.vel || { x: 0, y: 0, z: 0 }, nrm = m || { nx: 0, ny: 0, nz: 0 };
+        const impact = Math.abs((va.x - vb.x) * nrm.nx + (va.y - vb.y) * nrm.ny + (va.z - vb.z) * nrm.nz);
+        fire('collisionEnter', e, s, other, (n) => tagOk(other, param(n, 'tag')) && impact >= (+param(n, 'minSpeed') || 0), null, { impact, hit: { dist: 0, point: { x: e.x, y: e.y, z: e.z }, normal: { x: -nrm.nx, y: -nrm.ny, z: -nrm.nz } } });
+      },
+      separate(e, other, s) {
+        fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag')));
+        fire(e.body?.sensor || other.body?.sensor ? 'triggerExit' : 'collisionExit', e, s, other, (n) => tagOk(other, param(n, 'tag')));
+      },
+      destroy(e, s) { fire('destroyed', e, s); if (rayOverlay) s.overlays = (s.overlays || []).filter((f) => f !== rayOverlay); },
     };
   },
 });

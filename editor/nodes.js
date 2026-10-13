@@ -5,15 +5,15 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c' };
-const CATS = ['Events', 'Flow', 'Actions', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus' };
+const CATS = ['Events', 'Flow', 'Actions', 'Physics', 'Sensing', 'Move', 'Looks', 'Animation', 'Tween', 'Objects', 'Game', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
-  _events: ['start', 'tap', 'touch', 'update', 'every', 'button', 'swipe', 'onMessage'],
+  _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
   _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'destroy'],
-  _bool: ['compare', 'touching', 'grounded', 'isMoving', 'coinFlip', 'and', 'not'],
+  _bool: ['compare', 'touching', 'grounded', 'rayHits', 'inTrigger', 'isMoving', 'coinFlip', 'and', 'not'],
   _number: ['number', 'getVar', 'random', 'math', 'distance', 'position'],
   tap: ['addVar', 'punch', 'popText', 'sound', 'pulse', 'playAnim', 'particles', 'destroy'],
   touch: ['destroy', 'damage', 'addVar', 'sound', 'particles', 'playAnim', 'blink'],
@@ -23,6 +23,10 @@ const NEXT = {
   damaged: ['blink', 'playAnim', 'impulse', 'sound'], death: ['playAnim', 'fadeTo', 'particles', 'destroy', 'gameOver'],
   animEnd: ['playAnim', 'destroy', 'sendMessage'], playAnim: ['wait', 'sound', 'particles'],
   tweenMove: ['punch', 'sound', 'particles'], tweenVar: ['popText', 'sound'], delayedCall: ['destroy', 'tweenMove', 'message'],
+  triggerEnter: ['addVar', 'destroy', 'sound', 'particles', 'damage', 'setText'], triggerExit: ['message', 'sound', 'showHide'],
+  collisionEnter: ['branch', 'damage', 'sound', 'impulse', 'particles', 'punch'], landed: ['particles', 'sound', 'punch', 'impulse'],
+  raycast: ['destroy', 'damage', 'push', 'particles', 'setColor'], overlap: ['damage', 'push', 'setColor', 'destroy'], forEachTag: ['setColor', 'push', 'destroy', 'damage'],
+  pickNearest: ['moveToward', 'lookAt', 'damage', 'tweenToObj'], objectNear: ['message', 'playAnim', 'sound', 'lookAt'], explosion: ['particles', 'sound', 'destroy'],
   branch: ['playAnim', 'addVar', 'sound', 'message'], wait: ['playAnim', 'destroy', 'spawn', 'showHide'],
 };
 const RECENT_KEY = 'pocket.recentNodes';
@@ -40,8 +44,23 @@ const CAT_HELP = {
   Flow: 'Decide, wait, repeat, count.',
   Values: 'Numbers and true/false to plug into inputs.',
   Math: 'Work numbers out.',
+  Physics: 'Triggers, collisions, landing, forces and bodies.',
+  Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  triggerEnter: 'When something enters this trigger (or this enters one); it becomes “other”', triggerExit: 'When something leaves the trigger', triggerStay: 'Every frame while something is inside the trigger',
+  collisionEnter: 'When something solid bumps into this; set a speed to ignore soft touches', collisionExit: 'When a solid contact ends', collisionStay: 'Every frame while two solid things touch',
+  landed: 'When this lands on the ground', leftGround: 'When this jumps or falls off the ground',
+  addForce: 'Push with physics: a steady force (use with Every Frame), a one-off impulse, or a straight speed change; heavier things move less',
+  explosion: 'Blast nearby physics objects away, stronger close up', setBodyType: 'Dynamic falls and gets pushed, kinematic only moves by script, static never moves',
+  setTrigger: 'Trigger: things pass through but it still detects them. Solid: they bump.', setLayer: 'Which collision layer this is on (see the layer matrix)', physMaterial: 'Bounciness, slipperiness and weight',
+  impactSpeed: 'How hard the last collision was', inTrigger: 'Is something inside this trigger right now?', isColliding: 'Is this touching something solid right now?',
+  raycast: 'Shoot an invisible line; “hit” runs with what it hit as “other” (blocks too). Turn on “show the ray” to see it', rayHits: 'Does a line hit something? “ahead & down” checks for a ledge in front',
+  hitInfo: 'Where the last ray or collision hit: distance, point, and the surface direction (normal)', overlap: 'Find things within a radius: runs “each” for every one (as “other”), then “found” with the nearest',
+  countRadius: 'How many things with a tag are within a radius', forEachTag: 'Run something for every object with a tag (each one is “other”)',
+  pickNearest: 'Make the nearest object with a tag “other”, then use any “other” node', pickObject: 'Make a named object “other”', lineOfSight: 'Is the nearest tagged object visible, with nothing solid in between?',
+  objectNear: 'When a tagged object comes within range (“near”) and when it goes away (“left”)', screenEnter: 'When this comes onto the screen', screenExit: 'When this goes off the screen',
+  onScreen: 'Is this on the screen?', otherInfo: 'Facts about “other”: position, speed, distance, angle or health', otherHasTag: 'Does “other” have a tag?', hasOther: 'Is there an “other” object here?',
   start: 'When the game starts', update: 'Runs every frame', every: 'Repeats on a timer', touch: 'When something with a tag touches this',
   tap: 'When the player taps this object', button: 'When an on-screen button is pressed', swipe: 'When the player swipes', destroyed: 'When this object is removed',
   branch: 'Go one way if true, another if false', wait: 'Pause, then continue', chance: 'Pick a random path', once: 'Only the first time', sequence: 'Run up to three things in order',

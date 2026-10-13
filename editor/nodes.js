@@ -83,7 +83,7 @@ export const NODE_HELP = {
   clock: 'The phone\'s real time and date', dailyCheck: 'Once a day: “new day” (daily reward) or “same day”. Keeps a streak of days in a row',
   stampTime: 'Remember the time now on this device (e.g. when lives ran out)', timeSince: 'Seconds since Remember Time Now (0 if never): refill energy while away',
   onKey: 'A keyboard key (Space, Up, Down, Left, Right, Enter, A–Z, 0–9) pressed, released or held', keyHeld: 'Is a key down right now',
-  keyAxis: '−1, 0 or 1 from the arrow keys or WASD', tiltValue: 'How far the phone is tilted, −1 to 1 (asks permission on iPhone at the first touch)',
+  keyAxis: '−1, 0 or 1 from the arrow keys or WASD', tiltValue: 'How far the phone is tilted, −1 to 1 (on iPhone a "Tap to turn on tilt" button asks for motion access)', calibrateTilt: 'Makes the way the phone is held right now count as level (no tilt)',
   onShake: 'When the phone is shaken', onScreenTouch: 'A finger lands anywhere, or in one half of the screen', dragAmount: 'How far a finger moved this frame',
   pinchAmount: 'Two fingers: 1 = no pinch, bigger = spread apart, smaller = pinched in', camMoveTo: 'Glide the camera to a point (without a Camera component following something)',
   camToObject: 'Glide the camera to an object', camZoomTo: 'Smoothly zoom (3D: narrows the view)', camValue: 'Where the camera is, or its zoom',

@@ -1632,7 +1632,8 @@ export class Input {
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
     this.ups = []; // fingers lifted this frame: { id, x, y, sx, sy, time }
-    this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null;
+    this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null; this.tiltRaw = null;
+    this.tiltCfg = { max: 20, dead: 3, smooth: 0.3, invertX: false, invertY: false, calibrate: 'start' }; // Move's tilt settings
     this.keys = new Set(); this.keysDown = []; this.keysUp = []; // keyboard: held now, pressed / released this frame (names like 'space', 'arrowup', 'a')
     this.wantMotion = false; this.shakeOn = false; this.shook = false; // Visual Script tilt / shake nodes ask for the motion sensors on the first touch
     if (typeof window !== 'undefined') {
@@ -1645,8 +1646,9 @@ export class Input {
     }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
-    const askMotion = () => { if (!this.enabled) return; if (this.useTilt && !this.tiltOn) this.enableTilt(); if (this.wantMotion) { if (!this.tiltOn) this.enableTilt(); this.enableShake(); } };
-    el.addEventListener('touchend', askMotion); el.addEventListener('pointerup', askMotion); // iPhone only lets a page ask for motion access when a finger lifts
+    // iPhone only lets a page ask for motion access from a finger lifting (touchend) or a click, never from pointerdown / pointerup
+    const askMotion = () => { if (this.enabled && (this.useTilt || this.wantMotion) && !this.tiltOn) this.requestMotion(); };
+    el.addEventListener('touchend', askMotion); el.addEventListener('click', askMotion);
     el.addEventListener('pointermove', (e) => this.move(e));
     el.addEventListener('pointerup', (e) => this.up(e));
     el.addEventListener('pointercancel', (e) => this.up(e, true));
@@ -1658,20 +1660,20 @@ export class Input {
   down(e) {
     this.engine.audio.unlock();
     if (!this.enabled) return;
-    if (this.useTilt && !this.tiltOn) this.enableTilt();
-    if (this.wantMotion) { if (!this.tiltOn) this.enableTilt(); this.enableShake(); }
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
-    const stickSide = st.joystickSide === 'right' ? p.x > this.engine.width * 0.5 : p.x < this.engine.width * 0.5;
+    const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
+    const stickSide = zone >= 1 || (st.joystickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
     if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
     else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
       ptr.role = 'stick';
       const f = st.joystickMode === 'fixed' ? this.fixedStick() : null;
-      this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y };
+      this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y, stay: st.joystickMode === 'static' };
+      if (st.joystickHaptics !== false && st.joystickHaptics !== 'off') this.engine.vibrate(6);
     }
     this.pointers.set(e.pointerId, ptr);
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
@@ -1685,7 +1687,8 @@ export class Input {
     ptr.x = p.x; ptr.y = p.y;
     if (this.stick && this.stick.id === e.pointerId) {
       const max = this.stickRadius, dx = p.x - this.stick.bx, dy = p.y - this.stick.by, d = Math.hypot(dx, dy);
-      if (d > max && !this.stick.fixed) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
+      if (d > max && !this.stick.fixed && !this.stick.stay) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
+      const edge = d >= max * 0.98; if (edge && !this.stick.edge && this.engine.scene?.settings.joystickHaptics === 'edge') this.engine.vibrate(5); this.stick.edge = edge;
       this.stick.x = p.x; this.stick.y = p.y;
     }
   }
@@ -1707,23 +1710,65 @@ export class Input {
     }
   }
 
-  /** Tilt-to-move using the device's motion sensors (asks permission on iOS). */
+  /** Tilt-to-move using the device's motion sensors. Where no permission is needed (Android, computers) it just listens. */
   enableTilt() {
-    if (this.tiltOn || this.tiltAsking) return;
-    const listen = () => {
-      this.tiltOn = true; this.tiltAsking = false;
-      window.addEventListener('deviceorientation', (e) => {
-        if (e.gamma == null) return;
-        const angle = screen.orientation?.angle ?? window.orientation ?? 0;
-        let x = e.gamma, y = e.beta;
-        if (angle === 90) { x = e.beta; y = -e.gamma; } else if (angle === -90 || angle === 270) { x = -e.beta; y = e.gamma; }
-        if (this.tiltBase == null) this.tiltBase = y;
-        this.tiltAxis = { x: clamp(x / 25, -1, 1), y: clamp((y - this.tiltBase) / 25, -1, 1) };
-      });
-    };
-    const D = window.DeviceOrientationEvent;
-    if (D && typeof D.requestPermission === 'function') { this.tiltAsking = true; D.requestPermission().then((r) => { this.tiltAsking = false; if (r === 'granted') listen(); else this.engine.scene?.message?.('Tilt needs motion access: allow it in Settings › Safari', 2.5); }).catch(() => { this.tiltAsking = false; }); }
-    else if (D) listen();
+    if (this.tiltOn) return;
+    const D = typeof window !== 'undefined' && window.DeviceOrientationEvent;
+    if (!D) { this.tiltMissing = true; return; }
+    if (typeof D.requestPermission === 'function') return; // iPhone / iPad: needs a tap (requestMotion)
+    this.listenTilt();
+  }
+  /** Ask for motion access (iPhone / iPad). Call it straight from a tap: touchend, click or a button. */
+  requestMotion() {
+    const D = window.DeviceOrientationEvent, M = window.DeviceMotionEvent;
+    if (!D || typeof D.requestPermission !== 'function') { this.enableTilt(); if (this.wantMotion) this.enableShake(); return; }
+    if (typeof window !== 'undefined' && window.isSecureContext === false) { this.motionBlocked = 'https'; this.updateMotionPrompt(); return; }
+    // both asks start inside the same tap (a second tap would be needed otherwise)
+    const ask = D.requestPermission(), askM = this.wantMotion && M && typeof M.requestPermission === 'function' ? M.requestPermission() : null;
+    ask.then((r) => {
+      if (r === 'granted') { this.motionBlocked = null; this.listenTilt(); }
+      else { this.motionBlocked = 'denied'; this.engine.scene?.message?.('Motion access is off: close Safari fully, reopen the game and tap Allow', 3); }
+      this.updateMotionPrompt();
+    }).catch(() => { /* not a tap the browser accepts: the next tap or the button asks again */ });
+    askM?.then((r) => { if (r === 'granted') this.enableShake(); }).catch(() => {});
+  }
+  listenTilt() {
+    if (this.tiltOn) return;
+    this.tiltOn = true; this.tiltSeen = false;
+    window.addEventListener('deviceorientation', (e) => {
+      if (e.beta == null || e.gamma == null) return;
+      this.tiltSeen = true;
+      // the gravity direction in the phone's frame (no gimbal flips when the phone is held upright)
+      const b = e.beta * DEG, g = e.gamma * DEG, gx = Math.sin(g) * Math.cos(b), gy = -Math.sin(b), gz = -Math.cos(g) * Math.cos(b);
+      const ang = (screen.orientation?.angle ?? window.orientation ?? 0) * DEG, cs = Math.cos(ang), sn = Math.sin(ang);
+      const right = gx * cs - gy * sn, down = -gx * sn - gy * cs; // along the screen's right and down directions
+      this.tiltRaw = { x: Math.asin(clamp(right, -1, 1)) / DEG, y: Math.atan2(down, -gz) / DEG };
+      if (this.tiltBase == null) this.tiltBase = this.tiltCfg.calibrate === 'flat' ? 0 : this.tiltRaw.y;
+      const c = this.tiltCfg, sm = clamp(+c.smooth || 0, 0, 0.95), prev = this.tiltAxis || { x: 0, y: 0 };
+      const f = (deg) => { const dz = +c.dead || 0, m = Math.max(1, +c.max || 20), v = Math.abs(deg) <= dz ? 0 : (Math.abs(deg) - dz) / Math.max(1, m - dz) * Math.sign(deg); return clamp(v, -1, 1); };
+      const nx = f(this.tiltRaw.x) * (c.invertX ? -1 : 1), ny = f(this.tiltRaw.y - this.tiltBase) * (c.invertY ? -1 : 1);
+      this.tiltAxis = { x: prev.x + (nx - prev.x) * (1 - sm), y: prev.y + (ny - prev.y) * (1 - sm) };
+    });
+    window.addEventListener('orientationchange', () => { this.tiltBase = null; });
+    setTimeout(() => { if (!this.tiltSeen) { this.tiltMissing = true; this.engine.scene?.emit?.('tiltMissing'); } }, 1500); // no sensor (a computer): Move falls back to the joystick / keys
+    this.updateMotionPrompt();
+  }
+  /** Use the phone's current angle as "level" for forward / back tilt. */
+  calibrateTilt() { this.tiltBase = this.tiltCfg.calibrate === 'flat' ? 0 : this.tiltRaw?.y ?? null; }
+  /** iPhone / iPad: a "Tap to turn on tilt" button over the game until motion access is given. */
+  updateMotionPrompt() {
+    const eng = this.engine, need = (this.useTilt || this.wantMotion) && !this.tiltOn && this.enabled && !eng.editing && eng.scene?.state === 'play'
+      && typeof window !== 'undefined' && typeof window.DeviceOrientationEvent?.requestPermission === 'function';
+    if (!need) { this.motionPrompt?.remove(); this.motionPrompt = null; return; }
+    if (!this.motionPrompt && eng.root) {
+      const b = this.motionPrompt = document.createElement('button');
+      b.className = 'pocket-motion';
+      b.style.cssText = 'position:absolute;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 90px);transform:translateX(-50%);z-index:20;padding:14px 22px;border:0;border-radius:999px;background:rgba(20,20,28,.88);color:#fff;font:600 16px system-ui,sans-serif;box-shadow:0 6px 24px rgba(0,0,0,.35);max-width:86%;touch-action:manipulation';
+      b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); this.requestMotion(); });
+      eng.root.appendChild(b);
+    }
+    if (this.motionPrompt) this.motionPrompt.textContent = this.motionBlocked === 'denied' ? '📱 Motion access is off. Close Safari fully, reopen and tap here' : this.motionBlocked === 'https' ? '📱 Tilt needs the game on https' : '📱 Tap to turn on tilt';
   }
 
   /** Shake detection from the motion sensors (asks permission on iOS): sets `shook` for one frame. */
@@ -1748,23 +1793,29 @@ export class Input {
     const eng = this.engine, r = this.stickRadius, right = eng.scene?.settings.joystickSide === 'right';
     return { x: right ? eng.width - eng.safe.right - 30 - r : eng.safe.left + 30 + r, y: eng.height - eng.safe.bottom - 30 - r };
   }
-  get stickRadius() { return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[this.engine.scene?.settings.controlSize] || 1); }
+  get stickRadius() { const st = this.engine.scene?.settings || {}; return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[st.controlSize] || 1) * clamp(+st.joystickSize || 1, 0.5, 2); }
 
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
     if (this.stick) {
-      const sx = (this.stick.x - this.stick.bx) / this.stickRadius, sy = (this.stick.y - this.stick.by) / this.stickRadius, l = Math.hypot(sx, sy);
-      if (l > 0.12) { x += sx / Math.max(1, l); y += sy / Math.max(1, l); } // small dead zone
+      const st = this.engine.scene?.settings || {}, dz = clamp(st.joystickDeadZone ?? 0.12, 0, 0.8);
+      let sx = (this.stick.x - this.stick.bx) / this.stickRadius, sy = (this.stick.y - this.stick.by) / this.stickRadius;
+      const dir = st.joystickDirections || 'all';
+      if (dir === 'horizontal') sy = 0; else if (dir === 'vertical') sx = 0;
+      const l = Math.hypot(sx, sy);
+      if (l > dz) {
+        let m = st.joystickResponse === 'full' ? 1 : Math.min(1, (l - dz) / (1 - dz)), a = Math.atan2(sy, sx); // the dead zone doesn't eat the slow speeds
+        if (dir === '4' || dir === '8') { const step = Math.PI / (dir === '4' ? 2 : 4); a = Math.round(a / step) * step; }
+        if (st.joystickResponse === 'curve') m *= m; // fine control near the middle
+        x += Math.cos(a) * m; y += Math.sin(a) * m;
+      }
     }
     for (const b of this.buttons) {
       if (b.id == null) continue;
       if (b.action === 'dleft') x -= 1; else if (b.action === 'dright') x += 1; else if (b.action === 'dup') y -= 1; else if (b.action === 'ddown') y += 1;
     }
-    if (this.useTilt && this.tiltAxis) {
-      const dz = (v) => (Math.abs(v) < 0.08 ? 0 : v);
-      x += dz(this.tiltAxis.x); y += dz(this.tiltAxis.y);
-    }
+    if (this.useTilt && this.tiltAxis) { x += this.tiltAxis.x; y += this.tiltAxis.y; } // dead zone, range and smoothing were applied as it arrived
     if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); y += (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); } // arrow keys / WASD on a computer
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
@@ -1788,7 +1839,10 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
-  endFrame() { this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
+  endFrame() {
+    if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
+    if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
+    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
   reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
 }
 
@@ -2869,6 +2923,40 @@ export class Renderer3D {
   }
 }
 
+/** The on-screen joystick: style, colour and when it shows come from the game's Touch Controls settings. */
+function drawJoystick(ctx, engine, scene, inp, tint, pulse) {
+  const st = scene.settings, r = inp.stickRadius, style = st.joystickStyle || 'classic', col = st.joystickColor || null;
+  const C = (a) => (col ? withAlpha(col, a) : tint(a));
+  let base = null, knob = null, live = !!inp.stick;
+  if (inp.stick) { base = { x: inp.stick.bx, y: inp.stick.by }; knob = { x: inp.stick.x, y: inp.stick.y }; const dx = knob.x - base.x, dy = knob.y - base.y, d = Math.hypot(dx, dy); if (d > r) { knob = { x: base.x + dx / d * r, y: base.y + dy / d * r }; } }
+  else if (st.joystickMode === 'fixed' || st.joystickVisible === 'always') { base = inp.fixedStick(); knob = base; }
+  if (!base) {
+    if (scene.time < 4 && st.joystickHint !== false) { // a hint where to touch
+      const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = engine.width, H = engine.height, cx = zone >= 1 ? W / 2 : st.joystickSide === 'right' ? W * (1 - zone / 2) : W * zone / 2;
+      ctx.fillStyle = C(0.25 * pulse); ctx.font = `600 14px ${THEME.font}`; ctx.textAlign = 'center';
+      ctx.fillText('Touch & drag here to move', cx, H - engine.safe.bottom - 40);
+    }
+    return;
+  }
+  ctx.save();
+  if (!live) ctx.globalAlpha *= clamp(st.joystickIdleOpacity ?? 0.6, 0, 1);
+  const kr = r * clamp(+st.joystickKnob || 0.42, 0.2, 0.8);
+  if (style !== 'dot') {
+    ctx.lineWidth = style === 'ring' ? 3 : 2; ctx.strokeStyle = C(style === 'ring' ? 0.6 : 0.35); ctx.fillStyle = C(style === 'ring' ? 0 : 0.08);
+    ctx.beginPath(); ctx.arc(base.x, base.y, r, 0, Math.PI * 2); if (style !== 'ring') ctx.fill(); ctx.stroke();
+  }
+  const dir = st.joystickDirections || 'all';
+  if (style === 'arrows' || dir === '4' || dir === '8' || dir === 'horizontal' || dir === 'vertical') { // little arrows for the directions it can go
+    const angs = dir === 'horizontal' ? [0, 180] : dir === 'vertical' ? [90, 270] : dir === '8' ? [0, 45, 90, 135, 180, 225, 270, 315] : [0, 90, 180, 270];
+    ctx.fillStyle = C(0.45);
+    for (const a of angs) { const t = a * DEG, cx = base.x + Math.cos(t) * r * 0.78, cy = base.y + Math.sin(t) * r * 0.78, s = r * 0.1; ctx.beginPath(); ctx.moveTo(cx + Math.cos(t) * s, cy + Math.sin(t) * s); ctx.lineTo(cx + Math.cos(t + 2.3) * s, cy + Math.sin(t + 2.3) * s); ctx.lineTo(cx + Math.cos(t - 2.3) * s, cy + Math.sin(t - 2.3) * s); ctx.closePath(); ctx.fill(); }
+  }
+  if (live && style !== 'dot' && st.joystickTrail !== false) { ctx.strokeStyle = C(0.18); ctx.lineWidth = kr * 0.9; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(base.x, base.y); ctx.lineTo(knob.x, knob.y); ctx.stroke(); }
+  ctx.fillStyle = C(live ? 0.55 : 0.4); ctx.beginPath(); ctx.arc(knob.x, knob.y, kr, 0, Math.PI * 2); ctx.fill();
+  if (style === 'ring' || style === 'dot') { ctx.strokeStyle = C(0.8); ctx.lineWidth = 2; ctx.stroke(); }
+  ctx.restore();
+}
+
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
@@ -3051,22 +3139,7 @@ function renderUI(engine, scene) {
     ctx.save();
     ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
-    if (useStick && st.joystickMode === 'fixed' && !inp.stick) {
-      const f = inp.fixedStick(), r = inp.stickRadius;
-      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = tint(0.4); ctx.beginPath(); ctx.arc(f.x, f.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
-    }
-    if (inp.stick) {
-      const s = inp.stick, r = inp.stickRadius;
-      ctx.fillStyle = tint(0.08); ctx.strokeStyle = tint(0.35); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(s.bx, s.by, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = tint(0.5);
-      ctx.beginPath(); ctx.arc(s.x, s.y, r * 0.42, 0, Math.PI * 2); ctx.fill();
-    } else if (useStick && st.joystickMode !== 'fixed' && scene.time < 4) {
-      ctx.fillStyle = tint(0.25 * pulse); ctx.font = `600 14px ${TH.font}`; ctx.textAlign = 'center';
-      ctx.fillText('Touch & drag here to move', scene.settings.joystickSide === 'right' ? W * 0.75 : W * 0.25, H - engine.safe.bottom - 40);
-    }
+    if (useStick) drawJoystick(ctx, engine, scene, inp, tint, pulse);
     for (const b of inp.buttons) {
       if (b.hidden) continue; // UI Touch Buttons draw themselves
       if (b.hotbar) { // square inventory slot: block colour, white frame when picked, count in the corner
@@ -3184,49 +3257,117 @@ registerBehavior('move', {
   label: 'Move', description: 'Player movement with the joystick, dragging, or tilting the phone.',
   params: [
     { key: 'speed', label: 'Speed', type: 'number', default: 260, default3d: 7 },
-    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both', info: { joystick: 'A joystick appears where you touch the left half of the screen (it switches the game\'s joystick on). Arrow keys / WASD work on a computer.', both: 'Joystick on the left half, drag anywhere else.', tilt: 'Tilt the phone to steer. On iPhone the game asks for motion access when you first tap the screen.', drag: 'Drag a finger anywhere to move it.' } },
+    { key: 'control', label: 'Control', type: 'select', options: ['joystick', 'drag', 'both', 'tilt'], default: 'both', info: { joystick: 'A joystick appears where you touch the left half of the screen (it switches the game\'s joystick on; style it in Game Settings › Touch Controls). Arrow keys / WASD work on a computer.', both: 'Joystick on the left half, drag anywhere else.', tilt: 'Tilt the phone to steer. On iPhone a "Tap to turn on tilt" button asks for motion access.', drag: 'Drag a finger to move it.' } },
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
+    { key: 'accel', label: 'Smooth start / stop (0 = instant)', type: 'number', default: 0, range: [0, 0.95], step: 0.05 },
+    // tilt
+    { key: 'tiltMax', label: 'Tilt for full speed (°)', type: 'number', default: 20, range: [5, 60], step: 1, group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltDead', label: 'Dead zone (°)', type: 'number', default: 3, range: [0, 15], step: 0.5, group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltSmooth', label: 'Smoothing (0–0.9)', type: 'number', default: 0.3, range: [0, 0.9], step: 0.05, group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltLevel', label: 'Level is', type: 'select', options: [['start', 'How you hold it at the start'], ['flat', 'Flat on a table']], default: 'start', group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltInvertX', label: 'Invert left / right', type: 'bool', default: false, group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltInvertY', label: 'Invert forward / back', type: 'bool', default: false, group: 'Tilt', showIf: { control: ['tilt'] } },
+    { key: 'tiltFallback', label: 'No tilt sensor (computer)', type: 'select', options: [['joystick', 'Use the joystick instead'], ['none', 'Keys only']], default: 'joystick', group: 'Tilt', showIf: { control: ['tilt'] } },
+    // drag
+    { key: 'dragMode', label: 'Drag style', type: 'select', options: [['relative', 'Moves as far as your finger'], ['follow', 'Goes to your finger'], ['offset', 'Follows your finger (keeps the gap)']], default: 'relative', group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragArea', label: 'Start a drag', type: 'select', options: [['anywhere', 'Anywhere on screen'], ['object', 'Only on the object']], default: 'anywhere', group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragSpeed', label: 'Drag sensitivity', type: 'number', default: 1.2, range: [0.2, 4], step: 0.1, group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragSmooth', label: 'Drag smoothing (0–0.9)', type: 'number', default: 0, range: [0, 0.9], step: 0.05, group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragMax', label: 'Max drag speed (0 = none)', type: 'number', default: 0, default3d: 0, step: 50, group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragSolid', label: 'Walls stop it', type: 'bool', default: true, group: 'Drag', showIf: { control: ['drag', 'both'] } },
+    { key: 'dragThrow', label: 'Keep sliding when you let go', type: 'bool', default: false, group: 'Drag', showIf: { control: ['drag', 'both'] } },
   ],
   create(p) {
+    let grab = null, gap = null, dv = { x: 0, y: 0 }, fling = { x: 0, y: 0 }, was = false;
+    const dragOn = () => p.control === 'drag' || p.control === 'both';
     return {
       start(e, s) {
         e.ensureBody({ type: 'dynamic', gravityScale: is3D(e) ? 1 : 0 });
-        if (p.control === 'tilt') s.engine.input.useTilt = true;
+        const inp = s.engine.input;
+        if (p.control === 'tilt') {
+          inp.useTilt = true;
+          Object.assign(inp.tiltCfg, { max: +p.tiltMax || 20, dead: +(p.tiltDead ?? 3), smooth: +(p.tiltSmooth ?? 0.3), invertX: !!p.tiltInvertX, invertY: !!p.tiltInvertY, calibrate: p.tiltLevel || 'start' });
+          inp.enableTilt();
+          const fallback = () => { if (!s.settings.joystick && (!s.settings.controls || s.settings.controls === 'auto')) { s.settings.joystick = true; s.engine.layoutButtons?.(); } };
+          if ((p.tiltFallback || 'joystick') === 'joystick') { if (inp.tiltMissing) fallback(); else s.on('tiltMissing', fallback); }
+        }
         // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
         if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
       update(e, dt, s) {
-        const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis();
-        const ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y, b = e.body;
-        const d = p.control === 'drag' || p.control === 'both' ? inp.drag : { dx: 0, dy: 0 };
-        if (is3D(e)) {
-          b.vel.x = ax * p.speed; b.vel.z = ay * p.speed;
-          const k = 0.025 * p.speed / 7;
-          if (p.axes !== 'vertical') e.x += d.dx * k;
-          if (p.axes !== 'horizontal') e.z += d.dy * k;
-          if (p.face && (Math.abs(ax) + Math.abs(ay) > 0.1)) {
-            const target = Math.atan2(ax, ay) / DEG;
+        const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis(), b = e.body, three = is3D(e), z = three ? 1 : s.engine.renderer.zoomFor(s);
+        const ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y;
+        // which finger drags: any free finger, or one that started on the object
+        let f = null;
+        if (dragOn()) {
+          if (grab != null && !inp.pointers.has(grab)) grab = null;
+          if (grab == null) for (const d of inp.downs) {
+            if (p.dragArea === 'object' && !hitsEntity(s, e, d.x, d.y, 24)) continue;
+            grab = d.id; const w = screenToWorldAt(s, d.x, d.y, e.y) || e; gap = { x: e.x - w.x, y: e.y - w.y, z: e.z - (w.z ?? e.z) }; break;
+          }
+          if (grab == null && p.dragArea !== 'object') { const free = [...inp.pointers.values()].find((q) => q.role === 'free'); if (free) { grab = free.id; const w = screenToWorldAt(s, free.x, free.y, e.y) || e; gap = { x: e.x - w.x, y: e.y - w.y, z: e.z - (w.z ?? e.z) }; free.lx = free.x; free.ly = free.y; } }
+          f = grab != null ? inp.pointers.get(grab) : null;
+        }
+        // drag → a velocity, so walls and other bodies still block it
+        let want = null;
+        if (f) {
+          if (p.dragMode === 'follow' || p.dragMode === 'offset') {
+            const w = screenToWorldAt(s, f.x, f.y, e.y) || e, o = p.dragMode === 'offset' ? gap : { x: 0, y: 0, z: 0 };
+            const tx = w.x + o.x, ty = three ? e.y : w.y + o.y, tz = three ? (w.z ?? e.z) + o.z : e.z;
+            want = { x: (tx - e.x) / Math.max(dt, 1e-3), y: three ? (tz - e.z) / Math.max(dt, 1e-3) : (ty - e.y) / Math.max(dt, 1e-3) };
+          } else {
+            const lx = f.lx ?? f.x, ly = f.ly ?? f.y, k = (+p.dragSpeed || 1.2) * (three ? 0.025 * p.speed / 7 * 0.83 : 1 / z);
+            want = { x: (f.x - lx) * k / Math.max(dt, 1e-3), y: (f.y - ly) * k / Math.max(dt, 1e-3) };
+          }
+          f.lx = f.x; f.ly = f.y;
+          if (p.axes === 'vertical') want.x = 0; if (p.axes === 'horizontal') want.y = 0;
+          const mx = +p.dragMax || 0, l = Math.hypot(want.x, want.y); if (mx && l > mx) { want.x *= mx / l; want.y *= mx / l; }
+          const sm = clamp(+p.dragSmooth || 0, 0, 0.95), kk = sm ? 1 - Math.pow(sm, dt * 20) : 1;
+          dv = { x: dv.x + (want.x - dv.x) * kk, y: dv.y + (want.y - dv.y) * kk };
+          const fk = 1 - Math.pow(0.5, dt / 0.06); fling = { x: fling.x + (want.x - fling.x) * fk, y: fling.y + (want.y - fling.y) * fk }; // the finger's recent speed, for a throw
+          was = true;
+        } else if (was) { dv = p.dragThrow ? { ...fling } : { x: 0, y: 0 }; fling = { x: 0, y: 0 }; was = false; }
+        else if (!p.dragThrow) dv = { x: 0, y: 0 };
+        const solid = p.dragSolid !== false, grav = !three && !(s.gravity === 0 || b.gravityScale === 0);
+        const acc = clamp(+p.accel || 0, 0, 0.95), ease = (cur, tgt) => (acc ? cur + (tgt - cur) * (1 - Math.pow(acc, dt * 20)) : tgt);
+        const thrown = p.dragThrow && !f && (dv.x || dv.y);
+        if (thrown) { dv.x *= Math.pow(0.04, dt); dv.y *= Math.pow(0.04, dt); if (Math.hypot(dv.x, dv.y) < 2) dv = { x: 0, y: 0 }; } // slides to a stop
+        const dragVx = solid || thrown ? dv.x : 0, dragVy = solid || thrown ? dv.y : 0;
+        if (three) {
+          b.vel.x = ease(b.vel.x, ax * p.speed + dragVx); b.vel.z = ease(b.vel.z, ay * p.speed + dragVy);
+          if (!solid && f) { e.x += dv.x * dt; e.z += dv.y * dt; }
+          if (p.face && (Math.abs(b.vel.x) + Math.abs(b.vel.z) > 0.3)) {
+            const target = Math.atan2(b.vel.x, b.vel.z) / DEG;
             let diff = ((target - e.ry + 540) % 360) - 180;
             e.ry += diff * Math.min(1, dt * 12);
           }
         } else {
-          b.vel.x = ax * p.speed;
-          if (s.gravity === 0 || b.gravityScale === 0) b.vel.y = ay * p.speed;
-          const z = s.engine.renderer.zoomFor(s);
-          if (p.axes !== 'vertical') e.x += d.dx / z * 1.2;
-          if (p.axes !== 'horizontal') e.y += d.dy / z * 1.2;
+          b.vel.x = ease(b.vel.x, ax * p.speed + dragVx);
+          if (!grav) b.vel.y = ease(b.vel.y, ay * p.speed + dragVy);
+          else if (f && dragVy) b.vel.y = dragVy; // dragging up / down even with gravity
+          if (!solid && f) { e.x += dv.x * dt; e.y += dv.y * dt; }
           if (p.keepInView) {
             const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
-            e.x = clamp(e.x, v.left + hx, v.right - hx);
-            e.y = clamp(e.y, v.top + hy, v.bottom - hy - s.engine.safe.bottom / z);
+            const nx = clamp(e.x, v.left + hx, v.right - hx), ny = clamp(e.y, v.top + hy, v.bottom - hy - s.engine.safe.bottom / z);
+            if (nx !== e.x) { e.x = nx; if (Math.sign(b.vel.x) === Math.sign(e.x - (v.left + v.right) / 2)) b.vel.x = 0; }
+            if (ny !== e.y) { e.y = ny; if (Math.sign(b.vel.y) === Math.sign(e.y - (v.top + v.bottom) / 2)) b.vel.y = 0; }
           }
         }
       },
     };
   },
 });
+/** Is a screen point on (or near) an entity? */
+function hitsEntity(s, e, sx, sy, padPx = 0) {
+  const eng = s.engine;
+  if (s.mode === '2d') { const w = eng.renderer.screenToWorld(s, sx, sy), z = eng.renderer.zoomFor(s), ex = e.extents(), pad = padPx / z, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
+    return ex.sphere ? Math.hypot(w.x - cx, w.y - cy) <= ex.r + pad : Math.abs(w.x - cx) <= ex.hx + pad && Math.abs(w.y - cy) <= ex.hy + pad; }
+  const ray = eng.renderer.screenRay?.(s, sx, sy); if (!ray) return false;
+  const ex = e.extents(), grow = { ...ex, r: (ex.r || 0) * 1.4, hx: ex.hx * 1.4 + 0.3, hy: ex.hy * 1.4 + 0.3, hz: ex.hz * 1.4 + 0.3 };
+  return rayHitExtents(ray.o || ray.origin, ray.d || ray.dir, e, grow) != null;
+}
 
 registerBehavior('platformer', {
   label: 'Platformer', description: 'Run & jump. Uses gravity; tap or the jump button to jump.',
@@ -7554,6 +7695,7 @@ Object.assign(NODE_TYPES, {
   keyHeld: { cat: 'Input', label: 'Key Is Held', value: 'bool', params: [txt('key', 'Space', 'key')] },
   keyAxis: { cat: 'Input', label: 'Arrow Keys / WASD', value: 'number', params: [opt('axis', ['left / right', 'up / down'], 'left / right', 'axis')] },
   tiltValue: { cat: 'Input', label: 'Phone Tilt', value: 'number', params: [opt('axis', ['left / right', 'forward / back'], 'left / right', 'axis')] },
+  calibrateTilt: { cat: 'Input', label: 'Calibrate Tilt', exec: true, outs: ['then'] },
   onShake: { cat: 'Input', label: 'On Phone Shaken', outs: ['then'] },
   onScreenTouch: { cat: 'Input', label: 'On Screen Touched', outs: ['then'], params: [opt('where', ['anywhere', 'left half', 'right half', 'top half', 'bottom half'], 'anywhere', 'where')] },
   dragAmount: { cat: 'Input', label: 'Finger Drag', value: 'number', params: [opt('axis', ['x', 'y', 'distance'], 'x', 'this frame')] },
@@ -8273,6 +8415,7 @@ registerBehavior('graph', {
         case 'jump': if (e.body) e.body.vel.y = (+I('power') || 0) * up; s.engine.audio.sfx('jump'); break;
         case 'showHide': { const t = P('object') ? s.find(P('object')) : e; if (t) t.visible = P('mode') === 'show' ? true : P('mode') === 'hide' ? false : !t.visible; break; }
         case 'vibrate': s.engine.vibrate([30, 30, 30]); break;
+        case 'calibrateTilt': s.engine.input.calibrateTilt(); break;
         case 'shake': s.camera.shake = Math.max(s.camera.shake, +I('strength') || 10); break;
         case 'win': s.win(); return;
         case 'gameOver': s.gameOver(); return;

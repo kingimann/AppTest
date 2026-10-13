@@ -196,7 +196,7 @@ The editor fills the screen:
   - **Values** (orange): numbers, variables, random, compare, and/or/not, position, distance, velocity, touching, can see, **Angle To**, **Count With Tag**, **Object Exists**, **My Health**, **Item Count**, **Joystick**, **Screen Size**, **Is Moving**, **Finger On Screen**, **Finger Position**, **Coin Flip**, **Level Number**. **Math**: math, **Math (one value)** (abs, round, sqrt, sin…), **Clamp**, **Lerp**, **Loop Index**.
   - **Text** (green, with green dots that carry words): **Join Text**, **Fill In Text** (`{variables}` plus inputs a and b), **Number As Text** (normal, 1.2K, whole, 2 decimals, 1:05, percent, plain, **1st**, **XII**, **+5**), **Text Length**, **Change Case** (UPPER, lower, Title Case, reversed, tidy spaces), **Replace In Text**, **Part Of Text**, **Text Check** (equals, contains, starts / ends with, empty), **Text To Number**, **Get Text Variable**, **Set Text Variable To**, **Show Text On Object**, **Random Word** and **Word At** (words separated with `|`).
   - **Time** (blue): **Start Timer** (count down or stopwatch; the timer's name is also a variable, so text shows `{timer}`), **Pause / Resume / Stop Timer** (or add seconds), **Timer Value**, **On Timer Finished**, **Real Clock** (hour, minute, weekday, date, year…), **Daily Check** (*new day* / *same day*, with a streak of days in a row), **Remember Time Now** and **Seconds Since Remembered** (refill energy while the player was away).
-  - **Input** (magenta): **On Key** (pressed, released or held: Space, arrows, letters, Enter…), **Key Is Held**, **Arrow Keys / WASD** (−1, 0, 1), **Phone Tilt**, **On Phone Shaken**, **On Screen Touched** (anywhere or one half), **Finger Drag** and **Pinch Zoom**.
+  - **Input** (magenta): **On Key** (pressed, released or held: Space, arrows, letters, Enter…), **Key Is Held**, **Arrow Keys / WASD** (−1, 0, 1), **Phone Tilt**, **Calibrate Tilt**, **On Phone Shaken**, **On Screen Touched** (anywhere or one half), **Finger Drag** and **Pinch Zoom**.
   - **Camera**: **Move Camera To** (a point), **Move Camera To Object**, **Zoom Camera To** (all glide smoothly, with *arrived*), **Camera Value**.
   - **Audio**: **Play Music** (an imported sound, looped), **Stop Music** (with a fade), **Set Volume**, **Mute / Unmute**, **Play Note** (60 = middle C), **Is Muted**.
   - **AI** (orange, run from Every Frame): **Chase** (*caught*), **Run Away From** (*safe*), **Wander**, **Orbit Around**, **Keep Distance**, **Patrol Back And Forth** (*turned*). Speeds and distances pick sensible 2D / 3D defaults when left at 0.
@@ -318,6 +318,45 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 - New games start, like a Unity scene, with a **Main Camera** object (follows the player, or stays put if there isn't one) and a light object: **Directional Light** in 3D (its rotation aims the sun and the shadows; colour, intensity, ambient, shadows) or **Global Light 2D** (how bright the level is; Point Lights shine through the dark).
 - Create → **Camera & lights** adds more: Camera, Directional Light / Global Light 2D, Point Light. While a light object exists, the level's Lighting settings defer to it.
+
+### Move: joystick, tilt and drag
+
+The **Move** component steers with the joystick, a finger drag, both, or tilting the phone. *Smooth start / stop* eases the speed in and out.
+
+**Joystick** (Game Settings › Touch Controls › Joystick):
+
+| Setting | Choices |
+|---|---|
+| Where it appears | where you touch and follows your thumb · where you touch and stays put · fixed in the corner |
+| Side, Touch area | left / right · half, a third or the whole screen |
+| Directions | any · 8 · 4 · left/right only · up/down only (snapped, with little arrows on the stick) |
+| Response | push further = faster · gentle near the middle · always full speed |
+| Dead zone | how far you push before it moves (default 0.12); past it, speed still starts from zero |
+| Look | size, knob size, style (classic, ring, just the knob, with arrows), colour |
+| Show | only while touching, or always (resting in the corner at a chosen opacity) |
+| Vibration | a tap when it appears, also at the edge, or off; the "Touch & drag here" hint can be turned off |
+
+**Tilt** (Move › Control: tilt):
+- **iPhone / iPad:** a **"📱 Tap to turn on tilt"** button appears and asks for motion access when tapped. A tap on the game also asks.
+  - If access was refused, the button says how to fix it: close Safari fully, reopen the game, then tap Allow.
+  - Tilt needs the game served over https; GitHub Pages is.
+- Tilt reads the direction of gravity instead of raw angles, so it steers properly whether the phone is flat, at an angle or held upright, in portrait or landscape.
+- Settings:
+  - **Tilt for full speed** (degrees, default 20), **Dead zone** (degrees) and **Smoothing**.
+  - **Level is**: how you hold it at the start, or flat on a table.
+  - **Invert** left/right or forward/back.
+  - **No tilt sensor**: on a computer it switches to the joystick; arrow keys always work.
+- The **Calibrate Tilt** node makes the current angle count as level.
+
+**Drag** (Move › Control: drag or both):
+- **Drag style:**
+  - **Moves as far as your finger**: a relative drag, scaled by *Drag sensitivity*.
+  - **Goes to your finger.**
+  - **Follows your finger (keeps the gap).**
+- **Start a drag**: anywhere, or only on the object.
+- **Drag smoothing** and **Max drag speed**.
+- **Walls stop it**: dragging moves the body by velocity, so colliders block it.
+- **Keep sliding when you let go**: a flick throws it.
 
 ### Character Controller 2D
 
@@ -705,7 +744,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 
 | Type | What it does | Params (defaults) |
 | --- | --- | --- |
-| `move` | Player movement with the joystick, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true) |
+| `move` | Player movement with the joystick, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true), `accel` (0); tilt: `tiltMax` (20), `tiltDead` (3), `tiltSmooth` (0.3), `tiltLevel` (start / flat), `tiltInvertX/Y`, `tiltFallback` (joystick / none); drag: `dragMode` (relative / follow / offset), `dragArea` (anywhere / object), `dragSpeed` (1.2), `dragSmooth` (0), `dragMax` (0), `dragSolid` (true), `dragThrow` (false) |
 | `platformer` | Run & jump. Uses gravity; tap or the jump button to jump. | `speed` (240 / 3D 7), `jump` (620 / 3D 10), `doubleJump` (false), `onFall` ("respawn") |
 | `rotate` | Spin continuously. | `speed` (90), `axis` ("z" / 3D "y") |
 | `patrol` | Move back and forth from the start point. | `dx` (120 / 3D 4), `dy` (0), `dz` (0), `duration` (2) |
@@ -799,6 +838,7 @@ registerBehavior('blink', {
 | `engine.input.axis()` | `{x, y}` from the joystick or tilt |
 | `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'swipe:left')`, `isDown('jump' \| 'action')` | touch buttons, taps, swipes |
 | `engine.input.taps`, `engine.input.pointers`, `engine.input.useTilt = true` | raw touches, tilt controls |
+| `engine.input.requestMotion()`, `engine.input.calibrateTilt()`, `engine.input.tiltCfg` | ask for motion access from a tap (iPhone), set level, tilt range / dead zone / smoothing |
 | `engine.audio.sfx('coin' \| 'jump' \| 'hit' \| 'power' \| 'win' \| 'lose')`, `audio.play(url)` | sound |
 | `engine.vibrate(ms)`, `engine.timeScale`, `engine.paused`, `engine.restart()` | misc |
 
@@ -812,7 +852,7 @@ registerBehavior('blink', {
 
 **Custom UI:** UI entities can have a `bar: { var, max, maxVar, w, h, fill, bg, radius, label }` (health/progress bar; `var: "self.hp"` reads an object's own health from the Health component) and `showWhen: 'always' | 'play' | 'title' | 'paused' | 'over' | 'win'`. `settings.customScreens` turns off the built-in title/pause/end screens so your own UI and Buttons run them. Anchors include `left`, `center` and `right` edges.
 
-**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` or `'fixed'`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
+**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` / `'static'` / `'fixed'`; `joystickZone` (`half`/`third`/`full`), `joystickDirections` (`all`/`8`/`4`/`horizontal`/`vertical`), `joystickResponse` (`analog`/`curve`/`full`), `joystickDeadZone`, `joystickSize`, `joystickKnob`, `joystickStyle` (`classic`/`ring`/`dot`/`arrows`), `joystickColor`, `joystickVisible` (`touch`/`always`), `joystickIdleOpacity`, `joystickHaptics` (`tap`/`edge`/`off`), `joystickHint`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
 
 **Physics:** bodies support `oneWay` platforms (jump up through, land on top), riding moving (kinematic) platforms, `mass` (heavier pushes lighter), `friction`, `drag`, `maxFall`, and collider offsets `ox/oy/oz`.
 

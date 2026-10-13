@@ -977,6 +977,42 @@ export class Scene {
   itemCount(name) { return this.inventory?.[name]?.n || 0; }
   /** Broadcast a message by name; Tween / Animator / Sprite Animation components and "On Message" nodes can react. */
   send(name, data) { if (name) this.emit('message', String(name), data); }
+
+  // ---- UI navigation: pages with a history, like an app (Back returns to where you were) ----
+  /** Show a page: sets the page variable; with history, Back returns to the page you came from. */
+  navTo(page, v = 'page', o = {}) {
+    page = String(page ?? ''); v = v || 'page';
+    const cur = this.vars[v], st = ((this.navStacks ||= {})[v] ||= []);
+    this.navVar = v;
+    if (o.clear) st.length = 0;
+    if (sameVal(cur, page)) return false;
+    if (o.history !== false && cur != null && cur !== '') { st.push(cur); if (st.length > 50) st.shift(); }
+    this.navDir = o.dir ?? 1; this.navAt = this.time;
+    this.setVar(v, page);
+    this.emit('page', v, page, this.navDir);
+    return true;
+  }
+  /** Go back: closes an open popup or side bar first, then returns to the previous page. False if there's nowhere to go. */
+  navBack(v) {
+    if (this.modal && !this.modal.dead && this.modal.visible && this.modal._dismiss) { this.modal._dismiss(); this.emit('back', null, null); return true; }
+    const stacks = this.navStacks || {};
+    const key = v || (stacks[this.navVar]?.length ? this.navVar : Object.keys(stacks).find((k) => stacks[k].length));
+    const st = stacks[key]; if (!st?.length) return false;
+    const page = st.pop();
+    this.navVar = key; this.navDir = -1; this.navAt = this.time;
+    this.setVar(key, page);
+    this.emit('page', key, page, -1); this.emit('back', key, page);
+    return true;
+  }
+  canGoBack(v) {
+    if (this.modal && !this.modal.dead && this.modal.visible) return true;
+    const st = this.navStacks || {};
+    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length);
+  }
+  /** How many steps Back can take (pages in the history plus an open popup). */
+  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0); }
+  /** Which way the last page change went: 1 forward, -1 back (only for changes made this moment). */
+  navDirection() { return this.navAt === this.time ? this.navDir || 1 : 1; }
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
 
   after(sec, fn) { this.timers.push({ t: sec, fn, every: 0 }); }
@@ -2766,7 +2802,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -4075,12 +4111,17 @@ const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
 const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
 /** Show or hide a UI element with a little animation. */
-function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
+function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
   const k = 1;
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
-  const off = { 'slide from right': { x: 220 }, 'slide from left': { x: -220 }, 'slide from bottom': { y: 220 }, 'slide from top': { y: -220 } }[anim];
+  const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
+  if (anim === 'zoom') { // pages that grow in and fade out a little larger
+    if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.92; e.sy = base.sy * 0.92; s.to(e, { sx: base.sx, sy: base.sy, alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => done?.() }); }
+    else s.to(e, { sx: base.sx * 1.06, sy: base.sy * 1.06, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    return;
+  }
   if (show) {
     e.visible = true; e.alpha = 0;
     if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
@@ -4092,7 +4133,7 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done) {
     s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top'];
 
 registerBehavior('navItem', {
   label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
@@ -4104,14 +4145,24 @@ registerBehavior('navItem', {
     { key: 'idleColor', label: 'Normal colour', type: 'color', default: '', optional: true },
     { key: 'dimIdle', label: 'Fade when not selected', type: 'bool', default: true },
     { key: 'message', label: 'Also send message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab' },
   ],
   create(p) {
     let kids = [], was = null;
     return {
-      uiAlways: true,
+      uiAlways: true, page: p.page, var: p.var,
       start(e, s) { if (p.startHere && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, p.page); },
       update(e, dt, s) {
-        if (uiTapped(s, e)) { s.setVar(p.var, p.page); s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message); }
+        if (uiTapped(s, e)) {
+          const open = p.mode === 'open page (Back returns)';
+          let dir = 1;
+          if (!open) { // tabs: slide toward the side the tapped tab is on
+            const cur = s.entities.find((q) => q !== e && !q.dead && q.ui && (() => { const b = q.getBehavior('navItem'); return b && b.var === p.var && sameVal(s.vars[p.var], b.page); })());
+            if (cur) { const a = uiRect(s, e), b = uiRect(s, cur); dir = Math.abs(a.x - b.x) >= Math.abs(a.y - b.y) ? (a.x >= b.x ? 1 : -1) : (a.y >= b.y ? 1 : -1); }
+          }
+          s.navTo(p.page, p.var, { history: open, dir });
+          s.engine.audio.sfx('click'); s.punch(e, { sx: -0.08, sy: -0.08 }, 0.2, { add: true }); if (p.message) s.send(p.message);
+        }
         const on = sameVal(s.vars[p.var], p.page);
         if (on !== was) { kids = uiKids(s, e); was = on; }
         if (e.shape) e.shape.fill = on ? p.activeColor || '' : p.idleColor || '';
@@ -4148,7 +4199,131 @@ registerBehavior('uiShowIf', {
       start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; },
       update(e, dt, s) {
         const want = test(s.vars[p.var]);
-        if (want !== shown) { shown = want; uiAnimate(s, e, want, p.anim, 0.22); }
+        if (want !== shown) {
+          shown = want;
+          if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
+            const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
+            uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
+          } else uiAnimate(s, e, want, p.anim, 0.22);
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiBack', {
+  label: 'Back Button', description: 'Goes back to the page you came from, closing an open popup or side bar first. It hides itself when there is nowhere to go back to. The phone\'s back gesture, the Esc key and a swipe in from the left edge do the same.',
+  params: [
+    { key: 'var', label: 'Page variable (blank = any)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'hide', label: 'Hide when there is nowhere to go back', type: 'bool', default: true },
+    { key: 'fallback', label: 'Otherwise go to page', type: 'text', default: '' },
+  ],
+  create(p) {
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const can = s.canGoBack(p.var || undefined) || !!p.fallback;
+        if (p.hide && e.visible !== can && !e._parentHidden) e.visible = can;
+        if (uiTapped(s, e)) {
+          if (!s.navBack(p.var || undefined) && p.fallback) s.navTo(p.fallback, p.var || 'page', { history: false, dir: -1 });
+          s.engine.audio.sfx('click'); s.punch(e, { sx: -0.1, sy: -0.1 }, 0.2, { add: true });
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiPager', {
+  label: 'Swipe Pages', description: 'Swipe left and right between the UI inside it: onboarding screens, a shop carousel, level worlds. Dots show where you are, the page number goes into a variable, and messages like "slide next" move it.',
+  params: [
+    { key: 'var', label: 'Page number variable', type: 'text', default: 'slide', suggest: 'vars' },
+    { key: 'dots', label: 'Show dots', type: 'bool', default: true },
+    { key: 'dotColor', label: 'Dot colour', type: 'color', default: '#ffffff' },
+    { key: 'loop', label: 'Loop around', type: 'bool', default: false },
+    { key: 'auto', label: 'Auto-advance every (sec, 0 = off)', type: 'number', default: 0, range: [0, 10], step: 0.5 },
+    { key: 'message', label: 'Message name', type: 'text', default: 'slide', suggest: 'messages' },
+  ],
+  create(p) {
+    let kids = [], i = 0, off = 0, drag = null, sx = 0, from = 0, vel = 0, lastX = 0, timer = 0, moved = false, ref = null;
+    const width = (s, e) => uiRect(s, e).w / (uiK(s.engine.safe) || 1);
+    const go = (s, j) => {
+      const n = kids.length; if (!n) return;
+      j = p.loop ? ((j % n) + n) % n : clamp(j, 0, n - 1);
+      if (j !== i) { i = j; s.setVar(p.var, i + 1); s.engine.audio.sfx('click'); }
+      timer = 0;
+    };
+    return {
+      uiAlways: true,
+      get index() { return i; },
+      start(e, s) {
+        kids = uiKids(s, e).sort((a, b) => a.x - b.x);
+        for (const q of kids) q._pagerY = q.y;
+        i = clamp(Math.round(+s.vars[p.var] || 1) - 1, 0, Math.max(0, kids.length - 1));
+        off = -i * width(s, e); s.setVar(p.var, i + 1);
+        const pre = p.message || 'slide';
+        s.on('message', (m) => {
+          if (e.dead) return;
+          if (m === pre + ' next') go(s, i + 1); else if (m === pre + ' prev' || m === pre + ' back') go(s, i - 1);
+          else if (m.startsWith(pre + ' ') && Number.isFinite(+m.slice(pre.length + 1))) go(s, +m.slice(pre.length + 1) - 1);
+        });
+        s.on('var', (k, v) => { if (k === p.var && !e.dead) { const j = Math.round(+v || 1) - 1; if (j !== i && j >= 0 && j < kids.length) { i = j; timer = 0; } } });
+        if (p.dots !== false) (s.overlays ||= []).push(ref = (ctx) => {
+          if (e.dead || !e.visible || e._parentHidden || kids.length < 2 || s.engine.editing) return;
+          const r = uiRect(s, e), gap = 16, x0 = r.x - (kids.length - 1) * gap / 2, y = r.y + r.h / 2 - 14;
+          ctx.save(); ctx.globalAlpha = e.alpha ?? 1; ctx.fillStyle = p.dotColor || '#fff';
+          kids.forEach((_, j) => { ctx.globalAlpha = (e.alpha ?? 1) * (j === i ? 1 : 0.35); ctx.beginPath(); ctx.arc(x0 + j * gap, y, j === i ? 4.5 : 3.5, 0, Math.PI * 2); ctx.fill(); });
+          ctx.restore();
+        });
+      },
+      update(e, dt, s) {
+        if (!kids.length) return;
+        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, w = r.w / k;
+        const inside = (q) => Math.abs(q.x - r.x) <= r.w / 2 && Math.abs(q.y - r.y) <= r.h / 2;
+        const live = e.visible && !e._parentHidden;
+        if (live && drag == null) for (const d of inp.downs) if (inside(d)) { drag = d.id; sx = lastX = d.x; from = off; vel = 0; moved = false; }
+        const ptr = drag != null && inp.pointers.get(drag);
+        if (ptr) {
+          const dx = (ptr.x - sx) / k, edge = !p.loop && ((i === 0 && dx > 0) || (i === kids.length - 1 && dx < 0));
+          off = from + (edge ? dx * 0.35 : dx); // rubber-band at the ends
+          vel = vel * 0.6 + ((ptr.x - lastX) / k / Math.max(dt, 1e-3)) * 0.4; lastX = ptr.x;
+          if (Math.abs(ptr.x - sx) > 10) moved = true;
+        } else if (drag != null) {
+          const dx = off - from; drag = null;
+          if (dx < -w * 0.2 || vel < -400) go(s, i + 1); else if (dx > w * 0.2 || vel > 400) go(s, i - 1);
+        } else {
+          off += (-i * w - off) * Math.min(1, dt * 12);
+          if (+p.auto > 0 && live && kids.length > 1 && (timer += dt) >= +p.auto) go(s, p.loop || i < kids.length - 1 ? i + 1 : 0);
+        }
+        if (moved) inp.taps = inp.taps.filter((t) => !inside(t)); // a swipe isn't a tap on what's inside
+        kids.forEach((q, j) => {
+          q.x = j * w + off; q.y = q._pagerY;
+          const qr = uiRect(s, q);
+          q._clipHidden = qr.x + qr.w / 2 <= r.x - r.w / 2 + 1 || qr.x - qr.w / 2 >= r.x + r.w / 2 - 1;
+        });
+      },
+      destroy(e, s) { if (ref) s.overlays = (s.overlays || []).filter((f) => f !== ref); },
+    };
+  },
+});
+
+registerBehavior('uiTabIndicator', {
+  label: 'Tab Indicator', description: 'A bar or pill that slides under the selected tab. Put it inside the tab bar, next to its Nav Item tabs.',
+  params: [
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'matchWidth', label: 'Grow to the tab\'s width', type: 'bool', default: true },
+    { key: 'speed', label: 'Slide speed', type: 'number', default: 14, range: [2, 40], step: 1 },
+  ],
+  create(p) {
+    let first = true;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const tab = s.entities.find((q) => q !== e && !q.dead && q.ui && q.parentEnt === e.parentEnt && (() => { const b = q.getBehavior('navItem'); return b && b.var === p.var && sameVal(s.vars[p.var], b.page); })());
+        if (!tab) return;
+        const k = first ? 1 : Math.min(1, dt * (+p.speed || 14)), tw = tab.shape ? (tab.shape.type === 'circle' ? tab.shape.r * 2 : tab.shape.w) : (tab.extents().hx || 40) * 2;
+        e.x += (tab.x - e.x) * k;
+        if (p.matchWidth !== false && e.shape && e.shape.type !== 'circle') e.shape.w += (tw - e.shape.w) * k;
+        first = false;
       },
     };
   },
@@ -4357,7 +4532,7 @@ registerBehavior('uiLayout', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && (p.tag ? q.has(p.tag) : q.parentEnt === e));
+        const items = s.entities.filter((q) => q !== e && q.ui && !q.dead && q.visible && !q.getBehavior('uiTabIndicator') && (p.tag ? q.has(p.tag) : q.parentEnt === e));
         if (!items.length) return;
         const box = uiRect(s, e), sizes = items.map((q) => { const r = uiRect(s, q); return [r.w, r.h]; }), gap = +p.spacing || 0;
         const eng = s.engine, place = (q, cx, cy) => placeUI(q, cx, cy, eng.width, eng.height, eng.safe);
@@ -5231,6 +5406,8 @@ function runAction(s, e, p, other) {
     case 'set gravity': s.gravity = +p.amount || 0; break;
     case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
     case 'send message': s.send(v); break;
+    case 'go to page': { const [a, b] = String(v || 'home').split('='); if (b !== undefined) s.navTo(b.trim(), a.trim()); else s.navTo(a.trim(), 'page'); break; } // "shop", or "tab = weekly" for another variable
+    case 'go back': s.navBack(); break;
     case 'play animation': playClip(e, v); break;
     default: break;
   }
@@ -6290,6 +6467,13 @@ export const NODE_TYPES = {
   touchPos: { cat: 'Values', label: 'Finger Position', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   coinFlip: { cat: 'Values', label: 'Coin Flip', value: 'bool' },
   level: { cat: 'Values', label: 'Level Number', value: 'number' },
+  // UI navigation
+  goToPage: { cat: 'Objects', label: 'Go To Page', exec: true, outs: ['then'], params: [txt('page', 'shop', 'page'), txt('var', 'page', 'variable'), opt('history', ['open (Back returns)', 'switch (no history)', 'start over (clear history)'], 'open (Back returns)', 'history')] },
+  goBack: { cat: 'Objects', label: 'Go Back', exec: true, outs: ['then', 'nowhere to go'], params: [txt('var', '', 'variable (blank = any)')] },
+  onPage: { cat: 'Events', label: 'On Page Opened', outs: ['then'], params: [txt('page', 'shop', 'page (blank = any)'), txt('var', 'page', 'variable')] },
+  onBack: { cat: 'Events', label: 'On Back', outs: ['then'] },
+  pageIs: { cat: 'Values', label: 'Page Is', value: 'bool', params: [txt('page', 'home', 'page'), txt('var', 'page', 'variable')] },
+  canGoBack: { cat: 'Values', label: 'Can Go Back', value: 'bool' },
   // physics: triggers, collisions, forces and bodies
   triggerEnter: { cat: 'Physics', label: 'On Trigger Enter', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
   triggerExit: { cat: 'Physics', label: 'On Trigger Exit', outs: ['then'], params: [txt('tag', '', 'tag (blank = any)')] },
@@ -6707,6 +6891,8 @@ registerBehavior('graph', {
         }
         case 'otherHasTag': return !!ctx.other?.has(P('tag'));
         case 'hasOther': return !!ctx.other && !ctx.other.dead;
+        case 'pageIs': return sameVal(s.vars[P('var') || 'page'], P('page'));
+        case 'canGoBack': return s.canGoBack();
         default: return 0;
       }
     };
@@ -6856,6 +7042,8 @@ registerBehavior('graph', {
         case 'setTrigger': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; const b = t.ensureBody({ type: 'kinematic' }); b.sensor = P('mode') === 'toggle' ? !b.sensor : P('mode') === 'trigger'; break; }
         case 'setLayer': { const t = P('target') === 'other' ? ctx.other : e; if (!t) break; t.ensureBody({ type: 'kinematic' }).layer = Math.max(0, PHYSICS_LAYERS.indexOf(P('layer'))); break; }
         case 'physMaterial': { const b = e.ensureBody({ type: 'dynamic' }); b.bounce = Math.max(0, +I('bounce') || 0); b.friction = Math.max(0, +I('friction') || 0); b.mass = Math.max(0.01, +I('mass') || 1); break; }
+        case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
+        case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
         case 'raycast': { const h = ray(n, ctx, P, I); if (h) { ctx.hit = h; if (h.entity) ctx.other = h.entity; follow(n, 'hit', ctx); } else follow(n, 'miss', ctx); return; }
         case 'overlap': case 'forEachTag': {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
@@ -6887,6 +7075,8 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
+        if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
+        if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
         if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
         if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
         if (g.nodes.some((n) => n.type === 'stateEntered')) s.on('state', (who, name) => { if (who === e) fire('stateEntered', e, s, null, (n) => !param(n, 'state') || param(n, 'state') === name); });
@@ -6996,6 +7186,14 @@ export class Engine {
     this.deviceSafe = { top: 0, right: 0, bottom: 0, left: 0 };
     this.safe = { top: 0, right: 0, bottom: 0, left: 0, k: 1 };
     this.safeOverride = null; // the editor's phone preview: pretend there is a notch / home bar
+    // the phone's back gesture / browser Back and Esc go back in the game's UI (the editor turns this off: it has its own Back)
+    this.systemBack = opts.systemBack !== false; this.histDepth = 0; this.histSkip = 0;
+    window.addEventListener('popstate', () => {
+      if (!this.systemBack) return;
+      if (this.histSkip) { this.histSkip--; return; } // our own history.back() after the game went back by itself
+      if (this.histDepth > 0) { this.histDepth--; this.scene?.navBack(); }
+    });
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !this.editing && this.scene?.state === 'play' && this.scene.canGoBack()) { ev.preventDefault(); this.scene.navBack(); } });
 
     this.input = new Input(this, this.uiCanvas);
     this.audio = new Audio();
@@ -7257,6 +7455,20 @@ export class Engine {
   }
 
   /** An open side bar or popup takes the taps: one outside it closes it and goes no further. */
+  /** Keep the browser history in step with the game's pages, and go back on a swipe in from the left edge. */
+  navTick(s) {
+    const inp = this.input;
+    if (s.settings.edgeSwipeBack !== false && s.canGoBack()) {
+      for (const u of inp.ups) if (u.sx < 28 && u.x - u.sx > 70 && Math.abs(u.y - u.sy) < 90 && u.time < 0.7) { s.navBack(); inp.taps.length = 0; break; }
+    }
+    if (!this.systemBack || this.editing || typeof history === 'undefined') return;
+    const want = Math.min(s.navDepth(), 20);
+    try {
+      if (want > this.histDepth) { history.pushState({ pocketNav: this.histDepth + 1 }, ''); this.histDepth++; }
+      else if (want < this.histDepth && !this.histSkip) { this.histSkip++; this.histDepth--; history.back(); }
+    } catch { /* sandboxed frames can't change history */ }
+  }
+
   modalTaps(s) {
     const m = s.modal;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
@@ -7323,6 +7535,7 @@ export class Engine {
     if (!this.editing) this.fitScreen();
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
+    this.navTick(s);
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {

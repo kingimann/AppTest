@@ -314,6 +314,16 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Layout Group** can now arrange its own children and spread them evenly.
 - **In the UI editor:** the **Pages** button previews one page at a time.
 
+**Advanced navigation (pages with history, like an app):**
+- **Menu with Pages:** a main menu whose buttons open Levels, Settings and Credits pages (Levels has a World 2 page inside it). Each page slides in from the right; Back slides it out to the left and returns to the exact page you came from.
+- **Back Button:** goes back one page, closing an open popup or side bar first, and hides itself when there's nowhere to go back to (or goes to a *fallback* page). The **phone's back gesture / browser Back**, **Esc**, and a **swipe in from the left edge** (Game Settings › Mobile, on by default) do the same in played and exported games.
+- **Sliding Page:** a ready page with a Back button. **Show If** has two new animations: **slide (follows navigation)** (forward slides in from the right, Back from the left, and tabs slide toward the side you tapped) and **zoom**.
+- **Swipe Pages:** swipe between cards (onboarding, shop carousel, worlds) with dots, rubber-band ends, optional loop and auto-advance; the page number is in a variable (`slide`), and the messages `slide next`, `slide prev` and `slide 2` move it.
+- **Sliding Tab Bar:** a pill (**Tab Indicator**) slides and resizes to the selected tab.
+- **Nav Item** can *switch tab* (no history) or *open page (Back returns)*. Buttons, triggers and rules have the actions **go to page** (`shop`, or `tab = weekly` for another variable) and **go back**.
+- **Nodes:** **Go To Page** (open / switch / start over), **Go Back** (*then* / *nowhere to go*), **On Page Opened**, **On Back**, and the values **Page Is** and **Can Go Back**.
+- Scripts: `scene.navTo(page, variable, { history, dir, clear })`, `scene.navBack()`, `scene.canGoBack()`.
+
 ### Sprites (drawn art, no emoji)
 
 - *Project › Sprites* is a library of about 100 drawn sprites (as of v0.1): characters, enemies, items, nature, vehicles, blocks and white UI icons. They are vector art, so they stay sharp at any size and add almost nothing to a project (`sprite: { src: 'art:slime' }`).

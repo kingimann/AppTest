@@ -12,7 +12,7 @@ const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move',
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
-  _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'destroy'],
+  _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'goToPage', 'destroy'],
   _bool: ['compare', 'touching', 'grounded', 'rayHits', 'inTrigger', 'isMoving', 'coinFlip', 'and', 'not'],
   _number: ['number', 'getVar', 'random', 'math', 'distance', 'position'],
   tap: ['addVar', 'punch', 'popText', 'sound', 'pulse', 'playAnim', 'particles', 'destroy'],
@@ -48,6 +48,9 @@ const CAT_HELP = {
   Sensing: 'Raycasts, what\'s nearby, line of sight, the screen. Found objects become “other”.',
 };
 export const NODE_HELP = {
+  goToPage: 'Show a UI page (sets the page variable). “open” lets Back return here; “start over” clears the history', goBack: 'Go back a page (closes a popup or side bar first); “nowhere to go” runs when there is no history',
+  onPage: 'When a page opens (the page variable changes to it)', onBack: 'When the player goes back (Back button, phone back gesture, Esc, edge swipe)',
+  pageIs: 'Is this page showing?', canGoBack: 'Is there a page (or popup) to go back from?',
   triggerEnter: 'When something enters this trigger (or this enters one); it becomes “other”', triggerExit: 'When something leaves the trigger', triggerStay: 'Every frame while something is inside the trigger',
   collisionEnter: 'When something solid bumps into this; set a speed to ignore soft touches', collisionExit: 'When a solid contact ends', collisionStay: 'Every frame while two solid things touch',
   landed: 'When this lands on the ground', leftGround: 'When this jumps or falls off the ground',

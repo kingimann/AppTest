@@ -291,7 +291,7 @@ function changed({ structure = false, inspector = false } = {}) {
 // ============================================================================
 // Engine in edit mode
 // ============================================================================
-const engine = new Engine({ parent: $('#viewport') });
+const engine = new Engine({ parent: $('#viewport'), systemBack: false }); // the editor handles the phone's Back itself
 engine.editing = true;
 engine.showUI = true;
 engine.input.enabled = false;
@@ -2983,6 +2983,7 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Portrait or landscape: see Orientation above.'),
     orientationOf() === 'any' && C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
     C('settings.shareButton', { label: 'Share Score Button', type: 'bool', def: true }),
+    C('settings.edgeSwipeBack', { label: 'Swipe from the left edge goes Back', type: 'bool', def: true, infoText: 'In menus with pages: a swipe in from the left edge goes back, like an iPhone app. The phone\'s back gesture and Esc always do.' }),
     h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
   ], { icon: 'gamepad', key: 's-mobile' }));
   box.append(comp('Rules', [
@@ -3586,8 +3587,10 @@ function addPrefab(def, at) {
     return k;
   };
   for (const b of def.before || []) addTree(b, null, at);
-  const j = def.children ? addTree({ ...def.props, children: def.children }, null, at) : addEntity(def.props, at);
-  if (def.children || def.before) { selectedId = j.id; changed({ structure: true }); }
+  const kids = def.children || def.props.children; // children can sit on the widget or inside its props
+  const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
+  for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
+  if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
   if (def.note) setTimeout(() => toast(def.note), 900);
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   if (def.tilemap) { // centre the starter row under the drop point and get ready to paint

@@ -1336,7 +1336,8 @@ function control(target, path, spec) {
     changed({ structure: spec.structure || ['name', 'tags', 'template', 'locked'].includes(path) });
   };
   const val = get();
-  const label = h('label', { title: spec.label }, spec.label);
+  const text = String(spec.label ?? '').replace(/ \((2D|3D)\)$/, ''); // the other mode's fields are hidden, so no need to say which
+  const label = h('label', { title: text }, text);
   let el;
   switch (spec.type) {
     case 'number': {
@@ -1425,7 +1426,8 @@ function control(target, path, spec) {
       }
     }
   }
-  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : '') }, label, el);
+  const side = ['number', 'select', 'color', 'template', undefined, 'text'].includes(spec.type) && !spec.ease; // label left, control right
+  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : side ? ' side' : '') }, label, el);
   if (spec.infoText) row.append(h('div', { class: 'obox info' }, spec.infoText));
   return row;
 }
@@ -1488,6 +1490,7 @@ function suggestions(kind) {
 function shown(p, b, threeD) {
   if (p.only3d && !threeD) return false;
   if (p.only2d && threeD) return false;
+  if (/\((2D|3D)\)$/.test(p.label || '') && p.label.endsWith(threeD ? '(2D)' : '(3D)')) return false; // e.g. "Offset Z (3D)" in a 2D game
   if (!p.showIf) return true;
   if (typeof p.showIf === 'function') { try { return !!p.showIf(b); } catch { return true; } }
   return Object.entries(p.showIf).every(([k, vals]) => vals.includes(b[k] ?? p.def));
@@ -1592,11 +1595,11 @@ function vecRow(target, label, keys, defs, step) {
     const set = (v) => { target()[k] = v; changed(); };
     const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: get(), 'data-path': k,
       oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) set(n); } });
-    const b = h('b', { class: 'xyz'[i] }, 'XYZ'[i]);
+    const one = keys.length === 1, b = h('b', { class: one ? 'deg' : 'xyz'[i] }, one ? (label === 'Rotation' ? '°' : '⇆') : 'XYZ'[i]);
     scrubber(b, inp, get, set, step);
     return h('div', { class: 'vf' }, b, inp);
   });
-  return h('div', { class: 'row' }, h('label', {}, label), h('div', { class: 'vec', style: `--n:${keys.length}` }, fields));
+  return h('div', { class: 'row' + (keys.length === 1 ? ' side' : '') }, h('label', {}, label), h('div', { class: 'vec', style: `--n:${keys.length}` }, fields));
 }
 
 const GEO_OPTIONS = [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Cylinder'], ['cone', 'Cone'], ['capsule', 'Capsule'], ['pyramid', 'Pyramid'], ['wedge', 'Ramp / Wedge'], ['prism', 'Prism'], ['gem', 'Gem'], ['dome', 'Dome'], ['torus', 'Ring / Torus'], ['plane', 'Plane']];
@@ -1792,10 +1795,10 @@ function renderInspector() {
     h('span', { class: 'sp' }),
     h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
     h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
-  box.append(h('div', { class: 'nav-strip' }, h('label', { class: 'adv-toggle' },
-    h('input', { type: 'checkbox', checked: showAdvanced, onchange: (e) => { showAdvanced = e.target.checked; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); } }), 'Show advanced options')));
-  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings (e.g. speed, color)', value: inspQuery, autocapitalize: 'off',
-    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } })));
+  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings', value: inspQuery, autocapitalize: 'off',
+    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
+    h('button', { class: 'adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
+      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear'), 'Advanced')));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -1818,11 +1821,11 @@ function renderInspector() {
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
-  if (quick.length) box.append(h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))));
+  const quickRow = quick.length && h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))); // shown by Add Component below
   box.append(h('div', { class: 'comp-tools' },
     h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
-    h('button', { class: 'ct', title: 'Collapse all', onclick: () => { for (const el of box.querySelectorAll('.comp')) closedComps.add(el.dataset.key); renderInspector(); } }, icon('upload')),
-    h('button', { class: 'ct', title: 'Expand all', onclick: () => { closedComps.clear(); renderInspector(); } }, icon('download'))));
+    h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
+      if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -1991,6 +1994,7 @@ function renderInspector() {
     }));
   });
 
+  if (quickRow) box.append(quickRow);
   box.append(h('div', { class: 'add-comp', style: 'flex-direction:column;align-items:center;gap:10px' },
     h('button', { class: 'btn wide', onclick: openAddComponent }, icon('plus'), 'Add Component'),
     compClipboard && h('button', { class: 'btn wide', onclick: () => pasteComponent(j) }, icon('paste'), `Paste ${compClipboard.kind === 'behavior' ? Behaviors[compClipboard.data.type]?.label || 'Component' : compClipboard.kind}`)));

@@ -725,3 +725,22 @@ body.playing #attachBar { display: none !important; }
 .kids-btns { display: flex; gap: 10px; }
 .kids-btns .btn { flex: 1; height: 48px; padding: 0 10px; font-size: 15px; }
 .toast { top: calc(var(--top) + 140px); } /* below the selection bar / Attach banner */
+
+/* ---------- easier inspector ---------- */
+/* short fields sit beside their label: about half the scrolling */
+.row.side { grid-template-columns: minmax(92px, 36%) minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 14px; }
+.row.side > label { white-space: normal; line-height: 1.25; overflow: visible; font-size: 15px; color: #c9c9c9; }
+.row.side .num button { width: 44px; height: 48px; font-size: 20px; }
+.row.side input:not([type=checkbox]):not([type=range]), .row.side select { height: 48px; }
+.row.side .num input { text-align: center; padding: 6px 4px; }
+.row.side .obox { grid-column: 1 / -1; }
+.vec .vf b.deg { color: var(--muted); font-size: 16px; }
+/* component headers stay pinned while you scroll through that component */
+.comp { overflow: clip; }
+.comp-h { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 #2c2c2c; }
+/* search + Advanced in one row */
+.insp-search { align-items: center; }
+.insp-search input { flex: 1; min-width: 0; }
+.adv-btn { flex: none; height: 50px; padding: 0 14px; border: 1px solid #1f1f1f; border-radius: 10px; background: #3a3a3a; color: var(--muted); display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+.adv-btn.on { background: #46607c; color: #fff; border-color: #46607c; }
+.nav-strip { padding-bottom: 10px; }

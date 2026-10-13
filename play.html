@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Pocket Player</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<style>html,body{margin:0;height:100%;background:#0b0b1a;overflow:hidden;overscroll-behavior:none}</style>
+</head>
+<body>
+<script type="module">
+  // play.html?game=<template key>  or  play.html?src=<url to scene JSON>
+  import { Engine } from './engine/pocket.js';
+  import { templates } from './examples/templates.js';
+  const q = new URLSearchParams(location.search);
+  let json = templates[q.get('game') || 'sky-dodge'];
+  if (q.get('src')) json = await (await fetch(q.get('src'))).json();
+  document.title = json.name;
+  window.engine = new Engine();
+  window.engine.start(json);
+</script>
+</body>
+</html>

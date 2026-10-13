@@ -1,7 +1,7 @@
 {
-  "name": "Neon Dodge",
-  "short_name": "Neon Dodge",
-  "start_url": ".",
+  "name": "Pocket Engine",
+  "short_name": "Pocket",
+  "start_url": "./",
   "display": "fullscreen",
   "orientation": "portrait",
   "background_color": "#0b0b1a",

@@ -2,53 +2,68 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0b0b1a">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Neon Dodge">
-<title>Neon Dodge</title>
-<link rel="manifest" href="manifest.webmanifest">
+<title>Pocket Engine</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon.svg">
-<link rel="stylesheet" href="style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { --bg:#0b0b1a; --card:#16162a; --line:#2b2b48; --fg:#eef0ff; --muted:#9aa0c8; --accent:#33f0ff; --pink:#ff3dac; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: calc(env(safe-area-inset-top) + 32px) 16px calc(env(safe-area-inset-bottom) + 40px); }
+  h1 { font-size: clamp(40px, 12vw, 64px); line-height: 1; margin: 0 0 10px; font-weight: 900;
+    background: linear-gradient(180deg, var(--accent), var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--muted); font-size: 18px; margin: 0 0 24px; }
+  .cta { display:inline-block; background:var(--accent); color:#0b0b1a; font-weight:900; text-decoration:none; padding:15px 26px; border-radius:999px; font-size:18px; box-shadow:0 0 24px rgba(51,240,255,.4); }
+  h2 { font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 40px 0 12px; }
+  .cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; }
+  .card h3 { margin:0 0 4px; font-size:18px; }
+  .card p { margin:0 0 12px; color:var(--muted); font-size:14px; }
+  .card a { color:var(--accent); font-weight:700; text-decoration:none; margin-right:14px; }
+  ul { padding-left: 20px; color: var(--muted); } li { margin: 4px 0; } li b { color: var(--fg); }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; overflow-x:auto; font-size:13px; line-height:1.5; }
+</style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<main>
+  <h1>Pocket Engine</h1>
+  <p class="lead">A 2D + 3D game engine for mobile web browsers, with a visual editor you can use on your phone.</p>
+  <a class="cta" href="editor/">Open the editor →</a>
 
-<div id="hud" class="hidden">
-  <div class="stat"><span class="label">Score</span><span id="score">0</span></div>
-  <button id="pauseBtn" aria-label="Pause">II</button>
-  <div class="stat right"><span class="label">Best</span><span id="best">0</span></div>
-</div>
-
-<div id="menu" class="overlay">
-  <h1>NEON<br>DODGE</h1>
-  <p class="tagline">Drag anywhere to steer.<br>Dodge the blocks. Grab the orbs.</p>
-  <div class="legend">
-    <span><i class="dot orb"></i> +10</span>
-    <span><i class="dot shield"></i> Shield</span>
-    <span><i class="dot slow"></i> Slow-mo</span>
+  <h2>Examples</h2>
+  <div class="cards">
+    <div class="card"><h3>Neon Dodge</h3><p>2D · written in JavaScript against the engine API.</p><a href="examples/neon-dodge/">Play</a></div>
+    <div class="card"><h3>Sky Dodge</h3><p>2D · spawners, templates, collectibles. Made with the editor's building blocks.</p><a href="play.html?game=sky-dodge">Play</a><a href="editor/?template=sky-dodge">Edit</a></div>
+    <div class="card"><h3>Jump Quest</h3><p>2D platformer · gravity, moving platforms, springs, lives.</p><a href="play.html?game=jump-quest">Play</a><a href="editor/?template=jump-quest">Edit</a></div>
+    <div class="card"><h3>Gem Garden</h3><p>3D · WebGL, joystick, follow camera, patrolling enemies.</p><a href="play.html?game=gem-garden">Play</a><a href="editor/?template=gem-garden">Edit</a></div>
   </div>
-  <button id="playBtn" class="btn">PLAY</button>
-  <p class="small">Best: <span id="menuBest">0</span></p>
-</div>
 
-<div id="pause" class="overlay hidden">
-  <h2>Paused</h2>
-  <button id="resumeBtn" class="btn">RESUME</button>
-  <button id="quitBtn" class="btn ghost">MENU</button>
-</div>
+  <h2>What's inside</h2>
+  <ul>
+    <li><b>2D renderer</b> (Canvas 2D) and <b>3D renderer</b> (WebGL: lighting, fog, blob shadows)</li>
+    <li><b>Touch controls</b>: virtual joystick, jump/fire buttons, drag and tap. Keyboard on desktop</li>
+    <li><b>Arcade physics</b>: static, dynamic and kinematic bodies, triggers, gravity, platformer grounding</li>
+    <li><b>Behaviors</b>: move, platformer, spawner, shooter, collectible, hazard, goal, patrol, camera follow, custom scripts…</li>
+    <li><b>Game flow</b>: title screen, score, lives, best score saved on the device, game over, win, pause</li>
+    <li><b>Editor</b>: add objects, drag, pinch-zoom/orbit, inspector, undo, saved projects, one-file HTML export</li>
+  </ul>
 
-<div id="over" class="overlay hidden">
-  <h2>Game Over</h2>
-  <p class="big" id="finalScore">0</p>
-  <p class="small" id="newBest" hidden>New best!</p>
-  <button id="retryBtn" class="btn">PLAY AGAIN</button>
-  <button id="menuBtn" class="btn ghost">MENU</button>
-</div>
+  <h2>Use it from code</h2>
+<pre><code>import { Engine, Scene } from './engine/pocket.js';
 
-<script src="game.js"></script>
+const engine = new Engine();
+engine.start(() => {
+  const s = new Scene({ mode: '2d', settings: { title: 'MY GAME', joystick: true } });
+  s.add({ name: 'Player', tags: ['player'], x: 200, y: 500,
+          shape: { type: 'circle', r: 20, fill: '#33f0ff' },
+          behaviors: [{ type: 'move', speed: 260 }] });
+  s.add({ x: 200, y: 200, shape: { type: 'star', w: 40, h: 40, fill: '#ffd23d' },
+          behaviors: [{ type: 'collectible', score: 10 }] });
+  return s;
+});</code></pre>
+  <p style="color:var(--muted)">See <a style="color:var(--accent)" href="https://github.com/kingimann/AppTest#readme">the README</a> for the full API.</p>
+</main>
 </body>
 </html>

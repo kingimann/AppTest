@@ -661,6 +661,17 @@ export class Scene {
   emit(evt, ...args) { for (const fn of this.listeners[evt] || []) fn(...args); }
 
   setVar(k, v) { this.vars[k] = v; this.emit('var', k, v); }
+  /** Inventory: add (or with a negative n, remove) items. {inventory} lists them, {item_Name} counts one. */
+  addItem(name, n = 1, icon = '') {
+    const inv = (this.inventory ||= {});
+    const it = inv[name] ||= { n: 0, icon };
+    it.n = Math.max(0, it.n + n); if (icon) it.icon = icon;
+    if (!it.n) delete inv[name];
+    this.setVar('item_' + name, it.n || 0);
+    this.setVar('inventory', Object.entries(inv).map(([k, v]) => `${v.icon || k}×${v.n}`).join('  ') || '—');
+    this.emit('inventory', name, it.n || 0);
+  }
+  itemCount(name) { return this.inventory?.[name]?.n || 0; }
   /** Broadcast a message by name; Tween / Animator / Sprite Animation components and "On Message" nodes can react. */
   send(name, data) { if (name) this.emit('message', String(name), data); }
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
@@ -1356,11 +1367,14 @@ export class Renderer2D {
     ctx.scale(z, z);
     ctx.translate(-c.x, -c.y);
     if (engine.editing && engine.drawGrid) engine.drawGrid(ctx, scene, z);
+    for (const e of scene.entities) { const L = e.data._line; if (L && !e.dead) { ctx.strokeStyle = L[6]; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(L[3], L[4]); ctx.stroke(); } }
     for (const e of scene.entities) if (e.visible && !e.ui && !e.dead) drawEntity2D(ctx, e, scene.vars, scene.time);
     for (const p of scene.particles) {
-      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.globalAlpha = Math.max(0, p.life) * (p.alpha ?? 1);
       ctx.fillStyle = p.color;
-      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+      if (p.round) { ctx.beginPath(); ctx.arc(p.x, p.y, p.size / 2, 0, Math.PI * 2); ctx.fill(); }
+      else if (p.stretch) ctx.fillRect(p.x - p.size / 4, p.y - p.size * p.stretch / 2, p.size / 2, p.size * p.stretch);
+      else ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
     ctx.globalAlpha = 1;
     // lights: a soft additive glow, and holes cut into the darkness layer
@@ -1852,7 +1866,8 @@ export class Renderer3D {
       this.drawMesh('cylinder', M4.trs(e.x, ground + 0.015, e.z, 0, 0, 0, r * 2 * k, 0.01, r * 2 * k), '#000000', 1, 0.28 * k);
     }
     for (const [e, op] of transparent) this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive, op);
-    for (const p of scene.particles) this.drawMesh('box', M4.trs(p.x, p.y, p.z, 0, 0, 0, p.size, p.size, p.size), p.color, 1, Math.max(0, p.life));
+    for (const p of scene.particles) this.drawMesh(p.round ? 'sphere' : 'box', M4.trs(p.x, p.y, p.z, 0, 0, 0, p.size, p.size * (p.stretch || 1), p.size), p.color, 1, Math.max(0, p.life) * (p.alpha ?? 1));
+    for (const e of scene.entities) if (e.data._line && !e.dead) { const L = e.data._line; this.drawLines(L.slice(0, 6), L[6]); }
     gl.depthMask(true); gl.disable(gl.BLEND);
     engine.onRenderWorld?.(this, scene);
   }
@@ -1861,6 +1876,36 @@ export class Renderer3D {
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
+/** Dialogue box: speaker name, typewriter text, tap to continue. */
+function drawDialog(ctx, scene, W, H, engine) {
+  const d = scene.dialog, line = d.lines[d.i]; if (!line) return;
+  const m = 14, bw = Math.min(W - m * 2, 560), bh = 132, x = (W - bw) / 2, y = H - engine.safe.bottom - bh - 20;
+  ctx.save();
+  ctx.fillStyle = 'rgba(12,12,26,0.92)'; ctx.strokeStyle = 'rgba(255,224,130,0.9)'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 16); else ctx.rect(x, y, bw, bh); ctx.fill(); ctx.stroke();
+  if (line.who) {
+    ctx.font = '800 15px system-ui, sans-serif'; const tw = ctx.measureText(line.who).width + 24;
+    ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
+    ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
+  }
+  ctx.fillStyle = '#fff'; ctx.font = '600 17px system-ui, sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  const text = line.text.slice(0, Math.floor(d.chars)), words = text.split(' '); let row = '', ty = y + 26;
+  for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 && row) { ctx.fillText(row, x + 18, ty); row = w; ty += 24; } else row = t; }
+  ctx.fillText(row, x + 18, ty);
+  if (d.chars >= line.text.length) { ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(d.i < d.lines.length - 1 ? '▼' : '✓', x + bw - 16, y + bh - 28); }
+  ctx.restore();
+}
+/** Advance the dialogue: typewriter, tap to finish the line, tap again for the next. Returns true if it used the tap. */
+function stepDialog(s, dt, tapped) {
+  const d = s.dialog, line = d?.lines[d.i]; if (!line) { s.dialog = null; return false; }
+  d.chars = Math.min(line.text.length, d.chars + dt * 45);
+  if (!tapped) return false;
+  if (d.chars < line.text.length) d.chars = line.text.length;
+  else if (++d.i >= d.lines.length) { s.dialog = null; if (d.then) s.send(d.then); }
+  s.engine.audio.sfx('click');
+  return true;
+}
+
 function drawMessage(ctx, scene, W, H, engine) {
   const m = scene.msg;
   if (!m) return;
@@ -1962,6 +2007,7 @@ function renderUI(engine, scene) {
     ctx.globalAlpha = 1;
   }
   drawMessage(ctx, scene, W, H, engine);
+  if (scene.dialog) drawDialog(ctx, scene, W, H, engine);
   if (scene.rotateNeeded) {
     dim(0.9);
     big('⟳', H * 0.4, 64);
@@ -3066,7 +3112,7 @@ registerBehavior('checkpoint', {
 });
 
 registerBehavior('destructible', {
-  label: 'Health', description: 'Takes hits from objects with a tag (like bullets) and breaks when health runs out.',
+  label: 'Breakable', description: 'Takes hits from objects with a tag (like bullets) and breaks when its hits run out. For full health with damage, healing and death actions use Health & Damage.',
   params: [
     { key: 'hp', label: 'Health', type: 'number', default: 3 },
     { key: 'hitBy', label: 'Hurt by tag', type: 'text', default: 'bullet' },
@@ -3089,6 +3135,354 @@ registerBehavior('destructible', {
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
         e.destroy();
       },
+    };
+  },
+});
+
+// ---- advanced components ----
+/** Health & Damage: hit points, damage from tags, invulnerability, knockback, regeneration and what happens on death. */
+registerBehavior('health', {
+  label: 'Health & Damage', description: 'Hit points that go down when touched by dangerous tags. Brief invulnerability, knockback, regeneration, a health variable for your HUD, and a death action.',
+  params: [
+    { key: 'hp', label: 'Max health', type: 'number', default: 3, range: [1, 100], step: 1 },
+    { key: 'hurtBy', label: 'Hurt by tags (comma separated)', type: 'text', default: 'enemy, hazard', suggest: 'tags' },
+    { key: 'damage', label: 'Damage per hit', type: 'number', default: 1, step: 1 },
+    { key: 'invuln', label: 'Invulnerable after a hit (sec)', type: 'number', default: 1, range: [0, 5], step: 0.1 },
+    { key: 'knockback', label: 'Knockback', type: 'number', default: 300, default3d: 8 },
+    { key: 'regen', label: 'Heal per second', type: 'number', default: 0, step: 0.1, group: 'More' },
+    { key: 'syncVar', label: 'Show health in variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “hp”: show it with a Progress Bar or {hp} in a text.', group: 'More' },
+    { key: 'onDeath', label: 'When health reaches 0', type: 'select', options: ['destroy', 'game over', 'respawn', 'send message', 'nothing'], default: 'destroy' },
+    { key: 'message', label: 'Message to send', type: 'text', default: 'died', suggest: 'messages', showIf: { onDeath: ['send message'] } },
+    { key: 'points', label: 'Points when it dies', type: 'number', default: 0, step: 5, group: 'More' },
+  ],
+  create(p) {
+    let hp = 0, home = null;
+    const tags = String(p.hurtBy || '').split(',').map((t) => t.trim()).filter(Boolean);
+    const inst = {
+      get hp() { return hp; },
+      sync(e, s) { e.data.hp = hp; e.data.hpMax = p.hp; if (p.syncVar) s.setVar(p.syncVar, Math.ceil(hp)); },
+      heal(n, e = inst.entity) { hp = Math.min(p.hp, hp + n); inst.sync(e, e.scene); },
+      damage(n, e = inst.entity, from = null) {
+        const s = e.scene; if (e.dead || hp <= 0 || (e.data.invuln || 0) > 0) return;
+        hp -= n; e.data.invuln = +p.invuln || 0; inst.sync(e, s);
+        s.emit('damage', e, n); s.engine.audio.sfx('hit'); s.impulse(6, e);
+        if (from && p.knockback && e.body) { const dx = e.x - from.x, dy = e.y - from.y, dz = e.z - from.z, l = Math.hypot(dx, dy, dz) || 1, up = is3D(e) ? 1 : -1; e.body.vel.x = dx / l * p.knockback; e.body.vel.z = dz / l * p.knockback; e.body.vel.y = up * Math.abs(p.knockback) * 0.6; }
+        if (hp > 0) return;
+        s.emit('death', e); if (p.points) s.addVar('score', p.points);
+        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 24);
+        if (p.onDeath === 'destroy') e.destroy();
+        else if (p.onDeath === 'game over') s.gameOver();
+        else if (p.onDeath === 'respawn') { Object.assign(e, home); if (e.body) e.body.vel = { x: 0, y: 0, z: 0 }; hp = p.hp; inst.sync(e, s); }
+        else if (p.onDeath === 'send message') s.send(p.message);
+      },
+      start(e, s) { inst.entity = e; hp = p.hp; home = { x: e.x, y: e.y, z: e.z }; inst.sync(e, s); for (const t of tags) s.want(t); },
+      update(e, dt, s) { if (p.regen && hp > 0 && hp < p.hp) { hp = Math.min(p.hp, hp + p.regen * dt); inst.sync(e, s); } },
+      collide(e, other) { if (tags.some((t) => other.has(t))) inst.damage(+p.damage || 1, e, other); },
+    };
+    return inst;
+  },
+});
+
+/** Enemy AI: patrol → chase when it sees the target → attack in range → give up and go home. */
+registerBehavior('enemyAI', {
+  label: 'Enemy AI', description: 'A smart enemy: patrols, chases the player when it can see them, attacks up close (damaging their Health), and returns home when it loses them.',
+  params: [
+    { key: 'target', label: 'Target tag', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'sight', label: 'Sight range', type: 'number', default: 260, default3d: 9 },
+    { key: 'needLineOfSight', label: 'Walls block its view', type: 'bool', default: true },
+    { key: 'patrol', label: 'Patrol distance (0 = stand guard)', type: 'number', default: 100, default3d: 3 },
+    { key: 'speed', label: 'Patrol speed', type: 'number', default: 60, default3d: 2 },
+    { key: 'chaseSpeed', label: 'Chase speed', type: 'number', default: 140, default3d: 4.5 },
+    { key: 'attackRange', label: 'Attack range', type: 'number', default: 44, default3d: 1.4 },
+    { key: 'attackEvery', label: 'Attack every (sec)', type: 'number', default: 1, range: [0.1, 5], step: 0.1 },
+    { key: 'damage', label: 'Damage', type: 'number', default: 1, step: 1 },
+    { key: 'giveUp', label: 'Give up after losing sight (sec)', type: 'number', default: 3, group: 'More' },
+  ],
+  create(p) {
+    let home = null, dir = 1, lost = 0, cool = 0, state = 'patrol';
+    const moveTo = (e, s, tx, tz, speed, dt) => { // tz = target y in 2D
+      const three = is3D(e), b = e.body, grav = !three && s.gravity && b?.type === 'dynamic' && b.gravityScale;
+      let dx = tx - e.x, dy = three ? tz - e.z : tz - e.y; if (grav) dy = 0;
+      const l = Math.hypot(dx, dy); if (l < 1e-3) { if (b?.type === 'dynamic') { b.vel.x = 0; if (three) b.vel.z = 0; else if (!grav) b.vel.y = 0; } return; }
+      const vx = dx / l * speed, vy = dy / l * speed;
+      if (b?.type === 'dynamic') { b.vel.x = vx; if (three) b.vel.z = vy; else if (!grav) b.vel.y = vy; }
+      else { e.x += vx * dt; if (three) e.z += vy * dt; else e.y += vy * dt; }
+      if (Math.abs(vx) > 1e-3) e.data.flipX = vx < 0;
+      if (three) e.ry = Math.atan2(-vx, -vy) / DEG;
+    };
+    return {
+      start(e) { home = { x: e.x, y: e.y, z: e.z }; e.data.state = state; },
+      update(e, dt, s) {
+        const t = s.findAll(p.target).find((q) => q !== e && !q.dead), three = is3D(e);
+        const d = t ? Math.hypot(t.x - e.x, three ? 0 : t.y - e.y, three ? t.z - e.z : 0) : Infinity;
+        const sees = !!t && d <= p.sight && (!p.needLineOfSight || s.canSee(e, t));
+        cool -= dt;
+        if (sees) { lost = 0; state = d <= p.attackRange ? 'attack' : 'chase'; }
+        else if (state === 'chase' || state === 'attack') { lost += dt; if (lost > p.giveUp) state = 'return'; }
+        if (state === 'attack' && t) {
+          moveTo(e, s, e.x, three ? e.z : e.y, 0, dt);
+          if (cool <= 0) { cool = p.attackEvery; const hb = t.getBehavior('health'); if (hb) hb.damage(+p.damage || 1, t, e); else s.emit('attack', e, t); s.punch(e, three ? { sx: 0.25, sy: 0.25, sz: 0.25 } : { sx: 0.25, sy: 0.25 }, 0.3, { add: true }); }
+        } else if (state === 'chase' && t) moveTo(e, s, t.x, three ? t.z : t.y, p.chaseSpeed, dt);
+        else if (state === 'return') { const hz = three ? home.z : home.y; moveTo(e, s, home.x, hz, p.speed, dt); if (Math.hypot(e.x - home.x, (three ? e.z : e.y) - hz) < 4 * (three ? 0.05 : 1)) state = 'patrol'; }
+        else if (p.patrol > 0) { const tx = home.x + dir * p.patrol; moveTo(e, s, tx, three ? home.z : (s.gravity ? e.y : home.y), p.speed, dt); if (Math.abs(e.x - tx) < (three ? 0.1 : 3)) dir = -dir; }
+        else moveTo(e, s, e.x, three ? e.z : e.y, 0, dt);
+        e.data.state = state;
+      },
+    };
+  },
+});
+
+/** Grid A* over the level: static colliders are walls. Returns a list of points or null. */
+function findPath(s, from, to, cell, agentR, ignore) {
+  const three = s.mode === '3d', walls = s.entities.filter((q) => q.body && q.body.type === 'static' && !q.body.sensor && !q.dead && q !== ignore && !q.ui);
+  let x0 = Math.min(from.x, to.x), x1 = Math.max(from.x, to.x), y0 = Math.min(three ? from.z : from.y, three ? to.z : to.y), y1 = Math.max(three ? from.z : from.y, three ? to.z : to.y);
+  const pad = cell * 12; x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  const W = Math.min(160, Math.ceil((x1 - x0) / cell) + 1), H = Math.min(160, Math.ceil((y1 - y0) / cell) + 1);
+  const blocked = new Uint8Array(W * H), wb = walls.map((q) => { const ex = q.extents(); return { cx: q.x + (ex.ox || 0), cy: three ? q.z + (ex.oz || 0) : q.y + (ex.oy || 0), hx: (ex.sphere ? ex.r : ex.bx ?? ex.hx) + agentR, hy: (ex.sphere ? ex.r : three ? ex.hz : ex.by ?? ex.hy) + agentR, top: q.y + (ex.oy || 0) + (ex.sphere ? ex.r : ex.hy), bot: q.y + (ex.oy || 0) - (ex.sphere ? ex.r : ex.hy) }; })
+    .filter((w) => !three || (w.top > from.y - 0.4 && w.bot < from.y + 0.9)); // 3D: only things at body height are walls (floors aren't)
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const x = x0 + i * cell, y = y0 + j * cell;
+    for (const w of wb) if (Math.abs(x - w.cx) < w.hx && Math.abs(y - w.cy) < w.hy) { blocked[j * W + i] = 1; break; }
+  }
+  const idx = (x, y) => [Math.round((x - x0) / cell), Math.round((y - y0) / cell)];
+  const [si, sj] = idx(from.x, three ? from.z : from.y), [ti, tj] = idx(to.x, three ? to.z : to.y);
+  if (ti < 0 || tj < 0 || ti >= W || tj >= H || si < 0 || sj < 0 || si >= W || sj >= H) return null;
+  blocked[sj * W + si] = 0; blocked[tj * W + ti] = 0;
+  const g = new Float32Array(W * H).fill(Infinity), came = new Int32Array(W * H).fill(-1), open = [[0, si, sj]], closed = new Uint8Array(W * H);
+  g[sj * W + si] = 0;
+  const hf = (i, j) => Math.hypot(i - ti, j - tj);
+  while (open.length) {
+    let bi = 0; for (let k = 1; k < open.length; k++) if (open[k][0] < open[bi][0]) bi = k;
+    const [, i, j] = open.splice(bi, 1)[0], id = j * W + i;
+    if (closed[id]) continue; closed[id] = 1;
+    if (i === ti && j === tj) {
+      const pts = []; let c = id;
+      while (c !== -1) { const ci = c % W, cj = (c / W) | 0; pts.unshift(three ? { x: x0 + ci * cell, y: from.y, z: y0 + cj * cell } : { x: x0 + ci * cell, y: y0 + cj * cell, z: 0 }); c = came[c]; }
+      return pts;
+    }
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const ni = i + di, nj = j + dj; if (ni < 0 || nj < 0 || ni >= W || nj >= H) continue;
+      const nid = nj * W + ni; if (blocked[nid] || closed[nid]) continue;
+      if (di && dj && (blocked[j * W + ni] || blocked[nj * W + i])) continue; // no cutting corners
+      const ng = g[id] + (di && dj ? 1.414 : 1);
+      if (ng < g[nid]) { g[nid] = ng; came[nid] = id; open.push([ng + hf(ni, nj), ni, nj]); }
+    }
+    if (open.length > 20000) break;
+  }
+  return null;
+}
+registerBehavior('navigator', {
+  label: 'Pathfinding (Navigator)', description: 'Finds a way around walls to reach a target (A* pathfinding): smart chasers, pets that follow you, NPCs walking to places.',
+  params: [
+    { key: 'target', label: 'Go to tag or object', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'speed', label: 'Speed', type: 'number', default: 120, default3d: 3.5 },
+    { key: 'cell', label: 'Grid size (smaller = more precise)', type: 'number', default: 24, default3d: 0.5 },
+    { key: 'stop', label: 'Stop this close', type: 'number', default: 30, default3d: 1 },
+    { key: 'repath', label: 'Re-plan every (sec)', type: 'number', default: 0.5, range: [0.1, 3], step: 0.1, group: 'More' },
+  ],
+  create(p) {
+    let path = null, t = 0, k = 1;
+    return {
+      update(e, dt, s) {
+        const goal = s.find(p.target) || s.findAll(p.target).find((q) => q !== e);
+        if (!goal) return;
+        const three = is3D(e), dist = Math.hypot(goal.x - e.x, three ? goal.z - e.z : goal.y - e.y);
+        const b = e.body;
+        if (dist <= p.stop) { path = null; if (b?.type === 'dynamic') { b.vel.x = 0; if (three) b.vel.z = 0; else if (!s.gravity) b.vel.y = 0; } return; }
+        if ((t -= dt) <= 0 || !path) { t = p.repath; const ex = e.extents(); path = findPath(s, e, goal, Math.max(0.05, +p.cell || 24), (ex.sphere ? ex.r : Math.max(ex.hx, three ? ex.hz : ex.hy)) * 0.9, e); k = 1; }
+        const wp = path?.[Math.min(k, path.length - 1)] || goal;
+        const dx = wp.x - e.x, dy = three ? wp.z - e.z : wp.y - e.y, l = Math.hypot(dx, dy);
+        if (l < (+p.cell || 24) * 0.5 && path && k < path.length - 1) k++;
+        const vx = l ? dx / l * p.speed : 0, vy = l ? dy / l * p.speed : 0;
+        if (b?.type === 'dynamic') { b.vel.x = vx; if (three) b.vel.z = vy; else if (!s.gravity) b.vel.y = vy; }
+        else { e.x += vx * dt; if (three) e.z += vy * dt; else e.y += vy * dt; }
+        if (Math.abs(vx) > 1e-3) e.data.flipX = vx < 0;
+        if (three && l) e.ry = Math.atan2(-vx, -vy) / DEG;
+      },
+    };
+  },
+});
+
+/** Joint: tie this object to another with a spring, a rope or a stiff rod. */
+registerBehavior('joint', {
+  label: 'Joint (spring / rope / rod)', description: 'Connects this object to another one: a bouncy spring, a rope that stops it going too far (swinging, pendulums, grappling), or a stiff rod.',
+  params: [
+    { key: 'connectTo', label: 'Connect to object', type: 'text', default: '', suggest: 'objects' },
+    { key: 'kind', label: 'Type', type: 'select', options: ['rope', 'spring', 'rod'], default: 'rope' },
+    { key: 'length', label: 'Length (0 = current distance)', type: 'number', default: 0 },
+    { key: 'stiffness', label: 'Spring stiffness', type: 'number', default: 30, showIf: { kind: ['spring'] } },
+    { key: 'damping', label: 'Spring damping', type: 'number', default: 2, showIf: { kind: ['spring'] } },
+    { key: 'showLine', label: 'Draw the rope', type: 'bool', default: true },
+    { key: 'color', label: 'Rope color', type: 'color', default: '#d7ccc8', showIf: (b) => !!b.showLine },
+  ],
+  create(p) {
+    let L = 0;
+    return {
+      start(e, s) { const a = s.find(p.connectTo); e.ensureBody({ type: 'dynamic' }); L = +p.length || (a ? Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) : 100); },
+      update(e, dt, s) {
+        const a = s.find(p.connectTo); if (!a || a === e) { e.data._line = null; return; }
+        const b = e.body, dx = e.x - a.x, dy = e.y - a.y, dz = e.z - a.z, d = Math.hypot(dx, dy, dz) || 1e-6, nx = dx / d, ny = dy / d, nz = dz / d;
+        if (p.kind === 'spring') { const f = -(d - L) * p.stiffness, vn = b.vel.x * nx + b.vel.y * ny + b.vel.z * nz; b.vel.x += (f * nx - p.damping * vn * nx) * dt; b.vel.y += (f * ny - p.damping * vn * ny) * dt; b.vel.z += (f * nz - p.damping * vn * nz) * dt; }
+        else if (d > L || p.kind === 'rod') {
+          e.x = a.x + nx * L; e.y = a.y + ny * L; e.z = a.z + nz * L;
+          const vn = b.vel.x * nx + b.vel.y * ny + b.vel.z * nz;
+          if (vn > 0 || p.kind === 'rod') { b.vel.x -= vn * nx; b.vel.y -= vn * ny; b.vel.z -= vn * nz; }
+        }
+        e.data._line = p.showLine ? [a.x, a.y, a.z, e.x, e.y, e.z, p.color || '#d7ccc8'] : null;
+      },
+    };
+  },
+});
+
+/** Wave Spawner: waves of enemies with breaks in between, then do something when they are all beaten. */
+registerBehavior('waveSpawner', {
+  label: 'Wave Spawner', description: 'Spawns waves of a template (5 enemies, then 8, then a boss…) with breaks in between. Shows the wave number in {wave}. Can win the game when all waves are beaten.',
+  params: [
+    { key: 'waves', label: 'Waves', type: 'json', default: [{ template: 'Enemy', count: 4, every: 1 }, { template: 'Enemy', count: 7, every: 0.7 }, { template: 'Enemy', count: 12, every: 0.5 }] },
+    { key: 'pause', label: 'Break between waves (sec)', type: 'number', default: 3, range: [0, 15], step: 0.5 },
+    { key: 'area', label: 'Spawn area width', type: 'number', default: 300, default3d: 10 },
+    { key: 'areaH', label: 'Spawn area height / depth', type: 'number', default: 0, default3d: 10 },
+    { key: 'whenDone', label: 'When every wave is beaten', type: 'select', options: ['win', 'send message', 'loop waves', 'nothing'], default: 'win' },
+    { key: 'message', label: 'Message', type: 'text', default: 'waves-done', showIf: { whenDone: ['send message'] } },
+  ],
+  create(p) {
+    const waves = Array.isArray(p.waves) ? p.waves : [];
+    let w = -1, left = 0, t = 0, spawned = [], phase = 'break';
+    return {
+      start(e, s) { t = 1; s.setVar('wave', 0); },
+      update(e, dt, s) {
+        spawned = spawned.filter((q) => !q.dead);
+        t -= dt;
+        if (phase === 'break' && t <= 0) {
+          w++;
+          if (w >= waves.length) {
+            if (p.whenDone === 'loop waves') { w = 0; } else { phase = 'done'; if (p.whenDone === 'win') s.win(); else if (p.whenDone === 'send message') s.send(p.message); return; }
+          }
+          phase = 'spawn'; left = +waves[w].count || 1; t = 0; s.setVar('wave', w + 1); s.message(`Wave ${w + 1}`, 1.5); s.send('wave-' + (w + 1));
+        } else if (phase === 'spawn' && t <= 0 && left > 0) {
+          const W = waves[w], three = is3D(e);
+          const q = s.spawn(W.template, { x: e.x + rand(-0.5, 0.5) * p.area, y: three ? e.y : e.y + rand(-0.5, 0.5) * p.areaH, z: three ? e.z + rand(-0.5, 0.5) * p.areaH : 0 });
+          if (q) spawned.push(q);
+          left--; t = +W.every || 1;
+        } else if (phase === 'spawn' && left <= 0 && !spawned.length) { phase = 'break'; t = p.pause; }
+      },
+    };
+  },
+});
+
+/** Dialogue: a conversation box with speaker names and typewriter text; tap to continue. */
+registerBehavior('dialogue', {
+  label: 'Dialogue', description: 'Shows a conversation, one line at a time, with speaker names and typewriter text. Tap to continue. Write one line per row as “Name: text”.',
+  params: [
+    { key: 'lines', label: 'Lines (one per row, “Name: text”)', type: 'code', default: 'Guard: Halt! Who goes there?\nYou: Just a traveler.\nGuard: Fine. Watch out for slimes!' },
+    { key: 'trigger', label: 'Start when', type: 'select', options: ['touched by tag', 'tapped', 'game starts', 'message'], default: 'touched by tag' },
+    { key: 'tag', label: 'Tag', type: 'text', default: 'player', suggest: 'tags', showIf: { trigger: ['touched by tag'] } },
+    { key: 'message', label: 'Message', type: 'text', default: 'talk', suggest: 'messages', showIf: { trigger: ['message'] } },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
+  ],
+  create(p) {
+    let done = false;
+    const lines = String(p.lines || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const m = l.match(/^([^:]{1,24}):\s*(.*)$/); return m ? { who: m[1], text: m[2] } : { who: '', text: l }; });
+    const open = (s) => { if (done && p.once) return; if (s.dialog || !lines.length) return; done = true; s.dialog = { lines, i: 0, chars: 0, pause: p.pause, then: p.then }; };
+    return {
+      uiAlways: true,
+      start(e, s) { if (p.trigger === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } if (p.trigger === 'game starts') open(s); if (p.trigger === 'message') s.on('message', (n) => { if (n === p.message) open(s); }); },
+      update(e, dt, s) { if (p.trigger === 'tapped' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) open(s); },
+      collide(e, other, s) { if (p.trigger === 'touched by tag' && other.has(p.tag)) open(s); },
+    };
+  },
+});
+
+/** Day / Night Cycle: the sun moves, light and sky colors change; 2D levels get darker at night. */
+registerBehavior('dayNight', {
+  label: 'Day / Night Cycle', description: 'Time passes: the sun moves and the light and sky change from day to night and back. 2D levels get dark at night (add lights!). Shows the hour in {hour}.',
+  params: [
+    { key: 'dayLength', label: 'Length of a full day (sec)', type: 'number', default: 60, range: [5, 600], step: 5 },
+    { key: 'start', label: 'Start at hour (0–24)', type: 'number', default: 8, range: [0, 24], step: 0.5 },
+    { key: 'dayColor', label: 'Day sky', type: 'color', default: '#87b8e8' },
+    { key: 'nightColor', label: 'Night sky', type: 'color', default: '#0b1030' },
+    { key: 'maxDark', label: 'Night darkness (2D)', type: 'number', default: 0.8, range: [0, 1], step: 0.05, only2d: true },
+  ],
+  create(p) {
+    let hour = 0;
+    return {
+      start(e, s) { hour = +p.start || 0; },
+      update(e, dt, s) {
+        hour = (hour + dt * 24 / Math.max(1, +p.dayLength || 60)) % 24;
+        const sun = Math.sin((hour - 6) / 24 * Math.PI * 2), day = clamp(sun * 1.6 + 0.3, 0, 1);
+        s.background = mixColor(p.nightColor, p.dayColor, day);
+        if (s.mode === '3d') {
+          s.light.sunAngle = hour * 15; const h = clamp(sun, 0.05, 1) * 80 + 5, a = s.light.sunAngle * DEG, hh = h * DEG;
+          s.light.dir = { x: -Math.cos(hh) * Math.sin(a), y: -Math.sin(hh), z: -Math.cos(hh) * Math.cos(a) };
+          s.light.intensity = 0.15 + day * 0.95; s.light.ambient = 0.18 + day * 0.32;
+          s.light.color = mixColor('#ffb37a', '#ffffff', clamp(sun * 2, 0, 1));
+        } else s.light.darkness = (1 - day) * (+p.maxDark || 0);
+        const hr = Math.floor(hour); if (s.vars.hour !== hr) s.setVar('hour', hr);
+      },
+    };
+  },
+});
+
+/** Particle System: fire, smoke, rain, snow, sparkles, confetti, magic, bubbles. */
+const PARTICLE_PRESETS = {
+  fire: { rate: 40, colors: ['#ffd54f', '#ff9800', '#f44336'], speed: 60, spread: 0.6, dir: -90, life: 0.8, size: 7, gravity: -120, shrink: true, round: true },
+  smoke: { rate: 12, colors: ['#9e9e9e', '#757575'], speed: 30, spread: 0.5, dir: -90, life: 2, size: 14, gravity: -30, grow: true, round: true, alpha: 0.5 },
+  rain: { rate: 120, colors: ['#90caf9'], speed: 700, spread: 0.05, dir: 95, life: 1.2, size: 3, gravity: 0, area: true, stretch: 4 },
+  snow: { rate: 40, colors: ['#ffffff'], speed: 60, spread: 0.6, dir: 90, life: 6, size: 5, gravity: 10, area: true, round: true, wobble: true },
+  sparkle: { rate: 18, colors: ['#ffffff', '#fff59d', '#80deea'], speed: 40, spread: 3.2, dir: 0, life: 0.7, size: 4, gravity: 0, shrink: true },
+  confetti: { rate: 60, colors: ['#e53935', '#fdd835', '#43a047', '#1e88e5', '#8e24aa'], speed: 300, spread: 0.8, dir: -90, life: 2.5, size: 7, gravity: 500 },
+  magic: { rate: 30, colors: ['#ce93d8', '#80cbc4', '#fff59d'], speed: 50, spread: 3.2, dir: -90, life: 1.2, size: 5, gravity: -60, shrink: true, round: true },
+  bubbles: { rate: 8, colors: ['#b3e5fc'], speed: 50, spread: 0.4, dir: -90, life: 3, size: 10, gravity: -40, round: true, alpha: 0.6, wobble: true },
+};
+registerBehavior('particles', {
+  label: 'Particle System', description: 'Ready-made effects: fire, smoke, rain, snow, sparkles, confetti, magic, bubbles. Rain and snow cover the whole screen.',
+  params: [
+    { key: 'preset', label: 'Effect', type: 'select', options: Object.keys(PARTICLE_PRESETS), default: 'fire' },
+    { key: 'rate', label: 'Amount (per second, 0 = preset)', type: 'number', default: 0, range: [0, 300], step: 5 },
+    { key: 'size', label: 'Size (0 = preset)', type: 'number', default: 0, step: 1 },
+    { key: 'color', label: 'Tint (optional)', type: 'color', optional: true, default: '' },
+    { key: 'playing', label: 'Playing', type: 'bool', default: true },
+  ],
+  create(p) {
+    const P = PARTICLE_PRESETS[p.preset] || PARTICLE_PRESETS.fire;
+    let acc = 0, on = !!p.playing;
+    return {
+      start(e, s) { s.on('message', (n) => { if (n === 'particles-on' || n === e.name + '-on') on = true; if (n === 'particles-off' || n === e.name + '-off') on = false; }); },
+      update(e, dt, s) {
+        if (!on || !e.visible) return;
+        const three = s.mode === '3d', k3 = three ? 0.03 : 1, rate = +p.rate || P.rate, size = (+p.size || P.size) * (three ? 0.03 : 1);
+        acc += rate * dt;
+        const vb = !three && P.area ? s.viewBounds() : null;
+        while (acc >= 1 && s.particles.length < 1500) {
+          acc--;
+          const a = (P.dir * DEG) + rand(-P.spread, P.spread), sp = P.speed * rand(0.6, 1.2) * k3;
+          const c = p.color || P.colors[(Math.random() * P.colors.length) | 0];
+          let x = e.x, y = e.y, z = e.z;
+          if (P.area) { if (vb) { x = rand(vb.left - 40, vb.right + 40); y = vb.top - 10; } else { x = s.camera.target.x + rand(-12, 12); y = s.camera.target.y + 10; z = s.camera.target.z + rand(-12, 12); } }
+          s.particles.push({ x, y, z, color: c, life: 1, decay: 1 / (P.life * rand(0.8, 1.2)), vx: Math.cos(a) * sp, vy: three ? -Math.sin(a) * sp : Math.sin(a) * sp, vz: three ? rand(-0.3, 0.3) * sp : 0,
+            size: size * rand(0.7, 1.3), g: (three ? -P.gravity * 0.03 : P.gravity), drag: 1, shrink: P.shrink, grow: P.grow, round: P.round, alpha: P.alpha, stretch: P.stretch, wobble: P.wobble });
+        }
+      },
+    };
+  },
+});
+
+/** Inventory Item: picked up into the player's inventory ({inventory} shows it; conditions and instructions can check or use items). */
+registerBehavior('inventoryItem', {
+  label: 'Inventory Item', description: 'An item to pick up (key, potion, gem…). It goes into the inventory: show it with {inventory}, or {item_Key} for one item. Use “Has item” conditions and “Use item” instructions.',
+  params: [
+    { key: 'item', label: 'Item name', type: 'text', default: 'Key' },
+    { key: 'icon', label: 'Icon (emoji)', type: 'text', default: '🔑' },
+    { key: 'amount', label: 'Amount', type: 'number', default: 1, step: 1 },
+    { key: 'tag', label: 'Picked up by tag', type: 'text', default: 'player', suggest: 'tags' },
+  ],
+  create(p) {
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
+      collide(e, other, s) { if (!other.has(p.tag) || e.dead) return; s.addItem(p.item, +p.amount || 1, p.icon); s.engine.audio.sfx('power'); s.burst(e.x, e.y, e.z, '#fff59d', 12); s.message(`${p.icon} ${p.item}${+p.amount > 1 ? ' ×' + p.amount : ''}`, 1.2); e.destroy(); },
     };
   },
 });
@@ -4001,6 +4395,234 @@ export const NODE_TYPES = {
   canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
 };
 
+// ---- Logic library (PlayMaker / Game Creator style): events → conditions → instructions ----
+const bool = (k, d = false, label) => ({ key: k, type: 'bool', default: d, label: label || k });
+const sug = (prm, kind) => ({ ...prm, suggest: kind });
+const OPS6 = ['=', '≠', '>', '<', '≥', '≤'];
+const cmp = (a, op, b) => ({ '=': a === b, '≠': a !== b, '>': a > b, '<': a < b, '≥': a >= b, '≤': a <= b }[op] ?? false);
+const fmtVal = (v) => (typeof v === 'number' ? +v.toFixed(2) : v);
+/** Events that start trigger lists or FSM transitions. */
+export const LOGIC_EVENTS = {
+  start: { label: 'Game starts', icon: 'play' },
+  every: { label: 'Every few seconds', icon: 'clock', params: [num('seconds', 1, 'seconds')], say: (p) => `Every ${p.seconds}s` },
+  tap: { label: 'Tapped', icon: 'hand' },
+  touch: { label: 'Touched by tag', icon: 'player', params: [sug(txt('tag', 'player', 'tag'), 'tags')], say: (p) => `Touched by ${p.tag}` },
+  touchEnd: { label: 'Stops touching tag', icon: 'player', params: [sug(txt('tag', 'player', 'tag'), 'tags')], say: (p) => `Stops touching ${p.tag}` },
+  button: { label: 'Button pressed', icon: 'gamepad', params: [opt('button', ['jump', 'fire'], 'jump', 'button')], say: (p) => `${p.button} button` },
+  swipe: { label: 'Swiped', icon: 'arrow', params: [opt('dir', ['up', 'down', 'left', 'right'], 'up', 'direction')], say: (p) => `Swiped ${p.dir}` },
+  message: { label: 'Message received', icon: 'sign', params: [sug(txt('message', 'go', 'message'), 'messages')], say: (p) => `Message “${p.message}”` },
+  variable: { label: 'Variable reaches', icon: 'trophy', params: [sug(txt('name', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), num('value', 10, 'value')], say: (p) => `${p.name} ${p.op} ${p.value}` },
+  destroyed: { label: 'Destroyed', icon: 'trash' },
+  animEnd: { label: 'Animation finished', icon: 'clock', params: [sug(txt('clip', '', 'clip (empty = any)'), 'clips')], say: (p) => (p.clip ? `${p.clip} finished` : 'Animation finished') },
+  always: { label: 'Every frame (while conditions are true)', icon: 'bolt', say: () => 'When conditions are true' },
+  after: { label: 'After time in this state', icon: 'clock', fsm: true, params: [num('seconds', 1, 'seconds')], say: (p) => `After ${p.seconds}s` },
+  finished: { label: 'When this state’s actions finish', icon: 'check', fsm: true, say: () => 'When done' },
+};
+/** Conditions (all must pass; each can be flipped with "not"). */
+export const LOGIC_CONDITIONS = {
+  variable: { label: 'Compare variable', icon: 'trophy', params: [sug(txt('name', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), num('value', 10, 'value')], test: (c, p) => cmp(+c.s.vars[p.name] || 0, p.op, +p.value || 0), say: (p) => `${p.name} ${p.op} ${p.value}` },
+  chance: { label: 'Random chance', icon: 'star', params: [num('percent', 50, 'percent')], test: (c, p) => Math.random() * 100 < +p.percent, say: (p) => `${p.percent}% chance` },
+  touching: { label: 'Is touching tag', icon: 'player', params: [sug(txt('tag', 'player', 'tag'), 'tags')], test: (c, p) => c.s.engine.physics.touching(c.e, p.tag), say: (p) => `touching ${p.tag}` },
+  grounded: { label: 'Is on the ground', icon: 'platform', test: (c) => !!c.e.body?.grounded, say: () => 'on the ground' },
+  near: { label: 'Distance to tag', icon: 'crosshair', params: [sug(txt('tag', 'player', 'tag'), 'tags'), opt('op', ['<', '>'], '<', 'is'), num('value', 150, 'distance')], test: (c, p) => { const t = c.s.findAll(p.tag).find((q) => q !== c.e); const d = t ? Math.hypot(t.x - c.e.x, t.y - c.e.y, t.z - c.e.z) : Infinity; return p.op === '<' ? d < +p.value : d > +p.value; }, say: (p) => `${p.tag} ${p.op === '<' ? 'closer than' : 'further than'} ${p.value}` },
+  canSee: { label: 'Can see tag', icon: 'eye', params: [sug(txt('tag', 'player', 'tag'), 'tags')], test: (c, p) => { const t = c.s.findAll(p.tag).find((q) => q !== c.e); return !!t && c.s.canSee(c.e, t); }, say: (p) => `can see ${p.tag}` },
+  exists: { label: 'Object exists', icon: 'cube', params: [sug(txt('object', '', 'object'), 'objects')], test: (c, p) => !!c.s.find(p.object), say: (p) => `${p.object} exists` },
+  visible: { label: 'Is visible', icon: 'eye', params: [sug(txt('object', '', 'object (empty = this)'), 'objects')], test: (c, p) => !!(p.object ? c.s.find(p.object) : c.e)?.visible, say: (p) => `${p.object || 'this'} is visible` },
+  state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
+  hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
+  hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  playing: { label: 'Game is playing', icon: 'play', test: (c) => c.s.state === 'play' && !c.s.engine.paused, say: () => 'game is playing' },
+};
+const target = (c, name) => (!name || name === 'self' ? c.e : name === 'other' ? c.other : c.s.find(name) || c.s.findAll(name)[0]);
+const obj = (k = 'object', label = 'object (empty = this)') => sug(txt(k, '', label), 'objects');
+/** Instructions, run top to bottom. Returning a number waits that many seconds before the next one. */
+export const LOGIC_ACTIONS = {
+  // variables & score
+  setVar: { cat: 'Variables', label: 'Change variable', icon: 'trophy', params: [sug(txt('name', 'score', 'variable'), 'vars'), opt('op', ['add', 'set', 'subtract', 'multiply'], 'add', 'how'), num('value', 1, 'value')],
+    run: (c, p) => { const v = +p.value || 0, k = p.name || 'score', cur = +c.s.vars[k] || 0; c.s.setVar(k, p.op === 'set' ? v : p.op === 'subtract' ? cur - v : p.op === 'multiply' ? cur * v : cur + v); },
+    say: (p) => ({ add: `Add ${p.value} to ${p.name}`, set: `Set ${p.name} to ${p.value}`, subtract: `Subtract ${p.value} from ${p.name}`, multiply: `Multiply ${p.name} by ${p.value}` })[p.op] },
+  // objects
+  showHide: { cat: 'Objects', label: 'Show / hide object', icon: 'eye', params: [obj(), opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make it')], run: (c, p) => { const t = target(c, p.object); if (t) t.visible = p.mode === 'show' ? true : p.mode === 'hide' ? false : !t.visible; }, say: (p) => `${p.mode[0].toUpperCase() + p.mode.slice(1)} ${p.object || 'this'}` },
+  destroy: { cat: 'Objects', label: 'Destroy object', icon: 'trash', params: [sug(txt('object', 'self', 'object (self / other / name)'), 'objects'), bool('burst', true, 'particle burst')], run: (c, p) => { const t = target(c, p.object); if (t) { if (p.burst) c.s.burst(t.x, t.y, t.z, '#fff', 14); t.destroy(); } }, say: (p) => `Destroy ${p.object || 'self'}` },
+  spawn: { cat: 'Objects', label: 'Spawn template', icon: 'spawner', params: [sug(txt('template', '', 'template'), 'templates'), num('ox', 0, 'offset x'), num('oy', 0, 'offset y')], run: (c, p) => { if (p.template) c.s.spawn(p.template, { x: c.e.x + (+p.ox || 0), y: c.e.y + (+p.oy || 0), z: c.e.z }); }, say: (p) => `Spawn ${p.template || '…'}` },
+  setText: { cat: 'Objects', label: 'Set text', icon: 'text', params: [obj(), txt('text', 'Hello {score}', 'text')], run: (c, p) => { const t = target(c, p.object); if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = p.text; } }, say: (p) => `Text: “${p.text}”` },
+  setColor: { cat: 'Objects', label: 'Set color', icon: 'brush', params: [obj(), { key: 'color', type: 'color', default: '#ff5252', label: 'color' }, num('seconds', 0.3, 'fade time')], run: (c, p) => { const t = target(c, p.object); if (!t) return; const key = t.mesh ? 'mesh.color' : t.shape ? 'shape.fill' : 'text.color'; c.s.to(t, { [key]: p.color }, Math.max(0.01, +p.seconds || 0.01)); }, say: (p) => `Color ${p.object || 'this'} ${p.color}` },
+  teleport: { cat: 'Objects', label: 'Move to object', icon: 'portal', params: [obj('to', 'object to go to')], run: (c, p) => { const t = c.s.find(p.to); if (t) { c.e.x = t.x; c.e.y = t.y; c.e.z = t.z; } }, say: (p) => `Move to ${p.to || '…'}` },
+  giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}`) },
+  talk: { cat: 'Game', label: 'Say dialogue', icon: 'sign', params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello there!', 'text'), bool('wait', true, 'wait until closed')], run: (c, p) => { if (!c.s.dialog) c.s.dialog = { lines: [{ who: p.who, text: fillTemplate(p.text, c.s.vars) }], i: 0, chars: 0, pause: true }; return p.wait ? { until: () => !c.s.dialog } : 0; }, say: (p) => `${p.who}: “${p.text}”` },
+  // motion & animation
+  moveBy: { cat: 'Motion', label: 'Move by', icon: 'move', params: [num('x', 0, 'x'), num('y', -40, 'y'), num('z', 0, 'z (3D)'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outQuad', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = +p.seconds || 0; if (d <= 0) { c.e.x += +p.x || 0; c.e.y += +p.y || 0; c.e.z += +p.z || 0; return; } c.s.to(c.e, { x: +p.x || 0, y: +p.y || 0, z: +p.z || 0 }, d, { ease: p.ease, relative: true }); return p.wait ? d : 0; }, say: (p) => `Move by ${p.x}, ${p.y}${+p.z ? ', ' + p.z : ''}${+p.seconds ? ` in ${p.seconds}s` : ''}` },
+  rotateBy: { cat: 'Motion', label: 'Rotate by', icon: 'rotate', params: [num('degrees', 90, 'degrees'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outQuad', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const k = c.s.mode === '3d' ? 'ry' : 'rz', d = +p.seconds || 0; if (d <= 0) { c.e[k] += +p.degrees || 0; return; } c.s.to(c.e, { [k]: +p.degrees || 0 }, d, { ease: p.ease, relative: true }); return p.wait ? d : 0; }, say: (p) => `Rotate ${p.degrees}°` },
+  scaleTo: { cat: 'Motion', label: 'Scale to', icon: 'scale', params: [num('scale', 1.5, 'scale'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outBack', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { scale: +p.scale || 1 }, d, { ease: p.ease }); return p.wait ? d : 0; }, say: (p) => `Scale to ${p.scale}` },
+  fade: { cat: 'Motion', label: 'Fade', icon: 'eye', params: [num('alpha', 0, 'opacity (0–1)'), num('seconds', 0.5, 'over seconds'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { alpha: clamp(+p.alpha, 0, 1) }, d); return p.wait ? d : 0; }, say: (p) => `Fade to ${p.alpha}` },
+  punch: { cat: 'Motion', label: 'Punch (juice)', icon: 'star', params: [opt('what', ['scale', 'position', 'rotation'], 'scale', 'what'), num('amount', 0.3, 'amount'), num('seconds', 0.4, 'seconds')], run: (c, p) => { const a = +p.amount || 0.3, three = c.s.mode === '3d'; c.s.punch(c.e, p.what === 'scale' ? (three ? { sx: a, sy: a, sz: a } : { sx: a, sy: a }) : p.what === 'rotation' ? (three ? { ry: a * 90 } : { rz: a * 90 }) : { y: three ? a : -a * 60 }, +p.seconds || 0.4); }, say: (p) => `Punch ${p.what}` },
+  playAnim: { cat: 'Motion', label: 'Play animation', icon: 'clock', params: [sug(txt('clip', 'Bounce', 'clip'), 'clips')], run: (c, p) => c.e.getBehavior('animator')?.play(p.clip), say: (p) => `Play “${p.clip}”` },
+  // physics
+  push: { cat: 'Physics', label: 'Push (add velocity)', icon: 'arrow', params: [opt('who', ['self', 'other'], 'self', 'who'), num('x', 0, 'x'), num('y', -500, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const t = p.who === 'other' ? c.other : c.e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +p.x || 0; b.vel.y += +p.y || 0; b.vel.z += +p.z || 0; } }, say: (p) => `Push ${p.who} ${p.x}, ${p.y}` },
+  setVelocity: { cat: 'Physics', label: 'Set velocity', icon: 'arrow', params: [num('x', 0, 'x'), num('y', 0, 'y'), num('z', 0, 'z (3D)')], run: (c, p) => { const b = c.e.ensureBody({ type: 'dynamic' }); b.vel.x = +p.x || 0; b.vel.y = +p.y || 0; b.vel.z = +p.z || 0; }, say: (p) => `Velocity ${p.x}, ${p.y}` },
+  jump: { cat: 'Physics', label: 'Jump', icon: 'jumper', params: [num('power', 600, 'power')], run: (c, p) => { if (c.e.body) { c.e.body.vel.y = (+p.power || 0) * (c.s.mode === '3d' ? 1 : -1); c.s.engine.audio.sfx('jump'); } }, say: (p) => `Jump (${p.power})` },
+  setGravity: { cat: 'Physics', label: 'Set gravity', icon: 'body', params: [num('y', 1600, 'gravity y'), num('x', 0, 'gravity x')], run: (c, p) => { c.s.gravity = +p.y || 0; c.s.gravityX = +p.x || 0; }, say: (p) => `Gravity ${p.y}` },
+  // flow
+  wait: { cat: 'Flow', label: 'Wait', icon: 'clock', params: [num('seconds', 1, 'seconds')], run: (c, p) => Math.max(0, +p.seconds || 0), say: (p) => `Wait ${p.seconds}s` },
+  sendMessage: { cat: 'Flow', label: 'Send message', icon: 'sign', params: [sug(txt('message', 'go', 'message'), 'messages')], run: (c, p) => c.s.send(p.message), say: (p) => `Send “${p.message}”` },
+  setState: { cat: 'Flow', label: 'Go to state', icon: 'nodes', params: [txt('state', 'Idle', 'state')], run: (c, p) => c.e.getBehavior('fsm')?.goTo(p.state), say: (p) => `Go to ${p.state}` },
+  // game
+  message: { cat: 'Game', label: 'Show message', icon: 'sign', params: [txt('text', 'Hello! {score}', 'text'), num('seconds', 2, 'seconds')], run: (c, p) => c.s.message(fillTemplate(p.text, c.s.vars), +p.seconds || 2), say: (p) => `Say “${p.text}”` },
+  sound: { cat: 'Game', label: 'Play sound', icon: 'bolt', params: [opt('sound', ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'], 'coin', 'sound')], run: (c, p) => c.s.engine.audio.sfx(p.sound), say: (p) => `Sound: ${p.sound}` },
+  vibrate: { cat: 'Game', label: 'Vibrate', icon: 'gamepad', run: (c) => c.s.engine.vibrate([30, 30, 30]), say: () => 'Vibrate' },
+  shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
+  switchCamera: { cat: 'Game', label: 'Switch camera', icon: 'camera', params: [sug(txt('camera', 'Camera', 'camera object'), 'objects')], run: (c, p) => c.s.setCamera(p.camera), say: (p) => `Camera → ${p.camera}` },
+  save: { cat: 'Game', label: 'Save game', icon: 'save', params: [num('slot', 1, 'slot')], run: (c, p) => { if (c.s.saveGame(+p.slot || 1)) c.s.message('Game saved', 1.2); }, say: () => 'Save game' },
+  load: { cat: 'Game', label: 'Load game', icon: 'folder', params: [num('slot', 1, 'slot')], run: (c, p) => { c.s.loadGame(+p.slot || 1); }, say: () => 'Load game' },
+  win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
+  gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
+  nextLevel: { cat: 'Game', label: 'Next level', icon: 'flag', run: (c) => { if (c.s.engine.hasNextLevel()) c.s.win(); }, say: () => 'Next level' },
+  restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
+};
+const withDefaults = (def, it) => { const p = { ...it }; for (const q of def?.params || []) if (p[q.key] === undefined) p[q.key] = q.default; return p; };
+export const logicSay = (lib, it) => { const def = lib[it?.type]; if (!def) return it?.type || '?'; const p = withDefaults(def, it); return (def.say ? def.say(p) : def.label) || def.label; };
+/** Run an instruction list; waits pause it. ctx.cancelled stops it. */
+export function runInstructions(list, ctx, done) {
+  let i = 0;
+  const next = () => {
+    while (i < (list || []).length) {
+      if (ctx.cancelled || ctx.e.dead || ctx.s.engine?.scene !== ctx.s) return;
+      const it = list[i++], def = LOGIC_ACTIONS[it?.type];
+      if (!def || it.off) continue;
+      let r;
+      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { console.warn('[pocket] instruction failed', it.type, err); }
+      if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
+      if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
+    }
+    done?.();
+  };
+  next();
+}
+export function conditionsPass(list, ctx) {
+  for (const cd of list || []) { const def = LOGIC_CONDITIONS[cd.type]; if (!def) continue; const ok = !!def.test(ctx, withDefaults(def, cd)); if (ok === !!cd.not) return false; }
+  return true;
+}
+/** Watches what happened to an object this frame, for matching against events. */
+class LogicWatcher {
+  constructor(e, s) {
+    this.e = e; this.s = s; this.queue = []; this.now = []; this.timers = new Map(); this.edges = new Map(); this.first = true;
+    s.on('message', (n) => this.queue.push({ type: 'message', name: n }));
+    s.on('animationEnd', (ent, clip) => { if (ent === e) this.queue.push({ type: 'animEnd', clip }); });
+  }
+  push(ev) { this.queue.push(ev); }
+  frame(dt) {
+    const s = this.s, e = this.e, inp = s.engine.input, ev = this.queue;
+    this.queue = []; this.dt = dt;
+    if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) ev.push({ type: 'tap' });
+    if (inp.pressed('jump')) ev.push({ type: 'button', button: 'jump' });
+    if (inp.pressed('action')) ev.push({ type: 'button', button: 'fire' });
+    for (const d of ['up', 'down', 'left', 'right']) if (inp.pressed('swipe:' + d)) ev.push({ type: 'swipe', dir: d });
+    if (this.first) { ev.push({ type: 'start' }); this.first = false; }
+    this.now = ev;
+  }
+  /** Did event `x` happen? Returns { other } or null. key: per-listener timer/edge state; extra: { stateTime, finished } for state machines. */
+  match(x, key, extra = {}) {
+    const p = withDefaults(LOGIC_EVENTS[x?.type], x || {});
+    switch (x?.type) {
+      case 'every': { const t = (this.timers.get(key) || 0) + this.dt; if (t >= Math.max(0.05, +p.seconds || 1)) { this.timers.set(key, 0); return {}; } this.timers.set(key, t); return null; }
+      case 'variable': { const now = cmp(+this.s.vars[p.name] || 0, p.op, +p.value || 0), was = this.edges.get(key); this.edges.set(key, now); return now && !was ? {} : null; }
+      case 'always': return {};
+      case 'after': return (extra.stateTime || 0) >= (+p.seconds || 0) ? {} : null;
+      case 'finished': return extra.finished ? {} : null;
+      default: {
+        const hit = this.now.find((q) => q.type === x?.type && (x.type !== 'touch' && x.type !== 'touchEnd' || q.other?.has(p.tag)) && (x.type !== 'button' || q.button === p.button) && (x.type !== 'swipe' || q.dir === p.dir) && (x.type !== 'message' || q.name === p.message) && (x.type !== 'animEnd' || !p.clip || q.clip === p.clip));
+        return hit ? { other: hit.other } : null;
+      }
+    }
+  }
+  resetTimers() { this.timers.clear(); }
+}
+const needsSensor = (events, e, s) => {
+  for (const x of events) if (x && (x.type === 'touch' || x.type === 'touchEnd')) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(x.tag || 'player'); }
+};
+
+/** Triggers (Game Creator style): On [event] → If [conditions] → Do [instructions, one after another]. */
+registerBehavior('triggers', {
+  label: 'Triggers', description: 'Easy logic: On something happening → If conditions are true → Do a list of instructions in order (with waits). Like Game Creator.',
+  params: [{ key: 'triggers', label: 'Triggers', type: 'triggers', default: [{ event: { type: 'tap' }, conditions: [], actions: [{ type: 'setVar', name: 'score', op: 'add', value: 1 }, { type: 'punch', what: 'scale', amount: 0.3, seconds: 0.4 }] }] }],
+  create(p) {
+    const list = Array.isArray(p.triggers) ? p.triggers : [];
+    let w = null;
+    return {
+      uiAlways: true,
+      start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); },
+      update(e, dt, s) {
+        w.frame(dt);
+        list.forEach((t, i) => {
+          if (t.off || (s.state !== 'play' && t.event?.type !== 'tap' && t.event?.type !== 'message')) return;
+          if (t.once && t.fired) return;
+          const hit = w.match(t.event, i);
+          if (!hit) return;
+          const c = { s, e, other: hit.other };
+          if (!conditionsPass(t.conditions, c)) return;
+          t.fired = true;
+          runInstructions(t.actions, c);
+        });
+      },
+      collide(e, other) { w?.push({ type: 'touch', other }); },
+      separate(e, other) { w?.push({ type: 'touchEnd', other }); },
+      destroy(e, s) { for (const t of list) if (t.event?.type === 'destroyed' && conditionsPass(t.conditions, { s, e })) runInstructions(t.actions, { s, e }); },
+    };
+  },
+});
+
+/** State Machine (PlayMaker style): states with actions, and transitions between them on events. */
+registerBehavior('fsm', {
+  label: 'State Machine', description: 'Like PlayMaker: the object is always in one state (Idle, Chase, Attack…). Each state runs actions when it starts, and moves to another state when an event happens.',
+  params: [{ key: 'fsm', label: 'States', type: 'fsm', default: { start: 's1', any: [], states: [
+    { id: 's1', name: 'Idle', x: 30, y: 60, enter: [{ type: 'fade', alpha: 1, seconds: 0.2 }], stay: [], exit: [], transitions: [{ event: { type: 'tap' }, conditions: [], to: 's2' }] },
+    { id: 's2', name: 'Excited', x: 290, y: 60, enter: [{ type: 'punch', what: 'scale', amount: 0.4, seconds: 0.5 }, { type: 'setVar', name: 'score', op: 'add', value: 1 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 1 }, conditions: [], to: 's1' }] },
+  ] } }],
+  create(p) {
+    const g = p.fsm || { states: [] }, states = new Map((g.states || []).map((q) => [q.id, q]));
+    let cur = null, t = 0, finished = false, run = null, w = null;
+    const inst = {
+      uiAlways: false,
+      get state() { return cur?.name; },
+      enter(id, e, s) {
+        if (run) run.cancelled = true;
+        if (cur) runInstructions(cur.exit, { s, e });
+        cur = states.get(id) || null; t = 0; finished = false; w?.resetTimers();
+        e.data.state = cur?.name || '';
+        if (!cur) return;
+        run = { s, e, cancelled: false };
+        runInstructions(cur.enter, run, () => { finished = true; });
+        s.emit('state', e, cur.name);
+      },
+      goTo(name) { const st = (g.states || []).find((q) => q.name === name || q.id === name); if (st && inst.entity) inst.enter(st.id, inst.entity, inst.entity.scene); },
+      start(e, s) {
+        inst.entity = e; w = new LogicWatcher(e, s);
+        needsSensor([...(g.states || []).flatMap((q) => (q.transitions || []).map((tr) => tr.event)), ...(g.any || []).map((tr) => tr.event)], e, s);
+        inst.enter(g.start || g.states?.[0]?.id, e, s);
+      },
+      update(e, dt, s) {
+        if (!cur) return;
+        w.frame(dt); t += dt;
+        if (cur.stay?.length) runInstructions(cur.stay.filter((it) => it.type !== 'wait'), { s, e });
+        const trs = [...(cur.transitions || []).map((tr, i) => [tr, cur.id + ':' + i]), ...(g.any || []).map((tr, i) => [tr, 'any:' + i])];
+        for (const [tr, key] of trs) {
+          if (!states.has(tr.to) || (key.startsWith('any') && tr.to === cur.id)) continue;
+          const hit = w.match(tr.event, key, { stateTime: t, finished });
+          if (!hit || !conditionsPass(tr.conditions, { s, e, other: hit.other })) continue;
+          if (tr.actions?.length) runInstructions(tr.actions, { s, e, other: hit.other });
+          inst.enter(tr.to, e, s);
+          break;
+        }
+      },
+      collide(e, other) { w?.push({ type: 'touch', other }); },
+      separate(e, other) { w?.push({ type: 'touchEnd', other }); },
+      destroy() { if (run) run.cancelled = true; },
+    };
+    return inst;
+  },
+});
+
 registerBehavior('graph', {
   label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
   params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
@@ -4459,6 +5081,11 @@ export class Engine {
       }
       return;
     }
+    if (s.dialog) { // conversations: taps go to the dialogue; optionally the game waits
+      const used = stepDialog(s, dt, inp.taps.length > 0);
+      if (used) inp.taps.length = 0;
+      if (s.dialog?.pause) { s.time += dt; this.stepEffects(dt); this.runUIOnly(s, dt); return; }
+    }
     for (const e of s.entities) {
       if (!e.started && !e.dead) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
     }
@@ -4497,7 +5124,10 @@ export class Engine {
     for (let i = s.particles.length - 1; i >= 0; i--) {
       const p = s.particles[i];
       p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
-      p.vx *= drag; p.vy = p.vy * drag + g * dt; p.vz *= drag;
+      const dr = p.drag ?? drag;
+      p.vx *= dr; p.vy = p.vy * dr + (p.g ?? g) * dt; p.vz *= dr;
+      if (p.wobble) p.x += Math.sin((s.time + i) * 3) * dt * (s.mode === '3d' ? 0.3 : 20);
+      if (p.shrink) p.size *= 1 - dt * 1.2; else if (p.grow) p.size *= 1 + dt * 0.8;
       if ((p.life -= p.decay * dt) <= 0) s.particles.splice(i, 1);
     }
     s.camera.shake = Math.max(0, s.camera.shake - dt * 40);

@@ -70,6 +70,59 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
 
 **Sharing.** *☰ → Build HTML* makes one file anyone can play in a phone browser. Projects are saved on the phone automatically; JSON export/import is in the menu.
 
+### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
+
+Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
+
+- **Triggers** are friendly cards: **ON** something happens → **IF** conditions are true → **DO** instructions, top to bottom.
+  - **14 events**: game starts, every N seconds, tapped, touched / stops touching a tag, jump/fire button, swipe, message, variable reaches, destroyed, animation finished, and more.
+  - **12 conditions**, each flippable with NOT: compare variable, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
+  - **34 instructions** in 6 groups:
+    - Variables: change variable, give/use item.
+    - Objects: show/hide, destroy, spawn, set text, set colour, move to, damage/heal.
+    - Motion: move/rotate/scale/fade with easing and "wait until done", punch, play animation.
+    - Physics: push, set velocity, jump, gravity.
+    - Flow: **wait**, send message, go to state.
+    - Game: show message, dialogue, sound, vibrate, camera shake/switch, save/load, win, game over, next level, restart.
+  - Tap a row to edit it in place; ⋮ moves, duplicates, disables or deletes it.
+  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, talk to an NPC.
+- **State Machine**:
+  - The object is always in one state (Patrol, Look Around, Alert…). States are cards on a map with arrows between them.
+  - Tap a state to edit what it does **when entering**, **every frame** and **when leaving**.
+  - Each state also has its **transitions**: "ON event, IF conditions → go to another state". Two FSM-only events: "after N seconds in this state" and "when this state's actions finish".
+  - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
+  - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
+- **Node scripts** now have **Templates** too (★ in the Node Editor).
+
+### Advanced components
+
+| Component | What it does |
+| --- | --- |
+| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, message) |
+| **Enemy AI** | Patrols, chases when it sees the target (walls block its view), attacks in range (damaging Health), gives up and returns home |
+| **Pathfinding (Navigator)** | A* around walls to a tag or object, for smart chasers, pets and NPCs (2D and 3D) |
+| **Joint** | Spring, rope (pendulums, swings) or rod to another object, with a drawn rope |
+| **Wave Spawner** | Waves of a template with breaks, `{wave}` counter, win / message / loop when beaten |
+| **Dialogue** | Conversation box with speaker names and typewriter text; tap to continue; can pause the game |
+| **Day / Night Cycle** | Moves the sun, changes light and sky colours; 2D gets dark at night; `{hour}` |
+| **Particle System** | Fire, smoke, rain, snow, sparkle, confetti, magic, bubbles (rain and snow fill the screen) |
+| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction |
+
+Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
+
+### Hierarchy and Inspector
+
+- **Hierarchy**:
+  - Each row shows a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing its components.
+  - Filter chips: All, Player, Logic, Physics, UI, Templates. Search also matches tags and components.
+  - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - Bring to front / send to back; a lock button on locked objects.
+- **Inspector**:
+  - The object header stays at the top.
+  - **Quick add** chips for common components.
+  - Category filters: Visual, Physics, Logic, Animation, Gameplay. Collapse all / expand all.
+  - Components have a coloured edge by category.
+
 ### Node coding (Visual Script)
 
 Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Script*, or from the Getting started list, then tap **Open Node Editor**. The editor fills the screen:

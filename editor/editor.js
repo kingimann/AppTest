@@ -1,13 +1,14 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS } from './library.js';
 import { templates, templateInfo } from '../examples/templates.js';
 import { icon } from './icons.js';
 import { openNodeEditor } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openTimeline } from './timeline.js';
+import { openLogic } from './logic.js';
 import { makeCube } from './meshops.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -758,6 +759,9 @@ function openObjectMenu(id, sx, sy) {
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
     { icon: 'clock', label: 'Animate…', fn: () => openAnim(j, (j.behaviors || []).findIndex((b) => b.type === 'animator')) },
+    { icon: 'folder', label: j.folder ? `Folder: ${j.folder}…` : 'Put in Folder…', fn: () => moveToFolder(j) },
+    { icon: 'upload', label: 'Bring to Front', fn: () => { const L = project.entities; L.push(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
+    { icon: 'download', label: 'Send to Back', fn: () => { const L = project.entities; L.unshift(L.splice(L.indexOf(j), 1)[0]); changed({ structure: true }); pushHistory(); } },
     { icon: j.visible === false ? 'eye' : 'eyeoff', label: j.visible === false ? 'Show' : 'Hide', fn: () => { j.visible = j.visible === false; changed({ structure: true }); } },
     { icon: 'gear', label: j.locked ? 'Unlock' : 'Lock', fn: () => { j.locked = !j.locked; changed({ structure: true }); } },
     '-',
@@ -897,37 +901,95 @@ function iconFor(e) {
   if (e.sprite) return 'image';
   return 'gear';
 }
+/** Short component names shown under each object in the Hierarchy. */
+function compBadges(e) {
+  const out = [];
+  if (e.body) out.push(e.body.type === 'static' ? 'Static' : e.body.sensor ? 'Trigger' : 'Rigidbody');
+  if (e.light) out.push('Light');
+  if (e.model) out.push('Model');
+  for (const b of e.behaviors || []) { const d = Behaviors[b.type]; if (d) out.push(d.label.replace(/ \(.*\)$/, '')); }
+  return out;
+}
+const KIND_TINT = { player: '#4fc3f7', ui: '#ce93d8', logic: '#ffca28', camera: '#80cbc4', light: '#fff59d', template: '#9e9e9e' };
+function kindOf(e) {
+  if (e.template) return 'template';
+  if ((e.tags || []).includes('player')) return 'player';
+  if (e.ui) return 'ui';
+  if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
+  if (e.light && !hasVisual(e)) return 'light';
+  if ((e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules', 'script'].includes(b.type))) return 'logic';
+  return '';
+}
+const H_FILTERS = [['all', 'All'], ['player', 'Player'], ['logic', 'Logic'], ['physics', 'Physics'], ['ui', 'UI'], ['template', 'Templates']];
+let hKind = 'all';
+const closedFolders = new Set();
+function hMatch(e) {
+  if (uiMode && !e.ui) return false;
+  if (hFilter && !(e.name || '').toLowerCase().includes(hFilter) && !(e.tags || []).some((t) => t.includes(hFilter)) && !compBadges(e).some((c) => c.toLowerCase().includes(hFilter))) return false;
+  if (hKind === 'physics') return !!e.body;
+  if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
+  return hKind === 'all' || kindOf(e) === hKind;
+}
 function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
+  const search = h('input', { type: 'text', placeholder: 'Search names, tags, components', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
+  box.append(h('div', { class: 'h-filters' }, H_FILTERS.map(([k, l]) => h('button', { class: hKind === k ? 'on' : '', onclick: () => { hKind = k; renderHierarchy(); } }, l))));
   const gs = gettingStarted();
   if (gs) box.append(gs);
   const rows = h('div');
   box.append(rows);
+  const row = (e) => {
+    const badges = compBadges(e), kind = kindOf(e);
+    return h('div', {
+      class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder ? ' in-folder' : ''),
+      'data-id': e.id,
+      onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+    },
+    h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
+    h('span', { class: 'h-txt' },
+      h('span', { class: 'nm' }, e.name || 'Object', e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
+      badges.length ? h('span', { class: 'h-sub' }, badges.slice(0, 4).join(' · ') + (badges.length > 4 ? ` +${badges.length - 4}` : '')) : ''),
+    e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
+    h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')));
+  };
   function renderRows() {
+    const list = project.entities.filter(hMatch), folders = [...new Set(list.map((e) => e.folder).filter(Boolean))];
     rows.replaceChildren(...[
-      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, icon('scene', 'ico'),
-        h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
-        h('span', { class: 'tagchip' }, 'settings')),
+      h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, h('span', { class: 'h-ico' }, icon('scene')),
+        h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
+          h('span', { class: 'h-sub' }, `${project.entities.length} objects · ${is3D() ? '3D' : '2D'} · tap for game settings`))),
       uiMode && h('div', { class: 'h-cap' }, 'UI editor: screen elements only'),
-      project.entities.filter((e) => (!hFilter || (e.name || '').toLowerCase().includes(hFilter)) && (!uiMode || e.ui)).map((e) => h('div', {
-        class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : ''),
-        'data-id': e.id, style: '--indent: 14px',
-        onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
-      },
-      icon(iconFor(e), 'ico'),
-      h('span', { class: 'nm' }, e.name || 'Object'),
-      e.template && h('span', { class: 'tagchip' }, 'template'),
-      (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player'),
-      e.locked && h('span', { class: 'tagchip' }, 'locked'),
-      h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye'))))].flat());
+      ...folders.flatMap((f) => {
+        const items = list.filter((e) => e.folder === f), shut = closedFolders.has(f);
+        return [h('div', { class: 'h-folder' + (shut ? ' shut' : ''), onclick: () => { shut ? closedFolders.delete(f) : closedFolders.add(f); renderRows(); } },
+          icon('chevron'), icon('folder'), h('span', { class: 'nm' }, f), h('span', { class: 'h-count' }, items.length),
+          h('button', { class: 'eye', title: 'Folder options', onclick: (ev) => { ev.stopPropagation(); popMenu(ev.currentTarget, [
+            { icon: 'edit', label: 'Rename Folder…', fn: () => { const n = prompt('Folder name', f); if (n == null) return; for (const e of project.entities) if (e.folder === f) e.folder = n.trim() || undefined; changed({ structure: true }); } },
+            { icon: 'eyeoff', label: 'Hide / Show All', fn: () => { const vis = items.some((e) => e.visible !== false); for (const e of items) e.visible = !vis; changed({ structure: true }); } },
+            { icon: 'close', label: 'Remove Folder (keep objects)', fn: () => { for (const e of project.entities) if (e.folder === f) delete e.folder; changed({ structure: true }); } },
+          ]); } }, icon('more'))),
+        ...(shut ? [] : items.map(row))];
+      }),
+      ...list.filter((e) => !e.folder).map(row),
+      !list.length && h('div', { class: 'empty' }, hFilter || hKind !== 'all' ? 'Nothing matches.' : 'No objects yet. Tap Create or the blue + button.'),
+    ].filter(Boolean));
   }
   renderRows();
   box.scrollTop = scroll;
+}
+
+function moveToFolder(j) {
+  const existing = [...new Set(project.entities.map((e) => e.folder).filter(Boolean))];
+  const pick = (f) => { if (f) j.folder = f; else delete j.folder; changed({ structure: true }); pushHistory(); };
+  popMenu({ left: window.innerWidth / 2 - 110, top: window.innerHeight / 3, bottom: window.innerHeight / 3 }, [
+    { cap: 'Folder' }, ...existing.map((f) => ({ icon: 'folder', label: f, fn: () => pick(f) })),
+    { icon: 'plus', label: 'New Folder…', fn: () => { const n = prompt('Folder name', is3D() ? 'Environment' : 'Level'); if (n?.trim()) pick(n.trim()); } },
+    j.folder && { icon: 'close', label: 'No Folder', fn: () => pick('') },
+  ]);
 }
 
 /** A short checklist that walks new users through making a playable game. */
@@ -940,7 +1002,7 @@ function gettingStarted() {
     { done: has((e) => (e.tags || []).includes('player')), label: 'Add a player', btn: 'Player', fn: () => addPrefab(pf('Player')) },
     { done: has((e) => e.body?.type === 'static' || e.voxels), label: 'Add ground to stand on', btn: 'Platform', fn: () => addPrefab(pf('Platform')) },
     { done: has((e) => ['collectible', 'hazard', 'tappable', 'goal'].some((t) => beh(e, t))), label: 'Add something to collect', btn: is3D() ? 'Gem' : 'Coin', fn: () => addPrefab(pf('Coin', 'Gem')) },
-    { done: has((e) => beh(e, 'graph') || beh(e, 'rules')), label: 'Add logic with nodes', btn: 'Script', fn: addVisualScript },
+    { done: has((e) => ['graph', 'rules', 'triggers', 'fsm'].some((t) => beh(e, t))), label: 'Add some logic', btn: 'Triggers', fn: () => addLogic('triggers') },
     { done: store.get('pocket.editor.played.' + projectId, '') === '1', label: 'Press Play to test', btn: 'Play', fn: play },
   ];
   const n = steps.filter((x) => x.done).length;
@@ -975,7 +1037,10 @@ function openCreateMenu(anchor) {
   popMenu(anchor, [
     { cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addEntity(o.props) })),
     '-', { cap: 'Prefabs' }, ...groups.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) })),
-    '-', { cap: 'Logic' }, { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
+    '-', { cap: 'Logic' },
+    { icon: 'bolt', label: 'Triggers (On → If → Do)', fn: () => addLogic('triggers') },
+    { icon: 'nodes', label: 'State Machine', fn: () => addLogic('fsm') },
+    { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
     is3D() && { icon: 'cube', label: 'New 3D Model (Modeler)', fn: newModel },
   ]);
 }
@@ -1080,6 +1145,8 @@ function control(target, path, spec) {
       return rulesEditor(target, path);
     case 'clips':
       return clipsCard(target, path);
+    case 'triggers': case 'fsm':
+      return logicCard(target, path, spec.type);
     case 'graph':
       return graphCard(target, path);
     case 'template': {
@@ -1187,6 +1254,10 @@ function validate(b, j) {
   if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
   if (b.type === 'flipbook' && !String(b.frames || '').trim()) out.push(['warn', 'Add some frames, separated by commas.']);
   if (b.type === 'graph' && !(b.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push(['warn', 'This script has no Event node, so it never runs.']);
+  if (b.type === 'fsm' && !(b.fsm?.states || []).length) out.push(['warn', 'Add at least one state.']);
+  if (b.type === 'joint' && b.connectTo && !has(b.connectTo)) out.push(['error', `No object named “${b.connectTo}”.`]);
+  if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
+  if (b.type === 'waveSpawner' && (b.waves || []).some((w) => !all.some((e) => e.template && e.name === w.template))) out.push(['error', 'A wave uses a template that does not exist. Tick “Template” on the enemy object.']);
   if (b.type === 'tween' && b.effect === 'path' && !(Array.isArray(b.points) && b.points.length)) out.push(['error', 'The path needs at least one point.']);
   if (['move', 'platformer', 'firstPerson', 'thirdPerson'].includes(b.type) && !(j.tags || []).includes('player')) out.push(['info', 'Tip: tag this object “player” so enemies, coins and cameras find it.']);
   return out;
@@ -1351,9 +1422,24 @@ function pasteComponent(j) {
   toast('Component pasted');
 }
 /** A collapsible component block. opts: { icon, key, enabled, onToggle, menu: [{label, fn}], desc } */
+const INSP_CATS = [['all', 'All'], ['visual', 'Visual'], ['physics', 'Physics'], ['logic', 'Logic'], ['anim', 'Animation'], ['game', 'Gameplay']];
+const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim: '#ab47bc', game: '#ef5350', other: '#777' };
+let inspCat = 'all';
+/** Which inspector filter a component belongs to. */
+function compCat(key) {
+  if (['shape', 'mesh', 'text', 'sprite', 'model', 'bar', 'voxels', 'light', 'uiel'].includes(key)) return 'visual';
+  if (key === 'body') return 'physics';
+  const type = String(key).replace(/^b\d+/, ''), c = BEH_META[type]?.[0];
+  if (!c) return 'other';
+  if (['Logic', 'Scripting', 'AI', 'Turn-Based'].includes(c)) return 'logic';
+  if (['Animation', 'Effects'].includes(c)) return 'anim';
+  if (['Physics', 'Movement', 'Controllers', 'Camera'].includes(c)) return 'physics';
+  return 'game';
+}
 function comp(title, kids, opts = {}) {
   const key = opts.key || title;
-  const el = h('div', { class: 'comp' + (closedComps.has(key) ? ' closed' : '') });
+  const cat = opts.cat || compCat(key);
+  const el = h('div', { class: 'comp' + (closedComps.has(key) ? ' closed' : ''), 'data-key': key, 'data-cat': cat, style: `--cc:${CAT_TINT[cat] || '#555'}` });
   const head = h('div', { class: 'comp-h', onclick: (e) => {
     if (e.target.closest('input,button')) return;
     el.classList.toggle('closed');
@@ -1436,6 +1522,14 @@ function renderInspector() {
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
       !threeD && !j.ui && h('label', {}, 'Layer', h('input', { type: 'number', value: j.layer || 0, style: 'width:54px', oninput: (e) => { j.layer = parseInt(e.target.value, 10) || 0; changed(); } })))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
+
+  // quick add + component filters (Odin-style tidy inspector)
+  const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
+  if (quick.length) box.append(h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))));
+  box.append(h('div', { class: 'comp-tools' },
+    h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
+    h('button', { class: 'ct', title: 'Collapse all', onclick: () => { for (const el of box.querySelectorAll('.comp')) closedComps.add(el.dataset.key); renderInspector(); } }, icon('upload')),
+    h('button', { class: 'ct', title: 'Expand all', onclick: () => { closedComps.clear(); renderInspector(); } }, icon('download'))));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -1597,6 +1691,7 @@ function renderInspector() {
   box.append(h('div', { class: 'btns', style: 'padding:0 8px 24px' },
     h('button', { class: 'btn', onclick: () => duplicateEntity(j.id) }, icon('copy'), 'Duplicate'),
     h('button', { class: 'btn', onclick: () => deleteEntity(j.id) }, icon('trash'), 'Delete')));
+  if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
   if (inspQuery) applyInspSearch(box);
   box.scrollTop = scroll;
 }
@@ -1738,6 +1833,8 @@ const BEH_META = {
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], flipbook: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
 /** Odin-style [Button]s shown at the top of a component. */
 const BEH_BUTTONS = {
@@ -1745,6 +1842,7 @@ const BEH_BUTTONS = {
   flipbook: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 3) }],
   animator: [{ label: 'Open Animation Timeline', icon: 'clock', primary: true, fn: (j, i) => openAnim(j, i) }],
   camera: [{ label: 'Look Through Camera', icon: 'camera', fn: (j, i, b) => lookThrough(j, b) }],
+  particles: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 2.5) }],
 };
 let previewing = null;
 /** Run a Tween / Sprite Animation on the Scene view for a few seconds, then put everything back. */
@@ -1760,12 +1858,13 @@ function previewBehavior(j, b, seconds) {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (!inst.play) inst.update?.(e, dt, s);
     for (const tw of s.tweens) tw.update(dt);
+    for (let k = s.particles.length - 1; k >= 0; k--) { const q = s.particles[k]; q.x += q.vx * dt; q.y += q.vy * dt; q.vy += (q.g ?? 0) * dt; if (q.shrink) q.size *= 1 - dt * 1.2; if ((q.life -= q.decay * dt) <= 0) s.particles.splice(k, 1); }
     if (now - t0 < dur * 1000 && previewing) previewing.raf = requestAnimationFrame(step); else cancelPreview();
   };
   previewing = { raf: requestAnimationFrame(step) };
   toast('Previewing…');
 }
-function cancelPreview() { if (!previewing) return; cancelAnimationFrame(previewing.raf); previewing = null; engine.scene.tweens = []; rebuild(); }
+function cancelPreview() { if (!previewing) return; cancelAnimationFrame(previewing.raf); previewing = null; engine.scene.tweens = []; engine.scene.particles = []; rebuild(); }
 function lookThrough(j, b) {
   if (is3D() && !j.ui) { orbit.target = { x: j.x || 0, y: j.y || 0, z: j.z || 0 }; orbit.dist = Math.max(4, Math.hypot(b.ox || 0, b.oy || 0, b.oz || 0)); }
   else cam2d = { x: j.x || 0, y: j.y || 0, zoom: (+b.zoom || 1) * 0.85 };
@@ -1780,6 +1879,36 @@ function clipsCard(target, path) {
       h('small', {}, clips.map((c) => `${c.name} (${c.length}s, ${Object.keys(c.tracks || {}).length} tracks)`).join(' · ') || 'No clips yet'))),
     h('button', { class: 'btn primary gc-open', onclick: () => openAnim(target(), i) }, icon('clock'), 'Open Animation Timeline'));
 }
+/** Summary card for State Machine / Triggers, with a button to the full-screen Logic editor. */
+function logicCard(target, path, kind) {
+  const v = getPath(target(), path) || (kind === 'fsm' ? { states: [] } : []);
+  const sum = kind === 'fsm' ? `${(v.states || []).length} states · ${(v.states || []).reduce((n, s) => n + (s.transitions || []).length, 0) + (v.any || []).length} transitions`
+    : `${v.length} trigger${v.length === 1 ? '' : 's'}`;
+  const sub = kind === 'fsm' ? (v.states || []).map((s) => s.name + (s.id === v.start ? ' ★' : '')).join(' → ') : v.map((t) => logicSay(LOGIC_EVENTS, t.event)).join(' · ');
+  return h('div', { class: 'row full graph-card' },
+    h('div', { class: 'gc-sum' }, icon(kind === 'fsm' ? 'nodes' : 'bolt'), h('div', {}, h('b', {}, sum), h('small', {}, sub || 'Empty: open the editor to add some'))),
+    h('button', { class: 'btn primary gc-open', onclick: () => editLogic(target, path, kind) }, icon(kind === 'fsm' ? 'nodes' : 'bolt'), kind === 'fsm' ? 'Open State Machine' : 'Open Triggers'));
+}
+function editLogic(target, path, kind) {
+  const e = target(), id = e.id, T = () => ent(id) || e;
+  const back = () => ed.close();
+  const ed = openLogic({
+    kind, data: getPath(e, path), title: e.name, h, popMenu, toast, buzz, suggest: suggestions,
+    onChange: (d) => { setPath(T(), path, d); requestRebuild(); saveSoon(); },
+    onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
+  });
+  pushBack(back);
+}
+/** Add a State Machine or Triggers component to the selected object (or a new Logic object) and open it. */
+function addLogic(kind) {
+  let j = ent(selectedId);
+  if (!j || j.template) j = addEntity({ name: kind === 'fsm' ? 'Brain' : 'Logic', ...(is3D() ? { y: 0.5 } : {}) });
+  const b = defaultBehavior(kind, is3D() && !j.ui);
+  (j.behaviors ||= []).push(b);
+  selectedId = j.id; changed({ structure: true }); pushHistory();
+  editLogic(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.${kind === 'fsm' ? 'fsm' : 'triggers'}`, kind);
+}
+
 let timeline = null;
 function openAnim(j, i) {
   if (timeline) return;
@@ -1911,6 +2040,18 @@ const PREFABS_2D = [
   { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', shape: { type: 'rect', w: 140, h: 24, radius: 6, fill: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 160, y: 0, duration: 2, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'image', label: 'Animated Sprite', props: { name: 'Bird', shape: { type: 'emoji', emoji: '🐥', w: 56, h: 56 }, behaviors: [{ type: 'flipbook', frames: '🐥,🐤,🐣,🐤', fps: 6, mode: 'loop', when: 'always' }, { type: 'tween', effect: 'move by', x: 0, y: -20, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'camera', label: 'Group Camera', props: { name: 'Group Camera', behaviors: [{ type: 'camera', mode: 'group', target: 'player', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: 0 }] } },
+  { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], shape: { type: 'emoji', emoji: '👹', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
+  { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', shape: { type: 'emoji', emoji: '🧙', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
+  { icon: 'key', label: 'Inventory Key', props: { name: 'Key Pickup', shape: { type: 'emoji', emoji: '🔑', w: 36, h: 36 }, behaviors: [{ type: 'inventoryItem', item: 'Key', icon: '🔑', amount: 1, tag: 'player' }, { type: 'tween', effect: 'move by', x: 0, y: -8, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'star', label: 'Rain', props: { name: 'Rain', behaviors: [{ type: 'particles', preset: 'rain', rate: 0, size: 0, playing: true }] } },
+  { icon: 'sun', label: 'Day & Night', props: { name: 'Day & Night', behaviors: [{ type: 'dayNight', dayLength: 60, start: 8, dayColor: '#87b8e8', nightColor: '#0b1030', maxDark: 0.8 }] } },
+  { icon: 'spawner', label: 'Wave Spawner', props: { name: 'Wave Spawner', y: -40, behaviors: [{ type: 'waveSpawner', waves: [{ template: 'Wave Enemy', count: 4, every: 1 }, { template: 'Wave Enemy', count: 7, every: 0.7 }], pause: 3, area: 300, areaH: 0, whenDone: 'win' }] },
+    extra: [{ name: 'Wave Enemy', template: true, tags: ['enemy'], offset: { x: 0, y: 0 }, shape: { type: 'emoji', emoji: '👾', w: 36, h: 36 }, behaviors: [{ type: 'velocity', vx: 0, vy: 120, vz: 0 }, { type: 'health', hp: 1, hurtBy: 'bullet', damage: 1, invuln: 0, knockback: 0, onDeath: 'destroy', points: 5 }, { type: 'destroyOffscreen', margin: 80 }] }] },
+  { icon: 'nodes', label: 'Patrol Guard (FSM)', props: { name: 'Guard', tags: ['enemy'], shape: { type: 'emoji', emoji: '💂', w: 44, h: 44 }, behaviors: [{ type: 'fsm', fsm: { start: 'p', any: [], states: [
+    { id: 'p', name: 'Patrol', x: 30, y: 40, enter: [{ type: 'moveBy', x: 120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }, { type: 'moveBy', x: -120, y: 0, z: 0, seconds: 1.5, ease: 'inOutSine', wait: true }], stay: [], exit: [], transitions: [{ event: { type: 'finished' }, conditions: [], to: 'p2' }, { event: { type: 'always' }, conditions: [{ type: 'near', tag: 'player', op: '<', value: 150 }], to: 'a' }] },
+    { id: 'p2', name: 'Look Around', x: 30, y: 170, enter: [{ type: 'rotateBy', degrees: 20, seconds: 0.3 }, { type: 'wait', seconds: 0.4 }, { type: 'rotateBy', degrees: -20, seconds: 0.3 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 1.2 }, conditions: [], to: 'p' }] },
+    { id: 'a', name: 'Alert', x: 260, y: 100, enter: [{ type: 'punch', what: 'scale', amount: 0.4, seconds: 0.4 }, { type: 'message', text: 'Hey! Stop!', seconds: 1.2 }, { type: 'shake', strength: 8 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 2 }, conditions: [{ type: 'near', tag: 'player', op: '>', value: 220 }], to: 'p' }] },
+  ] } }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },

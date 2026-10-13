@@ -33,6 +33,14 @@ export const NODE_HELP = {
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
 
+/** Ready-made node graphs you can drop in and change. */
+const GRAPH_TEMPLATES = [
+  { label: 'Tap → score + pop', nodes: [{ id: 'a', type: 'tap', x: 0, y: 0 }, { id: 'b', type: 'addVar', x: 300, y: 0, params: { name: 'score', amount: 1 } }, { id: 'c', type: 'punch', x: 600, y: 0, params: { what: 'scale', amount: 0.3, seconds: 0.4 } }], links: [['a', 'then', 'b'], ['b', 'then', 'c']] },
+  { label: 'Touch player → hurt + shake', nodes: [{ id: 'a', type: 'touch', x: 0, y: 0, params: { tag: 'player' } }, { id: 'b', type: 'addVar', x: 300, y: 0, params: { name: 'lives', amount: -1 } }, { id: 'c', type: 'impulse', x: 600, y: 0, params: { strength: 14 } }], links: [['a', 'then', 'b'], ['b', 'then', 'c']] },
+  { label: 'Every 2s → spawn', nodes: [{ id: 'a', type: 'every', x: 0, y: 0, params: { seconds: 2 } }, { id: 'b', type: 'spawn', x: 300, y: 0, params: { template: '' } }], links: [['a', 'then', 'b']] },
+  { label: 'Score ≥ 10 → win', nodes: [{ id: 'a', type: 'update', x: 0, y: 0 }, { id: 'b', type: 'branch', x: 300, y: 0 }, { id: 'c', type: 'compare', x: 0, y: 150, params: { op: '≥', b: 10 } }, { id: 'd', type: 'getVar', x: -300, y: 150, params: { name: 'score' } }, { id: 'e', type: 'win', x: 600, y: 0 }], links: [['a', 'then', 'b'], ['b', 'true', 'e'], ['c', 'value', 'b', 'condition'], ['d', 'value', 'c', 'a']] },
+  { label: 'Swipe up → jump', nodes: [{ id: 'a', type: 'swipe', x: 0, y: 0, params: { dir: 'up' } }, { id: 'b', type: 'jump', x: 300, y: 0, params: { power: 650 } }], links: [['a', 'then', 'b']] },
+];
 const def = (n) => NODE_TYPES[n.type] || { label: n.type, cat: 'Actions' };
 const outKind = (d) => d.value || 'exec';
 
@@ -71,6 +79,7 @@ export function openNodeEditor(opts) {
       h('button', { class: 'ne-btn done', onclick: () => close() }, icon('check'), 'Done'),
       h('div', { class: 'ne-title' }, h('b', {}, 'Visual Script'), h('small', {}, opts.title || '')),
       undoBtn,
+      h('button', { class: 'ne-btn', title: 'Templates', onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Add a ready-made script' }, ...GRAPH_TEMPLATES.map((t) => ({ icon: 'star', label: t.label, fn: () => addTemplate(t) }))]) }, icon('star')),
       h('button', { class: 'ne-btn', title: 'Fit all nodes', onclick: () => fit() }, icon('frame'))),
     area, empty, hint,
     h('button', { class: 'ne-add', onclick: () => openPicker() }, icon('plus'), 'Add Node'));
@@ -219,6 +228,19 @@ export function openNodeEditor(opts) {
       '-',
       { icon: 'trash', label: 'Delete Node', fn: () => { snap(); g.nodes = g.nodes.filter((q) => q !== n); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); if (selected === n.id) selected = null; emit(); render(); } },
     ]);
+  }
+
+  function addTemplate(t) {
+    snap();
+    const map = {}, oy = g.nodes.length ? Math.max(...g.nodes.map((n) => n.y)) + 220 : 40;
+    for (const n of t.nodes) {
+      const id = nid(); map[n.id] = id;
+      const d = NODE_TYPES[n.type], params = {};
+      for (const q of [...(d.params || []), ...(d.inputs || [])]) params[q.key] = q.default;
+      g.nodes.push({ id, type: n.type, x: n.x + 40, y: n.y + oy, params: { ...params, ...(n.params || {}) } });
+    }
+    for (const [a, port, b, to = 'in'] of t.links) g.links.push({ from: { node: map[a], port }, to: { node: map[b], port: to } });
+    emit(); render(); requestAnimationFrame(fit); toast(`Added “${t.label}”`);
   }
 
   // ---------- add node ----------

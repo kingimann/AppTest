@@ -353,6 +353,35 @@ The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while
 - **In the editor:** the UI editor and Play show the game in its own shape, so a landscape game is a wide box on a portrait phone. Turn the phone to play it full screen.
 - From code: `settings.orientation` ('portrait' | 'landscape' | 'any'), `settings.wrongWay` ('ask' | 'letterbox'), `engine.letterbox` to force the box, and `engine.fitScreen()`.
 
+### Lists, buttons, inputs, sliders and UI animation
+
+New groups in *Project › UI*: **Buttons**, **Inputs**, **Lists** and **Animated**. The parts these components build (rows, knobs, ± buttons, options) appear when you press Play.
+- **List View** component: a scrolling list of rows.
+  - **Rows from:** typed items, a list variable (e.g. high scores) or numbers 1 to N.
+  - **Row text:** use `{item}`, `{i}` and any `{variable}`.
+  - **Picking:** drag to scroll, tap a row to pick it. Its position goes in `picked`, its text in `pickedItem`, and the message `picked` is sent.
+  - **Look:** row height, gaps, colours (with every other row and the picked row), roundness, numbering, a › arrow, and rows that slide in one after another.
+  - **Widgets:** List View, Leaderboard List, Settings List, Level Select List.
+- **Buttons:**
+  - Pill, Outline, Gradient, 3D, Glass, Neon, Danger, Chip.
+  - Round Icon Button, Floating Action Button.
+  - Hold-to-Confirm (a ring fills while you hold).
+- **Inputs:**
+  - **Text Input** now types right in the bar (the phone keyboard opens) instead of a pop-up. It handles text, numbers, passwords (shown as •••), e-mail and search. It has a hint colour, an outline while typing, live updates and a message on Enter, and the pop-up box is still an option. Widgets: Input Bar, Password Field, Number Field, Search Bar.
+  - **Toggle** can look like a **switch** (sliding knob) or a **checkbox** (a tick), and can send a message when it changes.
+  - **Segmented Control** (new): Easy | Normal | Hard with a highlight that slides to your pick. It stores the text or the position.
+  - **Stepper** (new): − value + with min, max, step, a value format like `x{value}`, and hold to keep counting.
+- **Slider:**
+  - A knob (circle or square, any colour and size), vertical sliders, and a click on each step.
+  - The value can show above the knob, while dragging, or at the end, with a format like `{value}%`.
+  - It can send a message when you let go.
+  - Widgets: Slider with Knob, Stepped Slider, Vertical Slider.
+- **UI Animation** component:
+  - **Entrance:** plays when the game starts, every time the element appears, or on a message, with a delay. It can animate the children one by one (menus whose buttons arrive in turn).
+  - **Idle loop:** float, pulse, breathe, wiggle, heartbeat, bounce, spin, glow, or a shake every few seconds.
+  - **Widgets:** Bouncing Title, Pulsing Play Button, Menu That Slides In, Spinning Reward Star, Heartbeat Heart, Attention Badge.
+- **New animations** everywhere UI shows and hides (popups, pages, Show / Hide UI node, UI Animation): **drop in** (falls and bounces), **flip**, **spin in**, **elastic pop**, **swing in**, **rise**, **stretch**.
+
 ### Navigation, popups and more UI
 
 Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.

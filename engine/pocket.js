@@ -6163,7 +6163,9 @@ export class Engine {
     this.root = document.createElement('div');
     this.root.className = 'pocket-root';
     const fixed = this.parent === document.body;
-    this.root.style.cssText = `position:${fixed ? 'fixed' : 'absolute'};inset:0;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
+    this.rootBase = `position:${fixed ? 'fixed' : 'absolute'};overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
+    this.root.style.cssText = this.rootBase + 'inset:0;';
+    this.letterbox = null; // true / false overrides the game's "held the wrong way" setting (the editor uses it)
     this.parent.appendChild(this.root);
     this.uiCanvas = document.createElement('canvas');
     this.uiCanvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:2;touch-action:none;';
@@ -6282,7 +6284,7 @@ export class Engine {
 
   setScene(scene, { skipRestore = false } = {}) {
     scene.engine = this;
-    this.scene = scene; this.updateSafe();
+    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe();
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });
@@ -6407,10 +6409,30 @@ export class Engine {
     return true;
   }
 
-  /** True when the game wants portrait/landscape and a phone is held the other way. */
+  /**
+   * Portrait or landscape games on a screen held the other way: with settings.wrongWay = 'letterbox' (or engine.letterbox),
+   * the game plays in a box of its own shape (black bars), instead of asking the player to turn the phone.
+   */
+  fitScreen() {
+    const s = this.scene, o = s?.settings.orientation, want = this.letterbox ?? (s?.settings.wrongWay === 'letterbox');
+    const P = this.parent === document.body ? { width: innerWidth, height: innerHeight } : this.parent.getBoundingClientRect();
+    let box = null;
+    if (s && want && (o === 'portrait' || o === 'landscape') && P.width > 0 && P.height > 0 && (o === 'landscape') === (P.height > P.width)) {
+      const v = s.view || {}, a = Math.max(+v.width || 0, +v.height || 0) / Math.max(1, Math.min(+v.width || 0, +v.height || 0));
+      const ratio = s.mode === '3d' || !(a >= 1.2 && a <= 3) ? 16 / 9 : a;
+      const w = o === 'landscape' ? P.width : Math.min(P.width, P.height / ratio), hh = o === 'landscape' ? Math.min(P.height, P.width / ratio) : P.height;
+      box = { w: Math.round(w), h: Math.round(hh), x: Math.round((P.width - w) / 2), y: Math.round((P.height - hh) / 2) };
+    }
+    const css = this.rootBase + (box ? `left:${box.x}px;top:${box.y}px;width:${box.w}px;height:${box.h}px;` : 'inset:0;');
+    this.boxed = !!box;
+    if (css !== this._fitCss) { this._fitCss = css; this.root.style.cssText = css; this.resize(); }
+    return box;
+  }
+
+  /** True when the game wants portrait/landscape and a phone is held the other way (and it isn't letterboxed). */
   wrongOrientation(s) {
     const o = s.settings.orientation;
-    if (!o || o === 'any' || !matchMedia('(pointer: coarse)').matches) return false;
+    if (!o || o === 'any' || this.boxed || !matchMedia('(pointer: coarse)').matches) return false;
     return o === 'portrait' ? this.width > this.height * 1.1 : this.height > this.width * 1.1;
   }
 
@@ -6460,6 +6482,7 @@ export class Engine {
     if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
+    if (!this.editing) this.fitScreen();
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused

@@ -267,6 +267,16 @@ The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while
 - While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
 - A custom script that crashes is reported once and the game keeps running.
 
+### Portrait or landscape
+
+- **Pick it when you start:** New Game has a *Blank game: Portrait / Landscape* switch, and every game type shows which way it plays.
+- **Change it any time:**
+  - *Game Settings → Orientation* (Portrait / Landscape / Either), or the orientation button on the UI editor's screen bar.
+  - Switching turns a 2D game's screen size around (400 × 700 ↔ 700 × 400) for every level, and a camera sitting in the middle of the old screen moves to the middle of the new one.
+- **Held the other way?** Choose what players see: *Ask the player to turn it*, or *Play in a box* (the game keeps its shape with bars at the edges). *Go full screen and lock the rotation* locks it on phones that allow it.
+- **In the editor:** the UI editor and Play show the game in its own shape, so a landscape game is a wide box on a portrait phone. Turn the phone to play it full screen.
+- From code: `settings.orientation` ('portrait' | 'landscape' | 'any'), `settings.wrongWay` ('ask' | 'letterbox'), `engine.letterbox` to force the box, and `engine.fitScreen()`.
+
 ### Safe area and UI scaling (fits every phone)
 
 - **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.

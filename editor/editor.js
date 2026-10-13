@@ -313,8 +313,36 @@ function requestRebuild() {
 }
 function rebuild() {
   engine.setScene(Scene.fromJSON(project, { editing: true }));
+  fitEditorScreen();
   applyCamera();
 }
+/** The UI editor and Play show the game's screen in its own shape (a landscape box on a portrait phone, and the other way). */
+function fitEditorScreen() {
+  engine.letterbox = !!(uiMode || playing);
+  engine.fitScreen();
+}
+const orientationOf = () => (root ? levelList()[0].settings?.orientation || 'any' : 'any');
+/** Portrait or landscape for the whole game: every level's setting, and 2D screen sizes turned to match. */
+function setOrientation(o) {
+  for (const lv of levelList()) {
+    lv.settings = { ...(lv.settings || {}), orientation: o };
+    if (lv.mode === '3d' || o === 'any') continue;
+    const v = (lv.view ||= { width: 400, height: 700 });
+    if ((o === 'landscape') === (v.width > v.height)) continue;
+    const ow = v.width, oh = v.height; v.width = oh; v.height = ow;
+    for (const e of lv.entities || []) // a camera still sitting in the middle of the old screen moves to the middle of the new one
+      if ((e.behaviors || []).some((b) => b.type === 'camera') && Math.abs((e.x || 0) - ow / 2) < 1 && Math.abs((e.y || 0) - oh / 2) < 1) { e.x = v.width / 2; e.y = v.height / 2; }
+  }
+  changed({ structure: true }); pushHistory(); renderInspector(); refreshOrientBtn();
+  toast(o === 'any' ? 'Plays either way up' : `Now a ${o} game${is3D() ? '' : ` (${project.view.width} × ${project.view.height})`}`);
+}
+function orientationRow() {
+  const cur = orientationOf();
+  return h('div', { class: 'row full' }, h('label', {}, 'Game orientation'),
+    h('div', { class: 'seg orient' }, [['portrait', 'Portrait', 'phone'], ['landscape', 'Landscape', 'phone'], ['any', 'Either', 'rotate']].map(([k, l, ic]) =>
+      h('button', { class: (cur === k ? 'on ' : '') + k, onclick: () => setOrientation(k) }, icon(ic), l))));
+}
+function refreshOrientBtn() { const b = $('.orient-btn'); if (b) b.replaceChildren(icon(orientationOf() === 'any' ? 'rotate' : 'phone'), h('span', {}, { portrait: 'Portrait', landscape: 'Landscape', any: 'Either way' }[orientationOf()])); const ic = b?.querySelector('svg'); if (ic && orientationOf() === 'landscape') ic.style.transform = 'rotate(90deg)'; }
 function applyCamera() {
   const s = engine.scene;
   if (!s || playing) return;
@@ -2656,6 +2684,12 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, threeD ? 'Gravity is in Physics below: about -25 is normal.' : 'Gravity is in Physics below: 0 for top-down games, about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
   ], { icon: 'sun', key: 's-env' }));
+  box.append(comp('Orientation', [
+    orientationRow(),
+    h('p', { class: 'desc' }, threeD ? 'Lock the game to portrait or landscape. 3D games fill the screen either way.' : 'Lock the game to portrait (tall) or landscape (wide). Switching turns the 2D screen size around too, so the camera shows the right shape.'),
+    orientationOf() !== 'any' && C('settings.wrongWay', { label: 'If the phone is held the other way', type: 'select', options: [['ask', 'Ask the player to turn it'], ['letterbox', 'Play in a box (bars at the edges)']], def: 'ask' }),
+    orientationOf() !== 'any' && C('settings.fullscreen', { label: 'Go full screen and lock the rotation on first tap', type: 'bool', def: false }),
+  ], { icon: 'phone', key: 's-orient' }));
   const POST_PRESETS = [['none', 'None', {}], ['glow', 'Neon glow', { bloom: 0.8, bloomRadius: 16, bloomThreshold: 50, saturation: 125, vignette: 0.35 }],
     ['warm', 'Warm sunset', { tint: '#ff9a3c', tintAmount: 0.25, saturation: 115, contrast: 105, vignette: 0.3 }], ['cold', 'Cold', { tint: '#4fa3ff', tintAmount: 0.2, saturation: 85, contrast: 108 }],
     ['night', 'Night', { brightness: 70, saturation: 70, tint: '#2a3d8f', tintAmount: 0.35, vignette: 0.6 }], ['retro', 'Retro', { contrast: 120, saturation: 140, vignette: 0.5, bloom: 0.35 }],
@@ -2736,9 +2770,8 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Check it in the UI editor: the Phone button shows a notch, Dynamic Island or home bar.'),
   ], { icon: 'hud', key: 's-safe' }));
   box.append(comp('Mobile', [
-    C('settings.orientation', { label: 'Screen Orientation', type: 'select', options: [['any', 'Any'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], def: 'any' }),
-    h('p', { class: 'desc' }, 'Players holding the phone the wrong way see a "turn your device" screen.'),
-    C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'Portrait or landscape: see Orientation above.'),
+    orientationOf() === 'any' && C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
     C('settings.shareButton', { label: 'Share Score Button', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
   ], { icon: 'gamepad', key: 's-mobile' }));
@@ -3616,13 +3649,17 @@ const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-ques
 function typeCards(onPick) {
   let mode = store.get('pocket.editor.newMode', '2d') === '3d' ? '3d' : '2d';
   const wrap = h('div', { class: 'type-wrap' });
+  const orient = () => store.get('pocket.editor.newOrient', 'portrait');
+  const tplOrient = (t) => templates[t.key].settings?.orientation;
   const draw = () => {
     const list = templateInfo.filter((t) => templates[t.key].mode === mode).sort((a, b) => (b.key.startsWith('empty') ? 1 : 0) - (a.key.startsWith('empty') ? 1 : 0));
     wrap.replaceChildren(
       h('div', { class: 'seg' }, ['2d', '3d'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
         icon(m === '3d' ? 'cube' : 'grid'), `${m.toUpperCase()} games`, h('small', {}, String(templateInfo.filter((t) => templates[t.key].mode === m).length))))),
-      h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t) },
-        h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube')),
+      h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l))),
+      h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t, t.key.startsWith('empty') ? orient() : null) },
+        h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube'),
+          (t.key.startsWith('empty') ? orient() : tplOrient(t)) && h('span', { class: 'pv-or ' + (t.key.startsWith('empty') ? orient() : tplOrient(t)) }, (t.key.startsWith('empty') ? orient() : tplOrient(t)) === 'landscape' ? 'Landscape' : 'Portrait')),
         h('b', {}, t.title), h('small', {}, t.blurb)))));
   };
   draw();
@@ -3642,10 +3679,11 @@ function projectList(all, row) {
   return wrap;
 }
 const modeBadge = (json) => h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D');
-function startGame(t) {
+function startGame(t, orient) {
   closeLayer(); hideHome();
   if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
   newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : undefined);
+  if (orient) { setOrientation(orient); resetCamera(); applyCamera(); }
   toast(`Created ${root.name}. Tap ▶ Play to try it!`);
 }
 function openNewDialog() {
@@ -3798,12 +3836,12 @@ function play() {
   document.body.classList.add('playing');
   $('#playBar').hidden = false;
   $('#playBtn').classList.add('on'); $('#playBtn').replaceChildren(icon('stop'), h('span', {}, 'Stop'));
-  engine.editing = false;
+  engine.editing = false; engine.letterbox = true; // a landscape game plays in a landscape box even on a portrait phone
   engine.input.enabled = true;
   engine.timeScale = 1;
   if (clearOnPlay()) { Log.clear(); consoleSeen = 0; }
   const json = clone(root);
-  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false, loadOnStart: false };
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, saveProgress: false, loadOnStart: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
@@ -3811,7 +3849,7 @@ function play() {
   updatePauseButtons();
   pushBack(stop);
   store.set('pocket.editor.played.' + projectId, '1');
-  requestAnimationFrame(() => { engine.resize(); engine.layoutButtons(); });
+  requestAnimationFrame(() => { engine.fitScreen(); engine.resize(); engine.layoutButtons(); if (engine.boxed) toast(`A ${orientationOf()} game: turn your phone to play it full screen`); });
 }
 function stop() {
   if (!playing) return;
@@ -3895,7 +3933,7 @@ function renderInspectCard() {
 }
 $('#viewport').addEventListener('pointerdown', (ev) => { // Inspect mode: a tap on the running game picks an object
   if (!playing || !engine.inspecting) return;
-  const r = $('#viewport').getBoundingClientRect(), hit = pick(ev.clientX - r.left, ev.clientY - r.top);
+  const r = surface.getBoundingClientRect(), hit = pick(ev.clientX - r.left, ev.clientY - r.top);
   inspectId = hit ? hit.id : null; buzz(6);
   if (hit) renderInspectCard(); else { $('#playInspect').hidden = true; toast('Nothing there. Tap an object.'); }
   engine.render();
@@ -3985,8 +4023,10 @@ function setViewMode(m) {
   $('#uiBtn').classList.toggle('on', uiMode);
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
+  refreshOrientBtn();
   if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: drag to move, pull edges to resize, pinch to zoom.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
+  fitEditorScreen();
   refreshAll(); applyCamera();
 }
 /** Pretend the screen has a notch / island / home bar while editing, to see the safe area at work. */
@@ -4021,7 +4061,8 @@ function drawPhoneCutouts(ctx, W, H) {
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));
-  const bar = h('div', { id: 'uiScreens', hidden: true }, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
+  const orientBtn = h('button', { class: 'orient-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Game orientation' }, ...[['portrait', 'Portrait'], ['landscape', 'Landscape'], ['any', 'Either way']].map(([k, l]) => ({ icon: orientationOf() === k ? 'check' : 'phone', label: l, fn: () => setOrientation(k) }))]) });
+  const bar = h('div', { id: 'uiScreens', hidden: true }, orientBtn, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
   $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected

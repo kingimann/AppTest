@@ -71,6 +71,7 @@ function saveNow() {
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
+let attachFor = null; // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
 const levelList = () => [root, ...(root.levels || [])];
@@ -193,7 +194,7 @@ function changed({ structure = false, inspector = false } = {}) {
   requestRebuild();
   saveSoon();
   pushHistorySoon();
-  if (structure) { renderHierarchy(); renderInspector(); }
+  if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); }
   else if (inspector) renderInspector();
 }
 
@@ -617,6 +618,12 @@ surface.addEventListener('pointerdown', (ev) => {
     paintAt(x, y);
     return;
   }
+  if (ptrs.size === 1 && attachFor) { // Attach mode: this tap picks the new parent (empty space cancels)
+    const hit = pick(x, y);
+    endAttach(hit ? hit.id : null);
+    gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: true };
+    return;
+  }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
     const giz = !panBtn && hitGizmo(x, y);
@@ -978,8 +985,26 @@ function select(id, { fromScene = false } = {}) {
 /** Quick actions for the selected object, floating over the Scene view. */
 function updateCtxBar() {
   const bar = $('#ctxBar'), j = ent(selectedId);
-  bar.hidden = !j || playing;
+  bar.hidden = !j || playing || !!attachFor;
   if (j) $('#hint').hidden = true;
+  if (j) { $('#ctxBar [data-act="detach"]').hidden = !j.parent; $('#ctxBar [data-act="attach"]').hidden = !parentChoices(j).length; }
+}
+// ---- Attach mode: tap "Attach", then tap the object (in the scene or the Hierarchy) it should go inside ----
+function startAttach(id) {
+  const j = ent(id); if (!j) return;
+  if (!parentChoices(j).length) { toast(j.ui ? 'Add another UI element first' : 'Add another object first'); return; }
+  attachFor = id;
+  const bar = $('#attachBar');
+  bar.querySelector('span').textContent = `Tap the object to put “${j.name || 'Object'}” inside`;
+  bar.hidden = false; buzz(8); updateCtxBar(); renderHierarchy();
+}
+function endAttach(targetId) {
+  const id = attachFor; if (!id) return false;
+  attachFor = null; $('#attachBar').hidden = true;
+  if (targetId && targetId !== id) setParent(id, targetId);
+  else if (targetId === id) toast('Pick a different object');
+  updateCtxBar(); renderHierarchy();
+  return true;
 }
 function ctxAction(act) {
   const j = ent(selectedId); if (!j) return;
@@ -987,6 +1012,8 @@ function ctxAction(act) {
   else if (act === 'duplicate') duplicateEntity(j.id);
   else if (act === 'focus') frameSelected();
   else if (act === 'delete') deleteEntity(j.id);
+  else if (act === 'attach') startAttach(j.id);
+  else if (act === 'detach') setParent(j.id, null);
 }
 /** Step through objects in the Inspector with ‹ ›. */
 function stepSelection(d) {
@@ -1093,7 +1120,7 @@ function renderHierarchy() {
     return h('div', {
       class: 'h-row' + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
-      onclick: () => { if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+      onclick: () => { if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
     depth ? h('span', { class: 'h-branch' }) : '',
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
@@ -1182,6 +1209,27 @@ function addChild(pid) {
   const L = project.entities; L.splice(L.indexOf(pj) + subtree(pid).length, 0, c);
   closedKids.delete(pid); selectedId = c.id;
   changed({ structure: true }); pushHistory(); toast(`Added a child to ${pj.name}`);
+}
+/** Objects that could be put inside `j` (not its parents or children, same kind: UI with UI). */
+const childChoices = (j) => project.entities.filter((e) => e.id !== j.id && e.parent !== j.id && !isInside(j.id, e.id) && !!e.ui === !!j.ui && !e.template);
+/** Inspector card: the object's children, each with a one-tap remove, plus New Child / Add Existing. */
+function kidsCard(j) {
+  const kids = kidsOf(j.id);
+  return h('div', { class: 'kids' },
+    h('div', { class: 'kids-h' }, icon('child'), h('b', {}, 'Children'), h('small', {}, kids.length ? String(kids.length) : 'none')),
+    kids.map((k) => h('div', { class: 'kid' },
+      h('button', { class: 'kid-nm', onclick: () => select(k.id) }, icon(iconFor(k)), h('span', {}, k.name || 'Object')),
+      h('button', { class: 'kid-x', title: `Take ${k.name} out of ${j.name}`, onclick: () => setParent(k.id, null) }, icon('unlink'), 'Remove'))),
+    h('div', { class: 'kids-btns' },
+      h('button', { class: 'btn', onclick: () => addChild(j.id) }, icon('plus'), 'New Child'),
+      h('button', { class: 'btn', onclick: (ev) => addExistingMenu(j, ev.currentTarget) }, icon('link'), 'Add Existing')));
+}
+function addExistingMenu(j, anchor) {
+  const opts = childChoices(j);
+  popMenu(anchor, [
+    { cap: `Put inside “${j.name}”…` },
+    ...(opts.length ? opts.map((e) => ({ icon: iconFor(e), label: e.name || 'Object', fn: () => setParent(e.id, j.id) })) : [{ cap: j.ui ? 'No other UI to add' : 'No other objects to add' }]),
+  ]);
 }
 function parentMenu(j, anchor) {
   const opts = parentChoices(j);
@@ -1760,7 +1808,8 @@ function renderInspector() {
         onchange: (e) => { j.tags = e.target.value.split(',').map((t) => t.trim()).filter(Boolean); changed({ structure: true }); } })),
     h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
       h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
-      h('button', { class: 'btn', title: 'Add a child object', onclick: () => addChild(j.id) }, icon('plus'))),
+      j.parent && h('button', { class: 'btn', title: 'Take it out of its parent', onclick: () => setParent(j.id, null) }, icon('unlink'))),
+    kidsCard(j),
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'),
@@ -2990,7 +3039,8 @@ function snapUI(j) {
 }
 $('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
-for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['delete', 'trash', 'Delete']]) {
+$('#attachBar button').addEventListener('click', () => endAttach(null));
+for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['attach', 'link', 'Attach'], ['detach', 'unlink', 'Detach'], ['delete', 'trash', 'Delete']]) {
   const b = $(`#ctxBar [data-act="${act}"]`);
   b.append(icon(ic), label);
   b.addEventListener('click', () => ctxAction(act));

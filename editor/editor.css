@@ -699,3 +699,29 @@ body.playing #uiScreens { display: none !important; }
 #viewport.short #zoomBar { padding: 3px; bottom: 10px; right: 80px; }
 #viewport.short #zoomBar button { width: 42px; height: 42px; }
 #viewport.short #addFab { width: 54px; height: 54px; right: 12px; bottom: 10px; border-radius: 17px; }
+
+/* ---------- selection bar with Attach / Detach, and the Attach banner ---------- */
+#ctxBar button[hidden] { display: none; }
+#ctxBar button[data-act=attach], #ctxBar button[data-act=detach] { color: #9cc3ea; }
+@media (max-width: 560px) {
+  #ctxBar { left: 70px; right: 8px; transform: none; justify-content: space-around; }
+  #ctxBar button { flex: 1 1 0; width: auto; min-width: 0; max-width: 64px; font-size: 10.5px; gap: 2px; }
+  #toolRail.two ~ #ctxBar, #toolRail.two ~ #attachBar { left: 114px; }
+}
+#attachBar { position: absolute; z-index: 6; top: 10px; left: 70px; right: 8px; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; min-height: 56px;
+  background: #2c5d87; color: #fff; border-radius: 14px; box-shadow: 0 4px 18px rgba(0,0,0,.45); font-weight: 600; font-size: 15px; line-height: 1.3; }
+#attachBar span { flex: 1; }
+#attachBar button { flex: none; height: 42px; padding: 0 16px; border: 0; border-radius: 10px; background: rgba(255,255,255,.18); color: #fff; font-weight: 600; }
+body.playing #attachBar { display: none !important; }
+.kids { grid-column: 1 / -1; border-top: 1px solid #2f2f2f; padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.kids-h { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.kids-h b { color: var(--text); font-weight: 600; }
+.kids-h small { margin-left: auto; color: var(--dim); font-size: 14px; }
+.kid { display: flex; align-items: center; gap: 8px; background: var(--field); border: 1px solid var(--field-b); border-radius: 12px; padding: 4px; }
+.kid-nm { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px; border: 0; background: transparent; text-align: left; }
+.kid-nm svg.i { color: #9cc3ea; }
+.kid-nm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kid-x { flex: none; height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: #4a3434; color: #ffb4a8; display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; }
+.kids-btns { display: flex; gap: 10px; }
+.kids-btns .btn { flex: 1; height: 48px; padding: 0 10px; font-size: 15px; }
+.toast { top: calc(var(--top) + 140px); } /* below the selection bar / Attach banner */

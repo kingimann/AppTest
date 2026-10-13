@@ -71,6 +71,8 @@ function saveNow() {
   store.set(CURRENT_KEY, projectId);
 }
 let saveTimer;
+const openDups = new Set(); // Hierarchy "Gem ×8" groups the user opened
+let hRevealed = null; // last selection the Hierarchy scrolled to
 let attachFor = null; // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
 
@@ -871,10 +873,10 @@ function worldAt(sx, sy) {
   return hit ? { x: hit.x, z: hit.z } : undefined;
 }
 const pointRect = (sx, sy) => { const r = surface.getBoundingClientRect(); return { left: r.left + sx + 12, right: r.left + sx + 12, top: r.top + sy + 12, bottom: r.top + sy - 12, guard: true }; };
-function openObjectMenu(id, sx, sy) {
+function openObjectMenu(id, sx, sy, anchor) {
   const j = ent(id); if (!j) return;
   select(id);
-  popMenu(pointRect(sx, sy), [
+  popMenu(anchor || pointRect(sx, sy), [
     { cap: j.name || 'Object' },
     { icon: 'info', label: 'Inspect', fn: () => ctxAction('inspect') },
     { icon: 'copy', label: 'Duplicate', fn: () => duplicateEntity(id) },
@@ -922,9 +924,22 @@ function setTool(t) {
   const was = tool;
   tool = t;
   for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  if (t !== was) showToolName(t);
   if (t === 'rect' && was !== 'rect') toast(is3D() && !ent(selectedId)?.ui ? 'Rect tool works on UI and 2D objects. In 3D use Scale.' : 'Rect: drag the edges and corners to resize. Drag the middle to move.');
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
+}
+
+const TOOL_NAMES = { hand: 'Hand · pan the view', move: 'Move', rotate: 'Rotate', scale: 'Scale', rect: 'Rect · resize', paint: 'Paint · place copies' };
+let toolTipTimer;
+/** Name the tool next to its button for a moment (the rail only shows icons). */
+function showToolName(t) {
+  const b = $(`#toolRail [data-tool="${t}"]`), rail = $('#toolRail'); if (!b || !rail.offsetParent) return;
+  let tip = $('#toolTip'); if (!tip) { tip = h('div', { id: 'toolTip' }); $('#viewport').append(tip); }
+  const rr = rail.getBoundingClientRect(), br = b.getBoundingClientRect(), vr = $('#viewport').getBoundingClientRect();
+  tip.textContent = TOOL_NAMES[t] || t;
+  tip.style.left = (rr.right - vr.left + 8) + 'px'; tip.style.top = (br.top - vr.top + br.height / 2) + 'px';
+  tip.classList.add('show'); clearTimeout(toolTipTimer); toolTipTimer = setTimeout(() => tip.classList.remove('show'), 1100);
 }
 
 let dockTab = 'hierarchy';
@@ -1106,14 +1121,18 @@ function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  const search = h('input', { type: 'text', placeholder: 'Search objects', value: hFilter, autocapitalize: 'off',
+  const search = h('input', { type: 'text', placeholder: 'Search', value: hFilter, autocapitalize: 'off',
     oninput: (e) => { hFilter = e.target.value.toLowerCase(); renderRows(); } });
-  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search));
-  box.append(h('div', { class: 'h-filters' }, H_FILTERS.map(([k, l]) => h('button', { class: hKind === k ? 'on' : '', onclick: () => { hKind = k; renderHierarchy(); } }, l))));
-  const gs = gettingStarted();
-  if (gs) box.append(gs);
+  const kindLabel = H_FILTERS.find(([k]) => k === hKind)?.[1] || 'All';
+  const filterBtn = h('button', { class: 'h-filter-btn' + (hKind !== 'all' ? ' on' : ''), title: 'Show only…',
+    onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Show' }, ...H_FILTERS.map(([k, l]) => ({ icon: k === hKind ? 'check' : 'list', label: k === 'all' ? 'Everything' : l, fn: () => { hKind = k; renderHierarchy(); } }))]) },
+    icon('list'), hKind === 'all' ? 'Filter' : kindLabel);
+  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: (e) => openCreateMenu(e.currentTarget) }, icon('plus'), 'Create'), search, filterBtn));
+  if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
   const rows = h('div');
   box.append(rows);
+  const gs = gettingStarted(); // after the list, so your objects come first
+  if (gs) box.append(gs);
   const row = (e, depth = 0) => {
     const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
@@ -1130,14 +1149,36 @@ function renderHierarchy() {
       (badges.length || kids || parentName) ? h('span', { class: 'h-sub' }, [parentName && `in ${parentName}`, kids && `${kids} child${kids > 1 ? 'ren' : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
+    e.id === selectedId && h('button', { class: 'eye', title: 'More actions', onclick: (ev) => { ev.stopPropagation(); openObjectMenu(e.id, 0, 0, ev.currentTarget); } }, icon('more')),
     h('button', { class: 'eye h-grip', title: 'Drag onto another object to make it a child', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
   };
-  const tree = (list) => { // parents with their children folded underneath
+  const tree = (list) => { // parents with their children folded underneath; 3+ top-level copies of one name fold into a group
     const inList = new Set(list.map((e) => e.id)), out = [];
     const walk = (e, d) => { out.push([e, d]); if (!closedKids.has(e.id)) for (const k of kidsOf(e.id)) if (inList.has(k.id)) walk(k, d + 1); };
-    for (const e of list) if (!e.parent || !inList.has(e.parent)) walk(e, 0);
+    const tops = list.filter((e) => !e.parent || !inList.has(e.parent)), count = new Map();
+    for (const e of tops) count.set(e.name || 'Object', (count.get(e.name || 'Object') || 0) + 1);
+    const done = new Set();
+    for (const e of tops) {
+      const nm = e.name || 'Object';
+      if (count.get(nm) < 3) { walk(e, 0); continue; }
+      if (done.has(nm)) continue;
+      done.add(nm);
+      const members = tops.filter((q) => (q.name || 'Object') === nm), gk = (e.folder || '') + '/' + nm;
+      out.push(['group', { key: gk, name: nm, members }]);
+      if (openDups.has(gk)) for (const m of members) walk(m, 1);
+    }
     return out;
   };
+  const groupRow = (g) => {
+    const shut = !openDups.has(g.key), first = g.members[0], kind = kindOf(first), badges = compBadges(first), vis = g.members.some((m) => m.visible !== false);
+    return h('div', { class: 'h-row h-group' + (g.members.some((m) => m.id === selectedId) ? ' has-sel' : ''), onclick: () => { shut ? openDups.add(g.key) : openDups.delete(g.key); renderRows(); } },
+      h('span', { class: 'h-twisty' + (shut ? ' shut' : '') }, icon('chevron')),
+      h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(first))),
+      h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, g.name, h('span', { class: 'h-count' }, '×' + g.members.length)),
+        h('span', { class: 'h-sub' }, [shut ? 'tap to show all' : 'tap to fold', ...badges.slice(0, 2)].join(' · '))),
+      h('button', { class: 'eye', title: vis ? 'Hide all' : 'Show all', onclick: (ev) => { ev.stopPropagation(); for (const m of g.members) m.visible = !vis; changed({ structure: true }); } }, icon(vis ? 'eye' : 'eyeoff')));
+  };
+  const rowsOf = (items) => tree(items).map(([e, d]) => (e === 'group' ? groupRow(d) : row(e, d)));
   function renderRows() {
     const list = project.entities.filter(hMatch), flat = !!hFilter || hKind !== 'all';
     const topOf = (e) => { let q = e, n = 0; while (q.parent && ent(q.parent) && n++ < 60) q = ent(q.parent); return q; }, folderOf = (e) => (flat ? e.folder : topOf(e).folder);
@@ -1145,7 +1186,7 @@ function renderHierarchy() {
     rows.replaceChildren(...[
       h('div', { class: 'h-row scene' + (selectedId === SCENE_ID ? ' sel' : ''), onclick: () => select(SCENE_ID) }, h('span', { class: 'h-ico' }, icon('scene')),
         h('span', { class: 'h-txt' }, h('span', { class: 'nm' }, levelList().length > 1 ? `${levelList()[0].name || 'Untitled'} › ${levelName(project, levelIdx)}` : levelList()[0].name || 'Untitled'),
-          h('span', { class: 'h-sub' }, `${project.entities.length} objects · ${is3D() ? '3D' : '2D'} · tap for game settings`))),
+          h('span', { class: 'h-sub' }, `${project.entities.length} objects · ${is3D() ? '3D' : '2D'} · settings`))),
       uiMode && h('div', { class: 'h-cap' }, 'UI editor: screen elements only'),
       ...folders.flatMap((f) => {
         const items = list.filter((e) => folderOf(e) === f), shut = closedFolders.has(f);
@@ -1156,14 +1197,24 @@ function renderHierarchy() {
             { icon: 'eyeoff', label: 'Hide / Show All', fn: () => { const vis = items.some((e) => e.visible !== false); for (const e of items) e.visible = !vis; changed({ structure: true }); } },
             { icon: 'close', label: 'Remove Folder (keep objects)', fn: () => { for (const e of project.entities) if (e.folder === f) delete e.folder; changed({ structure: true }); } },
           ]); } }, icon('more'))),
-        ...(shut ? [] : tree(items).map(([e, d]) => row(e, d)))];
+        ...(shut ? [] : rowsOf(items))];
       }),
-      ...(flat ? list.filter((e) => !e.folder).map((e) => row(e, 0)) : tree(list.filter((e) => !folderOf(e))).map(([e, d]) => row(e, d))),
+      ...(flat ? list.filter((e) => !e.folder).map((e) => row(e, 0)) : rowsOf(list.filter((e) => !folderOf(e)))),
       !list.length && h('div', { class: 'empty' }, hFilter || hKind !== 'all' ? 'Nothing matches.' : 'No objects yet. Tap Create or the blue + button.'),
     ].filter(Boolean));
   }
+  if (selectedId && selectedId !== hRevealed) reveal(selectedId); // newly selected (maybe in the Scene): unfold its way and scroll to it
   renderRows();
   box.scrollTop = scroll;
+  if (selectedId && selectedId !== hRevealed) { hRevealed = selectedId; box.querySelector(`.h-row[data-id="${selectedId}"]`)?.scrollIntoView({ block: 'nearest' }); }
+}
+/** Open whatever hides `id` in the Hierarchy: folded parents, its folder, its group of copies. */
+function reveal(id) {
+  let q = ent(id), n = 0;
+  while (q?.parent && n++ < 60) { closedKids.delete(q.parent); q = ent(q.parent); }
+  if (!q) return;
+  if (q.folder) closedFolders.delete(q.folder);
+  openDups.add((q.folder || '') + '/' + (q.name || 'Object'));
 }
 
 // ---- parenting (make one object a child of another) ----
@@ -1265,9 +1316,15 @@ function gettingStarted() {
   ];
   const n = steps.filter((x) => x.done).length;
   if (n === steps.length) return null;
+  const open = store.get(key + '.open', '') === '1', next = steps.find((x) => !x.done);
+  const toggle = () => { store.set(key + '.open', open ? '' : '1'); renderHierarchy(); };
+  const close = h('button', { class: 'gs-x', title: 'Hide', onclick: (ev) => { ev.stopPropagation(); store.set(key, 'hide'); renderHierarchy(); } }, icon('close'));
+  if (!open) return h('div', { class: 'gs mini', onclick: toggle }, // one line: progress + the next step
+    h('span', { class: 'gs-ring', style: `--p:${(n / steps.length) * 100}%` }, `${n}/${steps.length}`),
+    h('span', { class: 'gs-l' }, h('small', {}, 'Next step'), next.label),
+    h('button', { class: 'gs-go', onclick: (ev) => { ev.stopPropagation(); next.fn(); } }, next.btn), close);
   return h('div', { class: 'gs' },
-    h('div', { class: 'gs-hd' }, h('b', {}, 'Getting started'), h('span', { class: 'gs-n' }, `${n} / ${steps.length}`),
-      h('button', { class: 'gs-x', title: 'Hide', onclick: () => { store.set(key, 'hide'); renderHierarchy(); } }, icon('close'))),
+    h('div', { class: 'gs-hd', onclick: toggle }, icon('chevron'), h('b', {}, 'Getting started'), h('span', { class: 'gs-n' }, `${n} / ${steps.length}`), close),
     h('div', { class: 'gs-bar' }, h('i', { style: `width:${(n / steps.length) * 100}%` })),
     steps.map((x) => h('div', { class: 'gs-step' + (x.done ? ' done' : '') },
       h('span', { class: 'gs-dot' }, x.done ? icon('check') : null), h('span', { class: 'gs-l' }, x.label),
@@ -2683,13 +2740,21 @@ function popMenu(anchor, items) {
     window.addEventListener('pointercancel', release, { once: true });
     setTimeout(() => { layer.style.pointerEvents = ''; }, 1500);
   }
+  if (phoneSheets()) { // phones: a full-width action sheet at the bottom, easy to reach with a thumb
+    m.classList.add('sheet'); layer.className = 'dim';
+    m.append(h('button', { class: 'cancel', onclick: closeLayer }, 'Cancel'));
+    pushBack(layerBack);
+    return;
+  }
   const mw = m.offsetWidth, mh = m.offsetHeight;
   let x = Math.min(r.left, window.innerWidth - mw - 8), y = r.bottom + 2;
   if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 2);
   m.style.left = Math.max(8, x) + 'px'; m.style.top = y + 'px';
 }
+/** Phone-sized portrait screen: menus and dialogs come up from the bottom. */
+const phoneSheets = () => window.innerWidth < 700 && window.innerHeight > window.innerWidth;
 function openDialog(title, kids) {
-  const d = h('div', { class: 'dialog' }, h('div', { class: 'dh' }, h('span', {}, title), h('button', { onclick: closeLayer, title: 'Close' }, icon('close'))), h('div', { class: 'db' }, kids));
+  const d = h('div', { class: 'dialog' + (phoneSheets() ? ' sheet' : '') }, h('div', { class: 'dh' }, h('span', {}, title), h('button', { onclick: closeLayer, title: 'Close' }, icon('close'))), h('div', { class: 'db' }, kids));
   layer.replaceChildren(d); layer.className = 'dim'; layer.hidden = false;
   pushBack(layerBack);
 }

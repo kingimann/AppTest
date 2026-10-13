@@ -200,6 +200,12 @@ Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }]
 - **Project › Sounds › Import Sound** brings in MP3, WAV, OGG or M4A files from your phone (short clips work best: they're saved inside the project). Tap ▶ to preview; ⋯ renames (everything using it follows) or deletes.
 - Imported sounds appear in every Sound picker: the Sound component, Turret, the Play Sound action and node. From code: `s.engine.audio.sfx('name')`.
 
+### Play mode tools
+
+The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**.
+- **Inspect** pauses without the "PAUSED" screen. Tap any object in the running game, including ones spawned while playing, to see its live position, rotation, velocity, visibility and components, and change them. Step moves the game on a frame at a time while you watch the numbers. Changes last until you stop.
+- **Stats** shows FPS, objects, bodies, the game state, time and your variables (score, lives…).
+
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.

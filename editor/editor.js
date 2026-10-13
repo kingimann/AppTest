@@ -428,7 +428,16 @@ engine.onRenderWorld = (r, s, z) => {
 };
 
 engine.onRenderUI = (ctx, s) => {
-  if (playing) return;
+  if (playing) { // play-mode Inspect: ring the inspected object
+    const e = inspectId && s.byId(inspectId);
+    if (e && !e.dead) {
+      const p = e.ui ? uiBounds(e) : toScreen(e); if (!p) return;
+      let hx = 24, hy = 24;
+      if (!is3D() && !e.ui) { const b = boundsOf(e), z = engine.renderer.zoomFor(s); hx = (b.sphere ? b.r : b.hx) * z + 6; hy = (b.sphere ? b.r : b.hy) * z + 6; }
+      ctx.save(); ctx.strokeStyle = ORANGE; ctx.lineWidth = 2.5; ctx.setLineDash([6, 4]); ctx.strokeRect(p.x - hx, p.y - hy, hx * 2, hy * 2); ctx.restore();
+    }
+    return;
+  }
   // invisible logic objects
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const e of s.entities) {
@@ -3370,6 +3379,8 @@ function stop() {
   dropBack(stop);
   document.body.classList.remove('playing');
   $('#playBar').hidden = true; $('#playConsole').hidden = true;
+  engine.inspecting = false; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer);
+  if (!$('#playStats').hidden) toggleStats();
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
   engine.editing = true;
   engine.paused = false;
@@ -3382,11 +3393,73 @@ function stop() {
   renderHierarchy();
   requestAnimationFrame(() => { engine.resize(); rebuild(); });
 }
-function togglePause() { if (!playing) return; engine.paused = !engine.paused; updatePauseButtons(); }
+function togglePause() { if (!playing) return; engine.paused = !engine.paused; if (!engine.paused) setInspecting(false); updatePauseButtons(); }
 function updatePauseButtons() {
   $('#pauseBtn').disabled = !playing;
   for (const b of [$('#pauseBtn'), $('#pbPause')]) b.classList.toggle('on', playing && engine.paused);
+  $('#pbStep').disabled = !(playing && engine.paused);
+  $('#pbInspect').classList.toggle('on', !!engine.inspecting);
 }
+
+// ---- play mode tools (Unity's Step, Stats and play-mode Inspector) ----
+let inspectId = null, statsTimer = 0, inspectTimer = 0;
+function setInspecting(on) {
+  engine.inspecting = on;
+  if (on) { engine.paused = true; engine.input.enabled = false; engine.input.reset(); toast('Paused. Tap an object to inspect it.'); }
+  else { engine.input.enabled = playing; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer); }
+  updatePauseButtons();
+}
+function toggleStats() {
+  const el = $('#playStats'); el.hidden = !el.hidden; $('#pbStats').classList.toggle('on', !el.hidden);
+  clearInterval(statsTimer);
+  if (el.hidden) return;
+  const draw = () => {
+    const s = engine.scene; if (!s) return;
+    const live = s.entities.filter((e) => !e.dead), vars = Object.entries(s.vars).filter(([, v]) => typeof v !== 'object').slice(0, 8);
+    el.replaceChildren(...[['FPS', Math.round(engine.fps)], ['Objects', live.length], ['Bodies', live.filter((e) => e.body).length], ['State', engine.paused ? 'paused' : s.state], ['Time', s.time.toFixed(1) + 's'], ['Pixels', `×${engine.dpr}`], ...vars.map(([k, v]) => [k, typeof v === 'number' ? Math.round(v * 100) / 100 : String(v)])]
+      .map(([k, v]) => h('div', {}, h('span', {}, k), h('b', { class: k === 'FPS' && v < 40 ? 'bad' : '' }, v))));
+  };
+  draw(); statsTimer = setInterval(draw, 250);
+}
+/** Live values of the inspected object, refreshed while you look (fields you're typing in are left alone). */
+function renderInspectCard() {
+  const box = $('#playInspect'), s = engine.scene, e = inspectId && s.byId(inspectId);
+  if (!e || e.dead) { box.hidden = true; return; }
+  box.hidden = false;
+  const r = (v) => Math.round((+v || 0) * 100) / 100, three = s.mode === '3d';
+  const num = (label, get, set) => h('label', { class: 'pi-f' }, h('span', {}, label), h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: r(get()), 'data-live': label,
+    oninput: (ev) => { const n = parseFloat(ev.target.value); if (!Number.isNaN(n)) { set(n); engine.render(); } } }));
+  const fields = [num('X', () => e.x, (v) => (e.x = v)), num('Y', () => e.y, (v) => (e.y = v)), three && num('Z', () => e.z, (v) => (e.z = v)),
+    num(three ? 'Rot Y' : 'Rot', () => (three ? e.ry : e.rz), (v) => (three ? (e.ry = v) : (e.rz = v))),
+    e.body && num('Vel X', () => e.body.vel.x, (v) => (e.body.vel.x = v)), e.body && num('Vel Y', () => e.body.vel.y, (v) => (e.body.vel.y = v))].filter(Boolean);
+  const comps = (e.props?.behaviors || []).map((b) => Behaviors[b.type]?.label?.replace(/ \(.*\)$/, '') || b.type).filter(Boolean);
+  const pj = project.entities.find((q) => q.id === e.id);
+  box.replaceChildren(
+    h('div', { class: 'pi-h' }, icon('target'), h('span', {}, h('b', {}, e.name), h('small', {}, [pj ? 'in the level' : 'spawned while playing', [...e.tags].join(', ')].filter(Boolean).join(' · '))),
+      h('button', { title: 'Close', onclick: () => { inspectId = null; box.hidden = true; } }, icon('close'))),
+    h('div', { class: 'pi-grid' }, fields),
+    h('div', { class: 'pi-row' }, h('label', { class: 'pi-chk' }, h('input', { type: 'checkbox', checked: e.visible, onchange: (ev) => { e.visible = ev.target.checked; engine.render(); } }), 'Visible'),
+      e.body && h('span', { class: 'pi-tag' }, e.body.type + (e.body.grounded ? ' · grounded' : '')),
+      h('button', { class: 'btn', onclick: () => { e.destroy(); engine.scene.flush?.(); engine.render(); renderInspectCard(); } }, icon('trash'), 'Destroy')),
+    comps.length ? h('p', { class: 'pi-comps' }, comps.join(' · ')) : null,
+    h('p', { class: 'pi-note' }, 'Changes here last until you stop playing.'));
+  clearInterval(inspectTimer);
+  inspectTimer = setInterval(() => { // keep the numbers live (Step moves things)
+    if (!inspectId || box.hidden) return clearInterval(inspectTimer);
+    const ee = engine.scene.byId(inspectId); if (!ee || ee.dead) return renderInspectCard();
+    for (const inp of box.querySelectorAll('input[data-live]')) if (document.activeElement !== inp) {
+      const k = inp.dataset.live, v = { X: ee.x, Y: ee.y, Z: ee.z, Rot: ee.rz, 'Rot Y': ee.ry, 'Vel X': ee.body?.vel.x, 'Vel Y': ee.body?.vel.y }[k];
+      inp.value = r(v);
+    }
+  }, 200);
+}
+$('#viewport').addEventListener('pointerdown', (ev) => { // Inspect mode: a tap on the running game picks an object
+  if (!playing || !engine.inspecting) return;
+  const r = $('#viewport').getBoundingClientRect(), hit = pick(ev.clientX - r.left, ev.clientY - r.top);
+  inspectId = hit ? hit.id : null; buzz(6);
+  if (hit) renderInspectCard(); else { $('#playInspect').hidden = true; toast('Nothing there. Tap an object.'); }
+  engine.render();
+}, true);
 setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can unpause itself on tap
 
 // ============================================================================
@@ -3396,6 +3469,10 @@ $('#fileBtn').append(icon('menu'));
 for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
+$('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));
+$('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) return; engine.stepFrames = 1; buzz(4); setTimeout(() => { if (inspectId) renderInspectCard(); }, 60); });
+$('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
+$('#pbStats').addEventListener('click', toggleStats);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));

@@ -2266,7 +2266,7 @@ function renderUI(engine, scene) {
     return;
   }
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
-  if (ownScreen(scene, engine.paused ? 'paused' : scene.state)) return;
+  if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && engine.inspecting)) return; // the editor's Inspect keeps the view clear
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -5520,9 +5520,10 @@ export class Engine {
     if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
-    if (this.paused) {
+    if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
+    else if (this.paused) {
       this.runUIOnly(s, dt);
-      if ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause')) this.paused = false;
+      if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }

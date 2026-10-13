@@ -873,10 +873,10 @@ function worldAt(sx, sy) {
   return hit ? { x: hit.x, z: hit.z } : undefined;
 }
 const pointRect = (sx, sy) => { const r = surface.getBoundingClientRect(); return { left: r.left + sx + 12, right: r.left + sx + 12, top: r.top + sy + 12, bottom: r.top + sy - 12, guard: true }; };
-function openObjectMenu(id, sx, sy) {
+function openObjectMenu(id, sx, sy, anchor) {
   const j = ent(id); if (!j) return;
   select(id);
-  popMenu(pointRect(sx, sy), [
+  popMenu(anchor || pointRect(sx, sy), [
     { cap: j.name || 'Object' },
     { icon: 'info', label: 'Inspect', fn: () => ctxAction('inspect') },
     { icon: 'copy', label: 'Duplicate', fn: () => duplicateEntity(id) },
@@ -924,9 +924,22 @@ function setTool(t) {
   const was = tool;
   tool = t;
   for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
+  if (t !== was) showToolName(t);
   if (t === 'rect' && was !== 'rect') toast(is3D() && !ent(selectedId)?.ui ? 'Rect tool works on UI and 2D objects. In 3D use Scale.' : 'Rect: drag the edges and corners to resize. Drag the middle to move.');
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
+}
+
+const TOOL_NAMES = { hand: 'Hand · pan the view', move: 'Move', rotate: 'Rotate', scale: 'Scale', rect: 'Rect · resize', paint: 'Paint · place copies' };
+let toolTipTimer;
+/** Name the tool next to its button for a moment (the rail only shows icons). */
+function showToolName(t) {
+  const b = $(`#toolRail [data-tool="${t}"]`), rail = $('#toolRail'); if (!b || !rail.offsetParent) return;
+  let tip = $('#toolTip'); if (!tip) { tip = h('div', { id: 'toolTip' }); $('#viewport').append(tip); }
+  const rr = rail.getBoundingClientRect(), br = b.getBoundingClientRect(), vr = $('#viewport').getBoundingClientRect();
+  tip.textContent = TOOL_NAMES[t] || t;
+  tip.style.left = (rr.right - vr.left + 8) + 'px'; tip.style.top = (br.top - vr.top + br.height / 2) + 'px';
+  tip.classList.add('show'); clearTimeout(toolTipTimer); toolTipTimer = setTimeout(() => tip.classList.remove('show'), 1100);
 }
 
 let dockTab = 'hierarchy';
@@ -1136,6 +1149,7 @@ function renderHierarchy() {
       (badges.length || kids || parentName) ? h('span', { class: 'h-sub' }, [parentName && `in ${parentName}`, kids && `${kids} child${kids > 1 ? 'ren' : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
+    e.id === selectedId && h('button', { class: 'eye', title: 'More actions', onclick: (ev) => { ev.stopPropagation(); openObjectMenu(e.id, 0, 0, ev.currentTarget); } }, icon('more')),
     h('button', { class: 'eye h-grip', title: 'Drag onto another object to make it a child', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
   };
   const tree = (list) => { // parents with their children folded underneath; 3+ top-level copies of one name fold into a group
@@ -2726,13 +2740,21 @@ function popMenu(anchor, items) {
     window.addEventListener('pointercancel', release, { once: true });
     setTimeout(() => { layer.style.pointerEvents = ''; }, 1500);
   }
+  if (phoneSheets()) { // phones: a full-width action sheet at the bottom, easy to reach with a thumb
+    m.classList.add('sheet'); layer.className = 'dim';
+    m.append(h('button', { class: 'cancel', onclick: closeLayer }, 'Cancel'));
+    pushBack(layerBack);
+    return;
+  }
   const mw = m.offsetWidth, mh = m.offsetHeight;
   let x = Math.min(r.left, window.innerWidth - mw - 8), y = r.bottom + 2;
   if (y + mh > window.innerHeight - 8) y = Math.max(8, r.top - mh - 2);
   m.style.left = Math.max(8, x) + 'px'; m.style.top = y + 'px';
 }
+/** Phone-sized portrait screen: menus and dialogs come up from the bottom. */
+const phoneSheets = () => window.innerWidth < 700 && window.innerHeight > window.innerWidth;
 function openDialog(title, kids) {
-  const d = h('div', { class: 'dialog' }, h('div', { class: 'dh' }, h('span', {}, title), h('button', { onclick: closeLayer, title: 'Close' }, icon('close'))), h('div', { class: 'db' }, kids));
+  const d = h('div', { class: 'dialog' + (phoneSheets() ? ' sheet' : '') }, h('div', { class: 'dh' }, h('span', {}, title), h('button', { onclick: closeLayer, title: 'Close' }, icon('close'))), h('div', { class: 'db' }, kids));
   layer.replaceChildren(d); layer.className = 'dim'; layer.hidden = false;
   pushBack(layerBack);
 }

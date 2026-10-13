@@ -764,3 +764,21 @@ body.playing #attachBar { display: none !important; }
 .h-active button svg.i { width: 16px; height: 16px; }
 .h-row.scene { min-height: 58px; }
 .h-group .h-twisty { width: 24px; }
+
+/* ---------- phone: menus as action sheets, dialogs from the bottom ---------- */
+.menu.sheet { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: 100%; max-width: none; max-height: 72vh; border-radius: 20px 20px 0 0;
+  padding: 8px 0 calc(env(safe-area-inset-bottom) + 8px); border: 0; border-top: 1px solid #111; animation: sheetUp .18s ease-out; }
+.menu.sheet::before { content: ''; display: block; width: 44px; height: 5px; border-radius: 3px; background: #5a5a5a; margin: 2px auto 8px; }
+.menu.sheet button { min-height: 58px; font-size: 17px; padding: 0 22px; }
+.menu.sheet .cap { font-size: 13px; padding: 6px 22px 8px; }
+.menu.sheet .cancel { justify-content: center; margin: 8px 12px 0; width: calc(100% - 24px); border-radius: 14px; background: #3a3a3a; font-weight: 600; }
+.dialog.sheet { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; max-height: calc(100% - env(safe-area-inset-top) - 24px);
+  border-radius: 20px 20px 0 0; border: 0; padding-bottom: env(safe-area-inset-bottom); animation: sheetUp .2s ease-out; }
+@keyframes sheetUp { from { transform: translateY(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .menu.sheet, .dialog.sheet { animation: none; } }
+/* tool name hint next to the tool rail */
+#toolTip { position: absolute; z-index: 6; transform: translateY(-50%); pointer-events: none; background: rgba(25,25,25,.94); color: #fff; border: 1px solid #000;
+  padding: 7px 12px; border-radius: 10px; font-size: 14px; font-weight: 600; white-space: nowrap; opacity: 0; transition: opacity .15s; }
+#toolTip.show { opacity: 1; }
+/* touch screens: 16px text in fields stops iOS zooming the page when you type */
+@media (pointer: coarse) { input:not([type=checkbox]):not([type=range]):not([type=color]), select, textarea { font-size: 16px !important; } }

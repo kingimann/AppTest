@@ -545,6 +545,26 @@ Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are rel
 - **Messages:** `scene.send('door-open')`, the *send message* action, and the Send Message / On Message nodes let objects trigger each other.
 - **Nodes:** Tween, Punch, Stop Tweens, Play/Stop Animation, Animation Speed, Sprite Frame, Flip, Fade, Blink, On Animation End, Send Message, On Message, Camera Impulse.
 
+### A tidier Inspector
+
+- **One slim top row:** back to the Hierarchy, search (with "2/21"), Advanced, previous / next object.
+- **Compact object header:**
+  - The name, then tag chips.
+  - Two rows of small pickers: Layer · Draw + order · Parent · Child (New Child / Add Existing).
+  - The Children list only appears when there are children.
+- **Filter chips** (Visual, Physics, Logic…) only appear when an object has five or more components; otherwise it just says how many there are.
+- **Closed components show a summary:**
+  - Transform shows its position, Shape shows "Rectangle · 30×40", Text shows its words and size.
+  - Other components show their first settings, e.g. "run speed 240 · jump power 680".
+  - Fold everything with the list button to see the whole object at a glance.
+- **Less to scroll:**
+  - Rarely used settings fold away, and a fold opens by itself (with a dot) when something in it is set:
+    - Shape: **More looks** (outline width, dashes, gradient, shadow, glow).
+    - Text: **Style**, **Wrapping**, **Outline / shadow / glow**, **Numbers and fitting**, **Label box** and **Animation**.
+    - Components with a long list: the extra settings go in **More settings**.
+  - Descriptions show two lines; tap to read the rest.
+  - Rows and number fields are a little more compact.
+
 ### Inspector superpowers (Odin-style)
 
 - Sliders under ranged numbers.

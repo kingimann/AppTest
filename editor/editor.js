@@ -1038,22 +1038,27 @@ function tagMenu(anchor, j) {
     '-', { icon: 'plus', label: 'New Tag…', fn: () => { const t = prompt('New tag (e.g. boss, door, checkpoint)'); if (t?.trim()) { addTag(j, t.trim().toLowerCase().replace(/\s+/g, '-')); renderInspector(); } } },
     { icon: 'gear', label: 'Manage Tags & Layers…', fn: openTagsLayers }]);
 }
-/** Inspector header rows: tag chips, Layer and (2D / UI) draw layer + order. */
+/** Inspector header, compact: tag chips, then one row of small pickers (Layer, Draw + order, Parent, + Child). */
 function tagLayerRows(j) {
-  const threeD = is3D(), names = layerNames(), so = sortOf(j);
+  const threeD = is3D(), names = layerNames(), so = sortOf(j), kids = kidsOf(j.id);
   const chips = h('div', { class: 'tag-chips' }, (j.tags || []).map((t) => h('span', { class: 'tag-chip' }, t,
     h('button', { type: 'button', title: 'Remove tag', onclick: () => { j.tags = (j.tags || []).filter((q) => q !== t); changed({ structure: true }); pushHistory(); renderInspector(); } }, '×'))),
-    h('button', { type: 'button', class: 'tag-add', onclick: (e) => tagMenu(e.currentTarget, j) }, icon('plus'), (j.tags || []).length ? '' : 'Add tag'));
+    h('button', { type: 'button', class: 'tag-add', onclick: (e) => tagMenu(e.currentTarget, j) }, icon('plus'), (j.tags || []).length ? '' : 'Tag'));
+  const pill = (label, el, title) => h('label', { class: 'pill', title }, h('span', {}, label), el);
   return [
-    h('div', { class: 'sub tl-row' }, h('span', {}, 'Tags'), chips),
-    h('div', { class: 'sub tl-row' }, h('span', {}, 'Layer'),
-      h('select', { class: 'layer-sel', onchange: (e) => { if (e.target.value === 'edit') { e.target.value = String(layerOf(j)); openTagsLayers(); return; } setLayerOf(j, e.target.value); changed({ structure: true }); pushHistory(); } },
-        names.map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, `${i} · ${n}`)), h('option', { value: 'edit' }, 'Edit layers…'))),
-    !threeD && h('div', { class: 'sub tl-row' }, h('span', {}, 'Draw'),
-      h('select', { class: 'sort-sel', title: 'Draw layer: Background is behind everything, Top is in front', onchange: (e) => { const b = SORT_LAYERS.find((q) => q[0] === e.target.value)[1]; j.layer = b + sortOf(j).order; if (!j.layer) delete j.layer; changed(); pushHistory(); renderInspector(); } },
-        SORT_LAYERS.map(([n]) => h('option', { value: n, selected: n === so.name }, n))),
-      h('label', { class: 'ord' }, 'Order', h('input', { type: 'number', inputMode: 'numeric', value: so.order, title: 'Higher draws in front within the same draw layer',
-        oninput: (e) => { j.layer = sortOf(j).base + (parseInt(e.target.value, 10) || 0); if (!j.layer) delete j.layer; changed(); } }))),
+    h('div', { class: 'meta' }, chips),
+    h('div', { class: 'meta pills' },
+      pill('Layer', h('select', { class: 'layer-sel', onchange: (e) => { if (e.target.value === 'edit') { e.target.value = String(layerOf(j)); openTagsLayers(); return; } setLayerOf(j, e.target.value); changed({ structure: true }); pushHistory(); } },
+        names.map((n, i) => h('option', { value: String(i), selected: i === layerOf(j) }, n)), h('option', { value: 'edit' }, 'Edit layers…')), 'Which layer it is on: decides what it collides with'),
+      !threeD && pill('Draw', h('span', { class: 'pill-pair' },
+        h('select', { class: 'sort-sel', onchange: (e) => { const b = SORT_LAYERS.find((q) => q[0] === e.target.value)[1]; j.layer = b + sortOf(j).order; if (!j.layer) delete j.layer; changed(); pushHistory(); renderInspector(); } },
+          SORT_LAYERS.map(([n]) => h('option', { value: n, selected: n === so.name }, n))),
+        h('input', { class: 'ord', type: 'number', inputMode: 'numeric', value: so.order, title: 'Order: higher draws in front',
+          oninput: (e) => { j.layer = sortOf(j).base + (parseInt(e.target.value, 10) || 0); if (!j.layer) delete j.layer; changed(); } })), 'Draw layer and order: Background is behind, Top is in front'),
+      pill('Parent', h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
+        h('option', { value: '' }, 'None'), parentChoices(j).map((q) => h('option', { value: q.id, selected: q.id === j.parent }, q.name || 'Object'))), 'Put it inside another object: it moves with it'),
+      h('button', { type: 'button', class: 'pill pill-btn', onclick: (e) => popMenu(e.currentTarget, [{ icon: 'plus', label: 'New Child', fn: () => addChild(j.id) }, { icon: 'link', label: 'Add Existing…', fn: () => addExistingMenu(j, e.target) }]) },
+        icon('child'), kids.length ? `${kids.length} child${kids.length === 1 ? '' : 'ren'}` : 'Child')),
   ];
 }
 /** The Tags & Layers manager: add, rename and delete tags (everywhere at once), rename layers, see what uses them. */
@@ -2132,6 +2137,14 @@ function control(target, path, spec) {
 
 // ---- Odin-style inspector helpers ----
 const openGroups = new Set();
+/** A folding group inside a component; it starts open when something in it is already set (so nothing is hidden by surprise). */
+function fold(key, title, kids, isSet = false) {
+  kids = [kids].flat(Infinity).filter(Boolean); if (!kids.length) return null;
+  const body = h('div', { class: 'og-b' }, kids), open = openGroups.has(key) || (isSet && !openGroups.has('-' + key));
+  const g = h('div', { class: 'og' + (open ? ' open' : '') },
+    h('button', { class: 'og-h', onclick: () => { g.classList.toggle('open'); const on = g.classList.contains('open'); openGroups.delete(on ? '-' + key : key); openGroups.add(on ? key : '-' + key); } }, icon('chevron'), title, isSet ? h('span', { class: 'og-dot', title: 'Something here is set' }) : null), body);
+  return g;
+}
 /** A component's fields: validation messages, buttons, then params (hidden by showIf, folded into groups, with sliders and info boxes). */
 function behaviorBody(def, b, i, j, threeD, C) {
   const params = def.params.map((p) => ({ ...p, def: paramDefault(p, threeD) })), deps = showIfDeps(params);
@@ -2139,8 +2152,12 @@ function behaviorBody(def, b, i, j, threeD, C) {
   const btns = (BEH_BUTTONS[b.type] || []).filter((x) => !x.when || x.when(b, threeD));
   if (btns.length) out.push(h('div', { class: 'btns' }, btns.map((x) => h('button', { class: 'btn' + (x.primary ? ' primary' : ''), onclick: () => x.fn(j, i, b) }, icon(x.icon || 'play'), x.label))));
   const groups = new Map();
+  const visible = params.filter((p) => !((!showAdvanced && p.advanced) || !shown(p, b, threeD)));
+  const loose = visible.filter((p) => !p.group), MAIN = 5; // the first few loose settings stay out; the rest fold into "More settings"
+  const extra = !showAdvanced && loose.length > MAIN + 1 ? new Set(loose.slice(MAIN).map((p) => p.key)) : new Set();
   for (const p of params) {
     if ((!showAdvanced && p.advanced) || !shown(p, b, threeD)) continue;
+    if (extra.has(p.key)) p.group = 'More settings';
     let infoText = typeof p.info === 'string' ? p.info : null;
     if (p.info && typeof p.info === 'object') { const k = Object.keys(p.info).find((v) => Object.values(b).includes(v)); if (k) infoText = p.info[k]; }
     const dep = deps.has(p.key), el = C(`behaviors.${i}.${p.key}`, { ...p, infoText, structure: dep && p.type !== 'number', lazy: dep && p.type === 'number' });
@@ -2547,9 +2564,10 @@ function comp(title, kids, opts = {}) {
   h('span', { class: 'fold' }, icon('chevron')),
   opts.onToggle && h('input', { type: 'checkbox', checked: opts.enabled !== false, title: 'Enabled', onchange: (e) => opts.onToggle(e.target.checked) }),
   icon(opts.icon || 'bolt', 'ci'),
-  h('span', { class: 't' }, title),
+  h('span', { class: 't' }, title, opts.summary ? h('small', { class: 'sum' }, opts.summary) : null),
   opts.menu && h('button', { class: 'more', title: 'More', onclick: (e) => popMenu(e.currentTarget, opts.menu) }, icon('more')));
-  el.append(head, h('div', { class: 'comp-b' }, opts.desc && h('p', { class: 'desc' }, opts.desc), kids));
+  const desc = opts.desc && h('p', { class: 'desc clamp', title: 'Tap to read all', onclick: (e) => e.currentTarget.classList.toggle('clamp') }, opts.desc);
+  el.append(head, h('div', { class: 'comp-b' }, desc, kids));
   return el;
 }
 
@@ -2596,16 +2614,13 @@ function renderInspector() {
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
   }
 
-  box.append(h('div', { class: 'nav-strip' },
-    h('button', { class: 'btn back', onclick: () => setDock('hierarchy') }, icon('left'), 'Hierarchy'),
-    h('span', { class: 'crumb' }, `${idx + 1} of ${project.entities.length}`),
-    h('span', { class: 'sp' }),
-    h('button', { class: 'btn', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('left')),
-    h('button', { class: 'btn', title: 'Next object', onclick: () => stepSelection(1) }, icon('right'))));
-  box.append(h('div', { class: 'insp-search' }, h('input', { type: 'search', placeholder: 'Search settings', value: inspQuery, autocapitalize: 'off',
-    oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
-    h('button', { class: 'adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
-      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear'), 'Advanced')));
+  box.append(h('div', { class: 'insp-bar' }, // one slim row: back · search · advanced · previous / next
+    h('button', { class: 'ib', title: 'Back to the Hierarchy', onclick: () => setDock('hierarchy') }, icon('left')),
+    h('input', { type: 'search', placeholder: `Search (${idx + 1}/${project.entities.length})`, value: inspQuery, autocapitalize: 'off', oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
+    h('button', { class: 'ib adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
+      onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear')),
+    h('button', { class: 'ib', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('chevron')),
+    h('button', { class: 'ib next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -2613,10 +2628,7 @@ function renderInspector() {
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
     h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
     ...tagLayerRows(j),
-    h('div', { class: 'sub' }, h('span', {}, 'Parent'), h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
-      h('option', { value: '' }, '— none (top level) —'), parentChoices(j).map((p) => h('option', { value: p.id, selected: p.id === j.parent }, p.name || 'Object'))),
-      j.parent && h('button', { class: 'btn', title: 'Take it out of its parent', onclick: () => setParent(j.id, null) }, icon('unlink'))),
-    kidsCard(j),
+    kidsOf(j.id).length ? kidsCard(j) : null,
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'))));
@@ -2626,8 +2638,10 @@ function renderInspector() {
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
   const quickRow = quick.length && h('div', { class: 'quick-add' }, h('span', {}, 'Quick add'), quick.slice(0, 4).map((c) => h('button', { onclick: () => addComponentTo(j.id, c.key) }, icon(c.icon), c.label.replace(/ \(.*\)$/, '')))); // shown by Add Component below
-  box.append(h('div', { class: 'comp-tools' },
-    h('div', { class: 'cf' }, INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
+  const nComps = 1 + ['shape', 'text', 'sprite', 'mesh', 'model', 'bar', 'body', 'collider', 'light', 'voxels', 'tiles'].filter((k) => j[k]).length + (j.behaviors || []).length;
+  if (nComps < 5 && inspCat !== 'all') inspCat = 'all';
+  box.append(h('div', { class: 'comp-tools' + (nComps < 5 ? ' few' : '') },
+    h('div', { class: 'cf' }, nComps < 5 ? h('span', { class: 'cf-n' }, `${nComps} component${nComps === 1 ? '' : 's'}`) : INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
     h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
       if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
 
@@ -2636,7 +2650,7 @@ function renderInspector() {
     ? [vecRow(T, 'Position', ['x', 'y', 'z'], [0, 0, 0], 0.1), vecRow(T, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(T, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)]
     : [
       vecRow(T, j.ui ? 'Offset' : 'Position', ['x', 'y'], [0, 0], 1), vecRow(T, 'Rotation', ['rz'], [0], 1), vecRow(T, 'Scale', ['sx', 'sy'], [1, 1], 0.05)],
-  { icon: 'move', key: 'transform', menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
+  { icon: 'move', key: 'transform', summary: threeD ? `${round(j.x || 0)}, ${round(j.y || 0)}, ${round(j.z || 0)}` : `${round(j.x || 0)}, ${round(j.y || 0)}${j.rz ? ` · ${round(j.rz)}°` : ''}`, menu: [{ label: 'Reset', fn: () => { for (const k of ['rx', 'ry', 'rz']) delete j[k]; for (const k of ['sx', 'sy', 'sz']) delete j[k]; changed({ inspector: true }); } }] }));
 
   if (j.ui) {
     const inParent = j.parent && ent(j.parent)?.ui;
@@ -2668,7 +2682,8 @@ function renderInspector() {
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
-      t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true }),
+      t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
+      fold('shape:more', 'More looks', [
       t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
       t !== 'emoji' && j.shape.stroke && C('shape.dash', { label: 'Dashed outline', type: 'number', def: 0, range: [0, 30], step: 1 }),
       t !== 'emoji' && j.shape.fill && C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
@@ -2676,7 +2691,8 @@ function renderInspector() {
       C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
       j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 })],
       !j.shape.shadow && C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
-    ], { icon: iconFor(j), key: 'shape', menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
+      ], !!(j.shape.fill2 || j.shape.shadow || +j.shape.glow || +j.shape.dash)),
+    ], { icon: iconFor(j), key: 'shape', summary: `${t === 'rect' ? 'Rectangle' : t} · ${t === 'circle' || t === 'ring' ? 'r ' + (j.shape.r ?? 20) : `${j.shape.w ?? 40}×${j.shape.h ?? 40}`}`, menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
     box.append(comp('Image', [
@@ -2698,15 +2714,20 @@ function renderInspector() {
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
-      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
       C('text.font', { label: 'Font', type: 'select', options: fontOptions(j.text.font), def: 'theme' }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openFontPicker((f) => { j.text.font = f; changed({ inspector: true }); pushHistory(); }) }, icon('text'), 'More fonts…')),
       C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+      fold('text:style', 'Style: italic, letters, gradient', [
       C('text.italic', { label: 'Italic', type: 'bool', def: false }),
+      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
       C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase']], def: '' }),
       C('text.spacing', { label: 'Letter spacing', type: 'number', def: 0, range: [-4, 20], step: 0.5 }),
+      ], !!(j.text.italic || j.text.color2 || j.text.case || +j.text.spacing)),
+      fold('text:lines', 'Wrapping and line spacing', [
       C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
       C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
+      ], !!(+j.text.wrap || (j.text.lineHeight && +j.text.lineHeight !== 1.2))),
+      fold('text:fx', 'Outline, shadow, glow, underline', [
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
       C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
@@ -2714,16 +2735,20 @@ function renderInspector() {
       C('text.glow', { label: 'Glow', type: 'color', optional: true }),
       C('text.underline', { label: 'Underline', type: 'bool', def: false }),
       C('text.strike', { label: 'Strikethrough', type: 'bool', def: false }),
-      h('h5', { class: 'sub-head' }, 'Numbers & fitting'),
+      ], !!(j.text.outline || j.text.shadow || j.text.glow || j.text.underline || j.text.strike)),
+      fold('text:numbers', 'Numbers and fitting', [
       C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
       C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
       C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
-      h('h5', { class: 'sub-head' }, 'Label box'),
+      ], !!(j.text.format || +j.text.fit || j.text.valign)),
+      fold('text:box', 'Label box', [
       C('text.bg', { label: 'Box behind the text', type: 'color', optional: true, structure: true }),
       j.text.bg && [C('text.bgPad', { label: 'Box padding', type: 'number', def: 8, range: [0, 40], step: 1 }), C('text.bgRadius', { label: 'Box roundness', type: 'number', def: 8, range: [0, 40], step: 1 })],
-      h('h5', { class: 'sub-head' }, 'Animation'),
+      ], !!j.text.bg),
+      fold('text:anim', 'Animation', [
       C('text.effect', { label: 'Effect', type: 'select', options: [['', 'None'], ['wave', 'Wave (letters)'], ['bounce', 'Bounce (letters)'], ['shake', 'Shake (letters)'], ['rainbow', 'Rainbow (letters)'], ['pulse', 'Pulse'], ['float', 'Float up and down']], def: '' }),
-    ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
+      ], !!j.text.effect),
+    ], { icon: 'text', key: 'text', summary: `“${String(j.text.value || '').slice(0, 18)}${String(j.text.value || '').length > 18 ? '…' : ''}” · ${j.text.size || 24}px`, menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
     const g = j.mesh.geometry;
@@ -2900,8 +2925,10 @@ function renderInspector() {
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
+      .map((p) => { const v = b[p.key] ?? paramDefault(p, threeD); const t = String(v ?? ''); return t === '' ? null : `${String(p.label || p.key).replace(/\s*\(.*\)$/, '').split(' ').slice(0, 2).join(' ').toLowerCase()} ${t.length > 14 ? t.slice(0, 13) + '…' : t}`; }).filter(Boolean).join(' · ');
     box.append(comp(def.label, behaviorBody(def, b, i, j, threeD, C), {
-      icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu,
+      icon: BEH_META[b.type]?.[1] || 'bolt', key: 'b' + i + b.type, desc: def.description, menu, summary,
       enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); },
     }));
   });

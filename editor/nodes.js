@@ -23,6 +23,10 @@ export const NODE_HELP = {
   jump: 'Jump upward', showHide: 'Show or hide an object', vibrate: 'Buzz the phone', shake: 'Shake the camera', win: 'Player wins', gameOver: 'Game over',
   nextLevel: 'Go to the next level', restart: 'Start again',
   number: 'A fixed number', getVar: 'Read a variable', random: 'A random number (whole if min and max are whole)', math: 'Add, subtract, multiply…', compare: 'Is A bigger than B?',
+  touchEnd: 'When something with a tag stops touching this', saveGame: 'Save variables, level and collected items', loadGame: 'Continue from a save (or go to “no save”)',
+  deleteSave: 'Erase a save slot', push: 'Add speed: knockback, dash, boost', setGravity: 'Change gravity (flip it, zero-g…)', switchCamera: 'Make another Camera object active',
+  zoomCamera: 'Smoothly zoom in or out', setLight: 'Turn a light on/off or dim it', setDarkness: 'How dark the 2D scene is (0–1)',
+  hasSave: 'Is there a saved game?', grounded: 'Standing on something?', velocity: 'How fast this moves', touching: 'Touching something with a tag right now?', canSee: 'Nothing solid in between?',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
 

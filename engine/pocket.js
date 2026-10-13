@@ -32,6 +32,9 @@ export function hexToRgb(hex) {
   return c;
 }
 
+const rgba = (hex, a) => { const [r, g, b] = hexToRgb(hex); return `rgba(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0},${a})`; };
+const flickerK = (L, time, i) => (L.flicker ? 1 - L.flicker * 0.25 * (1 + Math.sin(time * 23 + i * 7) * Math.sin(time * 7.3 + i)) : 1);
+
 /** Column-major 4x4 matrix helpers (WebGL layout). */
 export const M4 = {
   identity() { const m = new Float32Array(16); m[0] = m[5] = m[10] = m[15] = 1; return m; },
@@ -111,8 +114,9 @@ export { store as storage };
 // Entities
 // ============================================================================
 export const SHAPE_DEFAULTS = { type: 'rect', w: 40, h: 40, r: 20, radius: 0, fill: '#33f0ff', stroke: '', lineWidth: 2, glow: 0, points: null, emoji: '' };
-export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false };
-export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center' };
+export const BAR_DEFAULTS = { var: 'hp', max: 100, maxVar: '', w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8, label: false, icon: '' }; // icon: show the value as repeated emoji (hearts)
+export const TEXT_DEFAULTS = { value: 'Text', size: 24, color: '#ffffff', font: 'system-ui, -apple-system, sans-serif', weight: '800', align: 'center', outline: '', outlineWidth: 4, shadow: false };
+export const LIGHT_DEFAULTS = { color: '#ffd9a0', intensity: 1, range: 160, flicker: 0 }; // 2D range in px, 3D range in units
 export const MESH_DEFAULTS = { geometry: 'box', w: 1, h: 1, d: 1, r: 0.5, color: '#33f0ff', emissive: 0, opacity: 1 };
 export const SPRITE_DEFAULTS = { src: '', w: 64, h: 64 };
 export const BODY_DEFAULTS = {
@@ -120,6 +124,9 @@ export const BODY_DEFAULTS = {
   ox: 0, oy: 0, oz: 0, // collider offset from the object's center
   oneWay: false, // platforms you can jump up through and land on
   mass: 1, friction: 0, drag: 0, maxFall: 0,
+  lockX: false, lockY: false, lockZ: false, // freeze movement along an axis
+  maxSpeed: 0, // 0 = no limit
+  ignore: '', // comma-separated tags this body passes through
 };
 
 const TRANSFORM_KEYS = ['x', 'y', 'z', 'rx', 'ry', 'rz'];
@@ -144,6 +151,7 @@ export class Entity {
     this.showWhen = props.showWhen || 'always'; // UI screens: always | play | title | over | win | paused
     this.voxels = props.voxels ? new VoxelWorld(props.voxels) : null;
     this.model = props.model ? { parts: (props.model.parts || []).map((q) => ({ ...q })) } : null;
+    this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.body = null;
     if (props.body) this.setBody(props.body);
     this.data = { ...(props.data || {}) };
@@ -183,6 +191,12 @@ export class Entity {
 
   /** Half-extents used for physics & picking. Planar 2D entities have infinite depth. */
   extents() {
+    const x = this.rawExtents();
+    if (x.swap) { const t = x.hx; x.hx = x.hy; x.hy = t; delete x.swap; }
+    if (x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; }
+    return x;
+  }
+  rawExtents() {
     if (this.voxels) {
       const b = this.voxels.bounds, s = this.voxels.size;
       return { sphere: false, hx: (b.i1 - b.i0 + 1) * s / 2, hy: (b.j1 - b.j0 + 1) * s / 2, hz: (b.k1 - b.k0 + 1) * s / 2, voxel: true };
@@ -192,7 +206,7 @@ export class Entity {
     const off = b && (b.ox || b.oy || b.oz) ? { ox: b.ox * sx, oy: b.oy * sy, oz: (b.oz || 0) * sz } : null;
     if (b && b.shape !== 'auto') {
       if (b.shape === 'circle' || b.shape === 'sphere') return { sphere: true, r: (b.r || 10) * Math.max(sx, sy, is2D ? 0 : sz), ...off };
-      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2, ...off };
+      return { sphere: false, hx: (b.w || 1) * sx / 2, hy: (b.h || 1) * sy / 2, hz: is2D ? Infinity : (b.d || 1) * sz / 2, ...off, ...this.rot2D() };
     }
     if (this.model && this.model.parts?.length) { // box around all the parts
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
@@ -204,7 +218,7 @@ export class Entity {
       }
       return { sphere: false, hx: (x1 - x0) * sx / 2, hy: (y1 - y0) * sy / 2, hz: (z1 - z0) * sz / 2, ox: (x0 + x1) / 2 * sx + (off?.ox || 0), oy: (y0 + y1) / 2 * sy + (off?.oy || 0), oz: (z0 + z1) / 2 * sz + (off?.oz || 0) };
     }
-    if (off) { const r = this.extents.call({ ...this, body: { ...b, ox: 0, oy: 0, oz: 0 } }); return { ...r, ...off }; }
+    if (off) { const r = this.rawExtents.call(Object.assign(Object.create(Entity.prototype), this, { body: { ...b, ox: 0, oy: 0, oz: 0 } })); return { ...r, ...off }; }
     if (this.mesh) {
       const m = this.mesh;
       switch (m.geometry) {
@@ -217,15 +231,22 @@ export class Entity {
     if (this.shape) {
       const s = this.shape;
       if (s.type === 'circle' || s.type === 'ring') return { sphere: true, r: s.r * Math.max(sx, sy) };
-      return { sphere: false, hx: s.w * sx / 2, hy: s.h * sy / 2, hz: Infinity };
+      return { sphere: false, hx: s.w * sx / 2, hy: s.h * sy / 2, hz: Infinity, ...this.rot2D() };
     }
-    if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity };
+    if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity, ...this.rot2D() };
     if (this.bar) return { sphere: false, hx: this.bar.w * sx / 2, hy: this.bar.h * sy / 2, hz: Infinity };
     if (this.text) {
       const len = String(this.text.value).length;
       return { sphere: false, hx: this.text.size * len * 0.3 * sx, hy: this.text.size * 0.6 * sy, hz: Infinity };
     }
     return { sphere: false, hx: 10, hy: 10, hz: is2D ? Infinity : 0.5 };
+  }
+
+  /** 2D boxes turned by rz collide as rotated rectangles. */
+  rot2D() {
+    if (this.mesh || this.ui || !this.rz || this.rz % 180 === 0) return null;
+    if (this.rz % 90 === 0) return { swap: true };
+    return { rot: this.rz * DEG };
   }
 
   /** Give this entity a body sized to its visuals if it has none. */
@@ -365,7 +386,7 @@ const DEFAULT_SETTINGS = {
   muteButton: true, orientation: 'any', fullscreen: false,
   joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
   controls: 'auto', joystickMode: 'floating', controlsOpacity: 1, jumpLabel: 'JUMP', actionLabel: 'FIRE', customScreens: false,
-  turnBased: false, turnDelay: 0.3,
+  turnBased: false, turnDelay: 0.3, loadOnStart: false,
 };
 const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
 
@@ -376,8 +397,14 @@ export class Scene {
     this.background = opts.background || (this.mode === '3d' ? '#87b8e8' : '#0b0b1a');
     this.view = { width: 400, height: 700, ...(opts.view || {}) };
     this.gravity = opts.gravity ?? (this.mode === '3d' ? -20 : 0); // along y (2D: +down, 3D: +up)
+    this.gravityX = +opts.gravityX || 0; this.gravityZ = +opts.gravityZ || 0; // sideways gravity (wind, tilted worlds)
     this.settings = { ...DEFAULT_SETTINGS, ...(opts.settings || {}) };
-    this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, ...(opts.light || {}) };
+    // sun (3D), ambient, sky/ground tint (3D), darkness (2D: 0 = off, 1 = pitch black; lights cut through it)
+    this.light = { dir: { x: -0.4, y: -1, z: -0.3 }, color: '#ffffff', ambient: 0.45, intensity: 1, sky: '', ground: '', shadows: true, darkness: 0, ambientColor: '#0a0a1e', ...(opts.light || {}) };
+    if (this.light.sunAngle != null || this.light.sunHeight != null) { // editor-friendly angles in degrees
+      const a = (+this.light.sunAngle || 0) * DEG, h = (this.light.sunHeight ?? 60) * DEG;
+      this.light.dir = { x: -Math.cos(h) * Math.sin(a), y: -Math.sin(h), z: -Math.cos(h) * Math.cos(a) };
+    }
     this.fog = { near: 30, far: 120, ...(opts.fog || {}) };
     this.vars = { score: 0, ...(opts.vars || {}) };
     this.initialVars = { ...this.vars };
@@ -414,6 +441,48 @@ export class Scene {
 
   /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
   want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
+
+  /**
+   * Cast a ray and return the closest body it hits: { entity, dist, point } or null.
+   * opts: { ignore: entity, tag: only this tag, solidOnly: skip triggers (default true) }
+   */
+  raycast(origin, dir, maxDist = Infinity, opts = {}) {
+    const o = { x: origin.x, y: origin.y, z: origin.z || 0 }, l = Math.hypot(dir.x, dir.y, dir.z || 0) || 1;
+    const d = { x: dir.x / l, y: dir.y / l, z: (dir.z || 0) / l };
+    let best = null;
+    for (const e of this.entities) {
+      if (e.dead || e === opts.ignore || e.ui || !(e.body || opts.any)) continue;
+      if (e.body && e.body.sensor && opts.solidOnly !== false) continue;
+      if (opts.tag && !e.has(opts.tag)) continue;
+      const t = rayHitExtents(o, d, e, e.extents());
+      if (t != null && t <= maxDist && (!best || t < best.dist)) best = { entity: e, dist: t };
+    }
+    if (best) best.point = { x: o.x + d.x * best.dist, y: o.y + d.y * best.dist, z: o.z + d.z * best.dist };
+    return best;
+  }
+  /** Can `a` see `b` without a solid body in between? */
+  canSee(a, b, maxDist = Infinity) {
+    const dx = b.x - a.x, dy = b.y - a.y, dz = (b.z || 0) - (a.z || 0), dist = Math.hypot(dx, dy, dz);
+    if (dist > maxDist) return false;
+    const hit = this.raycast(a, { x: dx, y: dy, z: dz }, dist, { ignore: a });
+    return !hit || hit.entity === b || hit.dist >= dist - 1e-3;
+  }
+
+  // ---- save slots: variables, level, and where things are (collected items stay collected) ----
+  saveGame(slot = 1) { return this.engine?.saveGame(slot); }
+  loadGame(slot = 1) { return this.engine?.loadGame(slot); }
+  hasSave(slot = 1) { return !!this.engine?.readSave(slot); }
+  deleteSave(slot = 1) { this.engine?.deleteSave(slot); }
+
+  // ---- cameras: objects with a Camera component; the active one drives the view ----
+  setCamera(name) { this.activeCamera = name; this.cameraCut = true; }
+  isActiveCamera(e) {
+    const cams = (this.cameras || []).filter((c) => !c.dead);
+    if (this.activeCamera) { const named = cams.find((c) => c.name === this.activeCamera); if (named) return named === e; }
+    let top = null;
+    for (const c of cams) if (!top || (c.data.camPriority || 0) > (top.data.camPriority || 0)) top = c;
+    return top === e;
+  }
 
   /** Show a message banner over the game for a few seconds. */
   message(text, seconds = 2.5) { this.msg = { text: String(text), t: seconds }; }
@@ -512,6 +581,31 @@ export class Scene {
   update() {}
 }
 
+/** Distance along a ray to an entity's collider, or null. */
+function rayHitExtents(o, d, e, ex) {
+  const c = { x: e.x + (ex.ox || 0), y: e.y + (ex.oy || 0), z: e.z + (ex.oz || 0) };
+  if (ex.sphere) {
+    const flat = !e.mesh && e.scene?.mode !== '3d';
+    const mx = o.x - c.x, my = o.y - c.y, mz = flat ? 0 : o.z - c.z, dz = flat ? 0 : d.z;
+    const A = d.x * d.x + d.y * d.y + dz * dz || 1, B = mx * d.x + my * d.y + mz * dz, C = mx * mx + my * my + mz * mz - ex.r * ex.r;
+    if (C <= 0) return 0;
+    const disc = B * B - A * C; if (disc < 0 || B > 0) return null;
+    return (-B - Math.sqrt(disc)) / A;
+  }
+  let ox = o.x - c.x, oy = o.y - c.y, dx = d.x, dy = d.y;
+  if (ex.rot) { const cs = Math.cos(ex.rot), sn = Math.sin(ex.rot); [ox, oy] = [ox * cs + oy * sn, -ox * sn + oy * cs]; [dx, dy] = [dx * cs + dy * sn, -dx * sn + dy * cs]; }
+  let t0 = 0, t1 = Infinity;
+  for (const [p, v, h] of [[ox, dx, ex.hx], [oy, dy, ex.hy], [o.z - c.z, d.z, ex.hz]]) {
+    if (!Number.isFinite(h)) continue;
+    if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h) return null; continue; }
+    let a = (-h - p) / v, b = (h - p) / v;
+    if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+    if (t0 > t1) return null;
+  }
+  return t0;
+}
+
 // ============================================================================
 // Physics (arcade: axis-aligned boxes & spheres, shared by 2D and 3D)
 // ============================================================================
@@ -520,7 +614,45 @@ function overlap(a, ea, b, eb) {
   if (eb.ox || eb.oy || eb.oz) b = { x: b.x + (eb.ox || 0), y: b.y + (eb.oy || 0), z: b.z + (eb.oz || 0) };
   return overlapRaw(a, ea, b, eb);
 }
+/** 2D separating-axis test for rotated rectangles (and circles against them). Normal points from a to b. */
+function overlapSAT(a, ea, b, eb) {
+  if (ea.sphere && eb.sphere) return null;
+  if (ea.sphere || eb.sphere) {
+    const [c, ec, bx, eBox, flip] = ea.sphere ? [a, ea, b, eb, false] : [b, eb, a, ea, true];
+    const t = eBox.rot || 0, cs = Math.cos(t), sn = Math.sin(t);
+    const dx = c.x - bx.x, dy = c.y - bx.y, lx = dx * cs + dy * sn, ly = -dx * sn + dy * cs; // circle in the box's frame
+    const qx = clamp(lx, -eBox.hx, eBox.hx), qy = clamp(ly, -eBox.hy, eBox.hy);
+    let nx, ny, depth;
+    const ox = lx - qx, oy = ly - qy, d = Math.hypot(ox, oy);
+    if (d > 1e-6) { if (d >= ec.r) return null; nx = ox / d; ny = oy / d; depth = ec.r - d; }
+    else { // center inside the box: push out along the nearest face
+      const px = eBox.hx - Math.abs(lx), py = eBox.hy - Math.abs(ly);
+      if (px < py) { nx = Math.sign(lx) || 1; ny = 0; depth = px + ec.r; } else { nx = 0; ny = Math.sign(ly) || 1; depth = py + ec.r; }
+    }
+    // (nx, ny) points box → circle in box space; rotate back to world
+    let wx = nx * cs - ny * sn, wy = nx * sn + ny * cs;
+    if (!flip) { wx = -wx; wy = -wy; } // a is the circle: normal from circle to box
+    return { nx: wx, ny: wy, nz: 0, depth };
+  }
+  const axes = [];
+  for (const e of [ea, eb]) { const t = e.rot || 0; axes.push([Math.cos(t), Math.sin(t)], [-Math.sin(t), Math.cos(t)]); }
+  const dx = b.x - a.x, dy = b.y - a.y;
+  let best = null;
+  for (const [ux, uy] of axes) {
+    const ra = proj(ea, ux, uy), rb = proj(eb, ux, uy), d = dx * ux + dy * uy, o = ra + rb - Math.abs(d);
+    if (o <= 0) return null;
+    if (!best || o < best.depth) best = { nx: ux * (Math.sign(d) || 1), ny: uy * (Math.sign(d) || 1), nz: 0, depth: o };
+  }
+  return best;
+}
+function proj(e, ux, uy) { const t = e.rot || 0, c = Math.cos(t), s = Math.sin(t); return e.hx * Math.abs(c * ux + s * uy) + e.hy * Math.abs(-s * ux + c * uy); }
+
 function overlapRaw(a, ea, b, eb) {
+  if (ea.rot || eb.rot) { // only 2D rectangles carry a rotation
+    const ia = ea.sphere ? ea.r : ea.bx ?? ea.hx, ja = ea.sphere ? ea.r : ea.by ?? ea.hy, ib = eb.sphere ? eb.r : eb.bx ?? eb.hx, jb = eb.sphere ? eb.r : eb.by ?? eb.hy;
+    if (Math.abs(b.x - a.x) >= ia + ib || Math.abs(b.y - a.y) >= ja + jb) return null;
+    return overlapSAT(a, ea, b, eb);
+  }
   if (!ea.sphere && !eb.sphere) {
     const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
     const ox = ea.hx + eb.hx - Math.abs(dx); if (ox <= 0) return null;
@@ -545,11 +677,31 @@ function overlapRaw(a, ea, b, eb) {
   return overlapRaw(a, { sphere: false, hx: ea.r, hy: ea.r, hz: Number.isFinite(eb.hz) ? ea.r : Infinity }, b, eb);
 }
 
+const ignoreSet = (b) => (b.ignore ? (b._ig && b._igSrc === b.ignore ? b._ig : (b._igSrc = b.ignore, b._ig = new Set(String(b.ignore).split(',').map((t) => t.trim()).filter(Boolean)))) : null);
+const passes = (a, b) => { const ia = ignoreSet(a.body), ib = ignoreSet(b.body); return (ia && [...b.tags].some((t) => ia.has(t))) || (ib && [...a.tags].some((t) => ib.has(t))); };
+/** Half-size of the box around a collider on the sweep axis (x). */
+const spanX = (ex) => (ex.sphere ? ex.r : ex.bx ?? ex.hx);
+
 export class Physics {
-  constructor() { this.contacts = new Set(); }
+  constructor() { this.contacts = new Map(); }
+
+  /** How many sub-steps this frame needs so fast, small bodies can't tunnel through walls. */
+  substeps(scene, dt) {
+    let n = Math.ceil(dt / (1 / 120));
+    for (const e of scene.entities) {
+      const b = e.body;
+      if (!b || b.type === 'static' || e.dead || b.sensor && !b.ccd) continue;
+      const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z);
+      if (v < 1e-3) continue;
+      const ex = e.extents(), size = Math.max(1e-3, ex.sphere ? ex.r : Math.min(ex.hx, ex.hy, Number.isFinite(ex.hz) ? ex.hz : Infinity));
+      n = Math.max(n, Math.ceil(v * dt / (size * 0.8)));
+    }
+    return Math.min(n, 24);
+  }
 
   step(scene, dt) {
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
+    const gx = scene.gravityX || 0, gz = scene.gravityZ || 0;
     if (scene.wantedTags) {
       for (const e of scene.entities) {
         if (e.body || e.dead || e.ui) continue;
@@ -564,10 +716,14 @@ export class Physics {
       }
       if (b.type === 'static') continue;
       if (b.type === 'dynamic') {
-        b.vel.y += g * b.gravityScale * dt;
+        b.vel.y += g * b.gravityScale * dt; b.vel.x += gx * b.gravityScale * dt; b.vel.z += gz * b.gravityScale * dt;
+        if (b.force && b.forceT === scene.time) { b.vel.x += b.force.x * dt; b.vel.y += b.force.y * dt; b.vel.z += b.force.z * dt; } // force zones
         if (b.drag) { const k = Math.max(0, 1 - b.drag * dt); b.vel.x *= k; b.vel.z *= k; if (!g || !b.gravityScale) b.vel.y *= k; }
         if (b.maxFall && gd && b.vel.y * gd > b.maxFall) b.vel.y = b.maxFall * gd;
+        if (b.maxSpeed) { const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z); if (v > b.maxSpeed) { const k = b.maxSpeed / v; b.vel.x *= k; b.vel.y *= k; b.vel.z *= k; } }
       }
+      if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
+      b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
       b.grounded = false; b.groundedOn = null;
     }
@@ -596,18 +752,23 @@ export class Physics {
         }
       }
     }
-    const ext = list.map((e) => e.extents());
-    const now = new Set();
-    for (let i = 0; i < list.length; i++) {
-      const a = list[i], ba = a.body;
-      for (let j = i + 1; j < list.length; j++) {
-        const b = list[j], bb = b.body;
+    // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
+    const items = list.map((e) => { const ex = e.extents(), cx = e.x + (ex.ox || 0), w = spanX(ex); return { e, ex, l: cx - w, r: cx + w }; });
+    items.sort((p, q) => p.l - q.l);
+    const now = new Map();
+    for (let i = 0; i < items.length; i++) {
+      const A = items[i], a = A.e, ba = a.body;
+      for (let j = i + 1; j < items.length; j++) {
+        const B = items[j];
+        if (B.l > A.r) break; // everything after starts further right
+        const b = B.e, bb = b.body;
         if (ba.type === 'static' && bb.type === 'static') continue;
         if (a.dead || b.dead) continue;
-        const m = overlap(a, ext[i], b, ext[j]);
+        if ((ba.ignore || bb.ignore) && passes(a, b)) continue;
+        const m = overlap(a, A.ex, b, B.ex);
         if (!m) continue;
         const key = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
-        now.add(key);
+        now.set(key, [a, b]);
         if (!this.contacts.has(key)) { collide(a, b, m); collide(b, a, { nx: -m.nx, ny: -m.ny, nz: -m.nz, depth: m.depth }); }
         if (ba.sensor || bb.sensor) continue;
         const ma = ba.type === 'dynamic', mb = bb.type === 'dynamic';
@@ -624,28 +785,48 @@ export class Physics {
         if (ma) {
           a.x -= m.nx * m.depth * share; a.y -= m.ny * m.depth * share; a.z -= m.nz * m.depth * share;
           const vn = ba.vel.x * m.nx + ba.vel.y * m.ny + ba.vel.z * m.nz;
-          if (vn > 0) { const k = vn * (1 + ba.bounce); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
+          if (vn > 0) { const k = vn * (1 + Math.max(ba.bounce, bb.bounce * 0.5)); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
           if (gd && m.ny * gd > 0.5) {
             ba.grounded = true; ba.groundedOn = b;
             if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
           }
+          A.ex = a.extents();
         }
         if (mb) {
           b.x += m.nx * m.depth * shareB; b.y += m.ny * m.depth * shareB; b.z += m.nz * m.depth * shareB;
           const vn = bb.vel.x * m.nx + bb.vel.y * m.ny + bb.vel.z * m.nz;
-          if (vn < 0) { const k = vn * (1 + bb.bounce); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
+          if (vn < 0) { const k = vn * (1 + Math.max(bb.bounce, ba.bounce * 0.5)); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
           if (gd && m.ny * gd < -0.5) {
             bb.grounded = true; bb.groundedOn = a;
             if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
           }
+          B.ex = b.extents();
         }
       }
     }
+    // contacts that ended this step
+    for (const [key, [a, b]] of this.contacts) if (!now.has(key)) { separate(a, b); separate(b, a); }
     this.contacts = now;
-    for (const e of list) if (e.body.type !== 'dynamic') { e.body.px = e.x; e.body.py = e.y; e.body.pz = e.z; }
+    for (const e of list) {
+      const b = e.body;
+      if (b.type !== 'dynamic') { b.px = e.x; b.py = e.y; b.pz = e.z; }
+      else { if (b.lockX) e.x = b.lx; if (b.lockY) e.y = b.ly; if (b.lockZ) e.z = b.lz; }
+    }
   }
+
+  /** Is `a` touching something tagged `tag` right now? */
+  touching(a, tag) {
+    for (const [x, y] of this.contacts.values()) if ((x === a && y.has(tag)) || (y === a && x.has(tag))) return true;
+    return false;
+  }
+}
+
+function separate(e, other) {
+  if (e.dead) return;
+  for (const b of e.behaviors) b.separate?.(e, other, e.scene);
+  e.scene?.emit('separate', e, other);
 }
 
 function collide(e, other, m) {
@@ -934,6 +1115,12 @@ function drawEntity2D(ctx, e, vars, time) {
     const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
     const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
     const k = clamp((+src[key] || 0) / max, 0, 1);
+    if (b.icon) { // hearts-style: one icon per point, empty ones faded
+      const n = Math.min(20, Math.round(max)), val = Math.round(+src[key] || 0), sz = b.h, gap = sz * 1.15, x0 = -((n - 1) * gap) / 2;
+      ctx.font = `${Math.round(sz)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (let i = 0; i < n; i++) { ctx.globalAlpha = alpha * (i < val ? 1 : 0.25); ctx.fillText(b.icon, x0 + i * gap, sz * 0.06); }
+      ctx.globalAlpha = alpha;
+    } else {
     e.data._barK = e.data._barK == null ? k : e.data._barK + (k - e.data._barK) * 0.25;
     ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(-b.w / 2, -b.h / 2, b.w, b.h, b.radius); else ctx.rect(-b.w / 2, -b.h / 2, b.w, b.h);
     ctx.fillStyle = b.bg; ctx.fill();
@@ -942,12 +1129,17 @@ function drawEntity2D(ctx, e, vars, time) {
       ctx.fillStyle = b.fill; ctx.fill();
     }
     if (b.label) { ctx.font = `800 ${Math.round(b.h * 0.7)}px system-ui, sans-serif`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`${formatNumber(+src[key] || 0)} / ${formatNumber(max)}`, 0, 1); }
+    }
   }
   if (e.text) {
     const t = e.text;
     ctx.font = `${t.weight} ${t.size}px ${t.font}`;
     ctx.fillStyle = t.color; ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    ctx.fillText(fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars), 0, 0);
+    const str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars);
+    if (t.shadow) { ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.size * 0.25; ctx.shadowOffsetY = t.size * 0.08; }
+    if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(str, 0, 0); ctx.shadowColor = 'transparent'; }
+    ctx.fillText(str, 0, 0);
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   }
   ctx.restore();
 }
@@ -984,8 +1176,37 @@ export class Renderer2D {
       ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
     ctx.globalAlpha = 1;
+    // lights: a soft additive glow, and holes cut into the darkness layer
+    const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible && !e.dead && !e.ui);
+    if (lights.length) {
+      ctx.globalCompositeOperation = 'lighter';
+      lights.forEach((e, i) => {
+        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+        gr.addColorStop(0, rgba(L.color, clamp(0.35 * L.intensity, 0, 1))); gr.addColorStop(1, rgba(L.color, 0));
+        ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+      });
+      ctx.globalCompositeOperation = 'source-over';
+    }
     engine.onRenderWorld?.(ctx, scene, z);
     ctx.restore();
+    const dark = +scene.light.darkness || 0;
+    if (dark > 0) {
+      const lm = this.lightMap ||= document.createElement('canvas');
+      if (lm.width !== this.canvas.width || lm.height !== this.canvas.height) { lm.width = this.canvas.width; lm.height = this.canvas.height; }
+      const l = lm.getContext('2d');
+      l.setTransform(1, 0, 0, 1, 0, 0); l.globalCompositeOperation = 'source-over';
+      l.clearRect(0, 0, lm.width, lm.height);
+      l.fillStyle = rgba(scene.light.ambientColor || '#0a0a1e', clamp(engine.editing ? dark * 0.6 : dark, 0, 1));
+      l.fillRect(0, 0, lm.width, lm.height);
+      l.globalCompositeOperation = 'destination-out';
+      l.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0); l.translate(engine.width / 2, engine.height / 2); l.scale(z, z); l.translate(-c.x, -c.y);
+      lights.forEach((e, i) => {
+        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
+        gr.addColorStop(0, `rgba(0,0,0,${clamp(L.intensity, 0, 1)})`); gr.addColorStop(0.55, `rgba(0,0,0,${clamp(L.intensity * 0.6, 0, 1)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2);
+      });
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lm, 0, 0);
+    }
   }
 }
 
@@ -1000,8 +1221,9 @@ void main() { vec4 w = uModel * vec4(aPos, 1.0); vW = w.xyz; vN = uNormalMat * a
 const FS = `
 precision mediump float;
 varying vec3 vN; varying vec3 vW; varying vec3 vCol;
-uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos;
+uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos, uSky, uGround;
 uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
+uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount;
 void main() {
   vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
@@ -1009,7 +1231,15 @@ void main() {
   float d = max(dot(n, l), 0.0);
   vec3 v = normalize(uCamPos - vW);
   float sp = pow(max(dot(n, normalize(l + v)), 0.0), 32.0) * 0.25;
-  vec3 lit = base * (uAmbient + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
+  vec3 amb = uAmbient * mix(uGround, uSky, n.y * 0.5 + 0.5);
+  vec3 lit = base * (amb + uLightColor * d * (1.0 - uAmbient)) + sp * uLightColor;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uPLCount) break;
+    vec3 tl = uPLPos[i] - vW; float dist = length(tl);
+    float att = clamp(1.0 - dist / uPLRange[i], 0.0, 1.0); att *= att;
+    vec3 pl = tl / max(dist, 0.0001);
+    lit += base * uPLCol[i] * max(dot(n, pl), 0.0) * att + uPLCol[i] * pow(max(dot(n, normalize(pl + v)), 0.0), 24.0) * 0.2 * att;
+  }
   vec3 c = mix(lit, base, uEmissive);
   float f = clamp((length(uCamPos - vW) - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
   gl_FragColor = vec4(mix(c, uFogColor, f), uOpacity);
@@ -1151,7 +1381,7 @@ export class Renderer3D {
     gl.disableVertexAttribArray(2); gl.vertexAttrib3f(2, 1, 1, 1);
     this.voxelCache = new WeakMap();
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
     for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
@@ -1297,8 +1527,20 @@ export class Renderer3D {
     const L = scene.light, ld = L.dir, ll = Math.hypot(ld.x, ld.y, ld.z) || 1;
     gl.uniformMatrix4fv(this.u.uViewProj, false, this.viewProj);
     gl.uniform3f(this.u.uLightDir, ld.x / ll, ld.y / ll, ld.z / ll);
-    gl.uniform3fv(this.u.uLightColor, hexToRgb(L.color));
+    const lc = hexToRgb(L.color), li = L.intensity ?? 1;
+    gl.uniform3f(this.u.uLightColor, lc[0] * li, lc[1] * li, lc[2] * li);
     gl.uniform1f(this.u.uAmbient, L.ambient);
+    gl.uniform3fv(this.u.uSky, L.sky ? hexToRgb(L.sky) : [1, 1, 1]);
+    gl.uniform3fv(this.u.uGround, L.ground ? hexToRgb(L.ground) : L.sky ? hexToRgb(L.sky).map((c) => c * 0.6) : [1, 1, 1]);
+    // point lights: the 8 nearest to the camera
+    const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible !== false && !e.dead && !e.ui)
+      .sort((a, b) => Math.hypot(a.x - eye.x, a.y - eye.y, a.z - eye.z) - Math.hypot(b.x - eye.x, b.y - eye.y, b.z - eye.z)).slice(0, 8);
+    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8);
+    lights.forEach((e, i) => {
+      const Lt = e.light, c = hexToRgb(Lt.color), k = (Lt.intensity ?? 1) * flickerK(Lt, scene.time, i);
+      pos.set([e.x, e.y, e.z], i * 3); col.set([c[0] * k, c[1] * k, c[2] * k], i * 3); rng[i] = Math.max(0.1, Lt.range > 50 ? 8 : Lt.range || 8);
+    });
+    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform1i(this.u.uPLCount, lights.length);
     gl.uniform3fv(this.u.uFogColor, bg);
     gl.uniform1f(this.u.uFogNear, scene.fog.near); gl.uniform1f(this.u.uFogFar, scene.fog.far);
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
@@ -1320,7 +1562,7 @@ export class Renderer3D {
     // blob shadows onto the highest static surface below each moving body
     gl.enable(gl.BLEND); gl.depthMask(false);
     const statics = scene.entities.filter((e) => e.body && e.body.type === 'static' && (e.mesh || e.model));
-    for (const e of shadows) {
+    for (const e of L.shadows === false ? [] : shadows) {
       const ex = e.extents(), r = ex.sphere ? ex.r : Math.max(ex.hx, ex.hz);
       const bottom = e.y - (ex.sphere ? ex.r : ex.hy);
       let ground = -Infinity;
@@ -1372,6 +1614,12 @@ export function anchorPoint(anchor, W, H, safe) {
   return { x, y };
 }
 
+/** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
+function ownScreen(scene, screen) {
+  if (scene.settings.customScreens) return true;
+  return scene.entities.some((e) => e.ui && !e.dead && e.visible && e.showWhen === screen);
+}
+
 function renderUI(engine, scene) {
   const ctx = engine.uiCtx, W = engine.width, H = engine.height, inp = engine.input;
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
@@ -1383,6 +1631,7 @@ function renderUI(engine, scene) {
     for (const e of scene.entities) {
       if (!e.ui || !e.visible || e.dead) continue;
       if (!engine.editing && e.showWhen !== 'always' && e.showWhen !== screen) continue;
+      if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue; // menus for other screens stay out of the way
       const o = anchorPoint(e.anchor, W, H, engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); drawEntity2D(ctx, e, scene.vars, scene.time); ctx.restore();
     }
@@ -1444,6 +1693,7 @@ function renderUI(engine, scene) {
     return;
   }
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
+  if (ownScreen(scene, engine.paused ? 'paused' : scene.state)) return;
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -1840,6 +2090,142 @@ registerBehavior('cameraFollow', {
           if (p.axes !== 'y') c.x += (e.x + p.ox - c.x) * k;
           if (p.axes !== 'x') c.y += (e.y + p.oy - c.y) * k;
         }
+      },
+    };
+  },
+});
+
+/** Camera: put it on a camera object. Follows a tagged target, or stays where the object is. The active camera drives the view. */
+registerBehavior('camera', {
+  label: 'Camera', description: 'A camera: follow the player (with smoothing, look-ahead, dead zone and level bounds), stay fixed, top-down, side-scroller or orbit by dragging. Switch cameras with the Switch Camera action.',
+  params: [
+    { key: 'mode', label: 'Mode', type: 'select', options: ['follow', 'fixed', 'side scroller', 'top down', 'orbit'], default: 'follow' },
+    { key: 'target', label: 'Follow tag', type: 'text', default: 'player' },
+    { key: 'smooth', label: 'Smoothness (higher = snappier)', type: 'number', default: 6 },
+    { key: 'zoom', label: 'Zoom (2D)', type: 'number', default: 1 },
+    { key: 'fov', label: 'Field of view (3D)', type: 'number', default: 60 },
+    { key: 'ox', label: 'Offset X', type: 'number', default: 0 },
+    { key: 'oy', label: 'Offset Y', type: 'number', default: 0, default3d: 7 },
+    { key: 'oz', label: 'Offset Z (3D)', type: 'number', default: 0, default3d: 11 },
+    { key: 'lookAhead', label: 'Look ahead (sec of movement)', type: 'number', default: 0, advanced: true },
+    { key: 'deadZone', label: 'Dead zone (target moves freely inside)', type: 'number', default: 0, advanced: true },
+    { key: 'bounds', label: 'Keep inside (2D)', type: 'select', options: ['none', 'level', 'custom'], default: 'none' },
+    { key: 'minX', label: 'Bounds min X', type: 'number', default: 0, advanced: true },
+    { key: 'maxX', label: 'Bounds max X', type: 'number', default: 400, advanced: true },
+    { key: 'minY', label: 'Bounds min Y', type: 'number', default: 0, advanced: true },
+    { key: 'maxY', label: 'Bounds max Y', type: 'number', default: 700, advanced: true },
+    { key: 'priority', label: 'Priority (highest starts active)', type: 'number', default: 0, advanced: true },
+  ],
+  create(p) {
+    let yaw = 0, pitch = 0.5, dist = 10, box = null, first = true;
+    const levelBounds = (s) => {
+      let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity;
+      for (const e of s.entities) {
+        if (e.ui || e.dead || e.template || e.getBehavior('camera') || !(e.shape || e.sprite || e.text)) continue;
+        const ex = e.extents(), hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy;
+        l = Math.min(l, e.x - hx); r = Math.max(r, e.x + hx); t = Math.min(t, e.y - hy); b = Math.max(b, e.y + hy);
+      }
+      return Number.isFinite(l) ? { l: Math.min(l, 0), r: Math.max(r, s.view.width), t: Math.min(t, 0), b: Math.max(b, s.view.height) } : null;
+    };
+    return {
+      start(e, s) {
+        (s.cameras ||= []).push(e); e.data.camPriority = +p.priority || 0;
+        if (is3D(e)) { dist = Math.hypot(p.ox, p.oy, p.oz) || 10; yaw = Math.atan2(p.ox, p.oz); pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); }
+        else if (p.bounds === 'level') box = levelBounds(s);
+        else if (p.bounds === 'custom') box = { l: p.minX, r: p.maxX, t: p.minY, b: p.maxY };
+      },
+      update(e, dt, s) {
+        if (!s.isActiveCamera(e)) return;
+        const cut = first || s.cameraCut; first = false; s.cameraCut = false;
+        const t = p.mode !== 'fixed' && p.target ? s.findAll(p.target).find((q) => q !== e) : null;
+        const k = cut ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt), c = s.camera, la = +p.lookAhead || 0, dz = +p.deadZone || 0;
+        const vel = t?.body?.vel || { x: 0, y: 0, z: 0 };
+        if (!is3D(e)) {
+          c.zoom += ((+p.zoom || 1) - c.zoom) * k;
+          let fx = e.x, fy = e.y;
+          if (t) { fx = t.x + p.ox + vel.x * la; fy = p.mode === 'side scroller' ? e.y : t.y + p.oy + (p.mode === 'top down' ? vel.y * la : 0); }
+          if (dz && t && !cut) { const ax = fx - c.x, ay = fy - c.y; fx = Math.abs(ax) < dz ? c.x : fx - Math.sign(ax) * dz; fy = Math.abs(ay) < dz ? c.y : fy - Math.sign(ay) * dz; }
+          let nx = c.x + (fx - c.x) * k, ny = c.y + (fy - c.y) * k;
+          if (box && s.engine) {
+            const z = s.engine.renderer.zoomFor(s), hw = s.engine.width / 2 / z, hh = s.engine.height / 2 / z;
+            nx = box.r - box.l > hw * 2 ? clamp(nx, box.l + hw, box.r - hw) : (box.l + box.r) / 2;
+            ny = box.b - box.t > hh * 2 ? clamp(ny, box.t + hh, box.b - hh) : (box.t + box.b) / 2;
+          }
+          c.x = nx; c.y = ny;
+          return;
+        }
+        c.fov += ((+p.fov || 60) - c.fov) * k;
+        let pos, look;
+        if (!t) { // fixed camera: sits on this object, looks at its target tag or straight ahead
+          const ft = p.target ? s.findAll(p.target).find((q) => q !== e) : null, ry = e.ry * DEG, rx = e.rx * DEG;
+          pos = { x: e.x, y: e.y, z: e.z };
+          look = ft ? { x: ft.x, y: ft.y, z: ft.z } : { x: e.x - Math.sin(ry) * Math.cos(rx), y: e.y + Math.sin(rx), z: e.z - Math.cos(ry) * Math.cos(rx) };
+        } else {
+          look = { x: t.x + vel.x * la, y: p.mode === 'side scroller' ? e.y : t.y, z: t.z + vel.z * la };
+          if (dz && !cut) for (const a of ['x', 'z']) { const d = look[a] - c.target[a]; look[a] = Math.abs(d) < dz ? c.target[a] : look[a] - Math.sign(d) * dz; }
+          if (p.mode === 'orbit') {
+            const inp = s.engine.input;
+            if (inp.pointerDown && !inp.stick) { yaw -= inp.drag.dx * 0.008; pitch = clamp(pitch + inp.drag.dy * 0.006, -0.2, 1.45); }
+            pos = { x: look.x + Math.sin(yaw) * Math.cos(pitch) * dist, y: look.y + Math.sin(pitch) * dist, z: look.z + Math.cos(yaw) * Math.cos(pitch) * dist };
+          } else if (p.mode === 'top down') pos = { x: look.x, y: look.y + dist, z: look.z + 0.001 };
+          else pos = { x: look.x + p.ox, y: look.y + p.oy, z: look.z + p.oz };
+        }
+        if (cut) { c.target = { ...look }; c.position = { ...pos }; return; }
+        for (const a of ['x', 'y', 'z']) { c.target[a] += (look[a] - c.target[a]) * k; c.position[a] += (pos[a] - c.position[a]) * k; }
+      },
+      destroy(e, s) { s.cameras = (s.cameras || []).filter((q) => q !== e); },
+    };
+  },
+});
+
+registerBehavior('forceZone', {
+  label: 'Force Zone', description: 'An area that pushes bodies inside it: wind, conveyor, water current, magnet (pull) or blast (push away).',
+  params: [
+    { key: 'mode', label: 'Force', type: 'select', options: ['direction', 'pull to center', 'push from center'], default: 'direction' },
+    { key: 'fx', label: 'Direction X', type: 'number', default: 0 },
+    { key: 'fy', label: 'Direction Y', type: 'number', default: -1, default3d: 1 },
+    { key: 'fz', label: 'Direction Z (3D)', type: 'number', default: 0 },
+    { key: 'strength', label: 'Strength', type: 'number', default: 1800, default3d: 40 },
+    { key: 'tag', label: 'Only affects tag (empty = all)', type: 'text', default: '' },
+    { key: 'hidden', label: 'Invisible while playing', type: 'bool', default: false },
+  ],
+  create(p) {
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); if (p.hidden) e.visible = false; if (p.tag) s.want(p.tag); },
+      update(e, dt, s) {
+        const ez = e.extents();
+        const l = Math.hypot(p.fx, p.fy, p.fz) || 1;
+        for (const o of s.entities) {
+          const b = o.body;
+          if (o === e || o.dead || !b || b.type !== 'dynamic' || (p.tag && !o.has(p.tag))) continue;
+          if (!overlap(e, ez, o, o.extents())) continue;
+          let fx, fy, fz;
+          if (p.mode === 'direction') { fx = p.fx / l; fy = p.fy / l; fz = p.fz / l; }
+          else { const dx = e.x - o.x, dy = e.y - o.y, dz = e.z - o.z, d = Math.hypot(dx, dy, dz) || 1, sg = p.mode === 'pull to center' ? 1 : -1; fx = sg * dx / d; fy = sg * dy / d; fz = sg * dz / d; }
+          if (b.forceT !== s.time) { b.force = { x: 0, y: 0, z: 0 }; b.forceT = s.time; }
+          b.force.x += fx * p.strength; b.force.y += fy * p.strength; b.force.z += fz * p.strength;
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('savePoint', {
+  label: 'Save Point', description: 'Saves the game when the player touches it (variables, level and what was collected). Load it with the Load Game action or Load on start.',
+  params: [
+    { key: 'slot', label: 'Save slot', type: 'number', default: 1 },
+    { key: 'text', label: 'Message', type: 'text', default: 'Game saved' },
+    { key: 'tag', label: 'Touched by tag', type: 'text', default: 'player' },
+  ],
+  create(p) {
+    let cool = 0;
+    return {
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
+      update(e, dt) { cool -= dt; },
+      collide(e, other, s) {
+        if (!other.has(p.tag) || cool > 0) return;
+        cool = 2;
+        if (s.saveGame(p.slot)) { if (p.text) s.message(p.text, 1.5); s.burst(e.x, e.y, e.z, '#7cf7a0', 14); s.engine.audio.sfx('power'); }
       },
     };
   },
@@ -2536,7 +2922,8 @@ registerBehavior('bounce', {
 
 // ---- events & effects ----
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game'];
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light'];
 /** Shared actions for Trigger, Timer, Condition, Button and Rules. */
 function runAction(s, e, p, other) {
   const v = p.value, obj = (name) => (name ? s.find(name) || s.findAll(name)[0] : e);
@@ -2563,6 +2950,13 @@ function runAction(s, e, p, other) {
     case 'show object': { const t = s.find(v); if (t) t.visible = true; break; }
     case 'next level': if (s.engine.hasNextLevel()) s.win(); break;
     case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
+    case 'save game': if (s.saveGame(p.amount || 1)) s.message(v && v !== 'Hello!' ? v : 'Game saved', 1.5); break;
+    case 'load game': if (!s.loadGame(p.amount || 1)) s.message('No saved game yet', 1.5); return;
+    case 'delete save': s.deleteSave(p.amount || 1); s.message('Save deleted', 1.5); break;
+    case 'switch camera': s.setCamera(v); break;
+    case 'push': { const t = (v ? obj(v) : other) || e, b = t?.ensureBody({ type: 'dynamic' }); const [px, py, pz] = String(p.amount).split(',').map(Number); if (b) { b.vel.x += px || 0; b.vel.y += py || 0; b.vel.z += pz || 0; } break; }
+    case 'set gravity': s.gravity = +p.amount || 0; break;
+    case 'toggle light': { const t = obj(v); if (t?.light) t.light.off = !t.light.off; break; }
     default: break;
   }
   if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
@@ -3032,6 +3426,7 @@ export const NODE_TYPES = {
   button: { cat: 'Events', label: 'On Button', outs: ['then'], params: [opt('button', ['jump', 'fire'], 'jump', 'button')] },
   swipe: { cat: 'Events', label: 'On Swipe', outs: ['then'], params: [opt('dir', ['up', 'down', 'left', 'right'], 'up', 'direction')] },
   destroyed: { cat: 'Events', label: 'On Destroyed', outs: ['then'] },
+  touchEnd: { cat: 'Events', label: 'On Touch End', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
   // flow
   branch: { cat: 'Flow', label: 'If', exec: true, inputs: [{ key: 'condition', type: 'bool', default: true }], outs: ['true', 'false'] },
   wait: { cat: 'Flow', label: 'Wait', exec: true, outs: ['then'], inputs: [{ key: 'seconds', type: 'number', default: 1 }] },
@@ -3055,6 +3450,15 @@ export const NODE_TYPES = {
   gameOver: { cat: 'Actions', label: 'Game Over', exec: true, outs: [] },
   nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
   restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
+  saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message')] },
+  loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['no save'], params: [num('slot', 1, 'slot')] },
+  deleteSave: { cat: 'Actions', label: 'Delete Save', exec: true, outs: ['then'], params: [num('slot', 1, 'slot')] },
+  push: { cat: 'Actions', label: 'Push (add velocity)', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: -400 }, { key: 'z', type: 'number', default: 0 }] },
+  setGravity: { cat: 'Actions', label: 'Set Gravity', exec: true, outs: ['then'], inputs: [{ key: 'y', type: 'number', default: 1600 }, { key: 'x', type: 'number', default: 0 }] },
+  switchCamera: { cat: 'Actions', label: 'Switch Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera object')] },
+  zoomCamera: { cat: 'Actions', label: 'Zoom Camera (2D)', exec: true, outs: ['then'], inputs: [{ key: 'zoom', type: 'number', default: 1.5 }], params: [num('seconds', 0.5, 'seconds')] },
+  setLight: { cat: 'Actions', label: 'Set Light', exec: true, outs: ['then'], params: [txt('object', '', 'object (empty = this)'), opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')], inputs: [{ key: 'intensity', type: 'number', default: 1 }] },
+  setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   // values
   number: { cat: 'Values', label: 'Number', value: 'number', params: [num('value', 1, 'value')] },
   getVar: { cat: 'Values', label: 'Get Variable', value: 'number', params: [txt('name', 'score', 'variable')] },
@@ -3067,6 +3471,11 @@ export const NODE_TYPES = {
   position: { cat: 'Values', label: 'My Position', value: 'number', params: [opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
   distance: { cat: 'Values', label: 'Distance To', value: 'number', params: [txt('tag', 'player', 'tag')] },
   time: { cat: 'Values', label: 'Game Time', value: 'number' },
+  hasSave: { cat: 'Values', label: 'Has Saved Game', value: 'bool', params: [num('slot', 1, 'slot')] },
+  grounded: { cat: 'Values', label: 'Is On Ground', value: 'bool' },
+  velocity: { cat: 'Values', label: 'My Velocity', value: 'number', params: [opt('axis', ['x', 'y', 'z', 'speed'], 'x', 'axis')] },
+  touching: { cat: 'Values', label: 'Is Touching', value: 'bool', params: [txt('tag', 'player', 'tag')] },
+  canSee: { cat: 'Values', label: 'Can See', value: 'bool', params: [txt('tag', 'player', 'tag'), num('range', 0, 'range (0 = any)')] },
 };
 
 registerBehavior('graph', {
@@ -3099,6 +3508,11 @@ registerBehavior('graph', {
         case 'position': return e[P('axis')] || 0;
         case 'distance': { const t = s.findAll(P('tag'))[0]; return t ? Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) : Infinity; }
         case 'time': return s.time;
+        case 'hasSave': return s.hasSave(+P('slot') || 1);
+        case 'grounded': return !!e.body?.grounded;
+        case 'velocity': { const v = e.body?.vel || { x: 0, y: 0, z: 0 }; return P('axis') === 'speed' ? Math.hypot(v.x, v.y, v.z) : v[P('axis')] || 0; }
+        case 'touching': return s.engine.physics.touching(e, P('tag'));
+        case 'canSee': { const t = s.findAll(P('tag')).find((q) => q !== e); return !!t && s.canSee(e, t, +P('range') || Infinity); }
         default: return 0;
       }
     };
@@ -3128,6 +3542,15 @@ registerBehavior('graph', {
         case 'gameOver': s.gameOver(); return;
         case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
         case 'restart': s.engine.restart(); return;
+        case 'saveGame': if (s.saveGame(+P('slot') || 1) && P('text')) s.message(P('text'), 1.5); break;
+        case 'loadGame': if (!s.loadGame(+P('slot') || 1)) follow(n, 'no save', ctx); return;
+        case 'deleteSave': s.deleteSave(+P('slot') || 1); break;
+        case 'push': { const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +I('x') || 0; b.vel.y += +I('y') || 0; b.vel.z += +I('z') || 0; } break; }
+        case 'setGravity': s.gravity = +I('y') || 0; s.gravityX = +I('x') || 0; break;
+        case 'switchCamera': s.setCamera(P('camera')); break;
+        case 'zoomCamera': if (s.mode === '2d') s.tween(s.camera, { zoom: Math.max(0.05, +I('zoom') || 1) }, Math.max(0.01, +P('seconds') || 0.01)); else s.tween(s.camera, { fov: clamp(60 / (+I('zoom') || 1), 10, 120) }, Math.max(0.01, +P('seconds') || 0.01)); break;
+        case 'setLight': { const t = P('object') ? s.find(P('object')) : e; if (t) { t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !t.light.off; t.light.intensity = +I('intensity') || 0; } break; }
+        case 'setDarkness': s.light.darkness = clamp(+I('darkness') || 0, 0, 1); break;
         default: break;
       }
       follow(n, 'then', ctx);
@@ -3139,7 +3562,7 @@ registerBehavior('graph', {
     return {
       uiAlways: true,
       start(e, s) {
-        if (g.nodes.some((n) => n.type === 'touch')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (n.type === 'touch') s.want(param(n, 'tag')); }
+        if (g.nodes.some((n) => n.type === 'touch' || n.type === 'touchEnd' || n.type === 'touching')) { e.ensureBody({ type: 'kinematic', sensor: true }); for (const n of g.nodes) if (['touch', 'touchEnd', 'touching'].includes(n.type)) s.want(param(n, 'tag')); }
         fire('start', e, s);
       },
       update(e, dt, s) {
@@ -3154,6 +3577,7 @@ registerBehavior('graph', {
         }
       },
       collide(e, other, s) { fire('touch', e, s, other, (n) => other.has(param(n, 'tag'))); },
+      separate(e, other, s) { fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag'))); },
       destroy(e, s) { fire('destroyed', e, s); },
     };
   },
@@ -3292,10 +3716,14 @@ export class Engine {
     this.setScene(s);
   }
 
-  setScene(scene) {
+  setScene(scene, { skipRestore = false } = {}) {
     scene.engine = this;
     this.scene = scene;
-    if (scene.settings.saveProgress && !this.editing && !this.restoredOnce) { // continue where the player left off
+    if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
+      this.loadedOnce = true;
+      return this.loadGame(1, { keepTitle: true });
+    }
+    if (scene.settings.saveProgress && !this.editing && !this.restoredOnce && !skipRestore) { // continue where the player left off
       this.restoredOnce = true;
       const saved = this.loadProgress(scene);
       if (saved && this.levels && saved.level > 0 && saved.level < this.levels.length && this.levelIndex !== saved.level) {
@@ -3374,6 +3802,47 @@ export class Engine {
   }
   clearProgress() { try { localStorage.removeItem(this.saveKey()); } catch { /* storage unavailable */ } }
 
+  // ---- save slots (Save Game / Load Game actions and nodes) ----
+  slotKey(slot) { return this.saveKey() + '.slot' + (slot || 1); }
+  readSave(slot) { try { return JSON.parse(store.get(this.slotKey(slot), 'null')); } catch { return null; } }
+  deleteSave(slot) { try { localStorage.removeItem(this.slotKey(slot)); } catch { /* storage unavailable */ } }
+  saveGame(slot = 1) {
+    const s = this.scene;
+    if (!s || this.editing) return false;
+    const vars = { ...s.vars }; delete vars.best;
+    const ids = new Set((s.json?.entities || []).filter((ep) => ep.id && !ep.template).map((ep) => ep.id)), alive = new Set();
+    const entities = {};
+    for (const e of s.entities) {
+      if (e.dead || !ids.has(e.id)) continue;
+      alive.add(e.id);
+      entities[e.id] = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, visible: e.visible, data: Object.fromEntries(Object.entries(e.data).filter(([k, v]) => !k.startsWith('_') && typeof v !== 'object')) };
+    }
+    const data = { vars, level: this.levelIndex || 0, entities, removed: [...ids].filter((id) => !alive.has(id)), time: s.time, saved: Date.now() };
+    store.set(this.slotKey(slot), JSON.stringify(data));
+    return true;
+  }
+  loadGame(slot = 1, { keepTitle = false } = {}) {
+    const d = this.readSave(slot);
+    if (!d || !this.factory) return false;
+    if (this.levels && d.level !== this.levelIndex && d.level < this.levels.length) this.levelIndex = d.level;
+    this.carry = null;
+    const s = this.factory();
+    if (!keepTitle || s.state !== 'title') s.state = 'play';
+    this.setScene(s, { skipRestore: true });
+    Object.assign(s.vars, d.vars);
+    const removed = new Set(d.removed || []);
+    for (const e of s.entities) {
+      if (removed.has(e.id)) { e.dead = true; continue; }
+      const st = d.entities?.[e.id];
+      if (!st) continue;
+      Object.assign(e, { x: st.x, y: st.y, z: st.z, rx: st.rx, ry: st.ry, rz: st.rz, visible: st.visible });
+      Object.assign(e.data, st.data || {});
+      if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+    }
+    s.flush();
+    return true;
+  }
+
   /** True when the game wants portrait/landscape and a phone is held the other way. */
   wrongOrientation(s) {
     const o = s.settings.orientation;
@@ -3430,19 +3899,19 @@ export class Engine {
     if (s.rotateNeeded) return;
     if (this.paused) {
       this.runUIOnly(s, dt);
-      if ((inp.pressed('tap') && !s.settings.customScreens) || inp.pressed('btn:pause')) this.paused = false;
+      if ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause')) this.paused = false;
       return;
     }
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
       this.runUIOnly(s, dt);
-      if (inp.pressed('tap') && !s.settings.customScreens) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap') && !ownScreen(s, 'title')) { s.state = 'play'; this.audio.sfx('click'); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
       this.runUIOnly(s, dt);
-      if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !s.settings.customScreens) {
+      if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !ownScreen(s, s.state)) {
         const t = inp.taps[0], r = this.shareRect;
         if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
         else if (s.levelComplete) this.nextLevel(); else this.restart();
@@ -3462,7 +3931,7 @@ export class Engine {
       for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
       if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
     }
-    const steps = Math.ceil(dt / (1 / 120));
+    const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();

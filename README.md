@@ -82,6 +82,38 @@ Add **Visual Script** from *Add Component → Logic*, from *Create → Visual Sc
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
+### Saving, lighting, physics and cameras
+
+- **Saving.** A save keeps variables, the level, where objects are and what was collected or destroyed. You can save with any of these:
+  - a **Save Point** prefab;
+  - a Button with *Do → save game* (Amount = slot);
+  - the Save Game node;
+  - the **Pause Menu** UI widget (Resume / Save / Load / Restart).
+
+  To load, use *load game*, the Load Game node, or the **Continue Menu** widget. *Game Settings → Saving → Continue from save slot 1 on start* resumes automatically.
+- **Lighting.** Add a **Light** object, or the Light component on anything (a torch on the player):
+  - **2D:** *Game Settings → Lighting → Darkness* makes caves and night levels, and lights cut through it. The **Torch** prefab sets this up for you.
+  - **3D:** up to 8 coloured point lights; sun colour, brightness, direction and height; ambient light; sky and ground tint; shadows on or off. The **Lamp** object is a lamp post with its own light.
+- **Physics.**
+  - Gravity on X, Y (and Z in 3D).
+  - Rigidbody materials: Ice, Rubber, Wood, Metal, Sticky, Bouncy, Feather.
+  - Freeze X/Y/Z, max speed, and "pass through tags" (e.g. bullets that ignore their shooter).
+  - **Force Zones** (Wind Zone prefab).
+  - Nodes: Push, Set Gravity, Is On Ground, My Velocity.
+- **Collisions.**
+  - 2D boxes collide at their rotation (a **Spinning Bar** really sweeps).
+  - Fast objects are checked in extra sub-steps, so they don't pass through walls.
+  - A sweep-and-prune broad phase keeps big scenes fast.
+  - "On Touch End", Is Touching and Can See (line of sight) nodes.
+- **Cameras.**
+  - Add a **Camera** object (Create → Camera). In 2D its dashed frame shows what it sees.
+  - Several cameras can sit in one scene: the highest priority starts active, and Switch Camera / Zoom Camera change it during play.
+- **UI.**
+  - Text can have fonts, weight, an outline and a drop shadow.
+  - Progress bars can show icons (Hearts widget).
+  - New widgets: Coin Counter, Big Title, Save / Load buttons, Pause Menu, Continue Menu, Dialog Box.
+  - Any UI set to *Show when: Paused / Title / Game over* replaces that built-in screen. In the editor these menus show in UI mode or when selected.
+
 ## Using the engine from code
 
 ```js
@@ -141,7 +173,10 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `hazard` | Hurts the player on touch. | `action` ("gameover"), `tag` ("player"), `destroySelf` (false) |
 | `goal` | The player wins when touching this. | `tag` ("player") |
 | `spring` | Bounces the player upward on touch. | `power` (900 / 3D 16), `tag` ("player") |
-| `cameraFollow` | The camera tracks this object. | `smooth` (6), `axes` ("both"), `ox` (0), `oy` (0 / 3D 7), `oz` (0 / 3D 11) |
+| `camera` | Put on a Camera object. Modes: follow, fixed, side scroller, top down, orbit (drag to look around). Smoothing, look-ahead, dead zone, 2D zoom / 3D field of view, keep-inside-level bounds, priority. Switch with the *switch camera* action or Switch Camera node. | `mode`, `target` ("player"), `smooth`, `zoom`, `fov`, `ox/oy/oz`, `lookAhead`, `deadZone`, `bounds`, `priority` |
+| `forceZone` | Area that pushes dynamic bodies inside it: wind, currents, conveyors, magnets (pull to center), blasts (push from center). | `mode`, `fx/fy/fz`, `strength`, `tag` |
+| `savePoint` | Saves the game when the player touches it. | `slot` (1), `text`, `tag` |
+| `cameraFollow` | The camera tracks this object (simple version of `camera`). | `smooth` (6), `axes` ("both"), `ox` (0), `oy` (0 / 3D 7), `oz` (0 / 3D 11) |
 | `wrap` | Leaving one edge brings it back on the other (2D). | — |
 | `timeScore` | Adds points every second while playing. | `rate` (10) |
 | `chase` | Moves toward the player when it gets close. | `speed` (110 / 3D 3.5), `range` (320 / 3D 10), `tag` ("player") |
@@ -209,7 +244,10 @@ registerBehavior('blink', {
 | `scene.message('Hi!', 3)` | message banner over the game |
 | `scene.burst(x, y, z, color, count)` | particle burst |
 | `scene.camera` | 2D: `{x, y, zoom, shake}`. 3D: `{position, target, fov, shake}` |
-| `scene.on('collide' \| 'var' \| 'over' \| 'win', fn)` | events |
+| `scene.on('collide' \| 'separate' \| 'var' \| 'over' \| 'win', fn)` | events (`separate` = stopped touching; behaviors get a `separate(e, other, scene)` hook) |
+| `scene.raycast(origin, dir, maxDist, { ignore, tag })`, `scene.canSee(a, b)` | ray tests against colliders (rotated 2D boxes, circles, 3D boxes and spheres) |
+| `scene.saveGame(slot)`, `scene.loadGame(slot)`, `scene.hasSave(slot)`, `scene.deleteSave(slot)` | save slots: variables, level, positions and what was collected |
+| `scene.setCamera('Camera 2')`, `scene.gravityX`, `scene.gravityZ`, `scene.light` | switch cameras, sideways gravity, lighting (`darkness` for 2D, sun / ambient / sky / ground for 3D) |
 
 | | |
 | --- | --- |

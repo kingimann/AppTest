@@ -277,6 +277,15 @@ engine.onRenderWorld = (r, s, z) => {
     // game camera frame
     ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5 / z;
     ctx.strokeRect(0, 0, s.view.width, s.view.height);
+    // Camera objects: dashed frame of what they see; selected lights: their range
+    for (const pe of project.entities) {
+      const cam = (pe.behaviors || []).find((b) => b.type === 'camera');
+      if (!cam || pe.ui) continue;
+      const zm = +cam.zoom || 1, w = s.view.width / zm, hgt = s.view.height / zm;
+      ctx.save(); ctx.setLineDash([8 / z, 6 / z]); ctx.strokeStyle = pe.id === selectedId ? ORANGE : 'rgba(140,200,255,0.7)'; ctx.lineWidth = 1.5 / z;
+      ctx.strokeRect((pe.x || 0) - w / 2, (pe.y || 0) - hgt / 2, w, hgt); ctx.restore();
+    }
+    if (sel?.light) { ctx.save(); ctx.setLineDash([5 / z, 5 / z]); ctx.strokeStyle = 'rgba(255,220,140,0.8)'; ctx.lineWidth = 1.5 / z; ctx.beginPath(); ctx.arc(sel.x, sel.y, sel.light.range, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
     for (const [e, col] of [[hover, '#4c8bd6'], [sel, ORANGE]]) {
       if (!e || e.ui) continue;
       const b = boundsOf(e), pad = 3 / z;
@@ -324,10 +333,14 @@ engine.onRenderUI = (ctx, s) => {
     ctx.fillStyle = isSel ? 'rgba(247,160,44,0.25)' : 'rgba(30,30,30,0.6)';
     ctx.strokeStyle = isSel ? ORANGE : 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.rect(p.x - 12, p.y - 12, 24, 24); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = isSel ? ORANGE : '#cfcfcf'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.stroke();
-    for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.moveTo(p.x + Math.cos(a) * 6, p.y + Math.sin(a) * 6); ctx.lineTo(p.x + Math.cos(a) * 8.5, p.y + Math.sin(a) * 8.5); }
-    ctx.stroke();
+    const pe = ent(e.id), glyph = (pe?.behaviors || []).some((b) => b.type === 'camera') ? '🎥' : e.light ? '💡' : '';
+    if (glyph) { ctx.font = '15px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; ctx.fillText(glyph, p.x, p.y + 1); }
+    else {
+      ctx.strokeStyle = isSel ? ORANGE : '#cfcfcf'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.stroke();
+      for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.moveTo(p.x + Math.cos(a) * 6, p.y + Math.sin(a) * 6); ctx.lineTo(p.x + Math.cos(a) * 8.5, p.y + Math.sin(a) * 8.5); }
+      ctx.stroke();
+    }
     ctx.font = '11px -apple-system, Segoe UI, sans-serif'; ctx.fillStyle = 'rgba(230,230,230,0.85)';
     ctx.fillText(e.name, p.x, p.y + 22);
   }
@@ -854,6 +867,8 @@ let hFilter = '';
 function iconFor(e) {
   if (!e) return 'scene';
   if (e.voxels) return 'grid';
+  if ((e.behaviors || []).some((b) => b.type === 'camera')) return 'camera';
+  if (e.light && !e.shape && !e.mesh && !e.model) return 'bulb';
   if (e.model) return 'cube';
   if (e.bar) return 'hud';
   if (e.ui) return 'hud';
@@ -1293,6 +1308,11 @@ function renderInspector() {
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
+      C('text.font', { label: 'Font', type: 'select', options: [['system-ui, -apple-system, sans-serif', 'Clean'], ['"Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif', 'Rounded'], ['Georgia, "Times New Roman", serif', 'Classic'], ['ui-monospace, Menlo, Consolas, monospace', 'Retro (mono)'], ['Impact, "Arial Black", sans-serif', 'Bold poster']], def: 'system-ui, -apple-system, sans-serif' }),
+      C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+      C('text.outline', { label: 'Outline', type: 'color', optional: true }),
+      j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
+      C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false }),
     ], { icon: 'text', key: 'text', menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
@@ -1313,6 +1333,9 @@ function renderInspector() {
     box.append(comp('Progress Bar', [
       h('p', { class: 'desc' }, 'Shows a variable as a bar: health, energy, progress. Use "self.hp" for this object\'s own health (Health component).'),
       C('bar.var', { label: 'Variable', type: 'text', def: 'hp' }),
+      h('div', { class: 'row' }, h('label', {}, 'Style'), h('div', { class: 'pair' },
+        h('button', { class: 'btn' + (!j.bar.icon ? ' primary' : ''), style: 'flex:1', onclick: () => { delete j.bar.icon; changed({ inspector: true }); } }, 'Bar'),
+        h('button', { class: 'btn' + (j.bar.icon ? ' primary' : ''), style: 'flex:1;font-size:20px', onclick: () => pickEmoji((em) => { j.bar.icon = em; if (j.bar.h < 22) j.bar.h = 28; changed({ inspector: true }); }) }, j.bar.icon || '❤️', h('span', { style: 'font-size:15px' }, 'Icons')))),
       C('bar.max', { label: 'Maximum', type: 'number', def: 100 }),
       showAdvanced && C('bar.maxVar', { label: 'Maximum from variable', type: 'text', def: '' }),
       C('bar.w', { label: 'Width', type: 'number', def: 160 }), C('bar.h', { label: 'Height', type: 'number', def: 16 }),
@@ -1339,12 +1362,26 @@ function renderInspector() {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Remove all blocks you added or removed by hand?')) return; j.voxels.edits = {}; changed({ inspector: true }); pushHistory(); } }, icon('trash'), 'Clear my edits')),
     ], { icon: 'grid', key: 'voxels', menu: [{ icon: 'trash', label: 'Remove Component', fn: () => { delete j.voxels; changed({ structure: true }); } }] }));
   }
+  if (j.light) {
+    box.append(comp('Light', [
+      h('p', { class: 'desc' }, threeD ? 'A point light: lights up nearby objects (up to 8 at once).' : 'Glows, and cuts through the darkness when Game Settings → Lighting → Darkness is above 0.'),
+      C('light.color', { label: 'Color', type: 'color' }),
+      C('light.intensity', { label: 'Brightness', type: 'number', def: 1, step: 0.1 }),
+      C('light.range', { label: 'Range', type: 'number', def: threeD ? 8 : 160, step: threeD ? 0.5 : 10 }),
+      C('light.flicker', { label: 'Flicker (0–1, like a torch)', type: 'number', def: 0, step: 0.1 }),
+    ], { icon: 'bulb', key: 'light', menu: removeMenu(() => { delete j.light; changed({ structure: true }); }, 'light') }));
+  }
   if (j.body && !j.ui) {
     const shp = j.body.shape || 'auto';
     box.append(comp(threeD ? 'Rigidbody' : 'Rigidbody 2D', [
       C('body.type', { label: 'Body Type', type: 'select', options: [['static', 'Static'], ['dynamic', 'Dynamic'], ['kinematic', 'Kinematic']], def: 'dynamic', structure: true }),
       C('body.sensor', { label: 'Is Trigger', type: 'bool', def: false }),
+      h('div', { class: 'row' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { Object.assign(j.body, m); changed({ inspector: true }); pushHistory(); } } },
+        h('option', { value: '' }, materialOf(j.body)), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
       j.body.type === 'dynamic' && [C('body.gravityScale', { label: 'Gravity Scale', type: 'number', def: 1, step: 0.1 }), C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05 })],
+      j.body.type === 'dynamic' && h('div', { class: 'row' }, h('label', {}, 'Freeze'), h('div', { class: 'pair' }, (threeD ? ['X', 'Y', 'Z'] : ['X', 'Y']).map((a) =>
+        h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.body['lock' + a], onchange: (e) => { if (e.target.checked) j.body['lock' + a] = true; else delete j.body['lock' + a]; changed(); } }), a)))),
+      C('body.ignore', { label: 'Pass through tags', type: 'text', def: '' }),
       C('body.shape', { label: 'Collider', type: 'select', options: [['auto', 'Fit to shape'], ['box', 'Box'], [threeD ? 'sphere' : 'circle', threeD ? 'Sphere' : 'Circle']], def: 'auto', structure: true }),
       shp === 'box' && [C('body.w', { label: 'Size X', type: 'number', def: 1 }), C('body.h', { label: 'Size Y', type: 'number', def: 1 }), threeD && C('body.d', { label: 'Size Z', type: 'number', def: 1 })],
       (shp === 'circle' || shp === 'sphere') && C('body.r', { label: 'Radius', type: 'number', def: 10 }),
@@ -1354,7 +1391,8 @@ function renderInspector() {
         C('body.mass', { label: 'Mass (who pushes whom)', type: 'number', def: 1, step: 0.5 }),
         C('body.friction', { label: 'Friction on ground', type: 'number', def: 0, step: 0.1 }),
         C('body.drag', { label: 'Air drag', type: 'number', def: 0, step: 0.1 }),
-        C('body.maxFall', { label: 'Max fall speed (0 = none)', type: 'number', def: 0 })],
+        C('body.maxFall', { label: 'Max fall speed (0 = none)', type: 'number', def: 0 }),
+        C('body.maxSpeed', { label: 'Max speed (0 = none)', type: 'number', def: 0 })],
       showAdvanced && j.body.type !== 'dynamic' && C('body.friction', { label: 'Surface friction', type: 'number', def: 0, step: 0.1 }),
     ], { icon: 'body', key: 'body', desc: 'Static: walls and ground. Dynamic: pushed by physics. Kinematic: moves on its own.',
       menu: removeMenu(() => { delete j.body; changed({ structure: true }); }, 'body') }));
@@ -1385,6 +1423,17 @@ function renderInspector() {
   box.scrollTop = scroll;
 }
 
+// ---- physics materials: presets for bounce / friction / drag ----
+const MATERIALS = {
+  Default: { bounce: 0, friction: 0, drag: 0 }, Ice: { bounce: 0.05, friction: 0, drag: 0 }, Rubber: { bounce: 0.8, friction: 0.3, drag: 0 },
+  Wood: { bounce: 0.1, friction: 0.6, drag: 0 }, Metal: { bounce: 0.2, friction: 0.2, drag: 0 }, Sticky: { bounce: 0, friction: 3, drag: 0 },
+  Bouncy: { bounce: 1, friction: 0, drag: 0 }, Feather: { bounce: 0, friction: 0.2, drag: 3 },
+};
+function materialOf(b) {
+  const hit = Object.entries(MATERIALS).find(([, m]) => (b.bounce || 0) === m.bounce && (b.friction || 0) === m.friction && (b.drag || 0) === m.drag);
+  return hit ? hit[0] + ' ✓' : 'Custom';
+}
+
 // ---- scene settings (shown when the scene root is selected) ----
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
@@ -1399,10 +1448,35 @@ function renderSceneSettings(box) {
   ], { icon: 'layers', key: 's-level' }));
   box.append(comp('Environment', [
     C('background', { label: 'Background', type: 'color' }),
-    C('gravity', { label: 'Gravity', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
-    h('p', { class: 'desc' }, threeD ? 'Use about -25 for normal gravity.' : 'Use 0 for top-down games and about 1600 for platformers.'),
+    h('p', { class: 'desc' }, threeD ? 'Gravity is in Physics below: about -25 is normal.' : 'Gravity is in Physics below: 0 for top-down games, about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
   ], { icon: 'sun', key: 's-env' }));
+  box.append(comp('Physics', [
+    C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
+    C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
+    threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
+    h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
+  ], { icon: 'body', key: 's-phys' }));
+  box.append(comp('Lighting', threeD ? [
+    C('light.color', { label: 'Sun Color', type: 'color', def: '#ffffff' }),
+    C('light.intensity', { label: 'Sun Brightness', type: 'number', def: 1, step: 0.1 }),
+    C('light.sunAngle', { label: 'Sun Direction (°)', type: 'number', def: 20, step: 15 }),
+    C('light.sunHeight', { label: 'Sun Height (°)', type: 'number', def: 60, step: 5 }),
+    C('light.ambient', { label: 'Ambient Light', type: 'number', def: 0.45, step: 0.05 }),
+    C('light.sky', { label: 'Sky Tint', type: 'color', optional: true }),
+    C('light.ground', { label: 'Ground Tint', type: 'color', optional: true }),
+    C('light.shadows', { label: 'Shadows', type: 'bool', def: true }),
+    h('p', { class: 'desc' }, 'Add Light objects (Create → Light) for lamps, torches and glowing gems. Low ambient + low sun = night.'),
+  ] : [
+    C('light.darkness', { label: 'Darkness (0 = off, 1 = black)', type: 'number', def: 0, step: 0.1 }),
+    C('light.ambientColor', { label: 'Darkness Color', type: 'color', def: '#0a0a1e' }),
+    h('p', { class: 'desc' }, 'Turn up Darkness for caves and night levels, then add Light objects or a Light component to the player (torch).'),
+  ], { icon: 'bulb', key: 's-light' }));
+  box.append(comp('Saving', [
+    h('p', { class: 'desc' }, 'Save games keep variables, the level, where things are and what was collected. Save with a Save Point, a Button (Do → save game) or the Save Game node; load with Load Game. Amount = slot number.'),
+    C('settings.loadOnStart', { label: 'Continue from save slot 1 on start', type: 'bool', def: false }),
+    C('settings.saveProgress', { label: 'Auto-save variables (clicker games)', type: 'bool', def: false }),
+  ], { icon: 'save', key: 's-save' }));
   box.append(comp('Start Screen', [
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
     C('settings.title', { label: 'Title', type: 'text', def: '' }),
@@ -1430,8 +1504,6 @@ function renderSceneSettings(box) {
     C('settings.orientation', { label: 'Screen Orientation', type: 'select', options: [['any', 'Any'], ['portrait', 'Portrait'], ['landscape', 'Landscape']], def: 'any' }),
     h('p', { class: 'desc' }, 'Players holding the phone the wrong way see a "turn your device" screen.'),
     C('settings.fullscreen', { label: 'Go Fullscreen on First Tap', type: 'bool', def: false }),
-    C('settings.saveProgress', { label: 'Save Progress', type: 'bool', def: false }),
-    h('p', { class: 'desc' }, 'Keeps variables (and the level) when the player closes the game, great for clicker games. Resets on game over.'),
     C('settings.shareButton', { label: 'Share Score Button', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'The screen stays awake while playing. Tilt controls: set a Move component\'s Control to "tilt".'),
   ], { icon: 'gamepad', key: 's-mobile' }));
@@ -1449,15 +1521,14 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Starting values, e.g. {"score": 0, "lives": 3}. Hazards that "damage" use lives.'),
   ], { icon: 'trophy', key: 's-rules' }));
   if (threeD) {
-    box.append(comp('Camera & Lighting', [
+    box.append(comp('Camera & Fog', [
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => {
         const c = engine.scene.camera, rv = (v) => ({ x: round(v.x), y: round(v.y), z: round(v.z) });
         project.camera = { ...(project.camera || {}), position: rv(c.position), target: rv(c.target) };
         changed(); toast('Game camera aligned with Scene view');
       } }, icon('camera'), 'Align Game Camera with View')),
-      h('p', { class: 'desc' }, 'Used when no object has a Camera Follow component.'),
+      h('p', { class: 'desc' }, 'Used when no object has a Camera component (Create → Camera).'),
       C('camera.fov', { label: 'Field of View', type: 'number', def: 60 }),
-      C('light.ambient', { label: 'Ambient Light', type: 'number', def: 0.45, step: 0.05 }),
       C('fog.near', { label: 'Fog Start', type: 'number', def: 30 }),
       C('fog.far', { label: 'Fog End', type: 'number', def: 120 }),
     ], { icon: 'camera', key: 's-cam' }));
@@ -1487,7 +1558,7 @@ const BEH_META = {
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
-  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'],
+  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
 };
 function defaultBehavior(type, threeD) {
   const b = { type };
@@ -1505,6 +1576,7 @@ function componentsFor(j) {
     { cat: 'Rendering', key: 'model', label: '3D Model', icon: 'cube', desc: 'Build a model out of shapes (3D modeling)', ok: (e) => threeD && !e.model && !e.ui, add: (e) => { e.model = { parts: [{ geometry: 'box', x: 0, y: 0.5, z: 0, w: 1, h: 1, d: 1, color: '#90caf9' }] }; } },
     { cat: 'UI', key: 'bar', label: 'Progress Bar', icon: 'hud', desc: 'Health, energy or progress shown as a bar', ok: (e) => !e.bar && (e.ui || !threeD), add: (e) => { e.bar = { var: 'hp', max: 100, w: 160, h: 16, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 8 }; } },
     { cat: 'Voxel', key: 'voxels', label: 'Voxel World', icon: 'cube', desc: 'Minecraft-style block terrain you can build on', ok: (e) => threeD && !e.voxels && !e.ui, add: (e) => { e.voxels = { size: 1, gen: { type: 'hills', w: 24, d: 24, h: 5, seed: 1, trees: true }, edits: {} }; } },
+    { cat: 'Rendering', key: 'light', label: 'Light', icon: 'bulb', desc: threeD ? 'A point light that lights up nearby objects' : 'A glow that cuts through darkness', ok: (e) => !e.light && !e.ui, add: (e) => { e.light = threeD ? { color: '#ffd9a0', intensity: 1.5, range: 8 } : { color: '#ffd9a0', intensity: 1, range: 160 }; } },
     { cat: 'Physics', key: 'body', label: threeD ? 'Rigidbody' : 'Rigidbody 2D', icon: 'body', desc: 'Collide, fall and stand on things', ok: (e) => !e.ui && !e.body, add: (e) => { e.body = { type: 'dynamic' }; } },
   ];
   for (const [type, def] of Object.entries(Behaviors)) {
@@ -1595,6 +1667,10 @@ const PREFABS_2D = [
   { icon: 'hand', label: 'Clicker', props: { name: 'Big Button', shape: { type: 'circle', r: 80, fill: '#ffb74d', stroke: '#e65100', lineWidth: 6 }, behaviors: [{ type: 'tappable', points: 1, var: 'score', bonusVar: 'perTap', destroy: false, sound: 'click' }] }, vars: { perTap: 0 } },
   { icon: 'plus', label: 'Upgrade', props: { name: 'Upgrade Button', ui: true, anchor: 'bottom', x: 0, y: -100, shape: { type: 'rect', w: 320, h: 60, radius: 14, fill: '#5d4037' }, text: { value: 'Upgrade +1/s  ·  {cost}', size: 18, color: '#fff3e0' }, behaviors: [{ type: 'upgrade', cost: 15, costVar: 'score', addVar: 'perSecond', amount: 1, growth: 1.15 }] }, vars: { perSecond: 0 },
     extra: [{ name: 'Income', offset: { x: -150, y: -300 }, behaviors: [{ type: 'income', var: 'score', rateVar: 'perSecond' }] }] },
+  { icon: 'arrow', label: 'Wind Zone', props: { name: 'Wind Zone', shape: { type: 'rect', w: 120, h: 200, fill: 'rgba(120,200,255,0.18)', stroke: 'rgba(120,200,255,0.5)', lineWidth: 2 }, behaviors: [{ type: 'forceZone', mode: 'direction', fx: 0, fy: -1, fz: 0, strength: 2400, tag: '', hidden: false }] } },
+  { icon: 'save', label: 'Save Point', props: { name: 'Save Point', shape: { type: 'emoji', emoji: '💾', w: 40, h: 40 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'float', amount: 6, period: 1.6 }] } },
+  { icon: 'bulb', label: 'Torch', props: { name: 'Torch', shape: { type: 'emoji', emoji: '🔥', w: 36, h: 36 }, light: { color: '#ffb056', intensity: 1, range: 180, flicker: 0.5 } }, scene: { light: { darkness: 0.85 } } },
+  { icon: 'rotate', label: 'Spinning Bar', props: { name: 'Spinning Bar', shape: { type: 'rect', w: 160, h: 16, radius: 8, fill: '#e53935' }, body: { type: 'kinematic' }, behaviors: [{ type: 'rotate', speed: 90 }, { type: 'hazard', action: 'damage' }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -1635,6 +1711,8 @@ const PREFABS_3D = [
   { icon: 'star', label: 'Fire', props: { name: 'Fire', y: 0.3, mesh: { geometry: 'cone', r: 0.3, h: 0.6, color: '#ff7043', emissive: 0.6 }, behaviors: [{ type: 'emitter', color: '#ffb74d', rate: 25, spread: 0.4 }, { type: 'hazard', action: 'damage' }] } },
   { icon: 'car', label: 'Car', props: { name: 'Car', tags: ['player'], y: 0.5, mesh: { geometry: 'box', w: 1.4, h: 0.8, d: 2.4, color: '#e53935' }, behaviors: [{ type: 'car', maxSpeed: 16, accel: 12, turn: 110, autoGas: false, chaseCam: true }] },
     scene: { settings: { joystick: true } } },
+  { icon: 'arrow', label: 'Wind Zone', props: { name: 'Wind Zone', y: 1.5, mesh: { geometry: 'box', w: 3, h: 3, d: 3, color: '#78c8ff', opacity: 0.2 }, behaviors: [{ type: 'forceZone', mode: 'direction', fx: 0, fy: 1, fz: 0, strength: 45, tag: '', hidden: false }] } },
+  { icon: 'save', label: 'Save Point', props: { name: 'Save Point', y: 0.6, mesh: { geometry: 'gem', w: 0.6, h: 1, d: 0.6, color: '#7cf7a0', emissive: 0.5 }, light: { color: '#7cf7a0', intensity: 1, range: 4 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'rotate', axis: 'y', speed: 90 }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -1654,6 +1732,8 @@ const OBJECTS_2D = [
   { icon: 'text', label: 'Text', props: { name: 'Text', text: { value: 'Hello', size: 32, color: '#ffffff' } } },
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
+  { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
+  { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
 ];
 const OBJECTS_3D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -1673,6 +1753,9 @@ const OBJECTS_3D = [
   { icon: 'circle', label: 'Torus', props: { name: 'Torus', mesh: { geometry: 'torus', w: 1, h: 1, d: 1, color: '#f06292' } } },
   { icon: 'plane', label: 'Plane', props: { name: 'Plane', y: 0.01, mesh: { geometry: 'plane', w: 4, d: 4, color: '#8d8d9a' } } },
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
+  { icon: 'camera', label: 'Camera', props: { name: 'Camera', y: 4, z: 8, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 7, oz: 11, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
+  { icon: 'bulb', label: 'Light', props: { name: 'Light', y: 2, light: { color: '#ffd9a0', intensity: 1.5, range: 8 } } },
+  { icon: 'bulb', label: 'Lamp', props: { name: 'Lamp', model: { parts: [{ geometry: 'cylinder', x: 0, y: 1, z: 0, r: 0.06, h: 2, color: '#455a64' }, { geometry: 'sphere', x: 0, y: 2.1, z: 0, r: 0.22, color: '#fff3c4', emissive: 1 }] }, light: { color: '#ffd9a0', intensity: 1.6, range: 7 } } },
 ];
 
 let projectTab = 'prefabs';
@@ -1803,6 +1886,7 @@ function addPrefab(def, at) {
   if (def.scene) {
     if (def.scene.gravity != null && !project.gravity) project.gravity = def.scene.gravity;
     Object.assign(project.settings, def.scene.settings || {});
+    if (def.scene.light && !(project.light?.darkness > 0)) project.light = { ...(project.light || {}), ...def.scene.light };
   }
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
@@ -2102,7 +2186,7 @@ function play() {
   engine.input.enabled = true;
   engine.timeScale = 1;
   const json = clone(root);
-  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false };
+  for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, orientation: 'any', saveProgress: false, loadOnStart: false };
   try {
     engine.start(json, { level: levelIdx });
     if (engine.scene.state === 'title') engine.scene.state = 'play';
@@ -2187,6 +2271,7 @@ $('#uiBtn').addEventListener('click', () => {
   $('#uiBtn').classList.toggle('on', uiMode);
   if (uiMode) { projectTab = 'ui'; renderProject(); toast('UI mode: only screen UI can be selected. Add widgets from Project → UI.'); }
 });
+engine.screenFilter = (e) => uiMode || e.id === selectedId; // title / pause / game-over UI shows in UI mode or when selected
 engine.onBeforeUI = (ctx) => { if (uiMode && !playing) { ctx.fillStyle = 'rgba(10,10,20,0.55)'; ctx.fillRect(0, 0, engine.width, engine.height); } };
 $('#addFab').addEventListener('click', () => { projectTab = 'prefabs'; renderProject(); setDock('project'); setSheet('half'); });
 $('#panelsFab').addEventListener('click', () => setSheet('half'));

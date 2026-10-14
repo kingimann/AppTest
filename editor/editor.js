@@ -3336,7 +3336,8 @@ function renderInspector() {
       fold('text:lines', 'Wrapping and line spacing', [
       C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
       C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
-      ], !!(+j.text.wrap || (j.text.lineHeight && +j.text.lineHeight !== 1.2))),
+      j.shape && j.shape.type !== 'circle' && j.text.align && j.text.align !== 'center' && C('text.inset', { label: 'Inset from the box edge (0 = off)', type: 'number', def: 0, range: [0, 200], step: 1, infoText: 'Left or right text starts this far in from the edge of its box (room for an icon, like a search bar). 0 = from the middle.' }),
+      ], !!(+j.text.wrap || (j.text.lineHeight && +j.text.lineHeight !== 1.2) || +j.text.inset)),
       fold('text:fx', 'Outline, shadow, glow, underline', [
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),

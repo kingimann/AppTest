@@ -140,6 +140,13 @@ Going the other way, a game can use app pieces directly. A Data List, Record For
 
 ## Look and motion
 
+### Sharp, lined-up screens
+
+- UI, text and app screens are always drawn at the phone's full sharpness (up to 3× pixels), whatever the game's *Graphics quality* setting. Only the game world is drawn at a lower resolution to save battery.
+- The templates use one grid: cards, lists and search bars sit **16 px** from the screen edge, and titles and section headings line up 20 px in.
+- Text that doesn't fit ends in **…** instead of being squeezed narrower.
+- Children keep their own parent: a label inside a card (`parent: 'card'`) is placed inside that card, even when the card is on a page.
+
 ### Light and dark mode
 
 App colours can be **theme colours** instead of fixed ones. In any colour box, the **@** button picks one:

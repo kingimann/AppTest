@@ -10505,7 +10505,7 @@ export const NODE_TYPES = {
   onVarReaches: { cat: 'Variables', label: 'When Variable Reaches', outs: ['then'], params: [txt('name', 'score', 'variable'), opt('op', ['≥', '≤', '=', '>', '<'], '≥', 'is'), num('value', 100, 'value')] },
   // functions: custom events you call by name (here, on the other object, on everything with a tag, or everywhere)
   customEvent: { cat: 'Functions', label: 'Custom Event', outs: ['then'], params: [txt('name', 'explode', 'event name')] },
-  callEvent: { cat: 'Functions', label: 'Call Custom Event', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'other', 'all with tag', 'everything'], 'this object', 'on'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  callEvent: { cat: 'Functions', label: 'Call Custom Event', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'other', 'all with tag', 'everything', 'object named'], 'this object', 'on'), txt('tag', 'enemy', 'tag or object name')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   eventValue: { cat: 'Functions', label: 'Event Value', value: 'number' },
   comment: { cat: 'Functions', label: 'Comment', comment: true, outs: [], params: [{ key: 'text', type: 'longtext', default: 'What this part of the script does…', label: 'note' }] },
   // more flow
@@ -10617,6 +10617,16 @@ export const NODE_TYPES = {
   runFunc: { cat: 'Functions', label: 'Run Function', exec: true, outs: ['then'], params: [txt('name', 'double', 'function name'), txt('store', '', 'put the result in variable (optional)')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
   callLater: { cat: 'Functions', label: 'Call Event Later', exec: true, outs: ['then'], params: [txt('name', 'explode', 'event name'), opt('on', ['this object', 'everything'], 'this object', 'on')], inputs: [{ key: 'seconds', type: 'number', default: 1 }, { key: 'value', type: 'number', default: 0 }] },
   callerIs: { cat: 'Functions', label: 'Caller Has Tag', value: 'bool', params: [txt('tag', 'player', 'tag')] },
+  // talking to other scripts: functions and variables on other objects, triggers, My Instructions / Conditions
+  callFuncOn: { cat: 'Functions', label: 'Call Function On Object', value: 'number', params: [txt('name', 'double', 'function name'), opt('on', ['object named', 'other', 'first with tag', 'this object'], 'object named', 'on'), { ...txt('object', 'Game Manager', 'object / tag'), suggest: 'objects' }], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  runFuncOn: { cat: 'Functions', label: 'Run Function On Objects', exec: true, outs: ['then', 'not found'], params: [txt('name', 'double', 'function name'), opt('on', ['object named', 'other', 'all with tag', 'everything', 'this object'], 'object named', 'on'), { ...txt('object', 'Game Manager', 'object / tag'), suggest: 'objects' }, txt('store', '', 'put the result in variable (optional)')], inputs: [{ key: 'a', type: 'number', default: 0 }, { key: 'b', type: 'number', default: 0 }, { key: 'c', type: 'number', default: 0 }] },
+  objHasFunc: { cat: 'Functions', label: 'Object Has Function', value: 'bool', params: [txt('name', 'double', 'function name'), { ...txt('object', 'Game Manager', 'object (name, tag or other)'), suggest: 'objects' }] },
+  getObjVar: { cat: 'Variables', label: 'Get Variable Of Object', value: 'number', params: [{ ...txt('object', 'Door', 'object (name, tag or other)'), suggest: 'objects' }, txt('name', 'open', 'its variable')] },
+  getObjText: { cat: 'Variables', label: 'Get Text Of Object Variable', value: 'text', params: [{ ...txt('object', 'Door', 'object (name, tag or other)'), suggest: 'objects' }, txt('name', 'label', 'its variable')] },
+  setObjVar: { cat: 'Variables', label: 'Set Variable Of Object', exec: true, outs: ['then', 'not found'], params: [{ ...txt('object', 'Door', 'object (name, tag or other)'), suggest: 'objects' }, txt('name', 'open', 'its variable'), opt('op', ['set', 'add', 'subtract', 'multiply'], 'set', 'do')], inputs: [{ key: 'value', type: 'text', default: '1' }] },
+  runTriggerN: { cat: 'Functions', label: 'Run Trigger', exec: true, outs: ['then'], params: [txt('name', 'Open door', 'trigger name')] },
+  runMyAction: { cat: 'Functions', label: 'Run My Instruction', exec: true, outs: ['then', 'not found'], params: [txt('name', 'Reward', 'My Instruction name')], inputs: [{ key: 'a', type: 'text', default: '' }, { key: 'b', type: 'text', default: '' }, { key: 'c', type: 'text', default: '' }] },
+  myCondition: { cat: 'Functions', label: 'My Condition', value: 'bool', params: [txt('name', 'Can afford', 'My Condition name')], inputs: [{ key: 'a', type: 'text', default: '' }, { key: 'b', type: 'text', default: '' }, { key: 'c', type: 'text', default: '' }] },
   // online: Photon multiplayer and PlayFab services
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
@@ -10966,6 +10976,33 @@ const OPS6 = ['=', '≠', '>', '<', '≥', '≤'];
 const cmp = (a, op, b) => ({ '=': a === b, '≠': a !== b, '>': a > b, '<': a < b, '≥': a >= b, '≤': a <= b }[op] ?? false);
 const fmtVal = (v) => (typeof v === 'number' ? +v.toFixed(2) : v);
 /** Events that start trigger lists or FSM transitions. */
+/** "My Instructions" / "My Conditions" built in the Triggers editor (project-wide); a game sets them when it starts. */
+export const customLogic = { actions: [], conditions: [] };
+export function setCustomLogic(src) { customLogic.actions = Array.isArray(src?.customActions) ? src.customActions : []; customLogic.conditions = Array.isArray(src?.customConditions) ? src.customConditions : []; }
+/** Put inputs into steps: a field that is just "@amount" becomes the value; "{@amount}" inside text is replaced. */
+export function bindArgs(v, args) {
+  if (typeof v === 'string') { const m = v.match(/^@(\w+)$/); if (m && m[1] in args) return args[m[1]]; return v.includes('{@') ? v.replace(/\{@(\w+)\}/g, (a, k) => (k in args ? String(args[k]) : a)) : v; }
+  if (Array.isArray(v)) return v.map((x) => bindArgs(x, args));
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, bindArgs(x, args)]));
+  return v;
+}
+const customArgs = (def, it) => Object.fromEntries((def.params || []).map((q) => { const v = it[q.key] ?? q.default ?? ''; return [q.key, q.type === 'number' && v !== '' && Number.isFinite(+v) ? +v : v]; }));
+const customSay = (def, p) => { const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
+/** Visual scripts on other objects: run one of their Functions and get its Return Value. */
+function callScriptFunction(t, name, args, from) { for (const f of t?._fns || []) if (f.has(name)) return { ok: true, v: f.call(name, args, from) }; return { ok: false, v: 0 }; }
+function whoOf(s, e, other, on, name) {
+  if (on === 'other') return other ? [other] : [];
+  if (on === 'all with tag') return s.findAll(name).filter((q) => !q.dead);
+  if (on === 'first with tag') { const q = s.findAll(name).find((x) => !x.dead); return q ? [q] : []; }
+  if (on === 'everything') return s.entities.filter((q) => !q.dead);
+  if (on === 'object named') { const q = s.find(name) || s.findAll(name)[0]; return q ? [q] : []; }
+  return e ? [e] : [];
+}
+const ON_WHO = ['this object', 'other', 'object named', 'all with tag', 'everything'];
+function screenFade(s, color, a, hold, b) {
+  const t0 = s.time, draw = (g) => { const t = s.time - t0, k = t < a ? t / a : t < a + hold ? 1 : 1 - (t - a - hold) / b; if (k <= 0) return; g.save(); g.globalAlpha = clamp(k, 0, 1); g.fillStyle = color; g.fillRect(0, 0, g.canvas.width, g.canvas.height); g.restore(); };
+  (s.overlays ||= []).push(draw); s.after(a + hold + b + 0.05, () => { s.overlays = (s.overlays || []).filter((q) => q !== draw); });
+}
 export const LOGIC_EVENTS = {
   start: { label: 'Game starts', icon: 'play' },
   every: { label: 'Every few seconds', icon: 'clock', params: [num('seconds', 1, 'seconds')], say: (p) => `Every ${p.seconds}s` },
@@ -10994,7 +11031,15 @@ export const LOGIC_EVENTS = {
   lose: { label: 'Game over', icon: 'enemy' },
   appHidden: { label: 'Player leaves the app', icon: 'phone' },
   appShown: { label: 'Player comes back to the app', icon: 'phone' },
-  called: { label: 'Run by another trigger', icon: 'link', params: [txt('name', 'Open door', 'name')], say: (p) => `Run “${p.name}”` },
+  called: { label: 'Run by another trigger / custom event', icon: 'link', params: [txt('name', 'Open door', 'name')], say: (p) => `Run “${p.name}”` },
+  shake: { label: 'Phone shaken', icon: 'phone' },
+  pageChanged: { label: 'Page changes (navigation)', icon: 'layers', params: [txt('page', '', 'to page (empty = any)')], say: (p) => (p.page ? `Page → ${p.page}` : 'Page changes') },
+  stateEntered: { label: 'State machine enters a state', icon: 'nodes', params: [txt('state', '', 'state (empty = any)')], say: (p) => (p.state ? `Enters ${p.state}` : 'Enters a state') },
+  inventory: { label: 'Inventory changes', icon: 'key', params: [txt('item', '', 'item (empty = any)')], say: (p) => (p.item ? `${p.item} changes` : 'Inventory changes') },
+  permission: { label: 'Permission answered', icon: 'key', params: [opt('kind', ['any', 'location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'any', 'for'), opt('answer', ['any', 'allowed', 'not allowed'], 'any', 'answer')], say: (p) => `Permission ${p.kind}: ${p.answer}` },
+  online: { label: 'Internet connection', icon: 'globe', params: [opt('mode', ['comes back', 'is lost'], 'is lost', 'when it')], say: (p) => `Internet ${p.mode}` },
+  orientation: { label: 'Phone turned', icon: 'phone', params: [opt('to', ['any', 'portrait', 'landscape'], 'any', 'to')], say: (p) => `Turned ${p.to === 'any' ? '' : 'to ' + p.to}` },
+  menu: { label: 'Side menu opens / closes', icon: 'menu', params: [opt('mode', ['any', 'opens', 'closes'], 'opens', 'when it')], say: (p) => `Menu ${p.mode}` },
   after: { label: 'After time in this state', icon: 'clock', fsm: true, params: [num('seconds', 1, 'seconds')], say: (p) => `After ${p.seconds}s` },
   finished: { label: 'When this state’s actions finish', icon: 'check', fsm: true, say: () => 'When done' },
 };
@@ -11021,6 +11066,19 @@ export const LOGIC_CONDITIONS = {
   level: { label: 'Level number', icon: 'flag', params: [opt('op', OPS6, '=', 'is'), num('value', 1, 'level')], test: (c, p) => cmp(c.s.level || 1, p.op, +p.value || 1), say: (p) => `level ${p.op} ${p.value}` },
   timeIn: { label: 'Time in this level', icon: 'clock', params: [opt('op', OPS6, '≥', 'is'), num('value', 10, 'seconds')], test: (c, p) => cmp(c.s.time || 0, p.op, +p.value || 0), say: (p) => `time ${p.op} ${p.value}s` },
   portrait: { label: 'Phone held upright', icon: 'phone', test: (c) => c.s.engine.height >= c.s.engine.width, say: () => 'phone upright' },
+  listHas: { label: 'List contains', icon: 'list', params: [txt('list', 'inventory', 'list'), txt('value', 'sword', 'value')], test: (c, p) => listOf(c.s, p.list).some((x) => sameVal(x, listVal(p.value))), say: (p) => `${p.list} has ${p.value}` },
+  listCount: { label: 'List length', icon: 'list', params: [txt('list', 'inventory', 'list'), opt('op', OPS6, '≥', 'is'), num('value', 3, 'items')], test: (c, p) => cmp(listOf(c.s, p.list).length, p.op, +p.value || 0), say: (p) => `${p.list} length ${p.op} ${p.value}` },
+  dictHas: { label: 'Dictionary has key', icon: 'list', params: [txt('dict', 'stats', 'dictionary'), txt('key', 'hp', 'key')], test: (c, p) => Object.prototype.hasOwnProperty.call(mapOf(c.s, p.dict), p.key), say: (p) => `${p.dict} has ${p.key}` },
+  pageIs: { label: 'Page is', icon: 'layers', params: [txt('page', 'home', 'page')], test: (c, p) => sameVal(c.s.vars.page, p.page), say: (p) => `page is ${p.page}` },
+  keyHeld: { label: 'Key held (keyboard)', icon: 'gamepad', params: [txt('key', 'space', 'key')], test: (c, p) => c.s.engine.input.keys.has(String(p.key || '').toLowerCase().trim()), say: (p) => `${p.key} held` },
+  screenHeld: { label: 'Finger on the screen', icon: 'hand', test: (c) => [...c.s.engine.input.pointers.values()].some((q) => q.role === 'free'), say: () => 'finger down' },
+  online: { label: 'Online', icon: 'globe', test: () => navigator.onLine !== false, say: () => 'online' },
+  hour: { label: 'Time of day (hour)', icon: 'clock', params: [opt('op', OPS6, '≥', 'is'), num('value', 18, 'hour (0–23)')], test: (c, p) => cmp(new Date().getHours(), p.op, +p.value || 0), say: (p) => `hour ${p.op} ${p.value}` },
+  permission: { label: 'Permission granted', icon: 'key', params: [opt('kind', ['location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'location', 'for')], test: (c, p) => c.s.engine.perms.status?.(p.kind) === 'granted' || c.s.engine.perms.known?.[p.kind] === 'granted', say: (p) => `${p.kind} allowed` },
+  objVar: { label: 'Another object’s variable', icon: 'key', params: [sug(txt('object', 'Door', 'object (name, tag or other)'), 'objects'), txt('name', 'open', 'its variable'), opt('op', OPS6, '=', 'is'), num('value', 1, 'value')], test: (c, p) => { const t = target(c, p.object); return !!t && cmp(+t.data[p.name] || 0, p.op, +p.value || 0); }, say: (p) => `${p.object}.${p.name} ${p.op} ${p.value}` },
+  funcResult: { label: 'Visual script function result', icon: 'nodes', params: [txt('name', 'canAfford', 'function'), opt('on', ['this object', 'other', 'object named', 'first with tag'], 'this object', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), num('a', 0, 'input a'), opt('op', OPS6, '≠', 'result is'), num('value', 0, 'value')], test: (c, p) => { const t = whoOf(c.s, c.e, c.other, p.on, p.object)[0]; const r = callScriptFunction(t, p.name, { a: +p.a || 0, b: 0, c: 0 }, c.e); return r.ok && cmp(+r.v || 0, p.op, +p.value || 0); }, say: (p) => `${p.name}(${p.a}) ${p.op} ${p.value}` },
+  eventValue: { label: 'Event value', icon: 'sign', params: [opt('op', OPS6, '=', 'is'), txt('value', '1', 'value')], test: (c, p) => (Number.isFinite(+c.eventValue) && Number.isFinite(+p.value) && String(p.value).trim() !== '' ? cmp(+c.eventValue, p.op, +p.value) : (p.op === '≠') !== sameVal(c.eventValue, p.value)), say: (p) => `event value ${p.op} ${p.value}` },
+  custom: { label: 'My condition', icon: 'script', hidden: true, test: (c, p) => { const def = customLogic.conditions.find((q) => q.id === p.ref); if (!def || (c.depth || 0) > 12) return false; const sub = Object.create(c); sub.depth = (c.depth || 0) + 1; return conditionsPass(bindArgs(def.conditions || [], customArgs(def, p)), sub, def.match === 'any'); }, say: (p) => { const def = customLogic.conditions.find((q) => q.id === p.ref); return def ? customSay(def, p) : 'Missing condition'; } },
   savedKey: { label: 'Save file has key', icon: 'save', params: [txt('key', 'coins', 'key'), txt('file', 'save', 'file')], test: (c, p) => c.s.engine.saves.has(p.key, p.file), say: (p) => `saved “${p.key}”` },
 };
 const target = (c, name) => (!name || name === 'self' ? c.e : name === 'other' ? c.other : c.s.find(name) || c.s.findAll(name)[0]);
@@ -11085,6 +11143,48 @@ export const LOGIC_ACTIONS = {
   phoneNotify: { cat: 'Game', label: 'Phone notification', icon: 'bell', params: [txt('title', 'Come back!', 'title'), txt('text', '', 'text'), num('minutes', 0, 'in minutes (0 = now)'), txt('id', '', 'id (same id replaces it)')], run: (c, p) => { c.s.engine.phone.send({ id: p.id, title: p.title, text: p.text, when: +p.minutes > 0 ? 'in' : 'now', seconds: +p.minutes * 60 }); }, say: (p) => `Phone notification: ${p.title || ''}${+p.minutes > 0 ? ` in ${p.minutes} min` : ''}` },
   notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
+  // lists & dictionaries
+  listAdd: { cat: 'Lists', label: 'List: add', icon: 'list', params: [txt('list', 'inventory', 'list'), txt('value', 'sword', 'value'), opt('where', ['at the end', 'at the start'], 'at the end', 'where'), bool('unique', false, 'only if not there')], run: (c, p) => { const a = [...listOf(c.s, p.list)], v = listVal(fillTemplate(p.value, c.s.vars)); if (p.unique && a.some((x) => sameVal(x, v))) return; if (p.where === 'at the start') a.unshift(v); else a.push(v); c.s.setVar(p.list, a); }, say: (p) => `Add ${p.value} to ${p.list}` },
+  listRemove: { cat: 'Lists', label: 'List: remove', icon: 'list', params: [txt('list', 'inventory', 'list'), opt('mode', ['this value', 'last', 'first', 'all of this value'], 'this value', 'remove'), txt('value', 'sword', 'value')], run: (c, p) => { let a = [...listOf(c.s, p.list)]; const v = listVal(p.value); if (p.mode === 'last') a.pop(); else if (p.mode === 'first') a.shift(); else if (p.mode === 'all of this value') a = a.filter((x) => !sameVal(x, v)); else { const i = a.findIndex((x) => sameVal(x, v)); if (i >= 0) a.splice(i, 1); } c.s.setVar(p.list, a); }, say: (p) => `Remove ${p.mode === 'this value' || p.mode === 'all of this value' ? p.value : p.mode} from ${p.list}` },
+  listClear: { cat: 'Lists', label: 'List: clear / shuffle / sort', icon: 'list', params: [txt('list', 'inventory', 'list'), opt('do', ['clear', 'shuffle', 'sort up', 'sort down', 'reverse'], 'clear', 'do')], run: (c, p) => { const a = [...listOf(c.s, p.list)]; if (p.do === 'clear') a.length = 0; else if (p.do === 'shuffle') for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } else if (p.do === 'reverse') a.reverse(); else a.sort((x, y) => (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * (p.do === 'sort down' ? -1 : 1)); c.s.setVar(p.list, a); }, say: (p) => `${p.do} ${p.list}` },
+  listPick: { cat: 'Lists', label: 'List: pick an item', icon: 'list', params: [txt('list', 'prizes', 'list'), opt('which', ['random', 'first', 'last'], 'random', 'which'), sug(txt('into', 'prize', 'into variable'), 'vars')], run: (c, p) => { const a = listOf(c.s, p.list); if (!a.length) return; c.s.setVar(p.into, p.which === 'first' ? a[0] : p.which === 'last' ? a[a.length - 1] : a[Math.floor(Math.random() * a.length)]); }, say: (p) => `${p.into} = ${p.which} from ${p.list}` },
+  mapSet: { cat: 'Lists', label: 'Dictionary: set', icon: 'list', params: [txt('dict', 'stats', 'dictionary'), txt('key', 'hp', 'key'), txt('value', '100', 'value'), opt('op', ['set', 'add'], 'set', 'how')], run: (c, p) => { const m = { ...mapOf(c.s, p.dict) }, v = listVal(fillTemplate(p.value, c.s.vars)); m[p.key] = p.op === 'add' ? (+m[p.key] || 0) + (+v || 0) : v; c.s.setVar(p.dict, m); }, say: (p) => `${p.dict}.${p.key} ${p.op === 'add' ? '+=' : '='} ${p.value}` },
+  mapRemove: { cat: 'Lists', label: 'Dictionary: remove key', icon: 'list', params: [txt('dict', 'stats', 'dictionary'), txt('key', 'hp', 'key (empty = clear all)')], run: (c, p) => { const m = p.key ? { ...mapOf(c.s, p.dict) } : {}; delete m[p.key]; c.s.setVar(p.dict, m); }, say: (p) => (p.key ? `Remove ${p.key} from ${p.dict}` : `Clear ${p.dict}`) },
+  // objects, motion & physics
+  setPos: { cat: 'Motion', label: 'Set position', icon: 'move', params: [num('x', 0, 'x'), num('y', 0, 'y'), num('z', 0, 'z (3D)'), bool('relative', false, 'relative to where it is'), obj()], run: (c, p) => { const t = target(c, p.object); if (!t) return; if (p.relative) { t.x += +p.x || 0; t.y += +p.y || 0; t.z += +p.z || 0; } else { t.x = +p.x || 0; t.y = +p.y || 0; if (c.s.mode === '3d') t.z = +p.z || 0; } if (t.body?.vel) t.body.vel = { x: 0, y: 0, z: 0 }; }, say: (p) => `${p.relative ? 'Move by' : 'Put at'} ${p.x}, ${p.y}` },
+  glideTo: { cat: 'Motion', label: 'Glide to object', icon: 'move', params: [sug(txt('to', 'player', 'object or tag'), 'objects'), num('seconds', 0.6, 'over seconds'), opt('ease', EASES, 'inOutQuad', 'ease'), bool('wait', true, 'wait until there')], run: (c, p) => { const t = c.s.find(p.to) || nearest(c.s, c.e, p.to); if (!t) return; const d = Math.max(0.01, +p.seconds || 0.01); c.s.to(c.e, { x: t.x, y: t.y, z: t.z }, d, { ease: p.ease }); return p.wait ? d : 0; }, say: (p) => `Glide to ${p.to}` },
+  face: { cat: 'Motion', label: 'Face object / tag', icon: 'target', params: [sug(txt('tag', 'player', 'object or tag'), 'tags')], run: (c, p) => { const t = c.s.find(p.tag) || nearest(c.s, c.e, p.tag); if (!t) return; if (c.s.mode === '3d') c.e.ry = Math.atan2(t.x - c.e.x, t.z - c.e.z) / DEG; else c.e.rz = Math.atan2(t.y - c.e.y, t.x - c.e.x) / DEG; }, say: (p) => `Face ${p.tag}` },
+  pushToward: { cat: 'Physics', label: 'Push toward object', icon: 'arrow', params: [sug(txt('tag', 'player', 'object or tag'), 'tags'), num('power', 500, 'power'), bool('away', false, 'away from it instead')], run: (c, p) => { const t = c.s.find(p.tag) || nearest(c.s, c.e, p.tag), b = c.e.ensureBody({ type: 'dynamic' }); if (!t) return; const dx = t.x - c.e.x, dy = t.y - c.e.y, dz = (t.z || 0) - (c.e.z || 0), d = Math.hypot(dx, dy, dz) || 1, k = (+p.power || 0) / d * (p.away ? -1 : 1); b.vel.x += dx * k; b.vel.y += dy * k; b.vel.z += dz * k; }, say: (p) => `Push ${p.away ? 'away from' : 'toward'} ${p.tag}` },
+  stopMove: { cat: 'Physics', label: 'Stop moving', icon: 'close', params: [obj()], run: (c, p) => { const t = target(c, p.object); if (t?.body?.vel) t.body.vel = { x: 0, y: 0, z: 0 }; c.s.tweens = (c.s.tweens || []).filter((tw) => tw.target !== t); }, say: (p) => `Stop ${p.object || 'moving'}` },
+  tagAdd: { cat: 'Objects', label: 'Add / remove tag', icon: 'key', params: [sug(txt('tag', 'collected', 'tag'), 'tags'), opt('mode', ['add', 'remove', 'toggle'], 'add', 'do'), obj()], run: (c, p) => { const t = target(c, p.object); if (!t || !p.tag) return; const has = t.tags.includes(p.tag), on = p.mode === 'toggle' ? !has : p.mode === 'add'; if (on && !has) t.tags.push(p.tag); else if (!on && has) t.tags = t.tags.filter((q) => q !== p.tag); }, say: (p) => `${p.mode} tag ${p.tag}` },
+  destroyTag: { cat: 'Objects', label: 'Destroy all with tag', icon: 'trash', params: [sug(txt('tag', 'enemy', 'tag'), 'tags'), bool('burst', true, 'particle burst')], run: (c, p) => { for (const t of c.s.findAll(p.tag)) { if (t.dead || t.template) continue; if (p.burst) c.s.burst(t.x, t.y, t.z, '#ffd23f', 10); t.destroy(); } }, say: (p) => `Destroy every ${p.tag}` },
+  setImage: { cat: 'Objects', label: 'Change picture', icon: 'image', params: [txt('image', 'art:star', 'picture (art:name or URL)'), obj()], run: (c, p) => { const t = target(c, p.object), src = String(p.image || '').trim(); if (!t || !src) return; if (t.sprite) t.sprite.src = src; else { const ex = t.extents(); t.sprite = { src, w: (ex.hx || 24) * 2, h: (ex.hy || 24) * 2 }; t.shape = null; } }, say: (p) => `Picture → ${p.image}` },
+  // camera
+  camLive: { cat: 'Camera', label: 'Make camera live', icon: 'camera', params: [sug(txt('camera', 'Camera 2', 'camera (empty = back to priorities)'), 'objects'), num('seconds', -1, 'blend seconds (−1 = its own)')], run: (c, p) => { if (+p.seconds >= 0) c.s.nextBlend = { dur: +p.seconds, ease: 'inOutCubic' }; c.s.activeCamera = p.camera || null; }, say: (p) => (p.camera ? `Camera → ${p.camera}` : 'Camera priorities') },
+  camFollow: { cat: 'Camera', label: 'Camera follows', icon: 'camera', params: [sug(txt('tag', 'player', 'tag or name'), 'tags'), sug(txt('camera', '', 'camera (empty = the live one)'), 'objects')], run: (c, p) => { const cam = p.camera ? c.s.find(p.camera) : c.s.activeCamEntity; if (cam) cam.data.camTarget = p.tag || null; }, say: (p) => `Camera follows ${p.tag}` },
+  camZoom: { cat: 'Camera', label: 'Camera zoom', icon: 'camera', params: [num('zoom', 1.5, 'zoom (2D) or field of view (3D); 0 = its own'), sug(txt('camera', '', 'camera (empty = the live one)'), 'objects')], run: (c, p) => { const cam = p.camera ? c.s.find(p.camera) : c.s.activeCamEntity; if (!cam) return; if (!+p.zoom) { delete cam.data.camZoom; delete cam.data.camFov; } else if (c.s.mode === '3d') cam.data.camFov = clamp(+p.zoom, 5, 140); else cam.data.camZoom = clamp(+p.zoom, 0.05, 20); }, say: (p) => (+p.zoom ? `Zoom ${p.zoom}` : 'Zoom back') },
+  screenFade: { cat: 'Camera', label: 'Fade the screen', icon: 'eye', params: [{ key: 'color', type: 'color', default: '#000000', label: 'colour' }, num('out', 0.4, 'fade out (s)'), num('hold', 0.3, 'hold (s)'), num('in', 0.4, 'fade in (s)'), bool('wait', true, 'wait while covered')], run: (c, p) => { const a = Math.max(0.01, +p.out || 0), h = Math.max(0, +p.hold || 0), b = Math.max(0.01, +p.in || 0); screenFade(c.s, p.color || '#000', a, h, b); return p.wait ? a + h / 2 : 0; }, say: () => 'Fade the screen' },
+  // device & time
+  slowMo: { cat: 'Game', label: 'Slow motion', icon: 'clock', params: [num('speed', 0.3, 'speed (1 = normal)'), num('seconds', 1.5, 'for real seconds (0 = until changed)')], run: (c, p) => { const eng = c.s.engine, k = clamp(+p.speed || 0, 0.05, 4); eng.timeScale = k; if (+p.seconds > 0) setTimeout(() => { if (eng.timeScale === k) eng.timeScale = 1; }, +p.seconds * 1000); }, say: (p) => `Slow motion ×${p.speed}` },
+  pauseGame: { cat: 'Game', label: 'Pause / resume', icon: 'clock', params: [opt('mode', ['pause', 'resume', 'toggle'], 'pause', 'do')], run: (c, p) => { const E = c.s.engine; E.paused = p.mode === 'pause' ? true : p.mode === 'resume' ? false : !E.paused; }, say: (p) => `${p.mode} game` },
+  haptic: { cat: 'Game', label: 'Haptic tap', icon: 'phone', params: [opt('style', ['light', 'medium', 'heavy', 'success', 'warning', 'error'], 'medium', 'style')], run: (c, p) => c.s.engine.vibrate({ light: 8, medium: 18, heavy: 35, success: [12, 60, 24], warning: [24, 80, 24], error: [30, 50, 30, 50, 30] }[p.style] ?? 18, p.style), say: (p) => `Haptic: ${p.style}` },
+  openUrl: { cat: 'Game', label: 'Open a website', icon: 'globe', params: [txt('url', 'https://', 'web address')], run: (c, p) => { if (/^https?:\/\//.test(p.url || '')) window.open(p.url, '_blank', 'noopener'); }, say: (p) => `Open ${p.url}` },
+  copyText: { cat: 'Game', label: 'Copy text', icon: 'copy', params: [txt('text', 'My score: {score}', 'text ({braces} work)')], run: (c, p) => { navigator.clipboard?.writeText(fillTemplate(p.text, c.s.vars)).catch(() => {}); }, say: (p) => `Copy “${p.text}”` },
+  shareText: { cat: 'Game', label: 'Share', icon: 'external', params: [txt('text', 'I scored {score}!', 'text ({braces} work)')], run: (c, p) => { const text = fillTemplate(p.text, c.s.vars); if (navigator.share) navigator.share({ text, url: location.href }).catch(() => {}); else navigator.clipboard?.writeText(text).catch(() => {}); }, say: (p) => `Share “${p.text}”` },
+  askText: { cat: 'Game', label: 'Ask the player to type', icon: 'text', params: [txt('question', 'What\'s your name?', 'question'), sug(txt('name', 'playerName', 'into variable'), 'vars'), num('max', 16, 'max letters')], run: (c, p) => { let done = false; askTextBox(c.s, { question: p.question, max: p.max, value: typeof c.s.vars[p.name] === 'string' ? c.s.vars[p.name] : '' }, (v) => { if (v != null) c.s.setVar(p.name, v); done = true; }); return { until: () => done }; }, say: (p) => `Ask: ${p.question}` },
+  setPage: { cat: 'Game', label: 'Go to page', icon: 'layers', params: [txt('page', 'shop', 'page')], run: (c, p) => c.s.setVar('page', p.page), say: (p) => `Page → ${p.page}` },
+  // talking to scripts and other triggers
+  callEvent: { cat: 'Scripts', label: 'Call custom event', icon: 'link', params: [txt('name', 'explode', 'event name'), opt('on', ON_WHO, 'everything', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), txt('value', '', 'value (optional)')], run: (c, p) => { const set = new Set(whoOf(c.s, c.e, c.other, p.on, p.object)); c.s.emit('graphCall', p.name, (q) => set.has(q), c.e, listVal(fillTemplate(p.value ?? '', c.s.vars))); }, say: (p) => `Call “${p.name}” on ${p.on === 'object named' || p.on === 'all with tag' ? p.object : p.on}` },
+  runFunction: { cat: 'Scripts', label: 'Run visual script function', icon: 'nodes', params: [txt('name', 'double', 'function'), opt('on', ON_WHO, 'this object', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), num('a', 0, 'input a'), num('b', 0, 'input b'), sug(txt('store', '', 'put the result in variable (optional)'), 'vars')], run: (c, p) => { let r = null; for (const t of whoOf(c.s, c.e, c.other, p.on, p.object)) { const q = callScriptFunction(t, p.name, { a: +p.a || 0, b: +p.b || 0, c: 0 }, c.e); if (q.ok) r = q; } if (!r) Log.add('warn', `No visual script function “${p.name}” found`, c.e?.name); else if (p.store) c.s.setVar(p.store, r.v); }, say: (p) => `Run ${p.name}()${p.store ? ' → ' + p.store : ''}` },
+  custom: { cat: 'My Instructions', label: 'My instruction', icon: 'script', hidden: true,
+    run: (c, p) => {
+      const def = customLogic.actions.find((q) => q.id === p.ref); if (!def) return;
+      if ((c.depth || 0) > 12) { Log.add('warn', `“${def.name}” uses itself too deeply`, c.e?.name); return; }
+      const sub = Object.create(c); sub.reps = {}; sub.depth = (c.depth || 0) + 1; let fin = false;
+      runInstructions(bindArgs(def.actions || [], customArgs(def, p)), sub, () => { fin = true; });
+      return fin || p.wait === false ? undefined : { until: () => fin };
+    },
+    say: (p) => { const def = customLogic.actions.find((q) => q.id === p.ref); return def ? customSay(def, p) : 'Missing instruction'; } },
   goLevel: { cat: 'Game', label: 'Go to level', icon: 'flag', params: [num('level', 1, 'level')], run: (c, p) => c.s.engine.goToLevel(+p.level || 1), say: (p) => `Go to level ${p.level}` },
   music: { cat: 'Game', label: 'Play music', icon: 'bell', params: [txt('sound', '', 'imported sound or URL (empty = stop)'), num('volume', 0.6, 'volume (0–1)')], run: (c, p) => { if (p.sound) c.s.engine.audio.music(p.sound, { loop: true, vol: clamp(+p.volume || 0, 0, 1) }); else c.s.engine.audio.stopMusic(0.5); }, say: (p) => (p.sound ? `Music: ${p.sound}` : 'Stop music') },
   burst: { cat: 'Game', label: 'Particle burst', icon: 'star', params: [{ key: 'color', type: 'color', default: '#ffd23f', label: 'colour' }, num('count', 16, 'how many'), opt('at', ['this', 'other'], 'this', 'at')], run: (c, p) => { const t = p.at === 'other' ? c.other : c.e; if (t) c.s.burst(t.x, t.y, t.z, p.color, clamp(+p.count || 16, 1, 200)); }, say: (p) => `Burst of ${p.count}` },
@@ -11117,11 +11217,32 @@ export function conditionsPass(list, ctx, any = false) {
   for (const cd of list || []) { const def = LOGIC_CONDITIONS[cd.type]; if (!def) continue; const ok = !!def.test(ctx, withDefaults(def, cd)); if (ok === !!cd.not) return false; }
   return true;
 }
+/** Does a queued happening match an event's settings? */
+function evOk(type, p, q) {
+  switch (type) {
+    case 'touch': case 'touchEnd': return !!q.other?.has(p.tag);
+    case 'button': return q.button === p.button;
+    case 'swipe': return q.dir === p.dir;
+    case 'message': return q.name === p.message;
+    case 'animEnd': return !p.clip || q.clip === p.clip;
+    case 'varChanged': return !p.name || q.name === p.name;
+    case 'called': return q.name === p.name;
+    case 'key': return q.key === String(p.key || '').toLowerCase().trim();
+    case 'pageChanged': return !p.page || sameVal(q.page, p.page);
+    case 'stateEntered': return !p.state || q.state === p.state;
+    case 'inventory': return !p.item || q.item === p.item;
+    case 'permission': return (p.kind === 'any' || q.kind === p.kind) && (p.answer === 'any' || (p.answer === 'allowed') === !!q.ok);
+    case 'online': return (p.mode === 'comes back') === !!q.on;
+    case 'orientation': return p.to === 'any' || q.o === p.to;
+    case 'menu': return p.mode === 'any' || (p.mode === 'opens') === !!q.open;
+    default: return true;
+  }
+}
 /** Watches what happened to an object this frame, for matching against events. */
 class LogicWatcher {
   constructor(e, s) {
     this.e = e; this.s = s; this.queue = []; this.now = []; this.timers = new Map(); this.edges = new Map(); this.first = true;
-    s.on('message', (n) => this.queue.push({ type: 'message', name: n }));
+    s.on('message', (n, data) => this.queue.push({ type: 'message', name: n, value: data }));
     s.on('animationEnd', (ent, clip) => { if (ent === e) this.queue.push({ type: 'animEnd', clip }); });
     s.on('var', (k) => this.queue.push({ type: 'varChanged', name: k }));
     s.on('damage', (who) => { if (who === e) this.queue.push({ type: 'damaged' }); });
@@ -11130,6 +11251,14 @@ class LogicWatcher {
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
     s.on('appVisible', (v) => this.queue.push({ type: v ? 'appShown' : 'appHidden' }));
     s.on('runTrigger', (n) => this.queue.push({ type: 'called', name: n }));
+    s.on('graphCall', (n, who, from, v) => { if (who(e)) this.queue.push({ type: 'called', name: n, other: from, value: v }); }); // custom events from visual scripts
+    s.on('state', (ent, name) => { if (ent === e) this.queue.push({ type: 'stateEntered', state: name }); });
+    s.on('var', (k, v) => { if (k === 'page') this.queue.push({ type: 'pageChanged', page: v }); });
+    s.on('inventory', (item) => this.queue.push({ type: 'inventory', item }));
+    s.on('permission', (kind, ok) => this.queue.push({ type: 'permission', kind, ok }));
+    s.on('online', (on) => this.queue.push({ type: 'online', on }));
+    s.on('orientation', (o) => this.queue.push({ type: 'orientation', o }));
+    s.on('menu', (m, open) => this.queue.push({ type: 'menu', open }));
     this.lastTap = -9; this.age = 0;
   }
   push(ev) { this.queue.push(ev); }
@@ -11139,6 +11268,7 @@ class LogicWatcher {
     this.age += dt;
     if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { ev.push({ type: 'tap' }); if (s.time - this.lastTap < 0.35) { ev.push({ type: 'doubleTap' }); this.lastTap = -9; } else this.lastTap = s.time; }
     for (const k of inp.keysDown) ev.push({ type: 'key', key: k });
+    if (inp.shook) ev.push({ type: 'shake' });
     if (inp.pressed('jump')) ev.push({ type: 'button', button: 'jump' });
     if (inp.pressed('action')) ev.push({ type: 'button', button: 'fire' });
     for (const d of ['up', 'down', 'left', 'right']) if (inp.pressed('swipe:' + d)) ev.push({ type: 'swipe', dir: d });
@@ -11168,15 +11298,22 @@ class LogicWatcher {
       case 'after': return (extra.stateTime || 0) >= (+p.seconds || 0) ? {} : null;
       case 'finished': return extra.finished ? {} : null;
       default: {
-        const hit = this.now.find((q) => q.type === x?.type && (x.type !== 'touch' && x.type !== 'touchEnd' || q.other?.has(p.tag)) && (x.type !== 'button' || q.button === p.button) && (x.type !== 'swipe' || q.dir === p.dir) && (x.type !== 'message' || q.name === p.message) && (x.type !== 'animEnd' || !p.clip || q.clip === p.clip) && (x.type !== 'varChanged' || !p.name || q.name === p.name) && (x.type !== 'called' || q.name === p.name) && (x.type !== 'key' || q.key === String(p.key || '').toLowerCase().trim()));
-        return hit ? { other: hit.other } : null;
+        const hit = this.now.find((q) => q.type === x?.type && evOk(x.type, p, q));
+        return hit ? { other: hit.other, value: hit.value } : null;
       }
     }
+  }
+  /** Every match this frame (two messages in one frame run a trigger twice); timed and edge events give at most one. */
+  matchAll(x, key, extra) {
+    if (['every', 'variable', 'always', 'after', 'finished', 'delay', 'random', 'landed', 'near', 'sees', 'longPress'].includes(x?.type)) { const m = this.match(x, key, extra); return m ? [m] : []; }
+    const p = withDefaults(LOGIC_EVENTS[x?.type], x || {});
+    return this.now.filter((q) => q.type === x?.type && evOk(x.type, p, q)).map((q) => ({ other: q.other, value: q.value }));
   }
   resetTimers() { this.timers.clear(); }
 }
 const needsSensor = (events, e, s) => {
   for (const x of events) if (x && (x.type === 'touch' || x.type === 'touchEnd')) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(x.tag || 'player'); }
+  if (events.some((x) => x?.type === 'shake')) s.engine.input.wantMotion = true;
 };
 
 /** Triggers (Game Creator style): On [event] → If [conditions] → Do [instructions, one after another]. */
@@ -11188,14 +11325,15 @@ registerBehavior('triggers', {
     const st = list.map(() => ({ runs: 0, last: -1e9, run: null })); // per copy: how often each trigger ran, when, and what is running now
     let w = null;
     /** Options: once / max runs, cooldown, chance, delay, if any / all conditions, else, overlap (allow, skip while running, restart). */
-    const fire = (t, i, e, s, other) => {
+    const fire = (t, i, e, s, other, value) => {
       const S = st[i], max = t.once ? 1 : Math.round(+t.maxRuns || 0);
       if (max > 0 && S.runs >= max) return;
       if (+t.cooldown > 0 && s.time - S.last < +t.cooldown) return;
       if (t.chance != null && t.chance !== '' && +t.chance < 100 && Math.random() * 100 >= +t.chance) return;
-      const c = { s, e, other, afterDeath: e.dead };
+      const c = { s, e, other, afterDeath: e.dead, eventValue: value };
       const ok = conditionsPass(t.conditions, c, t.match === 'any');
-      const steps = ok ? t.actions : t.elseActions;
+      let steps = ok ? t.actions : t.elseActions;
+      if (steps?.length && JSON.stringify(steps).includes('@event')) steps = bindArgs(steps, { event: value ?? '' }); // "@event" = the value that came with it
       if (!ok && !steps?.length) return;
       if (S.run && !S.run.done) { if (t.overlap === 'skip') return; if (t.overlap === 'restart') S.run.cancelled = true; }
       if (ok) { S.runs++; S.last = s.time; }
@@ -11209,9 +11347,8 @@ registerBehavior('triggers', {
       update(e, dt, s) {
         w.frame(dt);
         list.forEach((t, i) => {
-          if (t.off || (s.state !== 'play' && !['tap', 'message', 'called', 'win', 'lose', 'appHidden', 'appShown', 'varChanged'].includes(t.event?.type))) return;
-          const hit = w.match(t.event, i);
-          if (hit) fire(t, i, e, s, hit.other);
+          if (t.off || (s.state !== 'play' && !['tap', 'message', 'called', 'win', 'lose', 'appHidden', 'appShown', 'varChanged', 'pageChanged', 'permission', 'online', 'orientation', 'menu', 'inventory'].includes(t.event?.type))) return;
+          for (const hit of w.matchAll(t.event, i)) fire(t, i, e, s, hit.other, hit.value);
         });
       },
       collide(e, other) { w?.push({ type: 'touch', other }); },
@@ -11549,6 +11686,11 @@ registerBehavior('graph', {
         case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
+        case 'callFuncOn': { const t = whoOf(s, e, ctx.other, P('on'), P('object'))[0]; return +callScriptFunction(t, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }, e).v || 0; }
+        case 'objHasFunc': return !!(target(ctx, P('object'))?._fns || []).some((f) => f.has(P('name')));
+        case 'getObjVar': return +target(ctx, P('object'))?.data[P('name')] || 0;
+        case 'getObjText': return asText(target(ctx, P('object'))?.data[P('name')] ?? '');
+        case 'myCondition': { const def = customLogic.conditions.find((q) => q.name === P('name')); if (!def) return false; const args = {}; (def.params || []).slice(0, 3).forEach((q, i) => { const v = I('abc'[i]); if (v !== '' && v != null) args[q.key] = v; }); return LOGIC_CONDITIONS.custom.test({ s, e, other: ctx.other }, { ref: def.id, ...args }); }
         case 'esLoad': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined ? asText(P('def')) : Array.isArray(v) ? v.map(asText).join(', ') : v && typeof v === 'object' ? JSON.stringify(v) : asText(v); }
         case 'esLoadNum': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined || !Number.isFinite(+v) ? +P('def') || 0 : +v; }
         case 'esKeyExists': return s.engine.saves.has(P('key'), P('file'));
@@ -11789,8 +11931,9 @@ registerBehavior('graph', {
         case 'addMyVar': { const k = P('name') || 'hp'; setMy(s, e, k, (+e.data[k] || 0) + (+I('amount') || 0)); break; }
         case 'setOtherVar': setMy(s, ctx.other, P('name') || 'hp', +I('value') || 0); break;
         case 'callEvent': {
-          const on = P('on'), name = P('name'), v = +I('value') || 0, tag = P('tag');
-          const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : (q) => q === e;
+          const on = P('on'), name = P('name'), raw = I('value'), v = typeof raw === 'number' ? raw : listVal(raw ?? 0), tag = P('tag');
+          const named = on === 'object named' ? s.find(tag) : null;
+          const who = on === 'other' ? (q) => q === ctx.other : on === 'all with tag' ? (q) => q.has(tag) : on === 'everything' ? () => true : on === 'object named' ? (q) => q === named : (q) => q === e;
           s.emit('graphCall', name, who, e, v); break;
         }
         case 'changeVar': case 'clampVar': {
@@ -11808,6 +11951,24 @@ registerBehavior('graph', {
           break;
         }
         case 'setTextVar': s.setVar(P('name') || 'text', fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data))); break;
+        case 'runFuncOn': {
+          let found = false; const args = { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 };
+          for (const t of whoOf(s, e, ctx.other, P('on'), P('object'))) { const r = callScriptFunction(t, P('name'), args, e); if (r.ok) { found = true; if (P('store')) s.setVar(P('store'), r.v); } }
+          return follow(n, found ? 'then' : 'not found', ctx);
+        }
+        case 'setObjVar': {
+          const t = target(ctx, P('object')); if (!t) return follow(n, 'not found', ctx);
+          const k = P('name') || 'value', raw = I('value'), v = typeof raw === 'number' ? raw : listVal(raw), cur = +t.data[k] || 0, op = P('op');
+          t.data[k] = op === 'add' ? cur + (+v || 0) : op === 'subtract' ? cur - (+v || 0) : op === 'multiply' ? cur * (+v || 0) : v; s.emit('myvar', t, k, t.data[k]); break;
+        }
+        case 'runTriggerN': s.emit('runTrigger', P('name')); break;
+        case 'runMyAction': {
+          const def = customLogic.actions.find((q) => q.name === P('name')); if (!def) return follow(n, 'not found', ctx);
+          const it = { ref: def.id }; (def.params || []).slice(0, 3).forEach((q, i) => { const v = I('abc'[i]); if (v !== '' && v != null) it[q.key] = v; });
+          const later = { ...ctx, steps: 0 }, c2 = { s, e, other: ctx.other };
+          runInstructions([{ type: 'custom', ...it }], c2, () => { if (!e.dead) follow(n, 'then', later); });
+          return;
+        }
         case 'esSave': s.engine.saves.save(P('key') || 'value', listVal(I('value')), P('file')); break;
         case 'esSaveVar': { const v = P('var') || 'coins'; s.engine.saves.save(P('key') || v, s.vars[v] ?? 0, P('file')); break; }
         case 'esLoadVar': { const v = P('var') || 'coins', k = P('key') || v; if (!s.engine.saves.has(k, P('file'))) return follow(n, 'not saved yet', ctx); s.setVar(v, s.engine.saves.load(k, P('file'))); return follow(n, 'loaded', ctx); }
@@ -12207,7 +12368,14 @@ registerBehavior('graph', {
             for (const n of g.nodes) if (n.type === 'whenMyVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !was.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); was.set(n.id, now); }
           });
         }
-        if (has('customEvent')) s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
+        if (has('customEvent')) {
+          s.on('graphCall', (name, who, from, v) => { if (!e.dead && who(e)) fire('customEvent', e, s, from, (n) => param(n, 'name') === name, null, { eventValue: v }); });
+          s.on('runTrigger', (name) => { if (!e.dead) fire('customEvent', e, s, null, (n) => param(n, 'name') === name); }); // Triggers' "Run another trigger" reaches scripts too
+        }
+        if (g.nodes.some((n) => n.type === 'funcDef')) (e._fns ||= []).push({ // other objects' scripts and Triggers can call this script's Functions
+          has: (name) => g.nodes.some((n) => n.type === 'funcDef' && param(n, 'name') === name),
+          call: (name, args, from) => callFunction(s, e, { s, e, other: from, steps: 0 }, name, args),
+        });
         if (has('onVarReaches')) {
           const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };
           for (const n of g.nodes) if (n.type === 'onVarReaches') varWas.set(n.id, test(n, s.vars[param(n, 'name')]));
@@ -12791,6 +12959,7 @@ export class Engine {
       this.factory = () => this.buildLevel();
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
+    if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
     this.loadPrefs();
     this.setScene(this.factory());
     if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }

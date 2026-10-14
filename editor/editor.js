@@ -2504,6 +2504,8 @@ function validate(b, j) {
   if (b.type === 'tween' && b.effect === 'path' && !(Array.isArray(b.points) && b.points.length)) out.push(['error', 'The path needs at least one point.']);
   if (b.type === 'triggers') {
     const called = new Set(all.flatMap((e) => (e.behaviors || []).filter((q) => q.type === 'triggers').flatMap((q) => (q.triggers || []).filter((t) => t.event?.type === 'called').map((t) => t.event.name))));
+    const cA = new Set((root.customActions || []).map((d) => d.id)), cC = new Set((root.customConditions || []).map((d) => d.id));
+    for (const t of b.triggers || []) { if ((t.actions || []).concat(t.elseActions || []).some((a) => a.type === 'custom' && !cA.has(a.ref)) || (t.conditions || []).some((c) => c.type === 'custom' && !cC.has(c.ref))) { out.push(['error', 'A trigger uses a My Instruction or My Condition that was deleted. Open Triggers and remove it.']); break; } }
     for (const t of b.triggers || []) for (const a of [...(t.actions || []), ...(t.elseActions || [])]) if (a.type === 'runTrigger' && !called.has(a.name)) out.push(['warn', `“Run another trigger: ${a.name || '…'}” finds no trigger with the event “Run by another trigger” named that.`]);
   }
   if (b.type === 'autoSave' && j.template && !b.key) out.push(['warn', 'On a template every copy gets a new name, so copies are saved but never found again. Give it a Key, or save copies with nodes.']);
@@ -3732,6 +3734,7 @@ function editLogic(target, path, kind) {
   const back = () => ed.close();
   const ed = openLogic({
     kind, data: getPath(e, path), title: e.name, h, popMenu, toast, buzz, suggest: suggestions,
+    custom: { actions: (root.customActions ||= []), conditions: (root.customConditions ||= []) }, onCustomChange: () => { requestRebuild(); saveSoon(); },
     onChange: (d) => { setPath(T(), path, d); requestRebuild(); saveSoon(); },
     onClose: () => { dropBack(back); pushHistory(); renderInspector(); },
   });

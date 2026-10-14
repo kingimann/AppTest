@@ -150,14 +150,19 @@ Settings for you on this device (games keep their own settings):
 Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
 
 - **Triggers** are friendly cards: **ON** something happens → **IF** conditions are true → **DO** instructions, top to bottom.
-  - **30 events**: game starts, every N seconds, tapped, **double-tapped**, **pressed and held**, touched / stops touching a tag, jump/fire button, swipe, **keyboard key**, message, variable reaches, **variable changes**, **after a delay (once)**, **at random times**, **comes near a tag**, **starts seeing a tag**, **lands**, **takes damage**, **dies**, destroyed, animation finished, **level won**, **game over**, **player leaves / comes back to the app**, **run by another trigger**, and more.
-  - **22 conditions**, each flippable with NOT: compare variable, **compare two variables**, **its own variable**, **text variable**, **health** (or health %), **number of objects with a tag** (e.g. no enemies left), **is moving**, **level number**, **time in this level**, **phone held upright**, **save file has key**, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
-  - **54 instructions** in 6 groups:
+  - **38 events**: game starts, every N seconds, tapped, **double-tapped**, **pressed and held**, touched / stops touching a tag, jump/fire button, swipe, **keyboard key**, message, variable reaches, **variable changes**, **after a delay (once)**, **at random times**, **comes near a tag**, **starts seeing a tag**, **lands**, **takes damage**, **dies**, destroyed, animation finished, **level won**, **game over**, **player leaves / comes back to the app**, **run by another trigger or a visual script's custom event**, **phone shaken**, **page changes**, **state machine enters a state**, **inventory changes**, **permission answered**, **internet lost / back**, **phone turned**, **side menu opens / closes**.
+  - **35 conditions**, each flippable with NOT: **list contains / list length**, **dictionary has key**, **page is**, **key held**, **finger on the screen**, **online**, **time of day**, **permission granted**, **another object's variable**, **a visual script function's result**, **event value**, compare variable, **compare two variables**, **its own variable**, **text variable**, **health** (or health %), **number of objects with a tag** (e.g. no enemies left), **is moving**, **level number**, **time in this level**, **phone held upright**, **save file has key**, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
+  - **83 instructions** in 8 groups:
+    - Lists: **add / remove / clear / shuffle / sort / pick an item**, **dictionary set / add / remove**.
+    - Camera: **make a camera live**, **follow a tag**, **zoom**, **fade the screen**.
+    - Scripts: **call a custom event** (on this, other, an object, a tag or everything, with a value) and **run a visual script function** (store its result).
     - Variables: change variable, **toggle**, **random number**, **set text**, **change its own variable**, **save / load a variable (save files)**, give/use item.
     - Objects: show/hide, destroy, spawn, set text, set colour, move to, damage/heal.
     - Motion: move/rotate/scale/fade with easing and "wait until done", punch, play animation.
     - Physics: push, set velocity, jump, gravity.
     - Flow: **wait**, **wait a random time**, **wait until a variable…**, **continue only if…**, **repeat the steps above N times**, **stop here**, **run another trigger** (by name, on any object), send message, go to state.
+    - Motion, objects and physics (new): **set position**, **glide to an object**, **face a tag**, **push toward / away**, **stop moving**, **add / remove tags**, **destroy all with a tag**, **change picture**.
+    - Game (new): **slow motion**, **pause / resume**, **haptic tap**, **open a website**, **copy text**, **share**, **ask the player to type** (waits for the answer), **go to page**.
     - Game: show message, **pop-up text**, **particle burst**, dialogue, sound, **music**, vibrate, camera shake/switch, save/load, win, game over, next level, **go to level N**, restart.
     - Spawn can now spawn at the *other* object (what touched it).
   - **Per-trigger options** (⚙ on each trigger, shown as chips on its header):
@@ -167,10 +172,17 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
     - **all** conditions or **any** one;
     - what happens if it fires again while running: run another copy, ignore it, or start over;
     - **write to the Console** when it runs.
+  - **Event values**: a message or custom event can carry a value. Check it with the *Event value* condition, or type `@event` into any field (or `{@event}` inside text).
   - **ELSE** steps run when the event happens but the conditions are false (e.g. a chest with a 30% rare drop, else coins).
   - Fold triggers to a one-line summary (tap the name), **Fold all**, and move triggers up or down. Find Problems warns about a "Run another trigger" with no matching trigger.
   - Tap a row to edit it in place; ⋮ moves, duplicates, disables or deletes it.
   - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, double tap for a super jump, hold to charge, all enemies gone → win, a treasure chest with a rare drop, a clicker with a cooldown, blink 3 times, random spawns, save coins when the player leaves, talk to an NPC.
+- **My Instructions and My Conditions** (the *Mine* button in the Triggers or State Machine editor, or *New instruction…* / *New condition…* at the bottom of the picker):
+  - Build your own instruction from other instructions (with waits), or your own condition from other conditions (all or any must be true).
+  - Give them **inputs** (number or text, each with a default). Type `@amount` into any field of the steps to use an input, or `{@amount}` inside text.
+  - Use them like built-in ones: they appear under *My Instructions* / *My Conditions* in the pickers, and each use fills in its own inputs. A trigger waits for a My Instruction to finish, unless you choose *Don't wait for it*.
+  - Edit one from any row that uses it. You can also **Duplicate** it, **Delete** it (it tells you how many times it is used), or **Save to Library** and add it to any other game from *Mine → From your library*.
+  - They belong to the whole game, so every object's triggers and state machines can use them. Visual scripts can use them too, with **Run My Instruction** and **My Condition**. Find Problems flags uses of deleted ones.
 - **State Machine**:
   - The object is always in one state (Patrol, Look Around, Alert…). States are cards on a map with arrows between them.
   - Tap a state to edit what it does **when entering**, **every frame** and **when leaving**.
@@ -178,6 +190,13 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **Scripts, triggers and state machines talk to each other:**
+  - **Functions across objects:** **Call Function On Object** gives back another script's Return Value (e.g. the Game Manager's `canAfford`). **Run Function On Objects** runs it on one object, everything with a tag, or everything, and can store the result. **Object Has Function** checks first.
+  - **Other objects' variables:** **Get / Set Variable Of Object** (a door's `open`, an enemy's `hp`), by name, tag or *other*.
+  - **Custom events go everywhere:** *Call Custom Event* (now also *on object named*, with a text or number value) reaches visual scripts and Triggers (*Run by another trigger / custom event*, with the value as `@event`). The **Run Trigger** node and the Triggers instruction *Run another trigger* reach both too.
+  - **Triggers can use scripts:** *Run visual script function* (instruction) and *Visual script function result* (condition). **Run My Instruction** and **My Condition** nodes let scripts use the Triggers' reusable pieces.
+  - Messages, game variables and the *State machine enters a state* event connect state machines as well.
+  - Several messages in the same frame each run their trigger.
 
 ### Advanced components
 

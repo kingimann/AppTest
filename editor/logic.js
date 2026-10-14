@@ -1,9 +1,11 @@
 // Logic editor: PlayMaker-style State Machines and Game Creator-style Triggers, built from friendly cards.
 // Events start things, Conditions check things, Instructions do things (top to bottom, waits included).
-import { LOGIC_EVENTS, LOGIC_CONDITIONS, LOGIC_ACTIONS, logicSay } from '../engine/pocket.js';
+import { LOGIC_EVENTS, LOGIC_CONDITIONS, LOGIC_ACTIONS, logicSay, setCustomLogic } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
-const CAT_COLOR = { Variables: '#a86b16', Objects: '#2c6cb0', Motion: '#7e57c2', Physics: '#00897b', Flow: '#5c6bc0', Game: '#c0392b' };
+const CAT_COLOR = { Variables: '#a86b16', Lists: '#8d6e63', Objects: '#2c6cb0', Motion: '#7e57c2', Physics: '#00897b', Camera: '#455a64', Flow: '#5c6bc0', Scripts: '#6a5acd', Game: '#c0392b', 'My Instructions': '#2e7d6b', 'My Conditions': '#2e7d6b' };
+const LIB_KEY = 'pocket.editor.customLogic';
+const uid = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const TRIGGER_TEMPLATES = [
   { label: 'Tap to score', make: () => ({ event: { type: 'tap' }, conditions: [], actions: [{ type: 'setVar', name: 'score', op: 'add', value: 1 }, { type: 'punch', what: 'scale', amount: 0.3, seconds: 0.4 }, { type: 'sound', sound: 'click' }] }) },
   { label: 'Touch to collect', make: () => ({ event: { type: 'touch', tag: 'player' }, conditions: [], actions: [{ type: 'setVar', name: 'score', op: 'add', value: 10 }, { type: 'sound', sound: 'coin' }, { type: 'destroy', object: 'self', burst: true }] }) },
@@ -28,16 +30,49 @@ export function openLogic(opts) {
   let data = JSON.parse(JSON.stringify(opts.data ?? (opts.kind === 'fsm' ? { start: 's1', any: [], states: [] } : [])));
   const undo = [];
   const open = new Set(); // expanded rows
-  const emit = () => opts.onChange(JSON.parse(JSON.stringify(data)));
-  const snap = () => { undo.push(JSON.stringify(data)); if (undo.length > 60) undo.shift(); undoBtn.disabled = false; };
+  const custom = opts.custom || { actions: [], conditions: [] }; // My Instructions / My Conditions (the project's, shared by every object)
+  const syncCustom = () => setCustomLogic({ customActions: custom.actions, customConditions: custom.conditions });
+  const customChanged = () => { syncCustom(); opts.onCustomChange?.(); };
+  syncCustom();
+  let editing = null; // { kind: 'actions' | 'conditions', def } while a My Instruction / Condition is open
+  const emit = () => { syncCustom(); if (editing) opts.onCustomChange?.(); opts.onChange(JSON.parse(JSON.stringify(data))); };
+  const customDef = (kind, id) => custom[kind].find((q) => q.id === id);
+  /** A My Instruction / Condition looks like a built-in one to the rows and pickers. */
+  const asDef = (d, kind) => d && { cat: kind === 'actions' ? 'My Instructions' : 'My Conditions', label: d.name, icon: d.icon || 'script', params: (d.params || []).map((q) => ({ key: q.key, label: q.label || q.key, type: q.type === 'number' ? 'number' : 'text', default: q.default })) };
+  const actDef = (it) => (it?.type === 'custom' ? asDef(customDef('actions', it.ref), 'actions') : LOGIC_ACTIONS[it?.type]);
+  const condDef = (cd) => (cd?.type === 'custom' ? asDef(customDef('conditions', cd.ref), 'conditions') : LOGIC_CONDITIONS[cd?.type]);
+  const libWith = (base, kind) => ({ ...base, ...Object.fromEntries(custom[kind].map((d) => ['custom:' + d.id, asDef(d, kind)])), ['new:' + kind]: { cat: kind === 'actions' ? 'My Instructions' : 'My Conditions', label: kind === 'actions' ? 'New instruction…' : 'New condition…', icon: 'plus' } });
+  /** Picking from a list: built-ins add themselves; "custom:id" adds a call to a My Instruction; "new:…" makes one and opens it. */
+  const itemFor = (k, kind) => {
+    if (k.startsWith('custom:')) { const d = customDef(kind, k.slice(7)); const it = { type: 'custom', ref: d.id }; for (const q of d.params || []) it[q.key] = q.default ?? ''; return it; }
+    if (k === 'new:' + kind) { const d = newCustom(kind); return { type: 'custom', ref: d.id, _open: true }; }
+    return { type: k };
+  };
+  function newCustom(kind, base) {
+    const d = base ? JSON.parse(JSON.stringify(base)) : { name: kind === 'actions' ? 'My instruction' : 'My condition', params: [], ...(kind === 'actions' ? { actions: [] } : { conditions: [], match: 'all' }) };
+    d.id = uid(); if (base) d.name += ' copy';
+    custom[kind].push(d); customChanged(); return d;
+  }
+  const library = () => { try { const l = JSON.parse(localStorage.getItem(LIB_KEY) || '{}'); return { actions: l.actions || [], conditions: l.conditions || [] }; } catch { return { actions: [], conditions: [] }; } };
+  const saveLibrary = (l) => { try { localStorage.setItem(LIB_KEY, JSON.stringify(l)); return true; } catch { return false; } };
+  const usesOf = (kind, id) => { const n = JSON.stringify(data).split(`"ref":"${id}"`).length - 1; return n + JSON.stringify(custom).split(`"ref":"${id}"`).length - 1; };
+  const snap = () => { undo.push(JSON.stringify({ data, custom })); if (undo.length > 60) undo.shift(); undoBtn.disabled = false; };
   const change = (rerender = true) => { emit(); if (rerender) render(); };
 
   const body = h('div', { class: 'lg-body' });
-  const undoBtn = h('button', { class: 'ne-btn', title: 'Undo', disabled: true, onclick: () => { if (!undo.length) return; data = JSON.parse(undo.pop()); undoBtn.disabled = !undo.length; change(); } }, icon('undo'));
+  const undoBtn = h('button', { class: 'ne-btn', title: 'Undo', disabled: true, onclick: () => {
+    if (!undo.length) return;
+    const u = JSON.parse(undo.pop()); data = u.data;
+    for (const k of ['actions', 'conditions']) custom[k].splice(0, custom[k].length, ...u.custom[k]); // the project's lists stay the same arrays
+    if (editing) editing.def = custom[editing.kind].find((q) => q.id === editing.def.id) || null;
+    if (!editing?.def) editing = null;
+    undoBtn.disabled = !undo.length; customChanged(); change();
+  } }, icon('undo'));
   const root = h('div', { class: 'lg' + (opts.kind === 'fsm' ? ' fsm' : '') },
     h('div', { class: 'ne-top' },
       h('button', { class: 'ne-btn done', onclick: () => close() }, icon('check'), 'Done'),
       h('div', { class: 'ne-title' }, h('b', {}, opts.kind === 'fsm' ? 'State Machine' : 'Triggers'), h('small', {}, opts.title || '')),
+      h('button', { class: 'ne-btn', title: 'My Instructions & Conditions', onclick: (e) => manageMenu(e.currentTarget) }, icon('script'), h('span', { class: 'lg-mine' }, 'Mine')),
       undoBtn),
     body);
   document.body.append(root);
@@ -49,7 +84,7 @@ export function openLogic(opts) {
     function draw() {
       const q = search.value.toLowerCase(), groups = {};
       for (const [k, d] of Object.entries(lib)) {
-        if (d.fsm && !fsm) continue;
+        if ((d.fsm && !fsm) || d.hidden) continue;
         if (q && !d.label.toLowerCase().includes(q) && !(d.cat || '').toLowerCase().includes(q)) continue;
         (groups[d.cat || ''] ||= []).push([k, d]);
       }
@@ -69,7 +104,7 @@ export function openLogic(opts) {
       let el;
       if (p.type === 'select') el = h('select', { onchange: (e) => set(e.target.value) }, p.options.map((o) => h('option', { value: o, selected: o === val }, o)));
       else if (p.type === 'bool') el = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
-      else if (p.type === 'number') el = h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) set(n); } });
+      else if (p.type === 'number') el = h('input', { type: 'text', inputMode: editing ? 'text' : 'decimal', value: val ?? 0, oninput: (e) => { const t = e.target.value.trim(); if (/^@\w+$/.test(t)) return set(t); const n = parseFloat(t); if (!Number.isNaN(n)) set(n); } }); // "@amount" = a My Instruction input
       else if (p.type === 'color') el = h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value) });
       else {
         el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value) });
@@ -92,22 +127,23 @@ export function openLogic(opts) {
     return h('div', { class: 'lg-sec' },
       h('div', { class: 'lg-kw if' }, list.length ? 'IF' : 'IF (optional)'),
       list.map((cd, i) => {
-        const def = LOGIC_CONDITIONS[cd.type], id = 'c' + holderId(holder) + ':' + i, isOpen = open.has(id), say = h('span', { class: 'lg-say' }, logicSay(LOGIC_CONDITIONS, cd));
+        const def = condDef(cd), id = 'c' + holderId(holder) + ':' + i, isOpen = open.has(id), say = h('span', { class: 'lg-say' }, logicSay(LOGIC_CONDITIONS, cd));
         return h('div', { class: 'lg-row cond' + (isOpen ? ' open' : '') },
           h('div', { class: 'lg-rh', onclick: () => { isOpen ? open.delete(id) : open.add(id); render(); } },
             h('button', { class: 'lg-not' + (cd.not ? ' on' : ''), title: 'Flip (NOT)', onclick: (e) => { e.stopPropagation(); snap(); cd.not = !cd.not; change(); } }, cd.not ? 'NOT' : 'is'),
             icon(def?.icon || 'bolt'), say,
+            cd.type === 'custom' && customDef('conditions', cd.ref) ? h('button', { class: 'lg-x', title: 'Edit this condition', onclick: (e) => { e.stopPropagation(); openCustom('conditions', customDef('conditions', cd.ref)); } }, icon('edit')) : '',
             h('button', { class: 'lg-x', title: 'Remove', onclick: (e) => { e.stopPropagation(); snap(); list.splice(i, 1); change(); } }, icon('close'))),
           isOpen && def?.params?.length ? h('div', { class: 'lg-form' }, form(def, cd, () => { emit(); say.textContent = logicSay(LOGIC_CONDITIONS, cd); })) : '');
       }),
-      h('button', { class: 'lg-add', onclick: () => picker(LOGIC_CONDITIONS, 'Add a condition', (k) => { snap(); list.push({ type: k }); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); }) }, icon('plus'), 'Condition'));
+      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_CONDITIONS, 'conditions'), 'Add a condition', (k) => { snap(); const it = itemFor(k, 'conditions'), go = it._open; delete it._open; list.push(it); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); if (go) openCustom('conditions', customDef('conditions', it.ref)); }) }, icon('plus'), 'Condition'));
   }
   function actionBlock(holder, key, label, kw = 'do') {
     const list = holder[key] ||= [];
     return h('div', { class: 'lg-sec' },
       h('div', { class: 'lg-kw ' + kw }, label),
       list.map((it, i) => {
-        const def = LOGIC_ACTIONS[it.type], id = 'a' + holderId(holder) + key + ':' + i, isOpen = open.has(id), say = h('span', { class: 'lg-say' }, logicSay(LOGIC_ACTIONS, it));
+        const def = actDef(it), id = 'a' + holderId(holder) + key + ':' + i, isOpen = open.has(id), say = h('span', { class: 'lg-say' }, logicSay(LOGIC_ACTIONS, it));
         return h('div', { class: 'lg-row act' + (isOpen ? ' open' : '') + (it.off ? ' off' : ''), style: `--c:${CAT_COLOR[def?.cat] || '#666'}` },
           h('div', { class: 'lg-rh', onclick: () => { isOpen ? open.delete(id) : open.add(id); render(); } },
             h('span', { class: 'lg-n' }, i + 1), h('span', { class: 'lg-ic' }, icon(def?.icon || 'bolt')), say,
@@ -116,11 +152,13 @@ export function openLogic(opts) {
               i < list.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { snap(); list.splice(i + 1, 0, list.splice(i, 1)[0]); change(); } },
               { icon: 'copy', label: 'Duplicate', fn: () => { snap(); list.splice(i + 1, 0, JSON.parse(JSON.stringify(it))); change(); } },
               { icon: it.off ? 'eye' : 'eyeoff', label: it.off ? 'Enable' : 'Disable', fn: () => { snap(); it.off = !it.off; change(); } },
+              it.type === 'custom' && customDef('actions', it.ref) && { icon: 'edit', label: `Edit “${customDef('actions', it.ref).name}”`, fn: () => openCustom('actions', customDef('actions', it.ref)) },
+              it.type === 'custom' && { icon: it.wait === false ? 'clock' : 'step', label: it.wait === false ? 'Wait until it finishes' : 'Don’t wait for it', fn: () => { snap(); if (it.wait === false) delete it.wait; else it.wait = false; change(); } },
               '-', { icon: 'trash', label: 'Delete', fn: () => { snap(); list.splice(i, 1); change(); } },
-            ]); } }, icon('more'))),
+            ].filter(Boolean)); } }, icon('more'))),
           isOpen && def?.params?.length ? h('div', { class: 'lg-form' }, form(def, it, () => { emit(); say.textContent = logicSay(LOGIC_ACTIONS, it); })) : '');
       }),
-      h('button', { class: 'lg-add', onclick: () => picker(LOGIC_ACTIONS, 'Add an instruction', (k) => { snap(); list.push({ type: k }); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); }) }, icon('plus'), 'Instruction'));
+      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_ACTIONS, 'actions'), 'Add an instruction', (k) => { snap(); const it = itemFor(k, 'actions'), go = it._open; delete it._open; list.push(it); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); if (go) openCustom('actions', customDef('actions', it.ref)); }) }, icon('plus'), 'Instruction'));
   }
   const ids = new WeakMap(); let nextId = 1;
   const holderId = (o) => { if (!ids.has(o)) ids.set(o, nextId++); return ids.get(o); };
@@ -291,7 +329,51 @@ export function openLogic(opts) {
     cv.addEventListener('pointercancel', () => { d = null; });
   }
 
+  // ---------- My Instructions / My Conditions ----------
+  let backY = 0;
+  function openCustom(kind, def) { if (!def) return; if (!editing) backY = body.scrollTop; editing = { kind, def }; render(); body.scrollTop = 0; }
+  function renderCustom() {
+    const { kind, def } = editing, isAct = kind === 'actions', P = (def.params ||= []);
+    const edited = () => { customChanged(); emit(); };
+    const keyOf = (t) => String(t || '').trim().replace(/\W+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'input';
+    body.replaceChildren(
+      h('div', { class: 'lg-back' }, h('button', { class: 'btn', onclick: () => { editing = null; render(); body.scrollTop = backY; } }, icon('left'), 'Back'),
+        h('span', {}, isAct ? 'My Instruction' : 'My Condition', h('small', {}, ` · used ${usesOf(kind, def.id)}×`))),
+      h('div', { class: 'lg-card' },
+        h('label', { class: 'lg-f' }, h('span', {}, 'Name'), h('input', { type: 'text', value: def.name || '', oninput: (e) => { def.name = e.target.value; edited(); } })),
+        h('label', { class: 'lg-f' }, h('span', {}, 'What it does (optional)'), h('input', { type: 'text', value: def.desc || '', placeholder: isAct ? 'Gives the player a reward' : 'True when the player can pay', oninput: (e) => { def.desc = e.target.value; customChanged(); } })),
+        h('div', { class: 'lg-kw if' }, 'INPUTS'),
+        h('p', { class: 'lg-hint' }, 'Inputs are filled in each time you use it. Type ', h('code', {}, '@name'), ' into any field of the steps below to use an input (or ', h('code', {}, '{@name}'), ' inside text).'),
+        P.map((q, i) => h('div', { class: 'lg-inp' },
+          h('input', { type: 'text', value: q.label || q.key, placeholder: 'amount', 'aria-label': 'Input name', oninput: (e) => { q.label = e.target.value; q.key = keyOf(e.target.value); e.target.nextElementSibling.textContent = '@' + q.key; edited(); } }),
+          h('code', {}, '@' + q.key),
+          h('select', { onchange: (e) => { q.type = e.target.value; edited(); } }, [['number', 'Number'], ['text', 'Text']].map(([v, l]) => h('option', { value: v, selected: (q.type || 'number') === v }, l))),
+          h('input', { type: 'text', value: q.default ?? '', placeholder: 'default', 'aria-label': 'Default', oninput: (e) => { q.default = q.type === 'text' ? e.target.value : (Number.isFinite(+e.target.value) && e.target.value !== '' ? +e.target.value : e.target.value); edited(); } }),
+          h('button', { class: 'lg-x', title: 'Remove input', onclick: () => { P.splice(i, 1); edited(); render(); } }, icon('close')))),
+        h('button', { class: 'lg-add', onclick: () => { let k = 'value', n = 1; while (P.some((q) => q.key === k)) k = 'value' + ++n; P.push({ key: k, label: k, type: 'number', default: 1 }); edited(); render(); } }, icon('plus'), 'Input'),
+        isAct ? actionBlock(def, 'actions', 'DO') : [
+          (def.conditions || []).length > 1 ? h('div', { class: 'lg-match' }, h('span', {}, 'True when'), h('div', { class: 'mo-seg' }, [['all', 'all are true'], ['any', 'any is true']].map(([v, l]) => h('button', { class: (def.match || 'all') === v ? 'on' : '', onclick: () => { def.match = v; edited(); render(); } }, l)))) : '',
+          condBlock(def)]),
+      h('div', { class: 'lg-foot' },
+        h('button', { class: 'btn', onclick: () => { const l = library(); l[kind] = [JSON.parse(JSON.stringify(def)), ...l[kind].filter((q) => q.id !== def.id)].slice(0, 60); toast(saveLibrary(l) ? 'Saved to your library: add it to any game' : 'Not enough space'); } }, icon('save'), 'Save to Library'),
+        h('button', { class: 'btn', onclick: () => { const d = newCustom(kind, def); openCustom(kind, d); } }, icon('copy'), 'Duplicate'),
+        h('button', { class: 'btn', onclick: () => { const n = usesOf(kind, def.id); if (n && !confirm(`It is used ${n} time${n === 1 ? '' : 's'}. Delete it anyway? Those steps will do nothing.`)) return; custom[kind].splice(custom[kind].indexOf(def), 1); customChanged(); editing = null; render(); } }, icon('trash'), 'Delete')));
+  }
+  function manageMenu(anchor) {
+    const lib = library(), has = (kind, id) => custom[kind].some((q) => q.id === id);
+    popMenu(anchor, [
+      { cap: 'My Instructions' }, ...custom.actions.map((d) => ({ icon: 'script', label: d.name, fn: () => openCustom('actions', d) })),
+      { icon: 'plus', label: 'New instruction', fn: () => openCustom('actions', newCustom('actions')) },
+      '-', { cap: 'My Conditions' }, ...custom.conditions.map((d) => ({ icon: 'check', label: d.name, fn: () => openCustom('conditions', d) })),
+      { icon: 'plus', label: 'New condition', fn: () => openCustom('conditions', newCustom('conditions')) },
+      (lib.actions.some((d) => !has('actions', d.id)) || lib.conditions.some((d) => !has('conditions', d.id))) && '-',
+      (lib.actions.some((d) => !has('actions', d.id)) || lib.conditions.some((d) => !has('conditions', d.id))) && { cap: 'From your library (other games)' },
+      ...lib.actions.filter((d) => !has('actions', d.id)).map((d) => ({ icon: 'download', label: d.name, k: 'instruction', fn: () => { custom.actions.push(JSON.parse(JSON.stringify(d))); customChanged(); toast(`Added “${d.name}”`); render(); } })),
+      ...lib.conditions.filter((d) => !has('conditions', d.id)).map((d) => ({ icon: 'download', label: d.name, k: 'condition', fn: () => { custom.conditions.push(JSON.parse(JSON.stringify(d))); customChanged(); toast(`Added “${d.name}”`); render(); } })),
+    ].filter(Boolean));
+  }
   function render() {
+    if (editing) { if (!custom[editing.kind].includes(editing.def)) editing = null; else { renderCustom(); return; } }
     const y = body.querySelector('.fsm-detail')?.scrollTop ?? body.scrollTop;
     if (opts.kind === 'fsm') renderFSM(); else renderTriggers();
     const det = body.querySelector('.fsm-detail'); if (det) det.scrollTop = y; else body.scrollTop = y;

@@ -291,6 +291,7 @@ export class Entity {
       if (!def) { Log.add('warn', `Unknown component "${b.type}"`, this.name); return null; }
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
+      for (const k of def.passthrough || []) if (b[k] !== undefined) params[k] = b[k]; // extra data a component keeps without an Inspector field
       inst = def.create(params, this) || {};
       inst.type = b.type; inst.params ||= params;
     }
@@ -11618,13 +11619,21 @@ function onScreen(s, e, margin = 0) {
 
 registerBehavior('graph', {
   label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
+  passthrough: ['scripts', 'mainOff'], // more scripts in the same component
   params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
     { id: 'n1', type: 'tap', x: 20, y: 40, params: {} },
     { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } },
     { id: 'n3', type: 'message', x: 640, y: 40, params: { text: 'Score: {score}', seconds: 1.5 } },
   ], links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }, { from: { node: 'n2', port: 'then' }, to: { node: 'n3', port: 'in' } }] } }],
   create(p) {
+    const extra = (Array.isArray(p.scripts) ? p.scripts : []).filter((q) => q?.graph && !q.off);
+    if (extra.length) { // several scripts in one component: each runs on its own (own events, functions and state), side by side
+      const subs = [...(p.mainOff ? [] : [{ graph: p.graph }]), ...extra].filter((q) => q.graph).map((q) => Behaviors.graph.create({ ...p, graph: q.graph, scripts: [], mainOff: false, _sk: q.id || '' }));
+      const each = (k) => (...a) => { for (const b of subs) b[k]?.(...a); };
+      return { uiAlways: true, subs, start: each('start'), update: each('update'), collide: each('collide'), separate: each('separate'), destroy: each('destroy'), _run: (id, ctx) => subs[0]?._run(id, ctx), _value: (id, ctx) => subs[0]?._value(id, ctx) };
+    }
     const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
+    const SK = p._sk ? p._sk + ':' : ''; // which script of the component (live debug badges)
     const def = (n) => NODE_TYPES[n.type] || {};
     const anims = (e) => ['animator', 'spriteSheet'].map((t) => e.getBehavior(t)).filter(Boolean);
     const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
@@ -11654,7 +11663,7 @@ registerBehavior('graph', {
     const debugRays = [], repeats = new Map(), frameQueue = [], press = new Map(); let lastTapT = -9, varWas = new Map();
     const value = (n, ctx, depth) => { // remember the last value for the editor's live debug badges
       const v = valueOf(n, ctx, depth), st = ctx.s?.engine?.graphStats;
-      if (st && n) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
+      if (st && n) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
       return v;
     };
     const valueOf = (n, ctx, depth) => {
@@ -11854,7 +11863,7 @@ registerBehavior('graph', {
     };
     const follow = (n, port, ctx) => {
       const st = ctx.s?.engine?.graphStats, d = def(n);
-      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
+      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
     };
     /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
@@ -11867,7 +11876,7 @@ registerBehavior('graph', {
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const st = ctx.s.engine.graphStats;
-      if (st) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
+      if (st) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
       if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
       if (n.type.startsWith('la_')) { // a Triggers instruction as a node
         const k = n.type.slice(3), d = LOGIC_ACTIONS[k], later = { ...ctx, steps: 0 }; if (!d) return;

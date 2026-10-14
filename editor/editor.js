@@ -1573,7 +1573,11 @@ let scriptQuery = '';
 /** Each Visual Script component: { lv, li, e, b, bi }. */
 function allGraphs() {
   const out = [];
-  levelList().forEach((lv, li) => { for (const e of lv.entities || []) (e.behaviors || []).forEach((b, bi) => { if (b.type === 'graph') out.push({ lv, li, e, b, bi }); }); });
+  levelList().forEach((lv, li) => { for (const e of lv.entities || []) (e.behaviors || []).forEach((b, bi) => {
+    if (b.type !== 'graph') return;
+    out.push({ lv, li, e, b, bi, t: b, path: `behaviors.${bi}.graph`, name: (b.scripts || []).length ? b.mainName || 'Main script' : '' });
+    (b.scripts || []).forEach((sc, k) => out.push({ lv, li, e, b, bi, t: sc, k, path: `behaviors.${bi}.scripts.${k}.graph`, name: sc.name || `Script ${k + 2}` }));
+  }); });
   return out;
 }
 const graphEvents = (g) => [...new Set((g?.nodes || []).filter((n) => NODE_TYPES[n.type]?.cat === 'Events' || (NODE_TYPES[n.type]?.cat === 'Animation' && !NODE_TYPES[n.type].exec && !NODE_TYPES[n.type].value)).map((n) => NODE_TYPES[n.type].label.replace(/^On /, '')))];
@@ -1606,23 +1610,32 @@ function graphThumb(g) {
 function openGraphAt(li, id, bi) {
   if (li !== levelIdx) setLevel(li);
   selectedId = id; renderHierarchy(); updateCtxBar();
-  editGraph(() => ent(id) || {}, `behaviors.${bi}.graph`);
+  editGraph(() => ent(id) || {}, typeof bi === 'string' ? bi : `behaviors.${bi}.graph`); // a path for scripts inside a component
 }
 function scriptCard(x) {
-  const { li, e, b, bi } = x, g = b.graph || { nodes: [] }, sc = scriptOf(b), ev = graphEvents(g), here = li === levelIdx;
+  const { li, e, b } = x, t = x.t || b, bi = x.path || x.bi, g = t.graph || { nodes: [] }, sc = scriptOf(t), ev = graphEvents(g), here = li === levelIdx, sub = t !== b;
+  const off = b.enabled === false || (sub ? t.off : b.mainOff);
   const menu = (anchor) => popMenu(anchor, [
     { cap: `${e.name || 'Object'} · Visual Script` },
     { icon: 'nodes', label: 'Open Node Editor', fn: () => openGraphAt(li, e.id, bi) },
     { icon: 'info', label: 'Show Object in Inspector', fn: () => { if (li !== levelIdx) setLevel(li); select(e.id); setDock('inspector'); } },
-    sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete b.scriptRef; changed(); renderScripts(); toast('Unlinked'); } }
-      : { icon: 'save', label: 'Save as Reusable Script…', fn: () => { if (!g.nodes.length) { toast('Add some nodes first'); return; } const n = prompt('Name this script so you can reuse it', `${e.name || 'My'} script`); if (n?.trim()) { saveScript(b, g, n.trim()); renderScripts(); } } },
-    { icon: b.enabled === false ? 'eye' : 'eyeoff', label: b.enabled === false ? 'Turn On' : 'Turn Off', fn: () => { if (b.enabled === false) delete b.enabled; else b.enabled = false; changed(); renderScripts(); } },
+    sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete t.scriptRef; changed(); renderScripts(); toast('Unlinked'); } }
+      : { icon: 'save', label: 'Save as Reusable Script…', fn: () => { if (!g.nodes.length) { toast('Add some nodes first'); return; } const n = prompt('Name this script so you can reuse it', `${e.name || 'My'} script`); if (n?.trim()) { saveScript(t, g, n.trim()); renderScripts(); } } },
+    sub ? { icon: t.off ? 'eye' : 'eyeoff', label: t.off ? 'Turn On' : 'Turn Off', fn: () => { if (t.off) delete t.off; else t.off = true; changed(); renderScripts(); } }
+      : { icon: b.enabled === false ? 'eye' : 'eyeoff', label: b.enabled === false ? 'Turn On' : 'Turn Off', fn: () => { if (b.enabled === false) delete b.enabled; else b.enabled = false; changed(); renderScripts(); } },
     '-',
-    { icon: 'trash', label: 'Remove Script', fn: () => { if (!confirm(`Remove this Visual Script from ${e.name || 'the object'}?`)) return; e.behaviors.splice(e.behaviors.indexOf(b), 1); changed({ structure: true }); pushHistory(); renderScripts(); } },
+    { icon: 'trash', label: 'Remove Script', fn: () => {
+      if (!confirm(`Remove ${x.name ? `“${x.name}”` : 'this Visual Script'} from ${e.name || 'the object'}?`)) return;
+      if (sub) { b.scripts.splice(b.scripts.indexOf(t), 1); if (!b.scripts.length) delete b.scripts; }
+      else if ((b.scripts || []).length) { const nx = b.scripts.shift(); b.graph = nx.graph; b.mainName = nx.name; if (nx.scriptRef) b.scriptRef = nx.scriptRef; else delete b.scriptRef; if (nx.off) b.mainOff = true; else delete b.mainOff; if (!b.scripts.length) delete b.scripts; } // the next script becomes the main one
+      else e.behaviors.splice(e.behaviors.indexOf(b), 1);
+      changed({ structure: true }); pushHistory(); renderScripts();
+    } },
   ]);
-  return h('div', { class: 'sc-card' + (b.enabled === false ? ' off' : '') + (selectedId === e.id && here ? ' sel' : ''), 'data-obj': e.name || '', onclick: (ev2) => { if (!ev2.target.closest('.sc-more')) openGraphAt(li, e.id, bi); } },
+  return h('div', { class: 'sc-card' + (off ? ' off' : '') + (selectedId === e.id && here ? ' sel' : ''), 'data-obj': e.name || '', onclick: (ev2) => { if (!ev2.target.closest('.sc-more')) openGraphAt(li, e.id, bi); } },
     graphThumb(g),
     h('div', { class: 'sc-info' },
+      x.name ? h('span', { class: 'sc-sub' }, x.name) : null,
       h('b', {}, e.name || 'Object', e.behaviors.filter((q) => q.type === 'graph').length > 1 ? h('span', { class: 'sc-nth' }, `#${e.behaviors.filter((q) => q.type === 'graph').indexOf(b) + 1}`) : null, e.template ? h('em', { class: 'sc-tag' }, 'template') : null, sc ? h('em', { class: 'sc-tag link' }, icon('link'), sc.name) : null, b.enabled === false ? h('em', { class: 'sc-tag' }, 'off') : null),
       h('small', {}, ev.length ? 'When: ' + ev.join(', ') : 'No event yet: add a green Event node'),
       h('small', { class: 'sc-n' }, `${g.nodes.length} node${g.nodes.length === 1 ? '' : 's'} · ${(g.links || []).length} wire${(g.links || []).length === 1 ? '' : 's'}`)),
@@ -1631,7 +1644,7 @@ function scriptCard(x) {
 function renderScripts() {
   const box = $('#scripts'); if (!box) return;
   const all = allGraphs(), q = scriptQuery.trim().toLowerCase();
-  const match = (x) => !q || [x.e.name, ...(x.e.tags || []), scriptOf(x.b)?.name, ...graphEvents(x.b.graph), ...(x.b.graph?.nodes || []).map((n) => NODE_TYPES[n.type]?.label)].some((t) => String(t || '').toLowerCase().includes(q));
+  const match = (x) => !q || [x.e.name, x.name, ...(x.e.tags || []), scriptOf(x.t)?.name, ...graphEvents(x.t.graph), ...(x.t.graph?.nodes || []).map((n) => NODE_TYPES[n.type]?.label)].some((t) => String(t || '').toLowerCase().includes(q));
   const shown = all.filter(match), here = shown.filter((x) => x.li === levelIdx), other = shown.filter((x) => x.li !== levelIdx);
   const saved = userScripts();
   const sel = ent(selectedId);
@@ -2087,8 +2100,14 @@ function addVisualScript() {
   if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
     b.graph = { nodes: [{ id: 'n1', type: 'every', x: 20, y: 40, params: { seconds: 1 } }, { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } }],
       links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
-  (j.behaviors ||= []).push(b);
+  const bi = (j.behaviors || []).findIndex((q) => q.type === 'graph');
   selectedId = j.id;
+  if (bi >= 0) { // it already has a Visual Script component: add another script inside it
+    const host = j.behaviors[bi]; (host.scripts ||= []).push({ id: uid('gs'), name: `Script ${host.scripts.length + 2}`, graph: b.graph });
+    changed({ structure: true }); pushHistory();
+    editGraph(() => ent(j.id) || {}, `behaviors.${bi}.scripts.${host.scripts.length - 1}.graph`); return;
+  }
+  (j.behaviors ||= []).push(b);
   changed({ structure: true }); pushHistory();
   editGraph(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.graph`);
 }
@@ -2305,7 +2324,7 @@ function control(target, path, spec) {
     case 'triggers': case 'fsm':
       return logicCard(target, path, spec.type);
     case 'graph':
-      return graphCard(target, path);
+      return scriptsCard(target, path);
     case 'tweenSteps':
       return stepsCard(target, path);
     case 'template': {
@@ -2496,7 +2515,12 @@ function validate(b, j) {
   if (b.type === 'camera' && b.mode !== 'fixed' && b.target && !tagged(b.target)) out.push(['warn', `Nothing is tagged “${b.target}” yet: the camera will stay put.`]);
   if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
   if (b.type === 'flipbook' && !String(b.frames || '').trim()) out.push(['warn', 'Add some frames, separated by commas.']);
-  if (b.type === 'graph' && !(b.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push(['warn', 'This script has no Event node, so it never runs.']);
+  if (b.type === 'graph') {
+    const noEv = (g) => !(g?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events' || (NODE_TYPES[n.type] && !NODE_TYPES[n.type].exec && !NODE_TYPES[n.type].value && (NODE_TYPES[n.type].outs || []).length && n.type !== 'funcDef'));
+    const lst = b.scripts || [];
+    if (!b.mainOff && noEv(b.graph)) out.push(['warn', lst.length ? `“${b.mainName || 'Main script'}” has no Event node, so it never runs.` : 'This script has no Event node, so it never runs.']);
+    for (const [k, sc] of lst.entries()) if (!sc.off && noEv(sc.graph) && !(sc.graph?.nodes || []).some((n) => n.type === 'funcDef')) out.push(['warn', `“${sc.name || 'Script ' + (k + 2)}” has no Event node, so it never runs.`]);
+  }
   if (b.type === 'fsm' && !(b.fsm?.states || []).length) out.push(['warn', 'Add at least one state.']);
   if (b.type === 'joint' && b.connectTo && !has(b.connectTo)) out.push(['error', `No object named “${b.connectTo}”.`]);
   if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
@@ -2548,6 +2572,48 @@ function openProblems() {
   ]);
 }
 
+/** One Visual Script component can hold several scripts: the main one, then any number more, each with its own events. */
+function scriptsCard(target, path) {
+  const bpath = path.replace(/\.graph$/, ''), b = getPath(target(), bpath) || {}, list = b.scripts || [];
+  const re = () => { changed({ structure: true }); pushHistory(); renderInspector(); };
+  const add = (obj, open) => { (b.scripts ||= []).push({ id: uid('gs'), ...obj }); re(); if (open) editGraph(target, `${bpath}.scripts.${b.scripts.length - 1}.graph`); };
+  const addBtn = h('button', { class: 'btn wide gs-add', onclick: (e) => popMenu(e.currentTarget, [
+    { cap: 'Add a script to this component' },
+    { icon: 'plus', label: 'Blank script', fn: () => add({ name: `Script ${list.length + 2}`, graph: { nodes: [], links: [] } }, true) },
+    ...allScripts().map((s2) => ({ icon: 'link', label: s2.name, k: s2.here ? 'saved script' : 'from another game', fn: () => { let sc = userScripts().find((q) => q.id === s2.id); if (!sc) { sc = { id: s2.id, name: s2.name, graph: clone(s2.graph) }; userScripts().push(sc); } add({ name: sc.name, graph: clone(sc.graph), scriptRef: sc.id }); toast(`Added “${sc.name}” (linked)`); } })),
+  ]) }, icon('plus'), list.length ? 'Add Another Script' : 'Add Another Script (runs side by side)');
+  if (!list.length) return h('div', { class: 'row full gs-list' }, graphCard(target, path), addBtn); // one script: the usual big card
+  const mainName = b.mainName || 'Main script';
+  /** One compact row per script: on/off, name, what starts it, open, options. */
+  const row = (holder, name, off, gpath, extraMenu, onToggle) => {
+    const g = holder.graph || { nodes: [], links: [] }, ev = graphEvents(g), sc = scriptOf(holder);
+    return h('div', { class: 'gs-item' + (off ? ' off' : ''), onclick: (e) => { if (!e.target.closest('input,button')) editGraph(target, gpath); } },
+      h('input', { type: 'checkbox', checked: !off, title: off ? 'Turned off' : 'On', onchange: (e) => onToggle(e.target.checked) }),
+      h('span', { class: 'gs-txt' }, h('b', {}, sc ? icon('link') : null, name), h('small', {}, `${g.nodes.length} node${g.nodes.length === 1 ? '' : 's'} · ${ev.length ? ev.slice(0, 2).join(', ') + (ev.length > 2 ? '…' : '') : g.nodes.some((n) => n.type === 'funcDef') ? 'functions: ' + g.nodes.filter((n) => n.type === 'funcDef').map((n) => n.params?.name || 'function').join(', ') : 'no event yet'}`)),
+      h('button', { class: 'btn gs-open', onclick: () => editGraph(target, gpath) }, icon('nodes'), 'Open'),
+      h('button', { class: 'gs-more', title: 'Script options', onclick: (e) => popMenu(e.currentTarget, [
+        { cap: name },
+        { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Script name', name); if (n?.trim()) extraMenu.rename(n.trim()); } },
+        ...extraMenu.items,
+        sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete holder.scriptRef; re(); } }
+          : g.nodes.length && { icon: 'save', label: 'Save as Reusable Script…', fn: () => { const n = prompt('Name this script so you can reuse it', name); if (n?.trim()) { saveScript(holder, g, n.trim()); renderInspector(); } } },
+      ].filter(Boolean)) }, icon('more')));
+  };
+  const items = [row(b, mainName, b.mainOff, path, { rename: (n) => { b.mainName = n; re(); }, items: [
+    { icon: 'copy', label: 'Duplicate', fn: () => add({ name: mainName + ' copy', graph: clone(b.graph || { nodes: [], links: [] }) }) },
+  ] }, (on) => { if (on) delete b.mainOff; else b.mainOff = true; re(); })];
+  list.forEach((sc, k) => {
+    const nm = sc.name || `Script ${k + 2}`;
+    items.push(row(sc, nm, sc.off, `${bpath}.scripts.${k}.graph`, { rename: (n) => { sc.name = n; re(); }, items: [
+      { icon: 'copy', label: 'Duplicate', fn: () => { const c = clone(sc); c.id = uid('gs'); c.name = nm + ' copy'; delete c.scriptRef; list.splice(k + 1, 0, c); re(); } },
+      k > 0 && { icon: 'upload', label: 'Move Up', fn: () => { list.splice(k - 1, 0, list.splice(k, 1)[0]); re(); } },
+      k < list.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { list.splice(k + 1, 0, list.splice(k, 1)[0]); re(); } },
+      { icon: 'upload', label: 'Make Main Script', fn: () => { const m = { id: sc.id, name: mainName, graph: b.graph, ...(b.scriptRef ? { scriptRef: b.scriptRef } : {}), ...(b.mainOff ? { off: true } : {}) }; b.graph = sc.graph; b.mainName = nm; if (sc.scriptRef) b.scriptRef = sc.scriptRef; else delete b.scriptRef; if (sc.off) b.mainOff = true; else delete b.mainOff; list[k] = m; re(); } },
+      '-', { icon: 'trash', label: 'Delete Script', fn: () => { if ((sc.graph?.nodes || []).length && !confirm(`Delete “${nm}”?`)) return; list.splice(k, 1); if (!list.length) delete b.scripts; re(); } },
+    ].filter(Boolean) }, (on) => { if (on) delete sc.off; else sc.off = true; re(); }));
+  });
+  return h('div', { class: 'row full gs-list' }, h('div', { class: 'gs-note' }, `${list.length + 1} scripts in this component. Each runs on its own, side by side.`), items, addBtn);
+}
 /** Node-based coding: a summary card that opens the full-screen Node Editor. */
 function graphCard(target, path) {
   const g = getPath(target(), path) || { nodes: [], links: [] }, beh = getPath(target(), path.replace(/\.graph$/, '')), sc = scriptOf(beh);
@@ -2573,7 +2639,7 @@ function editGraph(target, path) {
   const back = () => ed.close();
   const ed = openNodeEditor({
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
-    stats: (nodeId) => engine.graphStats?.get(e.id + '|' + nodeId), // live debug: what ran in the last Play
+    stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
@@ -2595,7 +2661,7 @@ function saveScriptToLibrary(sc) { store.set(SCRIPT_LIB, JSON.stringify([{ id: s
 /** This game's scripts, then ones saved in your other games. */
 const allScripts = () => { const mine = userScripts(); return [...mine.map((q) => ({ ...q, here: true })), ...scriptLibrary().filter((q) => !mine.some((m) => m.id === q.id))]; };
 const scriptOf = (b) => (b?.scriptRef ? userScripts().find((q) => q.id === b.scriptRef) || null : null);
-function eachScriptUse(sid, fn) { for (const lv of levelList()) for (const e of lv.entities) for (const b of e.behaviors || []) if (b.type === 'graph' && b.scriptRef === sid) fn(b, e, lv); }
+function eachScriptUse(sid, fn) { for (const lv of levelList()) for (const e of lv.entities) for (const b of e.behaviors || []) if (b.type === 'graph') for (const t of [b, ...(b.scripts || [])]) if (t.scriptRef === sid) fn(t, e, lv); }
 function saveScript(beh, graph, name) {
   const sc = { id: uid('sc'), name, graph: clone(graph) };
   userScripts().push(sc); if (beh) beh.scriptRef = sc.id;

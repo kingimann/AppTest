@@ -1489,3 +1489,24 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .lg-pt { display: flex; flex-direction: column; min-width: 0; text-align: left; }
 .comp-tools .ct.fold-all { width: auto; padding: 0 12px; gap: 6px; display: inline-flex; align-items: center; color: #d6d6d6; font-size: 13.5px; font-weight: 600; }
 .comp-tools .ct.fold-all.on { background: #2f4a66; border-color: #3a6ea5; color: #fff; }
+
+/* ---- several scripts in one Visual Script component ---- */
+.gs-list { gap: 6px; }
+.gs-head { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 4px 2px; border-top: 1px solid #2c2c2c; }
+.gs-head:first-child { margin-top: 0; border-top: 0; }
+.gs-head b { flex: 1; font-size: 15px; }
+.gs-head.off b { color: var(--dim); text-decoration: line-through; }
+.gs-head input { width: 22px; height: 22px; }
+.gs-head svg.i { width: 18px; height: 18px; color: #9cc3f0; }
+.gs-more { width: 40px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); display: grid; place-items: center; padding: 0; }
+.gs-add { margin-top: 10px; width: 100%; }
+.sc-sub { display: inline-block; font-size: 11.5px; font-weight: 700; color: #9cc3f0; background: #1f2a36; border-radius: 6px; padding: 1px 7px; margin-bottom: 2px; }
+.gs-note { color: var(--muted); font-size: 12.5px; }
+.gs-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px 8px 10px; border: 1px solid #2c2c2c; border-radius: 12px; background: #2a2a2a; cursor: pointer; }
+.gs-item.off { opacity: .55; }
+.gs-item input { width: 22px; height: 22px; flex: none; }
+.gs-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gs-txt b { font-size: 15px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-txt b svg.i { width: 15px; height: 15px; color: #9cc3f0; flex: none; }
+.gs-txt small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-open { flex: none; min-height: 40px; padding: 0 12px; }

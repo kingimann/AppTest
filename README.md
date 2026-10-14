@@ -195,6 +195,11 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **Several scripts in one Visual Script component:**
+  - **Add Another Script** (blank, or one of your saved scripts, linked) puts more scripts in the same component. Each runs side by side with its own events, functions and state.
+  - With more than one, the component shows a compact row per script: on/off, name, what starts it, **Open**, and ⋯ (rename, duplicate, move, make main, save as reusable, unlink, delete).
+  - Each script shows up in the Scripts tab, gets its own warnings and keeps its own live-debug badges. Functions in any of them can be called from other objects.
+  - *New Script on …* in the Scripts tab adds to the object's existing component instead of making another one.
 - **43 new event nodes** (Events folder; each also works as a trigger event):
   - **Touch and keys:** On Finger Down (anywhere or on this object), On Drag This Object (start / dragging / dropped), On Two-Finger Tap, On Pinch (zoom in / out), On Key Released, On Any Key, On Phone Tilted, On Joystick (pushed / released), When Player Is Idle.
   - **Movement and physics:** On Hit Wall, On Hit Ceiling, On Starts / Stops Moving, On Starts Falling, On Fell Far, When Speed Goes Above, On Object Moves Away, On Sees / Loses Sight.

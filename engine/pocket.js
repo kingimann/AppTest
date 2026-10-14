@@ -4401,9 +4401,10 @@ function applyStretch(e, W, H, safe) {
   const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
   const moving = e._uiAnimUntil > performance.now() / 1000; // a show / hide animation is moving it: keep the size up to date, leave the position to the animation
   const RK = p && e.parentEnt._rowKids, ri = RK ? RK.indexOf(e) : -1;
-  if (ri >= 0) { const g = +e.parentEnt.row || 0, cw = Math.max(4, (box.w / K - ml - mr - g * (RK.length - 1)) / RK.length); set('w', cw); if (!moving) e.x = (box.l - ao.x) / K + ml + cw / 2 + ri * (cw + g); } // a cell of a row
-  else if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); if (!moving) e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); if (!moving) e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
+  const place = (k, v) => { if (!moving) { e[k] = v; return; } const B = e._animBase; if (B && Math.abs(v - B[k]) > 0.01) { e[k] += v - B[k]; B[k] = v; } }; // while it animates, the bars changing moves where it comes to rest
+  if (ri >= 0) { const g = +e.parentEnt.row || 0, cw = Math.max(4, (box.w / K - ml - mr - g * (RK.length - 1)) / RK.length); set('w', cw); place('x', (box.l - ao.x) / K + ml + cw / 2 + ri * (cw + g)); } // a cell of a row
+  else if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); place('x', (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2); }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); place('y', (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2); }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -6682,6 +6683,7 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = e._restAlpha ?? 1; e._uiAnimUntil = 0; e._hiding = false; done?.(); return; }
   e._hiding = !show; // on its way out: no more taps
+  if (e.ui && e.stretch && e.stretch !== 'none' && !e._animBase && s.engine?.width) { e._uiAnimUntil = 0; applyStretch(e, s.engine.width, s.engine.height, s.engine.safe); } // a page that hasn't been shown yet (or was laid out for other bars) starts from its real place and size
   e._uiAnimUntil = performance.now() / 1000 + dur * 3.5 + 0.15; // stretched pages keep still for the stretch layout meanwhile
   const k = 1;
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });

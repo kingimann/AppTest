@@ -425,6 +425,10 @@ export const UI_WIDGETS_MORE = [
     ['Shop (grid)', 'Game Systems', 'coin', 'uiShop', 360, 430, {}, { vars: { coins: 300 } }],
     ['Shop (list)', 'Game Systems', 'coin', 'uiShop', 360, 430, { layout: 'list', currency: 'gems', currencyIcon: '💎', items: 'Coin Pack | 🪙 | 5 | item:Coin Pack | +500 coins\nNo Ads | 🚫 | 20 | noads | Forever\nVIP Pass | 👑 | 50 | vip | Double rewards\nSkin Bundle | 🎨 | 30 | skins | 5 skins' }, { vars: { gems: 60 } }],
     ['Inventory Grid', 'Game Systems', 'key', 'uiInventoryGrid', 320, 240, {}],
+    ['Backpack (with info)', 'Game Systems', 'key', 'uiInventoryGrid', 340, 330, { slots: 20, columns: 5, info: true }],
+    ['Hotbar', 'Game Systems', 'grid', 'uiHotbar', 360, 60, {}, { anchor: 'bottom', y: -150 }],
+    ['Equipment', 'Game Systems', 'player', 'uiEquipment', 300, 230, {}],
+    ['Crafting Panel', 'Game Systems', 'list', 'uiCrafting', 360, 440, {}],
     ['Quest Log', 'Game Systems', 'list', 'uiQuestLog', 350, 290, {}],
     ['Daily Reward', 'Game Systems', 'clock', 'uiDailyReward', 350, 250, {}, { note: 'One claim per day, saved on the device. Send "daily reset" to test it again.' }],
     ['Level Map', 'Game Systems', 'flag', 'uiLevelMap', 360, 560, {}, { vars: { unlocked: 1 } }],
@@ -467,3 +471,36 @@ function loadingScreens() {
     ], { startOn: 'on a message', message: 'loading', seconds: 1.5, pace: 'fast then slow', action: 'next level', value: '' }, 'Hidden until something sends the message "loading" (e.g. a Goal Flag or a node). It fills up, then goes to the next level.'),
   ];
 }
+
+/** Each component's folder and icon in Add Component (also used by the documentation). */
+export const BEH_META = {
+  move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraControls: ['Camera', 'hand'], cameraTargetGroup: ['Camera', 'target'],
+  collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
+  timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
+  spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
+  float: ['Effects', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
+  unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
+  tappable: ['Touch', 'hand'], draggable: ['Touch', 'move'], swipeMove: ['Touch', 'arrow'],
+  orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Combat', 'bolt'],
+  firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
+  projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
+  clickPopup: ['Clicker', 'star'], comboClicker: ['Clicker', 'bolt'], longPress: ['Touch', 'clock'], doubleTap: ['Touch', 'hand'], tapToggle: ['Touch', 'check'],
+  pressFeedback: ['Touch', 'hand'], tapToSpawn: ['Touch', 'spawner'], dragLaunch: ['Touch', 'arrow'],
+  follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
+  bounce: ['Movement', 'circle'], trigger: ['Logic', 'bolt'], timer: ['Logic', 'clock'], dropItem: ['Gameplay', 'coin'],
+  emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
+  gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
+  turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
+  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'], autoSave: ['Saving', 'save'], saveManager: ['Saving', 'save'],
+  tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
+  netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
+  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiAppBar: ['UI', 'menu'], uiDropdown: ['UI', 'list'], uiKeypad: ['UI', 'key'], uiColorPicker: ['UI', 'brush'], uiCarousel: ['UI', 'layers'], uiSkillButton: ['UI', 'bolt'], uiRadialMenu: ['UI', 'circle'], uiSpinWheel: ['UI', 'star'],
+  uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
+  uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
+  uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], craftingStation: ['Crafting', 'gear'], loot: ['Crafting', 'gem'], resource: ['Crafting', 'gem'], uiHotbar: ['UI', 'grid'], uiEquipment: ['UI', 'player'], uiCrafting: ['UI', 'list'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
+};
+/** The order of those folders. */
+export const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'Survival', 'Crafting', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];

@@ -10,6 +10,21 @@ Plain JavaScript ES modules. No dependencies and no build step.
 - `examples/`: Neon Dodge (written in code) and the starter templates
 - `play.html`: plays a template (`?game=jump-quest`) or any scene JSON (`?src=my-game.json`)
 
+## Documentation
+
+The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
+
+- **17 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
+- **A reference generated from the engine itself**, so it always matches the running version:
+  - every component with all its settings, types, defaults (2D and 3D) and choices;
+  - every visual-script node with its wires and settings;
+  - every Trigger event, condition and instruction;
+  - the JavaScript API (classes, methods and functions, with their source comments);
+  - the scene events, and the built-in lists (item types, eases, shapes, sounds, defaults…).
+- **Search** across all of it.
+
+Guides are Markdown files in `docs/guide/`, so they also read well on GitHub.
+
 ## Running it
 
 ES modules need to be served over HTTP (opening the files with `file://` won't work):
@@ -241,7 +256,10 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 | **Dialogue** | Conversation box with speaker names and typewriter text; tap to continue; can pause the game |
 | **Day / Night Cycle** | Moves the sun, changes light and sky colours; 2D gets dark at night; `{hour}` |
 | **Particle System** | Fire, smoke, rain, snow, sparkle, confetti, magic, bubbles (rain and snow fill the screen) |
-| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction |
+| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction. Picked up on touch, tap or both, random amounts, a magnet pull; it stays on the ground when the inventory is full |
+| **Crafting Station** | A Workbench, Furnace or Anvil: recipes that need it work while the player is close; tapping it sends a message |
+| **Loot / Chest** | Gives items, with amount ranges and chances, when tapped, touched, destroyed or on a message |
+| **Resource (gather)** | Trees, rocks, ore and bushes: tap or touch to gather, several hits to break, can need a tool, extra loot, grows back |
 
 Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
 
@@ -510,6 +528,60 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Nodes:** **On Damaged** filters by damage type; its Event Value is how much, and "other" is who hurt it. The value node **Health / Hunger / Thirst** reads health, max, %, shield, hunger or thirst of any object.
 - **Hazards** set to *damage* now take health from a player that has Health, instead of a life.
 - **From code:** `health.damage(n, target, from, { type, crit, pierce, knockback })` returns the damage done. Health also has `heal`, `addShield`, `setMax`, `addEffect(name, perSecond, seconds)`, `cure`, `kill` and `respawn`. Hunger and Thirst have `add` and `set`. `STATUS_FX` is exported.
+
+### Inventory, items and crafting
+
+- **Game Settings › Items:** the list of every item in your game. Each item has:
+  - a name and an icon (emoji or `art:` sprite);
+  - a **type**: Material, Food, Drink, Potion, Weapon, Armour, Tool, Ammo, Key, Quest item or Other;
+  - a **rarity** (common, uncommon, rare, epic, legendary), which colours its slot frame;
+  - **how many stack in one slot**, a value and a description.
+- **What using an item does** (food, drinks, potions): fill hunger or thirst, heal, add a shield, cure an effect, give an effect (e.g. heal over time), or send a message. Food, drinks and potions are used up; keys and materials stay. You can change this per item.
+- **Equipment** (weapons, armour, tools): each piece goes in a **slot** (hand, offhand, head, body, legs, feet, neck, ring) and adds:
+  - **damage** to the player's Damage Dealer;
+  - **armour** to their Health;
+  - **speed ×** to their movement.
+
+  Using an item that can be equipped puts it on. The one already in that slot goes back into the inventory.
+- **Starter items** adds 25 ready-made items: wood, stone, iron, food, water, potions, swords, tools, armour and keys.
+- **Game Settings › Recipes:** what each recipe makes and how many, what it **needs** (`Wood 3, Stick 1`; mark tools that aren't used up with `(keep)`), and settings for:
+  - a **station** (Workbench, Furnace…);
+  - a crafting **time**;
+  - a category;
+  - **must be learned first** (use the *Learn recipe* instruction).
+
+  In the recipe editor, tap any item to add it as an ingredient. **Starter recipes** adds 12 recipes.
+- **Game Settings › Inventory:**
+  - **slots** (0 = unlimited): each stack takes one slot, and picking up more than fits shows "Inventory full";
+  - a default stack size;
+  - **keep the inventory between levels**.
+
+  Level changes, save slots and auto-save keep the inventory, the equipment and the recipes you've learned.
+- **Create → Gameplay** has Workbench, Furnace, Tree, Rock, Iron Rock (needs a Pickaxe), Berry Bush, Treasure Chest, Breakable Crate (drops loot) and Item Pick-up, in 2D and 3D. If your game has no items yet, adding one of these also adds the starter items and recipes.
+- **UI → Game Systems:** Inventory Grid, **Backpack (with info)**, **Hotbar**, **Equipment** and **Crafting Panel**.
+- **Triggers:**
+  - **Events:** *Crafts an item*, *Uses an item*, *Equips / takes off*, *Inventory is full*, *Learns a recipe*, *Gathered*.
+  - **Conditions:** *Can craft*, *Has equipped*, *Inventory space*, *Has item of type*, *Knows recipe*.
+  - **Instructions:** *Use item*, *Equip / take off*, *Craft*, *Learn recipe*, *Drop item*, *Give random loot*, *Inventory: sort / clear / slots*.
+  - All of these are nodes too, and there's an **Inventory Info** value node: free or used slots, items of a type, equipped damage or armour, crafting progress.
+- **From code:**
+  - Inventory: `scene.addItem(name, n)` returns how many fit. Also `useItem`, `equip`, `unequip`, `equipStat('damage')`, `itemStacks(type)`, `sortInventory('type')`, `dropNear(name, n)`.
+  - Crafting: `craft(item, times)`, `canCraft`, `craftMissing`, `learnRecipe`.
+  - Item names match whatever their capitalisation.
+
+### Grid movement (Grid Hero and Turn Enemy)
+
+- **Every input counts:** quick arrow / WASD presses each take a step (before, fast presses could be lost and holding only moved once). Holding a key or the joystick keeps walking.
+- **Swipes and taps:** swipe for one step, or **tap any tile to walk there**. It finds the shortest way around walls and shows a marker on the tile it's heading for. In turn-based games it walks one step per turn. Taps on UI buttons no longer move the hero.
+- **Lines up with your level:** at the start, the hero and Turn Enemies snap to the grid your walls sit on, so they never end up half a tile off.
+- **Fights:** bumping an enemy gives a nudge, hurts it (plus the equipped weapon's damage) and shows its health bar. Bumping a wall nudges and buzzes.
+- **Grid Hero** (Create) now comes with Health: 5 hearts and a bar over it. Before, the first enemy hit ended the game.
+- **Turn Enemies:**
+  - They walk around walls toward the player and never pile onto the same tile.
+  - Their attack damage can be set, and it hits the player's Health (or takes a life if the player has no Health).
+  - When they can't see the player, they can wait, wander or go back home.
+  - They can act every few turns (slow monsters).
+  - In games that aren't turn-based, they move every few seconds.
 
 ### Move: joystick, tilt and drag
 
@@ -792,7 +864,10 @@ Each of these is one object with one component: it draws itself, handles taps an
 | Component | What it does |
 |---|---|
 | **Shop** | Items (`Name \| icon \| price \| ID or item:Name \| note`) bought with a currency variable. Unlocks set `owned_ID` and can be equipped into a variable; `item:` entries go into the inventory each time. Tap twice to buy, a shake when you can't afford it, and a message when bought. Grid or list. |
-| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use: it sends `use Name` / `use item` and can use one up. |
+| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use, equip or drop: it sends `use Name` / `use item`. Show one item type only (a backpack tab), rarity frames, and an info line for the picked item. |
+| **Hotbar** | A row of quick slots. Tap to hold an item (`heldItem`), tap again to use or equip it; keys 1–9 pick a slot. |
+| **Equipment** | The player's slots (hand, offhand, head, body, legs, feet, neck, ring) with total damage, armour and speed. Tap a slot to take the item off. |
+| **Crafting** | The recipes, with each ingredient in green (have it) or red (missing). Tap one to craft it. Can show all recipes, only the ones you can make, or only those for nearby stations; it also shows crafting progress. |
 | **Quest Log** | Goals (`Text \| variable \| target \| reward`) with progress bars. They tick off and strike through, give rewards like `coins 100`, send a message and sort finished goals last. |
 | **Daily Reward** | A 7-day calendar, one claim per day, saved on the device. Rewards go into variables or the inventory, and the streak resets if a day is missed (optional). Send `daily reset` / `daily next day` to test it. |
 | **Level Map** | A winding path, straight line or grid of levels, with stars from `stars_1`, `stars_2`… and locks above the `unlocked` variable. The next level pulses, and it scrolls. Tapping a level plays it (`goToLevel`), sends a message or sets a variable. Presets: Level Map, Level Grid. |
@@ -1276,8 +1351,8 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `dropItem` | Drops a template when destroyed (loot, power-ups). | `template`, `chance` (1) |
 | `emitter` | Keeps giving off particles (fire, smoke, sparkles). | `color`, `rate` (20), `spread` (0.5) |
 | `blink` | Flashes on and off; with Hazard it only hurts while visible. | `on` (0.6), `off` (0.6), `solid` (true) |
-| `gridMove` | Moves one tile per swipe, joystick push or tap beside the player; ends your turn in turn-based games. Bump enemies to attack, push objects tagged `pushable`. | `tile` (40 / 3D 1), `tapToMove`, `damage` |
-| `gridEnemy` | Turn Enemy: each enemy turn steps toward the player and attacks when adjacent. | `tile`, `hp`, `points`, `sight` |
+| `gridMove` | Moves one tile at a time: arrow keys / WASD (every press counts), joystick, swipes, or tap a tile to walk there by the shortest way around walls. Holding a direction keeps walking. Lines up with the grid your walls sit on. Ends your turn in turn-based games. Bump enemies (Turn Enemies, or anything tagged `enemy` with Health) to attack them; push objects tagged `pushable`. Taps on UI buttons are ignored. | `tile` (40 / 3D 1), `tapToMove`, `tapMode` (walks to the tapped tile / steps toward the tap), `stepTime`, `holdRepeat`, `diagonal`, `damage` (plus the equipped weapon), `snap`, `face`, `marker` |
+| `gridEnemy` | Turn Enemy: on each enemy turn it walks around walls toward the player when it sees them (or waits, wanders, goes home), attacks when next to them (their Health, or a life), never shares a tile with another enemy, and shows a health bar when hurt. Not turn-based: it acts every few seconds. | `tile`, `hp`, `attack`, `points`, `sight`, `mode`, `every` (turns), `realTime`, `snap`, `showBar` |
 | `boardCell` | A board square (tic-tac-toe, connect-style): tap to place a mark; vs a friend or the computer. | `row`, `col`, `line` (3), `vsComputer` |
 | `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
 | `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |

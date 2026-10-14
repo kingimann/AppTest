@@ -18,6 +18,8 @@
   .lead { color: var(--muted); margin: 0 0 18px; }
   .cta { display:inline-flex; align-items:center; gap:8px; background:var(--accent); color:#fff; font-weight:600; text-decoration:none; padding:10px 18px; border-radius:3px; border:1px solid #2d5f99; }
   .cta:hover { background:#5a98e0; }
+  .cta.ghost { background:transparent; color:#7fb2ea; border-color:#3a5f8a; margin-left:8px; }
+  .cta.ghost:hover { background:#2a3a4f; }
   h2 { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 32px 0 10px; font-weight:600; }
   .cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
   .card { background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:14px; }
@@ -33,7 +35,7 @@
 <main>
   <h1>Make games on your phone</h1>
   <p class="lead">A 2D + 3D game engine for mobile web browsers, with a visual editor you can use on your phone.</p>
-  <a class="cta" href="editor/">Open Editor</a>
+  <a class="cta" href="editor/">Open Editor</a> <a class="cta ghost" href="docs/">Read the docs</a>
 
   <h2>Game types you can make</h2>
   <div class="cards">

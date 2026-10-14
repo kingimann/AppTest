@@ -3424,7 +3424,7 @@ function renderSceneSettings(box) {
 // ============================================================================
 const BEH_META = {
   move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraTargetGroup: ['Camera', 'target'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
@@ -3786,6 +3786,12 @@ const PREFABS_2D = [
   { icon: 'square', label: 'Camera Zone', props: { name: 'Camera Zone', shape: { type: 'rect', w: 300, h: 260, fill: 'rgba(120,180,255,0.12)', stroke: 'rgba(120,180,255,0.6)', lineWidth: 2 }, behaviors: [{ type: 'cameraZone', camera: 'Zone Camera', tag: 'player', mode: 'go back to the camera before' }] },
     extra: [{ name: 'Zone Camera', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'fixed', target: '', zoom: 1.4, blend: 0.8, priority: -1 }] }] },
   { icon: 'camera', label: 'Dolly Camera (cart)', props: { name: 'Dolly Camera', behaviors: [{ type: 'camera', mode: 'dolly', dollyMode: 'travel by itself', dollySpeed: 0.08, dollyLoop: 'back and forth', path: [{ x: 0, y: 350 }, { x: 900, y: 350 }], zoom: 1, blend: 1.2, priority: -1 }] } },
+  { icon: 'clock', label: 'Camera Sequence (cutscene)', props: { name: 'Camera Sequence', behaviors: [{ type: 'cameraSequence', shots: 'Wide Cam | 1.5 | 0\nMain Camera | 0.3 | 1.2', start: 'when the level starts', loop: false, skip: true, bars: true, endMessage: 'cutscene done' }] },
+    extra: [{ name: 'Wide Cam', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'fixed', target: '', zoom: 0.6, blend: 1, priority: -1 }] }] },
+  { icon: 'target', label: 'Target Group', props: { name: 'Target Group', behaviors: [{ type: 'cameraTargetGroup', members: 'player | 1 | 60\nenemy | 0.5 | 40' }] },
+    extra: [{ name: 'Group Cam', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'group', target: 'Target Group', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: -1 }] }] },
+  { icon: 'layers', label: 'Camera Mixer', props: { name: 'Camera Mixer', behaviors: [{ type: 'cameraMixer', camA: 'Main Camera', camB: 'Zone Camera', var: '', weight: 0.5, priority: -1 }] } },
+  { icon: 'camera', label: 'Camera Brain (custom blends)', props: { name: 'Camera Brain', behaviors: [{ type: 'cameraBrain', defaultBlend: '', defaultEase: 'inOutCubic', blends: 'Wide Cam > * = 1.5 inOutSine' }] } },
   { icon: 'camera', label: 'Camera Switcher', props: { name: 'Camera Switcher', behaviors: [{ type: 'cameraSwitcher', mode: 'a variable', var: 'state', map: 'run = Main Camera\nzoom = Zone Camera', hold: 0.3 }] } },
   { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], sprite: { src: 'art:zombie', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
   { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', sprite: { src: 'art:wizard', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },

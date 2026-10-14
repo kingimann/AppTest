@@ -568,3 +568,44 @@ export const templateInfo = [
   { key: 'app-expenses', title: 'Expense Tracker', blurb: 'Spending with a running total', icon: 'coin', color: '#10b981', kind: 'app' },
   { key: 'empty-3d', title: 'Blank 3D', blurb: 'Just a floor', icon: 'cube', color: '#2f3a44' },
 ];
+
+/** An app with games inside: three mini games (levels 2–4), a Play button for each, best scores and a list of every play. */
+function arcadeApp() {
+  const A = '#8b5cf6', games = [['tap-frenzy', 'Tap Frenzy', '👆'], ['sky-dodge', 'Sky Dodge', '🚀'], ['breakout', 'Breakout', '🧱']];
+  const levels = games.map(([key, title], gi) => {
+    const lv = JSON.parse(JSON.stringify(templates[key])); delete lv.name; delete lv.version; delete lv.levels;
+    lv.levelName = title; const ids = {};
+    for (const e of lv.entities) { const n = `g${gi}-` + e.id; ids[e.id] = n; e.id = n; }
+    for (const e of lv.entities) if (e.parent && ids[e.parent]) e.parent = ids[e.parent];
+    return lv;
+  });
+  const card = (gi, [key, title, emoji]) => {
+    const y = 40 + gi * 116, k = title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    return [
+      { id: 'card' + gi, name: title + ' Card', parent: 'p-home', ui: true, anchor: 'top', x: 0, y: y + 50, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 100, radius: 18, fill: '#ffffff' },
+        behaviors: [{ type: 'button', action: 'play game', value: title, amount: 1, sound: 'click' }] },
+      { id: 'card' + gi + 'e', name: title + ' Icon', parent: 'card' + gi, ui: true, anchor: 'left', x: 46, y: 0, text: { value: emoji, size: 40 } },
+      { id: 'card' + gi + 't', name: title + ' Name', parent: 'card' + gi, ui: true, anchor: 'left', x: 90, y: -14, text: { value: title, size: 20, color: INK, weight: '800', align: 'left' } },
+      { id: 'card' + gi + 'b', name: title + ' Best', parent: 'card' + gi, ui: true, anchor: 'left', x: 90, y: 16, text: { value: 'Best: {best_' + k + '}', size: 14, color: MUTED, weight: '700', align: 'left' } },
+      { id: 'card' + gi + 'p', name: title + ' Play', parent: 'card' + gi, ui: true, anchor: 'right', x: -50, y: 0, shape: { type: 'rect', w: 76, h: 40, radius: 20, fill: A }, text: { value: '▶ Play', size: 15, color: '#ffffff', weight: '800' } },
+    ];
+  };
+  return {
+    version: 1, name: 'Arcade', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { ...appSettings('Arcade'), recordPlays: 'Scores' }, vars: { page: 'home', lastGame: '—', lastScore: 0 },
+    collections: [{ name: 'Scores', fields: [{ name: 'Game', type: 'text' }, { name: 'Score', type: 'number' }, { name: 'Result', type: 'choice', options: 'won, lost, quit' }, { name: 'Date', type: 'date', default: 'today' }], rows: [] }],
+    entities: [
+      app.bar('home = Arcade\nscores = My Scores', A),
+      { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: games.map(([, title]) => ({ type: 'dataStat', collection: 'Scores', how: 'max', field: 'score', filter: `game = ${title}`, var: 'best_' + title.toLowerCase().replace(/[^a-z0-9]+/g, '_') })) },
+      ...app.page('p-home', 'home', true, [app.text('last', 'Last Game Text', 'Last game: {lastGame} · {lastScore}', 20, { size: 14, color: MUTED, weight: '700' })]),
+      ...games.flatMap((g, gi) => card(gi, g)),
+      ...app.page('p-scores', 'scores', false, [app.list('list', { top: 8, bottom: 90, list: { collection: 'Scores', title: '{game}', subtitle: '{result} · {date}', right: '{score}', sort: 'score (high-low)', empty: 'Play a game: every score lands here.', accent: A } })]),
+      { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
+        behaviors: [{ type: 'uiBottomNav', tabs: 'Games | play | home\nScores | trophy | scores', var: 'page', start: 1, style: 'pill', barColor: '#ffffff', activeColor: A, idleColor: '#9aa1ad', otherPage: 'keep the last tab lit' }] },
+    ],
+    levels,
+  };
+}
+templates['app-arcade'] = arcadeApp();
+templateInfo.splice(templateInfo.findIndex((t) => t.key === 'app-expenses') + 1, 0, { key: 'app-arcade', title: 'Arcade', blurb: 'An app with 3 games inside and a score list', icon: 'gamepad', color: '#8b5cf6', kind: 'app' });
+

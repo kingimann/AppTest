@@ -604,7 +604,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Apps (not just games)
 
-- **New Game or App › Apps:** Blank App, To-Do List, Notes and Expense Tracker. Each one is a working app with pages, an app bar, lists, forms, search and saving.
+- **New Game or App › Apps:** Blank App, To-Do List, Notes, Expense Tracker and Arcade. Each one is a working app with pages, an app bar, lists, forms, search and saving.
 - **App mode** (*Game Settings › App*): opens straight on its first page, with no title screen and no pause, sound or share buttons. App projects get an **App** badge and their own filter on the home screen.
 - **Data collections** (*Game Settings › Data*):
   - records with fields: text, long text, number, money, yes/no, date, choice, stars and icon;
@@ -627,6 +627,13 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **UI & Menus › App:** Data List, Checklist, Record Form, Search Bar, Add Button (+), Edit and Delete Buttons, Record Text, Total / Count Text, App Page and App Bar (light).
 - Stretched UI can have its own top and bottom margins.
 - **From code:** `engine.data.add / rows / query / update / remove / stat / reset`.
+- **Games inside apps:** apps and games live in one project.
+  - *Levels › Add a Game to This App* copies one of your games, or a game type, in as new levels, with a Play button.
+  - **Play Game** opens a game. It keeps its own title, pause and end screens, with **‹ Back to app** (the back gesture works too).
+  - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event.
+  - *Record every game played* fills a collection (game, score, result, date) for score tables.
+  - New **Arcade** app type: three games, best scores, and a score list.
+- Data Lists, Record Forms and Data Summaries work in games too.
 - See the [Making apps guide](docs/guide/apps.md).
 
 ### Squads: select and move many units (tactics and strategy)

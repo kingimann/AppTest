@@ -1409,7 +1409,7 @@ export class Scene {
     if (this.modal && !this.modal.dead && this.modal.visible && this.modal._dismiss) { this.modal._dismiss(); this.emit('back', null, null); return true; }
     const stacks = this.navStacks || {};
     const key = v || (stacks[this.navVar]?.length ? this.navVar : Object.keys(stacks).find((k) => stacks[k].length));
-    const st = stacks[key]; if (!st?.length) return false;
+    const st = stacks[key]; if (!st?.length) { if (this.fromApp && this.engine) { this.engine.backToApp(); return true; } return false; }
     const page = st.pop();
     this.navVar = key; this.navDir = -1; this.navAt = this.time;
     this.setVar(key, page);
@@ -1419,10 +1419,10 @@ export class Scene {
   canGoBack(v) {
     if (this.modal && !this.modal.dead && this.modal.visible) return true;
     const st = this.navStacks || {};
-    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length);
+    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length) || !!this.fromApp;
   }
   /** How many steps Back can take (pages in the history plus an open popup). */
-  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0); }
+  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0) + (this.fromApp ? 1 : 0); }
   /** Which way the last page change went: 1 forward, -1 back (only for changes made this moment). */
   navDirection() { return this.navAt === this.time ? this.navDir || 1 : 1; }
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
@@ -1573,7 +1573,7 @@ export class Scene {
       this.vars.best = Math.floor(this.vars.score); this.newBest = true;
       store.set('pocket.best.' + key, String(this.vars.best));
     }
-    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
+    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel() && !this.fromApp && !this.engine?.levels?.[(this.engine.levelIndex || 0) + 1]?.settings?.app; // a game opened from an app ends back in the app
     if (!this.levelComplete && this.settings.saveProgress) this.engine?.clearProgress();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
@@ -4228,7 +4228,7 @@ function renderUI(engine, scene) {
     ctx.restore();
   }
   const lt = scene.time - (scene.loadedAt || 0); // the level banner shows once a Loading Screen is gone
-  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading) {
+  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading && !scene.settings.app && !scene.fromApp) { // apps and the games inside them have no "LEVEL 2" banner
     ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2);
     big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
     ctx.globalAlpha = 1;
@@ -4244,8 +4244,17 @@ function renderUI(engine, scene) {
   if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && (engine.inspecting || engine.quietPause))) return; // the editor's Inspect (and a permission card) keep the view clear
+  // a game opened from an app: a button back to the app on its pause and end screens
+  const appBtn = (y) => {
+    if (!scene.fromApp) { engine.appRect = null; return; }
+    const w = 190, h = 46, x = W / 2 - w / 2; engine.appRect = { x, y, w, h };
+    ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+    big('‹ Back to app', y + h / 2, 17);
+  };
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
+    appBtn(H * 0.62);
   } else if (scene.state === 'title') {
     dim(0.55);
     const t = scene.settings.title;
@@ -4267,8 +4276,9 @@ function renderUI(engine, scene) {
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, TH.good);
     else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, withAlpha(TH.text, 0.7));
     big('Tap to play again', H * 0.66, 20, withAlpha(TH.text, pulse));
+    appBtn(H * 0.74);
     if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
-      const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
+      const w = 150, h = 46, x = W / 2 - w / 2, y = H * (scene.fromApp ? 0.83 : 0.74);
       engine.shareRect = { x, y, w, h };
       ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
       ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
@@ -4286,7 +4296,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -10833,6 +10843,8 @@ function runAction(s, e, p, other) {
     case 'move by': { const t = obj(v) || e; const [dx, dy, dz] = String(p.amount).split(',').map(Number); if (t) { t.x += dx || 0; t.y += dy || 0; t.z += dz || 0; } break; }
     case 'start game': if (s.state === 'title') s.state = 'play'; break;
     case 'new record': s.formIntent = 'new'; if (v) s.navTo(v); break; // value: the page with the Record Form
+    case 'play game': s.engine.playGame(v || 2); return; // value: the level (number or name) with the game
+    case 'back to app': s.engine.backToApp(); return;
     case 'edit opened record': s.formIntent = 'edit'; if (v) s.navTo(v); break;
     case 'delete opened record': { const r = s.openRecord; if (r) { s.engine.data.remove(r.col, r.id); openRecord(s, r.col, null); if (s.canGoBack()) s.navBack(); } break; }
     case 'restart game': s.engine.restart(); return;
@@ -13582,6 +13594,7 @@ export const LOGIC_EVENTS = {
   dialogueStarted: { label: 'Dialogue starts', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Talking to ${p.dialogue}` : 'A conversation starts') },
   dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
   dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
+  gameFinished: { label: 'Back from a game', icon: 'gamepad', params: [txt('game', '', 'game (level name; empty = any)'), opt('result', ['any', 'won', 'lost', 'quit'], 'any', 'result')], say: (p) => `Back from ${p.game || 'a game'}${p.result !== 'any' ? ` (${p.result})` : ''}` },
   recordAdded: { label: 'Record added', icon: 'plus', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is added${p.collection ? ' to ' + p.collection : ''}` },
   recordChanged: { label: 'Record changed', icon: 'edit', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record changes${p.collection ? ' in ' + p.collection : ''}` },
   recordDeleted: { label: 'Record deleted', icon: 'trash', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is deleted${p.collection ? ' from ' + p.collection : ''}` },
@@ -13681,6 +13694,8 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  playGame: { cat: 'Game', label: 'Play a game (from an app)', icon: 'gamepad', params: [txt('level', '2', 'level (number or name)')], run: (c, p) => { c.s.engine.playGame(p.level); }, say: (p) => `Play the game in level ${p.level}` },
+  backToApp: { cat: 'Game', label: 'Back to the app', icon: 'home', run: (c) => { c.s.engine.backToApp(); }, say: () => 'Back to the app' },
   dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
   dataSet: { cat: 'Data', label: 'Change the opened record', icon: 'edit', params: [txt('field', 'done', 'field'), txt('value', 'yes', 'to ({variables} work)')], run: (c, p) => { const r = c.s.openRecord; if (!r) return; const rec = c.s.engine.data.update(r.col, r.id, { [p.field]: fillTemplate(String(p.value ?? ''), c.s.vars) }); if (rec) openRecord(c.s, r.col, rec); }, say: (p) => `Set ${p.field} of the opened record to ${p.value}` },
   dataDelete: { cat: 'Data', label: 'Delete the opened record', icon: 'trash', run: (c) => { const r = c.s.openRecord; if (r) { c.s.engine.data.remove(r.col, r.id); openRecord(c.s, r.col, null); } }, say: () => 'Delete the opened record' },
@@ -13887,6 +13902,7 @@ function evOk(type, p, q) {
     case 'questStarted': case 'questUpdated': case 'questReady': case 'questCompleted': case 'questFailed': return !p.quest || String(q.item).toLowerCase() === String(p.quest).trim().toLowerCase();
     case 'dialogueStarted': case 'dialogueEnded': return !p.dialogue || String(q.item).toLowerCase() === String(p.dialogue).trim().toLowerCase() || String(q.other?.name || '').toLowerCase() === String(p.dialogue).trim().toLowerCase();
     case 'dialogueChoice': return !p.choice || String(q.item).toLowerCase() === String(p.choice).trim().toLowerCase();
+    case 'gameFinished': return (!p.game || String(q.item).toLowerCase() === String(p.game).trim().toLowerCase()) && (!p.result || p.result === 'any' || q.result === p.result);
     case 'recordAdded': case 'recordChanged': case 'recordDeleted': case 'recordOpened': return !p.collection || q.item === fieldKey(p.collection);
     case 'unitArrived': return !p.unit || q.other?.name === p.unit || !!q.other?.has?.(p.unit);
     case 'unitDefeated': return !p.team || p.team === 'any' || (p.team === 'yours') === (q.item === 'player');
@@ -13923,6 +13939,7 @@ class LogicWatcher {
     s.on('turn', () => this.queue.push({ type: 'turnStarted' }));
     s.on('data', (col, kind) => { const type = { added: 'recordAdded', changed: 'recordChanged', deleted: 'recordDeleted' }[kind]; if (type) this.queue.push({ type, item: col }); });
     s.on('recordOpened', (col) => this.queue.push({ type: 'recordOpened', item: col }));
+    s.on('gameFinished', (game, score, result) => this.queue.push({ type: 'gameFinished', item: game, value: score, result }));
     s.on('unitsSelected', (L) => this.queue.push({ type: 'unitsSelected', value: L.length }));
     s.on('unitArrived', (u) => this.queue.push({ type: 'unitArrived', other: u }));
     s.on('unitDefeated', (u, team) => this.queue.push({ type: 'unitDefeated', item: team, other: u }));
@@ -15844,6 +15861,33 @@ export class Engine {
   }
 
   hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+  /** A level by number (1 = first) or by its name. Returns its index, or -1. */
+  levelIndexOf(ref) {
+    if (!this.levels) return -1;
+    const n = +ref; if (String(ref).trim() !== '' && Number.isFinite(n)) return n >= 1 && n <= this.levels.length ? Math.round(n) - 1 : -1;
+    const k = String(ref || '').trim().toLowerCase(); return this.levels.findIndex((lv, i) => String(lv.levelName || (i === 0 ? lv.name : '') || '').trim().toLowerCase() === k);
+  }
+  /** Apps: open a game (another level of this project). It starts fresh (with its title screen), and Back or its end screen returns to the app. */
+  playGame(ref) {
+    const i = this.levelIndexOf(ref), s = this.scene; if (i < 0 || !s) { Log.add('warn', `There is no level “${ref}” to play`, 'App'); return false; }
+    this.appReturn = { level: this.levelIndex, vars: { ...s.vars, __inv: s.packInv() }, nav: JSON.parse(JSON.stringify(s.navStacks || {})), navVar: s.navVar, record: s.settings.recordPlays || '' };
+    this.carry = null; this.levelIndex = i; this.paused = false;
+    const g = this.factory(); g.fromApp = true; this.setScene(g);
+    this.audio.sfx('click'); return true;
+  }
+  /** Back from a game to the app that opened it: the app is where it was, with {lastScore}, {lastResult} and {lastGame}. */
+  backToApp() {
+    const R = this.appReturn, g = this.scene; if (!R || !g) return false;
+    const name = this.levels[this.levelIndex]?.levelName || `Level ${this.levelIndex + 1}`, score = Math.floor(+g.vars.score || 0), result = g.state === 'win' ? 'won' : g.state === 'over' ? 'lost' : 'quit';
+    this.appReturn = null; this.paused = false;
+    const bestKey = 'best_' + fieldKey(name), best = Math.max(+R.vars[bestKey] || 0, score);
+    this.carry = { ...R.vars, lastGame: name, lastScore: score, lastResult: result, [bestKey]: best, gamesPlayed: (+R.vars.gamesPlayed || 0) + 1 };
+    this.levelIndex = R.level;
+    const a = this.factory(); a.navStacks = R.nav; a.navVar = R.navVar; this.setScene(a);
+    if (R.record && this.data.def(R.record)) this.data.add(R.record, { game: name, score, result, date: isoDay() }); // every play goes into the app's data (Scores…)
+    a.emit('gameFinished', name, score, result);
+    return true;
+  }
   /** Jump to a level by number (1 = first), keeping variables like score. */
   goToLevel(n) {
     if (!this.levels) return;
@@ -15864,8 +15908,10 @@ export class Engine {
 
   restart(skipTitle = true) {
     if (!this.factory) return;
-    if (this.levels && this.scene?.state === 'win') { this.levelIndex = 0; this.carry = null; } // finished the last level
+    if (this.levels && this.scene?.state === 'win' && !this.scene.fromApp) { this.levelIndex = 0; this.carry = null; } // finished the last level
+    if (this.scene?.fromApp) this.carry = null; // a game inside an app starts fresh each time
     const s = this.factory();
+    if (this.scene?.fromApp && this.appReturn) s.fromApp = true; // playing again: still a game inside the app
     if (skipTitle && s.state === 'title') s.state = 'play';
     this.setScene(s);
   }
@@ -16219,6 +16265,8 @@ export class Engine {
     else if (this.paused) {
       this.runUIOnly(s, dt);
       this.stepUITweens(s, dt); // menus keep animating while the game is paused
+      const t0 = inp.taps[0], ar = this.appRect;
+      if (s.fromApp && ar && t0 && t0.x >= ar.x && t0.x <= ar.x + ar.w && t0.y >= ar.y && t0.y <= ar.y + ar.h) { this.backToApp(); return; }
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
@@ -16232,7 +16280,8 @@ export class Engine {
       s.time += dt; this.stepEffects(dt);
       this.runUIOnly(s, dt);
       if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !ownScreen(s, s.state)) {
-        const t = inp.taps[0], r = this.shareRect;
+        const t = inp.taps[0], r = this.shareRect, ar = this.appRect;
+        if (s.fromApp && ar && t && t.x >= ar.x && t.x <= ar.x + ar.w && t.y >= ar.y && t.y <= ar.y + ar.h) { this.backToApp(); return; }
         if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
         else if (s.levelComplete) this.nextLevel(); else this.restart();
       }

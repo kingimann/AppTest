@@ -247,6 +247,42 @@ function addLevel(duplicate, mode) {
   setLevel(levelList().length - 1);
   toast(`Added ${lv.levelName}`);
 }
+/** Put a whole game (a template or one of your projects) into this project as new levels: apps open it with Play Game. */
+function addGameToProject(json, name) {
+  const g = clone(json), lvls = [g, ...(g.levels || [])], base = (name || g.name || 'Game').trim(), first = levelList().length + 1;
+  lvls.forEach((lv, k) => {
+    if (k === 0) { delete lv.levels; delete lv.version; delete lv.name; for (const key of ['items', 'recipes', 'quests', 'dialogues', 'collections', 'sounds', 'customActions', 'customConditions']) delete lv[key]; }
+    lv.mode ||= g.mode || '2d';
+    lv.levelName = lvls.length > 1 ? `${base} ${k + 1}` : base;
+    if (lv.settings?.app) delete lv.settings.app;
+    const ids = {}; for (const e of lv.entities || []) { const n = uid(); ids[e.id] = n; e.id = n; }
+    for (const e of lv.entities || []) if (e.parent && ids[e.parent]) e.parent = ids[e.parent];
+    addSceneEssentials(lv, lv.mode);
+    (root.levels ||= []).push(normalize(lv));
+  });
+  // what the game needs from the whole project: items, recipes, quests, dialogues, data, sounds, My Instructions
+  const same = (a, b, key) => String(a[key] ?? '').toLowerCase() === String(b[key] ?? '').toLowerCase();
+  for (const [k, key] of [['items', 'name'], ['recipes', 'result'], ['quests', 'name'], ['dialogues', 'name'], ['collections', 'name'], ['customActions', 'name'], ['customConditions', 'name']]) for (const x of json[k] || []) { const L = (root[k] ||= []); if (!L.some((y) => same(y, x, key))) L.push(clone(x)); }
+  if (json.sounds) { root.sounds = { ...json.sounds, ...(root.sounds || {}) }; syncSoundNames(); }
+  // an app gets a button that opens it
+  if (root.settings?.app && project.settings?.app !== false && levelIdx === 0) {
+    const n = project.entities.filter((e) => (e.behaviors || []).some((b) => b.action === 'play game')).length;
+    project.entities.push({ id: uid(), name: `Play ${base}`, ui: true, anchor: 'center', x: 0, y: -60 + n * 66, layer: 3, shape: { type: 'rect', w: 300, h: 56, radius: 16, fill: '#6366f1' }, text: { value: `▶ Play ${base}`, size: 18, color: '#ffffff', weight: '800' }, behaviors: [{ type: 'button', action: 'play game', value: base, amount: 1, sound: 'click' }] });
+  }
+  pushHistory(); saveSoon(); rebuild(); refreshAll();
+  toast(`Added “${base}” as level ${first}${lvls.length > 1 ? `–${first + lvls.length - 1}` : ''}${root.settings?.app ? ' with a Play button' : ''}`);
+}
+/** Pick a game to add: a game type, or one of your own games. */
+function openAddGameDialog() {
+  const mine = Object.entries(loadProjects()).filter(([id, p]) => id !== projectId && !p.json.settings?.app).sort((a, b) => b[1].updated - a[1].updated);
+  const games = templateInfo.filter((t) => t.kind !== 'app' && !t.key.startsWith('empty'));
+  openDialog('Add a Game', [
+    h('p', { class: 'desc' }, root.settings?.app ? 'The game becomes part of this app (new levels). A Play button opens it; when it ends, or you go Back, you are back in the app, with {lastScore} and {lastResult}.' : 'The game is added as new levels of this project. Open it with a Play Game button or instruction (and come back with Back to App).'),
+    mine.length ? [h('h4', { class: 'tl-h' }, icon('folder'), 'My games'), h('div', { class: 'it-list' }, mine.map(([id, pr]) => h('button', { class: 'it-row', onclick: () => { closeLayer(); addGameToProject(pr.json, pr.name); } }, modeBadge(pr.json), h('span', { class: 'it-t' }, h('b', {}, pr.name), h('small', {}, `${[pr.json, ...(pr.json.levels || [])].length} level(s)`)), icon('plus'))))] : null,
+    h('h4', { class: 'tl-h' }, icon('gamepad'), 'Game types'),
+    h('div', { class: 'it-list' }, games.map((t) => h('button', { class: 'it-row', onclick: () => { closeLayer(); addGameToProject(templates[t.key], t.title); } }, modeBadge(templates[t.key]), h('span', { class: 'it-t' }, h('b', {}, t.title), h('small', {}, t.blurb)), icon('plus')))),
+  ].flat().filter(Boolean));
+}
 function deleteLevel() {
   const list = levelList();
   if (list.length < 2) { toast('A game needs at least one level'); return; }
@@ -280,6 +316,7 @@ function openLevelMenu() {
     { icon: 'grid', label: 'New 2D Level', fn: () => addLevel(false, '2d') },
     { icon: 'cube', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
     { icon: 'copy', label: 'Duplicate This Level', fn: () => addLevel(true) },
+    { icon: 'gamepad', label: root.settings?.app ? 'Add a Game to This App…' : 'Add a Game as New Levels…', fn: openAddGameDialog },
     { icon: 'edit', label: 'Rename Level…', fn: () => { const n = prompt('Level name', levelName(project, levelIdx)); if (n) { project.levelName = n; changed(); refreshAll(); } } },
     levelIdx > 1 && { icon: 'upload', label: 'Move Earlier', fn: () => moveLevel(-1) },
     levelIdx > 0 && levelIdx < list.length - 1 && { icon: 'download', label: 'Move Later', fn: () => moveLevel(1) },
@@ -3611,6 +3648,9 @@ function renderSceneSettings(box) {
   box.append(comp('App', [
     C('settings.app', { label: 'This is an app, not a game', type: 'bool', def: false, structure: true }),
     h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
+    h('p', { class: 'desc' }, 'Apps can hold games: add one as new levels, and a Play Game button opens it. The game keeps its own title, pause and end screens, with a “Back to app” button.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),
+    C('settings.recordPlays', { label: 'Record every game played in collection (blank = don’t)', type: 'text', def: '', infoText: 'Each play adds a record with game, score, result (won / lost / quit) and date. Make the collection in Data below.' }),
   ], { icon: 'phone', key: 's-app' }));
   box.append(comp('Data', [dataEditor()], { icon: 'list', key: 's-data' }));
   box.append(comp('Start Screen', [

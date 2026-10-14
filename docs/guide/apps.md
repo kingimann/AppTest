@@ -18,6 +18,7 @@ On the home screen (or *☰ → New Game or App…*), pick the **Apps** tab:
 | **To-Do List** | A checklist with search, a detail page, add and edit forms, and swipe to delete |
 | **Notes** | Notes with a mood, search, and editing |
 | **Expense Tracker** | Amounts with categories and dates, grouped by day, with a running total |
+| **Arcade** | An app with three games inside, best scores and a list of every play |
 
 Each one works as soon as you press **▶ Play**. Change the colours, rename the fields, and add pages.
 
@@ -114,15 +115,38 @@ Data Summary   Tasks · count where done = no → left
 Text           {left} to do
 ```
 
+## Games inside apps
+
+An app can hold games, and a game can use everything an app has. They live in the **same project**: the app is level 1, and each game is one or more further levels (each one 2D or 3D).
+
+1. *Levels › Add a Game to This App…* (or *Game Settings › App › Add a game…*). Pick one of your own games or a game type.
+   - Its levels are copied in, with what it needs from the whole project: items, recipes, quests, dialogues, data, sounds and My Instructions.
+   - The app's page gets a **▶ Play** button for it.
+2. A **Play Game Button** (*Add → UI & Menus → App*), the *play game* button action or the **Play a game** instruction opens a game by its level number or name (`2`, `Breakout`).
+3. The game plays as a normal game, with its own title screen, pause button and end screens:
+   - it starts fresh every time (score 0);
+   - **Tap to play again** replays it;
+   - its pause and end screens have a **‹ Back to app** button, and the phone's back gesture leaves it too;
+   - a *Back to App Button* widget or the **Back to the app** instruction does the same from your own UI.
+4. Back in the app, you're on the same page as before, with:
+   - `{lastGame}`, `{lastScore}`, `{lastResult}` (won, lost or quit) and `{gamesPlayed}`;
+   - the best score per game, as `{best_breakout}`;
+   - the **Back from a game** event, for Triggers and visual scripts.
+5. *Game Settings › App › Record every game played in collection* (e.g. `Scores`) adds a record for each play, with **game**, **score**, **result** and **date**. A Data List can then show a high-score table, and a Data Summary can show the best score (`max` of `score` where `game = Breakout`).
+
+The **Arcade** app type is a complete example: three mini games, a card with **Play** and the best score for each, and a *My Scores* tab.
+
+Going the other way, a game can use app pieces directly. A Data List, Record Form or Data Summary works in any level: for a level editor, a high-score table, a shop catalogue, or a player's journal.
+
 ## Triggers, visual scripts and code
 
 | Kind | Pieces |
 |---|---|
-| Events | Record added, Record changed, Record deleted, Record opened (for one collection or any) |
+| Events | Back from a game (game, won / lost / quit), Record added, Record changed, Record deleted, Record opened (for one collection or any) |
 | Conditions | Number of records (with a filter), A record is open |
-| Instructions | Add record (`title = {name}, done = no`), Change the opened record, Delete the opened record, Open a record (first match), Clear a collection (empty it, or back to the starting records), Data summary into variable |
+| Instructions | Play a game, Back to the app, Add record (`title = {name}, done = no`), Change the opened record, Delete the opened record, Open a record (first match), Clear a collection (empty it, or back to the starting records), Data summary into variable |
 | Nodes | All of the above, plus **Data Value** (count / sum / average / min / max) |
-| Button actions | new record, edit opened record, delete opened record |
+| Button actions | play game, back to app, new record, edit opened record, delete opened record |
 
 ```js
 const data = engine.data;
@@ -152,7 +176,6 @@ On the phone, each collection is kept under the app's name, so two apps never sh
 
 ## Tips
 
-- Want a game with data? Collections, lists and forms work in games too: a high score table, a level editor, a shop catalogue.
 - Use **Bottom Nav** for the app's main sections and **App Bar** for titles and Back.
 - Light colours suit apps. The templates use a white app bar, a `#f4f6fb` background and white rows. Set the **UI Theme** font for everything at once.
 - Ask for **notifications** (reminders) and **permissions** (camera, location) like a game does, from *Game Settings*.

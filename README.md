@@ -518,6 +518,47 @@ New groups in *Project › UI*: **Buttons**, **Inputs**, **Lists** and **Animate
   - **Widgets:** Bouncing Title, Pulsing Play Button, Menu That Slides In, Spinning Reward Star, Heartbeat Heart, Attention Badge.
 - **New animations** everywhere UI shows and hides (popups, pages, Show / Hide UI node, UI Animation): **drop in** (falls and bounces), **flip**, **spin in**, **elastic pop**, **swing in**, **rise**, **stretch**.
 
+### UI components pack (21 new components, 43 presets)
+
+Each of these is one object with one component: it draws itself, handles taps and shows a live preview in the editor. Find them in *Project › UI* under **Controls**, **Charts**, **HUD** and **Game Systems**, or in *Add Component › UI*. Lists are typed one item per line, with `|` between the parts.
+
+**Controls**
+
+| Component | What it does |
+|---|---|
+| **Dropdown** | Choices (`Label \| value`) into a variable. Looks: filled, outline, underline, pill. Scrolls when long, opens upward near the bottom, and can send a message on change. Presets: Dropdown, Language Dropdown. |
+| **Keypad** | Number pad into a variable, with max digits and PIN dots. With an **Answer**, ✓ (or reaching max digits) sends a right / wrong message and shakes when wrong. Keys: round, rounded or flat. Presets: Keypad (PIN), Code Lock Keypad. |
+| **Colour Picker** | Swatches into a variable, and can recolour an object or tag (shape fill, text, mesh or tint). Circle, rounded or square swatches. |
+| **Carousel** | Swipe or tap the arrows through cards (`Name \| icon \| value \| unlocked-when variable \| subtitle`); the middle card goes into a variable. Locked cards show 🔒. Looks: cover flow, flat row, stack. Dots, and optional looping. Presets: Character Select, Level Cards. |
+| **Skill Button** | Tap or press a key to send a message. Then a cooldown sweep with seconds. Charges, a cost from a variable (mana), and circle / rounded / hexagon shapes. Presets: Skill Button, with charges, Mana Spell Button. |
+| **Radial Menu** | A button that opens a wheel of choices (`Label \| icon \| message`): hold and slide, or tap then tap. Dims behind it. Presets: Emote Wheel, Build Wheel. |
+| **Prize Wheel** | Spins on a tap or message and lands on a weighted prize (`Label \| colour \| amount \| chance`). Adds the amount to a variable, puts the label in another, ticks as it spins, and can limit spins with a variable. |
+
+**Charts:** **Chart** draws columns, bars, line, area, pie, donut or radar from `Label | variable or number | colour`. It has a title, values, labels, grid and a grow-in animation. A line or area chart can **track a variable over time**. Presets: Column, Bar (stats), Score Over Time, Pie, Donut, Radar Stats.
+
+**HUD**
+
+| Component | What it does |
+|---|---|
+| **XP Bar** | XP and level variables. It levels up by itself (each level needs × more), with a LEVEL UP flash, sound and message, and an optional max level. Looks: bar with hex badge, thin bar, ring, segments. Text: xp / needed, percent or level. |
+| **Timer** | Countdown or stopwatch as a ring, bar, pill or digits, in seconds, m:ss or tenths. Warns (red, pulsing, ticking) near the end, writes a variable and sends a message at zero. It can also end the game, win, or restart. Control it with messages: `timer pause`, `timer start`, `timer reset`, `timer restart`, `timer add 5`. |
+| **Off-screen Arrows** | Edge arrows to a tag (2D and 3D, including behind the camera), with distance. Looks: arrow, chevron, dot, icon. Optional markers over targets you can see. Presets: Off-screen Arrows, Goal Marker. |
+| **Crosshair** | Cross, cross + dot, dot, circle, circle + dot, chevron, brackets or T. Spreads on a message (`fire`) and while the player moves, shows a hit marker on `hit`, and has an outline. Presets: Crosshair, Sniper Scope. |
+| **News Ticker** | Scrolling text with `{variables}`. Separate several messages with `\|`. Set speed and direction; the edges fade. |
+| **Notifications** | Stacking pop-ups from the message `notify Title\|text\|icon` or the **Notify** node. Looks: card, pill, achievement, banner. Position, duration, max at once and sound; tap to close. Presets: Achievement Popups, Toast Messages. |
+| **Screen Effects** | A red flash when a variable (hp) drops, a pulsing vignette when it's low, a white flash on `flash`, and confetti on `celebrate`, on winning, or from the **Celebrate** node. |
+
+**Game Systems**
+
+| Component | What it does |
+|---|---|
+| **Shop** | Items (`Name \| icon \| price \| ID or item:Name \| note`) bought with a currency variable. Unlocks set `owned_ID` and can be equipped into a variable; `item:` entries go into the inventory each time. Tap twice to buy, a shake when you can't afford it, and a message when bought. Grid or list. |
+| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use: it sends `use Name` / `use item` and can use one up. |
+| **Quest Log** | Goals (`Text \| variable \| target \| reward`) with progress bars. They tick off and strike through, give rewards like `coins 100`, send a message and sort finished goals last. |
+| **Daily Reward** | A 7-day calendar, one claim per day, saved on the device. Rewards go into variables or the inventory, and the streak resets if a day is missed (optional). Send `daily reset` / `daily next day` to test it. |
+| **Level Map** | A winding path, straight line or grid of levels, with stars from `stars_1`, `stars_2`… and locks above the `unlocked` variable. The next level pulses, and it scrolls. Tapping a level plays it (`goToLevel`), sends a message or sets a variable. Presets: Level Map, Level Grid. |
+| **Tutorial** | Coach marks (`Text \| target object or x%,y% \| spotlight size`): a spotlight on the target, a speech bubble with Next / Skip and a step counter. It can pause the game, run once per player, and starts on load or on a message. |
+
 ### Navigation, popups and more UI
 
 Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.

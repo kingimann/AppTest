@@ -111,7 +111,8 @@ Nodes: Go To Page, Go Back, On Page Opened, On Back, Page Is, Can Go Back.
 ## Animation
 
 - **UI Animation** component: an entrance (on start, on show, or on a message, children one by one) and an idle loop (float, pulse, breathe, wiggle, heartbeat, bounce, spin, glow, shake).
-- Show / hide animations everywhere: fade, pop, zoom, slide, drop in, flip, spin in, elastic pop, swing in, rise, stretch.
+- Show / hide animations everywhere: fade, pop, spring pop, zoom, slide, drop in, flip, spin in, elastic pop, swing in, rise, stretch. A panel that pops or zooms scales with everything inside it.
+- Page transitions that follow navigation (Back plays them in reverse): slide, push, shared axis, zoom, card stack, reveal from tap and wipe. *Game Settings › Motion › Page transitions* picks one for every page; see [Making apps](#/guide/apps).
 - **Show / Hide UI** node with *done*.
 
 ## Touch controls

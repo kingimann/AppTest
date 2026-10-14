@@ -164,10 +164,16 @@ App colours can be **theme colours** instead of fixed ones. In any colour box, t
 Everything in an app moves with **springs**, which feel natural and settle quickly:
 
 - **Buttons** squash when pressed and spring back, with an ink ripple. Their *Feel* is `spring` (the default), `squash`, `jelly` or `none`.
-- **Pages** have five more transitions in *Show If › Animation*:
+- **Pages** have more transitions in *Show If › Animation*. Those that *follow navigation* play in reverse when you go back:
   - `push (iOS, follows navigation)`: the new page slides over the old one, which moves a little to the side;
   - `shared axis (follows navigation)`: slides and fades;
+  - `zoom (follows navigation)`: the new page grows in while the old one grows past you and fades;
+  - `card stack (follows navigation)`: the new page rises over the old one, which sinks back and dims, like an iPhone sheet;
+  - `reveal from tap (follows navigation)`: the new page opens as a circle growing from where you tapped;
+  - `wipe (follows navigation)`: the new page is uncovered from the right edge;
   - `fade through`, `spring pop` and `sheet (from bottom)`.
+- **One transition for every page:** *Game Settings › Motion › Page transitions* overrides the pages' own choice. Tap one of the little moving previews to pick it.
+- A page or panel that scales (zoom, pop, fade through) scales **with everything inside it**, so its buttons and text grow together.
 - *Show If › Stagger* brings in the page's children **one after another** (`rise`, `fade`, `pop` or `slide`).
 - **Data Lists** stagger their rows in, glide rows to their new place when the order changes, highlight a row you press, stretch past the ends and show a scroll bar while scrolling. Ticks pop, done rows strike through, and a deleted row shrinks away.
 - **Record Forms** bring their fields in one by one. The focused field glows, switches slide, choice buttons have a highlight that slides between them, stars fill one at a time, and a missing field shakes.

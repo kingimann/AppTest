@@ -660,6 +660,17 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - A text showing a variable (`{score}`) pops when the value changes (*Pop when the value changes* in the Text card).
 - **Apps:** search bars with a magnifier and a clear ✕, *No results* and empty-list states, and app bars that get a shadow once you scroll.
 
+### Page transitions and Build Settings
+
+- **New page transitions** that follow navigation (Back reverses them): **zoom**, **card stack** (iPhone-sheet style), **reveal from tap** (a circle growing from your finger) and **wipe**.
+- *Game Settings › Motion › Page transitions* sets one transition for every page, picked from little moving previews.
+- Pop, spring pop, elastic pop, zoom and fade through now scale a panel **with everything inside it**. The incoming page always draws over the old one, even over its + button.
+- **Build Settings** is easier:
+  - **What are you making?** (Play file, Website, App Store & Google Play, Expo app) shows only the settings that build needs, with a matching main button;
+  - a **ready check** with Fix buttons (name, icon, version, description, App ID, a store version already used, testing options, compression…) and a **Recommended** button;
+  - chips that jump to each section, and a **Last built** line;
+  - ready-made icon emoji and colours with a light and dark Home Screen preview, and *Small update / Big* version buttons.
+
 ### Squads: select and move many units (tactics and strategy)
 
 - **Squad Unit** component: units on a grid that you command, on your team or the enemy's.

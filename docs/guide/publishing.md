@@ -13,8 +13,23 @@ All of them start from **☰ → Build Settings…**.
 
 ## Build Settings
 
-- **App:** name, version, author, description and file name.
-- **Icon:** your own picture, or an emoji on a colour. It's used on the Home Screen, the browser tab and the loading screen.
+The top of Build Settings helps you get it right:
+
+- **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play** or **Expo app**. Build Settings then shows only the settings that kind of build needs (tick *Every setting* to see them all), and the big button at the bottom makes it.
+- **The ready check** lists what to look at before you build, each with a button that fixes it or takes you there:
+  - a name that's still "Untitled", the default 🎮 icon, or a version that isn't a number;
+  - no description (for link previews and store listings) and no *Made by* name (for the stores);
+  - starting at a later level, levels left out, testing options still on, compression off;
+  - for the stores: an App ID that isn't valid (it offers one), no platform picked, and a version you already sent to the stores (they need a new number for every upload).
+
+  Red items stop the build until they're fixed. **Recommended** turns on the usual settings for a finished game in one tap.
+- **Chips** (App, Icon, Loading, Levels…) jump to a section.
+- **Last built** shows when you last built it, what kind, its version and size.
+
+The sections:
+
+- **App:** name, version, author, description and file name. *Small update* and *Big* set the next version for you (1.0 → 1.1, or 2.0).
+- **Icon:** your own picture, or an emoji on a colour: tap one of the ready emoji and colours, or type your own. A preview shows it on a light and a dark Home Screen. It's used on the Home Screen, the browser tab and the loading screen.
 - **Loading screen:** presets (Classic, Minimal, Neon, Retro, Candy, Cinematic, Storybook, Arcade). You can then set:
   - the background (colour, gradient, picture), the logo and name, and the loading bar style;
   - text and rotating tips, a minimum time, **Tap to Start** (so music can play straight away), and how it leaves.
@@ -29,7 +44,7 @@ All of them start from **☰ → Build Settings…**.
   - **Advanced:** extra code in `<head>`.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows what takes the space.
 - **Testing:** an FPS counter and on-screen errors for trying a build on another phone.
-- **Build** downloads it, **Share** sends it with the phone's share sheet, **Test** opens it in a new tab.
+- The main button builds what you picked at the top. For a play file, **Share** sends it with the phone's share sheet. **Test** opens it in a new tab.
 
 ## One HTML file
 
@@ -83,7 +98,8 @@ play.html?src=my-game.json
 
 - Play it on a real phone, in portrait and landscape if it allows both.
 - Check *☰ → Find Problems…*.
-- Turn on **Testing** in Build Settings and try the build on another phone.
+- Turn on **Testing** in Build Settings and try the build on another phone (the ready check reminds you to turn it off again).
+- Go through Build Settings' ready check until it says **Ready to build**.
 - Set a title, an icon and a loading screen.
 - Decide what's saved: best score, progress, save slots.
 - If it uses sound, give it a **Tap to Start** so music can begin.

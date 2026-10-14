@@ -2646,6 +2646,7 @@ export class Input {
       if (st.joystickHaptics !== false && st.joystickHaptics !== 'off') this.engine.vibrate(6);
     }
     this.pointers.set(e.pointerId, ptr);
+    this.lastDown = { x: p.x, y: p.y }; // where a "reveal from tap" page transition grows from
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
   }
 
@@ -4293,6 +4294,14 @@ function renderUI(engine, scene) {
       let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
       if (pa <= 0.002) continue;
       ctx.save();
+      if (!engine.editing) { // page transitions: a scale for a whole page (with everything in it), or a clip (reveal from tap, wipe)
+        let chain = null; for (let q = e, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._fx && (q._fx.z !== 1 || q._fx.clip)) (chain ||= []).unshift(q);
+        if (chain) for (const q of chain) {
+          const F = q._fx;
+          if (F.clip) { ctx.beginPath(); if (F.clip.kind === 'circle') ctx.arc(F.clip.x, F.clip.y, Math.max(0.01, F.clip.r * F.p), 0, Math.PI * 2); else ctx.rect(W * (1 - F.p), -H, W * F.p + 1, H * 3); ctx.clip(); }
+          if (F.z !== 1) { const r = uiBox(q, W, H, engine.safe); ctx.translate(r.x, r.y); ctx.scale(F.z, F.z); ctx.translate(-r.x, -r.y); }
+        }
+      }
       if (!engine.editing) for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
       ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
@@ -6442,9 +6451,10 @@ const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : Str
 function raiseTree(s, e) {
   const L = s.entities, inTree = (q) => { for (let p = q, n = 0; p && n < 60; p = p.parentEnt, n++) if (p === e) return true; return false; };
   const tree = L.filter(inTree); if (!tree.length) return;
-  const rest = L.filter((q) => !tree.includes(q));
-  for (const q of tree) { let i = rest.length; while (i > 0 && (rest[i - 1].layer || 0) > (q.layer || 0)) i--; rest.splice(i, 0, q); }
-  L.length = 0; L.push(...rest);
+  // the page goes over everything else on screen (even a raised + button on the old page), but stays under nav bars and popups
+  const top = (q) => { for (let a = q, n = 0; a && n < 60; a = a.parentEnt, n++) if (a._dock || (a.layer || 0) >= 10 || s.modal === a) return true; return false; };
+  const rest = L.filter((q) => !tree.includes(q)), under = rest.filter((q) => !top(q)), over = rest.filter(top);
+  L.length = 0; L.push(...under, ...tree, ...over);
 }
 /** Game Settings › Motion: how fast UI animations play, and whether to keep motion to a minimum (the phone's "Reduce motion"). */
 let reducedMQ = null;
@@ -6457,6 +6467,9 @@ function motionOf(s) {
 /** Show or hide a UI element with a little animation. */
 function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
+  const NAVF = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe', 'push (iOS, follows navigation)': 'push', 'shared axis (follows navigation)': 'shared axis' }[anim];
+  if (NAVF) anim = `${NAVF} ${show ? 'in' : 'out'}`; // used outside of page navigation (a popup, a Show / Hide UI node): the forward version
+  else if (anim === 'slide (follows navigation)') anim = show ? 'slide from right' : 'slide from left';
   const M = motionOf(s); dur *= M.k;
   if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; e._uiAnimUntil = 0; done?.(); return; }
@@ -6465,7 +6478,14 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
   const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
   const R = (e._animBase.rz ??= e.rz || 0);
-  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; if (!ok) e.visible = false; done?.(); };
+  // transition-only state the renderer reads: z scales the element with everything inside it, clip shows only part of it (reveal, wipe)
+  const FX = (e._fx ||= { e, z: 1, clip: null, p: 1 }); s.killTweens(FX, true); FX.z = 1; FX.clip = null; FX.p = 1;
+  const group = uiKids(s, e).length > 0; // a panel or page with things inside: scale them all together
+  const zoom = (from, to, d, ease, o = {}) => {
+    if (group) { FX.z = from; return s.to(FX, { z: to }, d, { ease, ...o }); }
+    e.sx = base.sx * from; e.sy = base.sy * from; return s.to(e, { sx: base.sx * to, sy: base.sy * to }, d, { ease, ...o });
+  };
+  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; FX.z = 1; FX.clip = null; FX.p = 1; if (!ok) e.visible = false; done?.(); };
   const H = (s.engine?.height || 700) / (uiK(s.engine?.safe) || 1);
   const front = () => queueMicrotask(() => raiseTree(s, e)); // (after this frame's updates) the page that moves over the other one draws on top (with everything inside it)
   const fin2 = fin;
@@ -6479,16 +6499,40 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       else { front(); s.to(e, { y: base.y + H }, dur * 1.2, { ease: 'inCubic', onComplete: () => fin2(false) }); }
       return;
     case 'fade through': // Material: the old page fades quickly, then the new one fades and grows in
-      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.94; e.sy = base.sy * 0.94; s.to(e, { alpha: 1, sx: base.sx, sy: base.sy }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
+      if (show) { e.visible = true; e.alpha = 0; zoom(0.92, 1, dur * 1.1, 'outCubic', { delay: dur * 0.4 }); s.to(e, { alpha: 1 }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
       else s.to(e, { alpha: 0 }, dur * 0.4, { ease: 'linear', onComplete: () => fin(false) });
       return;
     case 'shared axis in': e.visible = true; e.alpha = 0; e.x = base.x + 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
     case 'shared axis in back': e.visible = true; e.alpha = 0; e.x = base.x - 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
     case 'shared axis out': s.to(e, { x: base.x - 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
     case 'shared axis out back': s.to(e, { x: base.x + 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    // zoom (follows navigation): the new page grows in while the old one grows past you and fades; Back shrinks them the other way
+    case 'zoom nav in': front(); e.visible = true; e.alpha = 0; zoom(0.86, 1, dur * 1.6, 'outQuart'); s.to(e, { alpha: 1 }, dur * 0.9, { ease: 'outQuad', onComplete: () => {} }); s.to(FX, { p: 1 }, dur * 1.6, { onComplete: () => fin(true) }); return;
+    case 'zoom nav in back': e.visible = true; e.alpha = 0; zoom(1.1, 1, dur * 1.6, 'outQuart'); s.to(e, { alpha: 1 }, dur * 1.2, { ease: 'outQuad' }); s.to(FX, { p: 1 }, dur * 1.6, { onComplete: () => fin(true) }); return;
+    case 'zoom nav out': zoom(1, 1.1, dur * 1.4, 'outQuart'); s.to(e, { alpha: 0 }, dur * 0.9, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'zoom nav out back': front(); zoom(1, 0.86, dur * 1.4, 'outQuart'); s.to(e, { alpha: 0 }, dur * 1.1, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    // card stack (follows navigation): the new page rises from the bottom over the old one, which sinks back a little and dims (like an iPhone sheet)
+    case 'stack in': front(); e.visible = true; e.alpha = 1; e.y = base.y + H; s.to(e, { y: base.y }, dur * 2.6, { ease: 'springSnappy', onComplete: () => fin(true) }); return;
+    case 'stack out': e._uiAnimUntil += dur; zoom(1, 0.92, dur * 2, 'outCubic'); s.to(e, { alpha: 0.35 }, dur * 2, { ease: 'outCubic', onComplete: () => fin(false) }); return;
+    case 'stack in back': e.visible = true; e.alpha = 0.35; zoom(0.92, 1, dur * 2, 'outCubic'); s.to(e, { alpha: 1 }, dur * 2, { ease: 'outCubic', onComplete: () => fin(true) }); return;
+    case 'stack out back': front(); s.to(e, { y: base.y + H }, dur * 1.5, { ease: 'inCubic', onComplete: () => fin(false) }); return;
+    // reveal from tap: the new page opens as a growing circle from where you tapped; Back closes it the same way
+    case 'reveal in': case 'reveal out back': {
+      const t = s.engine?.input?.lastDown, W = s.engine?.width || 400, HH = s.engine?.height || 700, cx = t ? t.x : W / 2, cy = t ? t.y : HH / 2;
+      const r = Math.hypot(Math.max(cx, W - cx), Math.max(cy, HH - cy)) + 20, inn = anim === 'reveal in';
+      front(); e.visible = true; e.alpha = 1; FX.clip = { kind: 'circle', x: cx, y: cy, r }; FX.p = inn ? 0 : 1;
+      s.to(FX, { p: inn ? 1 : 0 }, dur * (inn ? 2.2 : 1.6), { ease: inn ? 'outCubic' : 'inCubic', onComplete: () => fin(inn) }); return;
+    }
+    case 'reveal out': case 'wipe out': s.to(FX, { p: 1 }, dur * 2.2, { onComplete: () => fin(false) }); return; // stays put underneath until the new page covers it
+    case 'reveal in back': case 'wipe in back': e.visible = true; e.alpha = 1; fin(true); return;
+    // wipe (follows navigation): the new page is uncovered from the right edge; Back wipes it away to the right
+    case 'wipe in': case 'wipe out back': {
+      const inn = anim === 'wipe in'; front(); e.visible = true; e.alpha = 1; FX.clip = { kind: 'wipe' }; FX.p = inn ? 0 : 1;
+      s.to(FX, { p: inn ? 1 : 0 }, dur * (inn ? 2 : 1.5), { ease: inn ? 'inOutCubic' : 'inCubic', onComplete: () => fin(inn) }); return;
+    }
     case 'spring pop':
-      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.5; e.sy = base.sy * 0.5; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'springBouncy', onComplete: () => fin(true) }); }
-      else s.to(e, { sx: base.sx * 0.6, sy: base.sy * 0.6, alpha: 0 }, dur * 0.8, { ease: 'inBack', onComplete: () => fin(false) });
+      if (show) { e.visible = true; e.alpha = 0; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); zoom(0.5, 1, dur * 3, 'springBouncy', { onComplete: () => fin(true) }); }
+      else { zoom(1, 0.6, dur * 0.8, 'inBack'); s.to(e, { alpha: 0 }, dur * 0.8, { ease: 'inQuad', onComplete: () => fin(false) }); }
       return;
   }
   switch (anim) { // the newer entrances / exits
@@ -6505,8 +6549,8 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       else s.to(e, { rz: R + 180, sx: base.sx * 0.3, sy: base.sy * 0.3, alpha: 0 }, dur * 1.2, { ease: 'inBack', onComplete: () => fin(false) });
       return;
     case 'elastic pop':
-      if (show) { e.visible = true; e.alpha = 1; e.sx = base.sx * 0.2; e.sy = base.sy * 0.2; s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'outElastic', onComplete: () => fin(true) }); }
-      else s.to(e, { sx: base.sx * 1.15, sy: base.sy * 1.15, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      if (show) { e.visible = true; e.alpha = 1; zoom(0.2, 1, dur * 3, 'outElastic', { onComplete: () => fin(true) }); }
+      else { zoom(1, 1.15, dur, 'inQuad'); s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) }); }
       return;
     case 'swing in': // hangs from the top and swings into place
       if (show) { e.visible = true; e.alpha = 0; e.rz = R - 25; e.y = base.y - 30; s.to(e, { rz: R, y: base.y, alpha: 1 }, dur * 2.4, { ease: 'outElastic', onComplete: () => fin(true) }); }
@@ -6522,22 +6566,22 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       return;
   }
   if (anim === 'zoom') { // pages that grow in and fade out a little larger
-    if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.92; e.sy = base.sy * 0.92; s.to(e, { sx: base.sx, sy: base.sy, alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => done?.() }); }
-    else s.to(e, { sx: base.sx * 1.06, sy: base.sy * 1.06, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    if (show) { e.visible = true; e.alpha = 0; zoom(0.92, 1, dur, 'outCubic'); s.to(e, { alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => fin(true) }); }
+    else { zoom(1, 1.06, dur, 'inQuad'); s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) }); }
     return;
   }
   if (show) {
     e.visible = true; e.alpha = 0;
     if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
-    if (anim === 'pop') { e.sx = base.sx * 0.6; e.sy = base.sy * 0.6; s.to(e, { sx: base.sx, sy: base.sy }, dur * 1.4, { ease: 'outBack' }); }
+    if (anim === 'pop') zoom(0.6, 1, dur * 1.4, 'outBack');
     s.to(e, { alpha: 1 }, dur, { ease: 'outQuad', onComplete: () => done?.() });
   } else {
     if (off) s.to(e, { x: base.x + (off.x || 0) * k, y: base.y + (off.y || 0) * k }, dur, { ease: 'inCubic' });
-    if (anim === 'pop') s.to(e, { sx: base.sx * 0.7, sy: base.sy * 0.7 }, dur, { ease: 'inBack' });
-    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    if (anim === 'pop') zoom(1, 0.7, dur, 'inBack');
+    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'zoom (follows navigation)', 'card stack (follows navigation)', 'reveal from tap (follows navigation)', 'wipe (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
 const STAGGERS = ['none', 'rise one after another', 'fade one after another', 'pop one after another', 'slide in one after another'];
 /** A page's contents arrive one after another (after the page itself shows). */
 function staggerKids(s, e, how) {
@@ -8714,7 +8758,7 @@ registerBehavior('uiShowIf', {
     { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
     { key: 'value', label: 'Value', type: 'text', default: 'home' },
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
-    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
   ],
   create(p) {
@@ -8736,11 +8780,14 @@ registerBehavior('uiShowIf', {
         if (want !== shown) {
           shown = want;
           const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
-          if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
+          const st = s.settings, all = st.pageAnim && st.pageAnim !== 'as each page says' && p.var === (st.pageVar || 'page') && p.op === '=' ? st.pageAnim : null, anim = all || p.anim; // Game Settings › Motion › Page transitions
+          const NAV = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe' }[anim];
+          if (NAV) uiAnimate(s, e, want, `${NAV} ${want ? 'in' : 'out'}${fwd ? '' : ' back'}`, 0.24);
+          else if (anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
             uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
-          } else if (p.anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
-          else if (p.anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
-          else uiAnimate(s, e, want, p.anim, 0.22);
+          } else if (anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
+          else if (anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
+          else uiAnimate(s, e, want, anim, 0.22);
           if (want) staggerKids(s, e, p.stagger);
         }
       },

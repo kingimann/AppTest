@@ -18,16 +18,20 @@ On a phone, panels open full size above the bottom bar. Drag the handle to make 
 | Do this | To |
 |---|---|
 | Tap an object | Select it |
-| Drag an object | Move it (snaps when the magnet is on) |
+| Drag an object | Move it (snaps when the magnet is on). It lines up with other objects' centres and edges (a pink guide line shows it), and a label shows where it is |
+| Double-tap an object | Edit its words (a text), or open it in the Inspector |
 | Drag empty space | Pan (2D) or orbit (3D) |
 | Pinch | Zoom |
 | Double-tap empty space | Reset the view |
 | Long-press an object | Object menu: Inspect, Duplicate, Copy, Paint copies, Focus, Hide, Lock, Make Prefab, Make Child Of…, Delete |
 | Long-press empty space | Paste here, Add object here, Reset view, Game settings |
 | Two-finger tap / three-finger tap | Undo / Redo |
-| − / + / ⟲ buttons | Zoom out, zoom in, reset the view |
+| ⟲ button (− / + too on a computer) | Reset the view (zoom out, zoom in) |
+| 👁 button next to snap and grid | **Clean view:** hide the buttons over the Scene |
 
-When something is selected, a **quick-action bar** appears over the Scene: Inspect, Duplicate, Focus, Attach / Detach (parenting) and Delete.
+When something is selected, a small **quick-action bar** floats next to it (never over it): Inspect, Duplicate, Focus, Attach / Detach (parenting) and Delete. While you drag, the buttons over the Scene fade out of the way.
+
+The **tool bar** on the left shows only the tool you're using; tap it to see the others (*☰ → Preferences › Fold the tool bar* turns this off). Cameras, lights and empty objects show their name only when selected, and tool tips stop after the first few times.
 
 ### Tools
 

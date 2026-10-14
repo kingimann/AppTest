@@ -686,6 +686,18 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   *Reduce motion* turns all of it off.
 - **Inspector with nothing selected:** buttons to **Add**, open **Game Settings**, the **Hierarchy** or **Scripts**, and the level's main objects to jump to.
 - Thin themed scrollbars on computers, and visible keyboard focus.
+- **A calmer Scene:**
+  - the tool bar folds to the tool you're using (tap it for the others; *Preferences › Fold the tool bar*);
+  - on phones only the "fit" button stays (pinch to zoom);
+  - the selection bar is icons only and floats next to the selected object, never over it;
+  - the Add button becomes a round + while something is selected;
+  - cameras, lights and empty objects show their names only when selected;
+  - tool and widget tips show only the first few times.
+- **Clean view** (the eye next to snap and grid) hides everything over your game. The buttons also fade while you drag.
+- **Easier editing:**
+  - **smart guides:** in 2D a dragged object lines up with other objects' centres and edges, and in the UI editor with the other elements in the same panel, with a pink line to show it;
+  - a **position readout** while dragging;
+  - **double-tap** an object to edit its text (for a text) or open it in the Inspector.
 
 ### Squads: select and move many units (tactics and strategy)
 

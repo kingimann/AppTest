@@ -1722,3 +1722,34 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 @media (prefers-reduced-motion: reduce) { .panel.dock.active, .menu, .dialog, .toast, .insp-empty .ie-ic, .layer, .scrim { animation: none !important; } }
 .pref-themes button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
 .th-dot { width: 14px; height: 14px; border-radius: 50%; border: 3px solid; flex: none; box-shadow: 0 0 0 1px rgba(127,127,127,.4); }
+
+/* ---------- a calmer Scene: fewer buttons over your game ---------- */
+/* the tool rail folds to the tool you're using; tap it to open the others */
+#toolRail { transition: opacity .2s ease, padding .2s ease; background: color-mix(in srgb, var(--g1) 82%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+#toolRail button { width: 44px; height: 44px; }
+#toolRail.compact:not(.open) button:not(.on) { display: none; }
+#toolRail.compact:not(.open) { padding: 4px; }
+#toolRail.compact:not(.open) button.on::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid currentColor; opacity: .6; }
+#toolRail button { position: relative; }
+#toolRail.open button:not(.on) { animation: railIn .18s var(--ease-out) both; }
+@keyframes railIn { from { opacity: 0; translate: 0 -6px; } }
+/* zoom: on phones pinch zooms, so only "fit" stays */
+@media (hover: none) { #zoomBar button[data-zoom=in], #zoomBar button[data-zoom=out] { display: none; } }
+#zoomBar { background: color-mix(in srgb, var(--g1) 82%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); padding: 4px; }
+#zoomBar button { width: 44px; height: 44px; }
+/* the selection bar: icons only, at the bottom where your thumb is, clear of the game's top */
+#ctxBar { bottom: auto !important; right: auto !important; transform: translateX(-50%) !important; justify-content: center; transition: left .12s ease, top .12s ease, opacity .18s ease; background: color-mix(in srgb, var(--g1) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-radius: 18px; padding: 4px; animation: ctxIn .22s var(--spring); }
+@keyframes ctxIn { from { opacity: 0; translate: 0 10px; scale: .95; } }
+#ctxBar button { flex: none !important; width: 46px !important; height: 46px; border-radius: 13px; }
+#ctxBar button span { display: none; }
+#ctxBar button svg.i { width: 22px; height: 22px; }
+/* the Add button is a round + while something is selected (the bar sits next to it) */
+#app.has-sel #addFab { min-width: 54px; width: 54px; height: 54px; padding: 0; justify-content: center; border-radius: 18px; }
+#app.has-sel #addFab span { display: none; }
+/* while you drag an object, the buttons over the Scene fade out of the way */
+#toolRail, #zoomBar, #addFab, #ctxBar, #panelsFab { transition: opacity .18s ease, transform .16s var(--spring); }
+#app.dragging #toolRail, #app.dragging #zoomBar, #app.dragging #addFab, #app.dragging #ctxBar, #app.dragging #panelsFab { opacity: .12; pointer-events: none; }
+/* Clean view: nothing over the Scene but your game (the eye in the bar brings them back) */
+#app.clean #toolRail, #app.clean #zoomBar, #app.clean #ctxBar, #app.clean #addFab { opacity: 0; pointer-events: none; translate: 0 6px; }
+#cleanBtn.on { background: var(--accent-soft); color: #fff; }
+#toolRail.open { z-index: 7; }

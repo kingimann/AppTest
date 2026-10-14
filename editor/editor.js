@@ -31,7 +31,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 const THEMES = {
   dark: {},
@@ -59,6 +59,7 @@ function applyEditorPrefs() {
   st.setProperty('--accent', EP.accent || EDITOR_PREFS.accent);
   st.setProperty('--ui-zoom', String(EP.uiSize || 1));
   document.documentElement.classList.toggle('reduce-motion', !!EP.reduceMotion);
+  document.getElementById('toolRail')?.classList.toggle('compact', EP.compactTools !== false);
   document.documentElement.dataset.edTheme = EP.theme === 'light' ? 'light' : 'dark'; // light needs a few extra rules (white text on panels, shadows)
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', (THEMES[EP.theme] || {})['--toolbar'] || '#191919');
   setSnapshotPolicy(EP.snapEvery, EP.snapKeep);
@@ -660,9 +661,25 @@ engine.onRenderUI = (ctx, s) => {
       for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.moveTo(p.x + Math.cos(a) * 6, p.y + Math.sin(a) * 6); ctx.lineTo(p.x + Math.cos(a) * 8.5, p.y + Math.sin(a) * 8.5); }
       ctx.stroke();
     }
-    ctx.font = '11px -apple-system, Segoe UI, sans-serif'; ctx.fillStyle = 'rgba(230,230,230,0.85)';
-    ctx.fillText(e.name, p.x, p.y + 22);
+    if (isSel || EP.labels === 'always') { ctx.font = '11px -apple-system, Segoe UI, sans-serif'; ctx.fillStyle = 'rgba(230,230,230,0.85)'; ctx.fillText(e.name, p.x, p.y + 22); } // names of cameras, lights and empties only when selected (less clutter)
   }
+  // smart guides while dragging (2D), and where the object is
+  if (sceneGuide && !is3D()) {
+    ctx.save(); ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]); ctx.beginPath();
+    if (sceneGuide.x != null) { const q = engine.renderer.worldToScreen(s, sceneGuide.x, 0); ctx.moveTo(q.x, 0); ctx.lineTo(q.x, engine.height); }
+    if (sceneGuide.y != null) { const q = engine.renderer.worldToScreen(s, 0, sceneGuide.y); ctx.moveTo(0, q.y); ctx.lineTo(engine.width, q.y); }
+    ctx.stroke(); ctx.restore();
+  }
+  if (gesture?.moved && (gesture.type === 'free' || gesture.type === 'axis') && !gesture.ui) {
+    const j = ent(gesture.id), e = s.byId(gesture.id), p = e && toScreen(e);
+    if (j && p) {
+      const txt = is3D() ? `x ${round(j.x || 0, 1)} · z ${round(j.z || 0, 1)}` : `x ${Math.round(j.x || 0)} · y ${Math.round(j.y || 0)}`;
+      ctx.save(); ctx.font = '700 12px system-ui, sans-serif'; const tw = ctx.measureText(txt).width + 16, ly = p.y - 46 < 70 ? p.y + 46 : p.y - 46;
+      ctx.fillStyle = 'rgba(20,20,26,0.88)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(p.x - tw / 2, ly - 11, tw, 22, 11); else ctx.rect(p.x - tw / 2, ly - 11, tw, 22); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, p.x, ly + 0.5); ctx.restore();
+    }
+  }
+  placeCtxBar(s);
   const sel = s.byId(selectedId);
   if (sel?.ui && !playing) { // Unity-style anchor marker: where the element is pinned, and its parent's box
     const o = uiOrigin(sel, engine.width, engine.height, engine.safe), a = uiv(o.x, o.y), b0 = uiBounds(sel);
@@ -784,6 +801,38 @@ function drawRectGizmo(ctx, f) {
   ctx.restore();
 }
 
+
+/** Smart guides (2D): while dragging, the object's centre and edges snap to other objects' centres and edges, with a line to show it. */
+let sceneGuide = null, lastObjTap = { id: null, t: 0 };
+function snapScene2D(j, live, z) {
+  sceneGuide = null;
+  if (!live) return;
+  const ex = live.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy, T = 7 / z;
+  let bx = null, by = null;
+  for (const q of engine.scene.entities) {
+    if (q === live || q.ui || q.dead || q.parentEnt || !q.visible || q.tiles || !hasVisual(q)) continue;
+    const qe = q.extents(), qw = qe.sphere ? qe.r : qe.hx, qh = qe.sphere ? qe.r : qe.hy;
+    if (qw > 4000 || qh > 4000) continue; // backgrounds
+    for (const [mine, theirs] of [[0, 0], [-hw, -qw], [hw, qw], [-hw, qw], [hw, -qw]]) { const d = (q.x + theirs) - (j.x + mine); if (Math.abs(d) < T && (!bx || Math.abs(d) < Math.abs(bx.d))) bx = { d, at: q.x + theirs }; }
+    for (const [mine, theirs] of [[0, 0], [-hh, -qh], [hh, qh], [-hh, qh], [hh, -qh]]) { const d = (q.y + theirs) - (j.y + mine); if (Math.abs(d) < T && (!by || Math.abs(d) < Math.abs(by.d))) by = { d, at: q.y + theirs }; }
+  }
+  if (bx || by) {
+    sceneGuide = {};
+    if (bx) { j.x = round(j.x + bx.d, 2); sceneGuide.x = bx.at; }
+    if (by) { j.y = round(j.y + by.d, 2); sceneGuide.y = by.at; }
+    if (!sceneGuide._buzzed) buzz(4);
+  }
+}
+/** Double-tap an object in the Scene: a text gets its words edited right away; anything else opens in the Inspector. */
+function quickEdit(id) {
+  const j = ent(id); if (!j) return;
+  if (j.text && !(j.behaviors || []).some((b) => ['uiInput', 'uiDataList', 'uiForm'].includes(b.type))) {
+    const v = prompt('Text', j.text.value ?? '');
+    if (v != null && v !== j.text.value) { j.text.value = v; pushHistory(); changed({ structure: false }); renderInspector(); toast('Text changed'); }
+    return;
+  }
+  setDock('inspector'); buzz(8);
+}
 /** Which gizmo handle is under a screen point, if any. */
 /** The selected object's 2D collider on screen: centre, half sizes (or radius) and angle, plus its handles. */
 function colliderFrame(e) {
@@ -1024,6 +1073,7 @@ surface.addEventListener('pointermove', (ev) => {
   }
   if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
+    if (!g.moved && g.type !== 'tap') $('#app').classList.add('dragging'); // the buttons over the Scene fade while you drag
     g.moved = true;
     if (g.type === 'tap') return;
     const j = ent(g.id), live = s.byId(g.id);
@@ -1035,7 +1085,7 @@ surface.addEventListener('pointermove', (ev) => {
         if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
         else { const hit = rayPlaneY(engine.renderer.screenRay(s, x, y), g.origW.y); if (hit) W = [snapV(hit.x - g.grabW.x, 0.5), g.origW.y, snapV(hit.z - g.grabW.z, 0.5)]; }
         if (W) { const l = worldToLocal(g.par, W[0], W[1], W[2], s.mode); j.x = round(l[0], 3); j.y = round(l[1], 3); if (is3D()) j.z = round(l[2], 3); }
-      } else if (!is3D()) { const z = engine.renderer.zoomFor(s); j.x = snapV(g.orig.x + dx / z, 10); j.y = snapV(g.orig.y + dy / z, 10); }
+      } else if (!is3D()) { const z = engine.renderer.zoomFor(s); j.x = snapV(g.orig.x + dx / z, 10); j.y = snapV(g.orig.y + dy / z, 10); snapScene2D(j, live, z); }
       else {
         const hit = rayPlaneY(engine.renderer.screenRay(s, x, y), g.orig.y);
         if (hit) { j.x = snapV(hit.x - g.grab.x, 0.5); j.z = snapV(hit.z - g.grab.z, 0.5); }
@@ -1359,6 +1409,7 @@ function panOrbit(dx, dy) {
 const endPointer = (ev) => {
   if (!ptrs.has(ev.pointerId)) return;
   ptrs.delete(ev.pointerId);
+  if (!ptrs.size) $('#app').classList.remove('dragging');
   cancelLongPress();
   if (ptrs.size === 0 && tapTrack && tapTrack.max >= 2 && !tapTrack.moved && performance.now() - tapTrack.t0 < 400) {
     undoRedo(tapTrack.max >= 3 ? 1 : -1); buzz(10); toast(tapTrack.max >= 3 ? 'Redo' : 'Undo');
@@ -1368,7 +1419,12 @@ const endPointer = (ev) => {
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
   if (g.type === 'collider' && g.moved) { pushHistory(); saveSoon(); renderInspector(); }
-  uiGuide = null;
+  uiGuide = null; sceneGuide = null;
+  if (['free', 'axis', 'tap', 'rotate', 'scale', 'rect'].includes(g.type) && g.id && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) { // double-tap an object: edit its text, or open the Inspector
+    const now = performance.now();
+    if (lastObjTap.id === g.id && now - lastObjTap.t < 340) { lastObjTap = { id: null, t: 0 }; quickEdit(g.id); }
+    else lastObjTap = { id: g.id, t: now };
+  }
   if ((g.type === 'voxel' || g.type === 'tile') && g.count) { pushHistory(); saveSoon(); renderInspector(); }
   if (g.type === 'paint' && g.count) { pushHistory(); saveSoon(); renderHierarchy(); toast(`Painted ${g.count} ${g.count === 1 ? 'copy' : 'copies'}`); }
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
@@ -1442,12 +1498,20 @@ function setTool(t) {
   const was = tool;
   tool = t;
   for (const b of $$('#toolRail [data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
-  if (t !== was) showToolName(t);
-  if (t === 'rect' && was !== 'rect') toast(is3D() && !ent(selectedId)?.ui ? 'Rect tool works on UI and 2D objects. In 3D use Scale.' : 'Rect: drag the edges and corners to resize. Drag the middle to move.');
+  if (t !== was && tipOnce('tool-' + t, null, 3)) showToolName(t);
+  if (t === 'rect' && was !== 'rect') { if (is3D() && !ent(selectedId)?.ui) toast('Rect tool works on UI and 2D objects. In 3D use Scale.'); else tipOnce('rect', 'Rect: drag the edges and corners to resize. Drag the middle to move.'); }
   if (t === 'paint' && was !== 'paint') toast(ent(selectedId) && !ent(selectedId).ui ? `Paint: tap or drag to place copies of ${ent(selectedId).name}` : 'Paint: select an object, then tap or drag in the Scene');
   updateCtxBar();
 }
 
+/** A teaching message only the first few times (then the editor stops repeating itself). */
+function tipOnce(key, msg, times = 2) {
+  let seen = {}; try { seen = JSON.parse(localStorage.getItem('pocket.editor.tips') || '{}'); } catch { /* storage unavailable */ }
+  if ((seen[key] || 0) >= times) return false;
+  seen[key] = (seen[key] || 0) + 1; try { localStorage.setItem('pocket.editor.tips', JSON.stringify(seen)); } catch { /* storage unavailable */ }
+  if (msg) toast(msg);
+  return true;
+}
 const TOOL_NAMES = { hand: 'Hand · pan the view', move: 'Move', rotate: 'Rotate', scale: 'Scale', rect: 'Rect · resize', paint: 'Paint · place copies' };
 let toolTipTimer;
 /** Name the tool next to its button for a moment (the rail only shows icons). */
@@ -1790,6 +1854,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
   engine.editSelected = selectedId; // a Side Menu previews open only while it's selected
+  $('#app')?.classList.toggle('has-sel', !!selectedId && selectedId !== SCENE_ID);
   if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   renderHierarchy();
   renderInspector();
@@ -1799,6 +1864,20 @@ function select(id, { fromScene = false } = {}) {
 }
 
 /** Quick actions for the selected object, floating over the Scene view. */
+/** The selection bar floats just above the selected object (below it near the top of the Scene), so it never covers what you are editing. */
+let ctxPos = '';
+function placeCtxBar(s) {
+  const bar = $('#ctxBar'); if (!bar || bar.hidden) return;
+  const e = s.byId(selectedId); if (!e) return;
+  let x, top, bot;
+  if (e.ui) { const b = uiBounds(e); x = b.x; top = b.y - b.hy; bot = b.y + b.hy; }
+  else { const p = toScreen(e); if (!p) return; let hy = 30; if (!is3D()) { const b = boundsOf(e), z = engine.renderer.zoomFor(s); hy = (b.sphere ? b.r : b.hy) * z; } x = p.x; top = p.y - hy; bot = p.y + hy; }
+  const W = engine.width, H = engine.height, bw = bar.offsetWidth || 240, bh = bar.offsetHeight || 54, gap = e.ui ? 14 : GIZ + 22; // room for the move arrows
+  let y = top - gap - bh; if (y < 64) y = Math.min(bot + gap, H - bh - 84); // too close to the top: put it underneath
+  y = Math.max(8, Math.min(y, H - bh - 84)); x = Math.max(bw / 2 + 8, Math.min(x, W - bw / 2 - 8));
+  const k = `${Math.round(x)},${Math.round(y)}`; if (k === ctxPos) return; ctxPos = k;
+  bar.style.left = Math.round(x) + 'px'; bar.style.top = Math.round(y) + 'px';
+}
 function updateCtxBar() {
   const bar = $('#ctxBar'), j = ent(selectedId);
   bar.hidden = !j || playing || !!attachFor;
@@ -4565,7 +4644,7 @@ function addPrefab(def, at) {
   const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
   for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
   if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
-  if (def.note) setTimeout(() => toast(def.note), 900);
+  if (def.note) setTimeout(() => tipOnce('note-' + (def.label || ''), def.note, 1), 900); // a widget explains itself the first time you add it
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
     const sz = j.tiles.size; j.x = Math.round((j.x - 5 * sz) / sz) * sz; j.y = Math.round((j.y + 2 * sz) / sz) * sz;
@@ -5060,6 +5139,7 @@ function openPreferences() {
   openDialog('Preferences', [
     h('p', { class: 'desc' }, 'These are for you on this device. Game settings live in Scene Settings and Build Settings.'),
     sec('Look', 'brush', [
+      tog('compactTools', 'Fold the tool bar', 'Shows only the tool you are using over the Scene; tap it for the others'),
       h('div', { class: 'row' }, h('label', {}, 'Theme'), h('div', { class: 'seg small pref-themes' }, THEME_NAMES.map(([v, l]) => h('button', { class: EP.theme === v ? 'on' : '', onclick: () => { setEP('theme', v); redo(); } }, h('i', { class: 'th-dot', style: `background:${THEMES[v]['--panel'] || '#383838'};border-color:${THEMES[v]['--toolbar'] || '#191919'}` }), l)))),
       h('div', { class: 'row' }, h('label', {}, 'Accent colour'), h('div', { class: 'pref-swatches' }, ACCENTS.map(([c, l]) => h('button', { class: 'pref-sw' + (EP.accent === c ? ' on' : ''), title: l, 'aria-label': l, style: `background:${c}`, onclick: () => { setEP('accent', c); redo(); } })))),
       sel('uiSize', 'Panel text size', [[0.9, 'Small'], [1, 'Normal'], [1.1, 'Large'], [1.25, 'Extra large']]),
@@ -5910,7 +5990,23 @@ setInterval(() => { if (playing) updatePauseButtons(); }, 300); // the game can 
 // Wire up
 // ============================================================================
 $('#fileBtn').append(icon('menu'));
-for (const b of $$('#toolRail [data-tool]')) { b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool)); b.addEventListener('click', () => setTool(b.dataset.tool)); }
+for (const b of $$('#toolRail [data-tool]')) {
+  b.append(icon(b.dataset.tool === 'paint' ? 'brush' : b.dataset.tool));
+  b.addEventListener('click', () => {
+    const rail = $('#toolRail');
+    if (EP.compactTools !== false && !rail.classList.contains('open') && b.dataset.tool === tool) { rail.classList.add('open'); buzz(6); return; } // folded: the tool you're using opens the rest
+    setTool(b.dataset.tool); rail.classList.remove('open');
+  });
+}
+$('#toolRail').classList.toggle('compact', EP.compactTools !== false);
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest?.('#toolRail')) $('#toolRail').classList.remove('open'); }, true);
+// Clean view: hide the editor's buttons over the Scene (tap the eye again, or the small button left behind, to bring them back)
+const cleanBtn = h('button', { class: 'pt-btn', id: 'cleanBtn', title: 'Clean view: hide the buttons over the Scene' });
+cleanBtn.append(icon('eye'));
+$('#frameBtn').after(cleanBtn);
+const setClean = (on) => { $('#app').classList.toggle('clean', on); cleanBtn.classList.toggle('on', on); cleanBtn.replaceChildren(icon(on ? 'eyeoff' : 'eye')); };
+cleanBtn.addEventListener('click', () => { const on = !$('#app').classList.contains('clean'); setClean(on); setEP('clean', on); if (on) tipOnce('clean', 'Clean view: tap the eye again to bring the buttons back'); });
+setClean(!!EP.clean);
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
 $('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));
@@ -6052,7 +6148,7 @@ function setViewMode(m) {
   $('#app').dataset.view = m;
   $('#uiScreens').hidden = !uiMode;
   refreshOrientBtn();
-  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); toast('UI editor: drag to move, pull edges to resize, pinch to zoom.'); }
+  if (uiMode) { projectTab = 'ui'; renderProject(); setTool('rect'); if (selectedId && !ent(selectedId)?.ui) select(null); tipOnce('ui-editor', 'UI editor: drag to move, pull edges to resize, pinch to zoom.'); }
   if (m === 'top') toast('Top view: lay out your level from above. Drag to pan, pinch to zoom.');
   fitEditorScreen();
   refreshAll(); applyCamera();
@@ -6151,13 +6247,26 @@ function snapUI(j) {
   const sx = a.x + j.x, sy = a.y + j.y;
   if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;
   if (Math.abs(sy - H / 2) < T) { j.y = Math.round(H / 2 - a.y); uiGuide.y = H / 2; } else if (Math.abs(j.y) < T) { j.y = 0; uiGuide.y = a.y; } else if (snap) j.y = Math.round(j.y / 4) * 4;
+  if (!live) return;
+  // line up with the other elements in the same parent (centres and edges)
+  const W2 = engine.width, H2 = engine.height, flat = (q) => { const o = uiOrigin(q, W2, H2, engine.safe), b = boundsOf(q); return { x: o.x + b.x, y: o.y + b.y, hx: b.hx, hy: b.hy }; }; // (the same space as the centre snapping above)
+  const me = boundsOf(live), cx = a.x + j.x + (me.x - (live.x || 0)), cy = a.y + j.y + (me.y - (live.y || 0)), K = 1;
+  let bx = null, by = null;
+  for (const q of engine.scene.entities) {
+    if (q === live || !q.ui || q.dead || !q.visible || q._parentHidden || q.parentEnt !== live.parentEnt) continue;
+    const r = flat(q);
+    if (uiGuide.x == null) for (const [mine, theirs] of [[0, 0], [-me.hx, -r.hx], [me.hx, r.hx], [-me.hx, r.hx], [me.hx, -r.hx]]) { const d = (r.x + theirs) - (cx + mine); if (Math.abs(d) < T && (!bx || Math.abs(d) < Math.abs(bx.d))) bx = { d, at: r.x + theirs }; }
+    if (uiGuide.y == null) for (const [mine, theirs] of [[0, 0], [-me.hy, -r.hy], [me.hy, r.hy], [-me.hy, r.hy], [me.hy, -r.hy]]) { const d = (r.y + theirs) - (cy + mine); if (Math.abs(d) < T && (!by || Math.abs(d) < Math.abs(by.d))) by = { d, at: r.y + theirs }; }
+  }
+  if (bx) { j.x = Math.round(j.x + bx.d / K); uiGuide.x = bx.at; }
+  if (by) { j.y = Math.round(j.y + by.d / K); uiGuide.y = by.at; }
 }
 $('#addFab').addEventListener('click', () => openCreate());
 $('#panelsFab').addEventListener('click', () => setSheet('half'));
 $('#attachBar button').addEventListener('click', () => endAttach(null));
 for (const [act, ic, label] of [['inspect', 'info', 'Inspect'], ['duplicate', 'copy', 'Duplicate'], ['focus', 'frame', 'Focus'], ['attach', 'link', 'Attach'], ['detach', 'unlink', 'Detach'], ['delete', 'trash', 'Delete']]) {
   const b = $(`#ctxBar [data-act="${act}"]`);
-  b.append(icon(ic), label);
+  b.append(icon(ic), h('span', {}, label)); b.title = label;
   b.addEventListener('click', () => ctxAction(act));
 }
 $('#levelBtn').addEventListener('click', openLevelMenu);

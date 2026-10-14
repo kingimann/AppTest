@@ -262,6 +262,7 @@ export class Entity {
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
     this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
+    this.ignoreBars = !!props.ignoreBars; this.overlap = !!props.overlap; // UI: may go under the nav bars / may overlap other UI (Keep UI apart)
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
     this.collider = props.collider ? { ...props.collider } : null; // Unity-style collider: alone it makes a solid (static) object
     this.body = null;
@@ -1620,7 +1621,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -1721,7 +1722,7 @@ class NotifyCenter {
     });
   }
   draw(ctx) {
-    const E = this.engine, now = this.now(), W = E.width, H = E.height, safe = E.safe;
+    const E = this.engine, now = this.now(), W = E.width, H = E.height, safe = E.safe, B = safe.bars || { top: 0, bottom: 0 }; // B: space the nav bars hold (notifications stay clear of them)
     this.list = this.list.filter((n) => { if (!n.closing && now - n.t0 > n.life) n.closing = now; return !(n.closing && now - n.closing > 0.4); });
     this.rects = [];
     if (!this.list.length) return;
@@ -1730,14 +1731,14 @@ class NotifyCenter {
     for (const n of this.list) (groups[n.T.position] ||= []).push(n);
     for (const [pos, list] of Object.entries(groups)) {
       const bottom = pos.startsWith('bottom'), left = pos.endsWith('left'), right = pos.endsWith('right');
-      let y = bottom ? H - safe.bottom - 16 : pos === 'center' ? H * 0.3 : safe.top + 12;
+      let y = bottom ? H - safe.bottom - B.bottom - 16 : pos === 'center' ? H * 0.3 : safe.top + B.top + 12;
       for (const n of [...list].reverse()) {
         const T = n.T, look = T.look || 'card', w = T.width > 0 ? Math.min(+T.width, W - 16) : look === 'banner' ? W : look === 'pill' || look === 'toast' ? Math.min(W - 40, 340) : look === 'bubble' ? Math.min(W - 60, 300) : Math.min(W - 24, 380);
         const lines = wrapLines(ctx, n.text, w - (n.icon || n.image ? 90 : 36), T.textSize, look === 'pill' ? 1 : 2), hasBtns = n.buttons.length > 0;
-        const top = look === 'banner' && !bottom && pos !== 'center' ? safe.top : 0;
+        const top = look === 'banner' && !bottom && pos !== 'center' && !B.top ? safe.top : 0;
         const h = top + (look === 'pill' ? 46 : look === 'minimal' ? 40 : Math.max(62, 22 + (T.label ? 14 : 0) + T.titleSize * 1.3 + lines.length * T.textSize * 1.35)) + (hasBtns ? 42 : 0) + (look === 'picture' ? 30 : 0);
         const inK = clamp((now - n.t0) / 0.35, 0, 1), outK = n.closing ? clamp((now - n.closing) / 0.35, 0, 1) : 0;
-        const x0 = look === 'banner' ? 0 : left ? 12 + safe.left : right ? W - w - 12 - safe.right : (W - w) / 2, y0 = bottom ? y - h : look === 'banner' && !bottom && pos !== 'center' ? 0 : y;
+        const x0 = look === 'banner' ? 0 : left ? 12 + safe.left : right ? W - w - 12 - safe.right : (W - w) / 2, y0 = bottom ? y - h : look === 'banner' && !bottom && pos !== 'center' ? (B.top ? safe.top + B.top : 0) : y;
         ctx.save();
         const k = applyNotifyAnim(ctx, T, inK, outK, x0, y0, w, h, bottom, left, right, now - n.t0);
         drawNotifyCard(ctx, n, x0, y0, w, h, top, lines, now, E);
@@ -1850,6 +1851,15 @@ class PhoneNotify {
     if (this.listening) return; this.listening = true;
     const N = this.native;
     N?.addListener?.('localNotificationActionPerformed', (ev) => { const id = ev?.notification?.extra?.key || ''; this.opened(id); });
+    // browsers: the service worker tells the open game, or opens it with ?notification=ID
+    navigator.serviceWorker?.addEventListener?.('message', (ev) => { if (ev.data && ev.data.pocketNotify != null) this.opened(String(ev.data.pocketNotify)); });
+    const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('notification') : null;
+    if (q != null) setTimeout(() => this.opened(q), 600);
+  }
+  /** Android 8+: notifications go in a channel; ours pops up on screen (high importance). */
+  async channel(N) {
+    if (this.channelMade || !N.createChannel) return; this.channelMade = true;
+    try { await N.createChannel({ id: 'game', name: document.title || 'Game', description: 'Reminders and news from the game', importance: 4, visibility: 1, vibration: true }); } catch { /* iOS has no channels */ }
   }
   opened(id) { const s = this.engine.scene; s?.send('notification opened', id); if (id) s?.send('notification opened ' + id); }
   /** Current permission: 'granted', 'denied', 'prompt' or 'unsupported'. */
@@ -1880,8 +1890,9 @@ class PhoneNotify {
     await this.cancel(key, true);
     const N = this.native;
     if (N) {
-      const n = { id, title, body, extra: { key } };
-      if (when === 'in') n.schedule = { at: new Date(Date.now() + Math.max(1, +o.seconds || 1) * 1000) };
+      const n = { id, title, body, extra: { key }, channelId: 'game' };
+      await this.channel(N);
+      if (when === 'in') n.schedule = { at: new Date(Date.now() + Math.max(1, +o.seconds || 1) * 1000), allowWhileIdle: true }; // (arrives on time even in Android's battery saver)
       else if (when === 'daily') { const [h, m] = String(o.time || '20:00').split(':').map((x) => parseInt(x, 10) || 0); n.schedule = { on: { hour: clamp(h, 0, 23), minute: clamp(m, 0, 59) } }; }
       else if (when === 'every') n.schedule = { every: o.every || 'day' };
       try { await N.schedule({ notifications: [n] }); return true; } catch (err) { Log.add?.('warn', 'Phone notification failed: ' + err.message); return false; }
@@ -1969,7 +1980,7 @@ export class Input {
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
-    const btn = this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
+    const btn = this.engine.scene?.modal ? null : this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
@@ -3312,7 +3323,7 @@ function drawMessage(ctx, scene, W, H, engine) {
     if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
   }
   if (line) lines.push(line);
-  const h = lines.length * (size + 6) + 24, y = scene.settings.messageTop ? engine.safe.top + H * 0.2 : H - engine.safe.bottom - 130 - h;
+  const h = lines.length * (size + 6) + 24, B = engine.safe.bars || { top: 0, bottom: 0 }, y = scene.settings.messageTop ? engine.safe.top + B.top + H * 0.2 : H - engine.safe.bottom - B.bottom - 130 - h;
   ctx.globalAlpha = Math.min(1, m.t * 3);
   ctx.fillStyle = 'rgba(15,15,25,0.85)';
   ctx.beginPath();
@@ -3326,9 +3337,77 @@ function drawMessage(ctx, scene, W, H, engine) {
 const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
 /** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
 export function uiOrigin(e, W, H, safe) {
-  const p = e.parentEnt;
-  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
-  return anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe);
+  const p = e.parentEnt, P = e._push;
+  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w + (P ? P.x : 0), y: r.y - r.h / 2 + f.y * r.h + (P ? P.y : 0) }; }
+  const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = safe?.bars;
+  if (B && !e._dock && !e.ignoreSafe && !e.ignoreBars) { // nav bars hold their edge of the screen: everything else is laid out in what's left
+    const a = e.anchor || 'top-left';
+    pt.x += a.includes('left') ? B.left : a.includes('right') ? -B.right : (B.left - B.right) / 2;
+    pt.y += a.startsWith('top') ? B.top : a.startsWith('bottom') ? -B.bottom : (B.top - B.bottom) / 2;
+  }
+  if (P) { pt.x += P.x; pt.y += P.y; }
+  return pt;
+}
+/** The screen area left for UI once the safe area and the nav bars are taken out. */
+export function uiArea(W, H, safe, e) {
+  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && safe?.bars || { top: 0, right: 0, bottom: 0, left: 0 };
+  const l = sf.left + B.left, t = sf.top + B.top;
+  return { l, t, w: Math.max(1, W - l - sf.right - B.right), h: Math.max(1, H - t - sf.bottom - B.bottom) };
+}
+/**
+ * Every frame: how much of each screen edge the nav bars hold (Bottom Nav, App Bar, an Icon Rail), so other UI is laid out
+ * clear of them; and, if the game asks, pushes UI elements apart so none overlap (Game Settings › Screen › Keep UI apart).
+ */
+function layoutUI(E, s) {
+  const S = E.safe, mode = s.settings.uiOverlap || 'bars', screen = E.paused ? 'paused' : s.state;
+  const b = { top: 0, right: 0, bottom: 0, left: 0 };
+  for (const e of s.entities) {
+    if (!e.ui || e.dead) continue;
+    for (const bh of e.behaviors) {
+      if (!bh.dock) continue;
+      e._dock = true;
+      if (mode === 'off' || !e.visible || e._parentHidden || e._clipHidden || (!E.editing && ![screen, 'always'].includes(uiScreenOf(e)))) continue;
+      const d = bh.dock(e, s);
+      if (d && d.size > 0) b[d.edge] = Math.max(b[d.edge], d.size);
+    }
+  }
+  S.bars = b.top || b.right || b.bottom || b.left ? b : null;
+  if (mode === 'push apart') pushApart(E, s, screen);
+  else if (E._pushed) { for (const e of s.entities) delete e._push; E._pushed = false; }
+}
+/** Keep UI apart: within each parent, a later element that overlaps an earlier one moves away from it (up or down, away from its anchor edge). */
+function pushApart(E, s, screen) {
+  const W = E.width, H = E.height, S = E.safe, groups = new Map();
+  for (const e of s.entities) {
+    delete e._push;
+    if (!e.ui || e.dead || !e.visible || e._parentHidden || e._dock || e.overlap || (e.stretch && e.stretch !== 'none') || e.ignoreSafe) continue;
+    if (!E.editing && ![screen, 'always'].includes(uiScreenOf(e))) continue;
+    if (E.editing && E.uiFilter && !E.uiFilter(e)) continue;
+    if (s.modal === e || e.behaviors.some((b) => b.uiAlways && !b.dock && b.open !== undefined)) continue; // menus and popups sit on top on purpose
+    const key = e.parentEnt?.ui ? e.parentEnt : null;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+  E._pushed = true;
+  const gap = 6;
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const placed = [];
+    for (const e of list) {
+      const r0 = uiBox(e, W, H, S);
+      if (r0.w <= 1 || r0.h <= 1 || (r0.w > W * 0.8 && r0.h > H * 0.5)) continue; // backgrounds and full-screen panels hold other things
+      const a = e.anchor || 'top-left', dir = a.startsWith('bottom') ? -1 : 1;
+      let dy = 0;
+      for (let pass = 0; pass < 6; pass++) {
+        const r = { x: r0.x, y: r0.y + dy, w: r0.w, h: r0.h };
+        const hit = placed.find((q) => Math.abs(q.x - r.x) * 2 < q.w + r.w && Math.abs(q.y - r.y) * 2 < q.h + r.h + gap * 2);
+        if (!hit) break;
+        dy = dir > 0 ? hit.y + hit.h / 2 + gap - (r0.y - r0.h / 2) : hit.y - hit.h / 2 - gap - (r0.y + r0.h / 2);
+      }
+      if (dy) e._push = { x: 0, y: dy };
+      placed.push({ x: r0.x, y: r0.y + dy, w: r0.w, h: r0.h });
+    }
+  }
 }
 /** UI scale (Canvas Scaler): screen pixels per UI unit. It rides along on the safe-area object. */
 export const uiK = (safe) => safe?.k || 1;
@@ -3362,8 +3441,7 @@ export function anchorPoint(anchor, W, H, safe) {
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
-  const sf = e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe;
-  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: sf.left, t: sf.top, w: W - sf.left - sf.right, h: H - sf.top - sf.bottom };
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : uiArea(W, H, safe, e);
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
   if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
   if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
@@ -3417,6 +3495,7 @@ function renderUI(engine, scene) {
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
+      if (scene.uiShift && !engine.editing) { let mine = false; for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === scene.uiShiftBy) { mine = true; break; } if (!mine) o.x += scene.uiShift; } // a side menu that pushes the screen aside
       let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
       if (pa <= 0.002) continue;
       ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
@@ -3452,7 +3531,7 @@ function renderUI(engine, scene) {
   const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
-  if (scene.state === 'play' && !engine.paused && !scene.loading) { // (a Loading Screen hides the touch controls)
+  if (scene.state === 'play' && !engine.paused && !scene.loading && !scene.modal) { // (a Loading Screen, side menu or popup hides the touch controls)
     ctx.save();
     ctx.globalAlpha = clamp((+scene.settings.controlsOpacity || 1) * (engine.prefs?.opacity ?? 1), 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
@@ -5127,7 +5206,7 @@ const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating',
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
-    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile' },
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
@@ -5152,17 +5231,30 @@ registerBehavior('uiBottomNav', {
     { key: 'centerMessage', label: 'Middle button sends message (blank = acts as a tab)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: { style: ['raised center'] } },
     { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab', group: 'Behaviour' },
     { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour', infoText: 'e.g. game, levels: the bar slides away while the variable is one of these.' },
+    { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'otherPage', label: 'On a page that isn\'t a tab', type: 'select', options: ['no tab lit', 'keep the last tab lit', 'hide the bar'], default: 'keep the last tab lit', group: 'Behaviour', infoText: 'e.g. Settings opened from the Side Menu.' },
+    { key: 'reselect', label: 'Tapping the current tab again sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', infoText: 'e.g. scroll top. The message gets the page name too.' },
     { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Layout', infoText: 'Pages, buttons and pop-ups anchored to the bottom sit above the bar instead of under it.' },
+    { key: 'maxWidth', label: 'Widest the bar gets (0 = full width)', type: 'number', default: 0, range: [0, 900], step: 10, group: 'Layout', infoText: 'On tablets and sideways phones the bar stays this wide, in the middle.' },
+    { key: 'badgeStyle', label: 'Badges', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Colours' },
+    { key: 'activeLift', label: 'Selected icon lifts up', type: 'number', default: 0, range: [0, 12], step: 1, group: 'Animation' },
   ],
   create(p) {
-    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => ({ label, icon, page: page || label.toLowerCase(), badge }));
-    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1;
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => { const a = page || label.toLowerCase(); return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge } : { label, icon, page: a, badge }; });
+    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1;
     const pulse = new Map(), ripples = [];
-    const hidden = (s) => !!p.hideOn && String(p.hideOn).split(',').map((x) => x.trim()).filter(Boolean).some((v) => sameVal(s.vars[p.var], v));
-    const activeIdx = (s) => T.findIndex((t) => sameVal(s.vars[p.var], t.page));
+    const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
+    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || s.barsHidden > 0 || !!s.navBarsOff;
+    const activeIdx = (s) => {
+      const m = T.findIndex((t) => t.msg && s.openMenus?.has(t.msg)); if (m >= 0) return m; // a "menu" tab lights up while its menu is open
+      const i = tabIdx(s); if (i >= 0) return i;
+      return (p.otherPage || 'keep the last tab lit') === 'keep the last tab lit' && lastTab >= 0 && lastTab < T.length ? lastTab : -1;
+    };
     const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
-      const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
+      const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
       const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
       const n = Math.max(1, T.length), tw = bw / n;
       return { w, h, bx, by, bw, bh, tw, n, cx: (i) => bx + tw * (i + 0.5), cy: by + bh / 2 };
@@ -5170,12 +5262,21 @@ registerBehavior('uiBottomNav', {
     const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
     return {
       uiAlways: true, var: p.var,
+      pageLabel(page, v) { if (v !== p.var) return null; const t = T.find((q) => q.page != null && sameVal(q.page, page)); return t ? t.label : null; },
+      /** The bar holds the bottom (or top) of the screen: other UI is laid out above it. */
+      dock(e, s) {
+        if (p.reserve === false || hide > 0.99) return null;
+        const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe), top = o.y + G.by * K, bot = o.y + (G.by + G.bh) * K;
+        if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide) };
+        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide) };
+      },
       start(e, s) { T = tabs(); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
       update(e, dt, s) {
         const k = Math.min(1, dt * (+p.speed || 14));
         hide += ((hidden(s) ? 1 : 0) - hide) * k;
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
+        const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
         const a = activeIdx(s), G = geo(e);
         if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
         if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
@@ -5193,7 +5294,8 @@ registerBehavior('uiBottomNav', {
           if (p.haptics !== false) s.engine.vibrate(8);
           if (p.sound) s.engine.audio.sfx(p.sound);
           if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
-          if (sameVal(s.vars[p.var], tab.page)) continue;
+          if (tab.msg) { s.send(tab.msg); continue; }
+          if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } continue; }
           const cur = activeIdx(s);
           s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 });
           if (p.message) s.send(p.message);
@@ -5251,7 +5353,7 @@ registerBehavior('uiBottomNav', {
             ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
             ctx.restore();
           } else {
-            const iy = lab ? -lsz * 0.85 : 0;
+            const iy = (lab ? -lsz * 0.85 : 0) - (on ? +p.activeLift || 0 : 0);
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
             if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
             drawNavIcon(ctx, t.icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
@@ -5262,7 +5364,7 @@ registerBehavior('uiBottomNav', {
           // badge
           const bv = t.badge ? s.vars[t.badge] : null;
           if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
-            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = p.badgeStyle !== 'dot only' && Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
             ctx.fillStyle = p.badgeColor || '#ff3b5c'; ctx.strokeStyle = st === 'minimal' ? 'transparent' : p.barColor || '#12141f'; ctx.lineWidth = 2;
             if (!txt) { ctx.beginPath(); ctx.arc(bxp, byp, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
             else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(txt).width + 8); rr(bxp - 6, byp - 8, w, 16, 8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bxp - 6 + w / 2, byp + 0.5); }
@@ -5310,6 +5412,12 @@ registerBehavior('uiSideBar', {
     { key: 'closeOnPick', label: 'Close when an item is picked', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'startOpen', label: 'Start open', type: 'bool', default: false, group: 'Behaviour' },
     { key: 'mode', label: 'Items', type: 'select', options: ['switch page', 'open page (Back returns)'], default: 'switch page', group: 'Behaviour' },
+    { key: 'edgeWidth', label: 'Edge swipe area (px)', type: 'number', default: 22, range: [8, 80], step: 2, group: 'Behaviour' },
+    { key: 'openVar', label: 'Set variable while open (blank = none)', type: 'text', default: '', suggest: 'vars', group: 'Behaviour', infoText: 'e.g. menuOpen: true while the menu is open, for Show If or nodes.' },
+    { key: 'bars', label: 'With a Bottom Nav / App Bar', type: 'select', options: ['stay between them', 'cover them', 'hide them while open'], default: 'stay between them', group: 'Works with', info: { 'stay between them': 'The menu fits between the bars, which stay usable (tapping one closes the menu).', 'cover them': 'The menu goes over everything.', 'hide them while open': 'The bars slide away while the menu is open.' } },
+    { key: 'openMode', label: 'Opening', type: 'select', options: ['over the screen', 'push the screen'], default: 'over the screen', group: 'Works with', infoText: 'Push slides the rest of the UI aside, so nothing is hidden under the menu.' },
+    { key: 'button', label: 'Built-in ☰ button', type: 'select', options: ['none', 'top corner', 'bottom corner'], default: 'none', group: 'Works with', infoText: 'On its own side. Hidden while an App Bar shows its own ☰.' },
+    { key: 'buttonColor', label: 'Button colour', type: 'color', default: '#ffffff', group: 'Works with' },
   ],
   create(p) {
     const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
@@ -5318,40 +5426,72 @@ registerBehavior('uiSideBar', {
       const [label = '', icon = '', act = '', badge = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
       return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge } : { kind: 'page', label, icon, page: a, badge };
     });
-    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9; // age: seconds since it started opening (items flow in by it)
+    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => st() === 'floating' || st() === 'glass';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     const inst = {
       uiAlways: true,
       get open() { return want; }, get rows() { return rows; },
-      set(e, s, v) { if (v === want) return; want = v; if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null; },
+      pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
+      set(e, s, v) {
+        if (v === want) return; want = v;
+        if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null;
+        (s.openMenus ||= new Set())[v ? 'add' : 'delete'](p.message); s.emit('menu', p.message, v);
+        if (p.bars === 'hide them while open') s.barsHidden = Math.max(0, (s.barsHidden || 0) + (v ? 1 : -1));
+        if (p.openVar) s.setVar(p.openVar, v);
+      },
+      /** Space a Bottom Nav / App Bar holds above and below the menu ('stay between them'). */
+      between(s) { const B = s.engine.safe.bars; return p.bars === 'stay between them' || p.bars === undefined ? { top: B?.top || 0, bottom: B?.bottom || 0 } : { top: 0, bottom: 0 }; },
       rect(s) { // the panel when fully open, in screen pixels
-        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0;
-        if (full()) return { x: 0, y: 0, w: W, h: H, m: 0 };
+        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0, bt = inst.between(s), S = E.safe;
+        const top = bt.top ? S.top + bt.top : 0, bot = bt.bottom ? S.bottom + bt.bottom : 0; // with bars, the menu fits between them
+        if (full()) return { x: 0, y: top, w: W, h: H - top - bot, m: 0, top, bot };
         const w = Math.min(+p.width || 290, W - 56), x = p.side === 'right' ? W - m - w : m;
-        return { x, y: m + (floaty() ? E.safe.top : 0), w, h: H - m * 2 - (floaty() ? E.safe.top + E.safe.bottom : 0), m };
+        const y0 = top || (floaty() ? S.top : 0), y1 = bot || (floaty() ? S.bottom : 0);
+        return { x, y: m + y0, w, h: H - m * 2 - y0 - y1, m, top, bot };
+      },
+      /** An Icon Rail holds its side of the screen, so other UI stays clear of it. */
+      dock(e, s) { if (!rail()) return null; const m = floaty() ? +p.margin || 0 : 0; return { edge: p.side === 'right' ? 'right' : 'left', size: 72 + m }; },
+      /** The built-in ☰ button (screen pixels), or null. */
+      btn(s) {
+        if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
+        const E = s.engine, S = E.safe, B = S.bars || { top: 0, bottom: 0, left: 0, right: 0 }, left = p.side !== 'right', K = uiK(S);
+        const x = left ? S.left + B.left + 34 * K : E.width - S.right - B.right - 34 * K, y = p.button === 'bottom corner' ? E.height - S.bottom - B.bottom - 34 * K : S.top + B.top + 34 * K;
+        return { x, y, r: 24 * K };
       },
       start(e, s) {
         I = parse(p.items); F = parse(p.footer);
         e._dismiss = () => inst.set(e, s, false);
-        if (want) s.modal = e;
+        e._modalPass = () => { if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
+        if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
         s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
-      destroy(e, s) { if (s.modal === e) s.modal = null; },
+      destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {
-        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72;
+        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72, edge = +p.edgeWidth || 22;
+        // the built-in ☰ button
+        const B = inst.btn(s);
+        if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
         // swipe from the edge / drag to close
-        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if (left ? d.x < 22 : d.x > E.width - 22) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
-        if (!drag && p.dragClose !== false && want && !full()) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w) { drag = { id: d.id, x0: d.x, t0: t, open: true, moved: false }; break; } }
+        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
+        if (!drag && want && ((p.dragClose !== false && !full()) || overflow > 0)) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w && d.y >= R.y && d.y <= R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, s0: scroll, open: true, moved: false, mode: null }; break; } }
         if (drag) {
           const q = inp.pointers.get(drag.id), span = Math.max(1, R.w - (rail() ? railW : 0));
-          if (q) { const dx = (q.x - drag.x0) * (left ? 1 : -1); if (Math.abs(dx) > 10) drag.moved = true; if (drag.moved || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1); }
-          else { if (drag.moved || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
+          if (q) {
+            const dx = (q.x - drag.x0) * (left ? 1 : -1), dy = q.y - (drag.y0 ?? q.y);
+            if (drag.open && !drag.mode && Math.hypot(dx, dy) > 10) drag.mode = Math.abs(dy) > Math.abs(dx) && overflow > 0 ? 'scroll' : p.dragClose !== false && !full() ? 'close' : 'none'; // up/down scrolls a long menu, sideways closes it
+            if (drag.mode) drag.moved = true;
+            if (drag.mode === 'scroll') scroll = clamp(drag.s0 - dy, 0, overflow);
+            else if (drag.mode === 'close' || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1);
+          } else { if (drag.mode === 'close' || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
         } else {
           const step = dt / Math.max(0.05, +p.duration || 0.28);
           t = want ? Math.min(1, t + step) : Math.max(0, t - step);
         }
+        scroll = clamp(scroll, 0, overflow);
         age += dt;
+        // "push the screen": the rest of the UI slides aside by as much as the menu is open
+        if (p.openMode === 'push the screen' && !rail()) { const sh = (left ? 1 : -1) * (R.w + R.m) * ease(t); if (sh || s.uiShiftBy === e) { s.uiShift = sh; s.uiShiftBy = sh ? e : null; } }
         // keep the entity the size of the open panel, so taps outside it close the menu (scene.modal)
         if (e.shape) { const k = uiK(E.safe) || 1; e.shape.w = R.w / k; e.shape.h = R.h / k; e.stretch = 'none'; placeUI(e, R.x + R.w / 2, R.y + R.h / 2, E.width, E.height, E.safe); }
         for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
@@ -5360,7 +5500,7 @@ registerBehavior('uiSideBar', {
         if (!visible || (drag && drag.moved)) return;
         for (const tp of inp.taps) {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
-          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
           if (!r) continue;
           const it = r.item; press.set(it, 1);
           if (p.haptics !== false) E.vibrate(8);
@@ -5376,12 +5516,17 @@ registerBehavior('uiSideBar', {
         const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
         if (!I.length && !F.length) { I = parse(p.items); F = parse(p.footer); }
         ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
-        const sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? 1 : ease(t), raw = editing ? 1 : t;
+        const shown = editing ? (E.editSelected === e.id ? 1 : 0) : t, sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? shown : ease(t), raw = shown; // the editor shows it open while it's selected
         rows = [];
+        const Bt = inst.btn(s);
+        if (Bt && tt < 0.99) { // the ☰ button fades out as the menu opens
+          ctx.save(); ctx.globalAlpha *= 1 - tt; ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.arc(Bt.x, Bt.y, Bt.r, 0, Math.PI * 2); ctx.fill();
+          drawNavIcon(ctx, 'menu', Bt.x, Bt.y, Bt.r * 1.0, p.buttonColor || '#ffffff'); ctx.restore();
+        }
         if (tt <= 0.001 && !rail()) return;
         const txt = p.text || '#e8eaf2', acc = p.accent || '#4fa3ff', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
         // dim behind
-        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, R.top || 0, W, H - (R.top || 0) - (R.bot || 0)); ctx.restore(); }
         // panel placement for this frame
         let w = R.w, x = R.x, alpha = 1, zoom = 1;
         if (rail()) { w = railW + (R.w - railW) * tt; x = left ? R.x : R.x + R.w - w; }
@@ -5452,12 +5597,124 @@ registerBehavior('uiSideBar', {
           return yy;
         };
         if (full()) { const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih * 1.25), 0); y = Math.max(y, R.y + (R.h - total) / 2); }
-        drawList(I, y);
-        if (F.length) { const fh = F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0), fy = R.y + R.h - safeB - fh - 10; if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        // the list scrolls when it doesn't fit above the footer, so items never run under it
+        const fh = F.length ? F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0) : 0, fy = R.y + R.h - safeB - fh - 10, listEnd = F.length ? fy - 8 : R.y + R.h - safeB - 6;
+        const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? (compact ? 6 : 32) : full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih), 0);
+        overflow = editing ? 0 : Math.max(0, total - (listEnd - y));
+        ctx.save(); ctx.beginPath(); ctx.rect(x - 40, y, w + 80, Math.max(0, listEnd - y)); ctx.clip();
+        const n0 = rows.length; drawList(I, y - (overflow ? scroll : 0));
+        for (let i = n0; i < rows.length; i++) rows[i].clipped = [y, listEnd];
+        ctx.restore();
+        if (overflow > 0) { const vh = listEnd - y, bh = Math.max(24, vh * vh / (vh + overflow)), by = y + (vh - bh) * (scroll / overflow); ctx.fillStyle = withAlpha(txt, 0.25); rr(left ? x + w - 5 : x + 2, by, 3, bh, 2); ctx.fill(); }
+        if (F.length) { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
         ctx.restore(); ctx.restore();
       },
     };
     return inst;
+  },
+});
+
+const APPBAR_STYLES = ['solid', 'transparent', 'glass', 'large title', 'centered'];
+registerBehavior('uiAppBar', {
+  label: 'App Bar', description: 'A top bar like a phone app: ☰ (opens the Side Menu) or ‹ Back on the left, the page title, and action buttons with badges. Works with Bottom Nav and Side Menu: the title follows the page, and other UI stays below it.',
+  params: [
+    { key: 'title', label: 'Title (blank = the page\'s name; variables in braces)', type: 'text', default: '' },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'titles', label: 'Page titles (page = Title, one per line)', type: 'code', default: '', infoText: 'Optional. Otherwise the title comes from the Bottom Nav / Side Menu label for the page.' },
+    { key: 'left', label: 'Left button', type: 'select', options: ['back, else menu', 'menu', 'back', 'none'], default: 'back, else menu', info: { 'back, else menu': '‹ when there is a page to go back to, otherwise ☰.', menu: 'Always ☰ (sends the menu message).', back: '‹ only when there is somewhere to go back to.', none: 'No button.' } },
+    { key: 'menuMessage', label: '☰ sends message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'actions', label: 'Right buttons (icon | message | badge variable)', type: 'code', default: 'bell | notifications | unread\nsearch | search' },
+    { key: 'style', label: 'Style', type: 'select', options: APPBAR_STYLES, default: 'solid', info: { solid: 'A coloured bar.', transparent: 'No bar, just buttons and title over the game.', glass: 'See-through frosted bar.', 'large title': 'A tall bar with a big title on the left (iOS style).', centered: 'Title in the middle.' } },
+    { key: 'bg', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
+    { key: 'text', label: 'Title & icons', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'accent', label: 'Pressed / lit', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'titleSize', label: 'Title size', type: 'number', default: 19, range: [12, 40], step: 1, group: 'Size & shape' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [14, 40], step: 1, group: 'Size & shape' },
+    { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'border', label: 'Line along the bottom', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'fillSafe', label: 'Fill the notch area above', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Feel' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
+  ],
+  create(p) {
+    const acts = () => String(p.actions || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).slice(0, 4).map(([icon, msg = '', badge = '']) => ({ icon, msg, badge }));
+    const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+    let A = acts(), hide = 0, press = new Map(), hits = [];
+    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
+    const canBack = (s) => Object.values(s.navStacks || {}).some((st) => st.length);
+    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' ? null : 'menu'; };
+    const titleOf = (s) => {
+      if (p.title) return fillTemplate(String(p.title), s.vars);
+      const page = s.vars[p.var];
+      for (const l of String(p.titles || '').split('\n')) { const m = /^\s*([^=]+?)\s*=\s*(.*)$/.exec(l); if (m && sameVal(m[1], page)) return fillTemplate(m[2], s.vars); }
+      for (const q of s.entities) for (const b of q.behaviors || []) { const t = b.pageLabel?.(page, p.var); if (t) return t; }
+      const t = String(page ?? ''); return t ? t[0].toUpperCase() + t.slice(1) : '';
+    };
+    const geo = (e) => { const ex = e.extents(); return { x: e.x - ex.hx, y: e.y - ex.hy, w: ex.hx * 2, h: ex.hy * 2 }; };
+    return {
+      uiAlways: true,
+      dock(e, s) {
+        if (p.reserve === false || hide > 0.99) return null;
+        const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe);
+        return { edge: 'top', size: Math.max(0, o.y + (G.y + G.h) * K - E.safe.top) * (1 - hide) };
+      },
+      update(e, dt, s) {
+        A = acts();
+        hide += ((hidden(s) ? 1 : 0) - hide) * Math.min(1, dt * 14);
+        for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
+        const lk = leftKind(s), on = hide < 0.5 && e.visible && !e._parentHidden;
+        (s.appBarMenu ||= new Set())[on && lk === 'menu' ? 'add' : 'delete'](p.menuMessage || 'menu'); // a Side Menu's own ☰ steps aside
+        if (!on || s.engine.editing) return;
+        const E = s.engine, r = uiRect(s, e), K = uiK(E.safe);
+        for (const t of E.input.taps) {
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, h = hits.find((q) => Math.abs(lx - q.x) < q.r && Math.abs(ly - q.y) < q.r + 6);
+          if (!h) continue;
+          press.set(h.key, 1); UK.tap(s, p);
+          if (h.key === 'left') { if (lk === 'back') s.navBack(); else s.send(p.menuMessage || 'menu'); }
+          else if (h.msg) s.send(h.msg);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = p.text || '#ffffff', acc = p.accent || '#4fa3ff', isz = +p.iconSize || 24;
+        if (hide > 0.99) return;
+        if (hide > 0.001) { ctx.translate(0, -(G.h + safeT + 10) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        if (st !== 'transparent') {
+          if (p.shadow !== false && st !== 'glass') { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
+          ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.bg || '#12141f';
+          ctx.fillRect(G.x, G.y - safeT, G.w, G.h + safeT); ctx.shadowColor = 'transparent';
+          if (p.border !== false || st === 'glass') { ctx.fillStyle = 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')'; ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
+        }
+        hits = [];
+        const big = st === 'large title', rowY = big ? G.y + Math.min(G.h, 56) / 2 : G.y + G.h / 2, lk = leftKind(s);
+        const button = (key, icon, x, msg, badge) => {
+          const pr = press.get(key) || 0, lit = key === 'left' && lk === 'menu' && s.openMenus?.has(p.menuMessage || 'menu');
+          if (pr || lit) { ctx.save(); ctx.globalAlpha *= lit ? 0.25 : 0.2 * pr; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(x, rowY, isz * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+          drawNavIcon(ctx, icon, x, rowY, isz, lit ? acc : col);
+          const bv = badge ? s.vars[badge] : null;
+          if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+            const n = +bv, t = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '', bx = x + isz * 0.45, by = rowY - isz * 0.45;
+            ctx.fillStyle = p.badgeColor || '#ff3b5c';
+            if (!t) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(t).width + 8); UK.rr(ctx, bx - w / 2, by - 8, w, 16, 8); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, bx, by + 0.5); }
+          }
+          hits.push({ key, x, y: rowY, r: Math.max(22, isz), msg });
+        };
+        let lx = G.x + 10;
+        if (lk) { button('left', lk === 'back' ? 'back' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
+        let rx = G.x + G.w - 28;
+        A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= 46; });
+        const title = titleOf(s), tsz = +p.titleSize || 19;
+        if (title) {
+          ctx.fillStyle = col; ctx.textBaseline = 'middle';
+          if (big) { ctx.font = `900 ${Math.round(tsz * 1.5)}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.fillText(title, G.x + 18, G.y + G.h - tsz * 1.05, G.w - 36); }
+          else if (st === 'centered') { ctx.font = `800 ${tsz}px ${THEME.font}`; ctx.textAlign = 'center'; const room = Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2; ctx.fillText(title, G.x + G.w / 2, rowY, Math.max(40, room)); }
+          else { ctx.font = `800 ${tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.fillText(title, lx + (lk ? 4 : 8), rowY, Math.max(40, rx + 22 - lx - 12)); }
+        }
+      },
+    };
   },
 });
 
@@ -9657,6 +9914,27 @@ Object.assign(NODE_TYPES, {
   uiEnabled: { cat: 'UI', label: 'Is Enabled', value: 'bool', params: [txt('object', 'Shop Button', 'object')] },
   safeArea: { cat: 'UI', label: 'Safe Area', value: 'number', params: [opt('side', ['top', 'bottom', 'left', 'right'], 'top', 'side')] },
 });
+// ---- app & device nodes: the phone around the game (switching apps, notifications, battery, menus) ----
+Object.assign(NODE_TYPES, {
+  onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
+  onAppShown: { cat: 'Events', label: 'On App Back', outs: ['then'] },
+  onNotifyOpened: { cat: 'Events', label: 'On Phone Notification Tapped', outs: ['then'], params: [txt('id', '', 'id (blank = any)')] },
+  onMenu: { cat: 'Events', label: 'On Side Menu Opened / Closed', outs: ['opened', 'closed'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
+  onOrientation: { cat: 'Events', label: 'On Screen Turned', outs: ['portrait', 'landscape'] },
+  onOnline: { cat: 'Events', label: 'On Connection Changed', outs: ['online', 'offline'] },
+  menuOpen: { cat: 'UI', label: 'Open / Close Side Menu', exec: true, outs: ['then'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }, opt('mode', ['toggle', 'open', 'close'], 'toggle', 'make it')] },
+  menuIsOpen: { cat: 'UI', label: 'Side Menu Is Open', value: 'bool', params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
+  navBars: { cat: 'UI', label: 'Show / Hide Nav Bars', exec: true, outs: ['then'], params: [opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make them')] },
+  vibratePattern: { cat: 'Device', label: 'Vibrate Pattern', exec: true, outs: ['then'], params: [txt('pattern', '80, 60, 80, 60, 200', 'buzz, pause, buzz… (ms)')] },
+  appBadge: { cat: 'Device', label: 'App Icon Badge', exec: true, outs: ['then'], inputs: [N_IN('count', 1)] },
+  fullScreen: { cat: 'Device', label: 'Full Screen', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')] },
+  keepScreenOn: { cat: 'Device', label: 'Keep Screen On', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off'], 'on', 'make it')] },
+  batteryLevel: { cat: 'Device', label: 'Battery Level', value: 'number' },
+  deviceLanguage: { cat: 'Device', label: 'Phone Language', value: 'text', params: [opt('form', ['short (en)', 'full (en-GB)'], 'short (en)', 'form')] },
+  notifyAllowed: { cat: 'Device', label: 'Notifications Allowed', value: 'bool' },
+  everyNth: { cat: 'Flow', label: 'Every Nth Time', exec: true, outs: ['then', 'skip'], params: [num('n', 3, 'every')] },
+  firstTimeEver: { cat: 'Flow', label: 'First Time Ever', exec: true, outs: ['first time', 'seen before'], params: [txt('key', 'tutorial', 'name (remembered on this device)')] },
+});
 /** A ready-made dialog for Show Alert / Ask Yes / No: a dimmed backdrop, a themed panel, title, text and buttons. */
 function nodeDialog(s, o, onPick) {
   const TH = themeOf(s.settings), btnW = o.buttons.length > 1 ? 120 : 200;
@@ -10208,6 +10486,10 @@ registerBehavior('graph', {
         case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
+        case 'menuIsOpen': return !!s.openMenus?.has(P('menu') || 'menu');
+        case 'batteryLevel': { const E = s.engine; if (!E._batt && navigator.getBattery) { E._batt = 1; navigator.getBattery().then((b) => { E.battery = b; }).catch(() => {}); } return E.battery ? Math.round(E.battery.level * 100) : 100; }
+        case 'deviceLanguage': { const l = (typeof navigator !== 'undefined' && navigator.language) || 'en'; return String(P('form')).startsWith('full') ? l : l.slice(0, 2); }
+        case 'notifyAllowed': { const ph = s.engine.phone; if (!ph._checking) { ph._checking = true; ph.status().then((v) => { ph.perm = v; ph._checking = false; }); } return ph.perm === 'granted'; }
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
         case 'netInRoom': return s.engine.online.inRoom();
@@ -10562,6 +10844,14 @@ registerBehavior('graph', {
         case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
+        case 'menuOpen': { const m = P('menu') || 'menu', md = P('mode'); s.send(md === 'open' ? m + ' open' : md === 'close' ? m + ' close' : m); break; }
+        case 'navBars': s.navBarsOff = P('mode') === 'toggle' ? !s.navBarsOff : P('mode') === 'hide'; break;
+        case 'vibratePattern': { const pat = String(P('pattern') || '').split(/[\s,]+/).map(Number).filter((x) => x >= 0 && x < 10000); if (pat.length) s.engine.vibrate(pat); break; }
+        case 'appBadge': { const c = Math.max(0, Math.round(+I('count') || 0)); try { if (c) navigator.setAppBadge?.(c)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } break; }
+        case 'fullScreen': { const on = !!document.fullscreenElement, want = P('mode') === 'toggle' ? !on : P('mode') === 'on'; if (want && !on) document.documentElement.requestFullscreen?.().catch(() => {}); else if (!want && on) document.exitFullscreen?.().catch(() => {}); break; }
+        case 'keepScreenOn': { const E = s.engine, on = P('mode') !== 'off'; E.stayAwake = on; if (on) E.keepAwake(); else { E.wakeLock?.release?.().catch?.(() => {}); E.wakeLock = null; } break; }
+        case 'everyNth': { const c = (state.get(n.id) || 0) + 1; state.set(n.id, c); return follow(n, c % Math.max(1, Math.round(+P('n') || 1)) === 0 ? 'then' : 'skip', ctx); }
+        case 'firstTimeEver': { const key = 'pocket.first.' + (s.engine.gameKey || 'game') + '.' + (P('key') || 'x'); let seen = false; try { seen = !!localStorage.getItem(key); if (!seen) localStorage.setItem(key, '1'); } catch { /* private mode */ } return follow(n, seen ? 'seen before' : 'first time', ctx); }
         case 'setTextTo': s.setVar(P('name') || 'text', asText(I('text'))); break;
         case 'showText': { const k = P('object'), t = k ? s.find(k) || s.findAll(k)[0] : e; if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = asText(I('text')); } break; }
         case 'timerStart': { const k = P('name') || 'timer', sec = Math.max(0, +I('seconds') || 0), down = P('mode') !== 'count up (stopwatch)'; (s.namedTimers ||= {})[k] = { t: down ? sec : 0, total: sec, down, running: true }; s.setVar(k, down ? Math.ceil(sec) : 0); break; }
@@ -10723,6 +11013,11 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onAppHidden', 'onAppShown')) s.on('appVisible', (v) => { if (!e.dead) fire(v ? 'onAppShown' : 'onAppHidden', e, s); });
+        if (has('onNotifyOpened')) s.on('message', (name, id) => { if (!e.dead && name === 'notification opened') fire('onNotifyOpened', e, s, null, (n) => !param(n, 'id') || param(n, 'id') === id); });
+        if (has('onMenu')) s.on('menu', (m, open) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onMenu' && (param(n, 'menu') || 'menu') === m) follow(n, open ? 'opened' : 'closed', { s, e, steps: 0 }); });
+        if (has('onOrientation')) s.on('orientation', (o) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onOrientation') follow(n, o, { s, e, steps: 0 }); });
+        if (has('onOnline')) s.on('online', (on) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onOnline') follow(n, on ? 'online' : 'offline', { s, e, steps: 0 }); });
         if (has('onTimerDone')) s.on('timerDone', (k) => { if (!e.dead) fire('onTimerDone', e, s, null, (n) => !param(n, 'name') || param(n, 'name') === k); });
         if (has('onShake', 'tiltValue')) s.engine.input.wantMotion = true;
         if (has('onMyVarChanged', 'whenMyVarReaches')) {
@@ -11227,12 +11522,15 @@ export class Engine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
     this.onVis = () => {
+      if (!this.editing) this.scene?.emit('appVisible', !document.hidden);
       if (document.hidden) { this.saveProgress(); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
     document.addEventListener('visibilitychange', this.onVis);
+    this.onNet = () => { if (!this.editing) this.scene?.emit('online', navigator.onLine !== false); };
+    window.addEventListener('online', this.onNet); window.addEventListener('offline', this.onNet);
     this.last = performance.now();
     this.running = true;
     this.frame = this.frame.bind(this);
@@ -11247,6 +11545,9 @@ export class Engine {
     const cs = getComputedStyle(this.safeProbe);
     this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
     this.updateSafe();
+    const orient = this.width > this.height ? 'landscape' : 'portrait';
+    if (this.orient && orient !== this.orient && !this.editing) this.scene?.emit('orientation', orient);
+    this.orient = orient;
     if (this.scene && !this.editing) this.render();
   }
 
@@ -11284,7 +11585,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes } }; // the UI theme, fonts, online services and notification types are game-wide
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes, uiOverlap: first.settings?.uiOverlap } }; // the UI theme, fonts, online services and notification types are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -11352,16 +11653,17 @@ export class Engine {
   }
 
   layoutButtons() {
+    const B = this.safe.bars || { top: 0, right: 0, bottom: 0, left: 0 }, sf = { top: this.safe.top + B.top, right: this.safe.right + B.right, bottom: this.safe.bottom + B.bottom, left: this.safe.left + B.left }; // touch controls stay clear of nav bars too
     const s = this.scene, b = [], m = 24;
     if (s && !this.editing) {
-      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1) * (this.prefs?.controlScale || 1), bottom = this.height - this.safe.bottom - m - r;
+      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1) * (this.prefs?.controlScale || 1), bottom = this.height - sf.bottom - m - r;
       // buttons go on the side opposite the joystick (left-handed players can swap)
       const left = this.stickSide === 'right';
-      const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
+      const X = (off) => (left ? sf.left + m + r + off : this.width - sf.right - m - r - off);
       if (s.settings.jumpButton) b.push({ action: 'jump', label: s.settings.jumpLabel || 'JUMP', x: X(0), y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: s.settings.actionLabel || 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
       // D-pad or left/right arrows instead of a joystick
-      const c = s.settings.controls, DX = (off) => (left ? this.width - this.safe.right - m - off : this.safe.left + m + off);
+      const c = s.settings.controls, DX = (off) => (left ? this.width - sf.right - m - off : sf.left + m + off);
       if (c === 'arrows') {
         b.push({ action: 'dleft', label: '◀', x: DX(r), y: bottom, r, id: null });
         b.push({ action: 'dright', label: '▶', x: DX(r * 3.4), y: bottom, r, id: null });
@@ -11377,12 +11679,12 @@ export class Engine {
       // a hotbar row of square slots along the bottom middle (the block builder's blocks); it moves up when the screen is too narrow
       const hb = (s.customButtons || []).filter((cb) => cb.hotbar);
       if (hb.length) {
-        const side = m + r * 2 + 12, room = this.width - this.safe.left - this.safe.right - side * 2, fits = room / hb.length >= 34;
-        const size = Math.min(48, fits ? room / hb.length : (this.width - this.safe.left - this.safe.right - 16) / hb.length), cx = (this.safe.left + this.width - this.safe.right) / 2;
-        const y = fits ? this.height - this.safe.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
+        const side = m + r * 2 + 12, room = this.width - sf.left - sf.right - side * 2, fits = room / hb.length >= 34;
+        const size = Math.min(48, fits ? room / hb.length : (this.width - sf.left - sf.right - 16) / hb.length), cx = (sf.left + this.width - sf.right) / 2;
+        const y = fits ? this.height - sf.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
         hb.forEach((cb, i) => b.push({ ...cb, x: cx + (i - (hb.length - 1) / 2) * size, y, w: size - 4, h: size - 4, r: size / 2, id: null }));
       }
-      const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
+      const top = sf.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
@@ -11500,9 +11802,10 @@ export class Engine {
     const m = s.modal;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
     const inp = this.input, r = m._modalRect?.() || uiBox(m, this.width, this.height, this.safe); // a component can claim the whole screen while open
-    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2;
+    const pass = m._modalPass?.() || []; // areas whose taps still reach the game (a side menu between nav bars)
+    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2, through = (t) => pass.some((q) => t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h);
     const out = inp.taps.some((t) => !inside(t));
-    inp.taps = inp.taps.filter(inside); inp.downs = inp.downs.filter(inside);
+    inp.taps = inp.taps.filter((t) => inside(t) || through(t)); inp.downs = inp.downs.filter((t) => inside(t) || through(t));
     if (out) m._dismiss?.();
   }
 
@@ -11636,7 +11939,8 @@ export class Engine {
 
   update(dt) {
     const s = this.scene, inp = this.input;
-    if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
+    const bk = this.safe.bars ? `${Math.round(this.safe.bars.top)},${Math.round(this.safe.bars.bottom)},${Math.round(this.safe.bars.left)},${Math.round(this.safe.bars.right)}` : '';
+    if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH || bk !== this.lastLayoutB) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; this.lastLayoutB = bk; }
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
     if (!this.editing) this.fitScreen();
@@ -11745,6 +12049,7 @@ export class Engine {
     const k = this.editing && !this.safeOverride?.scale ? 1 : uiScaleFor(this.width, this.height, st, this.scene?.view);
     const S = this.safe;
     S.top = side('top'); S.right = side('right'); S.bottom = side('bottom'); S.left = side('left'); S.k = k;
+    if (this.scene) layoutUI(this, this.scene);
     return S;
   }
 
@@ -11804,6 +12109,7 @@ export class Engine {
     this.running = false;
     this.ro.disconnect();
     document.removeEventListener('visibilitychange', this.onVis);
+    window.removeEventListener('online', this.onNet); window.removeEventListener('offline', this.onNet);
     this.root.remove();
   }
 }

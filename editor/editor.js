@@ -3124,6 +3124,7 @@ function renderSceneSettings(box) {
     C('settings.muteButton', { label: 'Mute Button', type: 'bool', def: true }),
     C('settings.controls', { label: 'Movement Controls', type: 'select', options: [['auto', 'Joystick (when turned on)'], ['dpad', 'D-pad (4 arrows)'], ['arrows', 'Left / right arrows'], ['joystick', 'Joystick']], def: 'auto' }),
     C('settings.controlsOpacity', { label: 'Controls Opacity (0.2–1)', type: 'number', def: 1, step: 0.1 }),
+    C('settings.playerSettings', { label: 'Player Settings (⚙)', type: 'select', options: [['pause', 'On the pause screen'], ['corner', 'Pause screen + a ⚙ in the corner'], ['off', 'Off']], def: 'pause', infoText: 'Lets players pick left-handed controls, sensitivity, control size, sound and vibration. It only shows what your game uses. A Button (Do → open settings) or the Open Settings node opens it too.' }),
     C('settings.controlSize', { label: 'Control Size', type: 'select', options: [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], def: 'medium' }),
     C('settings.jumpLabel', { label: 'Jump Button Text', type: 'text', def: 'JUMP' }),
     C('settings.actionLabel', { label: 'Fire Button Text', type: 'text', def: 'FIRE' }),
@@ -4723,7 +4724,8 @@ function stop() {
   engine.editing = true;
   engine.paused = false;
   engine.input.enabled = false;
-  engine.input.reset();
+  engine.input.reset(true);
+  engine.closeSettings?.(true); // a player Settings panel left open
   engine.timeScale = 1;
   engine.factory = null;
   updatePauseButtons();

@@ -291,7 +291,7 @@ export class Entity {
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       inst = def.create(params, this) || {};
-      inst.type = b.type;
+      inst.type = b.type; inst.params ||= params;
     }
     this.behaviors.push(inst);
     if (this.started && inst.start) inst.start(this, this.scene);
@@ -1619,6 +1619,33 @@ export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
+/** Each player's own settings (Pause › Settings), saved per game on their device. */
+export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
+const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
+function injectPrefsCss() {
+  if (typeof document === 'undefined' || document.getElementById('pk-ps-css')) return;
+  const st = document.createElement('style'); st.id = 'pk-ps-css';
+  st.textContent = `.pk-ps{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;font:15px system-ui,-apple-system,sans-serif;color:#f2f2f2}
+.pk-card{width:min(440px,100%);max-height:88%;display:flex;flex-direction:column;background:#1d1d24;border-radius:20px 20px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.4);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (min-height:520px) and (min-width:520px){.pk-ps{align-items:center}.pk-card{border-radius:20px}}
+.pk-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 6px}.pk-head b{font-size:20px}
+.pk-x{background:none;border:0;color:#bbb;font-size:20px;width:40px;height:40px}
+.pk-body{overflow:auto;padding:0 18px 8px;-webkit-overflow-scrolling:touch}
+.pk-body h3{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:#9a9aa8;margin:16px 0 4px}
+.pk-row{display:grid;grid-template-columns:1fr auto auto;align-items:center;gap:10px;min-height:48px;border-bottom:1px solid rgba(255,255,255,.06)}
+.pk-row span{display:flex;flex-direction:column}.pk-row small{color:#9a9aa8;font-size:12.5px}
+.pk-row input[type=range]{width:130px;accent-color:#5aa9ff}.pk-row output{min-width:44px;text-align:right;color:#cfd3ff;font-variant-numeric:tabular-nums}
+.pk-row input[type=checkbox]{grid-column:2/4;justify-self:end;width:46px;height:28px;appearance:none;-webkit-appearance:none;background:#444;border-radius:999px;position:relative;transition:background .15s}
+.pk-row input[type=checkbox]::after{content:'';position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .15s}
+.pk-row input[type=checkbox]:checked{background:#3d8bfd}.pk-row input[type=checkbox]:checked::after{left:21px}
+.pk-btn{border:0;border-radius:12px;padding:12px 16px;font:600 15px system-ui,sans-serif;background:#2c2c36;color:#fff;margin:10px 0 2px}
+.pk-btn.primary{background:#3d8bfd}.pk-btn.ghost{background:transparent;color:#bbb}
+.pk-foot{display:flex;justify-content:space-between;gap:10px;padding:6px 18px 14px}.pk-foot .pk-btn{flex:1}
+.pk-gear{position:absolute;z-index:25;border:0;color:#fff;font:600 16px system-ui,sans-serif;touch-action:manipulation}
+.pk-gear.pause{left:50%;top:62%;transform:translateX(-50%);padding:12px 22px;border-radius:999px;background:rgba(255,255,255,.16);backdrop-filter:blur(6px)}
+.pk-gear.corner{width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.35);font-size:22px}`;
+  document.head.appendChild(st);
+}
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -1667,7 +1694,7 @@ export class Input {
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
-    const stickSide = zone >= 1 || (st.joystickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
+    const stickSide = zone >= 1 || (this.engine.stickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
     if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
     else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
       ptr.role = 'stick';
@@ -1745,8 +1772,8 @@ export class Input {
       this.tiltRaw = { x: Math.asin(clamp(right, -1, 1)) / DEG, y: Math.atan2(down, -gz) / DEG };
       if (this.tiltBase == null) this.tiltBase = this.tiltCfg.calibrate === 'flat' ? 0 : this.tiltRaw.y;
       const c = this.tiltCfg, sm = clamp(+c.smooth || 0, 0, 0.95), prev = this.tiltAxis || { x: 0, y: 0 };
-      const f = (deg) => { const dz = +c.dead || 0, m = Math.max(1, +c.max || 20), v = Math.abs(deg) <= dz ? 0 : (Math.abs(deg) - dz) / Math.max(1, m - dz) * Math.sign(deg); return clamp(v, -1, 1); };
-      const nx = f(this.tiltRaw.x) * (c.invertX ? -1 : 1), ny = f(this.tiltRaw.y - this.tiltBase) * (c.invertY ? -1 : 1);
+      const P = this.engine.prefs || {}, f = (deg) => { const dz = +c.dead || 0, m = Math.max(1, (+c.max || 20) / clamp(P.tiltSens || 1, 0.3, 3)), v = Math.abs(deg) <= dz ? 0 : (Math.abs(deg) - dz) / Math.max(1, m - dz) * Math.sign(deg); return clamp(v, -1, 1); };
+      const nx = f(this.tiltRaw.x) * (c.invertX ? -1 : 1), ny = f(this.tiltRaw.y - this.tiltBase) * (!c.invertY !== !P.tiltInvert ? -1 : 1);
       this.tiltAxis = { x: prev.x + (nx - prev.x) * (1 - sm), y: prev.y + (ny - prev.y) * (1 - sm) };
     });
     window.addEventListener('orientationchange', () => { this.tiltBase = null; });
@@ -1790,17 +1817,19 @@ export class Input {
 
   /** Where a fixed joystick sits. */
   fixedStick() {
-    const eng = this.engine, r = this.stickRadius, right = eng.scene?.settings.joystickSide === 'right';
+    const eng = this.engine, r = this.stickRadius, right = eng.stickSide === 'right';
     return { x: right ? eng.width - eng.safe.right - 30 - r : eng.safe.left + 30 + r, y: eng.height - eng.safe.bottom - 30 - r };
   }
-  get stickRadius() { const st = this.engine.scene?.settings || {}; return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[st.controlSize] || 1) * clamp(+st.joystickSize || 1, 0.5, 2); }
+  get stickRadius() { const st = this.engine.scene?.settings || {}; return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[st.controlSize] || 1) * clamp(+st.joystickSize || 1, 0.5, 2) * (this.engine.prefs?.controlScale || 1); }
 
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
     if (this.stick) {
       const st = this.engine.scene?.settings || {}, dz = clamp(st.joystickDeadZone ?? 0.12, 0, 0.8);
-      let sx = (this.stick.x - this.stick.bx) / this.stickRadius, sy = (this.stick.y - this.stick.by) / this.stickRadius;
+      const sens = clamp(this.engine.prefs?.stickSens || 1, 0.3, 3); // the player's sensitivity: higher = less push for full speed
+      let sx = (this.stick.x - this.stick.bx) / this.stickRadius * sens, sy = (this.stick.y - this.stick.by) / this.stickRadius * sens;
+      { const l0 = Math.hypot(sx, sy); if (l0 > 1) { sx /= l0; sy /= l0; } }
       const dir = st.joystickDirections || 'all';
       if (dir === 'horizontal') sy = 0; else if (dir === 'vertical') sx = 0;
       const l = Math.hypot(sx, sy);
@@ -1843,7 +1872,8 @@ export class Input {
     if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
     if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
     this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
-  reset() { this.pointers.clear(); this.stick = null; this.useTilt = false; this.tiltBase = null; this.endFrame(); }
+  /** Forget fingers and presses. `full` (a new level) also turns tilt off until a component asks again. */
+  reset(full = false) { this.pointers.clear(); this.stick = null; if (full) { this.useTilt = false; this.tiltBase = null; } this.endFrame(); }
 }
 
 // ============================================================================
@@ -1852,13 +1882,15 @@ export class Input {
 /** Sound names every picker offers: the built-in synth sounds, then the game's imported sounds (the editor adds those). */
 export const SOUNDS = ['coin', 'jump', 'hit', 'power', 'win', 'lose', 'click'];
 export class Audio {
-  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); this.volume = 1; this.clips = {}; }
+  constructor() { this.ctx = null; this.muted = store.get('pocket.muted', '0') === '1'; this.buffers = new Map(); this.volume = 1; this.sfxVol = 1; this.musicVol = 1; this.clips = {}; }
   unlock() {
     if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; } }
     if (this.ctx.state === 'suspended') this.ctx.resume();
   }
-  setMuted(m) { this.muted = m; store.set('pocket.muted', m ? '1' : '0'); if (this.mus) this.mus.g.gain.value = m ? 0 : this.mus.vol * this.volume; }
-  setVolume(v) { this.volume = clamp(+v || 0, 0, 1); if (this.mus) this.mus.g.gain.value = this.muted ? 0 : this.mus.vol * this.volume; }
+  setMuted(m) { this.muted = m; store.set('pocket.muted', m ? '1' : '0'); if (this.mus) this.mus.g.gain.value = m ? 0 : this.mus.vol * this.volume * this.musicVol; }
+  setVolume(v) { this.volume = clamp(+v || 0, 0, 1); if (this.mus) this.mus.g.gain.value = this.muted ? 0 : this.mus.vol * this.volume * this.musicVol; }
+  /** The player's own sound / music levels (Settings). */
+  setLevels(sfx = this.sfxVol, music = this.musicVol) { this.sfxVol = clamp(+sfx, 0, 1); this.musicVol = clamp(+music, 0, 1); this.setVolume(this.volume); }
   /** Background music: an imported sound (by name) or a URL, looped. Playing new music replaces the old. */
   async music(src, { loop = true, vol = 0.6 } = {}) {
     this.stopMusic(0);
@@ -1867,7 +1899,7 @@ export class Audio {
     this.unlock(); const buf = await this.load(url);
     if (!buf || this._musicToken !== token || !this.ctx) return;
     const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
-    s.buffer = buf; s.loop = loop; g.gain.value = this.muted ? 0 : vol * this.volume; s.connect(g).connect(this.ctx.destination); s.start();
+    s.buffer = buf; s.loop = loop; g.gain.value = this.muted ? 0 : vol * this.volume * this.musicVol; s.connect(g).connect(this.ctx.destination); s.start();
     this.mus = { s, g, vol, src };
   }
   stopMusic(fade = 0) {
@@ -1878,8 +1910,8 @@ export class Audio {
     if (this.muted || !this.ctx) return;
     const t = this.ctx.currentTime + delay, o = this.ctx.createOscillator(), g = this.ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t); o.frequency.exponentialRampToValueAtTime(Math.max(1, to), t + dur);
-    if (this.volume <= 0.001) return;
-    g.gain.setValueAtTime(vol * this.volume, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    if (this.volume * this.sfxVol <= 0.001) return;
+    g.gain.setValueAtTime(vol * this.volume * this.sfxVol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     o.connect(g).connect(this.ctx.destination); o.start(t); o.stop(t + dur + 0.02);
   }
   sfx(name) {
@@ -1904,7 +1936,7 @@ export class Audio {
     if (this.muted) return;
     const buf = await this.load(url); if (!buf) return;
     const s = this.ctx.createBufferSource(), g = this.ctx.createGain();
-    s.buffer = buf; g.gain.value = vol * this.volume; s.connect(g).connect(this.ctx.destination); s.start();
+    s.buffer = buf; g.gain.value = vol * this.volume * this.sfxVol; s.connect(g).connect(this.ctx.destination); s.start();
   }
 }
 
@@ -2932,7 +2964,7 @@ function drawJoystick(ctx, engine, scene, inp, tint, pulse) {
   else if (st.joystickMode === 'fixed' || st.joystickVisible === 'always') { base = inp.fixedStick(); knob = base; }
   if (!base) {
     if (scene.time < 4 && st.joystickHint !== false) { // a hint where to touch
-      const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = engine.width, H = engine.height, cx = zone >= 1 ? W / 2 : st.joystickSide === 'right' ? W * (1 - zone / 2) : W * zone / 2;
+      const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = engine.width, H = engine.height, cx = zone >= 1 ? W / 2 : engine.stickSide === 'right' ? W * (1 - zone / 2) : W * zone / 2;
       ctx.fillStyle = C(0.25 * pulse); ctx.font = `600 14px ${THEME.font}`; ctx.textAlign = 'center';
       ctx.fillText('Touch & drag here to move', cx, H - engine.safe.bottom - 40);
     }
@@ -3137,7 +3169,7 @@ function renderUI(engine, scene) {
 
   if (scene.state === 'play' && !engine.paused && !scene.loading) { // (a Loading Screen hides the touch controls)
     ctx.save();
-    ctx.globalAlpha = clamp(+scene.settings.controlsOpacity || 1, 0.1, 1);
+    ctx.globalAlpha = clamp((+scene.settings.controlsOpacity || 1) * (engine.prefs?.opacity ?? 1), 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
     if (useStick) drawJoystick(ctx, engine, scene, inp, tint, pulse);
     for (const b of inp.buttons) {
@@ -3223,7 +3255,7 @@ function renderUI(engine, scene) {
 export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings',
   'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
@@ -3368,7 +3400,7 @@ registerBehavior('move', {
             const tx = w.x + o.x, ty = three ? e.y : w.y + o.y, tz = three ? (w.z ?? e.z) + o.z : e.z;
             want = { x: (tx - e.x) / Math.max(dt, 1e-3), y: three ? (tz - e.z) / Math.max(dt, 1e-3) : (ty - e.y) / Math.max(dt, 1e-3) };
           } else {
-            const lx = f.lx ?? f.x, ly = f.ly ?? f.y, k = (+p.dragSpeed || 1.2) * (three ? 0.025 * p.speed / 7 * 0.83 : 1 / z);
+            const lx = f.lx ?? f.x, ly = f.ly ?? f.y, k = (+p.dragSpeed || 1.2) * (s.engine.prefs?.dragSens || 1) * (three ? 0.025 * p.speed / 7 * 0.83 : 1 / z);
             want = { x: (f.x - lx) * k / Math.max(dt, 1e-3), y: (f.y - ly) * k / Math.max(dt, 1e-3) };
           }
           f.lx = f.x; f.ly = f.y;
@@ -3808,7 +3840,7 @@ registerBehavior('camera', {
         if (dz && cur) for (const k of [0, 2]) { const d = L[k] - cur.look[k]; L[k] = Math.abs(d) < dz ? cur.look[k] : L[k] - Math.sign(d) * dz; }
         if (p.mode === 'orbit') {
           const inp = s.engine.input;
-          if (inp.pointerDown && !inp.stick) { yaw -= inp.drag.dx * 0.008; pitch = clamp(pitch + inp.drag.dy * 0.006, -0.2, 1.45); }
+          if (inp.pointerDown && !inp.stick) { const L = s.engine.lookScale(); yaw -= inp.drag.dx * 0.008 * L.x; pitch = clamp(pitch + inp.drag.dy * 0.006 * L.y, -0.2, 1.45); }
           pos = [L[0] + Math.sin(yaw) * Math.cos(pitch) * dist, L[1] + Math.sin(pitch) * dist, L[2] + Math.cos(yaw) * Math.cos(pitch) * dist];
         } else if (p.mode === 'top down') pos = [L[0], L[1] + (+p.oy || dist), L[2] + 0.001];
         else if (p.mode === 'dolly' && Array.isArray(p.path) && p.path.length > 1) { const c = closestOnPath(p.path, { x: L[0], y: L[1], z: L[2] }); pos = [c.x, c.y, c.z]; }
@@ -5951,7 +5983,7 @@ registerBehavior('firstPerson', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = inp.axis(), b = e.body;
-        yaw -= inp.drag.dx * p.look * DEG; pitch = clamp(pitch - inp.drag.dy * p.look * DEG, -1.4, 1.4);
+        { const L = s.engine.lookScale(); yaw -= inp.drag.dx * p.look * DEG * L.x; pitch = clamp(pitch - inp.drag.dy * p.look * DEG * L.y, -1.4, 1.4); }
         const f = fwd3(yaw), r = right3(yaw);
         b.vel.x = (f.x * -a.y + r.x * a.x) * p.speed;
         b.vel.z = (f.z * -a.y + r.z * a.x) * p.speed;
@@ -5987,7 +6019,7 @@ registerBehavior('thirdPerson', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, a = inp.axis(), b = e.body;
-        yaw -= inp.drag.dx * p.look * DEG; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6, 0.05, 1.3);
+        { const L = s.engine.lookScale(); yaw -= inp.drag.dx * p.look * DEG * L.x; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6 * L.y, 0.05, 1.3); }
         const f = fwd3(yaw), r = right3(yaw);
         const vx = (f.x * -a.y + r.x * a.x) * p.speed, vz = (f.z * -a.y + r.z * a.x) * p.speed;
         b.vel.x = vx; b.vel.z = vz;
@@ -6288,6 +6320,7 @@ function runAction(s, e, p, other) {
     case 'restart game': s.engine.restart(); return;
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
+    case 'open settings': s.engine.openSettings(); break;
     case 'add score': s.addVar('score', p.amount); break;
     case 'win': s.win(); break;
     case 'game over': s.gameOver(); break;
@@ -7570,6 +7603,8 @@ export const NODE_TYPES = {
   spawnLaunch: { cat: 'Objects', label: 'Spawn & Launch', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('dir', ['facing', 'up', 'down', 'toward finger', 'toward tag', 'random'], 'facing', 'direction'), txt('tag', 'enemy', 'tag')], inputs: [{ key: 'speed', type: 'number', default: 500 }] },
   moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
   lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
+  openSettings: { cat: 'Game', label: 'Open Settings', exec: true, outs: ['then'] },
+  playerSetting: { cat: 'Game', label: 'Player Setting', value: 'number', params: [opt('setting', ['left-handed', 'joystick sensitivity', 'drag sensitivity', 'tilt sensitivity', 'look sensitivity', 'sound effects', 'music', 'vibration'], 'left-handed', 'setting')] },
   pauseGame: { cat: 'Game', label: 'Pause / Resume', exec: true, outs: ['then'], params: [opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
   // more values
   directionTo: { cat: 'Math', label: 'Direction To', value: 'number', params: [txt('tag', 'player', 'tag'), opt('axis', ['x', 'y', 'z'], 'x', 'axis')] },
@@ -8355,6 +8390,7 @@ registerBehavior('graph', {
         case 'chanceOf': return Math.random() * 100 < (+I('percent') || 0);
         case 'fingers': return s.engine.input.pointers.size;
         case 'isPaused': return !!s.engine.paused;
+        case 'playerSetting': { const PR = s.engine.prefs || PLAYER_PREFS, k = { 'left-handed': 'lefty', 'joystick sensitivity': 'stickSens', 'drag sensitivity': 'dragSens', 'tilt sensitivity': 'tiltSens', 'look sensitivity': 'lookSens', 'sound effects': 'sfx', music: 'music', vibration: 'vibration' }[P('setting')] || 'lefty'; const v = PR[k]; return typeof v === 'boolean' ? (v ? 1 : 0) : +v; }
         case 'childCount': return s.childrenOf(e).length;
         case 'formula': { const f = compileFormula(P('expr') || '0'), inp = { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0, d: +I('d') || 0 }; if (f.error && !state.has('fe:' + n.id)) { state.set('fe:' + n.id, 1); Log.add('warn', `Formula "${P('expr')}": ${f.error}`); } return f((k) => (k in inp ? inp[k] : k === 'time' ? s.time : k === 'dt' ? ctx.dt ?? 1 / 60 : s.vars[k] ?? e.data[k] ?? 0)); }
         case 'randomRange': { const a = +I('min') || 0, b = +I('max') || 0; return P('whole') ? Math.floor(rand(Math.min(a, b), Math.max(a, b) + 1)) : rand(a, b); }
@@ -8675,6 +8711,7 @@ registerBehavior('graph', {
         }
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
+        case 'openSettings': s.engine.openSettings(); break;
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
         case 'addScore': { const a = +I('amount') || 0; s.addVar('score', a); if (P('pop') !== false && a) popText(s, e.x, e.y, (a > 0 ? '+' : '') + formatNumber(a), '#ffd23d', 26); break; }
         case 'loseLife': {
@@ -9435,6 +9472,8 @@ export class Engine {
       this.levelIndex = clamp(opts.level || 0, 0, this.levels.length - 1);
       this.factory = () => this.buildLevel();
     }
+    this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
+    this.loadPrefs();
     this.setScene(this.factory());
     return this.scene;
   }
@@ -9496,7 +9535,7 @@ export class Engine {
     this.useRenderer(scene.mode);
     loadFonts(scene.settings.fonts);
     this.physics.contacts.clear();
-    this.input.reset();
+    this.input.reset(true);
     this.paused = false;
     scene.flush();
     scene.init(this);
@@ -9506,9 +9545,9 @@ export class Engine {
   layoutButtons() {
     const s = this.scene, b = [], m = 24;
     if (s && !this.editing) {
-      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1), bottom = this.height - this.safe.bottom - m - r;
+      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1) * (this.prefs?.controlScale || 1), bottom = this.height - this.safe.bottom - m - r;
       // buttons go on the side opposite the joystick (left-handed players can swap)
-      const left = s.settings.joystickSide === 'right';
+      const left = this.stickSide === 'right';
       const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
       if (s.settings.jumpButton) b.push({ action: 'jump', label: s.settings.jumpLabel || 'JUMP', x: X(0), y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: s.settings.actionLabel || 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
@@ -9685,7 +9724,82 @@ export class Engine {
   }
   releaseAwake() { this.wakeLock?.release().catch(() => {}); this.wakeLock = null; }
 
-  vibrate(p) { try { if (!this.audio.muted) navigator.vibrate?.(p); } catch { /* unsupported */ } }
+  // ---------- Player settings (each player's own choices, saved on their device per game) ----------
+  loadPrefs() {
+    let saved = {}; try { saved = JSON.parse(store.get('pocket.prefs.' + this.gameKey, '{}')) || {}; } catch { saved = {}; }
+    this.prefs = { ...PLAYER_PREFS, ...saved };
+    this.audio.setLevels(this.prefs.sfx, this.prefs.music);
+    return this.prefs;
+  }
+  savePrefs() { store.set('pocket.prefs.' + this.gameKey, JSON.stringify(this.prefs)); this.audio.setLevels(this.prefs.sfx, this.prefs.music); this.layoutButtons(); }
+  setPref(k, v) { this.prefs[k] = v; this.savePrefs(); }
+  /** Which side the joystick is on: the game's choice, swapped when the player turned on left-handed controls. */
+  get stickSide() { const g = this.scene?.settings.joystickSide === 'right' ? 'right' : 'left'; return this.prefs?.lefty ? (g === 'right' ? 'left' : 'right') : g; }
+  /** Camera-look drag multipliers from the player's settings. */
+  lookScale() { const P = this.prefs || {}, k = clamp(P.lookSens || 1, 0.2, 4); return { x: k, y: k * (P.invertLook ? -1 : 1) }; }
+  /** What this game uses, so Settings only shows what matters. */
+  controlsInUse() {
+    const s = this.scene, st = s?.settings || {}, beh = (t) => s?.entities.some((e) => e.behaviors?.some((b) => (typeof t === 'function' ? t(b) : b.type === t)));
+    return {
+      stick: !!st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick'),
+      buttons: this.input.buttons.some((b) => !b.hidden && !['pause', 'mute', 'settings'].includes(b.action)) || ['dpad', 'arrows'].includes(st.controls),
+      tilt: this.input.useTilt || this.input.wantMotion,
+      drag: beh((b) => b.type === 'move' && ['drag', 'both'].includes(b.params?.control)),
+      look: beh('firstPerson') || beh('thirdPerson') || beh((b) => b.type === 'camera' && b.params?.mode === 'orbit'),
+    };
+  }
+  /** The Settings panel (from the pause screen, the corner gear, a Button or the Open Settings node). */
+  openSettings() {
+    if (this.settingsPanel || this.editing && !this.input.enabled) return;
+    if (!this.paused && this.scene?.state === 'play') { this.paused = true; this.settingsResume = true; } else this.settingsResume = false;
+    injectPrefsCss();
+    const P = this.prefs, use = this.controlsInUse(), wrap = document.createElement('div');
+    wrap.className = 'pk-ps';
+    const row = (label, ctl, hint) => `<label class="pk-row"><span>${label}${hint ? `<small>${hint}</small>` : ''}</span>${ctl}</label>`;
+    const slider = (k, min, max, step) => `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${P[k]}"><output>${fmtPref(k, P[k])}</output>`;
+    const toggle = (k) => `<input type="checkbox" data-k="${k}" ${P[k] ? 'checked' : ''}>`;
+    const sec = (title, rows) => (rows.length ? `<h3>${title}</h3>` + rows.join('') : '');
+    const ctl = [], move = [];
+    if (use.stick || use.buttons) ctl.push(row('Left-handed', toggle('lefty'), use.stick ? 'Joystick on the right, buttons on the left' : 'Buttons on the other side'), row('Control size', slider('controlScale', 0.7, 1.5, 0.05)), row('Control opacity', slider('opacity', 0.2, 1, 0.05)));
+    if (use.stick) move.push(row('Joystick sensitivity', slider('stickSens', 0.5, 2, 0.05), 'Higher = less push for full speed'));
+    if (use.drag) move.push(row('Drag sensitivity', slider('dragSens', 0.3, 3, 0.05)));
+    if (use.tilt) move.push(row('Tilt sensitivity', slider('tiltSens', 0.5, 2.5, 0.05), 'Higher = less tilt for full speed'), row('Invert tilt forward / back', toggle('tiltInvert')), `<button class="pk-btn" data-act="calibrate">Set level to how I'm holding it</button>`);
+    if (use.look) move.push(row('Look sensitivity', slider('lookSens', 0.3, 3, 0.05)), row('Invert look up / down', toggle('invertLook')));
+    const other = [row('Sound effects', slider('sfx', 0, 1, 0.05)), row('Music', slider('music', 0, 1, 0.05)), row('Vibration', toggle('vibration'))];
+    wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="Settings"><div class="pk-head"><b>Settings</b><button class="pk-x" data-act="close" aria-label="Close">✕</button></div><div class="pk-body">${sec('Controls', ctl)}${sec('Movement', move)}${sec('Sound & feel', other)}</div><div class="pk-foot"><button class="pk-btn ghost" data-act="reset">Reset</button><button class="pk-btn primary" data-act="close">Done</button></div></div>`;
+    for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click']) wrap.addEventListener(ev, (e) => e.stopPropagation());
+    wrap.addEventListener('input', (e) => { const el = e.target, k = el.dataset?.k; if (!k) return; const v = el.type === 'checkbox' ? el.checked : +el.value; this.setPref(k, v); const o = el.nextElementSibling; if (o?.tagName === 'OUTPUT') o.textContent = fmtPref(k, v); if (k === 'vibration' && v) this.vibrate(20); });
+    wrap.addEventListener('click', (e) => {
+      const act = e.target.closest?.('[data-act]')?.dataset.act; if (!act && e.target === wrap) return this.closeSettings();
+      if (act === 'close') this.closeSettings();
+      else if (act === 'calibrate') { this.input.calibrateTilt(); this.scene?.message?.('Tilt level set', 1.2); }
+      else if (act === 'reset') { const resume = this.settingsResume; this.prefs = { ...PLAYER_PREFS }; this.savePrefs(); this.closeSettings(true); this.openSettings(); this.settingsResume = resume; }
+    });
+    this.root.appendChild(wrap); this.settingsPanel = wrap;
+    this.scene?.emit?.('settingsOpen');
+  }
+  closeSettings(keepPaused = false) {
+    this.settingsPanel?.remove(); this.settingsPanel = null;
+    if (this.settingsResume && !keepPaused) this.paused = false;
+    this.scene?.emit?.('settingsClose');
+  }
+  /** The ⚙ button: on the pause screen (default), also in the corner while playing, or off. */
+  updateSettingsUI() {
+    const s = this.scene, mode = s?.settings.playerSettings || 'pause', playing = !this.editing && !s?.loading && !s?.settings.customScreens;
+    const want = mode !== 'off' && playing && !this.settingsPanel && !this.inspecting && (this.paused ? s?.state === 'play' : mode === 'corner' && ['play', 'title'].includes(s?.state));
+    if (!want) { this.settingsBtn?.remove(); this.settingsBtn = null; return; }
+    const where = this.paused ? 'pause' : 'corner';
+    if (this.settingsBtn?.dataset.where === where) return;
+    this.settingsBtn?.remove(); injectPrefsCss();
+    const b = this.settingsBtn = document.createElement('button');
+    b.className = 'pk-gear ' + where; b.dataset.where = where; b.setAttribute('aria-label', 'Settings');
+    b.innerHTML = where === 'pause' ? '⚙&nbsp; Settings' : '⚙';
+    if (where === 'corner') b.style.cssText = `top:${this.safe.top + 10}px;right:${this.safe.right + 10}px`;
+    for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend']) b.addEventListener(ev, (e) => e.stopPropagation());
+    b.addEventListener('click', (e) => { e.stopPropagation(); this.openSettings(); });
+    this.root.appendChild(b);
+  }
+  vibrate(p) { try { if (!this.audio.muted && this.prefs?.vibration !== false) navigator.vibrate?.(p); } catch { /* unsupported */ } }
 
   frame(now) {
     if (!this.running) return;
@@ -9701,6 +9815,7 @@ export class Engine {
     if (this.scene) {
       if (!this.editing) this.update(dt * this.timeScale);
       this.render();
+      this.updateSettingsUI();
     }
     this.input.endFrame();
     requestAnimationFrame(this.frame);

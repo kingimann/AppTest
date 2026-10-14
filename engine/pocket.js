@@ -889,7 +889,7 @@ export class Scene {
     for (const ep of json.entities || []) {
       if (!editing && !ep.template && inTpl(ep)) { (s.templateKids[ep.parent] ||= []).push(ep); continue; } // children of templates spawn with them
       if (ep.template && !editing) { s.templates[ep.name] = ep; continue; }
-      const e = s.add(new Entity(editing ? { ...ep, behaviors: [] } : ep));
+      const e = s.add(new Entity(editing ? { ...ep, behaviors: (ep.behaviors || []).filter((b) => EDIT_PREVIEW.has(b?.type)) } : ep)); // the editor keeps only components that draw a preview
       if (ep.template) { e.template = true; e.alpha = 0.45; }
     }
     s.flush();
@@ -1619,6 +1619,8 @@ export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
+/** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -3140,6 +3142,7 @@ function renderUI(engine, scene) {
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
+      for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
       ctx.restore();
     }
     if (V) ctx.restore();
@@ -4819,6 +4822,1506 @@ registerBehavior('navItem', {
         const a = on || !p.dimIdle ? 1 : 0.55;
         for (const q of kids) q.alpha = a;
         if (!e.shape && e.text) e.alpha = a;
+      },
+    };
+  },
+});
+
+/** A white UI icon recoloured (cached per colour and size). Emoji and other text draw as text. */
+const tintCache = new Map();
+function drawNavIcon(ctx, icon, x, y, size, color, alpha = 1) {
+  if (!icon) return;
+  const src = /^(art:|data:|https?:)/.test(icon) ? icon : /^ui-|^[a-z][a-zA-Z-]+$/.test(icon) ? 'art:' + (icon.startsWith('ui-') || SPRITE_ART[icon] ? icon : 'ui-' + icon) : null;
+  ctx.globalAlpha *= alpha;
+  if (!src) { ctx.font = `${Math.round(size)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = color; ctx.fillText(icon, x, y + size * 0.05); ctx.globalAlpha /= alpha; return; }
+  const img = loadImage(src); if (!img.complete || !img.naturalWidth) { ctx.globalAlpha /= alpha; return; }
+  const px = Math.max(8, Math.round(size * 2)), key = src + '|' + color + '|' + px;
+  let c = tintCache.get(key);
+  if (!c) { c = document.createElement('canvas'); c.width = c.height = px; const x2 = c.getContext('2d'); x2.drawImage(img, 0, 0, px, px); x2.globalCompositeOperation = 'source-in'; x2.fillStyle = color; x2.fillRect(0, 0, px, px); if (tintCache.size > 300) tintCache.clear(); tintCache.set(key, c); }
+  ctx.drawImage(c, x - size / 2, y - size / 2, size, size);
+  ctx.globalAlpha /= alpha;
+}
+const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
+registerBehavior('uiBottomNav', {
+  label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
+  params: [
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
+    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
+    { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
+    { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
+    { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'idleColor', label: 'Other tabs', type: 'color', default: '#8b90a5', group: 'Colours' },
+    { key: 'indicatorColor', label: 'Indicator (blank = selected colour)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [12, 48], step: 1, group: 'Size & shape' },
+    { key: 'labelSize', label: 'Label size', type: 'number', default: 11, range: [8, 20], step: 1, group: 'Size & shape' },
+    { key: 'radius', label: 'Corner radius', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Size & shape', infoText: 'Floating and glass styles round their corners anyway.' },
+    { key: 'margin', label: 'Floating gap from the edges', type: 'number', default: 14, range: [0, 40], step: 1, group: 'Size & shape' },
+    { key: 'border', label: 'Line along the top', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'fillSafe', label: 'Fill the home-bar area below', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'anim', label: 'Indicator moves', type: 'select', options: ['slide', 'fade', 'none'], default: 'slide', group: 'Animation' },
+    { key: 'speed', label: 'Animation speed', type: 'number', default: 14, range: [2, 40], step: 1, group: 'Animation' },
+    { key: 'tapEffect', label: 'Tap effect', type: 'select', options: ['bounce', 'ripple', 'grow', 'none'], default: 'bounce', group: 'Animation' },
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Animation' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Animation' },
+    { key: 'centerMessage', label: 'Middle button sends message (blank = acts as a tab)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: { style: ['raised center'] } },
+    { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab', group: 'Behaviour' },
+    { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour', infoText: 'e.g. game, levels: the bar slides away while the variable is one of these.' },
+    { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+  ],
+  create(p) {
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => ({ label, icon, page: page || label.toLowerCase(), badge }));
+    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1;
+    const pulse = new Map(), ripples = [];
+    const hidden = (s) => !!p.hideOn && String(p.hideOn).split(',').map((x) => x.trim()).filter(Boolean).some((v) => sameVal(s.vars[p.var], v));
+    const activeIdx = (s) => T.findIndex((t) => sameVal(s.vars[p.var], t.page));
+    const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
+    const geo = (e) => { // local layout: bar rect and each tab's centre and width
+      const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
+      const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
+      const n = Math.max(1, T.length), tw = bw / n;
+      return { w, h, bx, by, bw, bh, tw, n, cx: (i) => bx + tw * (i + 0.5), cy: by + bh / 2 };
+    };
+    const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
+    return {
+      uiAlways: true, var: p.var,
+      start(e, s) { T = tabs(); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
+      update(e, dt, s) {
+        const k = Math.min(1, dt * (+p.speed || 14));
+        hide += ((hidden(s) ? 1 : 0) - hide) * k;
+        for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
+        for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
+        const a = activeIdx(s), G = geo(e);
+        if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
+        if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
+        fade = Math.min(1, fade + dt * (+p.speed || 14) / 3);
+        if (hide > 0.5 || !e.visible || e._parentHidden) return;
+        // taps: which tab is under the finger (in screen space)
+        const r = uiRect(s, e), K = uiK(s.engine.safe);
+        for (const t of s.engine.input.taps) {
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = p.style === 'raised center' && T.length % 2 === 1;
+          let i = Math.floor((lx - G.bx) / G.tw);
+          const inBar = ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
+          if (!inBar) continue;
+          const tab = T[i];
+          pulse.set(i, 1); if (p.tapEffect === 'ripple') ripples.push({ i, t: 0 });
+          if (p.haptics !== false) s.engine.vibrate(8);
+          if (p.sound) s.engine.audio.sfx(p.sound);
+          if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
+          if (sameVal(s.vars[p.var], tab.page)) continue;
+          const cur = activeIdx(s);
+          s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 });
+          if (p.message) s.send(p.message);
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (!T.length) T = tabs();
+        const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || act;
+        if (hide > 0.99) return;
+        if (hide > 0.001) { ctx.translate(0, (G.bh + 40) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
+        const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
+        // the bar
+        if (st !== 'minimal') {
+          if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
+          ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.barColor || '#12141f';
+          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill();
+          ctx.shadowColor = 'transparent';
+          if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); }
+          else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+        }
+        const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
+        // the indicator, under the icons
+        if (a >= 0 && ind != null && a !== raisedIdx) {
+          const x = p.anim === 'slide' ? ind : G.cx(a);
+          ctx.save(); if (p.anim === 'fade') ctx.globalAlpha *= fade;
+          ctx.fillStyle = indC;
+          const labelOn = showLabel(a, true), iy = labelOn && st !== 'bubble' ? G.cy - lsz * 0.85 : G.cy;
+          if (st === 'pill' || st === 'floating' || st === 'glass') { const ph = labelOn ? isz * 1.28 : isz * 1.5; ctx.globalAlpha *= st === 'glass' ? 0.35 : 0.22; rr(x - isz * 1.35, iy - ph / 2, isz * 2.7, ph, isz); ctx.fill(); }
+          else if (st === 'underline') { rr(x - G.tw * 0.25, G.by, G.tw * 0.5, 3, 2); ctx.fill(); }
+          else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tw * 1.6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
+          else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tw / 2 + 4, G.by + 4, G.tw - 8, G.bh - 8, 12); ctx.fill(); }
+          ctx.restore();
+        }
+        // ripples
+        for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tw * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        // tabs
+        T.forEach((t, i) => {
+          const on = i === a, col = on ? act : idle, pz = pulse.get(i) || 0;
+          let sc = 1 + (p.tapEffect === 'bounce' ? Math.sin(pz * Math.PI) * 0.18 : p.tapEffect === 'grow' && on ? 0.12 : 0) + (st === 'minimal' && on ? 0.12 : 0);
+          let x = G.cx(i), y = G.cy;
+          if (i === raisedIdx) { // the big round middle button
+            const R = G.bh * 0.46;
+            ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, G.by + 4, R * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+            drawNavIcon(ctx, t.icon, x, G.by + 4, isz * 1.15, '#ffffff');
+            if (showLabel(i, on)) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 0.9); }
+            return;
+          }
+          const lab = showLabel(i, on) && t.label;
+          if (st === 'bubble' && lab) { // icon and name side by side
+            ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = ctx.measureText(t.label).width, total = isz + 6 + lw;
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+            drawNavIcon(ctx, t.icon, -total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5);
+            ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
+            ctx.restore();
+          } else {
+            const iy = lab ? -lsz * 0.85 : 0;
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+            if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
+            drawNavIcon(ctx, t.icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
+            ctx.shadowColor = 'transparent';
+            if (lab) { ctx.font = `${on ? 800 : 600} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, 0, iy + isz * 0.5 + lsz * 1.05); }
+            ctx.restore();
+          }
+          // badge
+          const bv = t.badge ? s.vars[t.badge] : null;
+          if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+            ctx.fillStyle = p.badgeColor || '#ff3b5c'; ctx.strokeStyle = st === 'minimal' ? 'transparent' : p.barColor || '#12141f'; ctx.lineWidth = 2;
+            if (!txt) { ctx.beginPath(); ctx.arc(bxp, byp, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+            else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(txt).width + 8); rr(bxp - 6, byp - 8, w, 16, 8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bxp - 6 + w / 2, byp + 0.5); }
+          }
+        });
+      },
+    };
+  },
+});
+
+const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal'];
+registerBehavior('uiSideBar', {
+  label: 'Side Menu', description: 'A complete side menu: header, items with icons and badges, sections, switches and a footer, in 7 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
+  params: [
+    { key: 'items', label: 'Items (Label | icon | page or msg:name or toggle:var | badge variable; "# Title" = section, "-" = line)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings' },
+    { key: 'footer', label: 'Footer items (same format)', type: 'code', default: 'Help | info | msg:help' },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'side', label: 'Side', type: 'select', options: ['left', 'right'], default: 'left' },
+    { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
+    { key: 'title', label: 'Title', type: 'text', default: 'My Game', group: 'Header' },
+    { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '', group: 'Header' },
+    { key: 'avatar', label: 'Picture (icon or emoji, blank = none)', type: 'text', default: '🙂', group: 'Header' },
+    { key: 'header', label: 'Header look', type: 'select', options: ['simple', 'banner', 'none'], default: 'simple', group: 'Header' },
+    { key: 'closeButton', label: 'Close button (✕)', type: 'bool', default: true, group: 'Header' },
+    { key: 'bg', label: 'Background', type: 'color', default: '#151826', group: 'Colours' },
+    { key: 'text', label: 'Text', type: 'color', default: '#e8eaf2', group: 'Colours' },
+    { key: 'accent', label: 'Selected / accent', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'headerColor', label: 'Banner colour (blank = accent)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'width', label: 'Width', type: 'number', default: 290, range: [180, 420], step: 10, group: 'Size' },
+    { key: 'itemHeight', label: 'Row height', type: 'number', default: 50, range: [36, 80], step: 2, group: 'Size' },
+    { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 28], step: 1, group: 'Size' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 22, range: [14, 40], step: 1, group: 'Size' },
+    { key: 'showIcons', label: 'Show icons', type: 'bool', default: true, group: 'Size' },
+    { key: 'margin', label: 'Floating gap from the edges', type: 'number', default: 12, range: [0, 40], step: 1, group: 'Size' },
+    { key: 'anim', label: 'Opens with', type: 'select', options: ['slide', 'fade', 'zoom'], default: 'slide', group: 'Animation' },
+    { key: 'duration', label: 'Open time (sec)', type: 'number', default: 0.28, range: [0.05, 1], step: 0.01, group: 'Animation' },
+    { key: 'stagger', label: 'Items flow in one by one', type: 'bool', default: true, group: 'Animation' },
+    { key: 'dim', label: 'Dim behind it', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05, group: 'Animation' },
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Animation' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Animation' },
+    { key: 'swipeOpen', label: 'Swipe from the edge to open', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'dragClose', label: 'Drag it back to close', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'closeOnPick', label: 'Close when an item is picked', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false, group: 'Behaviour' },
+    { key: 'mode', label: 'Items', type: 'select', options: ['switch page', 'open page (Back returns)'], default: 'switch page', group: 'Behaviour' },
+  ],
+  create(p) {
+    const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+      if (/^-+$/.test(l)) return { kind: 'line' };
+      if (l.startsWith('#')) return { kind: 'section', label: l.replace(/^#+\s*/, '') };
+      const [label = '', icon = '', act = '', badge = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
+      return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge } : { kind: 'page', label, icon, page: a, badge };
+    });
+    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9; // age: seconds since it started opening (items flow in by it)
+    const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => st() === 'floating' || st() === 'glass';
+    const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
+    const inst = {
+      uiAlways: true,
+      get open() { return want; }, get rows() { return rows; },
+      set(e, s, v) { if (v === want) return; want = v; if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null; },
+      rect(s) { // the panel when fully open, in screen pixels
+        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0;
+        if (full()) return { x: 0, y: 0, w: W, h: H, m: 0 };
+        const w = Math.min(+p.width || 290, W - 56), x = p.side === 'right' ? W - m - w : m;
+        return { x, y: m + (floaty() ? E.safe.top : 0), w, h: H - m * 2 - (floaty() ? E.safe.top + E.safe.bottom : 0), m };
+      },
+      start(e, s) {
+        I = parse(p.items); F = parse(p.footer);
+        e._dismiss = () => inst.set(e, s, false);
+        if (want) s.modal = e;
+        s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+      update(e, dt, s) {
+        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72;
+        // swipe from the edge / drag to close
+        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if (left ? d.x < 22 : d.x > E.width - 22) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
+        if (!drag && p.dragClose !== false && want && !full()) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w) { drag = { id: d.id, x0: d.x, t0: t, open: true, moved: false }; break; } }
+        if (drag) {
+          const q = inp.pointers.get(drag.id), span = Math.max(1, R.w - (rail() ? railW : 0));
+          if (q) { const dx = (q.x - drag.x0) * (left ? 1 : -1); if (Math.abs(dx) > 10) drag.moved = true; if (drag.moved || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1); }
+          else { if (drag.moved || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
+        } else {
+          const step = dt / Math.max(0.05, +p.duration || 0.28);
+          t = want ? Math.min(1, t + step) : Math.max(0, t - step);
+        }
+        age += dt;
+        // keep the entity the size of the open panel, so taps outside it close the menu (scene.modal)
+        if (e.shape) { const k = uiK(E.safe) || 1; e.shape.w = R.w / k; e.shape.h = R.h / k; e.stretch = 'none'; placeUI(e, R.x + R.w / 2, R.y + R.h / 2, E.width, E.height, E.safe); }
+        for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
+        // taps on rows (rows[] was laid out by the last draw, in screen pixels)
+        const visible = t > 0.9 || (rail() && t < 0.1);
+        if (!visible || (drag && drag.moved)) return;
+        for (const tp of inp.taps) {
+          if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
+          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          if (!r) continue;
+          const it = r.item; press.set(it, 1);
+          if (p.haptics !== false) E.vibrate(8);
+          if (p.sound) E.audio.sfx(p.sound);
+          if (it.kind === 'toggle') { s.setVar(it.v, !(s.vars[it.v] ?? true)); continue; }
+          if (rail() && t < 0.5 && it.kind === 'page' && sameVal(s.vars[p.var], it.page)) continue;
+          if (it.kind === 'msg') s.send(it.msg);
+          else s.navTo(it.page, p.var, { history: p.mode === 'open page (Back returns)', dir: 1 });
+          if (p.closeOnPick !== false && want) inst.set(e, s, false);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
+        if (!I.length && !F.length) { I = parse(p.items); F = parse(p.footer); }
+        ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
+        const sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? 1 : ease(t), raw = editing ? 1 : t;
+        rows = [];
+        if (tt <= 0.001 && !rail()) return;
+        const txt = p.text || '#e8eaf2', acc = p.accent || '#4fa3ff', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
+        // dim behind
+        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+        // panel placement for this frame
+        let w = R.w, x = R.x, alpha = 1, zoom = 1;
+        if (rail()) { w = railW + (R.w - railW) * tt; x = left ? R.x : R.x + R.w - w; }
+        else if (p.anim === 'fade' || full()) alpha = tt;
+        else if (p.anim === 'zoom') { alpha = tt; zoom = 0.85 + 0.15 * tt; }
+        else x = left ? R.x - (R.w + R.m + 24) * (1 - tt) : R.x + (R.w + R.m + 24) * (1 - tt);
+        ctx.save(); ctx.globalAlpha *= alpha;
+        if (zoom !== 1) { const ox = left ? R.x : R.x + R.w, oy = R.y + R.h / 2; ctx.translate(ox, oy); ctx.scale(zoom, zoom); ctx.translate(-ox, -oy); }
+        const rr = (X, Y, Wd, Hd, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(X, Y, Wd, Hd, Math.max(0, Math.min(r, Hd / 2, Wd / 2))); else ctx.rect(X, Y, Wd, Hd); };
+        const rad = floaty() ? 22 : 0;
+        {
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = left ? 4 : -4;
+          ctx.fillStyle = sty === 'glass' ? 'rgba(255,255,255,0.1)' : full() ? withAlpha(bg, 0.97) : bg;
+          rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();
+          if (sty === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; rr(x, R.y, w, R.h, rad); ctx.stroke(); }
+        }
+        ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
+        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
+        let y = R.y + safeT + 10;
+        // header
+        const hasHead = p.header !== 'none' && !compact && (p.title || p.avatar);
+        if (hasHead) {
+          const banner = p.header === 'banner', hh = full() ? 120 : banner ? 132 : 96;
+          if (banner) { const g = ctx.createLinearGradient(x, R.y, x + w, R.y + hh + safeT); const hc = p.headerColor || acc; g.addColorStop(0, hc); g.addColorStop(1, withAlpha(hc, 0.55)); ctx.fillStyle = g; ctx.fillRect(x, R.y, w, hh + safeT + 10); }
+          const cx = full() ? x + w / 2 : x + pad + 26, cy = y + (full() ? 30 : banner ? 40 : 30);
+          if (p.avatar) { ctx.fillStyle = banner ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, 28, banner ? '#ffffff' : acc); }
+          ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle';
+          const tx = full() ? x + w / 2 : p.avatar ? cx + 38 : x + pad, ty = full() ? cy + 50 : cy;
+          ctx.fillStyle = banner ? '#ffffff' : txt; ctx.font = `800 ${full() ? 26 : 19}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle ? 10 : 0));
+          if (p.subtitle) { ctx.globalAlpha *= 0.7; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, ty + 12); ctx.globalAlpha /= 0.7; }
+          y += hh - (full() ? 0 : 6);
+        } else y += compact ? 8 : 4;
+        if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = full() ? x + w - 34 : x + w - 28, by = R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = p.header === 'banner' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
+        // items
+        const drawList = (list, startY, dirUp) => {
+          let yy = startY, idx = 0;
+          for (const it of list) {
+            const delay = p.stagger !== false && !editing && want ? idx * 0.035 : 0, ip = rail() || !want || drag ? (rail() ? 1 : tt) : clamp((age - delay) / Math.max(0.05, (+p.duration || 0.28) * 0.6), 0, 1), slide = (1 - ease(ip)) * 30 * (left ? -1 : 1);
+            if (it.kind === 'line') { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; continue; }
+            if (it.kind === 'section') { if (!compact) { ctx.save(); ctx.globalAlpha *= 0.55 * ease(ip); ctx.fillStyle = txt; ctx.font = `800 11.5px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(it.label.toUpperCase(), full() ? x + w / 2 : x + pad + 8 + slide, yy + 16); ctx.restore(); } yy += compact ? 6 : 32; continue; }
+            idx++;
+            const hgt = full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih, on = it.kind === 'page' && sameVal(s.vars[p.var], it.page);
+            const rx = x + (sty === 'classic' || compact ? 0 : 8), rw = w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
+            ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
+            if (on || pr) { ctx.fillStyle = withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr); if (sty === 'classic') { ctx.fillRect(rx, yy, rw, hgt); if (on) { ctx.fillStyle = acc; ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); } } else { rr(rx + (compact ? 12 : 0), yy + 3, rw - (compact ? 24 : 0), hgt - 6, full() ? hgt / 2 : 14); ctx.fill(); } }
+            const col = on ? acc : txt, cy = yy + hgt / 2;
+            if (compact) drawNavIcon(ctx, it.icon || it.label.slice(0, 1), x + w / 2, cy, isz, col);
+            else if (full()) { ctx.font = `800 ${tsz + 8}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(it.label, x + w / 2, cy); }
+            else {
+              const ix = x + pad + 14 + (sty === 'classic' ? 4 : 0);
+              if (icons && it.icon) drawNavIcon(ctx, it.icon, ix, cy, isz, col);
+              ctx.font = `${on ? 800 : 650} ${sty === 'minimal' ? tsz + 6 : tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
+              ctx.fillText(it.label, icons && it.icon ? ix + isz / 2 + 14 : x + pad + 8, cy);
+              if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sx = x + w - pad - 46, sw = 40, sh = 24; ctx.fillStyle = v ? acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); }
+              else if (it.kind === 'msg' && sty !== 'minimal') { ctx.strokeStyle = withAlpha(txt, 0.35); ctx.lineWidth = 2; const ax = x + w - pad - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); }
+            }
+            const bv = it.badge ? s.vars[it.badge] : null;
+            if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+              const n = +bv, tx = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+              const bx = compact ? x + w / 2 + isz * 0.5 : x + w - pad - (it.kind === 'msg' ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
+              ctx.fillStyle = p.badgeColor || '#ff3b5c';
+              if (!tx) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(tx).width + 10); rr(bx - bw / 2, by - 10, bw, 20, 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(tx, bx, by + 0.5); }
+            }
+            ctx.restore();
+            rows.push({ item: it, x: rx, y: yy, w: rw, h: hgt });
+            yy += hgt;
+          }
+          return yy;
+        };
+        if (full()) { const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih * 1.25), 0); y = Math.max(y, R.y + (R.h - total) / 2); }
+        drawList(I, y);
+        if (F.length) { const fh = F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0), fy = R.y + R.h - safeB - fh - 10; if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        ctx.restore(); ctx.restore();
+      },
+    };
+    return inst;
+  },
+});
+
+// ============================================================================
+// UI kit: self-drawn UI components (drawn in the entity's own space, taps converted to it)
+// ============================================================================
+const UK = {
+  box(e) { const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2; return { x: e.x - ex.hx, y: e.y - ex.hy, w, h, cx: e.x, cy: e.y }; },
+  /** A screen point in the entity's drawing space. */
+  local(s, e, t) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; return { x: (t.x - o.x) / k, y: (t.y - o.y) / k, id: t.id }; },
+  live(s, e) { return e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing; },
+  taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.map((t) => UK.local(s, e, t)) : []; },
+  downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.map((t) => UK.local(s, e, t)) : []; },
+  ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
+  in(p, r, pad = 0) { return p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad; },
+  rr(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.max(0, Math.min(r, h / 2, w / 2))); else ctx.rect(x, y, w, h); },
+  text(ctx, str, x, y, { size = 16, weight = 700, color = '#fff', align = 'center', base = 'middle', maxW } = {}) { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; if (maxW) ctx.fillText(String(str), x, y, maxW); else ctx.fillText(String(str), x, y); },
+  lines(txt) { return String(txt || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).map((l) => l.split('|').map((x) => x.trim())); },
+  tap(s, p) { if (p.haptics !== false) s.engine.vibrate(8); if (p.sound !== '' && p.sound !== undefined) s.engine.audio.sfx(p.sound || 'click'); },
+  /** Full-screen modal while open: taps reach this component only (it closes itself on outside taps). */
+  modal(s, e, on, close) { if (on) { s.modal = e; e._modalRect = () => ({ x: s.engine.width / 2, y: s.engine.height / 2, w: s.engine.width * 3, h: s.engine.height * 3 }); e._dismiss = close; } else if (s.modal === e) s.modal = null; },
+  num(v, d = 0) { const n = +v; return Number.isFinite(n) ? n : d; },
+  fmt(n) { return formatNumber(Math.floor(UK.num(n))); },
+  ease: (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3),
+};
+const UI_COMMON = [
+  { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Feel' },
+  { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
+];
+const colorParams = (o) => Object.entries(o).map(([key, [label, def]]) => ({ key, label, type: 'color', default: def, group: 'Colours' }));
+
+registerBehavior('uiDropdown', {
+  label: 'Dropdown', description: 'A drop-down menu: tap it to see the choices, pick one and it goes into a variable (difficulty, language, character…).',
+  params: [
+    { key: 'options', label: 'Choices (one per line: Label | value)', type: 'code', default: 'Easy | easy\nNormal | normal\nHard | hard\nNightmare | nightmare' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'difficulty', suggest: 'vars' },
+    { key: 'label', label: 'Label in front', type: 'text', default: '' },
+    { key: 'placeholder', label: 'When nothing is picked', type: 'text', default: 'Choose…' },
+    { key: 'start', label: 'Start on choice (0 = none)', type: 'number', default: 2, step: 1 },
+    { key: 'style', label: 'Look', type: 'select', options: ['filled', 'outline', 'underline', 'pill'], default: 'filled' },
+    { key: 'maxRows', label: 'Rows shown before scrolling', type: 'number', default: 5, range: [2, 10], step: 1 },
+    { key: 'message', label: 'Send message when changed', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ bg: ['Box', '#1f2333'], text: ['Text', '#ffffff'], accent: ['Accent', '#4fa3ff'], listBg: ['List', '#262b3f'] }),
+    { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [10, 30], step: 1, group: 'Colours' },
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let O = UK.lines(p.options).map(([l, v]) => ({ label: l, value: v ?? l })), open = false, t = 0, scroll = 0, up = false, drag = null;
+    const cur = (s) => O.findIndex((o) => sameVal(s.vars[p.var], o.value));
+    const geo = (e, s) => {
+      const b = UK.box(e), rh = Math.max(36, b.h), n = Math.min(O.length, +p.maxRows || 5), lh = rh * n;
+      const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, below = (E.height - (o.y + (b.y + b.h) * k)) / k;
+      up = below < lh + 12 && (o.y + b.y * k) / k > below;
+      return { b, rh, n, lh, ly: up ? b.y - lh - 6 : b.y + b.h + 6 };
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { O = UK.lines(p.options).map(([l, v]) => ({ label: l, value: v ?? l })); const i = Math.round(+p.start || 0) - 1; if (O[i] && (s.vars[p.var] == null || s.vars[p.var] === '')) s.setVar(p.var, O[i].value); },
+      destroy(e, s) { UK.modal(s, e, false); },
+      update(e, dt, s) {
+        t = clamp(t + (open ? dt : -dt) * 8, 0, 1);
+        const G = geo(e, s), close = () => { open = false; UK.modal(s, e, false); };
+        if (open && drag) { const q = UK.ptr(s, e, drag.id); if (q) { scroll = clamp(drag.s0 - (q.y - drag.y0), 0, Math.max(0, O.length * G.rh - G.lh)); if (Math.abs(q.y - drag.y0) > 8) drag.moved = true; } else drag = null; }
+        if (open) for (const d of UK.downs(s, e)) if (UK.in(d, { x: G.b.x, y: G.ly, w: G.b.w, h: G.lh })) drag = { id: d.id, y0: d.y, s0: scroll, moved: false };
+        for (const tp of UK.taps(s, e)) {
+          if (!open) { if (UK.in(tp, G.b)) { open = true; scroll = Math.max(0, Math.min(cur(s), O.length - G.n)) * G.rh; UK.modal(s, e, true, close); UK.tap(s, p); } continue; }
+          if (drag?.moved) continue;
+          if (UK.in(tp, { x: G.b.x, y: G.ly, w: G.b.w, h: G.lh })) { const i = Math.floor((tp.y - G.ly + scroll) / G.rh); if (O[i]) { const ch = !sameVal(s.vars[p.var], O[i].value); s.setVar(p.var, O[i].value); if (ch && p.message) s.send(p.message, O[i].value); UK.tap(s, p); } }
+          close();
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (!O.length) O = UK.lines(p.options).map(([l, v]) => ({ label: l, value: v ?? l }));
+        const G = geo(e, s), b = G.b, i = cur(s), tsz = +p.textSize || 16, acc = p.accent || '#4fa3ff', txt = p.text || '#fff';
+        const r = p.style === 'pill' ? b.h / 2 : 10;
+        if (p.style === 'underline') { ctx.fillStyle = open ? acc : withAlpha(txt, 0.35); ctx.fillRect(b.x, b.y + b.h - 2, b.w, 2); }
+        else { ctx.fillStyle = p.style === 'outline' ? 'rgba(0,0,0,0)' : p.bg || '#1f2333'; UK.rr(ctx, b.x, b.y, b.w, b.h, r); ctx.fill(); if (p.style === 'outline' || open) { ctx.strokeStyle = open ? acc : withAlpha(txt, 0.35); ctx.lineWidth = 2; ctx.stroke(); } }
+        const lab = i >= 0 ? O[i].label : p.placeholder || 'Choose…', pre = p.label ? p.label + ': ' : '';
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w - 30, b.h); ctx.clip();
+        UK.text(ctx, pre + lab, b.x + 14, b.cy, { size: tsz, weight: 700, color: i >= 0 ? txt : withAlpha(txt, 0.55), align: 'left' }); ctx.restore();
+        const ax = b.x + b.w - 18, ay = b.cy, fl = t * Math.PI; ctx.save(); ctx.translate(ax, ay); ctx.rotate(fl); ctx.strokeStyle = txt; ctx.lineWidth = 2.2; ctx.beginPath(); ctx.moveTo(-5, -2.5); ctx.lineTo(0, 2.5); ctx.lineTo(5, -2.5); ctx.stroke(); ctx.restore();
+        if (t <= 0.01) return;
+        const k = UK.ease(t), lh = G.lh * k, ly = up ? G.ly + G.lh - lh : G.ly;
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 18; ctx.fillStyle = p.listBg || '#262b3f'; UK.rr(ctx, b.x, ly, b.w, lh, 12); ctx.fill(); ctx.restore();
+        ctx.save(); UK.rr(ctx, b.x, ly, b.w, lh, 12); ctx.clip(); ctx.globalAlpha *= k;
+        O.forEach((o, j) => {
+          const y = G.ly - scroll + j * G.rh; if (y + G.rh < G.ly || y > G.ly + G.lh) return;
+          if (j === i) { ctx.fillStyle = withAlpha(acc, 0.2); ctx.fillRect(b.x, y, b.w, G.rh); }
+          UK.text(ctx, o.label, b.x + 16, y + G.rh / 2, { size: tsz, weight: j === i ? 800 : 600, color: j === i ? acc : txt, align: 'left' });
+          if (j === i) { ctx.strokeStyle = acc; ctx.lineWidth = 2.5; const cx = b.x + b.w - 22, cy = y + G.rh / 2; ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 2, cy + 4); ctx.lineTo(cx + 6, cy - 5); ctx.stroke(); }
+        });
+        if (O.length > G.n) { const sh = G.lh * G.n / O.length, sy = G.ly + (G.lh - sh) * (scroll / Math.max(1, O.length * G.rh - G.lh)); ctx.fillStyle = withAlpha(txt, 0.3); UK.rr(ctx, b.x + b.w - 5, sy + 4, 3, sh - 8, 2); ctx.fill(); }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiKeypad', {
+  label: 'Keypad', description: 'A number pad: type a code, a PIN or an answer. With an Answer set, ✓ checks it and sends a message for right or wrong (safes, doors, quizzes).',
+  params: [
+    { key: 'var', label: 'Variable (what was typed)', type: 'text', default: 'code', suggest: 'vars' },
+    { key: 'maxLength', label: 'Max digits', type: 'number', default: 4, range: [1, 12], step: 1 },
+    { key: 'mask', label: 'Hide digits (PIN dots)', type: 'bool', default: false },
+    { key: 'answer', label: 'Answer (blank = any)', type: 'text', default: '1234' },
+    { key: 'rightMessage', label: 'Message when right', type: 'text', default: 'unlocked', suggest: 'messages' },
+    { key: 'wrongMessage', label: 'Message when wrong', type: 'text', default: 'wrong code', suggest: 'messages' },
+    { key: 'enterMessage', label: 'Message on ✓ (no answer set)', type: 'text', default: 'entered', suggest: 'messages' },
+    { key: 'autoEnter', label: 'Check by itself at max digits', type: 'bool', default: true },
+    { key: 'display', label: 'Show the display', type: 'bool', default: true },
+    { key: 'keyStyle', label: 'Keys', type: 'select', options: ['round', 'rounded', 'flat'], default: 'round' },
+    ...colorParams({ keyColor: ['Keys', '#2a3048'], text: ['Text', '#ffffff'], accent: ['✓ key', '#3ccf7a'], displayBg: ['Display', '#11131d'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let typed = '', shake = 0, flash = 0, flashOk = false, press = -1, pressT = 0;
+    const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '✓'];
+    const geo = (e) => { const b = UK.box(e), dh = p.display !== false ? Math.min(64, b.h * 0.18) : 0, gy = b.y + dh + (dh ? 10 : 0), gh = b.y + b.h - gy, cw = b.w / 3, ch = gh / 4; return { b, dh, gy, cw, ch }; };
+    const check = (e, s) => {
+      if (p.answer !== '' && p.answer != null) { const ok = typed === String(p.answer); flash = 1; flashOk = ok; if (ok) s.send(p.rightMessage || 'unlocked', typed); else { shake = 1; s.send(p.wrongMessage || 'wrong code', typed); s.engine.vibrate([40, 30, 40]); typed = ''; s.setVar(p.var, ''); } }
+      else s.send(p.enterMessage || 'entered', typed);
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        shake = Math.max(0, shake - dt * 3); flash = Math.max(0, flash - dt * 2); pressT = Math.max(0, pressT - dt * 6);
+        const G = geo(e);
+        for (const tp of UK.taps(s, e)) {
+          if (tp.y < G.gy || !UK.in(tp, G.b)) continue;
+          const i = Math.floor((tp.x - G.b.x) / G.cw) + Math.floor((tp.y - G.gy) / G.ch) * 3, k = KEYS[i]; if (!k) continue;
+          press = i; pressT = 1; UK.tap(s, p);
+          if (k === '⌫') typed = typed.slice(0, -1);
+          else if (k === '✓') { check(e, s); continue; }
+          else if (typed.length < (+p.maxLength || 4)) typed += k;
+          s.setVar(p.var, typed);
+          if (p.autoEnter !== false && typed.length >= (+p.maxLength || 4) && p.answer) check(e, s);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), b = G.b, txt = p.text || '#fff', acc = p.accent || '#3ccf7a', n = +p.maxLength || 4;
+        if (G.dh) {
+          const sx = Math.sin(shake * 30) * 10 * shake;
+          ctx.fillStyle = flash > 0 ? withAlpha(flashOk ? '#3ccf7a' : '#ff4d5e', 0.25 + flash * 0.4) : p.displayBg || '#11131d'; UK.rr(ctx, b.x, b.y, b.w, G.dh, 14); ctx.fill();
+          if (p.mask) { const gap = Math.min(28, (b.w - 40) / n); for (let i = 0; i < n; i++) { const x = b.cx - (n - 1) * gap / 2 + i * gap + sx; ctx.beginPath(); ctx.arc(x, b.y + G.dh / 2, 7, 0, Math.PI * 2); if (i < typed.length) { ctx.fillStyle = txt; ctx.fill(); } else { ctx.strokeStyle = withAlpha(txt, 0.4); ctx.lineWidth = 2; ctx.stroke(); } } }
+          else UK.text(ctx, typed || '·'.repeat(n), b.cx + sx, b.y + G.dh / 2 + 1, { size: Math.min(34, G.dh * 0.55), weight: 800, color: typed ? txt : withAlpha(txt, 0.3) });
+        }
+        KEYS.forEach((k, i) => {
+          const cx = b.x + G.cw * (i % 3 + 0.5), cy = G.gy + G.ch * (Math.floor(i / 3) + 0.5), r = Math.min(G.cw, G.ch) * 0.42, pr = i === press ? pressT : 0;
+          ctx.fillStyle = k === '✓' ? acc : k === '⌫' ? withAlpha(p.keyColor || '#2a3048', 0.6) : p.keyColor || '#2a3048';
+          ctx.save(); ctx.translate(cx, cy); ctx.scale(1 - pr * 0.08, 1 - pr * 0.08);
+          if (p.keyStyle === 'flat') { ctx.globalAlpha *= 0.9; UK.rr(ctx, -G.cw / 2 + 3, -G.ch / 2 + 3, G.cw - 6, G.ch - 6, 4); }
+          else if (p.keyStyle === 'rounded') UK.rr(ctx, -G.cw / 2 + 5, -G.ch / 2 + 5, G.cw - 10, G.ch - 10, 14);
+          else { ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); }
+          ctx.fill(); if (pr) { ctx.fillStyle = `rgba(255,255,255,${pr * 0.25})`; ctx.fill(); }
+          UK.text(ctx, k, 0, 1, { size: Math.min(30, r * 0.85), weight: 700, color: txt }); ctx.restore();
+        });
+      },
+    };
+  },
+});
+
+registerBehavior('uiColorPicker', {
+  label: 'Colour Picker', description: 'Colour swatches: tap one to pick it. Saves the colour in a variable and can recolour an object (skins, paint, team colours).',
+  params: [
+    { key: 'colors', label: 'Colours (comma list)', type: 'text', default: '#ff4d5e, #ff9f43, #ffd23d, #3ccf7a, #22b8c9, #4fa3ff, #8e6bf2, #e0559b, #ffffff, #2b2f3f' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'color', suggest: 'vars' },
+    { key: 'target', label: 'Recolour object (name or tag, blank = none)', type: 'text', default: '', suggest: 'tags' },
+    { key: 'columns', label: 'Columns', type: 'number', default: 5, range: [1, 12], step: 1 },
+    { key: 'shape', label: 'Swatch shape', type: 'select', options: ['circle', 'rounded', 'square'], default: 'circle' },
+    { key: 'gap', label: 'Gap', type: 'number', default: 10, range: [0, 30], step: 1 },
+    { key: 'ring', label: 'Selected ring colour', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'message', label: 'Send message when picked', type: 'text', default: '', suggest: 'messages' },
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const C = () => String(p.colors || '').split(',').map((x) => x.trim()).filter(Boolean);
+    let pop = new Map();
+    const geo = (e) => { const b = UK.box(e), cols = Math.max(1, Math.round(+p.columns || 5)), list = C(), rows = Math.ceil(list.length / cols), g = +p.gap || 0, sz = Math.min((b.w - g * (cols - 1)) / cols, (b.h - g * (rows - 1)) / Math.max(1, rows)); return { b, cols, rows, list, g, sz, ox: b.cx - (cols * sz + (cols - 1) * g) / 2, oy: b.cy - (rows * sz + (rows - 1) * g) / 2 }; };
+    const paint = (s, col) => { if (!p.target) return; for (const q of [s.find(p.target), ...s.findAll(p.target)].filter(Boolean)) { if (q.shape) q.shape.fill = col; else if (q.text) q.text.color = col; else if (q.mesh) q.mesh.color = col; else q.tint = col; } };
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var]) paint(s, s.vars[p.var]); },
+      update(e, dt, s) {
+        for (const [k, v] of pop) { const n = v - dt * 4; if (n <= 0) pop.delete(k); else pop.set(k, n); }
+        const G = geo(e);
+        for (const tp of UK.taps(s, e)) G.list.forEach((c, i) => { const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g); if (UK.in(tp, { x, y, w: G.sz, h: G.sz })) { s.setVar(p.var, c); paint(s, c); pop.set(i, 1); UK.tap(s, p); if (p.message) s.send(p.message, c); } });
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), cur = String(s.vars[p.var] || '').toLowerCase();
+        G.list.forEach((c, i) => {
+          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g), on = c.toLowerCase() === cur, sc = 1 + Math.sin((pop.get(i) || 0) * Math.PI) * 0.15;
+          ctx.save(); ctx.translate(x + G.sz / 2, y + G.sz / 2); ctx.scale(sc, sc); const h = G.sz / 2 - (on ? 5 : 0);
+          ctx.fillStyle = c; if (p.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, h, 0, Math.PI * 2); } else UK.rr(ctx, -h, -h, h * 2, h * 2, p.shape === 'square' ? 3 : h * 0.35); ctx.fill();
+          ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.stroke();
+          if (on) { ctx.strokeStyle = p.ring || '#fff'; ctx.lineWidth = 3; if (p.shape === 'circle') { ctx.beginPath(); ctx.arc(0, 0, G.sz / 2 - 1, 0, Math.PI * 2); } else UK.rr(ctx, -G.sz / 2 + 1, -G.sz / 2 + 1, G.sz - 2, G.sz - 2, p.shape === 'square' ? 4 : G.sz * 0.3); ctx.stroke(); }
+          ctx.restore();
+        });
+      },
+    };
+  },
+});
+
+registerBehavior('uiCarousel', {
+  label: 'Carousel', description: 'Swipe through cards (characters, levels, cars, skins): the middle one is picked into a variable. Cards can be locked until a variable is true.',
+  params: [
+    { key: 'items', label: 'Cards (one per line: Name | icon or emoji | value | unlocked-when variable | subtitle)', type: 'code', default: 'Knight | 🛡️ | knight | | Strong and steady\nNinja | 🥷 | ninja | | Fast and sneaky\nWizard | 🧙 | wizard | owned_wizard | Unlock in the shop\nRobot | 🤖 | robot | owned_robot | Unlock in the shop' },
+    { key: 'var', label: 'Variable (picked value)', type: 'text', default: 'character', suggest: 'vars' },
+    { key: 'look', label: 'Look', type: 'select', options: ['cover flow', 'flat row', 'stack'], default: 'cover flow' },
+    { key: 'cardWidth', label: 'Card width (share of the box)', type: 'number', default: 0.55, range: [0.25, 1], step: 0.05 },
+    { key: 'arrows', label: 'Arrows', type: 'bool', default: true },
+    { key: 'dots', label: 'Dots', type: 'bool', default: true },
+    { key: 'loop', label: 'Loop around', type: 'bool', default: false },
+    { key: 'message', label: 'Send message when picked', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ card: ['Cards', '#232842'], text: ['Text', '#ffffff'], accent: ['Accent', '#4fa3ff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let C = [], pos = 0, target = 0, drag = null, lastSent = null;
+    const parse = () => UK.lines(p.items).map(([name, icon, value, lock, sub]) => ({ name, icon, value: value || (name || '').toLowerCase(), lock, sub }));
+    const unlocked = (s, c) => !c.lock || !!s.vars[c.lock] && s.vars[c.lock] !== '0';
+    const wrap = (i) => (p.loop ? ((i % C.length) + C.length) % C.length : clamp(i, 0, C.length - 1));
+    return {
+      uiAlways: true,
+      start(e, s) { C = parse(); const i = C.findIndex((c) => sameVal(s.vars[p.var], c.value)); pos = target = i >= 0 ? i : 0; if (i < 0 && C[0]) s.setVar(p.var, C[0].value); lastSent = s.vars[p.var]; },
+      update(e, dt, s) {
+        if (!C.length) C = parse();
+        const b = UK.box(e), cw = b.w * (+p.cardWidth || 0.55);
+        for (const d of UK.downs(s, e)) if (UK.in(d, b) && !drag) drag = { id: d.id, x0: d.x, p0: pos, moved: false };
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { const dx = q.x - drag.x0; if (Math.abs(dx) > 8) drag.moved = true; pos = drag.p0 - dx / (cw * 0.8); if (!p.loop) pos = clamp(pos, -0.3, C.length - 0.7); } else { target = Math.round(pos + (drag.moved ? 0 : 0)); target = p.loop ? target : clamp(target, 0, C.length - 1); drag = null; } }
+        else pos += (target - pos) * Math.min(1, dt * 12);
+        for (const tp of UK.taps(s, e)) {
+          if (!UK.in(tp, b)) continue;
+          if (p.arrows !== false && tp.x < b.x + 36) { target = p.loop ? target - 1 : Math.max(0, target - 1); UK.tap(s, p); }
+          else if (p.arrows !== false && tp.x > b.x + b.w - 36) { target = p.loop ? target + 1 : Math.min(C.length - 1, target + 1); UK.tap(s, p); }
+          else if (Math.abs(tp.x - b.cx) > cw / 2) { target += tp.x > b.cx ? 1 : -1; if (!p.loop) target = clamp(target, 0, C.length - 1); UK.tap(s, p); }
+        }
+        const c = C[wrap(Math.round(target))];
+        if (c && !drag && Math.abs(pos - target) < 0.02 && unlocked(s, c) && !sameVal(lastSent, c.value)) { s.setVar(p.var, c.value); lastSent = c.value; if (p.message) s.send(p.message, c.value); }
+      },
+      drawUI(ctx, e, s) {
+        if (!C.length) C = parse();
+        const b = UK.box(e), cw = b.w * (+p.cardWidth || 0.55), ch = b.h - (p.dots !== false ? 22 : 0), txt = p.text || '#fff', acc = p.accent || '#4fa3ff';
+        ctx.save(); UK.rr(ctx, b.x, b.y, b.w, b.h, 0); ctx.clip();
+        const order = C.map((c, i) => { let d = i - pos; if (p.loop && C.length > 2) { d = ((d % C.length) + C.length * 1.5) % C.length - C.length / 2; } return { c, d }; }).filter((o) => Math.abs(o.d) < 3).sort((a, b2) => Math.abs(b2.d) - Math.abs(a.d));
+        for (const { c, d } of order) {
+          const ad = Math.abs(d), flow = p.look === 'cover flow', stack = p.look === 'stack';
+          const sc = flow ? 1 - Math.min(ad, 2) * 0.16 : stack ? 1 - Math.min(ad, 2) * 0.08 : 1, x = b.cx + d * cw * (flow ? 0.72 : stack ? 0.18 : 1.06), y = b.y + ch / 2 + (stack ? ad * 10 : 0);
+          ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc); ctx.globalAlpha *= clamp(1.25 - ad * (stack ? 0.35 : 0.3), 0, 1);
+          const w = cw - 12, h = ch - 8, lock = !unlocked(s, c), sel = sameVal(s.vars[p.var], c.value);
+          ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 16; ctx.fillStyle = p.card || '#232842'; UK.rr(ctx, -w / 2, -h / 2, w, h, 18); ctx.fill(); ctx.shadowColor = 'transparent';
+          if (sel) { ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.stroke(); }
+          ctx.globalAlpha *= lock ? 0.45 : 1;
+          drawNavIcon(ctx, c.icon, 0, -h * 0.12, Math.min(w, h) * 0.42, txt);
+          UK.text(ctx, c.name, 0, h * 0.24, { size: Math.min(22, w * 0.13), weight: 800, color: txt, maxW: w - 16 });
+          if (c.sub) UK.text(ctx, c.sub, 0, h * 0.24 + 22, { size: 12, weight: 600, color: withAlpha(txt, 0.65), maxW: w - 16 });
+          ctx.globalAlpha /= lock ? 0.45 : 1;
+          if (lock) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; UK.rr(ctx, -w / 2, -h / 2, w, h, 18); ctx.fill(); UK.text(ctx, '🔒', 0, -h * 0.12, { size: Math.min(w, h) * 0.22 }); }
+          ctx.restore();
+        }
+        ctx.restore();
+        if (p.arrows !== false && C.length > 1) for (const dir of [-1, 1]) { const ax = dir < 0 ? b.x + 18 : b.x + b.w - 18, en = p.loop || (dir < 0 ? target > 0 : target < C.length - 1); ctx.fillStyle = `rgba(0,0,0,${en ? 0.45 : 0.15})`; ctx.beginPath(); ctx.arc(ax, b.y + ch / 2, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = withAlpha(txt, en ? 1 : 0.3); ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(ax + dir * -3, b.y + ch / 2 - 6); ctx.lineTo(ax + dir * 4, b.y + ch / 2); ctx.lineTo(ax + dir * -3, b.y + ch / 2 + 6); ctx.stroke(); }
+        if (p.dots !== false) { const n = C.length, sel = wrap(Math.round(pos)); for (let i = 0; i < n; i++) { const on = i === sel; ctx.fillStyle = on ? acc : withAlpha(txt, 0.3); UK.rr(ctx, b.cx - (n - 1) * 8 + i * 16 - (on ? 8 : 3), b.y + b.h - 10, on ? 16 : 6, 6, 3); ctx.fill(); } }
+      },
+    };
+  },
+});
+
+registerBehavior('uiSkillButton', {
+  label: 'Skill Button (cooldown)', description: 'An ability button: tap to use it (sends a message), then it cools down with a sweeping shadow. Charges, a cost (mana, energy) and a keyboard key are optional.',
+  params: [
+    { key: 'icon', label: 'Icon (UI icon or emoji)', type: 'text', default: '⚡' },
+    { key: 'label', label: 'Label under it', type: 'text', default: '' },
+    { key: 'message', label: 'Message when used', type: 'text', default: 'dash', suggest: 'messages' },
+    { key: 'cooldown', label: 'Cooldown (sec)', type: 'number', default: 3, range: [0, 120], step: 0.5 },
+    { key: 'charges', label: 'Charges', type: 'number', default: 1, range: [1, 9], step: 1 },
+    { key: 'costVar', label: 'Costs variable (blank = free)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'cost', label: 'Cost', type: 'number', default: 10, step: 1, showIf: (b) => !!b.costVar },
+    { key: 'key', label: 'Keyboard key', type: 'text', default: 'e' },
+    { key: 'shape', label: 'Shape', type: 'select', options: ['circle', 'rounded square', 'hexagon'], default: 'circle' },
+    { key: 'showTime', label: 'Show seconds left', type: 'bool', default: true },
+    ...colorParams({ color: ['Button', '#3a6ea5'], ring: ['Ready ring', '#7fd3ff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let cd = 0, charges = Math.max(1, +p.charges || 1), pop = 0, deny = 0, readyFlash = 0;
+    return {
+      update(e, dt, s) {
+        const max = Math.max(1, +p.charges || 1), cdt = +p.cooldown || 0;
+        if (charges < max) { cd += dt; if (cd >= cdt) { cd = 0; charges++; readyFlash = 1; } }
+        pop = Math.max(0, pop - dt * 4); deny = Math.max(0, deny - dt * 3); readyFlash = Math.max(0, readyFlash - dt * 2);
+        const b = UK.box(e), hit = UK.taps(s, e).some((t) => UK.in(t, b, 6)) || (p.key && s.engine.input.keysDown.includes(keyName(p.key)));
+        if (!hit || s.engine.paused) return;
+        const afford = !p.costVar || UK.num(s.vars[p.costVar]) >= (+p.cost || 0);
+        if (charges > 0 && afford) { charges--; if (charges === max - 1) cd = 0; if (p.costVar) s.setVar(p.costVar, UK.num(s.vars[p.costVar]) - (+p.cost || 0)); s.send(p.message || 'skill'); pop = 1; UK.tap(s, p); }
+        else { deny = 1; s.engine.vibrate(20); }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), max = Math.max(1, +p.charges || 1), lab = p.label ? 18 : 0, r = Math.min(b.w, b.h - lab) / 2 - 2, cx = b.cx + Math.sin(deny * 25) * 5 * deny, cy = b.y + r + 2, cdt = +p.cooldown || 0;
+        const afford = !p.costVar || UK.num(s.vars[p.costVar]) >= (+p.cost || 0), ready = charges > 0 && afford;
+        const path = () => { if (p.shape === 'hexagon') { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } ctx.closePath(); } else if (p.shape === 'rounded square') UK.rr(ctx, cx - r, cy - r, r * 2, r * 2, r * 0.35); else { ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); } };
+        ctx.save(); const sc = 1 + Math.sin(pop * Math.PI) * 0.12; ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+        ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 10; ctx.fillStyle = p.color || '#3a6ea5'; path(); ctx.fill(); ctx.shadowColor = 'transparent';
+        drawNavIcon(ctx, p.icon || '⚡', cx, cy, r * 1.05, '#ffffff', ready ? 1 : 0.55);
+        if (charges < max && cdt > 0) { // cooldown sweep
+          if (charges === 0) { const f = 1 - cd / cdt; ctx.save(); path(); ctx.clip(); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r * 1.5, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.closePath(); ctx.fill(); ctx.restore(); } // the part still cooling down
+          ctx.strokeStyle = withAlpha(p.ring || '#7fd3ff', 0.9); ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(cx, cy, r + 3, -Math.PI / 2, -Math.PI / 2 + (cd / cdt) * Math.PI * 2); ctx.stroke();
+          if (p.showTime !== false && charges === 0) UK.text(ctx, (cdt - cd).toFixed(cdt - cd < 1 ? 1 : 0), cx, cy + 1, { size: r * 0.6, weight: 900, color: '#fff' });
+        } else if (ready) { ctx.strokeStyle = withAlpha(p.ring || '#7fd3ff', 0.5 + readyFlash * 0.5); ctx.lineWidth = 2 + readyFlash * 3; path(); ctx.stroke(); }
+        if (!afford) { ctx.fillStyle = 'rgba(40,60,160,0.35)'; path(); ctx.fill(); }
+        ctx.restore();
+        if (max > 1) { ctx.fillStyle = '#ff9f43'; ctx.beginPath(); ctx.arc(cx + r * 0.72, cy - r * 0.72, 10, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, charges, cx + r * 0.72, cy - r * 0.72 + 0.5, { size: 12, weight: 900 }); }
+        if (p.costVar && p.cost) UK.text(ctx, p.cost, cx, cy + r * 0.72, { size: 11, weight: 900, color: afford ? '#bfe3ff' : '#ff8080' });
+        if (p.label) UK.text(ctx, p.label, cx, b.y + b.h - 8, { size: 12, weight: 800 });
+      },
+    };
+  },
+});
+
+registerBehavior('uiRadialMenu', {
+  label: 'Radial Menu', description: 'A round button that opens a wheel of choices around it. Hold and slide to a choice (or tap, then tap a choice): it sends that choice\'s message (emotes, build menus, weapon wheels).',
+  params: [
+    { key: 'items', label: 'Choices (one per line: Label | icon or emoji | message)', type: 'code', default: 'Wave | 👋 | emote wave\nLaugh | 😂 | emote laugh\nHeart | ❤️ | emote heart\nAngry | 😠 | emote angry\nCool | 😎 | emote cool\nGG | 🏆 | emote gg' },
+    { key: 'icon', label: 'Button icon', type: 'text', default: '😀' },
+    { key: 'open', label: 'Opens by', type: 'select', options: ['hold and slide', 'tap'], default: 'hold and slide' },
+    { key: 'radius', label: 'Wheel size', type: 'number', default: 110, range: [60, 220], step: 5 },
+    { key: 'dim', label: 'Dim behind', type: 'number', default: 0.35, range: [0, 0.9], step: 0.05 },
+    { key: 'labels', label: 'Show labels', type: 'bool', default: true },
+    ...colorParams({ color: ['Button', '#2a3048'], wheel: ['Wheel', '#1b1f30'], accent: ['Highlight', '#4fa3ff'], text: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let I = [], open = false, t = 0, hold = null, hi = -1;
+    const parse = () => UK.lines(p.items).map(([label, icon, msg]) => ({ label, icon, msg: msg || label }));
+    const pick = (b, q) => { const dx = q.x - b.cx, dy = q.y - b.cy, d = Math.hypot(dx, dy); if (d < Math.min(b.w, b.h) * 0.45 || d > (+p.radius || 110) * 1.6) return -1; const a = (Math.atan2(dy, dx) + Math.PI / 2 + Math.PI * 4) % (Math.PI * 2); return Math.floor((a + Math.PI / I.length) / (Math.PI * 2 / I.length)) % I.length; };
+    return {
+      uiAlways: true,
+      destroy(e, s) { UK.modal(s, e, false); },
+      update(e, dt, s) {
+        if (!I.length) I = parse();
+        t = clamp(t + (open ? dt : -dt) * 9, 0, 1);
+        const b = UK.box(e), close = () => { open = false; hi = -1; UK.modal(s, e, false); };
+        const fire = (i) => { if (I[i]) { s.send(I[i].msg); UK.tap(s, p); } };
+        if (p.open !== 'tap') {
+          for (const d of UK.downs(s, e)) if (!hold && Math.hypot(d.x - b.cx, d.y - b.cy) < Math.min(b.w, b.h) / 2 + 6) { hold = d.id; open = true; UK.modal(s, e, true, close); if (p.haptics !== false) s.engine.vibrate(10); }
+          if (hold != null) { const q = UK.ptr(s, e, hold); if (q) { const n = pick(b, q); if (n !== hi && n >= 0 && p.haptics !== false) s.engine.vibrate(5); hi = n; } else { fire(hi); hold = null; close(); } }
+          s.engine.input.taps = open ? [] : s.engine.input.taps;
+        } else for (const tp of UK.taps(s, e)) {
+          const inBtn = Math.hypot(tp.x - b.cx, tp.y - b.cy) < Math.min(b.w, b.h) / 2 + 6;
+          if (!open) { if (inBtn) { open = true; UK.modal(s, e, true, close); UK.tap(s, p); } continue; }
+          const n = pick(b, tp); if (n >= 0) fire(n); close();
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (!I.length) I = parse();
+        const b = UK.box(e), r0 = Math.min(b.w, b.h) / 2, R = (+p.radius || 110) * UK.ease(t), n = I.length || 1, txt = p.text || '#fff', acc = p.accent || '#4fa3ff';
+        if (t > 0.01) {
+          if (+p.dim) { ctx.save(); ctx.globalAlpha *= (+p.dim) * t; ctx.fillStyle = '#000'; ctx.fillRect(b.cx - 3000, b.cy - 3000, 6000, 6000); ctx.restore(); }
+          ctx.save(); ctx.globalAlpha *= t;
+          for (let i = 0; i < n; i++) {
+            const a0 = -Math.PI / 2 + (i - 0.5) * Math.PI * 2 / n + 0.03, a1 = a0 + Math.PI * 2 / n - 0.06, on = i === hi;
+            ctx.fillStyle = on ? acc : withAlpha(p.wheel || '#1b1f30', 0.94); ctx.beginPath(); ctx.arc(b.cx, b.cy, R * (on ? 1.06 : 1), a0, a1); ctx.arc(b.cx, b.cy, r0 + 8, a1, a0, true); ctx.closePath(); ctx.fill();
+            const am = (a0 + a1) / 2, rm = (R + r0 + 8) / 2, ix = b.cx + Math.cos(am) * rm, iy = b.cy + Math.sin(am) * rm;
+            drawNavIcon(ctx, I[i].icon || I[i].label.slice(0, 1), ix, iy - (p.labels !== false ? 7 : 0), Math.min(30, (R - r0) * 0.38), txt);
+            if (p.labels !== false) UK.text(ctx, I[i].label, ix, iy + 15, { size: 11, weight: 800, color: txt });
+          }
+          ctx.restore();
+        }
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 10; ctx.fillStyle = p.color || '#2a3048'; ctx.beginPath(); ctx.arc(b.cx, b.cy, r0 * (1 - t * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        drawNavIcon(ctx, open && hi >= 0 ? I[hi].icon : p.icon || '😀', b.cx, b.cy, r0 * 1.1, txt);
+      },
+    };
+  },
+});
+
+registerBehavior('uiSpinWheel', {
+  label: 'Prize Wheel', description: 'A wheel of prizes that spins when tapped (or on a message) and lands on a prize: adds it to a variable and sends a message. Segments can be more or less likely.',
+  params: [
+    { key: 'segments', label: 'Prizes (one per line: Label | colour | amount | chance weight)', type: 'code', default: '10 | #ff4d5e | 10 | 3\n50 | #ff9f43 | 50 | 2\n5 | #ffd23d | 5 | 4\n100 | #3ccf7a | 100 | 1\n20 | #4fa3ff | 20 | 3\nJackpot | #8e6bf2 | 500 | 0.3\n15 | #22b8c9 | 15 | 3\n25 | #e0559b | 25 | 2' },
+    { key: 'var', label: 'Add the prize to variable', type: 'text', default: 'coins', suggest: 'vars' },
+    { key: 'resultVar', label: 'Prize label goes in', type: 'text', default: 'prize', suggest: 'vars' },
+    { key: 'spinOn', label: 'Spins when', type: 'select', options: ['tapped', 'message only'], default: 'tapped' },
+    { key: 'message', label: 'Spin on message', type: 'text', default: 'spin', suggest: 'messages' },
+    { key: 'doneMessage', label: 'Message when it stops', type: 'text', default: 'prize won', suggest: 'messages' },
+    { key: 'duration', label: 'Spin time (sec)', type: 'number', default: 4, range: [1, 12], step: 0.5 },
+    { key: 'spinsVar', label: 'Spins left variable (blank = unlimited)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'text', label: 'Text colour', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'rim', label: 'Rim', type: 'color', default: '#ffd23d', group: 'Colours' },
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let S = [], ang = 0, from = 0, to = 0, t = 1, spinning = false, win = -1, tick = -1, glow = 0;
+    const parse = () => UK.lines(p.segments).map(([label, color, amount, w]) => ({ label, color: color || '#4fa3ff', amount: UK.num(amount), w: Math.max(0, UK.num(w, 1)) }));
+    const spin = (s) => {
+      if (spinning || !S.length) return;
+      if (p.spinsVar) { if (UK.num(s.vars[p.spinsVar]) <= 0) { s.engine.vibrate(30); return; } s.setVar(p.spinsVar, UK.num(s.vars[p.spinsVar]) - 1); }
+      const total = S.reduce((n, x) => n + x.w, 0) || 1; let r = Math.random() * total; win = S.findIndex((x) => (r -= x.w) < 0); if (win < 0) win = S.length - 1;
+      const seg = Math.PI * 2 / S.length, land = -(win + 0.5) * seg + (Math.random() - 0.5) * seg * 0.7; // pointer at the top
+      from = ang; to = ang - ((ang - land) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2 * (5 + Math.floor(+p.duration || 4)); t = 0; spinning = true;
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { S = parse(); s.on('message', (m) => { if (!e.dead && m === (p.message || 'spin')) spin(s); }); },
+      update(e, dt, s) {
+        glow = Math.max(0, glow - dt);
+        if (spinning) {
+          t = Math.min(1, t + dt / (+p.duration || 4)); ang = from + (to - from) * (1 - Math.pow(1 - t, 4));
+          const seg = Math.PI * 2 / S.length, k = Math.floor(((-ang % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) / seg); if (k !== tick) { tick = k; s.engine.audio.tone?.({ freq: 900, dur: 0.02, vol: 0.04, type: 'triangle' }); if (p.haptics !== false) s.engine.vibrate(3); }
+          if (t >= 1) { spinning = false; glow = 2; const w = S[win]; if (p.var && w.amount) s.setVar(p.var, UK.num(s.vars[p.var]) + w.amount); if (p.resultVar) s.setVar(p.resultVar, w.label); s.send(p.doneMessage || 'prize won', w.label); s.engine.audio.sfx('coin'); }
+        }
+        if (p.spinOn !== 'message only') { const b = UK.box(e); if (UK.taps(s, e).some((tp) => Math.hypot(tp.x - b.cx, tp.y - b.cy) < Math.min(b.w, b.h) / 2)) spin(s); }
+      },
+      drawUI(ctx, e, s) {
+        if (!S.length) S = parse();
+        const b = UK.box(e), R = Math.min(b.w, b.h) / 2 - 8, n = S.length || 1, seg = Math.PI * 2 / n, txt = p.text || '#fff';
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 20; ctx.fillStyle = p.rim || '#ffd23d'; ctx.beginPath(); ctx.arc(b.cx, b.cy, R + 8, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        ctx.save(); ctx.translate(b.cx, b.cy); ctx.rotate(ang);
+        S.forEach((x, i) => {
+          const a0 = -Math.PI / 2 + i * seg; ctx.fillStyle = x.color; ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, R, a0, a0 + seg); ctx.closePath(); ctx.fill();
+          if (!spinning && glow > 0 && i === win) { ctx.fillStyle = `rgba(255,255,255,${0.35 * Math.abs(Math.sin(glow * 6))})`; ctx.fill(); }
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 2; ctx.stroke();
+          ctx.save(); ctx.rotate(a0 + seg / 2); UK.text(ctx, x.label, R * 0.62, 0, { size: Math.min(18, R * 0.16), weight: 900, color: txt, maxW: R * 0.55 }); ctx.restore();
+        });
+        ctx.restore();
+        for (let i = 0; i < n * 2; i++) { const a = i * Math.PI / n + ang; ctx.fillStyle = i % 2 ? '#fff' : withAlpha('#fff', 0.5); ctx.beginPath(); ctx.arc(b.cx + Math.cos(a) * (R + 4), b.cy + Math.sin(a) * (R + 4), 2.5, 0, Math.PI * 2); ctx.fill(); }
+        ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(b.cx, b.cy, R * 0.16, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, spinning ? '…' : 'SPIN', b.cx, b.cy + 1, { size: R * 0.09, weight: 900, color: '#222' });
+        ctx.fillStyle = '#ffffff'; ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(b.cx - 13, b.cy - R - 14); ctx.lineTo(b.cx + 13, b.cy - R - 14); ctx.lineTo(b.cx, b.cy - R + 12); ctx.closePath(); ctx.fill(); ctx.stroke();
+        if (p.spinsVar) UK.text(ctx, `Spins: ${UK.num(s.vars[p.spinsVar])}`, b.cx, b.y + b.h + 2, { size: 13, weight: 800, base: 'top' });
+      },
+    };
+  },
+});
+const CHART_COLORS = ['#4fa3ff', '#ff9f43', '#3ccf7a', '#ff4d5e', '#8e6bf2', '#22b8c9', '#ffd23d', '#e0559b'];
+/** Draw in screen pixels from inside drawUI (undoes the element's origin and UI scale). */
+const toScreen = (ctx, e, s) => { const E = s.engine, k = uiK(E.safe) || 1, o = uiOrigin(e, E.width, E.height, E.safe); ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); };
+
+registerBehavior('uiChart', {
+  label: 'Chart', description: 'Bar, line, area, pie, donut or radar charts from your variables (stats screens, results, character stats). A line chart can also track a variable over time.',
+  params: [
+    { key: 'chart', label: 'Chart', type: 'select', options: ['bars', 'columns', 'line', 'area', 'pie', 'donut', 'radar'], default: 'columns' },
+    { key: 'data', label: 'Data (one per line: Label | variable or number | colour)', type: 'code', default: 'Mon | 12\nTue | 19\nWed | 8\nThu | 24\nFri | 15\nSat | 30\nSun | 22' },
+    { key: 'track', label: 'Track a variable over time (line / area; blank = use Data)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'every', label: 'Track every (sec)', type: 'number', default: 1, range: [0.1, 60], step: 0.1, showIf: (b) => !!b.track },
+    { key: 'points', label: 'Points kept', type: 'number', default: 30, range: [5, 200], step: 1, showIf: (b) => !!b.track },
+    { key: 'title', label: 'Title', type: 'text', default: '' },
+    { key: 'max', label: 'Top of the scale (0 = auto)', type: 'number', default: 0, step: 1 },
+    { key: 'values', label: 'Show values', type: 'bool', default: true },
+    { key: 'labels', label: 'Show labels', type: 'bool', default: true },
+    { key: 'grid', label: 'Grid lines', type: 'bool', default: true },
+    { key: 'animate', label: 'Grow in', type: 'bool', default: true },
+    ...colorParams({ color: ['Main colour', '#4fa3ff'], text: ['Text', '#e8eaf2'], bg: ['Background', ''] }),
+  ],
+  create(p) {
+    let D = [], grow = 0, hist = [], acc = 0;
+    const read = (s) => UK.lines(p.data).map(([label, v, color], i) => ({ label, v: UK.num(Number.isFinite(+v) ? v : s.vars[v]), color: color || (['pie', 'donut'].includes(p.chart) ? CHART_COLORS[i % CHART_COLORS.length] : p.color || '#4fa3ff') }));
+    return {
+      uiAlways: true,
+      start(e, s) { grow = p.animate === false ? 1 : 0; },
+      update(e, dt, s) {
+        grow = Math.min(1, grow + dt * 1.6);
+        if (p.track) { acc += dt; if (acc >= (+p.every || 1) || !hist.length) { acc = 0; hist.push(UK.num(s.vars[p.track])); if (hist.length > (+p.points || 30)) hist.shift(); } }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), txt = p.text || '#e8eaf2', g = s.engine.editing ? 1 : UK.ease(grow), type = p.chart || 'columns';
+        D = p.track && (type === 'line' || type === 'area') ? (hist.length ? hist : [0, 0]).map((v, i) => ({ label: '', v, color: p.color || '#4fa3ff' })) : read(s);
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, b.x, b.y, b.w, b.h, 16); ctx.fill(); }
+        let top = b.y + 10; if (p.title) { UK.text(ctx, p.title, b.cx, b.y + 16, { size: 15, weight: 800, color: txt }); top += 22; }
+        const max = +p.max || Math.max(1, ...D.map((d) => d.v)) * 1.1, lb = p.labels !== false && type !== 'pie' && type !== 'donut' && type !== 'radar' ? 18 : 0;
+        const area = { x: b.x + 12, y: top, w: b.w - 24, h: b.y + b.h - top - 10 - lb };
+        if (type === 'pie' || type === 'donut') {
+          const tot = D.reduce((n, d) => n + Math.max(0, d.v), 0) || 1, R = Math.min(area.w * 0.42, area.h / 2), cx = area.x + (p.labels !== false ? R + 4 : area.w / 2), cy = area.y + area.h / 2; let a = -Math.PI / 2;
+          D.forEach((d) => { const sw = Math.max(0, d.v) / tot * Math.PI * 2 * g; ctx.fillStyle = d.color; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, R, a, a + sw); ctx.closePath(); ctx.fill(); if (p.values !== false && sw > 0.35) UK.text(ctx, Math.round(d.v / tot * 100) + '%', cx + Math.cos(a + sw / 2) * R * (type === 'donut' ? 0.78 : 0.62), cy + Math.sin(a + sw / 2) * R * (type === 'donut' ? 0.78 : 0.62), { size: 11, weight: 800, color: '#fff' }); a += sw; });
+          if (type === 'donut') { ctx.save(); if (p.bg) ctx.fillStyle = p.bg; else ctx.globalCompositeOperation = 'destination-out'; ctx.beginPath(); ctx.arc(cx, cy, R * 0.56, 0, Math.PI * 2); ctx.fill(); ctx.restore(); UK.text(ctx, UK.fmt(tot), cx, cy + 1, { size: R * 0.32, weight: 900, color: txt }); }
+          if (p.labels !== false) D.forEach((d, i) => { const ly = area.y + 8 + i * 20; if (ly > area.y + area.h) return; const lx = cx + R + 16; ctx.fillStyle = d.color; UK.rr(ctx, lx, ly - 5, 10, 10, 3); ctx.fill(); UK.text(ctx, `${d.label}${p.values !== false ? ' · ' + UK.fmt(d.v) : ''}`, lx + 16, ly, { size: 12, weight: 700, color: txt, align: 'left', maxW: b.x + b.w - lx - 22 }); });
+          return;
+        }
+        if (type === 'radar') {
+          const n = Math.max(3, D.length), R = Math.min(area.w, area.h) / 2 - 16, cx = area.x + area.w / 2, cy = area.y + area.h / 2, pt = (i, f) => [cx + Math.cos(-Math.PI / 2 + i * Math.PI * 2 / n) * R * f, cy + Math.sin(-Math.PI / 2 + i * Math.PI * 2 / n) * R * f];
+          ctx.strokeStyle = withAlpha(txt, 0.15); ctx.lineWidth = 1; for (const f of [0.25, 0.5, 0.75, 1]) { ctx.beginPath(); for (let i = 0; i < n; i++) ctx.lineTo(...pt(i, f)); ctx.closePath(); ctx.stroke(); }
+          ctx.beginPath(); D.forEach((d, i) => ctx.lineTo(...pt(i, clamp(d.v / max, 0, 1) * g))); ctx.closePath(); ctx.fillStyle = withAlpha(p.color || '#4fa3ff', 0.35); ctx.fill(); ctx.strokeStyle = p.color || '#4fa3ff'; ctx.lineWidth = 2; ctx.stroke();
+          if (p.labels !== false) D.forEach((d, i) => { const [x, y] = pt(i, 1.18); UK.text(ctx, d.label, x, y, { size: 11, weight: 700, color: txt }); });
+          return;
+        }
+        if (p.grid !== false) { ctx.strokeStyle = withAlpha(txt, 0.1); ctx.lineWidth = 1; for (let i = 0; i <= 4; i++) { const y = area.y + area.h * i / 4; ctx.beginPath(); if (type === 'bars') { const x = area.x + area.w * i / 4; ctx.moveTo(x, area.y); ctx.lineTo(x, area.y + area.h); } else { ctx.moveTo(area.x, y); ctx.lineTo(area.x + area.w, y); } ctx.stroke(); } }
+        const n = D.length || 1;
+        if (type === 'bars') {
+          const lw = p.labels !== false ? Math.min(area.w * 0.3, 70) : 0, bh = area.h / n;
+          D.forEach((d, i) => { const y = area.y + i * bh, w = (area.w - lw) * clamp(d.v / max, 0, 1) * g; if (lw) UK.text(ctx, d.label, area.x + lw - 6, y + bh / 2, { size: 11, weight: 700, color: txt, align: 'right', maxW: lw - 8 }); ctx.fillStyle = d.color; UK.rr(ctx, area.x + lw, y + bh * 0.18, Math.max(2, w), bh * 0.64, 5); ctx.fill(); if (p.values !== false) UK.text(ctx, UK.fmt(d.v), area.x + lw + w + 6, y + bh / 2, { size: 11, weight: 800, color: txt, align: 'left' }); });
+          return;
+        }
+        if (type === 'columns') {
+          const cw = area.w / n;
+          D.forEach((d, i) => { const x = area.x + i * cw, hgt = area.h * clamp(d.v / max, 0, 1) * g; ctx.fillStyle = d.color; UK.rr(ctx, x + cw * 0.18, area.y + area.h - hgt, cw * 0.64, Math.max(2, hgt), Math.min(6, cw * 0.2)); ctx.fill(); if (p.values !== false && hgt > 4) UK.text(ctx, UK.fmt(d.v), x + cw / 2, area.y + area.h - hgt - 8, { size: 10, weight: 800, color: txt }); if (lb) UK.text(ctx, d.label, x + cw / 2, area.y + area.h + 10, { size: 11, weight: 700, color: withAlpha(txt, 0.75), maxW: cw - 2 }); });
+          return;
+        }
+        // line / area
+        const xs = (i) => area.x + (n === 1 ? area.w / 2 : area.w * i / (n - 1)), ys = (v) => area.y + area.h - area.h * clamp(v / max, 0, 1) * g;
+        ctx.beginPath(); D.forEach((d, i) => (i ? ctx.lineTo(xs(i), ys(d.v)) : ctx.moveTo(xs(i), ys(d.v))));
+        if (type === 'area') { ctx.save(); ctx.lineTo(xs(n - 1), area.y + area.h); ctx.lineTo(xs(0), area.y + area.h); ctx.closePath(); const gr = ctx.createLinearGradient(0, area.y, 0, area.y + area.h); gr.addColorStop(0, withAlpha(p.color || '#4fa3ff', 0.5)); gr.addColorStop(1, withAlpha(p.color || '#4fa3ff', 0.02)); ctx.fillStyle = gr; ctx.fill(); ctx.restore(); ctx.beginPath(); D.forEach((d, i) => (i ? ctx.lineTo(xs(i), ys(d.v)) : ctx.moveTo(xs(i), ys(d.v)))); }
+        ctx.strokeStyle = p.color || '#4fa3ff'; ctx.lineWidth = 2.5; ctx.lineJoin = 'round'; ctx.stroke();
+        if (!p.track || n < 40) D.forEach((d, i) => { ctx.fillStyle = p.color || '#4fa3ff'; ctx.beginPath(); ctx.arc(xs(i), ys(d.v), 3, 0, Math.PI * 2); ctx.fill(); if (lb && d.label) UK.text(ctx, d.label, xs(i), area.y + area.h + 10, { size: 11, weight: 700, color: withAlpha(txt, 0.75) }); });
+        if (p.values !== false && D.length) { const last = D[D.length - 1]; UK.text(ctx, UK.fmt(last.v), xs(n - 1) - 4, ys(last.v) - 10, { size: 11, weight: 800, color: txt, align: 'right' }); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiXPBar', {
+  label: 'XP Bar (levels)', description: 'Experience and levels: fills as the XP variable grows, levels up by itself (with a flash and a message), and each level needs more XP.',
+  params: [
+    { key: 'xpVar', label: 'XP variable', type: 'text', default: 'xp', suggest: 'vars' },
+    { key: 'levelVar', label: 'Level variable', type: 'text', default: 'playerLevel', suggest: 'vars' },
+    { key: 'base', label: 'XP for level 2', type: 'number', default: 100, step: 10 },
+    { key: 'growth', label: 'Each level needs × more', type: 'number', default: 1.4, range: [1, 3], step: 0.05 },
+    { key: 'maxLevel', label: 'Max level (0 = none)', type: 'number', default: 0, step: 1 },
+    { key: 'style', label: 'Look', type: 'select', options: ['bar with badge', 'thin bar', 'ring', 'segments'], default: 'bar with badge' },
+    { key: 'text', label: 'Text', type: 'select', options: ['xp / needed', 'percent', 'level only', 'none'], default: 'xp / needed' },
+    { key: 'message', label: 'Message on level up', type: 'text', default: 'level up', suggest: 'messages' },
+    ...colorParams({ fill: ['Fill', '#7c5cff'], fill2: ['Fill blend', '#4fa3ff'], track: ['Empty part', 'rgba(255,255,255,0.12)'], badge: ['Badge', '#ffd23d'], textColor: ['Text', '#ffffff'] }),
+  ],
+  create(p) {
+    let shown = 0, flash = 0, lvlShown = 1;
+    const need = (lv) => Math.round((+p.base || 100) * Math.pow(+p.growth || 1.4, Math.max(0, lv - 1)));
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.levelVar] == null) s.setVar(p.levelVar, 1); if (s.vars[p.xpVar] == null) s.setVar(p.xpVar, 0); shown = UK.num(s.vars[p.xpVar]) / need(UK.num(s.vars[p.levelVar], 1)); lvlShown = UK.num(s.vars[p.levelVar], 1); },
+      update(e, dt, s) {
+        let lv = UK.num(s.vars[p.levelVar], 1), xp = UK.num(s.vars[p.xpVar]), guard = 0;
+        while (xp >= need(lv) && (!+p.maxLevel || lv < +p.maxLevel) && guard++ < 50) { xp -= need(lv); lv++; s.setVar(p.levelVar, lv); s.setVar(p.xpVar, xp); flash = 1; s.send(p.message || 'level up', lv); s.engine.audio.sfx('power'); s.engine.vibrate([20, 30, 20]); }
+        const f = +p.maxLevel && lv >= +p.maxLevel ? 1 : clamp(xp / need(lv), 0, 1);
+        if (lv !== lvlShown) { shown = 0; lvlShown = lv; }
+        shown += (f - shown) * Math.min(1, dt * 6); flash = Math.max(0, flash - dt * 1.5);
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), lv = UK.num(s.vars[p.levelVar], 1), xp = UK.num(s.vars[p.xpVar]), nd = need(lv), f = s.engine.editing ? 0.62 : shown, tc = p.textColor || '#fff', st = p.style || 'bar with badge';
+        const label = { 'xp / needed': `${UK.fmt(xp)} / ${UK.fmt(nd)}`, percent: Math.round(f * 100) + '%', 'level only': `Level ${lv}`, none: '' }[p.text || 'xp / needed'];
+        const grad = (x, w) => { const g = ctx.createLinearGradient(x, 0, x + w, 0); g.addColorStop(0, p.fill || '#7c5cff'); g.addColorStop(1, p.fill2 || p.fill || '#4fa3ff'); return g; };
+        if (st === 'ring') {
+          const R = Math.min(b.w, b.h) / 2 - 6, lw = Math.max(5, R * 0.16);
+          ctx.lineCap = 'round'; ctx.lineWidth = lw; ctx.strokeStyle = p.track || 'rgba(255,255,255,0.12)'; ctx.beginPath(); ctx.arc(b.cx, b.cy, R, 0, Math.PI * 2); ctx.stroke();
+          ctx.strokeStyle = grad(b.x, b.w); ctx.beginPath(); ctx.arc(b.cx, b.cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f); ctx.stroke();
+          UK.text(ctx, lv, b.cx, b.cy - 4, { size: R * 0.6, weight: 900, color: tc }); UK.text(ctx, 'LEVEL', b.cx, b.cy + R * 0.38, { size: R * 0.2, weight: 800, color: withAlpha(tc, 0.7) });
+        } else {
+          const badge = st === 'bar with badge', bw = badge ? b.h : 0, x = b.x + (badge ? bw * 0.7 : 0), w = b.w - (badge ? bw * 0.7 : 0), th = st === 'thin bar' ? Math.max(6, b.h * 0.3) : b.h * (badge ? 0.62 : 1), y = b.cy - th / 2;
+          ctx.fillStyle = p.track || 'rgba(255,255,255,0.12)'; UK.rr(ctx, x, y, w, th, th / 2); ctx.fill();
+          if (st === 'segments') { const n = 10, gw = 3, sw = (w - gw * (n - 1)) / n; for (let i = 0; i < n; i++) { const on = clamp(f * n - i, 0, 1); if (on <= 0) continue; ctx.fillStyle = grad(x, w); UK.rr(ctx, x + i * (sw + gw), y, sw * on, th, 3); ctx.fill(); } }
+          else if (f > 0) { ctx.fillStyle = grad(x, w); UK.rr(ctx, x, y, Math.max(th, w * f), th, th / 2); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,0.18)'; UK.rr(ctx, x + 3, y + 2, Math.max(0, w * f - 6), th * 0.32, th * 0.16); ctx.fill(); }
+          if (label && st !== 'thin bar') UK.text(ctx, label, x + w / 2 + (badge ? bw * 0.15 : 0), b.cy + 1, { size: Math.min(14, th * 0.6), weight: 800, color: tc });
+          else if (label) UK.text(ctx, label, x + w, y - 8, { size: 12, weight: 800, color: tc, align: 'right' });
+          if (badge) { const R = bw / 2; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 8; ctx.fillStyle = p.badge || '#ffd23d'; ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; ctx.lineTo(b.x + R + Math.cos(a) * R, b.cy + Math.sin(a) * R); } ctx.closePath(); ctx.fill(); ctx.restore(); UK.text(ctx, lv, b.x + R, b.cy + 1, { size: R * 0.85, weight: 900, color: '#2b2200' }); }
+        }
+        if (flash > 0) { ctx.save(); ctx.globalAlpha *= flash; UK.text(ctx, 'LEVEL UP!', b.cx, b.y - 14 - (1 - flash) * 20, { size: 18, weight: 900, color: p.badge || '#ffd23d' }); ctx.restore(); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiTimerRing', {
+  label: 'Timer', description: 'A countdown (or count-up) timer as a ring, bar or big digits. Turns red and pulses near the end, then sends a message. Start, pause and reset it with messages.',
+  params: [
+    { key: 'seconds', label: 'Seconds', type: 'number', default: 30, step: 1 },
+    { key: 'countUp', label: 'Count up (stopwatch)', type: 'bool', default: false },
+    { key: 'look', label: 'Look', type: 'select', options: ['ring', 'bar', 'digits', 'pill'], default: 'ring' },
+    { key: 'format', label: 'Show', type: 'select', options: ['seconds', 'm:ss', 'seconds.tenths'], default: 'seconds' },
+    { key: 'autoStart', label: 'Start by itself', type: 'bool', default: true },
+    { key: 'message', label: 'Control message (start / pause / reset / add 5)', type: 'text', default: 'timer', suggest: 'messages' },
+    { key: 'endMessage', label: 'Message when it ends', type: 'text', default: 'time up', suggest: 'messages' },
+    { key: 'endAction', label: 'When it ends', type: 'select', options: ['nothing else', 'game over', 'win', 'restart timer'], default: 'nothing else' },
+    { key: 'warnAt', label: 'Warn when this many seconds are left', type: 'number', default: 5, step: 1 },
+    { key: 'var', label: 'Seconds go in variable', type: 'text', default: 'timeLeft', suggest: 'vars' },
+    ...colorParams({ color: ['Colour', '#4fa3ff'], warn: ['Warning', '#ff4d5e'], track: ['Empty part', 'rgba(255,255,255,0.14)'], text: ['Text', '#ffffff'] }),
+  ],
+  create(p) {
+    let t = 0, running = false, done = false, beat = 0, lastSec = -1;
+    const total = () => Math.max(0.1, +p.seconds || 30), left = () => (p.countUp ? t : Math.max(0, total() - t));
+    const fmt = (v) => p.format === 'm:ss' ? `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, '0')}` : p.format === 'seconds.tenths' ? v.toFixed(1) : String(p.countUp ? Math.floor(v) : Math.ceil(v));
+    return {
+      start(e, s) {
+        running = p.autoStart !== false;
+        s.on('message', (m) => { if (e.dead) return; const base = p.message || 'timer'; if (!m.startsWith(base)) return; const rest = m.slice(base.length).trim();
+          if (rest === 'start' || rest === 'resume' || rest === '') running = true; else if (rest === 'pause' || rest === 'stop') running = false; else if (rest === 'reset') { t = 0; done = false; } else if (rest === 'restart') { t = 0; done = false; running = true; } else if (/^add\s+-?\d/.test(rest)) t = Math.max(0, t - +rest.split(/\s+/)[1] * (p.countUp ? -1 : 1)); });
+      },
+      update(e, dt, s) {
+        if (running && !done) { t += dt; if (!p.countUp && t >= total()) { done = true; running = false; s.send(p.endMessage || 'time up'); s.engine.audio.sfx('lose'); const a = p.endAction; if (a === 'game over') s.gameOver(); else if (a === 'win') s.win(); else if (a === 'restart timer') { t = 0; done = false; running = true; } } }
+        if (p.var) s.setVar(p.var, Math.ceil(left() * 10) / 10);
+        const warn = !p.countUp && left() <= (+p.warnAt || 0) && left() > 0; beat = warn ? beat + dt : 0;
+        const sec = Math.ceil(left()); if (warn && sec !== lastSec) { lastSec = sec; s.engine.audio.tone?.({ freq: 880, dur: 0.06, vol: 0.06, type: 'triangle' }); }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), L = s.engine.editing ? total() * 0.66 : left(), f = p.countUp ? (t % 60) / 60 : L / total(), warn = !p.countUp && L <= (+p.warnAt || 0), col = warn ? p.warn || '#ff4d5e' : p.color || '#4fa3ff', pulse = warn ? 1 + Math.sin(beat * Math.PI * 2) * 0.06 : 1, txt = p.text || '#fff';
+        ctx.save(); ctx.translate(b.cx, b.cy); ctx.scale(pulse, pulse); ctx.translate(-b.cx, -b.cy);
+        if (p.look === 'bar') { const h = Math.min(b.h, 16), y = b.cy - h / 2; ctx.fillStyle = p.track || 'rgba(255,255,255,0.14)'; UK.rr(ctx, b.x, y, b.w, h, h / 2); ctx.fill(); ctx.fillStyle = col; UK.rr(ctx, b.x, y, Math.max(h, b.w * f), h, h / 2); ctx.fill(); UK.text(ctx, fmt(L), b.x + b.w, y - 10, { size: 13, weight: 900, color: txt, align: 'right' }); }
+        else if (p.look === 'digits') UK.text(ctx, fmt(L), b.cx, b.cy + 2, { size: Math.min(b.h * 0.8, b.w * 0.4), weight: 900, color: warn ? col : txt });
+        else if (p.look === 'pill') { ctx.fillStyle = 'rgba(0,0,0,0.45)'; UK.rr(ctx, b.x, b.y, b.w, b.h, b.h / 2); ctx.fill(); const r = b.h * 0.32; ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(b.x + b.h / 2, b.cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f); ctx.stroke(); UK.text(ctx, fmt(L), b.x + b.h + (b.w - b.h) / 2 - 6, b.cy + 1, { size: b.h * 0.45, weight: 900, color: txt }); }
+        else { const R = Math.min(b.w, b.h) / 2 - 6, lw = Math.max(4, R * 0.15); ctx.lineCap = 'round'; ctx.lineWidth = lw; ctx.strokeStyle = p.track || 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.arc(b.cx, b.cy, R, 0, Math.PI * 2); ctx.stroke(); ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(b.cx, b.cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f); ctx.stroke(); UK.text(ctx, fmt(L), b.cx, b.cy + 1, { size: R * 0.62, weight: 900, color: warn ? col : txt }); }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiOffscreen', {
+  label: 'Off-screen Arrows', description: 'Arrows at the screen edge pointing to objects you can\'t see (enemies, goals, friends), with their distance. Optional markers over them when they are on screen.',
+  params: [
+    { key: 'tag', label: 'Point to tag or name', type: 'text', default: 'enemy', suggest: 'tags' },
+    { key: 'look', label: 'Arrow', type: 'select', options: ['arrow', 'chevron', 'dot', 'icon'], default: 'arrow' },
+    { key: 'icon', label: 'Icon (UI icon or emoji)', type: 'text', default: '❗', showIf: { look: ['icon'] } },
+    { key: 'distance', label: 'Show distance', type: 'bool', default: true },
+    { key: 'onScreen', label: 'Marker over them when visible', type: 'bool', default: false },
+    { key: 'max', label: 'Max arrows', type: 'number', default: 5, range: [1, 30], step: 1 },
+    { key: 'margin', label: 'Gap from the edge', type: 'number', default: 28, range: [8, 80], step: 2 },
+    { key: 'size', label: 'Size', type: 'number', default: 18, range: [8, 48], step: 1 },
+    { key: 'color', label: 'Colour', type: 'color', default: '#ff4d5e', group: 'Colours' },
+  ],
+  create(p) {
+    return {
+      drawUI(ctx, e, s) {
+        const E = s.engine; if (E.editing) { const b = UK.box(e); drawNavIcon(ctx, '➤', b.cx, b.cy, 24, p.color || '#ff4d5e'); UK.text(ctx, 'arrows: ' + (p.tag || ''), b.cx, b.cy + 20, { size: 10, color: '#fff' }); return; }
+        ctx.save(); toScreen(ctx, e, s);
+        const W = E.width, H = E.height, m = +p.margin || 28, sz = +p.size || 18, col = p.color || '#ff4d5e', three = s.mode === '3d', me = s.findAll('player')[0];
+        const list = [...new Set([s.find(p.tag), ...s.findAll(p.tag)].filter((q) => q && !q.dead && q.visible !== false && q !== e))].map((q) => { const sp = E.renderer.worldToScreen(s, q.x, q.y, q.z); return { q, sp, d: me ? Math.hypot(q.x - me.x, q.y - me.y, three ? q.z - me.z : 0) : 0 }; }).sort((a, b) => a.d - b.d).slice(0, +p.max || 5);
+        for (const { sp, d } of list) {
+          let x = sp.x, y = sp.y; const off = sp.behind || x < m || x > W - m || y < m + E.safe.top || y > H - m - E.safe.bottom;
+          if (!off) { if (p.onScreen) { ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(x - 7, y - 34); ctx.lineTo(x + 7, y - 34); ctx.lineTo(x, y - 24); ctx.closePath(); ctx.fill(); } continue; }
+          let dx = x - W / 2, dy = y - H / 2; if (sp.behind) { dx = -dx; dy = -dy; }
+          const a = Math.atan2(dy, dx), kx = (W / 2 - m) / Math.max(1e-6, Math.abs(Math.cos(a))), ky = (H / 2 - m - Math.max(E.safe.top, E.safe.bottom)) / Math.max(1e-6, Math.abs(Math.sin(a))), k = Math.min(kx, ky);
+          x = W / 2 + Math.cos(a) * k; y = H / 2 + Math.sin(a) * k;
+          ctx.save(); ctx.translate(x, y); ctx.globalAlpha *= 0.92;
+          if (p.look === 'dot') { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, sz * 0.45, 0, Math.PI * 2); ctx.fill(); }
+          else if (p.look === 'icon') { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(0, 0, sz * 0.8, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, p.icon || '❗', 0, 0, sz, col); ctx.rotate(a); ctx.fillStyle = col; ctx.beginPath(); ctx.moveTo(sz * 1.25, 0); ctx.lineTo(sz * 0.85, -5); ctx.lineTo(sz * 0.85, 5); ctx.closePath(); ctx.fill(); }
+          else { ctx.rotate(a); ctx.fillStyle = col; ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 2; ctx.beginPath(); if (p.look === 'chevron') { ctx.moveTo(sz * 0.6, 0); ctx.lineTo(-sz * 0.4, -sz * 0.6); ctx.lineTo(-sz * 0.1, 0); ctx.lineTo(-sz * 0.4, sz * 0.6); } else { ctx.moveTo(sz * 0.7, 0); ctx.lineTo(-sz * 0.5, -sz * 0.55); ctx.lineTo(-sz * 0.5, sz * 0.55); } ctx.closePath(); ctx.stroke(); ctx.fill(); }
+          ctx.restore();
+          if (p.distance !== false && me) UK.text(ctx, three ? d.toFixed(0) + 'm' : Math.round(d / 10) + 'm', x - Math.cos(a) * sz * 1.4, y - Math.sin(a) * sz * 1.4, { size: 11, weight: 800, color: '#fff' });
+        }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiCrosshair', {
+  label: 'Crosshair', description: 'An aiming reticle in many styles. It spreads when you fire or move, and shows a hit marker on a message (shooters, aiming games).',
+  params: [
+    { key: 'look', label: 'Look', type: 'select', options: ['cross', 'cross + dot', 'dot', 'circle', 'circle + dot', 'chevron', 'brackets', 'T'], default: 'cross + dot' },
+    { key: 'size', label: 'Size', type: 'number', default: 10, range: [3, 40], step: 1 },
+    { key: 'gap', label: 'Gap', type: 'number', default: 5, range: [0, 30], step: 1 },
+    { key: 'thickness', label: 'Thickness', type: 'number', default: 2, range: [1, 8], step: 0.5 },
+    { key: 'outline', label: 'Dark outline', type: 'bool', default: true },
+    { key: 'spreadOn', label: 'Spread on message', type: 'text', default: 'fire', suggest: 'messages' },
+    { key: 'spreadMove', label: 'Spread while the player moves', type: 'bool', default: true },
+    { key: 'hitOn', label: 'Hit marker on message', type: 'text', default: 'hit', suggest: 'messages' },
+    ...colorParams({ color: ['Colour', '#ffffff'], hitColor: ['Hit marker', '#ff4d5e'] }),
+  ],
+  create(p) {
+    let spread = 0, hit = 0;
+    return {
+      start(e, s) { s.on('message', (m) => { if (e.dead) return; if (m === p.spreadOn) spread = Math.min(1, spread + 0.6); if (m === p.hitOn) hit = 1; }); },
+      update(e, dt, s) {
+        const pl = p.spreadMove !== false ? s.findAll('player')[0] : null, v = pl?.body?.vel, mv = v ? Math.hypot(v.x, v.z ?? 0, s.mode === '3d' ? 0 : v.y) / (s.mode === '3d' ? 8 : 300) : 0;
+        spread = Math.max(Math.min(0.6, mv), spread - dt * 3); hit = Math.max(0, hit - dt * 3);
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), sz = +p.size || 10, g = (+p.gap || 5) + spread * 14, th = +p.thickness || 2, col = p.color || '#fff', look = p.look || 'cross + dot', cx = b.cx, cy = b.cy;
+        const stroke = (fn) => { if (p.outline !== false) { ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = th + 2; ctx.beginPath(); fn(); ctx.stroke(); } ctx.strokeStyle = col; ctx.lineWidth = th; ctx.beginPath(); fn(); ctx.stroke(); };
+        ctx.lineCap = 'round';
+        if (look.startsWith('cross') || look === 'T') stroke(() => { for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { if (look === 'T' && dy < 0) continue; ctx.moveTo(cx + dx * g, cy + dy * g); ctx.lineTo(cx + dx * (g + sz), cy + dy * (g + sz)); } });
+        if (look.startsWith('circle')) stroke(() => ctx.arc(cx, cy, g + sz * 0.8, 0, Math.PI * 2));
+        if (look === 'chevron') stroke(() => { ctx.moveTo(cx - sz, cy + g + sz * 0.6); ctx.lineTo(cx, cy + g); ctx.lineTo(cx + sz, cy + g + sz * 0.6); });
+        if (look === 'brackets') stroke(() => { const r = g + sz; for (const sx of [-1, 1]) { ctx.moveTo(cx + sx * r * 0.6, cy - r); ctx.lineTo(cx + sx * r, cy - r); ctx.lineTo(cx + sx * r, cy + r); ctx.lineTo(cx + sx * r * 0.6, cy + r); } });
+        if (look.includes('dot') || look === 'dot') { if (p.outline !== false) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(cx, cy, th + 1, 0, Math.PI * 2); ctx.fill(); } ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, th, 0, Math.PI * 2); ctx.fill(); }
+        if (hit > 0) { ctx.save(); ctx.globalAlpha *= hit; ctx.strokeStyle = p.hitColor || '#ff4d5e'; ctx.lineWidth = th + 0.5; ctx.beginPath(); const a = 6, c = 13; for (const [dx, dy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) { ctx.moveTo(cx + dx * a, cy + dy * a); ctx.lineTo(cx + dx * c, cy + dy * c); } ctx.stroke(); ctx.restore(); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiTicker', {
+  label: 'News Ticker', description: 'Text that scrolls across, like a news bar or a marquee. Separate several messages with | and use {variables}.',
+  params: [
+    { key: 'text', label: 'Text (| separates messages, {variables} work)', type: 'text', default: '🏆 New high score: {best} | 🎁 Daily reward ready! | ⚡ Double coins this weekend' },
+    { key: 'speed', label: 'Speed', type: 'number', default: 60, range: [10, 400], step: 5 },
+    { key: 'direction', label: 'Moves', type: 'select', options: ['left', 'right'], default: 'left' },
+    { key: 'gap', label: 'Gap between messages', type: 'number', default: 60, range: [10, 300], step: 5 },
+    { key: 'size', label: 'Text size', type: 'number', default: 15, range: [8, 40], step: 1 },
+    { key: 'fade', label: 'Fade at the edges', type: 'bool', default: true },
+    ...colorParams({ bg: ['Background', 'rgba(0,0,0,0.5)'], color: ['Text', '#ffffff'], accent: ['Separator', '#ffd23d'] }),
+  ],
+  create(p) {
+    let x = 0;
+    return {
+      uiAlways: true,
+      update(e, dt) { x += dt * (+p.speed || 60); },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), msgs = String(p.text || '').split('|').map((m) => fillTemplate(m.trim(), s.vars)).filter(Boolean), sz = +p.size || 15, gap = +p.gap || 60;
+        if (p.bg) { ctx.fillStyle = p.bg; ctx.fillRect(b.x, b.y, b.w, b.h); }
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        ctx.font = `800 ${sz}px ${THEME.font}`; const widths = msgs.map((m) => ctx.measureText(m).width + gap), total = widths.reduce((a, c) => a + c, 0) || 1;
+        let off = (x % total); if (p.direction === 'right') off = total - off;
+        for (let start = b.x - off; start < b.x + b.w; start += total) { let cx = start; msgs.forEach((m, i) => { UK.text(ctx, m, cx, b.cy + 1, { size: sz, weight: 800, color: p.color || '#fff', align: 'left' }); ctx.fillStyle = p.accent || '#ffd23d'; ctx.beginPath(); ctx.arc(cx + widths[i] - gap / 2, b.cy, 3, 0, Math.PI * 2); ctx.fill(); cx += widths[i]; }); }
+        ctx.restore();
+        if (p.fade !== false && p.bg) for (const side of [0, 1]) { const g = ctx.createLinearGradient(side ? b.x + b.w : b.x, 0, side ? b.x + b.w - 30 : b.x + 30, 0); g.addColorStop(0, p.bg); g.addColorStop(1, withAlpha('#000', 0)); ctx.fillStyle = g; ctx.fillRect(side ? b.x + b.w - 30 : b.x, b.y, 30, b.h); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiNotifications', {
+  label: 'Notifications', description: 'Pop-up notifications that stack and slide away: achievements, rewards, messages. Send the message "notify Title|text|icon" (or use the Notify node) to show one.',
+  params: [
+    { key: 'listen', label: 'Show on message starting with', type: 'text', default: 'notify', suggest: 'messages' },
+    { key: 'position', label: 'Where', type: 'select', options: ['top', 'bottom', 'top right', 'center'], default: 'top' },
+    { key: 'look', label: 'Look', type: 'select', options: ['card', 'pill', 'achievement', 'banner'], default: 'card' },
+    { key: 'seconds', label: 'Show for (sec)', type: 'number', default: 3, range: [0.5, 15], step: 0.5 },
+    { key: 'max', label: 'Most at once', type: 'number', default: 3, range: [1, 6], step: 1 },
+    { key: 'sound', label: 'Sound', type: 'text', default: 'power', suggest: 'sounds' },
+    { key: 'tapToClose', label: 'Tap to close', type: 'bool', default: true },
+    ...colorParams({ bg: ['Card', '#1e2235'], text: ['Text', '#ffffff'], accent: ['Accent', '#ffd23d'] }),
+  ],
+  create(p) {
+    const N = []; let rects = [];
+    return {
+      uiAlways: true,
+      start(e, s) {
+        const pre = p.listen || 'notify';
+        s.on('message', (m, data) => {
+          if (e.dead || !(m === pre || m.startsWith(pre + ' '))) return;
+          const raw = m === pre ? (typeof data === 'string' ? data : data?.title ? `${data.title}|${data.text || ''}|${data.icon || ''}` : '') : m.slice(pre.length + 1);
+          const [title = '', text = '', icon = ''] = fillTemplate(raw, s.vars).split('|').map((x) => x.trim());
+          N.push({ title, text, icon: icon || (p.look === 'achievement' ? '🏆' : ''), t: 0 }); while (N.length > (+p.max || 3)) N.shift();
+          if (p.sound) s.engine.audio.sfx(p.sound); s.engine.vibrate(12);
+        });
+      },
+      update(e, dt, s) {
+        const life = +p.seconds || 3; for (const n of N) n.t += dt; while (N.length && N[0].t > life + 0.4) N.shift();
+        if (p.tapToClose !== false) for (const tp of s.engine.input.taps) { const r = rects.find((r) => tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h); if (r && r.n.t < life) r.n.t = life; }
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine, list = E.editing ? [{ title: 'Achievement unlocked', text: 'First jump!', icon: '🏆', t: 1 }] : N;
+        ctx.save(); toScreen(ctx, e, s); rects = [];
+        const W = E.width, H = E.height, life = +p.seconds || 3, look = p.look || 'card', pos = p.position || 'top', txt = p.text || '#fff', acc = p.accent || '#ffd23d';
+        const w = look === 'banner' ? W : look === 'pill' ? Math.min(W - 40, 320) : Math.min(W - 24, 380), h = look === 'pill' ? 44 : look === 'banner' ? 64 + (pos.startsWith('top') ? E.safe.top : 0) : 66;
+        let y = pos === 'bottom' ? H - E.safe.bottom - 20 - h : pos === 'center' ? H * 0.32 : (look === 'banner' ? 0 : E.safe.top + 14);
+        [...list].reverse().forEach((n) => {
+          const inT = clamp(n.t / 0.3, 0, 1), outT = clamp((n.t - life) / 0.35, 0, 1), k = UK.ease(inT) * (1 - outT);
+          const x = pos === 'top right' ? W - w - 12 + (1 - k) * (w + 20) : (W - w) / 2, yy = y + (pos === 'bottom' ? 1 : -1) * (1 - k) * (h + 30);
+          ctx.save(); ctx.globalAlpha *= k;
+          ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 18; ctx.fillStyle = look === 'achievement' ? '#2a2210' : p.bg || '#1e2235'; UK.rr(ctx, x, yy, w, h, look === 'banner' ? 0 : look === 'pill' ? h / 2 : 16); ctx.fill(); ctx.shadowColor = 'transparent';
+          if (look === 'achievement') { ctx.strokeStyle = acc; ctx.lineWidth = 2; ctx.stroke(); }
+          const ty = yy + h - (look === 'banner' ? 32 : h / 2), hasIcon = !!n.icon;
+          if (hasIcon) { ctx.fillStyle = withAlpha(acc, 0.2); ctx.beginPath(); ctx.arc(x + (look === 'pill' ? 24 : 34), ty, look === 'pill' ? 16 : 22, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, n.icon, x + (look === 'pill' ? 24 : 34), ty, look === 'pill' ? 20 : 26, acc); }
+          const tx = x + (hasIcon ? (look === 'pill' ? 48 : 66) : 18);
+          if (look === 'achievement') UK.text(ctx, 'ACHIEVEMENT', tx, ty - 17, { size: 9.5, weight: 900, color: acc, align: 'left' });
+          UK.text(ctx, n.title, tx, n.text && look !== 'pill' ? ty - (look === 'achievement' ? 2 : 9) : ty, { size: look === 'pill' ? 14 : 15, weight: 800, color: txt, align: 'left', maxW: x + w - tx - 12 });
+          if (n.text && look !== 'pill') UK.text(ctx, n.text, tx, ty + (look === 'achievement' ? 15 : 11), { size: 12.5, weight: 600, color: withAlpha(txt, 0.72), align: 'left', maxW: x + w - tx - 12 });
+          if (!E.editing) { ctx.fillStyle = withAlpha(acc, 0.7); ctx.fillRect(x + (look === 'banner' ? 0 : 14), yy + h - 3, (w - (look === 'banner' ? 0 : 28)) * clamp(1 - n.t / life, 0, 1), 2); }
+          ctx.restore(); rects.push({ x, y: yy, w, h, n });
+          y += (pos === 'bottom' ? -1 : 1) * (h + 8) * k;
+        });
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiScreenFX', {
+  label: 'Screen Effects', description: 'Full-screen feedback: a red flash when health drops, a pulsing vignette when it\'s low, a white flash on a message and confetti to celebrate.',
+  params: [
+    { key: 'hurtVar', label: 'Flash red when this variable drops', type: 'text', default: 'hp', suggest: 'vars' },
+    { key: 'lowAt', label: 'Pulse when it is at or below (0 = off)', type: 'number', default: 25, step: 1 },
+    { key: 'flashOn', label: 'White flash on message', type: 'text', default: 'flash', suggest: 'messages' },
+    { key: 'confettiOn', label: 'Confetti on message', type: 'text', default: 'celebrate', suggest: 'messages' },
+    { key: 'confettiOnWin', label: 'Confetti when you win', type: 'bool', default: true },
+    { key: 'amount', label: 'Confetti amount', type: 'number', default: 120, range: [20, 400], step: 10 },
+    ...colorParams({ hurt: ['Hurt colour', '#ff2a3d'], flashColor: ['Flash colour', '#ffffff'] }),
+  ],
+  create(p) {
+    let hurt = 0, flash = 0, last = null, beat = 0; const bits = [];
+    const confetti = (s) => { const W = s.engine.width; for (let i = 0; i < (+p.amount || 120); i++) bits.push({ x: Math.random() * W, y: -20 - Math.random() * 200, vx: (Math.random() - 0.5) * 160, vy: 80 + Math.random() * 180, r: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 6 + Math.random() * 6, h: 3 + Math.random() * 5, c: CHART_COLORS[i % CHART_COLORS.length], life: 0 }); s.engine.audio.sfx('win'); };
+    return {
+      uiAlways: true,
+      start(e, s) { last = UK.num(s.vars[p.hurtVar], null); s.on('message', (m) => { if (e.dead) return; if (m === p.flashOn) flash = 1; if (m === p.confettiOn) confetti(s); }); s.on('win', () => { if (!e.dead && p.confettiOnWin !== false) confetti(s); }); },
+      update(e, dt, s) {
+        const v = p.hurtVar ? UK.num(s.vars[p.hurtVar], null) : null; if (v != null && last != null && v < last) { hurt = 1; s.engine.vibrate(30); } last = v;
+        hurt = Math.max(0, hurt - dt * 2.2); flash = Math.max(0, flash - dt * 3); beat += dt;
+        const H = s.engine.height; for (const b of bits) { b.life += dt; b.vy += 120 * dt; b.x += (b.vx + Math.sin(b.life * 4 + b.r) * 30) * dt; b.y += b.vy * dt; b.r += b.vr * dt; }
+        for (let i = bits.length - 1; i >= 0; i--) if (bits[i].y > H + 30) bits.splice(i, 1);
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine; if (E.editing) { const b = UK.box(e); UK.text(ctx, '✨ Screen effects', b.cx, b.cy, { size: 12, color: '#fff' }); return; }
+        ctx.save(); toScreen(ctx, e, s); const W = E.width, H = E.height;
+        const v = UK.num(s.vars[p.hurtVar], null), low = +p.lowAt > 0 && v != null && v <= +p.lowAt && v > 0, va = Math.max(hurt * 0.75, low ? 0.25 + Math.sin(beat * 5) * 0.15 : 0);
+        if (va > 0.01) { const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.3, W / 2, H / 2, Math.max(W, H) * 0.75); g.addColorStop(0, withAlpha(p.hurt || '#ff2a3d', 0)); g.addColorStop(1, withAlpha(p.hurt || '#ff2a3d', va)); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+        if (flash > 0.01) { ctx.fillStyle = withAlpha(p.flashColor || '#fff', flash * 0.7); ctx.fillRect(0, 0, W, H); }
+        for (const b of bits) { ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r); ctx.scale(1, Math.abs(Math.cos(b.life * 6 + b.r))); ctx.fillStyle = b.c; ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); ctx.restore(); }
+        ctx.restore();
+      },
+    };
+  },
+});
+/** A vertical drag-to-scroll helper for long lists inside a box. */
+function scroller() {
+  let y = 0, drag = null, vel = 0;
+  return {
+    get y() { return y; },
+    update(s, e, b, contentH, dt) {
+      const max = Math.max(0, contentH - b.h);
+      for (const d of UK.downs(s, e)) if (UK.in(d, b) && !drag) drag = { id: d.id, y0: d.y, s0: y, moved: false, last: d.y };
+      if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { if (Math.abs(q.y - drag.y0) > 8) drag.moved = true; vel = (drag.last - q.y) / Math.max(dt, 1e-3); drag.last = q.y; y = clamp(drag.s0 - (q.y - drag.y0), -40, max + 40); } else drag = null; }
+      else { y += vel * dt; vel *= Math.pow(0.02, dt); if (y < 0) y += (0 - y) * Math.min(1, dt * 12); if (y > max) y += (max - y) * Math.min(1, dt * 12); }
+    },
+    get moved() { return !!drag?.moved; },
+  };
+}
+
+registerBehavior('uiShop', {
+  label: 'Shop', description: 'A shop of items to buy with a currency variable (coins, gems). Unlocks stay owned (owned_ID becomes true) and can be equipped; items starting with item: go into the inventory each time.',
+  params: [
+    { key: 'items', label: 'Items (one per line: Name | icon or emoji | price | ID or item:Name | note)', type: 'code', default: 'Red Hat | 🎩 | 50 | hat_red | +5% speed\nCool Shades | 🕶️ | 120 | shades | Look sharp\nWizard | 🧙 | 300 | wizard | New character\nRobot | 🤖 | 500 | robot | New character\nPotion | 🧪 | 25 | item:Potion | Heals 50\nShield | 🛡️ | 80 | item:Shield | Blocks one hit' },
+    { key: 'currency', label: 'Pay with variable', type: 'text', default: 'coins', suggest: 'vars' },
+    { key: 'currencyIcon', label: 'Currency icon', type: 'text', default: '🪙' },
+    { key: 'equipVar', label: 'Equipped goes in variable (blank = no equipping)', type: 'text', default: 'outfit', suggest: 'vars' },
+    { key: 'layout', label: 'Layout', type: 'select', options: ['grid', 'list'], default: 'grid' },
+    { key: 'columns', label: 'Grid columns', type: 'number', default: 2, range: [1, 5], step: 1, showIf: { layout: ['grid'] } },
+    { key: 'confirm', label: 'Tap twice to buy', type: 'bool', default: true },
+    { key: 'message', label: 'Message when bought (gets the ID)', type: 'text', default: 'bought', suggest: 'messages' },
+    ...colorParams({ card: ['Cards', '#232842'], text: ['Text', '#ffffff'], accent: ['Buy button', '#3ccf7a'], owned: ['Owned / equip', '#4fa3ff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let I = [], cards = [], sc = scroller(), arm = null, armT = 0, shake = new Map(), pop = new Map();
+    const parse = () => UK.lines(p.items).map(([name, icon, price, id, note]) => ({ name, icon, price: UK.num(price), id: id || name.toLowerCase().replace(/\W+/g, '_'), note, item: (id || '').startsWith('item:') ? id.slice(5).trim() : null }));
+    const owned = (s, it) => !it.item && !!s.vars['owned_' + it.id];
+    const layout = (e) => {
+      const b = UK.box(e), grid = p.layout !== 'list', cols = grid ? Math.max(1, Math.round(+p.columns || 2)) : 1, gap = 10, cw = (b.w - gap * (cols - 1)) / cols, ch = grid ? Math.min(cw * 1.2, 190) : 72;
+      return { b, cols, gap, cw, ch, grid, rect: (i) => ({ x: b.x + (i % cols) * (cw + gap), y: b.y + Math.floor(i / cols) * (ch + gap), w: cw, h: ch }), contentH: Math.ceil(I.length / cols) * (ch + gap) - gap };
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { I = parse(); },
+      update(e, dt, s) {
+        if (!I.length) I = parse();
+        const L = layout(e); sc.update(s, e, L.b, L.contentH, dt); armT = Math.max(0, armT - dt); if (!armT) arm = null;
+        for (const m of [shake, pop]) for (const [k, v] of m) { const n = v - dt * 3; if (n <= 0) m.delete(k); else m.set(k, n); }
+        if (sc.moved) return;
+        for (const tp of UK.taps(s, e)) {
+          if (!UK.in(tp, L.b)) continue;
+          const i = I.findIndex((it, j) => { const r = L.rect(j); return UK.in({ x: tp.x, y: tp.y + sc.y }, r); }); if (i < 0) continue;
+          const it = I[i];
+          if (owned(s, it)) { if (p.equipVar) { s.setVar(p.equipVar, it.id); pop.set(i, 1); UK.tap(s, p); } continue; }
+          const cash = UK.num(s.vars[p.currency]);
+          if (cash < it.price) { shake.set(i, 1); s.engine.vibrate([30, 30, 30]); s.send('not enough', it.id); continue; }
+          if (p.confirm !== false && arm !== i) { arm = i; armT = 2.2; UK.tap(s, p); continue; }
+          arm = null; s.setVar(p.currency, cash - it.price); pop.set(i, 1);
+          if (it.item) s.addItem(it.item, 1, it.icon); else { s.setVar('owned_' + it.id, true); if (p.equipVar) s.setVar(p.equipVar, it.id); }
+          s.engine.audio.sfx('coin'); s.engine.vibrate([15, 20, 15]); if (p.message) s.send(p.message, it.id); s.burst?.(0, 0, 0, '#ffd23d', 0);
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (!I.length) I = parse();
+        const L = layout(e), b = L.b, txt = p.text || '#fff', acc = p.accent || '#3ccf7a', own = p.owned || '#4fa3ff', cash = UK.num(s.vars[p.currency]);
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x - 4, b.y - 4, b.w + 8, b.h + 8); ctx.clip(); ctx.translate(0, -sc.y);
+        I.forEach((it, i) => {
+          const r = L.rect(i); if (r.y + r.h < b.y + sc.y - 10 || r.y > b.y + b.h + sc.y + 10) return;
+          const has = owned(s, it), eq = has && p.equipVar && sameVal(s.vars[p.equipVar], it.id), can = cash >= it.price, sh = shake.get(i) || 0, pp = pop.get(i) || 0;
+          ctx.save(); ctx.translate(r.x + r.w / 2 + Math.sin(sh * 30) * 6 * sh, r.y + r.h / 2); ctx.scale(1 + Math.sin(pp * Math.PI) * 0.05, 1 + Math.sin(pp * Math.PI) * 0.05); ctx.translate(-r.w / 2, -r.h / 2);
+          ctx.fillStyle = p.card || '#232842'; UK.rr(ctx, 0, 0, r.w, r.h, 16); ctx.fill(); if (eq) { ctx.strokeStyle = own; ctx.lineWidth = 2.5; ctx.stroke(); }
+          const bh = 32;
+          if (L.grid) {
+            drawNavIcon(ctx, it.icon, r.w / 2, r.h * 0.3, Math.min(r.w, r.h) * 0.3, txt);
+            UK.text(ctx, it.name, r.w / 2, r.h * 0.56, { size: 14, weight: 800, color: txt, maxW: r.w - 12 });
+            if (it.note) UK.text(ctx, it.note, r.w / 2, r.h * 0.56 + 17, { size: 11, weight: 600, color: withAlpha(txt, 0.6), maxW: r.w - 12 });
+          } else {
+            drawNavIcon(ctx, it.icon, 36, r.h / 2, 34, txt);
+            UK.text(ctx, it.name, 66, r.h / 2 - (it.note ? 9 : 0), { size: 15, weight: 800, color: txt, align: 'left', maxW: r.w - 190 });
+            if (it.note) UK.text(ctx, it.note, 66, r.h / 2 + 11, { size: 11.5, weight: 600, color: withAlpha(txt, 0.6), align: 'left', maxW: r.w - 190 });
+          }
+          const bw = L.grid ? r.w - 20 : 104, bx = L.grid ? 10 : r.w - bw - 12, by = L.grid ? r.h - bh - 10 : (r.h - bh) / 2;
+          const armed = arm === i, label = eq ? '✓ Equipped' : has ? (p.equipVar ? 'Equip' : '✓ Owned') : armed ? 'Buy?' : `${p.currencyIcon || ''} ${UK.fmt(it.price)}`.trim();
+          ctx.fillStyle = has ? withAlpha(own, eq ? 0.35 : 0.9) : armed ? '#ff9f43' : can ? acc : 'rgba(255,255,255,0.12)'; UK.rr(ctx, bx, by, bw, bh, bh / 2); ctx.fill();
+          UK.text(ctx, label, bx + bw / 2, by + bh / 2 + 1, { size: 13.5, weight: 900, color: has || can || armed ? '#fff' : withAlpha(txt, 0.5) });
+          if (it.item && s.itemCount(it.item)) UK.text(ctx, '×' + s.itemCount(it.item), r.w - 14, 16, { size: 12, weight: 900, color: withAlpha(txt, 0.8), align: 'right' });
+          ctx.restore();
+        });
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiInventoryGrid', {
+  label: 'Inventory Grid', description: 'Shows the inventory as a grid of slots with counts. Tap to pick an item (it goes in a variable); tap it again to use it (sends "use Name" and can use one up).',
+  params: [
+    { key: 'slots', label: 'Slots', type: 'number', default: 12, range: [1, 60], step: 1 },
+    { key: 'columns', label: 'Columns', type: 'number', default: 4, range: [1, 10], step: 1 },
+    { key: 'var', label: 'Picked item goes in', type: 'text', default: 'selectedItem', suggest: 'vars' },
+    { key: 'useOnSecondTap', label: 'Tap the picked item to use it', type: 'bool', default: true },
+    { key: 'consume', label: 'Using it uses one up', type: 'bool', default: true },
+    { key: 'labels', label: 'Show names', type: 'bool', default: false },
+    ...colorParams({ slot: ['Slots', 'rgba(255,255,255,0.08)'], border: ['Slot edge', 'rgba(255,255,255,0.15)'], accent: ['Picked', '#ffd23d'], text: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let pop = new Map();
+    const items = (s) => Object.entries(s.inventory || {}).map(([name, v]) => ({ name, icon: v.icon || name.slice(0, 2), n: v.n }));
+    const geo = (e) => { const b = UK.box(e), cols = Math.max(1, Math.round(+p.columns || 4)), n = Math.max(1, Math.round(+p.slots || 12)), rows = Math.ceil(n / cols), g = 8, sz = Math.min((b.w - g * (cols - 1)) / cols, (b.h - g * (rows - 1)) / rows); return { b, cols, n, g, sz, ox: b.cx - (cols * sz + (cols - 1) * g) / 2, oy: b.y }; };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        for (const [k, v] of pop) { const n2 = v - dt * 4; if (n2 <= 0) pop.delete(k); else pop.set(k, n2); }
+        const G = geo(e), list = items(s);
+        for (const tp of UK.taps(s, e)) for (let i = 0; i < G.n; i++) {
+          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g); if (!UK.in(tp, { x, y, w: G.sz, h: G.sz })) continue;
+          const it = list[i]; UK.tap(s, p); pop.set(i, 1);
+          if (!it) { s.setVar(p.var, ''); break; }
+          if (sameVal(s.vars[p.var], it.name) && p.useOnSecondTap !== false) { s.send('use ' + it.name, it.name); s.send('use item', it.name); if (p.consume !== false) s.addItem(it.name, -1); if (!s.itemCount(it.name)) s.setVar(p.var, ''); }
+          else s.setVar(p.var, it.name);
+          break;
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), list = s.engine.editing ? [{ name: 'Potion', icon: '🧪', n: 3 }, { name: 'Key', icon: '🗝️', n: 1 }, { name: 'Gem', icon: '💎', n: 12 }] : items(s), txt = p.text || '#fff', acc = p.accent || '#ffd23d';
+        for (let i = 0; i < G.n; i++) {
+          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g), it = list[i], on = it && sameVal(s.vars[p.var], it.name), k = 1 + Math.sin((pop.get(i) || 0) * Math.PI) * 0.08;
+          ctx.save(); ctx.translate(x + G.sz / 2, y + G.sz / 2); ctx.scale(k, k);
+          ctx.fillStyle = p.slot || 'rgba(255,255,255,0.08)'; UK.rr(ctx, -G.sz / 2, -G.sz / 2, G.sz, G.sz, 10); ctx.fill(); ctx.strokeStyle = on ? acc : p.border || 'rgba(255,255,255,0.15)'; ctx.lineWidth = on ? 3 : 1.5; ctx.stroke();
+          if (it) { drawNavIcon(ctx, it.icon, 0, p.labels ? -6 : 0, G.sz * 0.52, txt); if (it.n > 1) UK.text(ctx, it.n, G.sz / 2 - 6, G.sz / 2 - 9, { size: Math.max(10, G.sz * 0.2), weight: 900, color: txt, align: 'right' }); if (p.labels) UK.text(ctx, it.name, 0, G.sz / 2 - 9, { size: 9.5, weight: 700, color: withAlpha(txt, 0.8), maxW: G.sz - 6 }); }
+          ctx.restore();
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiQuestLog', {
+  label: 'Quest Log', description: 'A list of goals with progress bars: each follows a variable up to a target, ticks off when done and can give a reward (e.g. coins 50).',
+  params: [
+    { key: 'quests', label: 'Goals (one per line: Text | variable | target | reward as "variable amount")', type: 'code', default: 'Collect 50 coins | coins | 50 | gems 5\nDefeat 10 enemies | kills | 10 | coins 100\nReach level 3 | playerLevel | 3 | gems 10\nJump 25 times | jumps | 25 | coins 30' },
+    { key: 'title', label: 'Title', type: 'text', default: 'Quests' },
+    { key: 'doneMessage', label: 'Message when a goal is done', type: 'text', default: 'quest done', suggest: 'messages' },
+    { key: 'hideDone', label: 'Move finished goals to the bottom', type: 'bool', default: true },
+    ...colorParams({ bg: ['Background', '#181c2c'], text: ['Text', '#ffffff'], accent: ['Progress', '#4fa3ff'], done: ['Done', '#3ccf7a'] }),
+  ],
+  create(p) {
+    let Q = [], flash = new Map();
+    const parse = () => UK.lines(p.quests).map(([text, v, target, reward], i) => ({ i, text, v, target: Math.max(1, UK.num(target, 1)), reward: (reward || '').split(/\s+/).filter(Boolean) }));
+    return {
+      uiAlways: true,
+      start(e, s) { Q = parse(); },
+      update(e, dt, s) {
+        if (!Q.length) Q = parse();
+        for (const [k, v] of flash) { const n = v - dt; if (n <= 0) flash.delete(k); else flash.set(k, n); }
+        for (const q of Q) { const key = 'quest_done_' + q.i; if (!s.vars[key] && UK.num(s.vars[q.v]) >= q.target) { s.setVar(key, true); flash.set(q.i, 1.5); if (q.reward.length >= 2) s.setVar(q.reward[0], UK.num(s.vars[q.reward[0]]) + UK.num(q.reward[1])); s.send(p.doneMessage || 'quest done', q.text); s.engine.audio.sfx('win'); } }
+      },
+      drawUI(ctx, e, s) {
+        if (!Q.length) Q = parse();
+        const b = UK.box(e), txt = p.text || '#fff', acc = p.accent || '#4fa3ff', dn = p.done || '#3ccf7a';
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, b.x, b.y, b.w, b.h, 18); ctx.fill(); }
+        let y = b.y + 14; if (p.title) { UK.text(ctx, p.title, b.x + 16, y + 8, { size: 18, weight: 900, color: txt, align: 'left' }); const n = Q.filter((q) => s.vars['quest_done_' + q.i]).length; UK.text(ctx, `${n}/${Q.length}`, b.x + b.w - 16, y + 8, { size: 13, weight: 800, color: withAlpha(txt, 0.6), align: 'right' }); y += 30; }
+        const list = p.hideDone !== false ? [...Q].sort((a, c) => (!!s.vars['quest_done_' + a.i]) - (!!s.vars['quest_done_' + c.i])) : Q, rh = Math.min(58, (b.y + b.h - y - 6) / Math.max(1, list.length));
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, y, b.w, b.y + b.h - y); ctx.clip();
+        for (const q of list) {
+          const done = !!s.vars['quest_done_' + q.i] || s.engine.editing && q.i === 0, v = s.engine.editing ? q.target * (q.i === 1 ? 0.6 : q.i ? 0.2 : 1) : UK.num(s.vars[q.v]), f = clamp(v / q.target, 0, 1), fl = flash.get(q.i) || 0;
+          if (fl) { ctx.fillStyle = withAlpha(dn, fl * 0.25); UK.rr(ctx, b.x + 8, y, b.w - 16, rh - 4, 10); ctx.fill(); }
+          ctx.fillStyle = done ? dn : 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(b.x + 28, y + rh / 2 - 2, 11, 0, Math.PI * 2); ctx.fill();
+          if (done) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(b.x + 23, y + rh / 2 - 2); ctx.lineTo(b.x + 27, y + rh / 2 + 2); ctx.lineTo(b.x + 34, y + rh / 2 - 6); ctx.stroke(); }
+          UK.text(ctx, q.text, b.x + 48, y + rh / 2 - 10, { size: 14, weight: 700, color: done ? withAlpha(txt, 0.5) : txt, align: 'left', maxW: b.w - 140 });
+          if (done) { ctx.fillStyle = withAlpha(txt, 0.5); ctx.font = `700 14px ${THEME.font}`; const tw = Math.min(ctx.measureText(q.text).width, b.w - 140); ctx.fillRect(b.x + 48, y + rh / 2 - 10, tw, 1.5); }
+          const bx = b.x + 48, bw = b.w - 140, by = y + rh / 2 + 6; ctx.fillStyle = 'rgba(255,255,255,0.1)'; UK.rr(ctx, bx, by, bw, 6, 3); ctx.fill(); ctx.fillStyle = done ? dn : acc; UK.rr(ctx, bx, by, Math.max(6, bw * f), 6, 3); ctx.fill();
+          UK.text(ctx, `${UK.fmt(Math.min(v, q.target))}/${UK.fmt(q.target)}`, bx + bw + 8, by + 3, { size: 11, weight: 800, color: withAlpha(txt, 0.7), align: 'left' });
+          if (q.reward.length >= 2) UK.text(ctx, `+${q.reward[1]} ${q.reward[0]}`, b.x + b.w - 14, y + rh / 2 - 10, { size: 11, weight: 800, color: done ? withAlpha(dn, 0.8) : '#ffd23d', align: 'right' });
+          y += rh;
+        }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiDailyReward', {
+  label: 'Daily Reward', description: 'A 7-day reward calendar: one claim per day, the streak grows each day you come back (and can reset if you miss one). Saved on the player\'s device.',
+  params: [
+    { key: 'rewards', label: 'Days (one per line: Label | icon or emoji | variable | amount)', type: 'code', default: 'Day 1 | 🪙 | coins | 50\nDay 2 | 🪙 | coins | 100\nDay 3 | 💎 | gems | 5\nDay 4 | 🪙 | coins | 200\nDay 5 | 🧪 | item:Potion | 3\nDay 6 | 💎 | gems | 15\nDay 7 | 🎁 | coins | 1000' },
+    { key: 'resetIfMissed', label: 'Missing a day starts again', type: 'bool', default: true },
+    { key: 'columns', label: 'Columns', type: 'number', default: 4, range: [1, 7], step: 1 },
+    { key: 'message', label: 'Message when claimed', type: 'text', default: 'daily claimed', suggest: 'messages' },
+    ...colorParams({ card: ['Days', '#232842'], text: ['Text', '#ffffff'], accent: ['Today', '#ffd23d'], claimed: ['Claimed', '#3ccf7a'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let R = [], st = { streak: 0, last: '' }, pop = 0, key = '';
+    const parse = () => UK.lines(p.rewards).map(([label, icon, v, amount]) => ({ label, icon, v, amount: UK.num(amount) }));
+    const today = (off = 0) => { const d = new Date(Date.now() + off * 86400000); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+    const load = (s) => { key = 'pocket.daily.' + (s.engine.gameKey || 'game'); try { st = { streak: 0, last: '', ...JSON.parse(store.get(key, '{}')) }; } catch { st = { streak: 0, last: '' }; } if (p.resetIfMissed !== false && st.last && st.last !== today() && st.last !== today(-1)) st.streak = 0; if (st.streak >= R.length && st.last !== today()) st.streak = 0; };
+    const can = () => st.last !== today();
+    return {
+      uiAlways: true,
+      start(e, s) { R = parse(); load(s); s.on('message', (m) => { if (!e.dead && m === 'daily reset') { st = { streak: 0, last: '' }; store.set(key, JSON.stringify(st)); } else if (!e.dead && m === 'daily next day') { st.last = today(-1); } }); },
+      update(e, dt, s) {
+        if (!R.length) R = parse();
+        pop = Math.max(0, pop - dt * 2);
+        if (!can()) return;
+        const b = UK.box(e), cols = Math.max(1, Math.round(+p.columns || 4)), rows = Math.ceil(R.length / cols), g = 8, cw = (b.w - g * (cols - 1)) / cols, ch = (b.h - g * (rows - 1)) / rows, i = st.streak;
+        const r = { x: b.x + (i % cols) * (cw + g), y: b.y + Math.floor(i / cols) * (ch + g), w: cw, h: ch };
+        if (!UK.taps(s, e).some((t) => UK.in(t, r))) return;
+        const rw = R[i]; if (!rw) return;
+        if (rw.v.startsWith('item:')) s.addItem(rw.v.slice(5), rw.amount || 1, rw.icon); else s.setVar(rw.v, UK.num(s.vars[rw.v]) + rw.amount);
+        st.streak++; st.last = today(); store.set(key, JSON.stringify(st)); pop = 1;
+        s.send(p.message || 'daily claimed', rw.label); s.engine.audio.sfx('coin'); s.engine.vibrate([15, 30, 15]);
+      },
+      drawUI(ctx, e, s) {
+        if (!R.length) R = parse();
+        const b = UK.box(e), cols = Math.max(1, Math.round(+p.columns || 4)), rows = Math.ceil(R.length / cols), g = 8, cw = (b.w - g * (cols - 1)) / cols, ch = (b.h - g * (rows - 1)) / rows, txt = p.text || '#fff', acc = p.accent || '#ffd23d', cl = p.claimed || '#3ccf7a', ed = s.engine.editing, t = performance.now() / 1000;
+        R.forEach((rw, i) => {
+          const x = b.x + (i % cols) * (cw + g), y = b.y + Math.floor(i / cols) * (ch + g), claimed = ed ? i < 2 : i < st.streak, isToday = ed ? i === 2 : i === st.streak && can(), big = i === R.length - 1;
+          ctx.save(); const k = isToday ? 1 + Math.sin(t * 4) * 0.03 + Math.sin(pop * Math.PI) * 0.06 : 1; ctx.translate(x + cw / 2, y + ch / 2); ctx.scale(k, k); ctx.translate(-cw / 2, -ch / 2);
+          ctx.fillStyle = claimed ? withAlpha(cl, 0.18) : p.card || '#232842'; UK.rr(ctx, 0, 0, cw, ch, 14); ctx.fill();
+          if (isToday) { ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.stroke(); } else if (big) { ctx.strokeStyle = withAlpha(acc, 0.5); ctx.lineWidth = 1.5; ctx.stroke(); }
+          UK.text(ctx, rw.label, cw / 2, 14, { size: 11, weight: 800, color: withAlpha(txt, 0.75) });
+          ctx.globalAlpha *= claimed ? 0.5 : 1; drawNavIcon(ctx, rw.icon, cw / 2, ch * 0.5, Math.min(cw, ch) * 0.36, txt); ctx.globalAlpha /= claimed ? 0.5 : 1;
+          UK.text(ctx, (rw.v.startsWith('item:') ? '×' : '+') + UK.fmt(rw.amount), cw / 2, ch - 13, { size: 12.5, weight: 900, color: isToday ? acc : txt });
+          if (claimed) { ctx.fillStyle = cl; ctx.beginPath(); ctx.arc(cw - 13, 13, 9, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cw - 17, 13); ctx.lineTo(cw - 14, 16); ctx.lineTo(cw - 9, 10); ctx.stroke(); }
+          if (isToday) UK.text(ctx, 'CLAIM', cw / 2, ch * 0.5 + Math.min(cw, ch) * 0.28, { size: 10, weight: 900, color: acc });
+          ctx.restore();
+        });
+        if (!ed && !can()) UK.text(ctx, 'Come back tomorrow!', b.cx, b.y + b.h + 14, { size: 12.5, weight: 800, color: withAlpha(txt, 0.7) });
+      },
+    };
+  },
+});
+
+registerBehavior('uiLevelMap', {
+  label: 'Level Map', description: 'A path of level buttons with stars and locks, like puzzle-game maps. Finished levels show their stars (stars_1, stars_2…); tap an open level to play it.',
+  params: [
+    { key: 'count', label: 'Levels (0 = the game\'s levels)', type: 'number', default: 12, range: [0, 200], step: 1 },
+    { key: 'unlockedVar', label: 'Highest open level variable', type: 'text', default: 'unlocked', suggest: 'vars' },
+    { key: 'allOpen', label: 'Every level open', type: 'bool', default: false },
+    { key: 'starsVar', label: 'Stars variable prefix', type: 'text', default: 'stars_' },
+    { key: 'layout', label: 'Layout', type: 'select', options: ['winding path', 'grid', 'straight up'], default: 'winding path' },
+    { key: 'action', label: 'Tapping a level', type: 'select', options: ['plays that level', 'sends a message', 'sets a variable'], default: 'plays that level' },
+    { key: 'message', label: 'Message (gets the number) / variable', type: 'text', default: 'level', suggest: 'messages', showIf: (b) => b.action !== 'plays that level' },
+    { key: 'spacing', label: 'Spacing', type: 'number', default: 92, range: [50, 200], step: 2 },
+    ...colorParams({ node: ['Open levels', '#4fa3ff'], locked: ['Locked', '#3a3f55'], current: ['Next to play', '#ffd23d'], path: ['Path', 'rgba(255,255,255,0.25)'], text: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const sc = scroller(); let pressed = -1, pt = 0;
+    const count = (s) => Math.max(1, Math.round(+p.count || s.engine.levels?.length || 10));
+    const open = (s) => (p.allOpen ? Infinity : Math.max(1, UK.num(s.vars[p.unlockedVar], 1)));
+    const nodes = (e, s) => {
+      const b = UK.box(e), n = count(s), sp = +p.spacing || 92, out = [];
+      if (p.layout === 'grid') { const cols = Math.max(2, Math.floor(b.w / sp)), cw = b.w / cols; for (let i = 0; i < n; i++) out.push({ x: b.x + cw * (i % cols + 0.5), y: b.y + 50 + Math.floor(i / cols) * sp }); }
+      else for (let i = 0; i < n; i++) { const yy = b.y + b.h - 60 - i * sp, xx = p.layout === 'straight up' ? b.cx : b.cx + Math.sin(i * 1.1) * (b.w * 0.3); out.push({ x: xx, y: yy }); }
+      return out;
+    };
+    const contentH = (e, s) => { const b = UK.box(e), N = nodes(e, s); if (p.layout === 'grid') return N[N.length - 1].y - b.y + 70; return b.y + b.h - N[N.length - 1].y + 70; };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.box(e), grid = p.layout === 'grid'; pt = Math.max(0, pt - dt * 4);
+        sc.update(s, e, b, contentH(e, s), dt);
+        if (sc.moved) return;
+        const N = nodes(e, s), off = grid ? -sc.y : sc.y;
+        for (const tp of UK.taps(s, e)) {
+          const i = N.findIndex((q) => Math.hypot(tp.x - q.x, tp.y - (q.y + off)) < 34); if (i < 0) continue;
+          if (i + 1 > open(s)) { s.engine.vibrate(30); continue; }
+          pressed = i; pt = 1; UK.tap(s, p);
+          if (p.action === 'sends a message') s.send(p.message || 'level', i + 1);
+          else if (p.action === 'sets a variable') s.setVar(p.message || 'level', i + 1);
+          else if (s.engine.levels && s.engine.levels.length > i) s.engine.goToLevel(i + 1); else s.send('level', i + 1);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), N = nodes(e, s), O = open(s), grid = p.layout === 'grid', off = grid ? -sc.y : sc.y, txt = p.text || '#fff', t = performance.now() / 1000;
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip(); ctx.translate(0, off);
+        if (!grid) { ctx.strokeStyle = p.path || 'rgba(255,255,255,0.25)'; ctx.lineWidth = 8; ctx.lineCap = 'round'; ctx.setLineDash([2, 16]); ctx.beginPath(); N.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.stroke(); ctx.setLineDash([]); }
+        N.forEach((q, i) => {
+          if (q.y + off < b.y - 50 || q.y + off > b.y + b.h + 50) return;
+          const n = i + 1, locked = n > O, cur = n === O, stars = clamp(Math.round(UK.num(s.vars[(p.starsVar || 'stars_') + n])), 0, 3), R = 26 * (cur ? 1.15 + Math.sin(t * 3) * 0.04 : 1) * (pressed === i ? 1 - Math.sin(pt * Math.PI) * 0.1 : 1);
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 4; ctx.fillStyle = locked ? p.locked || '#3a3f55' : cur ? p.current || '#ffd23d' : p.node || '#4fa3ff'; ctx.beginPath(); ctx.arc(q.x, q.y, R, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, q.y, R - 4, Math.PI * 1.1, Math.PI * 1.7); ctx.stroke();
+          if (locked) drawNavIcon(ctx, 'lock', q.x, q.y, 22, withAlpha(txt, 0.6)); else UK.text(ctx, n, q.x, q.y + 1, { size: 20, weight: 900, color: cur ? '#3a2a00' : txt });
+          if (!locked && !cur) for (let k = 0; k < 3; k++) UK.text(ctx, '★', q.x + (k - 1) * 15, q.y + R + 10 - (k === 1 ? 3 : 0), { size: 15, weight: 900, color: k < stars ? '#ffd23d' : 'rgba(255,255,255,0.25)' });
+        });
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiTutorial', {
+  label: 'Tutorial (coach marks)', description: 'Step-by-step tips that point at things: the screen darkens except a spotlight on the target, with a speech bubble and Next / Skip. Can run only once per player.',
+  params: [
+    { key: 'steps', label: 'Steps (one per line: Text | target object name, or x%,y% | spotlight size)', type: 'code', default: 'Welcome! Let\'s learn the basics. | 50%,45% | 0\nDrag on the left to move. | 20%,80% | 90\nTap JUMP to jump over gaps. | 82%,85% | 70\nCollect coins for points! | Coin | 50' },
+    { key: 'startOn', label: 'Starts', type: 'select', options: ['when the game starts', 'on a message'], default: 'when the game starts' },
+    { key: 'message', label: 'Start message', type: 'text', default: 'tutorial', suggest: 'messages', showIf: { startOn: ['on a message'] } },
+    { key: 'once', label: 'Only the first time (saved)', type: 'bool', default: true },
+    { key: 'pause', label: 'Pause the game while it shows', type: 'bool', default: true },
+    { key: 'doneMessage', label: 'Message when finished', type: 'text', default: 'tutorial done', suggest: 'messages' },
+    { key: 'dim', label: 'Darkness', type: 'number', default: 0.7, range: [0.2, 0.95], step: 0.05 },
+    ...colorParams({ bubble: ['Bubble', '#ffffff'], text: ['Bubble text', '#1d2033'], accent: ['Buttons', '#4fa3ff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let S = [], idx = -1, t = 0, spot = null, btns = {}, wasLoading = false, key = '';
+    const parse = () => UK.lines(p.steps).map(([text, target, size]) => ({ text, target, size: UK.num(size, 60) }));
+    const begin = (e, s) => { if (!S.length) return; if (p.once !== false && store.get(key, '') === '1') return; idx = 0; t = 0; UK.modal(s, e, true, () => finish(e, s)); if (p.pause !== false) { wasLoading = s.loading; s.loading = true; } };
+    const finish = (e, s) => { if (idx < 0) return; idx = -1; UK.modal(s, e, false); if (p.pause !== false) s.loading = wasLoading || false; if (p.once !== false) store.set(key, '1'); s.send(p.doneMessage || 'tutorial done'); };
+    const where = (s, st) => { // the spotlight centre in screen pixels
+      const E = s.engine, m = /^\s*(-?[\d.]+)%\s*,\s*(-?[\d.]+)%\s*$/.exec(st.target || '');
+      if (m) return { x: E.width * m[1] / 100, y: E.height * m[2] / 100, r: st.size };
+      const q = st.target && (s.find(st.target) || s.findAll(st.target)[0]); if (!q) return { x: E.width / 2, y: E.height / 2, r: 0 };
+      if (q.ui) { const r = uiRect(s, q); return { x: r.x, y: r.y, r: st.size || Math.max(r.w, r.h) * 0.6 + 10 }; }
+      const sp = E.renderer.worldToScreen(s, q.x, q.y, q.z); return { x: sp.x, y: sp.y, r: st.size || 50 };
+    };
+    return {
+      uiAlways: true,
+      start(e, s) { S = parse(); key = 'pocket.tutorial.' + (s.engine.gameKey || 'game') + '.' + e.name; if (p.startOn !== 'on a message') begin(e, s); s.on('message', (m) => { if (e.dead) return; if (m === p.message && p.startOn === 'on a message') begin(e, s); if (m === 'tutorial reset') store.set(key, ''); }); },
+      destroy(e, s) { UK.modal(s, e, false); },
+      update(e, dt, s) {
+        if (idx < 0) return; t += dt;
+        const st = S[idx], w = where(s, st); spot = spot ? { x: spot.x + (w.x - spot.x) * Math.min(1, dt * 10), y: spot.y + (w.y - spot.y) * Math.min(1, dt * 10), r: spot.r + (w.r - spot.r) * Math.min(1, dt * 10) } : w;
+        for (const tp of s.engine.input.taps) {
+          if (t < 0.25) continue;
+          if (btns.skip && Math.hypot(tp.x - btns.skip.x, tp.y - btns.skip.y) < 40 && Math.abs(tp.y - btns.skip.y) < 22) { finish(e, s); UK.tap(s, p); return; }
+          UK.tap(s, p); idx++; t = 0; if (idx >= S.length) { finish(e, s); return; }
+        }
+        s.engine.input.taps = [];
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine, ed = E.editing;
+        if (ed) { const b = UK.box(e); ctx.fillStyle = 'rgba(0,0,0,0.5)'; UK.rr(ctx, b.x, b.y, b.w, b.h, 12); ctx.fill(); UK.text(ctx, `🎓 Tutorial · ${(S.length || parse().length)} steps`, b.cx, b.cy, { size: 13, weight: 800 }); return; }
+        if (idx < 0) return;
+        const i = idx, st = S[i]; if (!st) return;
+        ctx.save(); toScreen(ctx, e, s); const W = E.width, H = E.height, sp = spot && !ed ? spot : where(s, st), a = ed ? 0.5 : Math.min(1, t * 4);
+        if (ed) { ctx.globalAlpha *= 0.6; }
+        ctx.fillStyle = `rgba(0,0,0,${(+p.dim || 0.7) * a})`; ctx.beginPath(); ctx.rect(0, 0, W, H); if (sp.r > 0) ctx.arc(sp.x, sp.y, sp.r * (1 + Math.sin(performance.now() / 300) * 0.03), 0, Math.PI * 2, true); ctx.fill('evenodd');
+        if (sp.r > 0) { ctx.strokeStyle = withAlpha('#ffffff', 0.7 * a); ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.arc(sp.x, sp.y, sp.r + 6, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
+        ctx.font = `700 15px ${THEME.font}`; const maxW = Math.min(W - 48, 300), words = String(st.text).split(' '), lines = []; let cur = '';
+        for (const w of words) { const tst = cur ? cur + ' ' + w : w; if (ctx.measureText(tst).width > maxW - 28 && cur) { lines.push(cur); cur = w; } else cur = tst; } if (cur) lines.push(cur);
+        const bw = maxW, bh = 22 * lines.length + 62, below = sp.y + sp.r + 20 + bh < H - E.safe.bottom - 10, by = sp.r <= 0 ? H / 2 - bh / 2 : below ? sp.y + sp.r + 20 : sp.y - sp.r - 20 - bh, bx = clamp(sp.x - bw / 2, 16, W - bw - 16);
+        ctx.save(); ctx.globalAlpha *= a; ctx.translate(0, (1 - UK.ease(a)) * 12); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 16; ctx.fillStyle = p.bubble || '#fff'; UK.rr(ctx, bx, by, bw, bh, 16); ctx.fill(); ctx.shadowColor = 'transparent';
+        if (sp.r > 0) { const tx = clamp(sp.x, bx + 20, bx + bw - 20); ctx.beginPath(); if (below) { ctx.moveTo(tx - 10, by); ctx.lineTo(tx, by - 10); ctx.lineTo(tx + 10, by); } else { ctx.moveTo(tx - 10, by + bh); ctx.lineTo(tx, by + bh + 10); ctx.lineTo(tx + 10, by + bh); } ctx.fill(); }
+        lines.forEach((l, k) => UK.text(ctx, l, bx + 14, by + 22 + k * 22, { size: 15, weight: 700, color: p.text || '#1d2033', align: 'left' }));
+        const fy = by + bh - 22; UK.text(ctx, `${i + 1} / ${S.length || 1}`, bx + 14, fy, { size: 12, weight: 700, color: withAlpha(p.text || '#1d2033', 0.5), align: 'left' });
+        const last = i >= (S.length || 1) - 1; ctx.fillStyle = p.accent || '#4fa3ff'; UK.rr(ctx, bx + bw - 92, fy - 14, 80, 28, 14); ctx.fill(); UK.text(ctx, last ? 'Got it!' : 'Next ›', bx + bw - 52, fy + 1, { size: 13, weight: 900, color: '#fff' });
+        if (!last) { UK.text(ctx, 'Skip', bx + bw - 124, fy + 1, { size: 13, weight: 800, color: withAlpha(p.text || '#1d2033', 0.55) }); btns.skip = { x: bx + bw - 124, y: fy }; } else btns.skip = null;
+        ctx.restore(); ctx.restore();
       },
     };
   },
@@ -7604,6 +9107,8 @@ export const NODE_TYPES = {
   moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
   lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
   openSettings: { cat: 'Game', label: 'Open Settings', exec: true, outs: ['then'] },
+  notify: { cat: 'Game', label: 'Notify', exec: true, outs: ['then'], params: [txt('title', 'Well done!', 'title ({variables})'), txt('text', '', 'text'), txt('icon', '🏆', 'icon or emoji')] },
+  celebrate: { cat: 'Game', label: 'Celebrate (confetti)', exec: true, outs: ['then'] },
   playerSetting: { cat: 'Game', label: 'Player Setting', value: 'number', params: [opt('setting', ['left-handed', 'joystick sensitivity', 'drag sensitivity', 'tilt sensitivity', 'look sensitivity', 'sound effects', 'music', 'vibration'], 'left-handed', 'setting')] },
   pauseGame: { cat: 'Game', label: 'Pause / Resume', exec: true, outs: ['then'], params: [opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
   // more values
@@ -8712,6 +10217,8 @@ registerBehavior('graph', {
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
         case 'openSettings': s.engine.openSettings(); break;
+        case 'notify': s.send('notify ' + [P('title'), P('text'), P('icon')].map((x) => fillTemplate(String(x ?? ''), s.vars).replace(/\|/g, '/')).join('|')); break;
+        case 'celebrate': s.send('celebrate'); break;
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
         case 'addScore': { const a = +I('amount') || 0; s.addVar('score', a); if (P('pop') !== false && a) popText(s, e.x, e.y, (a > 0 ? '+' : '') + formatNumber(a), '#ffd23d', 26); break; }
         case 'loseLife': {
@@ -9692,7 +11199,7 @@ export class Engine {
   modalTaps(s) {
     const m = s.modal;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
-    const inp = this.input, r = uiBox(m, this.width, this.height, this.safe);
+    const inp = this.input, r = m._modalRect?.() || uiBox(m, this.width, this.height, this.safe); // a component can claim the whole screen while open
     const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2;
     const out = inp.taps.some((t) => !inside(t));
     inp.taps = inp.taps.filter(inside); inp.downs = inp.downs.filter(inside);

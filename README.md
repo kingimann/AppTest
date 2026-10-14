@@ -106,6 +106,18 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
   - **Behaviour:** **pause when switching apps**, **keep the screen on while playing**, and **ask before leaving mid-game**.
   - **Sharing:** a **link preview** (title and description for messages and social posts) and the **language code**.
   - **Extra code in `<head>`** (advanced): analytics, fonts or meta tags, pasted into every build as-is.
+- **App stores (iOS & Android):** publish with **Codemagic** ([codemagic.io](https://codemagic.io)), a cloud build service. You don't need a Mac or Android Studio.
+  - Set the **App ID** (like `com.yourname.game`; it's checked as you type) and tick iOS, Android or both.
+  - **iOS:** send to TestFlight, to TestFlight and then App Store review, or just build the .ipa; iPhone only or iPhone + iPad; the name of your App Store Connect key in Codemagic.
+  - **Android:** publish to internal / closed / open testing or production, or just build the .aab; *First release* (Google only accepts drafts until the first review); the keystore and Google Play key names in Codemagic.
+  - Also: full screen, a number to add to build numbers, and an email when a build finishes.
+  - **Download app project (.zip)** makes a [Capacitor](https://capacitorjs.com) project:
+    - `www/index.html`: the game, without the Home Screen prompts.
+    - `capacitor.config.json` and the icon / splash images in `assets/`.
+    - `codemagic.yaml` with an iOS and / or Android workflow.
+    - `scripts/prepare-native.mjs`: sets the version, build number, release signing, orientation and full screen in the native projects that Codemagic generates on each build.
+    - A `README.md` with the one-time setup: Apple / Google accounts, App Store Connect key, certificates, keystore, Play service account, and the first manual Play upload.
+  - Put the folder on GitHub, add it in Codemagic, and start a workflow. Build numbers go up by themselves; raise **Version** for a store update.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
 - **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
 - **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.
@@ -506,20 +518,94 @@ New groups in *Project › UI*: **Buttons**, **Inputs**, **Lists** and **Animate
   - **Widgets:** Bouncing Title, Pulsing Play Button, Menu That Slides In, Spinning Reward Star, Heartbeat Heart, Attention Badge.
 - **New animations** everywhere UI shows and hides (popups, pages, Show / Hide UI node, UI Animation): **drop in** (falls and bounces), **flip**, **spin in**, **elastic pop**, **swing in**, **rise**, **stretch**.
 
+### UI components pack (21 new components, 43 presets)
+
+Each of these is one object with one component: it draws itself, handles taps and shows a live preview in the editor. Find them in *Project › UI* under **Controls**, **Charts**, **HUD** and **Game Systems**, or in *Add Component › UI*. Lists are typed one item per line, with `|` between the parts.
+
+**Controls**
+
+| Component | What it does |
+|---|---|
+| **Dropdown** | Choices (`Label \| value`) into a variable. Looks: filled, outline, underline, pill. Scrolls when long, opens upward near the bottom, and can send a message on change. Presets: Dropdown, Language Dropdown. |
+| **Keypad** | Number pad into a variable, with max digits and PIN dots. With an **Answer**, ✓ (or reaching max digits) sends a right / wrong message and shakes when wrong. Keys: round, rounded or flat. Presets: Keypad (PIN), Code Lock Keypad. |
+| **Colour Picker** | Swatches into a variable, and can recolour an object or tag (shape fill, text, mesh or tint). Circle, rounded or square swatches. |
+| **Carousel** | Swipe or tap the arrows through cards (`Name \| icon \| value \| unlocked-when variable \| subtitle`); the middle card goes into a variable. Locked cards show 🔒. Looks: cover flow, flat row, stack. Dots, and optional looping. Presets: Character Select, Level Cards. |
+| **Skill Button** | Tap or press a key to send a message. Then a cooldown sweep with seconds. Charges, a cost from a variable (mana), and circle / rounded / hexagon shapes. Presets: Skill Button, with charges, Mana Spell Button. |
+| **Radial Menu** | A button that opens a wheel of choices (`Label \| icon \| message`): hold and slide, or tap then tap. Dims behind it. Presets: Emote Wheel, Build Wheel. |
+| **Prize Wheel** | Spins on a tap or message and lands on a weighted prize (`Label \| colour \| amount \| chance`). Adds the amount to a variable, puts the label in another, ticks as it spins, and can limit spins with a variable. |
+
+**Charts:** **Chart** draws columns, bars, line, area, pie, donut or radar from `Label | variable or number | colour`. It has a title, values, labels, grid and a grow-in animation. A line or area chart can **track a variable over time**. Presets: Column, Bar (stats), Score Over Time, Pie, Donut, Radar Stats.
+
+**HUD**
+
+| Component | What it does |
+|---|---|
+| **XP Bar** | XP and level variables. It levels up by itself (each level needs × more), with a LEVEL UP flash, sound and message, and an optional max level. Looks: bar with hex badge, thin bar, ring, segments. Text: xp / needed, percent or level. |
+| **Timer** | Countdown or stopwatch as a ring, bar, pill or digits, in seconds, m:ss or tenths. Warns (red, pulsing, ticking) near the end, writes a variable and sends a message at zero. It can also end the game, win, or restart. Control it with messages: `timer pause`, `timer start`, `timer reset`, `timer restart`, `timer add 5`. |
+| **Off-screen Arrows** | Edge arrows to a tag (2D and 3D, including behind the camera), with distance. Looks: arrow, chevron, dot, icon. Optional markers over targets you can see. Presets: Off-screen Arrows, Goal Marker. |
+| **Crosshair** | Cross, cross + dot, dot, circle, circle + dot, chevron, brackets or T. Spreads on a message (`fire`) and while the player moves, shows a hit marker on `hit`, and has an outline. Presets: Crosshair, Sniper Scope. |
+| **News Ticker** | Scrolling text with `{variables}`. Separate several messages with `\|`. Set speed and direction; the edges fade. |
+| **Notifications** | Stacking pop-ups from the message `notify Title\|text\|icon` or the **Notify** node. Looks: card, pill, achievement, banner. Position, duration, max at once and sound; tap to close. Presets: Achievement Popups, Toast Messages. |
+| **Screen Effects** | A red flash when a variable (hp) drops, a pulsing vignette when it's low, a white flash on `flash`, and confetti on `celebrate`, on winning, or from the **Celebrate** node. |
+
+**Game Systems**
+
+| Component | What it does |
+|---|---|
+| **Shop** | Items (`Name \| icon \| price \| ID or item:Name \| note`) bought with a currency variable. Unlocks set `owned_ID` and can be equipped into a variable; `item:` entries go into the inventory each time. Tap twice to buy, a shake when you can't afford it, and a message when bought. Grid or list. |
+| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use: it sends `use Name` / `use item` and can use one up. |
+| **Quest Log** | Goals (`Text \| variable \| target \| reward`) with progress bars. They tick off and strike through, give rewards like `coins 100`, send a message and sort finished goals last. |
+| **Daily Reward** | A 7-day calendar, one claim per day, saved on the device. Rewards go into variables or the inventory, and the streak resets if a day is missed (optional). Send `daily reset` / `daily next day` to test it. |
+| **Level Map** | A winding path, straight line or grid of levels, with stars from `stars_1`, `stars_2`… and locks above the `unlocked` variable. The next level pulses, and it scrolls. Tapping a level plays it (`goToLevel`), sends a message or sets a variable. Presets: Level Map, Level Grid. |
+| **Tutorial** | Coach marks (`Text \| target object or x%,y% \| spotlight size`): a spotlight on the target, a speech bubble with Next / Skip and a step counter. It can pause the game, run once per player, and starts on load or on a message. |
+
 ### Navigation, popups and more UI
 
 Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.
-- **Bottom Nav Bar:**
-  - Four tabs with icons (Home, Shop, Awards, Profile) that spread across the screen.
-  - Three ready-made **Pages**: tapping a tab sets the variable `page`, and each page shows when it matches.
-- **Side Bars:**
-  - **Side Bar (left):** a ☰ button slides in a menu with icons. It dims the game, and picking an item or tapping outside closes it.
-  - **Side Bar (right):** a ⚙ button opens settings toggles.
+- **Bottom Nav Bar:** one **Bottom Nav** component draws and runs the whole bar. Presets: Bottom Nav Bar (pill), Floating, Raised center, Bubble, Underline, Glass and Minimal icons. **Bottom Nav (separate tabs)** is the older version, made of one object per tab.
+  - **Tabs:** one per line, `Label | icon | page | badge variable`.
+    - The icon is a built-in UI icon (`home`, `shop`, `trophy`, `user`, `chat`, `gear`, `play`, `plus`, `star`, `heart`, `bell`…) or an emoji.
+    - A badge variable shows a red count (99+) when it is a number, or a dot when it is `true`.
+  - **9 styles:**
+
+    | Style | Look |
+    |---|---|
+    | classic | icons and labels; the selected tab lights up |
+    | pill | a soft pill behind the selected icon |
+    | underline | a line slides along the top |
+    | dot | a dot under the selected tab |
+    | bubble | the selected tab grows into a bubble with its name |
+    | floating | a rounded bar above the bottom edge |
+    | raised center | a big round middle button that sticks up; it can send a message instead of being a tab |
+    | glass | a see-through floating bar with a glow |
+    | minimal | just icons |
+  - **Labels:** auto, always, selected only, or never.
+  - **Colours:** bar, selected, other tabs, indicator and badge. *Apply theme* recolours the bar too.
+  - **Size & shape:** icon and label size, corner radius, floating gap, line along the top, shadow, and filling the home-bar area.
+  - **Animation:** the indicator slides, fades or jumps, at a set speed. Tap effects: bounce, ripple, grow or none. Also a tap sound and vibration.
+  - **Behaviour:** switch tab, or open as a page (Back returns). **Hide on these pages** slides the bar away (e.g. during `game`), and it can also send a message when the tab changes.
+  - Tapping a tab sets the variable `page`. Ready-made **Pages** show when it matches, and they slide toward the tab you picked. The bar is drawn in the editor too, so you see it while designing.
+- **Side Menus:** one **Side Menu** component draws and runs the whole menu.
+  - **Presets:** Side Menu (left), Side Menu (right) (settings switches behind a ⚙ button), Floating, Glass, Banner header, Icon Rail (always visible), Full-screen Menu and Minimal. The older menus made of separate objects are still there as *Side Bar (left / right, separate items)*.
+  - **Items:** one per line, `Label | icon | what it does | badge variable`.
+    - *What it does* is a page name (sets `page`), `msg:name` (sends a message, shown with ›), or `toggle:var` (an on/off switch that keeps the menu open).
+    - `# Title` starts a section and `-` draws a line.
+    - **Footer items** sit at the bottom (e.g. Help).
+  - **7 styles:** classic (tinted row with a bar on its edge), rounded, floating, glass, rail (a slim icon column that opens to the full menu), fullscreen (big centred items) and minimal.
+  - **Header:** a title and subtitle (with `{variables}`), a picture (icon or emoji), simple / banner / none, and a ✕ close button.
+  - **Colours:** background, text, accent, banner and badge.
+  - **Size:** width, row height, text and icon size, icons on or off, and the floating gap.
+  - **Animation:** opens with a slide, fade or zoom, at a set speed. Items can flow in one by one, and the game behind dims. Also a tap sound and vibration.
+  - **Opening and closing:**
+    - Open: the ☰ button, the message (`menu`, or `menu open` / `menu close`), or a **swipe from the screen edge**.
+    - Close: **drag it back**, tap outside, use the phone's Back gesture, or pick an item.
+    - Choose whether picking an item switches page or opens it as a page that Back returns from.
   - **Bottom Sheet:** a + button slides up a panel.
 - **Tab Bar, Page, App Bar** (menu + title + settings).
 - **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
 - **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
 - **New components** (Add Component › UI):
+  - **Bottom Nav** and **Side Menu:** complete navigation bars and menus (styles, badges, animations). See above.
   - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
   - **Show If (pages):** shows UI only when a variable matches, with fade / pop / slide.
   - **Side Bar (drawer):** slides in from any edge on a message.

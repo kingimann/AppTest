@@ -3056,6 +3056,7 @@ function applyTheme(list) {
   const byId = new Map(list.map((e) => [e.id, e])), onButton = (e) => btn(e) || (e.parent && btn(byId.get(e.parent) || ent(e.parent) || {}));
   for (const e of list) {
     for (const b of e.behaviors || []) if (b.type === 'uiBottomNav') { b.activeColor = T.accent; b.barColor = T.panel; b.idleColor = mixHex(T.text, T.panel, 0.4); }
+    for (const b of e.behaviors || []) if (b.type === 'uiSideBar') { b.accent = T.accent; b.bg = T.panel; b.text = T.text; }
     if (e.text) { e.text.font = 'theme'; e.text.color = onButton(e) ? (isLight(T.accent) ? '#1b1b1b' : '#ffffff') : T.text; delete e.text.color2; }
     if (e.shape && e.shape.type !== 'emoji' && e.shape.fill) {
       e.shape.fill = btn(e) ? T.accent : T.panel; delete e.shape.fill2;
@@ -3290,7 +3291,7 @@ const BEH_META = {
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
+  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],

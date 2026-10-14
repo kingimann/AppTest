@@ -544,15 +544,27 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Animation:** the indicator slides, fades or jumps, at a set speed. Tap effects: bounce, ripple, grow or none. Also a tap sound and vibration.
   - **Behaviour:** switch tab, or open as a page (Back returns). **Hide on these pages** slides the bar away (e.g. during `game`), and it can also send a message when the tab changes.
   - Tapping a tab sets the variable `page`. Ready-made **Pages** show when it matches, and they slide toward the tab you picked. The bar is drawn in the editor too, so you see it while designing.
-- **Side Bars:**
-  - **Side Bar (left):** a ☰ button slides in a menu with icons. It dims the game, and picking an item or tapping outside closes it.
-  - **Side Bar (right):** a ⚙ button opens settings toggles.
+- **Side Menus:** one **Side Menu** component draws and runs the whole menu.
+  - **Presets:** Side Menu (left), Side Menu (right) (settings switches behind a ⚙ button), Floating, Glass, Banner header, Icon Rail (always visible), Full-screen Menu and Minimal. The older menus made of separate objects are still there as *Side Bar (left / right, separate items)*.
+  - **Items:** one per line, `Label | icon | what it does | badge variable`.
+    - *What it does* is a page name (sets `page`), `msg:name` (sends a message, shown with ›), or `toggle:var` (an on/off switch that keeps the menu open).
+    - `# Title` starts a section and `-` draws a line.
+    - **Footer items** sit at the bottom (e.g. Help).
+  - **7 styles:** classic (tinted row with a bar on its edge), rounded, floating, glass, rail (a slim icon column that opens to the full menu), fullscreen (big centred items) and minimal.
+  - **Header:** a title and subtitle (with `{variables}`), a picture (icon or emoji), simple / banner / none, and a ✕ close button.
+  - **Colours:** background, text, accent, banner and badge.
+  - **Size:** width, row height, text and icon size, icons on or off, and the floating gap.
+  - **Animation:** opens with a slide, fade or zoom, at a set speed. Items can flow in one by one, and the game behind dims. Also a tap sound and vibration.
+  - **Opening and closing:**
+    - Open: the ☰ button, the message (`menu`, or `menu open` / `menu close`), or a **swipe from the screen edge**.
+    - Close: **drag it back**, tap outside, use the phone's Back gesture, or pick an item.
+    - Choose whether picking an item switches page or opens it as a page that Back returns from.
   - **Bottom Sheet:** a + button slides up a panel.
 - **Tab Bar, Page, App Bar** (menu + title + settings).
 - **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
 - **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
 - **New components** (Add Component › UI):
-  - **Bottom Nav:** a complete bottom navigation bar (styles, badges, animations). See *Bottom Nav Bar* above.
+  - **Bottom Nav** and **Side Menu:** complete navigation bars and menus (styles, badges, animations). See above.
   - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
   - **Show If (pages):** shows UI only when a variable matches, with fade / pop / slide.
   - **Side Bar (drawer):** slides in from any edge on a message.

@@ -1620,7 +1620,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -4988,6 +4988,194 @@ registerBehavior('uiBottomNav', {
         });
       },
     };
+  },
+});
+
+const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal'];
+registerBehavior('uiSideBar', {
+  label: 'Side Menu', description: 'A complete side menu: header, items with icons and badges, sections, switches and a footer, in 7 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
+  params: [
+    { key: 'items', label: 'Items (Label | icon | page or msg:name or toggle:var | badge variable; "# Title" = section, "-" = line)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings' },
+    { key: 'footer', label: 'Footer items (same format)', type: 'code', default: 'Help | info | msg:help' },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'side', label: 'Side', type: 'select', options: ['left', 'right'], default: 'left' },
+    { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
+    { key: 'title', label: 'Title', type: 'text', default: 'My Game', group: 'Header' },
+    { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '', group: 'Header' },
+    { key: 'avatar', label: 'Picture (icon or emoji, blank = none)', type: 'text', default: '🙂', group: 'Header' },
+    { key: 'header', label: 'Header look', type: 'select', options: ['simple', 'banner', 'none'], default: 'simple', group: 'Header' },
+    { key: 'closeButton', label: 'Close button (✕)', type: 'bool', default: true, group: 'Header' },
+    { key: 'bg', label: 'Background', type: 'color', default: '#151826', group: 'Colours' },
+    { key: 'text', label: 'Text', type: 'color', default: '#e8eaf2', group: 'Colours' },
+    { key: 'accent', label: 'Selected / accent', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'headerColor', label: 'Banner colour (blank = accent)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'width', label: 'Width', type: 'number', default: 290, range: [180, 420], step: 10, group: 'Size' },
+    { key: 'itemHeight', label: 'Row height', type: 'number', default: 50, range: [36, 80], step: 2, group: 'Size' },
+    { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 28], step: 1, group: 'Size' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 22, range: [14, 40], step: 1, group: 'Size' },
+    { key: 'showIcons', label: 'Show icons', type: 'bool', default: true, group: 'Size' },
+    { key: 'margin', label: 'Floating gap from the edges', type: 'number', default: 12, range: [0, 40], step: 1, group: 'Size' },
+    { key: 'anim', label: 'Opens with', type: 'select', options: ['slide', 'fade', 'zoom'], default: 'slide', group: 'Animation' },
+    { key: 'duration', label: 'Open time (sec)', type: 'number', default: 0.28, range: [0.05, 1], step: 0.01, group: 'Animation' },
+    { key: 'stagger', label: 'Items flow in one by one', type: 'bool', default: true, group: 'Animation' },
+    { key: 'dim', label: 'Dim behind it', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05, group: 'Animation' },
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Animation' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Animation' },
+    { key: 'swipeOpen', label: 'Swipe from the edge to open', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'dragClose', label: 'Drag it back to close', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'closeOnPick', label: 'Close when an item is picked', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false, group: 'Behaviour' },
+    { key: 'mode', label: 'Items', type: 'select', options: ['switch page', 'open page (Back returns)'], default: 'switch page', group: 'Behaviour' },
+  ],
+  create(p) {
+    const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+      if (/^-+$/.test(l)) return { kind: 'line' };
+      if (l.startsWith('#')) return { kind: 'section', label: l.replace(/^#+\s*/, '') };
+      const [label = '', icon = '', act = '', badge = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
+      return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge } : { kind: 'page', label, icon, page: a, badge };
+    });
+    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9; // age: seconds since it started opening (items flow in by it)
+    const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => st() === 'floating' || st() === 'glass';
+    const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
+    const inst = {
+      uiAlways: true,
+      get open() { return want; }, get rows() { return rows; },
+      set(e, s, v) { if (v === want) return; want = v; if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null; },
+      rect(s) { // the panel when fully open, in screen pixels
+        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0;
+        if (full()) return { x: 0, y: 0, w: W, h: H, m: 0 };
+        const w = Math.min(+p.width || 290, W - 56), x = p.side === 'right' ? W - m - w : m;
+        return { x, y: m + (floaty() ? E.safe.top : 0), w, h: H - m * 2 - (floaty() ? E.safe.top + E.safe.bottom : 0), m };
+      },
+      start(e, s) {
+        I = parse(p.items); F = parse(p.footer);
+        e._dismiss = () => inst.set(e, s, false);
+        if (want) s.modal = e;
+        s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+      update(e, dt, s) {
+        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72;
+        // swipe from the edge / drag to close
+        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if (left ? d.x < 22 : d.x > E.width - 22) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
+        if (!drag && p.dragClose !== false && want && !full()) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w) { drag = { id: d.id, x0: d.x, t0: t, open: true, moved: false }; break; } }
+        if (drag) {
+          const q = inp.pointers.get(drag.id), span = Math.max(1, R.w - (rail() ? railW : 0));
+          if (q) { const dx = (q.x - drag.x0) * (left ? 1 : -1); if (Math.abs(dx) > 10) drag.moved = true; if (drag.moved || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1); }
+          else { if (drag.moved || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
+        } else {
+          const step = dt / Math.max(0.05, +p.duration || 0.28);
+          t = want ? Math.min(1, t + step) : Math.max(0, t - step);
+        }
+        age += dt;
+        // keep the entity the size of the open panel, so taps outside it close the menu (scene.modal)
+        if (e.shape) { const k = uiK(E.safe) || 1; e.shape.w = R.w / k; e.shape.h = R.h / k; e.stretch = 'none'; placeUI(e, R.x + R.w / 2, R.y + R.h / 2, E.width, E.height, E.safe); }
+        for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
+        // taps on rows (rows[] was laid out by the last draw, in screen pixels)
+        const visible = t > 0.9 || (rail() && t < 0.1);
+        if (!visible || (drag && drag.moved)) return;
+        for (const tp of inp.taps) {
+          if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
+          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          if (!r) continue;
+          const it = r.item; press.set(it, 1);
+          if (p.haptics !== false) E.vibrate(8);
+          if (p.sound) E.audio.sfx(p.sound);
+          if (it.kind === 'toggle') { s.setVar(it.v, !(s.vars[it.v] ?? true)); continue; }
+          if (rail() && t < 0.5 && it.kind === 'page' && sameVal(s.vars[p.var], it.page)) continue;
+          if (it.kind === 'msg') s.send(it.msg);
+          else s.navTo(it.page, p.var, { history: p.mode === 'open page (Back returns)', dir: 1 });
+          if (p.closeOnPick !== false && want) inst.set(e, s, false);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
+        if (!I.length && !F.length) { I = parse(p.items); F = parse(p.footer); }
+        ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
+        const sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? 1 : ease(t), raw = editing ? 1 : t;
+        rows = [];
+        if (tt <= 0.001 && !rail()) return;
+        const txt = p.text || '#e8eaf2', acc = p.accent || '#4fa3ff', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
+        // dim behind
+        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+        // panel placement for this frame
+        let w = R.w, x = R.x, alpha = 1, zoom = 1;
+        if (rail()) { w = railW + (R.w - railW) * tt; x = left ? R.x : R.x + R.w - w; }
+        else if (p.anim === 'fade' || full()) alpha = tt;
+        else if (p.anim === 'zoom') { alpha = tt; zoom = 0.85 + 0.15 * tt; }
+        else x = left ? R.x - (R.w + R.m + 24) * (1 - tt) : R.x + (R.w + R.m + 24) * (1 - tt);
+        ctx.save(); ctx.globalAlpha *= alpha;
+        if (zoom !== 1) { const ox = left ? R.x : R.x + R.w, oy = R.y + R.h / 2; ctx.translate(ox, oy); ctx.scale(zoom, zoom); ctx.translate(-ox, -oy); }
+        const rr = (X, Y, Wd, Hd, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(X, Y, Wd, Hd, Math.max(0, Math.min(r, Hd / 2, Wd / 2))); else ctx.rect(X, Y, Wd, Hd); };
+        const rad = floaty() ? 22 : 0;
+        {
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = left ? 4 : -4;
+          ctx.fillStyle = sty === 'glass' ? 'rgba(255,255,255,0.1)' : full() ? withAlpha(bg, 0.97) : bg;
+          rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();
+          if (sty === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; rr(x, R.y, w, R.h, rad); ctx.stroke(); }
+        }
+        ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
+        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
+        let y = R.y + safeT + 10;
+        // header
+        const hasHead = p.header !== 'none' && !compact && (p.title || p.avatar);
+        if (hasHead) {
+          const banner = p.header === 'banner', hh = full() ? 120 : banner ? 132 : 96;
+          if (banner) { const g = ctx.createLinearGradient(x, R.y, x + w, R.y + hh + safeT); const hc = p.headerColor || acc; g.addColorStop(0, hc); g.addColorStop(1, withAlpha(hc, 0.55)); ctx.fillStyle = g; ctx.fillRect(x, R.y, w, hh + safeT + 10); }
+          const cx = full() ? x + w / 2 : x + pad + 26, cy = y + (full() ? 30 : banner ? 40 : 30);
+          if (p.avatar) { ctx.fillStyle = banner ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, 28, banner ? '#ffffff' : acc); }
+          ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle';
+          const tx = full() ? x + w / 2 : p.avatar ? cx + 38 : x + pad, ty = full() ? cy + 50 : cy;
+          ctx.fillStyle = banner ? '#ffffff' : txt; ctx.font = `800 ${full() ? 26 : 19}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle ? 10 : 0));
+          if (p.subtitle) { ctx.globalAlpha *= 0.7; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, ty + 12); ctx.globalAlpha /= 0.7; }
+          y += hh - (full() ? 0 : 6);
+        } else y += compact ? 8 : 4;
+        if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = full() ? x + w - 34 : x + w - 28, by = R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = p.header === 'banner' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
+        // items
+        const drawList = (list, startY, dirUp) => {
+          let yy = startY, idx = 0;
+          for (const it of list) {
+            const delay = p.stagger !== false && !editing && want ? idx * 0.035 : 0, ip = rail() || !want || drag ? (rail() ? 1 : tt) : clamp((age - delay) / Math.max(0.05, (+p.duration || 0.28) * 0.6), 0, 1), slide = (1 - ease(ip)) * 30 * (left ? -1 : 1);
+            if (it.kind === 'line') { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; continue; }
+            if (it.kind === 'section') { if (!compact) { ctx.save(); ctx.globalAlpha *= 0.55 * ease(ip); ctx.fillStyle = txt; ctx.font = `800 11.5px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(it.label.toUpperCase(), full() ? x + w / 2 : x + pad + 8 + slide, yy + 16); ctx.restore(); } yy += compact ? 6 : 32; continue; }
+            idx++;
+            const hgt = full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih, on = it.kind === 'page' && sameVal(s.vars[p.var], it.page);
+            const rx = x + (sty === 'classic' || compact ? 0 : 8), rw = w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
+            ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
+            if (on || pr) { ctx.fillStyle = withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr); if (sty === 'classic') { ctx.fillRect(rx, yy, rw, hgt); if (on) { ctx.fillStyle = acc; ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); } } else { rr(rx + (compact ? 12 : 0), yy + 3, rw - (compact ? 24 : 0), hgt - 6, full() ? hgt / 2 : 14); ctx.fill(); } }
+            const col = on ? acc : txt, cy = yy + hgt / 2;
+            if (compact) drawNavIcon(ctx, it.icon || it.label.slice(0, 1), x + w / 2, cy, isz, col);
+            else if (full()) { ctx.font = `800 ${tsz + 8}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(it.label, x + w / 2, cy); }
+            else {
+              const ix = x + pad + 14 + (sty === 'classic' ? 4 : 0);
+              if (icons && it.icon) drawNavIcon(ctx, it.icon, ix, cy, isz, col);
+              ctx.font = `${on ? 800 : 650} ${sty === 'minimal' ? tsz + 6 : tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
+              ctx.fillText(it.label, icons && it.icon ? ix + isz / 2 + 14 : x + pad + 8, cy);
+              if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sx = x + w - pad - 46, sw = 40, sh = 24; ctx.fillStyle = v ? acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); }
+              else if (it.kind === 'msg' && sty !== 'minimal') { ctx.strokeStyle = withAlpha(txt, 0.35); ctx.lineWidth = 2; const ax = x + w - pad - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); }
+            }
+            const bv = it.badge ? s.vars[it.badge] : null;
+            if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+              const n = +bv, tx = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+              const bx = compact ? x + w / 2 + isz * 0.5 : x + w - pad - (it.kind === 'msg' ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
+              ctx.fillStyle = p.badgeColor || '#ff3b5c';
+              if (!tx) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(tx).width + 10); rr(bx - bw / 2, by - 10, bw, 20, 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(tx, bx, by + 0.5); }
+            }
+            ctx.restore();
+            rows.push({ item: it, x: rx, y: yy, w: rw, h: hgt });
+            yy += hgt;
+          }
+          return yy;
+        };
+        if (full()) { const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih * 1.25), 0); y = Math.max(y, R.y + (R.h - total) / 2); }
+        drawList(I, y);
+        if (F.length) { const fh = F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0), fy = R.y + R.h - safeB - fh - 10; if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        ctx.restore(); ctx.restore();
+      },
+    };
+    return inst;
   },
 });
 

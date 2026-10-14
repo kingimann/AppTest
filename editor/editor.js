@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -50,7 +50,7 @@ function applyEditorPrefs() {
 }
 function setEP(k, v) { EP[k] = v; try { localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } catch { /* storage unavailable */ } applyEditorPrefs(); }
 applyEditorPrefs();
-const buzz = (ms = 8) => { if (!EP.haptics) return; try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
+const buzz = (ms = 8) => { if (EP.haptics) Haptics.play(ms); }; // (iPhone: a haptic tick)
 
 /** DOM builder: h('div', { class: 'x', onclick }, child, 'text') */
 function h(tag, attrs = {}, ...kids) {
@@ -1380,30 +1380,122 @@ function setDock(name, { fromTab = false } = {}) {
 }
 const isDesktop = () => false; // phones and tablets only
 
-// ---- Console (Unity-style): Debug Log messages, warnings and errors from the game ----
-let consoleSeen = 0, consoleLevel = 'all', consoleFrame = 0;
-const LOG_ICON = { info: 'info', warn: 'help', error: 'close' };
+// ---- Console (Unity-style, and more): messages, warnings and errors from the game; search, details, watches and commands ----
+let consoleSeen = 0, consoleLevel = 'all', consoleFrame = 0, consoleQuery = '', consoleOpen = null, playStartedAt = 0;
+const LOG_ICON = { info: 'info', warn: 'help', error: 'close', cmd: 'right', result: 'check' };
+const CP = (k, d) => store.get('pocket.editor.console.' + k, d);
 const clearOnPlay = () => store.get('pocket.editor.clearOnPlay', '1') === '1';
-function logRow(x) {
-  const obj = x.source && project.entities.find((e) => e.name === x.source.replace(/ script$/, ''));
-  return h('div', { class: 'log-row ' + x.level + (obj ? ' link' : ''), onclick: obj ? () => { if (playing) return; select(obj.id); setDock('inspector'); } : null },
-    h('span', { class: 'log-ic' }, icon(LOG_ICON[x.level] || 'info')),
-    h('span', { class: 'log-txt' }, h('span', {}, x.text), h('small', {}, [x.source, new Date(x.t).toLocaleTimeString()].filter(Boolean).join(' · '))),
-    x.count > 1 && h('span', { class: 'log-n' }, x.count > 999 ? '999+' : x.count));
+const consoleOpts = () => ({ collapse: CP('collapse', '1') === '1', time: CP('time', 'play'), newest: CP('newest', '1') === '1', pauseOnError: CP('pauseOnError', '') === '1' });
+const watches = () => { try { return JSON.parse(CP('watches', '[]')).filter(Boolean); } catch { return []; } };
+const setWatches = (w) => store.set('pocket.editor.console.watches', JSON.stringify([...new Set(w)].slice(0, 12)));
+const fmtVal = (v) => (v === undefined ? '(not set)' : typeof v === 'object' && v !== null ? JSON.stringify(v) : typeof v === 'number' ? String(Math.round(v * 1000) / 1000) : String(v));
+const logTime = (x) => { const o = consoleOpts(); if (o.time === 'off') return ''; if (o.time === 'play' && playStartedAt && x.t0 >= playStartedAt) return '+' + ((x.t0 - playStartedAt) / 1000).toFixed(1) + 's'; return new Date(x.t0 || x.t).toLocaleTimeString(); };
+/** Entries to show: level filter, search, and (optionally) identical messages merged into one row. */
+function consoleRows() {
+  const o = consoleOpts(), q = consoleQuery.trim().toLowerCase();
+  let rows = Log.entries.filter((x) => (consoleLevel === 'all' || x.level === consoleLevel || (consoleLevel === 'info' && (x.level === 'cmd' || x.level === 'result'))) && (!q || x.text.toLowerCase().includes(q) || x.source.toLowerCase().includes(q)));
+  if (o.collapse) { const m = new Map(); for (const x of rows) { const k = x.level + '|' + x.source + '|' + x.text; const y = m.get(k); if (y) { y.count += x.count; y.t = Math.max(y.t, x.t); } else m.set(k, { ...x }); } rows = [...m.values()]; }
+  rows = rows.slice(-300);
+  return o.newest ? rows.reverse() : rows;
 }
-function renderConsole() {
-  const box = $('#console'); if (!box) return;
+function logRow(x) {
+  const obj = x.source && project.entities.find((e) => e.name === x.source.replace(/ script$/, '')), key = x.t0 + '|' + x.text, open = consoleOpen === key;
+  const row = h('div', { class: 'log-row ' + x.level + (open ? ' open' : ''), onclick: (ev) => { if (ev.target.closest('.log-acts')) return; consoleOpen = open ? null : key; refreshConsoles(); } },
+    h('span', { class: 'log-ic' }, icon(LOG_ICON[x.level] || 'info')),
+    h('span', { class: 'log-txt' }, h('span', {}, x.text), h('small', {}, [x.source, logTime(x)].filter(Boolean).join(' · ')),
+      open && x.stack ? h('pre', { class: 'log-stack' }, x.stack) : null,
+      open ? h('div', { class: 'log-acts' },
+        h('button', { onclick: () => { navigator.clipboard?.writeText([x.text, x.source, x.stack].filter(Boolean).join('\n')).then(() => toast('Copied')).catch(() => toast('Couldn’t copy')); } }, icon('copy'), 'Copy'),
+        obj && !playing ? h('button', { onclick: () => { select(obj.id); setDock('inspector'); } }, icon('target'), 'Show object') : null,
+        obj && playing ? h('button', { onclick: () => { const live = engine.scene?.entities.find((q) => q.name === obj.name); if (live) { inspectId = live.id; engine.paused = true; updatePauseButtons(); renderInspectCard?.(); } } }, icon('target'), 'Inspect') : null,
+        h('button', { onclick: () => { consoleQuery = x.text.slice(0, 40); consoleOpen = null; refreshConsoles(); } }, icon('search'), 'Find similar')) : null),
+    x.count > 1 && h('span', { class: 'log-n' }, x.count > 999 ? '999+' : x.count));
+  return row;
+}
+function watchBar() {
+  const W = watches();
+  return h('div', { class: 'log-watch' },
+    ...W.map((k) => h('span', { class: 'lw', 'data-k': k }, h('b', {}, k), h('em', {}, fmtVal(engine.scene?.vars?.[k])), h('button', { title: 'Stop watching', onclick: () => { setWatches(watches().filter((q) => q !== k)); refreshConsoles(); } }, icon('close')))),
+    h('button', { class: 'lw-add', onclick: () => { const vars = Object.keys(engine.scene?.vars || {}).filter((k) => !W.includes(k)); const k = prompt('Watch which variable?' + (vars.length ? '\n\n' + vars.slice(0, 30).join(', ') : ''), vars[0] || 'score'); if (k?.trim()) { setWatches([...watches(), k.trim()]); refreshConsoles(); } } }, icon('plus'), W.length ? '' : 'Watch a variable'));
+}
+let cmdHistory = [], cmdPos = -1;
+function cmdLine() {
+  const inp = h('input', { type: 'text', class: 'log-cmd', placeholder: 'Command: score = 10, send win, vars, help…', autocapitalize: 'off', autocomplete: 'off', spellcheck: false, enterkeyhint: 'go',
+    onkeydown: (e) => {
+      if (e.key === 'Enter' && inp.value.trim()) { const c = inp.value.trim(); cmdHistory.push(c); cmdPos = cmdHistory.length; inp.value = ''; runCommand(c); setTimeout(() => $$('.log-cmd').forEach((q) => { if (q.isConnected && q.dataset.where === inp.dataset.where) q.focus(); }), 30); }
+      else if (e.key === 'ArrowUp' && cmdHistory.length) { cmdPos = Math.max(0, cmdPos - 1); inp.value = cmdHistory[cmdPos] || ''; e.preventDefault(); }
+      else if (e.key === 'ArrowDown' && cmdHistory.length) { cmdPos = Math.min(cmdHistory.length, cmdPos + 1); inp.value = cmdHistory[cmdPos] || ''; e.preventDefault(); }
+    } });
+  return h('div', { class: 'log-cmdrow' }, h('span', { class: 'log-prompt' }, '›'), inp, h('button', { class: 'log-run', title: 'Run', onclick: () => inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })) }, icon('play')));
+}
+const parseVal = (t) => { t = t.trim(); if (t === 'true') return true; if (t === 'false') return false; if (t !== '' && Number.isFinite(+t)) return +t; if (/^[[{"]/.test(t)) { try { return JSON.parse(t); } catch { /* text */ } } return t.replace(/^'(.*)'$/, '$1'); };
+/** The Console's command line: inspect and change the running game. */
+function runCommand(c) {
+  Log.add('cmd', c, '');
+  const S = engine.scene, out = (t, lv = 'result') => Log.add(lv, t, '');
+  const need = () => { if (!playing || !S) { out('Press Play first: commands work on the running game', 'warn'); return false; } return true; };
+  const [word, ...rest] = c.split(/\s+/), arg = rest.join(' '), m = /^([\w.]+)\s*(=|\+=|-=)\s*(.+)$/.exec(c);
+  switch (word.toLowerCase()) {
+    case 'help': out('vars · NAME · NAME = value (+= −=) · watch NAME · unwatch NAME · send MESSAGE [value] · objects · find NAME · pause · resume · step · restart · win · lose · level N · speed 0.5 · page NAME · back · clear'); return;
+    case 'clear': Log.clear(); consoleSeen = 0; return;
+    case 'watch': if (arg) { setWatches([...watches(), arg]); refreshConsoles(); out('Watching ' + arg); } return;
+    case 'unwatch': setWatches(watches().filter((q) => q !== arg)); refreshConsoles(); return;
+  }
+  if (!need()) return;
+  switch (word.toLowerCase()) {
+    case 'vars': { const v = Object.entries(S.vars).filter(([k]) => !k.startsWith('_')); out(v.length ? v.map(([k, x]) => `${k} = ${fmtVal(x)}`).join('\n') : 'No variables yet'); return; }
+    case 'send': { const [msg, ...v] = rest; if (!msg) return out('send MESSAGE [value]', 'warn'); S.send(msg, v.length ? parseVal(v.join(' ')) : undefined); out('Sent ' + msg); return; }
+    case 'objects': { const L = S.entities.filter((e) => !e.dead && !e.template && e.name); out(`${L.length} objects: ` + L.slice(0, 60).map((e) => e.name).join(', ') + (L.length > 60 ? '…' : '')); return; }
+    case 'find': { const e = S.find(arg) || S.findAll(arg)[0]; if (!e) return out('No object called ' + arg, 'warn'); out(`${e.name}: x ${Math.round(e.x)}, y ${Math.round(e.y)}${e.z ? ', z ' + Math.round(e.z) : ''} · ${e.visible ? 'visible' : 'hidden'}${e.tags?.length ? ' · tags ' + e.tags.join(', ') : ''}${e.health != null ? ' · health ' + e.health : ''}${Object.keys(e.data || {}).length ? ' · ' + Object.entries(e.data).filter(([k]) => !k.startsWith('_')).map(([k, v]) => `${k}=${fmtVal(v)}`).join(' ') : ''}`); return; }
+    case 'pause': engine.paused = true; updatePauseButtons(); out('Paused'); return;
+    case 'resume': engine.paused = false; updatePauseButtons(); out('Running'); return;
+    case 'step': engine.paused = true; engine.stepFrames = 1; updatePauseButtons(); return;
+    case 'restart': engine.restart?.(); out('Restarted'); return;
+    case 'win': S.win?.(); return;
+    case 'lose': case 'gameover': S.gameOver?.(); return;
+    case 'level': engine.goToLevel ? engine.goToLevel(Math.max(0, (+arg || 1) - 1)) : out('Can’t change level here', 'warn'); return;
+    case 'speed': engine.timeScale = Math.max(0, Math.min(4, +arg || 1)); out('Game speed ' + engine.timeScale + '×'); return;
+    case 'page': S.navTo(arg, 'page'); return;
+    case 'back': out(S.navBack() ? 'Went back' : 'Nowhere to go back to'); return;
+  }
+  if (m) { const [, k, op, v] = m, old = S.vars[k], nv = op === '=' ? parseVal(v) : (+old || 0) + (op === '+=' ? 1 : -1) * (+v || 0); S.setVar(k, nv); out(`${k} = ${fmtVal(nv)}`); return; }
+  if (/^\w+$/.test(c)) { out(`${c} = ${fmtVal(S.vars[c])}`); return; }
+  out('Unknown command. Type help', 'warn');
+}
+function consoleMenu(anchor) {
+  const o = consoleOpts(), set = (k, v) => { store.set('pocket.editor.console.' + k, v); refreshConsoles(); };
+  popMenu(anchor, [
+    { cap: 'Console' },
+    { icon: o.collapse ? 'check' : 'square', label: 'Merge identical messages', fn: () => set('collapse', o.collapse ? '' : '1') },
+    { icon: o.newest ? 'check' : 'square', label: 'Newest at the top', fn: () => set('newest', o.newest ? '' : '1') },
+    { icon: o.pauseOnError ? 'check' : 'square', label: 'Pause the game on an error', fn: () => set('pauseOnError', o.pauseOnError ? '' : '1') },
+    { icon: clearOnPlay() ? 'check' : 'square', label: 'Clear when you press Play', fn: () => { store.set('pocket.editor.clearOnPlay', clearOnPlay() ? '' : '1'); refreshConsoles(); } },
+    { icon: 'clock', label: 'Times: ' + { play: 'since Play', clock: 'clock', off: 'hidden' }[o.time], fn: () => set('time', { play: 'clock', clock: 'off', off: 'play' }[o.time]) },
+    '-',
+    { icon: 'copy', label: 'Copy All', fn: () => navigator.clipboard?.writeText(logText()).then(() => toast('Console copied')).catch(() => toast('Couldn’t copy')) },
+    { icon: 'download', label: 'Save as a File', fn: () => download('console-' + slug(root?.name || 'game') + '.txt', logText(), 'text/plain') },
+  ]);
+}
+const logText = () => Log.entries.map((x) => `[${new Date(x.t0 || x.t).toLocaleTimeString()}] ${x.level.toUpperCase()}${x.source ? ' (' + x.source + ')' : ''}: ${x.text}${x.count > 1 ? ' ×' + x.count : ''}${x.stack ? '\n' + x.stack : ''}`).join('\n');
+function consoleTools(compact) {
   const E = Log.entries, n = (lv) => E.filter((x) => x.level === lv).reduce((a, x) => a + x.count, 0);
-  const shown = consoleLevel === 'all' ? E : E.filter((x) => x.level === consoleLevel);
-  box.replaceChildren(
-    h('div', { class: 'log-tools' },
-      ...[['all', 'All', E.reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
-        h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; renderConsole(); } }, l, h('b', {}, c))),
-      h('span', { class: 'sp' }),
-      h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash'))),
-    h('label', { class: 'log-opt' }, h('input', { type: 'checkbox', checked: clearOnPlay(), onchange: (e) => store.set('pocket.editor.clearOnPlay', e.target.checked ? '1' : '') }), 'Clear when you press Play'),
-    shown.length ? h('div', { class: 'log-list' }, shown.slice().reverse().map(logRow))
-      : h('div', { class: 'empty' }, E.length ? 'Nothing of this kind.' : 'Messages from your game appear here while it runs: the Debug Log action and node, P.log() in scripts, warnings and errors.'));
+  const search = h('input', { type: 'search', class: 'log-search', placeholder: 'Search', value: consoleQuery, autocapitalize: 'off', oninput: (e) => { consoleQuery = e.target.value; refreshConsoles(true); } });
+  return h('div', { class: 'log-tools' + (compact ? ' compact' : '') },
+    ...[['all', 'All', E.filter((x) => x.level !== 'cmd' && x.level !== 'result').reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
+      h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; refreshConsoles(); } }, compact ? null : l, h('b', {}, c), compact ? icon(LOG_ICON[k] || 'list') : null)),
+    search,
+    h('button', { class: 'log-clear', title: 'More', onclick: (e) => consoleMenu(e.currentTarget) }, icon('more')),
+    h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash')));
+}
+function renderConsole(keepSearch) {
+  const box = $('#console'); if (!box) return;
+  const rows = consoleRows(), focused = keepSearch && document.activeElement?.classList.contains('log-search') && box.contains(document.activeElement), list = box.querySelector('.log-list');
+  if (focused) { list?.replaceWith(rows.length ? h('div', { class: 'log-list' }, rows.map(logRow)) : h('div', { class: 'log-list' }, h('div', { class: 'empty' }, 'Nothing matches.'))); updateConsoleBadge(); return; }
+  box.replaceChildren(consoleTools(false), watchBar(),
+    rows.length ? h('div', { class: 'log-list' }, rows.map(logRow))
+      : h('div', { class: 'log-list' }, h('div', { class: 'empty' }, Log.entries.length ? 'Nothing of this kind.' : 'Messages from your game appear here while it runs: the Debug Log action and nodes, P.log() in scripts, warnings and errors. Tap a message for details. Below, type commands to look inside the running game.')),
+    cmdLine());
+  box.querySelector('.log-cmd').dataset.where = 'dock';
   updateConsoleBadge();
 }
 function updateConsoleBadge() {
@@ -1412,17 +1504,31 @@ function updateConsoleBadge() {
   tab.querySelector('.dock-badge')?.remove();
   if (dockTab !== 'console' && (errs || warns)) tab.append(h('span', { class: 'dock-badge' + (errs ? ' err' : '') }, String(errs || warns)));
   const pb = $('#pbLog'); if (pb) { pb.querySelector('.dock-badge')?.remove(); const all = Log.entries.filter((x) => x.level === 'error').length; if (all) pb.append(h('span', { class: 'dock-badge err' }, String(all))); }
-  if (!$('#playConsole').hidden) renderPlayConsole();
 }
-function renderPlayConsole() {
-  $('#playConsole').replaceChildren(h('div', { class: 'pc-h' }, h('b', {}, 'Console'), h('button', { onclick: () => { $('#playConsole').hidden = true; } }, icon('close'))),
-    h('div', { class: 'pc-list' }, Log.entries.slice(-40).reverse().map(logRow)));
+function renderPlayConsole(keepSearch) {
+  const pc = $('#playConsole'), rows = consoleRows().slice(0, 80);
+  if (keepSearch && document.activeElement?.classList.contains('log-search') && pc.contains(document.activeElement)) { pc.querySelector('.pc-list')?.replaceChildren(...rows.map(logRow)); return; }
+  pc.replaceChildren(h('div', { class: 'pc-h' }, h('b', {}, 'Console'), h('button', { title: 'Bigger / smaller', onclick: () => pc.classList.toggle('tall') }, icon('frame')), h('button', { onclick: () => { pc.hidden = true; } }, icon('close'))),
+    consoleTools(true), watchBar(), h('div', { class: 'pc-list' }, rows.map(logRow)), cmdLine());
+  pc.querySelector('.log-cmd').dataset.where = 'play';
+}
+/** Redraw whichever consoles are showing (keepSearch: don't steal the search box's focus). */
+function refreshConsoles(keepSearch) {
+  if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(keepSearch); } else updateConsoleBadge();
+  if (!$('#playConsole').hidden) renderPlayConsole(keepSearch);
 }
 Log.listeners.add(() => { // batch redraws to once a frame
+  const last = Log.entries[Log.entries.length - 1];
+  if (last?.level === 'error' && playing && consoleOpts().pauseOnError && !engine.paused && last.count === 1) { engine.paused = true; updatePauseButtons(); toast('Paused on an error (see Console)'); }
   if (consoleFrame) return;
-  consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(); } else updateConsoleBadge(); });
+  consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (document.activeElement?.classList?.contains('log-cmd')) { const a = document.activeElement; refreshConsoles(true); if (!a.isConnected) $$('.log-cmd').find?.((q) => q.dataset.where === a.dataset.where)?.focus(); return; } refreshConsoles(true); });
 });
-window.addEventListener('error', (e) => { if (playing) Log.add('error', e.message || 'Error', 'game'); });
+setInterval(() => { // live watches
+  if (!playing) return;
+  for (const el of $$('.log-watch .lw')) { const em = el.querySelector('em'), v = fmtVal(engine.scene?.vars?.[el.dataset.k]); if (em && em.textContent !== v) { em.textContent = v; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); } }
+}, 200);
+window.addEventListener('error', (e) => { if (playing) Log.add('error', e.message || 'Error', 'game', e.error); });
+window.addEventListener('unhandledrejection', (e) => { if (playing) Log.add('error', 'Unhandled: ' + (e.reason?.message || e.reason), 'game', e.reason); });
 
 // ---- Scripts tab: every Visual Script in the game at a glance; tap one to open it ----
 let scriptQuery = '';
@@ -5032,12 +5138,13 @@ function play() {
   sheetBeforePlay = sheetState(); if (!isDesktop() && sheetBeforePlay !== 'peek') setSheet('peek'); // the game gets the whole screen
   updateCtxBar();
   document.body.classList.add('playing');
-  $('#playBar').hidden = false;
+  $('#playBar').hidden = false; pbOpen = false; applyPlayDock();
   $('#playBtn').classList.add('on'); $('#playBtn').replaceChildren(icon('stop'), h('span', {}, 'Stop'));
   engine.editing = false; engine.letterbox = true; // a landscape game plays in a landscape box even on a portrait phone
   engine.input.enabled = true;
   engine.timeScale = 1;
   if (clearOnPlay()) { Log.clear(); consoleSeen = 0; }
+  playStartedAt = Date.now();
   const json = clone(root);
   for (const lv of [json, ...(json.levels || [])]) lv.settings = { ...lv.settings, pauseButton: false, muteButton: false, fullscreen: false, saveProgress: false, loadOnStart: false };
   try {
@@ -5055,7 +5162,7 @@ function stop() {
   dropBack(stop);
   if (sheetBeforePlay && sheetBeforePlay !== 'peek' && !isDesktop()) setSheet(sheetBeforePlay); sheetBeforePlay = null;
   document.body.classList.remove('playing');
-  $('#playBar').hidden = true; $('#playConsole').hidden = true;
+  $('#playBar').hidden = true; $('#playConsole').hidden = true; applyPlayDock();
   engine.inspecting = false; inspectId = null; $('#playInspect').hidden = true; clearInterval(inspectTimer);
   if (!$('#playStats').hidden) toggleStats();
   $('#playBtn').classList.remove('on'); $('#playBtn').replaceChildren(icon('play'), h('span', {}, 'Play'));
@@ -5152,6 +5259,34 @@ $('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) r
 $('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
 $('#pbStats').addEventListener('click', toggleStats);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
+// ---- where the play bar goes: above the game (default) or below it, so it never covers the game's own UI; or floating / a small button you drag ----
+const PB_DOCKS = [['top', 'Above the game', 'The game starts under the bar: nothing of it is covered.'], ['bottom', 'Below the game', 'The game ends above the bar.'], ['float', 'Floating over the game', 'Drag the bar by its ⋮ button.'], ['mini', 'Small button', 'One round button you can drag anywhere; tap it for the tools.']];
+const pbDock = () => { const d = store.get('pocket.editor.playDock', 'top'); return PB_DOCKS.some(([k]) => k === d) ? d : 'top'; };
+let pbOpen = false;
+function applyPlayDock() {
+  const d = pbDock(), b = document.body;
+  for (const [k] of PB_DOCKS) b.classList.toggle('pb-' + k, k === d);
+  b.classList.toggle('pb-open', pbOpen);
+  const bar = $('#playBar'), pos = store.get('pocket.editor.playDockPos', null);
+  if ((d === 'float' || d === 'mini') && pos) { bar.style.left = pos.x + 'px'; bar.style.top = pos.y + 'px'; bar.style.transform = 'none'; }
+  else { bar.style.left = ''; bar.style.top = ''; bar.style.transform = ''; }
+  // the game's screen no longer reaches the notch / home bar on the side the bar takes
+  const base = PHONES[phone].safe || engine.deviceSafe || { top: 0, right: 0, bottom: 0, left: 0 };
+  engine.safeOverride = !playing ? PHONES[phone].safe : d === 'top' ? { ...base, top: 0 } : d === 'bottom' ? { ...base, bottom: 0 } : PHONES[phone].safe;
+  requestAnimationFrame(() => { engine.resize(); engine.layoutButtons(); });
+}
+$('#pbDock').append(icon('more')); $('#pbHandle').append(icon('more'));
+$('#pbDock').addEventListener('click', (ev) => { if (pbDragged) return; popMenu(ev.currentTarget, [{ cap: 'Play bar' }, ...PB_DOCKS.map(([k, l]) => ({ icon: pbDock() === k ? 'check' : 'square', label: l, fn: () => { store.set('pocket.editor.playDock', k); pbOpen = false; applyPlayDock(); toast(PB_DOCKS.find((q) => q[0] === k)[2]); } }))]); });
+$('#pbHandle').addEventListener('click', () => { if (pbDragged) return; pbOpen = !pbOpen; applyPlayDock(); });
+let pbDragged = false;
+for (const grip of [$('#pbDock'), $('#pbHandle')]) grip.addEventListener('pointerdown', (e) => { // floating / small button: drag it out of the way
+  if (!['float', 'mini'].includes(pbDock())) return;
+  const bar = $('#playBar'), r = bar.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top, x0 = e.clientX, y0 = e.clientY;
+  pbDragged = false;
+  const mv = (q) => { if (Math.hypot(q.clientX - x0, q.clientY - y0) > 6) pbDragged = true; if (!pbDragged) return; const x = clampN(q.clientX - dx, 4, innerWidth - r.width - 4), y = clampN(q.clientY - dy, 4, innerHeight - r.height - 4); bar.style.left = x + 'px'; bar.style.top = y + 'px'; bar.style.transform = 'none'; };
+  const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); if (pbDragged) { const rr = bar.getBoundingClientRect(); store.set('pocket.editor.playDockPos', { x: Math.round(rr.left), y: Math.round(rr.top) }); setTimeout(() => { pbDragged = false; }, 0); } };
+  addEventListener('pointermove', mv); addEventListener('pointerup', up);
+});
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
 for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['scripts', 'nodes', 'Scripts'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {

@@ -11,10 +11,10 @@ export const VERSION = '0.1.0';
 /** The game's console: messages from logic and scripts, warnings and errors (shown in the editor's Console). */
 export const Log = {
   entries: [], listeners: new Set(), max: 500,
-  add(level, text, source) {
+  add(level, text, source, extra) { // extra: { stack } for errors
     const last = this.entries[this.entries.length - 1], msg = String(text);
-    if (last && last.level === level && last.text === msg && last.source === source) { last.count++; last.t = Date.now(); } // repeats collapse into one line
-    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), count: 1 }); if (this.entries.length > this.max) this.entries.shift(); }
+    if (last && last.level === level && last.text === msg && last.source === (source || '')) { last.count++; last.t = Date.now(); } // repeats collapse into one line
+    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), t0: Date.now(), count: 1, stack: extra?.stack ? String(extra.stack).split('\n').slice(0, 8).join('\n') : '' }); if (this.entries.length > this.max) this.entries.shift(); }
     (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[pocket]', source ? source + ':' : '', msg);
     for (const f of this.listeners) { try { f(); } catch { /* a listener failing must not break the game */ } }
   },
@@ -9770,7 +9770,8 @@ export const NODE_TYPES = {
   setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
   message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
-  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text')] },
+  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text'), opt('level', ['log', 'warning', 'error'], 'log', 'as')] },
+  logValue: { cat: 'Actions', label: 'Debug Log Value', exec: true, outs: ['then'], params: [txt('label', 'speed', 'label'), opt('level', ['log', 'warning', 'error'], 'log', 'as')], inputs: [{ key: 'value', type: 'text', default: '' }] },
   sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', SOUNDS, 'coin', 'sound')] },
   spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
   destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
@@ -10244,6 +10245,7 @@ Object.assign(NODE_TYPES, {
   menuOpen: { cat: 'UI', label: 'Open / Close Side Menu', exec: true, outs: ['then'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }, opt('mode', ['toggle', 'open', 'close'], 'toggle', 'make it')] },
   menuIsOpen: { cat: 'UI', label: 'Side Menu Is Open', value: 'bool', params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
   navBars: { cat: 'UI', label: 'Show / Hide Nav Bars', exec: true, outs: ['then'], params: [opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make them')] },
+  haptic: { cat: 'Device', label: 'Haptic Feedback', exec: true, outs: ['then'], params: [opt('style', ['light', 'medium', 'heavy', 'success', 'warning', 'error'], 'medium', 'feel')] },
   vibratePattern: { cat: 'Device', label: 'Vibrate Pattern', exec: true, outs: ['then'], params: [txt('pattern', '80, 60, 80, 60, 200', 'buzz, pause, buzz… (ms)')] },
   appBadge: { cat: 'Device', label: 'App Icon Badge', exec: true, outs: ['then'], inputs: [N_IN('count', 1)] },
   fullScreen: { cat: 'Device', label: 'Full Screen', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')] },
@@ -10398,7 +10400,7 @@ export function runInstructions(list, ctx, done) {
       const it = list[i++], def = LOGIC_ACTIONS[it?.type];
       if (!def || it.off) continue;
       let r;
-      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name); }
+      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name, err); }
       if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
       if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
     }
@@ -10918,7 +10920,8 @@ registerBehavior('graph', {
         case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
         case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
         case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
-        case 'log': Log.add('info', fillTemplate(P('text'), s.vars), e?.name); break;
+        case 'log': Log.add({ warning: 'warn', error: 'error' }[P('level')] || 'info', fillTemplate(P('text'), s.vars), e?.name); break;
+        case 'logValue': { const v = input(n, 'value', ctx); Log.add({ warning: 'warn', error: 'error' }[P('level')] || 'info', `${P('label') || 'value'} = ${typeof v === 'object' ? JSON.stringify(v) : asText(v)}`, e?.name); break; }
         case 'sound': s.engine.audio.sfx(P('sound')); break;
         case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
         case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
@@ -11219,6 +11222,7 @@ registerBehavior('graph', {
         case 'bindMessage': { const key = P('message'), fn = P('func'); if (P('mode') === 'stop listening') bindings.delete(key + '|' + fn); else bindings.set(key + '|' + fn, { message: key, func: fn }); break; }
         case 'menuOpen': { const m = P('menu') || 'menu', md = P('mode'); s.send(md === 'open' ? m + ' open' : md === 'close' ? m + ' close' : m); break; }
         case 'navBars': s.navBarsOff = P('mode') === 'toggle' ? !s.navBarsOff : P('mode') === 'hide'; break;
+        case 'haptic': { const st = P('style') || 'medium'; s.engine.vibrate({ light: 8, medium: 18, heavy: 35, success: [12, 60, 24], warning: [24, 80, 24], error: [30, 50, 30, 50, 30] }[st] ?? 18, st); break; }
         case 'vibratePattern': { const pat = String(P('pattern') || '').split(/[\s,]+/).map(Number).filter((x) => x >= 0 && x < 10000); if (pat.length) s.engine.vibrate(pat); break; }
         case 'appBadge': { const c = Math.max(0, Math.round(+I('count') || 0)); try { if (c) navigator.setAppBadge?.(c)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } break; }
         case 'fullScreen': { const on = !!document.fullscreenElement, want = P('mode') === 'toggle' ? !on : P('mode') === 'on'; if (want && !on) document.documentElement.requestFullscreen?.().catch(() => {}); else if (!want && on) document.exitFullscreen?.().catch(() => {}); break; }
@@ -11516,11 +11520,11 @@ registerBehavior('script', {
         collide: typeof collide === 'function' ? collide : undefined };`);
       const hooks = f(Pocket), out = {};
       for (const [k, fn] of Object.entries(hooks)) if (fn) out[k] = (e, ...a) => { // a crash in one script is logged, not fatal
-        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script'); } }
+        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script', err); } }
       };
       return out;
     } catch (err) {
-      Log.add('error', `Script can't run: ${err.message}`, 'Custom script');
+      Log.add('error', `Script can't run: ${err.message}`, 'Custom script', err);
       return {};
     }
   },
@@ -11845,6 +11849,40 @@ registerBehavior('pfLeaderboard', {
     };
   },
 });
+
+// ============================================================================
+// Haptics: buzzes and taps on every phone. In an iOS / Android app: the native Haptics plugin. Android browsers:
+// the Vibration API. iPhone browsers have no vibration, but Safari (iOS 18+) gives a haptic tick when a
+// switch-style checkbox is toggled, so each buzz becomes ticks.
+// ============================================================================
+export const Haptics = {
+  native() { const C = typeof window !== 'undefined' && window.Capacitor; if (!C?.isNativePlatform?.()) return null; return C.Plugins?.Haptics || (C.isPluginAvailable?.('Haptics') && C.registerPlugin ? (this.plugin ||= C.registerPlugin('Haptics')) : null); },
+  ios: typeof navigator !== 'undefined' && (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)),
+  /** What this device can do: 'native', 'vibrate', 'ios-tick' or 'none'. */
+  get kind() { return this.native() ? 'native' : typeof navigator !== 'undefined' && navigator.vibrate && !this.ios ? 'vibrate' : this.ios ? 'ios-tick' : 'none'; },
+  tick() { // one iPhone haptic tick (needs to happen soon after a touch)
+    try { const l = document.createElement('label'), i = document.createElement('input'); l.ariaHidden = 'true'; l.style.display = 'none'; i.type = 'checkbox'; i.setAttribute('switch', ''); l.appendChild(i); document.head.appendChild(l); l.click(); l.remove(); } catch { /* not supported */ }
+  },
+  /** p: milliseconds, or a pattern [buzz, pause, buzz, …]; style: light / medium / heavy / success / warning / error. */
+  play(p, style) {
+    const pat = (Array.isArray(p) ? p : [p]).map((x) => Math.max(0, +x || 0)).slice(0, 20), N = this.native();
+    if (N) {
+      try {
+        if (style && ['success', 'warning', 'error'].includes(style)) { N.notification?.({ type: style.toUpperCase() }); return true; }
+        let t = 0;
+        pat.forEach((ms, i) => { if (i % 2 === 0 && ms > 0) { const at = t; setTimeout(() => { if (ms <= 30 || style) N.impact?.({ style: (style || (ms <= 12 ? 'light' : ms <= 25 ? 'medium' : 'heavy')).toUpperCase() }); else N.vibrate?.({ duration: ms }); }, at); } t += ms; });
+        return true;
+      } catch { /* plugin missing: fall through */ }
+    }
+    if (typeof navigator !== 'undefined' && navigator.vibrate && !this.ios) { try { return navigator.vibrate(pat.length === 1 ? pat[0] : pat); } catch { return false; } }
+    if (this.ios) { // ticks: one per short buzz, a few in a row for long ones
+      let t = 0, n = 0;
+      pat.forEach((ms, i) => { if (i % 2 === 0 && ms > 0) { const reps = Math.min(4, Math.max(1, Math.round(ms / 45))); for (let r = 0; r < reps && n < 10; r++, n++) { const at = t + r * 45; if (at === 0) this.tick(); else setTimeout(() => this.tick(), at); } } t += ms; });
+      return true;
+    }
+    return false;
+  },
+};
 
 export class Engine {
   constructor(opts = {}) {
@@ -12289,7 +12327,8 @@ export class Engine {
   }
   /** Show a notification: { type, title, text, icon, image, buttons: 'Label > message, …', duration }. */
   notify(o) { return this.notifier.push(o); }
-  vibrate(p) { try { if (!this.audio.muted && this.prefs?.vibration !== false) navigator.vibrate?.(p); } catch { /* unsupported */ } }
+  /** Buzz the phone (ms or a pattern). Player Settings › Vibration turns it off; muting sound doesn't. */
+  vibrate(p, style) { if (this.prefs?.vibration === false || this.editing) return false; return Haptics.play(p, style); }
 
   frame(now) {
     if (!this.running) return;
@@ -12304,9 +12343,14 @@ export class Engine {
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
     }
     if (this.scene) {
-      if (!this.editing) this.update(dt * this.timeScale);
-      this.render();
-      this.updateSettingsUI();
+      try { // a bug in one frame shows in the Console instead of freezing the game
+        if (!this.editing) this.update(dt * this.timeScale);
+        this.render();
+        this.updateSettingsUI();
+      } catch (err) {
+        const k = err?.message + '|' + (err?.stack || '').split('\n')[1];
+        if (k !== this.lastErr) { this.lastErr = k; Log.add('error', err?.message || String(err), 'game', err); } else Log.add('error', err?.message || String(err), 'game');
+      }
     }
     this.input.endFrame();
     requestAnimationFrame(this.frame);

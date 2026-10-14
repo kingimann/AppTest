@@ -1305,3 +1305,50 @@ body.playing #attachBar { display: none !important; }
 
 /* while the home screen is up, the editor behind it is hidden (and its game view sleeps), so scrolling the home stays smooth */
 body.home-open #app { visibility: hidden; }
+/* play bar docks: above / below the game (the game view makes room), floating, or a small round button */
+#playBar #pbHandle { display: none; }
+body.playing.pb-top #playBar, body.playing.pb-bottom #playBar { left: 0; right: 0; transform: none; border-radius: 0; border-width: 0; justify-content: center; box-shadow: none; background: #1d1d1d; }
+body.playing.pb-top #playBar { top: 0; padding: calc(env(safe-area-inset-top) + 6px) 8px 6px; border-bottom: 1px solid #000; }
+body.playing.pb-bottom #playBar { top: auto; bottom: 0; padding: 6px 8px calc(env(safe-area-inset-bottom) + 6px); border-top: 1px solid #000; }
+body.playing.pb-top #scenePanel { top: calc(env(safe-area-inset-top) + 59px); }
+body.playing.pb-bottom #scenePanel { bottom: calc(env(safe-area-inset-bottom) + 59px); }
+body.playing.pb-top #playStats { top: calc(env(safe-area-inset-top) + 68px); }
+body.playing.pb-bottom #playConsole { bottom: calc(env(safe-area-inset-bottom) + 66px); }
+body.playing.pb-mini #playBar > .tb:not(#pbHandle) { display: none; }
+body.playing.pb-mini #playBar #pbHandle { display: inline-flex; border-radius: 50%; }
+body.playing.pb-mini #playBar { padding: 4px; border-radius: 30px; }
+body.playing.pb-mini.pb-open #playBar > .tb:not(#pbHandle) { display: inline-flex; }
+body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle { touch-action: none; cursor: grab; }
+/* Console: search, watches, details, command line */
+.log-search { flex: 1 1 120px; min-width: 90px; height: 40px; border-radius: 20px; padding: 0 14px; font-size: 14px; }
+.log-tools.compact { padding: 8px; gap: 5px; position: static; background: transparent; }
+.log-tools.compact .log-f { padding: 0 9px; height: 36px; } .log-tools.compact .log-f svg.i { width: 15px; height: 15px; }
+.log-tools.compact .log-clear { width: 38px; height: 36px; }
+.log-watch { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 12px 10px; }
+.log-watch .lw { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 4px 0 12px; border-radius: 17px; background: #23354a; border: 1px solid #2f4a66; font-size: 13.5px; }
+.log-watch .lw b { color: #9fc8f0; font-weight: 700; } .log-watch .lw em { font-style: normal; font-family: ui-monospace, Menlo, monospace; color: #fff; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.log-watch .lw button { width: 28px; height: 28px; border: 0; border-radius: 14px; background: transparent; color: var(--muted); display: grid; place-items: center; } .log-watch .lw button svg { width: 14px; height: 14px; }
+.log-watch .lw.bump { animation: lwBump .5s; } @keyframes lwBump { 0% { background: #3a6ea5; } 100% { background: #23354a; } }
+.log-watch .lw-add { height: 34px; padding: 0 12px; border: 1px dashed #3d4e62; border-radius: 17px; background: transparent; color: #9fc8f0; display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; }
+.log-watch .lw-add svg { width: 15px; height: 15px; }
+.log-row.cmd .log-ic { background: #2c2c2c; color: #aaa; } .log-row.cmd .log-txt > span { font-family: ui-monospace, Menlo, monospace; color: #bbb; }
+.log-row.result .log-ic { background: #1f3a2a; color: #8fd6a8; } .log-row.result .log-txt > span { font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+.log-row.open { background: #262a30; }
+.log-stack { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: #1a1a1a; color: #ef9a9a; font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.log-row.open .log-txt > span { user-select: text; -webkit-user-select: text; }
+.log-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.log-acts button { height: 36px; padding: 0 12px; border: 1px solid #333; border-radius: 10px; background: #34383f; color: #e6e6e6; font-size: 13.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.log-acts button svg { width: 15px; height: 15px; }
+.log-cmdrow { position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); background: #1e1e1e; border-top: 1px solid #111; }
+.log-prompt { color: #8fc3ff; font: 700 18px ui-monospace, Menlo, monospace; padding-left: 4px; }
+.log-cmd { flex: 1; min-width: 0; height: 42px; border-radius: 10px; font: 15px ui-monospace, Menlo, monospace; }
+.log-run { width: 44px; height: 42px; border: 0; border-radius: 10px; background: #3a6ea5; color: #fff; display: grid; place-items: center; }
+#playConsole .log-cmdrow { position: static; padding-bottom: 8px; }
+#playConsole .pc-list { flex: 1; min-height: 60px; }
+#playConsole.tall { max-height: 78vh; }
+#playConsole .log-watch { padding: 0 8px 6px; }
+#playConsole > * { flex: none; }
+#playConsole > .pc-list { flex: 1 1 auto; min-height: 50px; overflow-y: auto; }
+.log-tools.compact { flex-wrap: nowrap; gap: 4px; }
+.log-tools.compact .log-f { padding: 0 7px; gap: 4px; }
+.log-tools.compact .log-search { flex: 1 1 60px; min-width: 50px; height: 36px; padding: 0 10px; }

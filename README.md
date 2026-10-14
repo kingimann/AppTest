@@ -247,7 +247,7 @@ The editor fills the screen:
   - **Device**: **Share**, **Copy To Clipboard**, **Open Website**, **Device Is** (portrait, landscape, touch screen, online, installed app, dark mode, reduced motion).
   - **App & device** (new):
     - **Events:** **On App Hidden** (the player switched apps or locked the phone) and **On App Back**, **On Phone Notification Tapped** (any, or one id), **On Side Menu Opened / Closed**, **On Screen Turned** (*portrait* / *landscape*), **On Connection Changed** (*online* / *offline*).
-    - **Steps:** **Open / Close Side Menu**, **Show / Hide Nav Bars** (slides the Bottom Nav and App Bar away, e.g. during a level), **Vibrate Pattern** (`80, 60, 80`), **App Icon Badge** (the number on the Home Screen icon of an installed web app; 0 clears it), **Full Screen**, **Keep Screen On**.
+    - **Steps:** **Haptic Feedback** (light, medium, heavy, success, warning, error), **Open / Close Side Menu**, **Show / Hide Nav Bars** (slides the Bottom Nav and App Bar away, e.g. during a level), **Vibrate Pattern** (`80, 60, 80`), **App Icon Badge** (the number on the Home Screen icon of an installed web app; 0 clears it), **Full Screen**, **Keep Screen On**.
     - **Flow:** **Every Nth Time** (*then* every 3rd time, *skip* otherwise: tips, ads, bonuses) and **First Time Ever** (once per device: tutorials, welcome messages).
     - **Values:** **Side Menu Is Open**, **Battery Level** (0–100), **Phone Language** (`en`, or `en-GB`), **Notifications Allowed**.
 - ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, Run / idle by speed, Collect: hop, fade, remove, and Tap → score counts up.
@@ -439,6 +439,12 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 | Sound & feel | **Sound effects**, **Music** (volume), **Vibration** | always |
 
 - **Reset** puts everything back. Opening the panel pauses the game; **Done** carries on.
+
+**Vibration** (every Vibrate action, node and component goes through one place):
+- **iOS / Android apps** (Build Settings › App stores): real vibration and haptic taps through `@capacitor/haptics`, now in the app project. Short buzzes become light / medium / heavy taps; success / warning / error get the phone's own patterns.
+- **Android browsers:** the Vibration API (patterns work).
+- **iPhone browsers** (Safari has no vibration API): on iOS 18 and later each buzz becomes a haptic tick, a few in a row for long ones. It works best right after a touch.
+- Muting the sound no longer turns vibration off; the player's **Vibration** setting does.
 - Game Settings › Touch Controls › **Player Settings (⚙)** sets where it opens: on the pause screen (default), also as a ⚙ in the top-right corner, or off.
   - A Button (Do → **open settings**) or the **Open Settings** node opens it too.
   - The **Player Setting** node reads a choice (left-handed and vibration are 1 / 0).
@@ -485,16 +491,26 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 
 ### Play mode tools
 
-The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**.
+The play bar: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**, and **⋮** to choose where the bar goes:
+- **Above the game** (the default) or **Below the game**: the game's screen starts (or ends) at the bar, so nothing at the top of your game (score, App Bar, buttons) is hidden under it. The game then doesn't add notch space on that side, since it no longer reaches the notch.
+- **Floating over the game** (drag it by ⋮), or a **Small button** you drag anywhere; tap it to open the tools. The choice and position are remembered.
 - **Inspect** pauses without the "PAUSED" screen. Tap any object in the running game, including ones spawned while playing, to see its live position, rotation, velocity, visibility and components, and change them. Step moves the game on a frame at a time while you watch the numbers. Changes last until you stop.
 - **Stats** shows FPS, objects, bodies, the game state, time and your variables (score, lives…).
 
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.
-- Repeated messages fold into one line with a count. Filter by Log / Warn / Error, clear it, and choose whether Play clears it. Tap a message from an object to jump to it.
-- While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
-- A custom script that crashes is reported once and the game keeps running.
+- Repeated messages fold into one line with a count, and **Merge identical messages** (⋮) folds them even when other messages come in between. Filter by Log / Warn / Error and **search** the text and object names.
+- **Tap a message** for its details: the full text (selectable), where it came from, an error's **stack** (where in the code it happened), and **Copy**, **Show object** (or **Inspect** it while playing) and **Find similar**.
+- **Watch variables:** pinned chips at the top show variables' live values while the game runs (they flash when they change). Add with **+**, or `watch score`.
+- **Command line** at the bottom, to look inside and change the running game:
+  - `score` shows a variable, `score = 10`, `score += 5`, `name = 'Ana'`, `items = [1, 2, 3]` change it, and `vars` lists them all.
+  - `send win` (or `send hit 5` with a value), `page shop`, `back`, `pause`, `resume`, `step`, `restart`, `win`, `lose`, `level 2`, `speed 0.5` (slow motion).
+  - `objects` lists what's in the scene, `find Player` shows an object's position, tags, health and own variables. `watch`, `unwatch`, `clear`, `help`. ↑ / ↓ go through earlier commands.
+- **⋮ options:** merge identical messages, newest at the top, **pause the game on an error**, clear when you press Play, times shown since Play / as the clock / hidden, **Copy All** and **Save as a File**.
+- While playing, the console button in the play bar (with a red count for errors) opens the same console over the game: filters, search, watches and the command line. ⛶ makes it taller.
+- **Errors never freeze the game:** an error in any frame (a component, a node, a script) is reported with its stack and the game keeps running. Unhandled errors and failed promises are reported too.
+- **Nodes:** **Debug Log** can log as a log, warning or error; **Debug Log Value** writes a label and any value (number, text, list, dictionary).
 
 ### Portrait or landscape
 

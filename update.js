@@ -8,8 +8,8 @@
   if (!location.protocol.startsWith('http') || !window.fetch) return;
   var base = new URL('./', document.currentScript ? document.currentScript.src : location.href);
   var FILES = ['index.html', 'play.html', 'engine/pocket.js', 'examples/templates.js', 'editor/', 'editor/index.html', 'editor/editor.css', 'editor/editor.js',
-    'editor/icons.js', 'editor/storage.js', 'editor/loading.js', 'editor/nodes.js', 'editor/modeler.js', 'editor/sprite2d.js', 'editor/meshops.js', 'editor/timeline.js', 'editor/logic.js', 'editor/items.js', 'editor/library.js', 'editor/stores.js', 'editor/expo.js',
-    'docs/', 'docs/index.html', 'docs/docs.css', 'docs/docs.js', 'docs/guide/getting-started.md', 'docs/guide/editor.md', 'docs/guide/concepts.md', 'docs/guide/objects.md', 'docs/guide/physics.md', 'docs/guide/triggers.md', 'docs/guide/visual-scripting.md', 'docs/guide/ui.md', 'docs/guide/gameplay.md', 'docs/guide/camera-lighting.md', 'docs/guide/animation-audio.md', 'docs/guide/saving-online.md', 'docs/guide/scripting.md', 'docs/guide/engine-api.md', 'docs/guide/custom-components.md', 'docs/guide/publishing.md', 'docs/guide/troubleshooting.md'];
+    'editor/icons.js', 'editor/storage.js', 'editor/loading.js', 'editor/nodes.js', 'editor/modeler.js', 'editor/sprite2d.js', 'editor/meshops.js', 'editor/timeline.js', 'editor/logic.js', 'editor/items.js', 'editor/story.js', 'editor/library.js', 'editor/stores.js', 'editor/expo.js',
+    'docs/', 'docs/index.html', 'docs/docs.css', 'docs/docs.js', 'docs/guide/getting-started.md', 'docs/guide/editor.md', 'docs/guide/concepts.md', 'docs/guide/objects.md', 'docs/guide/physics.md', 'docs/guide/triggers.md', 'docs/guide/visual-scripting.md', 'docs/guide/ui.md', 'docs/guide/gameplay.md', 'docs/guide/quests-dialogue.md', 'docs/guide/camera-lighting.md', 'docs/guide/animation-audio.md', 'docs/guide/saving-online.md', 'docs/guide/scripting.md', 'docs/guide/engine-api.md', 'docs/guide/custom-components.md', 'docs/guide/publishing.md', 'docs/guide/troubleshooting.md'];
   var running = null, latest = null, bar = null, busy = false, dismissed = null;
 
   function read() {

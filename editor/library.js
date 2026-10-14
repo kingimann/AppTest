@@ -430,11 +430,15 @@ export const UI_WIDGETS_MORE = [
     ['Equipment', 'Game Systems', 'player', 'uiEquipment', 300, 230, {}],
     ['Crafting Panel', 'Game Systems', 'list', 'uiCrafting', 360, 440, {}],
     ['Quest Log', 'Game Systems', 'list', 'uiQuestLog', 350, 290, {}],
+    ['Quest Tracker', 'Game Systems', 'flag', 'uiQuestTracker', 240, 110, {}, { anchor: 'top-left', x: 140, y: 130, story: true, note: 'Shows the tracked quest and its objectives. Tapping it sends “open quests”.' }],
+    ['Quest Tracker (all quests)', 'Game Systems', 'flag', 'uiQuestTracker', 240, 170, { show: 'all active quests', max: 3, hideDone: true }, { anchor: 'top-right', x: -140, y: 160, story: true }],
+    ['Quest Journal', 'Game Systems', 'list', 'uiQuestJournal', 350, 460, {}, { story: true }],
+    ['Quest Journal (popup)', 'Game Systems', 'list', 'uiQuestJournal', 350, 460, { showAvailable: true }, { story: true, also: [{ type: 'uiPopup', openOn: 'open quests', closeOn: 'close quests' }], note: 'Opens on the message “open quests” (tap the Quest Tracker) and closes when you tap outside.' }],
     ['Daily Reward', 'Game Systems', 'clock', 'uiDailyReward', 350, 250, {}, { note: 'One claim per day, saved on the device. Send "daily reset" to test it again.' }],
     ['Level Map', 'Game Systems', 'flag', 'uiLevelMap', 360, 560, {}, { vars: { unlocked: 1 } }],
     ['Level Grid', 'Game Systems', 'grid', 'uiLevelMap', 360, 460, { layout: 'grid', count: 20, spacing: 84 }, { vars: { unlocked: 1 } }],
     ['Tutorial (coach marks)', 'Game Systems', 'bulb', 'uiTutorial', 220, 50, { once: false }, { anchor: 'top', y: 160, note: 'Edit Steps: text, then a target object name or x%,y% on the screen. "Only the first time" saves that it was seen.' }],
-  ].map(([label, group, icon, type, w, h, extra, more = {}]) => ({ icon, label, group, props: { name: label.replace(/ \(.*\)$/, ''), ui: true, anchor: more.anchor || 'center', x: more.x || 0, y: more.y || 0, ...(more.stretch ? { stretch: more.stretch, margin: 0 } : {}), shape: { type: 'rect', w, h, radius: 0, fill: '' }, behaviors: [{ type, ...extra }] }, vars: more.vars, note: more.note })),
+  ].map(([label, group, icon, type, w, h, extra, more = {}]) => ({ icon, label, group, props: { name: label.replace(/ \(.*\)$/, ''), ui: true, anchor: more.anchor || 'center', x: more.x || 0, y: more.y || 0, ...(more.stretch ? { stretch: more.stretch, margin: 0 } : {}), shape: { type: 'rect', w, h, radius: 0, fill: '' }, behaviors: [{ type, ...extra }, ...(more.also || [])] }, vars: more.vars, note: more.note, story: more.story })),
 ];
 
 /** Ready-made in-game loading screens: a full-screen panel with a Loading Screen component, a bar, the percent and tips. */
@@ -499,7 +503,7 @@ export const BEH_META = {
   uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
   uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
-  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], craftingStation: ['Crafting', 'gear'], loot: ['Crafting', 'gem'], resource: ['Crafting', 'gem'], uiHotbar: ['UI', 'grid'], uiEquipment: ['UI', 'player'], uiCrafting: ['UI', 'list'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], craftingStation: ['Crafting', 'gear'], loot: ['Crafting', 'gem'], resource: ['Crafting', 'gem'], uiHotbar: ['UI', 'grid'], uiEquipment: ['UI', 'player'], uiCrafting: ['UI', 'list'], npc: ['Gameplay', 'sign'], uiQuestTracker: ['UI', 'flag'], uiQuestJournal: ['UI', 'list'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
 /** The order of those folders. */

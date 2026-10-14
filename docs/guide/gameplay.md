@@ -154,4 +154,6 @@ A **Voxel World** object is a Minecraft-style block world. **Block Builder** giv
 
 ## Dialogue, quests and story
 
-**Dialogue** (speaker names, typewriter text, tap to continue, pause the game), **Message** signs, the *Say dialogue* instruction, the **Say** node, **Quest Log**, **Tutorial** coach marks and **Camera Sequence** cutscenes.
+**NPCs** talk with dialogue scripts (lines, choices, conditions, actions) and give **quests** (objectives, rewards, chains), shown by the **Quest Tracker** and **Quest Journal**. Everything about them is in [Quests and dialogue](#/guide/quests-dialogue).
+
+Also: the simple **Dialogue** component, **Message** signs, the *Say dialogue* instruction, the **Say** node, the **Quest Log** list, **Tutorial** coach marks and **Camera Sequence** cutscenes.

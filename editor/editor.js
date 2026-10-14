@@ -15,6 +15,7 @@ import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './l
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
+import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
@@ -90,6 +91,9 @@ let root = null, project = null, projectId = null, selectedId = null, levelIdx =
 // Items & Recipes editors (Game Settings) work on the whole game
 queueMicrotask(() => initItems({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
   stations: () => levelList().flatMap((lv) => lv.entities || []).flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'craftingStation').map((b) => b.station)).filter(Boolean) }));
+// Quests & Dialogues editors (Game Settings) also work on the whole game
+queueMicrotask(() => initStory({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
+  objects: (npcs) => { const all = levelList().flatMap((lv) => lv.entities || []).filter((e) => !e.template); return npcs ? all.flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'npc' || b.type === 'dialogue').map((b) => ({ name: e.name, dialogue: b.dialogue || '' }))) : [...new Set(all.flatMap((e) => [e.name, ...(e.behaviors || []).filter((b) => b.type === 'npc' && b.talkName).map((b) => b.talkName)]).filter(Boolean))]; } }));
 let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
@@ -2475,6 +2479,8 @@ function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
   if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'items') return uniq([...(root.items || []).map((d) => d.name), ...all.flatMap((e) => (e.behaviors || []).filter((b) => ['inventoryItem', 'resource'].includes(b.type)).map((b) => b.item))]);
+  if (kind === 'quests') return uniq((root.quests || []).map((q) => q.name));
+  if (kind === 'dialogues') return uniq((root.dialogues || []).map((d) => d.name));
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
@@ -3561,6 +3567,8 @@ function renderSceneSettings(box) {
   box.append(comp('Inventory', [inventorySettings()], { icon: 'key', key: 's-inv' }));
   box.append(comp('Items', [itemsEditor()], { icon: 'gem', key: 's-items' }));
   box.append(comp('Recipes', [recipesEditor()], { icon: 'list', key: 's-recipes' }));
+  box.append(comp('Quests', [questsEditor()], { icon: 'flag', key: 's-quests' }));
+  box.append(comp('Dialogues', [dialoguesEditor()], { icon: 'sign', key: 's-dialogues' }));
   box.append(comp('Lighting Presets', [
     h('p', { class: 'desc' }, 'One tap sets the whole mood. Change it while playing with the Lighting Preset node (with a fade).'),
     h('div', { class: 'lp-grid' }, Object.entries(LIGHT_PRESETS).map(([name, pr]) => h('button', { class: 'lp-btn', style: `--a:${threeD ? pr.d3.bg : pr.d2[1]};--b:${threeD ? pr.d3.color : mixHex('#000000', '#ffffff', pr.d2[0])}`, onclick: () => applyLightingPreset(name) }, h('i'), name))),
@@ -4137,6 +4145,11 @@ const PREFABS_2D = [
   { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', shape: { type: 'emoji', emoji: '🧰', w: 48, h: 48 }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 120, openIcon: '📭' }] } },
   { icon: 'gem', label: 'Breakable Crate', group: 'Crafting', items: true, desc: 'Has health; drops loot when broken', props: { name: 'Crate', tags: ['enemy'], shape: { type: 'emoji', emoji: '📦', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'health', hp: 3, hurtBy: 'bullet', invuln: 0.2, knockback: 0 }, { type: 'loot', loot: 'Wood 1-3\nApple 1 30%', when: 'destroyed', into: 'onto the ground' }] } },
   { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', shape: { type: 'emoji', emoji: '🪵', w: 32, h: 32 }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
+  { icon: 'sign', label: 'Quest Giver', group: 'Story', story: true, desc: 'An NPC that offers quests (! and ?) and takes them back', props: { name: 'Elder', shape: { type: 'emoji', emoji: '🧙', w: 48, h: 48 }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧙' }] } },
+  { icon: 'sign', label: 'Villager', group: 'Story', story: true, desc: 'Tap to talk: a dialogue with choices', props: { name: 'Villager', shape: { type: 'emoji', emoji: '🧑‍🌾', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Villager', portrait: '🧑‍🌾' }] } },
+  { icon: 'sign', label: 'Shopkeeper', group: 'Story', story: true, desc: 'Sells a potion through dialogue choices', props: { name: 'Shopkeeper', shape: { type: 'emoji', emoji: '🧔', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Shopkeeper', portrait: '🧔' }] }, vars: { coins: 20 } },
+  { icon: 'sign', label: 'Signpost', group: 'Story', story: true, desc: 'Read it when you walk up', props: { name: 'Signpost', shape: { type: 'emoji', emoji: '🪧', w: 40, h: 40 }, behaviors: [{ type: 'npc', dialogue: 'Signpost', start: 'player comes close', range: 60, markers: false, bubble: false, pause: false }] } },
+  { icon: 'flag', label: 'Quest Spot', group: 'Story', story: true, desc: 'A place to reach for a quest (“reach Old Well”)', props: { name: 'Old Well', shape: { type: 'emoji', emoji: '🪣', w: 44, h: 44 }, body: { type: 'static' } } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -4195,6 +4208,9 @@ const PREFABS_3D = [
   { icon: 'gem', label: 'Iron Rock', group: 'Crafting', items: true, desc: 'Needs a Pickaxe: gives Iron Ore', props: { name: 'Iron Rock', y: 0.5, mesh: { geometry: 'gem', r: 0.8, color: '#8d6e63' }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Iron Ore', hits: 5, tool: 'Pickaxe', bonus: 'Gem 1 10%', respawn: 60 }] } },
   { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', y: 0.4, mesh: { geometry: 'box', w: 1, h: 0.8, d: 0.7, color: '#a1887f' }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 3.5 }] } },
   { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', y: 0.3, mesh: { geometry: 'box', w: 0.5, h: 0.3, d: 0.3, color: '#8d6e63' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
+  { icon: 'sign', label: 'Quest Giver', group: 'Story', story: true, desc: 'An NPC that offers quests (! and ?) and takes them back', props: { name: 'Elder', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#7e57c2' }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧙', range: 3 }] } },
+  { icon: 'sign', label: 'Villager', group: 'Story', story: true, desc: 'Tap to talk: a dialogue with choices', props: { name: 'Villager', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#8bc34a' }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Villager', portrait: '🧑‍🌾', range: 3 }] } },
+  { icon: 'sign', label: 'Signpost', group: 'Story', story: true, desc: 'Read it when you walk up', props: { name: 'Signpost', y: 0.6, mesh: { geometry: 'box', w: 0.8, h: 1.2, d: 0.15, color: '#a1887f' }, behaviors: [{ type: 'npc', dialogue: 'Signpost', start: 'player comes close', range: 2, markers: false, bubble: false, pause: false }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -4399,6 +4415,7 @@ function addPrefab(def, at) {
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.items) ensureStarterItems(); // crafting presets: an empty game gets starter items and recipes
+  if (def.story) ensureStarterStory(); // NPC presets and quest UI: an empty game gets the starter story
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {

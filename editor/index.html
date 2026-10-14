@@ -121,7 +121,7 @@
 // If the editor fails to start (usually old and new files mixed in the browser cache right after an update),
 // re-download its files and reload once; if that still fails, show a message with a button.
 (function () {
-  var FILES = ['editor.js', 'editor.css', 'icons.js', 'storage.js', 'library.js', 'logic.js', 'items.js', 'meshops.js', 'modeler.js', 'sprite2d.js', 'nodes.js', 'timeline.js', 'loading.js', 'stores.js', 'expo.js', '../engine/pocket.js', '../examples/templates.js'];
+  var FILES = ['editor.js', 'editor.css', 'icons.js', 'storage.js', 'library.js', 'logic.js', 'items.js', 'story.js', 'meshops.js', 'modeler.js', 'sprite2d.js', 'nodes.js', 'timeline.js', 'loading.js', 'stores.js', 'expo.js', '../engine/pocket.js', '../examples/templates.js'];
   function fresh() {
     try { sessionStorage.setItem('pocket.boot', String(Date.now())); } catch (e) {}
     var sw = navigator.serviceWorker ? navigator.serviceWorker.getRegistration().then(function (r) { return r && r.update(); }).catch(function () {}) : Promise.resolve();

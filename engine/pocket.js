@@ -1218,11 +1218,166 @@ export class Scene {
     return e;
   }
   /** Inventory state for level changes and saves. */
-  packInv() { return { inventory: this.inventory || {}, order: this.invOrder || [], equipped: this.equipped || {}, known: [...(this.knownRecipes || [])] }; }
+  packInv() { return { inventory: this.inventory || {}, order: this.invOrder || [], equipped: this.equipped || {}, known: [...(this.knownRecipes || [])], quests: this.quests || {}, talked: this.talked || {} }; }
   unpackInv(d) {
     if (!d) return;
     this.inventory = JSON.parse(JSON.stringify(d.inventory || {})); this.invOrder = [...(d.order || Object.keys(this.inventory))]; this.equipped = { ...(d.equipped || {}) }; this.knownRecipes = new Set(d.known || []);
+    if (d.quests && Object.keys(d.quests).length) { this.quests = JSON.parse(JSON.stringify(d.quests)); this.questHooks(); this.syncQuests(); }
+    this.talked = { ...(d.talked || {}) };
     this.syncInventory(); this.after(0, () => this.applyEquip());
+  }
+  // ---- dialogue (Game Settings › Dialogues, NPC and Dialogue components) ----
+  dialogueDef(name) { const k = String(name || '').trim().toLowerCase(); return (this.engine?.dialogues || []).find((d) => String(d.name).trim().toLowerCase() === k) || null; }
+  /** What a dialogue script can read and change: variables (my.x = the NPC's own), items, quests, messages. */
+  storyEnv(npc = null, first = false) {
+    const s = this;
+    return {
+      first, chosen: npc ? (npc.data._chosen ||= new Set()) : new Set(),
+      getVar: (k) => (k.startsWith('my.') ? npc?.data[k.slice(3)] : s.vars[k]),
+      setVar: (k, v) => { if (k.startsWith('my.')) { if (npc) npc.data[k.slice(3)] = v; } else s.setVar(k, v); },
+      itemCount: (n) => s.itemCount(n),
+      give: (n, k) => { if (k > 0) { const got = s.addItem(n, k); if (got < k) s.dropNear(n, k - got); if (got > 0) s.message(`${s.itemDef(n).icon || ''} ${s.itemDef(n).name || n}${got > 1 ? ' ×' + got : ''}`.trim(), 1.2); } else s.addItem(n, k); },
+      questState: (n) => s.questState(n),
+      quest: (cmd, n, k) => { if (cmd === 'start') s.startQuest(n); else if (cmd === 'complete' || cmd === 'turnin') s.completeQuest(n); else if (cmd === 'fail') s.failQuest(n); else if (cmd === 'reset') s.resetQuest(n); else if (cmd === 'progress') s.advanceQuest(n, k); else if (cmd === 'track') s.setVar('trackedQuest', s.questDef(n)?.name || n); },
+      send: (m, v) => s.send(m, v), sound: (x) => s.engine?.audio.sfx(x), learn: (r) => { if (s.learnRecipe(r)) s.message(`📜 New recipe: ${r}`, 1.4); },
+      fill: (t) => fillTemplate(t, { ...s.vars, ...(npc ? Object.fromEntries(Object.entries(npc.data).filter(([, v]) => typeof v !== 'object')) : {}) }),
+      log: (m) => Log.add('warn', m, npc?.name || 'Dialogue'),
+      chose: (t) => s.emit('dialogueChoice', npc, t),
+    };
+  }
+  /** Start a conversation from a dialogue's name (Game Settings › Dialogues) or a script. o: { npc, start, pause, then, portrait }. */
+  startDialogue(src, o = {}) {
+    if (this.dialog) return false;
+    const def = this.dialogueDef(src), script = def ? def.script : src;
+    if (!script || (!def && !o.inline && !/\n|:\s/.test(script) && !/^[*#@?]|->/.test(script))) { Log.add('warn', `There is no dialogue called “${src}”`, o.npc?.name || 'Dialogue'); return false; }
+    const name = def?.name || o.name || '', key = (name || o.npc?.name || 'dialogue').toLowerCase(), seen = (this.talked ||= {});
+    const run = new DialogueRunner(script, this.storyEnv(o.npc, !seen[key]), { start: o.start || 'start' });
+    seen[key] = (seen[key] || 0) + 1;
+    if (o.npc) this.emit('talk', o.npc, name);
+    this.emit('dialogueStart', o.npc, name);
+    if (run.done) { this.emit('dialogueEnd', o.npc, name); if (o.then) this.send(o.then); return true; } // only actions, nothing to show
+    this.dialog = { run, lines: [], i: 0, chars: 0, pause: o.pause !== false, then: o.then, npc: o.npc || null, name, portrait: o.portrait || def?.portrait || '' };
+    return true;
+  }
+
+  // ---- quests (Game Settings › Quests) ----
+  questDefs() { return this.engine?.quests || []; }
+  questDef(name) { const k = String(name || '').trim().toLowerCase(); return this.questDefs().find((q) => String(q.name).trim().toLowerCase() === k) || null; }
+  questRec(name) { const d = this.questDef(name); return d ? (this.quests ||= {})[d.name.toLowerCase()] || null : null; }
+  /** locked (needs another quest first) · available · active · ready (to hand in) · done · failed · unknown */
+  questState(name) {
+    const d = this.questDef(name); if (!d) return 'unknown';
+    const r = this.questRec(d.name); if (r) return r.state;
+    return tagList(d.requires).every((q) => this.questState(q) === 'done') ? 'available' : 'locked';
+  }
+  /** Objectives with how far along each is: [{ label, have, need, done }] */
+  questObjectives(name) {
+    const d = this.questDef(name); if (!d) return [];
+    const r = this.questRec(d.name), objs = parseObjectives(d.objectives), out = [];
+    let blocked = false;
+    objs.forEach((o, i) => {
+      let have = r ? r.prog[i] || 0 : 0;
+      if (r && r.state !== 'active') have = o.n; // finished quests show everything done
+      else if (o.type === 'collect') have = Math.min(o.n, this.itemCount(o.target));
+      else if (o.type === 'var') have = storyCond(`${o.target} ${o.op} ${o.value}`, this.storyEnv()) ? 1 : 0;
+      else if (o.type === 'quest') have = this.questState(o.target) === 'done' ? 1 : 0;
+      const done = have >= o.n && !blocked;
+      out.push({ ...o, have: Math.min(have, o.n), need: o.n, done, waiting: blocked });
+      if (d.order === 'in order' && !done) blocked = true;
+    });
+    return out;
+  }
+  questHooks() {
+    if (this._questHooked) return; this._questHooked = true;
+    const ev = (kind) => (key, n = 1) => this.questEvent(kind, key, n);
+    this.on('death', (e) => this.questEvent('kill', e, 1));
+    this.on('talk', (npc) => this.questEvent('talk', npc, 1));
+    this.on('message', (m) => this.questEvent('message', m, 1));
+    this.on('craft', ev('craft')); this.on('gathered', (src, item, n) => this.questEvent('gather', item, n || 1));
+    this.on('itemUsed', (u, item) => this.questEvent('use', item, 1));
+    this.on('inventory', () => this.questCheckAll()); this.on('var', (k) => { if (!String(k).startsWith('quest')) this.questCheckAll(); });
+  }
+  /** Something happened that objectives may count (kill / talk / message / craft / gather / use). */
+  questEvent(kind, key, n = 1) {
+    if (!this.quests) return;
+    const match = (o) => { if (key && typeof key === 'object') return String(key.name).toLowerCase() === o.target.toLowerCase() || key.has?.(o.target); return String(key).trim().toLowerCase() === o.target.toLowerCase(); };
+    for (const d of this.questDefs()) {
+      const r = this.questRec(d.name); if (!r || r.state !== 'active') continue;
+      const objs = this.questObjectives(d.name); let changed = false;
+      objs.forEach((o, i) => { if (o.type === kind && !o.done && !o.waiting && match(o)) { r.prog[i] = Math.min(o.n, (r.prog[i] || 0) + n); changed = true; } });
+      if (changed) this.questCheck(d.name, true);
+    }
+  }
+  questCheckAll() { for (const d of this.questDefs()) if (this.questRec(d.name)?.state === 'active') this.questCheck(d.name); }
+  /** Re-check a quest: tells listeners about progress, and finishes it when every objective is done. */
+  questCheck(name, progressed = false) {
+    const d = this.questDef(name), r = this.questRec(name); if (!d || !r || r.state !== 'active') return;
+    const objs = this.questObjectives(d.name), snap = objs.map((o) => o.have).join(',');
+    if (snap !== r.snap) { const first = r.snap === undefined; r.snap = snap; if (!first || progressed) this.emit('questUpdate', d.name, objs); }
+    if (!objs.length || !objs.every((o) => o.done)) return;
+    if (d.turnIn === 'at giver' && d.giver) { r.state = 'ready'; this.syncQuests(); this.emit('questReady', d.name); this.questNote('Quest ready', `Return to ${d.giver}`, d); }
+    else this.completeQuest(d.name);
+  }
+  questNote(title, text, d) { const n = this.engine?.notify?.({ type: 'achievement', title, text: text || d.name, icon: d.icon || '📜', duration: 2.6 }); if (!n && !this.engine?.notifier) this.message(`${title}: ${text || d.name}`, 2); }
+  syncQuests() {
+    const recs = Object.values(this.quests || {});
+    this.setVar('questsDone', recs.filter((r) => r.state === 'done').length); this.setVar('questsActive', recs.filter((r) => r.state === 'active' || r.state === 'ready').length);
+    if (this.vars.trackedQuest && !['active', 'ready'].includes(this.questState(this.vars.trackedQuest))) this.setVar('trackedQuest', this.questDefs().find((q) => ['active', 'ready'].includes(this.questState(q.name)))?.name || '');
+  }
+  startQuest(name) {
+    const d = this.questDef(name); if (!d) { Log.add('warn', `There is no quest called “${name}”`, 'Quests'); return false; }
+    const st = this.questState(d.name);
+    if (!(st === 'available' || st === 'failed' || (d.repeatable && st === 'done'))) return false;
+    this.questHooks();
+    (this.quests ||= {})[d.name.toLowerCase()] = { state: 'active', prog: parseObjectives(d.objectives).map(() => 0), t: this.time };
+    if (!this.vars.trackedQuest || !['active', 'ready'].includes(this.questState(this.vars.trackedQuest))) this.setVar('trackedQuest', d.name);
+    this.syncQuests(); this.emit('questStart', d.name); this.questNote('New quest', d.name, d); this.engine?.audio.sfx('power');
+    this.questCheck(d.name);
+    return true;
+  }
+  /** Finish a quest now (hand it in): takes "(take)" items and gives the rewards. */
+  completeQuest(name) {
+    const d = this.questDef(name), st = this.questState(name); if (!d || !['active', 'ready'].includes(st)) return false;
+    const objs = parseObjectives(d.objectives);
+    for (const o of objs) if (o.type === 'collect' && o.take) this.addItem(o.target, -o.n);
+    this.quests[d.name.toLowerCase()].state = 'done';
+    const rs = parseRewards(d.rewards);
+    for (const r of rs) {
+      if (r.kind === 'item' || (r.kind === 'var' && !this.itemDef(r.name).plain)) { const got = this.addItem(r.name, r.n); if (got < r.n) this.dropNear(r.name, r.n - got); }
+      else if (r.kind === 'var') this.addVar(r.name, r.n);
+      else if (r.kind === 'recipe') this.learnRecipe(r.name);
+      else if (r.kind === 'message') this.send(r.name);
+      else if (r.kind === 'quest') this.after(0.8, () => this.startQuest(r.name));
+    }
+    this.syncQuests(); this.emit('questComplete', d.name); this.engine?.audio.sfx('win');
+    this.questNote('Quest complete!', `${d.name}${rs.length ? ' · ' + rewardText(rs, this) : ''}`, d);
+    this.questCheckAll(); // "finish another quest" objectives
+    return true;
+  }
+  failQuest(name) { const r = this.questRec(name), d = this.questDef(name); if (!r || !['active', 'ready'].includes(r.state)) return false; r.state = 'failed'; this.syncQuests(); this.emit('questFail', d.name); this.questNote('Quest failed', d.name, d); return true; }
+  resetQuest(name) { const d = this.questDef(name); if (!d || !this.quests) return false; delete this.quests[d.name.toLowerCase()]; this.syncQuests(); return true; }
+  /** Move a quest on by hand: the first unfinished "custom" (or message) objective, or objective number `which` (1 = first). */
+  advanceQuest(name, n = 1, which = 0) {
+    const d = this.questDef(name), r = this.questRec(name); if (!d || !r || r.state !== 'active') return false;
+    const objs = this.questObjectives(d.name);
+    const i = which > 0 ? which - 1 : objs.findIndex((o) => !o.done && !o.waiting && (o.type === 'custom' || o.type === 'message'));
+    if (i < 0 || !objs[i]) return false;
+    r.prog[i] = Math.min(objs[i].n, (r.prog[i] || 0) + (+n || 1)); this.questCheck(d.name, true); return true;
+  }
+  /** Every frame (cheap): "go to" objectives, and quests that start by themselves. */
+  questTick() {
+    if ((this._qt = (this._qt || 0) + 1) % 6) return; // about 10 times a second
+    for (const d of this.questDefs()) {
+      if (d.autoStart && this.questState(d.name) === 'available') this.startQuest(d.name);
+      const r = this.questRec(d.name); if (!r || r.state !== 'active') continue;
+      const pl = this.player(); if (!pl) continue;
+      this.questObjectives(d.name).forEach((o, i) => {
+        if (o.type !== 'reach' || o.done || o.waiting) return;
+        const t = this.find(o.target) || this.findAll(o.target)[0]; if (!t) return;
+        const three = this.mode === '3d', ex = t.extents(), size = ex.sphere ? ex.r : Math.max(ex.hx || 0, three ? ex.hz || 0 : ex.hy || 0);
+        if (Math.hypot(pl.x - t.x, three ? 0 : pl.y - t.y, three ? (pl.z || 0) - (t.z || 0) : 0) <= (o.dist || (three ? 2 : 60)) + size) { r.prog[i] = 1; this.questCheck(d.name, true); }
+      });
+    }
   }
   /** Vars carried between levels / saved may hold the inventory under __inv. */
   restoreInv() { const d = this.vars.__inv; if (d === undefined) return; delete this.vars.__inv; if (this.settings.keepInventory !== false) this.unpackInv(d); }
@@ -3740,30 +3895,63 @@ function drawJoystick(ctx, engine, scene, inp, tint, pulse) {
 // ============================================================================
 /** Dialogue box: speaker name, typewriter text, tap to continue. */
 function drawDialog(ctx, scene, W, H, engine) {
-  const d = scene.dialog, line = d.lines[d.i]; if (!line) return;
-  const m = 14, bw = Math.min(W - m * 2, 560), bh = 132, x = (W - bw) / 2, y = H - engine.safe.bottom - bh - 20;
+  const d = scene.dialog, line = d.run ? d.run.line : d.lines[d.i]; if (!line) return;
+  const m = 14, bw = Math.min(W - m * 2, 560), x = (W - bw) / 2, pic = d.portrait && line.who ? 64 : 0;
   ctx.save();
+  ctx.font = `600 17px ${THEME.font}`;
+  const rows = []; { const words = String(line.text).split(' '); let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 - pic && row) { rows.push(row); row = w; } else row = t; } rows.push(row); }
+  const bh = Math.max(pic ? 96 : 0, 132, 44 + rows.length * 24), y = H - engine.safe.bottom - bh - 20;
+  // choices stack above the box once the line has been read
+  const ch = d.run?.choices, ready = d.chars >= line.text.length;
+  d._rects = [];
+  if (ch && ready) {
+    const rh = 46, gap = 8; let cy = y - 12 - ch.length * (rh + gap);
+    ch.forEach((c, i) => {
+      const r = { x: x + 10, y: cy, w: bw - 20, h: rh }; d._rects.push(r);
+      ctx.fillStyle = 'rgba(20,22,44,0.94)'; ctx.strokeStyle = 'rgba(255,224,130,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 14); else ctx.rect(r.x, r.y, r.w, r.h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffe082'; ctx.font = `800 13px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), r.x + 14, r.y + rh / 2);
+      ctx.fillStyle = '#fff'; ctx.font = `700 16px ${THEME.font}`; ctx.fillText(c.text, r.x + 34, r.y + rh / 2, r.w - 46);
+      cy += rh + gap;
+    });
+  }
   ctx.fillStyle = 'rgba(12,12,26,0.92)'; ctx.strokeStyle = 'rgba(255,224,130,0.9)'; ctx.lineWidth = 2.5;
   ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 16); else ctx.rect(x, y, bw, bh); ctx.fill(); ctx.stroke();
+  if (pic) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y + 24, 56, 56, 12); else ctx.rect(x + 14, y + 24, 56, 56); ctx.fill(); drawNavIcon(ctx, d.portrait, x + 42, y + 52, 40, '#fff'); }
   if (line.who) {
     ctx.font = '800 15px system-ui, sans-serif'; const tw = ctx.measureText(line.who).width + 24;
     ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
     ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
   }
   ctx.fillStyle = '#fff'; ctx.font = `600 17px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  const text = line.text.slice(0, Math.floor(d.chars)), words = text.split(' '); let row = '', ty = y + 26;
-  for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 && row) { ctx.fillText(row, x + 18, ty); row = w; ty += 24; } else row = t; }
-  ctx.fillText(row, x + 18, ty);
-  if (d.chars >= line.text.length) { ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(d.i < d.lines.length - 1 ? '▼' : '✓', x + bw - 16, y + bh - 28); }
+  let left = Math.floor(d.chars), ty = y + 26;
+  for (const r of rows) { if (left <= 0) break; ctx.fillText(r.slice(0, left), x + 18 + pic, ty); left -= r.length + 1; ty += 24; }
+  if (ready && !(ch && ch.length)) { const more = d.run ? !d.run.done : d.i < d.lines.length - 1; ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(more ? '▼' : '✓', x + bw - 16, y + bh - 28); }
   ctx.restore();
 }
-/** Advance the dialogue: typewriter, tap to finish the line, tap again for the next. Returns true if it used the tap. */
+/** Advance the dialogue: typewriter, tap to finish the line, tap again for the next (or pick a choice). Returns true if it used the tap. */
 function stepDialog(s, dt, tapped) {
-  const d = s.dialog, line = d?.lines[d.i]; if (!line) { s.dialog = null; return false; }
+  const d = s.dialog;
+  const end = () => { s.dialog = null; s.emit('dialogueEnd', d.npc || null, d.name || ''); if (d.then) s.send(d.then); };
+  if (d?.run) {
+    const r = d.run, line = r.line; if (r.done || !line) { end(); return false; }
+    d.chars = Math.min(line.text.length, d.chars + dt * 45);
+    const inp = s.engine.input;
+    if (r.choices && d.chars >= line.text.length) for (const k of inp.keysDown || []) { const i = +k - 1; if (Number.isInteger(i) && r.choices[i]) { r.choose(i); d.chars = 0; s.engine.audio.sfx('click'); if (r.done) end(); return true; } }
+    if (!tapped) return false;
+    const t = inp.taps[0];
+    if (d.chars < line.text.length) d.chars = line.text.length;
+    else if (r.choices?.length) { const k = (d._rects || []).findIndex((q) => t && t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h); if (k < 0) return true; r.choose(k); d.chars = 0; }
+    else { r.next(); d.chars = 0; }
+    s.engine.audio.sfx('click');
+    if (r.done) end();
+    return true;
+  }
+  const line = d?.lines[d.i]; if (!line) { s.dialog = null; return false; }
   d.chars = Math.min(line.text.length, d.chars + dt * 45);
   if (!tapped) return false;
   if (d.chars < line.text.length) d.chars = line.text.length;
-  else if (++d.i >= d.lines.length) { s.dialog = null; if (d.then) s.send(d.then); }
+  else if (++d.i >= d.lines.length) end();
   s.engine.audio.sfx('click');
   return true;
 }
@@ -3940,6 +4128,7 @@ function renderUI(engine, scene) {
   if (!scene) return;
   THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
   engine.onBeforeUI?.(ctx, scene);
+  if (!engine.editing) for (const f of scene.overlays || []) if (f.world) f(ctx, scene); // markers that belong to the world (NPC !, ?) sit under the UI
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
@@ -3967,7 +4156,7 @@ function renderUI(engine, scene) {
   engine.notifier?.draw(ctx); // notifications sit above the game's UI (and show in the editor's Test)
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
-  for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  for (const f of scene.overlays || []) if (!f.world) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
   drawStatBars(ctx, scene, engine);
   if (scene.popups?.length) { // floating "+10" texts
     const now = scene.time;
@@ -5905,7 +6094,7 @@ registerBehavior('destructible', {
         s.addVar('score', p.points);
         s.camera.shake = Math.max(s.camera.shake, 6);
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
-        e.destroy();
+        s.emit('death', e); e.destroy();
       },
     };
   },
@@ -6693,6 +6882,168 @@ registerBehavior('uiAppBar', {
 // ============================================================================
 // UI kit: self-drawn UI components (drawn in the entity's own space, taps converted to it)
 // ============================================================================
+// ---- dialogue scripts and quests (Game Settings › Dialogues / Quests) ----
+/**
+ * A dialogue script, one instruction per line:
+ *   # section            a place to jump to (the script starts at the top, or at "# start"); a section ends where the next one begins
+ *   Name: text           a line spoken by Name ({variables} work); a line without "Name:" is narration
+ *   * text -> section    a choice ([if condition] and (once) can go before the text; no "->" carries on below)
+ *   -> section / -> END  jump, or end the conversation
+ *   ? condition -> section   jump only if the condition is true
+ *   @command …           do something: set / add / give / take / quest / send / sound / learn / end
+ *   // comment
+ * Conditions: has Item [n] · quest Name is active|ready|done|failed|available|started · coins >= 10 · first · chance 30 · not … · … and … · … or …
+ */
+export function parseDialogue(src) {
+  const steps = [], labels = { start: 0 }, errors = [];
+  String(src || '').split('\n').forEach((raw, ln) => {
+    const l = raw.trim(), line = ln + 1; if (!l || l.startsWith('//')) return;
+    let m;
+    if ((m = l.match(/^(?:#|==)\s*(.+?)\s*=*$/))) {
+      // a section ends the one above it (no falling through into the next section)
+      if (steps.length && steps[steps.length - 1].k !== 'goto') steps.push({ k: 'goto', go: 'END', line, auto: true });
+      labels[m[1].trim().toLowerCase()] = steps.length; return;
+    }
+    if (l.startsWith('*')) {
+      let t = l.slice(1).trim(), cond = '', once = false, go = '';
+      for (let k = 0; k < 4; k++) { const c = t.match(/^\[if\s+([^\]]+)\]\s*/i); if (c) { cond = c[1].trim(); t = t.slice(c[0].length); continue; } const o = t.match(/^\(once\)\s*/i); if (o) { once = true; t = t.slice(o[0].length); continue; } break; }
+      const g = t.match(/\s*->\s*(.+)$/); if (g) { go = g[1].trim(); t = t.slice(0, g.index).trim(); }
+      steps.push({ k: 'choice', text: t, cond, once, go, line }); return;
+    }
+    if ((m = l.match(/^->\s*(.+)$/))) { steps.push({ k: 'goto', go: m[1].trim(), line }); return; }
+    if ((m = l.match(/^\?\s*(.+?)\s*->\s*(.+)$/))) { steps.push({ k: 'if', cond: m[1].trim(), go: m[2].trim(), line }); return; }
+    if (l.startsWith('@')) { steps.push({ k: 'do', cmd: l.slice(1).trim(), line }); return; }
+    m = l.match(/^([^:]{1,24}):\s+(.*)$/);
+    steps.push(m && !/^(https?|note)$/i.test(m[1].trim()) ? { k: 'say', who: m[1].trim(), text: m[2], line } : { k: 'say', who: '', text: l, line });
+  });
+  for (const s of steps) if (s.go && !/^end$/i.test(s.go) && labels[s.go.toLowerCase()] == null) errors.push(`Line ${s.line}: there is no section called “${s.go}”`);
+  return { steps, labels, errors };
+}
+const STORY_OPS = { '=': '==', '≥': '>=', '≤': '<=', '≠': '!=' };
+/** Is a dialogue / quest condition true? `env` gives access to variables, items and quests. */
+export function storyCond(cond, env) {
+  const c = String(cond || '').trim(); if (!c) return true;
+  if (/\s(?:or|\|\|)\s/i.test(c)) return c.split(/\s+(?:or|\|\|)\s+/i).some((q) => storyCond(q, env));
+  if (/\s(?:and|&&)\s/i.test(c)) return c.split(/\s+(?:and|&&)\s+/i).every((q) => storyCond(q, env));
+  let m;
+  if ((m = c.match(/^(?:not|!)\s*(.+)$/i))) return !storyCond(m[1], env);
+  if ((m = c.match(/^has\s+(.+?)(?:\s+(\d+))?$/i))) return env.itemCount(m[1]) >= (+m[2] || 1);
+  if ((m = c.match(/^quest\s+(.+?)\s+(?:is\s+)?(locked|available|active|ready|done|failed|started|not started)$/i))) {
+    const st = env.questState(m[1]), w = m[2].toLowerCase();
+    return w === 'started' ? ['active', 'ready', 'done'].includes(st) : w === 'not started' ? ['available', 'locked'].includes(st) : st === w;
+  }
+  if ((m = c.match(/^chance\s+(\d+(?:\.\d+)?)\s*%?$/i))) return Math.random() * 100 < +m[1];
+  if (/^first(\s+time)?$/i.test(c)) return !!env.first;
+  if ((m = c.match(/^(.+?)\s*(>=|<=|==|!=|≥|≤|≠|=|>|<)\s*(.+)$/))) {
+    const a = env.getVar(m[1].trim()), b = m[3].trim().replace(/^["']|["']$/g, ''), op = STORY_OPS[m[2]] || m[2];
+    if (b !== '' && Number.isFinite(+b) && (a === undefined || a === '' || Number.isFinite(+a))) { const x = +a || 0, y = +b; return op === '>=' ? x >= y : op === '<=' ? x <= y : op === '>' ? x > y : op === '<' ? x < y : op === '!=' ? x !== y : x === y; }
+    const x = String(a ?? ''); return op === '!=' ? x !== b : op === '==' ? x === b : false;
+  }
+  const v = env.getVar(c); return !!v && v !== '0';
+}
+const storyValue = (t) => { const s = String(t ?? '').trim().replace(/^["']|["']$/g, ''); return s !== '' && Number.isFinite(+s) ? +s : s; };
+/** Run a dialogue "@command". Returns 'end' to finish the conversation. */
+export function storyDo(cmd, env) {
+  const c = String(cmd || '').trim(), sp = c.indexOf(' '), verb = (sp < 0 ? c : c.slice(0, sp)).toLowerCase(), arg = sp < 0 ? '' : c.slice(sp + 1).trim();
+  let m;
+  switch (verb) {
+    case 'set': if ((m = arg.match(/^(\S+)\s*(?:=|to)?\s*(.*)$/i))) env.setVar(m[1], storyValue(m[2])); break;
+    case 'add': if ((m = arg.match(/^(\S+)\s+(-?[\d.]+)$/))) env.setVar(m[1], (+env.getVar(m[1]) || 0) + +m[2]); break;
+    case 'give': case 'take': if ((m = arg.match(/^(.+?)(?:\s+(\d+))?$/))) env.give(m[1], (+m[2] || 1) * (verb === 'take' ? -1 : 1)); break;
+    case 'quest': if ((m = arg.match(/^(start|complete|finish|fail|turnin|turn in|reset|progress|track)\s+(.+?)(?:\s+(\d+))?$/i))) env.quest(m[1].toLowerCase().replace(/\s+/g, '').replace('finish', 'complete'), m[2], +m[3] || 1); else env.log(`@quest needs start / complete / fail / turnin / reset / progress / track and a quest name: “@${c}”`); break;
+    case 'send': case 'message': if ((m = arg.match(/^(.+?)(?:\s+(-?[\d.]+))?$/))) env.send(m[1], m[2] != null ? +m[2] : undefined); break;
+    case 'sound': env.sound(arg); break;
+    case 'learn': env.learn(arg); break;
+    case 'end': case 'stop': return 'end';
+    default: env.log(`Unknown dialogue command “@${c}”`);
+  }
+  return null;
+}
+/** Plays a parsed dialogue: `line` is what to show, `choices` the buttons (or null), `done` when it's over. */
+export class DialogueRunner {
+  constructor(script, env, { start = 'start' } = {}) {
+    this.p = typeof script === 'string' ? parseDialogue(script) : script; this.env = env;
+    this.chosen = env.chosen || new Set(); this.done = false; this.line = null; this.choices = null; this.after = 0; this.lastLine = null;
+    this.i = this.p.labels[String(start).toLowerCase()] ?? 0;
+    this.advance();
+  }
+  finish() { this.done = true; this.line = null; this.choices = null; }
+  jump(go) { if (!go || /^end$/i.test(go)) { this.finish(); return false; } const j = this.p.labels[go.toLowerCase()]; if (j == null) { this.env.log(`Dialogue: no section called “${go}”`); this.finish(); return false; } this.i = j; return true; }
+  /** The choice buttons that start at the current step (filtered by their conditions). */
+  readChoices() {
+    const S = this.p.steps; let j = this.i; const list = [];
+    while (S[j]?.k === 'choice') { const s = S[j]; if (!(s.once && this.chosen.has(j)) && storyCond(s.cond, this.env)) list.push({ text: this.env.fill(s.text), go: s.go, at: j }); j++; }
+    this.after = j;
+    return j > this.i ? list : null;
+  }
+  /** Run actions and jumps until there's a line or choices to show, or the end. */
+  advance() {
+    const S = this.p.steps; let guard = 0;
+    this.line = null; this.choices = null;
+    while (!this.done) {
+      if (++guard > 1000) { this.env.log('Dialogue: it keeps jumping in a circle'); return this.finish(); }
+      const s = S[this.i]; if (!s) return this.finish();
+      if (s.k === 'say') {
+        this.i++; this.line = this.lastLine = { who: s.who, text: this.env.fill(s.text) };
+        const ch = this.readChoices(); if (ch) { if (ch.length) this.choices = ch; else this.i = this.after; }
+        return;
+      }
+      if (s.k === 'choice') { const ch = this.readChoices(); if (ch.length) { this.choices = ch; this.line = this.lastLine || { who: '', text: '' }; return; } this.i = this.after; continue; }
+      this.i++;
+      if (s.k === 'goto') { if (!this.jump(s.go)) return; continue; }
+      if (s.k === 'if') { if (storyCond(s.cond, this.env) && !this.jump(s.go)) return; continue; }
+      if (s.k === 'do' && storyDo(s.cmd, this.env) === 'end') return this.finish();
+    }
+  }
+  /** Tap to go on (when there are no choices). */
+  next() { if (this.done || this.choices) return; this.advance(); }
+  /** Pick choice number k. */
+  choose(k) {
+    const c = this.choices?.[k]; if (!c) return;
+    this.chosen.add(c.at); this.env.chose?.(c.text);
+    this.i = this.after; this.choices = null;
+    if (c.go && !this.jump(c.go)) return;
+    this.advance();
+  }
+}
+/**
+ * Quest objectives, one per line (an optional "| label" names it):
+ *   collect Wood 5 [(take)] · kill slime 3 · talk Guard · reach Castle [60] · craft Axe · use Apple 2 · gather Wood 10
+ *   var coins >= 100 · message boss defeated [2] · quest Other Quest · anything else (advance it with "Advance quest")
+ */
+export function parseObjectives(text) {
+  return String(text || '').split('\n').map((q) => q.trim()).filter((q) => q && !q.startsWith('//')).map((raw) => {
+    let [body, label] = raw.split('|').map((q) => q.trim()), take = false, m;
+    if (/\(take\)\s*$/i.test(body)) { take = true; body = body.replace(/\s*\(take\)\s*$/i, ''); }
+    const sp = body.indexOf(' '), type = (sp < 0 ? body : body.slice(0, sp)).toLowerCase(), rest = sp < 0 ? '' : body.slice(sp + 1).trim();
+    const nameN = (s) => { const k = s.match(/^(.+?)(?:\s+(\d+))?$/); return k ? { target: k[1].trim(), n: Math.max(1, +k[2] || 1) } : { target: s, n: 1 }; };
+    let o;
+    if (['collect', 'kill', 'defeat', 'craft', 'use', 'gather', 'message'].includes(type)) o = { type: type === 'defeat' ? 'kill' : type, ...nameN(rest) };
+    else if (type === 'talk' || type === 'reach' || type === 'goto') { const k = rest.match(/^(.+?)(?:\s+(\d+(?:\.\d+)?))?$/); o = { type: type === 'goto' ? 'reach' : type, target: k ? k[1].trim() : rest, n: 1, dist: k && k[2] ? +k[2] : 0 }; }
+    else if (type === 'var' && (m = rest.match(/^(\S+)\s*(>=|<=|==|!=|=|>|<|≥|≤)\s*(.+)$/))) o = { type: 'var', target: m[1], op: m[2], value: m[3].trim(), n: 1 };
+    else if (type === 'quest') o = { type: 'quest', target: rest, n: 1 };
+    else o = { type: 'custom', target: body, ...(body.match(/\s(\d+)$/) ? { n: +body.match(/\s(\d+)$/)[1] } : { n: 1 }) };
+    o.take = take;
+    const L = { collect: `Collect ${o.n} ${o.target}`, kill: `Defeat ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, talk: `Talk to ${o.target}`, reach: `Go to ${o.target}`, craft: `Craft ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, use: `Use ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, gather: `Gather ${o.n} ${o.target}`, var: `${o.target} ${o.op} ${o.value}`, message: o.target, quest: `Finish “${o.target}”`, custom: body.replace(/\s\d+$/, '') }[o.type];
+    o.label = label || L;
+    return o;
+  });
+}
+/** "coins 50, xp 20, item Iron Sword 1, recipe Axe, message party" → rewards */
+export function parseRewards(text) {
+  return String(text || '').split(/[,\n]/).map((q) => q.trim()).filter(Boolean).map((q) => {
+    let m;
+    if ((m = q.match(/^item\s+(.+?)(?:\s+(\d+))?$/i))) return { kind: 'item', name: m[1], n: +m[2] || 1 };
+    if ((m = q.match(/^recipe\s+(.+)$/i))) return { kind: 'recipe', name: m[1] };
+    if ((m = q.match(/^(?:message|send)\s+(.+)$/i))) return { kind: 'message', name: m[1] };
+    if ((m = q.match(/^quest\s+(.+)$/i))) return { kind: 'quest', name: m[1] };
+    if ((m = q.match(/^(\S+)\s+(-?[\d.]+)$/))) return { kind: 'var', name: m[1], n: +m[2] };
+    if ((m = q.match(/^(.+?)\s+(\d+)$/))) return { kind: 'item', name: m[1], n: +m[2] };
+    return { kind: 'item', name: q, n: 1 };
+  });
+}
+const rewardText = (rs, s) => rs.map((r) => (r.kind === 'var' ? `${r.n > 0 ? '+' : ''}${r.n} ${r.name}` : r.kind === 'item' ? `${s?.itemDef(r.name).icon || ''}${r.name}${r.n > 1 ? ' ×' + r.n : ''}` : r.kind === 'recipe' ? `📜 ${r.name}` : r.kind === 'quest' ? `New quest: ${r.name}` : '')).filter(Boolean).join('  ');
+
 /** Item types (Game Settings › Items): what an item is for. */
 export const ITEM_TYPES = {
   material: { label: 'Material', icon: '🪵' }, food: { label: 'Food', icon: '🍎' }, drink: { label: 'Drink', icon: '💧' }, potion: { label: 'Potion', icon: '🧪' },
@@ -9477,25 +9828,237 @@ registerBehavior('waveSpawner', {
 
 /** Dialogue: a conversation box with speaker names and typewriter text; tap to continue. */
 registerBehavior('dialogue', {
-  label: 'Dialogue', description: 'Shows a conversation, one line at a time, with speaker names and typewriter text. Tap to continue. Write one line per row as “Name: text”.',
+  label: 'Dialogue', description: 'Shows a conversation with speaker names and typewriter text; tap to continue. Write “Name: text” lines, or a full dialogue script with choices (* text -> section), conditions and actions — or pick a dialogue from Game Settings › Dialogues.',
   params: [
-    { key: 'lines', label: 'Lines (one per row, “Name: text”)', type: 'code', default: 'Guard: Halt! Who goes there?\nYou: Just a traveler.\nGuard: Fine. Watch out for slimes!' },
+    { key: 'lines', label: 'Lines (“Name: text”; choices with *)', type: 'code', default: 'Guard: Halt! Who goes there?\nYou: Just a traveler.\nGuard: Fine. Watch out for slimes!' },
+    { key: 'dialogue', label: 'Or a dialogue from Game Settings', type: 'text', default: '', suggest: 'dialogues' },
     { key: 'trigger', label: 'Start when', type: 'select', options: ['touched by tag', 'tapped', 'game starts', 'message'], default: 'touched by tag' },
     { key: 'tag', label: 'Tag', type: 'text', default: 'player', suggest: 'tags', showIf: { trigger: ['touched by tag'] } },
     { key: 'message', label: 'Message', type: 'text', default: 'talk', suggest: 'messages', showIf: { trigger: ['message'] } },
     { key: 'once', label: 'Only once', type: 'bool', default: true },
     { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    { key: 'portrait', label: 'Portrait (emoji or art:name)', type: 'text', default: '', group: 'More' },
     { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
   ],
   create(p) {
     let done = false;
-    const lines = String(p.lines || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const m = l.match(/^([^:]{1,24}):\s*(.*)$/); return m ? { who: m[1], text: m[2] } : { who: '', text: l }; });
-    const open = (s) => { if (done && p.once) return; if (s.dialog || !lines.length) return; done = true; s.dialog = { lines, i: 0, chars: 0, pause: p.pause, then: p.then }; };
+    const open = (e, s) => {
+      if ((done && p.once) || s.dialog) return;
+      const ok = p.dialogue ? s.startDialogue(p.dialogue, { npc: e, pause: p.pause, then: p.then, portrait: p.portrait }) : s.startDialogue(String(p.lines || ''), { npc: e, pause: p.pause, then: p.then, portrait: p.portrait, inline: true, name: e.name });
+      if (ok) done = true;
+    };
     return {
       uiAlways: true,
-      start(e, s) { if (p.trigger === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } if (p.trigger === 'game starts') open(s); if (p.trigger === 'message') s.on('message', (n) => { if (n === p.message) open(s); }); },
-      update(e, dt, s) { if (p.trigger === 'tapped' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) open(s); },
-      collide(e, other, s) { if (p.trigger === 'touched by tag' && other.has(p.tag)) open(s); },
+      start(e, s) { if (p.trigger === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } if (p.trigger === 'tapped') (s.tapTargets ||= new Set()).add(e); if (p.trigger === 'game starts') open(e, s); if (p.trigger === 'message') s.on('message', (n) => { if (n === p.message && !e.dead) open(e, s); }); },
+      update(e, dt, s) { if (p.trigger === 'tapped' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) open(e, s); },
+      collide(e, other, s) { if (p.trigger === 'touched by tag' && other.has(p.tag)) open(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); },
+    };
+  },
+});
+
+/** NPC: someone to talk to. Starts a dialogue, hands in finished quests, offers its quests, and shows ! / ? quest markers. */
+registerBehavior('npc', {
+  label: 'NPC (talk & quests)', description: 'A character the player talks to: tap them (or walk up) to start a dialogue from Game Settings › Dialogues. Quest givers show ! when they have a quest for you and ? when one is ready to hand in. With no dialogue, they offer their quests by themselves.',
+  params: [
+    { key: 'dialogue', label: 'Dialogue', type: 'text', default: '', suggest: 'dialogues', info: 'From Game Settings › Dialogues. Empty: it offers its quests, or says the lines below.' },
+    { key: 'lines', label: 'Or its own lines (“Name: text”, * choices)', type: 'code', default: '' },
+    { key: 'start', label: 'Talk when', type: 'select', options: ['tapped when close', 'tapped', 'player comes close', 'touched by tag', 'message'], default: 'tapped when close' },
+    { key: 'range', label: 'Close means within', type: 'number', default: 100, default3d: 3 },
+    { key: 'talkName', label: 'Name (quests and speaker; empty = the object’s name)', type: 'text', default: '' },
+    { key: 'portrait', label: 'Portrait (emoji or art:name)', type: 'text', default: '' },
+    { key: 'markers', label: 'Quest markers (! has a quest, ? hand one in)', type: 'bool', default: true },
+    { key: 'bubble', label: 'Show 💬 when the player is close', type: 'bool', default: true },
+    { key: 'turnIn', label: 'Talking hands in its finished quests', type: 'bool', default: true },
+    { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    { key: 'tag', label: 'Player tag', type: 'text', default: 'player', suggest: 'tags', group: 'More' },
+    { key: 'message', label: 'Message that starts the talk', type: 'text', default: 'talk', suggest: 'messages', showIf: { start: ['message'] }, group: 'More' },
+    { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
+  ],
+  create(p) {
+    let near = false, draw = null, cool = 0;
+    const who = (e) => (p.talkName || e.name || 'NPC').trim();
+    const gives = (s, e) => s.questDefs().filter((q) => String(q.giver || '').trim().toLowerCase() === who(e).toLowerCase());
+    const marker = (s, e) => { const g = gives(s, e); if (g.some((q) => s.questState(q.name) === 'ready')) return '?'; if (g.some((q) => s.questState(q.name) === 'available')) return '!'; return ''; };
+    /** A dialogue made up on the spot: thanks for finished quests, then offers the next one. */
+    const autoScript = (s, e, handed) => {
+      const n = who(e), L = [];
+      for (const q of handed) L.push(`${n}: ${q.thanks || `You did it! Thank you.`}`);
+      const avail = gives(s, e).find((q) => s.questState(q.name) === 'available'), active = gives(s, e).find((q) => ['active', 'ready'].includes(s.questState(q.name)));
+      if (avail) L.push(`${n}: ${avail.offer || avail.desc || 'I need your help with something.'}`, '* Accept -> accept', '* Not now -> END', '# accept', `@quest start ${avail.name}`, `${n}: ${avail.accepted || 'Thank you! Come back when it’s done.'}`);
+      else if (active) L.push(`${n}: ${active.reminder || `How is “${active.name}” going?`}`);
+      else if (!handed.length) L.push(`${n}: ${p.lines ? '' : 'Hello there!'}`);
+      return L.join('\n');
+    };
+    const talk = (e, s) => {
+      if (s.dialog || s.state !== 'play') return;
+      const handed = [];
+      if (p.turnIn !== false) for (const q of gives(s, e)) if (s.questState(q.name) === 'ready' && s.completeQuest(q.name)) handed.push(q);
+      const o = { npc: e, pause: p.pause, then: p.then, portrait: p.portrait, name: who(e) };
+      if (p.dialogue) s.startDialogue(p.dialogue, o);
+      else if (String(p.lines || '').trim() && !handed.length) s.startDialogue(String(p.lines), { ...o, inline: true });
+      else s.startDialogue(autoScript(s, e, handed), { ...o, inline: true });
+      cool = 0.4;
+    };
+    return {
+      start(e, s) {
+        if (p.start === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.start.startsWith('tapped')) (s.tapTargets ||= new Set()).add(e);
+        if (p.start === 'message') s.on('message', (m) => { if (m === p.message && !e.dead) talk(e, s); });
+        s.questHooks?.();
+        (s.overlays ||= []).push(draw = (ctx) => {
+          if (e.dead || !e.visible) return;
+          const mk = p.markers !== false ? marker(s, e) : '', bub = p.bubble !== false && near && !s.dialog;
+          if (!mk && !bub) return;
+          const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
+          const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh); if (q.behind) return;
+          const bob = Math.sin(s.time * 4) * 3, y = q.y - 22 + bob;
+          if (mk) { ctx.save(); ctx.fillStyle = '#ffd23d'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, y, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); UK.text(ctx, mk, q.x, y + 1, { size: 18, weight: 900, color: '#1b1b1b' }); ctx.restore(); }
+          if (bub) { const bx = q.x + (mk ? 26 : 0), by = y; ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 16, by - 13, 32, 26, 10); else ctx.rect(bx - 16, by - 13, 32, 26); ctx.fill(); UK.text(ctx, '💬', bx, by + 1, { size: 15 }); ctx.restore(); }
+        });
+        draw.world = true;
+      },
+      update(e, dt, s) {
+        cool -= dt;
+        const pl = nearest(s, e, p.tag), d = pl ? Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) : Infinity, was = near;
+        near = d <= (+p.range || 100);
+        if (s.state !== 'play' || s.dialog || cool > 0) return;
+        if (p.start === 'player comes close' && near && !was) talk(e, s);
+        if (p.start.startsWith('tapped')) for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { if (p.start === 'tapped when close' && !near) s.message('Get closer to talk', 1); else talk(e, s); break; }
+      },
+      collide(e, other, s) { if (p.start === 'touched by tag' && other.has(p.tag) && cool <= 0) talk(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); if (draw) s.overlays = (s.overlays || []).filter((f) => f !== draw); },
+    };
+  },
+});
+
+const QUEST_SAMPLE = [{ name: 'The Lost Ring', icon: '💍', state: 'active', objs: [{ label: 'Talk to the Elder', have: 1, need: 1, done: true }, { label: 'Collect 3 Wood', have: 2, need: 3 }, { label: 'Defeat 5 slime', have: 1, need: 5 }] }];
+const questView = (s, name) => { const d = s.questDef(name); return d ? { name: d.name, icon: d.icon || '📜', state: s.questState(d.name), desc: d.desc || '', giver: d.giver || '', rewards: rewardText(parseRewards(d.rewards), s), objs: s.questObjectives(d.name) } : null; };
+/** Quest Tracker: the quest you're doing (or every active one) with its objectives, on screen while playing. */
+registerBehavior('uiQuestTracker', {
+  label: 'Quest Tracker', description: 'Shows the tracked quest (or all active quests) with each objective and its progress, ticking them off as they’re done. Tap it to send a message (open your Quest Journal).',
+  params: [
+    { key: 'show', label: 'Show', type: 'select', options: ['tracked quest', 'all active quests'], default: 'tracked quest' },
+    { key: 'max', label: 'Most quests at once', type: 'number', default: 2, range: [1, 5], step: 1, showIf: { show: ['all active quests'] } },
+    { key: 'hideDone', label: 'Hide finished objectives', type: 'bool', default: false },
+    { key: 'empty', label: 'Text with no quest (empty = hide)', type: 'text', default: '' },
+    { key: 'message', label: 'Tapping it sends', type: 'text', default: 'open quests', suggest: 'messages' },
+    { key: 'align', label: 'Align', type: 'select', options: ['left', 'right'], default: 'left' },
+    ...colorParams({ bg: ['Background', 'rgba(0,0,0,0.45)'], text: ['Text', '#ffffff'], title: ['Quest name', '#ffd23d'], done: ['Done', '#5dff8a'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let flash = 0, last = '';
+    const list = (s) => {
+      if (s.engine.editing) return QUEST_SAMPLE;
+      const names = p.show === 'all active quests' ? s.questDefs().filter((q) => ['active', 'ready'].includes(s.questState(q.name))).map((q) => q.name).slice(0, Math.max(1, +p.max || 2)) : [s.vars.trackedQuest].filter((n) => n && ['active', 'ready'].includes(s.questState(n)));
+      return names.map((n) => questView(s, n)).filter(Boolean);
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        flash = Math.max(0, flash - dt);
+        const key = JSON.stringify(list(s).map((q) => [q.name, q.state, q.objs.map((o) => o.have)])); if (key !== last && last) flash = 1; last = key;
+        const b = UK.box(e); for (const t of UK.taps(s, e)) if (UK.in(t, b)) { UK.tap(s, p); if (p.message) s.send(p.message); }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), Q = list(s), right = p.align === 'right', tx = right ? b.x + b.w - 12 : b.x + 12, al = right ? 'right' : 'left';
+        if (!Q.length) { if (p.empty) { ctx.fillStyle = p.bg || 'rgba(0,0,0,0.45)'; UK.rr(ctx, b.x, b.y, b.w, 34, 10); ctx.fill(); UK.text(ctx, p.empty, tx, b.y + 17, { size: 13, weight: 700, color: withAlpha(p.text || '#fff', 0.7), align: al, maxW: b.w - 24 }); } return; }
+        let h = 10; for (const q of Q) h += 24 + q.objs.filter((o) => !(p.hideDone && o.done)).length * 19 + (q.state === 'ready' ? 19 : 0) + 6;
+        ctx.fillStyle = p.bg || 'rgba(0,0,0,0.45)'; UK.rr(ctx, b.x, b.y, b.w, h, 12); ctx.fill();
+        if (flash > 0) { ctx.strokeStyle = withAlpha(p.title || '#ffd23d', flash); ctx.lineWidth = 2; UK.rr(ctx, b.x, b.y, b.w, h, 12); ctx.stroke(); }
+        let y = b.y + 18;
+        for (const q of Q) {
+          UK.text(ctx, `${q.icon} ${q.name}`, tx, y, { size: 14, weight: 900, color: p.title || '#ffd23d', align: al, maxW: b.w - 24 }); y += 22;
+          if (q.state === 'ready') { UK.text(ctx, `✔ Return to ${q.giver || 'the quest giver'}`, tx, y, { size: 12.5, weight: 800, color: p.done || '#5dff8a', align: al, maxW: b.w - 24 }); y += 19; }
+          for (const o of q.objs) {
+            if (p.hideDone && o.done) continue;
+            const txt = `${o.done ? '✓' : '○'} ${o.label}${o.need > 1 ? `  ${o.have}/${o.need}` : ''}`;
+            UK.text(ctx, txt, tx, y, { size: 12.5, weight: 700, color: o.done ? p.done || '#5dff8a' : withAlpha(p.text || '#fff', o.waiting ? 0.45 : 0.9), align: al, maxW: b.w - 24 }); y += 19;
+          }
+          y += 6;
+        }
+      },
+    };
+  },
+});
+
+/** Quest Journal: every quest you've started, with details, objectives, rewards and Track. */
+registerBehavior('uiQuestJournal', {
+  label: 'Quest Journal', description: 'A list of your quests (active and finished; optionally ones you can start). Tap a quest for its description, objectives, giver and rewards, and to track it.',
+  params: [
+    { key: 'title', label: 'Title', type: 'text', default: 'Quests' },
+    { key: 'showAvailable', label: 'Also list quests you can start', type: 'bool', default: false },
+    { key: 'showDone', label: 'List finished quests', type: 'bool', default: true },
+    { key: 'rowH', label: 'Row height', type: 'number', default: 54, range: [40, 90], step: 2 },
+    ...colorParams({ bg: ['Background', 'rgba(20,24,40,0.94)'], row: ['Rows', 'rgba(255,255,255,0.06)'], text: ['Text', '#ffffff'], accent: ['Accent', '#ffd23d'], done: ['Done', '#5dff8a'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let open = null, scroll = 0, drag = null;
+    const order = { ready: 0, active: 1, available: 2, done: 3, failed: 4 };
+    const list = (s) => {
+      if (s.engine.editing) return [{ ...QUEST_SAMPLE[0], desc: 'The Elder lost her ring in the woods.', giver: 'Elder', rewards: '+50 coins  💍' }, { name: 'Wolf Trouble', icon: '🐺', state: 'done', objs: [], desc: '', giver: '', rewards: '' }];
+      return s.questDefs().filter((q) => { const st = s.questState(q.name); return ['active', 'ready'].includes(st) || (p.showDone !== false && ['done', 'failed'].includes(st)) || (p.showAvailable && st === 'available' && !q.hidden); })
+        .map((q) => questView(s, q.name)).sort((a, b) => order[a.state] - order[b.state]);
+    };
+    const chip = { active: 'Active', ready: 'Hand in', available: 'New', done: 'Done', failed: 'Failed' };
+    const geo = (e) => { const b = UK.box(e), head = p.title ? 42 : 8; return { b, head, top: b.y + head, h: b.h - head - 8, rh: Math.max(40, +p.rowH || 54) }; };
+    const detailH = (q) => 30 + (q.desc ? 36 : 0) + q.objs.length * 20 + (q.rewards ? 22 : 0) + 38;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const G = geo(e), L = list(s); let total = 0; for (const q of L) total += G.rh + 6 + (open === q.name ? detailH(q) : 0);
+        const maxS = Math.max(0, total - G.h);
+        for (const d of UK.downs(s, e)) if (UK.in(d, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) drag = { id: d.id, y0: d.y, s0: scroll };
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); else drag = null; }
+        scroll = clamp(scroll, 0, maxS);
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) continue;
+          let y = G.top - scroll;
+          for (const q of L) {
+            const h = G.rh + (open === q.name ? detailH(q) : 0);
+            if (t.y >= y && t.y < y + h) {
+              UK.tap(s, p);
+              if (open === q.name && t.y > y + h - 40 && ['active', 'ready'].includes(q.state)) s.setVar('trackedQuest', q.name);
+              else if (open === q.name && t.y > y + h - 40 && q.state === 'available') s.startQuest(q.name);
+              else open = open === q.name ? null : q.name;
+              break;
+            }
+            y += h + 6;
+          }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), L = list(s), txt = p.text || '#fff', acc = p.accent || '#ffd23d';
+        ctx.fillStyle = p.bg || 'rgba(20,24,40,0.94)'; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 16); ctx.fill();
+        if (p.title) UK.text(ctx, p.title, G.b.x + 16, G.b.y + 22, { size: 17, weight: 900, color: txt, align: 'left' });
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.top, G.b.w, G.h); ctx.clip();
+        if (!L.length) UK.text(ctx, 'No quests yet', G.b.cx, G.top + 30, { size: 13, weight: 700, color: withAlpha(txt, 0.6) });
+        let y = G.top - scroll;
+        for (const q of L) {
+          const isOpen = open === q.name, h = G.rh + (isOpen ? detailH(q) : 0), x = G.b.x + 8, w = G.b.w - 16;
+          ctx.fillStyle = p.row || 'rgba(255,255,255,0.06)'; UK.rr(ctx, x, y, w, h, 12); ctx.fill();
+          if (s.vars.trackedQuest === q.name && !s.engine.editing) { ctx.strokeStyle = acc; ctx.lineWidth = 2; UK.rr(ctx, x, y, w, h, 12); ctx.stroke(); }
+          drawNavIcon(ctx, q.icon, x + 24, y + G.rh / 2, G.rh * 0.45, txt);
+          UK.text(ctx, q.name, x + 46, y + G.rh / 2 - (q.objs.length ? 7 : 0), { size: 15, weight: 800, color: q.state === 'done' ? withAlpha(txt, 0.6) : txt, align: 'left', maxW: w - 140 });
+          if (q.objs.length && q.state !== 'done') { const dn = q.objs.filter((o) => o.done).length; UK.text(ctx, `${dn} / ${q.objs.length} done`, x + 46, y + G.rh / 2 + 11, { size: 11.5, weight: 700, color: withAlpha(txt, 0.6), align: 'left' }); }
+          const c = chip[q.state] || q.state, cc = q.state === 'ready' || q.state === 'done' ? p.done || '#5dff8a' : q.state === 'failed' ? '#ff6b6b' : acc;
+          ctx.font = `800 11px ${THEME.font}`; const cw = ctx.measureText(c).width + 16; ctx.fillStyle = withAlpha(cc, 0.2); UK.rr(ctx, x + w - cw - 10, y + G.rh / 2 - 11, cw, 22, 11); ctx.fill(); UK.text(ctx, c, x + w - cw / 2 - 10, y + G.rh / 2, { size: 11, weight: 800, color: cc });
+          if (isOpen) {
+            let dy = y + G.rh + 4;
+            if (q.giver) { UK.text(ctx, `From ${q.giver}`, x + 14, dy + 6, { size: 12, weight: 700, color: withAlpha(txt, 0.6), align: 'left' }); }
+            dy += 22;
+            if (q.desc) { UK.text(ctx, q.desc, x + 14, dy + 8, { size: 13, weight: 600, color: withAlpha(txt, 0.85), align: 'left', maxW: w - 28 }); dy += 36; }
+            for (const o of q.objs) { UK.text(ctx, `${o.done ? '✓' : '○'} ${o.label}${o.need > 1 ? `  ${o.have}/${o.need}` : ''}`, x + 14, dy + 8, { size: 13, weight: 700, color: o.done ? p.done || '#5dff8a' : txt, align: 'left', maxW: w - 28 }); dy += 20; }
+            if (q.rewards) { UK.text(ctx, `Rewards: ${q.rewards}`, x + 14, dy + 10, { size: 12.5, weight: 700, color: acc, align: 'left', maxW: w - 28 }); dy += 22; }
+            const btn = ['active', 'ready'].includes(q.state) ? (s.vars.trackedQuest === q.name ? '★ Tracked' : 'Track') : q.state === 'available' ? 'Start quest' : '';
+            if (btn) { ctx.fillStyle = withAlpha(acc, 0.22); UK.rr(ctx, x + 12, y + h - 38, 120, 28, 14); ctx.fill(); UK.text(ctx, btn, x + 72, y + h - 24, { size: 12.5, weight: 800, color: acc }); }
+          }
+          y += h + 6;
+        }
+        ctx.restore();
+      },
     };
   },
 });
@@ -11485,6 +12048,7 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  questInfo: { cat: 'Values', label: 'Quest Info', value: 'number', params: [{ ...txt('quest', 'The Lost Ring', 'quest (some answers ignore it)'), suggest: 'quests' }, opt('what', ['objectives done', 'objectives', 'percent done', 'is active', 'is done', 'quests done', 'quests active'], 'objectives done', 'what')] },
   invInfo: { cat: 'Values', label: 'Inventory Info', value: 'number', params: [opt('what', ['free slots', 'used slots', 'total items', 'items of type', 'equipped damage', 'equipped armour', 'crafting progress %'], 'free slots', 'what'), opt('type', Object.keys(ITEM_TYPES), 'food', 'type (items of type)')] },
   healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
@@ -12097,6 +12661,14 @@ export const LOGIC_EVENTS = {
   inventoryFull: { label: 'Inventory is full', icon: 'key' },
   recipeLearned: { label: 'Learns a recipe', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `Learns ${p.item}` : 'Learns a recipe') },
   gathered: { label: 'Gathered (Resource)', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `${p.item} gathered` : 'Gathered') },
+  questStarted: { label: 'Quest starts', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” starts` : 'A quest starts') },
+  questUpdated: { label: 'Quest progresses', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” progresses` : 'A quest progresses') },
+  questReady: { label: 'Quest ready to hand in', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” is ready to hand in` : 'A quest is ready to hand in') },
+  questCompleted: { label: 'Quest completed', icon: 'trophy', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” completed` : 'A quest is completed') },
+  questFailed: { label: 'Quest failed', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” failed` : 'A quest fails') },
+  dialogueStarted: { label: 'Dialogue starts', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Talking to ${p.dialogue}` : 'A conversation starts') },
+  dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
+  dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
   ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
@@ -12127,6 +12699,8 @@ export const LOGIC_CONDITIONS = {
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  questIs: { label: 'Quest state', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), opt('state', ['active', 'ready', 'done', 'failed', 'available', 'locked', 'started', 'not started'], 'active', 'is')], test: (c, p) => storyCond(`quest ${p.quest} is ${p.state}`, c.s.storyEnv()), say: (p) => `“${p.quest}” is ${p.state}` },
+  storyCheck: { label: 'Story check (dialogue condition)', icon: 'sign', params: [txt('check', 'has Key and coins >= 10', 'check')], test: (c, p) => storyCond(p.check, c.s.storyEnv(c.e)), say: (p) => p.check },
   canCraft: { label: 'Can craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], test: (c, p) => c.s.canCraft(p.item, +p.times || 1), say: (p) => `can craft ${p.item}` },
   isEquipped: { label: 'Has equipped', icon: 'key', params: [sug(txt('item', '', 'item (empty = anything)'), 'items'), opt('slot', ['any', ...EQUIP_SLOTS], 'any', 'in slot')], test: (c, p) => { const eq = c.s.equipped || {}, list = p.slot && p.slot !== 'any' ? [eq[p.slot]] : Object.values(eq); return list.some((n) => n && (!p.item || String(n).toLowerCase() === String(p.item).toLowerCase())); }, say: (p) => `has ${p.item || 'something'} equipped${p.slot && p.slot !== 'any' ? ' in ' + p.slot : ''}` },
   invSpace: { label: 'Inventory space', icon: 'key', params: [opt('op', OPS6, '≥', 'free slots'), num('value', 1, 'value')], test: (c, p) => cmp(Math.min(9999, c.s.slotsFree()), p.op, +p.value || 0), say: (p) => `free slots ${p.op} ${p.value}` },
@@ -12182,6 +12756,13 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  questStart: { cat: 'Game', label: 'Start quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.startQuest(p.quest); }, say: (p) => `Start quest “${p.quest}”` },
+  questComplete: { cat: 'Game', label: 'Complete / hand in quest', icon: 'trophy', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.completeQuest(p.quest); }, say: (p) => `Complete “${p.quest}”` },
+  questFail: { cat: 'Game', label: 'Fail quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.failQuest(p.quest); }, say: (p) => `Fail “${p.quest}”` },
+  questAdvance: { cat: 'Game', label: 'Advance quest objective', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), num('amount', 1, 'by'), num('objective', 0, 'objective number (0 = next one you do by hand)')], run: (c, p) => { c.s.advanceQuest(p.quest, +p.amount || 1, +p.objective || 0); }, say: (p) => `Advance “${p.quest}”${+p.objective ? ' objective ' + p.objective : ''} +${p.amount}` },
+  questReset: { cat: 'Game', label: 'Reset quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.resetQuest(p.quest); }, say: (p) => `Reset “${p.quest}”` },
+  questTrack: { cat: 'Game', label: 'Track quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.setVar('trackedQuest', c.s.questDef(p.quest)?.name || p.quest); }, say: (p) => `Track “${p.quest}”` },
+  startDialogue: { cat: 'Game', label: 'Start dialogue', icon: 'sign', params: [sug(txt('dialogue', 'Elder', 'dialogue'), 'dialogues'), txt('section', '', 'start at section (empty = top)'), bool('wait', true, 'wait until it ends')], run: (c, p) => { const ok = c.s.startDialogue(p.dialogue, { npc: c.e, start: p.section || 'start' }); return ok && p.wait !== false ? { until: () => !c.s.dialog } : 0; }, say: (p) => `Talk: “${p.dialogue}”${p.section ? ' at ' + p.section : ''}` },
   useItemFx: { cat: 'Variables', label: 'Use item (eat, drink, equip…)', icon: 'key', params: [sug(txt('item', 'Apple', 'item'), 'items')], run: (c, p) => { c.s.useItem(p.item, c.e?.has('player') ? c.e : c.s.player()); }, say: (p) => `Use ${p.item}` },
   equipItem: { cat: 'Variables', label: 'Equip / take off', icon: 'key', params: [opt('mode', ['equip', 'take off'], 'equip', 'do'), sug(txt('item', 'Iron Sword', 'item (equip)'), 'items'), opt('slot', EQUIP_SLOTS, 'hand', 'slot (take off)')], run: (c, p) => { if (p.mode === 'take off') c.s.unequip(p.slot); else c.s.equip(p.item); }, say: (p) => (p.mode === 'take off' ? `Take off ${p.slot}` : `Equip ${p.item}`) },
   craftItem: { cat: 'Variables', label: 'Craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], run: (c, p) => { c.s.craft(p.item, +p.times || 1); }, say: (p) => `Craft ${p.item}${+p.times > 1 ? ' ×' + p.times : ''}` },
@@ -12363,6 +12944,9 @@ function evOk(type, p, q) {
     case 'statusGot': return !p.effect || p.effect === 'any' || q.effect === p.effect;
     case 'needLow': case 'needEmpty': case 'ate': return !p.need || p.need === 'any' || q.need === p.need;
     case 'crafted': case 'itemUsed': case 'recipeLearned': case 'gathered': return !p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase());
+    case 'questStarted': case 'questUpdated': case 'questReady': case 'questCompleted': case 'questFailed': return !p.quest || String(q.item).toLowerCase() === String(p.quest).trim().toLowerCase();
+    case 'dialogueStarted': case 'dialogueEnded': return !p.dialogue || String(q.item).toLowerCase() === String(p.dialogue).trim().toLowerCase() || String(q.other?.name || '').toLowerCase() === String(p.dialogue).trim().toLowerCase();
+    case 'dialogueChoice': return !p.choice || String(q.item).toLowerCase() === String(p.choice).trim().toLowerCase();
     case 'equipped': return (!p.mode || p.mode === 'either' || q.mode === p.mode) && (!p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase()));
     default: return true;
   }
@@ -12389,6 +12973,10 @@ class LogicWatcher {
     s.on('inventoryFull', (item) => this.queue.push({ type: 'inventoryFull', item }));
     s.on('recipeLearned', (item) => this.queue.push({ type: 'recipeLearned', item }));
     s.on('gathered', (src, item, n) => this.queue.push({ type: 'gathered', item, value: n, other: src }));
+    for (const [ev, type] of [['questStart', 'questStarted'], ['questUpdate', 'questUpdated'], ['questReady', 'questReady'], ['questComplete', 'questCompleted'], ['questFail', 'questFailed']]) s.on(ev, (q) => this.queue.push({ type, item: q }));
+    s.on('dialogueStart', (npc, name) => this.queue.push({ type: 'dialogueStarted', item: name || npc?.name || '', other: npc }));
+    s.on('dialogueEnd', (npc, name) => this.queue.push({ type: 'dialogueEnded', item: name || npc?.name || '', other: npc }));
+    s.on('dialogueChoice', (npc, text) => this.queue.push({ type: 'dialogueChoice', item: text, other: npc }));
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -12761,6 +13349,13 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'questInfo': {
+          const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
+          if (w === 'objectives') return O.length; if (w === 'percent done') return st === 'done' ? 100 : O.length ? Math.round(dn / O.length * 100) : 0;
+          if (w === 'is active') return st === 'active' || st === 'ready' ? 1 : 0; if (w === 'is done') return st === 'done' ? 1 : 0;
+          if (w === 'quests done') return +s.vars.questsDone || 0; if (w === 'quests active') return +s.vars.questsActive || 0;
+          return dn;
+        }
         case 'invInfo': {
           switch (P('what')) {
             case 'used slots': return s.slotsUsed(); case 'total items': return Object.values(s.inventory || {}).reduce((a, v) => a + v.n, 0);
@@ -14279,7 +14874,7 @@ export class Engine {
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
-    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; } // Items & Recipes
+    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; } // Items, Recipes, Quests, Dialogues
     this.loadPrefs();
     this.setScene(this.factory());
     if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
@@ -14707,6 +15302,7 @@ export class Engine {
       for (const b of e.behaviors) { if (e.dead) break; if (!b.off) b.update?.(e, dt, s); }
     }
     s.update(dt, this);
+    if (this.quests?.length) s.questTick();
     if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
       for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
       if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }

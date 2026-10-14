@@ -14,7 +14,7 @@ Plain JavaScript ES modules. No dependencies and no build step.
 
 The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
 
-- **17 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
+- **18 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
 - **A reference generated from the engine itself**, so it always matches the running version:
   - every component with all its settings, types, defaults (2D and 3D) and choices;
   - every visual-script node with its wires and settings;
@@ -568,6 +568,39 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - Inventory: `scene.addItem(name, n)` returns how many fit. Also `useItem`, `equip`, `unequip`, `equipStat('damage')`, `itemStacks(type)`, `sortInventory('type')`, `dropNear(name, n)`.
   - Crafting: `craft(item, times)`, `canCraft`, `craftMissing`, `learnRecipe`.
   - Item names match whatever their capitalisation.
+
+### Quests and dialogue
+
+- **NPC (talk & quests)** component: tap someone when close (or walk up, touch them, or send a message) to talk.
+  - It shows **!** when it has a quest for you, **?** when one is ready to hand in, and 💬 when you're close.
+  - It has a portrait, its own name, and an option to pause the game while talking.
+  - A quest giver with no dialogue offers its quests by itself (Accept / Not now), reminds you, and thanks you when you hand them in.
+- **Game Settings › Dialogues:** conversations written as simple scripts:
+  - `Name: text` lines (with `{variables}`) and narration;
+  - `* choice -> section` buttons, with `[if has Key]` and `(once)`;
+  - `# sections`, `-> jumps`, `-> END`, and `? condition -> section`;
+  - `@give / @take / @set / @add / @quest start|complete|fail|progress / @send / @sound / @learn / @end`.
+
+  Conditions can check items, quest states, variables, `first`, `chance 30`, `not`, `and` and `or`. The editor checks the script as you type, has buttons that insert each kind of line, and a **Preview** that plays the dialogue with pretend items and finished quests.
+- **Game Settings › Quests:** each quest has:
+  - an icon, a description and a **giver**;
+  - what it **unlocks after**;
+  - **objectives**: `collect Wood 5 (take)`, `kill slime 3`, `talk Villager`, `reach Old Well`, `craft`, `use`, `gather`, `var coins >= 100`, `message`, `quest`, or a custom step, in any order or one after another;
+  - **rewards**: variables, items, recipes, a follow-up quest, a message;
+  - whether you **hand it in** to the giver or it completes right away;
+  - whether it **starts by itself** or **can be done again**;
+  - and what the giver says.
+
+  The editor shows objective and reward chips and warns about names that don't exist. **Starter story** adds three quests and three dialogues.
+- **Quest Tracker** (the tracked quest or all active ones, with progress) and **Quest Journal** (details, objectives, rewards, Track; also as a popup) in *UI → Game Systems*.
+- **Create → Gameplay → Story:** Quest Giver, Villager, Shopkeeper, Signpost and Quest Spot (2D and 3D). The first one also adds the starter story.
+- A notification shows when a quest starts, is ready and completes. The variables `questsDone`, `questsActive` and `trackedQuest` follow along. Quests and conversations carry to the next level and are kept by saves.
+- **Triggers and nodes:**
+  - **Events:** quest starts, progresses, is ready or completes, quest fails, dialogue starts or ends, dialogue choice picked.
+  - **Conditions:** *Quest state*, *Story check*.
+  - **Instructions:** start, complete, fail, advance, reset or track a quest; *Start dialogue*, optionally at a section, waiting until it ends.
+  - The **Quest Info** value node.
+- **From code:** `scene.startQuest`, `questState`, `questObjectives`, `advanceQuest`, `completeQuest`, `failQuest`, `resetQuest`, `startDialogue(name, { npc, start })`, and events such as `questComplete` and `dialogueChoice`. See the [Quests and dialogue guide](docs/guide/quests-dialogue.md).
 
 ### Grid movement (Grid Hero and Turn Enemy)
 

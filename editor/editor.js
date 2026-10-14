@@ -2,7 +2,7 @@
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
 import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
-import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
+import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
@@ -3386,6 +3386,7 @@ function renderInspector() {
       i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { j.behaviors.splice(i - 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       i < j.behaviors.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { j.behaviors.splice(i + 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       def && { icon: 'rotate', label: 'Reset', fn: () => { j.behaviors[i] = defaultBehavior(b.type, threeD); changed({ structure: true }); } },
+      def && { icon: 'help', label: 'Docs', fn: () => openDocs('ref/component/' + b.type) },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
     const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
@@ -3766,35 +3767,6 @@ function renderSceneSettings(box) {
 // ============================================================================
 // Components (Add Component list + Project panel)
 // ============================================================================
-const BEH_META = {
-  move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraControls: ['Camera', 'hand'], cameraTargetGroup: ['Camera', 'target'],
-  collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
-  timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
-  spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
-  float: ['Effects', 'arrow'], message: ['Gameplay', 'sign'], teleport: ['Gameplay', 'portal'],
-  unlock: ['Gameplay', 'door'], sound: ['Audio', 'bolt'],
-  tappable: ['Touch', 'hand'], draggable: ['Touch', 'move'], swipeMove: ['Touch', 'arrow'],
-  orbit: ['Movement', 'rotate'], pulse: ['Effects', 'circle'], checkpoint: ['Gameplay', 'flag'], destructible: ['Combat', 'bolt'],
-  firstPerson: ['Controllers', 'crosshair'], thirdPerson: ['Controllers', 'player'], car: ['Controllers', 'car'],
-  projectile: ['Combat', 'arrow'], income: ['Clicker', 'coin'], upgrade: ['Clicker', 'plus'],
-  clickPopup: ['Clicker', 'star'], comboClicker: ['Clicker', 'bolt'], longPress: ['Touch', 'clock'], doubleTap: ['Touch', 'hand'], tapToggle: ['Touch', 'check'],
-  pressFeedback: ['Touch', 'hand'], tapToSpawn: ['Touch', 'spawner'], dragLaunch: ['Touch', 'arrow'],
-  follow: ['AI', 'player'], wander: ['AI', 'ghost'], path: ['Movement', 'arrow'], turret: ['Combat', 'crosshair'],
-  bounce: ['Movement', 'circle'], trigger: ['Logic', 'bolt'], timer: ['Logic', 'clock'], dropItem: ['Gameplay', 'coin'],
-  emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
-  gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
-  turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
-  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'], autoSave: ['Saving', 'save'], saveManager: ['Saving', 'save'],
-  tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
-  netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiAppBar: ['UI', 'menu'], uiDropdown: ['UI', 'list'], uiKeypad: ['UI', 'key'], uiColorPicker: ['UI', 'brush'], uiCarousel: ['UI', 'layers'], uiSkillButton: ['UI', 'bolt'], uiRadialMenu: ['UI', 'circle'], uiSpinWheel: ['UI', 'star'],
-  uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
-  uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
-  uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
-  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], craftingStation: ['Crafting', 'gear'], loot: ['Crafting', 'gem'], resource: ['Crafting', 'gem'], uiHotbar: ['UI', 'grid'], uiEquipment: ['UI', 'player'], uiCrafting: ['UI', 'list'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
-  waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
-};
 /** Odin-style [Button]s shown at the top of a component. */
 const BEH_BUTTONS = {
   tween: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b) }],
@@ -4011,7 +3983,6 @@ function addComponentTo(id, key) {
 /** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
 const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
   Animation: 'clock', 'My Scripts': 'nodes', Colliders: 'square', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
-const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'Survival', 'Crafting', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
 const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
 function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
 /** A few components that usually make sense next for this object. */
@@ -4732,8 +4703,9 @@ function openFileMenu() {
     !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
     { icon: 'gear', label: 'Preferences…', k: 'editor & app', fn: openPreferences },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
+    { icon: 'help', label: 'Documentation', k: 'guides & reference', fn: () => openDocs('') },
     { icon: 'help', label: 'Controls', fn: openHelp },
-    { icon: 'external', label: 'Examples & Docs', fn: () => { location.href = '../'; } },
+    { icon: 'external', label: 'Examples', fn: () => { location.href = '../'; } },
   ]);
 }
 
@@ -4983,9 +4955,18 @@ function installApp() {
 }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {});
 
+/** The documentation (docs/), in a new tab so the project stays open. `route` like 'guide/physics' or 'ref/component/health'. */
+function openDocs(route = '') {
+  try { saveNow(); } catch { /* saved again soon */ }
+  const url = '../docs/' + (route ? '#/' + route : '');
+  const w = window.open(url, 'pocket-docs');
+  if (!w) location.href = url; // pop-ups blocked (some installed web apps): open here; the project is saved
+}
+
 function openHelp() {
   const row = (a, b) => h('div', { class: 'help-row' }, h('b', {}, a), h('span', {}, b));
   openDialog('Controls', [
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => openDocs('') }, icon('help'), 'Open the documentation'), h('button', { class: 'btn', onclick: () => openDocs('guide/getting-started') }, icon('play'), 'Getting started')),
     row('Select', 'Tap an object'), row('Move', 'Drag it, or use the arrows'), row('Rotate / Scale', 'Pick the tool, drag the handles'),
     row('Paint', 'Select an object, pick the brush, tap or drag to place copies'), row('Levels', 'Level button above the Scene'),
     row('More room', 'Tap the open panel tab, or drag the sheet handle'),

@@ -4302,7 +4302,8 @@ function renderUI(engine, scene) {
           if (F.z !== 1) { const r = uiBox(q, W, H, engine.safe); ctx.translate(r.x, r.y); ctx.scale(F.z, F.z); ctx.translate(-r.x, -r.y); }
         }
       }
-      if (!engine.editing) for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
+      // scroll views and lists cut off what's outside them (in the editor too, except what you have selected)
+      for (let q = e.parentEnt, n = 0, mine = e.id === engine.editSelected; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren || (engine.editing && !mine && q.behaviors.some((b) => b.clipsKids))) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius ?? (engine.editing ? q.shape?.radius || 0 : 0); ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
       ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
@@ -9292,6 +9293,7 @@ registerBehavior('uiScroll', {
     };
     return {
       uiAlways: true,
+      clipsKids: p.clip !== false, // (the editor cuts its contents off at its edges too)
       start(e, s) {
         collect(s, e); lay(e);
         e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
@@ -9596,6 +9598,7 @@ registerBehavior('uiList', {
     };
     return {
       uiAlways: true,
+      clipsKids: p.clip !== false, // (the editor cuts its contents off at its edges too)
       start(e, s) {
         picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); };
         e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;

@@ -6628,6 +6628,8 @@ function pageShowsRecord(s, v = 'page') {
   const onPage = (q) => { for (let a = q, n = 0; a && n < 40; a = a.parentEnt, n++) { const b = showIf(a); if (b) return sameVal(b.params?.value, val); } return false; };
   return s.entities.some((q) => q.ui && !q.dead && /\{record_/.test(String(q.text?.value || '')) && onPage(q));
 }
+/** Has a variable been given a value (not empty, 0, no or false)? */
+const isSet = (v) => v != null && v !== '' && v !== 0 && v !== false && !['0', 'false', 'no'].includes(String(v).toLowerCase());
 function uiHiding(e) { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q._hiding) return true; return false; }
 const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && !uiHiding(e) && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
@@ -6875,7 +6877,7 @@ const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating',
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
-    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
@@ -6903,6 +6905,12 @@ registerBehavior('uiBottomNav', {
     { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
     { key: 'otherPage', label: 'On a page that isn\'t a tab', type: 'select', options: ['no tab lit', 'keep the last tab lit', 'hide the bar'], default: 'keep the last tab lit', group: 'Behaviour', infoText: 'e.g. Settings opened from the Side Menu.' },
     { key: 'reselect', label: 'Tapping the current tab again sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', infoText: 'e.g. scroll top. The message gets the page name too.' },
+    { key: 'reselectTop', label: 'Tapping the current tab again scrolls its page to the top', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'swipe', label: 'Swipe left / right to change tab', type: 'bool', default: false, group: 'Behaviour', infoText: 'A quick sideways swipe on the page goes to the next or previous tab (not on sliders, carousels or swipe pages).' },
+    { key: 'remember', label: 'Open on the last tab used (next time)', type: 'bool', default: false, group: 'Behaviour' },
+    { key: 'holdMessage', label: 'Pressing and holding a tab sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', infoText: 'The held tab\'s page goes in the variable heldTab (for a quick menu or shortcuts).' },
+    { key: 'labelWeight', label: 'Label weight', type: 'select', options: ['normal', 'bold', 'bold when selected'], default: 'bold when selected', group: 'Size & shape' },
+    { key: 'labelCase', label: 'Label letters', type: 'select', options: ['as typed', 'UPPERCASE'], default: 'as typed', group: 'Size & shape' },
     { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Layout', infoText: 'Pages, buttons and pop-ups anchored to the bottom sit above the bar instead of under it.' },
     { key: 'maxWidth', label: 'Widest the bar gets (0 = full width)', type: 'number', default: 0, range: [0, 900], step: 10, group: 'Layout', infoText: 'On tablets and sideways phones the bar stays this wide, in the middle.' },
@@ -6913,13 +6921,17 @@ registerBehavior('uiBottomNav', {
     ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
-    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => { const a = page || label.toLowerCase(); return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge } : { label, icon, page: a, badge }; });
-    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1;
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
+    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
+    /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
+    const pagesHiding = (s) => { const now = s.time || 0; if (now - hideCache.t > 0.5 || now < hideCache.t) { hideCache = { t: now, list: s.entities.flatMap((q) => q.behaviors.filter((b) => b.type === 'uiShowIf' && b.params?.hideNav && (b.params.var || 'page') === p.var).map((b) => b.params.value)) }; } return hideCache.list; };
+    const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
+    const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
     const sizeBar = (e) => { const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
-    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || s.barsHidden > 0 || !!s.navBarsOff;
+    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || pagesHiding(s).some((v) => sameVal(s.vars[p.var], v)) || s.barsHidden > 0 || !!s.navBarsOff;
     const activeIdx = (s) => {
       const m = T.findIndex((t) => t.msg && s.openMenus?.has(t.msg)); if (m >= 0) return m; // a "menu" tab lights up while its menu is open
       const i = tabIdx(s); if (i >= 0) return i;
@@ -6943,7 +6955,12 @@ registerBehavior('uiBottomNav', {
         if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide) };
         return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide) };
       },
-      start(e, s) { T = tabs(); BH.start(s, e); sizeBar(e); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
+      start(e, s) {
+        T = tabs(); BH.start(s, e); sizeBar(e);
+        const saved = p.remember && !s.engine.editing ? store.get(memKey(s), '') : '', si = saved ? T.findIndex((t) => t.page != null && String(t.page) === saved) : -1;
+        const i = si >= 0 ? si : clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1);
+        if (T[i] && (si >= 0 || s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page);
+      },
       update(e, dt, s) {
         const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
         sizeBar(e);
@@ -6957,7 +6974,19 @@ registerBehavior('uiBottomNav', {
         fade = Math.min(1, fade + dt * (+p.speed || 14) / 3);
         if (hide > 0.5 || !e.visible || e._parentHidden) return;
         // taps: which tab is under the finger (in screen space)
-        const r = uiRect(s, e), K = uiK(s.engine.safe);
+        const r = uiRect(s, e), K = uiK(s.engine.safe), inp = s.engine.input;
+        const tabAt = (q) => { const lx = (q.x - r.x) / K + e.x, ly = (q.y - r.y) / K + e.y, i = Math.floor((lx - G.bx) / G.tw); return ly >= G.by && ly <= G.by + G.bh && i >= 0 && i < G.n ? i : -1; };
+        if (p.holdMessage) { // press and hold a tab
+          for (const d of inp.downs) { const i = tabAt(d); if (i >= 0) hold = { id: d.id, i, t: 0, x: d.x, y: d.y, done: false }; }
+          if (hold) { const q = inp.pointers.get(hold.id); if (!q || Math.hypot(q.x - hold.x, q.y - hold.y) > 12) hold = null; else if (!hold.done && (hold.t += dt) > 0.5) { hold.done = true; pulse.set(hold.i, 1); s.engine.vibrate(18); s.setVar('heldTab', T[hold.i].page ?? T[hold.i].msg ?? ''); s.send(p.holdMessage, T[hold.i].page); } }
+        }
+        if (p.swipe && T.length > 1) for (const u of inp.ups) { // a quick sideways swipe on the page: the next or previous tab
+          const dx = u.x - u.sx, dy = u.y - u.sy, cur = activeIdx(s);
+          if (u.time > 0.6 || Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6 || u.sx < 30 || cur < 0 || tabAt({ x: u.sx, y: u.sy }) >= 0) continue;
+          if (s.entities.some((q) => q.ui && q.visible && !q._parentHidden && q.behaviors.some((b) => ['uiPager', 'uiCarousel', 'uiSlider', 'uiSpinWheel', 'uiColorPicker', 'joystick'].includes(b.type) || (b.type === 'uiScroll' && b.params?.direction !== 'vertical') || (b.type === 'uiDataList' && b.params?.swipeDelete !== false)) && hitTest(s, q, u.sx, u.sy))) continue; // that swipe belongs to something else
+          let j = cur + (dx < 0 ? 1 : -1); while (T[j] && T[j].page == null) j += dx < 0 ? 1 : -1;
+          if (T[j]) { if (p.haptics !== false) s.engine.vibrate(6); goTab(s, j, cur); }
+        }
         for (const t of s.engine.input.taps) {
           const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = p.style === 'raised center' && T.length % 2 === 1;
           let i = Math.floor((lx - G.bx) / G.tw);
@@ -6969,16 +6998,14 @@ registerBehavior('uiBottomNav', {
           if (p.sound) s.engine.audio.sfx(p.sound);
           if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
           if (tab.msg) { s.send(tab.msg); continue; }
-          if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } continue; }
-          const cur = activeIdx(s);
-          s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 });
-          if (p.message) s.send(p.message);
+          if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } if (p.reselectTop !== false) s.emit('pageScrollTop', String(tab.page), p.var); continue; }
+          goTab(s, i, activeIdx(s));
         }
       },
       drawUI(ctx, e, s) {
         if (!T.length) T = tabs();
         if (s.engine.editing) sizeBar(e);
-        const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || act;
+        const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || (T[a]?.color ? tok(T[a].color) : act); // (a tab with its own colour lights up in it)
         if (hide > 0.99) return;
         BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
@@ -7011,13 +7038,13 @@ registerBehavior('uiBottomNav', {
         for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tw * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
         // tabs
         T.forEach((t, i) => {
-          const on = i === a, col = on ? act : idle, pz = pulse.get(i) || 0;
+          const on = i === a, col = on ? (t.color ? tok(t.color) : act) : idle, pz = pulse.get(i) || 0, icon = on && t.iconOn ? t.iconOn : t.icon, lw = p.labelWeight === 'bold' ? 800 : p.labelWeight === 'normal' ? 600 : on ? 800 : 600;
           let sc = 1 + (p.tapEffect === 'bounce' ? Math.sin(pz * Math.PI) * 0.18 : p.tapEffect === 'grow' && on ? 0.12 : 0) + (st === 'minimal' && on ? 0.12 : 0);
           let x = G.cx(i), y = G.cy;
           if (i === raisedIdx) { // the big round middle button
             const R = G.bh * 0.46;
             ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, G.by + 4, R * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
-            drawNavIcon(ctx, t.icon, x, G.by + 4, isz * 1.15, '#ffffff');
+            drawNavIcon(ctx, icon, x, G.by + 4, isz * 1.15, '#ffffff');
             if (showLabel(i, on)) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 0.9); }
             return;
           }
@@ -7025,16 +7052,16 @@ registerBehavior('uiBottomNav', {
           if (st === 'bubble' && lab) { // icon and name side by side
             ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = ctx.measureText(t.label).width, total = isz + 6 + lw;
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
-            drawNavIcon(ctx, t.icon, -total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5);
+            drawNavIcon(ctx, icon, -total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5);
             ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
             ctx.restore();
           } else {
             const iy = (lab ? -lsz * 0.85 : 0) - (on ? +p.activeLift || 0 : 0);
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
             if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
-            drawNavIcon(ctx, t.icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
+            drawNavIcon(ctx, icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
             ctx.shadowColor = 'transparent';
-            if (lab) { ctx.font = `${on ? 800 : 600} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, 0, iy + isz * 0.5 + lsz * 1.05); }
+            if (lab) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, 0, iy + isz * 0.5 + lsz * 1.05); }
             ctx.restore();
           }
           // badge
@@ -8950,9 +8977,17 @@ registerBehavior('uiShowIf', {
     { key: 'keepScroll', label: 'Remember where it was scrolled to', type: 'bool', default: true, group: 'Page', showIf: (b) => !!b.scroll },
     { key: 'showMessage', label: 'Message when it opens', type: 'text', default: '', suggest: 'messages', group: 'Page' },
     { key: 'hideMessage', label: 'Message when it closes', type: 'text', default: '', suggest: 'messages', group: 'Page' },
+    { key: 'firstMessage', label: 'Message the first time it opens', type: 'text', default: '', suggest: 'messages', group: 'Page', info: 'Once each time the game runs: load its data, play an intro…' },
+    { key: 'hideNav', label: 'Hide the bottom bar on this page', type: 'bool', default: false, group: 'Page', info: 'For a full-screen page: a game, a photo, a checkout. The Bottom Nav slides away and comes back on other pages.' },
+    { key: 'requireVar', label: 'Only open when this variable is set', type: 'text', default: '', suggest: 'vars', group: 'Page', info: 'e.g. loggedIn: without it, the page sends you to the page below instead (a sign-in page).' },
+    { key: 'otherwise', label: 'Otherwise go to page', type: 'text', default: 'login', group: 'Page', showIf: (b) => !!b.requireVar },
+    { key: 'refreshMessage', label: 'Pull down to refresh sends', type: 'text', default: '', suggest: 'messages', group: 'Page', info: 'Pull the page down from the top and let go: a spinner shows and this message is sent (reload a list, check for news).' },
+    { key: 'scrollTopOn', label: 'Scroll to the top on message', type: 'text', default: '', suggest: 'messages', group: 'Page', showIf: (b) => !!b.scroll },
+    { key: 'animSpeed', label: 'Transition speed', type: 'number', default: 1, range: [0.25, 3], step: 0.05, group: 'Page', info: '1 = normal, 2 = twice as fast, 0.5 = slower.' },
   ],
   create(p) {
-    let shown = null, drag = null, vel = 0, maxS = 0, barT = -9;
+    let shown = null, drag = null, vel = 0, maxS = 0, barT = -9, goal = null, pulled = false, refreshT = -9, firstDone = false;
+    const D = (d) => d / clamp(+p.animSpeed || 1, 0.25, 3); // Transition speed
     const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick'];
     const ownsDrag = (s, e, d) => s.entities.some((q) => q !== e && q.visible && q.ui && !q._parentHidden && q.behaviors.some((b) => SCROLLERS.includes(b.type)) && isInside(q, e) && hitTest(s, q, d.x, d.y));
     const isInside = (q, e) => { for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === e) return true; return false; };
@@ -8976,13 +9011,16 @@ registerBehavior('uiShowIf', {
           if (drag.on) {
             const raw = drag.s0 - (q.y - drag.y0) / k;
             y = raw < 0 ? raw * 0.4 : raw > maxS ? maxS + (raw - maxS) * 0.4 : raw; // a rubber band past the ends
+            pulled = !!p.refreshMessage && y < -56; goal = null;
             vel = (drag.last - q.y) / k / Math.max(dt, 1 / 120); drag.last = q.y; barT = performance.now() / 1000;
             inp.taps.length = 0; // a scroll is not a tap on a button
           }
-        } else { if (drag.on) inp.taps.length = 0; drag = null; }
-      } else {
+        } else { if (drag.on) inp.taps.length = 0; if (pulled) { pulled = false; refreshT = performance.now() / 1000; vel = 0; s.engine.vibrate(10); s.send(p.refreshMessage); } drag = null; }
+      } else if (goal != null) { y += (goal - y) * Math.min(1, dt * 10); vel = 0; barT = performance.now() / 1000; if (Math.abs(goal - y) < 0.5) { y = goal; goal = null; } } // scrolling to the top
+      else {
+        const spin = performance.now() / 1000 - refreshT < 0.9; // a moment with the spinner showing
         y += vel * dt; vel *= Math.pow(0.04, dt); if (Math.abs(vel) < 4) vel = 0; else barT = performance.now() / 1000;
-        const c = clamp(y, 0, maxS); y += (c - y) * Math.min(1, dt * 12); if (Math.abs(c - y) < 0.3) y = c;
+        const c = clamp(y, spin ? -44 : 0, maxS); y += (c - y) * Math.min(1, dt * 12); if (Math.abs(c - y) < 0.3) y = c;
       }
       if (y !== (e._scrollY || 0)) { s.emit('uiScroll', y - (e._scrollY || 0), e, maxS ? clamp(y / maxS, 0, 1) : 0); e._scrollY = y; }
     };
@@ -8997,28 +9035,42 @@ registerBehavior('uiShowIf', {
     };
     return {
       uiAlways: true,
-      start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; if (shown && p.showMessage) queueMicrotask(() => s.send(p.showMessage)); },
+      start(e, s) {
+        shown = test(s.vars[p.var]); e.visible = shown;
+        if (shown && p.showMessage) queueMicrotask(() => s.send(p.showMessage));
+        if (shown && p.firstMessage && !s.engine.editing) { firstDone = true; queueMicrotask(() => s.send(p.firstMessage)); }
+        s.on('pageScrollTop', (pg, v) => { if (!e.dead && pg === String(p.value) && (v || 'page') === (p.var || 'page') && (e._scrollY || 0) > 0) goal = 0; }); // tapping its tab again
+        if (p.scrollTopOn) s.on('message', (m) => { if (!e.dead && m === p.scrollTopOn) goal = 0; });
+      },
       update(e, dt, s) {
-        const want = test(s.vars[p.var]);
-        if (p.scroll && shown && e.visible && !s.engine.editing) scrollTick(e, dt, s);
+        let want = test(s.vars[p.var]);
+        if (want && !shown && p.requireVar && !s.engine.editing && !isSet(s.vars[p.requireVar]) && p.otherwise && !sameVal(p.otherwise, p.value)) { s.navTo(p.otherwise, p.var || 'page', { history: false }); want = false; return; } // not signed in (or the like): somewhere else instead
+        if ((p.scroll || p.refreshMessage) && shown && e.visible && !s.engine.editing) scrollTick(e, dt, s);
         if (want !== shown) {
           shown = want; drag = null; vel = 0;
           if (want && p.scroll && p.keepScroll === false) e._scrollY = 0;
           if (want && p.showMessage) s.send(p.showMessage); else if (!want && p.hideMessage) s.send(p.hideMessage);
+          if (want && p.firstMessage && !firstDone) { firstDone = true; s.send(p.firstMessage); }
           s.emit('pageChange', want ? 1 : 0, e, String(p.value));
           const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
           const st = s.settings, all = st.pageAnim && st.pageAnim !== 'as each page says' && p.var === (st.pageVar || 'page') && p.op === '=' ? st.pageAnim : null, anim = all || p.anim; // Game Settings › Motion › Page transitions
           const NAV = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe' }[anim];
-          if (NAV) uiAnimate(s, e, want, `${NAV} ${want ? 'in' : 'out'}${fwd ? '' : ' back'}`, 0.24);
+          if (NAV) uiAnimate(s, e, want, `${NAV} ${want ? 'in' : 'out'}${fwd ? '' : ' back'}`, D(0.24));
           else if (anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
-            uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
-          } else if (anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
-          else if (anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
-          else uiAnimate(s, e, want, anim, 0.22);
+            uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), D(0.3), null, Math.max(120, w));
+          } else if (anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), D(0.24), null, Math.max(120, w));
+          else if (anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), D(0.24));
+          else uiAnimate(s, e, want, anim, D(0.22));
           if (want) staggerKids(s, e, p.stagger);
         }
       },
-      drawUI(ctx, e, s) { // a thin scroll bar while it moves
+      drawUI(ctx, e, s) { // a thin scroll bar while it moves, and the pull-to-refresh spinner
+        const y0 = e._scrollY || 0;
+        if (p.refreshMessage && y0 < -4) {
+          const b = UK.box(e), pull = clamp(-y0 / 56, 0, 1), t = performance.now() / 1000, spin = t - refreshT < 0.9, cx = b.cx, cy = b.y + Math.min(-y0, 56) / 2 + 4, col = isDark(s) ? '#ffffff' : '#000000';
+          ctx.save(); ctx.globalAlpha *= 0.6 * Math.max(pull, spin ? 1 : 0); ctx.strokeStyle = col; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath();
+          const a0 = spin ? t * 8 : -Math.PI / 2; ctx.arc(cx, cy, 10, a0, a0 + (spin ? Math.PI * 1.4 : Math.PI * 2 * pull * 0.85)); ctx.stroke(); ctx.restore();
+        }
         if (!p.scroll || !maxS) return;
         const a = clamp(1.4 - (performance.now() / 1000 - barT) * 1.6, 0, 1); if (a <= 0) return;
         const b = UK.box(e), vis = b.h / (b.h + maxS), h = Math.max(30, (b.h - 12) * vis), f = clamp((e._scrollY || 0) / maxS, 0, 1), y = b.y + 6 + (b.h - 12 - h) * f;

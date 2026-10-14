@@ -6381,7 +6381,7 @@ function newPage(from, o = {}) {
 // ---- Bottom Nav tabs: Label | icon | page | badge, one per line ----
 const navBars = (v = 'page') => project.entities.flatMap((j) => (j.behaviors || []).filter((b) => b.type === 'uiBottomNav' && (b.var || 'page') === v));
 const navTabs = (b) => String(b.tabs ?? '').split('\n').filter((l) => l.trim()).map((l) => l.split('|').map((c) => c.trim()));
-const navTabsText = (rows) => rows.map((r) => { const c = [...r]; while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); }).join('\n');
+const navTabsText = (rows) => rows.map((r) => { const c = [...r].map((x) => x ?? ''); while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); }).join('\n');
 /** An icon that fits a page's name (Settings → gear, Shop → shop…). */
 function guessIcon(name) {
   const n = String(name).toLowerCase(), M = [[/home|start|main/, 'home'], [/search|explore|find|discover/, 'search'], [/profile|account|me$|user|player/, 'user'], [/setting|option|prefer/, 'gear'], [/shop|store|buy/, 'shop'], [/cart|basket|bag/, 'cart'],
@@ -6421,6 +6421,9 @@ function navTabEditor(get, set, path, b) {
           r[2] && !r[2].startsWith('msg:') && pages.includes(r[2]) && { icon: 'eye', label: `Show the “${r[2]}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${r[2]}`); } },
           r[2] && !r[2].startsWith('msg:') && !pages.includes(r[2]) && { icon: 'plus', label: `Make the “${r[2]}” page`, fn: () => { newPage(null, { name: r[0] || r[2], tab: false, stay: true }); draw(); } },
           { icon: 'bell', label: r[3] ? `Badge: {${r[3]}}…` : 'Badge from a variable…', k: 'a count on the tab', fn: () => { const n = prompt('Variable for the badge count (blank = none)', r[3] || ''); if (n !== null) { r[3] = n.trim(); save(rows); } } },
+          { icon: 'star', label: r[4] ? `Icon when selected: ${r[4]}` : 'Icon when selected…', k: 'e.g. a filled heart', fn: () => pickNavIcon(r[4], (ic) => { while (r.length < 4) r.push(''); r[4] = ic; save(rows); }) },
+          r[4] && { icon: 'close', label: 'Same icon when selected', fn: () => { r[4] = ''; save(rows); } },
+          { icon: 'brush', label: r[5] ? `Colour when selected: ${r[5]}` : 'Colour when selected…', k: 'blank = the bar\'s', fn: () => { const c = prompt('Colour when this tab is selected (#ff5a5f, @accent… blank = the bar\'s colour)', r[5] || ''); if (c !== null) { while (r.length < 5) r.push(''); r[5] = c.trim(); save(rows); } } },
           i > 0 && { icon: 'upload', label: 'Move Left', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(rows); } },
           i < rows.length - 1 && { icon: 'download', label: 'Move Right', fn: () => { rows.splice(i + 1, 0, rows.splice(i, 1)[0]); save(rows); } },
           { icon: 'trash', label: 'Remove Tab', danger: true, fn: () => { rows.splice(i, 1); save(rows); } },

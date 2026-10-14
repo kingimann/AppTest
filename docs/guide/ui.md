@@ -97,6 +97,9 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
 
 - **Bottom Nav:** a complete tab bar (9 styles, badges, animations). In the Inspector each tab is a card: tap its icon to pick from the icon grid (or an emoji), type its label, and choose the page it opens from a list. **+ Add Tab** offers your pages that aren't tabs yet, **a new page** (made for you, with a fitting icon), or a ☰ tab for the Side Menu. A tab's ⋯ menu adds a badge, moves it left or right, shows its page or removes it. (*Text* edits them as lines: `Label | icon | page | badge variable`.)
   - **New Page…** asks whether to add the page to the bottom bar too, and the page button's *Add “page” to the bottom bar* adds a page that's already there.
+  - A tab can have its own **icon when selected** (a filled heart) and **colour when selected** (in its ⋯ menu).
+  - *Behaviour*: **Swipe left / right to change tab**, **Tapping the current tab again scrolls its page to the top**, **Open on the last tab used** (next time the app opens), and **Pressing and holding a tab sends** a message (the tab's page is in `heldTab`).
+  - *Size & shape*: label weight (normal, bold, bold when selected) and UPPERCASE labels.
 - **Side Menu:** a drawer with sections, toggles, footer items and 7 styles. Items are `Label | icon | page or msg:name or toggle:var | badge`.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
 - **App Layout:** all three set up to work together.
@@ -117,7 +120,11 @@ Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Ca
 
 - **Scroll when it is taller than the screen:** drag up and down (with a flick, a rubber band at the ends and a thin scroll bar). Lists and scroll views inside it still scroll on their own, and a scroll never presses a button. The App Bar can hide or gain its shadow as the page scrolls.
 - **Remember where it was scrolled to**, or start at the top each time.
-- **Message when it opens / closes.**
+- **Message when it opens / closes**, and a **message the first time it opens** (load its data once).
+- **Hide the bottom bar on this page** (a game, a photo, a checkout): the Bottom Nav slides away and comes back on other pages.
+- **Only open when this variable is set** (e.g. `loggedIn`), **otherwise go to page** (a sign-in page).
+- **Pull down to refresh sends** a message (a spinner shows while it works), and **Scroll to the top on message**.
+- **Transition speed** (1 = normal, 2 = twice as fast).
 
 While a page is sliding away it no longer takes taps, so one tap can't press buttons on two pages.
 

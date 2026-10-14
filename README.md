@@ -119,6 +119,15 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
     - `scripts/prepare-native.mjs`: sets the version, build number, release signing, orientation and full screen in the native projects that Codemagic generates on each build.
     - A `README.md` with the one-time setup: Apple / Google accounts, App Store Connect key, certificates, keystore, Play service account, and the first manual Play upload.
   - Put the folder on GitHub, add it in Codemagic, and start a workflow. Build numbers go up by themselves; raise **Version** for a store update.
+  - **Or with Expo:** **Download Expo project (.zip)** makes an [Expo](https://expo.dev) app (SDK 57) instead, with the same App ID, version, orientation, icon and splash:
+    - The game runs in a full-screen WebView (`react-native-webview`). A small bridge in `App.js` gives it the same native features as the Capacitor export, through Expo's modules:
+      - **phone notifications**: scheduled, daily and repeating, and tapping one opens the game (`expo-notifications`);
+      - **haptics** (`expo-haptics`);
+      - the permissions your game asks for (camera, microphone and location usage texts on iOS, permissions on Android);
+      - the **Android Back button** (it goes back in the game, and closes the app when there's nowhere to go).
+    - Try it on your phone: `npm install`, then `npx expo start`, and scan the QR code with the Expo Go app.
+    - Build and publish in the cloud with **EAS**: `eas build --profile preview` (an installable test build) or `--profile production` (store builds, build numbers go up by themselves), then `eas submit`. The README inside has the steps.
+    - The game is `game/game-html.js`; download again and replace it to update the game.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
 - **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
 - **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.

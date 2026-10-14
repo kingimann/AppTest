@@ -46,6 +46,81 @@ export function hexToRgb(hex) {
 }
 
 const rgba = (hex, a) => { const [r, g, b] = hexToRgb(hex); return `rgba(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0},${a})`; };
+/** A colour between two hex colours (light and ambient fades). */
+const mixHexE = (a, b, t) => { const A = hexToRgb(a || '#000000'), B = hexToRgb(b || '#000000'), c = A.map((v, i) => Math.round((v + (B[i] - v) * clamp(t, 0, 1)) * 255)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
+const hueHex = (h) => { const f = (n) => { const k = (n + h / 30) % 12, a = Math.min(0.5, 1 - 0.5); return Math.round(255 * (0.5 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); }; return '#' + f(0) + f(8) + f(4); };
+/** A light right now: brightness factor and colour after its effect (flicker, pulse, blink, fire, rainbow). */
+function lightNow(L, time, i) {
+  let k = flickerK(L, time, i), col = L.color; const sp = +L.speed || 1;
+  switch (L.effect) {
+    case 'pulse': k *= 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(time * sp * Math.PI * 2 + i)); break;
+    case 'blink': k *= Math.floor(time * sp * 2 + i * 0.37) % 2 ? 0.05 : 1; break;
+    case 'fire': k *= 0.78 + 0.22 * (0.5 + 0.25 * Math.sin(time * 13 * sp + i * 3) + 0.25 * Math.sin(time * 31 * sp + i)); col = mixHexE(L.color, '#ff7a1a', 0.25 + 0.2 * Math.sin(time * 9 * sp + i)); break;
+    case 'rainbow': col = hueHex((time * sp * 90 + i * 50) % 360); break;
+  }
+  return { k, col };
+}
+/** 2D shadows: the area a light reaches, as a polygon (rays to the corners of solid objects nearby). */
+function lightPoly(scene, e, r) {
+  const segs = [], pts = [], x0 = e.x, y0 = e.y;
+  const box = (l, t, rr, b) => { const c = [[l, t], [rr, t], [rr, b], [l, b]]; for (let i = 0; i < 4; i++) { segs.push([c[i], c[(i + 1) % 4]]); pts.push(c[i]); } };
+  box(x0 - r, y0 - r, x0 + r, y0 + r);
+  for (const o of scene.entities) {
+    if (o === e || o.dead || o.ui || o.visible === false || !o.body || o.body.sensor || o.template || o.light) continue;
+    if (e.parentEnt === o || o.parentEnt === e) continue;
+    const ex = o.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, cx = o.x + (ex.ox || 0), cy = o.y + (ex.oy || 0);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy) || Math.abs(cx - x0) > r + hx || Math.abs(cy - y0) > r + hy) continue;
+    box(cx - hx, cy - hy, cx + hx, cy + hy);
+  }
+  const angles = []; for (const [px, py] of pts) { const a = Math.atan2(py - y0, px - x0); angles.push(a - 1e-4, a, a + 1e-4); }
+  const out = [];
+  for (const a of angles) {
+    const dx = Math.cos(a), dy = Math.sin(a); let best = Infinity;
+    for (const [[ax, ay], [bx, by]] of segs) {
+      const sx = bx - ax, sy = by - ay, den = dx * sy - dy * sx; if (Math.abs(den) < 1e-9) continue;
+      const t = ((ax - x0) * sy - (ay - y0) * sx) / den, u = ((ax - x0) * dy - (ay - y0) * dx) / den;
+      if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+    if (best < Infinity) out.push([a, x0 + dx * best, y0 + dy * best]);
+  }
+  out.sort((p, q) => p[0] - q[0]);
+  return out;
+}
+const isSpot = (L) => L.type === 'spot' || (!L.type && +L.cone > 0);
+const spotCone = (L) => clamp(+L.cone || 60, 5, 359);
+/** Shape a 2D light: a spotlight cone and / or its shadow polygon, as a clip. */
+function clipLight2D(g, e, L, r, poly) {
+  if (isSpot(L)) { const a = ((+L.aim || 0) + (e.rz || 0)) * DEG, h = (spotCone(L) / 2) * DEG; g.beginPath(); g.moveTo(e.x, e.y); g.arc(e.x, e.y, r, a - h, a + h); g.closePath(); g.clip(); }
+  if (poly?.length > 2) { g.beginPath(); poly.forEach(([, x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip(); }
+}
+export const LIGHT_PRESETS = {
+  Day: { d2: [1, '#0a0a1e'], d3: { color: '#ffffff', intensity: 1, ambient: 0.45, sky: '#dfe8ff', ground: '#8a7d70', bg: '#87b8e8' } },
+  'Golden hour': { d2: [0.8, '#4a2a10'], d3: { color: '#ffb36b', intensity: 0.9, ambient: 0.35, sky: '#ffd2a0', ground: '#6d4c41', bg: '#f2a65a' } },
+  Evening: { d2: [0.55, '#2a1640'], d3: { color: '#ff9a7a', intensity: 0.55, ambient: 0.28, sky: '#7a6aa8', ground: '#3a2a3a', bg: '#5a4a8a' } },
+  Night: { d2: [0.22, '#070a24'], d3: { color: '#7d93ff', intensity: 0.25, ambient: 0.16, sky: '#1b2a5c', ground: '#101018', bg: '#0b1030' } },
+  Overcast: { d2: [0.75, '#20242c'], d3: { color: '#dfe3ea', intensity: 0.6, ambient: 0.6, sky: '#c9d2dc', ground: '#7a7a7a', bg: '#9aa5b1' } },
+  Cave: { d2: [0.06, '#000000'], d3: { color: '#6b6b6b', intensity: 0.08, ambient: 0.07, sky: '#202020', ground: '#0a0a0a', bg: '#050505' } },
+  Spooky: { d2: [0.2, '#0b2a1a'], d3: { color: '#7dffb0', intensity: 0.3, ambient: 0.15, sky: '#1a3a2a', ground: '#0a120c', bg: '#0a1a12' } },
+  Underwater: { d2: [0.5, '#06304d'], d3: { color: '#7fd4ff', intensity: 0.5, ambient: 0.4, sky: '#2a7aa8', ground: '#0a2a3a', bg: '#0e4a6e' } },
+  Neon: { d2: [0.28, '#1a0033'], d3: { color: '#c050ff', intensity: 0.4, ambient: 0.3, sky: '#40106a', ground: '#100020', bg: '#12001f' } },
+};
+/** Change the scene lighting over some seconds (2D darkness / 3D sun & ambient), through the light objects if there are any. */
+function fadeLighting(s, target, seconds = 0) {
+  const three = s.mode === '3d', gl = s.entities.find((q) => q.globalLight && !q.dead), sun = s.entities.find((q) => q.sun && !q.dead);
+  const from = three ? { ...(sun ? sun.sun : s.light), sky: s.light.sky, ground: s.light.ground, bg: s.background } : { dark: gl ? 1 - (+gl.globalLight.brightness) : +s.light.darkness || 0, col: gl ? gl.globalLight.color : s.light.ambientColor };
+  const apply = (t) => {
+    if (three) {
+      const S = sun ? sun.sun : s.light, P = target;
+      if (P.color) S.color = mixHexE(from.color, P.color, t); if (P.intensity != null) S.intensity = from.intensity + (P.intensity - from.intensity) * t; if (P.ambient != null) S.ambient = from.ambient + (P.ambient - from.ambient) * t;
+      if (P.sky) s.light.sky = mixHexE(from.sky || '#ffffff', P.sky, t); if (P.ground) s.light.ground = mixHexE(from.ground || '#ffffff', P.ground, t); if (P.bg && typeof from.bg === 'string') s.background = mixHexE(from.bg, P.bg, t);
+    } else {
+      const d = target.darkness ?? from.dark, c = target.color || from.col, nd = from.dark + (d - from.dark) * t, nc = mixHexE(from.col || '#0a0a1e', c, t);
+      if (gl) { gl.globalLight.brightness = 1 - nd; gl.globalLight.color = nc; } else { s.light.darkness = nd; s.light.ambientColor = nc; }
+    }
+  };
+  if (!(seconds > 0)) return apply(1);
+  const t0 = s.time; const tick = () => { const t = (s.time - t0) / seconds; apply(Math.min(1, t)); if (t < 1) s.after(1 / 60, tick); }; tick();
+}
 const flickerK = (L, time, i) => (L.flicker ? 1 - L.flicker * 0.25 * (1 + Math.sin(time * 23 + i * 7) * Math.sin(time * 7.3 + i)) : 1);
 
 /** Column-major 4x4 matrix helpers (WebGL layout). */
@@ -291,6 +366,7 @@ export class Entity {
       if (!def) { Log.add('warn', `Unknown component "${b.type}"`, this.name); return null; }
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
+      for (const k of def.passthrough || []) if (b[k] !== undefined) params[k] = b[k]; // extra data a component keeps without an Inspector field
       inst = def.create(params, this) || {};
       inst.type = b.type; inst.params ||= params;
     }
@@ -909,6 +985,7 @@ export class Scene {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
     if (!base) { Log.add('warn', `Spawn: there is no template called "${templateOrProps}"`); return null; }
     const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    e.spawned = true; this.emit('spawned', e); // On Spawned / On Object Spawned nodes
     const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
     if (base.id) spawnKids(base.id, e);
     return e;
@@ -921,7 +998,7 @@ export class Scene {
       if (linked) this.linkHierarchy();
     }
     if (this.entities.some((e) => e.dead)) {
-      for (const e of this.entities) if (e.dead) for (const b of e.behaviors) b.destroy?.(e, this);
+      for (const e of this.entities) if (e.dead) { for (const b of e.behaviors) b.destroy?.(e, this); this.emit('objectGone', e); }
       this.entities = this.entities.filter((e) => !e.dead);
     }
   }
@@ -1191,6 +1268,7 @@ export class Scene {
   endWith(state) {
     if (this.state !== 'play') return;
     this.state = state; this.emit(state === 'win' ? 'win' : 'gameover');
+    queueMicrotask(() => { if (this.newBest) this.emit('newBest', this.vars.best); });
     this.endTime = this.time;
     const key = this.settings.saveBest;
     if (key && (+this.vars.score || 0) > (+this.vars.best || 0)) {
@@ -1443,6 +1521,8 @@ export class Physics {
 
   step(scene, dt) {
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
+    const minHit = Math.abs(g || 0) * 0.02; // slower than this is just settling, not a landing
+    const land = (b, speed) => { if (!b.wasGrounded && speed > minHit) b.landed = Math.max(b.landed || 0, speed); }; // remembered for the whole frame, so a quick bounce still counts
     const gx = scene.gravityX || 0, gz = scene.gravityZ || 0;
     if (scene.wantedTags) {
       for (const e of scene.entities) {
@@ -1467,7 +1547,7 @@ export class Physics {
       if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
       b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.grounded = false; b.groundedOn = null;
+      b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
     }
     // dynamic bodies collide with voxel worlds block by block
     const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
@@ -1489,7 +1569,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
-            if (gd && m.ny * gd > 0.5) b.grounded = true;
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -1524,7 +1604,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
-            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -1565,7 +1645,7 @@ export class Physics {
           const vn = ba.vel.x * m.nx + ba.vel.y * m.ny + ba.vel.z * m.nz;
           if (vn > 0) { const k = vn * (1 + Math.max(ba.bounce, bb.bounce * 0.5)); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
           if (gd && m.ny * gd > 0.5) {
-            ba.grounded = true; ba.groundedOn = b;
+            ba.grounded = true; ba.groundedOn = b; land(ba, vn);
             if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
           }
@@ -1576,7 +1656,7 @@ export class Physics {
           const vn = bb.vel.x * m.nx + bb.vel.y * m.ny + bb.vel.z * m.nz;
           if (vn < 0) { const k = vn * (1 + Math.max(bb.bounce, ba.bounce * 0.5)); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
           if (gd && m.ny * gd < -0.5) {
-            bb.grounded = true; bb.groundedOn = a;
+            bb.grounded = true; bb.groundedOn = a; land(bb, -vn);
             if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
           }
@@ -2203,7 +2283,7 @@ export class Input {
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
     const stickSide = zone >= 1 || (this.engine.stickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
     if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
-    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
+    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick && !this.onTapTarget(p)) {
       ptr.role = 'stick';
       const f = st.joystickMode === 'fixed' ? this.fixedStick() : null;
       this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y, stay: st.joystickMode === 'static' };
@@ -2211,6 +2291,13 @@ export class Input {
     }
     this.pointers.set(e.pointerId, ptr);
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
+  }
+
+  /** Is there something under this point that listens for taps (On Tap nodes, tap triggers, buttons)? Then the finger is a tap, not the joystick. */
+  onTapTarget(p) {
+    const s = this.engine.scene; if (!s?.tapTargets?.size) return false;
+    for (const t of s.tapTargets) if (!t.dead && t.visible !== false && hitTest(s, t, p.x, p.y)) return true;
+    return false;
   }
 
   move(e) {
@@ -2235,8 +2322,9 @@ export class Input {
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
     const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
     if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000 });
-    if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
-      this.taps.push({ x: ptr.x, y: ptr.y });
+    const tapDist = Math.max(16, Math.min(this.engine.width, this.engine.height) * 0.04); // a finger wobbles a little: more room on big screens
+    if (!cancelled && (ptr.role === 'free' || ptr.role === 'stick') && dt < 450 && dist < tapDist) {
+      this.taps.push({ x: ptr.sx, y: ptr.sy, ex: ptr.x, ey: ptr.y }); // where the finger landed is what was aimed at
       this.justPressed.add('tap');
     } else if (!cancelled && ptr.role === 'free' && dt < 700 && dist > 40) {
       const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
@@ -2969,13 +3057,14 @@ export class Renderer2D {
     ctx.globalAlpha = 1;
     // lights: a soft additive glow, and holes cut into the darkness layer
     const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible && !e.dead && !e.ui);
-    if (lights.length) {
+    const lit = lights.map((e, i) => { const L = e.light, now = lightNow(L, scene.time, i), r = L.range * (L.effect ? 1 : flickerK(L, scene.time, i)); return { e, L, r, k: now.k, col: now.col, poly: L.shadows ? lightPoly(scene, e, r) : null }; });
+    if (lit.length) {
       ctx.globalCompositeOperation = 'lighter';
-      lights.forEach((e, i) => {
-        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
-        gr.addColorStop(0, rgba(L.color, clamp(0.35 * L.intensity, 0, 1))); gr.addColorStop(1, rgba(L.color, 0));
-        ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
-      });
+      for (const { e, L, r, k, col, poly } of lit) {
+        const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r), soft = clamp(L.soft ?? 0.5, 0, 1);
+        gr.addColorStop(0, rgba(col, clamp(0.35 * L.intensity * k, 0, 1))); gr.addColorStop(clamp(1 - soft * 0.9, 0.05, 0.95), rgba(col, clamp(0.35 * L.intensity * k * 0.6, 0, 1))); gr.addColorStop(1, rgba(col, 0));
+        ctx.save(); clipLight2D(ctx, e, L, r, poly); ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2); ctx.restore();
+      }
       ctx.globalCompositeOperation = 'source-over';
     }
     engine.onRenderWorld?.(ctx, scene, z);
@@ -2991,11 +3080,11 @@ export class Renderer2D {
       l.fillRect(0, 0, lm.width, lm.height);
       l.globalCompositeOperation = 'destination-out';
       l.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0); l.translate(engine.width / 2, engine.height / 2); l.scale(z, z); l.translate(-c.x, -c.y);
-      lights.forEach((e, i) => {
-        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
-        gr.addColorStop(0, `rgba(0,0,0,${clamp(L.intensity, 0, 1)})`); gr.addColorStop(0.55, `rgba(0,0,0,${clamp(L.intensity * 0.6, 0, 1)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
-        l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2);
-      });
+      for (const { e, L, r, k, poly } of lit) {
+        const gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r), soft = clamp(L.soft ?? 0.5, 0, 1), a = clamp(L.intensity * k, 0, 1);
+        gr.addColorStop(0, `rgba(0,0,0,${a})`); gr.addColorStop(clamp(1 - soft * 0.9, 0.05, 0.95), `rgba(0,0,0,${a * 0.6})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        l.save(); clipLight2D(l, e, L, r, poly); l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2); l.restore();
+      }
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lm, 0, 0);
     }
   }
@@ -3014,7 +3103,7 @@ precision mediump float;
 varying vec3 vN; varying vec3 vW; varying vec3 vCol;
 uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos, uSky, uGround;
 uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
-uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount; uniform float uDouble;
+uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform vec4 uPLSpot[8]; uniform int uPLCount; uniform float uDouble;
 void main() {
   vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
@@ -3030,6 +3119,7 @@ void main() {
     vec3 tl = uPLPos[i] - vW; float dist = length(tl);
     float att = clamp(1.0 - dist / uPLRange[i], 0.0, 1.0); att *= att;
     vec3 pl = tl / max(dist, 0.0001);
+    if (uPLSpot[i].w > -1.5) att *= smoothstep(uPLSpot[i].w, uPLSpot[i].w + 0.06, dot(-pl, uPLSpot[i].xyz));
     lit += base * uPLCol[i] * max(dot(n, pl), 0.0) * att + uPLCol[i] * pow(max(dot(n, normalize(pl + v)), 0.0), 24.0) * 0.2 * att;
   }
   vec3 c = mix(lit, base, uEmissive);
@@ -3218,7 +3308,7 @@ export class Renderer3D {
     this.voxelCache = new WeakMap();
     this.meshCache = new Map(); // editable mesh parts (by their verts array) → GPU buffers, oldest dropped first
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount', 'uDouble']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLSpot', 'uPLCount', 'uDouble']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
     for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
@@ -3424,12 +3514,13 @@ export class Renderer3D {
     // point lights: the 8 nearest to the camera
     const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible !== false && !e.dead && !e.ui)
       .sort((a, b) => Math.hypot(a.x - eye.x, a.y - eye.y, a.z - eye.z) - Math.hypot(b.x - eye.x, b.y - eye.y, b.z - eye.z)).slice(0, 8);
-    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8);
+    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8), spot = new Float32Array(32).fill(-2);
     lights.forEach((e, i) => {
-      const Lt = e.light, c = hexToRgb(Lt.color), k = (Lt.intensity ?? 1) * flickerK(Lt, scene.time, i);
+      const Lt = e.light, now = lightNow(Lt, scene.time, i), c = hexToRgb(now.col), k = (Lt.intensity ?? 1) * now.k;
       pos.set([e.x, e.y, e.z], i * 3); col.set([c[0] * k, c[1] * k, c[2] * k], i * 3); rng[i] = Math.max(0.1, Lt.range > 50 ? 8 : Lt.range || 8);
+      if (isSpot(Lt)) { const t = (Lt.tilt ?? 90) * DEG, y = (e.ry || 0) * DEG; spot.set([Math.sin(y) * Math.cos(t), -Math.sin(t), Math.cos(y) * Math.cos(t), Math.cos(Math.min(179, spotCone(Lt)) / 2 * DEG)], i * 4); } // spotlight: aimed down by its tilt, turned by the object
     });
-    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform1i(this.u.uPLCount, lights.length);
+    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform4fv(this.u.uPLSpot, spot); gl.uniform1i(this.u.uPLCount, lights.length);
     gl.uniform3fv(this.u.uFogColor, bg);
     gl.uniform1f(this.u.uFogNear, scene.fog.near); gl.uniform1f(this.u.uFogFar, scene.fog.far);
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
@@ -3740,6 +3831,7 @@ function renderUI(engine, scene) {
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
   for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  drawStatBars(ctx, scene, engine);
   if (scene.popups?.length) { // floating "+10" texts
     const now = scene.time;
     scene.popups = scene.popups.filter((q) => now - q.t < q.life);
@@ -3948,7 +4040,7 @@ registerBehavior('move', {
         // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
         if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, b = e.body, three = is3D(e), z = three ? 1 : s.engine.renderer.zoomFor(s), M = e.move || { speedMul: 1 };
         let a = p.control === 'drag' || M.locked ? { x: 0, y: 0 } : inp.axis();
         let ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y;
@@ -4074,7 +4166,7 @@ registerBehavior('platformer', {
         e.ensureBody({ type: 'dynamic' });
         if (!s.gravity) s.gravity = is3D(e) ? -25 : 1600;
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body, up = is3D(e) ? 1 : -1;
         const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
         const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
@@ -4284,6 +4376,8 @@ registerBehavior('hazard', {
           return;
         }
         if (p.destroySelf) e.destroy();
+        const hb = p.action === 'damage' && other.getBehavior('health');
+        if (hb) { hb.damage(1, other, e); return; } // a player with Health loses health, not a life
         respawnOrEnd(other, s, p.action);
       },
     };
@@ -4702,6 +4796,53 @@ registerBehavior('cameraMixer', {
     };
   },
 });
+registerBehavior('cameraControls', {
+  label: 'Camera Controls (drag & pinch)', description: 'Lets the player move this camera: drag to pan, pinch (or mouse wheel) to zoom, double-tap to go back. For maps, strategy, idle and building games. Put it on a Camera set to Fixed.',
+  params: [
+    { key: 'pan', label: 'Drag to pan', type: 'bool', default: true },
+    { key: 'zoom', label: 'Pinch / wheel to zoom', type: 'bool', default: true },
+    { key: 'minZoom', label: 'Zoom out to (2D) / widest view (3D °)', type: 'number', default: 0.5, step: 0.1 },
+    { key: 'maxZoom', label: 'Zoom in to (2D) / narrowest view (3D °)', type: 'number', default: 3, step: 0.1 },
+    { key: 'limit', label: 'How far it can pan (0 = anywhere)', type: 'number', default: 0, step: 10 },
+    { key: 'glide', label: 'Keep gliding after a flick', type: 'bool', default: true },
+    { key: 'reset', label: 'Double-tap to go back', type: 'bool', default: true },
+    { key: 'onlyEmpty', label: 'Ignore fingers on tappable objects', type: 'bool', default: true },
+  ],
+  create(p) {
+    let home = null, lastPinch = 0, vx = 0, vy = 0, lastTap = -9;
+    const zoomKey = (s) => (s.mode === '3d' ? 'camFov' : 'camZoom');
+    return {
+      start(e) { home = { x: e.x, y: e.y, z: e.z }; },
+      update(e, dt, s) {
+        if (s.engine.editing) return;
+        const inp = s.engine.input, three = s.mode === '3d', free = [...inp.pointers.values()].filter((q) => q.role === 'free' && !(p.onlyEmpty !== false && q.onTap));
+        for (const q of inp.downs) { const ptr = inp.pointers.get(q.id); if (ptr && p.onlyEmpty !== false && inp.onTapTarget(ptr)) ptr.onTap = true; }
+        const zk = zoomKey(s), zNow = e.data[zk] ?? (three ? s.camera.fov || 60 : s.camera.zoom || 1);
+        const lo = Math.min(+p.minZoom || 0.5, +p.maxZoom || 3), hi = Math.max(+p.minZoom || 0.5, +p.maxZoom || 3);
+        const setZoom = (z) => { e.data[zk] = three ? clamp(z, Math.min(lo, hi) > 5 ? lo : 15, Math.max(lo, hi) > 5 ? hi : 100) : clamp(z, lo, hi); };
+        if (p.zoom !== false && free.length >= 2) {
+          const d = Math.hypot(free[0].x - free[1].x, free[0].y - free[1].y);
+          if (lastPinch) setZoom(three ? zNow * (lastPinch / d) : zNow * (d / lastPinch));
+          lastPinch = d; vx = vy = 0; return;
+        }
+        lastPinch = 0;
+        if (p.zoom !== false && inp.wheel?.dy) setZoom(three ? zNow * (1 + inp.wheel.dy * 0.001) : zNow * (1 - inp.wheel.dy * 0.001));
+        if (p.reset !== false) for (const t of inp.taps) { if (s.time - lastTap < 0.35 && !inp.onTapTarget(t)) { e.x = home.x; e.y = home.y; e.z = home.z; delete e.data[zk]; vx = vy = 0; lastTap = -9; } else lastTap = s.time; }
+        const z = three ? 1 : (e.data.camZoom ?? s.camera.zoom ?? 1);
+        if (p.pan !== false && free.length === 1) {
+          const dx = inp.drag.dx, dy = inp.drag.dy;
+          if (three) { const yaw = (e.ry || 0) * DEG, k = (s.camera.fov || 60) / 60 * 0.02 * Math.max(1, Math.abs(e.y)); const fx = -Math.sin(yaw), fz = -Math.cos(yaw); vx = -(dx * Math.cos(yaw) + dy * fx) * k / Math.max(dt, 1e-3); vy = -(-dx * Math.sin(yaw) + dy * fz) * k / Math.max(dt, 1e-3); e.x += vx * dt; e.z += vy * dt; }
+          else { vx = -dx / z / Math.max(dt, 1e-3); vy = -dy / z / Math.max(dt, 1e-3); e.x += vx * dt; e.y += vy * dt; }
+        } else if (p.glide !== false && (vx || vy)) {
+          const k = Math.exp(-5 * dt); vx *= k; vy *= k; if (Math.hypot(vx, vy) < 2) vx = vy = 0;
+          if (three) { e.x += vx * dt; e.z += vy * dt; } else { e.x += vx * dt; e.y += vy * dt; }
+        } else vx = vy = 0;
+        const L = +p.limit || 0;
+        if (L > 0 && home) { e.x = clamp(e.x, home.x - L, home.x + L); if (three) e.z = clamp(e.z, home.z - L, home.z + L); else e.y = clamp(e.y, home.y - L, home.y + L); }
+      },
+    };
+  },
+});
 registerBehavior('cameraTargetGroup', {
   label: 'Target Group', description: 'A group of things for a camera to frame together (Cinemachine Target Group), each with a weight (how much the camera cares) and a radius (room around it). Set a Group camera\'s Follow tag to this object\'s name.',
   params: [
@@ -4808,7 +4949,7 @@ registerBehavior('cameraImpulse', {
       },
       update(e, dt, s) {
         if (p.when === 'every few seconds') { t += dt; if (t >= Math.max(0.1, +p.every || 3)) { t = 0; fire(e, s); } }
-        if (p.when === 'it lands' && e.body) { const g = !!e.body.grounded; if (g && !wasGround) { const sp = Math.abs(e.body.lastImpact ?? e.body.vel?.y ?? 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); } wasGround = g; }
+        if (p.when === 'it lands' && e.body) { const g = !!e.body.grounded; if (e.body.landed > 0 || (g && !wasGround)) { const sp = e.body.landed || Math.abs(e.body.vel?.y ?? 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); } wasGround = g; }
       },
       collide(e, other, s) { if (p.when !== 'it hits something') return; const v = e.body?.vel || { x: 0, y: 0 }, sp = Math.hypot(v.x || 0, v.y || 0, v.z || 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); },
       destroy(e, s) { if (p.when === 'it is destroyed') fire(e, s); },
@@ -8516,49 +8657,311 @@ registerBehavior('touchButton', {
   },
 });
 
+/** Status effects that Health understands (Damage Dealer, nodes and triggers give them). */
+export const STATUS_FX = {
+  poison: { label: 'Poison', col: '#7dff5a', type: 'poison' },
+  burn: { label: 'Burn', col: '#ff8a3d', type: 'fire' },
+  bleed: { label: 'Bleed', col: '#ff3d5a', type: 'bleed' },
+  regen: { label: 'Heal over time', col: '#5dff9a', heal: true },
+  slow: { label: 'Slow', col: '#7ad7ff', speed: 0.5 },
+  freeze: { label: 'Freeze', col: '#bfefff', speed: 0 },
+};
+const tagList = (t) => String(t || '').split(',').map((q) => q.trim()).filter(Boolean);
+/** "fire 0.5, ice: 2, poison=0" → { fire: 0.5, ice: 2, poison: 0 } */
+const parseAmounts = (t) => { const m = {}; for (const part of String(t || '').split(',')) { const g = part.trim().match(/^(.+?)\s*[:= ]\s*(-?[\d.]+)$/); if (g) m[g[1].trim().toLowerCase()] = +g[2]; } return m; };
+/** Multiply a movement component's speed by its object's slow / freeze / hunger effects (e.data.speedFx). */
+function scaleSpeed(p, e) {
+  const fx = e.data.speedFx; if (!fx && p._baseSpeed === undefined) return;
+  if (p.speed !== p._lastSpeed) p._baseSpeed = p.speed; // someone changed the setting: that's the new normal
+  let k = 1; for (const v of Object.values(fx || {})) k *= v;
+  p.speed = p._lastSpeed = p._baseSpeed * k;
+}
+/** Floating text over an object, in 2D or 3D. */
+function popOver(s, e, text, color, size = 22) {
+  const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
+  const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh);
+  const bars = e._bars ? Object.values(e._bars).filter((b) => b.show).length : 0;
+  if (!q.behind) popText(s, q.x, q.y - 6 - (bars ? 10 + bars * 9 : 0), text, color, size);
+}
+const fmtHp = (n) => String(Math.round(n * 10) / 10);
+/** Small bars over objects: Health (with shield), Hunger, Thirst… set in e._bars by the components. */
+function drawStatBars(ctx, scene, engine) {
+  for (const e of scene.entities) {
+    const B = e._bars; if (!B || e.dead || e.visible === false || e.ui) continue;
+    const list = Object.values(B).filter((b) => b.show); if (!list.length) continue;
+    const ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = scene.mode === '3d', r = engine.renderer;
+    const q = three ? r.worldToScreen(scene, e.x, e.y + hh, e.z) : r.worldToScreen(scene, e.x, e.y - hh); if (q.behind) continue;
+    const w = three ? 46 : clamp((ex.sphere ? ex.r : ex.hx) * 2 * r.zoomFor(scene), 30, 70);
+    list.forEach((b, i) => {
+      const y = q.y - 12 - i * 9, x = q.x - w / 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 1, y - 1, w + 2, 7);
+      ctx.fillStyle = b.col; ctx.fillRect(x, y, w * clamp(b.k, 0, 1), 5);
+      if (b.k2 > 0) { ctx.fillStyle = '#7ad7ff'; ctx.fillRect(x, y + 3, w * clamp(b.k2, 0, 1), 2); } // shield: a strip along the bottom
+    });
+  }
+}
+/** Who is touching `e` right now, for those that match `ok`. */
+function touchingNow(s, e, ok) {
+  const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead && ok(o)) out.push(o); }
+  return out;
+}
+
 // ---- advanced components ----
-/** Health & Damage: hit points, damage from tags, invulnerability, knockback, regeneration and what happens on death. */
+/** Health & Damage: hit points, armour, shields, damage types, status effects, knockback, regeneration, lives and what happens on death. */
 registerBehavior('health', {
-  label: 'Health & Damage', description: 'Hit points that go down when touched by dangerous tags. Brief invulnerability, knockback, regeneration, a health variable for your HUD, and a death action.',
+  label: 'Health & Damage', description: 'Hit points that go down when touched by dangerous tags. Armour, shields, damage types, poison and burning, health pickups, fall damage, a health bar over it, damage numbers, lives and a death action.',
   params: [
     { key: 'hp', label: 'Max health', type: 'number', default: 3, range: [1, 100], step: 1 },
     { key: 'hurtBy', label: 'Hurt by tags (comma separated)', type: 'text', default: 'enemy, hazard', suggest: 'tags' },
     { key: 'damage', label: 'Damage per hit', type: 'number', default: 1, step: 1 },
     { key: 'invuln', label: 'Invulnerable after a hit (sec)', type: 'number', default: 1, range: [0, 5], step: 0.1 },
     { key: 'knockback', label: 'Knockback', type: 'number', default: 300, default3d: 8 },
-    { key: 'regen', label: 'Heal per second', type: 'number', default: 0, step: 0.1, group: 'More' },
-    { key: 'syncVar', label: 'Show health in variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “hp”: show it with a Progress Bar or {hp} in a text.', group: 'More' },
-    { key: 'onDeath', label: 'When health reaches 0', type: 'select', options: ['destroy', 'game over', 'respawn', 'send message', 'nothing'], default: 'destroy' },
+    { key: 'onDeath', label: 'When health reaches 0', type: 'select', options: ['destroy', 'game over', 'respawn', 'lose a life', 'send message', 'nothing'], default: 'destroy', info: '“Lose a life” takes one from the lives variable and respawns; game over when none are left.' },
     { key: 'message', label: 'Message to send', type: 'text', default: 'died', suggest: 'messages', showIf: { onDeath: ['send message'] } },
+    { key: 'armor', label: 'Armour (taken off every hit)', type: 'number', default: 0, step: 1, group: 'Defence' },
+    { key: 'defense', label: 'Damage reduction (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'Defence' },
+    { key: 'resist', label: 'Damage types (×)', type: 'text', default: '', info: 'How much each damage type hurts: “fire 0.5, poison 0, ice 2” (0 = immune, 2 = double).', group: 'Defence' },
+    { key: 'shield', label: 'Shield (soaks up hits first)', type: 'number', default: 0, step: 1, group: 'Defence' },
+    { key: 'shieldRegen', label: 'Shield refills per second', type: 'number', default: 1, step: 0.5, group: 'Defence' },
+    { key: 'god', label: 'Can’t be hurt', type: 'bool', default: false, group: 'Defence' },
+    { key: 'hurtWhileTouching', label: 'Keeps hurting while touching', type: 'bool', default: true, info: 'After the invulnerable time, standing in a hazard or on an enemy hurts again.', group: 'Defence' },
+    { key: 'regen', label: 'Heal per second', type: 'number', default: 0, step: 0.1, group: 'Healing' },
+    { key: 'regenDelay', label: 'Wait after a hit before healing (sec)', type: 'number', default: 0, step: 0.5, group: 'Healing', info: 'Also when the shield starts refilling.' },
+    { key: 'healTags', label: 'Health pickups (tags)', type: 'text', default: '', suggest: 'tags', info: 'e.g. “medkit”: touching one heals and uses it up.', group: 'Healing' },
+    { key: 'healAmount', label: 'Health per pickup', type: 'number', default: 1, step: 1, group: 'Healing' },
+    { key: 'fallDamage', label: 'Fall damage (0 = off)', type: 'number', default: 0, step: 1, group: 'Healing' },
+    { key: 'fallSpeed', label: 'Hurts when landing faster than', type: 'number', default: 900, default3d: 18, group: 'Healing' },
+    { key: 'showBar', label: 'Health bar over it', type: 'select', options: ['never', 'when hurt', 'always'], default: 'never', group: 'Look & sound' },
+    { key: 'numbers', label: 'Damage numbers', type: 'bool', default: false, group: 'Look & sound' },
+    { key: 'hitSound', label: 'Hit sound', type: 'text', default: 'hit', suggest: 'sounds', info: 'hit, click, power… or one of your sounds; “none” for silence.', group: 'Look & sound' },
+    { key: 'shake', label: 'Shake the camera when hit', type: 'bool', default: true, group: 'Look & sound' },
+    { key: 'deathFx', label: 'Death effect', type: 'select', options: ['burst', 'fade out', 'burst + fade', 'none'], default: 'burst', group: 'Look & sound' },
+    { key: 'syncVar', label: 'Show health in variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “hp”: show it with a Progress Bar or {hp} in a text.', group: 'More' },
     { key: 'points', label: 'Points when it dies', type: 'number', default: 0, step: 5, group: 'More' },
   ],
   create(p) {
-    let hp = 0, home = null;
-    const tags = String(p.hurtBy || '').split(',').map((t) => t.trim()).filter(Boolean);
+    let hp = 0, max = 0, sh = 0, shMax = 0, home = null, since = 99, dead = false;
+    const tags = tagList(p.hurtBy), healTags = tagList(p.healTags), resist = parseAmounts(p.resist), effects = new Map();
+    const hurtsMe = (e, o) => tags.some((t) => o.has(t)) && !o.getBehavior('damager')?.hits(e); // a Damage Dealer hurts with its own settings
     const inst = {
-      get hp() { return hp; },
-      sync(e, s) { e.data.hp = hp; e.data.hpMax = p.hp; if (p.syncVar) s.setVar(p.syncVar, Math.ceil(hp)); },
-      heal(n, e = inst.entity) { hp = Math.min(p.hp, hp + n); inst.sync(e, e.scene); },
-      damage(n, e = inst.entity, from = null) {
-        const s = e.scene; if (e.dead || hp <= 0 || (e.data.invuln || 0) > 0) return;
-        hp -= n; e.data.invuln = +p.invuln || 0; inst.sync(e, s);
-        s.emit('damage', e, n); s.engine.audio.sfx('hit'); s.impulse(6, e);
-        if (from && p.knockback && e.body) { const dx = e.x - from.x, dy = e.y - from.y, dz = e.z - from.z, l = Math.hypot(dx, dy, dz) || 1, up = is3D(e) ? 1 : -1; e.body.vel.x = dx / l * p.knockback; e.body.vel.z = dz / l * p.knockback; e.body.vel.y = up * Math.abs(p.knockback) * 0.6; }
-        if (hp > 0) return;
-        s.emit('death', e); if (p.points) s.addVar('score', p.points);
-        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 24);
-        if (p.onDeath === 'destroy') e.destroy();
-        else if (p.onDeath === 'game over') s.gameOver();
-        else if (p.onDeath === 'respawn') { Object.assign(e, home); if (e.body) e.body.vel = { x: 0, y: 0, z: 0 }; hp = p.hp; inst.sync(e, s); }
-        else if (p.onDeath === 'send message') s.send(p.message);
+      get hp() { return hp; }, get max() { return max; }, get shield() { return sh; }, get dead() { return dead; }, effects,
+      sync(e = inst.entity, s = e.scene) {
+        e.data.hp = hp; e.data.hpMax = max; e.data.hpShield = sh; e.data.status = [...effects.keys()].join(',');
+        if (p.syncVar) s.setVar(p.syncVar, Math.ceil(hp));
+        const k = max ? hp / max : 0;
+        (e._bars ||= {}).health = { k, k2: shMax ? sh / shMax : 0, col: k > 0.5 ? '#5dff8a' : k > 0.25 ? '#ffd23d' : '#ff4d4d', show: !dead && (p.showBar === 'always' || (p.showBar === 'when hurt' && (hp < max || sh < shMax))) };
       },
-      start(e, s) { inst.entity = e; hp = p.hp; home = { x: e.x, y: e.y, z: e.z }; inst.sync(e, s); for (const t of tags) s.want(t); },
-      update(e, dt, s) { if (p.regen && hp > 0 && hp < p.hp) { hp = Math.min(p.hp, hp + p.regen * dt); inst.sync(e, s); } },
-      collide(e, other) { if (tags.some((t) => other.has(t))) inst.damage(+p.damage || 1, e, other); },
+      heal(n, e = inst.entity, quiet = false) {
+        const was = hp; hp = Math.min(max, hp + Math.max(0, +n || 0)); if (hp > 0) dead = false;
+        const got = hp - was; inst.sync(e, e.scene);
+        if (got > 0) { e.scene.emit('heal', e, got); if (p.numbers && !quiet) popOver(e.scene, e, '+' + fmtHp(got), '#5dff8a', 18); }
+        return got;
+      },
+      /** Hurt it. o: { type, crit, pierce (ignores armour), dot (poison tick: no invulnerability), knockback, ignoreInvuln }. Returns the damage done. */
+      damage(n, e = inst.entity, from = null, o = {}) {
+        const s = e.scene; if (e.dead || dead || hp <= 0 || p.god) return 0;
+        if (!o.dot && !o.ignoreInvuln && (e.data.invuln || 0) > 0) return 0;
+        let d = +n || 0; if (d <= 0) return 0;
+        const type = String(o.type || '').toLowerCase(); if (type && resist[type] != null) d *= resist[type];
+        if (!o.pierce) d = d * (1 - clamp(+p.defense || 0, 0, 100) / 100) - (o.dot ? 0 : +p.armor || 0);
+        if (d <= 0.001) { if (p.numbers && !o.dot) popOver(s, e, resist[type] === 0 ? 'Immune' : 'Blocked', '#9fb3c8', 18); return 0; }
+        d = Math.round(d * 100) / 100;
+        let soak = 0; if (sh > 0) { soak = Math.min(sh, d); sh -= soak; if (sh <= 0) s.emit('shieldBreak', e); }
+        const total = d; d -= soak; hp = Math.max(0, hp - d); since = 0;
+        if (!o.dot) e.data.invuln = +p.invuln || 0;
+        e.data.lastHit = { amount: total, type, crit: !!o.crit };
+        inst.sync(e, s);
+        s.emit('damage', e, total, from, type);
+        if (!o.dot) { if (p.hitSound !== 'none') s.engine.audio.sfx(p.hitSound || 'hit'); if (p.shake !== false) s.impulse(6, e); }
+        if (p.numbers) popOver(s, e, (o.crit ? 'CRIT ' : '') + '-' + fmtHp(total), o.crit ? '#ff5d8f' : !d ? '#7ad7ff' : o.color || '#ff4d4d', o.crit ? 30 : o.dot ? 16 : 22);
+        const kb = o.knockback ?? p.knockback;
+        if (from && kb && e.body && !o.dot) { const dx = e.x - from.x, dy = e.y - from.y, dz = e.z - from.z, l = Math.hypot(dx, dy, dz) || 1, up = is3D(e) ? 1 : -1; e.body.vel.x = dx / l * kb; e.body.vel.z = dz / l * kb; e.body.vel.y = up * Math.abs(kb) * 0.6; }
+        if (hp <= 0) inst.die(e, s);
+        return total;
+      },
+      die(e = inst.entity, s = e.scene) {
+        if (dead || e.dead) return; dead = true; hp = 0; effects.clear(); delete (e.data.speedFx || {}).status; inst.sync(e, s);
+        s.emit('death', e); if (p.points) s.addVar('score', p.points);
+        const fx = p.deathFx || 'burst', fade = fx.includes('fade');
+        if (fx.includes('burst')) s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 24);
+        const act = p.onDeath === 'lose a life' ? ((+s.vars.lives || 0) > 1 ? 'life' : 'game over') : p.onDeath;
+        if (act === 'life') s.addVar('lives', -1);
+        if (act === 'destroy') {
+          if (!fade) return e.destroy();
+          if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+          const t0 = s.time, a0 = e.alpha ?? 1, tick = () => { const k = (s.time - t0) / 0.4; if (e.dead) return; if (k >= 1) return e.destroy(); e.alpha = a0 * (1 - k); s.after(1 / 60, tick); }; tick();
+        } else if (act === 'game over') { if (p.onDeath === 'lose a life') s.setVar('lives', 0); s.gameOver(); }
+        else if (act === 'respawn' || act === 'life') inst.respawn(e, s);
+        else if (act === 'send message') s.send(p.message);
+      },
+      respawn(e = inst.entity, s = e.scene) {
+        Object.assign(e, home); if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+        hp = max; sh = shMax; dead = false; effects.clear(); e.data.invuln = Math.max(+p.invuln || 0, 1); inst.sync(e, s);
+      },
+      kill(e = inst.entity) { if (!dead && !p.god) inst.die(e, e.scene); },
+      setMax(n, refill = false, e = inst.entity) { max = Math.max(1, +n || 1); hp = refill ? max : Math.min(hp, max); inst.sync(e, e.scene); },
+      addShield(n, e = inst.entity) { sh = Math.max(0, sh + (+n || 0)); shMax = Math.max(shMax, sh); inst.sync(e, e.scene); },
+      addEffect(name, perSec = 1, seconds = 3, e = inst.entity) {
+        if (dead || !STATUS_FX[name] || (p.god && !STATUS_FX[name].heal)) return;
+        const type = STATUS_FX[name].type; if (type && resist[type] === 0) return; // immune
+        effects.set(name, { dps: +perSec || 0, left: +seconds || 0, tick: 0 }); inst.sync(e, e.scene); e.scene.emit('status', e, name);
+      },
+      cure(name = 'any', e = inst.entity) { if (!name || name === 'any') effects.clear(); else effects.delete(name); inst.sync(e, e.scene); },
+      start(e, s) {
+        inst.entity = e; max = Math.max(1, +p.hp || 1); hp = max; shMax = sh = Math.max(0, +p.shield || 0);
+        home = { x: e.x, y: e.y, z: e.z }; inst.sync(e, s); for (const t of [...tags, ...healTags]) s.want(t);
+      },
+      update(e, dt, s) {
+        since += dt; let changed = false, slow = 1;
+        for (const [k, f] of effects) {
+          const def = STATUS_FX[k]; f.left -= dt;
+          if (def.speed != null) slow = Math.min(slow, def.speed);
+          else if ((f.tick += dt) >= 0.5) { f.tick -= 0.5; const amt = f.dps * 0.5; if (def.heal) inst.heal(amt, e, true); else inst.damage(amt, e, null, { type: def.type, dot: true, pierce: true, color: def.col }); }
+          if (f.left <= 0) { effects.delete(k); changed = true; if (def.speed == null && f.tick > 0.01 && !dead) { const amt = f.dps * f.tick; if (def.heal) inst.heal(amt, e, true); else inst.damage(amt, e, null, { type: def.type, dot: true, pierce: true, color: def.col }); } } // the last part-tick, so it always deals per second × seconds
+          if (dead) break;
+        }
+        if (slow < 1 || e.data.speedFx?.status !== undefined) { e.data.speedFx ||= {}; if (slow < 1) e.data.speedFx.status = slow; else delete e.data.speedFx.status; }
+        if (changed) inst.sync(e, s);
+        if (dead) return;
+        const calm = since >= (+p.regenDelay || 0);
+        if (p.regen && calm && hp < max) { hp = Math.min(max, hp + p.regen * dt); inst.sync(e, s); }
+        if (shMax && calm && sh < shMax && +p.shieldRegen) { sh = Math.min(shMax, sh + p.shieldRegen * dt); inst.sync(e, s); }
+        if (+p.fallDamage > 0 && e.body?.landed > (+p.fallSpeed || 900)) { const v = e.body.landed, f = +p.fallSpeed || 900; inst.damage(+p.fallDamage * (1 + (v - f) / f), e, null, { type: 'fall', ignoreInvuln: true }); }
+        if (p.hurtWhileTouching !== false && tags.length && !(e.data.invuln > 0) && s.state === 'play') { const o = touchingNow(s, e, (q) => hurtsMe(e, q))[0]; if (o) inst.damage(+p.damage || 1, e, o); }
+      },
+      collide(e, other) {
+        if (healTags.length && healTags.some((t) => other.has(t)) && !other.dead) { if (hp < max) { inst.heal(+p.healAmount || 1, e); other.destroy(); e.scene.engine.audio.sfx('power'); } return; }
+        if (hurtsMe(e, other)) inst.damage(+p.damage || 1, e, other);
+      },
+      destroy(e) { if (e._bars) delete e._bars.health; },
     };
     return inst;
   },
 });
+
+/** Damage Dealer: hurts objects with Health (weapons, bullets, spikes, lava, explosions). */
+registerBehavior('damager', {
+  label: 'Damage Dealer', description: 'Hurts objects with Health that it touches: swords, bullets, spikes, lava, explosions. Damage types, critical hits, poison / burn / slow, area damage and knockback.',
+  params: [
+    { key: 'targets', label: 'Hurts tags', type: 'text', default: 'enemy', suggest: 'tags' },
+    { key: 'amount', label: 'Damage', type: 'number', default: 1, step: 1 },
+    { key: 'dtype', label: 'Damage type', type: 'select', options: ['normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall'], default: 'normal', info: 'Health can resist or be weak to types.' },
+    { key: 'mode', label: 'Hurts', type: 'select', options: ['when it touches', 'while touching (every few seconds)'], default: 'when it touches' },
+    { key: 'every', label: 'Every (sec)', type: 'number', default: 0.5, step: 0.1, showIf: { mode: ['while touching (every few seconds)'] } },
+    { key: 'cooldown', label: 'Wait before hurting the same one again (sec)', type: 'number', default: 0.3, step: 0.1 },
+    { key: 'knockback', label: 'Knockback (0 = their own)', type: 'number', default: 0 },
+    { key: 'effect', label: 'Also gives', type: 'select', options: ['nothing', 'poison', 'burn', 'bleed', 'slow', 'freeze'], default: 'nothing' },
+    { key: 'effectDps', label: 'Effect damage per second', type: 'number', default: 1, step: 0.5, showIf: { effect: ['poison', 'burn', 'bleed'] } },
+    { key: 'effectTime', label: 'Effect lasts (sec)', type: 'number', default: 3, step: 0.5, showIf: { effect: ['poison', 'burn', 'bleed', 'slow', 'freeze'] } },
+    { key: 'destroyOnHit', label: 'Destroy itself after a hit (bullets)', type: 'bool', default: false },
+    { key: 'critChance', label: 'Critical hit chance (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'More' },
+    { key: 'critTimes', label: 'Critical hit ×', type: 'number', default: 2, step: 0.5, group: 'More' },
+    { key: 'area', label: 'Area damage radius (0 = only what it touches)', type: 'number', default: 0, group: 'More', info: 'Explosions: everything with a target tag this close is hurt, less at the edge.' },
+    { key: 'pierce', label: 'Goes through armour', type: 'bool', default: false, group: 'More' },
+    { key: 'noHealth', label: 'Destroys targets without Health', type: 'bool', default: false, group: 'More' },
+    { key: 'points', label: 'Points per hit', type: 'number', default: 0, step: 1, group: 'More' },
+  ],
+  create(p) {
+    const tags = tagList(p.targets), last = new Map(); let tick = 0;
+    const inst = {
+      hits(t) { return tags.some((g) => t.has(g)); },
+      hit(e, t, s, k = 1) {
+        const now = s.time; if (now - (last.get(t) ?? -99) < (+p.cooldown || 0)) return 0; last.set(t, now);
+        const hb = t.getBehavior('health');
+        if (!hb) { if (p.noHealth) { s.burst(t.x, t.y, t.z, t.mesh?.color || t.shape?.fill || '#ff8a3d', 16); t.destroy(); } return 0; }
+        const crit = +p.critChance > 0 && Math.random() * 100 < +p.critChance;
+        const d = (+p.amount || 0) * k * (crit ? +p.critTimes || 2 : 1);
+        const dealt = hb.damage(d, t, e, { type: p.dtype === 'normal' ? '' : p.dtype, crit, pierce: !!p.pierce, knockback: +p.knockback || undefined, ignoreInvuln: p.mode !== 'when it touches' });
+        if (p.effect && p.effect !== 'nothing') hb.addEffect(p.effect, +p.effectDps || 1, +p.effectTime || 3, t);
+        if (dealt > 0) { if (p.points) s.addVar('score', +p.points); s.emit('dealtDamage', e, t, dealt); }
+        return dealt;
+      },
+      strike(e, t, s) {
+        if (+p.area > 0) { for (const q of s.entities) if (!q.dead && q !== e && inst.hits(q)) { const d = Math.hypot(q.x - e.x, q.y - e.y, (q.z || 0) - (e.z || 0)); if (d <= +p.area) inst.hit(e, q, s, 1 - 0.5 * d / +p.area); } }
+        else inst.hit(e, t, s);
+        if (p.destroyOnHit) e.destroy();
+      },
+      start(e, s) { for (const t of tags) s.want(t); },
+      update(e, dt, s) {
+        if (p.mode === 'when it touches' || s.state !== 'play') return;
+        if ((tick -= dt) > 0) return; tick = Math.max(0.05, +p.every || 0.5);
+        for (const o of touchingNow(s, e, (q) => inst.hits(q))) { inst.strike(e, o, s); if (e.dead) break; }
+      },
+      collide(e, other, s) { if (p.mode === 'when it touches' && inst.hits(other) && !other.dead && other !== e && s.state === 'play') inst.strike(e, other, s); },
+    };
+    return inst;
+  },
+});
+
+/** Hunger and Thirst: a need that drains over time, is refilled by food / drink and hurts or slows when empty. */
+function needComponent(key, o) {
+  registerBehavior(key, {
+    label: o.label, description: o.desc,
+    params: [
+      { key: 'max', label: 'Full at', type: 'number', default: 100, step: 10 },
+      { key: 'drain', label: o.drainLabel, type: 'number', default: o.drain, step: 0.1 },
+      { key: 'moveDrain', label: 'Faster while moving (×)', type: 'number', default: o.move, step: 0.1 },
+      { key: 'items', label: o.itemsLabel, type: 'text', default: o.tag, suggest: 'tags', info: `Touching an object with this tag (or name) ${o.verb}s it.` },
+      { key: 'perItem', label: 'Each one gives', type: 'number', default: o.per, step: 5 },
+      { key: 'amounts', label: 'Different amounts', type: 'text', default: '', info: `By name or tag: “${o.example}”.` },
+      { key: 'consume', label: 'Uses the item up', type: 'bool', default: true },
+      { key: 'syncVar', label: 'Show in variable', type: 'text', default: key, suggest: 'vars', info: `Show it with a Progress Bar bound to “${key}”, or {${key}} in a text.` },
+      { key: 'lowAt', label: 'Low at (%)', type: 'number', default: 25, range: [0, 100], step: 5 },
+      { key: 'lowMessage', label: 'Message when it gets low', type: 'text', default: o.lowMsg, suggest: 'messages' },
+      { key: 'whenEmpty', label: 'When it runs out', type: 'select', options: ['hurts health', 'slows down', 'hurts and slows', 'game over', 'nothing'], default: 'hurts health' },
+      { key: 'emptyDamage', label: 'Health lost per second', type: 'number', default: 1, step: 0.5, showIf: { whenEmpty: ['hurts health', 'hurts and slows'] } },
+      { key: 'slowTo', label: 'Speed when empty (×)', type: 'number', default: 0.5, range: [0, 1], step: 0.1, showIf: { whenEmpty: ['slows down', 'hurts and slows'] } },
+      { key: 'start', label: 'Starts at (%)', type: 'number', default: 100, range: [0, 100], step: 5, group: 'More' },
+      { key: 'healAbove', label: 'Heals health while above (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'More', info: '0 = off. Well-fed players slowly heal.' },
+      { key: 'healRate', label: 'Health per second while above', type: 'number', default: 0.2, step: 0.1, group: 'More' },
+      { key: 'showBar', label: 'Bar over it', type: 'select', options: ['never', 'when low', 'always'], default: 'never', group: 'More' },
+      { key: 'sound', label: o.verb[0].toUpperCase() + o.verb.slice(1) + ' sound', type: 'text', default: 'power', suggest: 'sounds', group: 'More' },
+    ],
+    create(p) {
+      let v = 0, max = 1, low = false, empty = false, hurtT = 0;
+      const items = tagList(p.items), amounts = parseAmounts(p.amounts);
+      const inst = {
+        get value() { return v; }, get max() { return max; },
+        sync(e = inst.entity, s = e.scene) {
+          e.data[key] = v; e.data[key + 'Max'] = max; if (p.syncVar) s.setVar(p.syncVar, Math.round(v));
+          const k = v / max; (e._bars ||= {})[key] = { k, col: o.col, show: p.showBar === 'always' || (p.showBar === 'when low' && k * 100 <= (+p.lowAt || 0)) };
+        },
+        add(n, e = inst.entity) { v = clamp(v + (+n || 0), 0, max); inst.check(e, e.scene); inst.sync(e, e.scene); },
+        set(n, e = inst.entity) { v = clamp(+n || 0, 0, max); inst.check(e, e.scene); inst.sync(e, e.scene); },
+        check(e, s) {
+          const pc = v / max * 100, nowLow = pc <= (+p.lowAt || 0) && v > 0, nowEmpty = v <= 0;
+          if (nowLow && !low) { if (p.lowMessage) s.send(p.lowMessage); s.emit('needLow', e, key); }
+          if (nowEmpty && !empty) { s.emit('needEmpty', e, key); if (p.whenEmpty === 'game over') s.gameOver(); }
+          low = nowLow; empty = nowEmpty;
+          const slows = empty && /slows/.test(p.whenEmpty);
+          if (slows) (e.data.speedFx ||= {})[key] = clamp(+p.slowTo, 0, 1); else if (e.data.speedFx) delete e.data.speedFx[key];
+        },
+        worth(t) { const n = String(t.name || '').toLowerCase(); if (amounts[n] != null) return amounts[n]; for (const g of t.tags || []) if (amounts[String(g).toLowerCase()] != null) return amounts[String(g).toLowerCase()]; return +p.perItem || 0; },
+        isItem(t) { const n = String(t.name || '').toLowerCase(); return items.some((g) => t.has(g) || n === g.toLowerCase()); },
+        start(e, s) { inst.entity = e; max = Math.max(1, +p.max || 100); v = max * clamp(+(p.start ?? 100), 0, 100) / 100; for (const t of items) s.want(t); inst.check(e, s); inst.sync(e, s); },
+        update(e, dt, s) {
+          if (s.state !== 'play') return;
+          const b = e.body, moving = b && Math.hypot(b.vel.x || 0, is3D(e) ? b.vel.z || 0 : b.vel.y || 0) > (is3D(e) ? 0.5 : 20);
+          const was = v; v = Math.max(0, v - (+p.drain || 0) * (moving ? +p.moveDrain || 1 : 1) * dt);
+          if (v !== was) { inst.check(e, s); if (Math.round(v) !== Math.round(was) || v === 0) inst.sync(e, s); else e.data[key] = v; }
+          const hb = e.getBehavior('health');
+          if (empty && /hurts/.test(p.whenEmpty) && hb && (hurtT += dt) >= 1) { hurtT -= 1; hb.damage(+p.emptyDamage || 1, e, null, { dot: true, pierce: true, type: key === 'thirst' ? 'thirst' : 'hunger', color: o.col }); }
+          if (!empty) hurtT = 0;
+          if (+p.healAbove > 0 && hb && v / max * 100 >= +p.healAbove && hb.hp < hb.max && hb.hp > 0) hb.heal(+p.healRate * dt, e, true);
+        },
+        collide(e, other, s) {
+          if (!items.length || other.dead || !inst.isItem(other) || v >= max) return;
+          inst.add(inst.worth(other), e); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
+          s.emit(o.verb, e, other); if (p.consume !== false) other.destroy();
+        },
+        destroy(e) { if (e._bars) delete e._bars[key]; if (e.data.speedFx) delete e.data.speedFx[key]; },
+      };
+      return inst;
+    },
+  });
+}
+needComponent('hunger', { label: 'Hunger', desc: 'Goes down over time (faster while moving). Eating food fills it up; when it runs out the object loses health or slows down. Show it with a Progress Bar.', drainLabel: 'Gets hungry by (per second)', drain: 0.5, move: 1.5, itemsLabel: 'Food (tags or names)', tag: 'food', verb: 'eat', per: 25, example: 'apple 15, bread 30, steak 60', lowMsg: 'hungry', col: '#ffa63d' });
+needComponent('thirst', { label: 'Thirst', desc: 'Goes down over time, faster than hunger. Drinking water fills it up; when it runs out the object loses health or slows down. Show it with a Progress Bar.', drainLabel: 'Gets thirsty by (per second)', drain: 0.8, move: 1.5, itemsLabel: 'Drinks (tags or names)', tag: 'water', verb: 'drink', per: 30, example: 'water 30, juice 40, soda 20', lowMsg: 'thirsty', col: '#4db8ff' });
 
 /** Enemy AI: patrol → chase when it sees the target → attack in range → give up and go home. */
 registerBehavior('enemyAI', {
@@ -8936,7 +9339,7 @@ registerBehavior('thirdPerson', {
         yaw = (e.ry || 0) * DEG; tilt = p.height * DEG;
         s.settings.joystick = true; s.engine.layoutButtons();
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body;
         { const L = s.engine.lookScale(); yaw -= inp.drag.dx * p.look * DEG * L.x; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6 * L.y, 0.05, 1.3); }
         const f = fwd3(yaw), r = right3(yaw);
@@ -9575,6 +9978,7 @@ registerBehavior('controller2d', {
       },
       update(e, dt, s) {
         if (s.state !== 'play') return;
+        scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body, damp = Math.max(0, 1 - (+p.friction || 0) * dt);
         switch (p.mode) {
           case 'topdown4': {
@@ -10005,6 +10409,7 @@ registerBehavior('button', {
     return {
       uiAlways: true, // keeps working on title and end screens
       start(e, s) {
+        (s.tapTargets ||= new Set()).add(e); // Buttons: a touch here is a press, never the joystick
         if (!(+p.cooldown > 0)) return;
         (s.overlays ||= []).push(ring = (ctx) => { // a dark sweep over the button while it cools down
           if (e.dead || !e.visible || e._parentHidden || s.time >= cdUntil) return;
@@ -10346,7 +10751,7 @@ export const NODE_TYPES = {
   onMessage: { cat: 'Events', label: 'On Message', outs: ['then'], params: [txt('message', 'go', 'message')] },
   touchEnd: { cat: 'Events', label: 'On Touch End', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
   varChanged: { cat: 'Events', label: 'On Variable Changed', outs: ['then'], params: [txt('name', 'score', 'variable')] },
-  damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'] },
+  damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'], params: [opt('dtype', ['any', 'normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'any', 'damage type')] },
   death: { cat: 'Events', label: 'On Death', outs: ['then'] },
   holding: { cat: 'Events', label: 'While Touching Screen', outs: ['then'] },
   released: { cat: 'Events', label: 'On Finger Lifted', outs: ['then'] },
@@ -10434,7 +10839,6 @@ export const NODE_TYPES = {
   toggleComp: { cat: 'Objects', label: 'Turn Component On / Off', exec: true, outs: ['then'], params: [txt('component', 'patrol', 'component type'), opt('mode', ['off', 'on', 'toggle'], 'off', 'make it'), txt('object', '', 'object (blank = me)')] },
   waitUntil: { cat: 'Flow', label: 'Wait Until', exec: true, outs: ['then'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('timeout', 0, 'give up after (0 = never)')] },
   randomWait: { cat: 'Flow', label: 'Random Wait', exec: true, outs: ['then'], inputs: [{ key: 'min', type: 'number', default: 0.5 }, { key: 'max', type: 'number', default: 2 }] },
-  setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
   lookAt: { cat: 'Move', label: 'Look At', exec: true, outs: ['then'], params: [txt('tag', 'player', 'tag')] },
@@ -10481,6 +10885,7 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
@@ -10761,6 +11166,15 @@ Object.assign(NODE_TYPES, {
   camLens: { cat: 'Camera', label: 'Set Camera Zoom / Field Of View', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('what', ['zoom (2D)', 'field of view (3D)', 'back to its own'], 'zoom (2D)', 'set')], inputs: [N_IN('value', 1.5)] },
   camMix: { cat: 'Camera', label: 'Set Camera Mix', exec: true, outs: ['then'], params: [txt('mixer', 'Camera Mixer', 'mixer object')], inputs: [N_IN('mix', 0.5)] },
   camHold: { cat: 'Camera', label: 'Freeze Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('mode', ['freeze', 'unfreeze', 'toggle'], 'freeze', 'make it')] },
+  camFocus: { cat: 'Camera', label: 'Focus Camera On', exec: true, outs: ['then', 'back'], params: [txt('object', 'Chest', 'object or tag')], inputs: [N_IN('zoom', 1.6), N_IN('seconds', 1.5)] },
+  zoomPunch: { cat: 'Camera', label: 'Zoom Punch', exec: true, outs: ['then'], inputs: [N_IN('amount', 0.12), N_IN('seconds', 0.25)] },
+  takePhoto: { cat: 'Camera', label: 'Take Photo', exec: true, outs: ['then', 'failed'], params: [opt('then', ['share', 'save to device', 'keep in variable'], 'share', 'then'), txt('var', 'photo', 'variable (keep)'), txt('text', 'Look at this!', 'share text')] },
+  fadeLight: { cat: 'Looks', label: 'Fade Light', exec: true, outs: ['then', 'done'], params: [txt('object', '', 'light object (empty = this)'), { key: 'color', type: 'color', default: '#ffd9a0', label: 'to colour' }, bool('keepColor', true, 'keep its colour')], inputs: [N_IN('brightness', 1), N_IN('range', 0), N_IN('seconds', 1)] },
+  lightEffect: { cat: 'Looks', label: 'Set Light Effect', exec: true, outs: ['then'], params: [txt('object', '', 'light object (empty = this)'), opt('effect', ['steady', 'pulse', 'blink', 'fire', 'rainbow'], 'pulse', 'effect')], inputs: [N_IN('speed', 1)] },
+  setDarkness: { cat: 'Looks', label: 'Set Darkness / Ambient', exec: true, outs: ['then', 'done'], params: [{ key: 'color', type: 'color', default: '#0a0a1e', label: 'colour' }], inputs: [N_IN('darkness', 0.7), N_IN('seconds', 1)] },
+  setSun: { cat: 'Looks', label: 'Set Sun (3D)', exec: true, outs: ['then', 'done'], params: [{ key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], inputs: [N_IN('brightness', 1), N_IN('ambient', 0.45), N_IN('seconds', 1)] },
+  lightingPreset: { cat: 'Looks', label: 'Lighting Preset', exec: true, outs: ['then', 'done'], params: [opt('preset', ['Day', 'Golden hour', 'Evening', 'Night', 'Overcast', 'Cave', 'Spooky', 'Underwater', 'Neon'], 'Night', 'preset')], inputs: [N_IN('seconds', 2)] },
+  lightValue: { cat: 'Values', label: 'Light Brightness', value: 'number', params: [txt('object', '', 'light object (empty = this)')] },
   camFade: { cat: 'Camera', label: 'Fade Screen', exec: true, outs: ['faded out', 'done'], params: [{ key: 'color', type: 'color', default: '#000000', label: 'colour' }], inputs: [N_IN('fade out', 0.4), N_IN('hold', 0.3), N_IN('fade in', 0.4)] },
   camBars: { cat: 'Camera', label: 'Cinematic Bars', exec: true, outs: ['then'], params: [opt('mode', ['show', 'hide'], 'show', 'make them')] },
   groupAdd: { cat: 'Camera', label: 'Add To Target Group', exec: true, outs: ['then'], params: [txt('group', 'Target Group', 'target group'), opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name (for "object")')], inputs: [N_IN('weight', 1), N_IN('radius', 40)] },
@@ -10905,6 +11319,50 @@ Object.assign(NODE_TYPES, {
   esImport: { cat: 'Save Files', label: 'Import Save From Text', exec: true, outs: ['imported', 'not a save'], params: [txt('file', 'save', 'file'), txt('var', 'saveCode', 'from text variable')] },
   onSaveFile: { cat: 'Events', label: 'On Game Saved', outs: ['then'], params: [txt('file', '', 'file (blank = any)')] },
   onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
+  // more events: gestures, movement, objects coming and going, game flow, time and the device
+  onFingerDown: { cat: 'Events', label: 'On Finger Down', outs: ['then'], params: [opt('where', ['anywhere', 'on this object'], 'on this object', 'where')] },
+  onDragThis: { cat: 'Events', label: 'On Drag This Object', outs: ['start', 'dragging', 'dropped'] },
+  onTwoFingerTap: { cat: 'Events', label: 'On Two-Finger Tap', outs: ['then'] },
+  onPinch: { cat: 'Events', label: 'On Pinch', outs: ['zoom in', 'zoom out'], params: [num('amount', 1.25, 'how far (1.25 = 25%)')] },
+  onKeyUp: { cat: 'Events', label: 'On Key Released', outs: ['then'], params: [txt('key', 'space', 'key')] },
+  onAnyKey: { cat: 'Events', label: 'On Any Key', outs: ['then'] },
+  onTilt: { cat: 'Events', label: 'On Phone Tilted', outs: ['then'], params: [opt('dir', ['left', 'right', 'forward', 'back'], 'left', 'toward'), num('amount', 0.5, 'how far (0–1)')] },
+  onJoystick: { cat: 'Events', label: 'On Joystick', outs: ['pushed', 'released'] },
+  onIdle: { cat: 'Events', label: 'When Player Is Idle', outs: ['then'], params: [num('seconds', 5, 'no touches or keys for (seconds)')] },
+  onHitWall: { cat: 'Events', label: 'On Hit Wall', outs: ['then'] },
+  onHitCeiling: { cat: 'Events', label: 'On Hit Ceiling', outs: ['then'] },
+  onMovement: { cat: 'Events', label: 'On Starts / Stops Moving', outs: ['starts moving', 'stops'], params: [num('speed', 10, 'moving means faster than')] },
+  onFalling: { cat: 'Events', label: 'On Starts Falling', outs: ['then'], params: [num('speed', 60, 'falling faster than')] },
+  onFellFar: { cat: 'Events', label: 'On Fell Far', outs: ['then'], params: [num('distance', 800, 'below where it started (2D; 3D uses a 40th)')] },
+  onSpeedAbove: { cat: 'Events', label: 'When Speed Goes Above', outs: ['then'], params: [num('speed', 400, 'speed')] },
+  onObjectFar: { cat: 'Events', label: 'On Object Moves Away', outs: ['then'], params: [txt('tag', 'player', 'tag'), num('distance', 200, 'farther than')] },
+  onSight: { cat: 'Events', label: 'On Sees / Loses Sight', outs: ['sees', 'loses sight'], params: [txt('tag', 'player', 'tag')] },
+  onHealed: { cat: 'Events', label: 'On Healed', outs: ['then'] },
+  onHealthLow: { cat: 'Events', label: 'When Health Gets Low', outs: ['then'], params: [num('percent', 30, 'at or below (%)')] },
+  onSpawnedSelf: { cat: 'Events', label: 'On Spawned (as a copy)', outs: ['then'] },
+  onAnySpawned: { cat: 'Events', label: 'On Object Spawned', outs: ['then'], params: [txt('tag', '', 'tag or name (blank = any)')] },
+  onAnyDestroyed: { cat: 'Events', label: 'On Object Destroyed', outs: ['then'], params: [txt('tag', 'enemy', 'tag or name (blank = any)')] },
+  onNoneLeft: { cat: 'Events', label: 'When None Left', outs: ['then'], params: [txt('tag', 'enemy', 'tag')] },
+  onShownHidden: { cat: 'Events', label: 'On Shown / Hidden', outs: ['shown', 'hidden'] },
+  onSpriteFrame: { cat: 'Events', label: 'On Sprite Frame', outs: ['then'], params: [num('frame', 0, 'frame number')] },
+  onPauseChange: { cat: 'Events', label: 'On Paused / Resumed', outs: ['paused', 'resumed'] },
+  onGameState: { cat: 'Events', label: 'On Game State', outs: ['title screen', 'playing', 'game over', 'won'] },
+  onNewBest: { cat: 'Events', label: 'On New High Score', outs: ['then'] },
+  onItemCollected: { cat: 'Events', label: 'On Item Collected', outs: ['then'], params: [txt('item', '', 'item (blank = any)')] },
+  onAchievementGot: { cat: 'Events', label: 'On Achievement', outs: ['then'], params: [txt('name', '', 'achievement (blank = any)')] },
+  onAnyMessage: { cat: 'Events', label: 'On Any Message', outs: ['then'] },
+  onDialogueEnd: { cat: 'Events', label: 'On Dialogue Finished', outs: ['then'] },
+  onCutscene: { cat: 'Events', label: 'On Cutscene', outs: ['starts', 'ends'] },
+  onScrolled: { cat: 'Events', label: 'On Scrolled', outs: ['up', 'down'] },
+  onSaveLoaded: { cat: 'Events', label: 'On Save Loaded', outs: ['then'] },
+  onTimeReaches: { cat: 'Events', label: 'When Level Time Reaches', outs: ['then'], params: [num('seconds', 30, 'seconds')] },
+  onClock: { cat: 'Events', label: 'At Clock Time', outs: ['then'], params: [txt('time', '18:00', 'time (HH:MM, phone clock)')] },
+  onFirstPlay: { cat: 'Events', label: 'On First Time Ever', outs: ['then'] },
+  onNewDay: { cat: 'Events', label: 'On New Day', outs: ['then'] },
+  onWelcomeBack: { cat: 'Events', label: 'On Welcome Back', outs: ['then'], params: [num('hours', 1, 'away at least (hours)')] },
+  onBatteryLow: { cat: 'Events', label: 'On Battery Low', outs: ['then'], params: [num('percent', 20, 'at or below (%)')] },
+  onResize: { cat: 'Events', label: 'On Screen Resized', outs: ['then'] },
+  onDarkMode: { cat: 'Events', label: 'On Dark Mode Changed', outs: ['dark', 'light'] },
   onAppShown: { cat: 'Events', label: 'On App Back', outs: ['then'] },
   onNotifyOpened: { cat: 'Events', label: 'On Phone Notification Tapped', outs: ['then'], params: [txt('id', '', 'id (blank = any)')] },
   onMenu: { cat: 'Events', label: 'On Side Menu Opened / Closed', outs: ['opened', 'closed'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
@@ -10987,7 +11445,7 @@ export function bindArgs(v, args) {
   return v;
 }
 const customArgs = (def, it) => Object.fromEntries((def.params || []).map((q) => { const v = it[q.key] ?? q.default ?? ''; return [q.key, q.type === 'number' && v !== '' && Number.isFinite(+v) ? +v : v]; }));
-const customSay = (def, p) => { const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
+const customSay = (def, p) => { if (def.say) return def.say.replace(/\{@(\w+)\}/g, (m, k) => { const q = (def.params || []).find((x) => x.key === k); return q ? String(p[k] ?? q.default ?? '') : m; }); const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
 /** Visual scripts on other objects: run one of their Functions and get its Return Value. */
 function callScriptFunction(t, name, args, from) { for (const f of t?._fns || []) if (f.has(name)) return { ok: true, v: f.call(name, args, from) }; return { ok: false, v: 0 }; }
 function whoOf(s, e, other, on, name) {
@@ -11025,8 +11483,14 @@ export const LOGIC_EVENTS = {
   near: { label: 'Comes near tag', icon: 'crosshair', params: [sug(txt('tag', 'player', 'tag'), 'tags'), num('distance', 120, 'distance')], say: (p) => `${p.tag} comes within ${p.distance}` },
   sees: { label: 'Starts seeing tag', icon: 'eye', params: [sug(txt('tag', 'player', 'tag'), 'tags')], say: (p) => `Sees ${p.tag}` },
   landed: { label: 'Lands on the ground', icon: 'platform' },
-  damaged: { label: 'Takes damage (Health)', icon: 'heart' },
+  damaged: { label: 'Takes damage (Health)', icon: 'heart', params: [opt('dtype', ['any', 'normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'any', 'damage type')], say: (p) => (p.dtype && p.dtype !== 'any' ? `Takes ${p.dtype} damage` : 'Takes damage') },
   died: { label: 'Dies (Health runs out)', icon: 'enemy' },
+  healed: { label: 'Gets healed (Health)', icon: 'heart' },
+  shieldBreak: { label: 'Shield breaks (Health)', icon: 'heart' },
+  statusGot: { label: 'Gets poisoned / burnt / slowed…', icon: 'heart', params: [opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], say: (p) => (p.effect === 'any' ? 'Gets a status effect' : `Gets ${p.effect}`) },
+  needLow: { label: 'Gets hungry / thirsty', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Gets thirsty' : p.need === 'hunger' ? 'Gets hungry' : 'Gets hungry or thirsty') },
+  needEmpty: { label: 'Starving / out of water', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Out of water' : p.need === 'hunger' ? 'Starving' : 'Starving or out of water') },
+  ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
   appHidden: { label: 'Player leaves the app', icon: 'phone' },
@@ -11061,6 +11525,9 @@ export const LOGIC_CONDITIONS = {
   myVar: { label: 'Compare its own variable', icon: 'key', params: [txt('name', 'hp', 'object variable'), opt('op', OPS6, '≤', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data[p.name] || 0, p.op, +p.value || 0), say: (p) => `its ${p.name} ${p.op} ${p.value}` },
   textVar: { label: 'Text variable', icon: 'text', params: [sug(txt('name', 'playerName', 'variable'), 'vars'), opt('op', ['equals', 'contains', 'starts with', 'is empty'], 'equals', 'test'), txt('text', 'Hero', 'text')], test: (c, p) => { const v = String(c.s.vars[p.name] ?? '').toLowerCase(), t = String(p.text ?? '').toLowerCase(); return p.op === 'is empty' ? !v : p.op === 'contains' ? v.includes(t) : p.op === 'starts with' ? v.startsWith(t) : v === t; }, say: (p) => (p.op === 'is empty' ? `${p.name} is empty` : `${p.name} ${p.op} “${p.text}”`) },
   health: { label: 'Health', icon: 'heart', params: [opt('op', OPS6, '≤', 'is'), num('value', 1, 'value'), bool('percent', false, 'as a percent of full')], test: (c, p) => { const hp = +c.e.data.hp || 0, v = p.percent ? hp / (+c.e.data.hpMax || 1) * 100 : hp; return cmp(v, p.op, +p.value || 0); }, say: (p) => `health ${p.op} ${p.value}${p.percent ? '%' : ''}` },
+  need: { label: 'Hunger / thirst', icon: 'heart', params: [opt('need', ['hunger', 'thirst'], 'hunger', 'which'), opt('op', OPS6, '≤', 'is'), num('value', 25, 'value'), bool('percent', true, 'as a percent of full')], test: (c, p) => { const v = c.e.data[p.need]; if (v === undefined) return false; return cmp(p.percent ? (+v || 0) / (+c.e.data[p.need + 'Max'] || 100) * 100 : +v || 0, p.op, +p.value || 0); }, say: (p) => `${p.need} ${p.op} ${p.value}${p.percent ? '%' : ''}` },
+  hasStatus: { label: 'Has status effect', icon: 'heart', params: [opt('effect', ['any', ...Object.keys(STATUS_FX)], 'poison', 'effect')], test: (c, p) => { const st = String(c.e.data.status || ''); return p.effect === 'any' ? !!st : st.split(',').includes(p.effect); }, say: (p) => (p.effect === 'any' ? 'has a status effect' : `is ${p.effect === 'regen' ? 'healing over time' : p.effect === 'freeze' ? 'frozen' : p.effect === 'slow' ? 'slowed' : p.effect === 'burn' ? 'burning' : p.effect === 'bleed' ? 'bleeding' : 'poisoned'}`) },
+  shieldUp: { label: 'Shield left', icon: 'heart', params: [opt('op', OPS6, '>', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data.hpShield || 0, p.op, +p.value || 0), say: (p) => `shield ${p.op} ${p.value}` },
   tagCount: { label: 'Number of objects with tag', icon: 'enemy', params: [sug(txt('tag', 'enemy', 'tag'), 'tags'), opt('op', OPS6, '=', 'is'), num('value', 0, 'count')], test: (c, p) => cmp(c.s.findAll(p.tag).filter((q) => !q.dead && !q.template).length, p.op, +p.value || 0), say: (p) => `${p.tag} count ${p.op} ${p.value}` },
   moving: { label: 'Is moving', icon: 'move', params: [num('speed', 10, 'faster than')], test: (c, p) => { const v = c.e.body?.vel; return !!v && Math.hypot(v.x, v.y, v.z || 0) > (+p.speed || 0); }, say: (p) => `moving faster than ${p.speed}` },
   level: { label: 'Level number', icon: 'flag', params: [opt('op', OPS6, '=', 'is'), num('value', 1, 'level')], test: (c, p) => cmp(c.s.level || 1, p.op, +p.value || 1), say: (p) => `level ${p.op} ${p.value}` },
@@ -11103,7 +11570,12 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
-  damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}`) },
+  damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)'), opt('dtype', ['normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'normal', 'damage type'), bool('pierce', false, 'goes through armour')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e, { type: p.dtype && p.dtype !== 'normal' ? p.dtype : '', pierce: !!p.pierce }); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}${p.dtype && p.dtype !== 'normal' ? ' ' + p.dtype : ''}`) },
+  statusFx: { cat: 'Objects', label: 'Poison / burn / slow…', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', Object.keys(STATUS_FX), 'poison', 'effect'), num('perSecond', 1, 'damage (or healing) per second'), num('seconds', 3, 'seconds')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.addEffect(p.effect, +p.perSecond, +p.seconds, t); }, say: (p) => `${STATUS_FX[p.effect]?.label || p.effect}: ${p.object} for ${p.seconds}s` },
+  cure: { cat: 'Objects', label: 'Cure status effects', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.cure(p.effect, t); }, say: (p) => `Cure ${p.effect === 'any' ? 'everything' : p.effect} on ${p.object}` },
+  healthSet: { cat: 'Objects', label: 'Refill / revive / max health', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('what', ['refill health', 'set max health', 'set max health and refill', 'add shield', 'kill'], 'refill health', 'what'), num('amount', 5, 'amount')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (!hb) return; const n = +p.amount || 0; if (p.what === 'refill health') hb.heal(hb.max, t); else if (p.what === 'add shield') hb.addShield(n, t); else if (p.what === 'kill') hb.kill(t); else hb.setMax(n, p.what.endsWith('refill'), t); }, say: (p) => (p.what === 'refill health' || p.what === 'kill' ? `${p.what[0].toUpperCase() + p.what.slice(1)}: ${p.object}` : `${p.what[0].toUpperCase() + p.what.slice(1)} ${p.amount}: ${p.object}`) },
+  invulnerable: { cat: 'Objects', label: 'Make invulnerable', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), num('seconds', 3, 'seconds')], run: (c, p) => { const t = target(c, p.object); if (t) t.data.invuln = +p.seconds || 0; }, say: (p) => `${p.object} can’t be hurt for ${p.seconds}s` },
+  eat: { cat: 'Objects', label: 'Eat / drink (hunger, thirst)', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('need', ['hunger', 'thirst'], 'hunger', 'fills'), opt('mode', ['add', 'set to'], 'add', 'how'), num('amount', 25, 'amount')], run: (c, p) => { const t = target(c, p.object), nb = t?.getBehavior(p.need); if (nb) { if (p.mode === 'set to') nb.set(+p.amount, t); else nb.add(+p.amount, t); } }, say: (p) => (p.mode === 'set to' ? `Set ${p.need} to ${p.amount}` : `${p.need === 'thirst' ? 'Drink' : 'Eat'} +${p.amount}`) + (p.object && p.object !== 'self' ? ` (${p.object})` : '') },
   talk: { cat: 'Game', label: 'Say dialogue', icon: 'sign', params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello there!', 'text'), bool('wait', true, 'wait until closed')], run: (c, p) => { if (!c.s.dialog) c.s.dialog = { lines: [{ who: p.who, text: fillTemplate(p.text, c.s.vars) }], i: 0, chars: 0, pause: true }; return p.wait ? { until: () => !c.s.dialog } : 0; }, say: (p) => `${p.who}: “${p.text}”` },
   // motion & animation
   moveBy: { cat: 'Motion', label: 'Move by', icon: 'move', params: [num('x', 0, 'x'), num('y', -40, 'y'), num('z', 0, 'z (3D)'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outQuad', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = +p.seconds || 0; if (d <= 0) { c.e.x += +p.x || 0; c.e.y += +p.y || 0; c.e.z += +p.z || 0; return; } c.s.to(c.e, { x: +p.x || 0, y: +p.y || 0, z: +p.z || 0 }, d, { ease: p.ease, relative: true }); return p.wait ? d : 0; }, say: (p) => `Move by ${p.x}, ${p.y}${+p.z ? ', ' + p.z : ''}${+p.seconds ? ` in ${p.seconds}s` : ''}` },
@@ -11190,6 +11662,39 @@ export const LOGIC_ACTIONS = {
   burst: { cat: 'Game', label: 'Particle burst', icon: 'star', params: [{ key: 'color', type: 'color', default: '#ffd23f', label: 'colour' }, num('count', 16, 'how many'), opt('at', ['this', 'other'], 'this', 'at')], run: (c, p) => { const t = p.at === 'other' ? c.other : c.e; if (t) c.s.burst(t.x, t.y, t.z, p.color, clamp(+p.count || 16, 1, 200)); }, say: (p) => `Burst of ${p.count}` },
   toast: { cat: 'Game', label: 'Pop-up text here', icon: 'text', params: [txt('text', '+1', 'text ({braces} work)'), { key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], run: (c, p) => popText(c.s, c.e.x, c.e.y, fillTemplate(p.text, c.s.vars), p.color || '#ffffff', 26), say: (p) => `Pop-up “${p.text}”` },
 };
+// ---- nodes ⇄ triggers: every trigger event / condition / instruction is a node, and every node can be used in triggers ----
+NODE_TYPES._signal = { cat: '(internal)', label: 'Signal', exec: true, outs: [], hidden: true, params: [txt('port', 'then'), txt('tag', '')] };
+for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden) NODE_TYPES['la_' + k] = { cat: 'Instructions', label: d.label, exec: true, outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+for (const [k, d] of Object.entries(LOGIC_CONDITIONS)) if (!d.hidden) NODE_TYPES['lc_' + k] = { cat: 'Conditions', label: d.label, value: 'bool', params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+const evLabel = (l) => 'When: ' + l.charAt(0).toLowerCase() + l.slice(1);
+for (const [k, d] of Object.entries(LOGIC_EVENTS)) if (!d.hidden && !d.fsm && !['always'].includes(k)) NODE_TYPES['le_' + k] = { cat: 'Events', label: evLabel(d.label), outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+const nodeParams = (d, p) => Object.fromEntries([...(d.params || []), ...(d.inputs || [])].map((q) => [q.key, p[q.key] ?? q.default]));
+/** A one-node visual script: Triggers run any action node through it (its outputs call back), read any value node, or listen for any event node. */
+function nodeGraph(type, params, tag = '') {
+  const d = NODE_TYPES[type] || {}, nodes = [{ id: 'n', type, params: { ...params } }], links = [];
+  (d.outs || []).forEach((o, i) => { nodes.push({ id: 's' + i, type: '_signal', params: { port: o, tag } }); links.push({ from: { node: 'n', port: o }, to: { node: 's' + i, port: 'in' } }); });
+  return Behaviors.graph.create({ graph: { nodes, links } });
+}
+function nodeHost(e, key, type, params) { const m = (e._nodeHosts ||= new Map()); if (!m.has(key)) m.set(key, nodeGraph(type, params)); return m.get(key); }
+const nodeSay = (p) => { const d = NODE_TYPES[p.node]; if (!d) return 'Missing node'; const vals = [...(d.params || []), ...(d.inputs || [])].slice(0, 2).map((q) => p[q.key] ?? q.default).filter((v) => v !== '' && v != null && typeof v !== 'object'); return d.label + (vals.length ? ': ' + vals.join(', ') : ''); };
+LOGIC_EVENTS.node = { label: 'Node event', icon: 'nodes', hidden: true, say: nodeSay };
+LOGIC_CONDITIONS.node = { label: 'Node', icon: 'nodes', hidden: true, say: (p) => nodeSay(p) + (NODE_TYPES[p.node]?.value && NODE_TYPES[p.node].value !== 'bool' && p._op && p._op !== 'true' ? ` ${p._op} ${p._than ?? ''}` : ''),
+  test: (c, p) => {
+    const d = NODE_TYPES[p.node]; if (!d) return false;
+    const np = nodeParams(d, p), v = nodeHost(c.e, 'v' + p.node + JSON.stringify(np), p.node, np)._value('n', { s: c.s, e: c.e, other: c.other, eventValue: c.eventValue, steps: 0, dt: 1 / 60 });
+    if (d.value === 'bool' || !p._op || p._op === 'true') return !!v;
+    const t = p._than ?? '';
+    return Number.isFinite(+v) && String(t).trim() !== '' && Number.isFinite(+t) ? cmp(+v, p._op, +t) : (p._op === '≠') !== sameVal(v, t);
+  } };
+LOGIC_ACTIONS.node = { cat: 'Nodes', label: 'Node', icon: 'nodes', hidden: true, say: (p) => nodeSay(p) + (p._need && p._need !== 'any' ? ` (only if ${p._need})` : ''),
+  run: (c, p) => {
+    const d = NODE_TYPES[p.node]; if (!d) return;
+    const np = nodeParams(d, p), host = nodeHost(c.e, 'a' + p.node + JSON.stringify(np), p.node, np);
+    let fin = !(d.outs || []).length, port = null;
+    host._run('n', { s: c.s, e: c.e, other: c.other, eventValue: c.eventValue, steps: 0, dt: 1 / 60, onSignal: (pt) => { if (!fin) { fin = true; port = pt; } } });
+    if (fin) return p._need && p._need !== 'any' && port && port !== p._need ? 'stop' : undefined;
+    return { until: () => fin };
+  } };
 const withDefaults = (def, it) => { const p = { ...it }; for (const q of def?.params || []) if (p[q.key] === undefined) p[q.key] = q.default; return p; };
 export const logicSay = (lib, it) => { const def = lib[it?.type]; if (!def) return it?.type || '?'; const p = withDefaults(def, it); return (def.say ? def.say(p) : def.label) || def.label; };
 /** Run an instruction list; waits pause it. ctx.cancelled stops it. */
@@ -11235,6 +11740,9 @@ function evOk(type, p, q) {
     case 'online': return (p.mode === 'comes back') === !!q.on;
     case 'orientation': return p.to === 'any' || q.o === p.to;
     case 'menu': return p.mode === 'any' || (p.mode === 'opens') === !!q.open;
+    case 'damaged': return !p.dtype || p.dtype === 'any' || q.dtype === p.dtype;
+    case 'statusGot': return !p.effect || p.effect === 'any' || q.effect === p.effect;
+    case 'needLow': case 'needEmpty': case 'ate': return !p.need || p.need === 'any' || q.need === p.need;
     default: return true;
   }
 }
@@ -11245,7 +11753,14 @@ class LogicWatcher {
     s.on('message', (n, data) => this.queue.push({ type: 'message', name: n, value: data }));
     s.on('animationEnd', (ent, clip) => { if (ent === e) this.queue.push({ type: 'animEnd', clip }); });
     s.on('var', (k) => this.queue.push({ type: 'varChanged', name: k }));
-    s.on('damage', (who) => { if (who === e) this.queue.push({ type: 'damaged' }); });
+    s.on('damage', (who, n, from, type) => { if (who === e) this.queue.push({ type: 'damaged', value: Math.round((+n || 0) * 100) / 100, other: from, dtype: type || 'normal' }); });
+    s.on('heal', (who, n) => { if (who === e) this.queue.push({ type: 'healed', value: Math.round((+n || 0) * 100) / 100 }); });
+    s.on('shieldBreak', (who) => { if (who === e) this.queue.push({ type: 'shieldBreak' }); });
+    s.on('status', (who, k) => { if (who === e) this.queue.push({ type: 'statusGot', effect: k }); });
+    s.on('needLow', (who, k) => { if (who === e) this.queue.push({ type: 'needLow', need: k }); });
+    s.on('needEmpty', (who, k) => { if (who === e) this.queue.push({ type: 'needEmpty', need: k }); });
+    s.on('eat', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'hunger' }); });
+    s.on('drink', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'thirst' }); });
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -11284,7 +11799,7 @@ class LogicWatcher {
       case 'always': return {};
       case 'delay': { if (this.edges.get(key) || this.age < (+p.seconds || 0)) return null; this.edges.set(key, true); return {}; }
       case 'random': return Math.random() < this.dt / Math.max(0.1, +p.seconds || 3) ? {} : null;
-      case 'landed': { const g = !!this.e.body?.grounded, was = this.edges.get(key); this.edges.set(key, g); return g && was === false ? {} : null; }
+      case 'landed': { const b = this.e.body, g = !!b?.grounded, was = this.edges.get(key); this.edges.set(key, g); return b?.landed > 0 || (g && was === false) ? { value: Math.round(b?.landed || 0) } : null; }
       case 'near': case 'sees': {
         const t = nearest(this.s, this.e, p.tag), now = !!t && (x.type === 'near' ? Math.hypot(t.x - this.e.x, t.y - this.e.y, (t.z || 0) - (this.e.z || 0)) < (+p.distance || 120) : this.s.canSee(this.e, t));
         const was = this.edges.get(key); this.edges.set(key, now); return now && !was ? { other: t } : null;
@@ -11324,6 +11839,14 @@ registerBehavior('triggers', {
     const list = Array.isArray(p.triggers) ? p.triggers : [];
     const st = list.map(() => ({ runs: 0, last: -1e9, run: null })); // per copy: how often each trigger ran, when, and what is running now
     let w = null;
+    const tagBase = 't' + Math.random().toString(36).slice(2, 8) + ':';
+    const evHosts = list.map((t, i) => (t.event?.type === 'node' && NODE_TYPES[t.event.node] ? nodeGraph(t.event.node, nodeParams(NODE_TYPES[t.event.node], t.event), tagBase + i) : null)); // node events listen through a hidden one-node script
+    const drain = (e, s) => {
+      if (!e._sig?.length) return;
+      const mine = e._sig.filter((q) => String(q.tag).startsWith(tagBase)); if (!mine.length) return;
+      e._sig = e._sig.filter((q) => !String(q.tag).startsWith(tagBase));
+      for (const q of mine) { const i = +String(q.tag).slice(tagBase.length), t = list[i]; if (t && !t.off && (!t.event._port || t.event._port === 'any' || t.event._port === q.port)) fire(t, i, e, s, q.other, q.value); }
+    };
     /** Options: once / max runs, cooldown, chance, delay, if any / all conditions, else, overlap (allow, skip while running, restart). */
     const fire = (t, i, e, s, other, value) => {
       const S = st[i], max = t.once ? 1 : Math.round(+t.maxRuns || 0);
@@ -11343,17 +11866,22 @@ registerBehavior('triggers', {
     };
     return {
       uiAlways: true,
-      start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); },
+      start(e, s) {
+        w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); for (const hst of evHosts) hst?.start(e, s);
+        if (list.some((t) => ['tap', 'doubleTap', 'longPress'].includes(t.event?.type) || (t.event?.type === 'node' && ['tap', 'onDoubleTap', 'onLongPress', 'onDragThis'].includes(t.event.node)))) (s.tapTargets ||= new Set()).add(e); // the joystick leaves these alone
+      },
       update(e, dt, s) {
         w.frame(dt);
+        for (const hst of evHosts) hst?.update(e, dt, s);
+        drain(e, s);
         list.forEach((t, i) => {
           if (t.off || (s.state !== 'play' && !['tap', 'message', 'called', 'win', 'lose', 'appHidden', 'appShown', 'varChanged', 'pageChanged', 'permission', 'online', 'orientation', 'menu', 'inventory'].includes(t.event?.type))) return;
           for (const hit of w.matchAll(t.event, i)) fire(t, i, e, s, hit.other, hit.value);
         });
       },
-      collide(e, other) { w?.push({ type: 'touch', other }); },
-      separate(e, other) { w?.push({ type: 'touchEnd', other }); },
-      destroy(e, s) { list.forEach((t, i) => { if (t.event?.type === 'destroyed' && !t.off) fire(t, i, e, s); }); },
+      collide(e, other, s, m) { w?.push({ type: 'touch', other }); for (const hst of evHosts) hst?.collide(e, other, s, m); },
+      separate(e, other, s) { w?.push({ type: 'touchEnd', other }); for (const hst of evHosts) hst?.separate(e, other, s); },
+      destroy(e, s) { list.forEach((t, i) => { if (t.event?.type === 'destroyed' && !t.off) fire(t, i, e, s); }); for (const hst of evHosts) hst?.destroy(e, s); drain(e, s); },
     };
   },
 });
@@ -11529,13 +12057,21 @@ function onScreen(s, e, margin = 0) {
 
 registerBehavior('graph', {
   label: 'Visual Script', description: 'Node-based coding: connect event, action and value nodes in the Node Editor.',
+  passthrough: ['scripts', 'mainOff'], // more scripts in the same component
   params: [{ key: 'graph', label: 'Graph', type: 'graph', default: { nodes: [
     { id: 'n1', type: 'tap', x: 20, y: 40, params: {} },
     { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } },
     { id: 'n3', type: 'message', x: 640, y: 40, params: { text: 'Score: {score}', seconds: 1.5 } },
   ], links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }, { from: { node: 'n2', port: 'then' }, to: { node: 'n3', port: 'in' } }] } }],
   create(p) {
+    const extra = (Array.isArray(p.scripts) ? p.scripts : []).filter((q) => q?.graph && !q.off);
+    if (extra.length) { // several scripts in one component: each runs on its own (own events, functions and state), side by side
+      const subs = [...(p.mainOff ? [] : [{ graph: p.graph }]), ...extra].filter((q) => q.graph).map((q) => Behaviors.graph.create({ ...p, graph: q.graph, scripts: [], mainOff: false, _sk: q.id || '' }));
+      const each = (k) => (...a) => { for (const b of subs) b[k]?.(...a); };
+      return { uiAlways: true, subs, start: each('start'), update: each('update'), collide: each('collide'), separate: each('separate'), destroy: each('destroy'), _run: (id, ctx) => subs[0]?._run(id, ctx), _value: (id, ctx) => subs[0]?._value(id, ctx) };
+    }
     const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
+    const SK = p._sk ? p._sk + ':' : ''; // which script of the component (live debug badges)
     const def = (n) => NODE_TYPES[n.type] || {};
     const anims = (e) => ['animator', 'spriteSheet'].map((t) => e.getBehavior(t)).filter(Boolean);
     const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
@@ -11565,11 +12101,12 @@ registerBehavior('graph', {
     const debugRays = [], repeats = new Map(), frameQueue = [], press = new Map(); let lastTapT = -9, varWas = new Map();
     const value = (n, ctx, depth) => { // remember the last value for the editor's live debug badges
       const v = valueOf(n, ctx, depth), st = ctx.s?.engine?.graphStats;
-      if (st && n) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
+      if (st && n) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
       return v;
     };
     const valueOf = (n, ctx, depth) => {
       if (!n) return 0;
+      if (n.type.startsWith('lc_')) { const k = n.type.slice(3), d = LOGIC_CONDITIONS[k]; if (!d) return false; const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key); return conditionsPass([it], { s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue }); } // a Triggers condition as a node
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
       switch (n.type) {
         case 'number': return +P('value') || 0;
@@ -11596,6 +12133,11 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'healthOf': {
+          const t = P('object') ? target(ctx, P('object')) : e; if (!t) return 0;
+          const d = t.data, pc = (a, b) => (+b ? (+a || 0) / +b * 100 : 0);
+          switch (P('what')) { case 'max health': return +d.hpMax || 0; case 'health %': return pc(d.hp, d.hpMax); case 'shield': return +d.hpShield || 0; case 'hunger': return +d.hunger || 0; case 'hunger %': return pc(d.hunger, d.hungerMax); case 'thirst': return +d.thirst || 0; case 'thirst %': return pc(d.thirst, d.thirstMax); default: return +d.hp || 0; }
+        }
         case 'itemCount': return s.itemCount(P('item'));
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
@@ -11691,6 +12233,7 @@ registerBehavior('graph', {
         case 'getObjVar': return +target(ctx, P('object'))?.data[P('name')] || 0;
         case 'getObjText': return asText(target(ctx, P('object'))?.data[P('name')] ?? '');
         case 'myCondition': { const def = customLogic.conditions.find((q) => q.name === P('name')); if (!def) return false; const args = {}; (def.params || []).slice(0, 3).forEach((q, i) => { const v = I('abc'[i]); if (v !== '' && v != null) args[q.key] = v; }); return LOGIC_CONDITIONS.custom.test({ s, e, other: ctx.other }, { ref: def.id, ...args }); }
+        case 'lightValue': { const t = P('object') ? s.find(P('object')) : e; return t?.light && !t.light.off ? +t.light.intensity || 0 : 0; }
         case 'esLoad': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined ? asText(P('def')) : Array.isArray(v) ? v.map(asText).join(', ') : v && typeof v === 'object' ? JSON.stringify(v) : asText(v); }
         case 'esLoadNum': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined || !Number.isFinite(+v) ? +P('def') || 0 : +v; }
         case 'esKeyExists': return s.engine.saves.has(P('key'), P('file'));
@@ -11764,7 +12307,7 @@ registerBehavior('graph', {
     };
     const follow = (n, port, ctx) => {
       const st = ctx.s?.engine?.graphStats, d = def(n);
-      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
+      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
     };
     /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
@@ -11777,11 +12320,19 @@ registerBehavior('graph', {
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const st = ctx.s.engine.graphStats;
-      if (st) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
+      if (st) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
       if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
+      if (n.type.startsWith('la_')) { // a Triggers instruction as a node
+        const k = n.type.slice(3), d = LOGIC_ACTIONS[k], later = { ...ctx, steps: 0 }; if (!d) return;
+        const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key);
+        let sync = true, doneNow = false;
+        runInstructions([it], { s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue }, () => { if (sync) doneNow = true; else if (!ctx.e.dead) follow(n, 'then', later); });
+        sync = false; if (doneNow) follow(n, 'then', ctx); return;
+      }
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
+        case '_signal': if (ctx.onSignal) ctx.onSignal(P('port'), ctx); else (e._sig ||= []).push({ tag: P('tag'), port: P('port'), other: ctx.other, value: ctx.eventValue }); return; // a node run by Triggers reports its output
         case 'wait': { s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
@@ -11841,7 +12392,6 @@ registerBehavior('graph', {
         case 'switchCamera': s.setCamera(P('camera')); break;
         case 'zoomCamera': if (s.mode === '2d') s.tween(s.camera, { zoom: Math.max(0.05, +I('zoom') || 1) }, Math.max(0.01, +P('seconds') || 0.01)); else s.tween(s.camera, { fov: clamp(60 / (+I('zoom') || 1), 10, 120) }, Math.max(0.01, +P('seconds') || 0.01)); break;
         case 'setLight': { const t = P('object') ? s.find(P('object')) : e; if (t) { t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !t.light.off; t.light.intensity = +I('intensity') || 0; } break; }
-        case 'setDarkness': s.light.darkness = clamp(+I('darkness') || 0, 0, 1); break;
         case 'tweenTo': {
           const prop = P('prop'), v = +I('value') || 0, d = Math.max(0.01, +I('seconds') || 0.5);
           const tw = s.to(e, { [prop]: v }, d, { ease: P('ease'), relative: P('mode') === 'by' && prop !== 'scale' });
@@ -11968,6 +12518,48 @@ registerBehavior('graph', {
           const later = { ...ctx, steps: 0 }, c2 = { s, e, other: ctx.other };
           runInstructions([{ type: 'custom', ...it }], c2, () => { if (!e.dead) follow(n, 'then', later); });
           return;
+        }
+        case 'camFocus': {
+          const cam = s.activeCamEntity; if (!cam) break; const tgt = s.find(P('object')) || s.findAll(P('object'))[0]; if (!tgt) break;
+          const prev = { t: cam.data.camTarget, z: cam.data.camZoom, f: cam.data.camFov }, later = { ...ctx, steps: 0 };
+          cam.data.camTarget = tgt.name; if (s.mode === '3d') cam.data.camFov = clamp(60 / Math.max(0.1, +I('zoom') || 1), 10, 120); else cam.data.camZoom = Math.max(0.05, +I('zoom') || 1);
+          s.after(Math.max(0, +I('seconds') || 0), () => { for (const [k, v] of [['camTarget', prev.t], ['camZoom', prev.z], ['camFov', prev.f]]) { if (v === undefined) delete cam.data[k]; else cam.data[k] = v; } if (!e.dead) follow(n, 'back', later); });
+          break;
+        }
+        case 'zoomPunch': {
+          const cam = s.activeCamEntity; if (!cam) break; const three = s.mode === '3d', key = three ? 'camFov' : 'camZoom', had = key in cam.data, base = cam.data[key] ?? (three ? s.camera.fov || 60 : s.camera.zoom || 1), a = +I('amount') || 0.12, d = Math.max(0.05, +I('seconds') || 0.25), t0 = s.time;
+          const tick = () => { const t = (s.time - t0) / d; if (t >= 1) { if (had) cam.data[key] = base; else delete cam.data[key]; return; } const k = Math.sin(Math.PI * t) * a; cam.data[key] = three ? base * (1 - k) : base * (1 + k); s.after(1 / 60, tick); }; tick();
+          break;
+        }
+        case 'takePhoto': {
+          const later = { ...ctx, steps: 0 }, how = P('then');
+          s.engine.takePhoto().then(async (url) => {
+            if (!url) return follow(n, 'failed', later);
+            try {
+              if (how === 'keep in variable') s.setVar(P('var') || 'photo', url);
+              else if (how === 'save to device') { const a = document.createElement('a'); a.href = url; a.download = (s.engine.gameKey || 'game') + '-photo.png'; a.click(); }
+              else { const blob = await (await fetch(url)).blob(), file = new File([blob], 'photo.png', { type: 'image/png' }); if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], text: fillTemplate(P('text') || '', s.vars) }); else { const a = document.createElement('a'); a.href = url; a.download = 'photo.png'; a.click(); } }
+              if (!e.dead) follow(n, 'then', later);
+            } catch { if (!e.dead) follow(n, 'failed', later); }
+          });
+          return;
+        }
+        case 'fadeLight': {
+          const t = P('object') ? s.find(P('object')) : e; if (!t) break; t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = false;
+          const L = t.light, from = { i: +L.intensity || 0, r: +L.range || 0, c: L.color }, to = { i: +I('brightness') || 0, r: +I('range') > 0 ? +I('range') : from.r, c: P('keepColor') === false ? P('color') : from.c }, d = +I('seconds') || 0, t0 = s.time, later = { ...ctx, steps: 0 };
+          const tick = () => { const k = d > 0 ? Math.min(1, (s.time - t0) / d) : 1; L.intensity = from.i + (to.i - from.i) * k; L.range = from.r + (to.r - from.r) * k; L.color = mixHexE(from.c, to.c, k); if (k < 1) s.after(1 / 60, tick); else if (!e.dead) follow(n, 'done', later); }; tick();
+          break;
+        }
+        case 'lightEffect': { const t = P('object') ? s.find(P('object')) : e; if (t?.light) { t.light.effect = P('effect') === 'steady' ? '' : P('effect'); t.light.speed = +I('speed') || 1; } break; }
+        case 'setDarkness': case 'setSun': case 'lightingPreset': {
+          const sec = +I('seconds') || 0, later = { ...ctx, steps: 0 };
+          let tgt;
+          if (n.type === 'setDarkness') tgt = { darkness: clamp(+I('darkness') || 0, 0, 1), color: n.params?.color };
+          else if (n.type === 'setSun') tgt = { color: P('color'), intensity: +I('brightness') || 0, ambient: +I('ambient') || 0 };
+          else { const pr = LIGHT_PRESETS[P('preset')] || LIGHT_PRESETS.Day; tgt = s.mode === '3d' ? pr.d3 : { darkness: 1 - pr.d2[0], color: pr.d2[1] }; }
+          fadeLighting(s, tgt, sec);
+          s.after(sec, () => { if (!e.dead) follow(n, 'done', later); });
+          break;
         }
         case 'esSave': s.engine.saves.save(P('key') || 'value', listVal(I('value')), P('file')); break;
         case 'esSaveVar': { const v = P('var') || 'coins'; s.engine.saves.save(P('key') || v, s.vars[v] ?? 0, P('file')); break; }
@@ -12335,15 +12927,94 @@ registerBehavior('graph', {
       for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt, ...extra });
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
+    const leNodes = g.nodes.filter((n) => n.type.startsWith('le_') && !n.off); let lw = null;
+    // ---- more event nodes: listeners and per-frame checks ----
+    const MORE_EV = new Set(['onFingerDown', 'onDragThis', 'onTwoFingerTap', 'onPinch', 'onKeyUp', 'onAnyKey', 'onTilt', 'onJoystick', 'onIdle', 'onHitWall', 'onHitCeiling', 'onMovement', 'onFalling', 'onFellFar', 'onSpeedAbove', 'onObjectFar', 'onSight', 'onHealed', 'onHealthLow', 'onSpawnedSelf', 'onNoneLeft', 'onShownHidden', 'onSpriteFrame', 'onGameState', 'onDialogueEnd', 'onCutscene', 'onSaveLoaded', 'onTimeReaches', 'onClock']);
+    const moreEv = g.nodes.filter((n) => MORE_EV.has(n.type) && !n.off);
+    const out = (n, port, e, s, extra = {}) => follow(n, port, { s, e, steps: 0, ...extra });
+    const nodesOf = (type) => g.nodes.filter((n) => n.type === type && !n.off);
+    const edge = (n, key, now) => { const k = n.id + ':' + key, was = state.get(k); state.set(k, now); return was; };
+    const onceEver = (s, key) => { const k = 'pocket.ev.' + (s.engine.gameKey || 'game') + '.' + key; const seen = store.get(k, ''); return seen; };
+    function startMoreEvents(e, s) {
+      const E = s.engine, list = (type) => nodesOf(type);
+      if (list('onAnySpawned').length) s.on('spawned', (q) => { if (!e.dead) for (const n of list('onAnySpawned')) if (!param(n, 'tag') || q.has(param(n, 'tag'))) out(n, 'then', e, s, { other: q, eventValue: q.name }); });
+      if (list('onAnyDestroyed').length) s.on('objectGone', (q) => { if (q !== e && !e.dead) for (const n of list('onAnyDestroyed')) if (!param(n, 'tag') || q.has(param(n, 'tag'))) out(n, 'then', e, s, { other: q, eventValue: q.name }); });
+      if (list('onGameState').length) { s.on('gameover', () => { if (!e.dead) for (const n of list('onGameState')) out(n, 'game over', e, s); }); s.on('win', () => { if (!e.dead) for (const n of list('onGameState')) out(n, 'won', e, s); }); }
+      if (list('onPauseChange').length) s.on('pauseChanged', (p) => { if (!e.dead) for (const n of list('onPauseChange')) out(n, p ? 'paused' : 'resumed', e, s); });
+      if (list('onNewBest').length) s.on('newBest', (v) => { if (!e.dead) for (const n of list('onNewBest')) out(n, 'then', e, s, { eventValue: v }); });
+      if (list('onItemCollected').length) s.on('inventory', (name, cnt) => { const k = 'inv:' + name, was = state.get(k) ?? 0; state.set(k, cnt); if (cnt > was && !e.dead) for (const n of list('onItemCollected')) if (!param(n, 'item') || param(n, 'item') === name) out(n, 'then', e, s, { eventValue: name }); });
+      if (list('onAchievementGot').length) s.on('achievement', (nm) => { if (!e.dead) for (const n of list('onAchievementGot')) if (!param(n, 'name') || param(n, 'name') === nm) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onAnyMessage').length) s.on('message', (nm) => { if (!e.dead) for (const n of list('onAnyMessage')) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onScrolled').length) s.on('uiScroll', (d) => { if (!e.dead && d) for (const n of list('onScrolled')) out(n, d > 0 ? 'down' : 'up', e, s, { eventValue: d }); });
+      if (list('onResize').length) s.on('resize', (w, hh) => { if (!e.dead) for (const n of list('onResize')) out(n, 'then', e, s, { eventValue: w + 'x' + hh }); });
+      if (list('onDarkMode').length && typeof matchMedia === 'function') { const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', (ev) => { if (!e.dead && E.scene === s) for (const n of list('onDarkMode')) out(n, ev.matches ? 'dark' : 'light', e, s); }); }
+      if (list('onBatteryLow').length && navigator.getBattery) navigator.getBattery().then((bat) => { const chk = () => { if (e.dead || E.scene !== s) return; for (const n of list('onBatteryLow')) { const low = bat.level * 100 <= (+param(n, 'percent') || 20); if (low && !edge(n, 'bat', low)) out(n, 'then', e, s, { eventValue: Math.round(bat.level * 100) }); else edge(n, 'bat', low); } }; chk(); bat.addEventListener?.('levelchange', chk); }).catch(() => {});
+      // once per app session: first time ever, new day, welcome back
+      const fired = (E._evFired ||= new Set()), now = Date.now(), gk = E.gameKey || 'game';
+      if (E._lastSeen === undefined) { E._lastSeen = +store.get('pocket.ev.' + gk + '.lastSeen', 0) || 0; store.set('pocket.ev.' + gk + '.lastSeen', String(now)); setInterval(() => store.set('pocket.ev.' + gk + '.lastSeen', String(Date.now())), 15000); }
+      const sessionOnce = (type, fn) => { for (const n of list(type)) { const k = type + ':' + e.name + ':' + n.id; if (fired.has(k)) continue; fired.add(k); fn(n); } };
+      sessionOnce('onFirstPlay', (n) => { if (!onceEver(s, 'first')) { store.set('pocket.ev.' + gk + '.first', '1'); s.after(0, () => out(n, 'then', e, s)); } });
+      sessionOnce('onNewDay', (n) => { const today = new Date().toDateString(), k = 'pocket.ev.' + gk + '.day'; if (store.get(k, '') !== today) { store.set(k, today); s.after(0, () => out(n, 'then', e, s)); } });
+      sessionOnce('onWelcomeBack', (n) => { const away = E._lastSeen ? (now - E._lastSeen) / 3600000 : 0; if (E._lastSeen && away >= (+param(n, 'hours') || 0)) s.after(0, () => out(n, 'then', e, s, { eventValue: Math.round(away * 10) / 10 })); });
+      for (const n of list('onSpawnedSelf')) if (e.spawned) s.after(0, () => { if (!e.dead) out(n, 'then', e, s); });
+      for (const n of list('onFellFar')) state.set(n.id + ':y0', e.y);
+    }
+    function pollMoreEvents(e, dt, s, inp, playing) {
+      const E = s.engine, three = s.mode === '3d', b = e.body, v = b?.vel, speed = v ? Math.hypot(v.x, v.y, three ? v.z : 0) : 0;
+      for (const n of moreEv) {
+        const P = (k) => param(n, k), t = n.type;
+        if (t === 'onGameState') { const st = s.state, was = edge(n, 'st', st); if (was !== undefined && was !== st) { const port = { title: 'title screen', play: 'playing' }[st]; /* game over / won come from the scene's own events */ if (port) out(n, port, e, s); } continue; }
+        if (!playing && !e.ui) continue;
+        switch (t) {
+          case 'onFingerDown': for (const d of inp.downs) if (P('where') === 'anywhere' || hitTest(s, e, d.x, d.y)) out(n, 'then', e, s, { eventValue: d.x + ',' + d.y }); break;
+          case 'onDragThis': {
+            const id = state.get(n.id + ':drag');
+            if (id == null) { const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y)); if (d) { state.set(n.id + ':drag', d.id); out(n, 'start', e, s); } }
+            else if (inp.pointers.has(id)) { const q = inp.pointers.get(id); out(n, 'dragging', e, s, { eventValue: Math.round(Math.hypot(q.x - q.sx, q.y - q.sy)), dt }); }
+            else { state.delete(n.id + ':drag'); out(n, 'dropped', e, s); }
+            break;
+          }
+          case 'onTwoFingerTap': { const k = n.id + ':2f'; if (inp.downs.length) { const tm = state.get(k) || []; const nowT = s.time; const recent = [...tm.filter((x) => nowT - x < 0.2), ...inp.downs.map(() => nowT)]; state.set(k, recent); if (recent.length >= 2 && inp.pointers.size >= 2) { state.set(k, []); out(n, 'then', e, s); } } break; }
+          case 'onPinch': { const ps = [...inp.pointers.values()]; if (ps.length < 2) { state.delete(n.id + ':p0'); state.delete(n.id + ':pf'); break; } const d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y); if (!state.has(n.id + ':p0')) state.set(n.id + ':p0', d || 1); const r = d / state.get(n.id + ':p0'), a = Math.max(1.01, +P('amount') || 1.25); if (!state.get(n.id + ':pf') && (r >= a || r <= 1 / a)) { state.set(n.id + ':pf', true); out(n, r >= a ? 'zoom in' : 'zoom out', e, s, { eventValue: Math.round(r * 100) / 100 }); } break; }
+          case 'onKeyUp': if (inp.keysUp?.includes(String(P('key') || '').toLowerCase().trim())) out(n, 'then', e, s); break;
+          case 'onAnyKey': for (const k of inp.keysDown) out(n, 'then', e, s, { eventValue: k }); break;
+          case 'onTilt': { inp.wantMotion = true; const ta = inp.tiltAxis; if (!ta) break; const dir = P('dir'), val = dir === 'left' ? -ta.x : dir === 'right' ? ta.x : dir === 'forward' ? -ta.y : ta.y, on = val >= (+P('amount') || 0.5); if (on && !edge(n, 'tilt', on)) out(n, 'then', e, s); else edge(n, 'tilt', on); break; }
+          case 'onJoystick': { const on = !!inp.stick, was = edge(n, 'stick', on); if (on && !was) out(n, 'pushed', e, s); else if (!on && was) out(n, 'released', e, s); break; }
+          case 'onIdle': { const busy = inp.pointers.size || inp.keys?.size || inp.stick; const k = n.id + ':idle'; if (busy) { state.set(k, 0); state.delete(n.id + ':idf'); break; } const t2 = (state.get(k) || 0) + dt; state.set(k, t2); if (t2 >= (+P('seconds') || 5) && !state.get(n.id + ':idf')) { state.set(n.id + ':idf', true); out(n, 'then', e, s); } break; }
+          case 'onHitWall': { const w = b?.wall || 0, was = edge(n, 'wall', w); if (w && !was) out(n, 'then', e, s, { eventValue: w }); break; }
+          case 'onHitCeiling': { const c = !!b?.ceiling; if (c && !edge(n, 'ceil', c)) out(n, 'then', e, s); else edge(n, 'ceil', c); break; }
+          case 'onMovement': { const m = speed > (+P('speed') || 10), was = edge(n, 'mv', m); if (was === undefined) break; if (m && !was) out(n, 'starts moving', e, s); else if (!m && was) out(n, 'stops', e, s); break; }
+          case 'onFalling': { const f = !!v && !b.grounded && (three ? -v.y : v.y) > (+P('speed') || 60); if (f && !edge(n, 'fall', f)) out(n, 'then', e, s); else edge(n, 'fall', f); break; }
+          case 'onFellFar': { const y0 = state.get(n.id + ':y0') ?? e.y, d = three ? (y0 - e.y) * 40 : e.y - y0, far = d > (+P('distance') || 800); if (far && !edge(n, 'far', far)) out(n, 'then', e, s); else edge(n, 'far', far); break; }
+          case 'onSpeedAbove': { const f = speed > (+P('speed') || 400); if (f && !edge(n, 'spd', f)) out(n, 'then', e, s, { eventValue: Math.round(speed) }); else edge(n, 'spd', f); break; }
+          case 'onObjectFar': { const q = nearest(s, e, P('tag')); const far = !q || Math.hypot(q.x - e.x, q.y - e.y, (q.z || 0) - (e.z || 0)) > (+P('distance') || 200), was = edge(n, 'far', far); if (far && was === false) out(n, 'then', e, s, { other: q }); break; }
+          case 'onSight': { const q = nearest(s, e, P('tag')), see = !!q && s.canSee(e, q), was = edge(n, 'see', see); if (see && !was) out(n, 'sees', e, s, { other: q }); else if (!see && was) out(n, 'loses sight', e, s, { other: q }); break; }
+          case 'onHealed': { const hp = +e.data.hp; if (!Number.isFinite(hp)) break; const was = edge(n, 'hp', hp); if (was !== undefined && hp > was) out(n, 'then', e, s, { eventValue: hp - was }); break; }
+          case 'onHealthLow': { const max = +e.data.hpMax || 0; if (!max) break; const low = (+e.data.hp || 0) / max * 100 <= (+P('percent') || 30); if (low && !edge(n, 'low', low)) out(n, 'then', e, s); else edge(n, 'low', low); break; }
+          case 'onNoneLeft': { const cnt = s.findAll(P('tag')).filter((q) => !q.dead && !q.template).length, was = edge(n, 'cnt', cnt); if (cnt === 0 && was > 0) out(n, 'then', e, s); break; }
+          case 'onShownHidden': { const vis = e.visible !== false, was = edge(n, 'vis', vis); if (was !== undefined && vis !== was) out(n, vis ? 'shown' : 'hidden', e, s); break; }
+          case 'onSpriteFrame': { const f = e.sprite?.frame | 0, was = edge(n, 'fr', f); if (f === (+P('frame') | 0) && was !== f) out(n, 'then', e, s); break; }
+          case 'onDialogueEnd': { const on = !!s.dialog, was = edge(n, 'dlg', on); if (!on && was) out(n, 'then', e, s); break; }
+          case 'onCutscene': { const on = !!s.cutscene, was = edge(n, 'cut', on); if (on && !was) out(n, 'starts', e, s); else if (!on && was) out(n, 'ends', e, s); break; }
+          case 'onSaveLoaded': if (E.loadedSave && !state.get(n.id + ':ld')) { state.set(n.id + ':ld', true); E.loadedSave = false; out(n, 'then', e, s); } break;
+          case 'onTimeReaches': if ((s.time || 0) >= (+P('seconds') || 0) && !state.get(n.id + ':t')) { state.set(n.id + ':t', true); out(n, 'then', e, s); } break;
+          case 'onClock': { const d = new Date(), hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'), want = String(P('time') || '').trim().padStart(5, '0'), key = d.toDateString() + hm; if (hm === want && state.get(n.id + ':clk') !== key) { state.set(n.id + ':clk', key); out(n, 'then', e, s); } break; }
+        }
+      }
+    }
+    const leEvent = (n) => { const k = n.type.slice(3), d = LOGIC_EVENTS[k], ev = { type: k }; for (const q of d?.params || []) ev[q.key] = param(n, q.key); return ev; };
     const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
     const timers = new Map(), bindings = new Map();
     return {
       uiAlways: true,
       start(e, s) {
+        if (leNodes.length) { lw = new LogicWatcher(e, s); needsSensor(leNodes.map((n) => leEvent(n)), e, s); } // Triggers events used as nodes
+        startMoreEvents(e, s);
+        if (g.nodes.some((n) => ['tap', 'onDoubleTap', 'onLongPress', 'onDragThis', 'le_tap', 'le_doubleTap', 'le_longPress'].includes(n.type) || (n.type === 'onFingerDown' && param(n, 'where') !== 'anywhere'))) (s.tapTargets ||= new Set()).add(e);
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
         if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
-        if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
+        if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who, n, from, type) => { if (who === e) fire('damaged', e, s, from, (q) => { const f = q.params?.dtype; return !f || f === 'any' || f === (type || 'normal'); }, 0, { eventValue: Math.round((+n || 0) * 100) / 100 }); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
@@ -12413,7 +13084,9 @@ registerBehavior('graph', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, playing = s.state === 'play';
+        if (lw) { lw.frame(dt); for (const n of leNodes) for (const hit of lw.matchAll(leEvent(n), n.id)) if (playing || ['tap', 'message', 'called'].includes(n.type.slice(3))) follow(n, 'then', { s, e, other: hit.other, eventValue: hit.value, steps: 0, dt }); }
         if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
+        if (moreEv.length) pollMoreEvents(e, dt, s, inp, playing);
         if (!playing) return;
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
@@ -12429,7 +13102,12 @@ registerBehavior('graph', {
           if (has('onDoubleTap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { if (s.time - lastTapT < 0.35) { lastTapT = -9; fire('onDoubleTap', e, s); } else lastTapT = s.time; }
         }
         if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
-        if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
+        if (e.body && has('landed', 'leftGround')) {
+          const gr = !!e.body.grounded, hit = e.body.landed > 0;
+          if (hit || (wasGround === false && gr)) fire('landed', e, s, null, null, null, { eventValue: Math.round(e.body.landed || 0) }); // a quick bounce lands and leaves within one frame
+          else if (wasGround && !gr) fire('leftGround', e, s);
+          wasGround = gr;
+        }
         if (has('onDash')) { const d = !!e.move?.dashing; if (d && !wasDash) fire('onDash', e, s); wasDash = d; }
         if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
         for (const n of g.nodes) if (n.type === 'objectNear') {
@@ -12460,6 +13138,7 @@ registerBehavior('graph', {
         }
       },
       collide(e, other, s, m) {
+        lw?.push({ type: 'touch', other });
         fire('touch', e, s, other, (n) => other.has(param(n, 'tag')));
         if (e.body?.sensor || other.body?.sensor) { fire('triggerEnter', e, s, other, (n) => tagOk(other, param(n, 'tag'))); return; }
         if (!has('collisionEnter')) return;
@@ -12469,10 +13148,13 @@ registerBehavior('graph', {
         fire('collisionEnter', e, s, other, (n) => tagOk(other, param(n, 'tag')) && impact >= (+param(n, 'minSpeed') || 0), null, { impact, hit: { dist: 0, point: { x: e.x, y: e.y, z: e.z }, normal: { x: -nrm.nx, y: -nrm.ny, z: -nrm.nz } } });
       },
       separate(e, other, s) {
+        lw?.push({ type: 'touchEnd', other });
         fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag')));
         fire(e.body?.sensor || other.body?.sensor ? 'triggerExit' : 'collisionExit', e, s, other, (n) => tagOk(other, param(n, 'tag')));
       },
       destroy(e, s) { fire('destroyed', e, s); if (rayOverlay) s.overlays = (s.overlays || []).filter((f) => f !== rayOverlay); },
+      _run(id, ctx) { run(byId.get(id), ctx); }, // Triggers run single nodes through these
+      _value(id, ctx) { return value(byId.get(id), ctx, 0); },
     };
   },
 });
@@ -12920,6 +13602,7 @@ export class Engine {
   }
 
   resize() {
+    queueMicrotask(() => this.scene?.emit('resize', this.width, this.height));
     const r = this.root.getBoundingClientRect();
     this.width = Math.max(1, r.width); this.height = Math.max(1, r.height);
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
@@ -13126,6 +13809,7 @@ export class Engine {
     return true;
   }
   loadGame(slot = 1, { keepTitle = false } = {}) {
+    this.loadedSave = true; // On Save Loaded
     const d = this.readSave(slot);
     if (!d || !this.factory) return false;
     if (this.levels && d.level !== this.levelIndex && d.level < this.levels.length) this.levelIndex = d.level;
@@ -13344,6 +14028,7 @@ export class Engine {
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     this.navTick(s);
+    if (this.paused !== this._wasPaused) { if (this._wasPaused !== undefined && !this.editing) s.emit('pauseChanged', !!this.paused); this._wasPaused = this.paused; } // On Paused / Resumed nodes
     this.online.update(dt);
     this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
     this.modalTaps(s);
@@ -13390,6 +14075,7 @@ export class Engine {
       if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
     }
     const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
+    for (const e of s.entities) if (e.body) e.body.landed = 0; // landings this frame (any substep)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();
@@ -13450,6 +14136,8 @@ export class Engine {
     return S;
   }
 
+  /** The next frame as a PNG data URL (Take Photo node). */
+  takePhoto() { return new Promise((resolve) => { (this.photoWanted ||= []).push(resolve); }); }
   render() {
     if (!this.scene || !this.renderer) return;
     this.updateSafe();
@@ -13459,6 +14147,7 @@ export class Engine {
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);
+    if (this.photoWanted) { const cbs = this.photoWanted; this.photoWanted = null; try { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const g = c.getContext('2d'); g.drawImage(this.canvas, 0, 0); if (this.uiCanvas) g.drawImage(this.uiCanvas, 0, 0, c.width, c.height); const url = c.toDataURL('image/png'); for (const f of cbs) f(url); } catch { for (const f of cbs) f(null); } } // Take Photo: the frame just drawn, game + UI
   }
 
   /** Post-processing over the game view (not the HUD): colour grading and bloom on the GPU, vignette and tint as overlays. */

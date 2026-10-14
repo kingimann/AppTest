@@ -180,6 +180,11 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 - **My Instructions and My Conditions** (the *Mine* button in the Triggers or State Machine editor, or *New instruction…* / *New condition…* at the bottom of the picker):
   - Build your own instruction from other instructions (with waits), or your own condition from other conditions (all or any must be true).
   - Give them **inputs** (number or text, each with a default). Type `@amount` into any field of the steps to use an input, or `{@amount}` inside text.
+  - **Easy ways to make one:**
+    - **Save as My Instruction** / **Save as My Condition** (next to DO and IF) bundles a trigger's steps or checks into one reusable piece and puts it in their place. Pick which steps to bundle, or use *Make a My Instruction from this…* on any step.
+    - **New instruction… / New condition…** asks for a name, then starts blank or from a ready-made one. Instructions: *Reward*, *Spend coins*, *Hurt the player*, *Celebrate*, *Respawn*, *Spawn a few*. Conditions: *Can afford*, *Low health*, *Player is near*, *None left*, *Night time*, *Has item*.
+    - Tap **@** next to any value inside one to plug in an input, or to make that value a new input (its current value becomes the default). *Back to a fixed value* undoes it.
+    - **How it reads in a trigger** sets the sentence shown where it is used, e.g. "Reward {@amount} coins" reads "Reward 10 coins".
   - Use them like built-in ones: they appear under *My Instructions* / *My Conditions* in the pickers, and each use fills in its own inputs. A trigger waits for a My Instruction to finish, unless you choose *Don't wait for it*.
   - Edit one from any row that uses it. You can also **Duplicate** it, **Delete** it (it tells you how many times it is used), or **Save to Library** and add it to any other game from *Mine → From your library*.
   - They belong to the whole game, so every object's triggers and state machines can use them. Visual scripts can use them too, with **Run My Instruction** and **My Condition**. Find Problems flags uses of deleted ones.
@@ -190,6 +195,30 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **Several scripts in one Visual Script component:**
+  - **Add Another Script** (blank, or one of your saved scripts, linked) puts more scripts in the same component. Each runs side by side with its own events, functions and state.
+  - With more than one, the component shows a compact row per script: on/off, name, what starts it, **Open**, and ⋯ (rename, duplicate, move, make main, save as reusable, unlink, delete).
+  - Each script shows up in the Scripts tab, gets its own warnings and keeps its own live-debug badges. Functions in any of them can be called from other objects.
+  - *New Script on …* in the Scripts tab adds to the object's existing component instead of making another one.
+- **43 new event nodes** (Events folder; each also works as a trigger event):
+  - **Touch and keys:** On Finger Down (anywhere or on this object), On Drag This Object (start / dragging / dropped), On Two-Finger Tap, On Pinch (zoom in / out), On Key Released, On Any Key, On Phone Tilted, On Joystick (pushed / released), When Player Is Idle.
+  - **Movement and physics:** On Hit Wall, On Hit Ceiling, On Starts / Stops Moving, On Starts Falling, On Fell Far, When Speed Goes Above, On Object Moves Away, On Sees / Loses Sight.
+  - **Health:** On Healed, When Health Gets Low.
+  - **Objects coming and going:** On Spawned (as a copy), On Object Spawned / Destroyed (by tag or name), When None Left, On Shown / Hidden, On Sprite Frame.
+  - **Game flow:** On Paused / Resumed, On Game State (title / playing / game over / won), On New High Score, On Item Collected, On Achievement, On Any Message, On Dialogue Finished, On Cutscene (starts / ends), On Scrolled (up / down), On Save Loaded.
+  - **Time and returning players:** When Level Time Reaches, At Clock Time, On First Time Ever, On New Day, On Welcome Back (hours away as Event Value).
+  - **Device:** On Battery Low, On Screen Resized, On Dark Mode Changed.
+  - Physics bodies now report touching a wall (`body.wall` = −1 / 1) and a ceiling (`body.ceiling`) each frame.
+- **Triggers and visual scripts can do the same things:**
+  - Every **visual-script node** can be used in Triggers.
+    - Node events (On Touch, On Collision Enter, On Message…) are trigger events, with a choice of output when a node has several.
+    - Value nodes are conditions: true/false nodes directly; number and text nodes compared with = ≠ > < ≥ ≤.
+    - Action nodes are instructions. The trigger waits for the node to finish, and can *continue only if* a chosen output fires (e.g. Random Chance → yes).
+    - The pickers show the usual list first, then **Show N more from visual-script nodes**. Search covers everything.
+  - Every **trigger event, condition and instruction** is a node.
+    - Instructions and conditions have their own **Instructions** and **Conditions** folders.
+    - Trigger events are in **Events** as "When: …" (When: double-tapped, When: comes near tag…).
+    - A trigger instruction node goes on from "then" once it finishes, so trigger waits work in scripts too.
 - **Scripts, triggers and state machines talk to each other:**
   - **Functions across objects:** **Call Function On Object** gives back another script's Return Value (e.g. the Game Manager's `canAfford`). **Run Function On Objects** runs it on one object, everything with a tag, or everything, and can store the result. **Object Has Function** checks first.
   - **Other objects' variables:** **Get / Set Variable Of Object** (a door's `open`, an enemy's `hp`), by name, tag or *other*.
@@ -202,7 +231,9 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 
 | Component | What it does |
 | --- | --- |
-| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, message) |
+| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, lose a life, message). Also armour, shields, damage types, status effects, health pickups, fall damage, a health bar over it and damage numbers (see *Health, damage and survival*) |
+| **Damage Dealer** | Hurts objects with Health that it touches (weapons, bullets, spikes, lava, explosions): damage type, on touch or every few seconds while touching, critical hits, poison / burn / bleed / slow / freeze, area damage, knockback |
+| **Hunger** / **Thirst** | Drain over time (faster while moving), refilled by food / drink objects, hurt or slow the player when empty, can heal Health while full |
 | **Enemy AI** | Patrols, chases when it sees the target (walls block its view), attacks in range (damaging Health), gives up and returns home |
 | **Pathfinding (Navigator)** | A* around walls to a tag or object, for smart chasers, pets and NPCs (2D and 3D) |
 | **Joint** | Spring, rope (pendulums, swings) or rod to another object, with a drawn rope |
@@ -229,7 +260,8 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **Inspector**:
   - Short fields (numbers, dropdowns, colours, text) sit beside their label; component headers stay pinned while you scroll.
   - Only fields for the game's mode (2D or 3D) are shown. **Advanced** next to search shows the rarely used ones.
-  - Category filters: Visual, Physics, Logic, Animation, Gameplay, and one fold / unfold-all button.
+  - Category filters: Visual, Physics, Logic, Animation, Gameplay.
+  - **Collapse all / Expand all** folds every component at once. It is in Game Settings too, and remembered, so the next object you select opens collapsed as well.
   - **Quick add** chips for common components, next to Add Component.
   - **Add Component** opens with suggestions for the selected object (e.g. Rigidbody, Health, Triggers for a player that lacks them), your recently used components, and category folders with counts (Physics, Controllers, Combat, AI, Logic…). Tap a folder to browse it, or search everything at once.
   - Components have a coloured edge by category.
@@ -385,6 +417,8 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Colliders and Rigidbody (Unity-style)
 
+- **Every landing counts, even quick bounces.** The physics now records every time a body lands during a frame. A bouncy body that hits the ground and leaves again between two frames still fires **On Landed**, the Triggers event **Lands on the ground** and a Camera Impulse set to *it lands*. The hit speed is the Event Value. Bodies settling slowly don't count as new landings.
+
 - **2D games:** Box, Circle, Capsule, Polygon and Edge Collider 2D. **3D games:** Box, Sphere, Capsule and Cylinder Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).
 - **See them like Unity:** every collider is outlined in green in the Scene view (2D outlines, 3D wireframes; triggers are dashed / lighter). Turn it off with *2D/3D menu → Show All Colliders* or the checkbox on a collider; the selected object's collider always shows.
 
@@ -416,7 +450,73 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - New games start, like a Unity scene, with a **Main Camera** object (follows the player, or stays put if there isn't one) and a light object: **Directional Light** in 3D (its rotation aims the sun and the shadows; colour, intensity, ambient, shadows) or **Global Light 2D** (how bright the level is; Point Lights shine through the dark).
 - Create → **Camera & lights** adds more: Camera, Directional Light / Global Light 2D, Point Light. While a light object exists, the level's Lighting settings defer to it.
 
+### More lighting and camera tools
+
+- **Light types:** a light is a **Point** light (shines all round) or a **Spotlight** (a cone with a width you set). Aim a 2D spotlight with *Aim* (0 = right, 90 = down) plus the object's rotation; in 3D, *Aim down* tilts it and turning the object points it.
+- **Light effects:** Steady, **Pulse**, **Blink**, **Fire** (a flickering warm torch) and **Rainbow**, each with an effect speed.
+- **2D soft light and shadows:** *Softness* sets how gently a 2D light fades at its edge. **Casts shadows** makes solid objects (anything with a body) block the light, so walls throw dark shadows behind them.
+- **Lighting Presets** (Game Settings): one tap for Day, Golden hour, Evening, Night, Overcast, Cave, Spooky, Underwater or Neon. They set brightness, colours, ambient light, sky and background together, on the Global Light 2D / Directional Light object if there is one.
+- **Create → Camera & lights:** new **Spotlight** (2D and 3D) and **Torch (fire light)** objects.
+- **Camera Controls** (component, on a camera): lets players **drag to pan**, **pinch** (or use the mouse wheel) to zoom, flick to glide and **double-tap** to go back. It has zoom limits and a pan limit, and ignores fingers that start on tappable objects. Use it for maps, strategy, idle and building games.
+- **New nodes:**
+  - **Camera:** **Focus Camera On** (zooms on an object for some seconds, then *back*), **Zoom Punch** (a quick zoom in and out for hits and pickups), **Take Photo** (a picture of the game with its UI, which you can share, save to the device or keep in a variable).
+  - **Looks:** **Fade Light** (to a brightness, range and colour), **Set Light Effect**, **Set Darkness / Ambient** (2D, it now fades), **Set Sun (3D)**, **Lighting Preset** (fades the whole level to a mood, with *done*).
+  - **Values:** **Light Brightness**.
+- **From code:** `engine.takePhoto()` returns a PNG data URL. `LIGHT_PRESETS` is exported.
+
+### Health, damage and survival
+
+- **Health & Damage** has new settings, in folders:
+  - **Defence:**
+    - **armour** (taken off every hit);
+    - **damage reduction %**;
+    - **damage types ×**, e.g. `fire 0.5, poison 0, ice 2` (0 = immune);
+    - a **shield** that soaks up hits first and refills;
+    - **can't be hurt**;
+    - **keeps hurting while touching**: after the invulnerable time, standing on an enemy or in lava hurts again.
+  - **Healing:**
+    - heal per second, with a **wait after a hit**;
+    - **health pickups** by tag (`medkit`) and the amount each gives;
+    - **fall damage** when landing faster than a speed.
+  - **Look & sound:**
+    - a **health bar over it** (never, when hurt, always), with the shield as a blue strip;
+    - **damage numbers** (CRIT in pink, shield hits in blue, poison in green);
+    - hit sound, camera shake;
+    - death effect: burst, fade out, both or none.
+  - **When health reaches 0** can also **lose a life**: it takes one from `lives` and respawns, and it's game over when none are left.
+- **Status effects:** **poison**, **burn**, **bleed** (damage every half second), **heal over time**, **slow** and **freeze** (slow the object's movement). Each lasts some seconds. An object immune to a damage type can't get that effect.
+- **Damage Dealer** (component): put it on swords, bullets, spikes, lava, bombs. You can set:
+  - which tags it hurts and how much;
+  - the **damage type**;
+  - whether it hurts **when it touches** or **every few seconds while touching**;
+  - a cooldown per target and knockback;
+  - an effect it **also gives**;
+  - **critical hits** (chance and ×), **area damage** (explosions, weaker at the edge);
+  - going **through armour**, destroying targets without Health, **destroying itself after a hit** (bullets) and points per hit.
+- **Hunger** and **Thirst** (components). You can set:
+  - how fast each drains, and how much **faster while moving**;
+  - the **food / drink** tags or names, how much each one gives, and **different amounts** by name (`apple 15, steak 60`);
+  - a variable for your HUD (`hunger`, `thirst`);
+  - a **low** level, with a message (`hungry`, `thirsty`);
+  - what happens when it runs out: hurts health, slows down, both, game over or nothing;
+  - **heals health while above** a % (well-fed players heal);
+  - a bar over the object.
+- **Create → Gameplay** has **Survivor** (a player with Health, Hunger and Thirst), **Apple (food)**, **Water (drink)**, **Medkit**, **Spikes**, **Fire** (burns, with a flickering light) and **Poison Pool**, in 2D and 3D. **UI → Hunger Bar** and **Thirst Bar** go under the Health Bar.
+- **Triggers:**
+  - **Events:** *Takes damage* (by damage type), *Gets healed*, *Shield breaks*, *Gets poisoned / burnt / slowed…*, *Gets hungry / thirsty*, *Starving / out of water*, *Eats or drinks*.
+  - **Conditions:** *Hunger / thirst*, *Has status effect*, *Shield left*.
+  - **Instructions:** *Damage / heal* (with damage type and "goes through armour"), *Poison / burn / slow…*, *Cure status effects*, *Refill / revive / max health* (also add shield, kill), *Make invulnerable*, *Eat / drink*.
+  - All of these are nodes too.
+- **Nodes:** **On Damaged** filters by damage type; its Event Value is how much, and "other" is who hurt it. The value node **Health / Hunger / Thirst** reads health, max, %, shield, hunger or thirst of any object.
+- **Hazards** set to *damage* now take health from a player that has Health, instead of a life.
+- **From code:** `health.damage(n, target, from, { type, crit, pierce, knockback })` returns the damage done. Health also has `heal`, `addShield`, `setMax`, `addEffect(name, perSecond, seconds)`, `cure`, `kill` and `respawn`. Hunger and Thirst have `add` and `set`. `STATUS_FX` is exported.
+
 ### Move: joystick, tilt and drag
+
+- **Taps and the joystick get along:**
+  - A finger that lands on something you can tap never starts the joystick. That covers On Tap / Double Tap / Long Press / Drag nodes, tap triggers and Buttons.
+  - A quick touch that did start the joystick still counts as a tap.
+  - Taps forgive a little finger wobble (more room on big screens) and up to 0.45 s of press, and they are checked where the finger landed.
 
 The **Move** component steers with the joystick, a finger drag, both, or tilting the phone.
 

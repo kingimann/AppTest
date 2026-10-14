@@ -50,6 +50,8 @@ export const UI_WIDGETS = [
   { icon: 'hand', label: 'Button', props: { name: 'Button', ui: true, anchor: 'bottom', x: 0, y: -120, shape: { type: 'rect', w: 240, h: 60, radius: 16, fill: '#3a6ea5' }, text: { value: 'Play Again', size: 22, color: '#ffffff' },
     behaviors: [{ type: 'button', action: 'restart game', value: '', amount: 1, sound: 'none' }] } },
   { icon: 'hud', label: 'Health Bar', props: { name: 'Health Bar', ui: true, anchor: 'top-left', x: 110, y: 80, bar: { var: 'hp', max: 100, w: 180, h: 18, fill: '#ef5350', bg: 'rgba(0,0,0,0.45)', radius: 9, label: true } }, vars: { hp: 100 } },
+  { icon: 'hud', label: 'Hunger Bar', props: { name: 'Hunger Bar', ui: true, anchor: 'top-left', x: 110, y: 108, bar: { var: 'hunger', max: 100, w: 180, h: 14, fill: '#ffa63d', bg: 'rgba(0,0,0,0.45)', radius: 7, label: false } }, vars: { hunger: 100 } },
+  { icon: 'hud', label: 'Thirst Bar', props: { name: 'Thirst Bar', ui: true, anchor: 'top-left', x: 110, y: 130, bar: { var: 'thirst', max: 100, w: 180, h: 14, fill: '#4db8ff', bg: 'rgba(0,0,0,0.45)', radius: 7, label: false } }, vars: { thirst: 100 } },
   { icon: 'hud', label: 'Progress Bar', props: { name: 'Progress Bar', ui: true, anchor: 'top', x: 0, y: 80, bar: { var: 'score', max: 100, w: 240, h: 14, fill: '#66bb6a', bg: 'rgba(0,0,0,0.45)', radius: 7, label: false } } },
   { icon: 'coin', label: 'Score', props: { name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 30, align: 'left', color: '#ffffff' } } },
   { icon: 'heart', label: 'Lives', props: { name: 'Lives Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '♥ {lives}', size: 26, align: 'right', color: '#ff4d6d', weight: '900' } }, vars: { lives: 3 } },

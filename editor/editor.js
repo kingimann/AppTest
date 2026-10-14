@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, SaveFiles, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
+import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -1573,7 +1573,11 @@ let scriptQuery = '';
 /** Each Visual Script component: { lv, li, e, b, bi }. */
 function allGraphs() {
   const out = [];
-  levelList().forEach((lv, li) => { for (const e of lv.entities || []) (e.behaviors || []).forEach((b, bi) => { if (b.type === 'graph') out.push({ lv, li, e, b, bi }); }); });
+  levelList().forEach((lv, li) => { for (const e of lv.entities || []) (e.behaviors || []).forEach((b, bi) => {
+    if (b.type !== 'graph') return;
+    out.push({ lv, li, e, b, bi, t: b, path: `behaviors.${bi}.graph`, name: (b.scripts || []).length ? b.mainName || 'Main script' : '' });
+    (b.scripts || []).forEach((sc, k) => out.push({ lv, li, e, b, bi, t: sc, k, path: `behaviors.${bi}.scripts.${k}.graph`, name: sc.name || `Script ${k + 2}` }));
+  }); });
   return out;
 }
 const graphEvents = (g) => [...new Set((g?.nodes || []).filter((n) => NODE_TYPES[n.type]?.cat === 'Events' || (NODE_TYPES[n.type]?.cat === 'Animation' && !NODE_TYPES[n.type].exec && !NODE_TYPES[n.type].value)).map((n) => NODE_TYPES[n.type].label.replace(/^On /, '')))];
@@ -1606,23 +1610,32 @@ function graphThumb(g) {
 function openGraphAt(li, id, bi) {
   if (li !== levelIdx) setLevel(li);
   selectedId = id; renderHierarchy(); updateCtxBar();
-  editGraph(() => ent(id) || {}, `behaviors.${bi}.graph`);
+  editGraph(() => ent(id) || {}, typeof bi === 'string' ? bi : `behaviors.${bi}.graph`); // a path for scripts inside a component
 }
 function scriptCard(x) {
-  const { li, e, b, bi } = x, g = b.graph || { nodes: [] }, sc = scriptOf(b), ev = graphEvents(g), here = li === levelIdx;
+  const { li, e, b } = x, t = x.t || b, bi = x.path || x.bi, g = t.graph || { nodes: [] }, sc = scriptOf(t), ev = graphEvents(g), here = li === levelIdx, sub = t !== b;
+  const off = b.enabled === false || (sub ? t.off : b.mainOff);
   const menu = (anchor) => popMenu(anchor, [
     { cap: `${e.name || 'Object'} · Visual Script` },
     { icon: 'nodes', label: 'Open Node Editor', fn: () => openGraphAt(li, e.id, bi) },
     { icon: 'info', label: 'Show Object in Inspector', fn: () => { if (li !== levelIdx) setLevel(li); select(e.id); setDock('inspector'); } },
-    sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete b.scriptRef; changed(); renderScripts(); toast('Unlinked'); } }
-      : { icon: 'save', label: 'Save as Reusable Script…', fn: () => { if (!g.nodes.length) { toast('Add some nodes first'); return; } const n = prompt('Name this script so you can reuse it', `${e.name || 'My'} script`); if (n?.trim()) { saveScript(b, g, n.trim()); renderScripts(); } } },
-    { icon: b.enabled === false ? 'eye' : 'eyeoff', label: b.enabled === false ? 'Turn On' : 'Turn Off', fn: () => { if (b.enabled === false) delete b.enabled; else b.enabled = false; changed(); renderScripts(); } },
+    sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete t.scriptRef; changed(); renderScripts(); toast('Unlinked'); } }
+      : { icon: 'save', label: 'Save as Reusable Script…', fn: () => { if (!g.nodes.length) { toast('Add some nodes first'); return; } const n = prompt('Name this script so you can reuse it', `${e.name || 'My'} script`); if (n?.trim()) { saveScript(t, g, n.trim()); renderScripts(); } } },
+    sub ? { icon: t.off ? 'eye' : 'eyeoff', label: t.off ? 'Turn On' : 'Turn Off', fn: () => { if (t.off) delete t.off; else t.off = true; changed(); renderScripts(); } }
+      : { icon: b.enabled === false ? 'eye' : 'eyeoff', label: b.enabled === false ? 'Turn On' : 'Turn Off', fn: () => { if (b.enabled === false) delete b.enabled; else b.enabled = false; changed(); renderScripts(); } },
     '-',
-    { icon: 'trash', label: 'Remove Script', fn: () => { if (!confirm(`Remove this Visual Script from ${e.name || 'the object'}?`)) return; e.behaviors.splice(e.behaviors.indexOf(b), 1); changed({ structure: true }); pushHistory(); renderScripts(); } },
+    { icon: 'trash', label: 'Remove Script', fn: () => {
+      if (!confirm(`Remove ${x.name ? `“${x.name}”` : 'this Visual Script'} from ${e.name || 'the object'}?`)) return;
+      if (sub) { b.scripts.splice(b.scripts.indexOf(t), 1); if (!b.scripts.length) delete b.scripts; }
+      else if ((b.scripts || []).length) { const nx = b.scripts.shift(); b.graph = nx.graph; b.mainName = nx.name; if (nx.scriptRef) b.scriptRef = nx.scriptRef; else delete b.scriptRef; if (nx.off) b.mainOff = true; else delete b.mainOff; if (!b.scripts.length) delete b.scripts; } // the next script becomes the main one
+      else e.behaviors.splice(e.behaviors.indexOf(b), 1);
+      changed({ structure: true }); pushHistory(); renderScripts();
+    } },
   ]);
-  return h('div', { class: 'sc-card' + (b.enabled === false ? ' off' : '') + (selectedId === e.id && here ? ' sel' : ''), 'data-obj': e.name || '', onclick: (ev2) => { if (!ev2.target.closest('.sc-more')) openGraphAt(li, e.id, bi); } },
+  return h('div', { class: 'sc-card' + (off ? ' off' : '') + (selectedId === e.id && here ? ' sel' : ''), 'data-obj': e.name || '', onclick: (ev2) => { if (!ev2.target.closest('.sc-more')) openGraphAt(li, e.id, bi); } },
     graphThumb(g),
     h('div', { class: 'sc-info' },
+      x.name ? h('span', { class: 'sc-sub' }, x.name) : null,
       h('b', {}, e.name || 'Object', e.behaviors.filter((q) => q.type === 'graph').length > 1 ? h('span', { class: 'sc-nth' }, `#${e.behaviors.filter((q) => q.type === 'graph').indexOf(b) + 1}`) : null, e.template ? h('em', { class: 'sc-tag' }, 'template') : null, sc ? h('em', { class: 'sc-tag link' }, icon('link'), sc.name) : null, b.enabled === false ? h('em', { class: 'sc-tag' }, 'off') : null),
       h('small', {}, ev.length ? 'When: ' + ev.join(', ') : 'No event yet: add a green Event node'),
       h('small', { class: 'sc-n' }, `${g.nodes.length} node${g.nodes.length === 1 ? '' : 's'} · ${(g.links || []).length} wire${(g.links || []).length === 1 ? '' : 's'}`)),
@@ -1631,7 +1644,7 @@ function scriptCard(x) {
 function renderScripts() {
   const box = $('#scripts'); if (!box) return;
   const all = allGraphs(), q = scriptQuery.trim().toLowerCase();
-  const match = (x) => !q || [x.e.name, ...(x.e.tags || []), scriptOf(x.b)?.name, ...graphEvents(x.b.graph), ...(x.b.graph?.nodes || []).map((n) => NODE_TYPES[n.type]?.label)].some((t) => String(t || '').toLowerCase().includes(q));
+  const match = (x) => !q || [x.e.name, x.name, ...(x.e.tags || []), scriptOf(x.t)?.name, ...graphEvents(x.t.graph), ...(x.t.graph?.nodes || []).map((n) => NODE_TYPES[n.type]?.label)].some((t) => String(t || '').toLowerCase().includes(q));
   const shown = all.filter(match), here = shown.filter((x) => x.li === levelIdx), other = shown.filter((x) => x.li !== levelIdx);
   const saved = userScripts();
   const sel = ent(selectedId);
@@ -2087,8 +2100,14 @@ function addVisualScript() {
   if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
     b.graph = { nodes: [{ id: 'n1', type: 'every', x: 20, y: 40, params: { seconds: 1 } }, { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } }],
       links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
-  (j.behaviors ||= []).push(b);
+  const bi = (j.behaviors || []).findIndex((q) => q.type === 'graph');
   selectedId = j.id;
+  if (bi >= 0) { // it already has a Visual Script component: add another script inside it
+    const host = j.behaviors[bi]; (host.scripts ||= []).push({ id: uid('gs'), name: `Script ${host.scripts.length + 2}`, graph: b.graph });
+    changed({ structure: true }); pushHistory();
+    editGraph(() => ent(j.id) || {}, `behaviors.${bi}.scripts.${host.scripts.length - 1}.graph`); return;
+  }
+  (j.behaviors ||= []).push(b);
   changed({ structure: true }); pushHistory();
   editGraph(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.graph`);
 }
@@ -2097,7 +2116,7 @@ function addVisualScript() {
 function openCreate(startCat) {
   $('.cs')?.remove();
   const three = is3D(), objs = three ? OBJECTS_3D : OBJECTS_2D, prefabs = three ? PREFABS_3D : PREFABS_2D;
-  const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light'];
+  const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light', 'Spotlight', 'Torch (fire light)'];
   const artOf = (o) => { const src = o.props?.sprite?.src; return typeof src === 'string' && src.startsWith('art:') ? src : null; };
   const fromDef = (o, kind) => ({ label: o.label, icon: o.icon, art: o.art || artOf(o), desc: o.desc || o.note || '', group: o.group, fn: () => (kind === 'entity' ? addEntity(o.props) : addPrefab(o)) });
   const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons' && g !== 'UI Frames').flatMap(([g, list]) => list.map((k) => {
@@ -2305,7 +2324,7 @@ function control(target, path, spec) {
     case 'triggers': case 'fsm':
       return logicCard(target, path, spec.type);
     case 'graph':
-      return graphCard(target, path);
+      return scriptsCard(target, path);
     case 'tweenSteps':
       return stepsCard(target, path);
     case 'template': {
@@ -2496,7 +2515,12 @@ function validate(b, j) {
   if (b.type === 'camera' && b.mode !== 'fixed' && b.target && !tagged(b.target)) out.push(['warn', `Nothing is tagged “${b.target}” yet: the camera will stay put.`]);
   if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
   if (b.type === 'flipbook' && !String(b.frames || '').trim()) out.push(['warn', 'Add some frames, separated by commas.']);
-  if (b.type === 'graph' && !(b.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push(['warn', 'This script has no Event node, so it never runs.']);
+  if (b.type === 'graph') {
+    const noEv = (g) => !(g?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events' || (NODE_TYPES[n.type] && !NODE_TYPES[n.type].exec && !NODE_TYPES[n.type].value && (NODE_TYPES[n.type].outs || []).length && n.type !== 'funcDef'));
+    const lst = b.scripts || [];
+    if (!b.mainOff && noEv(b.graph)) out.push(['warn', lst.length ? `“${b.mainName || 'Main script'}” has no Event node, so it never runs.` : 'This script has no Event node, so it never runs.']);
+    for (const [k, sc] of lst.entries()) if (!sc.off && noEv(sc.graph) && !(sc.graph?.nodes || []).some((n) => n.type === 'funcDef')) out.push(['warn', `“${sc.name || 'Script ' + (k + 2)}” has no Event node, so it never runs.`]);
+  }
   if (b.type === 'fsm' && !(b.fsm?.states || []).length) out.push(['warn', 'Add at least one state.']);
   if (b.type === 'joint' && b.connectTo && !has(b.connectTo)) out.push(['error', `No object named “${b.connectTo}”.`]);
   if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
@@ -2548,6 +2572,48 @@ function openProblems() {
   ]);
 }
 
+/** One Visual Script component can hold several scripts: the main one, then any number more, each with its own events. */
+function scriptsCard(target, path) {
+  const bpath = path.replace(/\.graph$/, ''), b = getPath(target(), bpath) || {}, list = b.scripts || [];
+  const re = () => { changed({ structure: true }); pushHistory(); renderInspector(); };
+  const add = (obj, open) => { (b.scripts ||= []).push({ id: uid('gs'), ...obj }); re(); if (open) editGraph(target, `${bpath}.scripts.${b.scripts.length - 1}.graph`); };
+  const addBtn = h('button', { class: 'btn wide gs-add', onclick: (e) => popMenu(e.currentTarget, [
+    { cap: 'Add a script to this component' },
+    { icon: 'plus', label: 'Blank script', fn: () => add({ name: `Script ${list.length + 2}`, graph: { nodes: [], links: [] } }, true) },
+    ...allScripts().map((s2) => ({ icon: 'link', label: s2.name, k: s2.here ? 'saved script' : 'from another game', fn: () => { let sc = userScripts().find((q) => q.id === s2.id); if (!sc) { sc = { id: s2.id, name: s2.name, graph: clone(s2.graph) }; userScripts().push(sc); } add({ name: sc.name, graph: clone(sc.graph), scriptRef: sc.id }); toast(`Added “${sc.name}” (linked)`); } })),
+  ]) }, icon('plus'), list.length ? 'Add Another Script' : 'Add Another Script (runs side by side)');
+  if (!list.length) return h('div', { class: 'row full gs-list' }, graphCard(target, path), addBtn); // one script: the usual big card
+  const mainName = b.mainName || 'Main script';
+  /** One compact row per script: on/off, name, what starts it, open, options. */
+  const row = (holder, name, off, gpath, extraMenu, onToggle) => {
+    const g = holder.graph || { nodes: [], links: [] }, ev = graphEvents(g), sc = scriptOf(holder);
+    return h('div', { class: 'gs-item' + (off ? ' off' : ''), onclick: (e) => { if (!e.target.closest('input,button')) editGraph(target, gpath); } },
+      h('input', { type: 'checkbox', checked: !off, title: off ? 'Turned off' : 'On', onchange: (e) => onToggle(e.target.checked) }),
+      h('span', { class: 'gs-txt' }, h('b', {}, sc ? icon('link') : null, name), h('small', {}, `${g.nodes.length} node${g.nodes.length === 1 ? '' : 's'} · ${ev.length ? ev.slice(0, 2).join(', ') + (ev.length > 2 ? '…' : '') : g.nodes.some((n) => n.type === 'funcDef') ? 'functions: ' + g.nodes.filter((n) => n.type === 'funcDef').map((n) => n.params?.name || 'function').join(', ') : 'no event yet'}`)),
+      h('button', { class: 'btn gs-open', onclick: () => editGraph(target, gpath) }, icon('nodes'), 'Open'),
+      h('button', { class: 'gs-more', title: 'Script options', onclick: (e) => popMenu(e.currentTarget, [
+        { cap: name },
+        { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Script name', name); if (n?.trim()) extraMenu.rename(n.trim()); } },
+        ...extraMenu.items,
+        sc ? { icon: 'unlink', label: `Unlink from “${sc.name}”`, fn: () => { delete holder.scriptRef; re(); } }
+          : g.nodes.length && { icon: 'save', label: 'Save as Reusable Script…', fn: () => { const n = prompt('Name this script so you can reuse it', name); if (n?.trim()) { saveScript(holder, g, n.trim()); renderInspector(); } } },
+      ].filter(Boolean)) }, icon('more')));
+  };
+  const items = [row(b, mainName, b.mainOff, path, { rename: (n) => { b.mainName = n; re(); }, items: [
+    { icon: 'copy', label: 'Duplicate', fn: () => add({ name: mainName + ' copy', graph: clone(b.graph || { nodes: [], links: [] }) }) },
+  ] }, (on) => { if (on) delete b.mainOff; else b.mainOff = true; re(); })];
+  list.forEach((sc, k) => {
+    const nm = sc.name || `Script ${k + 2}`;
+    items.push(row(sc, nm, sc.off, `${bpath}.scripts.${k}.graph`, { rename: (n) => { sc.name = n; re(); }, items: [
+      { icon: 'copy', label: 'Duplicate', fn: () => { const c = clone(sc); c.id = uid('gs'); c.name = nm + ' copy'; delete c.scriptRef; list.splice(k + 1, 0, c); re(); } },
+      k > 0 && { icon: 'upload', label: 'Move Up', fn: () => { list.splice(k - 1, 0, list.splice(k, 1)[0]); re(); } },
+      k < list.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { list.splice(k + 1, 0, list.splice(k, 1)[0]); re(); } },
+      { icon: 'upload', label: 'Make Main Script', fn: () => { const m = { id: sc.id, name: mainName, graph: b.graph, ...(b.scriptRef ? { scriptRef: b.scriptRef } : {}), ...(b.mainOff ? { off: true } : {}) }; b.graph = sc.graph; b.mainName = nm; if (sc.scriptRef) b.scriptRef = sc.scriptRef; else delete b.scriptRef; if (sc.off) b.mainOff = true; else delete b.mainOff; list[k] = m; re(); } },
+      '-', { icon: 'trash', label: 'Delete Script', fn: () => { if ((sc.graph?.nodes || []).length && !confirm(`Delete “${nm}”?`)) return; list.splice(k, 1); if (!list.length) delete b.scripts; re(); } },
+    ].filter(Boolean) }, (on) => { if (on) delete sc.off; else sc.off = true; re(); }));
+  });
+  return h('div', { class: 'row full gs-list' }, h('div', { class: 'gs-note' }, `${list.length + 1} scripts in this component. Each runs on its own, side by side.`), items, addBtn);
+}
 /** Node-based coding: a summary card that opens the full-screen Node Editor. */
 function graphCard(target, path) {
   const g = getPath(target(), path) || { nodes: [], links: [] }, beh = getPath(target(), path.replace(/\.graph$/, '')), sc = scriptOf(beh);
@@ -2573,7 +2639,7 @@ function editGraph(target, path) {
   const back = () => ed.close();
   const ed = openNodeEditor({
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
-    stats: (nodeId) => engine.graphStats?.get(e.id + '|' + nodeId), // live debug: what ran in the last Play
+    stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
@@ -2595,7 +2661,7 @@ function saveScriptToLibrary(sc) { store.set(SCRIPT_LIB, JSON.stringify([{ id: s
 /** This game's scripts, then ones saved in your other games. */
 const allScripts = () => { const mine = userScripts(); return [...mine.map((q) => ({ ...q, here: true })), ...scriptLibrary().filter((q) => !mine.some((m) => m.id === q.id))]; };
 const scriptOf = (b) => (b?.scriptRef ? userScripts().find((q) => q.id === b.scriptRef) || null : null);
-function eachScriptUse(sid, fn) { for (const lv of levelList()) for (const e of lv.entities) for (const b of e.behaviors || []) if (b.type === 'graph' && b.scriptRef === sid) fn(b, e, lv); }
+function eachScriptUse(sid, fn) { for (const lv of levelList()) for (const e of lv.entities) for (const b of e.behaviors || []) if (b.type === 'graph') for (const t of [b, ...(b.scripts || [])]) if (t.scriptRef === sid) fn(t, e, lv); }
 function saveScript(beh, graph, name) {
   const sc = { id: uid('sc'), name, graph: clone(graph) };
   userScripts().push(sc); if (beh) beh.scriptRef = sc.id;
@@ -2904,6 +2970,7 @@ function comp(title, kids, opts = {}) {
     if (e.target.closest('input,button')) return;
     el.classList.toggle('closed');
     if (el.classList.contains('closed')) closedComps.add(key); else closedComps.delete(key);
+    const ib = el.closest('#inspector'); if (ib) syncFoldBtn(ib);
   } },
   h('span', { class: 'fold' }, icon('chevron')),
   opts.onToggle && h('input', { type: 'checkbox', checked: opts.enabled !== false, title: 'Enabled', onchange: (e) => opts.onToggle(e.target.checked) }),
@@ -2944,15 +3011,19 @@ function renderInspector() {
   const box = $('#inspector');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  if (selectedId === SCENE_ID) { renderSceneSettings(box); box.scrollTop = scroll; return; }
+  if (selectedId === SCENE_ID) {
+    const fresh = lastInspected !== SCENE_ID; lastInspected = SCENE_ID;
+    renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); box.scrollTop = scroll; return;
+  }
   const j = ent(selectedId);
   if (!j) { box.append(h('div', { class: 'empty' }, 'Nothing selected.', h('br'), 'Tap an object in the Scene or Hierarchy.')); return; }
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
   const idx = project.entities.indexOf(j);
+  let freshSel = false;
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
-    lastInspected = j.id; selectedPart = -1;
+    lastInspected = j.id; selectedPart = -1; freshSel = true;
     closedComps.clear();
     const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
@@ -2988,8 +3059,7 @@ function renderInspector() {
   if (nComps < 5 && inspCat !== 'all') inspCat = 'all';
   box.append(h('div', { class: 'comp-tools' + (nComps < 5 ? ' few' : '') },
     h('div', { class: 'cf' }, nComps < 5 ? h('span', { class: 'cf-n' }, `${nComps} component${nComps === 1 ? '' : 's'}`) : INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
-    h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
-      if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
+    foldAllBtn(box)));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -3192,6 +3262,14 @@ function renderInspector() {
       C('light.intensity', { label: 'Brightness', type: 'number', def: 1, step: 0.1 }),
       C('light.range', { label: 'Range', type: 'number', def: threeD ? 8 : 160, step: threeD ? 0.5 : 10 }),
       C('light.flicker', { label: 'Flicker (0–1, like a torch)', type: 'number', def: 0, step: 0.1 }),
+      C('light.type', { label: 'Type', type: 'select', options: [['point', 'Point'], ['spot', 'Spotlight']], def: +j.light.cone > 0 ? 'spot' : 'point', structure: true }),
+      (j.light.type === 'spot' || (!j.light.type && +j.light.cone > 0)) && C('light.cone', { label: 'Spot width (°)', type: 'number', def: 60, range: [5, 179], step: 5 }),
+      (j.light.type === 'spot' || (!j.light.type && +j.light.cone > 0)) && (threeD ? C('light.tilt', { label: 'Aim down (°, 90 = straight down; turn the object to aim it)', type: 'number', def: 90, range: [0, 90], step: 5 })
+        : C('light.aim', { label: 'Aim (°, 0 = right, 90 = down; plus the object’s rotation)', type: 'number', def: 0, range: [-180, 180], step: 15 })),
+      C('light.effect', { label: 'Effect', type: 'select', options: [['', 'Steady'], ['pulse', 'Pulse'], ['blink', 'Blink'], ['fire', 'Fire'], ['rainbow', 'Rainbow']], def: '', structure: true, dropdown: true }),
+      j.light.effect && C('light.speed', { label: 'Effect speed', type: 'number', def: 1, range: [0.1, 6], step: 0.1 }),
+      !threeD && C('light.soft', { label: 'Softness', type: 'number', def: 0.5, range: [0, 1], step: 0.05 }),
+      !threeD && C('light.shadows', { label: 'Casts shadows (solid objects block it)', type: 'bool', def: false }),
     ], { icon: 'bulb', key: 'light', menu: removeMenu(() => { delete j.light; changed({ structure: true }); }, 'light') }));
   }
   if (j.sun) box.append(comp('Directional Light', [
@@ -3323,6 +3401,8 @@ function renderInspector() {
   if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
   if (inspQuery) applyInspSearch(box);
   if (onlyChanged) applyOnlyChanged(box);
+  if (freshSel && foldAllPref) foldAll(box, true);
+  syncFoldBtn(box);
   box.scrollTop = scroll;
 }
 let onlyChanged = false;
@@ -3397,12 +3477,40 @@ function applyTheme(list) {
 }
 
 // ---- scene settings (shown when the scene root is selected) ----
+/** Collapse / expand every component; the choice is remembered, so the next object opens the same way. */
+let foldAllPref = store.get('pocket.editor.foldAll', '0') === '1';
+function foldAll(box, shut) {
+  for (const el of box.querySelectorAll('.comp')) { el.classList.toggle('closed', shut); if (shut) closedComps.add(el.dataset.key); else closedComps.delete(el.dataset.key); }
+}
+function foldAllBtn(box) {
+  return h('button', { class: 'ct fold-all', title: 'Collapse or expand all components', onclick: () => {
+    const comps = [...box.querySelectorAll('.comp')], allShut = comps.length && comps.every((el) => el.classList.contains('closed'));
+    foldAll(box, !allShut); foldAllPref = !allShut; store.set('pocket.editor.foldAll', foldAllPref ? '1' : '0'); syncFoldBtn(box); buzz(6);
+  } }, icon('collapse'), h('span', {}, 'Collapse all'));
+}
+function syncFoldBtn(box) {
+  const b = box.querySelector('.fold-all'); if (!b) return;
+  const comps = [...box.querySelectorAll('.comp')], allShut = comps.length && comps.every((el) => el.classList.contains('closed'));
+  b.querySelector('span').textContent = allShut ? 'Expand all' : 'Collapse all'; b.classList.toggle('on', !!allShut);
+}
+/** Lighting Presets: through the level's light object (Directional Light / Global Light 2D) when it has one. */
+function applyLightingPreset(name) {
+  const pr = LIGHT_PRESETS[name]; if (!pr) return;
+  const threeD = is3D(), lo = project.entities.find((e) => (threeD ? e.sun : e.globalLight));
+  if (threeD) {
+    const P = pr.d3; if (lo) Object.assign(lo.sun, { color: P.color, intensity: P.intensity, ambient: P.ambient }); else Object.assign(project.light ||= {}, { color: P.color, intensity: P.intensity, ambient: P.ambient });
+    Object.assign(project.light ||= {}, { sky: P.sky, ground: P.ground }); project.background = P.bg;
+  } else if (lo) Object.assign(lo.globalLight, { brightness: pr.d2[0], color: pr.d2[1] });
+  else Object.assign(project.light ||= {}, { darkness: 1 - pr.d2[0], ambientColor: pr.d2[1] });
+  changed({ structure: true }); pushHistory(); renderInspector(); toast(`Lighting: ${name}`);
+}
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
   const game = levelList()[0], GS = (path, spec) => control(() => levelList()[0], path, spec); // game-wide settings live on the first level
   box.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
     h('span'), h('input', { type: 'text', value: game.name, placeholder: 'Game name', oninput: (e) => { game.name = e.target.value; changed(); renderHierarchy(); } }),
     h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} game · Pocket Engine ${VERSION}`)));
+  box.append(h('div', { class: 'comp-tools few' }, h('div', { class: 'cf' }, h('span', { class: 'cf-n' }, 'Game Settings')), foldAllBtn(box)));
   box.append(comp('Level', [
     C('levelName', { label: 'Level Name', type: 'text', def: levelName(project, levelIdx) }),
     h('p', { class: 'desc' }, `This is level ${levelIdx + 1} of ${levelList().length}. Reaching a Goal moves on to the next level; score and lives carry over.`),
@@ -3444,6 +3552,10 @@ function renderSceneSettings(box) {
     threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
     h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
   ], { icon: 'body', key: 's-phys' }));
+  box.append(comp('Lighting Presets', [
+    h('p', { class: 'desc' }, 'One tap sets the whole mood. Change it while playing with the Lighting Preset node (with a fade).'),
+    h('div', { class: 'lp-grid' }, Object.entries(LIGHT_PRESETS).map(([name, pr]) => h('button', { class: 'lp-btn', style: `--a:${threeD ? pr.d3.bg : pr.d2[1]};--b:${threeD ? pr.d3.color : mixHex('#000000', '#ffffff', pr.d2[0])}`, onclick: () => applyLightingPreset(name) }, h('i'), name))),
+  ], { icon: 'sun', key: 's-lightpre' }));
   const lightObj = project.entities.find((e) => (threeD ? e.sun : e.globalLight));
   if (lightObj) box.append(h('div', { class: 'obox info', style: 'margin:16px 14px 0' }, `Lighting comes from “${lightObj.name}”. `, h('button', { class: 'btn', style: 'margin-top:8px;width:100%', onclick: () => select(lightObj.id) }, icon('sun'), `Select ${lightObj.name}`)));
   else box.append(comp('Lighting', threeD ? [
@@ -3648,7 +3760,7 @@ function renderSceneSettings(box) {
 // ============================================================================
 const BEH_META = {
   move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraTargetGroup: ['Camera', 'target'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraControls: ['Camera', 'hand'], cameraTargetGroup: ['Camera', 'target'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
@@ -3672,7 +3784,7 @@ const BEH_META = {
   uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
   uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
-  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
 /** Odin-style [Button]s shown at the top of a component. */
@@ -3891,7 +4003,7 @@ function addComponentTo(id, key) {
 /** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
 const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
   Animation: 'clock', 'My Scripts': 'nodes', Colliders: 'square', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
-const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'Survival', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
 const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
 function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
 /** A few components that usually make sense next for this object. */
@@ -4030,6 +4142,13 @@ const PREFABS_2D = [
     { id: 'p2', name: 'Look Around', x: 30, y: 170, enter: [{ type: 'rotateBy', degrees: 20, seconds: 0.3 }, { type: 'wait', seconds: 0.4 }, { type: 'rotateBy', degrees: -20, seconds: 0.3 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 1.2 }, conditions: [], to: 'p' }] },
     { id: 'a', name: 'Alert', x: 260, y: 100, enter: [{ type: 'punch', what: 'scale', amount: 0.4, seconds: 0.4 }, { type: 'message', text: 'Hey! Stop!', seconds: 1.2 }, { type: 'shake', strength: 8 }], stay: [], exit: [], transitions: [{ event: { type: 'after', seconds: 2 }, conditions: [{ type: 'near', tag: 'player', op: '>', value: 220 }], to: 'p' }] },
   ] } }] } },
+  { icon: 'heart', label: 'Survivor', group: 'Survival', desc: 'A player with Health, Hunger and Thirst', props: { name: 'Survivor', tags: ['player'], shape: { type: 'circle', r: 18, fill: '#8bc34a' }, behaviors: [{ type: 'move', control: 'both', speed: 240 }, { type: 'health', hp: 100, damage: 10, hurtBy: 'enemy', invuln: 0.8, onDeath: 'game over', syncVar: 'hp', numbers: true, showBar: 'when hurt', regen: 1, regenDelay: 4 }, { type: 'hunger' }, { type: 'thirst' }] } },
+  { icon: 'heart', label: 'Apple (food)', group: 'Survival', desc: 'Fills Hunger', props: { name: 'Apple', tags: ['food'], shape: { type: 'emoji', emoji: '🍎', w: 30, h: 30 }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'heart', label: 'Water (drink)', group: 'Survival', desc: 'Fills Thirst', props: { name: 'Water', tags: ['water'], shape: { type: 'emoji', emoji: '💧', w: 30, h: 30 }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'heart', label: 'Medkit', group: 'Survival', desc: 'Heals: add “medkit” to Health › Health pickups', props: { name: 'Medkit', tags: ['medkit'], shape: { type: 'emoji', emoji: '🩹', w: 30, h: 30 }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'enemy', label: 'Spikes', group: 'Survival', desc: 'Hurts the player while they stand on it', props: { name: 'Spikes', shape: { type: 'rect', w: 90, h: 16, radius: 3, fill: '#9e9e9e' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, mode: 'while touching (every few seconds)', every: 0.6 }] } },
+  { icon: 'enemy', label: 'Fire', group: 'Survival', desc: 'Fire damage that keeps burning', props: { name: 'Fire', shape: { type: 'emoji', emoji: '🔥', w: 40, h: 40 }, body: { type: 'kinematic', sensor: true }, light: { color: '#ffb35c', intensity: 1, range: 160, effect: 'fire' }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, dtype: 'fire', effect: 'burn', effectDps: 4, effectTime: 3 }] } },
+  { icon: 'enemy', label: 'Poison Pool', group: 'Survival', desc: 'Poisons whoever steps in', props: { name: 'Poison Pool', shape: { type: 'circle', r: 34, fill: '#7cb342' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 0, dtype: 'poison', effect: 'poison', effectDps: 5, effectTime: 4 }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -4074,6 +4193,13 @@ const PREFABS_3D = [
   { icon: 'save', label: 'Save Point', props: { name: 'Save Point', y: 0.6, mesh: { geometry: 'gem', w: 0.6, h: 1, d: 0.6, color: '#7cf7a0', emissive: 0.5 }, light: { color: '#7cf7a0', intensity: 1, range: 4 }, behaviors: [{ type: 'savePoint', slot: 1, text: 'Game saved', tag: 'player' }, { type: 'rotate', axis: 'y', speed: 90 }] } },
   { icon: 'coin', label: 'Spinning Coin', props: { name: 'Spinning Coin', y: 1, mesh: { geometry: 'cylinder', r: 0.4, h: 0.1, color: '#ffca28', emissive: 0.3 }, rx: 90, behaviors: [{ type: 'tween', effect: 'rotate by', angle: 360, duration: 1.5, ease: 'linear', loops: -1, loopType: 'restart', playOn: 'start' }, { type: 'collectible', score: 10 }] } },
   { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', y: 1, mesh: { geometry: 'box', w: 3, h: 0.4, d: 3, color: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 5, y: 0, z: 0, duration: 3, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
+  { icon: 'heart', label: 'Survivor', group: 'Survival', desc: 'A player with Health, Hunger and Thirst', props: { name: 'Survivor', tags: ['player'], y: 0.6, mesh: { geometry: 'capsule', r: 0.45, h: 1.2, color: '#8bc34a' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }, { type: 'health', hp: 100, damage: 10, hurtBy: 'enemy', invuln: 0.8, onDeath: 'game over', syncVar: 'hp', numbers: true, showBar: 'when hurt', regen: 1, regenDelay: 4 }, { type: 'hunger' }, { type: 'thirst' }] }, scene: { settings: { joystick: true } } },
+  { icon: 'heart', label: 'Apple (food)', group: 'Survival', desc: 'Fills Hunger', props: { name: 'Apple', tags: ['food'], y: 0.4, mesh: { geometry: 'sphere', r: 0.3, color: '#e53935' }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'heart', label: 'Water (drink)', group: 'Survival', desc: 'Fills Thirst', props: { name: 'Water', tags: ['water'], y: 0.4, mesh: { geometry: 'cylinder', r: 0.2, h: 0.6, color: '#4db8ff', opacity: 0.8 }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'heart', label: 'Medkit', group: 'Survival', desc: 'Heals: add “medkit” to Health › Health pickups', props: { name: 'Medkit', tags: ['medkit'], y: 0.3, mesh: { geometry: 'box', w: 0.6, h: 0.4, d: 0.6, color: '#ffffff' }, body: { type: 'kinematic', sensor: true } } },
+  { icon: 'enemy', label: 'Spikes', group: 'Survival', desc: 'Hurts the player while they stand on it', props: { name: 'Spikes', y: 0.15, mesh: { geometry: 'pyramid', w: 1.5, h: 0.3, d: 1.5, color: '#9e9e9e' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, mode: 'while touching (every few seconds)', every: 0.6 }] } },
+  { icon: 'enemy', label: 'Fire', group: 'Survival', desc: 'Fire damage that keeps burning', props: { name: 'Fire', y: 0.5, mesh: { geometry: 'cone', r: 0.4, h: 1, color: '#ff7043', emissive: 0.9 }, body: { type: 'kinematic', sensor: true }, light: { color: '#ffb35c', intensity: 2, range: 6, effect: 'fire' }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, dtype: 'fire', effect: 'burn', effectDps: 4, effectTime: 3 }] } },
+  { icon: 'enemy', label: 'Poison Pool', group: 'Survival', desc: 'Poisons whoever steps in', props: { name: 'Poison Pool', y: 0.05, mesh: { geometry: 'cylinder', r: 1, h: 0.1, color: '#7cb342' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 0, dtype: 'poison', effect: 'poison', effectDps: 5, effectTime: 4 }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -4095,6 +4221,8 @@ const OBJECTS_2D = [
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
+  { icon: 'bulb', label: 'Spotlight', props: { name: 'Spotlight', light: { color: '#fff3c4', intensity: 1.2, range: 260, type: 'spot', cone: 50, aim: 90, shadows: true } } },
+  { icon: 'bulb', label: 'Torch (fire light)', props: { name: 'Torch', shape: { type: 'emoji', emoji: '🔥', w: 30, h: 30 }, light: { color: '#ffb35c', intensity: 1, range: 180, effect: 'fire', shadows: true } } },
   { icon: 'sun', label: 'Global Light 2D', props: { name: 'Global Light 2D', globalLight: { brightness: 1, color: '#0a0a1e' } } },
   { icon: 'grid', label: 'Tilemap', props: { name: 'Tilemap', x: 0, y: 520, tiles: { size: 40, palette: TILE_PALETTE.map((t) => ({ ...t })), cells: Object.fromEntries([...Array(10)].map((_, i) => [i + ',0', 1])) } }, tilemap: true },
 ];
@@ -4120,6 +4248,7 @@ const OBJECTS_3D = [
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', y: 4, z: 8, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 7, oz: 11, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', y: 2, light: { color: '#ffd9a0', intensity: 1.5, range: 8 } } },
+  { icon: 'bulb', label: 'Spotlight', props: { name: 'Spotlight', y: 4, light: { color: '#fff3c4', intensity: 2.5, range: 10, type: 'spot', cone: 50, tilt: 90 } } },
   { icon: 'bulb', label: 'Lamp', props: { name: 'Lamp', model: { parts: [{ geometry: 'cylinder', x: 0, y: 1, z: 0, r: 0.06, h: 2, color: '#455a64' }, { geometry: 'sphere', x: 0, y: 2.1, z: 0, r: 0.22, color: '#fff3c4', emissive: 1 }] }, light: { color: '#ffd9a0', intensity: 1.6, range: 7 } } },
   { icon: 'sun', label: 'Directional Light', props: { name: 'Directional Light', y: 6, rx: 50, ry: -30, sun: { color: '#fff4e0', intensity: 1, ambient: 0.45, shadows: true } } },
 ];

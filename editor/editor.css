@@ -1470,3 +1470,48 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .lg-inp input, .lg-inp select { height: 44px; min-width: 0; font-size: 14px; padding: 4px 8px; }
 .lg-match { display: flex; align-items: center; gap: 10px; margin: 8px 0; color: var(--muted); font-size: 14px; }
 @media (max-width: 430px) { .lg-mine { display: none; } }
+
+/* ---- easier My Instructions ---- */
+.lg-kwrow { display: flex; align-items: center; gap: 8px; }
+.lg-save { margin-left: auto; height: 32px; padding: 0 10px; border: 1px solid #2f5b50; border-radius: 9px; background: rgba(46,125,107,.18); color: #8fd9c4; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.lg-save svg.i { width: 15px; height: 15px; }
+.lg-bind { display: flex; gap: 6px; align-items: center; min-width: 0; }
+.lg-bind > :first-child { flex: 1; min-width: 0; }
+.lg-at { flex: none; width: 40px; height: 40px; border: 1px solid #2c4560; border-radius: 10px; background: #1f2a36; color: #9cc3f0; font-weight: 800; font-size: 16px; padding: 0; }
+.lg-at.on { background: #3a6ea5; color: #fff; border-color: #3a6ea5; }
+.lg-new .lg-f { margin: 4px 0 10px; }
+.lg-new .btn.wide { width: 100%; margin-bottom: 12px; }
+.lg-pitem small { display: block; color: var(--muted); font-size: 11.5px; font-weight: 500; line-height: 1.3; margin-top: 2px; }
+.lg-choose { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 12px; max-height: 50vh; overflow-y: auto; }
+.lg-ck { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; background: #2a2c31; border: 1px solid #383a40; font-size: 14.5px; }
+.lg-ck.on { border-color: #3a6ea5; background: #2a3a4d; }
+.lg-ck input { width: 22px; height: 22px; }
+.lg-pt { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.comp-tools .ct.fold-all { width: auto; padding: 0 12px; gap: 6px; display: inline-flex; align-items: center; color: #d6d6d6; font-size: 13.5px; font-weight: 600; }
+.comp-tools .ct.fold-all.on { background: #2f4a66; border-color: #3a6ea5; color: #fff; }
+
+/* ---- several scripts in one Visual Script component ---- */
+.gs-list { gap: 6px; }
+.gs-head { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 4px 2px; border-top: 1px solid #2c2c2c; }
+.gs-head:first-child { margin-top: 0; border-top: 0; }
+.gs-head b { flex: 1; font-size: 15px; }
+.gs-head.off b { color: var(--dim); text-decoration: line-through; }
+.gs-head input { width: 22px; height: 22px; }
+.gs-head svg.i { width: 18px; height: 18px; color: #9cc3f0; }
+.gs-more { width: 40px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); display: grid; place-items: center; padding: 0; }
+.gs-add { margin-top: 10px; width: 100%; }
+.sc-sub { display: inline-block; font-size: 11.5px; font-weight: 700; color: #9cc3f0; background: #1f2a36; border-radius: 6px; padding: 1px 7px; margin-bottom: 2px; }
+.gs-note { color: var(--muted); font-size: 12.5px; }
+.gs-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px 8px 10px; border: 1px solid #2c2c2c; border-radius: 12px; background: #2a2a2a; cursor: pointer; }
+.gs-item.off { opacity: .55; }
+.gs-item input { width: 22px; height: 22px; flex: none; }
+.gs-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gs-txt b { font-size: 15px; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-txt b svg.i { width: 15px; height: 15px; color: #9cc3f0; flex: none; }
+.gs-txt small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gs-open { flex: none; min-height: 40px; padding: 0 12px; }
+
+/* ---- lighting presets ---- */
+.lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 8px; }
+.lp-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px; border: 1px solid #2c2c2c; border-radius: 12px; background: #2a2a2a; color: #ddd; font-size: 13px; font-weight: 600; }
+.lp-btn i { width: 100%; height: 34px; border-radius: 8px; background: radial-gradient(circle at 70% 30%, var(--b) 0 22%, transparent 60%), var(--a); border: 1px solid rgba(255,255,255,.1); }

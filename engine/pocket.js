@@ -336,6 +336,7 @@ export class Entity {
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    for (const k of ['marginTop', 'marginBottom', 'marginLeft', 'marginRight']) if (props[k] != null && props[k] !== '') this[k] = +props[k]; // per side (room for an app bar…)
     this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
     this.ignoreBars = !!props.ignoreBars; this.overlap = !!props.overlap; // UI: may go under the nav bars / may overlap other UI (Keep UI apart)
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
@@ -367,6 +368,7 @@ export class Entity {
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       for (const k of def.passthrough || []) if (b[k] !== undefined) params[k] = b[k]; // extra data a component keeps without an Inspector field
+      for (const k of Object.keys(params)) if (isTok(params[k])) { const raw = params[k]; Object.defineProperty(params, k, { get: () => tok(raw), set: (v) => { Object.defineProperty(params, k, { value: v, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true }); } // theme colours follow light / dark
       inst = def.create(params, this) || {};
       inst.type = b.type; inst.params ||= params;
     }
@@ -635,6 +637,32 @@ export class Camera3D {
 // ============================================================================
 const PI = Math.PI, c1 = 1.70158, c2 = c1 * 1.525, c3 = c1 + 1, c4 = (2 * PI) / 3, c5 = (2 * PI) / 4.5;
 const bounceOut = (x) => { const n = 7.5625, d = 2.75; if (x < 1 / d) return n * x * x; if (x < 2 / d) return n * (x -= 1.5 / d) * x + 0.75; if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + 0.9375; return n * (x -= 2.625 / d) * x + 0.984375; };
+/** Theme colours for apps (and any UI): write @bg, @card, @text… instead of a colour and it follows light / dark mode. */
+export const APP_PALETTES = {
+  light: { bg: '#f4f6fb', card: '#ffffff', text: '#1c1f26', sub: '#6b7280', line: '#e5e7eb', field: '#f2f4f7', bar: '#ffffff', accent: '#3a7bfd', onAccent: '#ffffff', danger: '#ef4444', good: '#10b981', shadow: 'rgba(15,23,42,0.10)', dim: 'rgba(0,0,0,0.45)' },
+  dark: { bg: '#0f1115', card: '#1b1e25', text: '#f3f4f6', sub: '#9ca3af', line: '#2a2f38', field: '#252a33', bar: '#16191f', accent: '#6ea0ff', onAccent: '#0b1020', danger: '#f87171', good: '#34d399', shadow: 'rgba(0,0,0,0.45)', dim: 'rgba(0,0,0,0.6)' },
+};
+export const THEME_TOKENS = Object.keys(APP_PALETTES.light);
+let PAL = APP_PALETTES.light, darkMQ = null;
+/** Is the app in dark mode? settings.appTheme (light / dark / follow the phone), or the variable darkMode when it is set. */
+export function isDark(s) {
+  const v = s?.vars?.darkMode;
+  if (v !== undefined && v !== '' && v !== null) return v === true || v === 1 || v === '1' || v === 'on' || v === 'yes' || v === 'dark';
+  const t = s?.settings?.appTheme || 'light';
+  if (t === 'dark') return true;
+  if (t === 'follow the phone') { if (darkMQ === null) try { darkMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : false; } catch { darkMQ = false; } return !!darkMQ?.matches; }
+  return false;
+}
+/** The palette for this frame (with the game's own accent, if it set one). */
+function setPalette(s) {
+  const base = isDark(s) ? APP_PALETTES.dark : APP_PALETTES.light, a = s?.settings?.appAccent;
+  PAL = a ? { ...base, accent: a } : base;
+}
+/** A colour, with theme tokens (@bg, @card, @text, @sub, @line, @field, @bar, @accent, @onAccent, @danger, @good, @shadow, @dim) replaced. */
+export function tok(c) { return typeof c === 'string' && c.charCodeAt(0) === 64 ? PAL[c.slice(1)] ?? c : c; }
+const isTok = (c) => typeof c === 'string' && c.charCodeAt(0) === 64;
+/** A damped spring as an ease: zeta = damping ratio (below 1 overshoots), w = stiffness. */
+function springEase(zeta, w) { const wd = w * Math.sqrt(1 - zeta * zeta); return (x) => (x >= 1 ? 1 : 1 - Math.exp(-zeta * w * x) * (Math.cos(wd * x) + (zeta * w / wd) * Math.sin(wd * x))); }
 export const Ease = {
   linear: (x) => x,
   inSine: (x) => 1 - Math.cos((x * PI) / 2), outSine: (x) => Math.sin((x * PI) / 2), inOutSine: (x) => -(Math.cos(PI * x) - 1) / 2,
@@ -653,6 +681,7 @@ export const Ease = {
 };
 Object.assign(Ease, {
   smoothStep: (x) => x * x * (3 - 2 * x),
+  springGentle: springEase(0.75, 9), springBouncy: springEase(0.42, 14), springSnappy: springEase(0.82, 15), // damped springs: settle softly, overshoot and bounce, or snap with a tiny overshoot
   spring: (x) => 1 - Math.cos(x * PI * 4.5) * Math.exp(-x * 6),
   flash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : x), // blinks between the start and the end while it moves
   inFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? x * x : 0),
@@ -883,6 +912,7 @@ export class Scene {
     this.tweens = [];
     this.pending = [];
     this.time = 0;
+    if (this.settings.app) Object.assign(this.settings, { pauseButton: false, muteButton: false, shareButton: false, title: '' }); // apps: no game buttons or title screen
     this.state = this.settings.title ? 'title' : 'play'; // title | play | over | win
     this.listeners = {};
     this.engine = null;
@@ -903,6 +933,10 @@ export class Scene {
     this.setVar('turnText', this.settings.enemyTurnText || 'Enemy turn');
   }
   get isPlayerTurn() { return this.turnSide === 'player'; }
+  /** Enemy turn: keep it going for this many seconds (enemies walking several tiles, one after another). */
+  holdTurn(sec) { this.turnHoldFor = Math.max(this.turnHoldFor || 0, +sec || 0); }
+  /** Back to the player's turn. */
+  playerTurn() { this.turnSide = 'player'; this.addVar('turn', 1); this.setVar('turnText', this.settings.playerTurnText || 'Your turn'); this.emit('turn'); }
 
   /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
   want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
@@ -1218,11 +1252,166 @@ export class Scene {
     return e;
   }
   /** Inventory state for level changes and saves. */
-  packInv() { return { inventory: this.inventory || {}, order: this.invOrder || [], equipped: this.equipped || {}, known: [...(this.knownRecipes || [])] }; }
+  packInv() { return { inventory: this.inventory || {}, order: this.invOrder || [], equipped: this.equipped || {}, known: [...(this.knownRecipes || [])], quests: this.quests || {}, talked: this.talked || {} }; }
   unpackInv(d) {
     if (!d) return;
     this.inventory = JSON.parse(JSON.stringify(d.inventory || {})); this.invOrder = [...(d.order || Object.keys(this.inventory))]; this.equipped = { ...(d.equipped || {}) }; this.knownRecipes = new Set(d.known || []);
+    if (d.quests && Object.keys(d.quests).length) { this.quests = JSON.parse(JSON.stringify(d.quests)); this.questHooks(); this.syncQuests(); }
+    this.talked = { ...(d.talked || {}) };
     this.syncInventory(); this.after(0, () => this.applyEquip());
+  }
+  // ---- dialogue (Game Settings › Dialogues, NPC and Dialogue components) ----
+  dialogueDef(name) { const k = String(name || '').trim().toLowerCase(); return (this.engine?.dialogues || []).find((d) => String(d.name).trim().toLowerCase() === k) || null; }
+  /** What a dialogue script can read and change: variables (my.x = the NPC's own), items, quests, messages. */
+  storyEnv(npc = null, first = false) {
+    const s = this;
+    return {
+      first, chosen: npc ? (npc.data._chosen ||= new Set()) : new Set(),
+      getVar: (k) => (k.startsWith('my.') ? npc?.getBehavior('npc')?.myVar?.(k.slice(3)) ?? npc?.data[k.slice(3)] : s.vars[k]),
+      setVar: (k, v) => { if (k.startsWith('my.')) { if (npc && !npc.getBehavior('npc')?.setMyVar?.(k.slice(3), v)) npc.data[k.slice(3)] = v; } else s.setVar(k, v); },
+      itemCount: (n) => s.itemCount(n),
+      give: (n, k) => { if (k > 0) { const got = s.addItem(n, k); if (got < k) s.dropNear(n, k - got); if (got > 0) s.message(`${s.itemDef(n).icon || ''} ${s.itemDef(n).name || n}${got > 1 ? ' ×' + got : ''}`.trim(), 1.2); } else s.addItem(n, k); },
+      questState: (n) => s.questState(n),
+      quest: (cmd, n, k) => { if (cmd === 'start') s.startQuest(n); else if (cmd === 'complete' || cmd === 'turnin') s.completeQuest(n); else if (cmd === 'fail') s.failQuest(n); else if (cmd === 'reset') s.resetQuest(n); else if (cmd === 'progress') s.advanceQuest(n, k); else if (cmd === 'track') s.setVar('trackedQuest', s.questDef(n)?.name || n); },
+      send: (m, v) => s.send(m, v), sound: (x) => s.engine?.audio.sfx(x), learn: (r) => { if (s.learnRecipe(r)) s.message(`📜 New recipe: ${r}`, 1.4); },
+      fill: (t) => fillTemplate(t, { ...s.vars, ...(npc ? Object.fromEntries(Object.entries(npc.data).filter(([, v]) => typeof v !== 'object')) : {}) }),
+      log: (m) => Log.add('warn', m, npc?.name || 'Dialogue'),
+      chose: (t) => s.emit('dialogueChoice', npc, t),
+    };
+  }
+  /** Start a conversation from a dialogue's name (Game Settings › Dialogues) or a script. o: { npc, start, pause, then, portrait }. */
+  startDialogue(src, o = {}) {
+    if (this.dialog) return false;
+    const def = this.dialogueDef(src), script = def ? def.script : src;
+    if (!script || (!def && !o.inline && !/\n|:\s/.test(script) && !/^[*#@?]|->/.test(script))) { Log.add('warn', `There is no dialogue called “${src}”`, o.npc?.name || 'Dialogue'); return false; }
+    const name = def?.name || o.name || '', key = (name || o.npc?.name || 'dialogue').toLowerCase(), seen = (this.talked ||= {});
+    const run = new DialogueRunner(script, this.storyEnv(o.npc, !seen[key]), { start: o.start || 'start' });
+    seen[key] = (seen[key] || 0) + 1;
+    if (o.npc) this.emit('talk', o.npc, name);
+    this.emit('dialogueStart', o.npc, name);
+    if (run.done) { this.emit('dialogueEnd', o.npc, name); if (o.then) this.send(o.then); return true; } // only actions, nothing to show
+    this.dialog = { run, lines: [], i: 0, chars: 0, pause: o.pause !== false, then: o.then, npc: o.npc || null, name, portrait: o.portrait || def?.portrait || '' };
+    return true;
+  }
+
+  // ---- quests (Game Settings › Quests) ----
+  questDefs() { return this.engine?.quests || []; }
+  questDef(name) { const k = String(name || '').trim().toLowerCase(); return this.questDefs().find((q) => String(q.name).trim().toLowerCase() === k) || null; }
+  questRec(name) { const d = this.questDef(name); return d ? (this.quests ||= {})[d.name.toLowerCase()] || null : null; }
+  /** locked (needs another quest first) · available · active · ready (to hand in) · done · failed · unknown */
+  questState(name) {
+    const d = this.questDef(name); if (!d) return 'unknown';
+    const r = this.questRec(d.name); if (r) return r.state;
+    return tagList(d.requires).every((q) => this.questState(q) === 'done') ? 'available' : 'locked';
+  }
+  /** Objectives with how far along each is: [{ label, have, need, done }] */
+  questObjectives(name) {
+    const d = this.questDef(name); if (!d) return [];
+    const r = this.questRec(d.name), objs = parseObjectives(d.objectives), out = [];
+    let blocked = false;
+    objs.forEach((o, i) => {
+      let have = r ? r.prog[i] || 0 : 0;
+      if (r && r.state !== 'active') have = o.n; // finished quests show everything done
+      else if (o.type === 'collect') have = Math.min(o.n, this.itemCount(o.target));
+      else if (o.type === 'var') have = storyCond(`${o.target} ${o.op} ${o.value}`, this.storyEnv()) ? 1 : 0;
+      else if (o.type === 'quest') have = this.questState(o.target) === 'done' ? 1 : 0;
+      const done = have >= o.n && !blocked;
+      out.push({ ...o, have: Math.min(have, o.n), need: o.n, done, waiting: blocked });
+      if (d.order === 'in order' && !done) blocked = true;
+    });
+    return out;
+  }
+  questHooks() {
+    if (this._questHooked) return; this._questHooked = true;
+    const ev = (kind) => (key, n = 1) => this.questEvent(kind, key, n);
+    this.on('death', (e) => this.questEvent('kill', e, 1));
+    this.on('talk', (npc) => this.questEvent('talk', npc, 1));
+    this.on('message', (m) => this.questEvent('message', m, 1));
+    this.on('craft', ev('craft')); this.on('gathered', (src, item, n) => this.questEvent('gather', item, n || 1));
+    this.on('itemUsed', (u, item) => this.questEvent('use', item, 1));
+    this.on('inventory', () => this.questCheckAll()); this.on('var', (k) => { if (!String(k).startsWith('quest')) this.questCheckAll(); });
+  }
+  /** Something happened that objectives may count (kill / talk / message / craft / gather / use). */
+  questEvent(kind, key, n = 1) {
+    if (!this.quests) return;
+    const match = (o) => { if (key && typeof key === 'object') return String(key.name).toLowerCase() === o.target.toLowerCase() || key.has?.(o.target); return String(key).trim().toLowerCase() === o.target.toLowerCase(); };
+    for (const d of this.questDefs()) {
+      const r = this.questRec(d.name); if (!r || r.state !== 'active') continue;
+      const objs = this.questObjectives(d.name); let changed = false;
+      objs.forEach((o, i) => { if (o.type === kind && !o.done && !o.waiting && match(o)) { r.prog[i] = Math.min(o.n, (r.prog[i] || 0) + n); changed = true; } });
+      if (changed) this.questCheck(d.name, true);
+    }
+  }
+  questCheckAll() { for (const d of this.questDefs()) if (this.questRec(d.name)?.state === 'active') this.questCheck(d.name); }
+  /** Re-check a quest: tells listeners about progress, and finishes it when every objective is done. */
+  questCheck(name, progressed = false) {
+    const d = this.questDef(name), r = this.questRec(name); if (!d || !r || r.state !== 'active') return;
+    const objs = this.questObjectives(d.name), snap = objs.map((o) => o.have).join(',');
+    if (snap !== r.snap) { const first = r.snap === undefined; r.snap = snap; if (!first || progressed) this.emit('questUpdate', d.name, objs); }
+    if (!objs.length || !objs.every((o) => o.done)) return;
+    if (d.turnIn === 'at giver' && d.giver) { r.state = 'ready'; this.syncQuests(); this.emit('questReady', d.name); this.questNote('Quest ready', `Return to ${d.giver}`, d); }
+    else this.completeQuest(d.name);
+  }
+  questNote(title, text, d) { const n = this.engine?.notify?.({ type: 'achievement', title, text: text || d.name, icon: d.icon || '📜', duration: 2.6 }); if (!n && !this.engine?.notifier) this.message(`${title}: ${text || d.name}`, 2); }
+  syncQuests() {
+    const recs = Object.values(this.quests || {});
+    this.setVar('questsDone', recs.filter((r) => r.state === 'done').length); this.setVar('questsActive', recs.filter((r) => r.state === 'active' || r.state === 'ready').length);
+    if (this.vars.trackedQuest && !['active', 'ready'].includes(this.questState(this.vars.trackedQuest))) this.setVar('trackedQuest', this.questDefs().find((q) => ['active', 'ready'].includes(this.questState(q.name)))?.name || '');
+  }
+  startQuest(name) {
+    const d = this.questDef(name); if (!d) { Log.add('warn', `There is no quest called “${name}”`, 'Quests'); return false; }
+    const st = this.questState(d.name);
+    if (!(st === 'available' || st === 'failed' || (d.repeatable && st === 'done'))) return false;
+    this.questHooks();
+    (this.quests ||= {})[d.name.toLowerCase()] = { state: 'active', prog: parseObjectives(d.objectives).map(() => 0), t: this.time };
+    if (!this.vars.trackedQuest || !['active', 'ready'].includes(this.questState(this.vars.trackedQuest))) this.setVar('trackedQuest', d.name);
+    this.syncQuests(); this.emit('questStart', d.name); this.questNote('New quest', d.name, d); this.engine?.audio.sfx('power');
+    this.questCheck(d.name);
+    return true;
+  }
+  /** Finish a quest now (hand it in): takes "(take)" items and gives the rewards. */
+  completeQuest(name) {
+    const d = this.questDef(name), st = this.questState(name); if (!d || !['active', 'ready'].includes(st)) return false;
+    const objs = parseObjectives(d.objectives);
+    for (const o of objs) if (o.type === 'collect' && o.take) this.addItem(o.target, -o.n);
+    this.quests[d.name.toLowerCase()].state = 'done';
+    const rs = parseRewards(d.rewards);
+    for (const r of rs) {
+      if (r.kind === 'item' || (r.kind === 'var' && !this.itemDef(r.name).plain)) { const got = this.addItem(r.name, r.n); if (got < r.n) this.dropNear(r.name, r.n - got); }
+      else if (r.kind === 'var') this.addVar(r.name, r.n);
+      else if (r.kind === 'recipe') this.learnRecipe(r.name);
+      else if (r.kind === 'message') this.send(r.name);
+      else if (r.kind === 'quest') this.after(0.8, () => this.startQuest(r.name));
+    }
+    this.syncQuests(); this.emit('questComplete', d.name); this.engine?.audio.sfx('win');
+    this.questNote('Quest complete!', `${d.name}${rs.length ? ' · ' + rewardText(rs, this) : ''}`, d);
+    this.questCheckAll(); // "finish another quest" objectives
+    return true;
+  }
+  failQuest(name) { const r = this.questRec(name), d = this.questDef(name); if (!r || !['active', 'ready'].includes(r.state)) return false; r.state = 'failed'; this.syncQuests(); this.emit('questFail', d.name); this.questNote('Quest failed', d.name, d); return true; }
+  resetQuest(name) { const d = this.questDef(name); if (!d || !this.quests) return false; delete this.quests[d.name.toLowerCase()]; this.syncQuests(); return true; }
+  /** Move a quest on by hand: the first unfinished "custom" (or message) objective, or objective number `which` (1 = first). */
+  advanceQuest(name, n = 1, which = 0) {
+    const d = this.questDef(name), r = this.questRec(name); if (!d || !r || r.state !== 'active') return false;
+    const objs = this.questObjectives(d.name);
+    const i = which > 0 ? which - 1 : objs.findIndex((o) => !o.done && !o.waiting && (o.type === 'custom' || o.type === 'message'));
+    if (i < 0 || !objs[i]) return false;
+    r.prog[i] = Math.min(objs[i].n, (r.prog[i] || 0) + (+n || 1)); this.questCheck(d.name, true); return true;
+  }
+  /** Every frame (cheap): "go to" objectives, and quests that start by themselves. */
+  questTick() {
+    if ((this._qt = (this._qt || 0) + 1) % 6) return; // about 10 times a second
+    for (const d of this.questDefs()) {
+      if (d.autoStart && this.questState(d.name) === 'available') this.startQuest(d.name);
+      const r = this.questRec(d.name); if (!r || r.state !== 'active') continue;
+      const pl = this.player(); if (!pl) continue;
+      this.questObjectives(d.name).forEach((o, i) => {
+        if (o.type !== 'reach' || o.done || o.waiting) return;
+        const t = this.find(o.target) || this.findAll(o.target)[0]; if (!t) return;
+        const three = this.mode === '3d', ex = t.extents(), size = ex.sphere ? ex.r : Math.max(ex.hx || 0, three ? ex.hz || 0 : ex.hy || 0);
+        if (Math.hypot(pl.x - t.x, three ? 0 : pl.y - t.y, three ? (pl.z || 0) - (t.z || 0) : 0) <= (o.dist || (three ? 2 : 60)) + size) { r.prog[i] = 1; this.questCheck(d.name, true); }
+      });
+    }
   }
   /** Vars carried between levels / saved may hold the inventory under __inv. */
   restoreInv() { const d = this.vars.__inv; if (d === undefined) return; delete this.vars.__inv; if (this.settings.keepInventory !== false) this.unpackInv(d); }
@@ -1248,7 +1437,7 @@ export class Scene {
     if (this.modal && !this.modal.dead && this.modal.visible && this.modal._dismiss) { this.modal._dismiss(); this.emit('back', null, null); return true; }
     const stacks = this.navStacks || {};
     const key = v || (stacks[this.navVar]?.length ? this.navVar : Object.keys(stacks).find((k) => stacks[k].length));
-    const st = stacks[key]; if (!st?.length) return false;
+    const st = stacks[key]; if (!st?.length) { if (this.fromApp && this.engine) { this.engine.backToApp(); return true; } return false; }
     const page = st.pop();
     this.navVar = key; this.navDir = -1; this.navAt = this.time;
     this.setVar(key, page);
@@ -1258,15 +1447,45 @@ export class Scene {
   canGoBack(v) {
     if (this.modal && !this.modal.dead && this.modal.visible) return true;
     const st = this.navStacks || {};
-    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length);
+    return v ? !!st[v]?.length : Object.values(st).some((a) => a.length) || !!this.fromApp;
   }
   /** How many steps Back can take (pages in the history plus an open popup). */
-  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0); }
+  navDepth() { return Object.values(this.navStacks || {}).reduce((n, a) => n + a.length, 0) + (this.modal && !this.modal.dead && this.modal.visible ? 1 : 0) + (this.fromApp ? 1 : 0); }
   /** Which way the last page change went: 1 forward, -1 back (only for changes made this moment). */
   navDirection() { return this.navAt === this.time ? this.navDir || 1 : 1; }
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
 
   after(sec, fn) { this.timers.push({ t: sec, fn, every: 0 }); }
+  /**
+   * Physics springs: move numbers on obj toward props with a real spring (interruptible: a new target keeps the speed it has).
+   * o: { stiffness 300, damping 24, mass 1, onRest }. Presets: o.feel = 'gentle' | 'bouncy' | 'snappy' | 'slow'.
+   */
+  spring(obj, props, o = {}) {
+    const F = { gentle: [170, 26], bouncy: [380, 14], snappy: [520, 38], slow: [90, 20] }[o.feel] || [o.stiffness ?? 300, o.damping ?? 24];
+    const L = (this.springs ||= []);
+    for (const [k, to] of Object.entries(props)) {
+      let sp = L.find((q) => q.obj === obj && q.k === k);
+      if (!sp) { sp = { obj, k, v: 0 }; L.push(sp); }
+      Object.assign(sp, { to: +to, stiffness: F[0], damping: F[1], mass: o.mass || 1, onRest: o.onRest, rest: false });
+      if (motionOf(this).reduced) { obj[k] = +to; sp.v = 0; } // reduce motion: jump there
+    }
+  }
+  /** A snackbar at the bottom of the screen with an optional action button: snackbar('Deleted', 'Undo', () => …). */
+  snackbar(text, action = '', fn = null, sec = 4) { this.snack = { text: String(text), action: String(action || ''), fn, t0: performance.now() / 1000, sec: Math.max(1, +sec || 4), out: 0 }; this.emit('snackbar', text); }
+  /** Stop springs on obj (all, or one property). */
+  stopSpring(obj, k) { if (this.springs) this.springs = this.springs.filter((q) => !(q.obj === obj && (!k || q.k === k))); }
+  stepSprings(dt) {
+    const L = this.springs; if (!L?.length) return;
+    const n = Math.max(1, Math.ceil(Math.min(dt, 0.1) / (1 / 120))), h = Math.min(dt, 0.1) / n;
+    for (const sp of L) {
+      let x = +sp.obj[sp.k] || 0;
+      for (let i = 0; i < n; i++) { const a = (-sp.stiffness * (x - sp.to) - sp.damping * sp.v) / sp.mass; sp.v += a * h; x += sp.v * h; }
+      const scale = Math.max(1, Math.abs(sp.to)) * 0.0005;
+      if (Math.abs(x - sp.to) < scale && Math.abs(sp.v) < scale * 20) { x = sp.to; sp.v = 0; sp.rest = true; }
+      sp.obj[sp.k] = x;
+    }
+    if (L.some((q) => q.rest)) { const done = L.filter((q) => q.rest); this.springs = L.filter((q) => !q.rest); for (const q of done) q.onRest?.(); }
+  }
   every(sec, fn) { this.timers.push({ t: sec, fn, every: sec }); }
   /** Quick tween (kept for older code): animate `to` over `duration`. */
   tween(target, to, duration = 0.3, ease = 'outCubic') { return this.to(target, to, duration, { ease }); }
@@ -1412,7 +1631,7 @@ export class Scene {
       this.vars.best = Math.floor(this.vars.score); this.newBest = true;
       store.set('pocket.best.' + key, String(this.vars.best));
     }
-    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel();
+    this.levelComplete = state === 'win' && !!this.engine?.hasNextLevel() && !this.fromApp && !this.engine?.levels?.[(this.engine.levelIndex || 0) + 1]?.settings?.app; // a game opened from an app ends back in the app
     if (!this.levelComplete && this.settings.saveProgress) this.engine?.clearProgress();
     this.engine?.audio.sfx(state === 'win' ? 'win' : 'lose');
     this.engine?.vibrate(state === 'win' ? [30, 40, 30] : [80, 40, 120]);
@@ -2799,6 +3018,26 @@ export const SPRITE_ART = {
   'ui-sound': artIcon('M10 24h10l14-12v40L20 40H10zM42 22q8 10 0 20M48 16q14 16 0 32'),
   'ui-lock': artIcon('M18 30h28v24H18zM24 30v-8a8 8 0 0 1 16 0v8'),
   'ui-check': artIcon('M12 34l14 14 26-30'),
+  'ui-moon': artIcon('M44 40A20 20 0 0 1 24 14a20 20 0 1 0 26 26z'),
+  'ui-sun': artIcon('M32 6v6M32 52v6M6 32h6M52 32h6M13 13l4 4M47 47l4 4M13 51l4-4M47 17l4-4', '<circle cx="32" cy="32" r="11" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-calendar': artIcon('M10 16h44v38H10zM10 26h44M22 10v10M42 10v10'),
+  'ui-clock': artIcon('M32 18v15l10 6', '<circle cx="32" cy="32" r="23" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-edit': artIcon('M40 12l12 12-28 28H12V40zM34 18l12 12'),
+  'ui-trash': artIcon('M12 18h40M26 18v-6h12v6M16 18l3 36h26l3-36M28 28v18M36 28v18'),
+  'ui-filter': artIcon('M10 14h44L38 34v16l-12 6V34z'),
+  'ui-sort': artIcon('M22 10v44M12 44l10 10 10-10M42 54V10M32 20l10-10 10 10'),
+  'ui-share': artIcon('M32 40V10M20 22l12-12 12 12M14 34v20h36V34'),
+  'ui-camera': artIcon('M8 20h12l4-6h16l4 6h12v32H8z', '<circle cx="32" cy="35" r="9" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-image': artIcon('M8 12h48v40H8zM8 44l14-14 12 12 8-8 14 14', '<circle cx="42" cy="24" r="4" fill="#fff"/>'),
+  'ui-mail': artIcon('M8 14h48v36H8zM8 16l24 18 24-18'),
+  'ui-phone': artIcon('M22 6h20v52H22zM29 50h6'),
+  'ui-pin': artIcon('M32 58S14 38 14 26a18 18 0 0 1 36 0c0 12-18 32-18 32z', '<circle cx="32" cy="26" r="6" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-list': artIcon('M22 16h32M22 32h32M22 48h32', '<circle cx="11" cy="16" r="3.5" fill="#fff"/><circle cx="11" cy="32" r="3.5" fill="#fff"/><circle cx="11" cy="48" r="3.5" fill="#fff"/>'),
+  'ui-grid': artIcon('M10 10h18v18H10zM36 10h18v18H36zM10 36h18v18H10zM36 36h18v18H36z'),
+  'ui-chart': artIcon('M10 54h44M16 46V30M28 46V16M40 46V26M52 46V36'),
+  'ui-download': artIcon('M32 10v32M20 30l12 12 12-12M12 54h40'),
+  'ui-refresh': artIcon('M50 20a20 20 0 1 0 4 16M50 8v12H38'),
+  'ui-more': `<circle cx="14" cy="32" r="5" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="50" cy="32" r="5" fill="#fff"/>`,
   'ui-coin': `<circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="5"/><path d="M32 22v20" stroke="#fff" stroke-width="5" stroke-linecap="round"/>`,
   'ui-gem': artIcon('M18 12h28l12 14-26 30L6 26zM6 26h52'),
   'ui-shop': artIcon('M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'),
@@ -2975,7 +3214,15 @@ function drawBar(ctx, e, b, k, v, max, time, alpha) {
     else { ctx.textAlign = 'center'; ctx.fillText(txt, 0, 1); }
   }
 }
+/** Draw an entity, with theme colour tokens in its shape and text resolved. */
 function drawEntity2D(ctx, e, vars, time) {
+  const sh = e.shape, tx = e.text;
+  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.shadow))) || (tx && (isTok(tx.color) || isTok(tx.stroke) || isTok(tx.bg))))) return drawEntity2DRaw(ctx, e, vars, time);
+  if (sh) e.shape = { ...sh, fill: tok(sh.fill), fill2: tok(sh.fill2), stroke: tok(sh.stroke), shadow: tok(sh.shadow) };
+  if (tx) e.text = { ...tx, color: tok(tx.color), stroke: tok(tx.stroke), bg: tok(tx.bg) };
+  try { return drawEntity2DRaw(ctx, e, vars, time); } finally { if (sh) e.shape = sh; if (tx) e.text = tx; }
+}
+function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -3172,7 +3419,7 @@ export class Renderer2D {
   render(scene, engine) {
     const ctx = this.ctx, c = scene.camera, z = this.zoomFor(scene);
     ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
-    ctx.fillStyle = scene.background;
+    ctx.fillStyle = tok(scene.background);
     ctx.fillRect(0, 0, engine.width, engine.height);
     ctx.save();
     ctx.translate(engine.width / 2, engine.height / 2);
@@ -3622,7 +3869,7 @@ export class Renderer3D {
   render(scene, engine) {
     const gl = this.gl, c = scene.camera, w = this.canvas.width, h = this.canvas.height;
     gl.viewport(0, 0, w, h);
-    const bg = hexToRgb(scene.background);
+    const bg = hexToRgb(tok(scene.background));
     gl.clearColor(bg[0], bg[1], bg[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     let eye = c.position;
@@ -3738,32 +3985,75 @@ function drawJoystick(ctx, engine, scene, inp, tint, pulse) {
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
+/** Whose picture goes with a line: the NPC talking, another NPC with that name, a dialogue with that name, or the conversation's own. */
+function speakerPortrait(s, d, who) {
+  if (!who) return '';
+  const k = String(who).trim().toLowerCase(), c = (d._por ||= {}); if (k in c) return c[k];
+  const own = d.npc ? String(d.npc.getBehavior('npc')?.speaker || d.npc.name).toLowerCase() : '';
+  let r = d.npc && own === k ? d.portrait : '';
+  if (!r) for (const e of s.entities) { const b = !e.dead && e.getBehavior?.('npc'); if (b?.portrait && (String(b.speaker).toLowerCase() === k || String(e.name).toLowerCase() === k)) { r = b.portrait; break; } }
+  if (!r) r = s.dialogueDef(who)?.portrait || (!d.npc ? d.portrait : '') || '';
+  return (c[k] = r);
+}
 /** Dialogue box: speaker name, typewriter text, tap to continue. */
 function drawDialog(ctx, scene, W, H, engine) {
-  const d = scene.dialog, line = d.lines[d.i]; if (!line) return;
-  const m = 14, bw = Math.min(W - m * 2, 560), bh = 132, x = (W - bw) / 2, y = H - engine.safe.bottom - bh - 20;
+  const d = scene.dialog, line = d.run ? d.run.line : d.lines[d.i]; if (!line) return;
+  const por = speakerPortrait(scene, d, line.who), m = 14, bw = Math.min(W - m * 2, 560), x = (W - bw) / 2, pic = por ? 64 : 0;
   ctx.save();
+  ctx.font = `600 17px ${THEME.font}`;
+  const rows = []; { const words = String(line.text).split(' '); let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 - pic && row) { rows.push(row); row = w; } else row = t; } rows.push(row); }
+  const bh = Math.max(pic ? 96 : 0, 132, 44 + rows.length * 24), y = H - engine.safe.bottom - bh - 20;
+  // choices stack above the box once the line has been read
+  const ch = d.run?.choices, ready = d.chars >= line.text.length;
+  d._rects = [];
+  if (ch && ready) {
+    const rh = 46, gap = 8; let cy = y - 12 - ch.length * (rh + gap);
+    ch.forEach((c, i) => {
+      const r = { x: x + 10, y: cy, w: bw - 20, h: rh }; d._rects.push(r);
+      ctx.fillStyle = 'rgba(20,22,44,0.94)'; ctx.strokeStyle = 'rgba(255,224,130,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 14); else ctx.rect(r.x, r.y, r.w, r.h); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#ffe082'; ctx.font = `800 13px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), r.x + 14, r.y + rh / 2);
+      ctx.fillStyle = '#fff'; ctx.font = `700 16px ${THEME.font}`; ctx.fillText(c.text, r.x + 34, r.y + rh / 2, r.w - 46);
+      cy += rh + gap;
+    });
+  }
   ctx.fillStyle = 'rgba(12,12,26,0.92)'; ctx.strokeStyle = 'rgba(255,224,130,0.9)'; ctx.lineWidth = 2.5;
   ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 16); else ctx.rect(x, y, bw, bh); ctx.fill(); ctx.stroke();
+  if (pic) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y + 24, 56, 56, 12); else ctx.rect(x + 14, y + 24, 56, 56); ctx.fill(); drawNavIcon(ctx, por, x + 42, y + 52, 40, '#fff'); }
   if (line.who) {
     ctx.font = '800 15px system-ui, sans-serif'; const tw = ctx.measureText(line.who).width + 24;
     ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
     ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
   }
   ctx.fillStyle = '#fff'; ctx.font = `600 17px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  const text = line.text.slice(0, Math.floor(d.chars)), words = text.split(' '); let row = '', ty = y + 26;
-  for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 && row) { ctx.fillText(row, x + 18, ty); row = w; ty += 24; } else row = t; }
-  ctx.fillText(row, x + 18, ty);
-  if (d.chars >= line.text.length) { ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(d.i < d.lines.length - 1 ? '▼' : '✓', x + bw - 16, y + bh - 28); }
+  let left = Math.floor(d.chars), ty = y + 26;
+  for (const r of rows) { if (left <= 0) break; ctx.fillText(r.slice(0, left), x + 18 + pic, ty); left -= r.length + 1; ty += 24; }
+  if (ready && !(ch && ch.length)) { const more = d.run ? !d.run.done : d.i < d.lines.length - 1; ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(more ? '▼' : '✓', x + bw - 16, y + bh - 28); }
   ctx.restore();
 }
-/** Advance the dialogue: typewriter, tap to finish the line, tap again for the next. Returns true if it used the tap. */
+/** Advance the dialogue: typewriter, tap to finish the line, tap again for the next (or pick a choice). Returns true if it used the tap. */
 function stepDialog(s, dt, tapped) {
-  const d = s.dialog, line = d?.lines[d.i]; if (!line) { s.dialog = null; return false; }
+  const d = s.dialog;
+  const end = () => { s.dialog = null; s.emit('dialogueEnd', d.npc || null, d.name || ''); if (d.then) s.send(d.then); };
+  if (d?.run) {
+    const r = d.run, line = r.line; if (r.done || !line) { end(); return false; }
+    d.chars = Math.min(line.text.length, d.chars + dt * 45);
+    const inp = s.engine.input;
+    if (r.choices && d.chars >= line.text.length) for (const k of inp.keysDown || []) { const i = +k - 1; if (Number.isInteger(i) && r.choices[i]) { r.choose(i); d.chars = 0; s.engine.audio.sfx('click'); if (r.done) end(); return true; } }
+    if (!tapped) return false;
+    const t = inp.taps[0];
+    if (d.chars < line.text.length) d.chars = line.text.length;
+    else if (r.choices?.length) { const k = (d._rects || []).findIndex((q) => t && t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h); if (k < 0) return true; r.choose(k); d.chars = 0; }
+    else { r.next(); d.chars = 0; }
+    s.engine.audio.sfx('click');
+    if (r.done) end();
+    return true;
+  }
+  const line = d?.lines[d.i]; if (!line) { s.dialog = null; return false; }
   d.chars = Math.min(line.text.length, d.chars + dt * 45);
   if (!tapped) return false;
   if (d.chars < line.text.length) d.chars = line.text.length;
-  else if (++d.i >= d.lines.length) { s.dialog = null; if (d.then) s.send(d.then); }
+  else if (++d.i >= d.lines.length) end();
   s.engine.audio.sfx('click');
   return true;
 }
@@ -3899,8 +4189,11 @@ function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
   const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : uiArea(W, H, safe, e);
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
+  // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
+  const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
+  const moving = e._uiAnimUntil > performance.now() / 1000; // a show / hide animation is moving it: keep the size up to date, leave the position to the animation
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); if (!moving) e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); if (!moving) e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -3927,6 +4220,21 @@ function drawMinimap(ctx, e, s) {
 /** Screen rectangle of a UI element: { x, y (center), w, h }. */
 function uiRect(s, e) { const eng = s.engine; return uiBox(e, eng.width, eng.height, eng.safe); }
 
+/** The snackbar: slides up above the bottom bars, waits, slides away; its action is a tappable word. */
+function drawSnackbar(ctx, s, engine, W, H) {
+  const k = s.snack; if (!k || engine.editing) { engine.snackRect = null; return; }
+  const t = performance.now() / 1000 - k.t0, outT = k.out || (t > k.sec ? k.t0 + k.sec : 0), o = outT ? (performance.now() / 1000 - outT) / 0.22 : 0;
+  if (o >= 1) { s.snack = null; engine.snackRect = null; return; }
+  const inK = Ease.springSnappy(Math.min(1, t / 0.45)), shown = Math.min(inK, 1 - Ease.inCubic(Math.min(1, o)));
+  ctx.save(); ctx.font = `600 15px ${THEME.font}`;
+  const aw = k.action ? ctx.measureText(k.action.toUpperCase()).width + 28 : 0, w = Math.min(W - 24, Math.max(220, ctx.measureText(k.text).width + aw + 40)), h = 50;
+  const bottom = H - (engine.safe.bottom || 0) - (engine.safe.bars?.bottom || 0) - 14, x = (W - w) / 2, y = bottom - h + (1 - shown) * (h + 30);
+  ctx.globalAlpha = Math.max(0, Math.min(1, shown * 1.4));
+  ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 4; ctx.fillStyle = '#262a33'; UK.rr(ctx, x, y, w, h, 12); ctx.fill(); ctx.shadowColor = 'transparent';
+  UK.text(ctx, k.text, x + 18, y + h / 2, { size: 15, weight: 600, color: '#fff', align: 'left', maxW: w - aw - 30 });
+  if (k.action) { UK.text(ctx, k.action.toUpperCase(), x + w - 16, y + h / 2, { size: 14, weight: 800, color: '#8ab4ff', align: 'right' }); engine.snackRect = { x: x + w - aw - 6, y, w: aw + 6, h }; } else engine.snackRect = null;
+  ctx.restore();
+}
 /** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
 function ownScreen(scene, screen) {
   if (scene.settings.customScreens) return true;
@@ -3940,6 +4248,7 @@ function renderUI(engine, scene) {
   if (!scene) return;
   THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
   engine.onBeforeUI?.(ctx, scene);
+  if (!engine.editing) for (const f of scene.overlays || []) if (f.world) f(ctx, scene); // markers that belong to the world (NPC !, ?) sit under the UI
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
@@ -3964,10 +4273,11 @@ function renderUI(engine, scene) {
     }
     if (V) ctx.restore();
   }
+  drawSnackbar(ctx, scene, engine, W, H);
   engine.notifier?.draw(ctx); // notifications sit above the game's UI (and show in the editor's Test)
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
-  for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  for (const f of scene.overlays || []) if (!f.world) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
   drawStatBars(ctx, scene, engine);
   if (scene.popups?.length) { // floating "+10" texts
     const now = scene.time;
@@ -4021,7 +4331,7 @@ function renderUI(engine, scene) {
     ctx.restore();
   }
   const lt = scene.time - (scene.loadedAt || 0); // the level banner shows once a Loading Screen is gone
-  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading) {
+  if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading && !scene.settings.app && !scene.fromApp) { // apps and the games inside them have no "LEVEL 2" banner
     ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2);
     big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
     ctx.globalAlpha = 1;
@@ -4037,8 +4347,17 @@ function renderUI(engine, scene) {
   if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && (engine.inspecting || engine.quietPause))) return; // the editor's Inspect (and a permission card) keep the view clear
+  // a game opened from an app: a button back to the app on its pause and end screens
+  const appBtn = (y) => {
+    if (!scene.fromApp) { engine.appRect = null; return; }
+    const w = 190, h = 46, x = W / 2 - w / 2; engine.appRect = { x, y, w, h };
+    ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
+    big('‹ Back to app', y + h / 2, 17);
+  };
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
+    appBtn(H * 0.62);
   } else if (scene.state === 'title') {
     dim(0.55);
     const t = scene.settings.title;
@@ -4060,8 +4379,9 @@ function renderUI(engine, scene) {
     if (scene.newBest) big('NEW BEST!', H * 0.54, 16, TH.good);
     else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, withAlpha(TH.text, 0.7));
     big('Tap to play again', H * 0.66, 20, withAlpha(TH.text, pulse));
+    appBtn(H * 0.74);
     if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
-      const w = 150, h = 46, x = W / 2 - w / 2, y = H * 0.74;
+      const w = 150, h = 46, x = W / 2 - w / 2, y = H * (scene.fromApp ? 0.83 : 0.74);
       engine.shareRect = { x, y, w, h };
       ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
       ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
@@ -4079,7 +4399,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -5905,7 +6225,7 @@ registerBehavior('destructible', {
         s.addVar('score', p.points);
         s.camera.shake = Math.max(s.camera.shake, 6);
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 26, 1.1);
-        e.destroy();
+        s.emit('death', e); e.destroy();
       },
     };
   },
@@ -5976,15 +6296,59 @@ registerBehavior('uiSlider', {
 const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
 const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
+/** Draw e and everything inside it last within their layers (a page sliding over another). */
+function raiseTree(s, e) {
+  const L = s.entities, inTree = (q) => { for (let p = q, n = 0; p && n < 60; p = p.parentEnt, n++) if (p === e) return true; return false; };
+  const tree = L.filter(inTree); if (!tree.length) return;
+  const rest = L.filter((q) => !tree.includes(q));
+  for (const q of tree) { let i = rest.length; while (i > 0 && (rest[i - 1].layer || 0) > (q.layer || 0)) i--; rest.splice(i, 0, q); }
+  L.length = 0; L.push(...rest);
+}
+/** Game Settings › Motion: how fast UI animations play, and whether to keep motion to a minimum (the phone's "Reduce motion"). */
+let reducedMQ = null;
+function motionOf(s) {
+  const st = s?.settings || {}, sp = +st.motionSpeed > 0 ? +st.motionSpeed : 1;
+  if (reducedMQ === null) try { reducedMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : false; } catch { reducedMQ = false; }
+  const reduced = st.reduceMotion === 'always' || ((st.reduceMotion || 'follow the phone') === 'follow the phone' && !!reducedMQ?.matches);
+  return { k: 1 / sp, reduced };
+}
 /** Show or hide a UI element with a little animation. */
 function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
+  const M = motionOf(s); dur *= M.k;
+  if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
+  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; e._uiAnimUntil = 0; done?.(); return; }
+  e._uiAnimUntil = performance.now() / 1000 + dur * 3.5 + 0.15; // stretched pages keep still for the stretch layout meanwhile
   const k = 1;
-  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
   const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
   const R = (e._animBase.rz ??= e.rz || 0);
   const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; if (!ok) e.visible = false; done?.(); };
+  const H = (s.engine?.height || 700) / (uiK(s.engine?.safe) || 1);
+  const front = () => queueMicrotask(() => raiseTree(s, e)); // (after this frame's updates) the page that moves over the other one draws on top (with everything inside it)
+  const fin2 = fin;
+  switch (anim) { // phone-style page transitions (uiShowIf passes the direction)
+    case 'push in': front(); e.visible = true; e.alpha = 1; e.x = base.x + dist; s.to(e, { x: base.x }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(true) }); return;
+    case 'push in back': e.visible = true; e.alpha = 0.4; e.x = base.x - dist * 0.3; s.to(e, { x: base.x, alpha: 1 }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(true) }); return;
+    case 'push out': s.to(e, { x: base.x - dist * 0.3, alpha: 0.35 }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(false) }); return;
+    case 'push out back': front(); s.to(e, { x: base.x + dist }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(false) }); return;
+    case 'sheet (from bottom)':
+      if (show) { front(); e.visible = true; e.alpha = 1; e.y = base.y + H; s.to(e, { y: base.y }, dur * 2.4, { ease: 'springSnappy', onComplete: () => fin2(true) }); }
+      else { front(); s.to(e, { y: base.y + H }, dur * 1.2, { ease: 'inCubic', onComplete: () => fin2(false) }); }
+      return;
+    case 'fade through': // Material: the old page fades quickly, then the new one fades and grows in
+      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.94; e.sy = base.sy * 0.94; s.to(e, { alpha: 1, sx: base.sx, sy: base.sy }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
+      else s.to(e, { alpha: 0 }, dur * 0.4, { ease: 'linear', onComplete: () => fin(false) });
+      return;
+    case 'shared axis in': e.visible = true; e.alpha = 0; e.x = base.x + 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
+    case 'shared axis in back': e.visible = true; e.alpha = 0; e.x = base.x - 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
+    case 'shared axis out': s.to(e, { x: base.x - 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'shared axis out back': s.to(e, { x: base.x + 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'spring pop':
+      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.5; e.sy = base.sy * 0.5; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'springBouncy', onComplete: () => fin(true) }); }
+      else s.to(e, { sx: base.sx * 0.6, sy: base.sy * 0.6, alpha: 0 }, dur * 0.8, { ease: 'inBack', onComplete: () => fin(false) });
+      return;
+  }
   switch (anim) { // the newer entrances / exits
     case 'drop in': // falls from above and bounces
       if (show) { e.visible = true; e.alpha = 1; e.y = base.y - dist; s.to(e, { y: base.y }, dur * 2.2, { ease: 'outBounce', onComplete: () => fin(true) }); }
@@ -6031,7 +6395,23 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
     s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const STAGGERS = ['none', 'rise one after another', 'fade one after another', 'pop one after another', 'slide in one after another'];
+/** A page's contents arrive one after another (after the page itself shows). */
+function staggerKids(s, e, how) {
+  if (!how || how === 'none' || motionOf(s).reduced) return;
+  const kids = uiKids(s, e).filter((q) => q.visible !== false).sort((a, b) => (a.y - b.y) || (a.x - b.x)), k = motionOf(s).k;
+  kids.slice(0, 24).forEach((q, i) => {
+    s.killTweens(q, true);
+    const b = (q._stagBase ||= { x: q.x, y: q.y, sx: q.sx, sy: q.sy }), d = (0.06 + i * 0.045) * k, o = { delay: d, ease: 'outCubic' };
+    Object.assign(q, b); // an interrupted stagger starts from the real place
+    q.alpha = 0;
+    if (how.startsWith('rise')) { q.y = b.y + 18; s.to(q, { y: b.y }, 0.4 * k, o); }
+    else if (how.startsWith('pop')) { q.sx = b.sx * 0.85; q.sy = b.sy * 0.85; s.to(q, { sx: b.sx, sy: b.sy }, 0.55 * k, { ...o, ease: 'springBouncy' }); }
+    else if (how.startsWith('slide')) { q.x = b.x + 40; s.to(q, { x: b.x }, 0.4 * k, o); }
+    s.to(q, { alpha: 1 }, 0.3 * k, o);
+  });
+}
 
 registerBehavior('navItem', {
   label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
@@ -6693,6 +7073,168 @@ registerBehavior('uiAppBar', {
 // ============================================================================
 // UI kit: self-drawn UI components (drawn in the entity's own space, taps converted to it)
 // ============================================================================
+// ---- dialogue scripts and quests (Game Settings › Dialogues / Quests) ----
+/**
+ * A dialogue script, one instruction per line:
+ *   # section            a place to jump to (the script starts at the top, or at "# start"); a section ends where the next one begins
+ *   Name: text           a line spoken by Name ({variables} work); a line without "Name:" is narration
+ *   * text -> section    a choice ([if condition] and (once) can go before the text; no "->" carries on below)
+ *   -> section / -> END  jump, or end the conversation
+ *   ? condition -> section   jump only if the condition is true
+ *   @command …           do something: set / add / give / take / quest / send / sound / learn / end
+ *   // comment
+ * Conditions: has Item [n] · quest Name is active|ready|done|failed|available|started · coins >= 10 · first · chance 30 · not … · … and … · … or …
+ */
+export function parseDialogue(src) {
+  const steps = [], labels = { start: 0 }, errors = [];
+  String(src || '').split('\n').forEach((raw, ln) => {
+    const l = raw.trim(), line = ln + 1; if (!l || l.startsWith('//')) return;
+    let m;
+    if ((m = l.match(/^(?:#|==)\s*(.+?)\s*=*$/))) {
+      // a section ends the one above it (no falling through into the next section)
+      if (steps.length && steps[steps.length - 1].k !== 'goto') steps.push({ k: 'goto', go: 'END', line, auto: true });
+      labels[m[1].trim().toLowerCase()] = steps.length; return;
+    }
+    if (l.startsWith('*')) {
+      let t = l.slice(1).trim(), cond = '', once = false, go = '';
+      for (let k = 0; k < 4; k++) { const c = t.match(/^\[if\s+([^\]]+)\]\s*/i); if (c) { cond = c[1].trim(); t = t.slice(c[0].length); continue; } const o = t.match(/^\(once\)\s*/i); if (o) { once = true; t = t.slice(o[0].length); continue; } break; }
+      const g = t.match(/\s*->\s*(.+)$/); if (g) { go = g[1].trim(); t = t.slice(0, g.index).trim(); }
+      steps.push({ k: 'choice', text: t, cond, once, go, line }); return;
+    }
+    if ((m = l.match(/^->\s*(.+)$/))) { steps.push({ k: 'goto', go: m[1].trim(), line }); return; }
+    if ((m = l.match(/^\?\s*(.+?)\s*->\s*(.+)$/))) { steps.push({ k: 'if', cond: m[1].trim(), go: m[2].trim(), line }); return; }
+    if (l.startsWith('@')) { steps.push({ k: 'do', cmd: l.slice(1).trim(), line }); return; }
+    m = l.match(/^([^:]{1,24}):\s+(.*)$/);
+    steps.push(m && !/^(https?|note)$/i.test(m[1].trim()) ? { k: 'say', who: m[1].trim(), text: m[2], line } : { k: 'say', who: '', text: l, line });
+  });
+  for (const s of steps) if (s.go && !/^end$/i.test(s.go) && labels[s.go.toLowerCase()] == null) errors.push(`Line ${s.line}: there is no section called “${s.go}”`);
+  return { steps, labels, errors };
+}
+const STORY_OPS = { '=': '==', '≥': '>=', '≤': '<=', '≠': '!=' };
+/** Is a dialogue / quest condition true? `env` gives access to variables, items and quests. */
+export function storyCond(cond, env) {
+  const c = String(cond || '').trim(); if (!c) return true;
+  if (/\s(?:or|\|\|)\s/i.test(c)) return c.split(/\s+(?:or|\|\|)\s+/i).some((q) => storyCond(q, env));
+  if (/\s(?:and|&&)\s/i.test(c)) return c.split(/\s+(?:and|&&)\s+/i).every((q) => storyCond(q, env));
+  let m;
+  if ((m = c.match(/^(?:not|!)\s*(.+)$/i))) return !storyCond(m[1], env);
+  if ((m = c.match(/^has\s+(.+?)(?:\s+(\d+))?$/i))) return env.itemCount(m[1]) >= (+m[2] || 1);
+  if ((m = c.match(/^quest\s+(.+?)\s+(?:is\s+)?(locked|available|active|ready|done|failed|started|not started)$/i))) {
+    const st = env.questState(m[1]), w = m[2].toLowerCase();
+    return w === 'started' ? ['active', 'ready', 'done'].includes(st) : w === 'not started' ? ['available', 'locked'].includes(st) : st === w;
+  }
+  if ((m = c.match(/^chance\s+(\d+(?:\.\d+)?)\s*%?$/i))) return Math.random() * 100 < +m[1];
+  if (/^first(\s+time)?$/i.test(c)) return !!env.first;
+  if ((m = c.match(/^(.+?)\s*(>=|<=|==|!=|≥|≤|≠|=|>|<)\s*(.+)$/))) {
+    const a = env.getVar(m[1].trim()), b = m[3].trim().replace(/^["']|["']$/g, ''), op = STORY_OPS[m[2]] || m[2];
+    if (b !== '' && Number.isFinite(+b) && (a === undefined || a === '' || Number.isFinite(+a))) { const x = +a || 0, y = +b; return op === '>=' ? x >= y : op === '<=' ? x <= y : op === '>' ? x > y : op === '<' ? x < y : op === '!=' ? x !== y : x === y; }
+    const x = String(a ?? ''); return op === '!=' ? x !== b : op === '==' ? x === b : false;
+  }
+  const v = env.getVar(c); return !!v && v !== '0';
+}
+const storyValue = (t) => { const s = String(t ?? '').trim().replace(/^["']|["']$/g, ''); return s !== '' && Number.isFinite(+s) ? +s : s; };
+/** Run a dialogue "@command". Returns 'end' to finish the conversation. */
+export function storyDo(cmd, env) {
+  const c = String(cmd || '').trim(), sp = c.indexOf(' '), verb = (sp < 0 ? c : c.slice(0, sp)).toLowerCase(), arg = sp < 0 ? '' : c.slice(sp + 1).trim();
+  let m;
+  switch (verb) {
+    case 'set': if ((m = arg.match(/^(\S+)\s*(?:=|to)?\s*(.*)$/i))) env.setVar(m[1], storyValue(m[2])); break;
+    case 'add': if ((m = arg.match(/^(\S+)\s+(-?[\d.]+)$/))) env.setVar(m[1], (+env.getVar(m[1]) || 0) + +m[2]); break;
+    case 'give': case 'take': if ((m = arg.match(/^(.+?)(?:\s+(\d+))?$/))) env.give(m[1], (+m[2] || 1) * (verb === 'take' ? -1 : 1)); break;
+    case 'quest': if ((m = arg.match(/^(start|complete|finish|fail|turnin|turn in|reset|progress|track)\s+(.+?)(?:\s+(\d+))?$/i))) env.quest(m[1].toLowerCase().replace(/\s+/g, '').replace('finish', 'complete'), m[2], +m[3] || 1); else env.log(`@quest needs start / complete / fail / turnin / reset / progress / track and a quest name: “@${c}”`); break;
+    case 'send': case 'message': if ((m = arg.match(/^(.+?)(?:\s+(-?[\d.]+))?$/))) env.send(m[1], m[2] != null ? +m[2] : undefined); break;
+    case 'sound': env.sound(arg); break;
+    case 'learn': env.learn(arg); break;
+    case 'end': case 'stop': return 'end';
+    default: env.log(`Unknown dialogue command “@${c}”`);
+  }
+  return null;
+}
+/** Plays a parsed dialogue: `line` is what to show, `choices` the buttons (or null), `done` when it's over. */
+export class DialogueRunner {
+  constructor(script, env, { start = 'start' } = {}) {
+    this.p = typeof script === 'string' ? parseDialogue(script) : script; this.env = env;
+    this.chosen = env.chosen || new Set(); this.done = false; this.line = null; this.choices = null; this.after = 0; this.lastLine = null;
+    this.i = this.p.labels[String(start).toLowerCase()] ?? 0;
+    this.advance();
+  }
+  finish() { this.done = true; this.line = null; this.choices = null; }
+  jump(go) { if (!go || /^end$/i.test(go)) { this.finish(); return false; } const j = this.p.labels[go.toLowerCase()]; if (j == null) { this.env.log(`Dialogue: no section called “${go}”`); this.finish(); return false; } this.i = j; return true; }
+  /** The choice buttons that start at the current step (filtered by their conditions). */
+  readChoices() {
+    const S = this.p.steps; let j = this.i; const list = [];
+    while (S[j]?.k === 'choice') { const s = S[j]; if (!(s.once && this.chosen.has(j)) && storyCond(s.cond, this.env)) list.push({ text: this.env.fill(s.text), go: s.go, at: j }); j++; }
+    this.after = j;
+    return j > this.i ? list : null;
+  }
+  /** Run actions and jumps until there's a line or choices to show, or the end. */
+  advance() {
+    const S = this.p.steps; let guard = 0;
+    this.line = null; this.choices = null;
+    while (!this.done) {
+      if (++guard > 1000) { this.env.log('Dialogue: it keeps jumping in a circle'); return this.finish(); }
+      const s = S[this.i]; if (!s) return this.finish();
+      if (s.k === 'say') {
+        this.i++; this.line = this.lastLine = { who: s.who, text: this.env.fill(s.text) };
+        const ch = this.readChoices(); if (ch) { if (ch.length) this.choices = ch; else this.i = this.after; }
+        return;
+      }
+      if (s.k === 'choice') { const ch = this.readChoices(); if (ch.length) { this.choices = ch; this.line = this.lastLine || { who: '', text: '' }; return; } this.i = this.after; continue; }
+      this.i++;
+      if (s.k === 'goto') { if (!this.jump(s.go)) return; continue; }
+      if (s.k === 'if') { if (storyCond(s.cond, this.env) && !this.jump(s.go)) return; continue; }
+      if (s.k === 'do' && storyDo(s.cmd, this.env) === 'end') return this.finish();
+    }
+  }
+  /** Tap to go on (when there are no choices). */
+  next() { if (this.done || this.choices) return; this.advance(); }
+  /** Pick choice number k. */
+  choose(k) {
+    const c = this.choices?.[k]; if (!c) return;
+    this.chosen.add(c.at); this.env.chose?.(c.text);
+    this.i = this.after; this.choices = null;
+    if (c.go && !this.jump(c.go)) return;
+    this.advance();
+  }
+}
+/**
+ * Quest objectives, one per line (an optional "| label" names it):
+ *   collect Wood 5 [(take)] · kill slime 3 · talk Guard · reach Castle [60] · craft Axe · use Apple 2 · gather Wood 10
+ *   var coins >= 100 · message boss defeated [2] · quest Other Quest · anything else (advance it with "Advance quest")
+ */
+export function parseObjectives(text) {
+  return String(text || '').split('\n').map((q) => q.trim()).filter((q) => q && !q.startsWith('//')).map((raw) => {
+    let [body, label] = raw.split('|').map((q) => q.trim()), take = false, m;
+    if (/\(take\)\s*$/i.test(body)) { take = true; body = body.replace(/\s*\(take\)\s*$/i, ''); }
+    const sp = body.indexOf(' '), type = (sp < 0 ? body : body.slice(0, sp)).toLowerCase(), rest = sp < 0 ? '' : body.slice(sp + 1).trim();
+    const nameN = (s) => { const k = s.match(/^(.+?)(?:\s+(\d+))?$/); return k ? { target: k[1].trim(), n: Math.max(1, +k[2] || 1) } : { target: s, n: 1 }; };
+    let o;
+    if (['collect', 'kill', 'defeat', 'craft', 'use', 'gather', 'message'].includes(type)) o = { type: type === 'defeat' ? 'kill' : type, ...nameN(rest) };
+    else if (type === 'talk' || type === 'reach' || type === 'goto') { const k = rest.match(/^(.+?)(?:\s+(\d+(?:\.\d+)?))?$/); o = { type: type === 'goto' ? 'reach' : type, target: k ? k[1].trim() : rest, n: 1, dist: k && k[2] ? +k[2] : 0 }; }
+    else if (type === 'var' && (m = rest.match(/^(\S+)\s*(>=|<=|==|!=|=|>|<|≥|≤)\s*(.+)$/))) o = { type: 'var', target: m[1], op: m[2], value: m[3].trim(), n: 1 };
+    else if (type === 'quest') o = { type: 'quest', target: rest, n: 1 };
+    else o = { type: 'custom', target: body, ...(body.match(/\s(\d+)$/) ? { n: +body.match(/\s(\d+)$/)[1] } : { n: 1 }) };
+    o.take = take;
+    const L = { collect: `Collect ${o.n} ${o.target}`, kill: `Defeat ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, talk: `Talk to ${o.target}`, reach: `Go to ${o.target}`, craft: `Craft ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, use: `Use ${o.n > 1 ? o.n + ' ' : ''}${o.target}`, gather: `Gather ${o.n} ${o.target}`, var: `${o.target} ${o.op} ${o.value}`, message: o.target, quest: `Finish “${o.target}”`, custom: body.replace(/\s\d+$/, '') }[o.type];
+    o.label = label || L;
+    return o;
+  });
+}
+/** "coins 50, xp 20, item Iron Sword 1, recipe Axe, message party" → rewards */
+export function parseRewards(text) {
+  return String(text || '').split(/[,\n]/).map((q) => q.trim()).filter(Boolean).map((q) => {
+    let m;
+    if ((m = q.match(/^item\s+(.+?)(?:\s+(\d+))?$/i))) return { kind: 'item', name: m[1], n: +m[2] || 1 };
+    if ((m = q.match(/^recipe\s+(.+)$/i))) return { kind: 'recipe', name: m[1] };
+    if ((m = q.match(/^(?:message|send)\s+(.+)$/i))) return { kind: 'message', name: m[1] };
+    if ((m = q.match(/^quest\s+(.+)$/i))) return { kind: 'quest', name: m[1] };
+    if ((m = q.match(/^(\S+)\s+(-?[\d.]+)$/))) return { kind: 'var', name: m[1], n: +m[2] };
+    if ((m = q.match(/^(.+?)\s+(\d+)$/))) return { kind: 'item', name: m[1], n: +m[2] };
+    return { kind: 'item', name: q, n: 1 };
+  });
+}
+const rewardText = (rs, s) => rs.map((r) => (r.kind === 'var' ? `${r.n > 0 ? '+' : ''}${r.n} ${r.name}` : r.kind === 'item' ? `${s?.itemDef(r.name).icon || ''}${r.name}${r.n > 1 ? ' ×' + r.n : ''}` : r.kind === 'recipe' ? `📜 ${r.name}` : r.kind === 'quest' ? `New quest: ${r.name}` : '')).filter(Boolean).join('  ');
+
 /** Item types (Game Settings › Items): what an item is for. */
 export const ITEM_TYPES = {
   material: { label: 'Material', icon: '🪵' }, food: { label: 'Food', icon: '🍎' }, drink: { label: 'Drink', icon: '💧' }, potion: { label: 'Potion', icon: '🧪' },
@@ -8030,7 +8572,8 @@ registerBehavior('uiShowIf', {
     { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
     { key: 'value', label: 'Value', type: 'text', default: 'home' },
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
-    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade' },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
+    { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
   ],
   create(p) {
     let shown = null;
@@ -8050,10 +8593,13 @@ registerBehavior('uiShowIf', {
         const want = test(s.vars[p.var]);
         if (want !== shown) {
           shown = want;
+          const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
           if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
-            const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
             uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
-          } else uiAnimate(s, e, want, p.anim, 0.22);
+          } else if (p.anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
+          else if (p.anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
+          else uiAnimate(s, e, want, p.anim, 0.22);
+          if (want) staggerKids(s, e, p.stagger);
         }
       },
     };
@@ -8249,6 +8795,68 @@ registerBehavior('uiPopup', {
         else if (p.tapCloses && timer > 0.2 && uiTapped(s, e)) inst.set(e, s, false);
       },
       destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+/** Bottom Sheet: a panel that slides up from the bottom with a spring, can be dragged to resize or dismiss, and dims what's behind. */
+registerBehavior('uiSheet', {
+  label: 'Bottom Sheet', description: 'A panel that slides up from the bottom of the screen with a spring (like Maps or Music). Drag its handle to pull it up, down or away; tapping outside or Back closes it. Put buttons, lists and text inside it.',
+  params: [
+    { key: 'openOn', label: 'Open on message', type: 'text', default: 'open sheet', suggest: 'messages' },
+    { key: 'closeOn', label: 'Close on message', type: 'text', default: 'close sheet', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'stops', label: 'Stops at', type: 'select', options: ['full height', 'half, then full'], default: 'full height', info: { 'half, then full': 'Opens half way; drag it up for all of it.' } },
+    { key: 'dim', label: 'Dim behind and tap outside closes', type: 'bool', default: true },
+    { key: 'handle', label: 'Drag handle', type: 'bool', default: true },
+    { key: 'dragAnywhere', label: 'Drag anywhere on it (not just the handle)', type: 'bool', default: false },
+    { key: 'message', label: 'Closing sends message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'handleColor', label: 'Handle', type: 'color', default: 'rgba(0,0,0,0.22)', group: 'Colours' },
+  ],
+  create(p) {
+    const st = { off: 1 }, dim = { e: null, a: 0 };
+    let open = false, base = null, drag = null, vel = 0, lastY = 0;
+    const H = (e) => e.extents().hy * 2;
+    const half = () => (p.stops === 'half, then full' ? 0.5 : 0);
+    const go = (s, e, to, o = {}) => { s.spring(st, { off: to }, o.fast ? { stiffness: 500, damping: 40 } : { stiffness: 360, damping: 30 }); };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want) {
+        if (want === open) return; open = want;
+        go(s, e, want ? half() : 1.08, { fast: !want });
+        if (want) { e.visible = true; s.modal = e; } else { if (s.modal === e) s.modal = null; if (p.message) s.send(p.message); }
+        s.engine.vibrate(want ? 8 : 4);
+      },
+      start(e, s) {
+        base = e.y; e._dismiss = () => inst.set(e, s, false);
+        if (p.startOpen) { open = true; st.off = half(); s.modal = e; } else { st.off = 1.08; e.visible = false; }
+        s.on('message', (m) => { if (e.dead) return; if (m === p.openOn) inst.set(e, s, true); else if (m === p.closeOn) inst.set(e, s, false); else if (m === p.openOn + ' toggle') inst.set(e, s, !open); });
+      },
+      update(e, dt, s) {
+        if (s.engine.editing) { e.y = base ?? e.y; return; }
+        const h = H(e), b = UK.box(e);
+        // drag the handle (or anywhere): follow the finger, then snap by where it ended and how fast it moved
+        if (open && !drag) for (const d of UK.downs(s, e)) if (UK.in(d, b) && (p.dragAnywhere || d.y < b.y + 44)) { drag = { id: d.id, y0: d.y, o0: st.off }; s.stopSpring(st); vel = 0; lastY = d.y; break; }
+        if (drag) {
+          const q = UK.ptr(s, e, drag.id);
+          if (q) { const o = drag.o0 + (q.y - drag.y0) / h; st.off = o < 0 ? o * 0.25 : o; vel = vel * 0.6 + ((q.y - lastY) / Math.max(dt, 1 / 120)) * 0.4; lastY = q.y; s.engine.input.taps.length = 0; }
+          else {
+            drag = null; const stops = [half(), 0].filter((v, i, a) => a.indexOf(v) === i);
+            if (vel > 900 || st.off > (stops[0] + 1) / 2 + 0.08) inst.set(e, s, false);
+            else if (vel < -900) go(s, e, 0); else go(s, e, stops.reduce((a, v) => (Math.abs(v - st.off) < Math.abs(a - st.off) ? v : a), stops[0]));
+          }
+        }
+        e.y = base + st.off * h;
+        if (!open && st.off >= 1.07 && !drag) e.visible = false;
+        if (p.dim) { dim.e = e; dim.a = 0.5 * clamp(1 - st.off, 0, 1); if (dim.a > 0.005) s.uiDim = dim; else if (s.uiDim === dim) s.uiDim = null; }
+      },
+      drawUI(ctx, e, s) {
+        if (p.handle === false) return;
+        const b = UK.box(e); ctx.fillStyle = p.handleColor || 'rgba(0,0,0,0.22)'; UK.rr(ctx, b.cx - 20, b.y + 8, 40, 5, 3); ctx.fill();
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; if (s.uiDim === dim) s.uiDim = null; },
     };
     return inst;
   },
@@ -9477,25 +10085,363 @@ registerBehavior('waveSpawner', {
 
 /** Dialogue: a conversation box with speaker names and typewriter text; tap to continue. */
 registerBehavior('dialogue', {
-  label: 'Dialogue', description: 'Shows a conversation, one line at a time, with speaker names and typewriter text. Tap to continue. Write one line per row as “Name: text”.',
+  label: 'Dialogue', description: 'Shows a conversation with speaker names and typewriter text; tap to continue. Write “Name: text” lines, or a full dialogue script with choices (* text -> section), conditions and actions — or pick a dialogue from Game Settings › Dialogues.',
   params: [
-    { key: 'lines', label: 'Lines (one per row, “Name: text”)', type: 'code', default: 'Guard: Halt! Who goes there?\nYou: Just a traveler.\nGuard: Fine. Watch out for slimes!' },
+    { key: 'lines', label: 'Lines (“Name: text”; choices with *)', type: 'code', default: 'Guard: Halt! Who goes there?\nYou: Just a traveler.\nGuard: Fine. Watch out for slimes!' },
+    { key: 'dialogue', label: 'Or a dialogue from Game Settings', type: 'text', default: '', suggest: 'dialogues' },
     { key: 'trigger', label: 'Start when', type: 'select', options: ['touched by tag', 'tapped', 'game starts', 'message'], default: 'touched by tag' },
     { key: 'tag', label: 'Tag', type: 'text', default: 'player', suggest: 'tags', showIf: { trigger: ['touched by tag'] } },
     { key: 'message', label: 'Message', type: 'text', default: 'talk', suggest: 'messages', showIf: { trigger: ['message'] } },
     { key: 'once', label: 'Only once', type: 'bool', default: true },
     { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    { key: 'portrait', label: 'Portrait (emoji or art:name)', type: 'text', default: '', group: 'More' },
     { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
   ],
   create(p) {
     let done = false;
-    const lines = String(p.lines || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const m = l.match(/^([^:]{1,24}):\s*(.*)$/); return m ? { who: m[1], text: m[2] } : { who: '', text: l }; });
-    const open = (s) => { if (done && p.once) return; if (s.dialog || !lines.length) return; done = true; s.dialog = { lines, i: 0, chars: 0, pause: p.pause, then: p.then }; };
+    const open = (e, s) => {
+      if ((done && p.once) || s.dialog) return;
+      const ok = p.dialogue ? s.startDialogue(p.dialogue, { npc: e, pause: p.pause, then: p.then, portrait: p.portrait }) : s.startDialogue(String(p.lines || ''), { npc: e, pause: p.pause, then: p.then, portrait: p.portrait, inline: true, name: e.name });
+      if (ok) done = true;
+    };
     return {
       uiAlways: true,
-      start(e, s) { if (p.trigger === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } if (p.trigger === 'game starts') open(s); if (p.trigger === 'message') s.on('message', (n) => { if (n === p.message) open(s); }); },
-      update(e, dt, s) { if (p.trigger === 'tapped' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) open(s); },
-      collide(e, other, s) { if (p.trigger === 'touched by tag' && other.has(p.tag)) open(s); },
+      start(e, s) { if (p.trigger === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); } if (p.trigger === 'tapped') (s.tapTargets ||= new Set()).add(e); if (p.trigger === 'game starts') open(e, s); if (p.trigger === 'message') s.on('message', (n) => { if (n === p.message && !e.dead) open(e, s); }); },
+      update(e, dt, s) { if (p.trigger === 'tapped' && e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) open(e, s); },
+      collide(e, other, s) { if (p.trigger === 'touched by tag' && other.has(p.tag)) open(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); },
+    };
+  },
+});
+
+/** NPC: someone to talk to. Starts a dialogue, hands in finished quests, offers its quests, and shows ! / ? quest markers. */
+registerBehavior('npc', {
+  label: 'NPC (talk & quests)', description: 'A character the player talks to: tap them (or walk up) to start a dialogue from Game Settings › Dialogues. Quest givers show ! when they have a quest for you and ? when one is ready to hand in. NPCs can wander, patrol or follow you, say things as you pass, run a shop, buy your items and take gifts (friendship).',
+  params: [
+    { key: 'dialogue', label: 'Dialogue', type: 'text', default: '', suggest: 'dialogues', info: 'From Game Settings › Dialogues. Empty: it offers its quests, its shop, or says the lines below.' },
+    { key: 'lines', label: 'Or its own lines (“Name: text”, * choices)', type: 'code', default: '' },
+    { key: 'greeting', label: 'Greeting (when it has nothing else to say)', type: 'text', default: 'Hello there!' },
+    { key: 'start', label: 'Talk when', type: 'select', options: ['tapped when close', 'tapped', 'player comes close', 'touched by tag', 'message'], default: 'tapped when close' },
+    { key: 'range', label: 'Close means within', type: 'number', default: 100, default3d: 3 },
+    { key: 'talkName', label: 'Name (quests and speaker; empty = the object’s name)', type: 'text', default: '' },
+    { key: 'portrait', label: 'Portrait (emoji or art:name)', type: 'text', default: '' },
+    { key: 'markers', label: 'Quest markers (! has a quest, ? hand one in)', type: 'bool', default: true },
+    { key: 'bubble', label: 'Show 💬 when the player is close', type: 'bool', default: true },
+    { key: 'nameTag', label: 'Show its name above it', type: 'bool', default: false },
+    { key: 'turnIn', label: 'Talking hands in its finished quests', type: 'bool', default: true },
+    { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    // moving around
+    { key: 'moveMode', label: 'Moves', type: 'select', options: ['stands still', 'wanders around', 'patrols a route', 'follows the player'], default: 'stands still', group: 'Moving' },
+    { key: 'speed', label: 'Walking speed', type: 'number', default: 60, default3d: 2, group: 'Moving', showIf: (b) => b.moveMode && b.moveMode !== 'stands still' },
+    { key: 'wander', label: 'Wanders within', type: 'number', default: 120, default3d: 4, group: 'Moving', showIf: { moveMode: ['wanders around'] } },
+    { key: 'route', label: 'Route (object names or x,y; one per line)', type: 'code', default: '', group: 'Moving', showIf: { moveMode: ['patrols a route'] } },
+    { key: 'waitAt', label: 'Waits at each stop (sec)', type: 'number', default: 1.5, group: 'Moving', showIf: { moveMode: ['wanders around', 'patrols a route'] } },
+    { key: 'followDist', label: 'Stays this close', type: 'number', default: 70, default3d: 2, group: 'Moving', showIf: { moveMode: ['follows the player'] } },
+    { key: 'stopNear', label: 'Stops when the player comes close', type: 'bool', default: true, group: 'Moving', showIf: (b) => b.moveMode && b.moveMode !== 'stands still' && b.moveMode !== 'follows the player' },
+    { key: 'facePlayer', label: 'Turns to face the player', type: 'bool', default: true, group: 'Moving' },
+    // saying things in passing
+    { key: 'barks', label: 'Says in a bubble (one per line, picked at random)', type: 'code', default: '', group: 'Chatter' },
+    { key: 'barkWhen', label: 'Says it', type: 'select', options: ['when the player comes close', 'every few seconds'], default: 'when the player comes close', group: 'Chatter' },
+    { key: 'barkEvery', label: 'Every (sec)', type: 'number', default: 8, group: 'Chatter', showIf: { barkWhen: ['every few seconds'] } },
+    // trading and gifts
+    { key: 'sells', label: 'Sells (Item | price, one per line)', type: 'code', default: '', group: 'Shop & gifts', info: 'Talking shows Buy. In your own dialogue, jump to it with -> shop (or -> menu for everything).' },
+    { key: 'buys', label: 'Buys from you (Item | price)', type: 'code', default: '', group: 'Shop & gifts', info: 'Talking shows Sell (-> sell).' },
+    { key: 'currency', label: 'Money variable', type: 'text', default: 'coins', suggest: 'vars', group: 'Shop & gifts' },
+    { key: 'likes', label: 'Likes these gifts (comma separated)', type: 'text', default: '', suggest: 'items', group: 'Shop & gifts', info: 'Talking shows Give a gift (-> gift). Each gift adds 1 to its friendship ({friend_Name}, or my.friendship in its dialogue).' },
+    { key: 'giftReply', label: 'Says when given a gift', type: 'text', default: 'For me? Thank you, I love it!', group: 'Shop & gifts' },
+    { key: 'tag', label: 'Player tag', type: 'text', default: 'player', suggest: 'tags', group: 'More' },
+    { key: 'message', label: 'Message that starts the talk', type: 'text', default: 'talk', suggest: 'messages', showIf: { start: ['message'] }, group: 'More' },
+    { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
+  ],
+  create(p) {
+    let near = false, draw = null, cool = 0, home = null, dest = null, pauseT = 0, routeI = 0, route = [], walking = false, bark = null, barkT = 0, barkCool = 0, lastBark = -1, ent = null, sc = null;
+    const who = (e) => (p.talkName || e.name || 'NPC').trim();
+    const fkey = (e) => 'friend_' + who(e).replace(/\W+/g, '_');
+    const gives = (s, e) => s.questDefs().filter((q) => String(q.giver || '').trim().toLowerCase() === who(e).toLowerCase());
+    const marker = (s, e) => { const g = gives(s, e); if (g.some((q) => s.questState(q.name) === 'ready')) return '?'; if (g.some((q) => s.questState(q.name) === 'available')) return '!'; return ''; };
+    const rows = (t) => String(t || '').split('\n').map((l) => l.split('|').map((q) => q.trim())).filter((r) => r[0]);
+    const priceOf = (s, r) => (r[1] !== undefined && r[1] !== '' && Number.isFinite(+r[1]) ? +r[1] : Math.max(1, +s.itemDef?.(r[0])?.value || 10));
+    const likes = () => String(p.likes || '').split(',').map((q) => q.trim()).filter(Boolean);
+    /** Shop, sell and gift sections, plus a menu that leads to them. */
+    const extras = (s, e, have = {}) => {
+      const n = who(e), cur = (p.currency || 'coins').trim(), L = [], menu = [];
+      const sells = rows(p.sells), buys = rows(p.buys), lk = likes();
+      if (sells.length && !have.shop) {
+        menu.push('* Buy -> shop');
+        L.push('# shop', `${n}: Take a look!`);
+        sells.forEach((r, i) => { const pr = priceOf(s, r); L.push(`* [if ${cur} >= ${pr}] ${r[0]}${+r[2] > 1 ? ' ×' + r[2] : ''} — ${pr} ${cur} -> buy${i}`, `* [if ${cur} < ${pr}] ${r[0]} — ${pr} ${cur} (not enough) -> broke`); });
+        L.push('* Back -> menu');
+        sells.forEach((r, i) => L.push(`# buy${i}`, `@add ${cur} -${priceOf(s, r)}`, `@give ${r[0]} ${Math.max(1, +r[2] || 1)}`, '@sound coin', `${n}: Thank you!`, '-> shop'));
+        L.push('# broke', `${n}: You don’t have enough ${cur} for that.`, '-> shop');
+      }
+      if (buys.length && !have.sell) {
+        menu.push('* Sell -> sell');
+        L.push('# sell', `${n}: What have you got for me?`);
+        buys.forEach((r, i) => L.push(`* [if has ${r[0]}] ${r[0]} — ${priceOf(s, r)} ${cur} -> sold${i}`));
+        L.push('* Back -> menu');
+        buys.forEach((r, i) => L.push(`# sold${i}`, `@take ${r[0]} 1`, `@add ${cur} ${priceOf(s, r)}`, '@sound coin', `${n}: Pleasure doing business.`, '-> sell'));
+      }
+      if (lk.length && !have.gift) {
+        menu.push('* Give a gift -> gift');
+        L.push('# gift', `${n}: Oh? What is it?`);
+        lk.forEach((it, i) => L.push(`* [if has ${it}] ${it} -> gave${i}`));
+        L.push('* Never mind -> menu');
+        lk.forEach((it, i) => L.push(`# gave${i}`, `@take ${it} 1`, '@add my.friendship 1', '@sound power', `${n}: ${p.giftReply || 'Thank you!'}`, '-> menu'));
+      }
+      if (menu.length && !have.menu) L.push('# menu', ...menu, '* Bye -> END');
+      return { text: L.join('\n'), menu: menu.length > 0 };
+    };
+    /** A dialogue made up on the spot: thanks for finished quests, offers the next one, then the shop / gifts menu. */
+    const autoScript = (s, e, handed) => {
+      const n = who(e), L = [], x = extras(s, e), next = x.menu ? 'menu' : 'END';
+      for (const q of handed) L.push(`${n}: ${q.thanks || `You did it! Thank you.`}`);
+      const avail = gives(s, e).find((q) => s.questState(q.name) === 'available'), active = gives(s, e).find((q) => ['active', 'ready'].includes(s.questState(q.name)));
+      const lines = String(p.lines || '').trim();
+      if (avail) L.push(`${n}: ${avail.offer || avail.desc || 'I need your help with something.'}`, '* Accept -> accept', `* Not now -> ${next}`, '# accept', `@quest start ${avail.name}`, `${n}: ${avail.accepted || 'Thank you! Come back when it’s done.'}`);
+      else if (active) L.push(`${n}: ${active.reminder || `How is “${active.name}” going?`}`);
+      else if (lines && !handed.length) L.push(lines);
+      else if (!handed.length) L.push(`${n}: ${p.greeting || 'Hello there!'}`);
+      if (x.menu && !(lines && /^\s*\*/m.test(lines) && !avail && !active && !handed.length)) L.push('-> menu');
+      return L.join('\n') + (x.text ? '\n' + x.text : '');
+    };
+    const talk = (e, s) => {
+      if (s.dialog || s.state !== 'play') return;
+      const handed = [];
+      if (p.turnIn !== false) for (const q of gives(s, e)) if (s.questState(q.name) === 'ready' && s.completeQuest(q.name)) handed.push(q);
+      const o = { npc: e, pause: p.pause, then: p.then, portrait: p.portrait, name: who(e) };
+      const def = p.dialogue ? s.dialogueDef(p.dialogue) : null;
+      if (def) { // its own dialogue, plus the shop / sell / gift / menu sections it doesn't write itself
+        const has = parseDialogue(def.script).labels, x = extras(s, e, { shop: 'shop' in has, sell: 'sell' in has, gift: 'gift' in has, menu: 'menu' in has });
+        s.startDialogue(def.script + (x.text ? '\n' + x.text : ''), { ...o, inline: true, name: def.name, portrait: p.portrait || def.portrait });
+      } else if (p.dialogue) s.startDialogue(p.dialogue, o); // warns that it doesn't exist
+      else s.startDialogue(autoScript(s, e, handed), { ...o, inline: true });
+      bark = null; cool = 0.4;
+    };
+    const flat = (e) => ({ x: e.x, y: is3D(e) ? e.z : e.y });
+    const face = (e, dx, dy) => {
+      if (is3D(e)) { if (Math.hypot(dx, dy) > 1e-3) e.ry = Math.atan2(-dx, -dy) / DEG; return; }
+      if (Math.abs(dx) < 0.5) return; if (e.shape?.type === 'emoji') e.data.flipX = dx > 0; else if (e.sprite || e.shape) e.sx = Math.abs(e.sx) * (dx < 0 ? -1 : 1);
+    };
+    /** Walk toward a point; true when there. 'blocked' if a wall is in the way. */
+    const walkTo = (e, s, tx, ty, dt, stopAt = 0) => {
+      const three = is3D(e), c = flat(e), dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy), eps = three ? 0.06 : 2;
+      if (d <= stopAt + eps) return true;
+      const step = Math.min(d - stopAt, (+p.speed || (three ? 2 : 60)) * dt), ex = e.extents(), rad = ex.sphere ? ex.r : Math.max(ex.hx, three ? ex.hz : ex.hy);
+      const hit = s.raycast(three ? { x: c.x, y: e.y, z: c.y } : { x: c.x, y: c.y }, three ? { x: dx, y: 0, z: dy } : { x: dx, y: dy }, step + rad, { ignore: e });
+      if (hit && !hit.entity.has(p.tag)) return 'blocked';
+      if (hit) return true; // the player is in the way: wait
+      e.x += dx / d * step; if (three) e.z += dy / d * step; else e.y += dy / d * step;
+      face(e, dx, dy); walking = true; return false;
+    };
+    const say = (s, text) => { bark = { text: fillTemplate(text, s.vars), t: s.time }; barkT = 2.8; s.emit('npcSays', ent, bark.text); };
+    const self = {
+      get portrait() { return p.portrait; }, get speaker() { return ent ? who(ent) : ''; },
+      /** my.x in its dialogue: friendship lives in a game variable (saved, kept between levels). */
+      myVar(k) { return k === 'friendship' && ent && sc ? +sc.vars[fkey(ent)] || 0 : undefined; },
+      setMyVar(k, v) { if (k !== 'friendship' || !ent || !sc) return false; sc.setVar(fkey(ent), v); return true; },
+      say(text) { if (sc) say(sc, text); },
+      start(e, s) {
+        ent = e; sc = s; home = flat(e);
+        if (p.start === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.moveMode && p.moveMode !== 'stands still' && e.body?.type === 'static') e.body.type = 'kinematic'; // it moves: physics must follow it
+        if (p.start.startsWith('tapped')) (s.tapTargets ||= new Set()).add(e);
+        if (p.start === 'message') s.on('message', (m) => { if (m === p.message && !e.dead) talk(e, s); });
+        if (likes().length && s.vars[fkey(e)] == null) s.vars[fkey(e)] = 0;
+        route = String(p.route || '').split(/[\n;]/).map((q) => q.trim()).filter(Boolean).map((q) => { const m = q.match(/^(-?[\d.]+)\s*,\s*(-?[\d.]+)$/); if (m) return { x: +m[1], y: +m[2] }; const o = s.find(q); return o ? flat(o) : null; }).filter(Boolean);
+        s.questHooks?.();
+        (s.overlays ||= []).push(draw = (ctx) => {
+          if (e.dead || !e.visible) return;
+          const mk = p.markers !== false ? marker(s, e) : '', bub = p.bubble !== false && near && !s.dialog && !bark, tag = p.nameTag;
+          if (!mk && !bub && !bark && !tag) return;
+          const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
+          const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh); if (q.behind) return;
+          let y = q.y - 22 + Math.sin(s.time * 4) * 3;
+          ctx.save();
+          if (tag) {
+            const f = likes().length ? Math.min(5, +s.vars[fkey(e)] || 0) : 0, label = who(e) + (f ? '  ' + '♥'.repeat(f) : '');
+            ctx.font = `800 12px ${THEME.font}`; const w = ctx.measureText(label).width + 14, ty = q.y - 12;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(q.x - w / 2, ty - 9, w, 18, 9); else ctx.rect(q.x - w / 2, ty - 9, w, 18); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, q.x, ty + 1); y -= 16;
+          }
+          if (mk) { ctx.fillStyle = '#ffd23d'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, y, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); UK.text(ctx, mk, q.x, y + 1, { size: 18, weight: 900, color: '#1b1b1b' }); }
+          if (bub) { const bx = q.x + (mk ? 26 : 0), by = y; ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 16, by - 13, 32, 26, 10); else ctx.rect(bx - 16, by - 13, 32, 26); ctx.fill(); UK.text(ctx, '💬', bx, by + 1, { size: 15 }); }
+          if (bark && !s.dialog) { // a speech bubble with what it says in passing
+            const a = Math.min(1, barkT * 3, (s.time - bark.t) * 6); ctx.globalAlpha = a; ctx.font = `700 13px ${THEME.font}`;
+            const words = bark.text.split(' '), L = []; let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > 170 && row) { L.push(row); row = w; } else row = t; } L.push(row);
+            const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 20, h = L.length * 17 + 12, bx = q.x - w / 2, by = y - (mk ? 20 : 4) - h;
+            ctx.fillStyle = 'rgba(255,255,255,0.96)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, w, h, 10); else ctx.rect(bx, by, w, h); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(q.x - 6, by + h - 1); ctx.lineTo(q.x, by + h + 7); ctx.lineTo(q.x + 6, by + h - 1); ctx.fill();
+            ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; L.forEach((t, i) => ctx.fillText(t, q.x, by + 14 + i * 17));
+          }
+          ctx.restore();
+        });
+        draw.world = true;
+      },
+      update(e, dt, s) {
+        cool -= dt; barkT -= dt; barkCool -= dt; pauseT -= dt; walking = false;
+        if (bark && barkT <= 0) bark = null;
+        const pl = nearest(s, e, p.tag), d = pl ? Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) : Infinity, was = near;
+        near = d <= (+p.range || 100);
+        if (s.state !== 'play') return;
+        const talking = s.dialog?.npc === e;
+        // chatter
+        const barks = String(p.barks || '').split('\n').map((q) => q.trim()).filter(Boolean);
+        if (barks.length && !s.dialog && barkCool <= 0) {
+          const go = p.barkWhen === 'every few seconds' ? (d < (+p.range || 100) * 4) : near && !was;
+          if (go) { let i = Math.floor(Math.random() * barks.length); if (barks.length > 1 && i === lastBark) i = (i + 1) % barks.length; lastBark = i; say(s, barks[i]); barkCool = p.barkWhen === 'every few seconds' ? Math.max(2, +p.barkEvery || 8) : 6; }
+        }
+        // moving
+        const mode = p.moveMode || 'stands still', three = is3D(e);
+        if (!talking && !s.dialog && mode !== 'stands still' && !(near && p.stopNear !== false && mode !== 'follows the player') && pauseT <= 0) {
+          if (mode === 'follows the player' && pl) { const f = +p.followDist || (three ? 2 : 70), c = flat(pl); if (Math.hypot(c.x - flat(e).x, c.y - flat(e).y) > f * 1.15 || walking) walkTo(e, s, c.x, c.y, dt, f); }
+          else if (mode === 'wanders around') {
+            if (!dest) { const R = +p.wander || (three ? 4 : 120), a = Math.random() * Math.PI * 2, k = Math.sqrt(Math.random()) * R; dest = { x: home.x + Math.cos(a) * k, y: home.y + Math.sin(a) * k }; }
+            const r = walkTo(e, s, dest.x, dest.y, dt); if (r === true || r === 'blocked') { dest = null; pauseT = (+p.waitAt || 1.5) * (0.5 + Math.random()); }
+          } else if (mode === 'patrols a route' && route.length) {
+            const t = route[routeI % route.length], r = walkTo(e, s, t.x, t.y, dt);
+            if (r === true) { routeI = (routeI + 1) % route.length; pauseT = +p.waitAt || 0; } else if (r === 'blocked') pauseT = 0.5;
+          }
+        }
+        if (!three && e.shape?.type === 'emoji') e.rz = walking ? Math.sin(s.time * 14) * 6 : e.rz * 0.8; // a little waddle while walking
+        if (p.facePlayer !== false && pl && (near || talking) && !walking) { const a = flat(pl), b = flat(e); face(e, a.x - b.x, a.y - b.y); }
+        if (s.dialog || cool > 0) return;
+        if (p.start === 'player comes close' && near && !was) talk(e, s);
+        if (p.start.startsWith('tapped')) for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { if (p.start === 'tapped when close' && !near) s.message('Get closer to talk', 1); else talk(e, s); break; }
+      },
+      collide(e, other, s) { if (p.start === 'touched by tag' && other.has(p.tag) && cool <= 0) talk(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); if (draw) s.overlays = (s.overlays || []).filter((f) => f !== draw); },
+    };
+    return self;
+  },
+});
+
+const QUEST_SAMPLE = [{ name: 'The Lost Ring', icon: '💍', state: 'active', objs: [{ label: 'Talk to the Elder', have: 1, need: 1, done: true }, { label: 'Collect 3 Wood', have: 2, need: 3 }, { label: 'Defeat 5 slime', have: 1, need: 5 }] }];
+const questView = (s, name) => { const d = s.questDef(name); return d ? { name: d.name, icon: d.icon || '📜', state: s.questState(d.name), desc: d.desc || '', giver: d.giver || '', rewards: rewardText(parseRewards(d.rewards), s), objs: s.questObjectives(d.name) } : null; };
+/** Quest Tracker: the quest you're doing (or every active one) with its objectives, on screen while playing. */
+registerBehavior('uiQuestTracker', {
+  label: 'Quest Tracker', description: 'Shows the tracked quest (or all active quests) with each objective and its progress, ticking them off as they’re done. Tap it to send a message (open your Quest Journal).',
+  params: [
+    { key: 'show', label: 'Show', type: 'select', options: ['tracked quest', 'all active quests'], default: 'tracked quest' },
+    { key: 'max', label: 'Most quests at once', type: 'number', default: 2, range: [1, 5], step: 1, showIf: { show: ['all active quests'] } },
+    { key: 'hideDone', label: 'Hide finished objectives', type: 'bool', default: false },
+    { key: 'empty', label: 'Text with no quest (empty = hide)', type: 'text', default: '' },
+    { key: 'message', label: 'Tapping it sends', type: 'text', default: 'open quests', suggest: 'messages' },
+    { key: 'align', label: 'Align', type: 'select', options: ['left', 'right'], default: 'left' },
+    ...colorParams({ bg: ['Background', 'rgba(0,0,0,0.45)'], text: ['Text', '#ffffff'], title: ['Quest name', '#ffd23d'], done: ['Done', '#5dff8a'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let flash = 0, last = '';
+    const list = (s) => {
+      if (s.engine.editing) return QUEST_SAMPLE;
+      const names = p.show === 'all active quests' ? s.questDefs().filter((q) => ['active', 'ready'].includes(s.questState(q.name))).map((q) => q.name).slice(0, Math.max(1, +p.max || 2)) : [s.vars.trackedQuest].filter((n) => n && ['active', 'ready'].includes(s.questState(n)));
+      return names.map((n) => questView(s, n)).filter(Boolean);
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        flash = Math.max(0, flash - dt);
+        const key = JSON.stringify(list(s).map((q) => [q.name, q.state, q.objs.map((o) => o.have)])); if (key !== last && last) flash = 1; last = key;
+        const b = UK.box(e); for (const t of UK.taps(s, e)) if (UK.in(t, b)) { UK.tap(s, p); if (p.message) s.send(p.message); }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), Q = list(s), right = p.align === 'right', tx = right ? b.x + b.w - 12 : b.x + 12, al = right ? 'right' : 'left';
+        if (!Q.length) { if (p.empty) { ctx.fillStyle = p.bg || 'rgba(0,0,0,0.45)'; UK.rr(ctx, b.x, b.y, b.w, 34, 10); ctx.fill(); UK.text(ctx, p.empty, tx, b.y + 17, { size: 13, weight: 700, color: withAlpha(p.text || '#fff', 0.7), align: al, maxW: b.w - 24 }); } return; }
+        let h = 10; for (const q of Q) h += 24 + q.objs.filter((o) => !(p.hideDone && o.done)).length * 19 + (q.state === 'ready' ? 19 : 0) + 6;
+        ctx.fillStyle = p.bg || 'rgba(0,0,0,0.45)'; UK.rr(ctx, b.x, b.y, b.w, h, 12); ctx.fill();
+        if (flash > 0) { ctx.strokeStyle = withAlpha(p.title || '#ffd23d', flash); ctx.lineWidth = 2; UK.rr(ctx, b.x, b.y, b.w, h, 12); ctx.stroke(); }
+        let y = b.y + 18;
+        for (const q of Q) {
+          UK.text(ctx, `${q.icon} ${q.name}`, tx, y, { size: 14, weight: 900, color: p.title || '#ffd23d', align: al, maxW: b.w - 24 }); y += 22;
+          if (q.state === 'ready') { UK.text(ctx, `✔ Return to ${q.giver || 'the quest giver'}`, tx, y, { size: 12.5, weight: 800, color: p.done || '#5dff8a', align: al, maxW: b.w - 24 }); y += 19; }
+          for (const o of q.objs) {
+            if (p.hideDone && o.done) continue;
+            const txt = `${o.done ? '✓' : '○'} ${o.label}${o.need > 1 ? `  ${o.have}/${o.need}` : ''}`;
+            UK.text(ctx, txt, tx, y, { size: 12.5, weight: 700, color: o.done ? p.done || '#5dff8a' : withAlpha(p.text || '#fff', o.waiting ? 0.45 : 0.9), align: al, maxW: b.w - 24 }); y += 19;
+          }
+          y += 6;
+        }
+      },
+    };
+  },
+});
+
+/** Quest Journal: every quest you've started, with details, objectives, rewards and Track. */
+registerBehavior('uiQuestJournal', {
+  label: 'Quest Journal', description: 'A list of your quests (active and finished; optionally ones you can start). Tap a quest for its description, objectives, giver and rewards, and to track it.',
+  params: [
+    { key: 'title', label: 'Title', type: 'text', default: 'Quests' },
+    { key: 'showAvailable', label: 'Also list quests you can start', type: 'bool', default: false },
+    { key: 'showDone', label: 'List finished quests', type: 'bool', default: true },
+    { key: 'rowH', label: 'Row height', type: 'number', default: 54, range: [40, 90], step: 2 },
+    ...colorParams({ bg: ['Background', 'rgba(20,24,40,0.94)'], row: ['Rows', 'rgba(255,255,255,0.06)'], text: ['Text', '#ffffff'], accent: ['Accent', '#ffd23d'], done: ['Done', '#5dff8a'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let open = null, scroll = 0, drag = null;
+    const order = { ready: 0, active: 1, available: 2, done: 3, failed: 4 };
+    const list = (s) => {
+      if (s.engine.editing) return [{ ...QUEST_SAMPLE[0], desc: 'The Elder lost her ring in the woods.', giver: 'Elder', rewards: '+50 coins  💍' }, { name: 'Wolf Trouble', icon: '🐺', state: 'done', objs: [], desc: '', giver: '', rewards: '' }];
+      return s.questDefs().filter((q) => { const st = s.questState(q.name); return ['active', 'ready'].includes(st) || (p.showDone !== false && ['done', 'failed'].includes(st)) || (p.showAvailable && st === 'available' && !q.hidden); })
+        .map((q) => questView(s, q.name)).sort((a, b) => order[a.state] - order[b.state]);
+    };
+    const chip = { active: 'Active', ready: 'Hand in', available: 'New', done: 'Done', failed: 'Failed' };
+    const geo = (e) => { const b = UK.box(e), head = p.title ? 42 : 8; return { b, head, top: b.y + head, h: b.h - head - 8, rh: Math.max(40, +p.rowH || 54) }; };
+    const detailH = (q) => 30 + (q.desc ? 36 : 0) + q.objs.length * 20 + (q.rewards ? 22 : 0) + 38;
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const G = geo(e), L = list(s); let total = 0; for (const q of L) total += G.rh + 6 + (open === q.name ? detailH(q) : 0);
+        const maxS = Math.max(0, total - G.h);
+        for (const d of UK.downs(s, e)) if (UK.in(d, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) drag = { id: d.id, y0: d.y, s0: scroll };
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); else drag = null; }
+        scroll = clamp(scroll, 0, maxS);
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) continue;
+          let y = G.top - scroll;
+          for (const q of L) {
+            const h = G.rh + (open === q.name ? detailH(q) : 0);
+            if (t.y >= y && t.y < y + h) {
+              UK.tap(s, p);
+              if (open === q.name && t.y > y + h - 40 && ['active', 'ready'].includes(q.state)) s.setVar('trackedQuest', q.name);
+              else if (open === q.name && t.y > y + h - 40 && q.state === 'available') s.startQuest(q.name);
+              else open = open === q.name ? null : q.name;
+              break;
+            }
+            y += h + 6;
+          }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), L = list(s), txt = p.text || '#fff', acc = p.accent || '#ffd23d';
+        ctx.fillStyle = p.bg || 'rgba(20,24,40,0.94)'; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 16); ctx.fill();
+        if (p.title) UK.text(ctx, p.title, G.b.x + 16, G.b.y + 22, { size: 17, weight: 900, color: txt, align: 'left' });
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.top, G.b.w, G.h); ctx.clip();
+        if (!L.length) UK.text(ctx, 'No quests yet', G.b.cx, G.top + 30, { size: 13, weight: 700, color: withAlpha(txt, 0.6) });
+        let y = G.top - scroll;
+        for (const q of L) {
+          const isOpen = open === q.name, h = G.rh + (isOpen ? detailH(q) : 0), x = G.b.x + 8, w = G.b.w - 16;
+          ctx.fillStyle = p.row || 'rgba(255,255,255,0.06)'; UK.rr(ctx, x, y, w, h, 12); ctx.fill();
+          if (s.vars.trackedQuest === q.name && !s.engine.editing) { ctx.strokeStyle = acc; ctx.lineWidth = 2; UK.rr(ctx, x, y, w, h, 12); ctx.stroke(); }
+          drawNavIcon(ctx, q.icon, x + 24, y + G.rh / 2, G.rh * 0.45, txt);
+          UK.text(ctx, q.name, x + 46, y + G.rh / 2 - (q.objs.length ? 7 : 0), { size: 15, weight: 800, color: q.state === 'done' ? withAlpha(txt, 0.6) : txt, align: 'left', maxW: w - 140 });
+          if (q.objs.length && q.state !== 'done') { const dn = q.objs.filter((o) => o.done).length; UK.text(ctx, `${dn} / ${q.objs.length} done`, x + 46, y + G.rh / 2 + 11, { size: 11.5, weight: 700, color: withAlpha(txt, 0.6), align: 'left' }); }
+          const c = chip[q.state] || q.state, cc = q.state === 'ready' || q.state === 'done' ? p.done || '#5dff8a' : q.state === 'failed' ? '#ff6b6b' : acc;
+          ctx.font = `800 11px ${THEME.font}`; const cw = ctx.measureText(c).width + 16; ctx.fillStyle = withAlpha(cc, 0.2); UK.rr(ctx, x + w - cw - 10, y + G.rh / 2 - 11, cw, 22, 11); ctx.fill(); UK.text(ctx, c, x + w - cw / 2 - 10, y + G.rh / 2, { size: 11, weight: 800, color: cc });
+          if (isOpen) {
+            let dy = y + G.rh + 4;
+            if (q.giver) { UK.text(ctx, `From ${q.giver}`, x + 14, dy + 6, { size: 12, weight: 700, color: withAlpha(txt, 0.6), align: 'left' }); }
+            dy += 22;
+            if (q.desc) { UK.text(ctx, q.desc, x + 14, dy + 8, { size: 13, weight: 600, color: withAlpha(txt, 0.85), align: 'left', maxW: w - 28 }); dy += 36; }
+            for (const o of q.objs) { UK.text(ctx, `${o.done ? '✓' : '○'} ${o.label}${o.need > 1 ? `  ${o.have}/${o.need}` : ''}`, x + 14, dy + 8, { size: 13, weight: 700, color: o.done ? p.done || '#5dff8a' : txt, align: 'left', maxW: w - 28 }); dy += 20; }
+            if (q.rewards) { UK.text(ctx, `Rewards: ${q.rewards}`, x + 14, dy + 10, { size: 12.5, weight: 700, color: acc, align: 'left', maxW: w - 28 }); dy += 22; }
+            const btn = ['active', 'ready'].includes(q.state) ? (s.vars.trackedQuest === q.name ? '★ Tracked' : 'Track') : q.state === 'available' ? 'Start quest' : '';
+            if (btn) { ctx.fillStyle = withAlpha(acc, 0.22); UK.rr(ctx, x + 12, y + h - 38, 120, 28, 14); ctx.fill(); UK.text(ctx, btn, x + 72, y + h - 24, { size: 12.5, weight: 800, color: acc }); }
+          }
+          y += h + 6;
+        }
+        ctx.restore();
+      },
     };
   },
 });
@@ -10125,6 +11071,11 @@ function runAction(s, e, p, other) {
     case 'jump': { const t = obj(v) || e; if (t?.body) t.body.vel.y = (s.mode === '3d' ? 1 : -1) * (p.amount > 50 || s.mode === '3d' ? p.amount : p.amount * 60); break; }
     case 'move by': { const t = obj(v) || e; const [dx, dy, dz] = String(p.amount).split(',').map(Number); if (t) { t.x += dx || 0; t.y += dy || 0; t.z += dz || 0; } break; }
     case 'start game': if (s.state === 'title') s.state = 'play'; break;
+    case 'new record': s.formIntent = 'new'; if (v) s.navTo(v); break; // value: the page with the Record Form
+    case 'play game': s.engine.playGame(v || 2); return; // value: the level (number or name) with the game
+    case 'back to app': s.engine.backToApp(); return;
+    case 'edit opened record': s.formIntent = 'edit'; if (v) s.navTo(v); break;
+    case 'delete opened record': { const r = s.openRecord; if (r) { s.engine.data.remove(r.col, r.id); openRecord(s, r.col, null); if (s.canGoBack()) s.navBack(); } break; }
     case 'restart game': s.engine.restart(); return;
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
@@ -10354,17 +11305,446 @@ registerBehavior('blink', {
   },
 });
 
+// ---- app data: collections of records kept on the device (Game Settings › Data) ----
+export const FIELD_TYPES = ['text', 'long text', 'number', 'money', 'yes/no', 'date', 'choice', 'rating', 'icon'];
+export const fieldKey = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
+/** A collection's fields with their keys (Title → title, Due date → due_date). */
+export function fieldsOf(def) {
+  return (def?.fields || []).filter((f) => f?.name).map((f) => ({ ...f, key: f.key || fieldKey(f.name), type: FIELD_TYPES.includes(f.type) ? f.type : 'text',
+    options: Array.isArray(f.options) ? f.options : String(f.options || '').split(',').map((q) => q.trim()).filter(Boolean) }));
+}
+const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const truthy = (v) => v === true || v === 1 || v === '1' || v === 'yes' || v === 'true';
+/** How a value reads in a list or text: money with its symbol, short dates, ✓, stars. */
+export function fieldText(f, v, def) {
+  if (v == null || v === '') return '';
+  switch (f?.type) {
+    case 'money': { const n = +v || 0; return (n < 0 ? '−' : '') + (def?.currency ?? '$') + Math.abs(n).toFixed(2).replace(/\.00$/, ''); }
+    case 'number': return String(Math.round((+v || 0) * 1000) / 1000);
+    case 'yes/no': return truthy(v) ? '✓' : '';
+    case 'rating': { const n = clamp(Math.round(+v || 0), 0, 5); return '★'.repeat(n) + '☆'.repeat(5 - n); }
+    case 'date': { const d = new Date(String(v).slice(0, 10) + 'T00:00'); if (isNaN(d)) return String(v); const t = isoDay(), y = isoDay(new Date(Date.now() - 864e5)), m = isoDay(new Date(Date.now() + 864e5)); const k = String(v).slice(0, 10); return k === t ? 'Today' : k === y ? 'Yesterday' : k === m ? 'Tomorrow' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }); }
+    default: return String(v);
+  }
+}
+const fieldDefault = (f) => (f.default !== undefined && f.default !== '' ? (f.type === 'yes/no' ? truthy(f.default) : ['number', 'money', 'rating'].includes(f.type) ? +f.default || 0 : f.default === 'today' && f.type === 'date' ? isoDay() : f.default)
+  : f.type === 'yes/no' ? false : f.type === 'date' ? isoDay() : f.type === 'choice' ? f.options[0] || '' : ['number', 'money', 'rating'].includes(f.type) ? 0 : '');
+/** Stores every collection (seed rows from Game Settings, then whatever the app adds) and saves it on the device. */
+export class DataStore {
+  constructor(engine) { this.engine = engine; this.cache = {}; this.n = 0; }
+  defs() { return this.engine.collections || []; }
+  def(name) { const k = fieldKey(name); return this.defs().find((d) => fieldKey(d.name) === k) || null; }
+  key(def) { return 'pocket.data.' + (this.engine.gameKey || 'game') + '.' + fieldKey(def.name); }
+  /** All records of a collection (the live array: don't change it yourself, use add / update / remove). */
+  rows(name) {
+    const def = this.def(name); if (!def) return [];
+    const k = fieldKey(def.name); if (this.cache[k]) return this.cache[k];
+    let rows = null; if (def.keep !== false) try { rows = JSON.parse(store.get(this.key(def), 'null')); } catch { rows = null; }
+    if (!Array.isArray(rows)) rows = (def.rows || []).map((r, i) => ({ ...this.newRecord(def.name), ...this.norm(def, r), id: r.id || 's' + i, _at: r._at ?? i })); // starting rows, missing fields filled in
+    return (this.cache[k] = rows);
+  }
+  save(name) { const def = this.def(name); if (def && def.keep !== false) store.set(this.key(def), JSON.stringify(this.rows(name))); }
+  changed(name, kind, rec) { this.save(name); const s = this.engine.scene; if (!s) return; this.syncVars(s); s.emit('data', fieldKey(name), kind, rec); }
+  /** {tasks_count} for every collection. */
+  syncVars(s) { for (const d of this.defs()) { const k = fieldKey(d.name) + '_count', n = this.rows(d.name).length; if (s.vars[k] !== n) s.setVar(k, n); } }
+  newRecord(name) { const o = {}; for (const f of fieldsOf(this.def(name))) o[f.key] = fieldDefault(f); return o; }
+  /** Add a record ({ title: 'Milk' } — field names or keys). Returns it (with an id). */
+  add(name, rec = {}) {
+    const def = this.def(name); if (!def) { Log.add('warn', `There is no data collection called “${name}”`, 'Data'); return null; }
+    const r = { ...this.newRecord(name), ...this.norm(def, rec), id: 'r' + Date.now().toString(36) + (this.n++).toString(36), _at: Date.now() };
+    this.rows(name).push(r); this.changed(name, 'added', r); return r;
+  }
+  get(name, id) { return this.rows(name).find((r) => r.id === id) || null; }
+  update(name, id, patch) { const def = this.def(name), r = this.get(name, id); if (!r) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r; }
+  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
+  clear(name) { const L = this.rows(name); L.length = 0; this.changed(name, 'cleared', null); }
+  /** Back to the starting rows from Game Settings (forgets what was saved on this device). */
+  reset(name) { const def = this.def(name); if (!def) return; try { localStorage.removeItem(this.key(def)); } catch { /* storage unavailable */ } delete this.cache[fieldKey(def.name)]; this.changed(name, 'reset', null); }
+  /** Field names or keys → keys, and values to the field's type. */
+  norm(def, rec) {
+    const F = fieldsOf(def), out = {};
+    for (const [k0, v] of Object.entries(rec || {})) {
+      const f = F.find((q) => q.key === k0 || q.key === fieldKey(k0)); const k = f ? f.key : k0;
+      out[k] = !f ? v : f.type === 'yes/no' ? truthy(v) : ['number', 'money', 'rating'].includes(f.type) ? (v === '' || v == null ? 0 : +v || 0) : v;
+    }
+    return out;
+  }
+  /** A record as text and numbers for conditions: yes/no → 1 / 0. */
+  env(name, r, vars = {}) {
+    const F = fieldsOf(this.def(name));
+    return { getVar: (k) => { const f = F.find((q) => q.key === k || q.key === fieldKey(k)); if (f) { const v = r[f.key]; return f.type === 'yes/no' ? (truthy(v) ? 1 : 0) : v; } return vars[k]; }, itemCount: () => 0, questState: () => '', first: false };
+  }
+  /** Records that pass a filter (“done = no”, “amount > 10 and category = Food”), match a search, sorted. */
+  query(name, { filter = '', search = '', sort = 'newest first', vars = {} } = {}) {
+    const def = this.def(name), F = fieldsOf(def); let L = this.rows(name).slice();
+    const f = String(filter || '').trim().replace(/(=|!=|≠)\s*yes\b/gi, '$1 1').replace(/(=|!=|≠)\s*no\b/gi, '$1 0');
+    if (f) L = L.filter((r) => storyCond(fillTemplate(f, vars), this.env(name, r, vars)));
+    const q = String(search || '').trim().toLowerCase();
+    if (q) L = L.filter((r) => F.some((fd) => ['text', 'long text', 'choice', 'icon'].includes(fd.type) && String(r[fd.key] ?? '').toLowerCase().includes(q)));
+    const st = String(sort || 'newest first').toLowerCase();
+    if (st === 'newest first') L.sort((a, b) => (b._at || 0) - (a._at || 0));
+    else if (st === 'oldest first') L.sort((a, b) => (a._at || 0) - (b._at || 0));
+    else { const m = st.match(/^(.+?)(?:\s+\((a-z|z-a|low-high|high-low)\))?$/), fd = F.find((x) => x.key === fieldKey(m[1]) || x.name.toLowerCase() === m[1].trim()); if (fd) { const dir = /z-a|high-low/.test(m[2] || '') ? -1 : 1; L.sort((a, b) => { const x = a[fd.key], y = b[fd.key]; return (typeof x === 'number' || typeof y === 'number' ? (+x || 0) - (+y || 0) : String(x ?? '').localeCompare(String(y ?? ''))) * dir; }); } }
+    return L;
+  }
+  /** count / sum / average / min / max of a field. */
+  stat(name, how = 'count', field = '', filter = '', vars = {}) {
+    const L = this.query(name, { filter, sort: 'oldest first', vars }), k = fieldKey(field);
+    if (how === 'count') return L.length;
+    const nums = L.map((r) => +r[k] || 0); if (!nums.length) return 0;
+    if (how === 'sum') return Math.round(nums.reduce((a, b) => a + b, 0) * 100) / 100;
+    if (how === 'average') return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 100) / 100;
+    return how === 'min' ? Math.min(...nums) : Math.max(...nums);
+  }
+}
+/** Open a record: its fields go into {record_title}, {record_amount}… (formatted) for detail pages. */
+function openRecord(s, name, rec) {
+  const D = s.engine.data, def = D.def(name); if (!def) return;
+  for (const k of Object.keys(s.vars)) if (k.startsWith('record_')) delete s.vars[k];
+  if (!rec) { s.openRecord = null; s.setVar('record_id', ''); return; }
+  s.openRecord = { col: fieldKey(def.name), id: rec.id };
+  for (const f of fieldsOf(def)) s.vars['record_' + f.key] = f.type === 'yes/no' ? (truthy(rec[f.key]) ? 'yes' : 'no') : f.type === 'long text' || f.type === 'text' || f.type === 'choice' || f.type === 'icon' ? rec[f.key] ?? '' : fieldText(f, rec[f.key], def);
+  s.setVar('record_id', rec.id); s.emit('recordOpened', fieldKey(def.name), rec);
+}
+const openedRecord = (s) => (s.openRecord ? s.engine.data.get(s.openRecord.col, s.openRecord.id) : null);
+
+registerBehavior('uiDataList', {
+  label: 'Data List', description: 'A scrolling list of the records in a data collection (Game Settings › Data): a title, a line under it, an icon, a value on the right and a checkbox. Search, filter and sort it; tap a row to open it on a page; swipe left to delete. It updates by itself when records change.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Tasks', suggest: 'collections' },
+    { key: 'title', label: 'Row title ({field})', type: 'text', default: '{title}' },
+    { key: 'subtitle', label: 'Line under it', type: 'text', default: '' },
+    { key: 'right', label: 'On the right', type: 'text', default: '' },
+    { key: 'icon', label: 'Icon (emoji, {field} or blank)', type: 'text', default: '' },
+    { key: 'check', label: 'Checkbox field (yes/no; blank = none)', type: 'text', default: '' },
+    { key: 'search', label: 'Search with variable', type: 'text', default: '', suggest: 'vars', info: 'Put a Text Input (type: search) on the same page with this variable.' },
+    { key: 'filter', label: 'Only show (e.g. done = no)', type: 'text', default: '' },
+    { key: 'sort', label: 'Sort', type: 'text', default: 'newest first', info: 'newest first, oldest first, or a field: title (a-z), amount (high-low), due (low-high)…' },
+    { key: 'groupBy', label: 'Group under headings by field', type: 'text', default: '' },
+    { key: 'openPage', label: 'Tapping a row opens page', type: 'text', default: '', info: 'The record’s fields are in {record_title}… there. Blank = just open it (and send the message).' },
+    { key: 'message', label: 'Tapping a row sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'swipeDelete', label: 'Swipe left to delete', type: 'bool', default: true },
+    { key: 'empty', label: 'When there is nothing', type: 'text', default: 'Nothing here yet' },
+    { key: 'rowH', label: 'Row height', type: 'number', default: 64, range: [36, 140], step: 2, group: 'Look' },
+    { key: 'gap', label: 'Gap between rows', type: 'number', default: 8, range: [0, 30], step: 1, group: 'Look' },
+    { key: 'radius', label: 'Row roundness', type: 'number', default: 14, range: [0, 40], step: 1, group: 'Look' },
+    { key: 'doneLook', label: 'Checked rows look done (faded)', type: 'bool', default: true, group: 'Look' },
+    ...colorParams({ bg: ['Background', ''], row: ['Rows', '#ffffff'], text: ['Text', '#1c1f26'], sub: ['Second line', '#6b7280'], accent: ['Accent', '#3a7bfd'], danger: ['Delete', '#ef4444'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let scroll = 0, drag = null, swX = {}, flick = 0, gone = new Map(), seen = false, firstT = 0, pressId = null, scrollT = -9, lastScroll = 0;
+    const A = new Map(), checkAt = {}; // per row: shown y / alpha / grow; when a box was ticked
+    const SAMPLE = [{ id: 'a', title: 'Buy milk', done: false, note: 'Today' }, { id: 'b', title: 'Call Sam', done: true, note: 'Tomorrow' }, { id: 'c', title: 'Book flights', done: false, note: 'Friday' }];
+    const now = () => performance.now() / 1000;
+    const geo = (e) => { const b = UK.box(e); return { b, rh: Math.max(30, +p.rowH || 64), gap: +p.gap || 0 }; };
+    const rowsOf = (s) => {
+      const D = s.engine.data, def = D.def(p.collection);
+      if (!def) return s.engine.editing ? SAMPLE.map((r) => ({ r, vars: { ...r, done: r.done ? '✓' : '' } })) : [];
+      const F = fieldsOf(def), L = D.query(p.collection, { filter: p.filter, search: p.search ? s.vars[p.search] : '', sort: p.sort, vars: s.vars });
+      return L.map((r) => { const v = Object.create(s.vars); for (const f of F) v[f.key] = fieldText(f, r[f.key], def); return { r, vars: v }; });
+    };
+    const layout = (e, s) => { // rows and headings with their y (from the top of the list)
+      const G = geo(e), L = rowsOf(s), out = []; let y = 0, head = null;
+      for (const it of L) {
+        if (p.groupBy) { const h = String(it.vars[fieldKey(p.groupBy)] || it.r[fieldKey(p.groupBy)] || '—'); if (h !== head) { head = h; out.push({ head: h, y, h: 30 }); y += 30; } }
+        out.push({ ...it, y, h: G.rh }); y += G.rh + G.gap;
+      }
+      return { out, total: y };
+    };
+    const checkKey = () => (p.check ? fieldKey(p.check) : '');
+    /** Rows glide to their places: they arrive one after another, new ones grow in, the rest slide to fill gaps. */
+    const animate = (s, out, dt) => {
+      const t = now(), M = motionOf(s), k = M.reduced ? 1 : Math.min(1, dt * 13 / M.k);
+      let i = 0;
+      for (const it of out) {
+        if (it.head) continue;
+        let a = A.get(it.r.id);
+        if (!a) { const first = t - firstT < 0.3; a = first && !M.reduced ? { y: it.y + 28, a: 0, g: 1, at: t + i * 0.045 * M.k } : { y: it.y, a: M.reduced ? 1 : 0, g: M.reduced ? 1 : 0, at: t }; A.set(it.r.id, a); }
+        if (t >= a.at) { a.y += (it.y - a.y) * k; a.a += (1 - a.a) * k; a.g += (1 - a.g) * Math.min(1, dt * 9 / M.k); }
+        i++;
+      }
+      if (A.size > out.length + 20) for (const id of [...A.keys()]) if (!out.some((q) => q.r?.id === id)) A.delete(id);
+    };
+    const del = (s, id) => { // delete, with Undo
+      const D = s.engine.data, rows = D.rows(p.collection), rec = rows.find((r) => r.id === id); if (!rec) return;
+      D.remove(p.collection, id);
+      s.snackbar?.(`Deleted “${String(rec[fieldsOf(D.def(p.collection))[0]?.key] ?? '').slice(0, 24) || 'item'}”`, 'Undo', () => { if (!D.get(p.collection, rec.id)) { D.rows(p.collection).push(rec); D.changed(p.collection, 'added', rec); } });
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const live = UK.live(s, e) || s.engine.editing;
+        if (live && !seen) { A.clear(); firstT = now(); scroll = 0; } seen = live;
+        const G = geo(e), { out, total } = layout(e, s), maxS = Math.max(0, total - G.b.h + 12);
+        animate(s, out, dt);
+        const rowAt = (y) => out.find((q) => !q.head && y >= G.b.y + q.y - scroll && y < G.b.y + q.y - scroll + q.h) || null;
+        for (const d of UK.downs(s, e)) if (UK.in(d, G.b)) { drag = { id: d.id, x0: d.x, y0: d.y, s0: scroll, row: rowAt(d.y), axis: '' }; flick = 0; pressId = drag.row?.r.id ?? null; }
+        if (drag) {
+          const q = UK.ptr(s, e, drag.id);
+          if (q) {
+            const dx = q.x - drag.x0, dy = q.y - drag.y0;
+            if (!drag.axis && Math.hypot(dx, dy) > 10) { drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && p.swipeDelete !== false && drag.row ? 'x' : 'y'; pressId = null; }
+            if (drag.axis === 'y') { const ns = clamp(drag.s0 - dy, -60, maxS + 60), over = ns < 0 ? -ns : ns > maxS ? ns - maxS : 0; const ns2 = over ? (ns < 0 ? -over * 0.5 : maxS + over * 0.5) : ns; flick = (ns2 - scroll) / Math.max(dt, 1 / 120); scroll = ns2; scrollT = now(); } // rubber band past the ends
+            if (drag.axis === 'x') swX[drag.row.r.id] = Math.min(0, dx);
+          } else {
+            if (drag.axis === 'x') { const id = drag.row.r.id; if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else swX[id] = 0; }
+            drag = null; pressId = null;
+          }
+        } else {
+          scroll += flick * dt; flick *= Math.pow(0.03, dt); if (Math.abs(flick) < 5) flick = 0; else scrollT = now();
+          scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12);
+        }
+        if (Math.abs(scroll - lastScroll) > 0.5) { lastScroll = scroll; s.emit('uiScroll', 0, e, maxS ? scroll / maxS : 0); }
+        for (const id of Object.keys(swX)) if (!drag || drag.row?.r.id !== id) { swX[id] *= Math.pow(0.001, dt); if (Math.abs(swX[id]) < 0.5) delete swX[id]; }
+        for (const [id, t] of gone) { const k = t + dt * 4; if (k >= 1) { gone.delete(id); del(s, id); } else gone.set(id, k); }
+        // taps: the checkbox, else open the row
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, G.b)) continue;
+          const row = rowAt(t.y); if (!row || s.engine.editing) continue;
+          UK.tap(s, p);
+          const ck = checkKey();
+          if (ck && t.x < G.b.x + 8 + G.rh * 0.75) { checkAt[row.r.id] = now(); s.engine.data.update(p.collection, row.r.id, { [ck]: !truthy(row.r[ck]) }); continue; }
+          openRecord(s, p.collection, row.r);
+          if (p.openPage) s.navTo(p.openPage);
+          if (p.message) s.send(p.message);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), { out, total } = layout(e, s), Ac = p.accent || '#3a7bfd', ck = checkKey(), txt = p.text || '#1c1f26', sub = p.sub || '#6b7280', t = now();
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 0); ctx.fill(); }
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.b.y, G.b.w, G.b.h); ctx.clip();
+        if (!out.length) { ctx.globalAlpha = Math.min(1, (t - firstT) * 3); UK.text(ctx, p.empty || '', G.b.cx, G.b.y + 60, { size: 15, weight: 600, color: sub }); ctx.globalAlpha = 1; }
+        for (const it of out) {
+          const an = it.head ? null : A.get(it.r.id) || { y: it.y, a: 1, g: 1 };
+          const y = G.b.y + (an ? an.y : it.y) - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
+          if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 14, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
+          const id = it.r.id, sw = swX[id] || 0, k = gone.has(id) ? gone.get(id) : 0, x = G.b.x + 4 + sw - k * G.b.w, w = G.b.w - 8, h = G.rh, done = ck && truthy(it.r[ck]);
+          if (sw < -4 || k) { ctx.globalAlpha = Math.min(1, -sw / 60 + k); ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, '🗑  Delete', G.b.x + w - 50, y + h / 2, { size: 13, weight: 800, color: '#fff' }); ctx.globalAlpha = 1; }
+          ctx.save();
+          const pr = pressId === id ? 0.985 : 1, gs = 0.94 + 0.06 * an.g;
+          ctx.translate(x + w / 2, y + h / 2); ctx.scale(pr * gs, pr * gs); ctx.translate(-(x + w / 2), -(y + h / 2));
+          ctx.globalAlpha = (done && p.doneLook !== false ? 0.55 : 1) * (1 - k) * an.a;
+          ctx.fillStyle = p.row || '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.08)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); ctx.shadowColor = 'transparent';
+          if (pressId === id) { ctx.fillStyle = 'rgba(0,0,0,0.05)'; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); }
+          let tx = x + 16;
+          if (ck) { // a round checkbox: pops and draws its tick when checked
+            const cx = x + 14 + h * 0.2, cy = y + h / 2, r = Math.min(13, h * 0.22), at = checkAt[id], pk = at ? Math.min(1, (t - at) / 0.32) : 1;
+            const pop = at && pk < 1 ? 1 + 0.28 * Math.sin(Math.PI * pk) : 1;
+            ctx.save(); ctx.translate(cx, cy); ctx.scale(pop, pop);
+            ctx.lineWidth = 2.5; ctx.strokeStyle = done ? Ac : withAlpha(sub, 0.7); ctx.fillStyle = Ac;
+            ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); if (done) { ctx.globalAlpha *= at ? Math.min(1, pk * 2) : 1; ctx.fill(); } ctx.stroke();
+            if (done) { const q = at ? Math.min(1, pk / 0.8) : 1, P = [[-r * 0.45, 0], [-r * 0.12, r * 0.36], [r * 0.5, -r * 0.34]], l1 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), l2 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]), d = q * (l1 + l2);
+              ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(...P[0]);
+              if (d <= l1) ctx.lineTo(P[0][0] + (P[1][0] - P[0][0]) * d / l1, P[0][1] + (P[1][1] - P[0][1]) * d / l1); else { ctx.lineTo(...P[1]); const f = (d - l1) / l2; ctx.lineTo(P[1][0] + (P[2][0] - P[1][0]) * f, P[1][1] + (P[2][1] - P[1][1]) * f); }
+              ctx.stroke(); }
+            ctx.restore(); tx = cx + r + 14;
+          }
+          const ic = p.icon ? fillTemplate(p.icon, it.vars) : '';
+          if (ic) { drawNavIcon(ctx, ic, tx + h * 0.22, y + h / 2, h * 0.42, Ac); tx += h * 0.44 + 12; }
+          const right = p.right ? fillTemplate(p.right, it.vars) : '', st = p.subtitle ? fillTemplate(p.subtitle, it.vars) : '';
+          let rw = 0; if (right) { ctx.font = `800 15px ${THEME.font}`; rw = ctx.measureText(right).width + 16; UK.text(ctx, right, x + w - 14, y + h / 2, { size: 15, weight: 800, color: /^[−-]/.test(right) ? (p.danger || '#ef4444') : txt, align: 'right' }); }
+          const title = fillTemplate(p.title || '{title}', it.vars);
+          UK.text(ctx, title, tx, y + h / 2 - (st ? 9 : 0), { size: 16, weight: 700, color: txt, align: 'left', maxW: x + w - tx - rw - 8 });
+          if (done && p.doneLook !== false) { // the strike-through draws across with the tick
+            const at = checkAt[id], q = at ? Math.min(1, Math.max(0, (t - at - 0.1) / 0.3)) : 1;
+            ctx.font = `700 16px ${THEME.font}`; const tw = Math.min(ctx.measureText(title).width, x + w - tx - rw - 8) * q; ctx.strokeStyle = txt; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(tx, y + h / 2 - (st ? 9 : 0)); ctx.lineTo(tx + tw, y + h / 2 - (st ? 9 : 0)); ctx.stroke();
+          }
+          if (st) UK.text(ctx, st, tx, y + h / 2 + 11, { size: 13, weight: 600, color: sub, align: 'left', maxW: x + w - tx - rw - 8 });
+          ctx.restore();
+        }
+        // a thin scroll bar while scrolling
+        const sa = Math.max(0, 1 - (t - scrollT - 0.6) / 0.4);
+        if (sa > 0 && total > G.b.h) { const bh = Math.max(30, G.b.h * G.b.h / total), by = G.b.y + clamp(scroll / Math.max(1, total - G.b.h), 0, 1) * (G.b.h - bh); ctx.globalAlpha = 0.35 * Math.min(1, sa); ctx.fillStyle = txt; UK.rr(ctx, G.b.x + G.b.w - 4, by, 3, bh, 2); ctx.fill(); ctx.globalAlpha = 1; }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiForm', {
+  label: 'Record Form', description: 'A form for a data collection: one input per field (text, numbers, money, yes/no switches, choices, dates, stars). Save adds a new record, or changes the one that was opened. The phone keyboard opens right on the field.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Tasks', suggest: 'collections' },
+    { key: 'fields', label: 'Fields (comma separated; blank = all)', type: 'text', default: '' },
+    { key: 'mode', label: 'Saving', type: 'select', options: ['new, or edits when opened with Edit', 'always adds a new record', 'always changes the opened record'], default: 'new, or edits when opened with Edit' },
+    { key: 'required', label: 'Must be filled in (comma separated)', type: 'text', default: '', info: 'Blank = the first text field.' },
+    { key: 'saveLabel', label: 'Save button', type: 'text', default: 'Save' },
+    { key: 'after', label: 'After saving', type: 'select', options: ['go back', 'clear the form', 'go to page', 'stay'], default: 'go back' },
+    { key: 'page', label: 'Page', type: 'text', default: 'home', showIf: { after: ['go to page'] } },
+    { key: 'message', label: 'Saving sends message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'deleteButton', label: 'Delete button when editing', type: 'bool', default: true },
+    { key: 'fieldH', label: 'Field height', type: 'number', default: 50, range: [36, 90], step: 2, group: 'Look' },
+    ...colorParams({ bg: ['Background', ''], field: ['Fields', '#f2f4f7'], text: ['Text', '#1c1f26'], label: ['Labels', '#6b7280'], accent: ['Accent', '#3a7bfd'], danger: ['Delete', '#ef4444'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let draft = {}, editing = null, shown = false, scroll = 0, drag = null, box = null, bad = '', boxField = null, shownAt = 0, badAt = -9, savePress = null, sc = null;
+    const M = { focus: 0 }, knob = {}, chip = {}, chipTo = {}, starAt = {}; // animated bits: switch knobs, the choice highlight, star pops, the focus glow
+    const now = () => performance.now() / 1000;
+    const D = (s) => s.engine.data, def = (s) => D(s).def(p.collection);
+    const fields = (s) => { const F = fieldsOf(def(s)); if (!p.fields) return F; const want = String(p.fields).split(',').map((q) => fieldKey(q)); return want.map((k) => F.find((f) => f.key === k)).filter(Boolean); };
+    const fh = () => Math.max(36, +p.fieldH || 50);
+    const hOf = (f) => (f.type === 'long text' ? fh() * 2 : f.type === 'choice' ? 44 : fh()) + 24;
+    const required = (s) => { const R = String(p.required || '').split(',').map((q) => fieldKey(q)).filter((q) => q !== 'field'); if (R.length) return R; const t = fields(s).find((f) => f.type === 'text'); return t ? [t.key] : []; };
+    const load = (s) => {
+      const intent = s.formIntent; s.formIntent = null;
+      const wantEdit = p.mode === 'always changes the opened record' || (p.mode !== 'always adds a new record' && intent === 'edit');
+      const rec = wantEdit ? openedRecord(s) : null;
+      editing = rec ? rec.id : null; draft = rec ? { ...rec } : D(s).newRecord(p.collection); bad = ''; scroll = 0; shownAt = now();
+      for (const f of fields(s)) if (f.type === 'yes/no') knob[f.key] = truthy(draft[f.key]) ? 1 : 0;
+      for (const k of Object.keys(chipTo)) delete chipTo[k];
+    };
+    const closeBox = (s, keep = true) => { if (!box) return; if (keep) setVal(s, boxField, box.value); box.remove(); box = null; boxField = null; s.engine.input.reset(); };
+    const setVal = (s, f, v) => { draft[f.key] = ['number', 'money'].includes(f.type) ? (v === '' ? '' : +String(v).replace(',', '.') || 0) : v; bad = ''; };
+    const openBox = (s, e, f, r) => {
+      closeBox(s);
+      const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, long = f.type === 'long text';
+      const el = box = document.createElement(long ? 'textarea' : 'input'); boxField = f;
+      if (!long) { el.type = f.type === 'date' ? 'date' : 'text'; if (['number', 'money'].includes(f.type)) el.inputMode = 'decimal'; el.enterKeyHint = 'done'; }
+      el.value = draft[f.key] ?? ''; el.placeholder = f.name; el.autocapitalize = 'sentences';
+      el.style.cssText = `position:absolute;left:${o.x + (r.x + 12) * k}px;top:${o.y + r.y * k}px;width:${(r.w - 24) * k}px;height:${r.h * k}px;z-index:30;border:0;outline:0;background:transparent;resize:none;` +
+        `color:${p.text || '#1c1f26'};font:600 ${Math.round(16 * k)}px ${THEME.font};padding:${long ? 10 * k : 0}px 0;margin:0;caret-color:${p.accent || '#3a7bfd'}`;
+      ['pointerdown', 'pointerup', 'touchstart'].forEach((ev) => el.addEventListener(ev, (x) => x.stopPropagation()));
+      el.addEventListener('input', () => setVal(s, f, el.value));
+      el.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter' && !long) closeBox(s); else if (ev.key === 'Escape') closeBox(s, false); });
+      el.addEventListener('blur', () => setTimeout(() => { if (box === el) closeBox(s); }, 0));
+      E.root.appendChild(el); setTimeout(() => el.focus(), 30);
+    };
+    const save = (e, s) => {
+      closeBox(s);
+      const miss = required(s).find((k) => String(draft[k] ?? '').trim() === '');
+      if (miss) { bad = miss; badAt = now(); s.message(`${fields(s).find((f) => f.key === miss)?.name || miss} is needed`, 1.2); s.engine.vibrate(30); return; }
+      const data = {}; for (const f of fields(s)) data[f.key] = draft[f.key];
+      let rec;
+      if (editing && D(s).get(p.collection, editing)) { rec = D(s).update(p.collection, editing, data); openRecord(s, p.collection, rec); }
+      else rec = D(s).add(p.collection, data);
+      s.engine.audio.sfx('coin'); s.engine.vibrate(10); s.emit('formSaved', fieldKey(p.collection), rec);
+      if (p.message) s.send(p.message);
+      if (p.after === 'go back') { if (s.canGoBack()) s.navBack(); else load(s); }
+      else if (p.after === 'go to page') s.navTo(p.page || 'home');
+      else if (p.after === 'clear the form') load(s);
+    };
+    const layout = (e, s) => { const b = UK.box(e), out = []; let y = 8; for (const f of fields(s)) { out.push({ f, y, h: hOf(f) }); y += hOf(f) + 6; } const btnY = y + 6; return { b, out, btnY, total: btnY + 52 + (editing && p.deleteButton !== false ? 60 : 0) + 10 }; };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const live = UK.live(s, e);
+        if (live && !shown) load(s);
+        shown = live; if (!live) { closeBox(s); return; }
+        const L = layout(e, s), maxS = Math.max(0, L.total - L.b.h);
+        if (box) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, r = L.out.find((q) => q.f === boxField); if (r) { box.style.top = (o.y + (L.b.y + r.y - scroll + 22) * k) + 'px'; } }
+        sc = s;
+        for (const d of UK.downs(s, e)) if (UK.in(d, L.b)) { drag = { id: d.id, y0: d.y, s0: scroll }; const y = d.y - L.b.y + scroll; savePress = y >= L.btnY && y < L.btnY + 52 ? d.id : null; }
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); if (Math.abs(q.y - drag.y0) > 10) savePress = null; } else { drag = null; savePress = null; } }
+        s.spring(M, { focus: box ? 1 : 0 }, { feel: 'snappy' });
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, L.b)) continue;
+          const y = t.y - L.b.y + scroll;
+          if (y >= L.btnY && y < L.btnY + 52) { UK.tap(s, p); save(e, s); continue; }
+          if (editing && p.deleteButton !== false && y >= L.btnY + 60 && y < L.btnY + 112) { UK.tap(s, p); closeBox(s, false); D(s).remove(p.collection, editing); openRecord(s, p.collection, null); s.emit('formDeleted', fieldKey(p.collection)); if (s.canGoBack()) { s.navBack(); if (s.canGoBack()) s.navBack(); } else load(s); continue; }
+          const r = L.out.find((q) => y >= q.y && y < q.y + q.h); if (!r) continue;
+          const f = r.f, fx = L.b.x + 8, fw = L.b.w - 16, fy = r.y + 22, rect = { x: fx, y: L.b.y + fy - scroll, w: fw, h: r.h - 24 };
+          if (f.type === 'yes/no') { draft[f.key] = !truthy(draft[f.key]); UK.tap(s, p); s.spring(knob, { [f.key]: truthy(draft[f.key]) ? 1 : 0 }, { feel: 'bouncy' }); }
+          else if (f.type === 'rating') { const n = clamp(Math.ceil((t.x - fx - 6) / 34), 0, 5); draft[f.key] = draft[f.key] === n ? 0 : n; starAt[f.key] = { n: draft[f.key], t: now() }; UK.tap(s, p); }
+          else if (f.type === 'choice') { let cx = fx; s.engine.uiCtx.font = `700 14px ${THEME.font}`; for (const o of f.options) { const w = s.engine.uiCtx.measureText(o).width + 26; if (t.x >= cx && t.x < cx + w) { draft[f.key] = o; UK.tap(s, p); break; } cx += w + 8; } }
+          else openBox(s, e, f, rect);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const L = layout(e, s), A = p.accent || '#3a7bfd', txt = p.text || '#1c1f26', lab = p.label || '#6b7280', fb = p.field || '#f2f4f7';
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, L.b.x, L.b.y, L.b.w, L.b.h, 0); ctx.fill(); }
+        const F = s.engine.editing && !def(s) ? [{ key: 'title', name: 'Title', type: 'text' }, { key: 'done', name: 'Done', type: 'yes/no' }] : null;
+        const rows = F ? F.map((f, i) => ({ f, y: 8 + i * (fh() + 30), h: hOf(f) })) : L.out;
+        ctx.save(); ctx.beginPath(); ctx.rect(L.b.x, L.b.y, L.b.w, L.b.h); ctx.clip();
+        const req = required(s), t = now(), mk = motionOf(s);
+        let fi = 0;
+        for (const { f, y: ry, h } of rows) {
+          // fields arrive one after another; a missing one shakes
+          const fa = mk.reduced || s.engine.editing ? 1 : Ease.outCubic(clamp((t - shownAt - fi++ * 0.045 * mk.k) / (0.32 * mk.k), 0, 1));
+          const shake = bad === f.key && !mk.reduced ? Math.sin((t - badAt) * 48) * 7 * Math.max(0, 1 - (t - badAt) / 0.5) : 0;
+          ctx.save(); ctx.globalAlpha *= fa; ctx.translate(shake, (1 - fa) * 18);
+          const y = L.b.y + ry - scroll, x = L.b.x + 8, w = L.b.w - 16, fy = y + 22, ih = h - 24, v = draft[f.key];
+          UK.text(ctx, f.name + (req.includes(f.key) ? ' *' : ''), x + 4, y + 9, { size: 12.5, weight: 800, color: bad === f.key ? (p.danger || '#ef4444') : lab, align: 'left' });
+          if (f.type === 'yes/no') {
+            const on = truthy(v); ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
+            UK.text(ctx, on ? 'Yes' : 'No', x + 14, fy + ih / 2, { size: 16, weight: 600, color: txt, align: 'left' });
+            const sw = 50, sh = 30, sx = x + w - sw - 12, sy = fy + ih / 2 - sh / 2, kv = knob[f.key] ?? (on ? 1 : 0), kc = clamp(kv, 0, 1);
+            ctx.fillStyle = withAlpha(lab, 0.35); UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill();
+            ctx.save(); ctx.globalAlpha *= kc; ctx.fillStyle = A; UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill(); ctx.restore(); // the colour fades in as the knob moves
+            const kr = sh / 2 - 3, stretch = 1 + Math.min(0.25, Math.abs(kv - Math.round(kv)) * 1.2);
+            ctx.save(); ctx.translate(sx + sh / 2 + kv * (sw - sh), sy + sh / 2); ctx.scale(stretch, 1); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, kr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          } else if (f.type === 'rating') {
+            const sa = starAt[f.key];
+            for (let i = 1; i <= 5; i++) { // stars fill one after another, the tapped one pops
+              const on = i <= (+v || 0), d = sa ? t - sa.t - (i - 1) * 0.04 : 1, pk = sa && on && d > 0 && d < 0.35 ? 1 + 0.45 * Math.sin(Math.PI * d / 0.35) : 1, lit = on && (!sa || d > 0);
+              ctx.save(); ctx.translate(x + 6 + (i - 0.5) * 34, fy + ih / 2); ctx.scale(pk, pk); UK.text(ctx, lit ? '★' : '☆', 0, 0, { size: 28, weight: 400, color: lit ? '#f5b301' : withAlpha(lab, 0.6) }); ctx.restore();
+            }
+          } else if (f.type === 'choice') {
+            // chips, with the highlight sliding to the chosen one
+            let cx = x; const pos = [];
+            ctx.font = `700 14px ${THEME.font}`; for (const o of f.options) { const cw = ctx.measureText(o).width + 26; pos.push({ o, x: cx, w: cw }); ctx.fillStyle = fb; UK.rr(ctx, cx, fy, cw, 36, 18); ctx.fill(); cx += cw + 8; }
+            const sel = pos.find((q) => q.o === v);
+            if (sel) {
+              const c = (chip[f.key] ||= { x: sel.x, w: sel.w }), key = sel.x + ',' + sel.w;
+              if (chipTo[f.key] !== key) { if (chipTo[f.key] == null) Object.assign(c, { x: sel.x, w: sel.w }); else sc?.spring(c, { x: sel.x, w: sel.w }, { stiffness: 420, damping: 30 }); chipTo[f.key] = key; }
+              ctx.fillStyle = A; UK.rr(ctx, c.x, fy, c.w, 36, 18); ctx.fill();
+            }
+            for (const q of pos) { const inHi = sel && chip[f.key] && q.x + q.w / 2 > chip[f.key].x && q.x + q.w / 2 < chip[f.key].x + chip[f.key].w; UK.text(ctx, q.o, q.x + q.w / 2, fy + 18, { size: 14, weight: 700, color: inHi ? '#fff' : txt }); }
+          } else {
+            ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
+            if (bad === f.key) { ctx.strokeStyle = p.danger || '#ef4444'; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); }
+            else if (boxField === f) { ctx.save(); ctx.globalAlpha *= clamp(M.focus, 0, 1); ctx.shadowColor = A; ctx.shadowBlur = 10; ctx.strokeStyle = A; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); ctx.restore(); }
+            if (boxField !== f) {
+              const shown2 = v === '' || v == null ? '' : f.type === 'date' || f.type === 'money' ? fieldText(f, v, def(s)) : String(v);
+              if (f.type === 'long text' && shown2) { const words = shown2.split(/\s+/), Lx = []; let row = ''; ctx.font = `600 15px ${THEME.font}`; for (const wd of words) { const tt = row ? row + ' ' + wd : wd; if (ctx.measureText(tt).width > w - 28 && row) { Lx.push(row); row = wd; } else row = tt; } Lx.push(row); Lx.slice(0, Math.floor((ih - 8) / 19)).forEach((t2, i) => UK.text(ctx, t2, x + 12, fy + 16 + i * 19, { size: 15, weight: 600, color: txt, align: 'left' })); }
+              else UK.text(ctx, shown2 || f.name, x + 12, fy + ih / 2, { size: 16, weight: 600, color: shown2 ? txt : withAlpha(lab, 0.7), align: 'left', maxW: w - 24 });
+            }
+          }
+          ctx.restore();
+        }
+        const by = L.b.y + L.btnY - scroll, bk = savePress != null ? 0.97 : 1, ba = mk.reduced || s.engine.editing ? 1 : Ease.outCubic(clamp((t - shownAt - fi * 0.045 * mk.k) / (0.32 * mk.k), 0, 1));
+        ctx.save(); ctx.globalAlpha *= ba; ctx.translate(L.b.cx, by + 26 + (1 - ba) * 18); ctx.scale(bk, bk); ctx.translate(-L.b.cx, -(by + 26));
+        ctx.shadowColor = withAlpha(A, 0.35); ctx.shadowBlur = 12; ctx.shadowOffsetY = 4; ctx.fillStyle = A; UK.rr(ctx, L.b.x + 8, by, L.b.w - 16, 52, 16); ctx.fill(); ctx.shadowColor = 'transparent';
+        UK.text(ctx, (editing ? '✓ ' : '') + (p.saveLabel || 'Save'), L.b.cx, by + 26, { size: 17, weight: 800, color: '#fff' }); ctx.restore();
+        if (editing && p.deleteButton !== false) { ctx.strokeStyle = p.danger || '#ef4444'; ctx.lineWidth = 2; UK.rr(ctx, L.b.x + 8, by + 60, L.b.w - 16, 52, 16); ctx.stroke(); UK.text(ctx, 'Delete', L.b.cx, by + 86, { size: 16, weight: 800, color: p.danger || '#ef4444' }); }
+        ctx.restore();
+      },
+      destroy(e, s) { if (box) { box.remove(); box = null; } },
+    };
+  },
+});
+
+registerBehavior('dataStat', {
+  label: 'Data Summary', description: 'Keeps a variable up to date with a count, total, average, smallest or largest value from a data collection (e.g. the total of all expenses, how many tasks are left). Show it in a text with {variable}.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Expenses', suggest: 'collections' },
+    { key: 'how', label: 'Work out', type: 'select', options: ['count', 'sum', 'average', 'min', 'max'], default: 'count' },
+    { key: 'field', label: 'Of field', type: 'text', default: 'amount', showIf: (b) => b.how && b.how !== 'count' },
+    { key: 'filter', label: 'Only records where (e.g. done = no)', type: 'text', default: '' },
+    { key: 'var', label: 'Into variable', type: 'text', default: 'total', suggest: 'vars' },
+    { key: 'format', label: 'Show as', type: 'select', options: ['number', 'money'], default: 'number', info: 'Money also fills {variable_text} with the currency symbol.' },
+  ],
+  create(p) {
+    const calc = (s) => { const D = s.engine.data, v = D.stat(p.collection, p.how, p.field, p.filter, s.vars); if (s.vars[p.var] !== v) s.setVar(p.var, v); if (p.format === 'money') { const t = fieldText({ type: 'money' }, v, D.def(p.collection)); if (s.vars[p.var + '_text'] !== t) s.setVar(p.var + '_text', t); } };
+    return { uiAlways: true, start(e, s) { calc(s); s.on('data', () => calc(s)); }, update(e, dt, s) { if (p.filter && /\{/.test(p.filter)) calc(s); } };
+  },
+});
+
 // ---- turn-based games ----
 /** Is a grid cell blocked? Static bodies, objects tagged "wall", other turn enemies, voxel blocks. */
-function blockerAt(s, x, y, z, except) {
+function blockerAt(s, x, y, z, except, skip) {
   for (const o of s.entities) {
-    if (o === except || o.dead || o.ui) continue;
+    if (o === except || o.dead || o.ui || skip?.(o)) continue;
+    const gu = o.getBehavior('gridUnit');
+    if (gu) { const h = gu.tile / 2 - 0.01; if (Math.abs(gu.cx - x) < h && Math.abs(gu.cy - (s.mode === '3d' ? z : y)) < h) return o; continue; } // squad units block the tile they stand on (or are stepping into)
     if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
     if (o.tiles) { if (s.mode !== '3d' && o.tiles.solidAtWorld(o, x, y)) return o; continue; }
     const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable') || (o.has('enemy') && o.getBehavior('health') && !o.getBehavior('health').dead);
     if (!solid) continue;
     const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
-    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && Math.abs(o.y - y) < Math.max(hy, 0.6) : Math.abs(o.y - y) < hy)) return o;
+    // 3D: it blocks if it rises above the walker's feet and starts below its head (the floor under it doesn't)
+    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && o.y + hy > y - 0.45 && o.y - hy < y + 0.45 : Math.abs(o.y - y) < hy)) return o;
   }
   return null;
 }
@@ -10379,14 +11759,14 @@ function gridOrigin(s, T) {
 }
 function snapToGrid(s, e, T) { const o = gridOrigin(s, T), three = s.mode === '3d'; e.x = Math.round((e.x - o.x) / T) * T + o.x; if (three) e.z = Math.round((e.z - o.y) / T) * T + o.y; else e.y = Math.round((e.y - o.y) / T) * T + o.y; }
 /** Things on a grid that fight back: Turn Enemies, and enemies with Health. */
-const gridFoe = (o) => !!o && !o.dead && (o.getBehavior('gridEnemy') || (o.has('enemy') && o.getBehavior('health')));
+const gridFoe = (o) => !!o && !o.dead && (o.getBehavior('gridEnemy') || o.getBehavior('gridUnit')?.team === 'enemy' || (o.has('enemy') && o.getBehavior('health')));
 /** Shortest 4-way (or 8-way) walk over free tiles. Returns steps [[dx, dy]…] or null. The last tile may be an enemy (to attack it). */
-function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = true } = {}) {
-  const three = s.mode === '3d', sx = e.x, sy = three ? e.z : e.y;
+function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = true, isFoe = gridFoe, skip = null, from = null } = {}) {
+  const three = s.mode === '3d', sx = from ? from.x : e.x, sy = from ? from.y : three ? e.z : e.y;
   const gx = Math.round((tx - sx) / T), gy = Math.round((ty - sy) / T); if (!gx && !gy) return [];
   const R = Math.max(Math.abs(gx), Math.abs(gy)) + 8, key = (i, j) => i + ',' + j, prev = new Map([[key(0, 0), null]]), q = [[0, 0]];
   const dirs = diagonal ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const blockAt = (i, j) => blockerAt(s, sx + i * T, three ? e.y : sy + j * T, three ? sy + j * T : e.z, e);
+  const blockAt = (i, j) => blockerAt(s, sx + i * T, three ? e.y : sy + j * T, three ? sy + j * T : e.z, e, skip);
   while (q.length && prev.size < maxCells) {
     const [i, j] = q.shift();
     if (i === gx && j === gy) { const out = []; for (let k = key(i, j), c = [i, j]; prev.get(k); ) { const p = prev.get(k); out.unshift([c[0] - p[0], c[1] - p[1]]); c = p; k = key(p[0], p[1]); } return out; }
@@ -10394,7 +11774,7 @@ function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = t
       const ni = i + dx, nj = j + dy, k = key(ni, nj); if (prev.has(k) || Math.abs(ni) > R || Math.abs(nj) > R) continue;
       if (dx && dy && (blockAt(i + dx, j) || blockAt(i, j + dy))) continue; // no cutting corners
       const b = blockAt(ni, nj), goal = ni === gx && nj === gy;
-      if (b && !(goal && foeOk && gridFoe(b))) continue;
+      if (b && !(goal && foeOk && isFoe(b))) continue;
       prev.set(k, [i, j]); q.push([ni, nj]);
     }
   }
@@ -10404,7 +11784,7 @@ function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = t
 function gridNudge(s, e, dx, dy, T) { const three = is3D(e), x0 = e.x, y0 = e.y, z0 = e.z, k = T * 0.25; s.tween(e, { x: x0 + dx * k, y: three ? y0 : y0 + dy * k, z: three ? z0 + dy * k : z0 }, 0.06); s.after(0.07, () => s.tween(e, { x: x0, y: y0, z: z0 }, 0.07)); }
 /** Hurt whatever is on a grid tile: a Turn Enemy, or anything with Health. */
 function gridHurt(s, target, amount, from) {
-  const ge = target.getBehavior('gridEnemy'); if (ge) return ge.hurt(target, s, amount, from);
+  const ge = target.getBehavior('gridEnemy') || target.getBehavior('gridUnit'); if (ge) return ge.hurt(target, s, amount, from);
   const hb = target.getBehavior('health'); if (hb) return hb.damage(amount, target, from, { knockback: 0 });
   return 0;
 }
@@ -10629,7 +12009,8 @@ registerBehavior('gridEnemy', {
     const attack = (e, s, pl) => {
       s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
       const hb = pl.getBehavior('health'), dmg = +p.attack || 1;
-      if (hb) hb.damage(dmg, pl, e, { knockback: 0 });
+      if (pl.getBehavior('gridUnit')) gridHurt(s, pl, dmg, e);
+      else if (hb) hb.damage(dmg, pl, e, { knockback: 0 });
       else if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
       s.emit('gridAttack', e, pl);
     };
@@ -10652,7 +12033,7 @@ registerBehavior('gridEnemy', {
         return dmg;
       },
       act(e, s) {
-        const pl = s.findAll('player')[0]; if (!pl || e.dead) return;
+        const pl = gridTargetFor(s, e, 'enemy'); if (!pl || e.dead) return;
         const t = T(), three = is3D(e), dx = Math.round((pl.x - e.x) / t), dy = Math.round(((three ? pl.z : pl.y) - (three ? e.z : e.y)) / t), d = Math.abs(dx) + Math.abs(dy);
         if (d === 1) return attack(e, s, pl);
         const sees = !+p.sight || d <= +p.sight;
@@ -10678,6 +12059,423 @@ registerBehavior('gridEnemy', {
     };
     return self;
   },
+});
+
+// ---- squads: grid units the player selects (one or many) and moves together: tactics and RTS games ----
+const SQUAD_DEFAULTS = { tapMode: 'adds to the group', drag: 'draws a selection box', formation: 'group', autoEndTurn: true, winWhenNoEnemies: true, loseWhenNoUnits: true, showRange: true, showPaths: true, color: '#4fc3f7', moveColor: '#4fc3f7', attackColor: '#ff5252' };
+const unitOf = (o) => (o && !o.dead ? o.getBehavior('gridUnit') : null);
+const squadUnits = (s, team) => s.entities.filter((o) => !o.dead && unitOf(o)?.team === team);
+/** The nearest thing an enemy goes after (team 'enemy': the player or a player unit), or a player unit goes after (team 'player'). */
+function gridTargetFor(s, e, team = 'enemy', maxDist = Infinity) {
+  let best = null, bd = maxDist;
+  for (const o of s.entities) {
+    if (o.dead || o === e || o.ui) continue;
+    const u = o.getBehavior('gridUnit');
+    if (!(team === 'enemy' ? (u ? u.team === 'player' : o.has('player')) : (u ? u.team === 'enemy' : gridFoe(o)))) continue;
+    const d = Math.hypot(o.x - e.x, o.y - e.y, (o.z || 0) - (e.z || 0)); if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+/** The tile an object stands on: units use the tile they hold, everything else its position. */
+const cellOf = (s, o) => { const u = unitOf(o); return u ? { x: u.cx, y: u.cy } : { x: o.x, y: s.mode === '3d' ? o.z : o.y }; };
+const canAct = (s, e) => { const u = unitOf(e); return !!u && u.team === 'player' && (!s.settings.turnBased || !u.done); };
+/** Free tiles around a spot for a group to stand on, in formation. */
+function formationCells(s, units, gx, gy, mode) {
+  const u0 = unitOf(units[0]), T = u0.tile, three = s.mode === '3d', fy = units[0].y, N = units.length;
+  const skip = (o) => units.includes(o), free = (x, y) => !blockerAt(s, x, three ? fy : y, three ? y : 0, null, skip);
+  const seen = new Set(['0,0']), q = [[0, 0]], out = [];
+  while (q.length && out.length < Math.max(N * 4, N + 10) && seen.size < 900) {
+    const [i, j] = q.shift(), x = gx + i * T, y = gy + j * T;
+    if (free(x, y)) out.push({ i, j, x, y });
+    for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const k = (i + a) + ',' + (j + b); if (!seen.has(k) && Math.abs(i + a) < 30 && Math.abs(j + b) < 30) { seen.add(k); q.push([i + a, j + b]); } }
+  }
+  const w = mode === 'line' ? (c) => Math.abs(c.j) * 4 + Math.abs(c.i) : mode === 'column' ? (c) => Math.abs(c.i) * 4 + Math.abs(c.j) : (c) => Math.hypot(c.i, c.j);
+  if (mode === 'keep their shape') {
+    const mx = units.reduce((a, e) => a + unitOf(e).cx, 0) / N, my = units.reduce((a, e) => a + unitOf(e).cy, 0) / N, used = new Set(), res = new Map();
+    for (const e of units) { const u = unitOf(e), x = gx + Math.round((u.cx - mx) / T) * T, y = gy + Math.round((u.cy - my) / T) * T, k = x + ',' + y; if (free(x, y) && !used.has(k)) { used.add(k); res.set(e, { x, y }); } }
+    const rest = out.filter((c) => !used.has(c.x + ',' + c.y));
+    for (const e of units) if (!res.has(e)) { const u = unitOf(e); rest.sort((a, b) => Math.hypot(a.x - u.cx, a.y - u.cy) - Math.hypot(b.x - u.cx, b.y - u.cy)); const c = rest.shift(); if (c) res.set(e, c); }
+    return res;
+  }
+  const cells = out.sort((a, b) => w(a) - w(b)).slice(0, N), res = new Map(), left = [...units];
+  while (cells.length && left.length) { // the closest pair first: nobody walks across the whole group
+    let bi = 0, bj = 0, bd = Infinity;
+    cells.forEach((c, i) => left.forEach((e, j) => { const u = unitOf(e), d = Math.hypot(c.x - u.cx, c.y - u.cy); if (d < bd) { bd = d; bi = i; bj = j; } }));
+    res.set(left[bj], cells[bi]); cells.splice(bi, 1); left.splice(bj, 1);
+  }
+  return res;
+}
+/** The squad: what's selected, the selection box, and highlights. One per scene, made by the first unit. */
+function squadOf(s) {
+  if (s.squad) return s.squad;
+  const sq = s.squad = { sel: new Set(), box: null, pan: null, last: null, fx: [], t: -1, ending: false, had: { player: 0, enemy: 0 }, sync: '', reach: new Map() };
+  sq.cfg = () => ({ ...SQUAD_DEFAULTS, ...(s.squadCfg || {}) });
+  s.on('message', (m) => {
+    const k = String(m || '').trim().toLowerCase();
+    if (k === 'select all') squadSelect(s, squadUnits(s, 'player').filter((e) => canAct(s, e)));
+    else if (k === 'select none' || k === 'deselect') squadSelect(s, []);
+    else if (k === 'select next') { const L = squadUnits(s, 'player').filter((e) => canAct(s, e)); if (L.length) { const cur = [...sq.sel][0], i = L.indexOf(cur); squadSelect(s, [L[(i + 1) % L.length]]); } }
+    else if (k === 'stop') for (const e of sq.sel) unitOf(e)?.stop();
+    else if (k === 'end turn' && s.settings.turnBased && s.isPlayerTurn) squadEndTurn(s);
+  });
+  s.on('turn', () => { sq.ending = false; for (const e of squadUnits(s, 'player')) unitOf(e).newTurn(e); });
+  (s.overlays ||= []).push(sq.draw = (ctx) => drawSquad(s, sq, ctx)); sq.draw.world = true;
+  return sq;
+}
+function squadSelect(s, list, quiet) {
+  const sq = squadOf(s), before = [...sq.sel].map((e) => e.id).join();
+  sq.sel = new Set(list.filter((e) => canAct(s, e)));
+  if ([...sq.sel].map((e) => e.id).join() === before) return;
+  if (!quiet && sq.sel.size) { s.engine.audio.tone({ freq: 660, to: 880, dur: 0.06, vol: 0.06 }); s.engine.vibrate(8); }
+  s.setVar('selectedUnits', sq.sel.size); s.emit('unitsSelected', [...sq.sel]);
+}
+function squadEndTurn(s) { const sq = squadOf(s); sq.sel.clear(); s.setVar('selectedUnits', 0); for (const e of squadUnits(s, 'player')) unitOf(e).stop(); s.endTurn(); }
+/** Send units somewhere ({ x, y }: a tile) or after someone ({ attack: entity }). */
+function squadOrder(s, units, cmd) {
+  const sq = squadOf(s), list = units.filter((e) => canAct(s, e) && !e.dead); if (!list.length) return;
+  if (cmd.attack) { for (const e of list) unitOf(e).order(e, { attack: cmd.attack }); sq.fx.push({ k: 'hit', e: cmd.attack, t: s.time }); s.engine.audio.tone({ freq: 300, to: 200, dur: 0.08, vol: 0.07 }); }
+  else {
+    const where = formationCells(s, list, cmd.x, cmd.y, sq.cfg().formation);
+    let n = 0; for (const e of list) { const c = where.get(e); if (c) { unitOf(e).order(e, { x: c.x, y: c.y }) && n++; } }
+    sq.fx.push({ k: 'tap', x: cmd.x, y: cmd.y, t: s.time, ok: n > 0 });
+    if (!n) { s.message?.('Can’t get there', 0.8); s.engine.vibrate(15); } else s.engine.audio.tone({ freq: 520, to: 700, dur: 0.06, vol: 0.06 });
+  }
+  s.emit('unitsOrdered', list, cmd);
+}
+const squadUiTap = (s, t) => s.entities.some((o) => o.ui && !o.dead && o.visible !== false && o.behaviors.length && hitTest(s, o, t.x, t.y))
+  || [...(s.tapTargets || [])].some((o) => !o.dead && o.visible !== false && !unitOf(o) && hitTest(s, o, t.x, t.y));
+const unitAtScreen = (s, x, y, team) => s.entities.find((o) => !o.dead && o.visible !== false && unitOf(o)?.team === team && hitTest(s, o, x, y)) || null;
+/** Where on the grid a screen point is (a tile centre). */
+function squadCellAt(s, sx, sy, ref) {
+  const u = unitOf(ref), T = u.tile, three = s.mode === '3d', w = three ? screenToWorldAt(s, sx, sy, ref.y - (ref.extents().hy || 0.5)) : s.engine.renderer.screenToWorld(s, sx, sy);
+  if (!w) return null;
+  const o = gridOrigin(s, T), wy = three ? w.z : w.y;
+  return { x: Math.round((w.x - o.x) / T) * T + o.x, y: Math.round((wy - o.y) / T) * T + o.y };
+}
+function panCamera(s, dx, dy) {
+  const c = s.camera;
+  if (s.mode !== '3d') { const z = s.engine.renderer.zoomFor(s); c.x -= dx / z; c.y -= dy / z; return; }
+  const cx = s.engine.width / 2, cy = s.engine.height / 2, a = screenToWorldAt(s, cx, cy, 0), b = screenToWorldAt(s, cx + dx, cy + dy, 0); if (!a || !b) return;
+  for (const p of [c.position, c.target]) { p.x -= b.x - a.x; p.z -= b.z - a.z; }
+}
+/** Once a frame: taps, the selection box, dragging units, ending the turn, counting units. */
+function squadTick(s) {
+  const sq = squadOf(s); if (sq.t === s.time) return; sq.t = s.time;
+  const cfg = sq.cfg(), inp = s.engine.input, tb = !!s.settings.turnBased;
+  for (const e of sq.sel) if (!canAct(s, e)) sq.sel.delete(e);
+  const mine = squadUnits(s, 'player'), foes = s.entities.filter((o) => !o.dead && !o.ui && (unitOf(o)?.team === 'enemy' || o.getBehavior('gridEnemy')));
+  sq.had.player = Math.max(sq.had.player, mine.length); sq.had.enemy = Math.max(sq.had.enemy, foes.length);
+  const ready = tb ? mine.filter((e) => !unitOf(e).done).length : mine.length, sig = [sq.sel.size, mine.length, foes.length, ready].join();
+  if (sig !== sq.sync) { sq.sync = sig; s.setVar('selectedUnits', sq.sel.size); s.setVar('unitsLeft', mine.length); s.setVar('enemiesLeft', foes.length); s.setVar('unitsReady', ready); }
+  if (s.state !== 'play') { sq.box = null; return; }
+  if (s.time > 0.3) {
+    if (cfg.winWhenNoEnemies && sq.had.enemy && !foes.length) { s.win(); return; }
+    if (cfg.loseWhenNoUnits && sq.had.player && !mine.length) { s.gameOver(); return; }
+  }
+  const myTurn = !tb || s.isPlayerTurn;
+  if (tb && myTurn && cfg.autoEndTurn && !sq.ending && mine.length && mine.every((e) => unitOf(e).done && !unitOf(e).busy) && mine.some((e) => unitOf(e).acted)) {
+    sq.ending = true; s.after(0.35, () => { if (s.isPlayerTurn && s.state === 'play') squadEndTurn(s); });
+  }
+  // dragging: a box over empty ground, a line from a unit (send it there), or moving the camera
+  for (const [id, ptr] of inp.pointers) {
+    if (ptr.role !== 'free' || Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) < 18) continue;
+    if (!sq.box || sq.box.id !== id) {
+      if (squadUiTap(s, { x: ptr.sx, y: ptr.sy })) continue;
+      const u = myTurn ? unitAtScreen(s, ptr.sx, ptr.sy, 'player') : null;
+      if (u && canAct(s, u)) sq.box = { id, unit: u };
+      else if (cfg.drag === 'moves the camera') sq.box = { id, pan: true, px: ptr.sx, py: ptr.sy };
+      else if (cfg.drag === 'draws a selection box' && myTurn) sq.box = { id };
+      else continue;
+    }
+    const b = sq.box;
+    if (b.pan) { panCamera(s, ptr.x - b.px, ptr.y - b.py); b.px = ptr.x; b.py = ptr.y; }
+    Object.assign(b, { x0: ptr.sx, y0: ptr.sy, x1: ptr.x, y1: ptr.y });
+    break;
+  }
+  if (sq.box) {
+    const b = sq.box, up = inp.ups.find((u) => u.id === b.id);
+    if (up && !b.pan && myTurn) {
+      if (b.unit) { // dragged from a unit: it (and the rest of the group, if it's in it) goes where the finger let go
+        const group = sq.sel.has(b.unit) ? [...sq.sel] : [b.unit]; if (!sq.sel.has(b.unit)) squadSelect(s, [b.unit]);
+        const foe = s.entities.find((o) => !o.dead && !o.ui && gridFoe(o) && hitTest(s, o, up.x, up.y)), c = squadCellAt(s, up.x, up.y, b.unit);
+        if (foe) squadOrder(s, group, { attack: foe }); else if (c) squadOrder(s, group, c);
+      } else {
+        const L = mine.filter((e) => canAct(s, e) && (() => { const q = s.mode === '3d' ? s.engine.renderer.worldToScreen(s, e.x, e.y, e.z) : s.engine.renderer.worldToScreen(s, e.x, e.y); return !q.behind && q.x >= Math.min(b.x0, b.x1) && q.x <= Math.max(b.x0, b.x1) && q.y >= Math.min(b.y0, b.y1) && q.y <= Math.max(b.y0, b.y1); })());
+        squadSelect(s, L);
+      }
+    }
+    if (up || !inp.pointers.has(b.id)) sq.box = null;
+  }
+  if (!myTurn) return;
+  // taps
+  for (const t of inp.taps) {
+    if (squadUiTap(s, t)) continue;
+    const u = unitAtScreen(s, t.x, t.y, 'player');
+    if (u) {
+      const dbl = sq.last && sq.last.e === u && s.time - sq.last.t < 0.35; sq.last = { e: u, t: s.time };
+      if (dbl) { squadSelect(s, mine.filter((e) => canAct(s, e))); sq.last = null; break; }
+      if (!canAct(s, u)) { s.message?.(`${u.name} is done this turn`, 0.9); s.engine.vibrate(15); break; }
+      if (cfg.tapMode === 'picks just that one') squadSelect(s, sq.sel.size === 1 && sq.sel.has(u) ? [] : [u]);
+      else { const L = new Set(sq.sel); if (L.has(u)) L.delete(u); else L.add(u); squadSelect(s, [...L]); }
+      break;
+    }
+    if (!sq.sel.size) break;
+    const foe = s.entities.find((o) => !o.dead && !o.ui && gridFoe(o) && hitTest(s, o, t.x, t.y));
+    if (foe) { squadOrder(s, [...sq.sel], { attack: foe }); break; }
+    const c = squadCellAt(s, t.x, t.y, [...sq.sel][0]); if (c) squadOrder(s, [...sq.sel], c);
+    break;
+  }
+}
+/** Tiles a unit can walk to this turn (turn-based), cached until it moves. */
+function unitReach(s, e) {
+  const u = unitOf(e), sq = squadOf(s), key = `${u.cx},${u.cy},${u.movesLeft},${s.vars.turn}`, c = sq.reach.get(e);
+  if (c && c.key === key) return c.cells;
+  const T = u.tile, three = s.mode === '3d', cells = [], seen = new Map([['0,0', 0]]), q = [[0, 0]];
+  const friend = (o) => unitOf(o)?.team === u.team;
+  while (q.length) {
+    const [i, j] = q.shift(), d = seen.get(i + ',' + j); if (d >= u.movesLeft) continue;
+    for (const [a, b] of u.dirs) {
+      const ni = i + a, nj = j + b, k = ni + ',' + nj; if (seen.has(k)) continue;
+      const x = u.cx + ni * T, y = u.cy + nj * T, bl = blockerAt(s, x, three ? e.y : y, three ? y : e.z, e);
+      if (bl && !friend(bl)) continue;
+      seen.set(k, d + 1); q.push([ni, nj]); if (!bl) cells.push({ x, y });
+    }
+  }
+  sq.reach.set(e, { key, cells }); return cells;
+}
+function drawSquad(s, sq, ctx) {
+  if (s.engine.editing) return;
+  const cfg = sq.cfg(), r = s.engine.renderer, three = s.mode === '3d', tb = !!s.settings.turnBased, now = s.time;
+  const P = (x, y, gy) => (three ? r.worldToScreen(s, x, gy, y) : r.worldToScreen(s, x, y));
+  const feet = (e) => (three ? e.y - (e.extents().hy || 0.5) : 0);
+  const quad = (x, y, T, gy) => { const h = T / 2 - (three ? 0.04 : 1); return [P(x - h, y - h, gy), P(x + h, y - h, gy), P(x + h, y + h, gy), P(x - h, y + h, gy)]; };
+  const poly = (pts) => { ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); };
+  const ring = (e, col, k = 1, dash) => {
+    const u = unitOf(e), T = u ? u.tile : (three ? 1 : 40), gy = feet(e), c = P(e.x, three ? e.z : e.y, gy), side = P(e.x + T * 0.45, three ? e.z : e.y, gy);
+    if (c.behind) return; const rx = Math.max(10, Math.hypot(side.x - c.x, side.y - c.y)) * k, ry = three ? rx * 0.55 : rx;
+    ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 3; if (dash) ctx.setLineDash(dash); ctx.beginPath(); ctx.ellipse(c.x, c.y + (three ? 0 : 0), rx, ry, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  };
+  ctx.save();
+  const sel = [...sq.sel];
+  // tiles it can reach (turn-based) and foes it can hit
+  if (cfg.showRange !== false && sel.length && tb && s.isPlayerTurn) {
+    ctx.fillStyle = cfg.moveColor; ctx.globalAlpha = 0.18; const done = new Set();
+    for (const e of sel) { const u = unitOf(e); if (u.busy || u.attacked) continue; for (const c of unitReach(s, e)) { const k = c.x + ',' + c.y; if (done.has(k)) continue; done.add(k); const q = quad(c.x, c.y, u.tile, feet(e)); if (q.some((p) => p.behind)) continue; poly(q); ctx.fill(); } }
+    ctx.globalAlpha = 1;
+  }
+  if (sel.length) {
+    const pulse = 0.55 + 0.45 * Math.abs(Math.sin(now * 5));
+    for (const o of s.entities) {
+      if (o.dead || o.ui || !gridFoe(o)) continue;
+      if (sel.some((e) => { const u = unitOf(e); return !(tb && u.attacked) && u.inRange(o); })) { ctx.globalAlpha = pulse; ring(o, cfg.attackColor, 1.05); ctx.globalAlpha = 1; }
+    }
+  }
+  // paths and where each unit is going
+  for (const e of squadUnits(s, 'player')) {
+    const u = unitOf(e); if (!u.path.length || !(cfg.showPaths !== false && (sq.sel.has(e) || !tb))) continue;
+    const gy = feet(e); let x = u.cx, y = u.cy; const pts = [P(e.x, three ? e.z : e.y, gy), P(x, y, gy)];
+    for (const [dx, dy] of u.path) { x += dx * u.tile; y += dy * u.tile; pts.push(P(x, y, gy)); }
+    if (pts.some((p) => p.behind)) continue;
+    ctx.strokeStyle = cfg.color; ctx.globalAlpha = 0.75; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -now * 30;
+    ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.stroke(); ctx.setLineDash([]);
+    const end = pts[pts.length - 1]; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(end.x, end.y, 5, 0, Math.PI * 2); ctx.fillStyle = cfg.color; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  for (const e of sel) ring(e, cfg.color, 1 + 0.06 * Math.sin(now * 6));
+  for (const e of squadUnits(s, 'player')) { const u = unitOf(e); if (u.target && !u.target.dead && (sq.sel.has(e) || !tb)) { const a = P(e.x, three ? e.z : e.y, feet(e)), b = P(u.target.x, three ? u.target.z : u.target.y, feet(e)); if (a.behind || b.behind) continue; ctx.strokeStyle = cfg.attackColor; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.setLineDash([4, 5]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; } }
+  // effects: tap markers, shots
+  sq.fx = sq.fx.filter((f) => now - f.t < 0.6);
+  for (const f of sq.fx) {
+    const k = (now - f.t) / 0.6;
+    if (f.k === 'tap') { const ref = sel[0] || squadUnits(s, 'player')[0]; const q = P(f.x, f.y, ref ? feet(ref) : 0); if (q.behind) continue; ctx.globalAlpha = 1 - k; ctx.strokeStyle = f.ok ? cfg.color : '#ff5252'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(q.x, q.y, 8 + k * 22, (8 + k * 22) * (three ? 0.55 : 1), 0, 0, Math.PI * 2); ctx.stroke(); }
+    else if (f.k === 'hit' && !f.e.dead) { ctx.globalAlpha = 1 - k; ring(f.e, cfg.attackColor, 1.4 - k * 0.4); }
+    else if (f.k === 'shot' && k < 0.3) {
+      const a = P(f.x0, f.y0, f.gy), b = P(f.x1, f.y1, f.gy); if (a.behind || b.behind) continue; const m = k / 0.3, x = a.x + (b.x - a.x) * m, y = a.y + (b.y - a.y) * m;
+      ctx.globalAlpha = 1; ctx.strokeStyle = f.col; ctx.lineWidth = f.look === 'magic bolt' ? 5 : 3; ctx.beginPath(); ctx.moveTo(x - (b.x - a.x) * 0.12, y - (b.y - a.y) * 0.12); ctx.lineTo(x, y); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  // the selection box, or a line from a dragged unit
+  const b = sq.box;
+  if (b && !b.pan && b.x1 != null) {
+    if (b.unit) { ctx.strokeStyle = cfg.color; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(b.x0, b.y0); ctx.lineTo(b.x1, b.y1); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(b.x1, b.y1, 12, 0, Math.PI * 2); ctx.stroke(); }
+    else { const x = Math.min(b.x0, b.x1), y = Math.min(b.y0, b.y1), w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0); ctx.fillStyle = cfg.color; ctx.globalAlpha = 0.15; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1; ctx.strokeStyle = cfg.color; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]); }
+  }
+  ctx.restore();
+}
+
+registerBehavior('gridUnit', {
+  label: 'Squad Unit', description: 'A unit on a grid, for tactics and strategy games. Tap units to select them (several at once, or drag a box), then tap a tile to move them all there in formation, or tap an enemy to attack it. Turn-based: each unit moves and attacks once per turn. Real-time: units fight what comes in range. Enemy units find their way to yours.',
+  params: [
+    { key: 'team', label: 'Team', type: 'select', options: [['player', 'yours (you command it)'], ['enemy', 'enemy (the computer plays it)']], default: 'player' },
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'hp', label: 'Health (if it has no Health component)', type: 'number', default: 5 },
+    { key: 'damage', label: 'Attack damage', type: 'number', default: 1 },
+    { key: 'range', label: 'Attack range (tiles, 1 = next to it)', type: 'number', default: 1, range: [1, 12], step: 1 },
+    { key: 'moves', label: 'Moves per turn (turn-based)', type: 'number', default: 4, range: [1, 20], step: 1 },
+    { key: 'stepTime', label: 'Time per step (sec)', type: 'number', default: 0.16, range: [0.03, 1], step: 0.01 },
+    { key: 'attackEvery', label: 'Attacks every (sec, real-time)', type: 'number', default: 0.8, step: 0.1 },
+    { key: 'fight', label: 'On its own', type: 'select', options: ['attacks foes in range', 'chases foes it sees', 'only does what it’s told'], default: 'attacks foes in range', info: 'Enemy units always chase what they see.' },
+    { key: 'sight', label: 'Sees foes within (tiles, 0 = anywhere)', type: 'number', default: 6, step: 1 },
+    { key: 'diagonal', label: 'Diagonal steps', type: 'bool', default: false },
+    { key: 'shot', label: 'Ranged attack looks like', type: 'select', options: ['arrow', 'magic bolt', 'nothing'], default: 'arrow', showIf: (b) => +b.range > 1 },
+    { key: 'points', label: 'Points when defeated', type: 'number', default: 10, showIf: { team: ['enemy'] } },
+    { key: 'showBar', label: 'Health bar over it', type: 'select', options: ['when hurt', 'always', 'never'], default: 'always', group: 'More' },
+    { key: 'snap', label: 'Line up with the grid at the start', type: 'bool', default: true, group: 'More' },
+    { key: 'sound', label: 'Sounds', type: 'bool', default: true, group: 'More' },
+  ],
+  create(p) {
+    let hp = 0, max = 1, path = [], goal = null, target = null, autoT = false, stepT = 0, cool = 0, wait = 0, think = 0, ent = null, s0 = null;
+    const T = () => +p.tile || 40, rng = () => Math.max(1, Math.round(+p.range || 1));
+    const dirs = p.diagonal ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const isFoe = (o) => !!o && !o.dead && o !== ent && (self.team === 'player' ? gridFoe(o) : (unitOf(o) ? unitOf(o).team === 'player' : o.has('player')));
+    const bar = (e) => { const k = hp / max, mine = self.team === 'player'; (e._bars ||= {}).health = { k, col: mine ? (k > 0.35 ? '#4fc3f7' : '#ffd23d') : (k > 0.5 ? '#ff7043' : '#ff4d4d'), show: p.showBar === 'always' || (p.showBar !== 'never' && hp < max) }; e.data.hp = hp; e.data.hpMax = max; };
+    const face = (e, dx, dy) => { if (is3D(e)) { if (dx || dy) e.ry = Math.atan2(-dx, -dy) / DEG; } else if (dx) { if (e.shape?.type === 'emoji') e.data.flipX = dx > 0; else e.sx = Math.abs(e.sx) * (dx < 0 ? -1 : 1); } };
+    const myPhase = (s) => !s.settings.turnBased || (self.team === 'player' ? s.isPlayerTurn : !s.isPlayerTurn);
+    const friendSkip = (o) => unitOf(o)?.team === self.team;
+    /** Work out the way to the goal or the target. strict: other units of the team block too. */
+    const plan = (e, s, strict) => {
+      const three = is3D(e), from = { x: self.cx, y: self.cy }, opts = { diagonal: !!p.diagonal, maxCells: 1500, from, skip: strict ? null : friendSkip };
+      let route = null;
+      if (target) { const c = cellOf(s, target); route = gridPath(s, e, c.x, c.y, T(), { ...opts, foeOk: true, isFoe: (b) => b === target }); if (route?.length) route.pop(); } // stop next to it
+      else if (goal) route = gridPath(s, e, goal.x, goal.y, T(), { ...opts, foeOk: false });
+      if (!route) { path = []; return false; }
+      if (s.settings.turnBased) route = route.slice(0, Math.max(0, self.movesLeft));
+      path = route; void three; return true;
+    };
+    const attack = (e, s, o) => {
+      const c = cellOf(s, o), dx = Math.sign(Math.round((c.x - self.cx) / T())), dy = Math.sign(Math.round((c.y - self.cy) / T()));
+      face(e, dx, dy); cool = Math.max(0.2, +p.attackEvery || 0.8); self.attacked = true; self.acted = true;
+      const dmg = Math.max(0, +p.damage || 0) + (+e.data.equipDamage || 0), three = is3D(e);
+      const hit = () => { if (!o.dead) gridHurt(s, o, dmg, e); };
+      if (rng() > 1 && p.shot !== 'nothing') {
+        const sq = squadOf(s), gy = three ? e.y - (e.extents().hy || 0.5) + T() * 0.4 : 0;
+        sq.fx.push({ k: 'shot', x0: e.x, y0: three ? e.z : e.y, x1: o.x, y1: three ? o.z : o.y, gy, t: s.time, look: p.shot, col: p.shot === 'magic bolt' ? '#b388ff' : '#ffe082' });
+        if (p.sound !== false) s.engine.audio.tone({ freq: p.shot === 'magic bolt' ? 900 : 1200, to: 400, dur: 0.12, vol: 0.05 });
+        s.after(0.17, hit);
+      } else { gridNudge(s, e, dx, dy, T()); hit(); stepT = Math.max(stepT, 0.17); } // no stepping until the lunge is back
+      s.emit('unitAttack', e, o); s.emit('gridAttack', e, o);
+    };
+    const self = {
+      team: p.team === 'enemy' ? 'enemy' : 'player', cx: 0, cy: 0, movesLeft: Math.round(+p.moves || 4), attacked: false, acted: false, dirs,
+      get tile() { return T(); }, get hp() { return hp; }, get max() { return max; }, get path() { return path; }, get goal() { return goal; }, get target() { return target; },
+      get busy() { return path.length > 0 || stepT > 0.02 || (!!target && !target.dead && !(s0?.settings.turnBased && self.attacked)); },
+      /** Turn-based: nothing left to do this turn. */
+      get done() { if (self.attacked) return true; if (self.movesLeft > 0) return false; return !s0 || !s0.entities.some((o) => isFoe(o) && self.inRange(o)); },
+      inRange(o) {
+        if (!o || o.dead || !s0) return false;
+        const c = cellOf(s0, o), dx = Math.abs(Math.round((c.x - self.cx) / T())), dy = Math.abs(Math.round((c.y - self.cy) / T()));
+        if (dx + dy === 0) return false;
+        return rng() <= 1 ? (p.diagonal ? Math.max(dx, dy) <= 1 : dx + dy <= 1) : (p.diagonal ? Math.max(dx, dy) : dx + dy) <= rng();
+      },
+      /** { x, y }: walk to that tile; { attack: entity }: go and attack it. Returns false if there's no way. */
+      order(e, cmd) {
+        const s = s0; if (!s || e.dead) return false;
+        if (s.settings.turnBased && self.attacked) return false;
+        wait = 0;
+        autoT = false;
+        if (cmd.attack) { target = cmd.attack; goal = null; if (self.inRange(target)) { path = []; return true; } if (!plan(e, s) || !path.length) { if (self.team === 'player') s.message?.('Can’t reach it', 0.8); target = null; return false; } return true; }
+        target = null; goal = { x: cmd.x, y: cmd.y };
+        if (goal.x === self.cx && goal.y === self.cy) { goal = null; path = []; return true; }
+        if (!plan(e, s) || !path.length) { goal = null; return false; }
+        return true;
+      },
+      stop() { path = []; goal = null; target = null; },
+      newTurn(e) { self.movesLeft = Math.round(+p.moves || 4); self.attacked = false; self.acted = false; e.alpha = 1; },
+      hurt(e, s, dmg, from) {
+        const hb = e.getBehavior('health'); if (hb) return hb.damage(dmg, e, from, { knockback: 0 });
+        hp -= dmg; e.data.invuln = 0.2; if (p.sound !== false) s.engine.audio.sfx('hit'); bar(e); s.emit('damage', e, dmg, from, '');
+        { const r = s.engine.renderer, hy = e.extents().hy || 10, q = is3D(e) ? r.worldToScreen(s, e.x, e.y + hy, e.z) : r.worldToScreen(s, e.x, e.y - hy); if (!q.behind) popText(s, q.x, q.y - 10, `-${dmg}`, '#ff6b6b', 20); }
+        const k = e.sx; s.tween(e, { sx: k * 1.15, sy: e.sy * 1.15 }, 0.06); s.after(0.07, () => !e.dead && s.tween(e, { sx: k, sy: Math.abs(k) * Math.sign(e.sy || 1) }, 0.08));
+        // fight back: an idle unit that gets hit goes for whoever hit it
+        if (from && !from.dead && !target && !path.length && isFoe(from) && p.fight !== 'only does what it’s told' && !s.settings.turnBased) { target = from; plan(e, s); }
+        if (hp <= 0) { if (self.team === 'enemy') s.addVar('score', +p.points || 0); s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#f55', 16); s.emit('death', e); s.emit('unitDefeated', e, self.team); e.destroy(); }
+        return dmg;
+      },
+      start(e, s) {
+        ent = e; s0 = s; max = Math.max(1, +p.hp || 1); hp = max;
+        if (p.snap !== false) snapToGrid(s, e, T());
+        self.cx = e.x; self.cy = is3D(e) ? e.z : e.y;
+        e.tags.add(self.team === 'enemy' ? 'enemy' : 'ally'); e.tags.add('unit');
+        if (!e.getBehavior('health')) bar(e);
+        squadOf(s); s.tapTargets?.delete(e);
+      },
+      update(e, dt, s) {
+        squadTick(s);
+        stepT -= dt; cool -= dt;
+        if (s.state !== 'play' || e.dead) return;
+        const tb = !!s.settings.turnBased;
+        if (tb && self.team === 'player' && s.isPlayerTurn) e.alpha += ((self.done && !self.busy ? 0.5 : 1) - e.alpha) * Math.min(1, dt * 8); // finished units fade a little
+        if (!myPhase(s)) return;
+        // thinking on its own (real-time)
+        if (!tb && (think -= dt) <= 0) {
+          think = 0.35 + Math.random() * 0.2;
+          const chase = self.team === 'enemy' || p.fight === 'chases foes it sees';
+          if (!target && !goal && !path.length && p.fight !== 'only does what it’s told' || (self.team === 'enemy' && !goal)) {
+            const sight = +p.sight || 0, f = gridTargetFor(s, e, self.team === 'enemy' ? 'enemy' : 'player', sight ? (sight + 0.5) * T() : Infinity);
+            if (f && (chase || self.inRange(f)) && f !== target) { target = f; autoT = !chase; plan(e, s); }
+          } else if (target && !target.dead && !self.inRange(target) && self.team === 'enemy') plan(e, s); // keep up with a moving target
+        }
+        if (stepT > 0) return;
+        { const three = is3D(e), k = Math.min(1, dt * 14); e.x += (self.cx - e.x) * k; if (three) e.z += (self.cy - e.z) * k; else e.y += (self.cy - e.y) * k; } // settle on its tile
+        if (target) {
+          if (target.dead) { target = null; path = []; }
+          else if (self.inRange(target)) {
+            path = [];
+            if (tb) { if (!self.attacked) attack(e, s, target); target = null; }
+            else if (cool <= 0) attack(e, s, target);
+            return;
+          } else if (autoT) { target = null; autoT = false; path = []; } // it only fights what's in range: don't chase
+          else if (!path.length) { if (tb && self.movesLeft <= 0) { target = null; return; } if (!plan(e, s) || !path.length) { target = null; return; } }
+        }
+        if (!path.length) { if (goal) { goal = null; s.emit('unitArrived', e); } return; }
+        const [dx, dy] = path[0], three = is3D(e), nx = self.cx + dx * T(), ny = self.cy + dy * T();
+        const b = blockerAt(s, nx, three ? e.y : ny, three ? ny : e.z, e);
+        if (b) {
+          if (b === target) { path = []; return; }
+          if (unitOf(b)?.team === self.team && (wait += dt) < 0.45) return; // a friend is in the way: wait for it a moment
+          wait = 0; if (!plan(e, s, true) || !path.length) { path = []; goal = null; if (!target) s.emit('unitArrived', e); }
+          return;
+        }
+        wait = 0; path.shift(); self.cx = nx; self.cy = ny; self.movesLeft--; self.acted = true;
+        face(e, dx, dy);
+        const st = Math.max(0.03, +p.stepTime || 0.16);
+        s.tween(e, three ? { x: nx, z: ny } : { x: nx, y: ny }, st * 0.92); stepT = st;
+        if (p.sound !== false && self.team === 'player') s.engine.audio.tone({ freq: 480 + Math.random() * 80, to: 560, dur: 0.04, vol: 0.035 });
+        s.emit('unitStep', e, dx, dy);
+        if (!path.length && !target && goal) { goal = null; s.emit('unitArrived', e); }
+      },
+      /** Enemy units take their turn one after another. */
+      turn(e, s) {
+        if (self.team !== 'enemy') return;
+        self.movesLeft = Math.round(+p.moves || 4); self.attacked = false;
+        const list = squadUnits(s, 'enemy'), i = list.indexOf(e), gap = 0.3, st = Math.max(0.03, +p.stepTime || 0.16);
+        s.holdTurn(i * gap + (self.movesLeft + 1) * st + 0.45);
+        s.after(i * gap, () => {
+          if (e.dead || s.state !== 'play') return;
+          const sight = +p.sight || 0, f = gridTargetFor(s, e, 'enemy', sight ? (sight + 0.5) * T() : Infinity); if (!f) return;
+          target = f; if (!self.inRange(f)) plan(e, s);
+        });
+      },
+      destroy(e, s) { if (e._bars) delete e._bars.health; s.squad?.sel.delete(e); },
+    };
+    return self;
+  },
+});
+
+registerBehavior('squadControl', {
+  label: 'Unit Commander', description: 'How the player commands Squad Units: tapping, dragging a selection box or the camera, formations, highlights, ending turns, winning and losing. Optional: without one the defaults are used.',
+  params: [
+    { key: 'tapMode', label: 'Tapping a unit', type: 'select', options: ['adds to the group', 'picks just that one'], default: 'adds to the group', info: 'Double-tap a unit to select all of them.' },
+    { key: 'drag', label: 'Dragging on the ground', type: 'select', options: ['draws a selection box', 'moves the camera', 'nothing'], default: 'draws a selection box', info: 'Dragging from a unit always sends it (and its group) where you let go.' },
+    { key: 'formation', label: 'Formation', type: 'select', options: ['group', 'line', 'column', 'keep their shape'], default: 'group' },
+    { key: 'showRange', label: 'Show where units can go (turn-based)', type: 'bool', default: true },
+    { key: 'showPaths', label: 'Show paths', type: 'bool', default: true },
+    { key: 'autoEndTurn', label: 'End the turn when every unit is done', type: 'bool', default: true },
+    { key: 'winWhenNoEnemies', label: 'Win when every enemy is gone', type: 'bool', default: true },
+    { key: 'loseWhenNoUnits', label: 'Game over when all your units are gone', type: 'bool', default: true },
+    ...colorParams({ color: ['Selection', '#4fc3f7'], moveColor: ['Move tiles', '#4fc3f7'], attackColor: ['Targets', '#ff5252'] }),
+  ],
+  create(p) { return { start(e, s) { s.squadCfg = p; squadOf(s); }, update(e, dt, s) { if (s.squad) squadTick(s); } }; },
 });
 
 registerBehavior('boardCell', {
@@ -10972,6 +12770,8 @@ registerBehavior('button', {
     { key: 'holdTime', label: 'Hold for (sec)', type: 'number', default: 0.6, range: [0.2, 3], step: 0.1, group: 'When it fires', showIf: { when: ['on long press'] } },
     { key: 'once', label: 'Only works once', type: 'bool', default: false, group: 'When it fires' },
     { key: 'pressScale', label: 'Squash when pressed', type: 'number', default: 0.92, range: [0.6, 1.1], step: 0.02, group: 'Look & feel' },
+    { key: 'feel', label: 'Feel', type: 'select', options: ['spring', 'squash', 'jelly', 'none'], default: 'spring', group: 'Look & feel', info: { spring: 'Presses in, then springs back with a little bounce.', squash: 'Presses in and eases back.', jelly: 'Wobbles like jelly when let go.', none: 'No movement.' } },
+    { key: 'ripple', label: 'Ripple where you touch (UI)', type: 'bool', default: true, group: 'Look & feel' },
     { key: 'pressColor', label: 'Colour while pressed', type: 'color', default: '', optional: true, group: 'Look & feel' },
     { key: 'haptic', label: 'Buzz the phone', type: 'bool', default: true, group: 'Look & feel' },
     { key: 'enableVar', label: 'Only works when variable', type: 'text', default: '', suggest: 'vars', group: 'Only works when…' },
@@ -10984,7 +12784,8 @@ registerBehavior('button', {
     { key: 'denied', label: 'Message when it can\'t be used', type: 'text', default: '', group: 'Cost & cooldown' },
   ],
   create(p) {
-    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null;
+    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null, wasDown = false;
+    const ripples = [];
     const gated = () => !!(p.enableVar || p.costVar || p.once || +p.cooldown > 0);
     const allowed = (s) => {
       if (p.once && used) return false;
@@ -11026,7 +12827,11 @@ registerBehavior('button', {
         if (!e.visible) { held = null; return; }
         base ??= { sx: e.sx, sy: e.sy };
         const inp = s.engine.input, mode = p.when || 'on tap';
-        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) { held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s); break; }
+        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) {
+          held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s);
+          if (e.ui && p.ripple !== false && e.shape && !motionOf(s).reduced) { const q = UK.local(s, e, d); ripples.push({ x: q.x, y: q.y, t: performance.now() / 1000, up: 0 }); if (ripples.length > 4) ripples.shift(); }
+          break;
+        }
         const ptr = held != null && inp.pointers.get(held);
         if (ptr) {
           heldT += dt;
@@ -11034,16 +12839,49 @@ registerBehavior('button', {
           if (mode === 'on long press' && !longDone && heldT >= (+p.holdTime || 0.6)) { longDone = true; fireIt(e, s); }
         } else held = null;
         if (mode === 'on tap') for (const t of inp.taps) if (hitTest(s, e, t.x, t.y)) { fireIt(e, s); break; }
-        // feel: squash while the finger is on it, optional pressed colour
-        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y);
-        if (down || e.data._btnSq) {
+        // feel: pressed in while the finger is on it, then back (with a spring, a jelly wobble or an ease), optional pressed colour
+        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y), feel = motionOf(s).reduced ? 'squash' : p.feel || 'squash';
+        if (!ptr) for (const r of ripples) r.up ||= performance.now() / 1000;
+        if (feel === 'none') { /* stays still */ }
+        else if (feel === 'spring' || feel === 'jelly') {
+          if (down !== wasDown) {
+            const k = +p.pressScale || 0.92;
+            if (down) s.spring(e, { sx: base.sx * k, sy: base.sy * k }, { stiffness: 600, damping: 34 });
+            else if (feel === 'jelly') { e.sx = base.sx * (1 + (1 - k) * 1.6); e.sy = base.sy * (1 - (1 - k) * 1.2); s.spring(e, { sx: base.sx, sy: base.sy }, { stiffness: 320, damping: 9 }); }
+            else s.spring(e, { sx: base.sx, sy: base.sy }, { feel: 'bouncy' });
+          }
+        } else if (down || e.data._btnSq) {
           const k = down ? +p.pressScale || 0.92 : 1, a = Math.min(1, dt * 25);
           e.sx += (base.sx * k - e.sx) * a; e.sy += (base.sy * k - e.sy) * a;
           e.data._btnSq = down || Math.abs(e.sx - base.sx) > 0.002; if (!e.data._btnSq) { e.sx = base.sx; e.sy = base.sy; }
         }
+        if (!down && !wasDown && (feel === 'spring' || feel === 'jelly') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { // a quick tap (down and up at once): press in and spring back
+          const k = +p.pressScale || 0.92;
+          if (feel === 'jelly') { e.sx = base.sx * (1 + (1 - k) * 1.6); e.sy = base.sy * (1 - (1 - k) * 1.2); s.spring(e, { sx: base.sx, sy: base.sy }, { stiffness: 320, damping: 9 }); }
+          else { e.sx = base.sx * k; e.sy = base.sy * k; s.spring(e, { sx: base.sx, sy: base.sy }, { feel: 'bouncy' }); }
+          if (e.ui && p.ripple !== false && e.shape && !motionOf(s).reduced) { const t0 = inp.taps.find((t) => hitTest(s, e, t.x, t.y)), q = UK.local(s, e, t0); ripples.push({ x: q.x, y: q.y, t: performance.now() / 1000, up: performance.now() / 1000 + 0.1 }); }
+        }
+        wasDown = down;
         if (p.pressColor && e.shape) { if (fill0 === undefined) fill0 = e.shape.fill; e.shape.fill = down ? p.pressColor : fill0; }
         // look disabled when it can't be used (only if something can disable it)
         if (gated()) { const off = !allowed(s) || s.time < cdUntil; if (off !== lastOff) { e.alpha = off ? +p.disabledAlpha : 1; lastOff = off; } }
+      },
+      /** Ink ripples, clipped to the button's shape. */
+      drawUI(ctx, e, s) {
+        if (!ripples.length) return;
+        const now = performance.now() / 1000, sh = e.shape, w = (sh.w || (sh.r || 20) * 2) * Math.abs(e.sx), h = (sh.h || (sh.r || 20) * 2) * Math.abs(e.sy), round = sh.type === 'circle';
+        const fill = String(sh.fill || ''), dark = /^#/.test(fill) ? (() => { const c = fill.length === 4 ? fill.slice(1).split('').map((x) => x + x).join('') : fill.slice(1, 7); const n = parseInt(c, 16); return ((n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) < 150; })() : true;
+        ctx.save(); ctx.beginPath();
+        if (round) ctx.arc(e.x, e.y, Math.min(w, h) / 2, 0, Math.PI * 2); else if (ctx.roundRect) ctx.roundRect(e.x - w / 2, e.y - h / 2, w, h, Math.min((sh.radius || 0) * Math.abs(e.sx), h / 2)); else ctx.rect(e.x - w / 2, e.y - h / 2, w, h);
+        ctx.clip();
+        const max = Math.hypot(w, h);
+        for (let i = ripples.length - 1; i >= 0; i--) {
+          const r = ripples[i], age = now - r.t, grow = 1 - Math.pow(1 - Math.min(1, age / 0.45), 3), fade = r.up ? Math.max(0, 1 - (now - Math.max(r.up, r.t + 0.15)) / 0.35) : 1;
+          if (r.up && fade <= 0) { ripples.splice(i, 1); continue; }
+          ctx.globalAlpha = 0.26 * fade; ctx.fillStyle = dark ? '#ffffff' : '#000000';
+          ctx.beginPath(); ctx.arc(r.x, r.y, 6 + grow * max, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
       },
       destroy(e, s) { if (ring) s.overlays = (s.overlays || []).filter((f) => f !== ring); },
     };
@@ -11485,6 +13323,8 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  dataValue: { cat: 'Values', label: 'Data Value', value: 'number', params: [{ ...txt('collection', 'Tasks', 'collection'), suggest: 'collections' }, opt('how', ['count', 'sum', 'average', 'min', 'max'], 'count', 'work out'), txt('field', 'amount', 'of field'), txt('filter', '', 'only where')] },
+  questInfo: { cat: 'Values', label: 'Quest Info', value: 'number', params: [{ ...txt('quest', 'The Lost Ring', 'quest (some answers ignore it)'), suggest: 'quests' }, opt('what', ['objectives done', 'objectives', 'percent done', 'is active', 'is done', 'quests done', 'quests active'], 'objectives done', 'what')] },
   invInfo: { cat: 'Values', label: 'Inventory Info', value: 'number', params: [opt('what', ['free slots', 'used slots', 'total items', 'items of type', 'equipped damage', 'equipped armour', 'crafting progress %'], 'free slots', 'what'), opt('type', Object.keys(ITEM_TYPES), 'food', 'type (items of type)')] },
   healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
@@ -12097,6 +13937,23 @@ export const LOGIC_EVENTS = {
   inventoryFull: { label: 'Inventory is full', icon: 'key' },
   recipeLearned: { label: 'Learns a recipe', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `Learns ${p.item}` : 'Learns a recipe') },
   gathered: { label: 'Gathered (Resource)', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `${p.item} gathered` : 'Gathered') },
+  questStarted: { label: 'Quest starts', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” starts` : 'A quest starts') },
+  questUpdated: { label: 'Quest progresses', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” progresses` : 'A quest progresses') },
+  questReady: { label: 'Quest ready to hand in', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” is ready to hand in` : 'A quest is ready to hand in') },
+  questCompleted: { label: 'Quest completed', icon: 'trophy', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” completed` : 'A quest is completed') },
+  questFailed: { label: 'Quest failed', icon: 'flag', params: [sug(txt('quest', '', 'quest (empty = any)'), 'quests')], say: (p) => (p.quest ? `“${p.quest}” failed` : 'A quest fails') },
+  dialogueStarted: { label: 'Dialogue starts', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Talking to ${p.dialogue}` : 'A conversation starts') },
+  dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
+  dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
+  gameFinished: { label: 'Back from a game', icon: 'gamepad', params: [txt('game', '', 'game (level name; empty = any)'), opt('result', ['any', 'won', 'lost', 'quit'], 'any', 'result')], say: (p) => `Back from ${p.game || 'a game'}${p.result !== 'any' ? ` (${p.result})` : ''}` },
+  recordAdded: { label: 'Record added', icon: 'plus', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is added${p.collection ? ' to ' + p.collection : ''}` },
+  recordChanged: { label: 'Record changed', icon: 'edit', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record changes${p.collection ? ' in ' + p.collection : ''}` },
+  recordDeleted: { label: 'Record deleted', icon: 'trash', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is deleted${p.collection ? ' from ' + p.collection : ''}` },
+  recordOpened: { label: 'Record opened', icon: 'eye', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is opened${p.collection ? ' in ' + p.collection : ''}` },
+  turnStarted: { label: 'Your turn starts', icon: 'clock', say: () => 'Your turn starts' },
+  unitsSelected: { label: 'Units selected', icon: 'player', say: () => 'Units are selected' },
+  unitArrived: { label: 'Unit arrives', icon: 'flag', params: [sug(txt('unit', '', 'unit name or tag (empty = any)'), 'tags')], say: (p) => (p.unit ? `${p.unit} arrives` : 'A unit arrives') },
+  unitDefeated: { label: 'Unit defeated', icon: 'enemy', params: [opt('team', ['any', 'yours', 'enemy'], 'any', 'team')], say: (p) => (p.team === 'any' ? 'A unit is defeated' : p.team === 'yours' ? 'One of your units is defeated' : 'An enemy unit is defeated') },
   ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
@@ -12127,6 +13984,12 @@ export const LOGIC_CONDITIONS = {
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  dataCount: { label: 'Number of records', icon: 'list', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'only where (e.g. done = no)'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(c.s.engine.data.stat(p.collection, 'count', '', p.filter, c.s.vars), p.op, +p.value || 0), say: (p) => `${p.collection}${p.filter ? ` (${p.filter})` : ''} count ${p.op} ${p.value}` },
+  recordIsOpen: { label: 'A record is open', icon: 'eye', test: (c) => !!openedRecord(c.s), say: () => 'a record is open' },
+  unitCount: { label: 'Number of units', icon: 'player', params: [opt('which', ['selected', 'yours', 'enemy', 'ready this turn'], 'selected', 'units'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(+c.s.vars[{ selected: 'selectedUnits', yours: 'unitsLeft', enemy: 'enemiesLeft', 'ready this turn': 'unitsReady' }[p.which] || 'selectedUnits'] || 0, p.op, +p.value || 0), say: (p) => `${p.which} units ${p.op} ${p.value}` },
+  isPlayerTurn: { label: 'It is your turn', icon: 'clock', test: (c) => c.s.isPlayerTurn, say: () => 'it is your turn' },
+  questIs: { label: 'Quest state', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), opt('state', ['active', 'ready', 'done', 'failed', 'available', 'locked', 'started', 'not started'], 'active', 'is')], test: (c, p) => storyCond(`quest ${p.quest} is ${p.state}`, c.s.storyEnv()), say: (p) => `“${p.quest}” is ${p.state}` },
+  storyCheck: { label: 'Story check (dialogue condition)', icon: 'sign', params: [txt('check', 'has Key and coins >= 10', 'check')], test: (c, p) => storyCond(p.check, c.s.storyEnv(c.e)), say: (p) => p.check },
   canCraft: { label: 'Can craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], test: (c, p) => c.s.canCraft(p.item, +p.times || 1), say: (p) => `can craft ${p.item}` },
   isEquipped: { label: 'Has equipped', icon: 'key', params: [sug(txt('item', '', 'item (empty = anything)'), 'items'), opt('slot', ['any', ...EQUIP_SLOTS], 'any', 'in slot')], test: (c, p) => { const eq = c.s.equipped || {}, list = p.slot && p.slot !== 'any' ? [eq[p.slot]] : Object.values(eq); return list.some((n) => n && (!p.item || String(n).toLowerCase() === String(p.item).toLowerCase())); }, say: (p) => `has ${p.item || 'something'} equipped${p.slot && p.slot !== 'any' ? ' in ' + p.slot : ''}` },
   invSpace: { label: 'Inventory space', icon: 'key', params: [opt('op', OPS6, '≥', 'free slots'), num('value', 1, 'value')], test: (c, p) => cmp(Math.min(9999, c.s.slotsFree()), p.op, +p.value || 0), say: (p) => `free slots ${p.op} ${p.value}` },
@@ -12182,6 +14045,31 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  snackbar: { cat: 'UI', label: 'Show snackbar', icon: 'info', params: [txt('text', 'Saved', 'text ({variables} work)'), txt('action', '', 'button (optional, e.g. Undo)'), txt('message', '', 'the button sends message'), num('seconds', 4, 'for (sec)')], run: (c, p) => c.s.snackbar(fillTemplate(p.text, c.s.vars), p.action, p.message ? () => c.s.send(p.message) : null, +p.seconds || 4), say: (p) => `Snackbar “${p.text}”${p.action ? ` [${p.action}]` : ''}` },
+  playGame: { cat: 'Game', label: 'Play a game (from an app)', icon: 'gamepad', params: [txt('level', '2', 'level (number or name)')], run: (c, p) => { c.s.engine.playGame(p.level); }, say: (p) => `Play the game in level ${p.level}` },
+  backToApp: { cat: 'Game', label: 'Back to the app', icon: 'home', run: (c) => { c.s.engine.backToApp(); }, say: () => 'Back to the app' },
+  dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
+  dataSet: { cat: 'Data', label: 'Change the opened record', icon: 'edit', params: [txt('field', 'done', 'field'), txt('value', 'yes', 'to ({variables} work)')], run: (c, p) => { const r = c.s.openRecord; if (!r) return; const rec = c.s.engine.data.update(r.col, r.id, { [p.field]: fillTemplate(String(p.value ?? ''), c.s.vars) }); if (rec) openRecord(c.s, r.col, rec); }, say: (p) => `Set ${p.field} of the opened record to ${p.value}` },
+  dataDelete: { cat: 'Data', label: 'Delete the opened record', icon: 'trash', run: (c) => { const r = c.s.openRecord; if (r) { c.s.engine.data.remove(r.col, r.id); openRecord(c.s, r.col, null); } }, say: () => 'Delete the opened record' },
+  dataOpen: { cat: 'Data', label: 'Open a record', icon: 'eye', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'first one where (blank = newest)'), txt('page', '', 'then go to page (optional)')], run: (c, p) => { const r = c.s.engine.data.query(p.collection, { filter: p.filter, vars: c.s.vars })[0]; openRecord(c.s, p.collection, r || null); if (r && p.page) c.s.navTo(p.page); }, say: (p) => `Open a ${p.collection} record${p.filter ? ` where ${p.filter}` : ''}` },
+  dataClear: { cat: 'Data', label: 'Clear a collection', icon: 'trash', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), opt('how', ['delete every record', 'back to the starting records'], 'delete every record', 'how')], run: (c, p) => { if (p.how === 'back to the starting records') c.s.engine.data.reset(p.collection); else c.s.engine.data.clear(p.collection); }, say: (p) => `${p.how === 'delete every record' ? 'Empty' : 'Reset'} ${p.collection}` },
+  dataToVar: { cat: 'Data', label: 'Data summary into variable', icon: 'stats', params: [sug(txt('collection', 'Expenses', 'collection'), 'collections'), opt('how', ['count', 'sum', 'average', 'min', 'max'], 'sum', 'work out'), txt('field', 'amount', 'of field'), txt('filter', '', 'only where'), sug(txt('var', 'total', 'into variable'), 'vars')], run: (c, p) => c.s.setVar(p.var, c.s.engine.data.stat(p.collection, p.how, p.field, p.filter, c.s.vars)), say: (p) => `${p.var} = ${p.how} of ${p.collection}${p.how === 'count' ? '' : '.' + p.field}` },
+  npcSay: { cat: 'Game', label: 'NPC says (bubble)', icon: 'sign', params: [sug(txt('npc', 'Villager', 'NPC (empty = this)'), 'objects'), txt('text', 'Nice day!', 'says')], run: (c, p) => { const e = p.npc ? c.s.find(p.npc) : c.e; e?.getBehavior('npc')?.say(p.text); }, say: (p) => `${p.npc || 'This NPC'} says “${p.text}”` },
+  squadSelect: { cat: 'Game', label: 'Select units', icon: 'player', params: [opt('which', ['all yours', 'none', 'by tag or name', 'next one'], 'all yours', 'select'), sug(txt('tag', 'archer', 'tag or name'), 'tags')], run: (c, p) => { const s = c.s; if (p.which === 'none') return squadSelect(s, []); if (p.which === 'next one') return s.send('select next'); squadSelect(s, squadUnits(s, 'player').filter((e) => p.which === 'all yours' || e.name === p.tag || e.has(p.tag))); }, say: (p) => (p.which === 'by tag or name' ? `Select units: ${p.tag}` : `Select ${p.which}`) },
+  squadMove: { cat: 'Game', label: 'Send units', icon: 'move', params: [opt('who', ['selected', 'all yours', 'by tag or name'], 'selected', 'units'), sug(txt('tag', 'archer', 'tag or name'), 'tags'), opt('to', ['an object', 'a position', 'attack an object'], 'an object', 'to'), sug(txt('object', 'Flag', 'object'), 'objects'), num('x', 0, 'x'), num('y', 0, 'y (z in 3D)')], run: (c, p) => {
+    const s = c.s, list = p.who === 'selected' ? [...squadOf(s).sel] : squadUnits(s, 'player').filter((e) => p.who === 'all yours' || e.name === p.tag || e.has(p.tag)); if (!list.length) return;
+    if (p.to === 'a position') { const T = unitOf(list[0]).tile, o = gridOrigin(s, T); return squadOrder(s, list, { x: Math.round((+p.x - o.x) / T) * T + o.x, y: Math.round((+p.y - o.y) / T) * T + o.y }); }
+    const t = c.s.find(p.object); if (!t) return; if (p.to === 'attack an object') return squadOrder(s, list, { attack: t });
+    const cc = cellOf(s, t); squadOrder(s, list, cc); }, say: (p) => `Send ${p.who === 'by tag or name' ? p.tag : p.who} units to ${p.to === 'a position' ? `${p.x}, ${p.y}` : (p.to === 'attack an object' ? 'attack ' : '') + p.object}` },
+  squadStop: { cat: 'Game', label: 'Stop units', icon: 'move', run: (c) => { for (const e of squadOf(c.s).sel) unitOf(e)?.stop(); }, say: () => 'Stop the selected units' },
+  endTurn: { cat: 'Game', label: 'End turn', icon: 'clock', run: (c) => { if (c.s.squad) squadEndTurn(c.s); else c.s.endTurn(); }, say: () => 'End your turn' },
+  questStart: { cat: 'Game', label: 'Start quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.startQuest(p.quest); }, say: (p) => `Start quest “${p.quest}”` },
+  questComplete: { cat: 'Game', label: 'Complete / hand in quest', icon: 'trophy', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.completeQuest(p.quest); }, say: (p) => `Complete “${p.quest}”` },
+  questFail: { cat: 'Game', label: 'Fail quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.failQuest(p.quest); }, say: (p) => `Fail “${p.quest}”` },
+  questAdvance: { cat: 'Game', label: 'Advance quest objective', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), num('amount', 1, 'by'), num('objective', 0, 'objective number (0 = next one you do by hand)')], run: (c, p) => { c.s.advanceQuest(p.quest, +p.amount || 1, +p.objective || 0); }, say: (p) => `Advance “${p.quest}”${+p.objective ? ' objective ' + p.objective : ''} +${p.amount}` },
+  questReset: { cat: 'Game', label: 'Reset quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.resetQuest(p.quest); }, say: (p) => `Reset “${p.quest}”` },
+  questTrack: { cat: 'Game', label: 'Track quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.setVar('trackedQuest', c.s.questDef(p.quest)?.name || p.quest); }, say: (p) => `Track “${p.quest}”` },
+  startDialogue: { cat: 'Game', label: 'Start dialogue', icon: 'sign', params: [sug(txt('dialogue', 'Elder', 'dialogue'), 'dialogues'), txt('section', '', 'start at section (empty = top)'), bool('wait', true, 'wait until it ends')], run: (c, p) => { const ok = c.s.startDialogue(p.dialogue, { npc: c.e, start: p.section || 'start' }); return ok && p.wait !== false ? { until: () => !c.s.dialog } : 0; }, say: (p) => `Talk: “${p.dialogue}”${p.section ? ' at ' + p.section : ''}` },
   useItemFx: { cat: 'Variables', label: 'Use item (eat, drink, equip…)', icon: 'key', params: [sug(txt('item', 'Apple', 'item'), 'items')], run: (c, p) => { c.s.useItem(p.item, c.e?.has('player') ? c.e : c.s.player()); }, say: (p) => `Use ${p.item}` },
   equipItem: { cat: 'Variables', label: 'Equip / take off', icon: 'key', params: [opt('mode', ['equip', 'take off'], 'equip', 'do'), sug(txt('item', 'Iron Sword', 'item (equip)'), 'items'), opt('slot', EQUIP_SLOTS, 'hand', 'slot (take off)')], run: (c, p) => { if (p.mode === 'take off') c.s.unequip(p.slot); else c.s.equip(p.item); }, say: (p) => (p.mode === 'take off' ? `Take off ${p.slot}` : `Equip ${p.item}`) },
   craftItem: { cat: 'Variables', label: 'Craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], run: (c, p) => { c.s.craft(p.item, +p.times || 1); }, say: (p) => `Craft ${p.item}${+p.times > 1 ? ' ×' + p.times : ''}` },
@@ -12363,6 +14251,13 @@ function evOk(type, p, q) {
     case 'statusGot': return !p.effect || p.effect === 'any' || q.effect === p.effect;
     case 'needLow': case 'needEmpty': case 'ate': return !p.need || p.need === 'any' || q.need === p.need;
     case 'crafted': case 'itemUsed': case 'recipeLearned': case 'gathered': return !p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase());
+    case 'questStarted': case 'questUpdated': case 'questReady': case 'questCompleted': case 'questFailed': return !p.quest || String(q.item).toLowerCase() === String(p.quest).trim().toLowerCase();
+    case 'dialogueStarted': case 'dialogueEnded': return !p.dialogue || String(q.item).toLowerCase() === String(p.dialogue).trim().toLowerCase() || String(q.other?.name || '').toLowerCase() === String(p.dialogue).trim().toLowerCase();
+    case 'dialogueChoice': return !p.choice || String(q.item).toLowerCase() === String(p.choice).trim().toLowerCase();
+    case 'gameFinished': return (!p.game || String(q.item).toLowerCase() === String(p.game).trim().toLowerCase()) && (!p.result || p.result === 'any' || q.result === p.result);
+    case 'recordAdded': case 'recordChanged': case 'recordDeleted': case 'recordOpened': return !p.collection || q.item === fieldKey(p.collection);
+    case 'unitArrived': return !p.unit || q.other?.name === p.unit || !!q.other?.has?.(p.unit);
+    case 'unitDefeated': return !p.team || p.team === 'any' || (p.team === 'yours') === (q.item === 'player');
     case 'equipped': return (!p.mode || p.mode === 'either' || q.mode === p.mode) && (!p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase()));
     default: return true;
   }
@@ -12389,6 +14284,17 @@ class LogicWatcher {
     s.on('inventoryFull', (item) => this.queue.push({ type: 'inventoryFull', item }));
     s.on('recipeLearned', (item) => this.queue.push({ type: 'recipeLearned', item }));
     s.on('gathered', (src, item, n) => this.queue.push({ type: 'gathered', item, value: n, other: src }));
+    for (const [ev, type] of [['questStart', 'questStarted'], ['questUpdate', 'questUpdated'], ['questReady', 'questReady'], ['questComplete', 'questCompleted'], ['questFail', 'questFailed']]) s.on(ev, (q) => this.queue.push({ type, item: q }));
+    s.on('dialogueStart', (npc, name) => this.queue.push({ type: 'dialogueStarted', item: name || npc?.name || '', other: npc }));
+    s.on('dialogueEnd', (npc, name) => this.queue.push({ type: 'dialogueEnded', item: name || npc?.name || '', other: npc }));
+    s.on('dialogueChoice', (npc, text) => this.queue.push({ type: 'dialogueChoice', item: text, other: npc }));
+    s.on('turn', () => this.queue.push({ type: 'turnStarted' }));
+    s.on('data', (col, kind) => { const type = { added: 'recordAdded', changed: 'recordChanged', deleted: 'recordDeleted' }[kind]; if (type) this.queue.push({ type, item: col }); });
+    s.on('recordOpened', (col) => this.queue.push({ type: 'recordOpened', item: col }));
+    s.on('gameFinished', (game, score, result) => this.queue.push({ type: 'gameFinished', item: game, value: score, result }));
+    s.on('unitsSelected', (L) => this.queue.push({ type: 'unitsSelected', value: L.length }));
+    s.on('unitArrived', (u) => this.queue.push({ type: 'unitArrived', other: u }));
+    s.on('unitDefeated', (u, team) => this.queue.push({ type: 'unitDefeated', item: team, other: u }));
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -12761,6 +14667,14 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
+        case 'questInfo': {
+          const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
+          if (w === 'objectives') return O.length; if (w === 'percent done') return st === 'done' ? 100 : O.length ? Math.round(dn / O.length * 100) : 0;
+          if (w === 'is active') return st === 'active' || st === 'ready' ? 1 : 0; if (w === 'is done') return st === 'done' ? 1 : 0;
+          if (w === 'quests done') return +s.vars.questsDone || 0; if (w === 'quests active') return +s.vars.questsActive || 0;
+          return dn;
+        }
         case 'invInfo': {
           switch (P('what')) {
             case 'used slots': return s.slotsUsed(); case 'total items': return Object.values(s.inventory || {}).reduce((a, v) => a + v.n, 0);
@@ -14178,6 +16092,7 @@ export class Engine {
     this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.perms = new Permissions(this); // location, camera, microphone, motion… (Ask Permission node)
     this.saves = new SaveFiles(this); // Easy Save-style save files (Save Key / Load Key nodes, Auto Save component)
+    this.data = new DataStore(this); // app data: collections of records kept on the device (Data List, Record Form)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -14279,7 +16194,7 @@ export class Engine {
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
-    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; } // Items & Recipes
+    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
     this.loadPrefs();
     this.setScene(this.factory());
     if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
@@ -14298,6 +16213,33 @@ export class Engine {
   }
 
   hasNextLevel() { return !!this.levels && this.levelIndex < this.levels.length - 1; }
+  /** A level by number (1 = first) or by its name. Returns its index, or -1. */
+  levelIndexOf(ref) {
+    if (!this.levels) return -1;
+    const n = +ref; if (String(ref).trim() !== '' && Number.isFinite(n)) return n >= 1 && n <= this.levels.length ? Math.round(n) - 1 : -1;
+    const k = String(ref || '').trim().toLowerCase(); return this.levels.findIndex((lv, i) => String(lv.levelName || (i === 0 ? lv.name : '') || '').trim().toLowerCase() === k);
+  }
+  /** Apps: open a game (another level of this project). It starts fresh (with its title screen), and Back or its end screen returns to the app. */
+  playGame(ref) {
+    const i = this.levelIndexOf(ref), s = this.scene; if (i < 0 || !s) { Log.add('warn', `There is no level “${ref}” to play`, 'App'); return false; }
+    this.appReturn = { level: this.levelIndex, vars: { ...s.vars, __inv: s.packInv() }, nav: JSON.parse(JSON.stringify(s.navStacks || {})), navVar: s.navVar, record: s.settings.recordPlays || '' };
+    this.carry = null; this.levelIndex = i; this.paused = false;
+    const g = this.factory(); g.fromApp = true; this.setScene(g);
+    this.audio.sfx('click'); return true;
+  }
+  /** Back from a game to the app that opened it: the app is where it was, with {lastScore}, {lastResult} and {lastGame}. */
+  backToApp() {
+    const R = this.appReturn, g = this.scene; if (!R || !g) return false;
+    const name = this.levels[this.levelIndex]?.levelName || `Level ${this.levelIndex + 1}`, score = Math.floor(+g.vars.score || 0), result = g.state === 'win' ? 'won' : g.state === 'over' ? 'lost' : 'quit';
+    this.appReturn = null; this.paused = false;
+    const bestKey = 'best_' + fieldKey(name), best = Math.max(+R.vars[bestKey] || 0, score);
+    this.carry = { ...R.vars, lastGame: name, lastScore: score, lastResult: result, [bestKey]: best, gamesPlayed: (+R.vars.gamesPlayed || 0) + 1 };
+    this.levelIndex = R.level;
+    const a = this.factory(); a.navStacks = R.nav; a.navVar = R.navVar; this.setScene(a);
+    if (R.record && this.data.def(R.record)) this.data.add(R.record, { game: name, score, result, date: isoDay() }); // every play goes into the app's data (Scores…)
+    a.emit('gameFinished', name, score, result);
+    return true;
+  }
   /** Jump to a level by number (1 = first), keeping variables like score. */
   goToLevel(n) {
     if (!this.levels) return;
@@ -14318,16 +16260,25 @@ export class Engine {
 
   restart(skipTitle = true) {
     if (!this.factory) return;
-    if (this.levels && this.scene?.state === 'win') { this.levelIndex = 0; this.carry = null; } // finished the last level
+    if (this.levels && this.scene?.state === 'win' && !this.scene.fromApp) { this.levelIndex = 0; this.carry = null; } // finished the last level
+    if (this.scene?.fromApp) this.carry = null; // a game inside an app starts fresh each time
     const s = this.factory();
+    if (this.scene?.fromApp && this.appReturn) s.fromApp = true; // playing again: still a game inside the app
     if (skipTitle && s.state === 'title') s.state = 'play';
     this.setScene(s);
   }
 
+  /** Apps: "dark mode toggle / on / off" messages, and the choice is remembered on the device. */
+  wireDarkMode(scene) {
+    const key = 'pocket.dark.' + (this.gameKey || 'game'), saved = store.get(key, '');
+    if (saved !== '' && (scene.vars.darkMode === undefined || scene.vars.darkMode === '')) scene.vars.darkMode = +saved;
+    scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
+    scene.on('var', (k, v) => { if (k === 'darkMode' && !this.editing) store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); });
+  }
   setScene(scene, { skipRestore = false } = {}) {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
-    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe();
+    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });
@@ -14665,14 +16616,21 @@ export class Engine {
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     this.navTick(s);
+    s.stepSprings(dt * (s.settings.motionSpeed > 0 ? +s.settings.motionSpeed : 1));
     if (this.paused !== this._wasPaused) { if (this._wasPaused !== undefined && !this.editing) s.emit('pauseChanged', !!this.paused); this._wasPaused = this.paused; } // On Paused / Resumed nodes
     this.online.update(dt);
     this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
+    if (s.snack && this.snackRect && inp.taps.length) { // the snackbar's action (Undo…)
+      const r = this.snackRect, i = inp.taps.findIndex((t) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h);
+      if (i >= 0) { inp.taps.splice(i, 1); const fn = s.snack.fn; s.snack.out = performance.now() / 1000; this.vibrate(8); this.audio.sfx('click'); try { fn?.(); } catch (err) { Log.add('error', String(err), 'Snackbar'); } }
+    }
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
       this.runUIOnly(s, dt);
       this.stepUITweens(s, dt); // menus keep animating while the game is paused
+      const t0 = inp.taps[0], ar = this.appRect;
+      if (s.fromApp && ar && t0 && t0.x >= ar.x && t0.x <= ar.x + ar.w && t0.y >= ar.y && t0.y <= ar.y + ar.h) { this.backToApp(); return; }
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
@@ -14686,7 +16644,8 @@ export class Engine {
       s.time += dt; this.stepEffects(dt);
       this.runUIOnly(s, dt);
       if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !ownScreen(s, s.state)) {
-        const t = inp.taps[0], r = this.shareRect;
+        const t = inp.taps[0], r = this.shareRect, ar = this.appRect;
+        if (s.fromApp && ar && t && t.x >= ar.x && t.x <= ar.x + ar.w && t.y >= ar.y && t.y <= ar.y + ar.h) { this.backToApp(); return; }
         if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
         else if (s.levelComplete) this.nextLevel(); else this.restart();
       }
@@ -14707,10 +16666,12 @@ export class Engine {
       for (const b of e.behaviors) { if (e.dead) break; if (!b.off) b.update?.(e, dt, s); }
     }
     s.update(dt, this);
+    if (this.quests?.length) s.questTick();
     if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
+      s.turnHoldFor = 0;
       for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
-      if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
-    }
+      if (s.state === 'play') { if (s.turnHoldFor > 0) { s.turnSide = 'enemyBusy'; s.turnDelay = s.turnHoldFor; } else s.playerTurn(); }
+    } else if (s.turnSide === 'enemyBusy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) s.playerTurn(); // enemies that walk several tiles hold the turn until they're done
     const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
     for (const e of s.entities) if (e.body) e.body.landed = 0; // landings this frame (any substep)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
@@ -14780,6 +16741,7 @@ export class Engine {
     this.updateSafe();
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.scene.syncLights();
+    setPalette(this.scene);
     this.renderer.render(this.scene, this);
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);

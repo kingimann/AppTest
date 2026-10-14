@@ -144,6 +144,68 @@ Turn on `settings.turnBased`. The player acts, then every component with a `turn
 - **Turn Button** / **Enemy Turn:** RPG-style battles (attack, heal, spell, with costs).
 - **Board Cell:** tic-tac-toe and connect-style boards against a friend or the computer.
 
+### Squads: commanding many units
+
+**Squad Unit** puts a unit on the grid that the player commands, alone or with others. This is the system for tactics games (Fire Emblem, Advance Wars) and real-time strategy (select a group, send it somewhere). Every unit has a **team**: *yours* (you command it) or *enemy* (the computer plays it).
+
+**Selecting:**
+
+- **Tap** a unit to add it to the group, and tap it again to take it out. With *Tapping a unit: picks just that one*, a tap selects only that unit.
+- **Double-tap** a unit to select all your units.
+- **Drag a box** over empty ground to select every unit inside it.
+- Selected units get a ring, and their paths and destinations are shown.
+- Messages: `select all`, `select none`, `select next`, `stop`, `end turn`. *Create → UI → Game Systems* has **Select All**, **Next Unit** and **End Turn** buttons and a **Squad Info** text.
+
+**Commanding:**
+
+- **Tap a tile** to move the whole group there. Each unit finds its own way around walls and gets its own tile, in a **formation**: group, line, column or keep their shape.
+- **Tap an enemy** to attack it. Every selected unit walks into range and attacks, and enemies in range of the selection pulse red.
+- **Drag from a unit** to a tile or an enemy to send it (and its group) there.
+- Units wait for each other in narrow corridors, find another way when blocked, and never share a tile.
+
+**Fighting:**
+
+- **Health** (or the unit's own HP, with a bar), **attack damage** and **attack range**: 1 is next to it; more is ranged, with an arrow or magic bolt.
+- Defeated enemies give **points**. A unit with the Health component uses it instead.
+
+**Turn-based** (`settings.turnBased`):
+
+- Each unit has **moves per turn** and **one attack**. A selected unit shows the tiles it can reach.
+- A tap further away walks as far as its moves allow.
+- Units that are done fade, and the turn ends by itself when all of them are done (or press End Turn).
+- Enemy units then take their turns one after another: they walk toward your nearest unit and attack it. The enemy turn waits until they finish moving.
+
+**Real-time:**
+
+- Units walk as soon as you command them.
+- *On its own* sets what a unit does by itself: **attacks foes in range** (the default), **chases foes it sees**, or **only does what it's told**.
+- A unit that is hit fights back.
+- Enemy units chase the nearest of your units within their sight.
+
+The **Unit Commander** component (optional) sets the rules:
+
+- the tap mode, and what dragging on the ground does: box select, move the camera, or nothing;
+- the formation;
+- whether to show move tiles and paths, and whether the turn ends by itself;
+- **win when every enemy is gone** and **game over when all your units are gone**;
+- the colours.
+
+Variables follow along: `selectedUnits`, `unitsLeft`, `enemiesLeft` and `unitsReady` (units that can still act this turn).
+
+| In Triggers / nodes | |
+|---|---|
+| Events | Your turn starts, Units selected, Unit arrives, Unit defeated (yours / enemy) |
+| Conditions | Number of units (selected, yours, enemy, ready this turn), It is your turn |
+| Instructions | Select units (all, none, by tag or name, next), Send units (to an object, a position, or to attack), Stop units, End turn |
+
+Turn Enemies and the Grid Hero work alongside squads: Turn Enemies go after the nearest of your units, and the Grid Hero can bump-attack enemy units. *Create → Gameplay → Squad* has Soldier, Archer, Knight, Mage, Enemy Unit, Enemy Archer and Unit Commander, and the **Squad Tactics** (turn-based) and **Squad Battle** (real-time) templates are complete games. In 3D, set the units' tile size to 1.
+
+```js
+{ type: 'gridUnit', team: 'player', tile: 40, hp: 6, damage: 2, range: 1, moves: 4, stepTime: 0.16, fight: 'attacks foes in range' }
+scene.squad.sel                 // the selected units (a Set)
+entity.getBehavior('gridUnit').order(entity, { x: 220, y: 300 });  // or { attack: enemy }
+```
+
 ## Clicker and idle games
 
 **Tap Target**, **Combo Clicker**, **Click Popup**, **Income** ("per second" into a variable), **Upgrade** (spend to raise a value, price grows), **Big Clicker** prefab, **Daily Reward**, **Shop**, **Quest Log**, `settings.saveProgress` and **Welcome Back** events for offline earnings.
@@ -154,4 +216,6 @@ A **Voxel World** object is a Minecraft-style block world. **Block Builder** giv
 
 ## Dialogue, quests and story
 
-**Dialogue** (speaker names, typewriter text, tap to continue, pause the game), **Message** signs, the *Say dialogue* instruction, the **Say** node, **Quest Log**, **Tutorial** coach marks and **Camera Sequence** cutscenes.
+**NPCs** talk with dialogue scripts (lines, choices, conditions, actions) and give **quests** (objectives, rewards, chains), shown by the **Quest Tracker** and **Quest Journal**. Everything about them is in [Quests and dialogue](#/guide/quests-dialogue).
+
+Also: the simple **Dialogue** component, **Message** signs, the *Say dialogue* instruction, the **Say** node, the **Quest Log** list, **Tutorial** coach marks and **Camera Sequence** cutscenes.

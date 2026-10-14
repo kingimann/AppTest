@@ -14,7 +14,7 @@ Plain JavaScript ES modules. No dependencies and no build step.
 
 The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
 
-- **17 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
+- **19 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
 - **A reference generated from the engine itself**, so it always matches the running version:
   - every component with all its settings, types, defaults (2D and 3D) and choices;
   - every visual-script node with its wires and settings;
@@ -568,6 +568,125 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - Inventory: `scene.addItem(name, n)` returns how many fit. Also `useItem`, `equip`, `unequip`, `equipStat('damage')`, `itemStacks(type)`, `sortInventory('type')`, `dropNear(name, n)`.
   - Crafting: `craft(item, times)`, `canCraft`, `craftMissing`, `learnRecipe`.
   - Item names match whatever their capitalisation.
+
+### Quests and dialogue
+
+- **NPC (talk & quests)** component: tap someone when close (or walk up, touch them, or send a message) to talk.
+  - It shows **!** when it has a quest for you, **?** when one is ready to hand in, and 💬 when you're close.
+  - It has a portrait, its own name, and an option to pause the game while talking.
+  - A quest giver with no dialogue offers its quests by itself (Accept / Not now), reminds you, and thanks you when you hand them in.
+- **Game Settings › Dialogues:** conversations written as simple scripts:
+  - `Name: text` lines (with `{variables}`) and narration;
+  - `* choice -> section` buttons, with `[if has Key]` and `(once)`;
+  - `# sections`, `-> jumps`, `-> END`, and `? condition -> section`;
+  - `@give / @take / @set / @add / @quest start|complete|fail|progress / @send / @sound / @learn / @end`.
+
+  Conditions can check items, quest states, variables, `first`, `chance 30`, `not`, `and` and `or`. The editor checks the script as you type, has buttons that insert each kind of line, and a **Preview** that plays the dialogue with pretend items and finished quests.
+- **Game Settings › Quests:** each quest has:
+  - an icon, a description and a **giver**;
+  - what it **unlocks after**;
+  - **objectives**: `collect Wood 5 (take)`, `kill slime 3`, `talk Villager`, `reach Old Well`, `craft`, `use`, `gather`, `var coins >= 100`, `message`, `quest`, or a custom step, in any order or one after another;
+  - **rewards**: variables, items, recipes, a follow-up quest, a message;
+  - whether you **hand it in** to the giver or it completes right away;
+  - whether it **starts by itself** or **can be done again**;
+  - and what the giver says.
+
+  The editor shows objective and reward chips and warns about names that don't exist. **Starter story** adds three quests and three dialogues.
+- **Quest Tracker** (the tracked quest or all active ones, with progress) and **Quest Journal** (details, objectives, rewards, Track; also as a popup) in *UI → Game Systems*.
+- **Create → Gameplay → Story:** Quest Giver, Villager, Shopkeeper, Signpost and Quest Spot (2D and 3D). The first one also adds the starter story.
+- A notification shows when a quest starts, is ready and completes. The variables `questsDone`, `questsActive` and `trackedQuest` follow along. Quests and conversations carry to the next level and are kept by saves.
+- **Triggers and nodes:**
+  - **Events:** quest starts, progresses, is ready or completes, quest fails, dialogue starts or ends, dialogue choice picked.
+  - **Conditions:** *Quest state*, *Story check*.
+  - **Instructions:** start, complete, fail, advance, reset or track a quest; *Start dialogue*, optionally at a section, waiting until it ends.
+  - The **Quest Info** value node.
+- **From code:** `scene.startQuest`, `questState`, `questObjectives`, `advanceQuest`, `completeQuest`, `failQuest`, `resetQuest`, `startDialogue(name, { npc, start })`, and events such as `questComplete` and `dialogueChoice`. See the [Quests and dialogue guide](docs/guide/quests-dialogue.md).
+
+### Apps (not just games)
+
+- **New Game or App › Apps:** Blank App, To-Do List, Notes, Expense Tracker and Arcade. Each one is a working app with pages, an app bar, lists, forms, search and saving.
+- **App mode** (*Game Settings › App*): opens straight on its first page, with no title screen and no pause, sound or share buttons. App projects get an **App** badge and their own filter on the home screen.
+- **Data collections** (*Game Settings › Data*):
+  - records with fields: text, long text, number, money, yes/no, date, choice, stars and icon;
+  - starting records, and ready-made collections (Tasks, Notes, Contacts, Expenses, Products);
+  - everything people add, change and delete is saved on their phone, and *Clear saved records* lets you test from the start.
+- **Data List:** rows with a title, a second line, an icon, a value on the right and a checkbox.
+  - Search, filter (`done = no`), sort (`amount (high-low)`) and headings by field (Today, Yesterday…).
+  - Tap a row to open its page, with its fields in `{record_title}`…
+  - Swipe left to delete, and it scrolls with a flick.
+- **Record Form:** one input per field, with the phone keyboard right on the field, date pickers, switches, choice buttons and stars.
+  - Required fields, then add, or edit the opened record (with Delete).
+  - Then go back, clear the form or go to a page.
+- **Data Summary:** count, sum, average, min or max of a field into a variable (`{total_text}` for money).
+- **Buttons:** new record, edit opened record, delete opened record.
+- **Triggers and nodes:**
+  - **Events:** record added, changed, deleted or opened.
+  - **Conditions:** number of records, a record is open.
+  - **Instructions:** add, change, delete or open a record, clear a collection, and data summary into a variable.
+  - The **Data Value** node.
+- **UI & Menus › App:** Data List, Checklist, Record Form, Search Bar, Add Button (+), Edit and Delete Buttons, Record Text, Total / Count Text, App Page, App Bar (light) and Spring Sheet.
+- Stretched UI can have its own top and bottom margins.
+- **From code:** `engine.data.add / rows / query / update / remove / stat / reset`.
+- **Games inside apps:** apps and games live in one project.
+  - *Levels › Add a Game to This App* copies one of your games, or a game type, in as new levels, with a Play button.
+  - **Play Game** opens a game. It keeps its own title, pause and end screens, with **‹ Back to app** (the back gesture works too).
+  - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event.
+  - *Record every game played* fills a collection (game, score, result, date) for score tables.
+  - New **Arcade** app type: three games, best scores, and a score list.
+- Data Lists, Record Forms and Data Summaries work in games too.
+- See the [Making apps guide](docs/guide/apps.md).
+
+### UI motion, light and dark mode
+
+- **Springs:** `scene.spring(obj, props, { feel: 'bouncy' })` and the eases `springGentle`, `springBouncy` and `springSnappy`.
+- **Buttons** squash and spring back with an ink ripple (*Feel*: spring, squash, jelly or none).
+- **Page transitions:** push (iOS), shared axis, fade through, spring pop and sheet. *Stagger* brings a page's children in one after another.
+- **Data Lists:** rows stagger in and glide when the order changes, with a press highlight, rubber-band ends, a fading scroll bar, ticks that pop, and swipe-delete with an **Undo snackbar**.
+- **Record Forms:** fields come in one by one; focus glow, sliding switches and choices, stars that fill, and a shake for a missing field.
+- **Spring Sheet:** a Bottom Sheet that springs up, with a drag handle, half and full stops, and flick to close.
+- **Theme colours** (`@bg`, `@card`, `@text`, `@accent`…) follow **light and dark mode**. The **@** button in every colour box picks one. *Game Settings › Theme & Dark Mode* chooses light, dark or follow the phone, and the accent colour.
+- The message `dark mode toggle` (or the variable `darkMode`) switches it while the app runs, and the phone remembers the choice. Every app template has a 🌙 button.
+- *Game Settings › Motion:* animation speed and **Reduce motion** (follows the phone's setting by default).
+- **Snackbars:** the *Show snackbar* instruction, or `scene.snackbar(text, 'Undo', fn)`.
+
+### Squads: select and move many units (tactics and strategy)
+
+- **Squad Unit** component: units on a grid that you command, on your team or the enemy's.
+- **Select:**
+  - tap units to add them to the group (tap again to remove);
+  - double-tap to select all;
+  - drag a box over the ground to select every unit inside it;
+  - or use the **Select All / Next Unit / End Turn** buttons (messages `select all`, `select none`, `select next`, `stop`, `end turn`).
+- **Highlights:** selection rings, health bars, the tiles each unit can reach (turn-based), enemies in range pulsing red, dashed paths with destinations, tap markers, and arrows or magic bolts for ranged attacks.
+- **Move:**
+  - tap a tile and the whole group walks there in formation (group, line, column or keep their shape), each on its own tile, finding its way around walls and waiting for each other in corridors;
+  - tap an enemy and they all attack it;
+  - or drag from a unit to send it.
+- **Turn-based:**
+  - moves per turn and one attack per unit;
+  - finished units fade, and the turn ends by itself (or with End Turn);
+  - enemy units then move one after another toward your nearest unit, and the enemy turn waits for them.
+- **Real-time:** units attack foes in range on their own, chase them, or only do what they're told. Units fight back when hit, and enemy units hunt yours.
+- **Unit Commander:** tap mode; dragging draws a box or moves the camera; formation; highlights; auto end turn; win / lose rules; colours.
+- **Variables:** `selectedUnits`, `unitsLeft`, `enemiesLeft`, `unitsReady`.
+- **Triggers and nodes:**
+  - **Events:** your turn starts, units selected, unit arrives, unit defeated.
+  - **Conditions:** number of units, it is your turn.
+  - **Instructions:** select units, send units (to an object, a position, or to attack), stop units, end turn.
+- **Create → Gameplay → Squad:** Soldier, Archer, Knight, Mage, Enemy Unit, Enemy Archer, Unit Commander (2D and 3D).
+- **New templates:** **Squad Tactics** (turn-based) and **Squad Battle** (real-time).
+- In 3D the floor no longer blocks grid movement; only things that rise above the walker's feet do.
+
+### NPCs: moving, chatting, trading and gifts
+
+- **Moving:** stand still, wander around, patrol a route (object names or x,y points), or follow the player. They stop to talk, can stop when you come close, and turn to face you.
+- **Chatter:** random lines in a speech bubble when you come close or every few seconds, and the **NPC says** instruction.
+- **Shop:**
+  - *Sells* (`Item | price | amount`) and *Buys from you* add **Buy** and **Sell** to the conversation, with "not enough coins" and any money variable;
+  - *Likes these gifts* adds **Give a gift**, which raises friendship (`friend_Name`, `my.friendship` in dialogue, ♥ on the name tag).
+- **Dialogues:** an NPC's own dialogue can jump to `-> shop`, `-> sell`, `-> gift` or `-> menu`.
+- **Name tags**, and **portraits per speaker** in the dialogue box.
+- **New presets:** Merchant, Wandering Villager, Patrol Guard, Companion.
 
 ### Grid movement (Grid Hero and Turn Enemy)
 

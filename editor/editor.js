@@ -1,10 +1,10 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
+import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
-const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
+const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
@@ -15,6 +15,8 @@ import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './l
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
+import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
+import { initData, dataEditor, ensureCollection } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
@@ -90,6 +92,11 @@ let root = null, project = null, projectId = null, selectedId = null, levelIdx =
 // Items & Recipes editors (Game Settings) work on the whole game
 queueMicrotask(() => initItems({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
   stations: () => levelList().flatMap((lv) => lv.entities || []).flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'craftingStation').map((b) => b.station)).filter(Boolean) }));
+// App Data (Game Settings › Data) works on the whole game too
+queueMicrotask(() => initData({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m) }));
+// Quests & Dialogues editors (Game Settings) also work on the whole game
+queueMicrotask(() => initStory({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
+  objects: (npcs) => { const all = levelList().flatMap((lv) => lv.entities || []).filter((e) => !e.template); return npcs ? all.flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'npc' || b.type === 'dialogue').map((b) => ({ name: e.name, dialogue: b.dialogue || '' }))) : [...new Set(all.flatMap((e) => [e.name, ...(e.behaviors || []).filter((b) => b.type === 'npc' && b.talkName).map((b) => b.talkName)]).filter(Boolean))]; } }));
 let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
@@ -240,6 +247,42 @@ function addLevel(duplicate, mode) {
   setLevel(levelList().length - 1);
   toast(`Added ${lv.levelName}`);
 }
+/** Put a whole game (a template or one of your projects) into this project as new levels: apps open it with Play Game. */
+function addGameToProject(json, name) {
+  const g = clone(json), lvls = [g, ...(g.levels || [])], base = (name || g.name || 'Game').trim(), first = levelList().length + 1;
+  lvls.forEach((lv, k) => {
+    if (k === 0) { delete lv.levels; delete lv.version; delete lv.name; for (const key of ['items', 'recipes', 'quests', 'dialogues', 'collections', 'sounds', 'customActions', 'customConditions']) delete lv[key]; }
+    lv.mode ||= g.mode || '2d';
+    lv.levelName = lvls.length > 1 ? `${base} ${k + 1}` : base;
+    if (lv.settings?.app) delete lv.settings.app;
+    const ids = {}; for (const e of lv.entities || []) { const n = uid(); ids[e.id] = n; e.id = n; }
+    for (const e of lv.entities || []) if (e.parent && ids[e.parent]) e.parent = ids[e.parent];
+    addSceneEssentials(lv, lv.mode);
+    (root.levels ||= []).push(normalize(lv));
+  });
+  // what the game needs from the whole project: items, recipes, quests, dialogues, data, sounds, My Instructions
+  const same = (a, b, key) => String(a[key] ?? '').toLowerCase() === String(b[key] ?? '').toLowerCase();
+  for (const [k, key] of [['items', 'name'], ['recipes', 'result'], ['quests', 'name'], ['dialogues', 'name'], ['collections', 'name'], ['customActions', 'name'], ['customConditions', 'name']]) for (const x of json[k] || []) { const L = (root[k] ||= []); if (!L.some((y) => same(y, x, key))) L.push(clone(x)); }
+  if (json.sounds) { root.sounds = { ...json.sounds, ...(root.sounds || {}) }; syncSoundNames(); }
+  // an app gets a button that opens it
+  if (root.settings?.app && project.settings?.app !== false && levelIdx === 0) {
+    const n = project.entities.filter((e) => (e.behaviors || []).some((b) => b.action === 'play game')).length;
+    project.entities.push({ id: uid(), name: `Play ${base}`, ui: true, anchor: 'center', x: 0, y: -60 + n * 66, layer: 3, shape: { type: 'rect', w: 300, h: 56, radius: 16, fill: '#6366f1' }, text: { value: `▶ Play ${base}`, size: 18, color: '#ffffff', weight: '800' }, behaviors: [{ type: 'button', action: 'play game', value: base, amount: 1, sound: 'click' }] });
+  }
+  pushHistory(); saveSoon(); rebuild(); refreshAll();
+  toast(`Added “${base}” as level ${first}${lvls.length > 1 ? `–${first + lvls.length - 1}` : ''}${root.settings?.app ? ' with a Play button' : ''}`);
+}
+/** Pick a game to add: a game type, or one of your own games. */
+function openAddGameDialog() {
+  const mine = Object.entries(loadProjects()).filter(([id, p]) => id !== projectId && !p.json.settings?.app).sort((a, b) => b[1].updated - a[1].updated);
+  const games = templateInfo.filter((t) => t.kind !== 'app' && !t.key.startsWith('empty'));
+  openDialog('Add a Game', [
+    h('p', { class: 'desc' }, root.settings?.app ? 'The game becomes part of this app (new levels). A Play button opens it; when it ends, or you go Back, you are back in the app, with {lastScore} and {lastResult}.' : 'The game is added as new levels of this project. Open it with a Play Game button or instruction (and come back with Back to App).'),
+    mine.length ? [h('h4', { class: 'tl-h' }, icon('folder'), 'My games'), h('div', { class: 'it-list' }, mine.map(([id, pr]) => h('button', { class: 'it-row', onclick: () => { closeLayer(); addGameToProject(pr.json, pr.name); } }, modeBadge(pr.json), h('span', { class: 'it-t' }, h('b', {}, pr.name), h('small', {}, `${[pr.json, ...(pr.json.levels || [])].length} level(s)`)), icon('plus'))))] : null,
+    h('h4', { class: 'tl-h' }, icon('gamepad'), 'Game types'),
+    h('div', { class: 'it-list' }, games.map((t) => h('button', { class: 'it-row', onclick: () => { closeLayer(); addGameToProject(templates[t.key], t.title); } }, modeBadge(templates[t.key]), h('span', { class: 'it-t' }, h('b', {}, t.title), h('small', {}, t.blurb)), icon('plus')))),
+  ].flat().filter(Boolean));
+}
 function deleteLevel() {
   const list = levelList();
   if (list.length < 2) { toast('A game needs at least one level'); return; }
@@ -273,6 +316,7 @@ function openLevelMenu() {
     { icon: 'grid', label: 'New 2D Level', fn: () => addLevel(false, '2d') },
     { icon: 'cube', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
     { icon: 'copy', label: 'Duplicate This Level', fn: () => addLevel(true) },
+    { icon: 'gamepad', label: root.settings?.app ? 'Add a Game to This App…' : 'Add a Game as New Levels…', fn: openAddGameDialog },
     { icon: 'edit', label: 'Rename Level…', fn: () => { const n = prompt('Level name', levelName(project, levelIdx)); if (n) { project.levelName = n; changed(); refreshAll(); } } },
     levelIdx > 1 && { icon: 'upload', label: 'Move Earlier', fn: () => moveLevel(-1) },
     levelIdx > 0 && levelIdx < list.length - 1 && { icon: 'download', label: 'Move Later', fn: () => moveLevel(1) },
@@ -2285,9 +2329,18 @@ function control(target, path, spec) {
         const col = h('input', { type: 'color', value: norm(val), oninput: (e) => { cb.checked = true; set(e.target.value); } });
         el = h('div', { class: 'pair' }, cb, col);
       } else el = h('input', { type: 'color', value: norm(val), oninput: (e) => set(e.target.value), onchange: (e) => rememberColor(e.target.value) });
+      // theme colours (@bg, @card…): follow the app's light / dark mode
+      const TL = { bg: 'Background', card: 'Cards', text: 'Text', sub: 'Second text', line: 'Lines', field: 'Fields', bar: 'Bars', accent: 'Accent', onAccent: 'On accent', danger: 'Danger', good: 'Good', shadow: 'Shadow', dim: 'Dim' };
+      const tokBtn = h('button', { type: 'button', class: 'csw tokbtn', title: 'Use a theme colour (follows light / dark mode)', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Theme colours (light / dark)' }, ...THEME_TOKENS.map((t) => ({ icon: 'sun', label: `${TL[t] || t}  @${t}`, fn: () => { set('@' + t); renderInspector(); } }))]) }, '@');
+      if (typeof val === 'string' && val.startsWith('@')) {
+        const t = val.slice(1);
+        el = h('div', { class: 'pair tokval' }, h('span', { class: 'tokchip' }, h('i', { style: `background:${APP_PALETTES.light[t] || '#888'}` }), h('i', { style: `background:${APP_PALETTES.dark[t] || '#888'}` }), `${TL[t] || t} (theme)`), tokBtn,
+          h('button', { type: 'button', class: 'csw', title: 'Use a fixed colour instead', onclick: () => { set(APP_PALETTES.light[t] && /^#/.test(APP_PALETTES.light[t]) ? APP_PALETTES.light[t] : '#ffffff'); renderInspector(); } }, '✕'));
+        break;
+      }
       // Odin-style color palette: recently used colors, one tap to reuse
       const sw = recentColors.slice(0, 8).map((c) => h('button', { type: 'button', class: 'csw', style: `background:${c}`, title: c, onclick: () => { set(c); renderInspector(); } }));
-      if (sw.length) el = h('div', { class: 'color-wrap' }, el, h('div', { class: 'csws' }, sw));
+      el = h('div', { class: 'color-wrap' }, h('div', { class: 'pair' }, el, tokBtn), sw.length ? h('div', { class: 'csws' }, sw) : null);
       break;
     }
     case 'range': {
@@ -2475,6 +2528,9 @@ function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
   if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'items') return uniq([...(root.items || []).map((d) => d.name), ...all.flatMap((e) => (e.behaviors || []).filter((b) => ['inventoryItem', 'resource'].includes(b.type)).map((b) => b.item))]);
+  if (kind === 'quests') return uniq((root.quests || []).map((q) => q.name));
+  if (kind === 'collections') return uniq((root.collections || []).map((c) => c.name));
+  if (kind === 'dialogues') return uniq((root.dialogues || []).map((d) => d.name));
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
@@ -3081,6 +3137,8 @@ function renderInspector() {
       sizeRow(j),
       C('stretch', { label: inParent ? 'Stretch inside parent' : 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill']], def: 'none', structure: true }),
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
+      j.stretch && j.stretch !== 'none' && C('marginTop', { label: 'Top margin (blank = Margin)', type: 'number', def: '', step: 2 }),
+      j.stretch && j.stretch !== 'none' && C('marginBottom', { label: 'Bottom margin (blank = Margin)', type: 'number', def: '', step: 2 }),
       !inParent && C('ignoreSafe', { label: 'Ignore safe area (go under the notch)', type: 'bool', def: false, structure: true }),
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       !inParent && !j.ignoreSafe && !(j.behaviors || []).some((b) => ['uiBottomNav', 'uiAppBar', 'uiSideBar'].includes(b.type)) && C('ignoreBars', { label: 'Go under the nav bars', type: 'bool', def: false, structure: true, infoText: 'Normally UI stays clear of a Bottom Nav, App Bar or Icon Rail. Turn this on for backgrounds that should fill the whole screen.' }),
@@ -3561,6 +3619,8 @@ function renderSceneSettings(box) {
   box.append(comp('Inventory', [inventorySettings()], { icon: 'key', key: 's-inv' }));
   box.append(comp('Items', [itemsEditor()], { icon: 'gem', key: 's-items' }));
   box.append(comp('Recipes', [recipesEditor()], { icon: 'list', key: 's-recipes' }));
+  box.append(comp('Quests', [questsEditor()], { icon: 'flag', key: 's-quests' }));
+  box.append(comp('Dialogues', [dialoguesEditor()], { icon: 'sign', key: 's-dialogues' }));
   box.append(comp('Lighting Presets', [
     h('p', { class: 'desc' }, 'One tap sets the whole mood. Change it while playing with the Lighting Preset node (with a fade).'),
     h('div', { class: 'lp-grid' }, Object.entries(LIGHT_PRESETS).map(([name, pr]) => h('button', { class: 'lp-btn', style: `--a:${threeD ? pr.d3.bg : pr.d2[1]};--b:${threeD ? pr.d3.color : mixHex('#000000', '#ffffff', pr.d2[0])}`, onclick: () => applyLightingPreset(name) }, h('i'), name))),
@@ -3594,6 +3654,27 @@ function renderSceneSettings(box) {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openSaveData() }, icon('folder'), 'Save Data…')),
     ], !!(game.settings?.saveEncrypt || game.settings?.saveBackup)),
   ], { icon: 'save', key: 's-save' }));
+  box.append(comp('App', [
+    C('settings.app', { label: 'This is an app, not a game', type: 'bool', def: false, structure: true }),
+    h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
+    h('p', { class: 'desc' }, 'Apps can hold games: add one as new levels, and a Play Game button opens it. The game keeps its own title, pause and end screens, with a “Back to app” button.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),
+    C('settings.recordPlays', { label: 'Record every game played in collection (blank = don’t)', type: 'text', def: '', infoText: 'Each play adds a record with game, score, result (won / lost / quit) and date. Make the collection in Data below.' }),
+  ], { icon: 'phone', key: 's-app' }));
+  box.append(comp('Theme & Dark Mode', [
+    C('settings.appTheme', { label: 'Look', type: 'select', options: [['light', 'Light'], ['dark', 'Dark'], ['follow the phone', 'Follow the phone (light or dark)']], def: 'light' }),
+    C('settings.appAccent', { label: 'Accent colour (blank = blue)', type: 'color', def: '', optional: true }),
+    h('p', { class: 'desc' }, 'Colours written as theme colours (the @ button next to any colour: Background, Cards, Text, Accent…) follow light and dark mode. The variable darkMode (1 / 0) switches it while playing: bind a Toggle to it for a Dark mode switch.'),
+    h('div', { class: 'tok-prev' }, ['light', 'dark'].map((m) => h('div', { class: 'tp ' + m, style: `background:${APP_PALETTES[m].bg};color:${APP_PALETTES[m].text}` }, h('b', {}, m === 'light' ? 'Light' : 'Dark'),
+      h('div', { style: `background:${APP_PALETTES[m].card};border-radius:10px;padding:8px 10px;margin-top:6px` }, 'A card', h('small', { style: `display:block;color:${APP_PALETTES[m].sub}` }, 'Second line')),
+      h('span', { style: `display:inline-block;margin-top:8px;padding:4px 12px;border-radius:99px;background:${project.settings?.appAccent || APP_PALETTES[m].accent};color:${APP_PALETTES[m].onAccent}` }, 'Accent')))),
+  ], { icon: 'sun', key: 's-theme' }));
+  box.append(comp('Motion', [
+    C('settings.motionSpeed', { label: 'Animation speed (1 = normal, 2 = twice as fast)', type: 'number', def: 1, step: 0.1, range: [0.25, 3] }),
+    C('settings.reduceMotion', { label: 'Reduce motion', type: 'select', options: [['follow the phone', 'Follow the phone (Reduce Motion setting)'], ['always', 'Always (quick fades only)'], ['never', 'Never']], def: 'follow the phone' }),
+    h('p', { class: 'desc' }, 'Page transitions, staggered lists, button springs, ripples, switches and sheets all follow these. People who turn on Reduce Motion on their phone get quick fades instead of movement.'),
+  ], { icon: 'star', key: 's-motion' }));
+  box.append(comp('Data', [dataEditor()], { icon: 'list', key: 's-data' }));
   box.append(comp('Start Screen', [
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
     C('settings.title', { label: 'Title', type: 'text', def: '' }),
@@ -4137,6 +4218,23 @@ const PREFABS_2D = [
   { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', shape: { type: 'emoji', emoji: '🧰', w: 48, h: 48 }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 120, openIcon: '📭' }] } },
   { icon: 'gem', label: 'Breakable Crate', group: 'Crafting', items: true, desc: 'Has health; drops loot when broken', props: { name: 'Crate', tags: ['enemy'], shape: { type: 'emoji', emoji: '📦', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'health', hp: 3, hurtBy: 'bullet', invuln: 0.2, knockback: 0 }, { type: 'loot', loot: 'Wood 1-3\nApple 1 30%', when: 'destroyed', into: 'onto the ground' }] } },
   { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', shape: { type: 'emoji', emoji: '🪵', w: 32, h: 32 }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
+  { icon: 'sign', label: 'Quest Giver', group: 'Story', story: true, desc: 'An NPC that offers quests (! and ?) and takes them back', props: { name: 'Elder', shape: { type: 'emoji', emoji: '🧙', w: 48, h: 48 }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧙' }] } },
+  { icon: 'sign', label: 'Villager', group: 'Story', story: true, desc: 'Tap to talk: a dialogue with choices', props: { name: 'Villager', shape: { type: 'emoji', emoji: '🧑‍🌾', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Villager', portrait: '🧑‍🌾' }] } },
+  { icon: 'sign', label: 'Shopkeeper', group: 'Story', story: true, desc: 'Sells a potion through dialogue choices', props: { name: 'Shopkeeper', shape: { type: 'emoji', emoji: '🧔', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Shopkeeper', portrait: '🧔' }] }, vars: { coins: 20 } },
+  { icon: 'sign', label: 'Signpost', group: 'Story', story: true, desc: 'Read it when you walk up', props: { name: 'Signpost', shape: { type: 'emoji', emoji: '🪧', w: 40, h: 40 }, behaviors: [{ type: 'npc', dialogue: 'Signpost', start: 'player comes close', range: 60, markers: false, bubble: false, pause: false }] } },
+  { icon: 'flag', label: 'Quest Spot', group: 'Story', story: true, desc: 'A place to reach for a quest (“reach Old Well”)', props: { name: 'Old Well', shape: { type: 'emoji', emoji: '🪣', w: 44, h: 44 }, body: { type: 'static' } } },
+  { icon: 'coin', label: 'Merchant', group: 'Story', desc: 'Buys and sells: talk to trade', props: { name: 'Merchant', shape: { type: 'emoji', emoji: '🧑‍💼', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧑‍💼', nameTag: true, greeting: 'Welcome, traveller!', sells: 'Health Potion | 10\nApple | 3 | 2\nTorch | 5', buys: 'Wood | 2\nGem | 30', barks: 'Fresh potions!\nBest prices in town!' }] }, vars: { coins: 30 }, items: true },
+  { icon: 'sign', label: 'Wandering Villager', group: 'Story', desc: 'Strolls around, chats as you pass, likes gifts', props: { name: 'Villager', shape: { type: 'emoji', emoji: '👩‍🌾', w: 40, h: 40 }, body: { type: 'kinematic' }, behaviors: [{ type: 'npc', portrait: '👩‍🌾', moveMode: 'wanders around', nameTag: true, likes: 'Apple, Berries', barks: 'Lovely weather!\nHave you seen my cat?\nThe Elder knows everything.' }] } },
+  { icon: 'enemy', label: 'Patrol Guard', group: 'Story', desc: 'Walks a route and calls out', props: { name: 'Guard', shape: { type: 'emoji', emoji: '💂', w: 40, h: 40 }, body: { type: 'kinematic' }, behaviors: [{ type: 'npc', portrait: '💂', moveMode: 'patrols a route', route: '0,0\n160,0', barks: 'Halt! Who goes there?\nAll quiet.', barkWhen: 'every few seconds', barkEvery: 7, greeting: 'Stay out of trouble.' }] }, note: 'Set its Route (Moving): object names or x,y points, one per line.' },
+  { icon: 'heart', label: 'Companion', group: 'Story', desc: 'Follows you around', props: { name: 'Dog', shape: { type: 'emoji', emoji: '🐕', w: 34, h: 34 }, behaviors: [{ type: 'npc', portrait: '🐕', moveMode: 'follows the player', markers: false, greeting: 'Woof!', barks: 'Woof!\n*wags tail*', range: 50 }] } },
+  // squads (tactics and strategy)
+  { icon: 'player', label: 'Soldier', group: 'Squad', desc: 'Your unit: tap to select, tap a tile to move', props: { name: 'Soldier', layer: 3, shape: { type: 'emoji', emoji: '🗡️', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', hp: 6, damage: 2, moves: 4 }] } },
+  { icon: 'crosshair', label: 'Archer', group: 'Squad', desc: 'Your unit: shoots 3 tiles away', props: { name: 'Archer', layer: 3, shape: { type: 'emoji', emoji: '🏹', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', hp: 4, damage: 2, range: 3, moves: 3 }] } },
+  { icon: 'player', label: 'Knight', group: 'Squad', desc: 'Your unit: tough and strong, slower', props: { name: 'Knight', layer: 3, shape: { type: 'emoji', emoji: '🛡️', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', hp: 10, damage: 3, moves: 3 }] } },
+  { icon: 'star', label: 'Mage', group: 'Squad', desc: 'Your unit: magic bolts, far but fragile', props: { name: 'Mage', layer: 3, shape: { type: 'emoji', emoji: '🧙', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', hp: 3, damage: 3, range: 4, moves: 3, shot: 'magic bolt' }] } },
+  { icon: 'enemy', label: 'Enemy Unit', group: 'Squad', desc: 'The computer moves it toward your units', props: { name: 'Goblin', layer: 3, shape: { type: 'emoji', emoji: '👺', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', team: 'enemy', hp: 4, damage: 2, moves: 4, sight: 7, points: 20 }] } },
+  { icon: 'enemy', label: 'Enemy Archer', group: 'Squad', desc: 'Shoots your units from afar', props: { name: 'Goblin Archer', layer: 3, shape: { type: 'emoji', emoji: '🧝', w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', team: 'enemy', hp: 3, damage: 1, range: 3, moves: 3, sight: 7, points: 20 }] } },
+  { icon: 'flag', label: 'Unit Commander', group: 'Squad', desc: 'How you command units: selection, formation, turns', props: { name: 'Unit Commander', behaviors: [{ type: 'squadControl' }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -4195,6 +4293,15 @@ const PREFABS_3D = [
   { icon: 'gem', label: 'Iron Rock', group: 'Crafting', items: true, desc: 'Needs a Pickaxe: gives Iron Ore', props: { name: 'Iron Rock', y: 0.5, mesh: { geometry: 'gem', r: 0.8, color: '#8d6e63' }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Iron Ore', hits: 5, tool: 'Pickaxe', bonus: 'Gem 1 10%', respawn: 60 }] } },
   { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', y: 0.4, mesh: { geometry: 'box', w: 1, h: 0.8, d: 0.7, color: '#a1887f' }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 3.5 }] } },
   { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', y: 0.3, mesh: { geometry: 'box', w: 0.5, h: 0.3, d: 0.3, color: '#8d6e63' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
+  { icon: 'coin', label: 'Merchant', group: 'Story', desc: 'Buys and sells: talk to trade', props: { name: 'Merchant', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#ffb300' }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧑‍💼', nameTag: true, range: 3, sells: 'Health Potion | 10\nApple | 3 | 2', buys: 'Wood | 2' }] }, vars: { coins: 30 }, items: true },
+  { icon: 'sign', label: 'Wandering Villager', group: 'Story', desc: 'Strolls around and chats as you pass', props: { name: 'Villager', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#ec407a' }, body: { type: 'kinematic' }, behaviors: [{ type: 'npc', portrait: '👩‍🌾', range: 3, moveMode: 'wanders around', nameTag: true, barks: 'Lovely weather!\nHave you seen my cat?' }] } },
+  { icon: 'player', label: 'Soldier', group: 'Squad', desc: 'Your unit: tap to select, tap the ground to move', props: { name: 'Soldier', y: 0.5, mesh: { geometry: 'capsule', r: 0.3, h: 1, color: '#4fc3f7' }, behaviors: [{ type: 'gridUnit', tile: 1, hp: 6, damage: 2, moves: 4 }] } },
+  { icon: 'crosshair', label: 'Archer', group: 'Squad', desc: 'Your unit: shoots 3 tiles away', props: { name: 'Archer', y: 0.5, mesh: { geometry: 'capsule', r: 0.3, h: 1, color: '#81c784' }, behaviors: [{ type: 'gridUnit', tile: 1, hp: 4, damage: 2, range: 3, moves: 3 }] } },
+  { icon: 'enemy', label: 'Enemy Unit', group: 'Squad', desc: 'The computer moves it toward your units', props: { name: 'Orc', y: 0.5, mesh: { geometry: 'box', w: 0.7, h: 1, d: 0.7, color: '#e53935' }, behaviors: [{ type: 'gridUnit', tile: 1, team: 'enemy', hp: 4, damage: 2, moves: 4, sight: 7, points: 20 }] } },
+  { icon: 'flag', label: 'Unit Commander', group: 'Squad', desc: 'How you command units: selection, formation, turns', props: { name: 'Unit Commander', behaviors: [{ type: 'squadControl' }] } },
+  { icon: 'sign', label: 'Quest Giver', group: 'Story', story: true, desc: 'An NPC that offers quests (! and ?) and takes them back', props: { name: 'Elder', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#7e57c2' }, body: { type: 'static' }, behaviors: [{ type: 'npc', portrait: '🧙', range: 3 }] } },
+  { icon: 'sign', label: 'Villager', group: 'Story', story: true, desc: 'Tap to talk: a dialogue with choices', props: { name: 'Villager', y: 0.9, mesh: { geometry: 'capsule', r: 0.4, h: 1.8, color: '#8bc34a' }, body: { type: 'static' }, behaviors: [{ type: 'npc', dialogue: 'Villager', portrait: '🧑‍🌾', range: 3 }] } },
+  { icon: 'sign', label: 'Signpost', group: 'Story', story: true, desc: 'Read it when you walk up', props: { name: 'Signpost', y: 0.6, mesh: { geometry: 'box', w: 0.8, h: 1.2, d: 0.15, color: '#a1887f' }, behaviors: [{ type: 'npc', dialogue: 'Signpost', start: 'player comes close', range: 2, markers: false, bubble: false, pause: false }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -4399,6 +4506,12 @@ function addPrefab(def, at) {
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.items) ensureStarterItems(); // crafting presets: an empty game gets starter items and recipes
+  if (def.story) ensureStarterStory(); // NPC presets and quest UI: an empty game gets the starter story
+  if (def.data) { // app widgets: the game needs a data collection, and the widget points at one that exists
+    const name = ensureCollection(def.data === true ? 'Tasks' : def.data), have = new Set((root.collections || []).map((c) => c.name.toLowerCase()));
+    def = { ...def, props: JSON.parse(JSON.stringify(def.props)) };
+    for (const b of def.props.behaviors || []) if (b.collection && !have.has(String(b.collection).toLowerCase())) b.collection = name;
+  }
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {
@@ -4676,7 +4789,7 @@ function openDialog(title, kids) {
 function openFileMenu() {
   popMenu($('#fileBtn'), [
     { icon: 'home', label: 'Home', fn: showHome },
-    { icon: 'newfile', label: 'New Game…', fn: openNewDialog },
+    { icon: 'newfile', label: 'New Game or App…', fn: openNewDialog },
     { icon: 'folder', label: 'Open Project…', fn: openProjectsDialog },
     { icon: 'undo', label: 'Undo', k: '2-finger tap', fn: () => undoRedo(-1) },
     { icon: 'redo', label: 'Redo', k: '3-finger tap', fn: () => undoRedo(1) },
@@ -4712,16 +4825,17 @@ function openFileMenu() {
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
 /** Game types to start from, split into 2D and 3D (Blank first) with a switch between them. */
 function typeCards(onPick) {
-  let mode = store.get('pocket.editor.newMode', '2d') === '3d' ? '3d' : '2d';
+  let mode = ['3d', 'app'].includes(store.get('pocket.editor.newMode', '2d')) ? store.get('pocket.editor.newMode', '2d') : '2d';
+  const kindOf = (t) => (t.kind === 'app' ? 'app' : templates[t.key].mode === '3d' ? '3d' : '2d');
   const wrap = h('div', { class: 'type-wrap' });
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
   const tplOrient = (t) => templates[t.key].settings?.orientation;
   const draw = () => {
-    const list = templateInfo.filter((t) => templates[t.key].mode === mode).sort((a, b) => (b.key.startsWith('empty') ? 1 : 0) - (a.key.startsWith('empty') ? 1 : 0));
+    const list = templateInfo.filter((t) => kindOf(t) === mode).sort((a, b) => (/^(empty|app-blank)/.test(b.key) ? 1 : 0) - (/^(empty|app-blank)/.test(a.key) ? 1 : 0));
     wrap.replaceChildren(
-      h('div', { class: 'seg' }, ['2d', '3d'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
-        icon(m === '3d' ? 'cube' : 'grid'), `${m.toUpperCase()} games`, h('small', {}, String(templateInfo.filter((t) => templates[t.key].mode === m).length))))),
-      h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l))),
+      h('div', { class: 'seg' }, ['2d', '3d', 'app'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
+        icon(m === '3d' ? 'cube' : m === 'app' ? 'phone' : 'grid'), m === 'app' ? 'Apps' : `${m.toUpperCase()} games`.replace(' games', window.innerWidth < 520 ? '' : ' games'), h('small', {}, String(templateInfo.filter((t) => kindOf(t) === m).length))))),
+      ...[mode !== 'app' && h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l)))].filter(Boolean),
       h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t, t.key.startsWith('empty') ? orient() : null) },
         h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube'),
           (t.key.startsWith('empty') ? orient() : tplOrient(t)) && h('span', { class: 'pv-or ' + (t.key.startsWith('empty') ? orient() : tplOrient(t)) }, (t.key.startsWith('empty') ? orient() : tplOrient(t)) === 'landscape' ? 'Landscape' : 'Portrait')),
@@ -4735,24 +4849,25 @@ function projectList(all, row) {
   let f = store.get('pocket.editor.projFilter', 'all');
   const wrap = h('div');
   const draw = () => {
-    const n = (m) => all.filter(([, p]) => (p.json.mode === '3d' ? '3d' : '2d') === m).length, shown = all.filter(([, p]) => f === 'all' || (p.json.mode === '3d' ? '3d' : '2d') === f);
-    wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')]].map(([k, l, c]) =>
+    const kind = (j) => (j.settings?.app ? 'app' : j.mode === '3d' ? '3d' : '2d');
+    const n = (m) => all.filter(([, p]) => kind(p.json) === m).length, shown = all.filter(([, p]) => f === 'all' || kind(p.json) === f);
+    wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].map(([k, l, c]) =>
       h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))),
-      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, `No ${f.toUpperCase()} games yet.`));
+      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`));
   };
   draw();
   return wrap;
 }
-const modeBadge = (json) => h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D');
+const modeBadge = (json) => (json.settings?.app ? h('span', { class: 'mode-badge mapp' }, 'App') : h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D'));
 function startGame(t, orient) {
   closeLayer(); hideHome();
   if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
-  newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : undefined);
+  newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : t.key === 'app-blank' ? 'My App' : undefined);
   if (orient) { setOrientation(orient); resetCamera(); applyCamera(); }
   toast(`Created ${root.name}. Tap ▶ Play to try it!`);
 }
 function openNewDialog() {
-  openDialog('New Game', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type. Each one is a working game you can change any way you like.'), typeCards(startGame)]);
+  openDialog('New Game or App', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type, or an app. Each one already works, and you can change it any way you like.'), typeCards(startGame)]);
 }
 
 // ---- Home screen: continue, new game by type, my games ----
@@ -4763,12 +4878,12 @@ function showHome() {
   const cur = root && all.find(([id]) => id === projectId);
   home.replaceChildren(...[
     h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('h1', {}, 'Pocket Engine')),
-    h('p', { class: 'sub' }, 'Make 2D and 3D games on your phone.'),
+    h('p', { class: 'sub' }, 'Make 2D and 3D games, and apps, on your phone.'),
     cur && h('button', { class: 'continue', onclick: hideHome },
-      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
-    h('h2', {}, 'New game'),
+      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.settings?.app ? 'App' : root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
+    h('h2', {}, 'New game or app'),
     typeCards(startGame),
-    all.length ? [h('h2', {}, 'My games'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
+    all.length ? [h('h2', {}, 'My games and apps'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
       modeBadge(pr.json),
       h('span', { class: 'nm', onclick: () => { saveNow(); openProject(pr.json, id); hideHome(); } }, pr.name),
       h('small', {}, new Date(pr.updated).toLocaleDateString()),

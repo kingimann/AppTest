@@ -3261,7 +3261,23 @@ registerBehavior('move', {
     { key: 'axes', label: 'Axes', type: 'select', options: ['all', 'horizontal', 'vertical'], default: 'all' },
     { key: 'keepInView', label: 'Keep on screen (2D)', type: 'bool', default: true },
     { key: 'face', label: 'Face direction (3D)', type: 'bool', default: true },
-    { key: 'accel', label: 'Smooth start / stop (0 = instant)', type: 'number', default: 0, range: [0, 0.95], step: 0.05 },
+    { key: 'accel', label: 'Smooth start / stop (0 = instant)', type: 'number', default: 0, range: [0, 0.95], step: 0.05, showIf: (b) => !(+b.accelTime || +b.decelTime) },
+    // movement feel
+    { key: 'accelTime', label: 'Time to full speed (s)', type: 'number', default: 0, range: [0, 3], step: 0.05, group: 'Movement', infoText: '0 = instant. Bigger feels heavier.' },
+    { key: 'decelTime', label: 'Time to stop (s)', type: 'number', default: 0, range: [0, 3], step: 0.05, group: 'Movement', infoText: '0 = stops at once. Bigger slides, like ice.' },
+    { key: 'directions', label: 'Directions', type: 'select', options: [['any', 'Any direction'], ['8', '8 directions'], ['4', '4 directions (no diagonals)']], default: 'any', group: 'Movement' },
+    { key: 'speedVar', label: 'Speed × variable (blank = off)', type: 'text', default: '', suggest: 'vars', group: 'Movement', infoText: 'Multiplies the speed by a variable, e.g. speedBoost = 2 for a power-up.' },
+    { key: 'face2D', label: 'Face where it moves (2D)', type: 'select', options: [['none', 'No'], ['flip', 'Flip left / right'], ['rotate', 'Turn to face it']], default: 'none', group: 'Movement' },
+    { key: 'turnSpeed', label: 'Turn speed (°/s, 0 = instant)', type: 'number', default: 0, step: 30, group: 'Movement', showIf: (b) => b.face2D === 'rotate' || b.face !== false },
+    { key: 'relative', label: 'Up on the stick moves (3D)', type: 'select', options: [['world', 'Up the screen / world forward'], ['camera', 'Away from the camera']], default: 'world', group: 'Movement' },
+    // run & dash
+    { key: 'runWith', label: 'Run with', type: 'select', options: [['off', 'Off'], ['edge', 'Pushing the joystick to the edge'], ['action', 'Holding the Fire button'], ['jump', 'Holding the Jump button'], ['always', 'Always (Shift walks on a keyboard)']], default: 'off', group: 'Run & dash', infoText: 'Shift runs on a keyboard too.' },
+    { key: 'runSpeed', label: 'Run speed ×', type: 'number', default: 1.7, range: [1, 5], step: 0.1, group: 'Run & dash', showIf: (b) => (b.runWith || 'off') !== 'off' },
+    { key: 'dashWith', label: 'Dash with', type: 'select', options: [['off', 'Off'], ['action', 'Fire button'], ['jump', 'Jump button'], ['doubletap', 'Double tap'], ['swipe', 'Swipe (dashes that way)']], default: 'off', group: 'Run & dash', infoText: 'A quick burst in the direction it is moving (or facing). Space / Shift+arrow on a keyboard.' },
+    { key: 'dashSpeed', label: 'Dash speed', type: 'number', default: 800, default3d: 22, step: 50, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashTime', label: 'Dash length (s)', type: 'number', default: 0.15, range: [0.05, 1], step: 0.05, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashCooldown', label: 'Dash cooldown (s)', type: 'number', default: 0.6, range: [0, 5], step: 0.1, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashTrail', label: 'Dash effect', type: 'bool', default: true, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
     // tilt
     { key: 'tiltMax', label: 'Tilt for full speed (°)', type: 'number', default: 20, range: [5, 60], step: 1, group: 'Tilt', showIf: { control: ['tilt'] } },
     { key: 'tiltDead', label: 'Dead zone (°)', type: 'number', default: 3, range: [0, 15], step: 0.5, group: 'Tilt', showIf: { control: ['tilt'] } },
@@ -3281,6 +3297,7 @@ registerBehavior('move', {
   ],
   create(p) {
     let grab = null, gap = null, dv = { x: 0, y: 0 }, fling = { x: 0, y: 0 }, was = false;
+    let running = false, iv = { x: 0, y: 0 }, dashT = 0, dashCd = 0, dashDir = null, lastDir = { x: 1, y: 0 }, lastTap = -1, moving = false;
     const dragOn = () => p.control === 'drag' || p.control === 'both';
     return {
       start(e, s) {
@@ -3293,12 +3310,45 @@ registerBehavior('move', {
           const fallback = () => { if (!s.settings.joystick && (!s.settings.controls || s.settings.controls === 'auto')) { s.settings.joystick = true; s.engine.layoutButtons?.(); } };
           if ((p.tiltFallback || 'joystick') === 'joystick') { if (inp.tiltMissing) fallback(); else s.on('tiltMissing', fallback); }
         }
+        // run / dash on a button: make sure that button is on screen
+        for (const [use, word] of [[p.runWith, 'RUN'], [p.dashWith, 'DASH']]) {
+          if (use === 'action' && !s.settings.actionButton) { s.settings.actionButton = true; if (!s.settings.actionLabel || s.settings.actionLabel === 'FIRE') s.settings.actionLabel = word; s.engine.layoutButtons?.(); }
+          if (use === 'jump' && !s.settings.jumpButton) { s.settings.jumpButton = true; if (!s.settings.jumpLabel || s.settings.jumpLabel === 'JUMP') s.settings.jumpLabel = word; s.engine.layoutButtons?.(); }
+        }
+        e.move = Object.assign(e.move || { locked: false, speedMul: 1 }, { // scripts change these (Set Move Speed, Lock Movement, Dash); a script may have set them first
+          dash: (dx, dy) => { if (dashCd > 0) return false; const l = Math.hypot(dx, dy); dashDir = l ? { x: dx / l, y: dy / l } : { ...lastDir }; dashT = +p.dashTime || 0.15; dashCd = (+p.dashCooldown || 0) + dashT; s.emit('dash', e); if (p.dashTrail !== false) s.burst?.(e.x, e.y, e.z, '#ffffff', 10); s.engine.vibrate(10); return true; },
+        });
+        Object.defineProperties(e.move, { running: { get: () => running, configurable: true }, dashing: { get: () => dashT > 0, configurable: true }, moving: { get: () => moving, configurable: true } });
         // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
         if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
       update(e, dt, s) {
-        const inp = s.engine.input, a = p.control === 'drag' ? { x: 0, y: 0 } : inp.axis(), b = e.body, three = is3D(e), z = three ? 1 : s.engine.renderer.zoomFor(s);
-        const ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y;
+        const inp = s.engine.input, b = e.body, three = is3D(e), z = three ? 1 : s.engine.renderer.zoomFor(s), M = e.move || { speedMul: 1 };
+        let a = p.control === 'drag' || M.locked ? { x: 0, y: 0 } : inp.axis();
+        let ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y;
+        if ((p.directions === '4' || p.directions === '8') && (ax || ay)) { const m = Math.hypot(ax, ay), st = Math.PI / (p.directions === '4' ? 2 : 4), an = Math.round(Math.atan2(ay, ax) / st) * st; ax = Math.cos(an) * m; ay = Math.sin(an) * m; if (Math.abs(ax) < 1e-6) ax = 0; if (Math.abs(ay) < 1e-6) ay = 0; }
+        if (three && p.relative === 'camera' && (ax || ay)) { // stick up = away from the camera
+          const c = s.camera, fx = c.target.x - c.position.x, fz = c.target.z - c.position.z, l = Math.hypot(fx, fz) || 1, F = { x: fx / l, z: fz / l }, Rt = { x: -F.z, z: F.x };
+          const wx = Rt.x * ax - F.x * ay, wz = Rt.z * ax - F.z * ay; ax = wx; ay = wz;
+        }
+        if (ax || ay) { const l = Math.hypot(ax, ay); lastDir = { x: ax / l, y: ay / l }; }
+        // run
+        const keys = inp.keys || new Set(), shift = keys.has('shift');
+        const rw = p.runWith || 'off', pushEdge = Math.hypot(a.x, a.y) > 0.95 && !!inp.stick;
+        running = rw !== 'off' && !M.locked && (rw === 'always' ? !shift : shift || (rw === 'edge' && pushEdge) || (rw === 'action' && inp.isDown('action')) || (rw === 'jump' && inp.isDown('jump')));
+        const sv = p.speedVar ? +s.vars[p.speedVar] : NaN, speed = p.speed * (Number.isFinite(sv) ? sv : 1) * (M.speedMul ?? 1) * (running ? +p.runSpeed || 1.7 : 1);
+        // dash
+        dashCd = Math.max(0, dashCd - dt);
+        const dw = p.dashWith || 'off';
+        if (dw !== 'off' && !M.locked && dashT <= 0 && e.move) {
+          let go = null;
+          if (dw === 'action' && inp.pressed('action')) go = [0, 0];
+          else if (dw === 'jump' && inp.justPressed.has('btn:jump')) go = [0, 0];
+          else if (dw === 'doubletap' && inp.taps.length) { if (s.time - lastTap < 0.3) { go = [0, 0]; lastTap = -1; } else lastTap = s.time; }
+          else if (dw === 'swipe') { for (const [k, v] of [['left', [-1, 0]], ['right', [1, 0]], ['up', [0, -1]], ['down', [0, 1]]]) if (inp.justPressed.has('swipe:' + k)) go = three && p.relative !== 'camera' ? v : v; }
+          if (inp.keysDown?.includes('space') && (dw === 'action' || dw === 'doubletap' || dw === 'swipe')) go = [0, 0];
+          if (go) e.move.dash(go[0] || lastDir.x, go[1] || lastDir.y);
+        }
         // which finger drags: any free finger, or one that started on the object
         let f = null;
         if (dragOn()) {
@@ -3331,21 +3381,31 @@ registerBehavior('move', {
         } else if (was) { dv = p.dragThrow ? { ...fling } : { x: 0, y: 0 }; fling = { x: 0, y: 0 }; was = false; }
         else if (!p.dragThrow) dv = { x: 0, y: 0 };
         const solid = p.dragSolid !== false, grav = !three && !(s.gravity === 0 || b.gravityScale === 0);
-        const acc = clamp(+p.accel || 0, 0, 0.95), ease = (cur, tgt) => (acc ? cur + (tgt - cur) * (1 - Math.pow(acc, dt * 20)) : tgt);
+        const acc = clamp(+p.accel || 0, 0, 0.95), at = +p.accelTime || 0, ct = +p.decelTime || 0;
+        const ease = (cur, tgt) => { // speed up over accelTime, slow down over decelTime (or the older 0–1 smoothing)
+          if (at || ct) { const up = tgt !== 0 && Math.sign(tgt) === Math.sign(cur || tgt) && Math.abs(tgt) > Math.abs(cur), rate = speed / Math.max(1e-3, up ? at : ct) * dt; return up ? (at ? Math.min(Math.abs(tgt), Math.abs(cur) + rate) * Math.sign(tgt) : tgt) : (ct ? (Math.abs(tgt - cur) <= rate ? tgt : cur + Math.sign(tgt - cur) * rate) : tgt); }
+          return acc ? cur + (tgt - cur) * (1 - Math.pow(acc, dt * 20)) : tgt;
+        };
+        iv = { x: ease(iv.x, ax * speed), y: ease(iv.y, ay * speed) };
+        if (dashT > 0) { dashT -= dt; const ds = +p.dashSpeed || (three ? 22 : 800); iv = { x: dashDir.x * ds, y: dashDir.y * ds }; if (dashT <= 0) iv = { x: dashDir.x * speed, y: dashDir.y * speed }; if (p.dashTrail !== false && Math.random() < 0.6) s.burst?.(e.x, e.y, e.z, '#ffffff', 1); }
+        moving = Math.hypot(iv.x, iv.y) > (three ? 0.2 : 8) || !!f;
         const thrown = p.dragThrow && !f && (dv.x || dv.y);
         if (thrown) { dv.x *= Math.pow(0.04, dt); dv.y *= Math.pow(0.04, dt); if (Math.hypot(dv.x, dv.y) < 2) dv = { x: 0, y: 0 }; } // slides to a stop
         const dragVx = solid || thrown ? dv.x : 0, dragVy = solid || thrown ? dv.y : 0;
         if (three) {
-          b.vel.x = ease(b.vel.x, ax * p.speed + dragVx); b.vel.z = ease(b.vel.z, ay * p.speed + dragVy);
+          b.vel.x = iv.x + dragVx; b.vel.z = iv.y + dragVy;
           if (!solid && f) { e.x += dv.x * dt; e.z += dv.y * dt; }
-          if (p.face && (Math.abs(b.vel.x) + Math.abs(b.vel.z) > 0.3)) {
-            const target = Math.atan2(b.vel.x, b.vel.z) / DEG;
-            let diff = ((target - e.ry + 540) % 360) - 180;
-            e.ry += diff * Math.min(1, dt * 12);
+          if (p.face !== false && (Math.abs(b.vel.x) + Math.abs(b.vel.z) > 0.3)) {
+            const target = Math.atan2(b.vel.x, b.vel.z) / DEG, diff = ((target - e.ry + 540) % 360) - 180, ts = +p.turnSpeed || 0;
+            e.ry += ts ? clamp(diff, -ts * dt, ts * dt) : diff * Math.min(1, dt * 12);
           }
         } else {
-          b.vel.x = ease(b.vel.x, ax * p.speed + dragVx);
-          if (!grav) b.vel.y = ease(b.vel.y, ay * p.speed + dragVy);
+          b.vel.x = iv.x + dragVx;
+          if (!grav) b.vel.y = iv.y + dragVy;
+          else if (dashT > 0) b.vel.y = iv.y; // a dash ignores gravity while it lasts
+          const vx = b.vel.x, vy = b.vel.y;
+          if (p.face2D === 'flip' && Math.abs(vx) > 5) { if (e.shape?.type === 'emoji') e.data.flipX = vx > 0; else e.sx = Math.abs(e.sx) * (vx < 0 ? -1 : 1); }
+          else if (p.face2D === 'rotate' && Math.hypot(vx, grav ? 0 : vy) > 5) { const target = Math.atan2(grav ? 0 : vy, vx) / DEG, diff = ((target - (e.rz || 0) + 540) % 360) - 180, ts = +p.turnSpeed || 0; e.rz = (e.rz || 0) + (ts ? clamp(diff, -ts * dt, ts * dt) : diff); }
           else if (f && dragVy) b.vel.y = dragVy; // dragging up / down even with gravity
           if (!solid && f) { e.x += dv.x * dt; e.y += dv.y * dt; }
           if (p.keepInView) {
@@ -7424,6 +7484,11 @@ export const NODE_TYPES = {
   lookAt: { cat: 'Move', label: 'Look At', exec: true, outs: ['then'], params: [txt('tag', 'player', 'tag')] },
   rotateBy: { cat: 'Move', label: 'Rotate By', exec: true, outs: ['then'], inputs: [{ key: 'degrees', type: 'number', default: 15 }] },
   setScale: { cat: 'Move', label: 'Set Scale', exec: true, outs: ['then'], inputs: [{ key: 'scale', type: 'number', default: 1 }] },
+  setMoveSpeed: { cat: 'Move', label: 'Set Move Speed', exec: true, outs: ['then'], inputs: [{ key: 'times', type: 'number', default: 1.5 }], params: [opt('mode', ['set to', 'multiply by'], 'set to', 'speed ×')] },
+  lockMove: { cat: 'Move', label: 'Lock Movement', exec: true, outs: ['then'], params: [opt('mode', ['lock', 'unlock', 'toggle'], 'lock', 'controls')] },
+  dashNow: { cat: 'Move', label: 'Dash', exec: true, outs: ['then', 'dashed', 'not ready'], params: [opt('dir', ['moving way', 'left', 'right', 'up', 'down'], 'moving way', 'direction')] },
+  onDash: { cat: 'Move', label: 'On Dash', outs: ['then'] },
+  isRunning: { cat: 'Move', label: 'Is Running', value: 'bool' },
   teleport: { cat: 'Move', label: 'Teleport To', exec: true, outs: ['then'], params: [txt('object', '', 'object or tag')] },
   setText: { cat: 'Looks', label: 'Set Text', exec: true, outs: ['then'], params: [txt('object', '', 'object (blank = me)'), txt('text', 'Score: {score}', 'text')] },
   setColor: { cat: 'Looks', label: 'Set Colour', exec: true, outs: ['then'], params: [{ key: 'color', type: 'color', default: '#ff5252', label: 'colour' }, opt('target', ['self', 'other'], 'self', 'who')] },
@@ -8227,6 +8292,7 @@ registerBehavior('graph', {
         case 'itemCount': return s.itemCount(P('item'));
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
+        case 'isRunning': return !!e.move?.running;
         case 'isMoving': { const v = e.body?.vel; if (v) return Math.hypot(v.x, v.y, v.z) > (s.mode === '3d' ? 0.2 : 10); const m = state.get('_moved'); return !!m && s.time - m < 0.1; }
         case 'isTweening': return s.isTweening(P('id') || e);
         case 'choose': return I('condition') ? +I('yes') || 0 : +I('no') || 0;
@@ -8488,6 +8554,9 @@ registerBehavior('graph', {
         case 'toggleVar': s.setVar(P('name') || 'on', +s.vars[P('name') || 'on'] ? 0 : 1); break;
         case 'setBackground': s.background = P('color') || s.background; break;
         case 'setAlpha': e.alpha = clamp(+I('alpha') || 0, 0, 1); break;
+        case 'setMoveSpeed': e.move ||= { locked: false, speedMul: 1 }; e.move.speedMul = P('mode') === 'multiply by' ? (e.move.speedMul ?? 1) * (+I('times') || 0) : +I('times') || 0; break;
+        case 'lockMove': e.move ||= { locked: false, speedMul: 1 }; e.move.locked = P('mode') === 'toggle' ? !e.move.locked : P('mode') === 'lock'; break;
+        case 'dashNow': { const d = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[P('dir')] || [0, 0]; const ok = e.move?.dash?.(d[0], d[1]); follow(n, ok ? 'dashed' : 'not ready', { ...ctx, steps: 0 }); break; }
         case 'stopMoving': { const t = P('target') === 'other' ? ctx.other : e; if (t?.body) { t.body.vel.x = t.body.vel.y = t.body.vel.z = 0; if (t.body.angVel != null) t.body.angVel = 0; } break; }
         case 'gravityScale': { const b = e.ensureBody({ type: 'dynamic' }); b.gravityScale = +I('scale') || 0; break; }
         case 'sendMessage': s.send(P('message')); break;
@@ -8806,7 +8875,7 @@ registerBehavior('graph', {
       for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt, ...extra });
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
-    const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null;
+    const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
     const timers = new Map();
     return {
       uiAlways: true,
@@ -8884,6 +8953,7 @@ registerBehavior('graph', {
         }
         if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
         if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
+        if (has('onDash')) { const d = !!e.move?.dashing; if (d && !wasDash) fire('onDash', e, s); wasDash = d; }
         if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
         for (const n of g.nodes) if (n.type === 'objectNear') {
           const t = nearest(s, e, param(n, 'tag')), r = +param(n, 'range') || defRange(s), isNear = !!t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= r;

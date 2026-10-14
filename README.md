@@ -521,9 +521,29 @@ New groups in *Project › UI*: **Buttons**, **Inputs**, **Lists** and **Animate
 ### Navigation, popups and more UI
 
 Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets come with their parts inside them (children), so they move and stretch together.
-- **Bottom Nav Bar:**
-  - Four tabs with icons (Home, Shop, Awards, Profile) that spread across the screen.
-  - Three ready-made **Pages**: tapping a tab sets the variable `page`, and each page shows when it matches.
+- **Bottom Nav Bar:** one **Bottom Nav** component draws and runs the whole bar. Presets: Bottom Nav Bar (pill), Floating, Raised center, Bubble, Underline, Glass and Minimal icons. **Bottom Nav (separate tabs)** is the older version, made of one object per tab.
+  - **Tabs:** one per line, `Label | icon | page | badge variable`.
+    - The icon is a built-in UI icon (`home`, `shop`, `trophy`, `user`, `chat`, `gear`, `play`, `plus`, `star`, `heart`, `bell`…) or an emoji.
+    - A badge variable shows a red count (99+) when it is a number, or a dot when it is `true`.
+  - **9 styles:**
+
+    | Style | Look |
+    |---|---|
+    | classic | icons and labels; the selected tab lights up |
+    | pill | a soft pill behind the selected icon |
+    | underline | a line slides along the top |
+    | dot | a dot under the selected tab |
+    | bubble | the selected tab grows into a bubble with its name |
+    | floating | a rounded bar above the bottom edge |
+    | raised center | a big round middle button that sticks up; it can send a message instead of being a tab |
+    | glass | a see-through floating bar with a glow |
+    | minimal | just icons |
+  - **Labels:** auto, always, selected only, or never.
+  - **Colours:** bar, selected, other tabs, indicator and badge. *Apply theme* recolours the bar too.
+  - **Size & shape:** icon and label size, corner radius, floating gap, line along the top, shadow, and filling the home-bar area.
+  - **Animation:** the indicator slides, fades or jumps, at a set speed. Tap effects: bounce, ripple, grow or none. Also a tap sound and vibration.
+  - **Behaviour:** switch tab, or open as a page (Back returns). **Hide on these pages** slides the bar away (e.g. during `game`), and it can also send a message when the tab changes.
+  - Tapping a tab sets the variable `page`. Ready-made **Pages** show when it matches, and they slide toward the tab you picked. The bar is drawn in the editor too, so you see it while designing.
 - **Side Bars:**
   - **Side Bar (left):** a ☰ button slides in a menu with icons. It dims the game, and picking an item or tapping outside closes it.
   - **Side Bar (right):** a ⚙ button opens settings toggles.
@@ -532,6 +552,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
 - **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
 - **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
 - **New components** (Add Component › UI):
+  - **Bottom Nav:** a complete bottom navigation bar (styles, badges, animations). See *Bottom Nav Bar* above.
   - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
   - **Show If (pages):** shows UI only when a variable matches, with fade / pop / slide.
   - **Side Bar (drawer):** slides in from any edge on a message.

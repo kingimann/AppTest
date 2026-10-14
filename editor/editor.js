@@ -3048,12 +3048,14 @@ const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'lineWidth', 
 let styleClipboard = null;
 function styleOf(j) { const out = {}; for (const [k, keys] of Object.entries(STYLE_KEYS)) if (j[k]) out[k] = Object.fromEntries(keys.filter((q) => j[k][q] !== undefined).map((q) => [q, j[k][q]])); return clone(out); }
 function pasteStyle(j, st) { for (const [k, v] of Object.entries(st)) if (j[k]) Object.assign(j[k], clone(v)); }
+const mixHex = (a, b, t) => { const p = (h) => parseInt(String(h).replace('#', '').slice(0, 6), 16), A = p(a), B = p(b); if (!Number.isFinite(A) || !Number.isFinite(B)) return a; const c = (sh) => Math.round((A >> sh & 255) * (1 - t) + (B >> sh & 255) * t); return '#' + [16, 8, 0].map((sh) => c(sh).toString(16).padStart(2, '0')).join(''); }; // a colour t of the way from a to b
 const isLight = (hex) => { const n = parseInt(String(hex).replace('#', '').slice(0, 6), 16) || 0; return ((n >> 16 & 255) * 0.299 + (n >> 8 & 255) * 0.587 + (n & 255) * 0.114) > 160; };
 /** Restyle UI elements with the game's theme: font, text colours, panel and button colours, corner radius. */
 function applyTheme(list) {
   const T = themeOf(root.settings), btn = (e) => (e.behaviors || []).some((b) => ['button', 'navItem', 'touchButton'].includes(b.type));
   const byId = new Map(list.map((e) => [e.id, e])), onButton = (e) => btn(e) || (e.parent && btn(byId.get(e.parent) || ent(e.parent) || {}));
   for (const e of list) {
+    for (const b of e.behaviors || []) if (b.type === 'uiBottomNav') { b.activeColor = T.accent; b.barColor = T.panel; b.idleColor = mixHex(T.text, T.panel, 0.4); }
     if (e.text) { e.text.font = 'theme'; e.text.color = onButton(e) ? (isLight(T.accent) ? '#1b1b1b' : '#ffffff') : T.text; delete e.text.color2; }
     if (e.shape && e.shape.type !== 'emoji' && e.shape.fill) {
       e.shape.fill = btn(e) ? T.accent : T.panel; delete e.shape.fill2;
@@ -3288,7 +3290,7 @@ const BEH_META = {
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
+  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
   triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],

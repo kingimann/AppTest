@@ -151,7 +151,14 @@ const iconBtn = (name, icon, anchor, x, y, msg) => ({ name, ui: true, anchor, x,
 
 /** More UI widgets: navigation (bottom bar, side bars, tabs, pages), popups and controls. Children sit inside their parent. */
 export const UI_WIDGETS_MORE = [
-  { icon: 'list', label: 'Bottom Nav Bar', group: 'Navigation', props: { name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: 'rgba(14,16,26,0.97)', stroke: 'rgba(255,255,255,0.08)', lineWidth: 1 },
+  ...[['Bottom Nav Bar', 'pill', {}], ['Bottom Nav (Floating)', 'floating', { barColor: '#1b1e2e' }], ['Bottom Nav (Raised center)', 'raised center', { tabs: 'Home | home | home\nShop | shop | shop | shopNew\nPlay | play | play\nAwards | trophy | awards\nProfile | user | profile', start: 1 }],
+    ['Bottom Nav (Bubble)', 'bubble', {}], ['Bottom Nav (Underline)', 'underline', {}], ['Bottom Nav (Glass)', 'glass', {}], ['Bottom Nav (Minimal icons)', 'minimal', {}]].map(([label, style, extra]) => ({
+    icon: 'list', label, group: 'Navigation', props: { name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
+      behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', var: 'page', start: 1, style, labels: 'auto', barColor: '#12141f', activeColor: '#4fa3ff', idleColor: '#8b90a5', indicatorColor: '', badgeColor: '#ff3b5c',
+        iconSize: 24, labelSize: 11, radius: 0, margin: 14, border: true, shadow: true, fillSafe: true, anim: 'slide', speed: 14, tapEffect: 'bounce', sound: 'click', haptics: true, centerMessage: '', mode: 'switch tab', hideOn: '', message: '', ...extra }] },
+    before: [page('Shop Page', 'Shop', 'rgba(16,20,34,0.94)'), page('Awards Page', 'Awards', 'rgba(26,18,36,0.94)'), page('Profile Page', 'Profile', 'rgba(14,26,30,0.94)')], vars: { page: 'home', shopNew: 3 },
+    note: 'One component draws the whole bar: pick a Style (9), edit the Tabs list (Label | icon | page | badge variable) and the colours. The Shop badge shows the variable shopNew.' })),
+  { icon: 'list', label: 'Bottom Nav (separate tabs)', group: 'Navigation', props: { name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: 'rgba(14,16,26,0.97)', stroke: 'rgba(255,255,255,0.08)', lineWidth: 1 },
     behaviors: [{ type: 'uiLayout', tag: '', direction: 'horizontal', spacing: 0, align: 'center', justify: 'spread', pad: 0 }] },
     children: [tab('Home', 'home', 'home', true, -150), tab('Shop', 'shop', 'shop', false, -50), tab('Awards', 'trophy', 'awards', false, 50), tab('Profile', 'user', 'profile', false, 150)],
     before: [page('Shop Page', 'Shop', 'rgba(16,20,34,0.94)'), page('Awards Page', 'Awards', 'rgba(26,18,36,0.94)'), page('Profile Page', 'Profile', 'rgba(14,26,30,0.94)')],

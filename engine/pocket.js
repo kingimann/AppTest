@@ -889,7 +889,7 @@ export class Scene {
     for (const ep of json.entities || []) {
       if (!editing && !ep.template && inTpl(ep)) { (s.templateKids[ep.parent] ||= []).push(ep); continue; } // children of templates spawn with them
       if (ep.template && !editing) { s.templates[ep.name] = ep; continue; }
-      const e = s.add(new Entity(editing ? { ...ep, behaviors: [] } : ep));
+      const e = s.add(new Entity(editing ? { ...ep, behaviors: (ep.behaviors || []).filter((b) => EDIT_PREVIEW.has(b?.type)) } : ep)); // the editor keeps only components that draw a preview
       if (ep.template) { e.template = true; e.alpha = 0.45; }
     }
     s.flush();
@@ -1619,6 +1619,8 @@ export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
+/** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
+const EDIT_PREVIEW = new Set(['uiBottomNav']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -3140,6 +3142,7 @@ function renderUI(engine, scene) {
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
       ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
+      for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
       ctx.restore();
     }
     if (V) ctx.restore();
@@ -4819,6 +4822,170 @@ registerBehavior('navItem', {
         const a = on || !p.dimIdle ? 1 : 0.55;
         for (const q of kids) q.alpha = a;
         if (!e.shape && e.text) e.alpha = a;
+      },
+    };
+  },
+});
+
+/** A white UI icon recoloured (cached per colour and size). Emoji and other text draw as text. */
+const tintCache = new Map();
+function drawNavIcon(ctx, icon, x, y, size, color, alpha = 1) {
+  if (!icon) return;
+  const src = /^(art:|data:|https?:)/.test(icon) ? icon : /^ui-|^[a-z][a-zA-Z-]+$/.test(icon) ? 'art:' + (icon.startsWith('ui-') || SPRITE_ART[icon] ? icon : 'ui-' + icon) : null;
+  ctx.globalAlpha *= alpha;
+  if (!src) { ctx.font = `${Math.round(size)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = color; ctx.fillText(icon, x, y + size * 0.05); ctx.globalAlpha /= alpha; return; }
+  const img = loadImage(src); if (!img.complete || !img.naturalWidth) { ctx.globalAlpha /= alpha; return; }
+  const px = Math.max(8, Math.round(size * 2)), key = src + '|' + color + '|' + px;
+  let c = tintCache.get(key);
+  if (!c) { c = document.createElement('canvas'); c.width = c.height = px; const x2 = c.getContext('2d'); x2.drawImage(img, 0, 0, px, px); x2.globalCompositeOperation = 'source-in'; x2.fillStyle = color; x2.fillRect(0, 0, px, px); if (tintCache.size > 300) tintCache.clear(); tintCache.set(key, c); }
+  ctx.drawImage(c, x - size / 2, y - size / 2, size, size);
+  ctx.globalAlpha /= alpha;
+}
+const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
+registerBehavior('uiBottomNav', {
+  label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
+  params: [
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
+    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
+    { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
+    { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
+    { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'idleColor', label: 'Other tabs', type: 'color', default: '#8b90a5', group: 'Colours' },
+    { key: 'indicatorColor', label: 'Indicator (blank = selected colour)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [12, 48], step: 1, group: 'Size & shape' },
+    { key: 'labelSize', label: 'Label size', type: 'number', default: 11, range: [8, 20], step: 1, group: 'Size & shape' },
+    { key: 'radius', label: 'Corner radius', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Size & shape', infoText: 'Floating and glass styles round their corners anyway.' },
+    { key: 'margin', label: 'Floating gap from the edges', type: 'number', default: 14, range: [0, 40], step: 1, group: 'Size & shape' },
+    { key: 'border', label: 'Line along the top', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'fillSafe', label: 'Fill the home-bar area below', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'anim', label: 'Indicator moves', type: 'select', options: ['slide', 'fade', 'none'], default: 'slide', group: 'Animation' },
+    { key: 'speed', label: 'Animation speed', type: 'number', default: 14, range: [2, 40], step: 1, group: 'Animation' },
+    { key: 'tapEffect', label: 'Tap effect', type: 'select', options: ['bounce', 'ripple', 'grow', 'none'], default: 'bounce', group: 'Animation' },
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Animation' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Animation' },
+    { key: 'centerMessage', label: 'Middle button sends message (blank = acts as a tab)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: { style: ['raised center'] } },
+    { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab', group: 'Behaviour' },
+    { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour', infoText: 'e.g. game, levels: the bar slides away while the variable is one of these.' },
+    { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+  ],
+  create(p) {
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => ({ label, icon, page: page || label.toLowerCase(), badge }));
+    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1;
+    const pulse = new Map(), ripples = [];
+    const hidden = (s) => !!p.hideOn && String(p.hideOn).split(',').map((x) => x.trim()).filter(Boolean).some((v) => sameVal(s.vars[p.var], v));
+    const activeIdx = (s) => T.findIndex((t) => sameVal(s.vars[p.var], t.page));
+    const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
+    const geo = (e) => { // local layout: bar rect and each tab's centre and width
+      const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
+      const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
+      const n = Math.max(1, T.length), tw = bw / n;
+      return { w, h, bx, by, bw, bh, tw, n, cx: (i) => bx + tw * (i + 0.5), cy: by + bh / 2 };
+    };
+    const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
+    return {
+      uiAlways: true, var: p.var,
+      start(e, s) { T = tabs(); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
+      update(e, dt, s) {
+        const k = Math.min(1, dt * (+p.speed || 14));
+        hide += ((hidden(s) ? 1 : 0) - hide) * k;
+        for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
+        for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
+        const a = activeIdx(s), G = geo(e);
+        if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
+        if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
+        fade = Math.min(1, fade + dt * (+p.speed || 14) / 3);
+        if (hide > 0.5 || !e.visible || e._parentHidden) return;
+        // taps: which tab is under the finger (in screen space)
+        const r = uiRect(s, e), K = uiK(s.engine.safe);
+        for (const t of s.engine.input.taps) {
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = p.style === 'raised center' && T.length % 2 === 1;
+          let i = Math.floor((lx - G.bx) / G.tw);
+          const inBar = ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
+          if (!inBar) continue;
+          const tab = T[i];
+          pulse.set(i, 1); if (p.tapEffect === 'ripple') ripples.push({ i, t: 0 });
+          if (p.haptics !== false) s.engine.vibrate(8);
+          if (p.sound) s.engine.audio.sfx(p.sound);
+          if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
+          if (sameVal(s.vars[p.var], tab.page)) continue;
+          const cur = activeIdx(s);
+          s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 });
+          if (p.message) s.send(p.message);
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (!T.length) T = tabs();
+        const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || act;
+        if (hide > 0.99) return;
+        if (hide > 0.001) { ctx.translate(0, (G.bh + 40) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
+        const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
+        // the bar
+        if (st !== 'minimal') {
+          if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
+          ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.barColor || '#12141f';
+          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill();
+          ctx.shadowColor = 'transparent';
+          if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); }
+          else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+        }
+        const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
+        // the indicator, under the icons
+        if (a >= 0 && ind != null && a !== raisedIdx) {
+          const x = p.anim === 'slide' ? ind : G.cx(a);
+          ctx.save(); if (p.anim === 'fade') ctx.globalAlpha *= fade;
+          ctx.fillStyle = indC;
+          const labelOn = showLabel(a, true), iy = labelOn && st !== 'bubble' ? G.cy - lsz * 0.85 : G.cy;
+          if (st === 'pill' || st === 'floating' || st === 'glass') { const ph = labelOn ? isz * 1.28 : isz * 1.5; ctx.globalAlpha *= st === 'glass' ? 0.35 : 0.22; rr(x - isz * 1.35, iy - ph / 2, isz * 2.7, ph, isz); ctx.fill(); }
+          else if (st === 'underline') { rr(x - G.tw * 0.25, G.by, G.tw * 0.5, 3, 2); ctx.fill(); }
+          else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tw * 1.6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
+          else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tw / 2 + 4, G.by + 4, G.tw - 8, G.bh - 8, 12); ctx.fill(); }
+          ctx.restore();
+        }
+        // ripples
+        for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tw * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        // tabs
+        T.forEach((t, i) => {
+          const on = i === a, col = on ? act : idle, pz = pulse.get(i) || 0;
+          let sc = 1 + (p.tapEffect === 'bounce' ? Math.sin(pz * Math.PI) * 0.18 : p.tapEffect === 'grow' && on ? 0.12 : 0) + (st === 'minimal' && on ? 0.12 : 0);
+          let x = G.cx(i), y = G.cy;
+          if (i === raisedIdx) { // the big round middle button
+            const R = G.bh * 0.46;
+            ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, G.by + 4, R * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+            drawNavIcon(ctx, t.icon, x, G.by + 4, isz * 1.15, '#ffffff');
+            if (showLabel(i, on)) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 0.9); }
+            return;
+          }
+          const lab = showLabel(i, on) && t.label;
+          if (st === 'bubble' && lab) { // icon and name side by side
+            ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = ctx.measureText(t.label).width, total = isz + 6 + lw;
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+            drawNavIcon(ctx, t.icon, -total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5);
+            ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
+            ctx.restore();
+          } else {
+            const iy = lab ? -lsz * 0.85 : 0;
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+            if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
+            drawNavIcon(ctx, t.icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
+            ctx.shadowColor = 'transparent';
+            if (lab) { ctx.font = `${on ? 800 : 600} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, 0, iy + isz * 0.5 + lsz * 1.05); }
+            ctx.restore();
+          }
+          // badge
+          const bv = t.badge ? s.vars[t.badge] : null;
+          if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+            ctx.fillStyle = p.badgeColor || '#ff3b5c'; ctx.strokeStyle = st === 'minimal' ? 'transparent' : p.barColor || '#12141f'; ctx.lineWidth = 2;
+            if (!txt) { ctx.beginPath(); ctx.arc(bxp, byp, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+            else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(txt).width + 8); rr(bxp - 6, byp - 8, w, 16, 8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bxp - 6 + w / 2, byp + 0.5); }
+          }
+        });
       },
     };
   },

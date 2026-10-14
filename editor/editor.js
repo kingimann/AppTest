@@ -396,7 +396,24 @@ let cam2d = { x: 200, y: 350, zoom: 0.85 };
 let orbit = { yaw: 0.5, pitch: 0.8, dist: 22, target: { x: 0, y: 0, z: 0 } };
 /** UI editor zoom / pan (only changes how the screen is shown while editing). */
 const uiView = { z: 1, x: 0, y: 0 };
-const uiv = (x, y) => { const cx = engine.width / 2, cy = engine.height / 2; return { x: (x - cx) * uiView.z + cx + uiView.x, y: (y - cy) * uiView.z + cy + uiView.y }; };
+/**
+ * The Scene view (2D, not the UI editor) shows the UI where it really is: laid out for the game's screen (its view size) and
+ * drawn inside the camera frame, so it zooms and pans with the level. The engine asks for this frame each time it draws.
+ */
+let sceneUI = null;
+engine.uiFrame = (s) => {
+  sceneUI = null;
+  engine.showUI = uiMode || !EP.hideUI; // Hide UI (Scene view): build the level without the HUD in the way
+  if (uiMode || playing || s.mode === '3d' || !engine.showUI) return null;
+  const v = s.view || { width: 400, height: 700 }, w = +v.width || 400, hh = +v.height || 700, R = engine.renderer;
+  const a = R.worldToScreen(s, 0, 0), b = R.worldToScreen(s, w, hh), z = (b.x - a.x) / w;
+  if (!(z > 0)) return null;
+  sceneUI = { w, h: hh, safe: { top: 0, right: 0, bottom: 0, left: 0, k: 1 }, v: { z, x: a.x + w / 2 * z - w / 2, y: a.y + hh / 2 * z - hh / 2 }, clip: { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y } };
+  return sceneUI;
+};
+/** The screen UI is laid out on, and how it's shown: the game's screen in the camera frame (Scene view), or the UI editor's view. */
+const UIS = () => sceneUI || { w: engine.width, h: engine.height, safe: engine.safe, v: uiView };
+const uiv = (x, y) => { const S = UIS(), V = S.v, cx = S.w / 2, cy = S.h / 2; return { x: (x - cx) * V.z + cx + V.x, y: (y - cy) * V.z + cy + V.y }; };
 function zoomUI(k, mx = engine.width / 2, my = engine.height / 2) {
   const z = Math.min(5, Math.max(0.25, uiView.z * k)), cx = engine.width / 2, cy = engine.height / 2;
   const ux = (mx - cx - uiView.x) / uiView.z + cx, uy = (my - cy - uiView.y) / uiView.z + cy; // the point under the fingers stays put
@@ -481,7 +498,7 @@ function boundsOf(e) {
   return { x, y: e.y, hx, hy, sphere: ex.sphere, r: ex.r };
 }
 function uiBounds(e) { // on screen, with the UI editor's zoom applied
-  const o = uiOrigin(e, engine.width, engine.height, engine.safe), b = boundsOf(e), z = uiView.z, v = uiv(o.x + b.x, o.y + b.y);
+  const S = UIS(), o = uiOrigin(e, S.w, S.h, S.safe), b = boundsOf(e), z = S.v.z, v = uiv(o.x + b.x, o.y + b.y);
   return { ...b, x: v.x, y: v.y, hx: b.hx * z, hy: b.hy * z, r: (b.r || 0) * z };
 }
 /** Screen-space center of an entity, for gizmos. */
@@ -683,7 +700,7 @@ engine.onRenderUI = (ctx, s) => {
   placeCtxBar(s);
   const sel = s.byId(selectedId);
   if (sel?.ui && !playing) { // Unity-style anchor marker: where the element is pinned, and its parent's box
-    const o = uiOrigin(sel, engine.width, engine.height, engine.safe), a = uiv(o.x, o.y), b0 = uiBounds(sel);
+    const S = UIS(), o = uiOrigin(sel, S.w, S.h, S.safe), a = uiv(o.x, o.y), b0 = uiBounds(sel);
     if (sel.parentEnt?.ui) { const pb = uiBounds(sel.parentEnt); ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = 'rgba(126,200,255,0.8)'; ctx.lineWidth = 1.5; ctx.strokeRect(pb.x - pb.hx, pb.y - pb.hy, pb.hx * 2, pb.hy * 2); ctx.restore(); }
     ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b0.x, b0.y); ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = '#ffffff'; ctx.strokeStyle = '#2f6db5'; ctx.lineWidth = 1.5;
@@ -711,7 +728,7 @@ const GIZ = 84;
 const RECT_HANDLES = [[-1, -1], [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0]];
 /** Screen rectangle of an entity for the Rect tool: centre, half sizes and pixels per unit. */
 function rectFrame(e) {
-  if (e.ui) { const b = uiBounds(e); return { cx: b.x, cy: b.y, hw: b.sphere ? b.r : b.hx, hh: b.sphere ? b.r : b.hy, k: uiView.z }; }
+  if (e.ui) { const b = uiBounds(e); return { cx: b.x, cy: b.y, hw: b.sphere ? b.r : b.hx, hh: b.sphere ? b.r : b.hy, k: UIS().v.z }; }
   if (is3D()) return null;
   const b = boundsOf(e), z = engine.renderer.zoomFor(engine.scene), p = engine.renderer.worldToScreen(engine.scene, b.x, b.y);
   return { cx: p.x, cy: p.y, hw: (b.sphere ? b.r : b.hx) * z, hh: (b.sphere ? b.r : b.hy) * z, k: z };
@@ -737,7 +754,7 @@ function setSize(j, w, hgt) {
 function gizmoAxes(e) {
   const s = engine.scene, o = screenCenter(e);
   if (!o) return null;
-  if (e.ui) return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: uiView.z, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: uiView.z, sign: -1 }] };
+  if (e.ui) return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: UIS().v.z, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: UIS().v.z, sign: -1 }] };
   if (s.mode === '2d') {
     const z = engine.renderer.zoomFor(s);
     return { o, axes: [{ k: 'x', dx: 1, dy: 0, ppu: z, sign: 1 }, { k: 'y', dx: 0, dy: -1, ppu: z, sign: -1 }] };
@@ -880,7 +897,7 @@ function hitGizmo(x, y) {
 // Picking
 // ============================================================================
 function pick(sx, sy) {
-  const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui));
+  const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui) && (uiMode || !e.ui || !EP.hideUI)); // hidden UI can't be tapped
   for (const e of list) {
     if (!e.ui) continue;
     const b = uiBounds(e);
@@ -1080,7 +1097,7 @@ surface.addEventListener('pointermove', (ev) => {
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { j.x = Math.round(g.orig.x + dx / uiView.z); j.y = Math.round(g.orig.y + dy / uiView.z); if (uiMode) snapUI(j); }
+      if (g.ui) { const z = UIS().v.z; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); }
       else if (childOf(g)) { // a child: move it in the world, store the result relative to its parent
         let W;
         if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
@@ -2128,11 +2145,11 @@ function setParent(id, pid, { batch = false } = {}) {
   if (pj && !!pj.ui !== !!j.ui) { toast(j.ui ? 'UI can only go inside other UI' : 'Game objects can’t go inside UI'); return; }
   const live = engine.scene.byId(id), lp = pid ? engine.scene.byId(pid) : null, mode = engine.scene.mode, r3 = (v) => round(v, 3);
   if (j.ui) {
-    const before = live ? uiBox(live, engine.width, engine.height, engine.safe) : null;
+    const before = live ? uiBox(live, UIS().w, UIS().h, UIS().safe) : null;
     if (pid) j.parent = pid; else delete j.parent;
     rebuild();
     const nl = engine.scene.byId(id);
-    if (before && nl) { const o = uiOrigin(nl, engine.width, engine.height, engine.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); }
+    if (before && nl) { const S = UIS(), o = uiOrigin(nl, S.w, S.h, S.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); }
   } else if (live) {
     const W = [live.x, live.y, live.z], rot = [live.rx, live.ry, live.rz], sc = [live.sx, live.sy, live.sz];
     const L = lp ? worldToLocal(lp, W[0], W[1], W[2], mode) : W;
@@ -3074,14 +3091,14 @@ function anchorPresets(j, inParent) {
   const rowOf = st === 'height' || st === 'both' ? 3 : cur.startsWith('top') ? 0 : cur.startsWith('bottom') ? 2 : 1;
   const colOf = st === 'width' || st === 'both' ? 3 : cur.includes('left') ? 0 : cur.includes('right') ? 2 : 1;
   const apply = (r, c) => {
-    const live = engine.scene.byId(j.id), before = live ? uiBox(live, engine.width, engine.height, engine.safe) : null;
+    const live = engine.scene.byId(j.id), before = live ? uiBox(live, UIS().w, UIS().h, UIS().safe) : null;
     const v = r === 0 ? 'top' : r === 2 ? 'bottom' : '', hz = c === 0 ? 'left' : c === 2 ? 'right' : '';
     j.anchor = v && hz ? `${v}-${hz}` : v || hz || 'center';
     j.stretch = r === 3 && c === 3 ? 'both' : r === 3 ? 'height' : c === 3 ? 'width' : 'none';
     if (j.stretch === 'none') delete j.stretch;
     rebuild();
     const nl = engine.scene.byId(j.id);
-    if (before && nl) { const o = uiOrigin(nl, engine.width, engine.height, engine.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); } // stays where it was
+    if (before && nl) { const S = UIS(), o = uiOrigin(nl, S.w, S.h, S.safe), ex = nl.extents(); j.x = Math.round(before.x - o.x - (ex.ox || 0)); j.y = Math.round(before.y - o.y - (ex.oy || 0)); } // stays where it was
     changed({ inspector: true }); pushHistory();
   };
   const cells = [];
@@ -6033,6 +6050,11 @@ $('#frameBtn').after(cleanBtn);
 const setClean = (on) => { $('#app').classList.toggle('clean', on); cleanBtn.classList.toggle('on', on); cleanBtn.replaceChildren(icon(on ? 'eyeoff' : 'eye')); };
 cleanBtn.addEventListener('click', () => { const on = !$('#app').classList.contains('clean'); setClean(on); setEP('clean', on); if (on) tipOnce('clean', 'Clean view: tap the eye again to bring the buttons back'); });
 setClean(!!EP.clean);
+// Hide UI: the level without the HUD, menus and pages over it (the UI editor still shows everything)
+const hideUiBtn = h('button', { class: 'pt-btn', id: 'hideUiBtn', title: 'Hide the game\'s UI in the Scene' });
+const setHideUI = (on) => { hideUiBtn.classList.toggle('on', on); hideUiBtn.replaceChildren(...[icon('hud'), on && h('i', { class: 'slash' })].filter(Boolean)); };
+hideUiBtn.addEventListener('click', () => { const on = !EP.hideUI; setEP('hideUI', on); setHideUI(on); if (on && ent(selectedId)?.ui && !uiMode) select(null); toast(on ? 'UI hidden in the Scene (the UI button still edits it)' : 'UI shown'); });
+cleanBtn.before(hideUiBtn); setHideUI(!!EP.hideUI);
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
 $('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));

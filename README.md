@@ -700,6 +700,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - the selected row gets an accent edge;
   - **jump chips** at the top of the Inspector (one per component, or per Game Settings section) stay put while you scroll and light up for the part you're in; tap one to open and jump to it;
   - component headers stick to the top while you scroll through a long component.
+- **UI in the Scene:** in 2D the game's UI sits inside the camera frame, laid out for the game's screen, so it zooms and pans with the level. **Hide UI** (the HUD button next to the eye) hides it while you build; the UI editor still shows it.
 - **Clean view** (the eye next to snap and grid) hides everything over your game. The buttons also fade while you drag.
 - **Easier editing:**
   - **smart guides:** in 2D a dragged object lines up with other objects' centres and edges, and in the UI editor with the other elements in the same panel, with a pink line to show it;

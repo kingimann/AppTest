@@ -1794,3 +1794,7 @@ html.dense #inspector input[type=color] { height: 42px; }
 html.dense .num button { width: 42px; height: 42px; font-size: 19px; }
 html.dense #inspector .btn { height: 44px; font-size: 15px; }
 html.dense #inspector:has(.comp-jump) { --cj-h: 50px; }
+#hideUiBtn { position: relative; }
+#hideUiBtn.on { background: var(--accent-soft); color: #fff; }
+#hideUiBtn .slash { position: absolute; left: 50%; top: 50%; width: 26px; height: 2px; background: currentColor; transform: translate(-50%, -50%) rotate(-45deg); border-radius: 1px; box-shadow: 0 0 0 1.5px var(--toolbar); }
+@media (max-width: 460px) { #scenePanel .panel-tabs .pt-btn { min-width: 38px; width: 38px; padding: 0; } #scenePanel .panel-tabs { gap: 4px; } }

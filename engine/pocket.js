@@ -16998,7 +16998,15 @@ export class Engine {
     setPalette(this.scene);
     this.renderer.render(this.scene, this);
     this.applyPost(this.scene.post);
-    renderUI(this, this.scene);
+    const F = this.editing && this.uiFrame?.(this.scene); // the editor's Scene view: UI laid out for the game's screen and drawn inside the camera frame (it zooms and pans with the level)
+    if (F) {
+      this.uiCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); this.uiCtx.clearRect(0, 0, this.width, this.height);
+      const keep = [this.width, this.height, this.safe, this.uiView];
+      this.width = F.w; this.height = F.h; this.safe = F.safe; this.uiView = F.v;
+      layoutUI(this, this.scene); // nav bars for this screen
+      const c = this.uiCtx; c.save(); if (F.clip) { c.beginPath(); c.rect(F.clip.x, F.clip.y, F.clip.w, F.clip.h); c.clip(); } // what's off the game's screen stays hidden
+      try { renderUI(this, this.scene); } finally { c.restore(); [this.width, this.height, this.safe, this.uiView] = keep; }
+    } else renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);
     if (this.photoWanted) { const cbs = this.photoWanted; this.photoWanted = null; try { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const g = c.getContext('2d'); g.drawImage(this.canvas, 0, 0); if (this.uiCanvas) g.drawImage(this.uiCanvas, 0, 0, c.width, c.height); const url = c.toDataURL('image/png'); for (const f of cbs) f(url); } catch { for (const f of cbs) f(null); } } // Take Photo: the frame just drawn, game + UI
   }

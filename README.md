@@ -150,17 +150,39 @@ Settings for you on this device (games keep their own settings):
 Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
 
 - **Triggers** are friendly cards: **ON** something happens → **IF** conditions are true → **DO** instructions, top to bottom.
-  - **14 events**: game starts, every N seconds, tapped, touched / stops touching a tag, jump/fire button, swipe, message, variable reaches, destroyed, animation finished, and more.
-  - **12 conditions**, each flippable with NOT: compare variable, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
-  - **34 instructions** in 6 groups:
-    - Variables: change variable, give/use item.
+  - **38 events**: game starts, every N seconds, tapped, **double-tapped**, **pressed and held**, touched / stops touching a tag, jump/fire button, swipe, **keyboard key**, message, variable reaches, **variable changes**, **after a delay (once)**, **at random times**, **comes near a tag**, **starts seeing a tag**, **lands**, **takes damage**, **dies**, destroyed, animation finished, **level won**, **game over**, **player leaves / comes back to the app**, **run by another trigger or a visual script's custom event**, **phone shaken**, **page changes**, **state machine enters a state**, **inventory changes**, **permission answered**, **internet lost / back**, **phone turned**, **side menu opens / closes**.
+  - **35 conditions**, each flippable with NOT: **list contains / list length**, **dictionary has key**, **page is**, **key held**, **finger on the screen**, **online**, **time of day**, **permission granted**, **another object's variable**, **a visual script function's result**, **event value**, compare variable, **compare two variables**, **its own variable**, **text variable**, **health** (or health %), **number of objects with a tag** (e.g. no enemies left), **is moving**, **level number**, **time in this level**, **phone held upright**, **save file has key**, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
+  - **83 instructions** in 8 groups:
+    - Lists: **add / remove / clear / shuffle / sort / pick an item**, **dictionary set / add / remove**.
+    - Camera: **make a camera live**, **follow a tag**, **zoom**, **fade the screen**.
+    - Scripts: **call a custom event** (on this, other, an object, a tag or everything, with a value) and **run a visual script function** (store its result).
+    - Variables: change variable, **toggle**, **random number**, **set text**, **change its own variable**, **save / load a variable (save files)**, give/use item.
     - Objects: show/hide, destroy, spawn, set text, set colour, move to, damage/heal.
     - Motion: move/rotate/scale/fade with easing and "wait until done", punch, play animation.
     - Physics: push, set velocity, jump, gravity.
-    - Flow: **wait**, send message, go to state.
-    - Game: show message, dialogue, sound, vibrate, camera shake/switch, save/load, win, game over, next level, restart.
+    - Flow: **wait**, **wait a random time**, **wait until a variable…**, **continue only if…**, **repeat the steps above N times**, **stop here**, **run another trigger** (by name, on any object), send message, go to state.
+    - Motion, objects and physics (new): **set position**, **glide to an object**, **face a tag**, **push toward / away**, **stop moving**, **add / remove tags**, **destroy all with a tag**, **change picture**.
+    - Game (new): **slow motion**, **pause / resume**, **haptic tap**, **open a website**, **copy text**, **share**, **ask the player to type** (waits for the answer), **go to page**.
+    - Game: show message, **pop-up text**, **particle burst**, dialogue, sound, **music**, vibrate, camera shake/switch, save/load, win, game over, next level, **go to level N**, restart.
+    - Spawn can now spawn at the *other* object (what touched it).
+  - **Per-trigger options** (⚙ on each trigger, shown as chips on its header):
+    - a **name**;
+    - runs every time, only once, or up to N times;
+    - a **cooldown**, a **delay** before the steps, and a **chance %**;
+    - **all** conditions or **any** one;
+    - what happens if it fires again while running: run another copy, ignore it, or start over;
+    - **write to the Console** when it runs.
+  - **Event values**: a message or custom event can carry a value. Check it with the *Event value* condition, or type `@event` into any field (or `{@event}` inside text).
+  - **ELSE** steps run when the event happens but the conditions are false (e.g. a chest with a 30% rare drop, else coins).
+  - Fold triggers to a one-line summary (tap the name), **Fold all**, and move triggers up or down. Find Problems warns about a "Run another trigger" with no matching trigger.
   - Tap a row to edit it in place; ⋮ moves, duplicates, disables or deletes it.
-  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, talk to an NPC.
+  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, double tap for a super jump, hold to charge, all enemies gone → win, a treasure chest with a rare drop, a clicker with a cooldown, blink 3 times, random spawns, save coins when the player leaves, talk to an NPC.
+- **My Instructions and My Conditions** (the *Mine* button in the Triggers or State Machine editor, or *New instruction…* / *New condition…* at the bottom of the picker):
+  - Build your own instruction from other instructions (with waits), or your own condition from other conditions (all or any must be true).
+  - Give them **inputs** (number or text, each with a default). Type `@amount` into any field of the steps to use an input, or `{@amount}` inside text.
+  - Use them like built-in ones: they appear under *My Instructions* / *My Conditions* in the pickers, and each use fills in its own inputs. A trigger waits for a My Instruction to finish, unless you choose *Don't wait for it*.
+  - Edit one from any row that uses it. You can also **Duplicate** it, **Delete** it (it tells you how many times it is used), or **Save to Library** and add it to any other game from *Mine → From your library*.
+  - They belong to the whole game, so every object's triggers and state machines can use them. Visual scripts can use them too, with **Run My Instruction** and **My Condition**. Find Problems flags uses of deleted ones.
 - **State Machine**:
   - The object is always in one state (Patrol, Look Around, Alert…). States are cards on a map with arrows between them.
   - Tap a state to edit what it does **when entering**, **every frame** and **when leaving**.
@@ -168,6 +190,13 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **Scripts, triggers and state machines talk to each other:**
+  - **Functions across objects:** **Call Function On Object** gives back another script's Return Value (e.g. the Game Manager's `canAfford`). **Run Function On Objects** runs it on one object, everything with a tag, or everything, and can store the result. **Object Has Function** checks first.
+  - **Other objects' variables:** **Get / Set Variable Of Object** (a door's `open`, an enemy's `hp`), by name, tag or *other*.
+  - **Custom events go everywhere:** *Call Custom Event* (now also *on object named*, with a text or number value) reaches visual scripts and Triggers (*Run by another trigger / custom event*, with the value as `@event`). The **Run Trigger** node and the Triggers instruction *Run another trigger* reach both too.
+  - **Triggers can use scripts:** *Run visual script function* (instruction) and *Visual script function result* (condition). **Run My Instruction** and **My Condition** nodes let scripts use the Triggers' reusable pieces.
+  - Messages, game variables and the *State machine enters a state* event connect state machines as well.
+  - Several messages in the same frame each run their trigger.
 
 ### Advanced components
 
@@ -204,6 +233,15 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Quick add** chips for common components, next to Add Component.
   - **Add Component** opens with suggestions for the selected object (e.g. Rigidbody, Health, Triggers for a player that lacks them), your recently used components, and category folders with counts (Physics, Controllers, Combat, AI, Logic…). Tap a folder to browse it, or search everything at once.
   - Components have a coloured edge by category.
+  - **Odin-style fields:**
+    - Settings changed from their default get a blue edge and a **↺ reset** button. The **✎ Changed only** button next to search hides everything else.
+    - A dropdown with 2–4 short choices becomes **toggle buttons**.
+    - Numbers whose label ends in a unit, like *(s)*, *(px)*, *(°)* or *(%)*, show it as a chip inside the field.
+    - "One per line: A | B | C" settings become a **table** with a column for each part. These include Bottom Nav tabs, shop items, camera shots and side menu items. Rows have a ⋯ menu to move them up or down, duplicate or delete them. **Text** switches back to the plain box.
+    - Comma lists (variables, tags, messages) become **chips**. Tap × to remove one, tap a chip to rename it, or add new ones with suggestions from your game.
+    - Required fields (like a Camera Mixer's cameras) show an error while they are empty.
+  - Each component's ⋯ menu has **Paste Values**, which copies another component of the same type onto this one, and **Copy as Text**.
+  - **☰ → Find Problems…** checks every level, object, component and reusable script at once. Examples: missing templates, objects that don't exist, scripts with no Event node, empty Images. Tap a problem to go straight to that object.
 
 ### Node coding (Visual Script)
 
@@ -761,6 +799,29 @@ Everything inside a panel that has *Show when* (title, game over, paused…) now
 - **Nodes:** **Go To Page** (open / switch / start over), **Go Back** (*then* / *nowhere to go*), **On Page Opened**, **On Back**, and the values **Page Is** and **Can Go Back**.
 - Scripts: `scene.navTo(page, variable, { history, dir, clear })`, `scene.navBack()`, `scene.canGoBack()`.
 
+### 2D Sprite Editor (draw your own sprites)
+
+The 2D cousin of the 3D Modeler. Open it from **Create → Characters & Sprites → Draw Your Own** or **+ → Draw a Sprite**. On any object, use **Draw** in the Image component, or **Draw your own** in the Shape Renderer, which starts from the shape it already has.
+
+- **Shapes as parts:** box, rounded box, circle, triangle, star, polygon, heart, line, text / emoji, and pictures from your phone.
+  - **Select** a part to drag it. Corners scale it while the opposite corner stays put, and the round knob rotates it. Pinch or drag empty space to pan and zoom.
+  - **Style:** fill colour, **gradient** (down, across, diagonal or radial), outline and width, opacity, corner radius, number of sides or points, glow and drop shadow.
+  - Flip, **cut out** (makes a hole in the parts below), bring to front / send to back, centre, copy, and **mirror copy** for symmetric characters.
+- **Pen:** tap points to draw your own shape; tap the first point to close it.
+- **Brush:** draw freely with a finger.
+- **Edit points:** drag any point of a shape, or tap the small dots to add points. Turn on **Smooth** for curves. **To points** turns any box, circle or star into an editable shape.
+- **Pixel art:** pixel layers with pencil, eraser, fill bucket and colour picker. There are 1×–3× brushes, **mirror painting**, a grid, and **pixel art mode** for crisp pixels and snapping. The fill bucket also recolours a shape when you tap it.
+- **Layers:** a thumbnail for each part, with show/hide and lock. You can also rename, reorder, duplicate or delete parts, and merge pixel layers.
+- **Frames for animation:**
+  - Copy a frame and change it a little. **Onion skin** shows the previous frame faintly.
+  - **Play** previews the animation, at your choice of **FPS**.
+  - Give frames **clip names** (idle, run…). Done saves the frames as a sprite sheet, with a **Sprite Sheet Animator** already set up with those clips.
+- **Starting points:** Smiley, Coin, Tree, Slime, Button and Heart. The ⋯ menu has:
+  - canvas size and background;
+  - snap, grid and keep proportions;
+  - **Save to / Open from My Drawings**, to reuse a drawing in other games.
+- Undo / redo throughout. Done saves a picture plus the editable drawing, so the sprite works everywhere a picture does (game, UI, exports) and opens again with every part still editable.
+
 ### Sprites (drawn art, no emoji)
 
 - *Project › Sprites* is a library of about 100 drawn sprites (as of v0.1): characters, enemies, items, nature, vehicles, blocks and white UI icons. They are vector art, so they stay sharp at any size and add almost nothing to a project (`sprite: { src: 'art:slime' }`).
@@ -799,6 +860,27 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 - **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
 - Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
 - Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.
+
+### Save files (Easy Save style)
+
+Games can keep anything between plays in **named save files** of keys, like Unity's Easy Save.
+
+- **Save Files nodes** (their own node folder):
+  - Save and load keys: **Save Key**, **Save Variable To Key**, **Load Key Into Variable** (with a *not saved yet* way out), and **Load Key** as text or as a number with a default.
+  - A key can hold a number, text, a list, a dictionary or a whole object.
+  - Check what is there: **Key Exists**, **Save File Exists**, **Number Of Saved Keys**, **Seconds Since Saved** (useful for offline earnings).
+  - Delete: **Delete Key**, **Delete Save File** (for New Game).
+  - In bulk: **Save / Load Variables** (all of them, or a comma list), **Save / Load Object** (position, rotation, scale, shown or hidden, its own variables, text).
+  - **Save Everything Now**, **Saved Keys To List**, **Save Files To List** (for save-slot menus).
+  - Files: **Copy Save File** (or move / rename), **Back Up Save File** and **Restore Backup**.
+  - **Export Save As Text** turns a save into one line (and copies it) so a player can move progress to another phone. **Import Save From Text** loads it back.
+  - **On Game Saved** is an event that runs whenever a file is written.
+- **Auto Save component** remembers one object between plays: where it is, whether it's shown, its own variables, and whether it was destroyed or collected (collected coins stay gone). It loads when the level starts. It saves when the player leaves the app, when the level ends, on a timer, on a message, or on *Save Everything Now*.
+- **Save Manager component** does the same for game variables: coins, upgrades, unlocked levels. Pick which ones, or keep them all.
+- **Game Settings › Saving › Save files:**
+  - **Encrypt save files** with a password. Players can't read or edit them, and a file changed outside the game is refused.
+  - **Keep the previous save as a backup.**
+  - **Save Data…** (also in ☰) is a save browser for the saves Play mode wrote on this device. It lists every file and key with its value, size and when it was saved. From there you can edit a value, add or delete keys, export or import, back up or restore, duplicate, or delete one file or all of them to start fresh.
 
 ### Saving, restore points and backups
 

@@ -2206,7 +2206,7 @@ export class Input {
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
     const stickSide = zone >= 1 || (this.engine.stickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
     if (btn) { ptr.role = 'button'; btn.id = e.pointerId; this.justPressed.add('btn:' + btn.action); this.engine.vibrate(8); }
-    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick) {
+    else if (st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick') && this.engine.scene.state === 'play' && stickSide && !this.stick && !this.onTapTarget(p)) {
       ptr.role = 'stick';
       const f = st.joystickMode === 'fixed' ? this.fixedStick() : null;
       this.stick = f ? { id: e.pointerId, bx: f.x, by: f.y, x: p.x, y: p.y, fixed: true } : { id: e.pointerId, bx: p.x, by: p.y, x: p.x, y: p.y, stay: st.joystickMode === 'static' };
@@ -2214,6 +2214,13 @@ export class Input {
     }
     this.pointers.set(e.pointerId, ptr);
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
+  }
+
+  /** Is there something under this point that listens for taps (On Tap nodes, tap triggers, buttons)? Then the finger is a tap, not the joystick. */
+  onTapTarget(p) {
+    const s = this.engine.scene; if (!s?.tapTargets?.size) return false;
+    for (const t of s.tapTargets) if (!t.dead && t.visible !== false && hitTest(s, t, p.x, p.y)) return true;
+    return false;
   }
 
   move(e) {
@@ -2238,8 +2245,9 @@ export class Input {
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
     const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
     if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000 });
-    if (!cancelled && ptr.role === 'free' && dt < 350 && dist < 14) {
-      this.taps.push({ x: ptr.x, y: ptr.y });
+    const tapDist = Math.max(16, Math.min(this.engine.width, this.engine.height) * 0.04); // a finger wobbles a little: more room on big screens
+    if (!cancelled && (ptr.role === 'free' || ptr.role === 'stick') && dt < 450 && dist < tapDist) {
+      this.taps.push({ x: ptr.sx, y: ptr.sy, ex: ptr.x, ey: ptr.y }); // where the finger landed is what was aimed at
       this.justPressed.add('tap');
     } else if (!cancelled && ptr.role === 'free' && dt < 700 && dist > 40) {
       const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
@@ -10008,6 +10016,7 @@ registerBehavior('button', {
     return {
       uiAlways: true, // keeps working on title and end screens
       start(e, s) {
+        (s.tapTargets ||= new Set()).add(e); // Buttons: a touch here is a press, never the joystick
         if (!(+p.cooldown > 0)) return;
         (s.overlays ||= []).push(ring = (ctx) => { // a dark sweep over the button while it cools down
           if (e.dead || !e.visible || e._parentHidden || s.time >= cdUntil) return;
@@ -11431,7 +11440,10 @@ registerBehavior('triggers', {
     };
     return {
       uiAlways: true,
-      start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); for (const hst of evHosts) hst?.start(e, s); },
+      start(e, s) {
+        w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); for (const hst of evHosts) hst?.start(e, s);
+        if (list.some((t) => ['tap', 'doubleTap', 'longPress'].includes(t.event?.type) || (t.event?.type === 'node' && ['tap', 'onDoubleTap', 'onLongPress', 'onDragThis'].includes(t.event.node)))) (s.tapTargets ||= new Set()).add(e); // the joystick leaves these alone
+      },
       update(e, dt, s) {
         w.frame(dt);
         for (const hst of evHosts) hst?.update(e, dt, s);
@@ -12525,6 +12537,7 @@ registerBehavior('graph', {
       start(e, s) {
         if (leNodes.length) { lw = new LogicWatcher(e, s); needsSensor(leNodes.map((n) => leEvent(n)), e, s); } // Triggers events used as nodes
         startMoreEvents(e, s);
+        if (g.nodes.some((n) => ['tap', 'onDoubleTap', 'onLongPress', 'onDragThis', 'le_tap', 'le_doubleTap', 'le_longPress'].includes(n.type) || (n.type === 'onFingerDown' && param(n, 'where') !== 'anywhere'))) (s.tapTargets ||= new Set()).add(e);
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
         if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });

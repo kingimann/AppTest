@@ -448,6 +448,11 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Move: joystick, tilt and drag
 
+- **Taps and the joystick get along:**
+  - A finger that lands on something you can tap never starts the joystick. That covers On Tap / Double Tap / Long Press / Drag nodes, tap triggers and Buttons.
+  - A quick touch that did start the joystick still counts as a tap.
+  - Taps forgive a little finger wobble (more room on big screens) and up to 0.45 s of press, and they are checked where the finger landed.
+
 The **Move** component steers with the joystick, a finger drag, both, or tilting the phone.
 
 **Movement** (Move › Movement):

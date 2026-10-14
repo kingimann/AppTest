@@ -1808,3 +1808,5 @@ html.dense #inspector:has(.comp-jump) { --cj-h: 50px; }
 #uiScreens button[hidden] { display: none !important; }
 /* the UI editor on a phone: − / + next to fit, as well as pinching */
 @media (hover: none) { #app[data-view=ui] #zoomBar button[data-zoom=in], #app[data-view=ui] #zoomBar button[data-zoom=out] { display: grid; } }
+/* hardly any room (a panel is open): the floating bars step aside; the panel has the same actions */
+#viewport.short #ctxBar, #app[data-view=ui] #viewport.short #zoomBar { display: none !important; }

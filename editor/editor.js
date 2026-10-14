@@ -408,11 +408,15 @@ engine.uiFrame = (s) => {
   if (playing || !engine.showUI) return null;
   if (uiMode) { // the UI editor: the game's screen at its real size (design width × height), fitted into the view, then your zoom and pan on top
     const land = orientationOf() === 'landscape', v = s.mode === '3d' || !s.view ? (land ? { width: 700, height: 400 } : { width: 400, height: 700 }) : s.view, w = +v.width || 400, hh = +v.height || 700, pad = 18;
-    const z0 = Math.max(0.05, Math.min((engine.width - pad * 2) / w, (engine.height - pad * 2) / hh)), z = z0 * uiView.z;
+    const zW = (engine.width - pad * 2) / w, zH = (engine.height - pad * 2) / hh, sel = selectedId && engine.scene.byId(selectedId);
+    const follow = sel?.ui && zH < zW * 0.6 && uiView.z === 1 && !uiView.x && !uiView.y; // a short view (a panel is open) and a UI element selected: fill the width and keep that element in sight
+    const z0 = Math.max(0.05, follow ? zW : Math.min(zW, zH)), z = z0 * uiView.z;
     let cx = engine.width / 2; // keep the screen clear of the tool bar when there's room beside it
     const rail = $('#toolRail'), rr = rail?.offsetParent ? rail.getBoundingClientRect() : null, vr = rr && engine.root.getBoundingClientRect();
     if (rr) { const fw = w * z0; cx = Math.max(cx, Math.min(rr.right - vr.left + 8 + fw / 2, engine.width - 6 - fw / 2)); }
-    const ox = cx + uiView.x - w / 2 * z, oy = engine.height / 2 + uiView.y - hh / 2 * z;
+    const ox = cx + uiView.x - w / 2 * z;
+    let oy = engine.height / 2 + uiView.y - hh / 2 * z;
+    if (follow) { const r = uiBox(sel, w, hh, { top: 0, right: 0, bottom: 0, left: 0, ...(PHONES[phone]?.safe || {}), k: 1 }); oy = Math.min(pad, Math.max(engine.height - pad - hh * z, engine.height / 2 - r.y * z)); }
     sceneUI = { w, h: hh, safe: { top: 0, right: 0, bottom: 0, left: 0, ...(PHONES[phone]?.safe || {}), k: 1 }, v: { z, x: ox + w / 2 * z - w / 2, y: oy + hh / 2 * z - hh / 2 }, clip: null, editor: true };
     return sceneUI;
   }

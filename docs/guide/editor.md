@@ -55,6 +55,7 @@ The view button above the Scene switches between:
   - The quick-action bar keeps to Inspect, Duplicate and Delete; small things are moved by their middle and resized by the handles at their edges.
   - **Tap** picks the smallest thing under your finger (a button rather than the card or page behind it). **Drag** moves it straight away.
   - Dragging a full-screen **page** pans the view instead of moving it (tap it to select it). **Pinch** zooms, or use − / + / fit; a pinch that starts on a button doesn't move the button.
+  - With a panel open (little room left), the screen fills the width and follows the selected element, so you see your changes to it; the floating bars step aside.
   - Things **stretched** to the screen width (search bars, app bars) move only up and down, and pulling their left or right edge changes their **margin** from the screen edge.
 
 ## Create screen

@@ -83,7 +83,7 @@ Long text that doesn't fit its space ends in "…" instead of being squeezed. Ta
 | Button | Tap / press / hold / long-press to do an action. Cost, cooldown, "only works when…", pressed look, sound and buzz |
 | Toggle, Checkbox, Segmented Control, Option Picker, Stepper, Star Rating | Set variables |
 | Slider | Drag to set a variable (one bound to `volume` 0–100 controls the game's sound) |
-| Text Input | Type into a variable (text, number, password, e-mail, search) |
+| Text Input | Type into a variable (text, number, password, e-mail, search). Search bars suggest as you type, remember recent searches, and can have Cancel and a 🎤 button (see *Making apps › Search bars*) |
 | Dropdown, Keypad, Colour Picker, Carousel | Choices |
 | Skill Button, Radial Menu, Prize Wheel | Game controls |
 | Touch Button | Your own on-screen control: left, right, up, down, jump, fire or a message while held |

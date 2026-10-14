@@ -187,6 +187,24 @@ Everything in an app moves with **springs**, which feel natural and settle quick
 - **Record Forms** bring their fields in one by one. The focused field glows, switches slide, choice buttons have a highlight that slides between them, stars fill one at a time, and a missing field shakes.
 
 - **Search bars** show a magnifier, and an ✕ that clears the search. While a search finds nothing, the Data List says *No results*; an empty list shows its *When there is nothing* line under a soft icon.
+
+### Search bars
+
+A search bar is a **Text Input** with *Type of input: search*. Its **Search** settings:
+
+| Setting | What it does |
+|---|---|
+| Suggestions while typing | From words you list, a list variable, or a **data collection** (the records that match, by a field such as `title`). The part you typed is in bold; tap one to search for it. |
+| Remember recent searches | Tapping the empty bar shows your last searches (with *Clear*), and matching ones come first among the suggestions. Kept on the phone. |
+| ✕ button to clear | Clears the search, while typing too. |
+| Cancel button while typing | The bar slides over to make room for *Cancel*, like on an iPhone. |
+| Microphone button | Search by voice where the phone's browser can listen (Chrome, Safari). |
+| Message when the search changes | Sent once typing pauses (*Pause before that message*), not on every letter: load results from a server, refresh a list. |
+| Message when a suggestion is picked | For acting on a picked suggestion. |
+
+- Several hints split by `|` take turns: `Search recipes | Try “pasta” | Search by ingredient`.
+- A Data List searching with the variable `search` puts how many records match in `{searchResults}` (the variable's name + `Results`).
+- The To-Do and Notes templates suggest their records as you type.
 - The **App Bar** of the app templates is flat at the top of a page and gets a shadow once you scroll (*Shadow: once scrolled*).
 
 *Game Settings › Motion* sets the **speed** of every animation and **Reduce motion**: *follow the phone* (the default, which uses the phone's accessibility setting), *always* or *never*. With reduced motion, transitions become short fades.

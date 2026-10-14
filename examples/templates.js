@@ -48,8 +48,8 @@ const app = {
   text: (id, name, value, y, o = {}) => ({ id, name, ui: true, anchor: 'top-left', x: 20, y, text: { value, size: o.size || 16, color: o.color || INK, weight: o.weight || '600', align: 'left', wrap: o.wrap ?? 360 } }),
   button: (id, name, label, action, value, o) => ({ id, name, ui: true, anchor: o.anchor || 'bottom', x: o.x || 0, y: o.y, shape: { type: o.r ? 'circle' : 'rect', w: o.w || 360, h: o.h || 52, r: o.r, radius: 16, fill: o.fill, stroke: o.stroke, lineWidth: o.stroke ? 2 : 0, ...(o.stroke ? {} : { shadow: '@shadow', shadowBlur: 12, shadowY: 4 }) },
     text: { value: label, size: o.size || 17, color: o.color || '@onAccent', weight: '800' }, behaviors: [{ type: 'button', action, value, amount: 1, sound: 'click', feel: 'spring', ripple: true }] }),
-  search: (id, v, hint) => ({ id, name: 'Search', ui: true, anchor: 'top', x: 0, y: 32, stretch: 'width', margin: 16, shape: { type: 'rect', w: 368, h: 44, radius: 12, fill: '@card', stroke: '@line', lineWidth: 1 },
-    text: { value: '', size: 16, color: INK, weight: '600', align: 'left', inset: 42 }, behaviors: [{ type: 'uiInput', var: v, kind: 'search', placeholder: hint, maxLength: 40, style: 'right in the bar', placeholderColor: '@sub', focusColor: '@accent', live: true, message: '' }] }),
+  search: (id, v, hint, coll) => ({ id, name: 'Search', ui: true, anchor: 'top', x: 0, y: 32, stretch: 'width', margin: 16, shape: { type: 'rect', w: 368, h: 44, radius: 12, fill: '@card', stroke: '@line', lineWidth: 1 },
+    text: { value: '', size: 16, color: INK, weight: '600', align: 'left', inset: 42 }, behaviors: [{ type: 'uiInput', var: v, kind: 'search', placeholder: hint, maxLength: 40, style: 'right in the bar', placeholderColor: '@sub', focusColor: '@accent', live: true, message: '', ...(coll ? { suggestFrom: 'a data collection', suggestCollection: coll, suggestField: 'title', cancelButton: true } : {}) }] }),
   list: (id, o) => ({ id, name: o.name || 'List', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 12, marginTop: o.top ?? 64, marginBottom: o.bottom ?? 8, shape: { type: 'rect', w: 380, h: 500, radius: 0, fill: '' },
     behaviors: [{ type: 'uiDataList', bg: '', row: '@card', text: INK, sub: MUTED, danger: '@danger', ...o.list, accent: '@accent' }] }),
   form: (id, o) => ({ id, name: id === 'form-edit' ? 'Edit Form' : 'Add Form', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 8, marginTop: 12, shape: { type: 'rect', w: 380, h: 600, radius: 0, fill: '' },
@@ -69,7 +69,7 @@ function todoApp() {
       app.bar('home = My Tasks\nadd = New task\ndetail = Task\nedit = Edit task', A),
       { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: [{ type: 'dataStat', collection: 'Tasks', how: 'count', filter: 'done = no', var: 'left' }, { type: 'dataStat', collection: 'Tasks', how: 'count', filter: 'done = yes', var: 'finished' }] },
       ...app.page('p-home', 'home', true, [
-        app.search('search', 'search', 'Search tasks'),
+        app.search('search', 'search', 'Search tasks', 'Tasks'),
         { ...app.text('summary', 'Summary', '{left} to do · {finished} done', 74, { size: 14, color: MUTED, weight: '700' }) },
         app.list('list', { top: 92, bottom: 8, list: { collection: 'Tasks', title: '{title}', subtitle: '{priority} · {due}', check: 'done', search: 'search', sort: 'newest first', openPage: 'detail', empty: 'No tasks. Tap + to add one.' } }),
         app.fab('add-btn', 'add'),
@@ -96,7 +96,7 @@ function notesApp() {
     entities: [
       app.bar('home = Notes\nadd = New note\ndetail = Note\nedit = Edit note', A),
       ...app.page('p-home', 'home', true, [
-        app.search('search', 'search', 'Search notes'),
+        app.search('search', 'search', 'Search notes', 'Notes'),
         app.list('list', { top: 64, list: { collection: 'Notes', title: '{title}', subtitle: '{body}', icon: '{mood}', sort: 'newest first', search: 'search', openPage: 'detail', empty: 'No notes yet. Tap + to write one.', rowH: 74 } }),
         app.fab('add-btn', 'add'),
       ]),

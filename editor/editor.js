@@ -5064,21 +5064,21 @@ function openFileMenu() {
 
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
 /** Game types to start from, split into 2D and 3D (Blank first) with a switch between them. */
-function typeCards(onPick) {
+function typeCards(onPick, o = {}) {
   let mode = ['3d', 'app'].includes(store.get('pocket.editor.newMode', '2d')) ? store.get('pocket.editor.newMode', '2d') : '2d';
   const kindOf = (t) => (t.kind === 'app' ? 'app' : templates[t.key].mode === '3d' ? '3d' : '2d');
   const wrap = h('div', { class: 'type-wrap' });
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
   const tplOrient = (t) => templates[t.key].settings?.orientation;
   const draw = () => {
-    const list = templateInfo.filter((t) => kindOf(t) === mode).sort((a, b) => (/^(empty|app-blank)/.test(b.key) ? 1 : 0) - (/^(empty|app-blank)/.test(a.key) ? 1 : 0));
+    const list = templateInfo.filter((t) => kindOf(t) === mode && !(o.home && /^(empty|app-blank)/.test(t.key))).sort((a, b) => (/^(empty|app-blank)/.test(b.key) ? 1 : 0) - (/^(empty|app-blank)/.test(a.key) ? 1 : 0));
     wrap.replaceChildren(
       h('div', { class: 'seg' }, ['2d', '3d', 'app'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
         icon(m === '3d' ? 'cube' : m === 'app' ? 'phone' : 'grid'), m === 'app' ? 'Apps' : `${m.toUpperCase()} games`.replace(' games', window.innerWidth < 520 ? '' : ' games'), h('small', {}, String(templateInfo.filter((t) => kindOf(t) === m).length))))),
-      ...[mode !== 'app' && h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l)))].filter(Boolean),
+      ...[mode !== 'app' && !o.home && h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l)))].filter(Boolean),
       h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t, t.key.startsWith('empty') ? orient() : null) },
-        h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube'),
-          (t.key.startsWith('empty') ? orient() : tplOrient(t)) && h('span', { class: 'pv-or ' + (t.key.startsWith('empty') ? orient() : tplOrient(t)) }, (t.key.startsWith('empty') ? orient() : tplOrient(t)) === 'landscape' ? 'Landscape' : 'Portrait')),
+        h('div', { class: 'pv', style: `--c:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube'),
+          (t.key.startsWith('empty') ? orient() : tplOrient(t)) === 'landscape' && h('span', { class: 'pv-or landscape' }, 'Landscape')), // (most are portrait: only the exceptions say so)
         h('b', {}, t.title), h('small', {}, t.blurb)))));
   };
   draw();
@@ -5110,33 +5110,103 @@ function openNewDialog() {
   openDialog('New Game or App', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type, or an app. Each one already works, and you can change it any way you like.'), typeCards(startGame)]);
 }
 
-// ---- Home screen: continue, new game by type, my games ----
+// ---- Home screen: continue, quick create, my games (with pictures), templates ----
+const agoText = (t) => { const s = (Date.now() - t) / 1000; if (s < 60) return 'just now'; if (s < 3600) return `${Math.floor(s / 60)} min ago`; if (s < 86400) return `${Math.floor(s / 3600)} h ago`; const d = Math.floor(s / 86400); return d === 1 ? 'yesterday' : d < 7 ? `${d} days ago` : new Date(t).toLocaleDateString(); };
+const projKind = (j) => (j?.settings?.app ? 'app' : j?.mode === '3d' ? '3d' : '2d');
+const KIND_INFO = { '2d': { label: '2D game', icon: 'grid', color: '#3a6ea5' }, '3d': { label: '3D game', icon: 'cube', color: '#2e8a63' }, app: { label: 'App', icon: 'phone', color: '#7b4fd6' } };
+const thumbKey = (id) => 'pocket.thumb.' + id;
+/** A small picture of the game as it was when you last stopped playing it. */
+function captureThumb() {
+  try {
+    const host = engine.root || $('#viewport'), R = host.getBoundingClientRect(); if (!R.width || !R.height) return;
+    engine.render?.(); // (draw now: a WebGL picture is only readable right after it's drawn)
+    const cvs = [...host.querySelectorAll('canvas')].filter((cv) => cv.getBoundingClientRect().width && getComputedStyle(cv).display !== 'none'); if (!cvs.length) return;
+    const rs = cvs.map((cv) => cv.getBoundingClientRect()), L = Math.max(R.left, Math.min(...rs.map((r) => r.left))), T = Math.max(R.top, Math.min(...rs.map((r) => r.top)));
+    const box = { left: L, top: T, width: Math.min(R.right, Math.max(...rs.map((r) => r.right))) - L, height: Math.min(R.bottom, Math.max(...rs.map((r) => r.bottom))) - T }, k = 640 / Math.max(box.width, box.height), W = Math.round(box.width * k), Hh = Math.round(box.height * k), ox = 0, oy = 0; // its own shape, at most 640 px
+    const c = document.createElement('canvas'); c.width = W; c.height = Hh; const g = c.getContext('2d');
+    g.fillStyle = '#111'; g.fillRect(0, 0, W, Hh);
+    cvs.forEach((cv, i) => { const r = rs[i]; g.drawImage(cv, ox + (r.left - box.left) * k, oy + (r.top - box.top) * k, r.width * k, r.height * k); });
+    store.set(thumbKey(projectId), c.toDataURL('image/jpeg', 0.7));
+  } catch { /* a picture is nice to have */ }
+}
+/** A project's picture: the last game screen, or a coloured tile with its kind's icon. */
+function projArt(id, json, name, big) {
+  const src = store.get(thumbKey(id), ''), K = KIND_INFO[projKind(json)];
+  if (src) return h('div', { class: 'pj-art' + (big ? ' big' : ''), style: `--img:url("${src}")` }, h('img', { src, alt: '' })); // the whole screen, over a blurred copy of itself
+  let hsh = 0; for (const ch of String(name || '')) hsh = (hsh * 31 + ch.charCodeAt(0)) | 0;
+  const hue = Math.abs(hsh) % 360;
+  return h('div', { class: 'pj-art gen' + (big ? ' big' : ''), style: `--a:hsl(${hue} 55% 42%);--b:hsl(${(hue + 40) % 360} 60% 24%)` }, icon(K.icon), h('span', {}, String(name || '?').trim().charAt(0).toUpperCase()));
+}
+function projMenu(anchor, id, pr) {
+  const open = () => { saveNow(); openProject(pr.json, id); hideHome(); };
+  popMenu(anchor, [{ cap: pr.name },
+    { icon: 'edit', label: 'Open', fn: open },
+    { icon: 'play', label: 'Play', fn: () => { open(); play(); } },
+    { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Name', pr.name)?.trim(); if (!n) return; if (id === projectId) { root.name = n; saveNow(); } else { pr.json.name = n; saveProject(id, { ...pr, name: n, json: pr.json }); } setTimeout(showHome, 50); } },
+    { icon: 'copy', label: 'Duplicate', fn: () => { const c = clone(pr.json); c.name = pr.name + ' (copy)'; const nid = uid('p'); saveProject(nid, { name: c.name, updated: Date.now(), json: c }); const t = store.get(thumbKey(id), ''); if (t) store.set(thumbKey(nid), t); setTimeout(showHome, 50); toast(`Made “${c.name}”`); } },
+    '-', id !== projectId && { icon: 'trash', label: 'Delete', danger: true, fn: () => { if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return; deleteProject(id); store.set(thumbKey(id), ''); showHome(); } }].filter(Boolean));
+}
+/** Your games and apps as picture cards (the newest first), with All / 2D / 3D / Apps once there are a few. */
+function myProjects(all) {
+  let f = store.get('pocket.editor.projFilter', 'all'), more = false;
+  const wrap = h('div', { class: 'pj-wrap' });
+  const draw = () => {
+    const n = (m) => all.filter(([, p]) => projKind(p.json) === m).length, shown = all.filter(([, p]) => f === 'all' || projKind(p.json) === f), cut = more ? shown : shown.slice(0, 6);
+    wrap.replaceChildren(...[
+      all.length > 3 ? h('div', { class: 'chips' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].filter(([k, , c]) => k === 'all' || c).map(([k, l, c]) =>
+        h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))) : null,
+      shown.length ? h('div', { class: 'pj-grid' }, cut.map(([id, pr]) => { const K = KIND_INFO[projKind(pr.json)];
+        return h('div', { class: 'pj' + (id === projectId ? ' cur' : '') },
+          h('button', { class: 'pj-open', onclick: () => { saveNow(); if (id !== projectId) openProject(pr.json, id); hideHome(); } }, projArt(id, pr.json, pr.name),
+            h('span', { class: 'pj-t' }, h('b', {}, pr.name), h('small', {}, h('i', { style: `--c:${K.color}` }, K.label), ' · ', agoText(pr.updated)))),
+          h('button', { class: 'pj-more', 'aria-label': 'More', onclick: (e) => projMenu(e.currentTarget, id, pr) }, icon('more'))); }))
+        : h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`),
+      shown.length > 6 ? h('button', { class: 'btn pj-all', onclick: () => { more = !more; draw(); } }, more ? 'Show fewer' : `Show all ${shown.length}`) : null].filter(Boolean));
+  };
+  draw();
+  return wrap;
+}
+/** Blank 2D game, blank 3D game, blank app: one tap each. */
+function quickCreate() {
+  const orient = () => store.get('pocket.editor.newOrient', 'portrait');
+  const wrap = h('div');
+  const draw = () => wrap.replaceChildren(
+    h('div', { class: 'quick' }, [['empty-2d', '2d', 'New 2D game'], ['empty-3d', '3d', 'New 3D game'], ['app-blank', 'app', 'New app']].map(([key, k, label]) => {
+      const t = templateInfo.find((x) => x.key === key) || { key }, K = KIND_INFO[k];
+      return h('button', { class: 'q', style: `--c:${K.color}`, onclick: () => startGame(t, k === 'app' ? null : orient()) }, h('span', { class: 'q-ic' }, icon(K.icon), h('em', {}, icon('plus'))), h('b', {}, label), h('small', {}, k === 'app' ? 'Pages and a tab bar' : orient() === 'landscape' ? 'Landscape' : 'Portrait'));
+    })),
+    h('div', { class: 'q-or' }, h('span', {}, 'New games start'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: orient() === k ? 'on' : '', onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, l))));
+  draw();
+  return wrap;
+}
 function showHome() {
   closeLayer();
   $('.toast')?.remove();
   const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
-  const cur = root && all.find(([id]) => id === projectId);
+  const cur = root && all.find(([id]) => id === projectId), hr = new Date().getHours();
+  const greet = hr < 5 ? 'Up late? Let’s make something.' : hr < 12 ? 'Good morning! Let’s make something.' : hr < 18 ? 'Good afternoon! Let’s make something.' : 'Good evening! Let’s make something.';
   home.replaceChildren(...[
-    h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('h1', {}, 'Pocket Engine')),
-    h('p', { class: 'sub' }, 'Make 2D and 3D games, and apps, on your phone.'),
-    cur && h('button', { class: 'continue', onclick: hideHome },
-      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.settings?.app ? 'App' : root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
-    h('h2', {}, 'New game or app'),
-    typeCards(startGame),
-    all.length ? [h('h2', {}, 'My games and apps'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
-      modeBadge(pr.json),
-      h('span', { class: 'nm', onclick: () => { saveNow(); openProject(pr.json, id); hideHome(); } }, pr.name),
-      h('small', {}, new Date(pr.updated).toLocaleDateString()),
-      id !== projectId && h('button', { title: 'Delete', onclick: () => {
-        if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return;
-        deleteProject(id); showHome();
-      } }, icon('trash'))))] : null,
+    h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('div', { class: 'hd-t' }, h('h1', {}, 'Pocket Engine'), h('p', { class: 'sub' }, greet)),
+      h('button', { class: 'hd-b', title: 'Documentation', onclick: () => openDocs('') }, icon('help')),
+      h('button', { class: 'hd-b', title: 'Preferences', onclick: openPreferences }, icon('gear'))),
+    cur && h('div', { class: 'hero' },
+      h('button', { class: 'hero-art', onclick: hideHome, 'aria-label': 'Open' }, projArt(cur[0], root, root.name, true), h('span', { class: 'hero-tag' }, icon('clock'), 'Continue')),
+      h('div', { class: 'hero-b' },
+        h('div', { class: 'hero-t' }, h('b', {}, root.name), h('small', {}, `${KIND_INFO[projKind(root)].label} · edited ${agoText(cur[1].updated)}${(root.levels || []).length ? ` · ${(root.levels || []).length + 1} levels` : ''}`)),
+        h('div', { class: 'hero-btns' },
+          h('button', { class: 'btn', onclick: () => { hideHome(); play(); } }, icon('play'), 'Play'),
+          h('button', { class: 'btn primary continue', onclick: hideHome }, icon('edit'), 'Keep editing')))),
+    h('h2', {}, 'Create'),
+    quickCreate(),
+    all.length ? [h('h2', {}, 'My games and apps', h('small', {}, String(all.length))), myProjects(all)] : null,
+    h('h2', {}, 'Start from a template'),
+    typeCards(startGame, { home: true }),
     safetyCard(all.length),
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
       !matchMedia('(display-mode: standalone)').matches && h('button', { class: 'btn', onclick: installApp }, icon('download'), 'Install App'),
       window.pocketUpdate && h('button', { class: 'btn', onclick: () => { saveNow(); window.pocketUpdate.available ? window.pocketUpdate.apply() : window.pocketUpdate.check(); } }, icon('download'), 'Updates')),
-    window.pocketUpdate && h('p', { class: 'sub' }, `Pocket Engine ${window.pocketUpdate.version}`),
+    window.pocketUpdate && h('p', { class: 'sub ver' }, `Pocket Engine ${window.pocketUpdate.version}`),
   ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
   home.scrollTop = 0;
@@ -6026,6 +6096,7 @@ function play() {
 }
 function stop() {
   if (!playing) return;
+  captureThumb(); // the home screen shows the game as you left it
   playing = false;
   dropBack(stop);
   if (sheetBeforePlay && sheetBeforePlay !== 'peek' && !isDesktop()) setSheet(sheetBeforePlay); sheetBeforePlay = null;

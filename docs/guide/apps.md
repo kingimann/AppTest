@@ -10,7 +10,7 @@ You publish an app the same way as a game: as a link, an installable web app, or
 
 ## Start an app
 
-On the home screen (or *☰ → New Game or App…*), pick the **Apps** tab:
+On the home screen, tap **New app** for a blank app, or pick the **Apps** tab under *Start from a template* (also in *☰ → New Game or App…*):
 
 | App | What it shows you |
 |---|---|

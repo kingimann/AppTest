@@ -1810,3 +1810,17 @@ html.dense #inspector:has(.comp-jump) { --cj-h: 50px; }
 @media (hover: none) { #app[data-view=ui] #zoomBar button[data-zoom=in], #app[data-view=ui] #zoomBar button[data-zoom=out] { display: grid; } }
 /* hardly any room (a panel is open): the floating bars step aside; the panel has the same actions */
 #viewport.short #ctxBar, #app[data-view=ui] #viewport.short #zoomBar { display: none !important; }
+textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-height: 1.35; }
+/* Bottom Nav tabs: one card per tab */
+.navtabs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.nt-row { display: grid; grid-template-columns: 44px 1fr 36px; gap: 8px; align-items: center; padding: 6px; border-radius: 12px; background: var(--g2); border: 1px solid var(--g3); }
+.nt-icbtn { width: 44px; height: 44px; border-radius: 10px; border: 0; background: var(--g3); display: grid; place-items: center; }
+.nt-ic { display: block; width: 24px; height: 24px; background: currentColor; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+.nt-ic.nt-emoji { background: none; font-size: 22px; line-height: 1; width: auto; height: auto; }
+.nt-mid { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nt-mid input, .nt-mid select { width: 100%; min-width: 0; }
+.nt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.nt-grid button { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 2px 6px; border-radius: 12px; border: 1px solid var(--g3); background: var(--g2); color: var(--text); font-size: 11px; }
+.nt-grid button.on { border-color: var(--accent); background: var(--accent-soft, var(--g3)); }
+.nt-grid .nt-ic { width: 26px; height: 26px; }
+.nt-icbtn { color: var(--text); }

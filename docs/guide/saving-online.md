@@ -58,6 +58,12 @@ Each game uses **your own free accounts**: *Game Settings › Online* takes a Pl
 - Players sign in automatically with a private ID on their device. **Set Player Name** names them on leaderboards.
 - **Online Leaderboard** widget; **Post Score** node (in PlayFab, allow clients to post player statistics).
 - **Cloud Save / Cloud Load** keep variables in the player's account. **Load Remote Config** turns Title Data into variables. **Track Event** records analytics.
+- **Accounts:** *Add Email Login* links an email and password to the player's account, *Sign In With Email* gets the same player (scores, cloud save, items) on another phone, *Send Password Reset* emails a reset link.
+- **Currency and store:** *Add Currency* adds or (with a minus amount) takes virtual currency; balances are in `pf` + the code (`{pfGC}`). *Buy Item* buys from your catalog with currency, *Get Inventory* fills the list `pfItems`, and *Owns Item* checks one. (In PlayFab, allow clients to add currency in the title's API settings.)
+- **Player data:** *Save Player Data* / *Load Player Data* keep chosen variables by key (lists and dictionaries too). *Get My Stats* reads the player's statistics into variables.
+- **Friends:** *Add Friend* by player name, and the Online Leaderboard's *Only my friends*.
+- **Cloud Script:** *Run Cloud Script* calls one of your functions on PlayFab's servers with arguments (`amount = 5, item = gem`). An object it returns becomes variables, anything else goes in `pfResult`.
+- **News and time:** *Get News* reads Title News (`pfNews`, `pfNewsTitle`, `pfNewsBody`). *Get Server Time* puts the server's clock in `pfServerTime`, for daily rewards that changing the phone's clock can't cheat.
 
 ### Photon (real-time multiplayer)
 
@@ -65,12 +71,20 @@ Each game uses **your own free accounts**: *Game Settings › Online* takes a Pl
 - **Network Sync** (on your player): everyone else sees a copy that follows you, tagged `remote`.
 - **Spawn For Everyone**, and spawners or shooters that spawn for everyone.
 - **Send Network Message** arrives as a normal game message; **Set Shared Variable** keeps a variable the same for everyone.
-- Events: On Joined Room, On Player Joined / Left, On Online Error. Text can show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}`.
+- **Send Network Message** can go to everyone else, everyone (you too) or just **the host**.
+- **Rooms:** *Create Room* makes a room by name, or with a short code to share (`K7Q2M`, in `{netRoom}`), public or **private** (found only by its name), with settings like `mode = race, map = 2`. *Join Matching Room* joins any room with the same settings, or makes one. The **Room List** widget shows the open rooms with their players; tap one to join. The list is also in `netRooms` and `netRoomCount`.
+- **Room settings:** *Set Room Setting* sets a variable for everyone in the room. It's kept for players who join later.
+- **Players:** *Set My Name*, and *Set My Player Info* (team, ready, skin…). `netPlayerNames` lists everyone, `netPlayerProps` has their info, and `netAllReady` is 1 when everyone set `ready`.
+- **Chat:** *Send Chat* and the **Chat Box** widget (bubbles, a text box and a Send button). The last 30 lines are in `netChat`.
+- Events: On Joined Room, On Player Joined / Left, **On Became Host** (the host left and you took over), **On Room List Changed**, **On Chat Message**, On Online Error. Text can show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}`.
 
 ```js
 const o = scene.engine.online;
 o.join('room1'); o.sendMessage('ping', 5); o.setShared('round', 2);
 o.pfSubmit('score', 1200); o.pfLeaderboard('score');
+o.createRoom('', { max: 4, priv: true, props: { mode: 'race' } }); o.joinMatching({ mode: 'race' });
+o.setRoomProp('round', 3); o.setPlayerProp('ready', 1); o.chat('gg!'); o.sendMessage('ping', 1, 'host');
+await o.pfAddCurrency('GC', 50); await o.pfBuy('sword', 'GC', 100); await o.pfCloud('grantReward', { amount: 5 });
 ```
 
 ## Notifications

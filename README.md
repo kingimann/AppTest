@@ -605,6 +605,10 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 ### Apps (not just games)
 
 - **New Game or App › Apps:** Blank App, To-Do List, Notes, Expense Tracker and Arcade. Each one is a working app with pages, an app bar, lists, forms, search and saving.
+- **Text:** rich-text tags (`<b>`, `<color=…>`, `<size=…>`, `<mark=…>`, `<icon=star>`), auto size to fit its box, wrap to its box, a line limit with "…", typewriter reveal, numbers that count up, gradient direction, shadow offset and a bordered label box.
+- **Panels (windows):** a header with a title and ✕, drag to move, fold, resize from the corner, grow to fit, frosted glass, and per-corner rounding.
+- **Bottom bar tabs:** each tab is a card with an icon grid, a label and a page list; *Add Tab* adds a page you have or a new one (made for you, with a fitting icon), and New Page offers to add its tab.
+- **Pages:** scroll when taller than the screen, remember their scroll, send messages when they open and close, and New / Duplicate / Rename / Delete in the editor's page button.
 - **Editing apps:** the Scene and the UI editor show one page at a time (the home page first; picking something on another page switches to it), with the lists, forms and search bars drawn as they look in the app. The UI editor lays the app out at its real screen size, fitted to your screen, with **+ Add** in the bar above it.
 - **Sharp and lined up:** UI and app screens are drawn at the phone's full sharpness (up to 3×), even when the game world is drawn at lower quality. Templates share one 16 px edge margin. Search text starts after the magnifier, and text that doesn't fit ends in "…" instead of being squeezed.
 - **App mode** (*Game Settings › App*): opens straight on its first page, with no title screen and no pause, sound or share buttons. App projects get an **App** badge and their own filter on the home screen.
@@ -1207,6 +1211,8 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 - **Online Leaderboard** widget / component: shows the top players (or the ones around you) in a text, refreshing on start, on the message `leaderboard`, and after posting. **Post Score** (node or the *submit score online* button action) sends a variable to a leaderboard. In PlayFab, turn on *Title settings › API Features › Allow client to post player statistics*.
 - **Cloud Save / Cloud Load** keep the game's variables in the player's account. **Load Remote Config** turns Title Data into variables, so you can tune a live game. **Track Event** records analytics events. Virtual currencies show up as variables like `{pfGC}`.
 
+- **More PlayFab:** email login (add it to the account, sign in on another phone, password reset), virtual currency (add or take), buying catalog items and the inventory (`pfItems`, *Owns Item*), player data by key, the player's own statistics, friends (and a friends-only leaderboard), Cloud Script, Title News and the server's clock (`pfServerTime`).
+
 **Photon** (real-time multiplayer), loading the official Photon Realtime library (`photon-realtime` from npm via jsDelivr) when it's first needed:
 - **Join Room** (by name, or any open room; it connects first), **Leave Room**, or *Join a room when the game starts*. **Multiplayer Lobby** widget: status, *Play Online* and *Leave* buttons.
 - **Network Sync** component: put it on your player. Everyone else in the room sees a copy that follows you (position, turning, facing, animation clip), with your name over it in 2D. Copies are tagged `remote` and are left out of the camera and the player tag; *solid* makes them bump.
@@ -1214,6 +1220,8 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 - **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
 - Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
 - Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.
+
+- **More Photon:** rooms with a share code, private rooms and settings (*Create Room*, *Join Matching Room*), the **Room List** widget (open rooms; tap to join), room settings for everyone, player names and info (team, ready…) with `netAllReady`, room **chat** (**Chat Box** widget), messages just for the host, and *On Became Host*.
 
 ### Save files (Easy Save style)
 

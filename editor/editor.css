@@ -1829,3 +1829,6 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .nav-styles .ns { display: flex; flex-direction: column; gap: 4px; padding: 4px 4px 6px; border-radius: 12px; border: 2px solid transparent; background: var(--g2); color: var(--text); font-size: 12px; font-weight: 600; text-transform: capitalize; }
 .nav-styles .ns img { width: 100%; height: auto; border-radius: 8px; display: block; }
 .nav-styles .ns.on { border-color: var(--accent); }
+.page-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0 8px; }
+.page-head .page-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--accent-strong); color: #fff; font-weight: 800; margin-right: auto; }
+.page-head .page-chip svg.i { width: 16px; height: 16px; }

@@ -117,7 +117,13 @@ scene.canGoBack();
 
 Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Can Go Back.
 
-**Page settings** (in the page's *Show If*, group *Page*):
+**The Page card:** select a page and its settings are in one **Page** card in the Inspector:
+
+- Its name (**Rename**, which updates the buttons and tabs that open it), **Show** it in the UI editor, **The app opens on this page**, its **Title in the App Bar**, and **Add to the bottom bar**.
+- **Look:** background colour or gradient, a **background picture** (cover, fit, tile or stretch, with opacity and a tint over it so text stays readable), and space at the top and bottom.
+- **Opening and closing**, **Scrolling**, **Bottom bar and access**, **Messages** (the settings below).
+
+A page only moves when you drag it if there's something below the screen to scroll to (or pull to refresh is on).
 
 - **Scroll when it is taller than the screen:** drag up and down (with a flick, a rubber band at the ends and a thin scroll bar). Lists and scroll views inside it still scroll on their own, and a scroll never presses a button. The App Bar can hide or gain its shadow as the page scrolls.
 - **Remember where it was scrolled to**, or start at the top each time.

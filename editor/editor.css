@@ -941,6 +941,7 @@ body.playing #attachBar { display: none !important; }
 .type.blank { border-style: dashed; }
 .mode-badge { flex: none; min-width: 34px; height: 26px; padding: 0 6px; border-radius: 8px; font-size: 12px; font-weight: 800; display: grid; place-items: center; }
 .mode-badge.m2 { background: #2c4a6e; color: #bfdcff; } .mode-badge.m3 { background: #2f5a3a; color: #c5f0c8; }
+.mode-badge.mapp { background: #4b3a7a; color: #e0d4ff; }
 .ne-folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .ne-folder { position: relative; text-align: left; min-height: 84px; padding: 10px 12px; border: 1px solid #222; border-radius: 14px; background: color-mix(in srgb, var(--c) 18%, var(--card)); display: flex; flex-direction: column; gap: 3px; color: inherit; }
 .ne-folder b { font-size: 16px; }
@@ -1563,3 +1564,18 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .st-pretend summary, .st-help summary { cursor: pointer; color: var(--muted); font-size: 13px; padding: 4px 0; }
 .st-pretend { display: flex; flex-direction: column; gap: 6px; }
 .st-help pre { white-space: pre-wrap; font-size: 12px; background: var(--field); padding: 10px; border-radius: 10px; overflow-x: auto; }
+/* App Data (data.js) */
+.dt-fields { display: flex; flex-direction: column; gap: 8px; }
+.dt-field { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
+.dt-field input, .dt-field select { min-height: 38px; padding: 4px 10px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); font-size: 15px; flex: 1 1 120px; min-width: 0; }
+.dt-field input.wide { flex-basis: 100%; }
+.dt-field input.def { flex: 1 1 90px; }
+.dt-acts { display: flex; gap: 4px; margin-left: auto; }
+.dt-acts .ib, .dt-table .ib { min-width: 36px; height: 36px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); display: grid; place-items: center; }
+.dt-acts .ib svg, .dt-table .ib svg { width: 16px; height: 16px; }
+.dt-table { overflow-x: auto; border-radius: 12px; border: 1px solid var(--line); }
+.dt-table table { border-collapse: collapse; min-width: 100%; font-size: 14px; }
+.dt-table th { text-align: left; padding: 6px 8px; color: var(--muted); font-size: 12px; background: var(--card); white-space: nowrap; }
+.dt-table td { padding: 4px; border-top: 1px solid var(--line); }
+.dt-table td input, .dt-table td select { width: 100%; min-width: 90px; min-height: 34px; padding: 2px 8px; border-radius: 8px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); font-size: 14px; }
+.dt-table td input[type=checkbox] { width: 22px; min-width: 0; min-height: 0; height: 22px; }

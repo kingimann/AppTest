@@ -336,6 +336,7 @@ export class Entity {
     this.light = props.light ? { ...LIGHT_DEFAULTS, ...props.light } : null; // point light (2D and 3D)
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
+    for (const k of ['marginTop', 'marginBottom', 'marginLeft', 'marginRight']) if (props[k] != null && props[k] !== '') this[k] = +props[k]; // per side (room for an app bar…)
     this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
     this.ignoreBars = !!props.ignoreBars; this.overlap = !!props.overlap; // UI: may go under the nav bars / may overlap other UI (Keep UI apart)
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
@@ -883,6 +884,7 @@ export class Scene {
     this.tweens = [];
     this.pending = [];
     this.time = 0;
+    if (this.settings.app) Object.assign(this.settings, { pauseButton: false, muteButton: false, shareButton: false, title: '' }); // apps: no game buttons or title screen
     this.state = this.settings.title ? 'title' : 'play'; // title | play | over | win
     this.listeners = {};
     this.engine = null;
@@ -4101,8 +4103,10 @@ function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
   const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : uiArea(W, H, safe, e);
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
+  // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
+  const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -4282,7 +4286,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -10828,6 +10832,9 @@ function runAction(s, e, p, other) {
     case 'jump': { const t = obj(v) || e; if (t?.body) t.body.vel.y = (s.mode === '3d' ? 1 : -1) * (p.amount > 50 || s.mode === '3d' ? p.amount : p.amount * 60); break; }
     case 'move by': { const t = obj(v) || e; const [dx, dy, dz] = String(p.amount).split(',').map(Number); if (t) { t.x += dx || 0; t.y += dy || 0; t.z += dz || 0; } break; }
     case 'start game': if (s.state === 'title') s.state = 'play'; break;
+    case 'new record': s.formIntent = 'new'; if (v) s.navTo(v); break; // value: the page with the Record Form
+    case 'edit opened record': s.formIntent = 'edit'; if (v) s.navTo(v); break;
+    case 'delete opened record': { const r = s.openRecord; if (r) { s.engine.data.remove(r.col, r.id); openRecord(s, r.col, null); if (s.canGoBack()) s.navBack(); } break; }
     case 'restart game': s.engine.restart(); return;
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
@@ -11054,6 +11061,350 @@ registerBehavior('blink', {
         e.data.blinkOff = p.solid && !e.visible; // Hazard ignores touches while hidden
       },
     };
+  },
+});
+
+// ---- app data: collections of records kept on the device (Game Settings › Data) ----
+export const FIELD_TYPES = ['text', 'long text', 'number', 'money', 'yes/no', 'date', 'choice', 'rating', 'icon'];
+export const fieldKey = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
+/** A collection's fields with their keys (Title → title, Due date → due_date). */
+export function fieldsOf(def) {
+  return (def?.fields || []).filter((f) => f?.name).map((f) => ({ ...f, key: f.key || fieldKey(f.name), type: FIELD_TYPES.includes(f.type) ? f.type : 'text',
+    options: Array.isArray(f.options) ? f.options : String(f.options || '').split(',').map((q) => q.trim()).filter(Boolean) }));
+}
+const isoDay = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const truthy = (v) => v === true || v === 1 || v === '1' || v === 'yes' || v === 'true';
+/** How a value reads in a list or text: money with its symbol, short dates, ✓, stars. */
+export function fieldText(f, v, def) {
+  if (v == null || v === '') return '';
+  switch (f?.type) {
+    case 'money': { const n = +v || 0; return (n < 0 ? '−' : '') + (def?.currency ?? '$') + Math.abs(n).toFixed(2).replace(/\.00$/, ''); }
+    case 'number': return String(Math.round((+v || 0) * 1000) / 1000);
+    case 'yes/no': return truthy(v) ? '✓' : '';
+    case 'rating': { const n = clamp(Math.round(+v || 0), 0, 5); return '★'.repeat(n) + '☆'.repeat(5 - n); }
+    case 'date': { const d = new Date(String(v).slice(0, 10) + 'T00:00'); if (isNaN(d)) return String(v); const t = isoDay(), y = isoDay(new Date(Date.now() - 864e5)), m = isoDay(new Date(Date.now() + 864e5)); const k = String(v).slice(0, 10); return k === t ? 'Today' : k === y ? 'Yesterday' : k === m ? 'Tomorrow' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }); }
+    default: return String(v);
+  }
+}
+const fieldDefault = (f) => (f.default !== undefined && f.default !== '' ? (f.type === 'yes/no' ? truthy(f.default) : ['number', 'money', 'rating'].includes(f.type) ? +f.default || 0 : f.default === 'today' && f.type === 'date' ? isoDay() : f.default)
+  : f.type === 'yes/no' ? false : f.type === 'date' ? isoDay() : f.type === 'choice' ? f.options[0] || '' : ['number', 'money', 'rating'].includes(f.type) ? 0 : '');
+/** Stores every collection (seed rows from Game Settings, then whatever the app adds) and saves it on the device. */
+export class DataStore {
+  constructor(engine) { this.engine = engine; this.cache = {}; this.n = 0; }
+  defs() { return this.engine.collections || []; }
+  def(name) { const k = fieldKey(name); return this.defs().find((d) => fieldKey(d.name) === k) || null; }
+  key(def) { return 'pocket.data.' + (this.engine.gameKey || 'game') + '.' + fieldKey(def.name); }
+  /** All records of a collection (the live array: don't change it yourself, use add / update / remove). */
+  rows(name) {
+    const def = this.def(name); if (!def) return [];
+    const k = fieldKey(def.name); if (this.cache[k]) return this.cache[k];
+    let rows = null; if (def.keep !== false) try { rows = JSON.parse(store.get(this.key(def), 'null')); } catch { rows = null; }
+    if (!Array.isArray(rows)) rows = (def.rows || []).map((r, i) => ({ ...this.newRecord(def.name), ...this.norm(def, r), id: r.id || 's' + i, _at: r._at ?? i })); // starting rows, missing fields filled in
+    return (this.cache[k] = rows);
+  }
+  save(name) { const def = this.def(name); if (def && def.keep !== false) store.set(this.key(def), JSON.stringify(this.rows(name))); }
+  changed(name, kind, rec) { this.save(name); const s = this.engine.scene; if (!s) return; this.syncVars(s); s.emit('data', fieldKey(name), kind, rec); }
+  /** {tasks_count} for every collection. */
+  syncVars(s) { for (const d of this.defs()) { const k = fieldKey(d.name) + '_count', n = this.rows(d.name).length; if (s.vars[k] !== n) s.setVar(k, n); } }
+  newRecord(name) { const o = {}; for (const f of fieldsOf(this.def(name))) o[f.key] = fieldDefault(f); return o; }
+  /** Add a record ({ title: 'Milk' } — field names or keys). Returns it (with an id). */
+  add(name, rec = {}) {
+    const def = this.def(name); if (!def) { Log.add('warn', `There is no data collection called “${name}”`, 'Data'); return null; }
+    const r = { ...this.newRecord(name), ...this.norm(def, rec), id: 'r' + Date.now().toString(36) + (this.n++).toString(36), _at: Date.now() };
+    this.rows(name).push(r); this.changed(name, 'added', r); return r;
+  }
+  get(name, id) { return this.rows(name).find((r) => r.id === id) || null; }
+  update(name, id, patch) { const def = this.def(name), r = this.get(name, id); if (!r) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r; }
+  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
+  clear(name) { const L = this.rows(name); L.length = 0; this.changed(name, 'cleared', null); }
+  /** Back to the starting rows from Game Settings (forgets what was saved on this device). */
+  reset(name) { const def = this.def(name); if (!def) return; try { localStorage.removeItem(this.key(def)); } catch { /* storage unavailable */ } delete this.cache[fieldKey(def.name)]; this.changed(name, 'reset', null); }
+  /** Field names or keys → keys, and values to the field's type. */
+  norm(def, rec) {
+    const F = fieldsOf(def), out = {};
+    for (const [k0, v] of Object.entries(rec || {})) {
+      const f = F.find((q) => q.key === k0 || q.key === fieldKey(k0)); const k = f ? f.key : k0;
+      out[k] = !f ? v : f.type === 'yes/no' ? truthy(v) : ['number', 'money', 'rating'].includes(f.type) ? (v === '' || v == null ? 0 : +v || 0) : v;
+    }
+    return out;
+  }
+  /** A record as text and numbers for conditions: yes/no → 1 / 0. */
+  env(name, r, vars = {}) {
+    const F = fieldsOf(this.def(name));
+    return { getVar: (k) => { const f = F.find((q) => q.key === k || q.key === fieldKey(k)); if (f) { const v = r[f.key]; return f.type === 'yes/no' ? (truthy(v) ? 1 : 0) : v; } return vars[k]; }, itemCount: () => 0, questState: () => '', first: false };
+  }
+  /** Records that pass a filter (“done = no”, “amount > 10 and category = Food”), match a search, sorted. */
+  query(name, { filter = '', search = '', sort = 'newest first', vars = {} } = {}) {
+    const def = this.def(name), F = fieldsOf(def); let L = this.rows(name).slice();
+    const f = String(filter || '').trim().replace(/(=|!=|≠)\s*yes\b/gi, '$1 1').replace(/(=|!=|≠)\s*no\b/gi, '$1 0');
+    if (f) L = L.filter((r) => storyCond(fillTemplate(f, vars), this.env(name, r, vars)));
+    const q = String(search || '').trim().toLowerCase();
+    if (q) L = L.filter((r) => F.some((fd) => ['text', 'long text', 'choice', 'icon'].includes(fd.type) && String(r[fd.key] ?? '').toLowerCase().includes(q)));
+    const st = String(sort || 'newest first').toLowerCase();
+    if (st === 'newest first') L.sort((a, b) => (b._at || 0) - (a._at || 0));
+    else if (st === 'oldest first') L.sort((a, b) => (a._at || 0) - (b._at || 0));
+    else { const m = st.match(/^(.+?)(?:\s+\((a-z|z-a|low-high|high-low)\))?$/), fd = F.find((x) => x.key === fieldKey(m[1]) || x.name.toLowerCase() === m[1].trim()); if (fd) { const dir = /z-a|high-low/.test(m[2] || '') ? -1 : 1; L.sort((a, b) => { const x = a[fd.key], y = b[fd.key]; return (typeof x === 'number' || typeof y === 'number' ? (+x || 0) - (+y || 0) : String(x ?? '').localeCompare(String(y ?? ''))) * dir; }); } }
+    return L;
+  }
+  /** count / sum / average / min / max of a field. */
+  stat(name, how = 'count', field = '', filter = '', vars = {}) {
+    const L = this.query(name, { filter, sort: 'oldest first', vars }), k = fieldKey(field);
+    if (how === 'count') return L.length;
+    const nums = L.map((r) => +r[k] || 0); if (!nums.length) return 0;
+    if (how === 'sum') return Math.round(nums.reduce((a, b) => a + b, 0) * 100) / 100;
+    if (how === 'average') return Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 100) / 100;
+    return how === 'min' ? Math.min(...nums) : Math.max(...nums);
+  }
+}
+/** Open a record: its fields go into {record_title}, {record_amount}… (formatted) for detail pages. */
+function openRecord(s, name, rec) {
+  const D = s.engine.data, def = D.def(name); if (!def) return;
+  for (const k of Object.keys(s.vars)) if (k.startsWith('record_')) delete s.vars[k];
+  if (!rec) { s.openRecord = null; s.setVar('record_id', ''); return; }
+  s.openRecord = { col: fieldKey(def.name), id: rec.id };
+  for (const f of fieldsOf(def)) s.vars['record_' + f.key] = f.type === 'yes/no' ? (truthy(rec[f.key]) ? 'yes' : 'no') : f.type === 'long text' || f.type === 'text' || f.type === 'choice' || f.type === 'icon' ? rec[f.key] ?? '' : fieldText(f, rec[f.key], def);
+  s.setVar('record_id', rec.id); s.emit('recordOpened', fieldKey(def.name), rec);
+}
+const openedRecord = (s) => (s.openRecord ? s.engine.data.get(s.openRecord.col, s.openRecord.id) : null);
+
+registerBehavior('uiDataList', {
+  label: 'Data List', description: 'A scrolling list of the records in a data collection (Game Settings › Data): a title, a line under it, an icon, a value on the right and a checkbox. Search, filter and sort it; tap a row to open it on a page; swipe left to delete. It updates by itself when records change.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Tasks', suggest: 'collections' },
+    { key: 'title', label: 'Row title ({field})', type: 'text', default: '{title}' },
+    { key: 'subtitle', label: 'Line under it', type: 'text', default: '' },
+    { key: 'right', label: 'On the right', type: 'text', default: '' },
+    { key: 'icon', label: 'Icon (emoji, {field} or blank)', type: 'text', default: '' },
+    { key: 'check', label: 'Checkbox field (yes/no; blank = none)', type: 'text', default: '' },
+    { key: 'search', label: 'Search with variable', type: 'text', default: '', suggest: 'vars', info: 'Put a Text Input (type: search) on the same page with this variable.' },
+    { key: 'filter', label: 'Only show (e.g. done = no)', type: 'text', default: '' },
+    { key: 'sort', label: 'Sort', type: 'text', default: 'newest first', info: 'newest first, oldest first, or a field: title (a-z), amount (high-low), due (low-high)…' },
+    { key: 'groupBy', label: 'Group under headings by field', type: 'text', default: '' },
+    { key: 'openPage', label: 'Tapping a row opens page', type: 'text', default: '', info: 'The record’s fields are in {record_title}… there. Blank = just open it (and send the message).' },
+    { key: 'message', label: 'Tapping a row sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'swipeDelete', label: 'Swipe left to delete', type: 'bool', default: true },
+    { key: 'empty', label: 'When there is nothing', type: 'text', default: 'Nothing here yet' },
+    { key: 'rowH', label: 'Row height', type: 'number', default: 64, range: [36, 140], step: 2, group: 'Look' },
+    { key: 'gap', label: 'Gap between rows', type: 'number', default: 8, range: [0, 30], step: 1, group: 'Look' },
+    { key: 'radius', label: 'Row roundness', type: 'number', default: 14, range: [0, 40], step: 1, group: 'Look' },
+    { key: 'doneLook', label: 'Checked rows look done (faded)', type: 'bool', default: true, group: 'Look' },
+    ...colorParams({ bg: ['Background', ''], row: ['Rows', '#ffffff'], text: ['Text', '#1c1f26'], sub: ['Second line', '#6b7280'], accent: ['Accent', '#3a7bfd'], danger: ['Delete', '#ef4444'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let scroll = 0, drag = null, swipe = null, swX = {}, flick = 0, gone = new Map();
+    const SAMPLE = [{ id: 'a', title: 'Buy milk', done: false, note: 'Today' }, { id: 'b', title: 'Call Sam', done: true, note: 'Tomorrow' }, { id: 'c', title: 'Book flights', done: false, note: 'Friday' }];
+    const geo = (e) => { const b = UK.box(e); return { b, rh: Math.max(30, +p.rowH || 64), gap: +p.gap || 0 }; };
+    const rowsOf = (s) => {
+      const D = s.engine.data, def = D.def(p.collection);
+      if (!def) return s.engine.editing ? SAMPLE.map((r) => ({ r, vars: { ...r, done: r.done ? '✓' : '' } })) : [];
+      const F = fieldsOf(def), L = D.query(p.collection, { filter: p.filter, search: p.search ? s.vars[p.search] : '', sort: p.sort, vars: s.vars });
+      return L.map((r) => { const v = Object.create(s.vars); for (const f of F) v[f.key] = fieldText(f, r[f.key], def); return { r, vars: v }; });
+    };
+    const layout = (e, s) => { // rows and headings with their y (from the top of the list)
+      const G = geo(e), L = rowsOf(s), out = []; let y = 0, head = null;
+      for (const it of L) {
+        if (p.groupBy) { const h = String(it.vars[fieldKey(p.groupBy)] || it.r[fieldKey(p.groupBy)] || '—'); if (h !== head) { head = h; out.push({ head: h, y, h: 30 }); y += 30; } }
+        out.push({ ...it, y, h: G.rh }); y += G.rh + G.gap;
+      }
+      return { out, total: y };
+    };
+    const checkKey = () => (p.check ? fieldKey(p.check) : '');
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const G = geo(e), { out, total } = layout(e, s), maxS = Math.max(0, total - G.b.h + 12);
+        for (const d of UK.downs(s, e)) if (UK.in(d, G.b)) { drag = { id: d.id, x0: d.x, y0: d.y, s0: scroll, row: out.find((q) => !q.head && d.y >= G.b.y + q.y - scroll && d.y < G.b.y + q.y - scroll + q.h) || null, axis: '' }; flick = 0; }
+        if (drag) {
+          const q = UK.ptr(s, e, drag.id);
+          if (q) {
+            const dx = q.x - drag.x0, dy = q.y - drag.y0;
+            if (!drag.axis && Math.hypot(dx, dy) > 10) drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && p.swipeDelete !== false && drag.row ? 'x' : 'y';
+            if (drag.axis === 'y') { const ns = clamp(drag.s0 - dy, -40, maxS + 40); flick = (ns - scroll) / Math.max(dt, 1 / 120); scroll = ns; }
+            if (drag.axis === 'x') swX[drag.row.r.id] = Math.min(0, dx);
+          } else {
+            if (drag.axis === 'x') { const id = drag.row.r.id; if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else swX[id] = 0; }
+            drag = null;
+          }
+        } else { scroll += flick * dt; flick *= Math.pow(0.04, dt); if (Math.abs(flick) < 5) flick = 0; scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12); }
+        for (const id of Object.keys(swX)) if (!drag || drag.row?.r.id !== id) { swX[id] *= Math.pow(0.001, dt); if (Math.abs(swX[id]) < 0.5) delete swX[id]; }
+        for (const [id, t] of gone) { const k = t + dt * 4; if (k >= 1) { gone.delete(id); s.engine.data.remove(p.collection, id); } else gone.set(id, k); }
+        // taps: the checkbox, else open the row
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, G.b)) continue;
+          const row = out.find((q) => !q.head && t.y >= G.b.y + q.y - scroll && t.y < G.b.y + q.y - scroll + q.h); if (!row || s.engine.editing) continue;
+          UK.tap(s, p);
+          const ck = checkKey();
+          if (ck && t.x < G.b.x + 8 + G.rh * 0.75) { s.engine.data.update(p.collection, row.r.id, { [ck]: !truthy(row.r[ck]) }); continue; }
+          openRecord(s, p.collection, row.r);
+          if (p.openPage) s.navTo(p.openPage);
+          if (p.message) s.send(p.message);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), { out } = layout(e, s), A = p.accent || '#3a7bfd', ck = checkKey(), txt = p.text || '#1c1f26', sub = p.sub || '#6b7280';
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 0); ctx.fill(); }
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.b.y, G.b.w, G.b.h); ctx.clip();
+        if (!out.length) UK.text(ctx, p.empty || '', G.b.cx, G.b.y + 60, { size: 15, weight: 600, color: sub });
+        for (const it of out) {
+          const y = G.b.y + it.y - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
+          if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 14, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
+          const id = it.r.id, sw = swX[id] || 0, k = gone.has(id) ? gone.get(id) : 0, x = G.b.x + 4 + sw - k * G.b.w, w = G.b.w - 8, h = G.rh, done = ck && truthy(it.r[ck]);
+          if (sw < -4 || k) { ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, 'Delete', G.b.x + w - 30, y + h / 2, { size: 13, weight: 800, color: '#fff' }); }
+          ctx.globalAlpha = (done && p.doneLook !== false ? 0.55 : 1) * (1 - k);
+          ctx.fillStyle = p.row || '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.08)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 1; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); ctx.shadowColor = 'transparent';
+          let tx = x + 16;
+          if (ck) { const cx = x + 14 + h * 0.2, r = Math.min(13, h * 0.22); ctx.lineWidth = 2.5; ctx.strokeStyle = done ? A : withAlpha(sub, 0.7); ctx.fillStyle = done ? A : 'transparent'; ctx.beginPath(); ctx.arc(cx, y + h / 2, r, 0, Math.PI * 2); if (done) ctx.fill(); ctx.stroke(); if (done) UK.text(ctx, '✓', cx, y + h / 2 + 1, { size: r * 1.3, weight: 900, color: '#fff' }); tx = cx + r + 14; }
+          const ic = p.icon ? fillTemplate(p.icon, it.vars) : '';
+          if (ic) { drawNavIcon(ctx, ic, tx + h * 0.22, y + h / 2, h * 0.42, A); tx += h * 0.44 + 12; }
+          const right = p.right ? fillTemplate(p.right, it.vars) : '', st = p.subtitle ? fillTemplate(p.subtitle, it.vars) : '';
+          let rw = 0; if (right) { ctx.font = `800 15px ${THEME.font}`; rw = ctx.measureText(right).width + 16; UK.text(ctx, right, x + w - 14, y + h / 2, { size: 15, weight: 800, color: /^[−-]/.test(right) ? (p.danger || '#ef4444') : txt, align: 'right' }); }
+          const title = fillTemplate(p.title || '{title}', it.vars);
+          UK.text(ctx, title, tx, y + h / 2 - (st ? 9 : 0), { size: 16, weight: 700, color: txt, align: 'left', maxW: x + w - tx - rw - 8 });
+          if (done && p.doneLook !== false) { ctx.font = `700 16px ${THEME.font}`; const tw = Math.min(ctx.measureText(title).width, x + w - tx - rw - 8); ctx.strokeStyle = txt; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(tx, y + h / 2 - (st ? 9 : 0)); ctx.lineTo(tx + tw, y + h / 2 - (st ? 9 : 0)); ctx.stroke(); }
+          if (st) UK.text(ctx, st, tx, y + h / 2 + 11, { size: 13, weight: 600, color: sub, align: 'left', maxW: x + w - tx - rw - 8 });
+          ctx.globalAlpha = 1;
+        }
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiForm', {
+  label: 'Record Form', description: 'A form for a data collection: one input per field (text, numbers, money, yes/no switches, choices, dates, stars). Save adds a new record, or changes the one that was opened. The phone keyboard opens right on the field.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Tasks', suggest: 'collections' },
+    { key: 'fields', label: 'Fields (comma separated; blank = all)', type: 'text', default: '' },
+    { key: 'mode', label: 'Saving', type: 'select', options: ['new, or edits when opened with Edit', 'always adds a new record', 'always changes the opened record'], default: 'new, or edits when opened with Edit' },
+    { key: 'required', label: 'Must be filled in (comma separated)', type: 'text', default: '', info: 'Blank = the first text field.' },
+    { key: 'saveLabel', label: 'Save button', type: 'text', default: 'Save' },
+    { key: 'after', label: 'After saving', type: 'select', options: ['go back', 'clear the form', 'go to page', 'stay'], default: 'go back' },
+    { key: 'page', label: 'Page', type: 'text', default: 'home', showIf: { after: ['go to page'] } },
+    { key: 'message', label: 'Saving sends message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'deleteButton', label: 'Delete button when editing', type: 'bool', default: true },
+    { key: 'fieldH', label: 'Field height', type: 'number', default: 50, range: [36, 90], step: 2, group: 'Look' },
+    ...colorParams({ bg: ['Background', ''], field: ['Fields', '#f2f4f7'], text: ['Text', '#1c1f26'], label: ['Labels', '#6b7280'], accent: ['Accent', '#3a7bfd'], danger: ['Delete', '#ef4444'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let draft = {}, editing = null, shown = false, scroll = 0, drag = null, box = null, bad = '', boxField = null;
+    const D = (s) => s.engine.data, def = (s) => D(s).def(p.collection);
+    const fields = (s) => { const F = fieldsOf(def(s)); if (!p.fields) return F; const want = String(p.fields).split(',').map((q) => fieldKey(q)); return want.map((k) => F.find((f) => f.key === k)).filter(Boolean); };
+    const fh = () => Math.max(36, +p.fieldH || 50);
+    const hOf = (f) => (f.type === 'long text' ? fh() * 2 : f.type === 'choice' ? 44 : fh()) + 24;
+    const required = (s) => { const R = String(p.required || '').split(',').map((q) => fieldKey(q)).filter((q) => q !== 'field'); if (R.length) return R; const t = fields(s).find((f) => f.type === 'text'); return t ? [t.key] : []; };
+    const load = (s) => {
+      const intent = s.formIntent; s.formIntent = null;
+      const wantEdit = p.mode === 'always changes the opened record' || (p.mode !== 'always adds a new record' && intent === 'edit');
+      const rec = wantEdit ? openedRecord(s) : null;
+      editing = rec ? rec.id : null; draft = rec ? { ...rec } : D(s).newRecord(p.collection); bad = ''; scroll = 0;
+    };
+    const closeBox = (s, keep = true) => { if (!box) return; if (keep) setVal(s, boxField, box.value); box.remove(); box = null; boxField = null; s.engine.input.reset(); };
+    const setVal = (s, f, v) => { draft[f.key] = ['number', 'money'].includes(f.type) ? (v === '' ? '' : +String(v).replace(',', '.') || 0) : v; bad = ''; };
+    const openBox = (s, e, f, r) => {
+      closeBox(s);
+      const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, long = f.type === 'long text';
+      const el = box = document.createElement(long ? 'textarea' : 'input'); boxField = f;
+      if (!long) { el.type = f.type === 'date' ? 'date' : 'text'; if (['number', 'money'].includes(f.type)) el.inputMode = 'decimal'; el.enterKeyHint = 'done'; }
+      el.value = draft[f.key] ?? ''; el.placeholder = f.name; el.autocapitalize = 'sentences';
+      el.style.cssText = `position:absolute;left:${o.x + (r.x + 12) * k}px;top:${o.y + r.y * k}px;width:${(r.w - 24) * k}px;height:${r.h * k}px;z-index:30;border:0;outline:0;background:transparent;resize:none;` +
+        `color:${p.text || '#1c1f26'};font:600 ${Math.round(16 * k)}px ${THEME.font};padding:${long ? 10 * k : 0}px 0;margin:0;caret-color:${p.accent || '#3a7bfd'}`;
+      ['pointerdown', 'pointerup', 'touchstart'].forEach((ev) => el.addEventListener(ev, (x) => x.stopPropagation()));
+      el.addEventListener('input', () => setVal(s, f, el.value));
+      el.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter' && !long) closeBox(s); else if (ev.key === 'Escape') closeBox(s, false); });
+      el.addEventListener('blur', () => setTimeout(() => { if (box === el) closeBox(s); }, 0));
+      E.root.appendChild(el); setTimeout(() => el.focus(), 30);
+    };
+    const save = (e, s) => {
+      closeBox(s);
+      const miss = required(s).find((k) => String(draft[k] ?? '').trim() === '');
+      if (miss) { bad = miss; s.message(`${fields(s).find((f) => f.key === miss)?.name || miss} is needed`, 1.2); s.engine.vibrate(30); return; }
+      const data = {}; for (const f of fields(s)) data[f.key] = draft[f.key];
+      let rec;
+      if (editing && D(s).get(p.collection, editing)) { rec = D(s).update(p.collection, editing, data); openRecord(s, p.collection, rec); }
+      else rec = D(s).add(p.collection, data);
+      s.engine.audio.sfx('coin'); s.engine.vibrate(10); s.emit('formSaved', fieldKey(p.collection), rec);
+      if (p.message) s.send(p.message);
+      if (p.after === 'go back') { if (s.canGoBack()) s.navBack(); else load(s); }
+      else if (p.after === 'go to page') s.navTo(p.page || 'home');
+      else if (p.after === 'clear the form') load(s);
+    };
+    const layout = (e, s) => { const b = UK.box(e), out = []; let y = 8; for (const f of fields(s)) { out.push({ f, y, h: hOf(f) }); y += hOf(f) + 6; } const btnY = y + 6; return { b, out, btnY, total: btnY + 52 + (editing && p.deleteButton !== false ? 60 : 0) + 10 }; };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const live = UK.live(s, e);
+        if (live && !shown) load(s);
+        shown = live; if (!live) { closeBox(s); return; }
+        const L = layout(e, s), maxS = Math.max(0, L.total - L.b.h);
+        if (box) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, r = L.out.find((q) => q.f === boxField); if (r) { box.style.top = (o.y + (L.b.y + r.y - scroll + 22) * k) + 'px'; } }
+        for (const d of UK.downs(s, e)) if (UK.in(d, L.b)) drag = { id: d.id, y0: d.y, s0: scroll };
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); else drag = null; }
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, L.b)) continue;
+          const y = t.y - L.b.y + scroll;
+          if (y >= L.btnY && y < L.btnY + 52) { UK.tap(s, p); save(e, s); continue; }
+          if (editing && p.deleteButton !== false && y >= L.btnY + 60 && y < L.btnY + 112) { UK.tap(s, p); closeBox(s, false); D(s).remove(p.collection, editing); openRecord(s, p.collection, null); s.emit('formDeleted', fieldKey(p.collection)); if (s.canGoBack()) { s.navBack(); if (s.canGoBack()) s.navBack(); } else load(s); continue; }
+          const r = L.out.find((q) => y >= q.y && y < q.y + q.h); if (!r) continue;
+          const f = r.f, fx = L.b.x + 8, fw = L.b.w - 16, fy = r.y + 22, rect = { x: fx, y: L.b.y + fy - scroll, w: fw, h: r.h - 24 };
+          if (f.type === 'yes/no') { draft[f.key] = !truthy(draft[f.key]); UK.tap(s, p); }
+          else if (f.type === 'rating') { const n = clamp(Math.ceil((t.x - fx - 6) / 34), 0, 5); draft[f.key] = draft[f.key] === n ? 0 : n; UK.tap(s, p); }
+          else if (f.type === 'choice') { let cx = fx; s.engine.uiCtx.font = `700 14px ${THEME.font}`; for (const o of f.options) { const w = s.engine.uiCtx.measureText(o).width + 26; if (t.x >= cx && t.x < cx + w) { draft[f.key] = o; UK.tap(s, p); break; } cx += w + 8; } }
+          else openBox(s, e, f, rect);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const L = layout(e, s), A = p.accent || '#3a7bfd', txt = p.text || '#1c1f26', lab = p.label || '#6b7280', fb = p.field || '#f2f4f7';
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, L.b.x, L.b.y, L.b.w, L.b.h, 0); ctx.fill(); }
+        const F = s.engine.editing && !def(s) ? [{ key: 'title', name: 'Title', type: 'text' }, { key: 'done', name: 'Done', type: 'yes/no' }] : null;
+        const rows = F ? F.map((f, i) => ({ f, y: 8 + i * (fh() + 30), h: hOf(f) })) : L.out;
+        ctx.save(); ctx.beginPath(); ctx.rect(L.b.x, L.b.y, L.b.w, L.b.h); ctx.clip();
+        const req = required(s);
+        for (const { f, y: ry, h } of rows) {
+          const y = L.b.y + ry - scroll, x = L.b.x + 8, w = L.b.w - 16, fy = y + 22, ih = h - 24, v = draft[f.key];
+          UK.text(ctx, f.name + (req.includes(f.key) ? ' *' : ''), x + 4, y + 9, { size: 12.5, weight: 800, color: bad === f.key ? (p.danger || '#ef4444') : lab, align: 'left' });
+          if (f.type === 'yes/no') {
+            const on = truthy(v); ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
+            UK.text(ctx, on ? 'Yes' : 'No', x + 14, fy + ih / 2, { size: 16, weight: 600, color: txt, align: 'left' });
+            const sw = 50, sh = 30, sx = x + w - sw - 12, sy = fy + ih / 2 - sh / 2; ctx.fillStyle = on ? A : withAlpha(lab, 0.35); UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(on ? sx + sw - sh / 2 : sx + sh / 2, sy + sh / 2, sh / 2 - 3, 0, Math.PI * 2); ctx.fill();
+          } else if (f.type === 'rating') {
+            for (let i = 1; i <= 5; i++) UK.text(ctx, i <= (+v || 0) ? '★' : '☆', x + 6 + (i - 0.5) * 34, fy + ih / 2, { size: 28, weight: 400, color: i <= (+v || 0) ? '#f5b301' : withAlpha(lab, 0.6) });
+          } else if (f.type === 'choice') {
+            let cx = x; for (const o of f.options) { ctx.font = `700 14px ${THEME.font}`; const cw = ctx.measureText(o).width + 26, on = v === o; ctx.fillStyle = on ? A : fb; UK.rr(ctx, cx, fy, cw, 36, 18); ctx.fill(); UK.text(ctx, o, cx + cw / 2, fy + 18, { size: 14, weight: 700, color: on ? '#fff' : txt }); cx += cw + 8; }
+          } else {
+            ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
+            if (bad === f.key || boxField === f) { ctx.strokeStyle = bad === f.key ? (p.danger || '#ef4444') : A; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); }
+            if (boxField !== f) {
+              const shown2 = v === '' || v == null ? '' : f.type === 'date' || f.type === 'money' ? fieldText(f, v, def(s)) : String(v);
+              if (f.type === 'long text' && shown2) { const words = shown2.split(/\s+/), Lx = []; let row = ''; ctx.font = `600 15px ${THEME.font}`; for (const wd of words) { const tt = row ? row + ' ' + wd : wd; if (ctx.measureText(tt).width > w - 28 && row) { Lx.push(row); row = wd; } else row = tt; } Lx.push(row); Lx.slice(0, Math.floor((ih - 8) / 19)).forEach((t2, i) => UK.text(ctx, t2, x + 12, fy + 16 + i * 19, { size: 15, weight: 600, color: txt, align: 'left' })); }
+              else UK.text(ctx, shown2 || f.name, x + 12, fy + ih / 2, { size: 16, weight: 600, color: shown2 ? txt : withAlpha(lab, 0.7), align: 'left', maxW: w - 24 });
+            }
+          }
+        }
+        const by = L.b.y + L.btnY - scroll; ctx.fillStyle = A; UK.rr(ctx, L.b.x + 8, by, L.b.w - 16, 52, 16); ctx.fill(); UK.text(ctx, (editing ? '✓ ' : '') + (p.saveLabel || 'Save'), L.b.cx, by + 26, { size: 17, weight: 800, color: '#fff' });
+        if (editing && p.deleteButton !== false) { ctx.strokeStyle = p.danger || '#ef4444'; ctx.lineWidth = 2; UK.rr(ctx, L.b.x + 8, by + 60, L.b.w - 16, 52, 16); ctx.stroke(); UK.text(ctx, 'Delete', L.b.cx, by + 86, { size: 16, weight: 800, color: p.danger || '#ef4444' }); }
+        ctx.restore();
+      },
+      destroy(e, s) { if (box) { box.remove(); box = null; } },
+    };
+  },
+});
+
+registerBehavior('dataStat', {
+  label: 'Data Summary', description: 'Keeps a variable up to date with a count, total, average, smallest or largest value from a data collection (e.g. the total of all expenses, how many tasks are left). Show it in a text with {variable}.',
+  params: [
+    { key: 'collection', label: 'Collection', type: 'text', default: 'Expenses', suggest: 'collections' },
+    { key: 'how', label: 'Work out', type: 'select', options: ['count', 'sum', 'average', 'min', 'max'], default: 'count' },
+    { key: 'field', label: 'Of field', type: 'text', default: 'amount', showIf: (b) => b.how && b.how !== 'count' },
+    { key: 'filter', label: 'Only records where (e.g. done = no)', type: 'text', default: '' },
+    { key: 'var', label: 'Into variable', type: 'text', default: 'total', suggest: 'vars' },
+    { key: 'format', label: 'Show as', type: 'select', options: ['number', 'money'], default: 'number', info: 'Money also fills {variable_text} with the currency symbol.' },
+  ],
+  create(p) {
+    const calc = (s) => { const D = s.engine.data, v = D.stat(p.collection, p.how, p.field, p.filter, s.vars); if (s.vars[p.var] !== v) s.setVar(p.var, v); if (p.format === 'money') { const t = fieldText({ type: 'money' }, v, D.def(p.collection)); if (s.vars[p.var + '_text'] !== t) s.setVar(p.var + '_text', t); } };
+    return { uiAlways: true, start(e, s) { calc(s); s.on('data', () => calc(s)); }, update(e, dt, s) { if (p.filter && /\{/.test(p.filter)) calc(s); } };
   },
 });
 
@@ -12609,6 +12960,7 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  dataValue: { cat: 'Values', label: 'Data Value', value: 'number', params: [{ ...txt('collection', 'Tasks', 'collection'), suggest: 'collections' }, opt('how', ['count', 'sum', 'average', 'min', 'max'], 'count', 'work out'), txt('field', 'amount', 'of field'), txt('filter', '', 'only where')] },
   questInfo: { cat: 'Values', label: 'Quest Info', value: 'number', params: [{ ...txt('quest', 'The Lost Ring', 'quest (some answers ignore it)'), suggest: 'quests' }, opt('what', ['objectives done', 'objectives', 'percent done', 'is active', 'is done', 'quests done', 'quests active'], 'objectives done', 'what')] },
   invInfo: { cat: 'Values', label: 'Inventory Info', value: 'number', params: [opt('what', ['free slots', 'used slots', 'total items', 'items of type', 'equipped damage', 'equipped armour', 'crafting progress %'], 'free slots', 'what'), opt('type', Object.keys(ITEM_TYPES), 'food', 'type (items of type)')] },
   healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
@@ -13230,6 +13582,10 @@ export const LOGIC_EVENTS = {
   dialogueStarted: { label: 'Dialogue starts', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Talking to ${p.dialogue}` : 'A conversation starts') },
   dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
   dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
+  recordAdded: { label: 'Record added', icon: 'plus', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is added${p.collection ? ' to ' + p.collection : ''}` },
+  recordChanged: { label: 'Record changed', icon: 'edit', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record changes${p.collection ? ' in ' + p.collection : ''}` },
+  recordDeleted: { label: 'Record deleted', icon: 'trash', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is deleted${p.collection ? ' from ' + p.collection : ''}` },
+  recordOpened: { label: 'Record opened', icon: 'eye', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is opened${p.collection ? ' in ' + p.collection : ''}` },
   turnStarted: { label: 'Your turn starts', icon: 'clock', say: () => 'Your turn starts' },
   unitsSelected: { label: 'Units selected', icon: 'player', say: () => 'Units are selected' },
   unitArrived: { label: 'Unit arrives', icon: 'flag', params: [sug(txt('unit', '', 'unit name or tag (empty = any)'), 'tags')], say: (p) => (p.unit ? `${p.unit} arrives` : 'A unit arrives') },
@@ -13264,6 +13620,8 @@ export const LOGIC_CONDITIONS = {
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  dataCount: { label: 'Number of records', icon: 'list', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'only where (e.g. done = no)'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(c.s.engine.data.stat(p.collection, 'count', '', p.filter, c.s.vars), p.op, +p.value || 0), say: (p) => `${p.collection}${p.filter ? ` (${p.filter})` : ''} count ${p.op} ${p.value}` },
+  recordIsOpen: { label: 'A record is open', icon: 'eye', test: (c) => !!openedRecord(c.s), say: () => 'a record is open' },
   unitCount: { label: 'Number of units', icon: 'player', params: [opt('which', ['selected', 'yours', 'enemy', 'ready this turn'], 'selected', 'units'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(+c.s.vars[{ selected: 'selectedUnits', yours: 'unitsLeft', enemy: 'enemiesLeft', 'ready this turn': 'unitsReady' }[p.which] || 'selectedUnits'] || 0, p.op, +p.value || 0), say: (p) => `${p.which} units ${p.op} ${p.value}` },
   isPlayerTurn: { label: 'It is your turn', icon: 'clock', test: (c) => c.s.isPlayerTurn, say: () => 'it is your turn' },
   questIs: { label: 'Quest state', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), opt('state', ['active', 'ready', 'done', 'failed', 'available', 'locked', 'started', 'not started'], 'active', 'is')], test: (c, p) => storyCond(`quest ${p.quest} is ${p.state}`, c.s.storyEnv()), say: (p) => `“${p.quest}” is ${p.state}` },
@@ -13323,6 +13681,12 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
+  dataSet: { cat: 'Data', label: 'Change the opened record', icon: 'edit', params: [txt('field', 'done', 'field'), txt('value', 'yes', 'to ({variables} work)')], run: (c, p) => { const r = c.s.openRecord; if (!r) return; const rec = c.s.engine.data.update(r.col, r.id, { [p.field]: fillTemplate(String(p.value ?? ''), c.s.vars) }); if (rec) openRecord(c.s, r.col, rec); }, say: (p) => `Set ${p.field} of the opened record to ${p.value}` },
+  dataDelete: { cat: 'Data', label: 'Delete the opened record', icon: 'trash', run: (c) => { const r = c.s.openRecord; if (r) { c.s.engine.data.remove(r.col, r.id); openRecord(c.s, r.col, null); } }, say: () => 'Delete the opened record' },
+  dataOpen: { cat: 'Data', label: 'Open a record', icon: 'eye', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'first one where (blank = newest)'), txt('page', '', 'then go to page (optional)')], run: (c, p) => { const r = c.s.engine.data.query(p.collection, { filter: p.filter, vars: c.s.vars })[0]; openRecord(c.s, p.collection, r || null); if (r && p.page) c.s.navTo(p.page); }, say: (p) => `Open a ${p.collection} record${p.filter ? ` where ${p.filter}` : ''}` },
+  dataClear: { cat: 'Data', label: 'Clear a collection', icon: 'trash', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), opt('how', ['delete every record', 'back to the starting records'], 'delete every record', 'how')], run: (c, p) => { if (p.how === 'back to the starting records') c.s.engine.data.reset(p.collection); else c.s.engine.data.clear(p.collection); }, say: (p) => `${p.how === 'delete every record' ? 'Empty' : 'Reset'} ${p.collection}` },
+  dataToVar: { cat: 'Data', label: 'Data summary into variable', icon: 'stats', params: [sug(txt('collection', 'Expenses', 'collection'), 'collections'), opt('how', ['count', 'sum', 'average', 'min', 'max'], 'sum', 'work out'), txt('field', 'amount', 'of field'), txt('filter', '', 'only where'), sug(txt('var', 'total', 'into variable'), 'vars')], run: (c, p) => c.s.setVar(p.var, c.s.engine.data.stat(p.collection, p.how, p.field, p.filter, c.s.vars)), say: (p) => `${p.var} = ${p.how} of ${p.collection}${p.how === 'count' ? '' : '.' + p.field}` },
   npcSay: { cat: 'Game', label: 'NPC says (bubble)', icon: 'sign', params: [sug(txt('npc', 'Villager', 'NPC (empty = this)'), 'objects'), txt('text', 'Nice day!', 'says')], run: (c, p) => { const e = p.npc ? c.s.find(p.npc) : c.e; e?.getBehavior('npc')?.say(p.text); }, say: (p) => `${p.npc || 'This NPC'} says “${p.text}”` },
   squadSelect: { cat: 'Game', label: 'Select units', icon: 'player', params: [opt('which', ['all yours', 'none', 'by tag or name', 'next one'], 'all yours', 'select'), sug(txt('tag', 'archer', 'tag or name'), 'tags')], run: (c, p) => { const s = c.s; if (p.which === 'none') return squadSelect(s, []); if (p.which === 'next one') return s.send('select next'); squadSelect(s, squadUnits(s, 'player').filter((e) => p.which === 'all yours' || e.name === p.tag || e.has(p.tag))); }, say: (p) => (p.which === 'by tag or name' ? `Select units: ${p.tag}` : `Select ${p.which}`) },
   squadMove: { cat: 'Game', label: 'Send units', icon: 'move', params: [opt('who', ['selected', 'all yours', 'by tag or name'], 'selected', 'units'), sug(txt('tag', 'archer', 'tag or name'), 'tags'), opt('to', ['an object', 'a position', 'attack an object'], 'an object', 'to'), sug(txt('object', 'Flag', 'object'), 'objects'), num('x', 0, 'x'), num('y', 0, 'y (z in 3D)')], run: (c, p) => {
@@ -13523,6 +13887,7 @@ function evOk(type, p, q) {
     case 'questStarted': case 'questUpdated': case 'questReady': case 'questCompleted': case 'questFailed': return !p.quest || String(q.item).toLowerCase() === String(p.quest).trim().toLowerCase();
     case 'dialogueStarted': case 'dialogueEnded': return !p.dialogue || String(q.item).toLowerCase() === String(p.dialogue).trim().toLowerCase() || String(q.other?.name || '').toLowerCase() === String(p.dialogue).trim().toLowerCase();
     case 'dialogueChoice': return !p.choice || String(q.item).toLowerCase() === String(p.choice).trim().toLowerCase();
+    case 'recordAdded': case 'recordChanged': case 'recordDeleted': case 'recordOpened': return !p.collection || q.item === fieldKey(p.collection);
     case 'unitArrived': return !p.unit || q.other?.name === p.unit || !!q.other?.has?.(p.unit);
     case 'unitDefeated': return !p.team || p.team === 'any' || (p.team === 'yours') === (q.item === 'player');
     case 'equipped': return (!p.mode || p.mode === 'either' || q.mode === p.mode) && (!p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase()));
@@ -13556,6 +13921,8 @@ class LogicWatcher {
     s.on('dialogueEnd', (npc, name) => this.queue.push({ type: 'dialogueEnded', item: name || npc?.name || '', other: npc }));
     s.on('dialogueChoice', (npc, text) => this.queue.push({ type: 'dialogueChoice', item: text, other: npc }));
     s.on('turn', () => this.queue.push({ type: 'turnStarted' }));
+    s.on('data', (col, kind) => { const type = { added: 'recordAdded', changed: 'recordChanged', deleted: 'recordDeleted' }[kind]; if (type) this.queue.push({ type, item: col }); });
+    s.on('recordOpened', (col) => this.queue.push({ type: 'recordOpened', item: col }));
     s.on('unitsSelected', (L) => this.queue.push({ type: 'unitsSelected', value: L.length }));
     s.on('unitArrived', (u) => this.queue.push({ type: 'unitArrived', other: u }));
     s.on('unitDefeated', (u, team) => this.queue.push({ type: 'unitDefeated', item: team, other: u }));
@@ -13931,6 +14298,7 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
         case 'questInfo': {
           const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
           if (w === 'objectives') return O.length; if (w === 'percent done') return st === 'done' ? 100 : O.length ? Math.round(dn / O.length * 100) : 0;
@@ -15355,6 +15723,7 @@ export class Engine {
     this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.perms = new Permissions(this); // location, camera, microphone, motion… (Ask Permission node)
     this.saves = new SaveFiles(this); // Easy Save-style save files (Save Key / Load Key nodes, Auto Save component)
+    this.data = new DataStore(this); // app data: collections of records kept on the device (Data List, Record Form)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -15456,7 +15825,7 @@ export class Engine {
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
-    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; } // Items, Recipes, Quests, Dialogues
+    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
     this.loadPrefs();
     this.setScene(this.factory());
     if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
@@ -15504,7 +15873,7 @@ export class Engine {
   setScene(scene, { skipRestore = false } = {}) {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
-    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe();
+    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene);
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });

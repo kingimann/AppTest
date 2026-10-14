@@ -4,7 +4,7 @@
 import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
-const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
+const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
@@ -16,6 +16,7 @@ import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
 import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
+import { initData, dataEditor, ensureCollection } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
@@ -91,6 +92,8 @@ let root = null, project = null, projectId = null, selectedId = null, levelIdx =
 // Items & Recipes editors (Game Settings) work on the whole game
 queueMicrotask(() => initItems({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
   stations: () => levelList().flatMap((lv) => lv.entities || []).flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'craftingStation').map((b) => b.station)).filter(Boolean) }));
+// App Data (Game Settings › Data) works on the whole game too
+queueMicrotask(() => initData({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m) }));
 // Quests & Dialogues editors (Game Settings) also work on the whole game
 queueMicrotask(() => initStory({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
   objects: (npcs) => { const all = levelList().flatMap((lv) => lv.entities || []).filter((e) => !e.template); return npcs ? all.flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'npc' || b.type === 'dialogue').map((b) => ({ name: e.name, dialogue: b.dialogue || '' }))) : [...new Set(all.flatMap((e) => [e.name, ...(e.behaviors || []).filter((b) => b.type === 'npc' && b.talkName).map((b) => b.talkName)]).filter(Boolean))]; } }));
@@ -2480,6 +2483,7 @@ function suggestions(kind) {
   if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'items') return uniq([...(root.items || []).map((d) => d.name), ...all.flatMap((e) => (e.behaviors || []).filter((b) => ['inventoryItem', 'resource'].includes(b.type)).map((b) => b.item))]);
   if (kind === 'quests') return uniq((root.quests || []).map((q) => q.name));
+  if (kind === 'collections') return uniq((root.collections || []).map((c) => c.name));
   if (kind === 'dialogues') return uniq((root.dialogues || []).map((d) => d.name));
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
@@ -3087,6 +3091,8 @@ function renderInspector() {
       sizeRow(j),
       C('stretch', { label: inParent ? 'Stretch inside parent' : 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill']], def: 'none', structure: true }),
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
+      j.stretch && j.stretch !== 'none' && C('marginTop', { label: 'Top margin (blank = Margin)', type: 'number', def: '', step: 2 }),
+      j.stretch && j.stretch !== 'none' && C('marginBottom', { label: 'Bottom margin (blank = Margin)', type: 'number', def: '', step: 2 }),
       !inParent && C('ignoreSafe', { label: 'Ignore safe area (go under the notch)', type: 'bool', def: false, structure: true }),
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       !inParent && !j.ignoreSafe && !(j.behaviors || []).some((b) => ['uiBottomNav', 'uiAppBar', 'uiSideBar'].includes(b.type)) && C('ignoreBars', { label: 'Go under the nav bars', type: 'bool', def: false, structure: true, infoText: 'Normally UI stays clear of a Bottom Nav, App Bar or Icon Rail. Turn this on for backgrounds that should fill the whole screen.' }),
@@ -3602,6 +3608,11 @@ function renderSceneSettings(box) {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openSaveData() }, icon('folder'), 'Save Data…')),
     ], !!(game.settings?.saveEncrypt || game.settings?.saveBackup)),
   ], { icon: 'save', key: 's-save' }));
+  box.append(comp('App', [
+    C('settings.app', { label: 'This is an app, not a game', type: 'bool', def: false, structure: true }),
+    h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
+  ], { icon: 'phone', key: 's-app' }));
+  box.append(comp('Data', [dataEditor()], { icon: 'list', key: 's-data' }));
   box.append(comp('Start Screen', [
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
     C('settings.title', { label: 'Title', type: 'text', def: '' }),
@@ -4434,6 +4445,11 @@ function addPrefab(def, at) {
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
   if (def.items) ensureStarterItems(); // crafting presets: an empty game gets starter items and recipes
   if (def.story) ensureStarterStory(); // NPC presets and quest UI: an empty game gets the starter story
+  if (def.data) { // app widgets: the game needs a data collection, and the widget points at one that exists
+    const name = ensureCollection(def.data === true ? 'Tasks' : def.data), have = new Set((root.collections || []).map((c) => c.name.toLowerCase()));
+    def = { ...def, props: JSON.parse(JSON.stringify(def.props)) };
+    for (const b of def.props.behaviors || []) if (b.collection && !have.has(String(b.collection).toLowerCase())) b.collection = name;
+  }
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {
@@ -4711,7 +4727,7 @@ function openDialog(title, kids) {
 function openFileMenu() {
   popMenu($('#fileBtn'), [
     { icon: 'home', label: 'Home', fn: showHome },
-    { icon: 'newfile', label: 'New Game…', fn: openNewDialog },
+    { icon: 'newfile', label: 'New Game or App…', fn: openNewDialog },
     { icon: 'folder', label: 'Open Project…', fn: openProjectsDialog },
     { icon: 'undo', label: 'Undo', k: '2-finger tap', fn: () => undoRedo(-1) },
     { icon: 'redo', label: 'Redo', k: '3-finger tap', fn: () => undoRedo(1) },
@@ -4747,16 +4763,17 @@ function openFileMenu() {
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
 /** Game types to start from, split into 2D and 3D (Blank first) with a switch between them. */
 function typeCards(onPick) {
-  let mode = store.get('pocket.editor.newMode', '2d') === '3d' ? '3d' : '2d';
+  let mode = ['3d', 'app'].includes(store.get('pocket.editor.newMode', '2d')) ? store.get('pocket.editor.newMode', '2d') : '2d';
+  const kindOf = (t) => (t.kind === 'app' ? 'app' : templates[t.key].mode === '3d' ? '3d' : '2d');
   const wrap = h('div', { class: 'type-wrap' });
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
   const tplOrient = (t) => templates[t.key].settings?.orientation;
   const draw = () => {
-    const list = templateInfo.filter((t) => templates[t.key].mode === mode).sort((a, b) => (b.key.startsWith('empty') ? 1 : 0) - (a.key.startsWith('empty') ? 1 : 0));
+    const list = templateInfo.filter((t) => kindOf(t) === mode).sort((a, b) => (/^(empty|app-blank)/.test(b.key) ? 1 : 0) - (/^(empty|app-blank)/.test(a.key) ? 1 : 0));
     wrap.replaceChildren(
-      h('div', { class: 'seg' }, ['2d', '3d'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
-        icon(m === '3d' ? 'cube' : 'grid'), `${m.toUpperCase()} games`, h('small', {}, String(templateInfo.filter((t) => templates[t.key].mode === m).length))))),
-      h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l))),
+      h('div', { class: 'seg' }, ['2d', '3d', 'app'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
+        icon(m === '3d' ? 'cube' : m === 'app' ? 'phone' : 'grid'), m === 'app' ? 'Apps' : `${m.toUpperCase()} games`.replace(' games', window.innerWidth < 520 ? '' : ' games'), h('small', {}, String(templateInfo.filter((t) => kindOf(t) === m).length))))),
+      ...[mode !== 'app' && h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l)))].filter(Boolean),
       h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t, t.key.startsWith('empty') ? orient() : null) },
         h('div', { class: 'pv', style: `background:${t.color || '#2b2b2b'}` }, icon(t.icon || 'cube'),
           (t.key.startsWith('empty') ? orient() : tplOrient(t)) && h('span', { class: 'pv-or ' + (t.key.startsWith('empty') ? orient() : tplOrient(t)) }, (t.key.startsWith('empty') ? orient() : tplOrient(t)) === 'landscape' ? 'Landscape' : 'Portrait')),
@@ -4770,24 +4787,25 @@ function projectList(all, row) {
   let f = store.get('pocket.editor.projFilter', 'all');
   const wrap = h('div');
   const draw = () => {
-    const n = (m) => all.filter(([, p]) => (p.json.mode === '3d' ? '3d' : '2d') === m).length, shown = all.filter(([, p]) => f === 'all' || (p.json.mode === '3d' ? '3d' : '2d') === f);
-    wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')]].map(([k, l, c]) =>
+    const kind = (j) => (j.settings?.app ? 'app' : j.mode === '3d' ? '3d' : '2d');
+    const n = (m) => all.filter(([, p]) => kind(p.json) === m).length, shown = all.filter(([, p]) => f === 'all' || kind(p.json) === f);
+    wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].map(([k, l, c]) =>
       h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))),
-      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, `No ${f.toUpperCase()} games yet.`));
+      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`));
   };
   draw();
   return wrap;
 }
-const modeBadge = (json) => h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D');
+const modeBadge = (json) => (json.settings?.app ? h('span', { class: 'mode-badge mapp' }, 'App') : h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D'));
 function startGame(t, orient) {
   closeLayer(); hideHome();
   if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
-  newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : undefined);
+  newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : t.key === 'app-blank' ? 'My App' : undefined);
   if (orient) { setOrientation(orient); resetCamera(); applyCamera(); }
   toast(`Created ${root.name}. Tap ▶ Play to try it!`);
 }
 function openNewDialog() {
-  openDialog('New Game', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type. Each one is a working game you can change any way you like.'), typeCards(startGame)]);
+  openDialog('New Game or App', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type, or an app. Each one already works, and you can change it any way you like.'), typeCards(startGame)]);
 }
 
 // ---- Home screen: continue, new game by type, my games ----
@@ -4798,12 +4816,12 @@ function showHome() {
   const cur = root && all.find(([id]) => id === projectId);
   home.replaceChildren(...[
     h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('h1', {}, 'Pocket Engine')),
-    h('p', { class: 'sub' }, 'Make 2D and 3D games on your phone.'),
+    h('p', { class: 'sub' }, 'Make 2D and 3D games, and apps, on your phone.'),
     cur && h('button', { class: 'continue', onclick: hideHome },
-      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
-    h('h2', {}, 'New game'),
+      h('span', { class: 'ic' }, icon('play')), h('span', {}, h('b', {}, `Continue “${root.name}”`), h('small', {}, `${root.settings?.app ? 'App' : root.mode.toUpperCase()} · last edited ${new Date(cur[1].updated).toLocaleString()}`))),
+    h('h2', {}, 'New game or app'),
     typeCards(startGame),
-    all.length ? [h('h2', {}, 'My games'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
+    all.length ? [h('h2', {}, 'My games and apps'), projectList(all, ([id, pr]) => h('div', { class: 'proj-row' },
       modeBadge(pr.json),
       h('span', { class: 'nm', onclick: () => { saveNow(); openProject(pr.json, id); hideHome(); } }, pr.name),
       h('small', {}, new Date(pr.updated).toLocaleDateString()),

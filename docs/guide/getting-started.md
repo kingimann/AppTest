@@ -1,6 +1,6 @@
 # Getting started
 
-Pocket Engine is a game engine and editor that runs in your phone's web browser. You build games by placing objects and giving them **components** (ready-made behaviours like *Move*, *Health* or *Collectible*). For your own rules you use **Triggers** (ON something → IF true → DO this) or **visual scripts** (nodes). There's no install and no build step, and games run on any modern phone.
+Pocket Engine is a game engine and editor that runs in your phone's web browser. It makes apps too ([Making apps](#/guide/apps)). You build games by placing objects and giving them **components** (ready-made behaviours like *Move*, *Health* or *Collectible*). For your own rules you use **Triggers** (ON something → IF true → DO this) or **visual scripts** (nodes). There's no install and no build step, and games run on any modern phone.
 
 This page walks you through making a small game from scratch, then shows where to go next.
 
@@ -18,6 +18,7 @@ The **Home** screen offers two things:
 
 - **Game types:** complete, playable starters you can change any way you like. There are platformers, third and first person 3D, top-down, shooters, racing, runners, clickers, Breakout, a voxel sandbox, a turn-based RPG, a dungeon crawler, board games and more. Opening one is the fastest way to see how a kind of game is put together.
 - **Blank 2D / Blank 3D:** an empty level with a camera and a light, to build your own. You can pick portrait or landscape.
+- **Apps:** a blank app, a to-do list, notes and an expense tracker. Apps have pages, lists and forms instead of levels, and save what people add on their phone. See [Making apps](#/guide/apps).
 
 > **Tip:** Templates are the best documentation for "how would I make X?". Open one, select its objects and look at their components in the Inspector.
 

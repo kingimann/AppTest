@@ -14,7 +14,7 @@ Plain JavaScript ES modules. No dependencies and no build step.
 
 The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
 
-- **18 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
+- **19 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
 - **A reference generated from the engine itself**, so it always matches the running version:
   - every component with all its settings, types, defaults (2D and 3D) and choices;
   - every visual-script node with its wires and settings;
@@ -601,6 +601,33 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - **Instructions:** start, complete, fail, advance, reset or track a quest; *Start dialogue*, optionally at a section, waiting until it ends.
   - The **Quest Info** value node.
 - **From code:** `scene.startQuest`, `questState`, `questObjectives`, `advanceQuest`, `completeQuest`, `failQuest`, `resetQuest`, `startDialogue(name, { npc, start })`, and events such as `questComplete` and `dialogueChoice`. See the [Quests and dialogue guide](docs/guide/quests-dialogue.md).
+
+### Apps (not just games)
+
+- **New Game or App › Apps:** Blank App, To-Do List, Notes and Expense Tracker. Each one is a working app with pages, an app bar, lists, forms, search and saving.
+- **App mode** (*Game Settings › App*): opens straight on its first page, with no title screen and no pause, sound or share buttons. App projects get an **App** badge and their own filter on the home screen.
+- **Data collections** (*Game Settings › Data*):
+  - records with fields: text, long text, number, money, yes/no, date, choice, stars and icon;
+  - starting records, and ready-made collections (Tasks, Notes, Contacts, Expenses, Products);
+  - everything people add, change and delete is saved on their phone, and *Clear saved records* lets you test from the start.
+- **Data List:** rows with a title, a second line, an icon, a value on the right and a checkbox.
+  - Search, filter (`done = no`), sort (`amount (high-low)`) and headings by field (Today, Yesterday…).
+  - Tap a row to open its page, with its fields in `{record_title}`…
+  - Swipe left to delete, and it scrolls with a flick.
+- **Record Form:** one input per field, with the phone keyboard right on the field, date pickers, switches, choice buttons and stars.
+  - Required fields, then add, or edit the opened record (with Delete).
+  - Then go back, clear the form or go to a page.
+- **Data Summary:** count, sum, average, min or max of a field into a variable (`{total_text}` for money).
+- **Buttons:** new record, edit opened record, delete opened record.
+- **Triggers and nodes:**
+  - **Events:** record added, changed, deleted or opened.
+  - **Conditions:** number of records, a record is open.
+  - **Instructions:** add, change, delete or open a record, clear a collection, and data summary into a variable.
+  - The **Data Value** node.
+- **UI & Menus › App:** Data List, Checklist, Record Form, Search Bar, Add Button (+), Edit and Delete Buttons, Record Text, Total / Count Text, App Page and App Bar (light).
+- Stretched UI can have its own top and bottom margins.
+- **From code:** `engine.data.add / rows / query / update / remove / stat / reset`.
+- See the [Making apps guide](docs/guide/apps.md).
 
 ### Squads: select and move many units (tactics and strategy)
 

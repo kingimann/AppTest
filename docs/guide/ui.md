@@ -101,6 +101,7 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - A tab can have its own **icon when selected** (a filled heart) and **colour when selected** (in its ⋯ menu).
   - *Behaviour*: **Swipe left / right to change tab**, **Tapping the current tab again scrolls its page to the top**, **Open on the last tab used** (next time the app opens), and **Pressing and holding a tab sends** a message (the tab's page is in `heldTab`).
   - *Size & shape*: label weight (normal, bold, bold when selected) and UPPERCASE labels.
+  - *Background*: **Background see-through** (1 = solid, 0 = clear), **Blur what is behind** (frosted glass, like iOS), a **gradient** to a second colour, and the **line colour** on its top edge. **Pages run under the bar** (auto, yes or no): on *auto*, a see-through, blurred, floating, glass or minimal bar lets the open page reach the bottom of the screen and show through it. What's on the page (buttons, lists, the last item of a scrolling page) still stops above the bar, and dragging on the bar never scrolls the page.
 - **Side Menu:** a drawer with sections, toggles, footer items and 7 styles. Items are `Label | icon | page or msg:name or toggle:var | badge`.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
 - **App Layout:** all three set up to work together.
@@ -129,6 +130,7 @@ A page only moves when you drag it if there's something below the screen to scro
 - **Remember where it was scrolled to**, or start at the top each time.
 - **Message when it opens / closes**, and a **message the first time it opens** (load its data once).
 - **Hide the bottom bar on this page** (a game, a photo, a checkout): the Bottom Nav slides away and comes back on other pages.
+- **Tab that stays lit on this page** (a detail page opened from Explore keeps Explore lit), **Bottom bar on this page** (as the bar says, solid, half see-through, see-through or clear) and **Bottom bar colour on this page**. A page that asks for a solid bar also stops running under it.
 - **Only open when this variable is set** (e.g. `loggedIn`), **otherwise go to page** (a sign-in page).
 - **Pull down to refresh sends** a message (a spinner shows while it works), and **Scroll to the top on message**.
 - **Transition speed** (1 = normal, 2 = twice as fast).

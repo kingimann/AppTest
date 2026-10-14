@@ -583,6 +583,15 @@ Pop-up notifications are built in; there's no component to add. Every game has *
 - **Test** shows a type in the editor. From the type editor, the dialog steps aside while the preview plays. *Test a few* shows several at once.
 - Types are game-wide: every level uses them. A *Notifications* component (Project › UI › HUD) still works, and handles plain `notify` messages in scenes that have one.
 
+### Permissions (Game Settings › Permissions)
+
+Ask the player for **location**, the **camera**, the **microphone**, **motion sensors** (tilt and shake), **notifications** or **lasting storage** (so the phone doesn't clear saves when space runs low).
+- **The friendly way:** a card explains why first (an icon, a title and your reason, with **Allow** / **Not now**). Its Allow button is a real tap, so the phone's own question follows straight away, which iPhones need for motion. If the player said no before, the card says how to turn it back on in the phone's settings. *Explain first* can be turned off to ask straight away.
+- **When:** the **Ask Permission** node (outputs *allowed*, *not allowed*, *not supported*), a trigger's **Ask permission**, the action **ask permission** (value `location`, `camera`…), or Game Settings › Permissions › Ask **on the first tap** (several are asked one after another). **Test** there asks on your own device.
+- **Using them:** **Location** (latitude, longitude, accuracy, speed, heading, altitude, seconds since the last update; it keeps updating while the game runs), **Distance To Place** (metres to a latitude / longitude: treasure hunts, check-ins), **On Location Changed**, **Microphone Loudness** (0–100: blow, shout or clap to play), **Permission Status** (granted / denied / prompt / unsupported), **Has Permission**, **On Permission Answered**.
+- **In app builds** (Build Settings › App stores), the project declares what the game uses: iOS gets your reasons as the camera, microphone and location usage texts (iOS requires them), and Android gets the camera, microphone and location permissions. Nothing is declared for permissions the game doesn't use.
+- The game waits while the card is up, without the PAUSED screen.
+
 ### Phone notifications (Game Settings › Phone Notifications)
 
 Real notifications in the phone's own notification area (the lock screen and pull-down list), such as "Your energy is full!".
@@ -907,6 +916,14 @@ The Camera component is a virtual camera:
 - **Noise and impulse:** handheld **noise**, and **impulse** shakes that are weaker far away (`scene.impulse(strength, at)`, Camera Impulse node).
 - **Orthographic 3D** for isometric games.
 - **Switching:** with several cameras the highest priority starts. Switching (action, node or `scene.setCamera(name)`) **blends** smoothly over the new camera's blend time and ease.
+- **Free Look** (orbit, 3D): drag to orbit, **pinch** (or the mouse wheel) to zoom between a closest and furthest distance, lowest / highest angle, and **swing back behind the target** after some seconds without touching (it follows the way it moves or faces).
+- **Dolly cart:** a dolly camera can **travel by itself** along its track at a speed, looping, going back and forth or stopping at the end, looking at a target or along the track (fly-throughs, title screens). It keeps moving even while another camera is live.
+- **More framing:** a separate **up / down dead zone** and **up / down damping** (follow sideways quickly but jumps slowly, so the screen doesn't bounce), **pixel perfect** 2D (no blurry in-between positions), and a **3D confiner** box the camera stays inside.
+- **Noise feel:** handheld, gentle sway, earthquake or engine rumble.
+- **Camera Zone** (component, *Create → Camera Zone*): an invisible area; when the player walks in, its camera takes over and blends in (with its own blend time if you like), and leaving goes back to the camera before (or keeps it). Like Cinemachine trigger zones.
+- **Camera Switcher** (component): **State-Driven Camera**: each value of a variable has its camera (`run = Follow Cam`, `aim = Aim Cam`); or **Clear Shot**: the first camera in a list that can see the target with nothing solid in between. A *stay at least* time stops quick flicking.
+- **Camera Impulse** (component, Impulse Source): shakes the camera when the object hits something (faster than a speed), lands, is destroyed, on a message, at the start or every few seconds; weaker further away (*felt up to*), and it can vibrate the phone.
+- **Nodes:** **Make Camera Live** (with your own blend time and ease), **Back To Camera Priorities**, **Set Camera Priority**, **Set Camera Target** (follow the boss in a cutscene), **Camera Impulse** (from this object or everywhere), **Set Camera Noise**, **Recenter Orbit Camera**, **On Camera Live**, **Camera Is Live**.
 
 ### 3D Modeler (Blender-style modeling)
 

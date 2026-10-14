@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -3311,6 +3311,21 @@ function renderSceneSettings(box) {
       h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'This is a test notification 🔔', when: 'now' }); toast(ok ? 'Sent. Check your notifications' : engine.phone.kind === 'none' ? 'This browser has no notifications' : 'Notifications are blocked for this site'); } }, icon('bell'), 'Test on this device'),
       h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'Sent 10 seconds later', when: 'in', seconds: 10 }); toast(ok ? 'Coming in 10 seconds (keep this tab open)' : 'Notifications are blocked for this site'); } }, icon('play'), 'In 10 seconds')),
   ], { icon: 'bell', key: 's-phone', summary: PN.reminders || PN.dailyTitle ? 'reminders on' : '' }));
+  const used = usedPermissions();
+  box.append(comp('Permissions', [
+    h('p', { class: 'desc' }, 'Things only the player can allow: location, camera, microphone, motion sensors and keeping saves safe. Ask with the Ask Permission node (allowed / not allowed) or a trigger\'s "Ask permission", or here on the first tap. A card explains why first; its Allow button then brings up the phone\'s own question, so players aren\'t surprised.'),
+    used.length ? h('div', { class: 'obox info' }, 'This game uses: ' + used.join(', ') + '. App exports (Build Settings › App stores) include what iOS and Android need for these.') : null,
+    ...['location', 'camera', 'microphone', 'motion', 'storage'].map((k) => {
+      const PK = (path, spec) => control(() => game, `settings.permissions.${k}.${path}`, spec), cur = game.settings?.permissions?.[k] || {};
+      return h('div', { class: 'perm-row' },
+        h('div', { class: 'perm-h' }, h('span', { class: 'perm-ic' }, PERMISSIONS[k].icon), h('b', {}, k[0].toUpperCase() + k.slice(1)),
+          h('button', { class: 'btn', onclick: async () => { const r = await engine.perms.ask(k, { title: cur.title, why: cur.why, soft: cur.soft !== false }); toast(r === 'granted' ? 'Allowed on this device' : r === 'unsupported' ? 'Not available in this browser' : 'Not allowed'); } }, icon('play'), 'Test')),
+        PK('ask', { label: 'Ask', type: 'select', options: [['when asked', 'When a node asks'], ['first tap', 'On the first tap']], def: 'when asked' }),
+        PK('why', { label: 'Why', type: 'text', def: '', placeholder: PERMISSIONS[k].why, infoText: 'Shown on the card, and by iOS when it asks (app builds).' }),
+        PK('soft', { label: 'Explain first (recommended)', type: 'bool', def: true }));
+    }),
+    h('p', { class: 'desc' }, 'Notifications are in Phone Notifications above. Nodes that use these: Location, Distance To Place, On Location Changed, Microphone Loudness, Permission Status, Has Permission, On Permission Answered.'),
+  ], { icon: 'key', key: 's-perms', summary: used.length ? used.join(', ') : '' }));
   box.append(comp('Screen & Safe Area', [
     h('p', { class: 'desc' }, 'Phones come in many sizes, and many have a notch, rounded corners or a home bar. UI anchored to corners and edges stays inside the safe area, and grows or shrinks to suit the screen.'),
     C('settings.safeArea', { label: 'Safe area', type: 'select', options: [['device', 'Keep UI clear of notches & home bar'], ['off', 'Use the whole screen']], def: 'device' }),
@@ -3408,7 +3423,7 @@ function renderSceneSettings(box) {
 // ============================================================================
 const BEH_META = {
   move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
@@ -3767,6 +3782,10 @@ const PREFABS_2D = [
   { icon: 'platform', label: 'Moving Platform', props: { name: 'Moving Platform', shape: { type: 'rect', w: 140, h: 24, radius: 6, fill: '#8d6e63' }, body: { type: 'kinematic' }, behaviors: [{ type: 'tween', effect: 'move by', x: 160, y: 0, duration: 2, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'image', label: 'Animated Sprite', props: { name: 'Bird', sprite: { src: 'art:bird', w: 56, h: 56 }, behaviors: [{ type: 'flipbook', frames: 'art:bird,art:bird2', fps: 6, mode: 'loop', when: 'always' }, { type: 'tween', effect: 'move by', x: 0, y: -20, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
   { icon: 'camera', label: 'Group Camera', props: { name: 'Group Camera', behaviors: [{ type: 'camera', mode: 'group', target: 'player', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: 0 }] } },
+  { icon: 'square', label: 'Camera Zone', props: { name: 'Camera Zone', shape: { type: 'rect', w: 300, h: 260, fill: 'rgba(120,180,255,0.12)', stroke: 'rgba(120,180,255,0.6)', lineWidth: 2 }, behaviors: [{ type: 'cameraZone', camera: 'Zone Camera', tag: 'player', mode: 'go back to the camera before' }] },
+    extra: [{ name: 'Zone Camera', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'fixed', target: '', zoom: 1.4, blend: 0.8, priority: -1 }] }] },
+  { icon: 'camera', label: 'Dolly Camera (cart)', props: { name: 'Dolly Camera', behaviors: [{ type: 'camera', mode: 'dolly', dollyMode: 'travel by itself', dollySpeed: 0.08, dollyLoop: 'back and forth', path: [{ x: 0, y: 350 }, { x: 900, y: 350 }], zoom: 1, blend: 1.2, priority: -1 }] } },
+  { icon: 'camera', label: 'Camera Switcher', props: { name: 'Camera Switcher', behaviors: [{ type: 'cameraSwitcher', mode: 'a variable', var: 'state', map: 'run = Main Camera\nzoom = Zone Camera', hold: 0.3 }] } },
   { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], sprite: { src: 'art:zombie', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
   { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', sprite: { src: 'art:wizard', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
   { icon: 'key', label: 'Inventory Key', props: { name: 'Key Pickup', sprite: { src: 'art:key', w: 36, h: 36 }, behaviors: [{ type: 'inventoryItem', item: 'Key', icon: '🔑', amount: 1, tag: 'player' }, { type: 'tween', effect: 'move by', x: 0, y: -8, duration: 0.8, ease: 'inOutSine', loops: -1, loopType: 'yoyo', playOn: 'start' }] } },
@@ -4838,9 +4857,23 @@ function storeOpts() {
     orientation: o.orientation && o.orientation !== 'any' ? o.orientation : orientationOf() === 'any' ? '' : orientationOf(),
     iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')) };
 }
+/** Which permissions the game asks for (Game Settings › Permissions, nodes and triggers): for the app's iOS / Android declarations. */
+function usedPermissions() {
+  const out = new Set(), P = levelList()[0]?.settings?.permissions || {};
+  for (const [k, v] of Object.entries(P)) if (v?.ask === 'first tap') out.add(k);
+  const scan = (o) => { if (!o || typeof o !== 'object') return; if (Array.isArray(o)) { o.forEach(scan); return; }
+    if ((o.type === 'askPermission' || o.type === 'permStatus' || o.type === 'hasPermission') && o.params?.kind) out.add(o.params.kind);
+    if (o.type === 'askPermission' && o.kind) out.add(o.kind); // trigger instruction
+    if (o.action === 'ask permission' && o.value) out.add(String(o.value).trim().toLowerCase());
+    if (['location', 'distanceTo', 'onLocation'].includes(o.type) && (o.params || o.links === undefined)) out.add('location');
+    if (o.type === 'micLevel') out.add('microphone');
+    for (const v of Object.values(o)) if (v && typeof v === 'object') scan(v); };
+  for (const lv of levelList()) scan(lv.entities);
+  return [...out].filter((k) => PERMISSIONS[k] && k !== 'notifications' && k !== 'storage');
+}
 /** Build Settings → App stores: a Capacitor project with a codemagic.yaml, as a .zip. */
 async function exportStoreProject() {
-  const so = storeOpts();
+  const so = { ...storeOpts(), perms: usedPermissions().map((k) => ({ kind: k, why: levelList()[0]?.settings?.permissions?.[k]?.why || PERMISSIONS[k].why })) };
   if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
   if (!so.ios && !so.android) return toast('Tick iOS, Android or both');
   try {

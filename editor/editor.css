@@ -1352,3 +1352,7 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .log-tools.compact { flex-wrap: nowrap; gap: 4px; }
 .log-tools.compact .log-f { padding: 0 7px; gap: 4px; }
 .log-tools.compact .log-search { flex: 1 1 60px; min-width: 50px; height: 36px; padding: 0 10px; }
+/* Game Settings › Permissions */
+.perm-row { border: 1px solid #2c2c2c; border-radius: 14px; padding: 6px 10px 10px; margin: 10px 0; background: rgba(255,255,255,.02); }
+.perm-h { display: flex; align-items: center; gap: 10px; padding: 4px 0 2px; }
+.perm-h b { flex: 1; font-size: 15px; } .perm-ic { font-size: 22px; }

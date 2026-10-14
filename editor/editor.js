@@ -4300,8 +4300,9 @@ function showHome() {
   ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
   home.scrollTop = 0;
+  document.body.classList.add('home-open'); engine.sleeping = true;
 }
-function hideHome() { $('#home').hidden = true; requestAnimationFrame(() => engine.resize()); }
+function hideHome() { $('#home').hidden = true; document.body.classList.remove('home-open'); engine.sleeping = false; requestAnimationFrame(() => engine.resize()); }
 function openProjectsDialog() {
   const all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
   openDialog('Open Project', all.length ? projectList(all, ([id, p]) => h('div', { class: 'proj-row' },

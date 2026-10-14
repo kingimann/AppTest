@@ -12293,6 +12293,7 @@ export class Engine {
 
   frame(now) {
     if (!this.running) return;
+    if (this.sleeping) { this.last = now; requestAnimationFrame(this.frame); return; } // hidden behind a full-screen page (the editor's home): draw nothing
     const dt = Math.min(1 / 20, (now - this.last) / 1000);
     this.last = now;
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;

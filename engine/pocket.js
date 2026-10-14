@@ -6910,14 +6910,14 @@ function blurBehind(ctx, e, s, lx, ly, lw, lh, blur) {
   try { t.drawImage(E.canvas, sx * gd, sy * gd, sw * gd, sh * gd, 0, 0, blurTmp.width, blurTmp.height); t.drawImage(E.uiCanvas, sx * d, sy * d, sw * d, sh * d, 0, 0, blurTmp.width, blurTmp.height); } catch { return; }
   ctx.filter = `blur(${blur}px)`; ctx.drawImage(blurTmp, (sx - r.x) / K + e.x, (sy - r.y) / K + e.y, sw / K, sh / K); ctx.filter = 'none';
 }
-const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
+const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal', 'segmented', 'curved', 'neon', 'dock', 'spotlight', 'outline', 'chips'];
 registerBehavior('uiBottomNav', {
-  label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
+  label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 16 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
     { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
-    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
+    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
     { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
     { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
     { key: 'barOpacity', label: 'Background see-through (1 = solid, 0 = clear)', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Background', info: 'How much of the page shows through the bar. With a see-through bar the pages run underneath it.' },
@@ -6929,6 +6929,9 @@ registerBehavior('uiBottomNav', {
     { key: 'idleColor', label: 'Other tabs', type: 'color', default: '#8b90a5', group: 'Colours' },
     { key: 'indicatorColor', label: 'Indicator (blank = selected colour)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'onColor', label: 'Icon and text on the highlight', type: 'color', default: '#ffffff', group: 'Colours', showIf: { style: ['segmented', 'curved', 'chips'] } },
+    { key: 'glow', label: 'Glow', type: 'number', default: 16, range: [0, 40], step: 1, group: 'Colours', showIf: { style: ['neon', 'spotlight'] } },
+    { key: 'iconMotion', label: 'The newly selected icon', type: 'select', options: ['stays still', 'bounces', 'pops', 'spins', 'wiggles', 'flips'], default: 'stays still', group: 'Animation' },
     { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [12, 48], step: 1, group: 'Size & shape' },
     { key: 'labelSize', label: 'Label size', type: 'number', default: 11, range: [8, 20], step: 1, group: 'Size & shape' },
     { key: 'radius', label: 'Corner radius', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Size & shape', infoText: 'Floating and glass styles round their corners anyway.' },
@@ -6964,7 +6967,7 @@ registerBehavior('uiBottomNav', {
   ],
   create(p) {
     const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
-    let W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
+    let selT = 9, W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
     /** What the pages say about the bar (hide it, which tab stays lit, its colour there), looked up now and then. */
     const pageInfo = (s) => { const now = s.time || 0; if (now - hideCache.t > 0.5 || now < hideCache.t) { hideCache = { t: now, list: s.entities.flatMap((q) => q.behaviors.filter((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var).map((b) => ({ value: b.params.value, hide: !!b.params.hideNav, tab: b.params.navTab || '', color: b.params.navColor || '', look: b.params.navLook || 'as the bar says' }))) }; } return hideCache.list; };
@@ -6973,7 +6976,7 @@ registerBehavior('uiBottomNav', {
     const LOOK = { solid: 1, 'half see-through': 0.6, 'see-through': 0.3, clear: 0 };
     const opacity = (s) => { const h = here(s); return h && LOOK[h.look] != null ? LOOK[h.look] : clamp(p.barOpacity ?? 1, 0, 1); };
     const blurOf = (s) => { const h = here(s); return h && LOOK[h.look] === 1 ? 0 : +p.barBlur || 0; }; // a page that wants a solid bar gets no frosted glass
-    const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || ['floating', 'glass', 'minimal'].includes(p.style)));
+    const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || (floatingStyle() || p.style === 'minimal')));
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
     const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
@@ -6987,7 +6990,7 @@ registerBehavior('uiBottomNav', {
       const h = here(s); if (h?.tab) { const j = T.findIndex((t) => t.page != null && sameVal(t.page, h.tab)); if (j >= 0) return j; } // a sub-page (Detail) keeps its tab (Home) lit
       return (p.otherPage || 'keep the last tab lit') === 'keep the last tab lit' && lastTab >= 0 && lastTab < T.length ? lastTab : -1;
     };
-    const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
+    const floatingStyle = () => ['floating', 'glass', 'segmented', 'dock'].includes(p.style);
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
       const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
       const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
@@ -6995,7 +6998,7 @@ registerBehavior('uiBottomNav', {
       const left = (i) => { if (!ws) return bx + tw * i; let x = bx; for (let j = 0; j < i; j++) x += ws[j]; return x; };
       return { w, h, bx, by, bw, bh, tw, n, cx: (i) => left(i) + (ws ? ws[i] : tw) / 2, tws: (i) => (ws ? ws[i] ?? tw : tw), at: (lx) => { if (!ws) return Math.floor((lx - bx) / tw); for (let j = 0; j < n; j++) if (lx < left(j + 1)) return lx < bx ? -1 : j; return n; }, cy: by + bh / 2 };
     };
-    const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
+    const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always', curved: 'selected only', dock: 'never', outline: 'never' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
     return {
       uiAlways: true, var: p.var,
       pageLabel(page, v) { if (v !== p.var) return null; const t = T.find((q) => q.page != null && sameVal(q.page, page)); return t ? t.label : null; },
@@ -7029,7 +7032,8 @@ registerBehavior('uiBottomNav', {
         } else W8 = null;
         const G = geo(e);
         if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
-        if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
+        if (a !== lastActive) { if (p.anim === 'fade') fade = 0; if (lastActive !== -1 || ind != null) selT = 0; lastActive = a; }
+        selT += dt;
         fade = Math.min(1, fade + dt * (+p.speed || 14) / 3);
         if (hide > 0.5 || !e.visible || e._parentHidden) return;
         // taps: which tab is under the finger (in screen space)
@@ -7069,6 +7073,18 @@ registerBehavior('uiBottomNav', {
         BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
+        const notchR = (+p.iconSize || 24) * 0.95 + 8, nx = a >= 0 && ind != null ? (p.anim === 'slide' ? ind : G.cx(a)) : null;
+        const barPath = (x, y, w, h, r) => { // the curved style's bar has a notch where the selected circle sits
+          if (st !== 'curved' || nx == null) return rr(x, y, w, h, r);
+          const R = notchR, d = R * 0.92; r = Math.min(r, h / 2);
+          ctx.beginPath(); ctx.moveTo(x + r, y);
+          ctx.lineTo(Math.max(x + r, nx - R * 1.55), y);
+          ctx.bezierCurveTo(nx - R * 0.95, y, nx - R * 1.02, y + d, nx, y + d);
+          ctx.bezierCurveTo(nx + R * 1.02, y + d, nx + R * 0.95, y, Math.min(x + w - r, nx + R * 1.55), y);
+          ctx.lineTo(x + w - r, y); if (r) ctx.arcTo(x + w, y, x + w, y + r, r);
+          ctx.lineTo(x + w, y + h); ctx.lineTo(x, y + h); ctx.lineTo(x, y + r); if (r) ctx.arcTo(x, y, x + r, y, r); ctx.closePath();
+        };
+        const onC = tok(p.onColor) || '#ffffff', glowK = +p.glow >= 0 ? +p.glow : 16;
         // floating bars (and none at all): the strip they sit in shows the open page's colour, not a band of something else
         if ((fl || st === 'minimal') && !e.parentEnt?.ui && !under(s)) {
           const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var && sameVal(s.vars[p.var], b.params?.value)));
@@ -7079,17 +7095,19 @@ registerBehavior('uiBottomNav', {
         if (st !== 'minimal') {
           if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
           const hp = here(s), bc = hp?.color ? tok(hp.color) : p.barColor || '#12141f', bh2 = G.bh + (!fl && p.fillSafe !== false ? safeB : 0), op = opacity(s);
-          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.shadowColor = 'transparent'; rr(G.bx, G.by, G.bw, bh2, rad); ctx.clip(); blurBehind(ctx, e, s, G.bx, G.by, G.bw, bh2, blurOf(s)); ctx.restore(); } // frosted glass
+          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.shadowColor = 'transparent'; barPath(G.bx, G.by, G.bw, bh2, rad); ctx.clip(); blurBehind(ctx, e, s, G.bx, G.by, G.bw, bh2, blurOf(s)); ctx.restore(); } // frosted glass
           let paint = st === 'glass' && /^#[0-9a-f]{3,8}$/i.test(bc) ? withAlpha(bc, 0.72) : bc; // glass: the bar's colour, see-through
           if (p.barColor2 && st !== 'glass') { const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, bc); g.addColorStop(1, tok(p.barColor2)); paint = g; }
           ctx.fillStyle = paint;
           const ba = ctx.globalAlpha; ctx.globalAlpha *= op; if (op < 0.6) ctx.shadowColor = 'transparent'; // (no shadow under a nearly clear bar)
-          rr(G.bx, G.by, G.bw, bh2, rad); ctx.fill(); ctx.globalAlpha = ba;
+          barPath(G.bx, G.by, G.bw, bh2, rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
           if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.save(); ctx.clip(); const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.5, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(G.bx, G.by, G.bw, G.bh); ctx.restore(); } // a glassy sheen
-          else if (p.border !== false && !fl) { ctx.strokeStyle = tok(p.lineColor) || 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+          else if (st === 'neon') { ctx.strokeStyle = withAlpha(indC, 0.35); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+          else if (p.border !== false && !fl && st !== 'curved') { ctx.strokeStyle = tok(p.lineColor) || 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
         }
         const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
+        if (st === 'chips') T.forEach((t, i) => { if (i === a) return; const ch = Math.min(G.bh - 18, 40); ctx.save(); ctx.fillStyle = withAlpha(idle, 0.13); rr(G.cx(i) - G.tws(i) / 2 + 5, G.cy - ch / 2, G.tws(i) - 10, ch, ch / 2); ctx.fill(); ctx.restore(); });
         // the indicator, under the icons
         if (a >= 0 && ind != null && a !== raisedIdx) {
           const x = p.anim === 'slide' ? ind : G.cx(a);
@@ -7101,15 +7119,34 @@ registerBehavior('uiBottomNav', {
           else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
           else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tws(a) - 6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
           else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tws(a) / 2 + 4, G.by + 4, G.tws(a) - 8, G.bh - 8, 12); ctx.fill(); }
+          else if (st === 'segmented') { const ih = G.bh - 12; ctx.shadowColor = withAlpha(indC, 0.45); ctx.shadowBlur = 10; ctx.shadowOffsetY = 2; rr(x - G.tws(a) / 2 + 6, G.by + 6, G.tws(a) - 12, ih, ih / 2); ctx.fill(); }
+          else if (st === 'curved') { ctx.shadowColor = withAlpha(indC, 0.5); ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.beginPath(); ctx.arc(x, G.by + 2, notchR - 6, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'neon') { const w = G.tws(a) * 0.5; ctx.shadowColor = indC; ctx.shadowBlur = glowK; rr(x - w / 2, G.by, w, 3, 2); ctx.fill(); ctx.fill(); }
+          else if (st === 'spotlight') { const w = G.tws(a) * 0.42, W2 = G.tws(a) * 0.9, g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, withAlpha(indC, 0.42)); g.addColorStop(1, withAlpha(indC, 0)); ctx.fillStyle = g;
+            ctx.beginPath(); ctx.moveTo(x - w / 2, G.by); ctx.lineTo(x + w / 2, G.by); ctx.lineTo(x + W2 / 2, G.by + G.bh); ctx.lineTo(x - W2 / 2, G.by + G.bh); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = indC; ctx.shadowColor = indC; ctx.shadowBlur = glowK * 0.6; rr(x - w / 2, G.by, w, 3, 2); ctx.fill(); }
+          else if (st === 'outline') { const R = isz * (labelOn ? 0.7 : 0.95); ctx.globalAlpha *= 0.14; ctx.beginPath(); ctx.arc(x, iy, R, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha /= 0.14; ctx.strokeStyle = indC; ctx.lineWidth = 2; ctx.stroke(); }
+          else if (st === 'dock') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 6, 2.5, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'chips') { const ch = Math.min(G.bh - 18, 40); ctx.shadowColor = withAlpha(indC, 0.4); ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; rr(x - G.tws(a) / 2 + 5, G.cy - ch / 2, G.tws(a) - 10, ch, ch / 2); ctx.fill(); }
           ctx.restore();
         }
         // ripples
         for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tws(r.i) * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
         // tabs
         T.forEach((t, i) => {
-          const on = i === a, col = on ? (t.color ? tok(t.color) : act) : idle, pz = pulse.get(i) || 0, icon = on && t.iconOn ? t.iconOn : t.icon, lw = p.labelWeight === 'bold' ? 800 : p.labelWeight === 'normal' ? 600 : on ? 800 : 600;
+          const on = i === a, filled = on && ['segmented', 'chips'].includes(st), col = filled ? onC : on ? (t.color ? tok(t.color) : act) : idle, pz = pulse.get(i) || 0, icon = on && t.iconOn ? t.iconOn : t.icon, lw = p.labelWeight === 'bold' ? 800 : p.labelWeight === 'normal' ? 600 : on ? 800 : 600;
           let sc = 1 + (p.tapEffect === 'bounce' ? Math.sin(pz * Math.PI) * 0.18 : p.tapEffect === 'grow' && on ? 0.12 : 0) + (st === 'minimal' && on ? 0.12 : 0);
-          let x = G.cx(i), y = G.cy;
+          let x = G.cx(i), y = G.cy, lift = on ? +p.activeLift || 0 : 0, rot = 0, flip = 1;
+          if (st === 'dock') { const m = ind == null ? 0 : Math.max(0, 1 - Math.abs(x - ind) / (G.tws(i) * 1.25)); sc *= 1.08 + 0.22 * m; lift += 6 * m; } // big icons that magnify around the selected one
+          if (on && selT < 0.7) { // the newly selected icon moves
+            const mo = p.iconMotion, u = (d) => clamp(selT / d, 0, 1);
+            if (mo === 'bounces') sc *= 1 + Math.sin(u(0.38) * Math.PI) * 0.28;
+            else if (mo === 'pops') sc *= 0.55 + 0.45 * Ease.outBack(u(0.4));
+            else if (mo === 'spins') rot = -(1 - Ease.outCubic(u(0.55))) * Math.PI * 2;
+            else if (mo === 'wiggles') rot = Math.sin(selT * 32) * 0.4 * (1 - u(0.55));
+            else if (mo === 'flips') flip = Math.cos((1 - Ease.outCubic(u(0.45))) * Math.PI);
+          }
+          const navIcon = (ix, iy, sz, c, al) => { if (!rot && flip === 1) return drawNavIcon(ctx, icon, ix, iy, sz, c, al); ctx.save(); ctx.translate(ix, iy); ctx.rotate(rot); ctx.scale(flip, 1); drawNavIcon(ctx, icon, 0, 0, sz, c, al); ctx.restore(); };
           if (i === raisedIdx) { // the big round middle button
             const R = G.bh * 0.46;
             ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, G.by + 4, R * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
@@ -7118,17 +7155,28 @@ registerBehavior('uiBottomNav', {
             return;
           }
           const lab = showLabel(i, on) && t.label;
-          if (st === 'bubble' && lab) { // icon and name side by side
+          if (st === 'curved' && on) {
+            const cx2 = p.anim === 'slide' && ind != null ? ind : x;
+            ctx.save(); ctx.translate(cx2, G.by + 2); ctx.scale(sc, sc); navIcon(0, 0, isz, onC, 1); ctx.restore();
+            if (lab) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 1.1); }
+          } else if (st === 'chips') { // icon and name side by side, inside the chip (just the icon if the name doesn't fit)
+            ctx.font = `${lw} ${lsz + 1}px ${THEME.font}`; const lw2 = lab ? ctx.measureText(t.label).width : 0, fit = lab && isz * 0.85 + 6 + lw2 <= G.tws(i) - 24, total = fit ? isz * 0.85 + 6 + lw2 : isz * 0.85;
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
+            navIcon(-total / 2 + isz * 0.425, 0, isz * 0.85, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5);
+            if (fit) { ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz * 0.85 + 6, 1); }
+            ctx.restore();
+          } else if (st === 'bubble' && lab) { // icon and name side by side
             ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = ctx.measureText(t.label).width, total = isz + 6 + lw;
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
-            drawNavIcon(ctx, icon, -total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5);
+            navIcon(-total / 2 + isz / 2, 0, isz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5);
             ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
             ctx.restore();
           } else {
-            const iy = (lab ? -lsz * 0.85 : 0) - (on ? +p.activeLift || 0 : 0);
+            const iy = (lab ? -lsz * 0.85 : 0) - lift, dz = st === 'dock' ? 1.15 : 1;
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
-            if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
-            drawNavIcon(ctx, icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
+            if ((st === 'glass' || st === 'neon') && on) { ctx.shadowColor = act; ctx.shadowBlur = st === 'neon' ? glowK : 12; }
+            if (st === 'neon' && !on) ctx.globalAlpha *= 0.65;
+            navIcon(0, iy, isz * dz, col, on || /^(art:|ui-|[a-z])/.test(icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
             ctx.shadowColor = 'transparent';
             if (lab) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, 0, iy + isz * 0.5 + lsz * 1.05); }
             ctx.restore();

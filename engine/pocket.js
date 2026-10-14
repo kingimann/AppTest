@@ -1648,6 +1648,189 @@ function injectPrefsCss() {
 .pk-gear.corner{width:44px;height:44px;border-radius:50%;background:rgba(0,0,0,.35);font-size:22px}`;
   document.head.appendChild(st);
 }
+// ============================================================================
+// Notifications: game-wide notification types (Game Settings › Notifications), shown with
+// the message "notify:type Title|text|icon", the Notify node or the "show notification" action.
+// ============================================================================
+/** Built-in notification types; a game's own types (settings.notifyTypes) override them by name or add new ones. */
+export const NOTIFY_DEFAULTS = {
+  look: 'card', position: 'top', width: 0, bg: '#1e2235', bg2: '', text: '#ffffff', sub: '', accent: '#4fa3ff', border: '', borderWidth: 0, radius: 16,
+  shadow: true, glow: false, icon: '', iconShape: 'circle', image: '', titleSize: 15, textSize: 12.5, animIn: 'slide', animOut: 'slide', duration: 3,
+  sound: 'power', vibrate: true, progress: true, tap: 'close', tapValue: '', buttons: '', max: 3, label: '',
+};
+export const NOTIFY_TYPES = [
+  { name: 'default' },
+  { name: 'achievement', look: 'achievement', bg: '#2a2210', accent: '#ffd23d', border: '#ffd23d', borderWidth: 2, icon: '🏆', label: 'ACHIEVEMENT', animIn: 'pop', sound: 'win' },
+  { name: 'reward', look: 'card', bg: '#173322', bg2: '#0f2418', accent: '#3ccf7a', icon: '🎁', label: 'REWARD', animIn: 'bounce', sound: 'coin', buttons: 'Claim > claim reward' , tap: 'nothing', duration: 6 },
+  { name: 'levelup', look: 'banner', position: 'top', bg: '#5b3cc4', bg2: '#2f7de1', accent: '#ffffff', icon: '⭐', label: 'LEVEL UP', animIn: 'drop', sound: 'win', glow: true },
+  { name: 'info', look: 'pill', position: 'bottom', bg: '#262b3f', accent: '#4fa3ff', icon: 'info', sound: 'click', progress: false, duration: 2.5 },
+  { name: 'warning', look: 'card', bg: '#3a2a10', accent: '#ff9f43', border: '#ff9f43', borderWidth: 1.5, icon: '⚠️', sound: 'hit', animIn: 'shake' },
+  { name: 'error', look: 'toast', position: 'bottom', bg: '#4a1820', accent: '#ff4d5e', icon: '✖️', sound: 'lose', animIn: 'shake' },
+  { name: 'chat', look: 'bubble', position: 'top left', bg: '#ffffff', text: '#1d2033', accent: '#4fa3ff', icon: '💬', sound: 'click', progress: false, duration: 4 },
+];
+const NOTIFY_LOOKS = ['card', 'pill', 'banner', 'achievement', 'toast', 'bubble', 'minimal', 'picture'];
+const NOTIFY_POSITIONS = ['top', 'bottom', 'center', 'top left', 'top right', 'bottom left', 'bottom right'];
+const NOTIFY_ANIMS_IN = ['slide', 'fade', 'pop', 'bounce', 'drop', 'flip', 'zoom', 'shake', 'none'];
+const NOTIFY_ANIMS_OUT = ['slide', 'fade', 'shrink', 'none'];
+/** A notification type by name, with every setting filled in. */
+function notifyType(settings, name, extra) {
+  const own = (settings?.notifyTypes || extra || []).filter(Boolean), find = (n) => own.find((t) => t.name === n) || NOTIFY_TYPES.find((t) => t.name === n);
+  const base = find('default') || {}, t = find(name || 'default') || base;
+  return { ...NOTIFY_DEFAULTS, ...base, ...t, name: t.name || 'default' };
+}
+class NotifyCenter {
+  constructor(engine) { this.engine = engine; this.list = []; this.rects = []; }
+  now() { return performance.now() / 1000; }
+  /** Show one: { type, title, text, icon, image, buttons, duration }. Returns the notification. */
+  push(o = {}) {
+    const E = this.engine, s = E.scene, T = notifyType(s?.settings, o.type, E.notifyTypes), fill = (x) => (s ? fillTemplate(String(x ?? ''), s.vars) : String(x ?? ''));
+    const n = { T, title: fill(o.title), text: fill(o.text), icon: o.icon || T.icon, image: o.image || T.image, buttons: parseButtons(o.buttons ?? T.buttons), t0: this.now(), life: +(o.duration ?? T.duration) || 3, closing: null, data: o.data };
+    this.list.push(n);
+    const same = this.list.filter((q) => q.T.position === T.position && !q.closing); while (same.length > Math.max(1, +T.max || 3)) { const old = same.shift(); old.closing = this.now(); }
+    if (!E.editing) { if (T.sound && T.sound !== 'none') E.audio.sfx(T.sound); if (T.vibrate !== false) E.vibrate(12); }
+    s?.emit?.('notified', n);
+    return n;
+  }
+  /** "notify:type Title|text|icon|buttons" (type and the rest optional). */
+  fromMessage(m, data) {
+    const mm = /^notify(?::([\w-]+))?(?:\s+([\s\S]*))?$/.exec(m); if (!mm) return false;
+    const raw = mm[2] != null ? mm[2] : typeof data === 'string' ? data : data && typeof data === 'object' ? [data.title, data.text, data.icon].join('|') : '';
+    const [title = '', text = '', icon = '', buttons] = raw.split('|').map((x) => x.trim());
+    this.push({ type: mm[1] || (data && data.type) || 'default', title, text, icon, buttons: buttons || undefined, data });
+    return true;
+  }
+  close(n) { if (!n.closing) n.closing = this.now(); }
+  clear() { this.list = []; this.rects = []; }
+  /** Taps on notifications: buttons send their message, the card does its tap action. Used taps are removed. */
+  taps(inp) {
+    if (!this.rects.length || !inp.taps.length) return;
+    const s = this.engine.scene;
+    inp.taps = inp.taps.filter((tp) => {
+      for (const r of this.rects) {
+        const b = r.btns.find((q) => tp.x >= q.x && tp.x <= q.x + q.w && tp.y >= q.y && tp.y <= q.y + q.h);
+        if (b) { if (b.msg && b.msg !== 'close') s?.send(b.msg, r.n.data); s?.emit?.('notifyTap', r.n, b.msg); this.engine.audio.sfx('click'); this.close(r.n); return false; }
+        if (tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h) {
+          const T = r.n.T; if (T.tap === 'nothing') return false;
+          s?.emit?.('notifyTap', r.n, null);
+          if (T.tap === 'message' && T.tapValue) s?.send(T.tapValue, r.n.data);
+          if (T.tap === 'page' && T.tapValue) s?.navTo?.(T.tapValue, 'page', { history: true });
+          this.close(r.n); return false;
+        }
+      }
+      return true;
+    });
+  }
+  draw(ctx) {
+    const E = this.engine, now = this.now(), W = E.width, H = E.height, safe = E.safe;
+    this.list = this.list.filter((n) => { if (!n.closing && now - n.t0 > n.life) n.closing = now; return !(n.closing && now - n.closing > 0.4); });
+    this.rects = [];
+    if (!this.list.length) return;
+    ctx.save(); ctx.setTransform(E.dpr, 0, 0, E.dpr, 0, 0);
+    const groups = {};
+    for (const n of this.list) (groups[n.T.position] ||= []).push(n);
+    for (const [pos, list] of Object.entries(groups)) {
+      const bottom = pos.startsWith('bottom'), left = pos.endsWith('left'), right = pos.endsWith('right');
+      let y = bottom ? H - safe.bottom - 16 : pos === 'center' ? H * 0.3 : safe.top + 12;
+      for (const n of [...list].reverse()) {
+        const T = n.T, look = T.look || 'card', w = T.width > 0 ? Math.min(+T.width, W - 16) : look === 'banner' ? W : look === 'pill' || look === 'toast' ? Math.min(W - 40, 340) : look === 'bubble' ? Math.min(W - 60, 300) : Math.min(W - 24, 380);
+        const lines = wrapLines(ctx, n.text, w - (n.icon || n.image ? 90 : 36), T.textSize, look === 'pill' ? 1 : 2), hasBtns = n.buttons.length > 0;
+        const top = look === 'banner' && !bottom && pos !== 'center' ? safe.top : 0;
+        const h = top + (look === 'pill' ? 46 : look === 'minimal' ? 40 : Math.max(62, 22 + (T.label ? 14 : 0) + T.titleSize * 1.3 + lines.length * T.textSize * 1.35)) + (hasBtns ? 42 : 0) + (look === 'picture' ? 30 : 0);
+        const inK = clamp((now - n.t0) / 0.35, 0, 1), outK = n.closing ? clamp((now - n.closing) / 0.35, 0, 1) : 0;
+        const x0 = look === 'banner' ? 0 : left ? 12 + safe.left : right ? W - w - 12 - safe.right : (W - w) / 2, y0 = bottom ? y - h : look === 'banner' && !bottom && pos !== 'center' ? 0 : y;
+        ctx.save();
+        const k = applyNotifyAnim(ctx, T, inK, outK, x0, y0, w, h, bottom, left, right, now - n.t0);
+        drawNotifyCard(ctx, n, x0, y0, w, h, top, lines, now, E);
+        ctx.restore();
+        const btns = n.buttons.map((b, i, arr) => { const bw = (w - 28 - (arr.length - 1) * 8) / arr.length; return { x: x0 + 14 + i * (bw + 8), y: y0 + h - 38, w: bw, h: 30, msg: b.msg }; });
+        if (k > 0.5) this.rects.push({ n, x: x0, y: y0, w, h, btns });
+        y += (bottom ? -1 : 1) * (h + 8) * Math.max(0.0001, k);
+      }
+    }
+    ctx.restore();
+  }
+}
+function parseButtons(spec) {
+  if (Array.isArray(spec)) return spec;
+  return String(spec || '').split(',').map((b) => b.trim()).filter(Boolean).slice(0, 2).map((b) => { const [label, msg] = b.split('>').map((x) => x.trim()); return { label, msg: msg || 'close' }; });
+}
+function wrapLines(ctx, text, maxW, size, max) {
+  if (!text) return [];
+  ctx.font = `600 ${size}px ${THEME.font}`; const out = []; let cur = '';
+  for (const w of String(text).split(/\s+/)) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { out.push(cur); cur = w; if (out.length >= max) break; } else cur = t; }
+  if (cur && out.length < max) out.push(cur); else if (cur && out.length) out[out.length - 1] = out[out.length - 1].replace(/\s*\S*$/, '…');
+  return out;
+}
+/** Sets up the canvas for a notification's in / out animation and returns how "present" it is (0–1). */
+function applyNotifyAnim(ctx, T, inK, outK, x, y, w, h, bottom, left, right, age) {
+  const e = (q) => 1 - Math.pow(1 - q, 3), cx = x + w / 2, cy = y + h / 2;
+  let k = e(inK);
+  switch (inK < 1 ? T.animIn : '') {
+    case 'fade': ctx.globalAlpha *= k; break;
+    case 'pop': { const sc = inK < 1 ? 0.6 + 0.4 * k + Math.sin(inK * Math.PI) * 0.12 : 1; ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy); ctx.globalAlpha *= Math.min(1, inK * 3); break; }
+    case 'zoom': ctx.translate(cx, cy); ctx.scale(0.3 + 0.7 * k, 0.3 + 0.7 * k); ctx.translate(-cx, -cy); ctx.globalAlpha *= k; break;
+    case 'bounce': { const b = inK < 1 ? 1 - Math.abs(Math.cos(inK * Math.PI * 2.5)) * (1 - inK) : 1; ctx.translate(0, (bottom ? 1 : -1) * (1 - b) * (h + 30)); break; }
+    case 'drop': ctx.translate(0, (bottom ? 1 : -1) * (1 - k) * (h + 40) + Math.sin(inK * Math.PI) * (bottom ? -8 : 8)); break;
+    case 'flip': ctx.translate(cx, cy); ctx.scale(1, Math.max(0.02, k)); ctx.translate(-cx, -cy); break;
+    case 'shake': ctx.translate(Math.sin(age * 50) * 10 * (1 - inK), 0); ctx.globalAlpha *= Math.min(1, inK * 4); break;
+    case 'none': break;
+    default: if (left || right) ctx.translate((left ? -1 : 1) * (1 - k) * (w + 30), 0); else ctx.translate(0, (bottom ? 1 : -1) * (1 - k) * (h + 30));
+  }
+  if (outK > 0) {
+    const o = e(outK);
+    switch (T.animOut) {
+      case 'fade': ctx.globalAlpha *= 1 - o; break;
+      case 'shrink': ctx.translate(cx, cy); ctx.scale(1 - o * 0.6, 1 - o * 0.6); ctx.translate(-cx, -cy); ctx.globalAlpha *= 1 - o; break;
+      case 'none': ctx.globalAlpha *= outK > 0 ? 0 : 1; break;
+      default: if (left || right) ctx.translate((left ? -1 : 1) * o * (w + 30), 0); else ctx.translate(0, (bottom ? 1 : -1) * o * (h + 30)); ctx.globalAlpha *= 1 - o * 0.5;
+    }
+    k *= 1 - o;
+  }
+  return k;
+}
+function drawNotifyCard(ctx, n, x, y, w, h, top, lines, now, E) {
+  const T = n.T, look = T.look || 'card', r = look === 'banner' ? 0 : look === 'pill' || look === 'toast' ? Math.min(h / 2, 24) : look === 'minimal' ? 10 : +T.radius || 0;
+  const rr = (X, Y, Wd, Hd, R) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(X, Y, Wd, Hd, Math.max(0, Math.min(R, Hd / 2, Wd / 2))); else ctx.rect(X, Y, Wd, Hd); };
+  const acc = T.accent || '#4fa3ff', txt = T.text || '#fff', sub = T.sub || withAlpha(txt, 0.72);
+  ctx.save();
+  if (T.shadow !== false && look !== 'minimal') { ctx.shadowColor = T.glow ? withAlpha(acc, 0.8) : 'rgba(0,0,0,0.45)'; ctx.shadowBlur = T.glow ? 24 : 18; ctx.shadowOffsetY = T.glow ? 0 : 4; }
+  if (T.bg2) { const g = ctx.createLinearGradient(x, y, x + w, y + h); g.addColorStop(0, T.bg); g.addColorStop(1, T.bg2); ctx.fillStyle = g; } else ctx.fillStyle = look === 'minimal' ? withAlpha(T.bg || '#000', 0.6) : T.bg || '#1e2235';
+  rr(x, y, w, h, r); ctx.fill(); ctx.shadowColor = 'transparent';
+  if (look === 'bubble') { ctx.beginPath(); ctx.moveTo(x + 22, y + h - 1); ctx.lineTo(x + 14, y + h + 10); ctx.lineTo(x + 34, y + h - 1); ctx.fill(); }
+  ctx.save(); rr(x, y, w, h, r); ctx.clip();
+  if (n.image && look === 'picture') { const img = loadImage(n.image); if (img.complete && img.naturalWidth) { const s = Math.max(w / img.naturalWidth, h / img.naturalHeight); ctx.drawImage(img, x + (w - img.naturalWidth * s) / 2, y + (h - img.naturalHeight * s) / 2, img.naturalWidth * s, img.naturalHeight * s); } const g = ctx.createLinearGradient(0, y, 0, y + h); g.addColorStop(0, 'rgba(0,0,0,0.05)'); g.addColorStop(1, 'rgba(0,0,0,0.75)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
+  if (look === 'achievement') { const sh = (now * 0.6) % 2; const g = ctx.createLinearGradient(x + (sh - 0.5) * w * 1.5, 0, x + (sh - 0.2) * w * 1.5, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.12)'); g.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); }
+  if (look === 'toast') { ctx.fillStyle = acc; ctx.fillRect(x, y, 5, h); }
+  if (T.progress !== false && !n.closing) { ctx.fillStyle = withAlpha(acc, 0.75); const f = clamp(1 - (now - n.t0) / n.life, 0, 1); ctx.fillRect(x, y + h - 3, w * f, 3); }
+  ctx.restore();
+  if (T.borderWidth > 0 && T.border) { ctx.strokeStyle = T.border; ctx.lineWidth = +T.borderWidth; rr(x, y, w, h, r); ctx.stroke(); }
+  // icon or picture
+  const btnH = n.buttons.length ? 42 : 0, bodyY = y + top, bodyH = h - top - btnH - (look === 'picture' ? 0 : 0), cy = look === 'picture' ? y + h - btnH - 30 : bodyY + bodyH / 2;
+  let tx = x + (look === 'toast' ? 22 : 16);
+  const isz = look === 'pill' ? 20 : look === 'minimal' ? 18 : 26;
+  if (n.image && look !== 'picture') { const img = loadImage(n.image), R = look === 'pill' ? 16 : 22; if (img.complete && img.naturalWidth) { ctx.save(); ctx.beginPath(); if (T.iconShape === 'square') rr(tx, cy - R, R * 2, R * 2, 8); else ctx.arc(tx + R, cy, R, 0, Math.PI * 2); ctx.clip(); ctx.drawImage(img, tx, cy - R, R * 2, R * 2); ctx.restore(); } tx += R * 2 + 12; }
+  else if (n.icon && look !== 'picture') {
+    const R = look === 'pill' ? 16 : look === 'minimal' ? 13 : 22;
+    if (T.iconShape !== 'none') { ctx.fillStyle = withAlpha(acc, 0.2); ctx.beginPath(); if (T.iconShape === 'square') rr(tx, cy - R, R * 2, R * 2, 8); else ctx.arc(tx + R, cy, R, 0, Math.PI * 2); ctx.fill(); }
+    drawNavIcon(ctx, n.icon, tx + R, cy, isz, acc); tx += R * 2 + 12;
+  }
+  const maxW = x + w - tx - 12, tTitle = T.titleSize || 15, tText = T.textSize || 12.5;
+  const blockH = (T.label ? 14 : 0) + (n.title ? tTitle * 1.25 : 0) + lines.length * tText * 1.35;
+  let ty = look === 'picture' ? cy - blockH / 2 : cy - blockH / 2;
+  const put = (s2, size, weight, color) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = look === 'banner' && !n.icon ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(s2, ctx.textAlign === 'center' ? x + w / 2 : tx, ty + size * 0.6, maxW); ty += size * 1.3; };
+  if (T.label && look !== 'pill' && look !== 'minimal') put(T.label, 9.5, 900, acc);
+  if (n.title) put(n.title, look === 'pill' || look === 'minimal' ? 14 : tTitle, 800, txt);
+  if (look !== 'pill' && look !== 'minimal') for (const l of lines) put(l, tText, 600, sub);
+  // buttons
+  n.buttons.forEach((b, i, arr) => {
+    const bw = (w - 28 - (arr.length - 1) * 8) / arr.length, bx = x + 14 + i * (bw + 8), by = y + h - 38;
+    ctx.fillStyle = i === 0 ? acc : 'rgba(255,255,255,0.14)'; rr(bx, by, bw, 30, 15); ctx.fill();
+    ctx.font = `800 13px ${THEME.font}`; ctx.fillStyle = i === 0 ? (isLightColor(acc) ? '#1b1b1b' : '#fff') : txt; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, bx + bw / 2, by + 15.5, bw - 8);
+  });
+  ctx.restore();
+}
+const isLightColor = (c) => { try { const [r, g, b] = hexToRgb(c); return r * 0.299 + g * 0.587 + b * 0.114 > 0.62; } catch { return false; } };
+
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -3147,6 +3330,8 @@ function renderUI(engine, scene) {
     }
     if (V) ctx.restore();
   }
+  engine.notifier?.draw(ctx); // notifications sit above the game's UI (and show in the editor's Test)
+  ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
   for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
   if (scene.popups?.length) { // floating "+10" texts
@@ -3258,7 +3443,7 @@ function renderUI(engine, scene) {
 export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification',
   'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
@@ -7824,6 +8009,7 @@ function runAction(s, e, p, other) {
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
     case 'open settings': s.engine.openSettings(); break;
+    case 'show notification': { const m = /^([\w-]+):\s*([\s\S]*)$/.exec(String(v || '')), known = m && notifyType(s.settings, m[1], s.engine.notifyTypes).name === m[1]; const [title = '', text = '', icon = ''] = String(known ? m[2] : v || '').split('|').map((x) => x.trim()); s.engine.notify({ type: known ? m[1] : 'default', title, text, icon: icon || undefined }); break; }
     case 'add score': s.addVar('score', p.amount); break;
     case 'win': s.win(); break;
     case 'game over': s.gameOver(); break;
@@ -9107,7 +9293,7 @@ export const NODE_TYPES = {
   moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
   lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
   openSettings: { cat: 'Game', label: 'Open Settings', exec: true, outs: ['then'] },
-  notify: { cat: 'Game', label: 'Notify', exec: true, outs: ['then'], params: [txt('title', 'Well done!', 'title ({variables})'), txt('text', '', 'text'), txt('icon', '🏆', 'icon or emoji')] },
+  notify: { cat: 'Game', label: 'Notify', exec: true, outs: ['then', 'tapped'], params: [{ ...txt('type', 'default', 'type'), suggest: 'notifyTypes' }, txt('title', 'Well done!', 'title ({variables})'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)'), txt('buttons', '', 'buttons (Label > message, …)')] },
   celebrate: { cat: 'Game', label: 'Celebrate (confetti)', exec: true, outs: ['then'] },
   playerSetting: { cat: 'Game', label: 'Player Setting', value: 'number', params: [opt('setting', ['left-handed', 'joystick sensitivity', 'drag sensitivity', 'tilt sensitivity', 'look sensitivity', 'sound effects', 'music', 'vibration'], 'left-handed', 'setting')] },
   pauseGame: { cat: 'Game', label: 'Pause / Resume', exec: true, outs: ['then'], params: [opt('mode', ['pause', 'resume', 'toggle'], 'toggle', 'make it')] },
@@ -9499,6 +9685,7 @@ export const LOGIC_ACTIONS = {
   win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
   gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
   nextLevel: { cat: 'Game', label: 'Next level', icon: 'flag', run: (c) => { if (c.s.engine.hasNextLevel()) c.s.win(); }, say: () => 'Next level' },
+  notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
 };
 const withDefaults = (def, it) => { const p = { ...it }; for (const q of def?.params || []) if (p[q.key] === undefined) p[q.key] = q.default; return p; };
@@ -10217,7 +10404,7 @@ registerBehavior('graph', {
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
         case 'openSettings': s.engine.openSettings(); break;
-        case 'notify': s.send('notify ' + [P('title'), P('text'), P('icon')].map((x) => fillTemplate(String(x ?? ''), s.vars).replace(/\|/g, '/')).join('|')); break;
+        case 'notify': { const later = { ...ctx, steps: 0 }, nn = s.engine.notify({ type: P('type') || 'default', title: P('title'), text: P('text'), icon: P('icon') || undefined, buttons: P('buttons') || undefined }); s.on('notifyTap', (q) => { if (q === nn && !e.dead) follow(n, 'tapped', later); }); break; }
         case 'celebrate': s.send('celebrate'); break;
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
         case 'addScore': { const a = +I('amount') || 0; s.addVar('score', a); if (P('pop') !== false && a) popText(s, e.x, e.y, (a > 0 ? '+' : '') + formatNumber(a), '#ffd23d', 26); break; }
@@ -10889,6 +11076,7 @@ export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
+    this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -10989,7 +11177,7 @@ export class Engine {
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon } }; // the UI theme, fonts and online services are game-wide
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes } }; // the UI theme, fonts, online services and notification types are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -11043,6 +11231,11 @@ export class Engine {
     }
     this.useRenderer(scene.mode);
     loadFonts(scene.settings.fonts);
+    scene.on('message', (m, d) => { // notifications: notify:type always; plain "notify" unless a Notifications component handles it
+      if (typeof m !== 'string' || !m.startsWith('notify')) return;
+      if (!m.startsWith('notify:') && scene.entities.some((q) => !q.dead && q.getBehavior?.('uiNotifications'))) return;
+      this.notifier.fromMessage(m, d);
+    });
     this.physics.contacts.clear();
     this.input.reset(true);
     this.paused = false;
@@ -11308,6 +11501,8 @@ export class Engine {
     b.addEventListener('click', (e) => { e.stopPropagation(); this.openSettings(); });
     this.root.appendChild(b);
   }
+  /** Show a notification: { type, title, text, icon, image, buttons: 'Label > message, …', duration }. */
+  notify(o) { return this.notifier.push(o); }
   vibrate(p) { try { if (!this.audio.muted && this.prefs?.vibration !== false) navigator.vibrate?.(p); } catch { /* unsupported */ } }
 
   frame(now) {
@@ -11340,6 +11535,7 @@ export class Engine {
     if (s.rotateNeeded) return;
     this.navTick(s);
     this.online.update(dt);
+    this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {

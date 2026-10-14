@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS } from '../engine/pocket.js';
+import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -2228,6 +2228,7 @@ function suggestions(kind) {
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
+  if (kind === 'notifyTypes') return allNotifyTypes().map((t) => t.name);
   if (kind === 'clips') return uniq((ent(selectedId)?.behaviors || []).filter((b) => b.type === 'animator').flatMap((b) => (b.clips || []).map((c) => c.name)));
   if (kind === 'messages') {
     const out = [];
@@ -3175,6 +3176,16 @@ function renderSceneSettings(box) {
     ], ['joystickMode', 'joystickZone', 'joystickDirections', 'joystickResponse', 'joystickDeadZone', 'joystickSize', 'joystickStyle', 'joystickColor', 'joystickVisible'].some((k) => project.settings?.[k] != null && project.settings[k] !== '')),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
+  box.append(comp('Notifications', [
+    h('p', { class: 'desc' }, 'Pop-ups for achievements, rewards and messages. Each type has its own look. Show one with the message notify:TYPE Title|text|icon (e.g. notify:reward Coins!|+50), the Notify node, a trigger\'s "Show notification", or a Button set to "show notification".'),
+    h('div', { class: 'nt-list' }, allNotifyTypes().map((t) => h('div', { class: 'nt-row' },
+      h('span', { class: 't-sw', style: `background:${t.bg2 ? `linear-gradient(135deg,${t.bg},${t.bg2})` : t.bg};border-color:${t.accent}` }, t.icon && !/^[a-z]/.test(t.icon) ? t.icon : ''),
+      h('span', { class: 'nt-name' }, t.name, h('small', {}, `${t.look} · ${t.position}${customNotify(t.name) ? ' · edited' : ''}`)),
+      h('button', { class: 'btn', onclick: () => testNotify(t.name) }, icon('play'), 'Test'),
+      h('button', { class: 'btn', onclick: () => openNotifyEditor(t.name) }, icon('edit'), 'Edit')))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const name = uniqueNotifyName('custom'); gameSettings().notifyTypes = [...(gameSettings().notifyTypes || []), { name, look: 'card', icon: '🔔' }]; changed({ inspector: true }); pushHistory(); openNotifyEditor(name); } }, icon('plus'), 'New type'),
+      h('button', { class: 'btn', onclick: () => ['default', 'achievement', 'reward', 'warning'].forEach((n, i) => setTimeout(() => testNotify(n), i * 450)) }, icon('play'), 'Test a few')),
+  ], { icon: 'bell', key: 's-notify', summary: `${allNotifyTypes().length} types` }));
   box.append(comp('Screen & Safe Area', [
     h('p', { class: 'desc' }, 'Phones come in many sizes, and many have a notch, rounded corners or a home bar. UI anchored to corners and edges stays inside the safe area, and grows or shrinks to suit the screen.'),
     C('settings.safeArea', { label: 'Safe area', type: 'select', options: [['device', 'Keep UI clear of notches & home bar'], ['off', 'Use the whole screen']], def: 'device' }),
@@ -4302,6 +4313,81 @@ function endTour() { store.set('pocket.editor.toured', '1'); closeLayer(); }
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+// ---------- Notifications (Game Settings › Notifications) ----------
+const gameSettings = () => { const g = levelList()[0]; return (g.settings ||= {}); };
+const customNotify = (name) => (gameSettings().notifyTypes || []).find((t) => t.name === name);
+function allNotifyTypes() {
+  const own = gameSettings().notifyTypes || [], names = [...NOTIFY_TYPES.map((t) => t.name), ...own.map((t) => t.name).filter((n) => !NOTIFY_TYPES.some((b) => b.name === n))];
+  return names.map((n) => ({ ...NOTIFY_DEFAULTS, ...(NOTIFY_TYPES.find((t) => t.name === n) || {}), ...(own.find((t) => t.name === n) || {}), name: n }));
+}
+const uniqueNotifyName = (base) => { let n = base, i = 2; while (allNotifyTypes().some((t) => t.name === n)) n = base + i++; return n; };
+/** The game's own copy of a type (made from the built-in one the first time it is edited). */
+function ensureNotifyType(name) {
+  const st = gameSettings(); st.notifyTypes ||= [];
+  let t = st.notifyTypes.find((q) => q.name === name);
+  if (!t) { t = { ...(NOTIFY_TYPES.find((q) => q.name === name) || {}), name }; st.notifyTypes.push(t); }
+  return t;
+}
+function testNotify(name, extra = {}) {
+  engine.notifyTypes = gameSettings().notifyTypes; // the editor previews the game-wide types from any level
+  const t = allNotifyTypes().find((q) => q.name === name) || {};
+  const text = { achievement: 'You collected 100 coins', reward: 'Your daily gift is ready', levelup: 'You reached level 5!', info: '', warning: 'Your health is low', error: 'Could not save the game', chat: 'Want to race again?', default: 'This is how it looks in your game' }[name] ?? 'This is how it looks in your game';
+  const title = { achievement: 'Coin Collector', reward: 'Daily reward', levelup: 'Level up!', info: 'Game saved', warning: 'Careful!', error: 'Oops', chat: 'Alex', default: 'Notification' }[name] || t.name;
+  const n = engine.notify({ type: name, title, text, ...extra }); engine.render();
+  const dlg = !layer.hidden && layer.querySelector('.dialog') ? layer : null; // from the type editor: step aside so the preview shows
+  if (dlg) { dlg.style.visibility = 'hidden'; const back = () => { dlg.style.visibility = ''; clearTimeout(tm); }; const tm = setTimeout(back, (n.life + 0.7) * 1000); setTimeout(() => document.addEventListener('pointerdown', back, { once: true, capture: true }), 50); }
+  let frames = 0; const tick = () => { engine.render(); if (++frames < 240 && engine.notifier.list.length) requestAnimationFrame(tick); }; requestAnimationFrame(tick); // the editor only redraws on changes
+}
+function openNotifyEditor(name) {
+  const builtIn = NOTIFY_TYPES.some((q) => q.name === name), T = () => ensureNotifyType(name);
+  const C = (path, spec) => control(T, path, { ...spec, def: spec.def ?? NOTIFY_DEFAULTS[path] ?? (NOTIFY_TYPES.find((q) => q.name === name) || {})[path] });
+  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const sounds = [['none', 'None'], ...SOUNDS.map((x) => [x, x]), ...Object.keys(project.sounds || root.sounds || {}).map((x) => [x, x + ' (yours)'])];
+  openDialog(`Notification type: ${name}`, [
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => testNotify(name) }, icon('play'), 'Test'), h('button', { class: 'btn', onclick: () => testNotify(name, { buttons: T().buttons || 'OK > close, Later' }) }, icon('play'), 'Test with buttons')),
+    !builtIn && h('div', { class: 'row side' }, h('label', {}, 'Name'), h('input', { type: 'text', value: name, onchange: (e) => { const v = e.target.value.trim().replace(/[^\w-]/g, '') || name; if (v !== name && !allNotifyTypes().some((q) => q.name === v)) { T().name = v; changed({ inspector: true }); pushHistory(); closeLayer(); openNotifyEditor(v); } } })),
+    h('p', { class: 'desc' }, `Show it with the message notify:${name} Title|text|icon.`),
+    sec('Look', 'brush', [
+      C('look', { label: 'Style', type: 'select', options: [['card', 'Card'], ['pill', 'Pill (one line)'], ['banner', 'Banner (full width)'], ['achievement', 'Achievement (shine)'], ['toast', 'Toast (coloured edge)'], ['bubble', 'Speech bubble'], ['minimal', 'Minimal'], ['picture', 'Picture background']] }),
+      C('position', { label: 'Where', type: 'select', options: [['top', 'Top'], ['bottom', 'Bottom'], ['center', 'Middle'], ['top left', 'Top left'], ['top right', 'Top right'], ['bottom left', 'Bottom left'], ['bottom right', 'Bottom right']] }),
+      C('width', { label: 'Width (0 = automatic)', type: 'number', step: 10 }),
+      C('radius', { label: 'Corner roundness', type: 'number', step: 1 }),
+      C('max', { label: 'Most at once here', type: 'number', step: 1 }),
+    ]),
+    sec('Colours', 'brush', [
+      C('bg', { label: 'Background', type: 'color' }), C('bg2', { label: 'Blend to (gradient)', type: 'color', optional: true }),
+      C('text', { label: 'Title', type: 'color' }), C('sub', { label: 'Text (blank = title, faded)', type: 'color', optional: true }),
+      C('accent', { label: 'Accent (icon, buttons, timer)', type: 'color' }),
+      C('border', { label: 'Border', type: 'color', optional: true }), C('borderWidth', { label: 'Border width', type: 'number', step: 0.5 }),
+      C('shadow', { label: 'Shadow', type: 'bool' }), C('glow', { label: 'Glow in the accent colour', type: 'bool' }),
+    ]),
+    sec('Content', 'text', [
+      C('label', { label: 'Small heading (e.g. ACHIEVEMENT)', type: 'text' }),
+      C('icon', { label: 'Icon (UI icon name or emoji)', type: 'text' }),
+      C('iconShape', { label: 'Icon background', type: 'select', options: [['circle', 'Circle'], ['square', 'Rounded square'], ['none', 'None']] }),
+      C('image', { label: 'Picture (replaces the icon; fills a Picture style)', type: 'image' }),
+      C('titleSize', { label: 'Title size', type: 'number', step: 1 }), C('textSize', { label: 'Text size', type: 'number', step: 0.5 }),
+    ]),
+    sec('Motion & sound', 'play', [
+      C('animIn', { label: 'Comes in with', type: 'select', options: [['slide', 'Slide'], ['fade', 'Fade'], ['pop', 'Pop'], ['bounce', 'Bounce'], ['drop', 'Drop'], ['flip', 'Flip'], ['zoom', 'Zoom'], ['shake', 'Shake'], ['none', 'Nothing']] }),
+      C('animOut', { label: 'Leaves with', type: 'select', options: [['slide', 'Slide'], ['fade', 'Fade'], ['shrink', 'Shrink'], ['none', 'Disappear']] }),
+      C('duration', { label: 'Stays for (sec)', type: 'number', step: 0.5 }),
+      C('progress', { label: 'Timer bar along the bottom', type: 'bool' }),
+      C('sound', { label: 'Sound', type: 'select', options: sounds }), C('vibrate', { label: 'Vibrate', type: 'bool' }),
+    ]),
+    sec('Tapping', 'hand', [
+      C('tap', { label: 'Tapping it', type: 'select', options: [['close', 'Closes it'], ['message', 'Sends a message'], ['page', 'Opens a page'], ['nothing', 'Does nothing (use buttons)']] }),
+      C('tapValue', { label: 'Message / page', type: 'text', suggest: 'messages' }),
+      C('buttons', { label: 'Buttons (up to 2: Label > message, Label > message)', type: 'text', placeholder: 'Claim > claim reward, Later' }),
+      h('p', { class: 'desc' }, 'A button without "> message" just closes it. The first button uses the accent colour.'),
+    ]),
+    h('div', { class: 'btns' },
+      builtIn ? h('button', { class: 'btn', onclick: () => { const st = gameSettings(); st.notifyTypes = (st.notifyTypes || []).filter((q) => q.name !== name); changed({ inspector: true }); pushHistory(); closeLayer(); openNotifyEditor(name); toast('Back to the built-in look'); } }, icon('undo'), 'Reset to built-in')
+        : h('button', { class: 'btn danger', onclick: () => { const st = gameSettings(); st.notifyTypes = (st.notifyTypes || []).filter((q) => q.name !== name); changed({ inspector: true }); pushHistory(); closeLayer(); toast('Type deleted'); } }, icon('trash'), 'Delete type'),
+      h('button', { class: 'btn', onclick: () => { const nn = uniqueNotifyName(name + '-copy'); const st = gameSettings(); st.notifyTypes = [...(st.notifyTypes || []), { ...allNotifyTypes().find((q) => q.name === name), name: nn }]; changed({ inspector: true }); pushHistory(); closeLayer(); openNotifyEditor(nn); } }, icon('copy'), 'Duplicate')),
+  ]);
+  $('.dialog .db')?.addEventListener('change', () => { engine.notifyTypes = gameSettings().notifyTypes; });
+}
 /** ☰ → Preferences: how the editor looks and behaves on this device, plus the app itself (updates, install, storage). */
 function openPreferences() {
   const redo = () => setTimeout(() => { const sc = $('.dialog .db')?.scrollTop; openPreferences(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });

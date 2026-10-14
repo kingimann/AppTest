@@ -518,6 +518,38 @@ New groups in *Project › UI*: **Buttons**, **Inputs**, **Lists** and **Animate
   - **Widgets:** Bouncing Title, Pulsing Play Button, Menu That Slides In, Spinning Reward Star, Heartbeat Heart, Attention Badge.
 - **New animations** everywhere UI shows and hides (popups, pages, Show / Hide UI node, UI Animation): **drop in** (falls and bounces), **flip**, **spin in**, **elastic pop**, **swing in**, **rise**, **stretch**.
 
+### Notifications (Game Settings › Notifications)
+
+Pop-up notifications are built in; there's no component to add. Every game has **notification types**, each with its own look.
+- **Built-in types:**
+
+  | Type | Look |
+  |---|---|
+  | default | card at the top |
+  | achievement | gold border with a shine |
+  | reward | green, with a **Claim** button |
+  | levelup | gradient banner |
+  | info | pill at the bottom |
+  | warning | orange border, shakes |
+  | error | red toast |
+  | chat | speech bubble at the top left |
+
+  Edit any of them (**Reset to built-in** puts it back), **Duplicate** one, or make a **New type**.
+- **Showing one:**
+  - The message `notify:TYPE Title|text|icon|buttons`, e.g. `notify:reward Daily gift|+50 coins|🎁`. Plain `notify Title|text` uses *default*, and `{variables}` work.
+  - The **Notify** node (type, title, text, icon, buttons, and a *tapped* output).
+  - A trigger's **Show notification**.
+  - A Button / Timer / Trigger Zone action **show notification** with `type: Title|text|icon` (or just `Title|text`).
+  - `engine.notify({ type, title, text, icon, image, buttons, duration })`.
+- **Each type sets:**
+  - **Look:** style (card, pill, banner, achievement, toast, speech bubble, minimal, picture background), position (top, bottom, middle or any corner), width, corner roundness, and how many show at once.
+  - **Colours:** background with an optional gradient, title, text, accent, border and border width, shadow, and glow.
+  - **Content:** a small heading (e.g. ACHIEVEMENT), an icon (UI icon or emoji) with a circle / square / no background, a picture (replaces the icon, or fills the *picture* style), and title and text sizes.
+  - **Motion & sound:** comes in with slide, fade, pop, bounce, drop, flip, zoom or shake; leaves with slide, fade, shrink or disappear; how long it stays; a timer bar; sound and vibration.
+  - **Tapping:** close, send a message, open a page, or do nothing. Up to **2 buttons** (`Claim > claim reward, Later`): the first uses the accent colour, and a button without a message just closes it.
+- **Test** shows a type in the editor. From the type editor, the dialog steps aside while the preview plays. *Test a few* shows several at once.
+- Types are game-wide: every level uses them. A *Notifications* component (Project › UI › HUD) still works, and handles plain `notify` messages in scenes that have one.
+
 ### UI components pack (21 new components, 43 presets)
 
 Each of these is one object with one component: it draws itself, handles taps and shows a live preview in the editor. Find them in *Project › UI* under **Controls**, **Charts**, **HUD** and **Game Systems**, or in *Add Component › UI*. Lists are typed one item per line, with `|` between the parts.

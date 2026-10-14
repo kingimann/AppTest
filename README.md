@@ -97,10 +97,31 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
   - **Text and tips:** extra text, rotating tips (separate with `|`) and an optional "Made with Pocket Engine" line.
   - **Finish:** minimum time, **Tap to Start** with your own text (so music can play straight away), and how it leaves (fade, slide up, zoom, circle wipe or cut).
 - **Levels:** untick unfinished levels to leave them out, and pick the level to start at (handy for testing).
-- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, blocking long-press menus, and whether it can be added to the Home Screen as an app.
+- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, and blocking long-press menus.
+- **Web app:** how the game behaves once it is on the Home Screen or in a browser.
+  - **Can be added to the Home Screen**, with a short **Home Screen name**.
+  - **Opens:** full screen, like an app (keeps the status bar), with small browser buttons, or in the browser.
+  - **Suggest installing:** never, shortly after it starts, or after a game ends. A small bar shows an **Install** button where the browser offers one (Android / Chrome) or the steps on iPhone ("Tap Share, then Add to Home Screen"). It never shows once installed, the player can close it, and the message is yours to write.
+  - **Screen:** orientation (same as the game, portrait, landscape, either), **browser bar colour** and the **iPhone status bar** (see-through, black, white).
+  - **Behaviour:** **pause when switching apps**, **keep the screen on while playing**, and **ask before leaving mid-game**.
+  - **Sharing:** a **link preview** (title and description for messages and social posts) and the **language code**.
+  - **Extra code in `<head>`** (advanced): analytics, fonts or meta tags, pasted into every build as-is.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
 - **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
 - **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.
+
+### Editor Preferences (☰ → Preferences…)
+
+Settings for you on this device (games keep their own settings):
+
+| Group | Settings |
+|---|---|
+| Look | theme (Dark, Black, Slate, Warm), accent colour, panel text size, reduce motion |
+| Editing | snap on / off, snap step for 2D (1–50 px) and 3D (0.1–1), rotation snap (5°–90°), grid, all colliders, vibration on taps |
+| Saving | save straight away, after a few seconds, every 10 seconds, or only on Save / leaving; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
+| App | open on the Home screen or straight into the last game, keep the screen on while editing, version and **Check for updates**, **Install app**, storage used and **Protect my games** (asks the browser not to clear them) |
+
+**Reset preferences** puts them back.
 
 ### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
 

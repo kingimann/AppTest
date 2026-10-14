@@ -6,7 +6,7 @@ import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './libr
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
-import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB } from './storage.js';
+import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
@@ -24,7 +24,32 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
-const buzz = (ms = 8) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
+// ---------- Editor Preferences (this device only) ----------
+const EDITOR_PREFS = { theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
+const THEMES = {
+  dark: {},
+  black: { '--toolbar': '#000', '--bg': '#0a0a0a', '--panel': '#151515', '--card': '#1a1a1a', '--tab': '#222', '--tab-off': '#101010', '--header': '#1c1c1c', '--field': '#0f0f0f', '--field-b': '#050505', '--line': '#000', '--hover': '#262626' },
+  slate: { '--toolbar': '#1b2029', '--bg': '#232a35', '--panel': '#323b4a', '--card': '#384252', '--tab': '#414c5e', '--tab-off': '#29313d', '--header': '#3b4556', '--field': '#252c37', '--field-b': '#1c222b', '--line': '#181d25', '--hover': '#465267' },
+  warm: { '--toolbar': '#1f1a17', '--bg': '#2a2420', '--panel': '#3d3530', '--card': '#433a34', '--tab': '#4b413a', '--tab-off': '#2f2824', '--header': '#463c36', '--field': '#2b2521', '--field-b': '#211c19', '--line': '#1b1714', '--hover': '#53473f' },
+};
+const ACCENTS = [['#4c8bd6', 'Blue'], ['#8e6bf2', 'Purple'], ['#e0559b', 'Pink'], ['#e8743c', 'Orange'], ['#3dbb7a', 'Green'], ['#22b8c9', 'Teal']];
+let wakeLockEd = null;
+async function editorWake() { if (!EP.keepAwake || document.hidden || wakeLockEd || !navigator.wakeLock) return; try { wakeLockEd = await navigator.wakeLock.request('screen'); wakeLockEd.addEventListener('release', () => { wakeLockEd = null; }); } catch { /* not allowed now */ } }
+document.addEventListener('visibilitychange', editorWake);
+function applyEditorPrefs() {
+  const st = document.documentElement.style;
+  for (const t of Object.values(THEMES)) for (const k of Object.keys(t)) st.removeProperty(k);
+  for (const [k, v] of Object.entries(THEMES[EP.theme] || {})) st.setProperty(k, v);
+  st.setProperty('--accent', EP.accent || EDITOR_PREFS.accent);
+  st.setProperty('--ui-zoom', String(EP.uiSize || 1));
+  document.documentElement.classList.toggle('reduce-motion', !!EP.reduceMotion);
+  setSnapshotPolicy(EP.snapEvery, EP.snapKeep);
+  if (EP.keepAwake) editorWake(); else { wakeLockEd?.release?.(); wakeLockEd = null; }
+}
+function setEP(k, v) { EP[k] = v; try { localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } catch { /* storage unavailable */ } applyEditorPrefs(); }
+applyEditorPrefs();
+const buzz = (ms = 8) => { if (!EP.haptics) return; try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
 /** DOM builder: h('div', { class: 'x', onclick }, child, 'text') */
 function h(tag, attrs = {}, ...kids) {
@@ -140,7 +165,7 @@ let hRevealed = null; // last selection the Hierarchy scrolled to
 let attachFor = null;
 let colliderEdit = null; // object whose 2D collider is being edited with handles
 let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
-const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 500); };
+const saveSoon = () => { clearTimeout(saveTimer); if (EP.autosave === 'leave') return; saveTimer = setTimeout(saveNow, (+EP.autosave || 0.5) * 1000); }; // Preferences › Saving
 
 const levelList = () => [root, ...(root.levels || [])];
 const levelName = (lv, i) => lv.levelName || `Level ${i + 1}`;
@@ -810,7 +835,7 @@ function rayPlaneY(ray, y) {
 const surface = engine.uiCanvas;
 const ptrs = new Map();
 let gesture = null;
-const snapV = (v, step) => (snap ? Math.round(v / step) * step : round(v, 2));
+const snapV = (v, step) => { if (!snap) return round(v, 2); const st = step === 10 ? +EP.snap2D || 10 : step === 0.5 ? +EP.snap3D || 0.5 : step; return round(Math.round(v / st) * st, 3); }; // steps from Preferences
 const localXY = (ev) => { const r = surface.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; };
 
 let tapTrack = null, lastEmptyTap = 0, lpTimer = 0;
@@ -963,7 +988,7 @@ surface.addEventListener('pointermove', (ev) => {
       let deg = (g.a1 - g.a0) * 180 / Math.PI;
       const key = is3D() && !g.ui ? 'ry' : 'rz';
       let v = key === 'ry' ? g.orig.ry - deg : g.orig.rz + deg;
-      v = snap ? Math.round(v / 15) * 15 : round(v, 1);
+      v = snap ? Math.round(v / (+EP.rotSnap || 15)) * (+EP.rotSnap || 15) : round(v, 1);
       j[key] = v;
     } else if (g.type === 'rect') {
       const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
@@ -4154,6 +4179,7 @@ function openFileMenu() {
     { icon: 'download', label: 'Export This Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     '-',
     !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
+    { icon: 'gear', label: 'Preferences…', k: 'editor & app', fn: openPreferences },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
     { icon: 'help', label: 'Controls', fn: openHelp },
     { icon: 'external', label: 'Examples & Docs', fn: () => { location.href = '../'; } },
@@ -4270,6 +4296,55 @@ function endTour() { store.set('pocket.editor.toured', '1'); closeLayer(); }
 
 let installPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
+/** ☰ → Preferences: how the editor looks and behaves on this device, plus the app itself (updates, install, storage). */
+function openPreferences() {
+  const redo = () => setTimeout(() => { const sc = $('.dialog .db')?.scrollTop; openPreferences(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
+  const sel = (k, label, options, info) => h('div', { class: 'row side' }, h('label', {}, label), h('select', { onchange: (e) => { const o = options.find(([v]) => String(v) === e.target.value); setEP(k, o ? o[0] : e.target.value); redo(); } }, options.map(([v, l]) => h('option', { value: String(v), selected: String(EP[k]) === String(v) }, l))), info && h('small', { class: 'pref-info' }, info));
+  const tog = (k, label, info, after) => h('label', { class: 'row inline' }, h('span', {}, label, info && h('small', { class: 'pref-info' }, info)), h('input', { type: 'checkbox', checked: !!EP[k], onchange: (e) => { setEP(k, e.target.checked); after?.(e.target.checked); } }));
+  const flag = (label, get, set) => h('label', { class: 'row inline' }, h('span', {}, label), h('input', { type: 'checkbox', checked: get(), onchange: (e) => set(e.target.checked) }));
+  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const storeInfo = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Checking storage…'));
+  Promise.all([storageUse(), isPersisted()]).then(([u, kept]) => {
+    const row = (l, v) => h('div', { class: 'br-row' }, h('span', {}, l), h('b', {}, v));
+    storeInfo.replaceChildren(row('Games saved', String(Object.keys(loadProjects()).length)), u ? row('Space used', `${kb(u.used)} of ${kb(u.quota)}`) : null, row('Where', usingIndexedDB() ? 'This device (IndexedDB)' : 'This device (basic storage)'),
+      row('Protected from clean-ups', kept ? 'Yes' : 'No'), !kept ? h('button', { class: 'btn', style: 'margin-top:8px', onclick: async () => { await askPersist(); toast((await isPersisted()) ? 'Your games are protected' : 'The browser said no. Installing the app usually helps'); redo(); } }, icon('save'), 'Protect my games') : null);
+  });
+  const installedApp = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  openDialog('Preferences', [
+    h('p', { class: 'desc' }, 'These are for you on this device. Game settings live in Scene Settings and Build Settings.'),
+    sec('Look', 'brush', [
+      h('div', { class: 'row' }, h('label', {}, 'Theme'), h('div', { class: 'seg small pref-themes' }, [['dark', 'Dark'], ['black', 'Black'], ['slate', 'Slate'], ['warm', 'Warm']].map(([v, l]) => h('button', { class: EP.theme === v ? 'on' : '', onclick: () => { setEP('theme', v); redo(); } }, l)))),
+      h('div', { class: 'row' }, h('label', {}, 'Accent colour'), h('div', { class: 'pref-swatches' }, ACCENTS.map(([c, l]) => h('button', { class: 'pref-sw' + (EP.accent === c ? ' on' : ''), title: l, 'aria-label': l, style: `background:${c}`, onclick: () => { setEP('accent', c); redo(); } })))),
+      sel('uiSize', 'Panel text size', [[0.9, 'Small'], [1, 'Normal'], [1.1, 'Large'], [1.25, 'Extra large']]),
+      tog('reduceMotion', 'Reduce motion', 'Turns off sliding and fading animations'),
+    ]),
+    sec('Editing', 'move', [
+      flag('Snap when moving', () => snap, (v) => { snap = v; store.set('pocket.editor.snap', v ? '1' : '0'); $('#snapBtn')?.classList.toggle('on', v); }),
+      sel('snap2D', 'Snap step (2D)', [[1, '1 px'], [5, '5 px'], [10, '10 px'], [16, '16 px (tiles)'], [20, '20 px'], [32, '32 px'], [50, '50 px']]),
+      sel('snap3D', 'Snap step (3D)', [[0.1, '0.1'], [0.25, '0.25'], [0.5, '0.5'], [1, '1']]),
+      sel('rotSnap', 'Rotation snap', [[5, '5°'], [15, '15°'], [30, '30°'], [45, '45°'], [90, '90°']]),
+      flag('Show the grid', () => showGrid, (v) => { showGrid = v; store.set('pocket.editor.grid', v ? '1' : '0'); $('#gridBtn')?.classList.toggle('on', v); engine.render(); }),
+      flag('Show all colliders', () => showColliders, (v) => toggleColliders(v)),
+      tog('haptics', 'Vibration on taps', 'Little buzzes when you pick, drop or press things'),
+    ]),
+    sec('Saving', 'save', [
+      sel('autosave', 'Save my work', [['0.5', 'Straight away'], ['3', 'After a few seconds'], ['10', 'Every 10 seconds'], ['leave', 'Only when I tap Save or leave']]),
+      sel('snapEvery', 'Restore point every', [[1, '1 minute'], [3, '3 minutes'], [5, '5 minutes'], [10, '10 minutes']]),
+      sel('snapKeep', 'Restore points kept', [[6, '6'], [12, '12'], [24, '24'], [40, '40']], '☰ → Restore Earlier Version… goes back to one'),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); backupAll(); } }, icon('save'), 'Back up all games'), h('button', { class: 'btn', onclick: () => { closeLayer(); importJSON(); } }, icon('upload'), 'Restore a backup')),
+    ]),
+    sec('App', 'phone', [
+      sel('startOn', 'When the app opens', [['home', 'Show the Home screen'], ['last', 'Go straight to my last game']]),
+      tog('keepAwake', 'Keep the screen on while editing'),
+      h('div', { class: 'br-row' }, h('span', {}, 'Version'), h('b', {}, window.pocketUpdate?.version || '–')),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => window.pocketUpdate ? window.pocketUpdate.check() : toast('Updates are checked when the app is online') }, icon('download'), window.pocketUpdate?.available ? 'Update now' : 'Check for updates'),
+        !installedApp && h('button', { class: 'btn', onclick: installApp }, icon('phone'), 'Install app')),
+      storeInfo,
+    ]),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm('Put every preference back to how it started?')) return; EP = { ...EDITOR_PREFS }; setEP('theme', 'dark'); redo(); toast('Preferences reset'); } }, icon('undo'), 'Reset preferences')),
+  ]);
+}
 function installApp() {
   if (installPrompt) { installPrompt.prompt(); installPrompt = null; return; }
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -4370,6 +4445,10 @@ const BUILD_DEFAULTS = {
   icon: '', iconEmoji: '🎮', iconBg: '#3a8dff', ...LOADING_DEFAULTS,
   startLevel: '1', quality: 'balanced', backGesture: true, installable: true, compress: true,
   noMenu: true, showFps: false, showErrors: false,
+  // web app (how the game behaves as an installed / home-screen app)
+  display: 'fullscreen', shortName: '', themeColor: '', statusBar: 'black-translucent', orientation: '', lang: 'en',
+  installHint: 'off', installText: 'Add this game to your Home Screen to play any time, even offline.', pauseHidden: true, keepAwake: true, confirmLeave: false,
+  social: true, headHTML: '',
 };
 const QUALITY = { battery: 1, balanced: 2, sharp: 3 };
 const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -4424,13 +4503,14 @@ async function buildHTML() {
   const o = buildOpts(), src = await loadEngineSrc(), { game, start } = buildGameJSON();
   const title = o.title || root.name || 'My Game', bg = hexOr(root.background, '#000000'), splashBg = hexOr(o.splashBg, bg);
   const iconURL = await makeIcon(o, 512), small = await makeIcon(o, 180);
-  const orient = { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any';
-  const manifest = { name: title, short_name: title.slice(0, 12), description: o.description || undefined, display: 'fullscreen', orientation: orient,
-    background_color: splashBg, theme_color: bg, start_url: '.', icons: [{ src: iconURL, sizes: '512x512', type: 'image/png', purpose: 'any' }] };
+  const orient = o.orientation || { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any', theme = hexOr(o.themeColor, bg), short = (o.shortName || title).slice(0, 12);
+  const manifest = { name: title, short_name: short, description: o.description || undefined, display: o.display || 'fullscreen', orientation: orient, lang: o.lang || 'en',
+    background_color: splashBg, theme_color: theme, start_url: '.', icons: [{ src: iconURL, sizes: '512x512', type: 'image/png', purpose: 'any' }] };
   const json = JSON.stringify(game);
   const L = loadingParts(o, { title, icon: small, bg, font: themeOf(root.settings).font });
   const gf = (root.settings?.fonts || []).filter(Boolean), nameGF = /^"([^"]+)", system-ui, sans-serif$/.exec(o.nameFont || '')?.[1];
-  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author, fonts: gf });
+  const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author, fonts: gf,
+    install: o.installable !== false ? o.installHint || 'off' : 'off', installText: o.installText, pauseHidden: o.pauseHidden !== false, keepAwake: o.keepAwake !== false, confirmLeave: !!o.confirmLeave });
   let payload, engineBytes, gameBytes;
   if (o.compress && typeof CompressionStream === 'function') {
     const [E, G] = await Promise.all([gzip64(src), gzip64(json)]);
@@ -4447,18 +4527,21 @@ boot(Engine, game);`;
     payload = `${code}\nLD.set(0.6);\nboot(Engine, ${data});`;
   }
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="${escHTML(o.lang || 'en')}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="${escHTML(title.slice(0, 20))}">
-<meta name="theme-color" content="${bg}">
+<meta name="apple-mobile-web-app-status-bar-style" content="${escHTML(o.statusBar || 'black-translucent')}">
+<meta name="apple-mobile-web-app-title" content="${escHTML((o.shortName || title).slice(0, 20))}">
+<meta name="theme-color" content="${theme}">
 ${o.description ? `<meta name="description" content="${escHTML(o.description)}">\n` : ''}${o.author ? `<meta name="author" content="${escHTML(o.author)}">\n` : ''}<meta name="generator" content="Pocket Engine">
+${o.social !== false ? `<meta property="og:type" content="website"><meta property="og:title" content="${escHTML(title)}">${o.description ? `<meta property="og:description" content="${escHTML(o.description)}">` : ''}<meta name="twitter:card" content="summary">\n` : ''}${o.headHTML ? o.headHTML + '\n' : ''}
 <title>${escHTML(title)}</title>
 <link rel="icon" type="image/png" href="${small}"><link rel="apple-touch-icon" href="${small}">
 ${o.installable !== false ? `<link rel="manifest" href="data:application/manifest+json,${encodeURIComponent(JSON.stringify(manifest))}">\n` : ''}${nameGF ? `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(nameGF).replace(/%20/g, '+')}&display=swap">\n` : ''}<style>html,body{margin:0;height:100%;background:${bg};overflow:hidden;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
 ${L.css}
 #fps{position:fixed;left:6px;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:98;font:12px monospace;color:#0f0;background:rgba(0,0,0,.55);padding:2px 6px;border-radius:4px;pointer-events:none}
+#pk-install{position:fixed;left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom,0px) + 12px);z-index:99;display:flex;align-items:center;gap:10px;padding:10px 10px 10px 14px;border-radius:16px;background:rgba(20,22,30,.94);color:#fff;font:14px/1.35 system-ui,-apple-system,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.45);max-width:460px;margin:0 auto}
+#pk-install img{width:40px;height:40px;border-radius:10px}#pk-install p{margin:0;flex:1}#pk-install button{border:0;border-radius:10px;padding:9px 14px;font:600 14px system-ui,sans-serif;background:#3a8dff;color:#fff}#pk-install .x{background:transparent;color:#aaa;padding:6px 8px;font-size:18px}
 #err{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom,0px) + 8px);z-index:100;background:#b3261e;color:#fff;font:13px/1.4 monospace;padding:10px 12px;border-radius:10px;white-space:pre-wrap;max-height:40%;overflow:auto}</style>
 </head><body>
 ${L.html}
@@ -4480,11 +4563,31 @@ async function preload(game) {
   if (!all) return;
   await Promise.race([Promise.all(jobs.map((j) => j.then(() => LD.set(0.66 + 0.32 * (++n / all))))), new Promise((ok) => setTimeout(ok, 6000))]);
 }
+/** "Add to Home Screen": the browser's own install button where there is one (Android), steps elsewhere (iPhone). */
+let installEvt = null; addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; });
+const installed = () => matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone;
+function installHint() {
+  if (installed() || document.getElementById('pk-install') || sessionStorage.getItem('pk-install-x')) return;
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!installEvt && !ios) return;
+  const d = document.createElement('div'); d.id = 'pk-install';
+  const icon = document.querySelector('link[rel=apple-touch-icon]')?.href;
+  d.innerHTML = (icon ? '<img alt="">' : '') + '<p></p>' + (installEvt ? '<button class="go">Install</button>' : '') + '<button class="x" aria-label="Not now">✕</button>';
+  if (icon) d.querySelector('img').src = icon;
+  d.querySelector('p').textContent = ios && !installEvt ? C.installText + ' Tap Share, then "Add to Home Screen".' : C.installText;
+  d.querySelector('.x').onclick = () => { d.remove(); sessionStorage.setItem('pk-install-x', '1'); };
+  const go = d.querySelector('.go'); if (go) go.onclick = async () => { installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; d.remove(); };
+  for (const ev of ['pointerdown', 'touchstart']) d.addEventListener(ev, (e) => e.stopPropagation());
+  document.body.appendChild(d);
+}
 async function boot(Engine, game) {
   await preload(game); LD.set(1);
   LD.done(() => {
-    window.engine = new Engine({ maxPixelRatio: C.dpr, systemBack: C.back });
+    window.engine = new Engine({ maxPixelRatio: C.dpr, systemBack: C.back, pauseOnHide: C.pauseHidden, keepAwake: C.keepAwake });
     window.engine.start(game, { level: C.start });
+    if (C.install === 'start') setTimeout(installHint, 2500);
+    if (C.install === 'end') { let was = ''; setInterval(() => { const st = window.engine.scene?.state; if ((st === 'over' || st === 'win') && st !== was) setTimeout(installHint, 1200); was = st; }, 500); }
+    if (C.confirmLeave) addEventListener('beforeunload', (e) => { if (window.engine.scene?.state === 'play') { e.preventDefault(); e.returnValue = ''; } });
     if (C.fps) { const f = document.createElement('div'); f.id = 'fps'; document.body.appendChild(f); let n = 0, last = performance.now(); const tick = (now) => { n++; if (now - last >= 500) { f.textContent = Math.round(n * 1000 / (now - last)) + ' fps'; n = 0; last = now; } requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
   });
 }
@@ -4608,6 +4711,7 @@ function openBuildSettings() {
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
   const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const Cr = (path, spec) => { const el = C(path, spec); el.addEventListener('change', redo); return el; }; // a field that shows or hides others
   const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
   const report = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Working out the size…'));
   const lvls = levelList();
@@ -4659,8 +4763,26 @@ function openBuildSettings() {
       C('quality', { label: 'Graphics', type: 'select', options: [['battery', 'Battery saver (fastest)'], ['balanced', 'Balanced'], ['sharp', 'Sharpest (slower)']] }),
       C('backGesture', { label: 'Back gesture goes back in menus', type: 'bool' }),
       C('noMenu', { label: 'Block long-press menus and text selection', type: 'bool' }),
-      C('installable', { label: 'Can be added to the Home Screen', type: 'bool' }),
       h('p', { class: 'desc' }, `Plays ${{ portrait: 'in portrait', landscape: 'in landscape', any: 'either way up' }[orientationOf()]} (change it in Scene Settings). Fullscreen, pause, mute and save options are in Scene Settings too.`),
+    ]),
+    sec('Web app', 'globe', [
+      h('p', { class: 'desc' }, 'How the game looks and behaves once it is added to the Home Screen (or opened in a browser).'),
+      Cr('installable', { label: 'Can be added to the Home Screen', type: 'bool' }),
+      o.installable !== false && [
+        C('shortName', { label: 'Home Screen name (short)', def: '', placeholder: (o.title || root.name || '').slice(0, 12) }),
+        C('display', { label: 'Opens', type: 'select', options: [['fullscreen', 'Full screen (no bars)'], ['standalone', 'Like an app (keeps the status bar)'], ['minimal-ui', 'With small browser buttons'], ['browser', 'In the browser']] }),
+        Cr('installHint', { label: 'Suggest installing', type: 'select', options: [['off', 'Never'], ['start', 'Shortly after it starts'], ['end', 'After a game ends']], infoText: 'A small bar with an Install button (Android) or the steps (iPhone). Never shows once the game is installed, and a player can close it.' }),
+        o.installHint && o.installHint !== 'off' && C('installText', { label: 'Install message', def: BUILD_DEFAULTS.installText }),
+      ],
+      C('orientation', { label: 'Screen orientation', type: 'select', options: [['', `Same as the game (${orientationOf()})`], ['portrait', 'Portrait'], ['landscape', 'Landscape'], ['any', 'Either way']] }),
+      C('themeColor', { label: 'Browser bar colour', type: 'color', optional: true, infoText: 'The colour of the status bar / browser bar. Empty = the game\'s background.' }),
+      C('statusBar', { label: 'iPhone status bar', type: 'select', options: [['black-translucent', 'See-through (game behind it)'], ['black', 'Black'], ['default', 'White']] }),
+      C('pauseHidden', { label: 'Pause when switching apps', type: 'bool' }),
+      C('keepAwake', { label: 'Keep the screen on while playing', type: 'bool' }),
+      C('confirmLeave', { label: 'Ask before leaving mid-game', type: 'bool', infoText: 'Browsers ask "Leave site?" if the page is closed or reloaded while playing.' }),
+      C('social', { label: 'Link preview (title and description)', type: 'bool' }),
+      C('lang', { label: 'Language code', def: 'en', placeholder: 'en, fr, es…' }),
+      C('headHTML', { label: 'Extra code in <head> (advanced)', type: 'code', def: '', placeholder: '<script>…analytics…</script>', infoText: 'Pasted into every build as-is: analytics, fonts, meta tags. Only paste code you trust.' }),
     ]),
     sec('File size', 'download', [
       C('compress', { label: 'Compress (much smaller file)', type: 'bool' }),
@@ -4678,7 +4800,9 @@ function openBuildSettings() {
       h('button', { class: 'btn', onclick: testBuild }, icon('play'), 'Test')),
   ]);
   // settings that change the look or size refresh the report when edited
-  $('.dialog .db').addEventListener('change', () => { if (root.build && !root.build.title) delete root.build.title; updateReport(); });
+  $('.dialog .db').addEventListener('change', () => {
+    if (root.build && !root.build.title) delete root.build.title; updateReport();
+  });
   updateReport();
 }
 
@@ -5058,7 +5182,7 @@ storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('S
   else {
     if (all[cur]) openProject(all[cur].json, cur);
     else newFromTemplate('sky-dodge', 'My First Game');
-    showHome();
+    if (!(EP.startOn === 'last' && all[cur])) showHome(); // Preferences › Start on
     if (store.get('pocket.editor.toured', '') !== '1') {
       const hint = $('#hint');
       hint.textContent = 'Tap + to add things · tap an object to edit it';

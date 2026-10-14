@@ -9382,6 +9382,8 @@ export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
+    this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
+    this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
     this.root.className = 'pocket-root';
     const fixed = this.parent === document.body;
@@ -9426,7 +9428,7 @@ export class Engine {
     this.onVis = () => {
       if (document.hidden) this.saveProgress();
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
-      if (document.hidden && this.scene?.state === 'play' && !this.editing) this.paused = true;
+      if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
     document.addEventListener('visibilitychange', this.onVis);
@@ -9716,7 +9718,7 @@ export class Engine {
     this.keepAwake();
   }
   async keepAwake() {
-    if (this.wakeLock || !navigator.wakeLock || this.editing) return;
+    if (this.wakeLock || !navigator.wakeLock || this.editing || !this.stayAwake) return;
     try {
       this.wakeLock = await navigator.wakeLock.request('screen');
       this.wakeLock.addEventListener('release', () => { this.wakeLock = null; });

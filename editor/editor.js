@@ -8,6 +8,7 @@ const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', '
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
+import { NAV_STYLE_THUMBS } from './navstyles.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openSprite2D, newDrawing } from './sprite2d.js';
@@ -2472,6 +2473,14 @@ function control(target, path, spec) {
       return deco(h('div', { class: 'row inline' }, label, el));
     case 'select': {
       const opts = spec.options.map((o) => (Array.isArray(o) ? o : [o, o]));
+      if (/\.style$/.test(path) && getPath(target(), path.replace(/\.style$/, '.type')) === 'uiBottomNav') { // Bottom Nav: pick a style by its picture
+        const nb = getPath(target(), path.replace(/\.style$/, '')), n = navTabs(nb).length;
+        el = h('div', { class: 'nav-styles' }, opts.map(([v, l]) => h('button', { type: 'button', class: 'ns' + (v === val ? ' on' : ''), title: l, onclick: (e) => {
+          set(v); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); buzz(4);
+          if (v === 'raised center' && n % 2 === 0) toast(`Raised center needs an odd number of tabs (now ${n}): add or remove one`);
+        } }, NAV_STYLE_THUMBS[v] ? h('img', { src: NAV_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l + (v === 'raised center' && n % 2 === 0 ? ' (odd tabs)' : '')))));
+        label.textContent = 'Style'; break;
+      }
       if (!spec.ease && !spec.dropdown && opts.length >= 2 && opts.length <= 4 && opts.reduce((n, [, l]) => n + String(l).length, 0) <= 24) { // Odin [EnumToggleButtons]: few short choices are buttons
         el = h('div', { class: 'etb', role: 'radiogroup' }, opts.map(([v, l]) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(v === val), class: v === val ? 'on' : '', 'data-v': v,
           onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) { b.classList.toggle('on', b === e.currentTarget); b.setAttribute('aria-checked', String(b === e.currentTarget)); } markMod(); buzz(4); } }, l)));
@@ -2571,7 +2580,7 @@ function control(target, path, spec) {
   }
   const wide = el.classList?.contains('tlist') || el.classList?.contains('chips-ed');
   const side = ['number', 'select', 'color', 'template', undefined, 'text'].includes(spec.type) && !spec.ease && !wide; // label left, control right
-  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : side ? ' side' : '') }, label, el);
+  const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' || el?.classList?.contains('nav-styles') ? ' full' : side ? ' side' : '') }, label, el);
   if (spec.infoText) row.append(h('div', { class: 'obox info' }, spec.infoText));
   return deco(row);
   /** Odin-style override marks: a dot and a reset button on values changed from the default (and "Changed only" uses them). */
@@ -6008,7 +6017,7 @@ function play() {
   updatePauseButtons();
   pushBack(stop);
   store.set('pocket.editor.played.' + projectId, '1');
-  requestAnimationFrame(() => { engine.fitScreen(); engine.resize(); engine.layoutButtons(); if (engine.boxed) toast(`A ${orientationOf()} game: turn your phone to play it full screen`); });
+  requestAnimationFrame(() => { engine.fitScreen(); engine.resize(); engine.layoutButtons(); if (engine.boxed && (orientationOf() === 'portrait') === (innerWidth > innerHeight)) toast(`A ${orientationOf()} game: turn your phone to play it full screen`); }); // (only when it really is held the other way)
 }
 function stop() {
   if (!playing) return;

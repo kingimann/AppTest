@@ -6922,7 +6922,7 @@ registerBehavior('uiBottomNav', {
   ],
   create(p) {
     const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
-    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
+    let W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
     const pagesHiding = (s) => { const now = s.time || 0; if (now - hideCache.t > 0.5 || now < hideCache.t) { hideCache = { t: now, list: s.entities.flatMap((q) => q.behaviors.filter((b) => b.type === 'uiShowIf' && b.params?.hideNav && (b.params.var || 'page') === p.var).map((b) => b.params.value)) }; } return hideCache.list; };
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
@@ -6941,8 +6941,9 @@ registerBehavior('uiBottomNav', {
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
       const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
       const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
-      const n = Math.max(1, T.length), tw = bw / n;
-      return { w, h, bx, by, bw, bh, tw, n, cx: (i) => bx + tw * (i + 0.5), cy: by + bh / 2 };
+      const n = Math.max(1, T.length), tw = bw / n, ws = p.style === 'bubble' && W8 && W8.length === n ? W8.map((f) => f * bw) : null; // bubble: the selected tab is wider (room for its name)
+      const left = (i) => { if (!ws) return bx + tw * i; let x = bx; for (let j = 0; j < i; j++) x += ws[j]; return x; };
+      return { w, h, bx, by, bw, bh, tw, n, cx: (i) => left(i) + (ws ? ws[i] : tw) / 2, tws: (i) => (ws ? ws[i] ?? tw : tw), at: (lx) => { if (!ws) return Math.floor((lx - bx) / tw); for (let j = 0; j < n; j++) if (lx < left(j + 1)) return lx < bx ? -1 : j; return n; }, cy: by + bh / 2 };
     };
     const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
     return {
@@ -6968,14 +6969,21 @@ registerBehavior('uiBottomNav', {
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
         const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
-        const a = activeIdx(s), G = geo(e);
+        const a = activeIdx(s);
+        if (p.style === 'bubble' && T.length > 1) { // the selected tab grows to fit its name, the others share the rest
+          const n = T.length, ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity), c = s.engine.uiCtx, isz = +p.iconSize || 24, lsz = +p.labelSize || 11;
+          let fa = 1 / n; if (a >= 0 && c && showLabel(a, true)) { c.font = `700 ${lsz + 2}px ${THEME.font}`; fa = clamp((isz + c.measureText(T[a].label).width + 44) / bw, 1 / n, 0.55); }
+          const want = T.map((_, i) => (a < 0 ? 1 / n : i === a ? fa : (1 - fa) / (n - 1)));
+          if (!W8 || W8.length !== n) W8 = want; else W8 = W8.map((f, i) => f + (want[i] - f) * k);
+        } else W8 = null;
+        const G = geo(e);
         if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
         if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
         fade = Math.min(1, fade + dt * (+p.speed || 14) / 3);
         if (hide > 0.5 || !e.visible || e._parentHidden) return;
         // taps: which tab is under the finger (in screen space)
         const r = uiRect(s, e), K = uiK(s.engine.safe), inp = s.engine.input;
-        const tabAt = (q) => { const lx = (q.x - r.x) / K + e.x, ly = (q.y - r.y) / K + e.y, i = Math.floor((lx - G.bx) / G.tw); return ly >= G.by && ly <= G.by + G.bh && i >= 0 && i < G.n ? i : -1; };
+        const tabAt = (q) => { const lx = (q.x - r.x) / K + e.x, ly = (q.y - r.y) / K + e.y, i = G.at(lx); return ly >= G.by && ly <= G.by + G.bh && i >= 0 && i < G.n ? i : -1; };
         if (p.holdMessage) { // press and hold a tab
           for (const d of inp.downs) { const i = tabAt(d); if (i >= 0) hold = { id: d.id, i, t: 0, x: d.x, y: d.y, done: false }; }
           if (hold) { const q = inp.pointers.get(hold.id); if (!q || Math.hypot(q.x - hold.x, q.y - hold.y) > 12) hold = null; else if (!hold.done && (hold.t += dt) > 0.5) { hold.done = true; pulse.set(hold.i, 1); s.engine.vibrate(18); s.setVar('heldTab', T[hold.i].page ?? T[hold.i].msg ?? ''); s.send(p.holdMessage, T[hold.i].page); } }
@@ -6989,7 +6997,7 @@ registerBehavior('uiBottomNav', {
         }
         for (const t of s.engine.input.taps) {
           const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = p.style === 'raised center' && T.length % 2 === 1;
-          let i = Math.floor((lx - G.bx) / G.tw);
+          let i = G.at(lx);
           const inBar = ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
           if (!inBar) continue;
           const tab = T[i];
@@ -7010,14 +7018,20 @@ registerBehavior('uiBottomNav', {
         BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
+        // floating bars (and none at all): the strip they sit in shows the open page's colour, not a band of something else
+        if ((fl || st === 'minimal') && !e.parentEnt?.ui) {
+          const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var && sameVal(s.vars[p.var], b.params?.value)));
+          const fill = pg ? tok(pg.shape.fill) : tok(s.background || '');
+          if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; ctx.fillRect(e.x - G.w, G.by - (st === 'minimal' ? 0 : 8), G.w * 2, G.bh + 200); ctx.restore(); }
+        }
         // the bar
         if (st !== 'minimal') {
           if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
-          ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.barColor || '#12141f';
+          const bc = p.barColor || '#12141f'; ctx.fillStyle = st === 'glass' && /^#[0-9a-f]{3,8}$/i.test(bc) ? withAlpha(bc, 0.72) : bc; // glass: the bar's colour, see-through
           const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
           rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
-          if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); }
+          if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.save(); ctx.clip(); const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.5, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(G.bx, G.by, G.bw, G.bh); ctx.restore(); } // a glassy sheen
           else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
         }
         const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
@@ -7028,14 +7042,14 @@ registerBehavior('uiBottomNav', {
           ctx.fillStyle = indC;
           const labelOn = showLabel(a, true), iy = labelOn && st !== 'bubble' ? G.cy - lsz * 0.85 : G.cy;
           if (st === 'pill' || st === 'floating' || st === 'glass') { const ph = labelOn ? isz * 1.28 : isz * 1.5; ctx.globalAlpha *= st === 'glass' ? 0.35 : 0.22; rr(x - isz * 1.35, iy - ph / 2, isz * 2.7, ph, isz); ctx.fill(); }
-          else if (st === 'underline') { rr(x - G.tw * 0.25, G.by, G.tw * 0.5, 3, 2); ctx.fill(); }
+          else if (st === 'underline') { rr(x - G.tws(a) * 0.25, G.by, G.tws(a) * 0.5, 3, 2); ctx.fill(); }
           else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
-          else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tw * 1.6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
-          else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tw / 2 + 4, G.by + 4, G.tw - 8, G.bh - 8, 12); ctx.fill(); }
+          else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tws(a) - 6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
+          else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tws(a) / 2 + 4, G.by + 4, G.tws(a) - 8, G.bh - 8, 12); ctx.fill(); }
           ctx.restore();
         }
         // ripples
-        for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tw * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+        for (const r of ripples) { ctx.save(); ctx.globalAlpha *= (1 - r.t) * 0.35; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(G.cx(r.i), G.cy, G.tws(r.i) * 0.55 * r.t, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
         // tabs
         T.forEach((t, i) => {
           const on = i === a, col = on ? (t.color ? tok(t.color) : act) : idle, pz = pulse.get(i) || 0, icon = on && t.iconOn ? t.iconOn : t.icon, lw = p.labelWeight === 'bold' ? 800 : p.labelWeight === 'normal' ? 600 : on ? 800 : 600;

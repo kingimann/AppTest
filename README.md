@@ -241,7 +241,10 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 | **Dialogue** | Conversation box with speaker names and typewriter text; tap to continue; can pause the game |
 | **Day / Night Cycle** | Moves the sun, changes light and sky colours; 2D gets dark at night; `{hour}` |
 | **Particle System** | Fire, smoke, rain, snow, sparkle, confetti, magic, bubbles (rain and snow fill the screen) |
-| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction |
+| **Inventory Item** | Pick-ups go to the inventory: `{inventory}`, `{item_Key}`, "Has item" condition, "Give / use item" instruction. Picked up on touch, tap or both, random amounts, a magnet pull; it stays on the ground when the inventory is full |
+| **Crafting Station** | A Workbench, Furnace or Anvil: recipes that need it work while the player is close; tapping it sends a message |
+| **Loot / Chest** | Gives items, with amount ranges and chances, when tapped, touched, destroyed or on a message |
+| **Resource (gather)** | Trees, rocks, ore and bushes: tap or touch to gather, several hits to break, can need a tool, extra loot, grows back |
 
 Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
 
@@ -510,6 +513,46 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Nodes:** **On Damaged** filters by damage type; its Event Value is how much, and "other" is who hurt it. The value node **Health / Hunger / Thirst** reads health, max, %, shield, hunger or thirst of any object.
 - **Hazards** set to *damage* now take health from a player that has Health, instead of a life.
 - **From code:** `health.damage(n, target, from, { type, crit, pierce, knockback })` returns the damage done. Health also has `heal`, `addShield`, `setMax`, `addEffect(name, perSecond, seconds)`, `cure`, `kill` and `respawn`. Hunger and Thirst have `add` and `set`. `STATUS_FX` is exported.
+
+### Inventory, items and crafting
+
+- **Game Settings › Items:** the list of every item in your game. Each item has:
+  - a name and an icon (emoji or `art:` sprite);
+  - a **type**: Material, Food, Drink, Potion, Weapon, Armour, Tool, Ammo, Key, Quest item or Other;
+  - a **rarity** (common, uncommon, rare, epic, legendary), which colours its slot frame;
+  - **how many stack in one slot**, a value and a description.
+- **What using an item does** (food, drinks, potions): fill hunger or thirst, heal, add a shield, cure an effect, give an effect (e.g. heal over time), or send a message. Food, drinks and potions are used up; keys and materials stay. You can change this per item.
+- **Equipment** (weapons, armour, tools): each piece goes in a **slot** (hand, offhand, head, body, legs, feet, neck, ring) and adds:
+  - **damage** to the player's Damage Dealer;
+  - **armour** to their Health;
+  - **speed ×** to their movement.
+
+  Using an item that can be equipped puts it on. The one already in that slot goes back into the inventory.
+- **Starter items** adds 25 ready-made items: wood, stone, iron, food, water, potions, swords, tools, armour and keys.
+- **Game Settings › Recipes:** what each recipe makes and how many, what it **needs** (`Wood 3, Stick 1`; mark tools that aren't used up with `(keep)`), and settings for:
+  - a **station** (Workbench, Furnace…);
+  - a crafting **time**;
+  - a category;
+  - **must be learned first** (use the *Learn recipe* instruction).
+
+  In the recipe editor, tap any item to add it as an ingredient. **Starter recipes** adds 12 recipes.
+- **Game Settings › Inventory:**
+  - **slots** (0 = unlimited): each stack takes one slot, and picking up more than fits shows "Inventory full";
+  - a default stack size;
+  - **keep the inventory between levels**.
+
+  Level changes, save slots and auto-save keep the inventory, the equipment and the recipes you've learned.
+- **Create → Gameplay** has Workbench, Furnace, Tree, Rock, Iron Rock (needs a Pickaxe), Berry Bush, Treasure Chest, Breakable Crate (drops loot) and Item Pick-up, in 2D and 3D. If your game has no items yet, adding one of these also adds the starter items and recipes.
+- **UI → Game Systems:** Inventory Grid, **Backpack (with info)**, **Hotbar**, **Equipment** and **Crafting Panel**.
+- **Triggers:**
+  - **Events:** *Crafts an item*, *Uses an item*, *Equips / takes off*, *Inventory is full*, *Learns a recipe*, *Gathered*.
+  - **Conditions:** *Can craft*, *Has equipped*, *Inventory space*, *Has item of type*, *Knows recipe*.
+  - **Instructions:** *Use item*, *Equip / take off*, *Craft*, *Learn recipe*, *Drop item*, *Give random loot*, *Inventory: sort / clear / slots*.
+  - All of these are nodes too, and there's an **Inventory Info** value node: free or used slots, items of a type, equipped damage or armour, crafting progress.
+- **From code:**
+  - Inventory: `scene.addItem(name, n)` returns how many fit. Also `useItem`, `equip`, `unequip`, `equipStat('damage')`, `itemStacks(type)`, `sortInventory('type')`, `dropNear(name, n)`.
+  - Crafting: `craft(item, times)`, `canCraft`, `craftMissing`, `learnRecipe`.
+  - Item names match whatever their capitalisation.
 
 ### Move: joystick, tilt and drag
 
@@ -792,7 +835,10 @@ Each of these is one object with one component: it draws itself, handles taps an
 | Component | What it does |
 |---|---|
 | **Shop** | Items (`Name \| icon \| price \| ID or item:Name \| note`) bought with a currency variable. Unlocks set `owned_ID` and can be equipped into a variable; `item:` entries go into the inventory each time. Tap twice to buy, a shake when you can't afford it, and a message when bought. Grid or list. |
-| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use: it sends `use Name` / `use item` and can use one up. |
+| **Inventory Grid** | The inventory as slots with counts. Tap to pick (into a variable), tap again to use, equip or drop: it sends `use Name` / `use item`. Show one item type only (a backpack tab), rarity frames, and an info line for the picked item. |
+| **Hotbar** | A row of quick slots. Tap to hold an item (`heldItem`), tap again to use or equip it; keys 1–9 pick a slot. |
+| **Equipment** | The player's slots (hand, offhand, head, body, legs, feet, neck, ring) with total damage, armour and speed. Tap a slot to take the item off. |
+| **Crafting** | The recipes, with each ingredient in green (have it) or red (missing). Tap one to craft it. Can show all recipes, only the ones you can make, or only those for nearby stations; it also shows crafting progress. |
 | **Quest Log** | Goals (`Text \| variable \| target \| reward`) with progress bars. They tick off and strike through, give rewards like `coins 100`, send a message and sort finished goals last. |
 | **Daily Reward** | A 7-day calendar, one claim per day, saved on the device. Rewards go into variables or the inventory, and the streak resets if a day is missed (optional). Send `daily reset` / `daily next day` to test it. |
 | **Level Map** | A winding path, straight line or grid of levels, with stars from `stars_1`, `stars_2`… and locks above the `unlocked` variable. The next level pulses, and it scrolls. Tapping a level plays it (`goToLevel`), sends a message or sets a variable. Presets: Level Map, Level Grid. |

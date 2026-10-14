@@ -14,6 +14,7 @@ import { openSprite2D, newDrawing } from './sprite2d.js';
 import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
+import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
@@ -86,6 +87,9 @@ const SCENE_ID = '__scene';
 
 // root = the whole game (level 1 plus root.levels[]); project = the level being edited
 let root = null, project = null, projectId = null, selectedId = null, levelIdx = 0;
+// Items & Recipes editors (Game Settings) work on the whole game
+queueMicrotask(() => initItems({ root: () => root, save: () => changed(), openDialog: (t, k) => openDialog(t, k), closeLayer: () => closeLayer(), toast: (m) => toast(m),
+  stations: () => levelList().flatMap((lv) => lv.entities || []).flatMap((e) => (e.behaviors || []).filter((b) => b.type === 'craftingStation').map((b) => b.station)).filter(Boolean) }));
 let history = [], hIndex = -1;
 let snap = store.get('pocket.editor.snap', '1') === '1';
 let showGrid = store.get('pocket.editor.grid', '1') === '1';
@@ -2470,6 +2474,7 @@ function drawEase(cv, name) {
 function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
   if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
+  if (kind === 'items') return uniq([...(root.items || []).map((d) => d.name), ...all.flatMap((e) => (e.behaviors || []).filter((b) => ['inventoryItem', 'resource'].includes(b.type)).map((b) => b.item))]);
   if (kind === 'templates') return uniq(all.filter((e) => e.template).map((e) => e.name));
   if (kind === 'objects') return uniq(all.filter((e) => !e.template).map((e) => e.name));
   if (kind === 'vars') return uniq(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})]);
@@ -3552,6 +3557,9 @@ function renderSceneSettings(box) {
     threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
     h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
   ], { icon: 'body', key: 's-phys' }));
+  box.append(comp('Inventory', [inventorySettings()], { icon: 'key', key: 's-inv' }));
+  box.append(comp('Items', [itemsEditor()], { icon: 'gem', key: 's-items' }));
+  box.append(comp('Recipes', [recipesEditor()], { icon: 'list', key: 's-recipes' }));
   box.append(comp('Lighting Presets', [
     h('p', { class: 'desc' }, 'One tap sets the whole mood. Change it while playing with the Lighting Preset node (with a fade).'),
     h('div', { class: 'lp-grid' }, Object.entries(LIGHT_PRESETS).map(([name, pr]) => h('button', { class: 'lp-btn', style: `--a:${threeD ? pr.d3.bg : pr.d2[1]};--b:${threeD ? pr.d3.color : mixHex('#000000', '#ffffff', pr.d2[0])}`, onclick: () => applyLightingPreset(name) }, h('i'), name))),
@@ -3784,7 +3792,7 @@ const BEH_META = {
   uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
   uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
-  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
+  triggers: ['Logic', 'bolt'], fsm: ['Logic', 'nodes'], health: ['Combat', 'heart'], damager: ['Combat', 'crosshair'], hunger: ['Survival', 'heart'], thirst: ['Survival', 'heart'], craftingStation: ['Crafting', 'gear'], loot: ['Crafting', 'gem'], resource: ['Crafting', 'gem'], uiHotbar: ['UI', 'grid'], uiEquipment: ['UI', 'player'], uiCrafting: ['UI', 'list'], enemyAI: ['AI', 'enemy'], navigator: ['AI', 'arrow'], joint: ['Physics', 'magnet'],
   waveSpawner: ['Spawning', 'spawner'], dialogue: ['UI', 'sign'], dayNight: ['Effects', 'sun'], particles: ['Effects', 'star'], inventoryItem: ['Gameplay', 'key'], destructible: ['Combat', 'bolt'],
 };
 /** Odin-style [Button]s shown at the top of a component. */
@@ -4003,7 +4011,7 @@ function addComponentTo(id, key) {
 /** Unity-style Add Component: search, suggestions for this object, recently used, and category folders to browse. */
 const CAT_ICON = { Rendering: 'square', Physics: 'body', Controllers: 'player', Movement: 'arrow', Gameplay: 'coin', Combat: 'enemy', AI: 'ghost', Logic: 'script', Scripting: 'script',
   Animation: 'clock', 'My Scripts': 'nodes', Colliders: 'square', Effects: 'star', Camera: 'camera', UI: 'hud', Touch: 'hand', Spawning: 'spawner', Clicker: 'hand', Saving: 'save', Audio: 'bolt', Voxel: 'cube', 'Turn-Based': 'grid', Other: 'gear' };
-const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'Survival', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
+const CAT_ORDER = ['My Scripts', 'Rendering', 'Physics', 'Colliders', 'Controllers', 'Movement', 'Gameplay', 'Combat', 'Survival', 'Crafting', 'AI', 'Logic', 'Scripting', 'Animation', 'Effects', 'Camera', 'UI', 'Touch', 'Spawning', 'Clicker', 'Turn-Based', 'Saving', 'Audio', 'Voxel', 'Other'];
 const recentComps = () => { try { return JSON.parse(store.get('pocket.editor.recentComps', '[]')); } catch { return []; } };
 function rememberComp(key) { store.set('pocket.editor.recentComps', JSON.stringify([key, ...recentComps().filter((k) => k !== key)].slice(0, 6))); }
 /** A few components that usually make sense next for this object. */
@@ -4149,6 +4157,15 @@ const PREFABS_2D = [
   { icon: 'enemy', label: 'Spikes', group: 'Survival', desc: 'Hurts the player while they stand on it', props: { name: 'Spikes', shape: { type: 'rect', w: 90, h: 16, radius: 3, fill: '#9e9e9e' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, mode: 'while touching (every few seconds)', every: 0.6 }] } },
   { icon: 'enemy', label: 'Fire', group: 'Survival', desc: 'Fire damage that keeps burning', props: { name: 'Fire', shape: { type: 'emoji', emoji: '🔥', w: 40, h: 40 }, body: { type: 'kinematic', sensor: true }, light: { color: '#ffb35c', intensity: 1, range: 160, effect: 'fire' }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, dtype: 'fire', effect: 'burn', effectDps: 4, effectTime: 3 }] } },
   { icon: 'enemy', label: 'Poison Pool', group: 'Survival', desc: 'Poisons whoever steps in', props: { name: 'Poison Pool', shape: { type: 'circle', r: 34, fill: '#7cb342' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 0, dtype: 'poison', effect: 'poison', effectDps: 5, effectTime: 4 }] } },
+  { icon: 'gear', label: 'Workbench', group: 'Crafting', items: true, desc: 'Crafting station: Workbench recipes work next to it', props: { name: 'Workbench', shape: { type: 'emoji', emoji: '🛠️', w: 54, h: 54 }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'craftingStation', station: 'Workbench' }] } },
+  { icon: 'gear', label: 'Furnace', group: 'Crafting', items: true, desc: 'Smelts ore and cooks food', props: { name: 'Furnace', shape: { type: 'emoji', emoji: '🧱', w: 54, h: 54 }, body: { type: 'kinematic', sensor: true }, light: { color: '#ff9a4d', intensity: 0.8, range: 140, effect: 'fire' }, behaviors: [{ type: 'craftingStation', station: 'Furnace' }] } },
+  { icon: 'gem', label: 'Tree', group: 'Crafting', items: true, desc: 'Tap to chop: gives Wood, grows back', props: { name: 'Tree', shape: { type: 'emoji', emoji: '🌳', w: 70, h: 70 }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Wood', hits: 3, bonus: 'Apple 1 30%, Stick 1-2 50%', respawn: 30 }] } },
+  { icon: 'gem', label: 'Rock', group: 'Crafting', items: true, desc: 'Tap to mine: gives Stone', props: { name: 'Rock', shape: { type: 'emoji', emoji: '🪨', w: 50, h: 50 }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Stone', hits: 4, bonus: 'Coal 1 40%', respawn: 40 }] } },
+  { icon: 'gem', label: 'Iron Rock', group: 'Crafting', items: true, desc: 'Needs a Pickaxe: gives Iron Ore', props: { name: 'Iron Rock', shape: { type: 'emoji', emoji: '⛰️', w: 56, h: 56 }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Iron Ore', hits: 5, tool: 'Pickaxe', bonus: 'Gem 1 10%', respawn: 60 }] } },
+  { icon: 'gem', label: 'Berry Bush', group: 'Crafting', items: true, desc: 'Walk into it for Berries', props: { name: 'Berry Bush', shape: { type: 'emoji', emoji: '🫐', w: 44, h: 44 }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'resource', item: 'Berries', amount: 2, hits: 1, gather: 'tapping or touching', respawn: 25 }] } },
+  { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', shape: { type: 'emoji', emoji: '🧰', w: 48, h: 48 }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 120, openIcon: '📭' }] } },
+  { icon: 'gem', label: 'Breakable Crate', group: 'Crafting', items: true, desc: 'Has health; drops loot when broken', props: { name: 'Crate', tags: ['enemy'], shape: { type: 'emoji', emoji: '📦', w: 44, h: 44 }, body: { type: 'static' }, behaviors: [{ type: 'health', hp: 3, hurtBy: 'bullet', invuln: 0.2, knockback: 0 }, { type: 'loot', loot: 'Wood 1-3\nApple 1 30%', when: 'destroyed', into: 'onto the ground' }] } },
+  { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', shape: { type: 'emoji', emoji: '🪵', w: 32, h: 32 }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
 ];
 const PREFABS_3D = [
   { icon: 'player', label: 'Player', props: { name: 'Player', tags: ['player'], y: 0.6, mesh: { geometry: 'sphere', r: 0.6, color: '#4f8ef7' }, behaviors: [{ type: 'move', speed: 7, control: 'joystick' }, { type: 'cameraFollow', oy: 9, oz: 10, smooth: 5 }] }, scene: { settings: { joystick: true } } },
@@ -4200,6 +4217,13 @@ const PREFABS_3D = [
   { icon: 'enemy', label: 'Spikes', group: 'Survival', desc: 'Hurts the player while they stand on it', props: { name: 'Spikes', y: 0.15, mesh: { geometry: 'pyramid', w: 1.5, h: 0.3, d: 1.5, color: '#9e9e9e' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, mode: 'while touching (every few seconds)', every: 0.6 }] } },
   { icon: 'enemy', label: 'Fire', group: 'Survival', desc: 'Fire damage that keeps burning', props: { name: 'Fire', y: 0.5, mesh: { geometry: 'cone', r: 0.4, h: 1, color: '#ff7043', emissive: 0.9 }, body: { type: 'kinematic', sensor: true }, light: { color: '#ffb35c', intensity: 2, range: 6, effect: 'fire' }, behaviors: [{ type: 'damager', targets: 'player', amount: 10, dtype: 'fire', effect: 'burn', effectDps: 4, effectTime: 3 }] } },
   { icon: 'enemy', label: 'Poison Pool', group: 'Survival', desc: 'Poisons whoever steps in', props: { name: 'Poison Pool', y: 0.05, mesh: { geometry: 'cylinder', r: 1, h: 0.1, color: '#7cb342' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'damager', targets: 'player', amount: 0, dtype: 'poison', effect: 'poison', effectDps: 5, effectTime: 4 }] } },
+  { icon: 'gear', label: 'Workbench', group: 'Crafting', items: true, desc: 'Crafting station: Workbench recipes work next to it', props: { name: 'Workbench', y: 0.45, mesh: { geometry: 'box', w: 1.6, h: 0.9, d: 0.9, color: '#8d6e63' }, body: { type: 'static' }, behaviors: [{ type: 'craftingStation', station: 'Workbench' }] } },
+  { icon: 'gear', label: 'Furnace', group: 'Crafting', items: true, desc: 'Smelts ore and cooks food', props: { name: 'Furnace', y: 0.6, mesh: { geometry: 'box', w: 1.2, h: 1.2, d: 1.2, color: '#757575' }, body: { type: 'static' }, light: { color: '#ff9a4d', intensity: 2, range: 5, effect: 'fire' }, behaviors: [{ type: 'craftingStation', station: 'Furnace' }] } },
+  { icon: 'gem', label: 'Tree', group: 'Crafting', items: true, desc: 'Tap to chop: gives Wood, grows back', props: { name: 'Tree', y: 1.5, mesh: { geometry: 'cone', r: 1, h: 3, color: '#2e7d32' }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Wood', hits: 3, bonus: 'Apple 1 30%, Stick 1-2 50%', respawn: 30 }] } },
+  { icon: 'gem', label: 'Rock', group: 'Crafting', items: true, desc: 'Tap to mine: gives Stone', props: { name: 'Rock', y: 0.5, mesh: { geometry: 'gem', r: 0.8, color: '#9e9e9e' }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Stone', hits: 4, bonus: 'Coal 1 40%', respawn: 40 }] } },
+  { icon: 'gem', label: 'Iron Rock', group: 'Crafting', items: true, desc: 'Needs a Pickaxe: gives Iron Ore', props: { name: 'Iron Rock', y: 0.5, mesh: { geometry: 'gem', r: 0.8, color: '#8d6e63' }, body: { type: 'static' }, behaviors: [{ type: 'resource', item: 'Iron Ore', hits: 5, tool: 'Pickaxe', bonus: 'Gem 1 10%', respawn: 60 }] } },
+  { icon: 'gem', label: 'Treasure Chest', group: 'Crafting', items: true, desc: 'Tap to open: random loot', props: { name: 'Chest', y: 0.4, mesh: { geometry: 'box', w: 1, h: 0.8, d: 0.7, color: '#a1887f' }, body: { type: 'static' }, behaviors: [{ type: 'loot', loot: 'Gem 1-2\nHealth Potion 1 60%\nIron Bar 2-4 50%\nKey 1 20%', when: 'tapped', reach: 3.5 }] } },
+  { icon: 'gem', label: 'Item Pick-up', group: 'Crafting', items: true, desc: 'Walk over it to pick it up (set the item)', props: { name: 'Wood', y: 0.3, mesh: { geometry: 'box', w: 0.5, h: 0.3, d: 0.3, color: '#8d6e63' }, body: { type: 'kinematic', sensor: true }, behaviors: [{ type: 'inventoryItem', item: 'Wood', icon: '', amount: 3 }] } },
 ];
 const OBJECTS_2D = [
   { icon: 'gear', label: 'Empty', props: { name: 'GameObject' } },
@@ -4403,6 +4427,7 @@ function addPrefab(def, at) {
   }
   if (def.props.behaviors?.some((b) => b.type === 'hazard') && project.vars.lives == null) project.vars.lives = 3;
   if (def.vars) for (const [k, v] of Object.entries(def.vars)) project.vars[k] ??= v;
+  if (def.items) ensureStarterItems(); // crafting presets: an empty game gets starter items and recipes
   if (def.settings) for (const [k, v] of Object.entries(def.settings)) if (!project.settings[k]) project.settings[k] = v;
   if (def.forceSettings) Object.assign(project.settings, def.forceSettings); // e.g. custom touch controls replace the built-in joystick
   for (const x of def.extra || []) {

@@ -1078,17 +1078,154 @@ export class Scene {
   setLayer(e, l) { const i = this.layerIndex(l); e.physLayer = i; if (e.body) e.body.layer = i; return i; }
   /** Everything on a Layer. */
   findInLayer(l) { const i = this.layerIndex(l); return this.entities.filter((e) => !e.dead && (e.body ? e.body.layer | 0 : e.physLayer) === i); }
-  /** Inventory: add (or with a negative n, remove) items. {inventory} lists them, {item_Name} counts one. */
-  addItem(name, n = 1, icon = '') {
-    const inv = (this.inventory ||= {});
-    const it = inv[name] ||= { n: 0, icon };
-    it.n = Math.max(0, it.n + n); if (icon) it.icon = icon;
-    if (!it.n) delete inv[name];
+  // ---- inventory & crafting (items are described in the game's Items list: type, stack size, effects, equipment stats) ----
+  /** Add (or with a negative n, remove) items. Respects Game Settings › Inventory slots and each item's stack size. Returns how many changed. */
+  addItem(name, n = 1, icon = '', force = false) {
+    if (!name) return 0;
+    const def = this.itemDef(name); name = def.name || name;
+    const inv = (this.inventory ||= {}), order = (this.invOrder ||= []);
+    n = Math.round(+n || 0); if (!n) return 0;
+    if (n > 0 && !force) {
+      const room = this.itemRoom(name);
+      if (room < n) { if (!this._fullMsg || this.time - this._fullMsg > 1.5) { this._fullMsg = this.time; this.message('Inventory full', 1.2); this.emit('inventoryFull', name); } if (room <= 0) return 0; n = room; }
+    }
+    const it = inv[name] ||= { n: 0, icon: icon || def.icon || '' };
+    const before = it.n; it.n = Math.max(0, it.n + n); if (icon) it.icon = icon;
+    if (it.n && !order.includes(name)) order.push(name);
+    if (!it.n) { delete inv[name]; this.invOrder = order.filter((q) => q !== name); }
     this.setVar('item_' + name, it.n || 0);
-    this.setVar('inventory', Object.entries(inv).map(([k, v]) => `${v.icon || k}×${v.n}`).join('  ') || '—');
+    this.syncInventory();
     this.emit('inventory', name, it.n || 0);
+    return it.n - before;
   }
-  itemCount(name) { return this.inventory?.[name]?.n || 0; }
+  itemCount(name) { const inv = this.inventory; if (!inv || !name) return 0; if (inv[name]) return inv[name].n; const d = this.itemDef(name); return inv[d.name]?.n || 0; }
+  /** The Items-list entry for a name (any case), or a plain one. */
+  itemDef(name) { const d = this.engine?.itemDB?.get(String(name || '').trim().toLowerCase()); return d || { name: String(name || ''), icon: this.inventory?.[name]?.icon || '', type: 'misc', plain: true }; }
+  stackOf(name) { const d = this.itemDef(name); return Math.max(1, +d.stack || +this.settings.invStack || 99); }
+  /** Slots used: each stack of an item takes one. */
+  slotsUsed() { let n = 0; for (const [k, v] of Object.entries(this.inventory || {})) n += Math.ceil(v.n / this.stackOf(k)); return n; }
+  slotCount() { return Math.max(0, Math.round(+this.settings.invSlots || 0)); }
+  slotsFree() { const c = this.slotCount(); return c ? Math.max(0, c - this.slotsUsed()) : Infinity; }
+  /** How many more of an item fit (Infinity without a slot limit). */
+  itemRoom(name) {
+    const c = this.slotCount(); if (!c) return Infinity;
+    const st = this.stackOf(name), have = this.itemCount(name), part = have % st ? st - (have % st) : 0;
+    return part + this.slotsFree() * st;
+  }
+  /** Items as stacks, in inventory order (what grids and hotbars show). */
+  itemStacks(filter = 'all') {
+    const out = [];
+    for (const name of (this.invOrder ||= Object.keys(this.inventory || {}))) {
+      const v = this.inventory?.[name]; if (!v) continue;
+      const d = this.itemDef(name); if (filter && filter !== 'all' && (d.type || 'misc') !== filter) continue;
+      const st = this.stackOf(name); let left = v.n;
+      while (left > 0) { const k = Math.min(st, left); out.push({ name, icon: v.icon || d.icon || name.slice(0, 2), n: k, def: d }); left -= k; }
+    }
+    return out;
+  }
+  syncInventory() { this.setVar('inventory', (this.invOrder || []).filter((k) => this.inventory?.[k]).map((k) => `${this.inventory[k].icon || k}×${this.inventory[k].n}`).join('  ') || '—'); this.setVar('slotsFree', Number.isFinite(this.slotsFree()) ? this.slotsFree() : 999); }
+  sortInventory(by = 'type') {
+    const T = Object.keys(ITEM_TYPES), R = Object.keys(RARITY), d = (k) => this.itemDef(k);
+    const key = { name: (k) => k.toLowerCase(), type: (k) => String(T.indexOf(d(k).type || 'misc')).padStart(2, '0') + k.toLowerCase(), rarity: (k) => String(9 - R.indexOf(d(k).rarity || 'common')) + k.toLowerCase(), count: (k) => String(1e6 - this.itemCount(k)).padStart(7, '0') }[by] || ((k) => k);
+    this.invOrder = [...(this.invOrder || [])].sort((a, b) => (key(a) < key(b) ? -1 : 1)); this.syncInventory(); this.emit('inventory', '', 0);
+  }
+  clearInventory() { const names = Object.keys(this.inventory || {}); this.inventory = {}; this.invOrder = []; for (const k of names) { this.setVar('item_' + k, 0); this.emit('inventory', k, 0); } this.syncInventory(); }
+  /** The player (first object tagged player): who uses, equips and crafts. */
+  player() { return this.entities.find((q) => !q.dead && q.has('player')) || null; }
+  /** Use an item: eat / drink / heal / effects from its Items entry, or equip it (weapons, armour, tools). */
+  useItem(name, user = this.player(), consume) {
+    if (!this.itemCount(name)) return false;
+    const d = this.itemDef(name); name = d.name || name;
+    if (equipSlotOf(d)) return this.equip(name, user);
+    const hb = user?.getBehavior('health');
+    if (+d.heal && hb) hb.heal(+d.heal, user);
+    if (+d.food) user?.getBehavior('hunger')?.add(+d.food, user);
+    if (+d.drink) user?.getBehavior('thirst')?.add(+d.drink, user);
+    if (+d.shield && hb) hb.addShield(+d.shield, user);
+    if (d.cure && d.cure !== 'nothing' && hb) hb.cure(d.cure === 'everything' ? 'any' : d.cure, user);
+    if (d.effect && d.effect !== 'nothing' && hb) hb.addEffect(d.effect, +d.effectPower || 1, +d.effectTime || 5, user);
+    if (d.message) this.send(d.message, name);
+    this.send('use ' + name, name); this.send('use item', name);
+    const used = consume ?? (d.plain ? true : d.consume ?? CONSUMABLE.has(d.type || 'misc'));
+    if (used) this.addItem(name, -1);
+    if (user && (+d.heal || +d.food || +d.drink)) popOver(this, user, `${d.icon || ''} ${name}`.trim(), RARITY[d.rarity] || '#ffffff', 18);
+    this.emit('itemUsed', user, name); return true;
+  }
+  /** Put an item from the inventory into its equipment slot (the one there goes back into the inventory). */
+  equip(name, user = this.player()) {
+    const d = this.itemDef(name); name = d.name || name; const slot = equipSlotOf(d) || 'hand', eq = (this.equipped ||= {});
+    if (!this.itemCount(name)) return false;
+    if (eq[slot]) this.unequip(slot, user, true);
+    this.addItem(name, -1); eq[slot] = name; this.setVar('equip_' + slot, name);
+    this.applyEquip(user); this.engine?.audio.sfx('click'); this.emit('equip', user, name, slot); return true;
+  }
+  unequip(slot, user = this.player(), swapping = false) {
+    const eq = this.equipped || {}, name = eq[slot]; if (!name) return false;
+    if (!swapping && this.itemRoom(name) < 1) { this.message('Inventory full', 1.2); return false; }
+    delete eq[slot]; this.addItem(name, 1, '', true); this.setVar('equip_' + slot, '');
+    this.applyEquip(user); this.emit('unequip', user, name, slot); return true;
+  }
+  /** Total of a stat (damage, armor, speed ×) over everything equipped. */
+  equipStat(k) { const list = Object.values(this.equipped || {}).map((n) => +this.itemDef(n)[k] || 0); return k === 'speed' ? list.reduce((m, v) => m * (v || 1), 1) : list.reduce((a, v) => a + v, 0); }
+  applyEquip(user = this.player()) {
+    if (!user) return; const sp = this.equipStat('speed');
+    if (sp !== 1) (user.data.speedFx ||= {}).equip = sp; else if (user.data.speedFx) delete user.data.speedFx.equip;
+    user.data.equipDamage = this.equipStat('damage'); user.data.equipArmor = this.equipStat('armor');
+    this.setVar('equipDamage', user.data.equipDamage); this.setVar('equipArmor', user.data.equipArmor);
+  }
+  /** Recipes from the game's Recipes list. */
+  recipes() { return this.engine?.recipes || []; }
+  recipeFor(item) { if (item && typeof item === 'object') return item; const k = String(item || '').trim().toLowerCase(); return this.recipes().find((r) => r.id === item || String(r.result).toLowerCase() === k) || null; }
+  knowsRecipe(r) { r = this.recipeFor(r); return !!r && (!r.locked || (this.knownRecipes ||= new Set()).has(String(r.result).toLowerCase())); }
+  learnRecipe(item) { const r = this.recipeFor(item); if (!r) return false; const k = String(r.result).toLowerCase(), K = (this.knownRecipes ||= new Set()); if (K.has(k)) return false; K.add(k); this.emit('recipeLearned', r.result); return true; }
+  /** Is the player next to a crafting station with this name (a Crafting Station component)? */
+  nearStation(name) { if (!name) return true; const t = this._stations?.get(String(name).toLowerCase()); return t != null && this.time - t < 0.25; }
+  /** What's missing to craft it: [] when it can be made now. */
+  craftMissing(r, times = 1) {
+    r = this.recipeFor(r); if (!r) return ['no recipe'];
+    const miss = [];
+    if (!this.knowsRecipe(r)) miss.push('not learned');
+    if (r.station && !this.nearStation(r.station)) miss.push('needs ' + r.station);
+    for (const g of parseIngredients(r.ingredients)) { const have = this.itemCount(g.name); if (have < g.n * times) miss.push(`${g.n * times - have} ${g.name}`); }
+    if (this.crafting) miss.push('busy');
+    return miss;
+  }
+  canCraft(r, times = 1) { return !this.craftMissing(r, times).length; }
+  /** Craft a recipe (by result name or recipe): takes the ingredients and gives the result (after its time, if it has one). */
+  craft(item, times = 1) {
+    const r = this.recipeFor(item); times = Math.max(1, Math.round(+times || 1));
+    if (!r || !this.canCraft(r, times)) { this.emit('craftFailed', r?.result || item); return false; }
+    const ings = parseIngredients(r.ingredients);
+    for (const g of ings) if (!g.keep) this.addItem(g.name, -g.n * times);
+    const amount = Math.max(1, Math.round(+r.amount || 1)) * times;
+    const done = () => {
+      this.crafting = null;
+      const got = this.addItem(r.result, amount);
+      if (got < amount) this.dropNear(r.result, amount - got); // no room: it lands on the ground
+      this.engine?.audio.sfx('power'); this.emit('craft', r.result, amount);
+      const pl = this.player(); if (pl) popOver(this, pl, `+${amount} ${this.itemDef(r.result).icon || r.result}`, '#ffd23d', 20);
+    };
+    const t = (+r.time || 0) * times;
+    if (t > 0) { this.crafting = { result: r.result, t0: this.time, dur: t }; this.emit('craftStart', r.result, amount); this.after(t, done); } else done();
+    return true;
+  }
+  /** Drop items on the ground next to the player (or a point) as pick-ups. */
+  dropNear(name, n = 1, at = this.player()) {
+    const d = this.itemDef(name); name = d.name || name; n = Math.round(+n || 0); if (n <= 0) return null;
+    const three = this.mode === '3d', x = (at?.x || 0) + (three ? rand(-1, 1) : rand(-40, 40)), y = (at?.y || 0) + (three ? 0 : rand(-30, 10)), z = (at?.z || 0) + (three ? rand(-1, 1) : 0);
+    const look = three ? { mesh: { geometry: 'box', w: 0.45, h: 0.45, d: 0.45, color: RARITY[d.rarity] || '#ffd23d', emissive: 0.3 } } : (d.icon && !String(d.icon).startsWith('art:') ? { shape: { type: 'emoji', emoji: d.icon, w: 28, h: 28 } } : { shape: { type: 'circle', r: 12, fill: RARITY[d.rarity] || '#ffd23d' } });
+    const e = this.spawn({ name, x, y, z, ...look, behaviors: [{ type: 'inventoryItem', item: name, icon: d.icon || '', amount: n, delay: 0.8 }] });
+    return e;
+  }
+  /** Inventory state for level changes and saves. */
+  packInv() { return { inventory: this.inventory || {}, order: this.invOrder || [], equipped: this.equipped || {}, known: [...(this.knownRecipes || [])] }; }
+  unpackInv(d) {
+    if (!d) return;
+    this.inventory = JSON.parse(JSON.stringify(d.inventory || {})); this.invOrder = [...(d.order || Object.keys(this.inventory))]; this.equipped = { ...(d.equipped || {}) }; this.knownRecipes = new Set(d.known || []);
+    this.syncInventory(); this.after(0, () => this.applyEquip());
+  }
+  /** Vars carried between levels / saved may hold the inventory under __inv. */
+  restoreInv() { const d = this.vars.__inv; if (d === undefined) return; delete this.vars.__inv; if (this.settings.keepInventory !== false) this.unpackInv(d); }
   /** Broadcast a message by name; Tween / Animator / Sprite Animation components and "On Message" nodes can react. */
   send(name, data) { if (name) this.emit('message', String(name), data); }
 
@@ -6556,6 +6693,31 @@ registerBehavior('uiAppBar', {
 // ============================================================================
 // UI kit: self-drawn UI components (drawn in the entity's own space, taps converted to it)
 // ============================================================================
+/** Item types (Game Settings › Items): what an item is for. */
+export const ITEM_TYPES = {
+  material: { label: 'Material', icon: '🪵' }, food: { label: 'Food', icon: '🍎' }, drink: { label: 'Drink', icon: '💧' }, potion: { label: 'Potion', icon: '🧪' },
+  weapon: { label: 'Weapon', icon: '⚔️' }, armor: { label: 'Armour', icon: '🛡️' }, tool: { label: 'Tool', icon: '⛏️' }, ammo: { label: 'Ammo', icon: '🏹' },
+  key: { label: 'Key', icon: '🔑' }, quest: { label: 'Quest item', icon: '📜' }, misc: { label: 'Other', icon: '📦' },
+};
+export const RARITY = { common: '#b0bec5', uncommon: '#66bb6a', rare: '#42a5f5', epic: '#ab47bc', legendary: '#ffa726' };
+export const EQUIP_SLOTS = ['hand', 'offhand', 'head', 'body', 'legs', 'feet', 'neck', 'ring'];
+const CONSUMABLE = new Set(['food', 'drink', 'potion', 'misc']);
+const DEFAULT_SLOT = { weapon: 'hand', armor: 'body', tool: 'hand' };
+/** The equipment slot an item goes in, or '' if it isn't worn / held. */
+const equipSlotOf = (d) => (d.slot === 'none' ? '' : d.slot || DEFAULT_SLOT[d.type] || '');
+/** "Wood 3, Stone x2, 2 Rope, Hammer (keep)" → [{ name, n, keep }] */
+export function parseIngredients(t) {
+  if (Array.isArray(t)) return t;
+  return String(t || '').split(',').map((q) => q.trim()).filter(Boolean).map((q) => {
+    const keep = /\((keep|tool|not used up)\)\s*$/i.test(q); q = q.replace(/\s*\((keep|tool|not used up)\)\s*$/i, '');
+    let m = q.match(/^(\d+)\s*[x×]?\s+(.+)$/); if (m) return { name: m[2].trim(), n: +m[1], keep };
+    m = q.match(/^(.+?)\s*[x×]?\s*(\d+)$/); if (m) return { name: m[1].trim(), n: +m[2], keep };
+    return { name: q, n: 1, keep };
+  });
+}
+/** Build the engine's item lookup from the game's Items list. */
+function buildItemDB(list) { const m = new Map(); for (const d of Array.isArray(list) ? list : []) if (d?.name) m.set(String(d.name).trim().toLowerCase(), { ...d, name: String(d.name).trim() }); return m; }
+
 const UK = {
   box(e) { const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2; return { x: e.x - ex.hx, y: e.y - ex.hy, w, h, cx: e.x, cy: e.y }; },
   /** A screen point in the entity's drawing space. */
@@ -7438,45 +7600,205 @@ registerBehavior('uiShop', {
   },
 });
 
+/** Inventory Grid and Hotbar: slots showing the inventory (stacks, rarity frames). Tap to pick, tap again to use / equip / drop. */
+function inventorySlots(p, hotbar) {
+  let pop = new Map();
+  const SAMPLE = [{ name: 'Wood', icon: '🪵', n: 24, def: { type: 'material' } }, { name: 'Apple', icon: '🍎', n: 3, def: { type: 'food' } }, { name: 'Iron Sword', icon: '🗡️', n: 1, def: { type: 'weapon', rarity: 'rare' } }, { name: 'Potion', icon: '🧪', n: 2, def: { type: 'potion', rarity: 'uncommon' } }, { name: 'Key', icon: '🗝️', n: 1, def: { type: 'key', rarity: 'epic' } }];
+  const geo = (e, info) => { const b = UK.box(e), cols = Math.max(1, Math.round(+(hotbar ? p.slots : p.columns) || 4)), n = Math.max(1, Math.round(+p.slots || 12)), rows = Math.ceil(n / cols), g = hotbar ? 6 : 8, ih = info ? 40 : 0, sz = Math.min((b.w - g * (cols - 1)) / cols, (b.h - ih - g * (rows - 1)) / rows); return { b, cols, n, g, sz, ih, ox: b.cx - (cols * sz + (cols - 1) * g) / 2, oy: b.y }; };
+  const list = (s) => (s.engine.editing ? SAMPLE.filter((q) => !p.filter || p.filter === 'all' || q.def.type === p.filter) : s.itemStacks(p.filter || 'all'));
+  const act = (s, it) => {
+    const how = p.onUse || 'use or equip';
+    if (how === 'select only') return;
+    if (how === 'drop') { if (s.addItem(it.name, -1)) s.dropNear(it.name, 1); }
+    else s.useItem(it.name, s.player(), p.consume === false ? false : undefined);
+    if (!s.itemCount(it.name)) s.setVar(p.var, '');
+  };
+  return {
+    uiAlways: true,
+    update(e, dt, s) {
+      for (const [k, v] of pop) { const n2 = v - dt * 4; if (n2 <= 0) pop.delete(k); else pop.set(k, n2); }
+      const G = geo(e, p.info), L = list(s);
+      if (hotbar && p.keys !== false) for (const k of s.engine.input.keysDown || []) { const i = +k - 1; if (Number.isInteger(i) && i >= 0 && i < G.n) { const it = L[i]; s.setVar(p.var, it ? it.name : ''); pop.set(i, 1); } }
+      for (const tp of UK.taps(s, e)) for (let i = 0; i < G.n; i++) {
+        const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g); if (!UK.in(tp, { x, y, w: G.sz, h: G.sz })) continue;
+        const it = L[i]; UK.tap(s, p); pop.set(i, 1);
+        if (!it) { s.setVar(p.var, ''); break; }
+        if (sameVal(s.vars[p.var], it.name) && p.useOnSecondTap !== false) act(s, it);
+        else s.setVar(p.var, it.name);
+        break;
+      }
+    },
+    drawUI(ctx, e, s) {
+      const G = geo(e, p.info), L = list(s), txt = p.text || '#fff', acc = p.accent || '#ffd23d';
+      for (let i = 0; i < G.n; i++) {
+        const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g), it = L[i], on = it && sameVal(s.vars[p.var], it.name), k = 1 + Math.sin((pop.get(i) || 0) * Math.PI) * 0.08;
+        const rc = it && p.rarity !== false && it.def?.rarity && it.def.rarity !== 'common' ? RARITY[it.def.rarity] : null;
+        ctx.save(); ctx.translate(x + G.sz / 2, y + G.sz / 2); ctx.scale(k, k);
+        ctx.fillStyle = rc ? withAlpha(rc, 0.18) : p.slot || 'rgba(255,255,255,0.08)'; UK.rr(ctx, -G.sz / 2, -G.sz / 2, G.sz, G.sz, 10); ctx.fill();
+        ctx.strokeStyle = on ? acc : rc || p.border || 'rgba(255,255,255,0.15)'; ctx.lineWidth = on ? 3 : rc ? 2 : 1.5; ctx.stroke();
+        if (hotbar && p.numbers !== false) UK.text(ctx, i + 1, -G.sz / 2 + 7, -G.sz / 2 + 8, { size: 9, weight: 800, color: withAlpha(txt, 0.5), align: 'left' });
+        if (it) {
+          drawNavIcon(ctx, it.icon, 0, p.labels ? -6 : 0, G.sz * 0.52, txt);
+          if (it.n > 1) UK.text(ctx, it.n, G.sz / 2 - 6, G.sz / 2 - 9, { size: Math.max(10, G.sz * 0.2), weight: 900, color: txt, align: 'right' });
+          if (p.labels) UK.text(ctx, it.name, 0, G.sz / 2 - 9, { size: 9.5, weight: 700, color: withAlpha(txt, 0.8), maxW: G.sz - 6 });
+        }
+        ctx.restore();
+      }
+      if (p.info) {
+        const pick = L.find((q) => sameVal(s.vars[p.var], q.name)), y = G.oy + Math.ceil(G.n / G.cols) * (G.sz + G.g) + 4, d = pick ? s.itemDef(pick.name) : null;
+        if (pick) {
+          UK.text(ctx, `${pick.name}${d.type && d.type !== 'misc' ? ' · ' + (ITEM_TYPES[d.type]?.label || d.type) : ''}`, G.b.cx, y + 9, { size: 13, weight: 800, color: RARITY[d.rarity] && d.rarity !== 'common' ? RARITY[d.rarity] : txt, maxW: G.b.w });
+          const bits = [d.desc, +d.heal ? `+${d.heal} health` : '', +d.food ? `+${d.food} food` : '', +d.drink ? `+${d.drink} drink` : '', +d.damage ? `⚔ ${d.damage}` : '', +d.armor ? `🛡 ${d.armor}` : ''].filter(Boolean).join(' · ');
+          if (bits) UK.text(ctx, bits, G.b.cx, y + 27, { size: 11, weight: 600, color: withAlpha(txt, 0.75), maxW: G.b.w });
+        } else UK.text(ctx, s.slotCount() ? `${s.slotsUsed()} / ${s.slotCount()} slots` : 'Tap an item', G.b.cx, y + 14, { size: 12, weight: 700, color: withAlpha(txt, 0.6) });
+      }
+    },
+  };
+}
+const SLOT_TYPES = ['all', ...Object.keys(ITEM_TYPES)];
 registerBehavior('uiInventoryGrid', {
-  label: 'Inventory Grid', description: 'Shows the inventory as a grid of slots with counts. Tap to pick an item (it goes in a variable); tap it again to use it (sends "use Name" and can use one up).',
+  label: 'Inventory Grid', description: 'Shows the inventory as a grid of slots (stacks, rarity colours). Tap to pick an item (it goes in a variable); tap it again to use it: eat, drink, heal, or equip weapons and armour. Show one type only for a backpack tab.',
   params: [
     { key: 'slots', label: 'Slots', type: 'number', default: 12, range: [1, 60], step: 1 },
     { key: 'columns', label: 'Columns', type: 'number', default: 4, range: [1, 10], step: 1 },
+    { key: 'filter', label: 'Show', type: 'select', options: SLOT_TYPES, default: 'all' },
     { key: 'var', label: 'Picked item goes in', type: 'text', default: 'selectedItem', suggest: 'vars' },
-    { key: 'useOnSecondTap', label: 'Tap the picked item to use it', type: 'bool', default: true },
-    { key: 'consume', label: 'Using it uses one up', type: 'bool', default: true },
+    { key: 'useOnSecondTap', label: 'Tap the picked item again to…', type: 'bool', default: true },
+    { key: 'onUse', label: 'Second tap', type: 'select', options: ['use or equip', 'drop', 'select only'], default: 'use or equip' },
+    { key: 'consume', label: 'Using it uses one up', type: 'bool', default: true, info: 'Items in Game Settings › Items follow their type (food is eaten, keys and materials stay).' },
+    { key: 'info', label: 'Show the picked item’s name and info', type: 'bool', default: false },
     { key: 'labels', label: 'Show names', type: 'bool', default: false },
+    { key: 'rarity', label: 'Rarity colours', type: 'bool', default: true },
     ...colorParams({ slot: ['Slots', 'rgba(255,255,255,0.08)'], border: ['Slot edge', 'rgba(255,255,255,0.15)'], accent: ['Picked', '#ffd23d'], text: ['Text', '#ffffff'] }),
     ...UI_COMMON,
   ],
+  create(p) { return inventorySlots(p, false); },
+});
+registerBehavior('uiHotbar', {
+  label: 'Hotbar', description: 'A row of quick slots (the first items in the inventory). Tap one to hold it (heldItem), tap it again to use or equip it. Keys 1–9 pick a slot.',
+  params: [
+    { key: 'slots', label: 'Slots', type: 'number', default: 6, range: [1, 12], step: 1 },
+    { key: 'filter', label: 'Show', type: 'select', options: SLOT_TYPES, default: 'all' },
+    { key: 'var', label: 'Held item goes in', type: 'text', default: 'heldItem', suggest: 'vars' },
+    { key: 'useOnSecondTap', label: 'Tap the held item again to use it', type: 'bool', default: true },
+    { key: 'onUse', label: 'Second tap', type: 'select', options: ['use or equip', 'drop', 'select only'], default: 'use or equip' },
+    { key: 'keys', label: 'Keys 1–9 pick a slot', type: 'bool', default: true },
+    { key: 'numbers', label: 'Slot numbers', type: 'bool', default: true },
+    { key: 'rarity', label: 'Rarity colours', type: 'bool', default: true },
+    ...colorParams({ slot: ['Slots', 'rgba(0,0,0,0.45)'], border: ['Slot edge', 'rgba(255,255,255,0.25)'], accent: ['Held', '#ffd23d'], text: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) { return inventorySlots(p, true); },
+});
+
+/** Equipment: what the player wears and holds; tap a slot to take it off. */
+registerBehavior('uiEquipment', {
+  label: 'Equipment', description: 'The player’s equipment slots (hand, head, body…) with what is worn and the total damage, armour and speed. Tap a slot to take it off. Equip from the inventory or with the Equip instruction.',
+  params: [
+    { key: 'slots', label: 'Slots', type: 'text', default: 'hand, offhand, head, body, legs, feet', info: 'Any of: ' + EQUIP_SLOTS.join(', ') },
+    { key: 'columns', label: 'Columns', type: 'number', default: 3, range: [1, 8], step: 1 },
+    { key: 'stats', label: 'Show stats', type: 'bool', default: true },
+    ...colorParams({ slot: ['Slots', 'rgba(255,255,255,0.08)'], border: ['Slot edge', 'rgba(255,255,255,0.18)'], text: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
   create(p) {
-    let pop = new Map();
-    const items = (s) => Object.entries(s.inventory || {}).map(([name, v]) => ({ name, icon: v.icon || name.slice(0, 2), n: v.n }));
-    const geo = (e) => { const b = UK.box(e), cols = Math.max(1, Math.round(+p.columns || 4)), n = Math.max(1, Math.round(+p.slots || 12)), rows = Math.ceil(n / cols), g = 8, sz = Math.min((b.w - g * (cols - 1)) / cols, (b.h - g * (rows - 1)) / rows); return { b, cols, n, g, sz, ox: b.cx - (cols * sz + (cols - 1) * g) / 2, oy: b.y }; };
+    const ICON = { hand: '✋', offhand: '🤚', head: '⛑️', body: '👕', legs: '👖', feet: '👢', neck: '📿', ring: '💍' };
+    const slots = () => tagList(p.slots).map((q) => q.toLowerCase());
+    const geo = (e) => { const b = UK.box(e), S = slots(), cols = Math.max(1, Math.round(+p.columns || 3)), rows = Math.ceil(S.length / cols), sh = p.stats !== false ? 26 : 0, g = 8, sz = Math.min((b.w - g * (cols - 1)) / cols, (b.h - sh - g * (rows - 1)) / rows - 12); return { b, S, cols, g, sz, ox: b.cx - (cols * sz + (cols - 1) * g) / 2, oy: b.y, rows }; };
     return {
       uiAlways: true,
       update(e, dt, s) {
-        for (const [k, v] of pop) { const n2 = v - dt * 4; if (n2 <= 0) pop.delete(k); else pop.set(k, n2); }
-        const G = geo(e), list = items(s);
-        for (const tp of UK.taps(s, e)) for (let i = 0; i < G.n; i++) {
-          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g); if (!UK.in(tp, { x, y, w: G.sz, h: G.sz })) continue;
-          const it = list[i]; UK.tap(s, p); pop.set(i, 1);
-          if (!it) { s.setVar(p.var, ''); break; }
-          if (sameVal(s.vars[p.var], it.name) && p.useOnSecondTap !== false) { s.send('use ' + it.name, it.name); s.send('use item', it.name); if (p.consume !== false) s.addItem(it.name, -1); if (!s.itemCount(it.name)) s.setVar(p.var, ''); }
-          else s.setVar(p.var, it.name);
-          break;
+        const G = geo(e);
+        for (const tp of UK.taps(s, e)) G.S.forEach((sl, i) => { const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + 12 + G.g); if (UK.in(tp, { x, y, w: G.sz, h: G.sz + 12 }) && s.equipped?.[sl]) { UK.tap(s, p); s.unequip(sl); } });
+      },
+      drawUI(ctx, e, s) {
+        const G = geo(e), txt = p.text || '#fff', eq = s.engine.editing ? { hand: 'Iron Sword', head: 'Helmet' } : s.equipped || {};
+        G.S.forEach((sl, i) => {
+          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + 12 + G.g), name = eq[sl], d = name ? s.itemDef(name) : null, rc = d?.rarity && d.rarity !== 'common' ? RARITY[d.rarity] : null;
+          ctx.fillStyle = rc ? withAlpha(rc, 0.18) : p.slot || 'rgba(255,255,255,0.08)'; UK.rr(ctx, x, y, G.sz, G.sz, 10); ctx.fill(); ctx.strokeStyle = rc || p.border || 'rgba(255,255,255,0.18)'; ctx.lineWidth = rc ? 2 : 1.5; ctx.stroke();
+          if (name) drawNavIcon(ctx, d.icon || (s.engine.editing ? (sl === 'hand' ? '🗡️' : '⛑️') : name.slice(0, 2)), x + G.sz / 2, y + G.sz / 2, G.sz * 0.5, txt);
+          else drawNavIcon(ctx, ICON[sl] || '▫️', x + G.sz / 2, y + G.sz / 2, G.sz * 0.36, txt, 0.3);
+          UK.text(ctx, name || sl, x + G.sz / 2, y + G.sz + 7, { size: 10, weight: 700, color: withAlpha(txt, name ? 0.9 : 0.5), maxW: G.sz + 6 });
+        });
+        if (p.stats !== false) {
+          const dmg = s.engine.editing ? 5 : s.equipStat('damage'), arm = s.engine.editing ? 2 : s.equipStat('armor'), sp = s.engine.editing ? 1 : s.equipStat('speed');
+          UK.text(ctx, `⚔ ${dmg}   🛡 ${arm}${sp !== 1 ? `   👟 ×${Math.round(sp * 100) / 100}` : ''}`, G.b.cx, G.oy + G.rows * (G.sz + 12 + G.g) + 8, { size: 13, weight: 800, color: txt });
+        }
+      },
+    };
+  },
+});
+
+/** Crafting: the recipes from Game Settings › Recipes, with what each needs; tap one to make it. */
+registerBehavior('uiCrafting', {
+  label: 'Crafting', description: 'A list of recipes (Game Settings › Recipes) showing what each needs: green when you have it, red when not. Tap a recipe to craft it. Recipes that need a station (Workbench, Furnace) work next to a Crafting Station.',
+  params: [
+    { key: 'title', label: 'Title', type: 'text', default: 'Crafting' },
+    { key: 'show', label: 'Show', type: 'select', options: ['all recipes', 'ones I can make', 'ones for nearby stations'], default: 'all recipes' },
+    { key: 'category', label: 'Only category (empty = all)', type: 'text', default: '' },
+    { key: 'station', label: 'Only for station (empty = all)', type: 'text', default: '' },
+    { key: 'locked', label: 'Show recipes not learned yet (as ???)', type: 'bool', default: false },
+    { key: 'rowH', label: 'Row height', type: 'number', default: 62, range: [44, 100], step: 2 },
+    ...colorParams({ bg: ['Background', 'rgba(20,24,40,0.92)'], row: ['Rows', 'rgba(255,255,255,0.06)'], text: ['Text', '#ffffff'], have: ['Have', '#5dff8a'], need: ['Missing', '#ff6b6b'], accent: ['Button', '#4fa3ff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let scroll = 0, drag = null, flash = new Map();
+    const SAMPLE = [{ result: 'Wooden Sword', amount: 1, ingredients: 'Wood 3, Stick 1' }, { result: 'Torch', amount: 2, ingredients: 'Stick 1, Coal 1' }, { result: 'Iron Bar', amount: 1, ingredients: 'Iron Ore 2', station: 'Furnace', time: 2 }];
+    const rows = (s) => {
+      let R = s.engine.editing ? (s.engine.recipes?.length ? s.engine.recipes : SAMPLE) : s.recipes();
+      if (p.category) R = R.filter((r) => String(r.category || '').toLowerCase() === p.category.toLowerCase());
+      if (p.station) R = R.filter((r) => String(r.station || '').toLowerCase() === p.station.toLowerCase());
+      if (s.engine.editing) return R;
+      if (!p.locked) R = R.filter((r) => s.knowsRecipe(r));
+      if (p.show === 'ones I can make') R = R.filter((r) => s.canCraft(r));
+      if (p.show === 'ones for nearby stations') R = R.filter((r) => !r.station || s.nearStation(r.station));
+      return R;
+    };
+    const geo = (e) => { const b = UK.box(e), head = p.title ? 40 : 8; return { b, head, top: b.y + head, h: b.h - head - 8, rh: Math.max(44, +p.rowH || 62) }; };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        for (const [k, v] of flash) { if (v - dt <= 0) flash.delete(k); else flash.set(k, v - dt); }
+        const G = geo(e), R = rows(s), maxS = Math.max(0, R.length * (G.rh + 6) - G.h);
+        for (const d of UK.downs(s, e)) if (UK.in(d, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) drag = { id: d.id, y0: d.y, s0: scroll };
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); else drag = null; }
+        scroll = clamp(scroll, 0, maxS);
+        for (const tp of UK.taps(s, e)) {
+          if (!UK.in(tp, { x: G.b.x, y: G.top, w: G.b.w, h: G.h })) continue;
+          const i = Math.floor((tp.y - G.top + scroll) / (G.rh + 6)), r = R[i]; if (!r) continue;
+          UK.tap(s, p);
+          if (s.craft(r)) flash.set(i, 0.5); else { flash.set(i, -0.5); s.message(s.craftMissing(r).join(', ') ? 'Need ' + s.craftMissing(r).join(', ') : 'Can’t craft', 1.4); }
         }
       },
       drawUI(ctx, e, s) {
-        const G = geo(e), list = s.engine.editing ? [{ name: 'Potion', icon: '🧪', n: 3 }, { name: 'Key', icon: '🗝️', n: 1 }, { name: 'Gem', icon: '💎', n: 12 }] : items(s), txt = p.text || '#fff', acc = p.accent || '#ffd23d';
-        for (let i = 0; i < G.n; i++) {
-          const x = G.ox + (i % G.cols) * (G.sz + G.g), y = G.oy + Math.floor(i / G.cols) * (G.sz + G.g), it = list[i], on = it && sameVal(s.vars[p.var], it.name), k = 1 + Math.sin((pop.get(i) || 0) * Math.PI) * 0.08;
-          ctx.save(); ctx.translate(x + G.sz / 2, y + G.sz / 2); ctx.scale(k, k);
-          ctx.fillStyle = p.slot || 'rgba(255,255,255,0.08)'; UK.rr(ctx, -G.sz / 2, -G.sz / 2, G.sz, G.sz, 10); ctx.fill(); ctx.strokeStyle = on ? acc : p.border || 'rgba(255,255,255,0.15)'; ctx.lineWidth = on ? 3 : 1.5; ctx.stroke();
-          if (it) { drawNavIcon(ctx, it.icon, 0, p.labels ? -6 : 0, G.sz * 0.52, txt); if (it.n > 1) UK.text(ctx, it.n, G.sz / 2 - 6, G.sz / 2 - 9, { size: Math.max(10, G.sz * 0.2), weight: 900, color: txt, align: 'right' }); if (p.labels) UK.text(ctx, it.name, 0, G.sz / 2 - 9, { size: 9.5, weight: 700, color: withAlpha(txt, 0.8), maxW: G.sz - 6 }); }
-          ctx.restore();
+        const G = geo(e), R = rows(s), txt = p.text || '#fff', ed = s.engine.editing;
+        ctx.fillStyle = p.bg || 'rgba(20,24,40,0.92)'; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 16); ctx.fill();
+        if (p.title) {
+          UK.text(ctx, p.title, G.b.x + 16, G.b.y + 21, { size: 17, weight: 900, color: txt, align: 'left' });
+          const c = s.crafting; if (c) { const k = clamp((s.time - c.t0) / c.dur, 0, 1), w = 90, x = G.b.x + G.b.w - w - 14; ctx.fillStyle = 'rgba(255,255,255,0.12)'; UK.rr(ctx, x, G.b.y + 15, w, 12, 6); ctx.fill(); ctx.fillStyle = p.accent || '#4fa3ff'; UK.rr(ctx, x, G.b.y + 15, w * k, 12, 6); ctx.fill(); }
         }
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.top, G.b.w, G.h); ctx.clip();
+        if (!R.length) UK.text(ctx, 'Nothing to craft yet', G.b.cx, G.top + 30, { size: 13, weight: 700, color: withAlpha(txt, 0.6) });
+        R.forEach((r, i) => {
+          const y = G.top + i * (G.rh + 6) - scroll; if (y > G.top + G.h || y + G.rh < G.top) return;
+          const known = ed || s.knowsRecipe(r), d = s.itemDef(r.result), ok = !ed && s.canCraft(r), fl = flash.get(i) || 0;
+          ctx.fillStyle = fl > 0 ? withAlpha(p.have || '#5dff8a', 0.25) : fl < 0 ? withAlpha(p.need || '#ff6b6b', 0.2) : p.row || 'rgba(255,255,255,0.06)'; UK.rr(ctx, G.b.x + 8, y, G.b.w - 16, G.rh, 12); ctx.fill();
+          const ic = G.rh * 0.62; drawNavIcon(ctx, known ? d.icon || (ed ? '🛠️' : r.result.slice(0, 2)) : '❔', G.b.x + 14 + ic / 2, y + G.rh / 2, ic * 0.8, txt);
+          const tx = G.b.x + 22 + ic, nameCol = d.rarity && d.rarity !== 'common' ? RARITY[d.rarity] : txt;
+          UK.text(ctx, known ? `${r.result}${+r.amount > 1 ? ' ×' + r.amount : ''}` : '???', tx, y + 17, { size: 14, weight: 800, color: nameCol, align: 'left', maxW: G.b.w - ic - 110 });
+          let cx = tx;
+          for (const g of parseIngredients(r.ingredients)) {
+            const have = ed ? g.n : s.itemCount(g.name), gd = s.itemDef(g.name), label = `${gd.icon || g.name} ${have}/${g.n}`;
+            ctx.font = `700 11px ${THEME.font}`; const w = ctx.measureText(label).width + 12; if (cx + w > G.b.x + G.b.w - 86) break;
+            ctx.fillStyle = withAlpha(have >= g.n ? p.have || '#5dff8a' : p.need || '#ff6b6b', 0.18); UK.rr(ctx, cx, y + G.rh - 26, w, 18, 9); ctx.fill();
+            UK.text(ctx, label, cx + w / 2, y + G.rh - 17, { size: 11, weight: 700, color: have >= g.n ? p.have || '#5dff8a' : p.need || '#ff6b6b' }); cx += w + 5;
+          }
+          const bx = G.b.x + G.b.w - 78, by = y + G.rh / 2 - 15;
+          ctx.fillStyle = ok || ed ? p.accent || '#4fa3ff' : 'rgba(255,255,255,0.12)'; UK.rr(ctx, bx, by, 62, 30, 15); ctx.fill();
+          UK.text(ctx, r.station && !ed && !s.nearStation(r.station) ? '📍' + r.station : (+r.time ? `⏱ ${r.time}s` : 'Make'), bx + 31, by + 15, { size: r.station && !ed && !s.nearStation(r.station) ? 9 : 12, weight: 800, color: ok || ed ? '#fff' : withAlpha(txt, 0.5), maxW: 58 });
+        });
+        ctx.restore();
       },
     };
   },
@@ -8763,7 +9085,7 @@ registerBehavior('health', {
         if (!o.dot && !o.ignoreInvuln && (e.data.invuln || 0) > 0) return 0;
         let d = +n || 0; if (d <= 0) return 0;
         const type = String(o.type || '').toLowerCase(); if (type && resist[type] != null) d *= resist[type];
-        if (!o.pierce) d = d * (1 - clamp(+p.defense || 0, 0, 100) / 100) - (o.dot ? 0 : +p.armor || 0);
+        if (!o.pierce) d = d * (1 - clamp(+p.defense || 0, 0, 100) / 100) - (o.dot ? 0 : (+p.armor || 0) + (+e.data.equipArmor || 0)); // equipped armour adds to it
         if (d <= 0.001) { if (p.numbers && !o.dot) popOver(s, e, resist[type] === 0 ? 'Immune' : 'Blocked', '#9fb3c8', 18); return 0; }
         d = Math.round(d * 100) / 100;
         let soak = 0; if (sh > 0) { soak = Math.min(sh, d); sh -= soak; if (sh <= 0) s.emit('shieldBreak', e); }
@@ -8860,6 +9182,7 @@ registerBehavior('damager', {
     { key: 'pierce', label: 'Goes through armour', type: 'bool', default: false, group: 'More' },
     { key: 'noHealth', label: 'Destroys targets without Health', type: 'bool', default: false, group: 'More' },
     { key: 'points', label: 'Points per hit', type: 'number', default: 0, step: 1, group: 'More' },
+    { key: 'useWeapon', label: 'Adds the equipped weapon’s damage (on the player)', type: 'bool', default: true, group: 'More' },
   ],
   create(p) {
     const tags = tagList(p.targets), last = new Map(); let tick = 0;
@@ -8870,7 +9193,8 @@ registerBehavior('damager', {
         const hb = t.getBehavior('health');
         if (!hb) { if (p.noHealth) { s.burst(t.x, t.y, t.z, t.mesh?.color || t.shape?.fill || '#ff8a3d', 16); t.destroy(); } return 0; }
         const crit = +p.critChance > 0 && Math.random() * 100 < +p.critChance;
-        const d = (+p.amount || 0) * k * (crit ? +p.critTimes || 2 : 1);
+        const owner = e.has('player') ? e : e.parentEnt?.has('player') ? e.parentEnt : null, bonus = p.useWeapon !== false && owner ? +owner.data.equipDamage || 0 : 0;
+        const d = ((+p.amount || 0) + bonus) * k * (crit ? +p.critTimes || 2 : 1);
         const dealt = hb.damage(d, t, e, { type: p.dtype === 'normal' ? '' : p.dtype, crit, pierce: !!p.pierce, knockback: +p.knockback || undefined, ignoreInvuln: p.mode !== 'when it touches' });
         if (p.effect && p.effect !== 'nothing') hb.addEffect(p.effect, +p.effectDps || 1, +p.effectTime || 3, t);
         if (dealt > 0) { if (p.points) s.addVar('score', +p.points); s.emit('dealtDamage', e, t, dealt); }
@@ -9252,17 +9576,179 @@ registerBehavior('particles', {
 
 /** Inventory Item: picked up into the player's inventory ({inventory} shows it; conditions and instructions can check or use items). */
 registerBehavior('inventoryItem', {
-  label: 'Inventory Item', description: 'An item to pick up (key, potion, gem…). It goes into the inventory: show it with {inventory}, or {item_Key} for one item. Use “Has item” conditions and “Use item” instructions.',
+  label: 'Inventory Item', description: 'An item to pick up (wood, potion, sword, key…). It goes into the inventory; its type, icon, stack size and effects come from Game Settings › Items. Use “Has item” conditions and “Use item” instructions.',
   params: [
-    { key: 'item', label: 'Item name', type: 'text', default: 'Key' },
-    { key: 'icon', label: 'Icon (emoji)', type: 'text', default: '🔑' },
+    { key: 'item', label: 'Item name', type: 'text', default: 'Key', suggest: 'items' },
+    { key: 'icon', label: 'Icon (emoji, empty = from Items)', type: 'text', default: '🔑' },
     { key: 'amount', label: 'Amount', type: 'number', default: 1, step: 1 },
+    { key: 'amountMax', label: 'Up to (random amount, 0 = exactly)', type: 'number', default: 0, step: 1, group: 'More' },
     { key: 'tag', label: 'Picked up by tag', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'pickup', label: 'Picked up', type: 'select', options: ['on touch', 'on tap', 'on touch or tap'], default: 'on touch' },
+    { key: 'magnet', label: 'Pulled in from (0 = off)', type: 'number', default: 0, step: 10, group: 'More', info: 'Flies to the player when they come this close.' },
+    { key: 'delay', label: 'Can be picked up after (sec)', type: 'number', default: 0, step: 0.1, group: 'More' },
+    { key: 'note', label: 'Show what was picked up', type: 'bool', default: true, group: 'More' },
   ],
   create(p) {
+    let age = 0, n = 0;
+    const take = (e, s) => {
+      if (e.dead || age < (+p.delay || 0)) return;
+      const d = s.itemDef(p.item), icon = p.icon || d.icon || '';
+      const got = s.addItem(p.item, n, icon); if (got <= 0) return; // inventory full: it stays
+      s.engine.audio.sfx('power'); s.burst(e.x, e.y, e.z, RARITY[d.rarity] || '#fff59d', 12);
+      if (p.note !== false) s.message(`${icon} ${d.name || p.item}${got > 1 ? ' ×' + got : ''}`.trim(), 1.2);
+      n -= got; if (n <= 0) e.destroy();
+    };
     return {
-      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); },
-      collide(e, other, s) { if (!other.has(p.tag) || e.dead) return; s.addItem(p.item, +p.amount || 1, p.icon); s.engine.audio.sfx('power'); s.burst(e.x, e.y, e.z, '#fff59d', 12); s.message(`${p.icon} ${p.item}${+p.amount > 1 ? ' ×' + p.amount : ''}`, 1.2); e.destroy(); },
+      start(e, s) { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); const a = Math.round(+p.amount || 1), b = Math.round(+p.amountMax || 0); n = b > a ? a + Math.floor(Math.random() * (b - a + 1)) : a; if (p.pickup !== 'on touch') (s.tapTargets ||= new Set()).add(e); },
+      update(e, dt, s) {
+        age += dt;
+        if (p.pickup !== 'on touch' && s.state === 'play') for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { take(e, s); break; }
+        if (+p.magnet > 0 && age >= (+p.delay || 0)) { const pl = nearest(s, e, p.tag); if (pl) { const dx = pl.x - e.x, dy = pl.y - e.y, dz = (pl.z || 0) - (e.z || 0), d = Math.hypot(dx, dy, dz); if (d < +p.magnet && d > 1e-3) { const k = Math.min(1, dt * 8); e.x += dx * k; e.y += dy * k; e.z += dz * k; } } }
+        if (p.pickup !== 'on tap' && age >= (+p.delay || 0) && s.engine.physics.touching(e, p.tag)) take(e, s);
+      },
+      collide(e, other, s) { if (p.pickup !== 'on tap' && other.has(p.tag)) take(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); },
+    };
+  },
+});
+
+/** "Wood 2-4, Apple 1 50%, Gem 5%" → [{ name, min, max, chance }] */
+export function parseLoot(t) {
+  return String(t || '').split(/[,\n]/).map((q) => q.trim()).filter(Boolean).map((q) => {
+    let chance = 100; q = q.replace(/\s*@?\s*(\d+(?:\.\d+)?)\s*%$/, (_, c) => { chance = +c; return ''; }).trim();
+    let min = 1, max = 1; q = q.replace(/\s*[x×]?\s*(\d+)(?:\s*-\s*(\d+))?$/, (_, a, b) => { min = +a; max = b ? +b : +a; return ''; }).trim();
+    return { name: q, min, max: Math.max(min, max), chance };
+  }).filter((q) => q.name);
+}
+/** Roll a loot list and hand out what comes up: into the inventory or onto the ground. */
+function giveLoot(s, e, list, into) {
+  const got = [];
+  for (const L of parseLoot(list)) {
+    if (Math.random() * 100 >= L.chance) continue;
+    const n = L.min + Math.floor(Math.random() * (L.max - L.min + 1)); if (n <= 0) continue;
+    if (into) { const k = s.addItem(L.name, n); if (k < n) s.dropNear(L.name, n - k, e); }
+    else for (let i = 0; i < n; i += Math.max(1, Math.ceil(n / 3))) s.dropNear(L.name, Math.min(Math.max(1, Math.ceil(n / 3)), n - i), e);
+    got.push(`${s.itemDef(L.name).icon || ''}${L.name}${n > 1 ? ' ×' + n : ''}`);
+  }
+  return got;
+}
+
+/** Crafting Station: recipes that need it (Workbench, Furnace…) can be made while the player is close. */
+registerBehavior('craftingStation', {
+  label: 'Crafting Station', description: 'A workbench, furnace or anvil. Recipes that need this station can be crafted while the player is close. Tapping it sends a message (open your Crafting panel with it).',
+  params: [
+    { key: 'station', label: 'Station name', type: 'text', default: 'Workbench' },
+    { key: 'range', label: 'Works within', type: 'number', default: 100, default3d: 3 },
+    { key: 'tag', label: 'Used by tag', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'message', label: 'Message when tapped', type: 'text', default: 'open crafting', suggest: 'messages' },
+    { key: 'hint', label: 'Show its name when close', type: 'bool', default: true },
+  ],
+  create(p) {
+    let near = false, draw = null;
+    const key = () => String(p.station || '').trim().toLowerCase();
+    return {
+      start(e, s) {
+        (s.tapTargets ||= new Set()).add(e);
+        if (p.hint !== false) (s.overlays ||= []).push(draw = (ctx) => {
+          if (!near || e.dead || !e.visible) return; const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
+          const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh); if (q.behind) return;
+          const t = `🔨 ${p.station}`; ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText(t).width + 18;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)'; UK.rr(ctx, q.x - w / 2, q.y - 34, w, 24, 12); ctx.fill(); UK.text(ctx, t, q.x, q.y - 22, { size: 13, weight: 800 });
+        });
+      },
+      update(e, dt, s) {
+        const pl = nearest(s, e, p.tag), d = pl ? Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) : Infinity, now = d <= (+p.range || 100);
+        if (now) (s._stations ||= new Map()).set(key(), s.time);
+        if (now !== near) { near = now; s.emit(now ? 'stationNear' : 'stationLeft', e, p.station); if (now) s.setVar('station', p.station); else if (s.vars.station === p.station) s.setVar('station', ''); }
+        if (s.state === 'play') for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { s.setVar('station', p.station); s.send(p.message || 'open crafting', p.station); break; }
+      },
+      destroy(e, s) { s.tapTargets?.delete(e); if (draw) s.overlays = (s.overlays || []).filter((f) => f !== draw); },
+    };
+  },
+});
+
+/** Loot / Chest: gives or drops items (with chances) when opened, tapped or destroyed. */
+registerBehavior('loot', {
+  label: 'Loot / Chest', description: 'Gives items when it is opened (tapped or touched), destroyed (enemies, crates) or on a message. Each line can have an amount range and a chance: “Wood 2-4, Apple 1 50%, Gem 5%”.',
+  params: [
+    { key: 'loot', label: 'Loot', type: 'code', default: 'Coin 3-6\nApple 1 50%\nGem 1 10%', info: 'Item amount (or min-max) and an optional chance %.' },
+    { key: 'when', label: 'Gives it when', type: 'select', options: ['tapped', 'touched by tag', 'destroyed', 'message'], default: 'tapped' },
+    { key: 'tag', label: 'Opened by tag', type: 'text', default: 'player', suggest: 'tags', showIf: { when: ['touched by tag', 'tapped'] } },
+    { key: 'reach', label: 'Player must be within (0 = anywhere)', type: 'number', default: 0, showIf: { when: ['tapped'] } },
+    { key: 'message', label: 'Message', type: 'text', default: 'open chest', suggest: 'messages', showIf: { when: ['message'] } },
+    { key: 'into', label: 'Items go', type: 'select', options: ['straight into the inventory', 'onto the ground'], default: 'straight into the inventory' },
+    { key: 'once', label: 'Only once', type: 'bool', default: true },
+    { key: 'openIcon', label: 'Looks like this once opened (emoji)', type: 'text', default: '' },
+    { key: 'destroyAfter', label: 'Disappears once opened', type: 'bool', default: false },
+  ],
+  create(p) {
+    let opened = false;
+    const open = (e, s) => {
+      if (opened && p.once !== false) return; opened = true;
+      const got = giveLoot(s, e, p.loot, p.into !== 'onto the ground');
+      s.engine.audio.sfx('power'); s.burst(e.x, e.y, e.z, '#ffd23d', 18);
+      if (got.length && p.into !== 'onto the ground') s.message(got.join('  '), 1.6); else if (!got.length && p.when !== 'destroyed') s.message('Empty', 1);
+      s.emit('lootOpened', e, got);
+      if (p.openIcon && e.shape?.type === 'emoji') e.shape.emoji = p.openIcon;
+      if (p.destroyAfter && p.when !== 'destroyed') e.destroy();
+    };
+    return {
+      start(e, s) {
+        if (p.when === 'tapped') (s.tapTargets ||= new Set()).add(e);
+        if (p.when === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.when === 'message') s.on('message', (m) => { if (m === p.message && !e.dead) open(e, s); });
+      },
+      update(e, dt, s) {
+        if (p.when !== 'tapped' || s.state !== 'play') return;
+        for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { const pl = nearest(s, e, p.tag); if (+p.reach > 0 && (!pl || Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) > +p.reach)) { s.message('Too far away', 1); break; } open(e, s); break; }
+      },
+      collide(e, other, s) { if (p.when === 'touched by tag' && other.has(p.tag)) open(e, s); },
+      destroy(e, s) { s.tapTargets?.delete(e); if (p.when === 'destroyed' && s.state === 'play' && !s._ending) open(e, s); },
+    };
+  },
+});
+
+/** Resource: trees, rocks, ore and bushes the player gathers items from (by tapping or touching), maybe with a tool. */
+registerBehavior('resource', {
+  label: 'Resource (gather)', description: 'A tree, rock, ore or bush. Tap it (or walk into it) to gather items; after some hits it breaks and can grow back. It can need a tool (Axe, Pickaxe) in the inventory or equipped.',
+  params: [
+    { key: 'item', label: 'Gives item', type: 'text', default: 'Wood', suggest: 'items' },
+    { key: 'amount', label: 'Per hit', type: 'number', default: 1, step: 1 },
+    { key: 'hits', label: 'Hits before it breaks', type: 'number', default: 3, range: [1, 50], step: 1 },
+    { key: 'bonus', label: 'Extra loot when it breaks', type: 'text', default: '', info: 'Like Loot: “Apple 1 30%, Seed 1-2”.' },
+    { key: 'tool', label: 'Needs tool (item name, empty = none)', type: 'text', default: '', suggest: 'items' },
+    { key: 'gather', label: 'Gathered by', type: 'select', options: ['tapping', 'touching', 'tapping or touching'], default: 'tapping' },
+    { key: 'reach', label: 'Player must be within (0 = anywhere)', type: 'number', default: 120, default3d: 3.5 },
+    { key: 'tag', label: 'Player tag', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'cooldown', label: 'Time between hits (sec)', type: 'number', default: 0.3, step: 0.1, group: 'More' },
+    { key: 'respawn', label: 'Grows back after (sec, 0 = never)', type: 'number', default: 20, step: 5 },
+    { key: 'into', label: 'Items go', type: 'select', options: ['straight into the inventory', 'onto the ground'], default: 'straight into the inventory', group: 'More' },
+  ],
+  create(p) {
+    let left = 0, cool = 0, gone = false, regrow = 0;
+    const hit = (e, s) => {
+      if (gone || cool > 0) return; cool = Number.isFinite(+p.cooldown) ? +p.cooldown : 0.3;
+      const pl = nearest(s, e, p.tag);
+      if (+p.reach > 0 && (!pl || Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) > +p.reach)) { s.message('Get closer', 0.8); return; }
+      if (p.tool && !s.itemCount(p.tool) && !Object.values(s.equipped || {}).some((q) => sameVal(String(q).toLowerCase(), p.tool.toLowerCase()))) { s.message(`Needs ${/^[aeiou]/i.test(p.tool) ? 'an' : 'a'} ${p.tool}`, 1.2); return; }
+      left--; s.punch(e, is3D(e) ? { sx: -0.08, sy: 0.06, sz: -0.08 } : { sx: -0.08, sy: 0.08 }, 0.2, { add: true }); s.engine.audio.sfx('hit'); s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#a1887f', 8);
+      const n = Math.max(1, Math.round(+p.amount || 1));
+      if (p.into === 'onto the ground') s.dropNear(p.item, n, e); else { const k = s.addItem(p.item, n); if (k < n) s.dropNear(p.item, n - k, e); else popOver(s, e, `+${n} ${s.itemDef(p.item).icon || p.item}`, '#ffffff', 18); }
+      s.emit('gathered', e, p.item, n);
+      if (left > 0) return;
+      if (p.bonus) giveLoot(s, e, p.bonus, p.into !== 'onto the ground');
+      if (+p.respawn > 0) { gone = true; regrow = +p.respawn; e.visible = false; if (e.body) e.body.sensor = true; } else e.destroy();
+    };
+    return {
+      start(e, s) { left = Math.max(1, Math.round(+p.hits || 3)); if (p.gather !== 'touching') (s.tapTargets ||= new Set()).add(e); if (p.gather !== 'tapping') s.want(p.tag); },
+      update(e, dt, s) {
+        cool -= dt;
+        if (gone) { if ((regrow -= dt) <= 0) { gone = false; left = Math.max(1, Math.round(+p.hits || 3)); e.visible = true; if (e.body) e.body.sensor = !!e.props?.body?.sensor; s.punch(e, { sx: -0.5, sy: -0.5, sz: -0.5 }, 0.4); } return; }
+        if (s.state !== 'play') return;
+        if (p.gather !== 'touching') for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { hit(e, s); break; }
+        if (p.gather !== 'tapping' && s.engine.physics.touching(e, p.tag)) hit(e, s);
+      },
+      destroy(e, s) { s.tapTargets?.delete(e); },
     };
   },
 });
@@ -10885,6 +11371,7 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  invInfo: { cat: 'Values', label: 'Inventory Info', value: 'number', params: [opt('what', ['free slots', 'used slots', 'total items', 'items of type', 'equipped damage', 'equipped armour', 'crafting progress %'], 'free slots', 'what'), opt('type', Object.keys(ITEM_TYPES), 'food', 'type (items of type)')] },
   healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
@@ -11490,6 +11977,12 @@ export const LOGIC_EVENTS = {
   statusGot: { label: 'Gets poisoned / burnt / slowed…', icon: 'heart', params: [opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], say: (p) => (p.effect === 'any' ? 'Gets a status effect' : `Gets ${p.effect}`) },
   needLow: { label: 'Gets hungry / thirsty', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Gets thirsty' : p.need === 'hunger' ? 'Gets hungry' : 'Gets hungry or thirsty') },
   needEmpty: { label: 'Starving / out of water', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Out of water' : p.need === 'hunger' ? 'Starving' : 'Starving or out of water') },
+  crafted: { label: 'Crafts an item', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `Crafts ${p.item}` : 'Crafts something') },
+  itemUsed: { label: 'Uses an item', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `Uses ${p.item}` : 'Uses an item') },
+  equipped: { label: 'Equips / takes off', icon: 'key', params: [opt('mode', ['puts on', 'takes off', 'either'], 'puts on', 'when it'), sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => `${p.mode === 'either' ? 'Equips or takes off' : p.mode === 'takes off' ? 'Takes off' : 'Puts on'} ${p.item || 'something'}` },
+  inventoryFull: { label: 'Inventory is full', icon: 'key' },
+  recipeLearned: { label: 'Learns a recipe', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `Learns ${p.item}` : 'Learns a recipe') },
+  gathered: { label: 'Gathered (Resource)', icon: 'key', params: [sug(txt('item', '', 'item (empty = any)'), 'items')], say: (p) => (p.item ? `${p.item} gathered` : 'Gathered') },
   ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
@@ -11520,6 +12013,11 @@ export const LOGIC_CONDITIONS = {
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  canCraft: { label: 'Can craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], test: (c, p) => c.s.canCraft(p.item, +p.times || 1), say: (p) => `can craft ${p.item}` },
+  isEquipped: { label: 'Has equipped', icon: 'key', params: [sug(txt('item', '', 'item (empty = anything)'), 'items'), opt('slot', ['any', ...EQUIP_SLOTS], 'any', 'in slot')], test: (c, p) => { const eq = c.s.equipped || {}, list = p.slot && p.slot !== 'any' ? [eq[p.slot]] : Object.values(eq); return list.some((n) => n && (!p.item || String(n).toLowerCase() === String(p.item).toLowerCase())); }, say: (p) => `has ${p.item || 'something'} equipped${p.slot && p.slot !== 'any' ? ' in ' + p.slot : ''}` },
+  invSpace: { label: 'Inventory space', icon: 'key', params: [opt('op', OPS6, '≥', 'free slots'), num('value', 1, 'value')], test: (c, p) => cmp(Math.min(9999, c.s.slotsFree()), p.op, +p.value || 0), say: (p) => `free slots ${p.op} ${p.value}` },
+  hasItemType: { label: 'Has item of type', icon: 'key', params: [opt('type', Object.keys(ITEM_TYPES), 'food', 'type'), num('count', 1, 'at least')], test: (c, p) => c.s.itemStacks(p.type).reduce((a, q) => a + q.n, 0) >= (+p.count || 1), say: (p) => `has ${p.count} ${ITEM_TYPES[p.type]?.label.toLowerCase() || p.type}` },
+  knowsRecipe: { label: 'Knows recipe', icon: 'key', params: [sug(txt('item', 'Iron Sword', 'item'), 'items')], test: (c, p) => c.s.knowsRecipe(p.item), say: (p) => `knows how to make ${p.item}` },
   playing: { label: 'Game is playing', icon: 'play', test: (c) => c.s.state === 'play' && !c.s.engine.paused, say: () => 'game is playing' },
   compareVars: { label: 'Compare two variables', icon: 'trophy', params: [sug(txt('a', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), sug(txt('b', 'best', 'other variable'), 'vars')], test: (c, p) => cmp(+c.s.vars[p.a] || 0, p.op, +c.s.vars[p.b] || 0), say: (p) => `${p.a} ${p.op} ${p.b}` },
   myVar: { label: 'Compare its own variable', icon: 'key', params: [txt('name', 'hp', 'object variable'), opt('op', OPS6, '≤', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data[p.name] || 0, p.op, +p.value || 0), say: (p) => `its ${p.name} ${p.op} ${p.value}` },
@@ -11570,6 +12068,13 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  useItemFx: { cat: 'Variables', label: 'Use item (eat, drink, equip…)', icon: 'key', params: [sug(txt('item', 'Apple', 'item'), 'items')], run: (c, p) => { c.s.useItem(p.item, c.e?.has('player') ? c.e : c.s.player()); }, say: (p) => `Use ${p.item}` },
+  equipItem: { cat: 'Variables', label: 'Equip / take off', icon: 'key', params: [opt('mode', ['equip', 'take off'], 'equip', 'do'), sug(txt('item', 'Iron Sword', 'item (equip)'), 'items'), opt('slot', EQUIP_SLOTS, 'hand', 'slot (take off)')], run: (c, p) => { if (p.mode === 'take off') c.s.unequip(p.slot); else c.s.equip(p.item); }, say: (p) => (p.mode === 'take off' ? `Take off ${p.slot}` : `Equip ${p.item}`) },
+  craftItem: { cat: 'Variables', label: 'Craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], run: (c, p) => { c.s.craft(p.item, +p.times || 1); }, say: (p) => `Craft ${p.item}${+p.times > 1 ? ' ×' + p.times : ''}` },
+  learnRecipe: { cat: 'Variables', label: 'Learn recipe', icon: 'key', params: [sug(txt('item', 'Iron Sword', 'item'), 'items')], run: (c, p) => { if (c.s.learnRecipe(p.item)) c.s.message(`📜 New recipe: ${p.item}`, 1.6); }, say: (p) => `Learn recipe ${p.item}` },
+  dropItem: { cat: 'Variables', label: 'Drop item', icon: 'key', params: [sug(txt('item', 'Wood', 'item'), 'items'), num('amount', 1, 'amount')], run: (c, p) => { const n = -c.s.addItem(p.item, -(+p.amount || 1)); if (n > 0) c.s.dropNear(p.item, n, c.e?.has('player') ? c.e : c.s.player()); }, say: (p) => `Drop ${p.amount} ${p.item}` },
+  lootRoll: { cat: 'Variables', label: 'Give random loot', icon: 'key', params: [txt('loot', 'Coin 3-6, Gem 1 10%', 'loot (item amount chance%)'), opt('into', ['inventory', 'ground'], 'inventory', 'into')], run: (c, p) => { const got = giveLoot(c.s, c.e, p.loot, p.into !== 'ground'); if (got.length && p.into !== 'ground') c.s.message(got.join('  '), 1.6); }, say: (p) => `Loot: ${p.loot}` },
+  invManage: { cat: 'Variables', label: 'Inventory: sort / clear / slots', icon: 'key', params: [opt('what', ['sort by type', 'sort by name', 'sort by rarity', 'sort by count', 'clear', 'set slots', 'add slots'], 'sort by type', 'do'), num('amount', 20, 'slots')], run: (c, p) => { const s = c.s; if (p.what.startsWith('sort')) s.sortInventory(p.what.split(' ').pop()); else if (p.what === 'clear') s.clearInventory(); else { s.settings.invSlots = Math.max(0, (p.what === 'add slots' ? s.slotCount() : 0) + Math.round(+p.amount || 0)); s.syncInventory(); } }, say: (p) => (p.what.endsWith('slots') ? `${p.what[0].toUpperCase() + p.what.slice(1)} ${p.amount}` : `Inventory: ${p.what}`) },
   damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)'), opt('dtype', ['normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'normal', 'damage type'), bool('pierce', false, 'goes through armour')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e, { type: p.dtype && p.dtype !== 'normal' ? p.dtype : '', pierce: !!p.pierce }); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}${p.dtype && p.dtype !== 'normal' ? ' ' + p.dtype : ''}`) },
   statusFx: { cat: 'Objects', label: 'Poison / burn / slow…', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', Object.keys(STATUS_FX), 'poison', 'effect'), num('perSecond', 1, 'damage (or healing) per second'), num('seconds', 3, 'seconds')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.addEffect(p.effect, +p.perSecond, +p.seconds, t); }, say: (p) => `${STATUS_FX[p.effect]?.label || p.effect}: ${p.object} for ${p.seconds}s` },
   cure: { cat: 'Objects', label: 'Cure status effects', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.cure(p.effect, t); }, say: (p) => `Cure ${p.effect === 'any' ? 'everything' : p.effect} on ${p.object}` },
@@ -11743,6 +12248,8 @@ function evOk(type, p, q) {
     case 'damaged': return !p.dtype || p.dtype === 'any' || q.dtype === p.dtype;
     case 'statusGot': return !p.effect || p.effect === 'any' || q.effect === p.effect;
     case 'needLow': case 'needEmpty': case 'ate': return !p.need || p.need === 'any' || q.need === p.need;
+    case 'crafted': case 'itemUsed': case 'recipeLearned': case 'gathered': return !p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase());
+    case 'equipped': return (!p.mode || p.mode === 'either' || q.mode === p.mode) && (!p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase()));
     default: return true;
   }
 }
@@ -11761,6 +12268,13 @@ class LogicWatcher {
     s.on('needEmpty', (who, k) => { if (who === e) this.queue.push({ type: 'needEmpty', need: k }); });
     s.on('eat', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'hunger' }); });
     s.on('drink', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'thirst' }); });
+    s.on('craft', (item, n) => this.queue.push({ type: 'crafted', item, value: n }));
+    s.on('itemUsed', (u, item) => this.queue.push({ type: 'itemUsed', item }));
+    s.on('equip', (u, item, slot) => this.queue.push({ type: 'equipped', item, slot, mode: 'puts on' }));
+    s.on('unequip', (u, item, slot) => this.queue.push({ type: 'equipped', item, slot, mode: 'takes off' }));
+    s.on('inventoryFull', (item) => this.queue.push({ type: 'inventoryFull', item }));
+    s.on('recipeLearned', (item) => this.queue.push({ type: 'recipeLearned', item }));
+    s.on('gathered', (src, item, n) => this.queue.push({ type: 'gathered', item, value: n, other: src }));
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -12133,6 +12647,14 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'invInfo': {
+          switch (P('what')) {
+            case 'used slots': return s.slotsUsed(); case 'total items': return Object.values(s.inventory || {}).reduce((a, v) => a + v.n, 0);
+            case 'items of type': return s.itemStacks(P('type')).reduce((a, q) => a + q.n, 0); case 'equipped damage': return s.equipStat('damage'); case 'equipped armour': return s.equipStat('armor');
+            case 'crafting progress %': return s.crafting ? clamp((s.time - s.crafting.t0) / s.crafting.dur, 0, 1) * 100 : 0;
+            default: return Math.min(9999, s.slotsFree());
+          }
+        }
         case 'healthOf': {
           const t = P('object') ? target(ctx, P('object')) : e; if (!t) return 0;
           const d = t.data, pc = (a, b) => (+b ? (+a || 0) / +b * 100 : 0);
@@ -13643,6 +14165,7 @@ export class Engine {
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
+    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; } // Items & Recipes
     this.loadPrefs();
     this.setScene(this.factory());
     if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
@@ -13654,7 +14177,7 @@ export class Engine {
     const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes, uiOverlap: first.settings?.uiOverlap } }; // the UI theme, fonts, online services and notification types are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
-    if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
+    if (this.carry) { Object.assign(s.vars, this.carry); s.restoreInv(); if (s.state === 'title') s.state = 'play'; }
     if (s.settings.timeLimit) s.vars.time = +s.settings.timeLimit;
     s.vars.level = s.level;
     return s;
@@ -13664,14 +14187,14 @@ export class Engine {
   /** Jump to a level by number (1 = first), keeping variables like score. */
   goToLevel(n) {
     if (!this.levels) return;
-    const i = clamp(Math.round(n) - 1, 0, this.levels.length - 1), carry = { ...this.scene.vars };
+    const i = clamp(Math.round(n) - 1, 0, this.levels.length - 1), carry = { ...this.scene.vars, __inv: this.scene.packInv() };
     delete carry.best; delete carry.level; delete carry.time;
     this.carry = carry; this.levelIndex = i; this.setScene(this.factory()); this.saveProgress();
   }
 
   nextLevel() {
     if (!this.hasNextLevel()) return;
-    const carry = { ...this.scene.vars };
+    const carry = { ...this.scene.vars, __inv: this.scene.packInv() };
     delete carry.best; delete carry.level; delete carry.time;
     this.carry = carry;
     this.levelIndex++;
@@ -13702,7 +14225,7 @@ export class Engine {
         this.levelIndex = saved.level; this.carry = saved.vars;
         return this.setScene(this.factory());
       }
-      if (saved?.vars) Object.assign(scene.vars, saved.vars);
+      if (saved?.vars) { Object.assign(scene.vars, saved.vars); scene.restoreInv(); }
     }
     this.useRenderer(scene.mode);
     loadFonts(scene.settings.fonts);
@@ -13781,7 +14304,7 @@ export class Engine {
   saveProgress() {
     const s = this.scene;
     if (!s || this.editing || !s.settings.saveProgress || s.state !== 'play') return;
-    const vars = { ...s.vars }; delete vars.time; delete vars.best;
+    const vars = { ...s.vars, __inv: s.packInv() }; delete vars.time; delete vars.best;
     store.set(this.saveKey(), JSON.stringify({ vars, level: this.levelIndex || 0 }));
   }
   loadProgress(s) {
@@ -13796,7 +14319,7 @@ export class Engine {
   saveGame(slot = 1) {
     const s = this.scene;
     if (!s || this.editing) return false;
-    const vars = { ...s.vars }; delete vars.best;
+    const vars = { ...s.vars, __inv: s.packInv() }; delete vars.best;
     const ids = new Set((s.json?.entities || []).filter((ep) => ep.id && !ep.template).map((ep) => ep.id)), alive = new Set();
     const entities = {};
     for (const e of s.entities) {
@@ -13817,7 +14340,7 @@ export class Engine {
     const s = this.factory();
     if (!keepTitle || s.state !== 'title') s.state = 'play';
     this.setScene(s, { skipRestore: true });
-    Object.assign(s.vars, d.vars);
+    Object.assign(s.vars, d.vars); s.restoreInv();
     const removed = new Set(d.removed || []);
     for (const e of s.entities) {
       if (removed.has(e.id)) { e.dead = true; continue; }

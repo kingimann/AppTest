@@ -10987,7 +10987,7 @@ export function bindArgs(v, args) {
   return v;
 }
 const customArgs = (def, it) => Object.fromEntries((def.params || []).map((q) => { const v = it[q.key] ?? q.default ?? ''; return [q.key, q.type === 'number' && v !== '' && Number.isFinite(+v) ? +v : v]; }));
-const customSay = (def, p) => { const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
+const customSay = (def, p) => { if (def.say) return def.say.replace(/\{@(\w+)\}/g, (m, k) => { const q = (def.params || []).find((x) => x.key === k); return q ? String(p[k] ?? q.default ?? '') : m; }); const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
 /** Visual scripts on other objects: run one of their Functions and get its Return Value. */
 function callScriptFunction(t, name, args, from) { for (const f of t?._fns || []) if (f.has(name)) return { ok: true, v: f.call(name, args, from) }; return { ok: false, v: 0 }; }
 function whoOf(s, e, other, on, name) {

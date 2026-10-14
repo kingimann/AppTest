@@ -180,6 +180,11 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 - **My Instructions and My Conditions** (the *Mine* button in the Triggers or State Machine editor, or *New instruction…* / *New condition…* at the bottom of the picker):
   - Build your own instruction from other instructions (with waits), or your own condition from other conditions (all or any must be true).
   - Give them **inputs** (number or text, each with a default). Type `@amount` into any field of the steps to use an input, or `{@amount}` inside text.
+  - **Easy ways to make one:**
+    - **Save as My Instruction** / **Save as My Condition** (next to DO and IF) bundles a trigger's steps or checks into one reusable piece and puts it in their place. Pick which steps to bundle, or use *Make a My Instruction from this…* on any step.
+    - **New instruction… / New condition…** asks for a name, then starts blank or from a ready-made one. Instructions: *Reward*, *Spend coins*, *Hurt the player*, *Celebrate*, *Respawn*, *Spawn a few*. Conditions: *Can afford*, *Low health*, *Player is near*, *None left*, *Night time*, *Has item*.
+    - Tap **@** next to any value inside one to plug in an input, or to make that value a new input (its current value becomes the default). *Back to a fixed value* undoes it.
+    - **How it reads in a trigger** sets the sentence shown where it is used, e.g. "Reward {@amount} coins" reads "Reward 10 coins".
   - Use them like built-in ones: they appear under *My Instructions* / *My Conditions* in the pickers, and each use fills in its own inputs. A trigger waits for a My Instruction to finish, unless you choose *Don't wait for it*.
   - Edit one from any row that uses it. You can also **Duplicate** it, **Delete** it (it tells you how many times it is used), or **Save to Library** and add it to any other game from *Mine → From your library*.
   - They belong to the whole game, so every object's triggers and state machines can use them. Visual scripts can use them too, with **Run My Instruction** and **My Condition**. Find Problems flags uses of deleted ones.

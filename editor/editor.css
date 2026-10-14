@@ -1753,3 +1753,44 @@ button:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); out
 #app.clean #toolRail, #app.clean #zoomBar, #app.clean #ctxBar, #app.clean #addFab { opacity: 0; pointer-events: none; translate: 0 6px; }
 #cleanBtn.on { background: var(--accent-soft); color: #fff; }
 #toolRail.open { z-index: 7; }
+
+/* ---------- Hierarchy and Inspector ---------- */
+#inspector { position: relative; } /* (the jump chips measure from here) */
+/* component headers stay at the top while you scroll through a long component */
+.comp { overflow: clip; }
+.comp-h { position: sticky; top: var(--cj-h, 0px); z-index: 2; }
+.comp.flash { animation: compFlash 1s ease; }
+@keyframes compFlash { 0%, 35% { box-shadow: 0 0 0 2px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* jump chips: one per component, always at the top of the Inspector */
+.comp-jump { position: sticky; top: 0; z-index: 3; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 8px 12px; margin: 6px 0 0; background: color-mix(in srgb, var(--panel) 92%, transparent); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.comp-jump::-webkit-scrollbar { display: none; }
+#inspector:has(.comp-jump) { --cj-h: 50px; }
+.cj { flex: none; display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px 0 9px; border-radius: 17px; border: 1px solid var(--g2); background: var(--card); color: var(--muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.cj svg.i { width: 16px; height: 16px; }
+.cj.on { background: var(--accent-soft); border-color: transparent; color: var(--hi); }
+/* Hierarchy: lines show what's inside what; the eye and the drag grip stay quiet until you need them */
+.h-row { position: relative; }
+.h-row[style*="--tree"]::before { content: ''; position: absolute; left: calc(var(--tree) - 2px); top: 0; bottom: 0; width: 1.5px; background: color-mix(in srgb, var(--accent) 35%, var(--g5)); border-radius: 1px; }
+.h-row .eye, .h-row .h-grip { opacity: .42; transition: opacity .15s ease; }
+.h-row.sel .eye, .h-row.sel .h-grip, .h-row.off .eye, .h-row:hover .eye, .h-row:hover .h-grip { opacity: 1; }
+.h-row.sel { box-shadow: inset 3px 0 0 var(--accent); }
+
+/* ---------- Compact panels (Preferences › Compact panels) ---------- */
+html.dense .h-row { min-height: 50px; gap: 10px; }
+html.dense .h-row[style*="--tree"] { padding-left: calc(14px + var(--tree) * .8) !important; }
+html.dense .h-row[style*="--tree"]::before { left: calc(var(--tree) * .8 - 2px); }
+html.dense .h-ico { width: 32px; height: 32px; border-radius: 9px; }
+html.dense .h-ico svg.i { width: 18px; height: 18px; }
+html.dense .h-txt .nm { font-size: 15px; }
+html.dense .h-sub { font-size: 12px; }
+html.dense .h-row .eye { width: 38px; height: 38px; }
+html.dense .comp { margin: 10px 10px 0; border-radius: 14px; }
+html.dense .comp-h { min-height: 50px; font-size: 15px; }
+html.dense .comp-b { padding-top: 2px; }
+html.dense .row { margin-top: 10px; gap: 6px; }
+html.dense .row > label { font-size: 14px; }
+html.dense #inspector input:not([type=checkbox]):not([type=color]):not([type=range]), html.dense #inspector select { height: 42px; font-size: 15px; }
+html.dense #inspector input[type=color] { height: 42px; }
+html.dense .num button { width: 42px; height: 42px; font-size: 19px; }
+html.dense #inspector .btn { height: 44px; font-size: 15px; }
+html.dense #inspector:has(.comp-jump) { --cj-h: 50px; }

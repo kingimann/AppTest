@@ -65,7 +65,8 @@ Every object in the current level, in drawing order.
 - **The top row is the level itself.** Tap it to open **Game Settings** in the Inspector.
 - Rows show a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing the object's components.
 - Three or more objects with the same name fold into one row (**Gem ×8**).
-- **Children** sit indented under their parent with a fold arrow. Drag a row's grip onto another object to make it a child.
+- **Children** sit indented under their parent with a fold arrow and a tree line. Drag a row's grip onto another object to make it a child.
+- The eye and the drag grip are faint until a row is selected; the selected row has an accent edge.
 - **Folders:** long-press → *Put in Folder…*.
 - **Filter:** player, logic, physics, UI, templates, a tag or a layer. Search matches names, tags and components.
 - **Select** (tick button): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder or Delete them together.
@@ -80,6 +81,9 @@ The selected object's settings, as **components** (cards).
 - **Quick add** chips sit next to Add Component.
 - **⋯ on a card:** Copy, **Paste Values** (from another component of the same type), Copy as Text, move up / down, turn off, remove, and **Docs** (opens this component's reference page).
 - **Collapse all / Expand all** folds every card. The choice is remembered for the next object you select.
+- **Jump chips:** with four or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. A card's header also sticks to the top while you scroll through it.
+
+*Preferences › Compact panels* (on by default) makes Hierarchy rows shorter and Inspector fields smaller, so more fits on a phone screen.
 
 ### Fields
 

@@ -4271,10 +4271,24 @@ export function fitText(ctx, str, maxW) {
 }
 const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
 /** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
+/** A full-screen page (or other top-level backdrop): it runs under see-through bars; what's on it doesn't. */
+const isBackdrop = (e) => e.ui && e.stretch === 'both' && !e.parentEnt?.ui && !e._dock && !e.ignoreBars && !e.ignoreSafe;
+/** The bars an element lays itself out around: a backdrop leaves out the ones it goes under. */
+function barsFor(e, safe) {
+  const B = safe?.bars, U = safe?.under; if (!B || !U || !isBackdrop(e)) return B;
+  return { top: U.top >= B.top ? 0 : B.top, right: U.right >= B.right ? 0 : B.right, bottom: U.bottom >= B.bottom ? 0 : B.bottom, left: U.left >= B.left ? 0 : B.left };
+}
+/** The part of a backdrop that's under see-through bars (its children stay out of it). */
+function underOf(p, safe) { const U = safe?.under; if (!U || !isBackdrop(p)) return null; const B = safe.bars, k = uiK(safe) || 1; return { top: (B.top - barsFor(p, safe).top), bottom: (B.bottom - barsFor(p, safe).bottom), left: (B.left - barsFor(p, safe).left), right: (B.right - barsFor(p, safe).right), k }; }
 export function uiOrigin(e, W, H, safe) {
   const p = e.parentEnt, P = e._push;
-  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w + (P ? P.x : 0), y: r.y - r.h / 2 + f.y * r.h + (P ? P.y : 0) - (p._scrollY || 0) * uiK(safe) }; } // (a page scrolled by its Show If moves what is inside it)
-  const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = safe?.bars;
+  if (p && p.ui && !p.dead) {
+    const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor), Un = underOf(p, safe);
+    let x = r.x - r.w / 2 + f.x * r.w, y = r.y - r.h / 2 + f.y * r.h;
+    if (Un) { x += Un.left * (1 - f.x) - Un.right * f.x; y += Un.top * (1 - f.y) - Un.bottom * f.y; } // inside the part of the page that isn't under a bar
+    return { x: x + (P ? P.x : 0), y: y + (P ? P.y : 0) - (p._scrollY || 0) * uiK(safe) }; // (a page scrolled by its Show If moves what is inside it)
+  } // (a page scrolled by its Show If moves what is inside it)
+  const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = barsFor(e, safe);
   if (B && !e._dock && !e.ignoreSafe && !e.ignoreBars) { // nav bars hold their edge of the screen: everything else is laid out in what's left
     const a = e.anchor || 'top-left';
     pt.x += a.includes('left') ? B.left : a.includes('right') ? -B.right : (B.left - B.right) / 2;
@@ -4285,7 +4299,7 @@ export function uiOrigin(e, W, H, safe) {
 }
 /** The screen area left for UI once the safe area and the nav bars are taken out. */
 export function uiArea(W, H, safe, e) {
-  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && safe?.bars || { top: 0, right: 0, bottom: 0, left: 0 };
+  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && (e ? barsFor(e, safe) : safe?.bars) || { top: 0, right: 0, bottom: 0, left: 0 };
   const l = sf.left + B.left, t = sf.top + B.top;
   return { l, t, w: Math.max(1, W - l - sf.right - B.right), h: Math.max(1, H - t - sf.bottom - B.bottom) };
 }
@@ -4295,7 +4309,7 @@ export function uiArea(W, H, safe, e) {
  */
 function layoutUI(E, s) {
   const S = E.safe, mode = s.settings.uiOverlap || 'bars', screen = E.paused ? 'paused' : s.state;
-  const b = { top: 0, right: 0, bottom: 0, left: 0 };
+  const b = { top: 0, right: 0, bottom: 0, left: 0 }, u = { top: 0, right: 0, bottom: 0, left: 0 };
   for (const e of s.entities) {
     if (!e.ui || e.dead) continue;
     for (const bh of e.behaviors) {
@@ -4303,10 +4317,11 @@ function layoutUI(E, s) {
       e._dock = true;
       if (mode === 'off' || !e.visible || e._parentHidden || e._clipHidden || (!E.editing && ![screen, 'always'].includes(uiScreenOf(e)))) continue;
       const d = bh.dock(e, s);
-      if (d && d.size > 0) b[d.edge] = Math.max(b[d.edge], d.size);
+      if (d && d.size > 0) { b[d.edge] = Math.max(b[d.edge], d.size); if (d.under) u[d.edge] = Math.max(u[d.edge], d.size); } // under: pages run beneath it (a see-through bar), what's on them stays clear
     }
   }
   S.bars = b.top || b.right || b.bottom || b.left ? b : null;
+  S.under = u.top || u.right || u.bottom || u.left ? u : null;
   if (mode === 'push apart') pushApart(E, s, screen);
   else if (E._pushed) { for (const e of s.entities) delete e._push; E._pushed = false; }
 }
@@ -4376,7 +4391,8 @@ export function anchorPoint(anchor, W, H, safe) {
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
-  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : uiArea(W, H, safe, e);
+  const Un = p ? underOf(e.parentEnt, safe) : null;
+  const box = p ? (Un ? { l: p.x - p.w / 2 + Un.left, t: p.y - p.h / 2 + Un.top, w: p.w - Un.left - Un.right, h: p.h - Un.top - Un.bottom } : { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h }) : uiArea(W, H, safe, e); // (in a page under a see-through bar: the part not under it)
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
   // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
   const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
@@ -6873,6 +6889,19 @@ class BarHider {
   }
 }
 
+/** Frosted glass: what's already drawn behind a box (the game and the UI under it), blurred into it. Call with a clip set. */
+let blurTmp = null;
+function blurBehind(ctx, e, s, lx, ly, lw, lh, blur) {
+  const E = s.engine; if (!E.canvas || !E.uiCanvas) return;
+  const r = uiRect(s, e), K = uiK(E.safe) || 1, m = blur * 2;
+  const sx = Math.max(0, r.x + (lx - e.x) * K - m), sy = Math.max(0, r.y + (ly - e.y) * K - m), sw = Math.min(E.width - sx, lw * K + m * 2), sh = Math.min(E.height - sy, lh * K + m * 2);
+  if (!(sw > 1 && sh > 1)) return;
+  const d = E.uiDpr || 1, gd = E.dpr || 1; blurTmp ||= document.createElement('canvas');
+  blurTmp.width = Math.ceil(sw * d); blurTmp.height = Math.ceil(sh * d);
+  const t = blurTmp.getContext('2d'); t.clearRect(0, 0, blurTmp.width, blurTmp.height);
+  try { t.drawImage(E.canvas, sx * gd, sy * gd, sw * gd, sh * gd, 0, 0, blurTmp.width, blurTmp.height); t.drawImage(E.uiCanvas, sx * d, sy * d, sw * d, sh * d, 0, 0, blurTmp.width, blurTmp.height); } catch { return; }
+  ctx.filter = `blur(${blur}px)`; ctx.drawImage(blurTmp, (sx - r.x) / K + e.x, (sy - r.y) / K + e.y, sw / K, sh / K); ctx.filter = 'none';
+}
 const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
@@ -6883,6 +6912,11 @@ registerBehavior('uiBottomNav', {
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
     { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
     { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
+    { key: 'barOpacity', label: 'Background see-through (1 = solid, 0 = clear)', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Background', info: 'How much of the page shows through the bar. With a see-through bar the pages run underneath it.' },
+    { key: 'barBlur', label: 'Blur what is behind (frosted glass)', type: 'number', default: 0, range: [0, 30], step: 1, group: 'Background', info: 'Blurs the page and the game behind the bar, like iOS. Works best with a see-through bar.' },
+    { key: 'barColor2', label: 'Gradient to', type: 'color', default: '', optional: true, group: 'Background' },
+    { key: 'lineColor', label: 'Line colour', type: 'color', default: 'rgba(255,255,255,0.08)', group: 'Background', showIf: (b) => b.border !== false },
+    { key: 'underPages', label: 'Pages go under the bar', type: 'select', options: ['auto', 'yes', 'no'], default: 'auto', group: 'Background', info: { auto: 'Yes when the bar is see-through, blurred or floating: the page shows through and scrolls under it, while its buttons and lists stay above it.', yes: 'Always: the page runs to the bottom of the screen.', no: 'Never: pages end above the bar.' } },
     { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#4fa3ff', group: 'Colours' },
     { key: 'idleColor', label: 'Other tabs', type: 'color', default: '#8b90a5', group: 'Colours' },
     { key: 'indicatorColor', label: 'Indicator (blank = selected colour)', type: 'color', default: '', optional: true, group: 'Colours' },
@@ -6917,14 +6951,21 @@ registerBehavior('uiBottomNav', {
     { key: 'badgeStyle', label: 'Badges', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Colours' },
     { key: 'activeLift', label: 'Selected icon lifts up', type: 'number', default: 0, range: [0, 12], step: 1, group: 'Animation' },
     { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape', infoText: 'How tall the bar is. Icons and labels stay centred; change their sizes above.' },
-    { key: 'barOpacity', label: 'Bar opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Colours' },
+
     ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
     const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
     let W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
-    const pagesHiding = (s) => { const now = s.time || 0; if (now - hideCache.t > 0.5 || now < hideCache.t) { hideCache = { t: now, list: s.entities.flatMap((q) => q.behaviors.filter((b) => b.type === 'uiShowIf' && b.params?.hideNav && (b.params.var || 'page') === p.var).map((b) => b.params.value)) }; } return hideCache.list; };
+    /** What the pages say about the bar (hide it, which tab stays lit, its colour there), looked up now and then. */
+    const pageInfo = (s) => { const now = s.time || 0; if (now - hideCache.t > 0.5 || now < hideCache.t) { hideCache = { t: now, list: s.entities.flatMap((q) => q.behaviors.filter((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var).map((b) => ({ value: b.params.value, hide: !!b.params.hideNav, tab: b.params.navTab || '', color: b.params.navColor || '', look: b.params.navLook || 'as the bar says' }))) }; } return hideCache.list; };
+    const pagesHiding = (s) => pageInfo(s).filter((q) => q.hide).map((q) => q.value);
+    const here = (s) => pageInfo(s).find((q) => sameVal(s.vars[p.var], q.value)) || null;
+    const LOOK = { solid: 1, 'half see-through': 0.6, 'see-through': 0.3, clear: 0 };
+    const opacity = (s) => { const h = here(s); return h && LOOK[h.look] != null ? LOOK[h.look] : clamp(p.barOpacity ?? 1, 0, 1); };
+    const blurOf = (s) => { const h = here(s); return h && LOOK[h.look] === 1 ? 0 : +p.barBlur || 0; }; // a page that wants a solid bar gets no frosted glass
+    const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || ['floating', 'glass', 'minimal'].includes(p.style)));
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
     const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
@@ -6935,6 +6976,7 @@ registerBehavior('uiBottomNav', {
     const activeIdx = (s) => {
       const m = T.findIndex((t) => t.msg && s.openMenus?.has(t.msg)); if (m >= 0) return m; // a "menu" tab lights up while its menu is open
       const i = tabIdx(s); if (i >= 0) return i;
+      const h = here(s); if (h?.tab) { const j = T.findIndex((t) => t.page != null && sameVal(t.page, h.tab)); if (j >= 0) return j; } // a sub-page (Detail) keeps its tab (Home) lit
       return (p.otherPage || 'keep the last tab lit') === 'keep the last tab lit' && lastTab >= 0 && lastTab < T.length ? lastTab : -1;
     };
     const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
@@ -6953,8 +6995,9 @@ registerBehavior('uiBottomNav', {
       dock(e, s) {
         if (p.reserve === false || hide > 0.99) return null;
         const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe), top = o.y + G.by * K, bot = o.y + (G.by + G.bh) * K;
-        if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide) };
-        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide) };
+        const U = under(s);
+        if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide), under: U };
+        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide), under: U };
       },
       start(e, s) {
         T = tabs(); BH.start(s, e); sizeBar(e);
@@ -7019,7 +7062,7 @@ registerBehavior('uiBottomNav', {
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
         // floating bars (and none at all): the strip they sit in shows the open page's colour, not a band of something else
-        if ((fl || st === 'minimal') && !e.parentEnt?.ui) {
+        if ((fl || st === 'minimal') && !e.parentEnt?.ui && !under(s)) {
           const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var && sameVal(s.vars[p.var], b.params?.value)));
           const fill = pg ? tok(pg.shape.fill) : tok(s.background || '');
           if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; ctx.fillRect(e.x - G.w, G.by - (st === 'minimal' ? 0 : 8), G.w * 2, G.bh + 200); ctx.restore(); }
@@ -7027,12 +7070,16 @@ registerBehavior('uiBottomNav', {
         // the bar
         if (st !== 'minimal') {
           if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
-          const bc = p.barColor || '#12141f'; ctx.fillStyle = st === 'glass' && /^#[0-9a-f]{3,8}$/i.test(bc) ? withAlpha(bc, 0.72) : bc; // glass: the bar's colour, see-through
-          const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
-          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill(); ctx.globalAlpha = ba;
+          const hp = here(s), bc = hp?.color ? tok(hp.color) : p.barColor || '#12141f', bh2 = G.bh + (!fl && p.fillSafe !== false ? safeB : 0), op = opacity(s);
+          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.shadowColor = 'transparent'; rr(G.bx, G.by, G.bw, bh2, rad); ctx.clip(); blurBehind(ctx, e, s, G.bx, G.by, G.bw, bh2, blurOf(s)); ctx.restore(); } // frosted glass
+          let paint = st === 'glass' && /^#[0-9a-f]{3,8}$/i.test(bc) ? withAlpha(bc, 0.72) : bc; // glass: the bar's colour, see-through
+          if (p.barColor2 && st !== 'glass') { const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, bc); g.addColorStop(1, tok(p.barColor2)); paint = g; }
+          ctx.fillStyle = paint;
+          const ba = ctx.globalAlpha; ctx.globalAlpha *= op; if (op < 0.6) ctx.shadowColor = 'transparent'; // (no shadow under a nearly clear bar)
+          rr(G.bx, G.by, G.bw, bh2, rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
           if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.save(); ctx.clip(); const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.5, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(G.bx, G.by, G.bw, G.bh); ctx.restore(); } // a glassy sheen
-          else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+          else if (p.border !== false && !fl) { ctx.strokeStyle = tok(p.lineColor) || 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
         }
         const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
         // the indicator, under the icons
@@ -8993,6 +9040,9 @@ registerBehavior('uiShowIf', {
     { key: 'hideMessage', label: 'Message when it closes', type: 'text', default: '', suggest: 'messages', group: 'Page' },
     { key: 'firstMessage', label: 'Message the first time it opens', type: 'text', default: '', suggest: 'messages', group: 'Page', info: 'Once each time the game runs: load its data, play an intro…' },
     { key: 'hideNav', label: 'Hide the bottom bar on this page', type: 'bool', default: false, group: 'Page', info: 'For a full-screen page: a game, a photo, a checkout. The Bottom Nav slides away and comes back on other pages.' },
+    { key: 'navTab', label: 'Tab that stays lit on this page', type: 'text', default: '', group: 'Page', info: 'For a page that isn\'t a tab itself (a Detail page opened from Home): the name of the tab\'s page, e.g. home.' },
+    { key: 'navLook', label: 'Bottom bar on this page', type: 'select', options: ['as the bar says', 'solid', 'half see-through', 'see-through', 'clear'], default: 'as the bar says', group: 'Page' },
+    { key: 'navColor', label: 'Bottom bar colour on this page', type: 'color', default: '', optional: true, group: 'Page' },
     { key: 'requireVar', label: 'Only open when this variable is set', type: 'text', default: '', suggest: 'vars', group: 'Page', info: 'e.g. loggedIn: without it, the page sends you to the page below instead (a sign-in page).' },
     { key: 'otherwise', label: 'Otherwise go to page', type: 'text', default: 'login', group: 'Page', showIf: (b) => !!b.requireVar },
     { key: 'refreshMessage', label: 'Pull down to refresh sends', type: 'text', default: '', suggest: 'messages', group: 'Page', info: 'Pull the page down from the top and let go: a spinner shows and this message is sent (reload a list, check for news).' },
@@ -9014,14 +9064,15 @@ registerBehavior('uiShowIf', {
       const E = s.engine, k = uiK(E.safe) || 1, pb = uiBox(e, E.width, E.height, E.safe), top = pb.y - pb.h / 2, sy = e._scrollY || 0;
       let bottom = 0;
       for (const q of s.entities) { if (q.parentEnt !== e || !q.visible || !q.ui || q.dead) continue; const r = uiBox(q, E.width, E.height, E.safe); bottom = Math.max(bottom, (r.y + r.h / 2 - top) / k + sy); }
-      return Math.max(0, bottom + 16 - pb.h / k);
+      const Un = underOf(e, E.safe);
+      return Math.max(0, bottom + 16 - (pb.h - (Un ? Un.bottom : 0)) / k); // (the last things can scroll up above a see-through bar)
     };
     const scrollTick = (e, dt, s) => {
       const E = s.engine, inp = E.input, k = uiK(E.safe) || 1, b = uiBox(e, E.width, E.height, E.safe);
       maxS = overflow(s, e);
       e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0;
       const canScroll = maxS > 0.5, canPull = !!p.refreshMessage;
-      if (canScroll || canPull) for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d)) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; } // (nothing below the screen and no pull-to-refresh: the page stays put)
+      if (canScroll || canPull) for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d) && !s.entities.some((q) => q._dock && q.visible && !q._parentHidden && hitTest(s, q, d.x, d.y))) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; } // (nothing below the screen and no pull-to-refresh: the page stays put)
       let y = e._scrollY || 0;
       if (drag) {
         const q = inp.pointers.get(drag.id);

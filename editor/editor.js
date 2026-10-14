@@ -6383,7 +6383,7 @@ function pageCard(j, b, i, threeD, C, menu) {
     ], true),
     fold('page:motion', 'Opening and closing', [P('anim'), P('stagger'), P('animSpeed')], !!(b.anim || b.stagger || (b.animSpeed && +b.animSpeed !== 1))),
     fold('page:scroll', 'Scrolling', [P('scroll', { structure: true }), P('keepScroll'), P('scrollTopOn'), P('refreshMessage')], !!(b.scroll || b.refreshMessage)),
-    fold('page:nav', 'Bottom bar and access', [P('hideNav'), P('requireVar', { structure: true }), P('otherwise')], !!(b.hideNav || b.requireVar)),
+    fold('page:nav', 'Bottom bar and access', [P('hideNav'), P('navTab'), P('navLook'), P('navColor'), P('requireVar', { structure: true }), P('otherwise')], !!(b.hideNav || b.requireVar || b.navTab || b.navColor || (b.navLook && b.navLook !== 'as the bar says'))),
     fold('page:msg', 'Messages', [P('showMessage'), P('hideMessage'), P('firstMessage')], !!(b.showMessage || b.hideMessage || b.firstMessage)),
     fold('page:adv', 'Advanced: the variable behind pages', [P('var'), P('value'), P('op')]),
   ];

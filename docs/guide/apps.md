@@ -39,6 +39,7 @@ An app is a set of **pages**. A page is a full-screen panel with **Show If** on 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
 - **App Bar** shows the page title (*Page titles*: `home = My Tasks`, one per line) and a ‹ Back button. The phone's back gesture, the browser's Back button and Esc go back too.
 - *Add → UI & Menus → App → App Page* adds a new page. Change its value from `newpage` to your page's name.
+- **In the editor** you see one page at a time, starting with the home page. Switch pages with the page button above the UI editor's screen, or select something on another page in the Hierarchy and the editor shows that page.
 
 The engine keeps other UI clear of the app bar and the bottom nav. A page that fills the screen starts below the app bar and ends above the tabs. Stretched UI can have a different **top** and **bottom margin**, for example to leave room for a search bar.
 

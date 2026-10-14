@@ -2057,7 +2057,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -9547,6 +9547,10 @@ registerBehavior('uiInput', {
         e.text.color = empty && !box ? p.placeholderColor : color0;
       },
       drawUI(ctx, e, s) {
+        if (s.engine.editing && !box && !e.text?.value && p.placeholder) { // the editor: show the hint, where the typing will go
+          const b = UK.box(e), t = e.text || {}, al = t.align === 'left' || t.align === 'right' ? t.align : 'center', ins = +t.inset > 0 ? +t.inset : 12;
+          UK.text(ctx, p.placeholder, al === 'left' ? b.x + ins : al === 'right' ? b.x + b.w - ins : b.cx, b.cy, { size: t.size || 16, weight: t.weight || 600, color: tok(p.placeholderColor) || '#8a93a8', align: al, maxW: b.w - ins - (p.kind === 'search' ? 40 : 12) });
+        }
         if (p.kind !== 'search' || s.engine.editing && !e.shape) return;
         const b = UK.box(e), c = p.placeholderColor || '#8a93a8', isz = Math.min(18, b.h * 0.4);
         glyph(ctx, 'search', b.x + 14 + isz / 2, b.cy, isz, c);
@@ -11799,7 +11803,7 @@ registerBehavior('uiDataList', {
           }
           const ic = p.icon ? fillTemplate(p.icon, it.vars) : '';
           if (ic) { drawNavIcon(ctx, ic, tx + h * 0.22, y + h / 2, h * 0.42, Ac); tx += h * 0.44 + 12; }
-          const right = p.right ? fillTemplate(p.right, it.vars) : '', st = p.subtitle ? fillTemplate(p.subtitle, it.vars) : '';
+          const right = p.right ? fillTemplate(p.right, it.vars) : '', st = p.subtitle ? fillTemplate(p.subtitle, it.vars).replace(/^[\s·•|,–-]+$/, '') : ''; // (a line of only separators: nothing to show)
           let rw = 0; if (right) { ctx.font = `800 15px ${THEME.font}`; rw = ctx.measureText(right).width + 16; UK.text(ctx, right, x + w - 14, y + h / 2, { size: 15, weight: 800, color: /^[−-]/.test(right) ? (p.danger || '#ef4444') : txt, align: 'right' }); }
           const title = fillTemplate(p.title || '{title}', it.vars);
           UK.text(ctx, title, tx, y + h / 2 - (st ? 9 : 0), { size: 16, weight: 700, color: txt, align: 'left', maxW: x + w - tx - rw - 8 });

@@ -7051,7 +7051,7 @@ registerBehavior('uiBottomNav', {
           if (T[j]) { if (p.haptics !== false) s.engine.vibrate(6); goTab(s, j, cur); }
         }
         for (const t of s.engine.input.taps) {
-          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = p.style === 'raised center' && T.length % 2 === 1;
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = (p.style === 'raised center' && T.length % 2 === 1) || p.style === 'curved'; // (their circles stick up above the bar)
           let i = G.at(lx);
           const inBar = ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
           if (!inBar) continue;
@@ -7059,7 +7059,7 @@ registerBehavior('uiBottomNav', {
           pulse.set(i, 1); if (p.tapEffect === 'ripple') ripples.push({ i, t: 0 });
           if (p.haptics !== false) s.engine.vibrate(8);
           if (p.sound) s.engine.audio.sfx(p.sound);
-          if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
+          if (raised && p.style === 'raised center' && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
           if (tab.msg) { s.send(tab.msg); continue; }
           if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } if (p.reselectTop !== false) s.emit('pageScrollTop', String(tab.page), p.var); continue; }
           goTab(s, i, activeIdx(s));
@@ -7069,6 +7069,7 @@ registerBehavior('uiBottomNav', {
         if (!T.length) T = tabs();
         if (s.engine.editing) sizeBar(e);
         const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || (T[a]?.color ? tok(T[a].color) : act); // (a tab with its own colour lights up in it)
+        if (a >= 0 && (ind == null || s.engine.editing)) ind = G.cx(a); // (in the editor nothing animates: the indicator sits on the selected tab)
         if (hide > 0.99) return;
         BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
@@ -7086,10 +7087,10 @@ registerBehavior('uiBottomNav', {
         };
         const onC = tok(p.onColor) || '#ffffff', glowK = +p.glow >= 0 ? +p.glow : 16;
         // floating bars (and none at all): the strip they sit in shows the open page's colour, not a band of something else
-        if ((fl || st === 'minimal') && !e.parentEnt?.ui && !under(s)) {
+        if ((fl || st === 'minimal' || st === 'curved') && !e.parentEnt?.ui && !under(s)) {
           const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var && sameVal(s.vars[p.var], b.params?.value)));
-          const fill = pg ? tok(pg.shape.fill) : tok(s.background || '');
-          if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; ctx.fillRect(e.x - G.w, G.by - (st === 'minimal' ? 0 : 8), G.w * 2, G.bh + 200); ctx.restore(); }
+          const fill = pg ? tok(pg.shape.fill) : tok(s.background || '') || THEME.bg || '';
+          if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; ctx.fillRect(e.x - G.w / 2, G.by - (st === 'minimal' ? 0 : 8), G.w, G.h + safeB + 8); ctx.restore(); }
         }
         // the bar
         if (st !== 'minimal') {

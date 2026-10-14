@@ -10361,7 +10361,7 @@ function blockerAt(s, x, y, z, except) {
     if (o === except || o.dead || o.ui) continue;
     if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
     if (o.tiles) { if (s.mode !== '3d' && o.tiles.solidAtWorld(o, x, y)) return o; continue; }
-    const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable');
+    const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable') || (o.has('enemy') && o.getBehavior('health') && !o.getBehavior('health').dead);
     if (!solid) continue;
     const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
     if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && Math.abs(o.y - y) < Math.max(hy, 0.6) : Math.abs(o.y - y) < hy)) return o;
@@ -10369,48 +10369,131 @@ function blockerAt(s, x, y, z, except) {
   return null;
 }
 
+/** The grid that walls sit on (so a Grid Hero and Turn Enemies line up with the level): offset of a wall, or of the hero. */
+function gridOrigin(s, T) {
+  const c = (s._gridOrigin ||= {}); if (c[T]) return c[T];
+  const three = s.mode === '3d', m = (v) => Math.round((((v % T) + T) % T) * 1000) / 1000;
+  const ref = s.entities.find((o) => !o.dead && !o.ui && !o.tiles && !o.voxels && o.body && o.body.type === 'static' && !o.body.sensor)
+    || s.entities.find((o) => !o.dead && o.getBehavior?.('gridMove'));
+  return (c[T] = ref ? { x: m(ref.x), y: m(three ? ref.z : ref.y) } : { x: 0, y: 0 });
+}
+function snapToGrid(s, e, T) { const o = gridOrigin(s, T), three = s.mode === '3d'; e.x = Math.round((e.x - o.x) / T) * T + o.x; if (three) e.z = Math.round((e.z - o.y) / T) * T + o.y; else e.y = Math.round((e.y - o.y) / T) * T + o.y; }
+/** Things on a grid that fight back: Turn Enemies, and enemies with Health. */
+const gridFoe = (o) => !!o && !o.dead && (o.getBehavior('gridEnemy') || (o.has('enemy') && o.getBehavior('health')));
+/** Shortest 4-way (or 8-way) walk over free tiles. Returns steps [[dx, dy]…] or null. The last tile may be an enemy (to attack it). */
+function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = true } = {}) {
+  const three = s.mode === '3d', sx = e.x, sy = three ? e.z : e.y;
+  const gx = Math.round((tx - sx) / T), gy = Math.round((ty - sy) / T); if (!gx && !gy) return [];
+  const R = Math.max(Math.abs(gx), Math.abs(gy)) + 8, key = (i, j) => i + ',' + j, prev = new Map([[key(0, 0), null]]), q = [[0, 0]];
+  const dirs = diagonal ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  const blockAt = (i, j) => blockerAt(s, sx + i * T, three ? e.y : sy + j * T, three ? sy + j * T : e.z, e);
+  while (q.length && prev.size < maxCells) {
+    const [i, j] = q.shift();
+    if (i === gx && j === gy) { const out = []; for (let k = key(i, j), c = [i, j]; prev.get(k); ) { const p = prev.get(k); out.unshift([c[0] - p[0], c[1] - p[1]]); c = p; k = key(p[0], p[1]); } return out; }
+    for (const [dx, dy] of dirs) {
+      const ni = i + dx, nj = j + dy, k = key(ni, nj); if (prev.has(k) || Math.abs(ni) > R || Math.abs(nj) > R) continue;
+      if (dx && dy && (blockAt(i + dx, j) || blockAt(i, j + dy))) continue; // no cutting corners
+      const b = blockAt(ni, nj), goal = ni === gx && nj === gy;
+      if (b && !(goal && foeOk && gridFoe(b))) continue;
+      prev.set(k, [i, j]); q.push([ni, nj]);
+    }
+  }
+  return null;
+}
+/** Step toward a direction: a little nudge and back (bumping a wall or attacking). */
+function gridNudge(s, e, dx, dy, T) { const three = is3D(e), x0 = e.x, y0 = e.y, z0 = e.z, k = T * 0.25; s.tween(e, { x: x0 + dx * k, y: three ? y0 : y0 + dy * k, z: three ? z0 + dy * k : z0 }, 0.06); s.after(0.07, () => s.tween(e, { x: x0, y: y0, z: z0 }, 0.07)); }
+/** Hurt whatever is on a grid tile: a Turn Enemy, or anything with Health. */
+function gridHurt(s, target, amount, from) {
+  const ge = target.getBehavior('gridEnemy'); if (ge) return ge.hurt(target, s, amount, from);
+  const hb = target.getBehavior('health'); if (hb) return hb.damage(amount, target, from, { knockback: 0 });
+  return 0;
+}
+
 registerBehavior('gridMove', {
-  label: 'Grid Move', description: 'Moves one tile per swipe (or joystick push / tap beside the player). In turn-based games each move ends your turn. Bump enemies to attack, push "pushable" objects.',
+  label: 'Grid Move', description: 'Moves one tile at a time: arrow keys / WASD, joystick, swipes, or tap a tile to walk there (it finds the way around walls). In turn-based games each step ends your turn. Bump enemies to attack, push "pushable" objects.',
   params: [
     { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
-    { key: 'tapToMove', label: 'Tap beside the player to move', type: 'bool', default: true },
+    { key: 'tapToMove', label: 'Tap the screen to move', type: 'bool', default: true },
+    { key: 'tapMode', label: 'Tapping', type: 'select', options: ['walks to the tapped tile', 'steps toward the tap'], default: 'walks to the tapped tile', showIf: { tapToMove: [true] } },
+    { key: 'stepTime', label: 'Time per step (sec)', type: 'number', default: 0.14, range: [0.03, 1], step: 0.01 },
+    { key: 'holdRepeat', label: 'Keeps walking while held', type: 'bool', default: true },
+    { key: 'diagonal', label: 'Diagonal steps', type: 'bool', default: false },
     { key: 'damage', label: 'Bump attack damage', type: 'number', default: 1 },
+    { key: 'snap', label: 'Line up with the grid at the start', type: 'bool', default: true, group: 'More', info: 'Uses the grid your walls sit on.' },
+    { key: 'face', label: 'Face where it moves (2D)', type: 'select', options: ['flip left / right', 'turn', 'no'], default: 'flip left / right', group: 'More' },
+    { key: 'sound', label: 'Step sound', type: 'bool', default: true, group: 'More' },
+    { key: 'marker', label: 'Show where it is walking', type: 'bool', default: true, group: 'More' },
   ],
   create(p) {
-    let busy = 0, armed = true;
+    let busy = 0, held = 0, path = [], goal = null, draw = null;
+    const T = () => +p.tile || 40;
+    const dirOfAxis = (a) => { const ax = Math.abs(a.x) > 0.38 ? Math.sign(a.x) : 0, ay = Math.abs(a.y) > 0.38 ? Math.sign(a.y) : 0; if (p.diagonal) return ax || ay ? [ax, ay] : null; if (!ax && !ay) return null; return Math.abs(a.x) > Math.abs(a.y) ? [ax, 0] : [0, ay]; };
+    const KEYDIR = { arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0], arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1] };
+    const tapIgnored = (s, t) => s.engine.input.onTapTarget(t) || s.entities.some((o) => o.ui && !o.dead && o.visible !== false && o.behaviors.length && hitTest(s, o, t.x, t.y));
+    const face = (e, dx, dy) => {
+      if (is3D(e)) { e.ry = Math.atan2(-dx, -dy) / DEG; return; }
+      if (p.face === 'turn') e.rz = Math.atan2(dy, dx) / DEG;
+      else if (p.face !== 'no' && dx) { if (e.shape?.type === 'emoji') e.data.flipX = dx > 0; else e.sx = Math.abs(e.sx) * (dx < 0 ? -1 : 1); }
+    };
+    /** Take one step; returns false if it couldn't move (wall), true if it moved, attacked or pushed. */
+    const step = (e, s, dx, dy) => {
+      const t = T(), three = is3D(e), tx = e.x + dx * t, ty = three ? e.y : e.y + dy * t, tz = three ? e.z + dy * t : e.z;
+      face(e, dx, dy);
+      const hit = blockerAt(s, tx, ty, tz, e);
+      const owner = e, bonus = +owner.data.equipDamage || 0;
+      if (gridFoe(hit)) { gridNudge(s, e, dx, dy, t); gridHurt(s, hit, (+p.damage || 1) + bonus, e); s.emit('gridAttack', e, hit); path = []; goal = null; busy = Math.max(0.16, +p.stepTime || 0.14); if (s.settings.turnBased) s.endTurn(); return true; }
+      if (hit && hit.tags.has('pushable')) {
+        const bx = hit.x + dx * t, by = three ? hit.y : hit.y + dy * t, bz = three ? hit.z + dy * t : hit.z;
+        if (blockerAt(s, bx, by, bz, hit)) { gridNudge(s, e, dx, dy, t); s.engine.vibrate(15); path = []; goal = null; busy = 0.15; return false; }
+        s.tween(hit, { x: bx, y: by, z: bz }, +p.stepTime || 0.14);
+      } else if (hit) { gridNudge(s, e, dx, dy, t); s.engine.vibrate(15); path = []; goal = null; busy = 0.15; return false; }
+      s.tween(e, { x: tx, y: ty, z: tz }, (+p.stepTime || 0.14) * 0.9);
+      if (p.sound !== false) s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
+      busy = +p.stepTime || 0.14; s.emit('gridStep', e, dx, dy);
+      if (s.settings.turnBased) s.endTurn();
+      return true;
+    };
     return {
-      start(e, s) { e.ensureBody({ type: 'kinematic' }); s.want('player'); },
-      update(e, dt, s) {
-        if ((busy -= dt) > 0 || s.state !== 'play' || (s.settings.turnBased && !s.isPlayerTurn)) return;
-        const inp = s.engine.input, a = inp.axis();
-        let dx = 0, dy = 0;
-        if (inp.pressed('swipe:left')) dx = -1; else if (inp.pressed('swipe:right')) dx = 1;
-        else if (inp.pressed('swipe:up')) dy = -1; else if (inp.pressed('swipe:down')) dy = 1;
-        else if (Math.hypot(a.x, a.y) > 0.6) { if (armed) { if (Math.abs(a.x) > Math.abs(a.y)) dx = Math.sign(a.x); else dy = Math.sign(a.y); armed = false; } }
-        else armed = true;
-        if (!dx && !dy && p.tapToMove && inp.taps.length) {
-          const t = inp.taps[0], sp = s.mode === '3d' ? s.engine.renderer.worldToScreen(s, e.x, e.y, e.z) : s.engine.renderer.worldToScreen(s, e.x, e.y);
-          const ox = t.x - sp.x, oy = t.y - sp.y;
-          if (Math.hypot(ox, oy) > 24) { if (Math.abs(ox) > Math.abs(oy)) dx = Math.sign(ox); else dy = Math.sign(oy); }
-        }
-        if (!dx && !dy) return;
-        const T = p.tile, tx = e.x + dx * T, ty = is3D(e) ? e.y : e.y + dy * T, tz = is3D(e) ? e.z + dy * T : e.z;
-        if (is3D(e)) e.ry = Math.atan2(-dx, -dy) / DEG;
-        const hit = blockerAt(s, tx, ty, tz, e);
-        if (hit && hit.getBehavior('gridEnemy')) { // bump attack
-          hit.getBehavior('gridEnemy').hurt(hit, s, p.damage);
-          busy = 0.15; if (s.settings.turnBased) s.endTurn(); return;
-        }
-        if (hit && hit.tags.has('pushable')) {
-          const bx = hit.x + dx * T, by = is3D(e) ? hit.y : hit.y + dy * T, bz = is3D(e) ? hit.z + dy * T : hit.z;
-          if (blockerAt(s, bx, by, bz, hit)) { s.engine.vibrate(15); return; }
-          s.tween(hit, { x: bx, y: by, z: bz }, 0.12);
-        } else if (hit) { s.engine.vibrate(15); return; }
-        s.tween(e, { x: tx, y: ty, z: tz }, 0.12);
-        s.engine.audio.tone({ freq: 520, to: 600, dur: 0.05, vol: 0.05 });
-        busy = 0.14;
-        if (s.settings.turnBased) s.endTurn();
+      start(e, s) {
+        e.ensureBody({ type: 'kinematic' }); s.want('player');
+        if (p.snap !== false) snapToGrid(s, e, T());
+        if (p.marker !== false) (s.overlays ||= []).push(draw = (ctx) => {
+          if (!goal || e.dead) return; const r = s.engine.renderer, three = s.mode === '3d', q = three ? r.worldToScreen(s, goal.x, e.y - (e.extents().hy || 0.5), goal.y) : r.worldToScreen(s, goal.x, goal.y);
+          if (q.behind) return; const z = three ? 14 : T() * r.zoomFor(s) * 0.32, k = 0.6 + 0.4 * Math.abs(Math.sin(s.time * 6));
+          ctx.save(); ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2.5; ctx.globalAlpha = k; ctx.beginPath(); ctx.arc(q.x, q.y, z, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+        });
       },
+      update(e, dt, s) {
+        busy -= dt;
+        if (s.state !== 'play') { path = []; goal = null; return; }
+        const inp = s.engine.input, three = is3D(e);
+        // what the player asked for this frame (always read, so quick presses are never lost)
+        let want = null;
+        for (const k of inp.keysDown || []) if (KEYDIR[k]) { want = KEYDIR[k]; break; }
+        if (!want) for (const [d, v] of [['left', [-1, 0]], ['right', [1, 0]], ['up', [0, -1]], ['down', [0, 1]]]) if (inp.pressed('swipe:' + d)) { want = v; break; }
+        const a = dirOfAxis(inp.axis());
+        if (!want && a) { held += dt; if (held === dt) want = a; } else if (!a) held = 0;
+        if (want) { path = [want]; goal = null; }
+        else if (p.tapToMove !== false && inp.taps.length) {
+          const t = inp.taps.find((q) => !tapIgnored(s, q));
+          if (t) {
+            const w = three ? screenToWorldAt(s, t.x, t.y, e.y) : s.engine.renderer.screenToWorld(s, t.x, t.y);
+            if (w) {
+              const o = gridOrigin(s, T()), cx = Math.round((w.x - o.x) / T()) * T() + o.x, wy = three ? w.z : w.y, cy = Math.round((wy - o.y) / T()) * T() + o.y;
+              if (p.tapMode === 'steps toward the tap') { const ox = w.x - e.x, oy = wy - (three ? e.z : e.y); if (Math.hypot(ox, oy) > T() * 0.4) { path = [Math.abs(ox) > Math.abs(oy) ? [Math.sign(ox), 0] : [0, Math.sign(oy)]]; goal = null; } }
+              else { const route = gridPath(s, e, cx, cy, T(), { diagonal: !!p.diagonal }); if (route?.length) { path = route; goal = { x: cx, y: cy }; } else if (route === null) { s.engine.vibrate(10); s.message?.('Can’t get there', 0.8); } }
+            }
+          }
+        }
+        if (busy > 0 || (s.settings.turnBased && !s.isPlayerTurn)) return;
+        // holding the joystick / a key keeps walking
+        if (!path.length && a && p.holdRepeat !== false && held > 0.22) path = [a];
+        if (!path.length) { goal = null; return; }
+        const [dx, dy] = path.shift();
+        step(e, s, dx, dy);
+        if (!path.length) goal = null;
+      },
+      destroy(e, s) { if (draw) s.overlays = (s.overlays || []).filter((f) => f !== draw); },
     };
   },
 });
@@ -10526,41 +10609,72 @@ registerBehavior('controller2d', {
 });
 
 registerBehavior('gridEnemy', {
-  label: 'Turn Enemy', description: 'On each enemy turn, steps one tile toward the player and attacks when next to them. Bump it to hurt it.',
+  label: 'Turn Enemy', description: 'A grid enemy. In turn-based games it acts on each enemy turn (otherwise every few seconds): walks around walls toward the player when it sees them, wanders or stands guard, and attacks when next to them (their Health, or a life). Bump it to hurt it.',
   params: [
     { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
-    { key: 'hp', label: 'Health', type: 'number', default: 1 },
+    { key: 'hp', label: 'Health (if it has no Health component)', type: 'number', default: 1 },
+    { key: 'attack', label: 'Attack damage', type: 'number', default: 1 },
     { key: 'points', label: 'Points when defeated', type: 'number', default: 10 },
     { key: 'sight', label: 'Notices player within (tiles, 0 = always)', type: 'number', default: 6 },
+    { key: 'mode', label: 'When it can’t see the player', type: 'select', options: ['waits', 'wanders', 'goes back home'], default: 'waits' },
+    { key: 'every', label: 'Acts every (turns)', type: 'number', default: 1, range: [1, 10], step: 1, info: '2 = a slow enemy that moves every other turn.' },
+    { key: 'realTime', label: 'Not turn-based: acts every (sec)', type: 'number', default: 0.7, step: 0.1, group: 'More' },
+    { key: 'snap', label: 'Line up with the grid at the start', type: 'bool', default: true, group: 'More' },
+    { key: 'showBar', label: 'Health bar over it', type: 'select', options: ['when hurt', 'always', 'never'], default: 'when hurt', group: 'More' },
   ],
   create(p) {
-    let hp = p.hp;
+    let hp = 0, max = 1, turns = 0, clock = 0, home = null;
+    const T = () => +p.tile || 40;
+    const bar = (e) => { const k = hp / max; (e._bars ||= {}).health = { k, col: k > 0.5 ? '#5dff8a' : k > 0.25 ? '#ffd23d' : '#ff4d4d', show: p.showBar === 'always' || (p.showBar !== 'never' && hp < max) }; e.data.hp = hp; e.data.hpMax = max; };
+    const attack = (e, s, pl) => {
+      s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
+      const hb = pl.getBehavior('health'), dmg = +p.attack || 1;
+      if (hb) hb.damage(dmg, pl, e, { knockback: 0 });
+      else if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
+      s.emit('gridAttack', e, pl);
+    };
+    const moveTo = (e, s, dx, dy) => {
+      const t = T(), three = is3D(e), tx = e.x + dx * t, ty = three ? e.y : e.y + dy * t, tz = three ? e.z + dy * t : e.z, k = Math.round(tx) + ',' + Math.round(three ? tz : ty);
+      const R = (s._gridRes ||= { turn: -1, set: new Set() }); if (R.turn !== s.time) { R.turn = s.time; R.set.clear(); }
+      if (R.set.has(k) || blockerAt(s, tx, ty, tz, e)) return false;
+      const pl = s.findAll('player')[0]; if (pl && Math.abs(pl.x - tx) < t / 2 && Math.abs((three ? pl.z - tz : pl.y - ty)) < t / 2) return false;
+      R.set.add(k); s.tween(e, { x: tx, y: ty, z: tz }, 0.15);
+      if (three) e.ry = Math.atan2(-dx, -dy) / DEG; else if (dx && e.shape?.type === 'emoji') e.data.flipX = dx > 0;
+      return true;
+    };
     const self = {
-      hurt(e, s, dmg) {
-        hp -= dmg; e.data.invuln = 0.2; s.engine.audio.sfx('hit');
+      get hp() { return hp; },
+      hurt(e, s, dmg, from) {
+        const hb = e.getBehavior('health'); if (hb) return hb.damage(dmg, e, from, { knockback: 0 });
+        hp -= dmg; e.data.invuln = 0.2; s.engine.audio.sfx('hit'); bar(e); s.emit('damage', e, dmg, from, '');
         s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#f55', 12);
-        if (hp <= 0) { s.addVar('score', p.points); e.destroy(); }
+        if (hp <= 0) { s.addVar('score', p.points); s.emit('death', e); e.destroy(); }
+        return dmg;
       },
-      turn(e, s) {
-        const pl = s.findAll('player')[0];
-        if (!pl) return;
-        const T = p.tile, dx = Math.round((pl.x - e.x) / T), dy = Math.round(((is3D(e) ? pl.z : pl.y) - (is3D(e) ? e.z : e.y)) / T);
-        if (Math.abs(dx) + Math.abs(dy) === 1) { // adjacent: attack
-          s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
-          if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
+      act(e, s) {
+        const pl = s.findAll('player')[0]; if (!pl || e.dead) return;
+        const t = T(), three = is3D(e), dx = Math.round((pl.x - e.x) / t), dy = Math.round(((three ? pl.z : pl.y) - (three ? e.z : e.y)) / t), d = Math.abs(dx) + Math.abs(dy);
+        if (d === 1) return attack(e, s, pl);
+        const sees = !+p.sight || d <= +p.sight;
+        if (sees) {
+          const route = gridPath(s, e, pl.x, three ? pl.z : pl.y, t, { maxCells: 400, foeOk: false });
+          const first = route?.[0] || null; // the player's own tile ends the route; the step before it is what matters
+          if (first && moveTo(e, s, first[0], first[1])) return;
+          const tries = Math.abs(dx) >= Math.abs(dy) ? [[Math.sign(dx), 0], [0, Math.sign(dy)]] : [[0, Math.sign(dy)], [Math.sign(dx), 0]];
+          for (const [mx, my] of tries) if ((mx || my) && moveTo(e, s, mx, my)) return;
           return;
         }
-        if (p.sight && Math.abs(dx) + Math.abs(dy) > p.sight) return;
-        const tries = Math.abs(dx) >= Math.abs(dy) ? [[Math.sign(dx), 0], [0, Math.sign(dy)]] : [[0, Math.sign(dy)], [Math.sign(dx), 0]];
-        for (const [mx, my] of tries) {
-          if (!mx && !my) continue;
-          const tx = e.x + mx * T, ty = is3D(e) ? e.y : e.y + my * T, tz = is3D(e) ? e.z + my * T : e.z;
-          if (blockerAt(s, tx, ty, tz, e) || (Math.abs(pl.x - tx) < T / 2 && Math.abs((is3D(e) ? pl.z - tz : pl.y - ty)) < T / 2)) continue;
-          s.tween(e, { x: tx, y: ty, z: tz }, 0.15);
-          if (is3D(e)) e.ry = Math.atan2(-mx, -my) / DEG;
-          break;
-        }
+        if (p.mode === 'wanders') { const D = [[1, 0], [-1, 0], [0, 1], [0, -1]].sort(() => Math.random() - 0.5); for (const [mx, my] of D) if (moveTo(e, s, mx, my)) return; }
+        else if (p.mode === 'goes back home' && home) { const route = gridPath(s, e, home.x, home.y, t, { maxCells: 400, foeOk: false }); if (route?.[0]) moveTo(e, s, route[0][0], route[0][1]); }
       },
+      start(e, s) {
+        max = Math.max(1, +p.hp || 1); hp = max; if (p.snap !== false) snapToGrid(s, e, T()); home = { x: e.x, y: is3D(e) ? e.z : e.y };
+        if (!e.getBehavior('health')) bar(e);
+        const pl = s.findAll('player')[0]; if (pl && !pl.getBehavior('health') && s.vars.lives == null) s.setVar('lives', 3); // something to lose before game over
+      },
+      turn(e, s) { if (++turns % Math.max(1, Math.round(+p.every || 1))) return; self.act(e, s); },
+      update(e, dt, s) { if (s.settings.turnBased || s.state !== 'play') return; if ((clock += dt) >= Math.max(0.15, +p.realTime || 0.7) * Math.max(1, Math.round(+p.every || 1))) { clock = 0; self.act(e, s); } },
+      destroy(e) { if (e._bars) delete e._bars.health; },
     };
     return self;
   },

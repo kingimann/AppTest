@@ -554,6 +554,20 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - Crafting: `craft(item, times)`, `canCraft`, `craftMissing`, `learnRecipe`.
   - Item names match whatever their capitalisation.
 
+### Grid movement (Grid Hero and Turn Enemy)
+
+- **Every input counts:** quick arrow / WASD presses each take a step (before, fast presses could be lost and holding only moved once). Holding a key or the joystick keeps walking.
+- **Swipes and taps:** swipe for one step, or **tap any tile to walk there**. It finds the shortest way around walls and shows a marker on the tile it's heading for. In turn-based games it walks one step per turn. Taps on UI buttons no longer move the hero.
+- **Lines up with your level:** at the start, the hero and Turn Enemies snap to the grid your walls sit on, so they never end up half a tile off.
+- **Fights:** bumping an enemy gives a nudge, hurts it (plus the equipped weapon's damage) and shows its health bar. Bumping a wall nudges and buzzes.
+- **Grid Hero** (Create) now comes with Health: 5 hearts and a bar over it. Before, the first enemy hit ended the game.
+- **Turn Enemies:**
+  - They walk around walls toward the player and never pile onto the same tile.
+  - Their attack damage can be set, and it hits the player's Health (or takes a life if the player has no Health).
+  - When they can't see the player, they can wait, wander or go back home.
+  - They can act every few turns (slow monsters).
+  - In games that aren't turn-based, they move every few seconds.
+
 ### Move: joystick, tilt and drag
 
 - **Taps and the joystick get along:**
@@ -1322,8 +1336,8 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 | `dropItem` | Drops a template when destroyed (loot, power-ups). | `template`, `chance` (1) |
 | `emitter` | Keeps giving off particles (fire, smoke, sparkles). | `color`, `rate` (20), `spread` (0.5) |
 | `blink` | Flashes on and off; with Hazard it only hurts while visible. | `on` (0.6), `off` (0.6), `solid` (true) |
-| `gridMove` | Moves one tile per swipe, joystick push or tap beside the player; ends your turn in turn-based games. Bump enemies to attack, push objects tagged `pushable`. | `tile` (40 / 3D 1), `tapToMove`, `damage` |
-| `gridEnemy` | Turn Enemy: each enemy turn steps toward the player and attacks when adjacent. | `tile`, `hp`, `points`, `sight` |
+| `gridMove` | Moves one tile at a time: arrow keys / WASD (every press counts), joystick, swipes, or tap a tile to walk there by the shortest way around walls. Holding a direction keeps walking. Lines up with the grid your walls sit on. Ends your turn in turn-based games. Bump enemies (Turn Enemies, or anything tagged `enemy` with Health) to attack them; push objects tagged `pushable`. Taps on UI buttons are ignored. | `tile` (40 / 3D 1), `tapToMove`, `tapMode` (walks to the tapped tile / steps toward the tap), `stepTime`, `holdRepeat`, `diagonal`, `damage` (plus the equipped weapon), `snap`, `face`, `marker` |
+| `gridEnemy` | Turn Enemy: on each enemy turn it walks around walls toward the player when it sees them (or waits, wanders, goes home), attacks when next to them (their Health, or a life), never shares a tile with another enemy, and shows a health bar when hurt. Not turn-based: it acts every few seconds. | `tile`, `hp`, `attack`, `points`, `sight`, `mode`, `every` (turns), `realTime`, `snap`, `showBar` |
 | `boardCell` | A board square (tic-tac-toe, connect-style): tap to place a mark; vs a friend or the computer. | `row`, `col`, `line` (3), `vsComputer` |
 | `turnAction` | Turn Button: on your turn, tap to change a variable (attack/heal/spell), optionally costing another. | `var`, `amount` (min/max), `max`, `costVar`, `cost`, `text`, `sound` |
 | `turnOpponent` | Enemy Turn: on the enemy's turn, changes a variable and shows a message. | `var`, `amount`, `text` |

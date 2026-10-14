@@ -1831,6 +1831,100 @@ function drawNotifyCard(ctx, n, x, y, w, h, top, lines, now, E) {
 }
 const isLightColor = (c) => { try { const [r, g, b] = hexToRgb(c); return r * 0.299 + g * 0.587 + b * 0.114 > 0.62; } catch { return false; } };
 
+// ============================================================================
+// Phone notifications: the device's notification area. In an iOS / Android app (Capacitor, from
+// Build Settings › App stores) they can be scheduled and arrive while the game is closed; in a
+// browser they use the Notification API and only fire while the game is open.
+// ============================================================================
+const hashId = (s) => { let h = 0; for (const c of String(s ?? 'n')) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 || 1; };
+class PhoneNotify {
+  constructor(engine) { this.engine = engine; this.timers = new Map(); this.listening = false; this.asked = false; }
+  get native() {
+    const C = typeof window !== 'undefined' && window.Capacitor;
+    if (!C?.isNativePlatform?.()) return null;
+    return C.Plugins?.LocalNotifications || (C.isPluginAvailable?.('LocalNotifications') && C.registerPlugin ? (this.plugin ||= C.registerPlugin('LocalNotifications')) : null);
+  }
+  /** 'native' (app), 'web' (browser Notification API) or 'none'. */
+  get kind() { return this.native ? 'native' : typeof window !== 'undefined' && 'Notification' in window ? 'web' : 'none'; }
+  listen() {
+    if (this.listening) return; this.listening = true;
+    const N = this.native;
+    N?.addListener?.('localNotificationActionPerformed', (ev) => { const id = ev?.notification?.extra?.key || ''; this.opened(id); });
+  }
+  opened(id) { const s = this.engine.scene; s?.send('notification opened', id); if (id) s?.send('notification opened ' + id); }
+  /** Current permission: 'granted', 'denied', 'prompt' or 'unsupported'. */
+  async status() {
+    const N = this.native;
+    try { if (N) { const r = await N.checkPermissions(); return r.display === 'granted' ? 'granted' : r.display === 'denied' ? 'denied' : 'prompt'; } } catch { /* plugin missing */ }
+    if (this.kind === 'web') return Notification.permission === 'default' ? 'prompt' : Notification.permission;
+    return 'unsupported';
+  }
+  /** Ask the player for permission (browsers need a tap first). Resolves true when allowed. */
+  async ask() {
+    this.asked = true; this.listen();
+    const N = this.native;
+    try { if (N) { const r = await N.requestPermissions(); return r.display === 'granted'; } } catch { return false; }
+    if (this.kind !== 'web') return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    try { return (await Notification.requestPermission()) === 'granted'; } catch { return false; }
+  }
+  /**
+   * Send or schedule one. o: { id, title, text, when: 'now' | 'in' | 'daily' | 'every', seconds, time: 'HH:MM', every: 'minute'|'hour'|'day'|'week' }.
+   * The same id replaces an earlier one. Resolves true if it was sent / scheduled.
+   */
+  async send(o = {}) {
+    const s = this.engine.scene, fill = (x) => (s ? fillTemplate(String(x ?? ''), s.vars) : String(x ?? ''));
+    const title = fill(o.title) || document.title || 'Game', body = fill(o.text), key = String(o.id || title), id = hashId(key), when = o.when || 'now';
+    if (!(await this.ask())) { s?.emit?.('phoneNotifyDenied', key); return false; }
+    await this.cancel(key, true);
+    const N = this.native;
+    if (N) {
+      const n = { id, title, body, extra: { key } };
+      if (when === 'in') n.schedule = { at: new Date(Date.now() + Math.max(1, +o.seconds || 1) * 1000) };
+      else if (when === 'daily') { const [h, m] = String(o.time || '20:00').split(':').map((x) => parseInt(x, 10) || 0); n.schedule = { on: { hour: clamp(h, 0, 23), minute: clamp(m, 0, 59) } }; }
+      else if (when === 'every') n.schedule = { every: o.every || 'day' };
+      try { await N.schedule({ notifications: [n] }); return true; } catch (err) { Log.add?.('warn', 'Phone notification failed: ' + err.message); return false; }
+    }
+    // browser: show now, or later while the game is still open
+    const fire = () => this.webShow(key, title, body);
+    if (when === 'now') return fire();
+    let ms = 0;
+    if (when === 'in') ms = Math.max(1, +o.seconds || 1) * 1000;
+    else if (when === 'daily') { const [h, m] = String(o.time || '20:00').split(':').map((x) => parseInt(x, 10) || 0), d = new Date(); d.setHours(h, m, 0, 0); if (d <= new Date()) d.setDate(d.getDate() + 1); ms = d - Date.now(); }
+    else if (when === 'every') ms = { minute: 60e3, hour: 3600e3, day: 864e5, week: 6048e5 }[o.every || 'day'] || 864e5;
+    const repeat = when === 'daily' ? 864e5 : when === 'every' ? ms : 0;
+    const t = setTimeout(function tick() { fire(); if (repeat) this?.timers?.set(key, setTimeout(tick.bind(this), repeat)); }.bind(this), Math.min(ms, 2147483000));
+    this.timers.set(key, t);
+    return true;
+  }
+  async webShow(key, title, body) {
+    if (this.kind !== 'web' || Notification.permission !== 'granted') return false;
+    const icon = document.querySelector('link[rel="apple-touch-icon"]')?.href || document.querySelector('link[rel="icon"]')?.href || undefined;
+    try { const reg = await navigator.serviceWorker?.getRegistration?.(); if (reg?.showNotification) { await reg.showNotification(title, { body, icon, tag: key, data: { key } }); return true; } } catch { /* fall back */ }
+    try { const n = new Notification(title, { body, icon, tag: key }); n.onclick = () => { window.focus?.(); this.opened(key); n.close(); }; return true; } catch { return false; }
+  }
+  /** Cancel one by id (blank = all of this game's). */
+  async cancel(key, quiet) {
+    if (key) { clearTimeout(this.timers.get(String(key))); this.timers.delete(String(key)); } else { for (const t of this.timers.values()) clearTimeout(t); this.timers.clear(); }
+    const N = this.native; if (!N) return;
+    try {
+      if (key) await N.cancel({ notifications: [{ id: hashId(key) }] });
+      else { const p = await N.getPending(); if (p?.notifications?.length) await N.cancel({ notifications: p.notifications.map((n) => ({ id: n.id })) }); }
+    } catch (err) { if (!quiet) Log.add?.('warn', 'Cancel failed: ' + err.message); }
+  }
+  /** Game Settings › Phone notifications: "come back" reminders and a daily reminder, re-planned each time the game opens. */
+  async planReminders(settings) {
+    const P = settings?.phoneNotify; if (!P) return;
+    const lines = String(P.reminders || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((l) => l[1]);
+    if (!lines.length && !P.dailyTitle) return;
+    if ((await this.status()) !== 'granted') return; // only once the player has allowed it
+    for (let i = 0; i < 8; i++) await this.cancel('comeback-' + i, true);
+    lines.slice(0, 8).forEach(([hours, title, text], i) => this.send({ id: 'comeback-' + i, title, text, when: 'in', seconds: Math.max(0.01, +hours || 24) * 3600 }));
+    if (P.dailyTitle) this.send({ id: 'daily-reminder', title: P.dailyTitle, text: P.dailyText || '', when: 'daily', time: P.dailyTime || '19:00' });
+  }
+}
+
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -3323,7 +3417,10 @@ function renderUI(engine, scene) {
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
-      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
+      let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
+      if (pa <= 0.002) continue;
+      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
+      const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
       ctx.restore();
@@ -3443,7 +3540,7 @@ function renderUI(engine, scene) {
 export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification',
   'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
@@ -8009,6 +8106,7 @@ function runAction(s, e, p, other) {
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
     case 'open settings': s.engine.openSettings(); break;
+    case 'phone notification': { const [title = '', text = ''] = String(v || '').split('|').map((x) => x.trim()); s.engine.phone.send({ title, text, when: +p.amount > 0 ? 'in' : 'now', seconds: +p.amount }); break; }
     case 'show notification': { const m = /^([\w-]+):\s*([\s\S]*)$/.exec(String(v || '')), known = m && notifyType(s.settings, m[1], s.engine.notifyTypes).name === m[1]; const [title = '', text = '', icon = ''] = String(known ? m[2] : v || '').split('|').map((x) => x.trim()); s.engine.notify({ type: known ? m[1] : 'default', title, text, icon: icon || undefined }); break; }
     case 'add score': s.addVar('score', p.amount); break;
     case 'win': s.win(); break;
@@ -9293,6 +9391,9 @@ export const NODE_TYPES = {
   moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
   lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
   openSettings: { cat: 'Game', label: 'Open Settings', exec: true, outs: ['then'] },
+  phoneNotify: { cat: 'Game', label: 'Phone Notification', exec: true, outs: ['then', 'not allowed'], params: [txt('title', 'Come back!', 'title ({variables})'), txt('text', 'Your energy is full', 'text'), opt('when', ['now', 'in', 'daily', 'every'], 'now', 'when'), num('amount', 1, 'amount (for “in”)'), opt('unit', ['seconds', 'minutes', 'hours', 'days'], 'hours', 'unit (for “in”)'), txt('time', '19:00', 'time HH:MM (for “daily”)'), opt('every', ['minute', 'hour', 'day', 'week'], 'day', 'repeat (for “every”)'), txt('id', '', 'id (same id replaces it)')] },
+  phoneCancel: { cat: 'Game', label: 'Cancel Phone Notification', exec: true, outs: ['then'], params: [txt('id', '', 'id (blank = all)')] },
+  phoneAsk: { cat: 'Game', label: 'Ask Notification Permission', exec: true, outs: ['allowed', 'not allowed'] },
   notify: { cat: 'Game', label: 'Notify', exec: true, outs: ['then', 'tapped'], params: [{ ...txt('type', 'default', 'type'), suggest: 'notifyTypes' }, txt('title', 'Well done!', 'title ({variables})'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)'), txt('buttons', '', 'buttons (Label > message, …)')] },
   celebrate: { cat: 'Game', label: 'Celebrate (confetti)', exec: true, outs: ['then'] },
   playerSetting: { cat: 'Game', label: 'Player Setting', value: 'number', params: [opt('setting', ['left-handed', 'joystick sensitivity', 'drag sensitivity', 'tilt sensitivity', 'look sensitivity', 'sound effects', 'music', 'vibration'], 'left-handed', 'setting')] },
@@ -9685,6 +9786,7 @@ export const LOGIC_ACTIONS = {
   win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
   gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
   nextLevel: { cat: 'Game', label: 'Next level', icon: 'flag', run: (c) => { if (c.s.engine.hasNextLevel()) c.s.win(); }, say: () => 'Next level' },
+  phoneNotify: { cat: 'Game', label: 'Phone notification', icon: 'bell', params: [txt('title', 'Come back!', 'title'), txt('text', '', 'text'), num('minutes', 0, 'in minutes (0 = now)'), txt('id', '', 'id (same id replaces it)')], run: (c, p) => { c.s.engine.phone.send({ id: p.id, title: p.title, text: p.text, when: +p.minutes > 0 ? 'in' : 'now', seconds: +p.minutes * 60 }); }, say: (p) => `Phone notification: ${p.title || ''}${+p.minutes > 0 ? ` in ${p.minutes} min` : ''}` },
   notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
 };
@@ -10404,6 +10506,9 @@ registerBehavior('graph', {
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
         case 'openSettings': s.engine.openSettings(); break;
+        case 'phoneNotify': { const later = { ...ctx, steps: 0 }, unit = { seconds: 1, minutes: 60, hours: 3600, days: 86400 }[P('unit')] || 3600; s.engine.phone.send({ id: P('id'), title: P('title'), text: P('text'), when: P('when'), seconds: (+P('amount') || 1) * unit, time: P('time'), every: P('every') }).then((ok) => { if (!e.dead && !ok) follow(n, 'not allowed', later); }); break; }
+        case 'phoneCancel': s.engine.phone.cancel(P('id')); break;
+        case 'phoneAsk': { const later = { ...ctx, steps: 0 }; s.engine.phone.ask().then((ok) => { if (!e.dead) follow(n, ok ? 'allowed' : 'not allowed', later); }); return; }
         case 'notify': { const later = { ...ctx, steps: 0 }, nn = s.engine.notify({ type: P('type') || 'default', title: P('title'), text: P('text'), icon: P('icon') || undefined, buttons: P('buttons') || undefined }); s.on('notifyTap', (q) => { if (q === nn && !e.dead) follow(n, 'tapped', later); }); break; }
         case 'celebrate': s.send('celebrate'); break;
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
@@ -11077,6 +11182,7 @@ export class Engine {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
+    this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -11121,7 +11227,7 @@ export class Engine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
     this.onVis = () => {
-      if (document.hidden) this.saveProgress();
+      if (document.hidden) { this.saveProgress(); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
@@ -11172,6 +11278,7 @@ export class Engine {
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     this.loadPrefs();
     this.setScene(this.factory());
+    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
     return this.scene;
   }
 
@@ -11410,6 +11517,8 @@ export class Engine {
   onFirstGesture() {
     const s = this.scene;
     if (!s || this.editing) return;
+    const P = this.levels?.[0]?.settings?.phoneNotify;
+    if (P?.ask === 'first tap' && !this.phone.asked) this.phone.ask().then((ok) => ok && this.phone.planReminders(this.levels?.[0]?.settings)); // browsers only allow the question from a tap
     if (s.settings.fullscreen && !document.fullscreenElement) {
       document.documentElement.requestFullscreen?.().then(() => {
         if (s.settings.orientation !== 'any') screen.orientation?.lock?.(s.settings.orientation).catch(() => {});
@@ -11540,6 +11649,7 @@ export class Engine {
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
       this.runUIOnly(s, dt);
+      this.stepUITweens(s, dt); // menus keep animating while the game is paused
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
@@ -11591,6 +11701,12 @@ export class Engine {
     if (s.kids.length) s.syncHierarchy(false);
   }
 
+  /** Only the tweens moving UI (pages, popups, menus): used while the game is paused. */
+  stepUITweens(s, dt) {
+    let any = false;
+    for (const tw of s.tweens) { const t = tw.target; if (t && !t.dead && (t.ui || t.e?.ui || t._uiTween)) { tw.update(dt); any = true; } } // UI entities and the dimming behind side bars / popups
+    if (any && s.tweens.some((t) => t.done)) s.tweens = s.tweens.filter((t) => !t.done);
+  }
   stepEffects(dt) {
     const s = this.scene;
     if (s.namedTimers && s.state === 'play' && !s.loading) for (const [k, t] of Object.entries(s.namedTimers)) { // Start Timer nodes; the timer's name is also a variable ({timer} in text)

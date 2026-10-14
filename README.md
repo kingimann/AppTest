@@ -115,6 +115,7 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
     - `www/index.html`: the game, without the Home Screen prompts.
     - `capacitor.config.json` and the icon / splash images in `assets/`.
     - `codemagic.yaml` with an iOS and / or Android workflow.
+    - `@capacitor/local-notifications`, so Phone Notifications work in the app.
     - `scripts/prepare-native.mjs`: sets the version, build number, release signing, orientation and full screen in the native projects that Codemagic generates on each build.
     - A `README.md` with the one-time setup: Apple / Google accounts, App Store Connect key, certificates, keystore, Play service account, and the first manual Play upload.
   - Put the folder on GitHub, add it in Codemagic, and start a workflow. Build numbers go up by themselves; raise **Version** for a store update.
@@ -550,6 +551,23 @@ Pop-up notifications are built in; there's no component to add. Every game has *
 - **Test** shows a type in the editor. From the type editor, the dialog steps aside while the preview plays. *Test a few* shows several at once.
 - Types are game-wide: every level uses them. A *Notifications* component (Project › UI › HUD) still works, and handles plain `notify` messages in scenes that have one.
 
+### Phone notifications (Game Settings › Phone Notifications)
+
+Real notifications in the phone's own notification area (the lock screen and pull-down list), such as "Your energy is full!".
+
+- **Where they work:**
+  - **iOS / Android apps** made with *Build Settings › App stores*: full support. They can be scheduled and arrive while the game is closed. The app project includes `@capacitor/local-notifications`.
+  - **Browsers:** only while the game is open (the Notification API). On iPhone, only once the game is added to the Home Screen.
+- **Sending one:**
+  - The **Phone Notification** node: title and text (with `{variables}`), and *when*: now, in N seconds / minutes / hours / days, daily at a time (HH:MM), or every minute / hour / day / week. An **id** lets a newer one replace an older one. Its *not allowed* output runs if the player said no.
+  - **Cancel Phone Notification** cancels one by id, or all of them if the id is blank.
+  - A trigger's **Phone notification** (in N minutes, 0 = now), or the action **phone notification** with `Title|text` (amount = seconds from now).
+- **Permission:** the player has to allow notifications once. *Ask the player* can be: on their first tap, when the **Ask Notification Permission** node runs (outputs *allowed* / *not allowed*), or only when the first one is sent.
+- **Come-back reminders:** one per line, `hours | Title | text` (e.g. `24 | We miss you! | Your daily chest is ready`). They count from when the player leaves the game, and are replaced each time they come back.
+- **Daily reminder:** a title, text and time that repeats every day.
+- Tapping a notification opens the game and sends the message `notification opened` (and `notification opened ID`).
+- **Test on this device** and **In 10 seconds** send a test notification from the editor.
+
 ### UI components pack (21 new components, 43 presets)
 
 Each of these is one object with one component: it draws itself, handles taps and shows a live preview in the editor. Find them in *Project › UI* under **Controls**, **Charts**, **HUD** and **Game Systems**, or in *Add Component › UI*. Lists are typed one item per line, with `|` between the parts.
@@ -598,6 +616,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Tabs:** one per line, `Label | icon | page | badge variable`.
     - The icon is a built-in UI icon (`home`, `shop`, `trophy`, `user`, `chat`, `gear`, `play`, `plus`, `star`, `heart`, `bell`…) or an emoji.
     - A badge variable shows a red count (99+) when it is a number, or a dot when it is `true`.
+  - **Page changes** cross-fade in about a quarter of a second: everything inside a page fades with it, and it still finishes while the game is paused or on the title screen.
   - **9 styles:**
 
     | Style | Look |

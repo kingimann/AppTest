@@ -3,7 +3,7 @@
 // projects are generated on Codemagic's machines (npx cap add), then scripts/prepare-native.mjs patches in the
 // version, build number, signing, orientation and full screen, and @capacitor/assets makes the icons and splash.
 
-export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5';
+export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5', NOTIFY_VERSION = '^8.3.0';
 
 /** A valid reverse-domain app ID from a name (letters, digits and underscores; no part starts with a digit). */
 export function suggestAppId(author, title) {
@@ -228,6 +228,7 @@ Make your changes in Pocket Engine, open **Build Settings → App stores → Dow
 ## What's inside
 - \`www/index.html\`: the whole game (the same file as Build HTML, without the "Add to Home Screen" bits).
 - \`capacitor.config.json\`: the app name, ID and background colour.
+- \`@capacitor/local-notifications\` (in \`package.json\`): lets the game put notifications in the phone's notification area, even while it is closed (Game Settings › Phone Notifications).
 - \`assets/\`: the icon and splash screen. Codemagic makes every size from these (\`@capacitor/assets\`).
 - \`scripts/prepare-native.mjs\`: sets the version, build number, signing, orientation${o.fullscreen ? ' and full screen' : ''} in the generated native projects.
 - \`codemagic.yaml\`: the build${both ? 's' : ''}.
@@ -244,7 +245,7 @@ export function storeFiles(o, { html, icon, fg, splash }) {
     name: slugName, version: /^\d+\.\d+\.\d+$/.test(o.version) ? o.version : (String(o.version || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.')),
     private: true, description: `${o.name} (made with Pocket Engine)`,
     scripts: { 'add:ios': 'cap add ios --packagemanager CocoaPods && node scripts/prepare-native.mjs ios', 'add:android': 'cap add android && node scripts/prepare-native.mjs android', assets: 'capacitor-assets generate', sync: 'cap sync' },
-    dependencies: { '@capacitor/core': CAPACITOR_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
+    dependencies: { '@capacitor/core': CAPACITOR_VERSION, '@capacitor/local-notifications': NOTIFY_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
     devDependencies: { '@capacitor/cli': CAPACITOR_VERSION, '@capacitor/assets': ASSETS_VERSION },
   };
   const cap = { appId: o.appId, appName: o.name, webDir: 'www', backgroundColor: o.splashBg, ios: { contentInset: 'never', scrollEnabled: false }, android: { backgroundColor: o.splashBg } };

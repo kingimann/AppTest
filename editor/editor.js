@@ -3186,6 +3186,21 @@ function renderSceneSettings(box) {
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const name = uniqueNotifyName('custom'); gameSettings().notifyTypes = [...(gameSettings().notifyTypes || []), { name, look: 'card', icon: '🔔' }]; changed({ inspector: true }); pushHistory(); openNotifyEditor(name); } }, icon('plus'), 'New type'),
       h('button', { class: 'btn', onclick: () => ['default', 'achievement', 'reward', 'warning'].forEach((n, i) => setTimeout(() => testNotify(n), i * 450)) }, icon('play'), 'Test a few')),
   ], { icon: 'bell', key: 's-notify', summary: `${allNotifyTypes().length} types` }));
+  const G = (path, spec) => control(() => game, 'settings.phoneNotify.' + path, spec), PN = game.settings?.phoneNotify || {};
+  box.append(comp('Phone Notifications', [
+    h('p', { class: 'desc' }, 'Real notifications in the phone\'s notification area, like "Your energy is full!". Send them from the Phone Notification node or a trigger\'s "Phone notification". Tapping one opens the game and sends the message notification opened (and notification opened ID).'),
+    h('div', { class: 'obox info' }, 'Full support (scheduled, arrives while the game is closed) is in iOS / Android apps made with Build Settings › App stores. In a browser they only appear while the game is open, and on iPhone only once it is added to the Home Screen.'),
+    G('ask', { label: 'Ask the player', type: 'select', options: [['first tap', 'On their first tap'], ['when asked', 'When a node asks'], ['never', 'Only when one is sent']], def: 'when asked', infoText: 'Phones need the player to allow notifications once. Asking at a good moment (after a win, from a "Remind me" button) gets more yeses.' }),
+    G('reminders', { label: 'Come-back reminders', type: 'code', def: '', infoText: 'One per line: hours | Title | text. Counted from when the player leaves the game, and replaced each time they come back. E.g. 24 | We miss you! | Your daily chest is ready' }),
+    G('dailyTitle', { label: 'Daily reminder title', type: 'text', def: '' }),
+    PN.dailyTitle && [
+      G('dailyText', { label: 'Daily reminder text', type: 'text', def: '' }),
+      G('dailyTime', { label: 'Time (HH:MM)', type: 'text', def: '19:00' }),
+    ],
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'This is a test notification 🔔', when: 'now' }); toast(ok ? 'Sent. Check your notifications' : engine.phone.kind === 'none' ? 'This browser has no notifications' : 'Notifications are blocked for this site'); } }, icon('bell'), 'Test on this device'),
+      h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'Sent 10 seconds later', when: 'in', seconds: 10 }); toast(ok ? 'Coming in 10 seconds (keep this tab open)' : 'Notifications are blocked for this site'); } }, icon('play'), 'In 10 seconds')),
+  ], { icon: 'bell', key: 's-phone', summary: PN.reminders || PN.dailyTitle ? 'reminders on' : '' }));
   box.append(comp('Screen & Safe Area', [
     h('p', { class: 'desc' }, 'Phones come in many sizes, and many have a notch, rounded corners or a home bar. UI anchored to corners and edges stays inside the safe area, and grows or shrinks to suit the screen.'),
     C('settings.safeArea', { label: 'Safe area', type: 'select', options: [['device', 'Keep UI clear of notches & home bar'], ['off', 'Use the whole screen']], def: 'device' }),

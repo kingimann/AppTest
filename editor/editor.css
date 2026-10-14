@@ -1824,3 +1824,8 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .nt-grid button.on { border-color: var(--accent); background: var(--accent-soft, var(--g3)); }
 .nt-grid .nt-ic { width: 26px; height: 26px; }
 .nt-icbtn { color: var(--text); }
+/* Bottom Nav: styles as pictures */
+.nav-styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; width: 100%; }
+.nav-styles .ns { display: flex; flex-direction: column; gap: 4px; padding: 4px 4px 6px; border-radius: 12px; border: 2px solid transparent; background: var(--g2); color: var(--text); font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.nav-styles .ns img { width: 100%; height: auto; border-radius: 8px; display: block; }
+.nav-styles .ns.on { border-color: var(--accent); }

@@ -6993,8 +6993,8 @@ registerBehavior('uiBottomNav', {
     const floatingStyle = () => ['floating', 'glass', 'segmented', 'dock'].includes(p.style);
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
       const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
-      const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
-      const n = Math.max(1, T.length), tw = bw / n, ws = p.style === 'bubble' && W8 && W8.length === n ? W8.map((f) => f * bw) : null; // bubble: the selected tab is wider (room for its name)
+      const cp = p.style === 'chips' ? 6 : 0, bw = w - m * 2 - cp * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
+      const n = Math.max(1, T.length), tw = bw / n, ws = (p.style === 'bubble' || p.style === 'chips') && W8 && W8.length === n ? W8.map((f) => f * bw) : null; // bubble: the selected tab is wider (room for its name)
       const left = (i) => { if (!ws) return bx + tw * i; let x = bx; for (let j = 0; j < i; j++) x += ws[j]; return x; };
       return { w, h, bx, by, bw, bh, tw, n, cx: (i) => left(i) + (ws ? ws[i] : tw) / 2, tws: (i) => (ws ? ws[i] ?? tw : tw), at: (lx) => { if (!ws) return Math.floor((lx - bx) / tw); for (let j = 0; j < n; j++) if (lx < left(j + 1)) return lx < bx ? -1 : j; return n; }, cy: by + bh / 2 };
     };
@@ -7024,9 +7024,10 @@ registerBehavior('uiBottomNav', {
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
         const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
         const a = activeIdx(s);
-        if (p.style === 'bubble' && T.length > 1) { // the selected tab grows to fit its name, the others share the rest
-          const n = T.length, ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity), c = s.engine.uiCtx, isz = +p.iconSize || 24, lsz = +p.labelSize || 11;
-          let fa = 1 / n; if (a >= 0 && c && showLabel(a, true)) { c.font = `700 ${lsz + 2}px ${THEME.font}`; fa = clamp((isz + c.measureText(T[a].label).width + 44) / bw, 1 / n, 0.55); }
+        const c0 = s.engine.uiCtx, chipsFit = p.style === 'chips' && c0 && (() => { const ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity) - 12, isz = +p.iconSize || 24, lsz = +p.labelSize || 11; c0.font = `800 ${lsz + 1}px ${THEME.font}`; return T.every((t) => !showLabel(0, true) || !t.label || isz * 0.85 + 6 + c0.measureText(t.label).width + 24 <= bw / T.length - 10); })();
+        if ((p.style === 'bubble' || (p.style === 'chips' && !chipsFit)) && T.length > 1) { // the selected tab grows to fit its name, the others share the rest (chips: when the names don't all fit)
+          const n = T.length, ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity) - (p.style === 'chips' ? 12 : 0), c = s.engine.uiCtx, isz = +p.iconSize || 24, lsz = +p.labelSize || 11;
+          let fa = 1 / n; if (a >= 0 && c && showLabel(a, true)) { c.font = `${p.style === 'chips' ? 800 : 700} ${lsz + (p.style === 'chips' ? 1 : 2)}px ${THEME.font}`; fa = clamp((isz + c.measureText(T[a].label).width + (p.style === 'chips' ? 48 : 44)) / bw, 1 / n, 0.55); }
           const want = T.map((_, i) => (a < 0 ? 1 / n : i === a ? fa : (1 - fa) / (n - 1)));
           if (!W8 || W8.length !== n) W8 = want; else W8 = W8.map((f, i) => f + (want[i] - f) * k);
         } else W8 = null;
@@ -7255,7 +7256,7 @@ registerBehavior('uiSideBar', {
       const [label = '', icon = '', act = '', badge = '', sub = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
       return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge, sub } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge, sub } : { kind: 'page', label, icon, page: a, badge, sub };
     });
-    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
+    let otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     const inst = {
@@ -7284,6 +7285,8 @@ registerBehavior('uiSideBar', {
       /** The built-in ☰ button (screen pixels), or null. */
       btn(s) {
         if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
+        const now = s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && q.behaviors.some((b) => b.type === 'button' && b.params?.action === 'send message' && String(b.params?.value ?? '').trim() === p.message)) };
+        if (otherBtn.on) return null; // a ☰ button of your own already opens this menu: don't draw a second one on top of it
         const E = s.engine, S = E.safe, B = S.bars || { top: 0, bottom: 0, left: 0, right: 0 }, left = p.side !== 'right', K = uiK(S);
         const x = left ? S.left + B.left + 34 * K : E.width - S.right - B.right - 34 * K, y = p.button === 'bottom corner' ? E.height - S.bottom - B.bottom - 34 * K : S.top + B.top + 34 * K;
         return { x, y, r: 24 * K };

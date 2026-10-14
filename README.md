@@ -321,7 +321,24 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Move: joystick, tilt and drag
 
-The **Move** component steers with the joystick, a finger drag, both, or tilting the phone. *Smooth start / stop* eases the speed in and out.
+The **Move** component steers with the joystick, a finger drag, both, or tilting the phone.
+
+**Movement** (Move › Movement):
+- **Time to full speed** / **Time to stop** (seconds): 0 = instant. Bigger values feel heavier or slide like ice. The older *Smooth start / stop* still works when these are 0.
+- **Directions**: any, 8 or 4 (no diagonals), for this object whatever the joystick allows.
+- **Speed × variable**: multiplies the speed by a variable (e.g. `speedBoost` for power-ups).
+- **Face where it moves (2D)**: flip left/right or turn to face it. **Turn speed** (°/s) also limits how fast 3D objects turn.
+- **Up on the stick moves (3D)**: up the screen, or away from the camera (for orbiting / third-person cameras).
+
+**Run & dash** (Move › Run & dash):
+- **Run with**: pushing the joystick to the edge, holding the Fire or Jump button, or always. Shift runs on a keyboard. **Run speed ×** sets how much faster.
+- **Dash with**: the Fire button, the Jump button, a double tap or a swipe (dashes that way); Space on a keyboard.
+  - Settings: **Dash speed**, **Dash length**, **Cooldown** and a dash effect.
+  - A dash ignores gravity while it lasts.
+- A button picked for run or dash is switched on and labelled RUN / DASH.
+
+**Nodes** (Move category): **Set Move Speed** (set to / multiply by), **Lock Movement** (lock / unlock / toggle, e.g. during dialogue), **Dash** (outputs *dashed* or *not ready*), **On Dash**, **Is Running**.
+
 
 **Joystick** (Game Settings › Touch Controls › Joystick):
 
@@ -744,7 +761,7 @@ Coordinates: in 2D, units are design pixels and y points down. In 3D, units are 
 
 | Type | What it does | Params (defaults) |
 | --- | --- | --- |
-| `move` | Player movement with the joystick, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true), `accel` (0); tilt: `tiltMax` (20), `tiltDead` (3), `tiltSmooth` (0.3), `tiltLevel` (start / flat), `tiltInvertX/Y`, `tiltFallback` (joystick / none); drag: `dragMode` (relative / follow / offset), `dragArea` (anywhere / object), `dragSpeed` (1.2), `dragSmooth` (0), `dragMax` (0), `dragSolid` (true), `dragThrow` (false) |
+| `move` | Player movement with the joystick, dragging, or tilting the phone (`control: "tilt"`). | `speed` (260 / 3D 7), `control` ("both"), `axes` ("all"), `keepInView` (true), `face` (true), `accel` (0); movement: `accelTime` / `decelTime` (0), `directions` (any / 8 / 4), `speedVar`, `face2D` (none / flip / rotate), `turnSpeed` (0), `relative` (world / camera); run & dash: `runWith` (off / edge / action / jump / always), `runSpeed` (1.7), `dashWith` (off / action / jump / doubletap / swipe), `dashSpeed` (800 / 3D 22), `dashTime` (0.15), `dashCooldown` (0.6), `dashTrail` (true); tilt: `tiltMax` (20), `tiltDead` (3), `tiltSmooth` (0.3), `tiltLevel` (start / flat), `tiltInvertX/Y`, `tiltFallback` (joystick / none); drag: `dragMode` (relative / follow / offset), `dragArea` (anywhere / object), `dragSpeed` (1.2), `dragSmooth` (0), `dragMax` (0), `dragSolid` (true), `dragThrow` (false) |
 | `platformer` | Run & jump. Uses gravity; tap or the jump button to jump. | `speed` (240 / 3D 7), `jump` (620 / 3D 10), `doubleJump` (false), `onFall` ("respawn") |
 | `rotate` | Spin continuously. | `speed` (90), `axis` ("z" / 3D "y") |
 | `patrol` | Move back and forth from the start point. | `dx` (120 / 3D 4), `dy` (0), `dz` (0), `duration` (2) |

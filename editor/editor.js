@@ -31,7 +31,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 const THEMES = {
   dark: {},
@@ -60,6 +60,7 @@ function applyEditorPrefs() {
   st.setProperty('--ui-zoom', String(EP.uiSize || 1));
   document.documentElement.classList.toggle('reduce-motion', !!EP.reduceMotion);
   document.getElementById('toolRail')?.classList.toggle('compact', EP.compactTools !== false);
+  document.documentElement.classList.toggle('dense', EP.dense !== false); // Compact panels: shorter rows and fields, more fits on screen
   document.documentElement.dataset.edTheme = EP.theme === 'light' ? 'light' : 'dark'; // light needs a few extra rules (white text on panels, shadows)
   document.querySelector('meta[name=theme-color]')?.setAttribute('content', (THEMES[EP.theme] || {})['--toolbar'] || '#191919');
   setSnapshotPolicy(EP.snapEvery, EP.snapKeep);
@@ -2028,7 +2029,7 @@ function renderHierarchy() {
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
       class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
-      'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px` : '',
+      'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
       onclick: () => { if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); } else if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
     },
     multi ? h('span', { class: 'h-check' + (multi.has(e.id) ? ' on' : '') }, multi.has(e.id) ? icon('check') : null) : '',
@@ -3181,7 +3182,7 @@ function renderInspector() {
   box.replaceChildren();
   if (selectedId === SCENE_ID) {
     const fresh = lastInspected !== SCENE_ID; lastInspected = SCENE_ID;
-    renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); box.scrollTop = scroll; return;
+    renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); compJump(box); box.scrollTop = scroll; return;
   }
   const j = ent(selectedId);
   if (!j) { box.append(inspectorEmpty()); return; }
@@ -3575,7 +3576,31 @@ function renderInspector() {
   if (onlyChanged) applyOnlyChanged(box);
   if (freshSel && foldAllPref) foldAll(box, true);
   syncFoldBtn(box);
+  compJump(box);
   box.scrollTop = scroll;
+}
+/** A row of chips, one per component (or Game Settings section), that stays at the top of the Inspector: tap one to jump there. */
+function compJump(box) {
+  const comps = [...box.querySelectorAll(':scope > .comp')].filter((c) => c.style.display !== 'none');
+  if (comps.length < 4) return;
+  const chips = comps.map((c) => {
+    const t = c.querySelector('.comp-h .t')?.firstChild?.textContent?.trim() || c.dataset.key, ic = c.querySelector('.comp-h svg.ci')?.cloneNode(true);
+    const b = h('button', { type: 'button', class: 'cj', onclick: () => {
+      if (c.classList.contains('closed')) { c.classList.remove('closed'); closedComps.delete(c.dataset.key); syncFoldBtn(box); }
+      const bar = box.querySelector('.comp-jump'), top = c.offsetTop - (bar?.offsetHeight || 0) - 6;
+      box.scrollTo({ top, behavior: EP.reduceMotion ? 'auto' : 'smooth' }); c.classList.remove('flash'); void c.offsetWidth; c.classList.add('flash'); buzz(5);
+    } }, ic, h('span', {}, t));
+    b._comp = c; return b;
+  });
+  const bar = h('div', { class: 'comp-jump' }, chips);
+  (box.querySelector('.comp-tools') || comps[0]).after(bar);
+  const mark = () => { // the chip of the component at the top lights up
+    const y = box.scrollTop + bar.offsetHeight + 12; let cur = chips[0];
+    for (const b of chips) if (b._comp.offsetTop <= y) cur = b;
+    for (const b of chips) b.classList.toggle('on', b === cur);
+    if (cur && !cur.classList.contains('seen')) { chips.forEach((b) => b.classList.remove('seen')); cur.classList.add('seen'); const l = cur.offsetLeft - bar.clientWidth / 2 + cur.offsetWidth / 2; bar.scrollTo({ left: Math.max(0, l), behavior: 'auto' }); }
+  };
+  box.onscroll = mark; mark();
 }
 let onlyChanged = false;
 /** Odin-style "show only overrides": keep rows changed from their defaults, open their groups, hide the rest. */
@@ -5139,6 +5164,7 @@ function openPreferences() {
   openDialog('Preferences', [
     h('p', { class: 'desc' }, 'These are for you on this device. Game settings live in Scene Settings and Build Settings.'),
     sec('Look', 'brush', [
+      tog('dense', 'Compact panels', 'Shorter rows in the Hierarchy and smaller fields in the Inspector, so more fits on screen'),
       tog('compactTools', 'Fold the tool bar', 'Shows only the tool you are using over the Scene; tap it for the others'),
       h('div', { class: 'row' }, h('label', {}, 'Theme'), h('div', { class: 'seg small pref-themes' }, THEME_NAMES.map(([v, l]) => h('button', { class: EP.theme === v ? 'on' : '', onclick: () => { setEP('theme', v); redo(); } }, h('i', { class: 'th-dot', style: `background:${THEMES[v]['--panel'] || '#383838'};border-color:${THEMES[v]['--toolbar'] || '#191919'}` }), l)))),
       h('div', { class: 'row' }, h('label', {}, 'Accent colour'), h('div', { class: 'pref-swatches' }, ACCENTS.map(([c, l]) => h('button', { class: 'pref-sw' + (EP.accent === c ? ' on' : ''), title: l, 'aria-label': l, style: `background:${c}`, onclick: () => { setEP('accent', c); redo(); } })))),

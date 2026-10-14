@@ -95,7 +95,8 @@ Lists inside components are typed one item per line with `|` between the parts, 
 
 Apps and menus are built from **pages**. A page is a panel with **Show If** (or *Show when*) on the `page` variable. Navigation changes `page`, and pages fade or slide between each other.
 
-- **Bottom Nav:** a complete tab bar (9 styles, badges, animations). Tabs are `Label | icon | page | badge variable`.
+- **Bottom Nav:** a complete tab bar (9 styles, badges, animations). In the Inspector each tab is a card: tap its icon to pick from the icon grid (or an emoji), type its label, and choose the page it opens from a list. **+ Add Tab** offers your pages that aren't tabs yet, **a new page** (made for you, with a fitting icon), or a ☰ tab for the Side Menu. A tab's ⋯ menu adds a badge, moves it left or right, shows its page or removes it. (*Text* edits them as lines: `Label | icon | page | badge variable`.)
+  - **New Page…** asks whether to add the page to the bottom bar too, and the page button's *Add “page” to the bottom bar* adds a page that's already there.
 - **Side Menu:** a drawer with sections, toggles, footer items and 7 styles. Items are `Label | icon | page or msg:name or toggle:var | badge`.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
 - **App Layout:** all three set up to work together.

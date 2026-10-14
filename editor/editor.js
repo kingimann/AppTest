@@ -2528,6 +2528,7 @@ function control(target, path, spec) {
       break;
     }
     case 'code':
+      if (/\.tabs$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.tabs$/, '.type')) === 'uiBottomNav') { el = navTabEditor(get, set, path, getPath(target(), path.replace(/\.tabs$/, ''))); label.textContent = 'Tabs'; break; } // pick pages and icons
       if (/\|/.test(text) && !rawTables.has(path)) { el = tableList(get, set, text, path); label.textContent = text.replace(/\s*\(.*$/, '') || text; break; } // the columns say the rest
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
       break;
@@ -6329,6 +6330,7 @@ engine.uiFilter = (e) => {
   const cur = curPage();
   if (cur === 'all' || playing) return true;
   const [v, val] = cur.split('='), seen = new Set();
+  if (engine.scene && engine.scene.vars[v] !== val) engine.scene.vars[v] = val; // the App Bar's title and the lit tab follow the page shown
   for (let j = ent(e.id); j && !seen.has(j.id); j = j.parent ? ent(j.parent) : null) { seen.add(j.id); const b = showIfOf(j); if (b && (b.var || 'page') === v && String(b.value ?? '') !== val) return false; }
   return true;
 };
@@ -6339,6 +6341,7 @@ function pageMenu(anchor) {
   popMenu(anchor, [{ cap: 'Show page' }, ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: cur === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) }))),
     '-', { icon: cur === 'all' ? 'check' : 'layers', label: 'All pages at once', k: 'stacked', fn: () => setUIPage('all') },
     '-', { icon: 'plus', label: 'New Page…', fn: () => newPage() },
+    pg && navBars(cur.split('=')[0]).length && !navBars(cur.split('=')[0]).some((b) => navTabs(b).some((r) => r[2] === cur.split('=')[1])) && { icon: 'plus', label: `Add “${cur.split('=')[1]}” to the bottom bar`, fn: () => { const [v, val] = cur.split('='), nm = (pg.name || val).replace(/ Page$/, ''); for (const b of navBars(v)) b.tabs = navTabsText([...navTabs(b), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } },
     pg && { icon: 'copy', label: `Duplicate “${cur.split('=')[1]}”…`, fn: () => newPage(pg) },
     pg && { icon: 'edit', label: `Rename “${cur.split('=')[1]}”…`, k: 'updates buttons and tabs', fn: () => renamePage(pg) },
     pg && { icon: 'trash', label: `Delete “${cur.split('=')[1]}”`, danger: true, fn: () => { if (confirm(`Delete the page “${cur.split('=')[1]}” and everything on it?`)) { deleteEntity(pg.id); uiPage = 'auto'; refreshPageBtn(); } } }].filter(Boolean));
@@ -6351,8 +6354,8 @@ function pageEnt(k) {
 }
 const pageSlug = (t) => String(t || '').trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').slice(0, 40);
 /** A new page (or a copy of one): it opens with a Go To Page button, a tab or a list row set to its name. */
-function newPage(from) {
-  const name = prompt(from ? 'Name of the copy' : 'Name of the new page (e.g. Settings, Shop)', from ? (from.name || 'Page').replace(/ Page$/, '') + ' 2' : '')?.trim(); if (!name) return;
+function newPage(from, o = {}) {
+  const name = (o.name ?? prompt(from ? 'Name of the copy' : 'Name of the new page (e.g. Settings, Shop)', from ? (from.name || 'Page').replace(/ Page$/, '') + ' 2' : ''))?.trim(); if (!name) return;
   const val = pageSlug(name) || 'page' + Math.floor(Math.random() * 1000), v = from ? showIfOf(from).var || 'page' : 'page';
   if (uiPages().get(v)?.has(val)) { toast(`There is already a page “${val}”`); return; }
   let top;
@@ -6368,9 +6371,71 @@ function newPage(from) {
     project.entities.push(top, { id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
   }
   for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
-  setUIPage(`${v}=${val}`); selectedId = top.id;
+  const navs = navBars(v), inTab = navs.some((b) => navTabs(b).some((r) => r[2] === val));
+  if (navs.length && !inTab && (o.tab ?? confirm(`Add “${name}” to the bottom bar too?`))) for (const b of navs) b.tabs = navTabsText([...navTabs(b), [name, guessIcon(name), val]]);
+  if (!o.stay) { setUIPage(`${v}=${val}`); selectedId = top.id; }
   changed({ structure: true }); pushHistory();
-  toast(`Page “${val}” added. Open it with a button set to Go To Page → ${val}`);
+  toast(navs.length && (o.tab ?? true) ? `Page “${val}” added${navs.length ? ' with a tab' : ''}` : `Page “${val}” added. Open it with a button set to Go To Page → ${val}`);
+  return val;
+}
+// ---- Bottom Nav tabs: Label | icon | page | badge, one per line ----
+const navBars = (v = 'page') => project.entities.flatMap((j) => (j.behaviors || []).filter((b) => b.type === 'uiBottomNav' && (b.var || 'page') === v));
+const navTabs = (b) => String(b.tabs ?? '').split('\n').filter((l) => l.trim()).map((l) => l.split('|').map((c) => c.trim()));
+const navTabsText = (rows) => rows.map((r) => { const c = [...r]; while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); }).join('\n');
+/** An icon that fits a page's name (Settings → gear, Shop → shop…). */
+function guessIcon(name) {
+  const n = String(name).toLowerCase(), M = [[/home|start|main/, 'home'], [/search|explore|find|discover/, 'search'], [/profile|account|me$|user|player/, 'user'], [/setting|option|prefer/, 'gear'], [/shop|store|buy/, 'shop'], [/cart|basket|bag/, 'cart'],
+    [/chat|message|inbox|talk/, 'chat'], [/mail/, 'mail'], [/notif|alert|bell/, 'bell'], [/score|rank|leader|award|trophy|win/, 'trophy'], [/map|world|place|location/, 'map'], [/music|song|sound|audio/, 'music'], [/calendar|event|plan|schedule/, 'calendar'],
+    [/photo|gallery|picture|image/, 'image'], [/camera/, 'camera'], [/stat|chart|graph|report/, 'chart'], [/like|fav|love|heart/, 'heart'], [/list|task|todo|note/, 'list'], [/info|about|help/, 'info'], [/time|clock|history/, 'clock'], [/gem|reward|prize/, 'gem'], [/coin|wallet|money|bank/, 'coin'], [/play|game|level/, 'play']];
+  return (M.find(([re]) => re.test(n)) || [, 'star'])[1];
+}
+const NAV_ICONS = () => (SPRITE_GROUPS.Icons || []).map((k) => k.replace(/^ui-/, ''));
+/** A grid of tab icons (or an emoji). */
+function pickNavIcon(cur, cb) {
+  openDialog('Tab icon', [h('div', { class: 'nt-grid' }, NAV_ICONS().map((ic) => h('button', { type: 'button', class: ic === cur ? 'on' : '', title: ic, onclick: () => { closeLayer(); cb(ic); } }, navIconImg(ic), h('span', {}, ic)))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); pickEmoji((em) => cb(em)); } }, icon('star'), 'Use an emoji…'))]);
+}
+/** A tab icon in the editor's own text colour (the icon art is a shape to tint), or an emoji. */
+function navIconImg(ic) {
+  if (!/^[a-z][a-zA-Z-]*$/.test(ic || '')) return h('span', { class: 'nt-ic nt-emoji' }, ic || '⭐');
+  const u = artURL('art:' + (ic.startsWith('ui-') ? ic : 'ui-' + ic));
+  return h('span', { class: 'nt-ic', 'data-icon': ic, style: `-webkit-mask-image:url("${u}");mask-image:url("${u}")` });
+}
+/** The Bottom Nav's tabs as cards: an icon to pick, a label, the page it opens, a badge; add a tab from a page (or a new one). */
+function navTabEditor(get, set, path, b) {
+  const box = h('div', { class: 'navtabs' });
+  const v = b?.var || 'page';
+  const draw = () => {
+    const rows = navTabs({ tabs: get() }), save = (r) => { set(navTabsText(r)); if (box.isConnected) draw(); else renderInspector(); }; // (making a page redraws the Inspector)
+    const pages = [...(uiPages().get(v) || [])], used = new Set(rows.map((r) => r[2]));
+    box.replaceChildren(
+      ...rows.map((r, i) => h('div', { class: 'nt-row' },
+        h('button', { type: 'button', class: 'nt-icbtn', title: 'Pick an icon', onclick: () => pickNavIcon(r[1], (ic) => { r[1] = ic; save(rows); }) }, navIconImg(r[1])),
+        h('div', { class: 'nt-mid' },
+          h('input', { type: 'text', value: r[0] ?? '', placeholder: 'Label', 'aria-label': 'Tab label', oninput: (e) => { r[0] = e.target.value; set(navTabsText(rows)); } }),
+          h('select', { 'aria-label': 'Opens page', onchange: (e) => { const val = e.target.value; if (val === '\u0000new') { const nv = newPage(null, { name: prompt('Name of the new page', r[0] || '') || '', tab: false, stay: true }); if (nv) { r[2] = nv; save(rows); } else draw(); return; } r[2] = val; save(rows); } },
+            [...new Set([...pages, r[2]].filter(Boolean))].map((pg) => h('option', { value: pg, selected: pg === r[2] }, pg.startsWith('msg:') ? (pg === 'msg:menu' ? '☰ opens the side menu' : 'sends ' + pg.slice(4)) : '→ ' + pg + (pages.includes(pg) ? '' : ' (no page yet)'))),
+            !r[2]?.startsWith('msg:') && !pages.includes('msg:menu') ? h('option', { value: 'msg:menu' }, '☰ opens the side menu') : null,
+            h('option', { value: '\u0000new' }, '+ New page…'))),
+        h('button', { type: 'button', class: 'tl-m', title: 'Tab', onclick: (e) => popMenu(e.currentTarget, [
+          r[2] && !r[2].startsWith('msg:') && pages.includes(r[2]) && { icon: 'eye', label: `Show the “${r[2]}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${r[2]}`); } },
+          r[2] && !r[2].startsWith('msg:') && !pages.includes(r[2]) && { icon: 'plus', label: `Make the “${r[2]}” page`, fn: () => { newPage(null, { name: r[0] || r[2], tab: false, stay: true }); draw(); } },
+          { icon: 'bell', label: r[3] ? `Badge: {${r[3]}}…` : 'Badge from a variable…', k: 'a count on the tab', fn: () => { const n = prompt('Variable for the badge count (blank = none)', r[3] || ''); if (n !== null) { r[3] = n.trim(); save(rows); } } },
+          i > 0 && { icon: 'upload', label: 'Move Left', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+          i < rows.length - 1 && { icon: 'download', label: 'Move Right', fn: () => { rows.splice(i + 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+          { icon: 'trash', label: 'Remove Tab', danger: true, fn: () => { rows.splice(i, 1); save(rows); } },
+        ].filter(Boolean)) }, icon('more')))),
+      h('div', { class: 'tl-foot' },
+        h('button', { type: 'button', class: 'btn primary', onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Add a tab for' },
+          ...pages.filter((pg) => !used.has(pg)).map((pg) => ({ icon: 'layers', label: pg, k: 'a page you have', fn: () => save([...rows, [pg.charAt(0).toUpperCase() + pg.slice(1).replace(/-/g, ' '), guessIcon(pg), pg]]) })),
+          '-', { icon: 'plus', label: 'A new page…', k: 'makes the page too', fn: () => { const name = prompt('Name of the new page (e.g. Settings, Shop)')?.trim(); if (!name) return; const nv = newPage(null, { name, tab: false, stay: true }); if (nv) save([...rows, [name, guessIcon(name), nv]]); } },
+          !used.has('msg:menu') && { icon: 'menu', label: 'The side menu', k: '☰ opens it', fn: () => save([...rows, ['Menu', 'menu', 'msg:menu']]) }].filter(Boolean)) }, icon('plus'), 'Add Tab'),
+        h('span', { class: 'tl-n' }, `${rows.length} tab${rows.length === 1 ? '' : 's'}`),
+        h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')),
+      ...(rows.length > 5 ? [h('p', { class: 'desc' }, 'More than 5 tabs get crowded on a phone: put the rest in a Side Menu.')] : []));
+  };
+  draw();
+  return box;
 }
 /** Rename a page: its Show If, and the buttons, tabs, lists and titles that lead to it. */
 function renamePage(pg) {

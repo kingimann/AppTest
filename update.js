@@ -93,7 +93,7 @@
   var LINE = 72, MAX = 120;
   function scrollerOf(t, root) { // the nearest scrolled box between the finger and the page: only pull when it's at the top
     for (var n = t; n && n !== document.documentElement; n = n.parentElement) {
-      if (n.scrollTop > 0) return n;
+      if (n.scrollTop !== 0) return n; // (iOS: negative while bouncing at the top)
       if (n === root) break;
     }
     return (root === document.body && (document.scrollingElement || document.documentElement).scrollTop > 0) ? document.scrollingElement : null;
@@ -101,11 +101,18 @@
   function attach(root) {
     if (!root || root._pkPull) return; root._pkPull = true;
     var y0 = 0, x0 = 0, d = 0, on = false, busyPull = false;
+    var clean = 0;
     var shift = function (px, anim) { // slide what's inside down (not the panel itself, so nothing behind it shows)
+      clearTimeout(clean);
       for (var c = root.firstElementChild; c; c = c.nextElementSibling) {
         if (c.tagName === 'SCRIPT' || c.tagName === 'STYLE' || getComputedStyle(c).position === 'fixed') continue;
-        c.style.transition = anim ? 'transform .25s' : 'none'; c.style.transform = px ? 'translateY(' + px + 'px)' : '';
+        c.style.transition = anim ? 'transform .25s' : 'none'; c.style.transform = px ? 'translateY(' + px + 'px)' : 'translateY(0)';
       }
+      // back at rest: remove the transforms completely. Left on, iOS keeps every section as its own layer and can
+      // fail to repaint them while the page scrolls (big blank blocks over the content)
+      if (!px) clean = setTimeout(function () {
+        for (var c = root.firstElementChild; c; c = c.nextElementSibling) { c.style.transition = ''; c.style.transform = ''; }
+      }, anim ? 300 : 0);
     };
     var place = function (px, anim) { var u = pullUI(); u.el.style.transition = anim ? 'transform .25s, opacity .25s' : 'none'; u.el.style.transform = 'translate(-50%,' + px + 'px)'; };
     root.addEventListener('touchstart', function (e) {

@@ -11,10 +11,10 @@ export const VERSION = '0.1.0';
 /** The game's console: messages from logic and scripts, warnings and errors (shown in the editor's Console). */
 export const Log = {
   entries: [], listeners: new Set(), max: 500,
-  add(level, text, source) {
+  add(level, text, source, extra) { // extra: { stack } for errors
     const last = this.entries[this.entries.length - 1], msg = String(text);
-    if (last && last.level === level && last.text === msg && last.source === source) { last.count++; last.t = Date.now(); } // repeats collapse into one line
-    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), count: 1 }); if (this.entries.length > this.max) this.entries.shift(); }
+    if (last && last.level === level && last.text === msg && last.source === (source || '')) { last.count++; last.t = Date.now(); } // repeats collapse into one line
+    else { this.entries.push({ level, text: msg, source: source || '', t: Date.now(), t0: Date.now(), count: 1, stack: extra?.stack ? String(extra.stack).split('\n').slice(0, 8).join('\n') : '' }); if (this.entries.length > this.max) this.entries.shift(); }
     (level === 'error' ? console.error : level === 'warn' ? console.warn : console.log)('[pocket]', source ? source + ':' : '', msg);
     for (const f of this.listeners) { try { f(); } catch { /* a listener failing must not break the game */ } }
   },
@@ -1632,6 +1632,8 @@ function injectPrefsCss() {
 .pk-card{width:min(440px,100%);max-height:88%;display:flex;flex-direction:column;background:#1d1d24;border-radius:20px 20px 0 0;box-shadow:0 -8px 40px rgba(0,0,0,.4);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media (min-height:520px) and (min-width:520px){.pk-ps{align-items:center}.pk-card{border-radius:20px}}
 .pk-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 6px}.pk-head b{font-size:20px}
+.pk-perm .pk-card{align-items:center;text-align:center;padding:22px 20px calc(18px + env(safe-area-inset-bottom,0px));gap:8px}.pk-perm-ic{font-size:44px;line-height:1.1}.pk-perm-t{font-size:20px}.pk-perm-w{margin:0 0 8px;color:#c9cbd6;line-height:1.4;max-width:340px}
+.pk-perm-b{display:flex;gap:10px;width:100%;max-width:360px}.pk-perm .pk-pb{flex:1;height:50px;border:0;border-radius:14px;background:#3a8dff;color:#fff;font:700 16px system-ui,-apple-system,sans-serif}.pk-perm .pk-pb.ghost{background:rgba(255,255,255,.1);color:#e6e6e6}
 .pk-x{background:none;border:0;color:#bbb;font-size:20px;width:40px;height:40px}
 .pk-body{overflow:auto;padding:0 18px 8px;-webkit-overflow-scrolling:touch}
 .pk-body h3{font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:#9a9aa8;margin:16px 0 4px}
@@ -1933,6 +1935,106 @@ class PhoneNotify {
     for (let i = 0; i < 8; i++) await this.cancel('comeback-' + i, true);
     lines.slice(0, 8).forEach(([hours, title, text], i) => this.send({ id: 'comeback-' + i, title, text, when: 'in', seconds: Math.max(0.01, +hours || 24) * 3600 }));
     if (P.dailyTitle) this.send({ id: 'daily-reminder', title: P.dailyTitle, text: P.dailyText || '', when: 'daily', time: P.dailyTime || '19:00' });
+  }
+}
+
+// ============================================================================
+// Permissions: asking the player for location, camera, microphone, motion sensors, notifications or lasting storage.
+// A friendly card first explains why ("soft ask"); its Allow button is a real tap, so the phone's own question can follow.
+// ============================================================================
+export const PERMISSIONS = {
+  location: { icon: '📍', title: 'Allow location?', why: 'The game uses where you are (only while you play).', denied: 'Location is off for this game. Turn it on in your phone\'s settings to use it.' },
+  camera: { icon: '📷', title: 'Allow the camera?', why: 'The game uses your camera.', denied: 'The camera is off for this game. Turn it on in your phone\'s settings.' },
+  microphone: { icon: '🎤', title: 'Allow the microphone?', why: 'The game listens for sound (blow, shout, clap). Nothing is recorded or sent.', denied: 'The microphone is off for this game. Turn it on in your phone\'s settings.' },
+  motion: { icon: '📱', title: 'Allow motion sensors?', why: 'Tilt and shake your phone to play.', denied: 'Motion is off: close the browser fully, reopen the game and tap Allow.' },
+  notifications: { icon: '🔔', title: 'Allow notifications?', why: 'We\'ll let you know when there\'s something new for you.', denied: 'Notifications are off for this game. Turn them on in your phone\'s settings.' },
+  storage: { icon: '💾', title: 'Keep your progress safe?', why: 'So the phone doesn\'t clear your saved game when space runs low.', denied: '' },
+};
+const PERM_QUERY = { location: 'geolocation', camera: 'camera', microphone: 'microphone', notifications: 'notifications', storage: 'persistent-storage' };
+class Permissions {
+  constructor(engine) { this.engine = engine; this.known = {}; this.busy = null; this.location = null; this.mic = null; }
+  /** 'granted', 'denied', 'prompt' or 'unsupported' (as far as this browser can tell). */
+  async status(kind) {
+    const E = this.engine;
+    if (kind === 'notifications') return E.phone.status();
+    if (kind === 'motion') { const D = typeof window !== 'undefined' && window.DeviceOrientationEvent; if (!D) return 'unsupported'; if (typeof D.requestPermission !== 'function') return 'granted'; return E.input.tiltOn ? 'granted' : E.input.motionBlocked === 'denied' ? 'denied' : this.known.motion || 'prompt'; }
+    if (kind === 'storage' && !navigator.storage?.persist) return 'unsupported';
+    if (kind === 'location' && !navigator.geolocation) return 'unsupported';
+    if ((kind === 'camera' || kind === 'microphone') && !navigator.mediaDevices?.getUserMedia) return 'unsupported';
+    try { const r = await navigator.permissions?.query({ name: PERM_QUERY[kind] }); if (r?.state) return r.state === 'prompt' && this.known[kind] === 'denied' ? 'denied' : r.state; } catch { /* this browser can't say */ }
+    return this.known[kind] || 'prompt';
+  }
+  /** The phone's own question (call it from a tap where possible). Resolves true when allowed. */
+  async request(kind) {
+    const E = this.engine, done = (ok) => { this.known[kind] = ok ? 'granted' : 'denied'; E.scene?.emit('permission', kind, ok); return ok; };
+    try {
+      switch (kind) {
+        case 'notifications': return done(await E.phone.ask());
+        case 'motion': {
+          const D = window.DeviceOrientationEvent; if (!D) return false;
+          if (typeof D.requestPermission !== 'function') { E.input.enableTilt(); return done(true); }
+          const r = await D.requestPermission(); if (r === 'granted') { E.input.motionBlocked = null; E.input.listenTilt(); window.DeviceMotionEvent?.requestPermission?.().then((m) => m === 'granted' && E.input.enableShake?.()).catch(() => {}); }
+          return done(r === 'granted');
+        }
+        case 'camera': case 'microphone': {
+          const st = await navigator.mediaDevices.getUserMedia(kind === 'camera' ? { video: { facingMode: 'user' } } : { audio: true });
+          if (kind === 'microphone') this.startMic(st); else st.getTracks().forEach((t) => t.stop());
+          return done(true);
+        }
+        case 'location': return done(await new Promise((res) => navigator.geolocation.getCurrentPosition((pos) => { this.setLocation(pos); res(true); }, () => res(false), { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 })));
+        case 'storage': return done(!!(await navigator.storage?.persist?.()));
+        default: return false;
+      }
+    } catch { return done(false); }
+  }
+  setLocation(pos) { const c = pos.coords; this.location = { lat: c.latitude, lon: c.longitude, accuracy: c.accuracy, speed: c.speed ?? 0, heading: c.heading ?? 0, altitude: c.altitude ?? 0, t: Date.now() }; this.engine.scene?.emit('location', this.location); }
+  /** Keep the location fresh while the game runs (after permission). */
+  watchLocation() { if (this.watchId != null || !navigator.geolocation) return; this.watchId = navigator.geolocation.watchPosition((p) => this.setLocation(p), () => {}, { enableHighAccuracy: true, maximumAge: 5000 }); }
+  startMic(stream) {
+    try { const ctx = this.engine.audio.ctx || new (window.AudioContext || window.webkitAudioContext)(), src = ctx.createMediaStreamSource(stream), an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an); this.mic = { an, buf: new Uint8Array(an.fftSize), stream }; } catch { /* no audio */ }
+  }
+  /** Loudness 0–100 from the microphone (0 until it's allowed). */
+  micLevel() {
+    const m = this.mic; if (!m) return 0;
+    m.an.getByteTimeDomainData(m.buf); let sum = 0; for (const v of m.buf) { const d = (v - 128) / 128; sum += d * d; }
+    return Math.min(100, Math.round(Math.sqrt(sum / m.buf.length) * 300));
+  }
+  /**
+   * Ask, the friendly way: a card explains why, then the phone asks. o: { title, why, soft: true }.
+   * Resolves 'granted', 'denied' or 'unsupported'.
+   */
+  async ask(kind, o = {}) {
+    const st = await this.status(kind);
+    if (st === 'granted') { if (kind === 'location') this.watchLocation(); return 'granted'; }
+    if (st === 'unsupported') return 'unsupported';
+    const info = { ...PERMISSIONS[kind], ...Object.fromEntries(Object.entries(o).filter(([, v]) => v)) };
+    if (st === 'denied') { if (info.denied && o.soft !== false) await this.card(kind, { ...info, title: info.title.replace(/\?$/, ''), why: info.denied, okOnly: true }); return 'denied'; }
+    if (o.soft === false) { const ok = await this.request(kind); if (ok && kind === 'location') this.watchLocation(); return ok ? 'granted' : 'denied'; }
+    const r = await this.card(kind, info);
+    if (r === 'granted' && kind === 'location') this.watchLocation();
+    return r;
+  }
+  /** The explaining card (DOM over the game). Its Allow tap runs the real request. */
+  card(kind, info) {
+    if (this.busy) return this.busy;
+    const E = this.engine; injectPrefsCss();
+    const wasPaused = E.paused; if (E.scene?.state === 'play') { E.paused = true; E.quietPause = true; } // the game waits, without the PAUSED screen
+    const wrap = document.createElement('div'); wrap.className = 'pk-ps pk-perm';
+    const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="${esc(info.title)}"><div class="pk-perm-ic">${esc(info.icon || '🔒')}</div><b class="pk-perm-t">${esc(info.title)}</b><p class="pk-perm-w">${esc(info.why)}</p>` +
+      `<div class="pk-perm-b">${info.okOnly ? '<button data-act="no" class="pk-pb">OK</button>' : `<button data-act="no" class="pk-pb ghost">${esc(info.no || 'Not now')}</button><button data-act="yes" class="pk-pb">${esc(info.yes || 'Allow')}</button>`}</div></div>`;
+    for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend']) wrap.addEventListener(ev, (e) => e.stopPropagation());
+    E.root.appendChild(wrap);
+    this.busy = new Promise((resolve) => {
+      const finish = (r) => { wrap.remove(); this.busy = null; E.quietPause = false; if (E.scene?.state === 'play') E.paused = wasPaused; resolve(r); };
+      wrap.addEventListener('click', (e) => {
+        const act = e.target.closest?.('[data-act]')?.dataset.act; if (!act) return;
+        if (act === 'no' || info.okOnly) { E.scene?.emit('permission', kind, false); return finish(info.okOnly ? 'denied' : 'denied'); }
+        wrap.querySelector('.pk-card').style.opacity = '0.6';
+        this.request(kind).then((ok) => finish(ok ? 'granted' : 'denied')); // started inside the tap, so iPhones accept it
+      });
+    });
+    return this.busy;
   }
 }
 
@@ -3582,7 +3684,7 @@ function renderUI(engine, scene) {
   }
   if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
-  if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && engine.inspecting)) return; // the editor's Inspect keeps the view clear
+  if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && (engine.inspecting || engine.quietPause))) return; // the editor's Inspect (and a permission card) keep the view clear
   if (engine.paused) {
     dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
   } else if (scene.state === 'title') {
@@ -3624,7 +3726,7 @@ function renderUI(engine, scene) {
 export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
   'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
@@ -4126,7 +4228,7 @@ registerBehavior('cameraFollow', {
 registerBehavior('camera', {
   label: 'Camera', description: 'A virtual camera: follow, fixed, side scroller, top down, orbit (drag), group (frames several targets) or dolly track. Smoothing, look-ahead, dead zone, screen offset, handheld noise, bounds, blends between cameras, orthographic 3D.',
   params: [
-    { key: 'mode', label: 'Mode', type: 'select', options: ['follow', 'fixed', 'side scroller', 'top down', 'orbit', 'group', 'dolly'], default: 'follow' },
+    { key: 'mode', label: 'Mode', type: 'select', options: ['follow', 'fixed', 'side scroller', 'top down', 'orbit', 'group', 'dolly'], default: 'follow', info: { orbit: 'Free Look: drag to orbit around the target, pinch to zoom; it can swing back behind it by itself.', dolly: 'On a track: follows the target along it, or travels along it by itself (a dolly cart).' } },
     { key: 'target', label: 'Follow tag', type: 'text', default: 'player', suggest: 'tags', info: { group: 'Frames every object with this tag.', fixed: 'Fixed cameras look at this tag (3D). Leave empty to look straight ahead.' } },
     { key: 'lookAt', label: 'Look at tag (3D, empty = same)', type: 'text', default: '', suggest: 'tags', only3d: true, showIf: { mode: ['follow', 'dolly', 'side scroller'] } },
     { key: 'smooth', label: 'Damping (higher = snappier)', type: 'number', default: 6, range: [0.5, 30], step: 0.5 },
@@ -4139,23 +4241,44 @@ registerBehavior('camera', {
     { key: 'oz', label: 'Offset Z (3D)', type: 'number', default: 0, default3d: 11, only3d: true, showIf: { mode: ['follow', 'side scroller', 'orbit', 'group'] } },
     { key: 'path', label: 'Dolly track points (world)', type: 'json', default: [{ x: 0, y: 350 }, { x: 800, y: 350 }], default3d: [{ x: -10, y: 4, z: 10 }, { x: 10, y: 4, z: 10 }], showIf: { mode: ['dolly'] } },
     { key: 'padding', label: 'Group padding', type: 'number', default: 80, default3d: 3, showIf: { mode: ['group'] } },
+    { key: 'dollyMode', label: 'On the track', type: 'select', options: ['follow the target', 'travel by itself'], default: 'follow the target', showIf: { mode: ['dolly'] } },
+    { key: 'dollySpeed', label: 'Travel speed (track lengths per second)', type: 'number', default: 0.1, range: [0, 2], step: 0.01, showIf: { dollyMode: ['travel by itself'] } },
+    { key: 'dollyLoop', label: 'At the end', type: 'select', options: ['loop', 'back and forth', 'stop'], default: 'loop', showIf: { dollyMode: ['travel by itself'] } },
+    { key: 'orbitPinch', label: 'Pinch to zoom in / out', type: 'bool', default: true, only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
+    { key: 'minDist', label: 'Closest', type: 'number', default: 4, only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
+    { key: 'maxDist', label: 'Furthest', type: 'number', default: 25, only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
+    { key: 'minPitch', label: 'Lowest angle (°)', type: 'number', default: -10, range: [-80, 80], only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
+    { key: 'maxPitch', label: 'Highest angle (°)', type: 'number', default: 80, range: [-80, 89], only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
+    { key: 'recenter', label: 'Swing back behind the target after (sec, 0 = never)', type: 'number', default: 0, range: [0, 10], step: 0.5, only3d: true, showIf: { mode: ['orbit'] }, group: 'Free Look' },
     { key: 'screenX', label: 'Screen X (-0.5 left … 0.5 right)', type: 'number', default: 0, range: [-0.5, 0.5], step: 0.05, group: 'Framing' },
     { key: 'screenY', label: 'Screen Y (-0.5 top … 0.5 bottom)', type: 'number', default: 0, range: [-0.5, 0.5], step: 0.05, group: 'Framing' },
     { key: 'lookAhead', label: 'Look ahead (sec of movement)', type: 'number', default: 0, range: [0, 2], step: 0.05, group: 'Framing' },
     { key: 'deadZone', label: 'Dead zone (target moves freely inside)', type: 'number', default: 0, group: 'Framing' },
+    { key: 'deadZoneY', label: 'Dead zone up / down (blank = same)', type: 'number', default: '', optional: true, group: 'Framing' },
+    { key: 'smoothY', label: 'Up / down damping (blank = same)', type: 'number', default: '', optional: true, group: 'Framing', infoText: 'e.g. follow sideways quickly but jumps slowly, so the screen doesn\'t bounce with every jump.' },
+    { key: 'pixelSnap', label: 'Pixel perfect (2D: no blurry in-between positions)', type: 'bool', default: false, only2d: true, group: 'Framing' },
     { key: 'bounds', label: 'Keep inside (2D confiner)', type: 'select', options: ['none', 'level', 'custom'], default: 'none', only2d: true, group: 'Framing' },
     { key: 'minX', label: 'Bounds min X', type: 'number', default: 0, showIf: { bounds: ['custom'] }, group: 'Framing' },
     { key: 'maxX', label: 'Bounds max X', type: 'number', default: 400, showIf: { bounds: ['custom'] }, group: 'Framing' },
     { key: 'minY', label: 'Bounds min Y', type: 'number', default: 0, showIf: { bounds: ['custom'] }, group: 'Framing' },
     { key: 'maxY', label: 'Bounds max Y', type: 'number', default: 700, showIf: { bounds: ['custom'] }, group: 'Framing' },
+    { key: 'bounds3d', label: 'Keep inside (3D confiner)', type: 'select', options: ['none', 'box'], default: 'none', only3d: true, group: 'Framing' },
+    { key: 'box3d', label: 'Box: min X, max X, min Y, max Y, min Z, max Z', type: 'text', default: '-20, 20, 1, 30, -20, 20', only3d: true, showIf: { bounds3d: ['box'] }, group: 'Framing' },
     { key: 'noise', label: 'Handheld noise (shake amount)', type: 'number', default: 0, range: [0, 20], step: 0.5, group: 'Noise & blend' },
     { key: 'noiseSpeed', label: 'Noise speed', type: 'number', default: 1, range: [0.1, 5], step: 0.1, group: 'Noise & blend', showIf: (b) => +b.noise > 0 },
+    { key: 'noiseProfile', label: 'Noise feel', type: 'select', options: ['handheld', 'gentle sway', 'earthquake', 'engine rumble'], default: 'handheld', group: 'Noise & blend', showIf: (b) => +b.noise > 0 },
     { key: 'blend', label: 'Blend in from previous camera (sec)', type: 'number', default: 0.8, range: [0, 4], step: 0.1, group: 'Noise & blend' },
     { key: 'blendEase', label: 'Blend ease', type: 'select', options: EASES, default: 'inOutCubic', ease: true, group: 'Noise & blend' },
     { key: 'priority', label: 'Priority (highest starts active)', type: 'number', default: 0, step: 1, group: 'Noise & blend' },
   ],
   create(p) {
-    let yaw = 0, pitch = 0.5, dist = 10, box = null, st = null;
+    let yaw = 0, pitch = 0.5, dist = 10, box = null, st = null, idle = 0, yaw0 = 0, pinch0 = null, dollyT = 0, dollyDir = 1;
+    const box3 = () => { const n = String(p.box3d || '').split(',').map((x) => parseFloat(x)); return n.length >= 6 && n.every(Number.isFinite) ? n : null; };
+    const trackPoint = (pts, u) => { // a point part-way (0–1) along the track, by length
+      const seg = []; let L = 0; for (let i = 0; i < pts.length - 1; i++) { const a = pts[i], b = pts[i + 1], l = Math.hypot(b.x - a.x, b.y - a.y, (b.z || 0) - (a.z || 0)); seg.push(l); L += l; }
+      let d = clamp(u, 0, 1) * L; for (let i = 0; i < seg.length; i++) { if (d <= seg[i] || i === seg.length - 1) { const a = pts[i], b = pts[i + 1], k = seg[i] ? d / seg[i] : 0; return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k, z: (a.z || 0) + ((b.z || 0) - (a.z || 0)) * k }; } d -= seg[i]; }
+      return pts[0];
+    };
     const levelBounds = (s) => {
       let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity;
       for (const e of s.entities) {
@@ -4175,41 +4298,67 @@ registerBehavior('camera', {
       }
       return best || pts[0];
     };
-    const group = (s, e) => {
-      const list = s.findAll(p.target).filter((q) => q !== e);
+    const group = (s, e, T = p.target) => {
+      const list = s.findAll(T).filter((q) => q !== e);
       if (!list.length) return null;
       let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity, n = Infinity, f = -Infinity;
       for (const q of list) { l = Math.min(l, q.x); r = Math.max(r, q.x); t = Math.min(t, q.y); b = Math.max(b, q.y); n = Math.min(n, q.z); f = Math.max(f, q.z); }
       return { x: (l + r) / 2, y: (t + b) / 2, z: (n + f) / 2, w: r - l, h: b - t, d: f - n, vel: { x: 0, y: 0, z: 0 } };
     };
-    const noise = (s, k) => { const tt = s.time * (+p.noiseSpeed || 1), a = +p.noise || 0; return a ? [Math.sin(tt * 2.1 + k) * 0.6 + Math.sin(tt * 5.3 + k * 2) * 0.4, Math.sin(tt * 1.7 + k + 3) * 0.6 + Math.sin(tt * 4.1 + k) * 0.4, Math.sin(tt * 2.9 + k + 5) * 0.5].map((v) => v * a) : [0, 0, 0]; };
+    const noise = (s, k, e) => {
+      const tt = s.time * (+p.noiseSpeed || 1), a = e?.data?.camNoise ?? (+p.noise || 0); if (!a) return [0, 0, 0];
+      switch (p.noiseProfile) {
+        case 'gentle sway': return [Math.sin(tt * 0.6 + k) * 0.8, Math.sin(tt * 0.45 + k + 2) * 0.6, Math.sin(tt * 0.5 + k + 4) * 0.4].map((v) => v * a);
+        case 'earthquake': return [noise1(tt * 9 + k) + Math.sin(tt * 23) * 0.3, noise1(tt * 8 + k + 50) + Math.sin(tt * 19) * 0.3, noise1(tt * 7 + k + 99)].map((v) => v * a * 1.4);
+        case 'engine rumble': return [Math.sin(tt * 40 + k) * 0.25, Math.sin(tt * 47 + k + 1) * 0.35, 0].map((v) => v * a);
+        default: return [Math.sin(tt * 2.1 + k) * 0.6 + Math.sin(tt * 5.3 + k * 2) * 0.4, Math.sin(tt * 1.7 + k + 3) * 0.6 + Math.sin(tt * 4.1 + k) * 0.4, Math.sin(tt * 2.9 + k + 5) * 0.5].map((v) => v * a);
+      }
+    };
     /** Where this camera wants to be right now. */
     const desired = (e, s, cur) => {
-      const three = is3D(e), tgt = p.mode === 'fixed' ? null : p.mode === 'group' ? group(s, e) : p.target ? s.findAll(p.target).find((q) => q !== e) : null;
-      const vel = tgt?.vel || tgt?.body?.vel || { x: 0, y: 0, z: 0 }, la = +p.lookAhead || 0, dz = +p.deadZone || 0;
+      const T = e.data.camTarget ?? p.target, three = is3D(e), tgt = p.mode === 'fixed' ? null : p.mode === 'group' ? group(s, e, T) : T ? s.findAll(T).find((q) => q !== e) : null;
+      const vel = tgt?.vel || tgt?.body?.vel || { x: 0, y: 0, z: 0 }, la = +p.lookAhead || 0, dz = +p.deadZone || 0, dzy = p.deadZoneY === '' || p.deadZoneY == null ? dz : +p.deadZoneY || 0;
+      const travel = p.mode === 'dolly' && p.dollyMode === 'travel by itself' && Array.isArray(p.path) && p.path.length > 1;
       if (!three) {
         let zoom = +p.zoom || 1, fx = e.x, fy = e.y;
-        if (tgt) {
+        if (travel) { const c = trackPoint(p.path, dollyT); fx = c.x; fy = c.y; }
+        else if (tgt) {
           fx = tgt.x + p.ox + vel.x * la; fy = p.mode === 'side scroller' ? e.y : tgt.y + p.oy + (p.mode === 'top down' ? vel.y * la : 0);
           if (p.mode === 'group') zoom = clamp(Math.min(s.view.width / (tgt.w + 2 * p.padding), s.view.height / (tgt.h + 2 * p.padding)), 0.15, +p.zoom || 1);
           if (p.mode === 'dolly' && Array.isArray(p.path) && p.path.length > 1) { const c = closestOnPath(p.path, tgt); fx = c.x; fy = c.y; }
         }
         fx -= (+p.screenX || 0) * s.view.width / zoom; fy -= (+p.screenY || 0) * s.view.height / zoom;
-        if (dz && tgt && cur) { const ax = fx - cur.x, ay = fy - cur.y; fx = Math.abs(ax) < dz ? cur.x : fx - Math.sign(ax) * dz; fy = Math.abs(ay) < dz ? cur.y : fy - Math.sign(ay) * dz; }
+        if ((dz || dzy) && tgt && cur && !travel) { const ax = fx - cur.x, ay = fy - cur.y; fx = Math.abs(ax) < dz ? cur.x : fx - Math.sign(ax) * dz; fy = Math.abs(ay) < dzy ? cur.y : fy - Math.sign(ay) * dzy; }
         return { x: fx, y: fy, zoom };
       }
       const lookTag = p.lookAt ? s.findAll(p.lookAt).find((q) => q !== e) : null;
       let pos, look;
-      if (!tgt) {
-        const ry = e.ry * DEG, rx = e.rx * DEG, ft = p.target ? s.findAll(p.target).find((q) => q !== e) : null;
+      if (travel) { // dolly cart: ride the track, looking at the target (or along the track)
+        const c = trackPoint(p.path, dollyT), n = trackPoint(p.path, clamp(dollyT + 0.02 * dollyDir, 0, 1)), ft = lookTag || (T ? s.findAll(T).find((q) => q !== e) : null);
+        pos = [c.x, c.y, c.z]; look = ft ? [ft.x, ft.y, ft.z] : [n.x + (n.x - c.x) * 10, n.y + (n.y - c.y) * 10, n.z + (n.z - c.z) * 10];
+      } else if (!tgt) {
+        const ry = e.ry * DEG, rx = e.rx * DEG, ft = T ? s.findAll(T).find((q) => q !== e) : null;
         pos = [e.x, e.y, e.z];
         look = ft ? [ft.x, ft.y, ft.z] : [e.x - Math.sin(ry) * Math.cos(rx), e.y + Math.sin(rx), e.z - Math.cos(ry) * Math.cos(rx)];
       } else {
         let L = [tgt.x + vel.x * la, p.mode === 'side scroller' ? e.y : tgt.y, tgt.z + vel.z * la];
-        if (dz && cur) for (const k of [0, 2]) { const d = L[k] - cur.look[k]; L[k] = Math.abs(d) < dz ? cur.look[k] : L[k] - Math.sign(d) * dz; }
+        if ((dz || dzy) && cur) for (const k of [0, 1, 2]) { const z = k === 1 ? dzy : dz, d = L[k] - cur.look[k]; if (z) L[k] = Math.abs(d) < z ? cur.look[k] : L[k] - Math.sign(d) * z; }
         if (p.mode === 'orbit') {
-          const inp = s.engine.input;
-          if (inp.pointerDown && !inp.stick) { const L = s.engine.lookScale(); yaw -= inp.drag.dx * 0.008 * L.x; pitch = clamp(pitch + inp.drag.dy * 0.006 * L.y, -0.2, 1.45); }
+          const inp = s.engine.input, lo = (Number.isFinite(+p.minPitch) && p.minPitch !== '' ? +p.minPitch : -10) * DEG, hi = (Number.isFinite(+p.maxPitch) && p.maxPitch !== '' ? +p.maxPitch : 80) * DEG;
+          const fingers = [...inp.pointers.values()].filter((q) => q.role === 'free');
+          if (p.orbitPinch !== false && fingers.length >= 2) { // pinch: closer / further
+            const d = Math.hypot(fingers[0].x - fingers[1].x, fingers[0].y - fingers[1].y);
+            if (pinch0) dist = clamp(pinch0.dist * pinch0.d / Math.max(20, d), +p.minDist || 2, +p.maxDist || 40); else pinch0 = { d, dist };
+            idle = 0;
+          } else {
+            pinch0 = null;
+            if (inp.pointerDown && !inp.stick) { const LS = s.engine.lookScale(); yaw -= inp.drag.dx * 0.008 * LS.x; pitch = clamp(pitch + inp.drag.dy * 0.006 * LS.y, lo, hi); idle = 0; }
+          }
+          if (inp.wheel?.dy) { dist = clamp(dist * (1 + inp.wheel.dy * 0.001), +p.minDist || 2, +p.maxDist || 40); idle = 0; }
+          if (+p.recenter > 0 && idle > +p.recenter) { // swing back behind the target (the way it faces / moves)
+            const v = tgt.body?.vel || vel, sp = Math.hypot(v.x || 0, v.z || 0), behind = sp > 0.5 ? Math.atan2(-(v.x || 0), -(v.z || 0)) : tgt.ry != null ? tgt.ry * DEG : yaw0;
+            let dy = behind - yaw; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); yaw += dy * Math.min(1, s.dt * 2 || 0.03);
+          }
           pos = [L[0] + Math.sin(yaw) * Math.cos(pitch) * dist, L[1] + Math.sin(pitch) * dist, L[2] + Math.cos(yaw) * Math.cos(pitch) * dist];
         } else if (p.mode === 'top down') pos = [L[0], L[1] + (+p.oy || dist), L[2] + 0.001];
         else if (p.mode === 'dolly' && Array.isArray(p.path) && p.path.length > 1) { const c = closestOnPath(p.path, { x: L[0], y: L[1], z: L[2] }); pos = [c.x, c.y, c.z]; }
@@ -4230,25 +4379,34 @@ registerBehavior('camera', {
     return {
       start(e, s) {
         (s.cameras ||= []).push(e); e.data.camPriority = +p.priority || 0;
-        if (is3D(e)) { dist = Math.hypot(p.ox, p.oy, p.oz) || 10; yaw = Math.atan2(p.ox, p.oz); pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); }
+        e._camRecenter = () => { yaw = yaw0; pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); dist = Math.hypot(p.ox, p.oy, p.oz) || 10; };
+        if (is3D(e)) { dist = Math.hypot(p.ox, p.oy, p.oz) || 10; yaw = yaw0 = Math.atan2(p.ox, p.oz); pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); }
         else if (p.bounds === 'level') box = levelBounds(s);
         else if (p.bounds === 'custom') box = { l: p.minX, r: p.maxX, t: p.minY, b: p.maxY };
       },
       update(e, dt, s) {
+        if (p.mode === 'dolly' && p.dollyMode === 'travel by itself') { // the cart keeps moving even while another camera is live
+          dollyT += (+p.dollySpeed || 0) * dt * dollyDir;
+          if (dollyT > 1 || dollyT < 0) { if (p.dollyLoop === 'loop') dollyT = ((dollyT % 1) + 1) % 1; else if (p.dollyLoop === 'back and forth') { dollyDir = -dollyDir; dollyT = clamp(dollyT, 0, 1); } else dollyT = clamp(dollyT, 0, 1); }
+        }
+        idle += dt; s.dt = dt;
         if (!s.isActiveCamera(e)) { st = null; return; }
         const c = s.camera, three = is3D(e);
         if (s.activeCamEntity !== e) { // just became active: cut, or blend from wherever the view is now
           const had = !!s.activeCamEntity && !s.activeCamEntity.dead;
           s.activeCamEntity = e; st = null;
-          s.camBlend = had && +p.blend > 0 ? { t: 0, dur: +p.blend, ease: easeFn(p.blendEase), from: three ? { pos: [c.position.x, c.position.y, c.position.z], look: [c.target.x, c.target.y, c.target.z], fov: c.fov } : { x: c.x, y: c.y, zoom: c.zoom } } : null;
+          const nb = s.nextBlend; s.nextBlend = null; // Blend To Camera node: this switch's own time and ease
+          const dur = nb ? +nb.dur : +p.blend, ease = nb?.ease || p.blendEase;
+          s.emit('cameraLive', e.name, e);
+          s.camBlend = had && dur > 0 ? { t: 0, dur, ease: easeFn(ease), from: three ? { pos: [c.position.x, c.position.y, c.position.z], look: [c.target.x, c.target.y, c.target.z], fov: c.fov } : { x: c.x, y: c.y, zoom: c.zoom } } : null;
         }
         if (s.cameraCut) { st = null; s.cameraCut = false; }
-        const want = desired(e, s, st), k = !st ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt);
+        const want = desired(e, s, st), k = !st ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt), ky = !st ? 1 : p.smoothY === '' || p.smoothY == null ? k : 1 - Math.exp(-(+p.smoothY || 6) * dt);
         if (!st) st = JSON.parse(JSON.stringify(want));
-        const nz = noise(s, e.id.length);
+        const nz = noise(s, e.id.length, e);
         let out;
         if (!three) {
-          st.x += (want.x - st.x) * k; st.y += (want.y - st.y) * k; st.zoom += (want.zoom - st.zoom) * k;
+          st.x += (want.x - st.x) * k; st.y += (want.y - st.y) * ky; st.zoom += (want.zoom - st.zoom) * k;
           out = { x: st.x + nz[0], y: st.y + nz[1], zoom: st.zoom };
           if (box && s.engine) {
             const zf = s.engine.renderer.zoomFor ? s.engine.renderer.zoomFor({ ...s, camera: { zoom: out.zoom } }) : out.zoom, hw = s.engine.width / 2 / zf, hh = s.engine.height / 2 / zf;
@@ -4256,9 +4414,11 @@ registerBehavior('camera', {
             out.y = box.b - box.t > hh * 2 ? clamp(out.y, box.t + hh, box.b - hh) : (box.t + box.b) / 2;
           }
         } else {
-          for (const q of [0, 1, 2]) { st.pos[q] += (want.pos[q] - st.pos[q]) * k; st.look[q] += (want.look[q] - st.look[q]) * k; }
+          for (const q of [0, 1, 2]) { const kk = q === 1 ? ky : k; st.pos[q] += (want.pos[q] - st.pos[q]) * kk; st.look[q] += (want.look[q] - st.look[q]) * kk; }
           st.fov += (want.fov - st.fov) * k;
           out = { pos: st.pos.map((v, q) => v + nz[q] * 0.05), look: st.look.map((v, q) => v + nz[q] * 0.02), fov: st.fov };
+          const b3 = p.bounds3d === 'box' && box3(); // 3D confiner: the camera stays inside the box (it keeps looking at the target)
+          if (b3) { const [x0, x1, y0, y1, z0, z1] = b3, lim = [[x0, x1], [y0, y1], [z0, z1]]; out.pos = out.pos.map((v, q) => clamp(v, Math.min(...lim[q]), Math.max(...lim[q]))); }
         }
         const B = s.camBlend;
         if (B) {
@@ -4267,13 +4427,111 @@ registerBehavior('camera', {
           else out = { pos: out.pos.map((v, q) => lerp(B.from.pos[q], v, u)), look: out.look.map((v, q) => lerp(B.from.look[q], v, u)), fov: lerp(B.from.fov, out.fov, u) };
           if (B.t >= B.dur) s.camBlend = null;
         }
-        if (!three) { c.x = out.x; c.y = out.y; c.zoom = out.zoom; }
+        if (!three) { c.x = p.pixelSnap ? Math.round(out.x) : out.x; c.y = p.pixelSnap ? Math.round(out.y) : out.y; c.zoom = out.zoom; }
         else {
           c.position = { x: out.pos[0], y: out.pos[1], z: out.pos[2] }; c.target = { x: out.look[0], y: out.look[1], z: out.look[2] }; c.fov = out.fov;
           c.ortho = !!p.ortho; c.orthoSize = +p.orthoSize || 14;
         }
       },
       destroy(e, s) { s.cameras = (s.cameras || []).filter((q) => q !== e); },
+    };
+  },
+});
+
+/** Is any object with this tag inside the object's box? (camera zones) */
+function inZone(s, e, tag) {
+  const ex = e.extents(), three = is3D(e), hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, hz = ex.sphere ? ex.r : ex.hz ?? hx;
+  return s.findAll(tag).some((q) => q !== e && !q.dead && Math.abs(q.x - e.x) <= hx && (three ? Math.abs(q.z - e.z) <= hz && Math.abs(q.y - e.y) <= Math.max(hy, 50) : Math.abs(q.y - e.y) <= hy));
+}
+registerBehavior('cameraZone', {
+  label: 'Camera Zone', description: 'An area that switches the camera (like Cinemachine trigger zones): when the player walks in, the chosen camera takes over and blends in; when they leave, it goes back. Size it like any object; it\'s invisible while playing.',
+  params: [
+    { key: 'camera', label: 'Camera to use', type: 'text', default: 'Camera 2', suggest: 'objects' },
+    { key: 'tag', label: 'Who sets it off (tag)', type: 'text', default: 'player', suggest: 'tags' },
+    { key: 'mode', label: 'When they leave', type: 'select', options: ['go back to the camera before', 'keep this camera'], default: 'go back to the camera before' },
+    { key: 'blend', label: 'Blend time (sec, blank = the camera\'s own)', type: 'number', default: '', optional: true },
+    { key: 'hide', label: 'Invisible while playing', type: 'bool', default: true },
+    { key: 'message', label: 'Also send message on enter', type: 'text', default: '', suggest: 'messages' },
+  ],
+  create(p) {
+    let inside = false, before = null;
+    return {
+      start(e, s) { if (p.hide !== false) e.visible = false; },
+      update(e, dt, s) {
+        const now = inZone(s, e, p.tag || 'player');
+        if (now === inside) return;
+        inside = now;
+        if (p.blend !== '' && p.blend != null) s.nextBlend = { dur: +p.blend || 0, ease: null };
+        if (now) { before = s.activeCamera || ''; s.activeCamera = p.camera; if (p.message) s.send(p.message); }
+        else if (p.mode !== 'keep this camera' && s.activeCamera === p.camera) s.activeCamera = before || null;
+      },
+    };
+  },
+});
+registerBehavior('cameraSwitcher', {
+  label: 'Camera Switcher', description: 'Picks the live camera for you. By variable (State-Driven Camera): each value of a variable has its camera (state = aim → Aim Cam). Clear shot: the first camera in the list that can see the target (nothing solid in between).',
+  params: [
+    { key: 'mode', label: 'Picks by', type: 'select', options: ['a variable', 'clear shot'], default: 'a variable' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'state', suggest: 'vars', showIf: { mode: ['a variable'] } },
+    { key: 'map', label: 'Value = Camera (one per line)', type: 'code', default: 'run = Follow Cam\naim = Aim Cam\nmenu = Menu Cam', showIf: { mode: ['a variable'] } },
+    { key: 'cameras', label: 'Cameras to try, best first (comma list)', type: 'text', default: 'Camera 1, Camera 2, Camera 3', showIf: { mode: ['clear shot'] } },
+    { key: 'target', label: 'Target (tag)', type: 'text', default: 'player', suggest: 'tags', showIf: { mode: ['clear shot'] } },
+    { key: 'fallback', label: 'Otherwise use camera (blank = by priority)', type: 'text', default: '', suggest: 'objects' },
+    { key: 'hold', label: 'Stay on a camera at least (sec)', type: 'number', default: 0.5, range: [0, 5], step: 0.1, infoText: 'Stops quick flicking back and forth.' },
+  ],
+  create(p) {
+    let held = 9, cur = undefined;
+    const pick = (s) => {
+      if (p.mode === 'clear shot') {
+        const t = s.findAll(p.target || 'player')[0]; if (!t) return p.fallback || null;
+        for (const name of String(p.cameras || '').split(',').map((x) => x.trim()).filter(Boolean)) { const c = s.find(name); if (c && !c.dead && s.canSee(c, t)) return name; }
+        return p.fallback || null;
+      }
+      const v = s.vars[p.var];
+      for (const l of String(p.map || '').split('\n')) { const m = /^\s*([^=]+?)\s*=\s*(.+?)\s*$/.exec(l); if (m && sameVal(m[1], v)) return m[2]; }
+      return p.fallback || null;
+    };
+    return {
+      update(e, dt, s) {
+        held += dt;
+        const want = pick(s);
+        if (want === cur || held < (+p.hold || 0)) return;
+        cur = want; held = 0; s.activeCamera = want || null;
+      },
+    };
+  },
+});
+registerBehavior('cameraImpulse', {
+  label: 'Camera Impulse', description: 'Shakes the camera when something happens to this object (Cinemachine Impulse Source): a hit, a landing, an explosion. Weaker the further it is from the camera.',
+  params: [
+    { key: 'when', label: 'When', type: 'select', options: ['it hits something', 'it lands', 'it is destroyed', 'a message arrives', 'it starts', 'every few seconds'], default: 'it hits something' },
+    { key: 'message', label: 'Message', type: 'text', default: 'boom', suggest: 'messages', showIf: { when: ['a message arrives'] } },
+    { key: 'every', label: 'Every (sec)', type: 'number', default: 3, showIf: { when: ['every few seconds'] } },
+    { key: 'strength', label: 'Strength', type: 'number', default: 10, range: [1, 40], step: 1 },
+    { key: 'minSpeed', label: 'Only hits faster than', type: 'number', default: 0, showIf: { when: ['it hits something', 'it lands'] } },
+    { key: 'range', label: 'Felt up to (distance, 0 = everywhere the same)', type: 'number', default: 0 },
+    { key: 'vibrate', label: 'Vibrate the phone too', type: 'bool', default: true },
+  ],
+  create(p) {
+    let t = 0, wasGround = true;
+    const fire = (e, s, k = 1) => {
+      const c = s.camera, three = s.mode === '3d', fx = three ? c.target.x : c.x, fy = three ? c.target.y : c.y, fz = three ? c.target.z : 0, d = Math.hypot(e.x - fx, e.y - fy, (e.z || 0) - fz), R = +p.range || 0;
+      const a = (+p.strength || 10) * k * (R > 0 ? clamp(1 - d / R, 0, 1) : 1);
+      if (a <= 0.2) return;
+      c.shake = Math.max(c.shake, a);
+      if (p.vibrate !== false) s.engine?.vibrate(Math.min(60, a * 3));
+    };
+    return {
+      start(e, s) {
+        if (p.when === 'it starts') fire(e, s);
+        if (p.when === 'a message arrives') s.on('message', (m) => { if (!e.dead && m === p.message) fire(e, s); });
+      },
+      update(e, dt, s) {
+        if (p.when === 'every few seconds') { t += dt; if (t >= Math.max(0.1, +p.every || 3)) { t = 0; fire(e, s); } }
+        if (p.when === 'it lands' && e.body) { const g = !!e.body.grounded; if (g && !wasGround) { const sp = Math.abs(e.body.lastImpact ?? e.body.vel?.y ?? 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); } wasGround = g; }
+      },
+      collide(e, other, s) { if (p.when !== 'it hits something') return; const v = e.body?.vel || { x: 0, y: 0 }, sp = Math.hypot(v.x || 0, v.y || 0, v.z || 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); },
+      destroy(e, s) { if (p.when === 'it is destroyed') fire(e, s); },
     };
   },
 });
@@ -8640,6 +8898,7 @@ function runAction(s, e, p, other) {
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
     case 'open settings': s.engine.openSettings(); break;
+    case 'ask permission': s.engine.perms.ask(String(v || 'location').trim().toLowerCase()); break;
     case 'phone notification': { const [title = '', text = ''] = String(v || '').split('|').map((x) => x.trim()); s.engine.phone.send({ title, text, when: +p.amount > 0 ? 'in' : 'now', seconds: +p.amount }); break; }
     case 'show notification': { const m = /^([\w-]+):\s*([\s\S]*)$/.exec(String(v || '')), known = m && notifyType(s.settings, m[1], s.engine.notifyTypes).name === m[1]; const [title = '', text = '', icon = ''] = String(known ? m[2] : v || '').split('|').map((x) => x.trim()); s.engine.notify({ type: known ? m[1] : 'default', title, text, icon: icon || undefined }); break; }
     case 'add score': s.addVar('score', p.amount); break;
@@ -9770,7 +10029,8 @@ export const NODE_TYPES = {
   setVar: { cat: 'Actions', label: 'Set Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   addVar: { cat: 'Actions', label: 'Add to Variable', exec: true, outs: ['then'], params: [txt('name', 'score', 'variable')], inputs: [{ key: 'amount', type: 'number', default: 1 }] },
   message: { cat: 'Actions', label: 'Show Message', exec: true, outs: ['then'], params: [txt('text', 'Hello! Score: {score}', 'text'), num('seconds', 2, 'seconds')] },
-  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text')] },
+  log: { cat: 'Actions', label: 'Debug Log', exec: true, outs: ['then'], params: [txt('text', 'score is {score}', 'text'), opt('level', ['log', 'warning', 'error'], 'log', 'as')] },
+  logValue: { cat: 'Actions', label: 'Debug Log Value', exec: true, outs: ['then'], params: [txt('label', 'speed', 'label'), opt('level', ['log', 'warning', 'error'], 'log', 'as')], inputs: [{ key: 'value', type: 'text', default: '' }] },
   sound: { cat: 'Actions', label: 'Play Sound', exec: true, outs: ['then'], params: [opt('sound', SOUNDS, 'coin', 'sound')] },
   spawn: { cat: 'Actions', label: 'Spawn Template', exec: true, outs: ['then'], params: [txt('template', '', 'template')] },
   destroy: { cat: 'Actions', label: 'Destroy', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')] },
@@ -10127,6 +10387,23 @@ Object.assign(NODE_TYPES, {
   dragAmount: { cat: 'Input', label: 'Finger Drag', value: 'number', params: [opt('axis', ['x', 'y', 'distance'], 'x', 'this frame')] },
   pinchAmount: { cat: 'Input', label: 'Pinch Zoom', value: 'number' },
   // camera
+  askPermission: { cat: 'Device', label: 'Ask Permission', exec: true, outs: ['allowed', 'not allowed', 'not supported'], params: [opt('kind', ['location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'location', 'for'), txt('title', '', 'title (blank = the usual one)'), txt('why', '', 'why you need it (blank = the usual text)'), { key: 'soft', type: 'bool', default: true, label: 'explain first, then the phone asks' }] },
+  permStatus: { cat: 'Device', label: 'Permission Status', value: 'text', params: [opt('kind', ['location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'location', 'for')] },
+  hasPermission: { cat: 'Device', label: 'Has Permission', value: 'bool', params: [opt('kind', ['location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'location', 'for')] },
+  onPermission: { cat: 'Device', label: 'On Permission Answered', outs: ['allowed', 'not allowed'], params: [opt('kind', ['any', 'location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'any', 'for')] },
+  micLevel: { cat: 'Device', label: 'Microphone Loudness', value: 'number' },
+  location: { cat: 'Device', label: 'Location', value: 'number', params: [opt('part', ['latitude', 'longitude', 'accuracy (m)', 'speed (m/s)', 'heading (°)', 'altitude (m)', 'seconds since update'], 'latitude', 'part')] },
+  distanceTo: { cat: 'Device', label: 'Distance To Place (m)', value: 'number', inputs: [N_IN('latitude', 51.5007), N_IN('longitude', -0.1246)] },
+  onLocation: { cat: 'Device', label: 'On Location Changed', outs: ['then'] },
+  camLive: { cat: 'Camera', label: 'Make Camera Live', exec: true, outs: ['then'], params: [txt('camera', 'Camera 2', 'camera'), num('seconds', -1, 'blend (sec, −1 = its own)'), opt('ease', EASES, 'inOutCubic', 'blend ease')] },
+  camAuto: { cat: 'Camera', label: 'Back To Camera Priorities', exec: true, outs: ['then'] },
+  camPriority: { cat: 'Camera', label: 'Set Camera Priority', exec: true, outs: ['then'], params: [txt('camera', 'Camera 2', 'camera')], inputs: [N_IN('priority', 10)] },
+  camTarget: { cat: 'Camera', label: 'Set Camera Target', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), txt('tag', 'boss', 'follow tag or name')] },
+  camImpulse: { cat: 'Camera', label: 'Camera Impulse', exec: true, outs: ['then'], params: [opt('from', ['this object', 'everywhere'], 'this object', 'from')], inputs: [N_IN('strength', 12)] },
+  camNoise: { cat: 'Camera', label: 'Set Camera Noise', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera')], inputs: [N_IN('amount', 4)] },
+  camRecenter: { cat: 'Camera', label: 'Recenter Orbit Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera')] },
+  onCamLive: { cat: 'Camera', label: 'On Camera Live', outs: ['then'], params: [txt('camera', '', 'camera (blank = any)')] },
+  camIsLive: { cat: 'Camera', label: 'Camera Is Live', value: 'bool', params: [txt('camera', 'Camera', 'camera')] },
   camMoveTo: { cat: 'Camera', label: 'Move Camera To', exec: true, outs: ['then', 'arrived'], inputs: [N_IN('x', 200), N_IN('y', 350), N_IN('seconds', 0.6)] },
   camToObject: { cat: 'Camera', label: 'Move Camera To Object', exec: true, outs: ['then', 'arrived'], params: [txt('object', 'Player', 'object or tag')], inputs: [N_IN('seconds', 0.6)] },
   camZoomTo: { cat: 'Camera', label: 'Zoom Camera To', exec: true, outs: ['then', 'arrived'], inputs: [N_IN('zoom', 1.5), N_IN('seconds', 0.5)] },
@@ -10244,6 +10521,7 @@ Object.assign(NODE_TYPES, {
   menuOpen: { cat: 'UI', label: 'Open / Close Side Menu', exec: true, outs: ['then'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }, opt('mode', ['toggle', 'open', 'close'], 'toggle', 'make it')] },
   menuIsOpen: { cat: 'UI', label: 'Side Menu Is Open', value: 'bool', params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
   navBars: { cat: 'UI', label: 'Show / Hide Nav Bars', exec: true, outs: ['then'], params: [opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make them')] },
+  haptic: { cat: 'Device', label: 'Haptic Feedback', exec: true, outs: ['then'], params: [opt('style', ['light', 'medium', 'heavy', 'success', 'warning', 'error'], 'medium', 'feel')] },
   vibratePattern: { cat: 'Device', label: 'Vibrate Pattern', exec: true, outs: ['then'], params: [txt('pattern', '80, 60, 80, 60, 200', 'buzz, pause, buzz… (ms)')] },
   appBadge: { cat: 'Device', label: 'App Icon Badge', exec: true, outs: ['then'], inputs: [N_IN('count', 1)] },
   fullScreen: { cat: 'Device', label: 'Full Screen', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')] },
@@ -10383,6 +10661,7 @@ export const LOGIC_ACTIONS = {
   win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
   gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
   nextLevel: { cat: 'Game', label: 'Next level', icon: 'flag', run: (c) => { if (c.s.engine.hasNextLevel()) c.s.win(); }, say: () => 'Next level' },
+  askPermission: { cat: 'Game', label: 'Ask permission', icon: 'key', params: [opt('kind', ['location', 'camera', 'microphone', 'motion', 'notifications', 'storage'], 'location', 'for'), txt('why', '', 'why (blank = the usual text)')], run: (c, p) => { c.s.engine.perms.ask(p.kind, { why: p.why }); }, say: (p) => `Ask for ${p.kind || 'location'}` },
   phoneNotify: { cat: 'Game', label: 'Phone notification', icon: 'bell', params: [txt('title', 'Come back!', 'title'), txt('text', '', 'text'), num('minutes', 0, 'in minutes (0 = now)'), txt('id', '', 'id (same id replaces it)')], run: (c, p) => { c.s.engine.phone.send({ id: p.id, title: p.title, text: p.text, when: +p.minutes > 0 ? 'in' : 'now', seconds: +p.minutes * 60 }); }, say: (p) => `Phone notification: ${p.title || ''}${+p.minutes > 0 ? ` in ${p.minutes} min` : ''}` },
   notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
@@ -10398,7 +10677,7 @@ export function runInstructions(list, ctx, done) {
       const it = list[i++], def = LOGIC_ACTIONS[it?.type];
       if (!def || it.off) continue;
       let r;
-      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name); }
+      try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name, err); }
       if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
       if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
     }
@@ -10808,6 +11087,11 @@ registerBehavior('graph', {
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
         case 'menuIsOpen': return !!s.openMenus?.has(P('menu') || 'menu');
+        case 'permStatus': case 'hasPermission': { const pm = s.engine.perms, k = P('kind'); if (!pm._st?.[k] || s.time - pm._st[k].t > 1) { (pm._st ||= {})[k] = { v: pm._st?.[k]?.v ?? pm.known[k] ?? 'prompt', t: s.time }; pm.status(k).then((v) => { pm._st[k].v = v; }); } const v = pm._st[k].v; return n.type === 'hasPermission' ? v === 'granted' : v; }
+        case 'micLevel': return s.engine.perms.micLevel();
+        case 'location': { const L = s.engine.perms.location; if (!L) return 0; return { latitude: L.lat, longitude: L.lon, 'accuracy (m)': L.accuracy, 'speed (m/s)': L.speed, 'heading (°)': L.heading, 'altitude (m)': L.altitude, 'seconds since update': (Date.now() - L.t) / 1000 }[P('part')] ?? 0; }
+        case 'distanceTo': { const L = s.engine.perms.location; if (!L) return 0; const R = 6371000, r = Math.PI / 180, la1 = L.lat * r, la2 = (+I('latitude') || 0) * r, dla = la2 - la1, dlo = ((+I('longitude') || 0) - L.lon) * r, h = Math.sin(dla / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dlo / 2) ** 2; return Math.round(2 * R * Math.asin(Math.min(1, Math.sqrt(h)))); }
+        case 'camIsLive': return !!s.activeCamEntity && !s.activeCamEntity.dead && s.activeCamEntity.name === P('camera');
         case 'arrGetText': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1); return asText(a[i < 0 ? a.length + i : i - 1]); }
         case 'arrJoin': return listOf(s, P('name')).map(asText).join(P('sep') ?? ', ');
         case 'arrCount': { const v = listVal(I('value')); return listOf(s, P('name')).filter((x) => sameVal(x, v)).length; }
@@ -10918,7 +11202,8 @@ registerBehavior('graph', {
         case 'setVar': s.setVar(P('name') || 'score', +I('value') || 0); break;
         case 'addVar': s.addVar(P('name') || 'score', +I('amount') || 0); break;
         case 'message': s.message(fillTemplate(P('text'), s.vars), +P('seconds') || 2); break;
-        case 'log': Log.add('info', fillTemplate(P('text'), s.vars), e?.name); break;
+        case 'log': Log.add({ warning: 'warn', error: 'error' }[P('level')] || 'info', fillTemplate(P('text'), s.vars), e?.name); break;
+        case 'logValue': { const v = input(n, 'value', ctx); Log.add({ warning: 'warn', error: 'error' }[P('level')] || 'info', `${P('label') || 'value'} = ${typeof v === 'object' ? JSON.stringify(v) : asText(v)}`, e?.name); break; }
         case 'sound': s.engine.audio.sfx(P('sound')); break;
         case 'spawn': if (P('template')) s.spawn(P('template'), { x: e.x, y: e.y, z: e.z }); break;
         case 'destroy': { const t = P('target') === 'other' ? ctx.other : e; if (t) { s.burst(t.x, t.y, t.z, '#fff', 12); t.destroy(); } break; }
@@ -11219,6 +11504,7 @@ registerBehavior('graph', {
         case 'bindMessage': { const key = P('message'), fn = P('func'); if (P('mode') === 'stop listening') bindings.delete(key + '|' + fn); else bindings.set(key + '|' + fn, { message: key, func: fn }); break; }
         case 'menuOpen': { const m = P('menu') || 'menu', md = P('mode'); s.send(md === 'open' ? m + ' open' : md === 'close' ? m + ' close' : m); break; }
         case 'navBars': s.navBarsOff = P('mode') === 'toggle' ? !s.navBarsOff : P('mode') === 'hide'; break;
+        case 'haptic': { const st = P('style') || 'medium'; s.engine.vibrate({ light: 8, medium: 18, heavy: 35, success: [12, 60, 24], warning: [24, 80, 24], error: [30, 50, 30, 50, 30] }[st] ?? 18, st); break; }
         case 'vibratePattern': { const pat = String(P('pattern') || '').split(/[\s,]+/).map(Number).filter((x) => x >= 0 && x < 10000); if (pat.length) s.engine.vibrate(pat); break; }
         case 'appBadge': { const c = Math.max(0, Math.round(+I('count') || 0)); try { if (c) navigator.setAppBadge?.(c)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } break; }
         case 'fullScreen': { const on = !!document.fullscreenElement, want = P('mode') === 'toggle' ? !on : P('mode') === 'on'; if (want && !on) document.documentElement.requestFullscreen?.().catch(() => {}); else if (!want && on) document.exitFullscreen?.().catch(() => {}); break; }
@@ -11245,6 +11531,14 @@ registerBehavior('graph', {
           return follow(n, 'new day', ctx);
         }
         case 'stampTime': store.set(savedVarKey(s, '@time.' + (P('key') || 'lastPlayed')), String(Date.now())); break;
+        case 'askPermission': { const later = { ...ctx, steps: 0 }; s.engine.perms.ask(P('kind'), { title: P('title'), why: P('why'), soft: P('soft') !== false }).then((r) => { if (!e.dead) follow(n, r === 'granted' ? 'allowed' : r === 'unsupported' ? 'not supported' : 'not allowed', later); }); return; }
+        case 'camLive': { const sec = +P('seconds'); if (sec >= 0) s.nextBlend = { dur: sec, ease: P('ease') }; s.activeCamera = P('camera') || null; break; }
+        case 'camAuto': s.activeCamera = null; break;
+        case 'camPriority': { const c = s.find(P('camera')); if (c) c.data.camPriority = +I('priority') || 0; break; }
+        case 'camTarget': { const c = s.find(P('camera')); if (c) c.data.camTarget = P('tag') || null; break; }
+        case 'camImpulse': { const k = +I('strength') || 12; if (P('from') === 'everywhere') { s.camera.shake = Math.max(s.camera.shake, k); s.engine.vibrate(Math.min(60, k * 3)); } else s.impulse(k, e); break; }
+        case 'camNoise': { const c = s.find(P('camera')); if (c) c.data.camNoise = +I('amount') || 0; break; }
+        case 'camRecenter': s.find(P('camera'))?._camRecenter?.(); break;
         case 'camMoveTo': case 'camToObject': {
           let x = +I('x') || 0, y = +I('y') || 0;
           if (n.type === 'camToObject') { const t = nearest(s, e, P('object')) || (s.find(P('object')) === e ? e : null); if (!t) break; x = t.x; y = s.mode === '3d' ? t.z : t.y; }
@@ -11387,6 +11681,9 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onPermission')) s.on('permission', (k, ok) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onPermission' && (param(n, 'kind') === 'any' || param(n, 'kind') === k)) follow(n, ok ? 'allowed' : 'not allowed', { s, e, steps: 0 }); });
+        if (has('onLocation')) s.on('location', () => { if (!e.dead) fire('onLocation', e, s); });
+        if (has('onCamLive')) s.on('cameraLive', (name) => { if (!e.dead) fire('onCamLive', e, s, null, (n) => !param(n, 'camera') || param(n, 'camera') === name); });
         if (has('onAppHidden', 'onAppShown')) s.on('appVisible', (v) => { if (!e.dead) fire(v ? 'onAppShown' : 'onAppHidden', e, s); });
         if (has('onNotifyOpened')) s.on('message', (name, id) => { if (!e.dead && name === 'notification opened') fire('onNotifyOpened', e, s, null, (n) => !param(n, 'id') || param(n, 'id') === id); });
         if (has('onMenu')) s.on('menu', (m, open) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onMenu' && (param(n, 'menu') || 'menu') === m) follow(n, open ? 'opened' : 'closed', { s, e, steps: 0 }); });
@@ -11516,11 +11813,11 @@ registerBehavior('script', {
         collide: typeof collide === 'function' ? collide : undefined };`);
       const hooks = f(Pocket), out = {};
       for (const [k, fn] of Object.entries(hooks)) if (fn) out[k] = (e, ...a) => { // a crash in one script is logged, not fatal
-        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script'); } }
+        try { return fn(e, ...a); } catch (err) { if (!e.data._scriptErr || e.data._scriptErr !== err.message) { e.data._scriptErr = err.message; Log.add('error', `${k}(): ${err.message}`, (e.name || 'Object') + ' script', err); } }
       };
       return out;
     } catch (err) {
-      Log.add('error', `Script can't run: ${err.message}`, 'Custom script');
+      Log.add('error', `Script can't run: ${err.message}`, 'Custom script', err);
       return {};
     }
   },
@@ -11846,12 +12143,47 @@ registerBehavior('pfLeaderboard', {
   },
 });
 
+// ============================================================================
+// Haptics: buzzes and taps on every phone. In an iOS / Android app: the native Haptics plugin. Android browsers:
+// the Vibration API. iPhone browsers have no vibration, but Safari (iOS 18+) gives a haptic tick when a
+// switch-style checkbox is toggled, so each buzz becomes ticks.
+// ============================================================================
+export const Haptics = {
+  native() { const C = typeof window !== 'undefined' && window.Capacitor; if (!C?.isNativePlatform?.()) return null; return C.Plugins?.Haptics || (C.isPluginAvailable?.('Haptics') && C.registerPlugin ? (this.plugin ||= C.registerPlugin('Haptics')) : null); },
+  ios: typeof navigator !== 'undefined' && (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)),
+  /** What this device can do: 'native', 'vibrate', 'ios-tick' or 'none'. */
+  get kind() { return this.native() ? 'native' : typeof navigator !== 'undefined' && navigator.vibrate && !this.ios ? 'vibrate' : this.ios ? 'ios-tick' : 'none'; },
+  tick() { // one iPhone haptic tick (needs to happen soon after a touch)
+    try { const l = document.createElement('label'), i = document.createElement('input'); l.ariaHidden = 'true'; l.style.display = 'none'; i.type = 'checkbox'; i.setAttribute('switch', ''); l.appendChild(i); document.head.appendChild(l); l.click(); l.remove(); } catch { /* not supported */ }
+  },
+  /** p: milliseconds, or a pattern [buzz, pause, buzz, …]; style: light / medium / heavy / success / warning / error. */
+  play(p, style) {
+    const pat = (Array.isArray(p) ? p : [p]).map((x) => Math.max(0, +x || 0)).slice(0, 20), N = this.native();
+    if (N) {
+      try {
+        if (style && ['success', 'warning', 'error'].includes(style)) { N.notification?.({ type: style.toUpperCase() }); return true; }
+        let t = 0;
+        pat.forEach((ms, i) => { if (i % 2 === 0 && ms > 0) { const at = t; setTimeout(() => { if (ms <= 30 || style) N.impact?.({ style: (style || (ms <= 12 ? 'light' : ms <= 25 ? 'medium' : 'heavy')).toUpperCase() }); else N.vibrate?.({ duration: ms }); }, at); } t += ms; });
+        return true;
+      } catch { /* plugin missing: fall through */ }
+    }
+    if (typeof navigator !== 'undefined' && navigator.vibrate && !this.ios) { try { return navigator.vibrate(pat.length === 1 ? pat[0] : pat); } catch { return false; } }
+    if (this.ios) { // ticks: one per short buzz, a few in a row for long ones
+      let t = 0, n = 0;
+      pat.forEach((ms, i) => { if (i % 2 === 0 && ms > 0) { const reps = Math.min(4, Math.max(1, Math.round(ms / 45))); for (let r = 0; r < reps && n < 10; r++, n++) { const at = t + r * 45; if (at === 0) this.tick(); else setTimeout(() => this.tick(), at); } } t += ms; });
+      return true;
+    }
+    return false;
+  },
+};
+
 export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
     this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
+    this.perms = new Permissions(this); // location, camera, microphone, motion… (Ask Permission node)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -12196,6 +12528,12 @@ export class Engine {
     if (!s || this.editing) return;
     const P = this.levels?.[0]?.settings?.phoneNotify;
     if (P?.ask === 'first tap' && !this.phone.asked) this.phone.ask().then((ok) => ok && this.phone.planReminders(this.levels?.[0]?.settings)); // browsers only allow the question from a tap
+    const PM = this.levels?.[0]?.settings?.permissions;
+    if (PM && !this.permsAsked) { // Game Settings › Permissions: ask on the first tap, one after another
+      this.permsAsked = true;
+      const list = Object.entries(PM).filter(([k, v]) => v?.ask === 'first tap' && PERMISSIONS[k]);
+      (async () => { for (const [k, v] of list) await this.perms.ask(k, { title: v.title, why: v.why, soft: v.soft !== false }); })();
+    }
     if (s.settings.fullscreen && !document.fullscreenElement) {
       document.documentElement.requestFullscreen?.().then(() => {
         if (s.settings.orientation !== 'any') screen.orientation?.lock?.(s.settings.orientation).catch(() => {});
@@ -12289,10 +12627,12 @@ export class Engine {
   }
   /** Show a notification: { type, title, text, icon, image, buttons: 'Label > message, …', duration }. */
   notify(o) { return this.notifier.push(o); }
-  vibrate(p) { try { if (!this.audio.muted && this.prefs?.vibration !== false) navigator.vibrate?.(p); } catch { /* unsupported */ } }
+  /** Buzz the phone (ms or a pattern). Player Settings › Vibration turns it off; muting sound doesn't. */
+  vibrate(p, style) { if (this.prefs?.vibration === false || this.editing) return false; return Haptics.play(p, style); }
 
   frame(now) {
     if (!this.running) return;
+    if (this.sleeping) { this.last = now; requestAnimationFrame(this.frame); return; } // hidden behind a full-screen page (the editor's home): draw nothing
     const dt = Math.min(1 / 20, (now - this.last) / 1000);
     this.last = now;
     this.fps += (1 / Math.max(dt, 1e-4) - this.fps) * 0.05;
@@ -12303,9 +12643,14 @@ export class Engine {
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
     }
     if (this.scene) {
-      if (!this.editing) this.update(dt * this.timeScale);
-      this.render();
-      this.updateSettingsUI();
+      try { // a bug in one frame shows in the Console instead of freezing the game
+        if (!this.editing) this.update(dt * this.timeScale);
+        this.render();
+        this.updateSettingsUI();
+      } catch (err) {
+        const k = err?.message + '|' + (err?.stack || '').split('\n')[1];
+        if (k !== this.lastErr) { this.lastErr = k; Log.add('error', err?.message || String(err), 'game', err); } else Log.add('error', err?.message || String(err), 'game');
+      }
     }
     this.input.endFrame();
     requestAnimationFrame(this.frame);

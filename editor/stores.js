@@ -3,7 +3,7 @@
 // projects are generated on Codemagic's machines (npx cap add), then scripts/prepare-native.mjs patches in the
 // version, build number, signing, orientation and full screen, and @capacitor/assets makes the icons and splash.
 
-export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5', NOTIFY_VERSION = '^8.3.0';
+export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5', NOTIFY_VERSION = '^8.3.0', HAPTICS_VERSION = '^8.0.2';
 
 /** A valid reverse-domain app ID from a name (letters, digits and underscores; no part starts with a digit). */
 export function suggestAppId(author, title) {
@@ -122,7 +122,7 @@ export function codemagicYaml(o) {
 
 /** Patches the generated native projects (run on Codemagic after `npx cap add`). Plain Node, no packages. */
 export function prepareScript(o) {
-  const cfg = JSON.stringify({ version: o.version, orientation: o.orientation, fullscreen: o.fullscreen, iosDevices: o.iosDevices, background: o.splashBg }, null, 2);
+  const cfg = JSON.stringify({ version: o.version, orientation: o.orientation, fullscreen: o.fullscreen, iosDevices: o.iosDevices, background: o.splashBg, perms: o.perms || [] }, null, 2);
   return `// Patches the generated iOS / Android projects for this game: version and build number, release signing,
 // orientation and full screen. Run after \`npx cap add <platform>\`: node scripts/prepare-native.mjs ios|android
 // Codemagic sets BUILD_NUMBER (the codemagic.yaml passes APP_BUILD_NUMBER) and the CM_KEYSTORE_* variables.
@@ -153,13 +153,15 @@ if (platform === 'android') {
     return s;
   });
   const orient = { portrait: 'sensorPortrait', landscape: 'sensorLandscape' }[APP.orientation];
+  const ANDROID_PERMS = { camera: ['android.permission.CAMERA'], microphone: ['android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS'], location: ['android.permission.ACCESS_COARSE_LOCATION', 'android.permission.ACCESS_FINE_LOCATION'] };
   edit('android/app/src/main/AndroidManifest.xml', (s) => {
+    for (const p of APP.perms || []) for (const name of ANDROID_PERMS[p.kind] || []) if (!s.includes('"' + name + '"')) s = s.replace(/<application\\b/, '<uses-permission android:name="' + name + '" />\\n    <application'); // what the game asks the player for
     s = s.replace(/\\s+android:screenOrientation="[^"]*"/g, '');
     return orient ? s.replace(/<activity\\b/, '<activity\\n            android:screenOrientation="' + orient + '"') : s;
   });
   // Phone Notifications: Android shows a small one-colour icon in the status bar (a bell; capacitor.config.json points at it)
   mkdirSync('android/app/src/main/res/drawable', { recursive: true });
-  writeFileSync('android/app/src/main/res/drawable/ic_stat_notify.xml', '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">\n  <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>\n</vector>\n');
+  writeFileSync('android/app/src/main/res/drawable/ic_stat_notify.xml', '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">\\n  <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>\\n</vector>\\n');
   console.log('wrote the notification icon');
   if (APP.fullscreen) edit('android/app/src/main/res/values/styles.xml', (s) => s.includes('android:windowFullscreen') ? s
     : s.replace(/(<style name="AppTheme.NoActionBar"[^>]*>)/, '$1\\n        <item name="android:windowFullscreen">true</item>\\n        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>'));
@@ -178,6 +180,9 @@ if (platform === 'android') {
     s = setKey(s, 'UISupportedInterfaceOrientations~ipad', arr(APP.orientation === 'portrait' ? ['UIInterfaceOrientationPortrait', 'UIInterfaceOrientationPortraitUpsideDown'] : list));
     s = setKey(s, 'UIRequiresFullScreen', '<true/>'); // a game: no iPad split screen (also required when not every orientation is allowed)
     s = setKey(s, 'ITSAppUsesNonExemptEncryption', '<false/>'); // no export-compliance question on every TestFlight upload
+    const IOS_KEYS = { camera: ['NSCameraUsageDescription'], microphone: ['NSMicrophoneUsageDescription'], location: ['NSLocationWhenInUseUsageDescription'] };
+    const xml = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    for (const p of APP.perms || []) for (const key of IOS_KEYS[p.kind] || []) s = setKey(s, key, '<string>' + xml(p.why) + '</string>'); // the reason iOS shows when it asks
     if (APP.fullscreen) { s = setKey(s, 'UIStatusBarHidden', '<true/>'); s = setKey(s, 'UIViewControllerBasedStatusBarAppearance', '<false/>'); }
     return s;
   });
@@ -232,6 +237,7 @@ Make your changes in Pocket Engine, open **Build Settings → App stores → Dow
 ## What's inside
 - \`www/index.html\`: the whole game (the same file as Build HTML, without the "Add to Home Screen" bits).
 - \`capacitor.config.json\`: the app name, ID and background colour.
+- \`@capacitor/haptics\`: real vibration and haptic taps on iPhone and Android (the Vibrate actions and nodes).
 - \`@capacitor/local-notifications\` (in \`package.json\`): lets the game put notifications in the phone's notification area, even while it is closed (Game Settings › Phone Notifications).
 - \`assets/\`: the icon and splash screen. Codemagic makes every size from these (\`@capacitor/assets\`).
 - \`scripts/prepare-native.mjs\`: sets the version, build number, signing, orientation${o.fullscreen ? ' and full screen' : ''} in the generated native projects.
@@ -249,7 +255,7 @@ export function storeFiles(o, { html, icon, fg, splash }) {
     name: slugName, version: /^\d+\.\d+\.\d+$/.test(o.version) ? o.version : (String(o.version || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.')),
     private: true, description: `${o.name} (made with Pocket Engine)`,
     scripts: { 'add:ios': 'cap add ios --packagemanager CocoaPods && node scripts/prepare-native.mjs ios', 'add:android': 'cap add android && node scripts/prepare-native.mjs android', assets: 'capacitor-assets generate', sync: 'cap sync' },
-    dependencies: { '@capacitor/core': CAPACITOR_VERSION, '@capacitor/local-notifications': NOTIFY_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
+    dependencies: { '@capacitor/core': CAPACITOR_VERSION, '@capacitor/local-notifications': NOTIFY_VERSION, '@capacitor/haptics': HAPTICS_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
     devDependencies: { '@capacitor/cli': CAPACITOR_VERSION, '@capacitor/assets': ASSETS_VERSION },
   };
   const cap = { appId: o.appId, appName: o.name, webDir: 'www', backgroundColor: o.splashBg, ios: { contentInset: 'never', scrollEnabled: false }, android: { backgroundColor: o.splashBg },

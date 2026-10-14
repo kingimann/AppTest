@@ -247,7 +247,7 @@ The editor fills the screen:
   - **Device**: **Share**, **Copy To Clipboard**, **Open Website**, **Device Is** (portrait, landscape, touch screen, online, installed app, dark mode, reduced motion).
   - **App & device** (new):
     - **Events:** **On App Hidden** (the player switched apps or locked the phone) and **On App Back**, **On Phone Notification Tapped** (any, or one id), **On Side Menu Opened / Closed**, **On Screen Turned** (*portrait* / *landscape*), **On Connection Changed** (*online* / *offline*).
-    - **Steps:** **Open / Close Side Menu**, **Show / Hide Nav Bars** (slides the Bottom Nav and App Bar away, e.g. during a level), **Vibrate Pattern** (`80, 60, 80`), **App Icon Badge** (the number on the Home Screen icon of an installed web app; 0 clears it), **Full Screen**, **Keep Screen On**.
+    - **Steps:** **Haptic Feedback** (light, medium, heavy, success, warning, error), **Open / Close Side Menu**, **Show / Hide Nav Bars** (slides the Bottom Nav and App Bar away, e.g. during a level), **Vibrate Pattern** (`80, 60, 80`), **App Icon Badge** (the number on the Home Screen icon of an installed web app; 0 clears it), **Full Screen**, **Keep Screen On**.
     - **Flow:** **Every Nth Time** (*then* every 3rd time, *skip* otherwise: tips, ads, bonuses) and **First Time Ever** (once per device: tutorials, welcome messages).
     - **Values:** **Side Menu Is Open**, **Battery Level** (0–100), **Phone Language** (`en`, or `en-GB`), **Notifications Allowed**.
 - ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, Run / idle by speed, Collect: hop, fade, remove, and Tap → score counts up.
@@ -439,6 +439,12 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 | Sound & feel | **Sound effects**, **Music** (volume), **Vibration** | always |
 
 - **Reset** puts everything back. Opening the panel pauses the game; **Done** carries on.
+
+**Vibration** (every Vibrate action, node and component goes through one place):
+- **iOS / Android apps** (Build Settings › App stores): real vibration and haptic taps through `@capacitor/haptics`, now in the app project. Short buzzes become light / medium / heavy taps; success / warning / error get the phone's own patterns.
+- **Android browsers:** the Vibration API (patterns work).
+- **iPhone browsers** (Safari has no vibration API): on iOS 18 and later each buzz becomes a haptic tick, a few in a row for long ones. It works best right after a touch.
+- Muting the sound no longer turns vibration off; the player's **Vibration** setting does.
 - Game Settings › Touch Controls › **Player Settings (⚙)** sets where it opens: on the pause screen (default), also as a ⚙ in the top-right corner, or off.
   - A Button (Do → **open settings**) or the **Open Settings** node opens it too.
   - The **Player Setting** node reads a choice (left-handed and vibration are 1 / 0).
@@ -485,16 +491,26 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 
 ### Play mode tools
 
-The bar at the top while playing: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**.
+The play bar: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect**, **Stats**, **Console**, and **⋮** to choose where the bar goes:
+- **Above the game** (the default) or **Below the game**: the game's screen starts (or ends) at the bar, so nothing at the top of your game (score, App Bar, buttons) is hidden under it. The game then doesn't add notch space on that side, since it no longer reaches the notch.
+- **Floating over the game** (drag it by ⋮), or a **Small button** you drag anywhere; tap it to open the tools. The choice and position are remembered.
 - **Inspect** pauses without the "PAUSED" screen. Tap any object in the running game, including ones spawned while playing, to see its live position, rotation, velocity, visibility and components, and change them. Step moves the game on a frame at a time while you watch the numbers. Changes last until you stop.
 - **Stats** shows FPS, objects, bodies, the game state, time and your variables (score, lives…).
 
 ### Console
 
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.
-- Repeated messages fold into one line with a count. Filter by Log / Warn / Error, clear it, and choose whether Play clears it. Tap a message from an object to jump to it.
-- While playing, the console button in the play bar (with a red count for errors) opens a live log over the game.
-- A custom script that crashes is reported once and the game keeps running.
+- Repeated messages fold into one line with a count, and **Merge identical messages** (⋮) folds them even when other messages come in between. Filter by Log / Warn / Error and **search** the text and object names.
+- **Tap a message** for its details: the full text (selectable), where it came from, an error's **stack** (where in the code it happened), and **Copy**, **Show object** (or **Inspect** it while playing) and **Find similar**.
+- **Watch variables:** pinned chips at the top show variables' live values while the game runs (they flash when they change). Add with **+**, or `watch score`.
+- **Command line** at the bottom, to look inside and change the running game:
+  - `score` shows a variable, `score = 10`, `score += 5`, `name = 'Ana'`, `items = [1, 2, 3]` change it, and `vars` lists them all.
+  - `send win` (or `send hit 5` with a value), `page shop`, `back`, `pause`, `resume`, `step`, `restart`, `win`, `lose`, `level 2`, `speed 0.5` (slow motion).
+  - `objects` lists what's in the scene, `find Player` shows an object's position, tags, health and own variables. `watch`, `unwatch`, `clear`, `help`. ↑ / ↓ go through earlier commands.
+- **⋮ options:** merge identical messages, newest at the top, **pause the game on an error**, clear when you press Play, times shown since Play / as the clock / hidden, **Copy All** and **Save as a File**.
+- While playing, the console button in the play bar (with a red count for errors) opens the same console over the game: filters, search, watches and the command line. ⛶ makes it taller.
+- **Errors never freeze the game:** an error in any frame (a component, a node, a script) is reported with its stack and the game keeps running. Unhandled errors and failed promises are reported too.
+- **Nodes:** **Debug Log** can log as a log, warning or error; **Debug Log Value** writes a label and any value (number, text, list, dictionary).
 
 ### Portrait or landscape
 
@@ -566,6 +582,15 @@ Pop-up notifications are built in; there's no component to add. Every game has *
   - **Tapping:** close, send a message, open a page, or do nothing. Up to **2 buttons** (`Claim > claim reward, Later`): the first uses the accent colour, and a button without a message just closes it.
 - **Test** shows a type in the editor. From the type editor, the dialog steps aside while the preview plays. *Test a few* shows several at once.
 - Types are game-wide: every level uses them. A *Notifications* component (Project › UI › HUD) still works, and handles plain `notify` messages in scenes that have one.
+
+### Permissions (Game Settings › Permissions)
+
+Ask the player for **location**, the **camera**, the **microphone**, **motion sensors** (tilt and shake), **notifications** or **lasting storage** (so the phone doesn't clear saves when space runs low).
+- **The friendly way:** a card explains why first (an icon, a title and your reason, with **Allow** / **Not now**). Its Allow button is a real tap, so the phone's own question follows straight away, which iPhones need for motion. If the player said no before, the card says how to turn it back on in the phone's settings. *Explain first* can be turned off to ask straight away.
+- **When:** the **Ask Permission** node (outputs *allowed*, *not allowed*, *not supported*), a trigger's **Ask permission**, the action **ask permission** (value `location`, `camera`…), or Game Settings › Permissions › Ask **on the first tap** (several are asked one after another). **Test** there asks on your own device.
+- **Using them:** **Location** (latitude, longitude, accuracy, speed, heading, altitude, seconds since the last update; it keeps updating while the game runs), **Distance To Place** (metres to a latitude / longitude: treasure hunts, check-ins), **On Location Changed**, **Microphone Loudness** (0–100: blow, shout or clap to play), **Permission Status** (granted / denied / prompt / unsupported), **Has Permission**, **On Permission Answered**.
+- **In app builds** (Build Settings › App stores), the project declares what the game uses: iOS gets your reasons as the camera, microphone and location usage texts (iOS requires them), and Android gets the camera, microphone and location permissions. Nothing is declared for permissions the game doesn't use.
+- The game waits while the card is up, without the PAUSED screen.
 
 ### Phone notifications (Game Settings › Phone Notifications)
 
@@ -891,6 +916,14 @@ The Camera component is a virtual camera:
 - **Noise and impulse:** handheld **noise**, and **impulse** shakes that are weaker far away (`scene.impulse(strength, at)`, Camera Impulse node).
 - **Orthographic 3D** for isometric games.
 - **Switching:** with several cameras the highest priority starts. Switching (action, node or `scene.setCamera(name)`) **blends** smoothly over the new camera's blend time and ease.
+- **Free Look** (orbit, 3D): drag to orbit, **pinch** (or the mouse wheel) to zoom between a closest and furthest distance, lowest / highest angle, and **swing back behind the target** after some seconds without touching (it follows the way it moves or faces).
+- **Dolly cart:** a dolly camera can **travel by itself** along its track at a speed, looping, going back and forth or stopping at the end, looking at a target or along the track (fly-throughs, title screens). It keeps moving even while another camera is live.
+- **More framing:** a separate **up / down dead zone** and **up / down damping** (follow sideways quickly but jumps slowly, so the screen doesn't bounce), **pixel perfect** 2D (no blurry in-between positions), and a **3D confiner** box the camera stays inside.
+- **Noise feel:** handheld, gentle sway, earthquake or engine rumble.
+- **Camera Zone** (component, *Create → Camera Zone*): an invisible area; when the player walks in, its camera takes over and blends in (with its own blend time if you like), and leaving goes back to the camera before (or keeps it). Like Cinemachine trigger zones.
+- **Camera Switcher** (component): **State-Driven Camera**: each value of a variable has its camera (`run = Follow Cam`, `aim = Aim Cam`); or **Clear Shot**: the first camera in a list that can see the target with nothing solid in between. A *stay at least* time stops quick flicking.
+- **Camera Impulse** (component, Impulse Source): shakes the camera when the object hits something (faster than a speed), lands, is destroyed, on a message, at the start or every few seconds; weaker further away (*felt up to*), and it can vibrate the phone.
+- **Nodes:** **Make Camera Live** (with your own blend time and ease), **Back To Camera Priorities**, **Set Camera Priority**, **Set Camera Target** (follow the boss in a cutscene), **Camera Impulse** (from this object or everywhere), **Set Camera Noise**, **Recenter Orbit Camera**, **On Camera Live**, **Camera Is Live**.
 
 ### 3D Modeler (Blender-style modeling)
 

@@ -35,10 +35,19 @@ const EDITOR_PREFS = { theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 const THEMES = {
   dark: {},
-  black: { '--toolbar': '#000', '--bg': '#0a0a0a', '--panel': '#151515', '--card': '#1a1a1a', '--tab': '#222', '--tab-off': '#101010', '--header': '#1c1c1c', '--field': '#0f0f0f', '--field-b': '#050505', '--line': '#000', '--hover': '#262626' },
-  slate: { '--toolbar': '#1b2029', '--bg': '#232a35', '--panel': '#323b4a', '--card': '#384252', '--tab': '#414c5e', '--tab-off': '#29313d', '--header': '#3b4556', '--field': '#252c37', '--field-b': '#1c222b', '--line': '#181d25', '--hover': '#465267' },
-  warm: { '--toolbar': '#1f1a17', '--bg': '#2a2420', '--panel': '#3d3530', '--card': '#433a34', '--tab': '#4b413a', '--tab-off': '#2f2824', '--header': '#463c36', '--field': '#2b2521', '--field-b': '#211c19', '--line': '#1b1714', '--hover': '#53473f' },
+  black: { '--toolbar': '#000', '--bg': '#0a0a0a', '--panel': '#151515', '--card': '#1a1a1a', '--tab': '#222', '--tab-off': '#101010', '--header': '#1c1c1c', '--field': '#0f0f0f', '--field-b': '#050505', '--line': '#000', '--hover': '#262626',
+    '--g0': '#000', '--g1': '#0b0b0b', '--g2': '#141414', '--g3': '#1b1b1b', '--g4': '#222', '--g5': '#2c2c2c', '--g6': '#3a3a3a' },
+  slate: { '--toolbar': '#1b2029', '--bg': '#232a35', '--panel': '#323b4a', '--card': '#384252', '--tab': '#414c5e', '--tab-off': '#29313d', '--header': '#3b4556', '--field': '#252c37', '--field-b': '#1c222b', '--line': '#181d25', '--hover': '#465267',
+    '--g0': '#141921', '--g1': '#1c222b', '--g2': '#262d38', '--g3': '#2e3643', '--g4': '#363f4d', '--g5': '#424c5c', '--g6': '#525d6f' },
+  midnight: { '--toolbar': '#0b0e1a', '--bg': '#10142a', '--panel': '#181d38', '--card': '#1e2444', '--tab': '#262d52', '--tab-off': '#141932', '--header': '#202748', '--field': '#121630', '--field-b': '#0b0e20', '--line': '#080b18', '--hover': '#2a3260',
+    '--g0': '#070a16', '--g1': '#0d1124', '--g2': '#141933', '--g3': '#1a203e', '--g4': '#20274a', '--g5': '#2a3259', '--g6': '#38416e', '--text': '#e3e7f7', '--muted': '#a6acc9', '--dim': '#6f7697' },
+  warm: { '--toolbar': '#1f1a17', '--bg': '#2a2420', '--panel': '#3d3530', '--card': '#433a34', '--tab': '#4b413a', '--tab-off': '#2f2824', '--header': '#463c36', '--field': '#2b2521', '--field-b': '#211c19', '--line': '#1b1714', '--hover': '#53473f',
+    '--g0': '#171310', '--g1': '#211c19', '--g2': '#2b2521', '--g3': '#342d28', '--g4': '#3d3530', '--g5': '#4a413a', '--g6': '#5b5048' },
+  light: { '--toolbar': '#ffffff', '--bg': '#eceef3', '--panel': '#ffffff', '--card': '#f5f6f9', '--tab': '#e4e7ee', '--tab-off': '#f5f6f9', '--header': '#eef0f5', '--field': '#f1f3f7', '--field-b': '#d6dae2', '--line': '#e1e4eb', '--hover': '#e7ebf2',
+    '--g0': '#cfd4dd', '--g1': '#dde1e8', '--g2': '#eef0f4', '--g3': '#e9ecf1', '--g4': '#e3e6ec', '--g5': '#d8dce4', '--g6': '#c3c9d3', '--text': '#1c2029', '--muted': '#5a6372', '--dim': '#8a93a2', '--shadow': 'rgba(30,40,60,.18)',
+    '--sel': 'var(--accent)', '--accent-soft': 'var(--accent)', '--accent-faint': 'color-mix(in srgb, var(--accent) 16%, #fff)', '--accent-text': 'var(--accent-strong)' },
 };
+const THEME_NAMES = [['dark', 'Dark'], ['black', 'Black'], ['slate', 'Slate'], ['midnight', 'Midnight'], ['warm', 'Warm'], ['light', 'Light']];
 const ACCENTS = [['#4c8bd6', 'Blue'], ['#8e6bf2', 'Purple'], ['#e0559b', 'Pink'], ['#e8743c', 'Orange'], ['#3dbb7a', 'Green'], ['#22b8c9', 'Teal']];
 let wakeLockEd = null;
 async function editorWake() { if (!EP.keepAwake || document.hidden || wakeLockEd || !navigator.wakeLock) return; try { wakeLockEd = await navigator.wakeLock.request('screen'); wakeLockEd.addEventListener('release', () => { wakeLockEd = null; }); } catch { /* not allowed now */ } }
@@ -50,6 +59,8 @@ function applyEditorPrefs() {
   st.setProperty('--accent', EP.accent || EDITOR_PREFS.accent);
   st.setProperty('--ui-zoom', String(EP.uiSize || 1));
   document.documentElement.classList.toggle('reduce-motion', !!EP.reduceMotion);
+  document.documentElement.dataset.edTheme = EP.theme === 'light' ? 'light' : 'dark'; // light needs a few extra rules (white text on panels, shadows)
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', (THEMES[EP.theme] || {})['--toolbar'] || '#191919');
   setSnapshotPolicy(EP.snapEvery, EP.snapKeep);
   if (EP.keepAwake) editorWake(); else { wakeLockEd?.release?.(); wakeLockEd = null; }
 }
@@ -3068,6 +3079,23 @@ function syncTransformInputs() {
   }
 }
 
+/** The Inspector with nothing selected: what it's for, a few ways to start, and the main objects to jump to. */
+function inspectorEmpty() {
+  const list = (project.entities || []).filter((e) => !e.ui && !e.template && e.name && !/camera|light/i.test(e.name));
+  const seen = new Set(), key = [...list.filter((e) => (e.tags || []).includes('player')), ...list.filter((e) => !(e.tags || []).includes('player'))].filter((e) => !seen.has(e.name) && seen.add(e.name)).slice(0, 4); // one of each name
+  const uiCount = (project.entities || []).filter((e) => e.ui && !e.parent).length;
+  return h('div', { class: 'insp-empty' },
+    h('div', { class: 'ie-ic' }, icon('info')),
+    h('b', {}, 'Nothing selected'),
+    h('p', {}, 'Tap an object in the Scene or the Hierarchy to change how it looks and what it does.'),
+    h('div', { class: 'ie-btns' },
+      h('button', { class: 'btn primary', onclick: () => openCreate() }, icon('plus'), 'Add'),
+      h('button', { class: 'btn', onclick: () => select(SCENE_ID) }, icon('gear'), 'Game Settings'),
+      h('button', { class: 'btn', onclick: () => setDock('hierarchy') }, icon('list'), 'Hierarchy'),
+      h('button', { class: 'btn', onclick: () => setDock('scripts') }, icon('nodes'), 'Scripts')),
+    key.length ? h('div', { class: 'ie-recent' }, h('small', {}, `In this level · ${(project.entities || []).length} objects${uiCount ? `, ${uiCount} UI` : ''}`),
+      key.map((e) => h('button', { onclick: () => select(e.id) }, icon(iconFor(e)), e.name, (e.tags || []).includes('player') ? h('small', { style: 'margin:0 0 0 auto;text-transform:none;letter-spacing:0' }, 'player') : null))) : null);
+}
 function renderInspector() {
   const box = $('#inspector');
   const scroll = box.scrollTop;
@@ -3077,7 +3105,7 @@ function renderInspector() {
     renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); box.scrollTop = scroll; return;
   }
   const j = ent(selectedId);
-  if (!j) { box.append(h('div', { class: 'empty' }, 'Nothing selected.', h('br'), 'Tap an object in the Scene or Hierarchy.')); return; }
+  if (!j) { box.append(inspectorEmpty()); return; }
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
@@ -5032,7 +5060,7 @@ function openPreferences() {
   openDialog('Preferences', [
     h('p', { class: 'desc' }, 'These are for you on this device. Game settings live in Scene Settings and Build Settings.'),
     sec('Look', 'brush', [
-      h('div', { class: 'row' }, h('label', {}, 'Theme'), h('div', { class: 'seg small pref-themes' }, [['dark', 'Dark'], ['black', 'Black'], ['slate', 'Slate'], ['warm', 'Warm']].map(([v, l]) => h('button', { class: EP.theme === v ? 'on' : '', onclick: () => { setEP('theme', v); redo(); } }, l)))),
+      h('div', { class: 'row' }, h('label', {}, 'Theme'), h('div', { class: 'seg small pref-themes' }, THEME_NAMES.map(([v, l]) => h('button', { class: EP.theme === v ? 'on' : '', onclick: () => { setEP('theme', v); redo(); } }, h('i', { class: 'th-dot', style: `background:${THEMES[v]['--panel'] || '#383838'};border-color:${THEMES[v]['--toolbar'] || '#191919'}` }), l)))),
       h('div', { class: 'row' }, h('label', {}, 'Accent colour'), h('div', { class: 'pref-swatches' }, ACCENTS.map(([c, l]) => h('button', { class: 'pref-sw' + (EP.accent === c ? ' on' : ''), title: l, 'aria-label': l, style: `background:${c}`, onclick: () => { setEP('accent', c); redo(); } })))),
       sel('uiSize', 'Panel text size', [[0.9, 'Small'], [1, 'Normal'], [1.1, 'Large'], [1.25, 'Extra large']]),
       tog('reduceMotion', 'Reduce motion', 'Turns off sliding and fading animations'),

@@ -153,7 +153,7 @@ Settings for you on this device (games keep their own settings):
 
 | Group | Settings |
 |---|---|
-| Look | theme (Dark, Black, Slate, Warm), accent colour, panel text size, reduce motion |
+| Look | theme (Dark, Black, Slate, Midnight, Warm, Light), accent colour (it colours the Play and Add buttons, selections and highlights too), panel text size, reduce motion |
 | Editing | snap on / off, snap step for 2D (1–50 px) and 3D (0.1–1), rotation snap (5°–90°), grid, all colliders, vibration on taps |
 | Saving | save straight away, after a few seconds, every 10 seconds, or only on Save / leaving; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
 | App | open on the Home screen or straight into the last game, keep the screen on while editing, version and **Check for updates**, **Install app**, storage used and **Protect my games** (asks the browser not to clear them) |
@@ -670,6 +670,22 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - a **ready check** with Fix buttons (name, icon, version, description, App ID, a store version already used, testing options, compression…) and a **Recommended** button;
   - chips that jump to each section, and a **Last built** line;
   - ready-made icon emoji and colours with a light and dark Home Screen preview, and *Small update / Big* version buttons.
+
+### Editor look and feel
+
+- **Every panel follows the theme:** fields, borders, menus, chips and cards now use the theme's colours (on Slate or Warm, nothing stays plain grey).
+- **New themes:** **Midnight** (deep blue) and **Light**. Each theme in *Preferences* shows a colour dot.
+- **The accent colour is used everywhere:** the Play and Add buttons, primary buttons, selected rows, tabs and highlights.
+- **Motion:**
+  - panels fade up when you switch tabs;
+  - menus and dialogs pop in, and sheets spring up;
+  - toasts slide in;
+  - buttons dip when pressed;
+  - the active bottom tab's icon sits in an accent pill.
+
+  *Reduce motion* turns all of it off.
+- **Inspector with nothing selected:** buttons to **Add**, open **Game Settings**, the **Hierarchy** or **Scripts**, and the level's main objects to jump to.
+- Thin themed scrollbars on computers, and visible keyboard focus.
 
 ### Squads: select and move many units (tactics and strategy)
 

@@ -53,6 +53,9 @@ The view button above the Scene switches between:
   - **+ Add** sits in the bar above the screen, so it never covers your own buttons.
   - Apps show **one page at a time**: the page the app opens on, or the one picked in the page button. Selecting something on another page (from the Hierarchy) shows that page. *All pages at once* stacks them.
   - The quick-action bar keeps to Inspect, Duplicate and Delete; small things are moved by their middle and resized by the handles at their edges.
+  - **Tap** picks the smallest thing under your finger (a button rather than the card or page behind it). **Drag** moves it straight away.
+  - Dragging a full-screen **page** pans the view instead of moving it (tap it to select it). **Pinch** zooms, or use − / + / fit; a pinch that starts on a button doesn't move the button.
+  - Things **stretched** to the screen width (search bars, app bars) move only up and down, and pulling their left or right edge changes their **margin** from the screen edge.
 
 ## Create screen
 

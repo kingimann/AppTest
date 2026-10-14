@@ -1806,3 +1806,5 @@ html.dense #inspector:has(.comp-jump) { --cj-h: 50px; }
 #uiScreens .add-ui-btn svg.i { width: 18px; height: 18px; stroke-width: 2.4; }
 @media (max-width: 420px) { #ctxBar button { width: 40px !important; height: 40px; border-radius: 11px; } #ctxBar button svg.i { width: 20px; height: 20px; } }
 #uiScreens button[hidden] { display: none !important; }
+/* the UI editor on a phone: − / + next to fit, as well as pinching */
+@media (hover: none) { #app[data-view=ui] #zoomBar button[data-zoom=in], #app[data-view=ui] #zoomBar button[data-zoom=out] { display: grid; } }

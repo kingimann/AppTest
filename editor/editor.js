@@ -912,6 +912,12 @@ function hitGizmo(x, y) {
 // ============================================================================
 // Picking
 // ============================================================================
+/** A page or panel that fills (most of) the screen: you pan over it rather than drag it. */
+function isBackdrop(e) {
+  if (e.stretch === 'both') return true;
+  const S = UIS(), b = uiBounds(e), z = S.v.z;
+  return b.hx * 2 >= S.w * z * 0.85 && b.hy * 2 >= S.h * z * 0.6;
+}
 /** Is this UI element drawn in the editor right now (its page and screen are the ones shown)? */
 function uiShown(e) {
   if (!e.visible || e._parentHidden || e._clipHidden) return false;
@@ -920,12 +926,14 @@ function uiShown(e) {
 }
 function pick(sx, sy) {
   const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui) && (uiMode || !e.ui || !EP.hideUI)); // hidden UI can't be tapped
+  let bestUI = null, bestA = Infinity; // UI: the smallest thing under the finger (a button over a card over a page), with a little room around small ones
   for (const e of list) {
     if (!e.ui) continue;
     if (!uiShown(e)) continue; // on another page or screen: not drawn, so not tappable
-    const b = uiBounds(e);
-    if (Math.abs(sx - b.x) <= b.hx + 6 && Math.abs(sy - b.y) <= b.hy + 6) return e;
+    const b = uiBounds(e), pad = Math.max(6, 22 - Math.min(b.hx, b.hy)); // thin text and small icons get a bigger target
+    if (Math.abs(sx - b.x) <= b.hx + pad && Math.abs(sy - b.y) <= b.hy + pad) { const a = (b.hx + 4) * (b.hy + 4) + (Math.abs(sx - b.x) > b.hx || Math.abs(sy - b.y) > b.hy ? 1e6 : 0); if (a < bestA) { bestA = a; bestUI = e; } } // (a hit right on it beats one only near it)
   }
+  if (bestUI) return bestUI;
   for (const e of list) {
     if (e.ui || hasVisual(e)) continue;
     const p = toScreen(e);
@@ -1029,13 +1037,19 @@ surface.addEventListener('pointerdown', (ev) => {
   }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
-    const giz = !panBtn && hitGizmo(x, y);
+    let giz = !panBtn && hitGizmo(x, y);
+    if (giz?.handle === 'free' && uiMode) { const under = pick(x, y); if (under && under.id !== selectedId || isBackdrop(engine.scene.byId(selectedId))) giz = null; } // inside a selected card or page: the thing under the finger wins (and a page pans)
     if (giz) {
       beginTransform(giz, x, y);
       if (giz.handle === 'free') armLongPress(() => { if (gesture && !gesture.moved) { const id = gesture.id; gesture = null; buzz(15); openObjectMenu(id, x, y); } });
       return;
     }
     const hit = panBtn || tool === 'hand' ? null : pick(x, y);
+    if (hit && uiMode && isBackdrop(hit)) { // a full-screen page or panel: dragging it pans the view (it can't move anyway), a tap selects it
+      gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: false, pickId: hit.id };
+      armLongPress(() => { if (gesture && !gesture.moved) { gesture = null; buzz(15); openObjectMenu(hit.id, x, y); } });
+      return;
+    }
     if (hit) {
       const was = selectedId === hit.id;
       select(hit.id, { fromScene: true });
@@ -1053,7 +1067,8 @@ surface.addEventListener('pointerdown', (ev) => {
       armLongPress(() => { if (gesture && !gesture.moved && (gesture.type === 'pan' || gesture.type === 'orbit')) { gesture = null; buzz(15); openSpaceMenu(x, y); } });
     }
   } else if (ptrs.size === 2) {
-    if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
+    if (gesture?.ui && gesture.moved && (gesture.type === 'free' || gesture.type === 'rect')) { const j = ent(gesture.id); if (j) { j.x = gesture.orig.x; j.y = gesture.orig.y; if (gesture.m0) Object.assign(j, gesture.m0); if (gesture.size0) setSize(j, gesture.size0[0], gesture.size0[1]); requestRebuild(); } } // a pinch that started on a UI element: the first finger didn't mean to move it
+    else if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
     const [a, b] = [...ptrs.values()];
     gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, zoom0: cam2d.zoom, dist0: orbit.dist };
   }
@@ -1120,7 +1135,7 @@ surface.addEventListener('pointermove', (ev) => {
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { const z = UIS().v.z; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); }
+      if (g.ui) { const z = UIS().v.z, st = j.stretch || 'none'; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); if (st === 'width' || st === 'both') j.x = g.orig.x; if (st === 'height' || st === 'both') j.y = g.orig.y; } // a stretched side follows the screen
       else if (childOf(g)) { // a child: move it in the world, store the result relative to its parent
         let W;
         if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
@@ -1143,6 +1158,14 @@ surface.addEventListener('pointermove', (ev) => {
       let v = key === 'ry' ? g.orig.ry - deg : g.orig.rz + deg;
       v = snap ? Math.round(v / (+EP.rotSnap || 15)) * (+EP.rotSnap || 15) : round(v, 1);
       j[key] = v;
+    } else if (g.type === 'rect' && g.ui && j.stretch && j.stretch !== 'none' && (g.dir[0] && /width|both/.test(j.stretch) || g.dir[1] && /height|both/.test(j.stretch))) { // stretched: pulling an edge changes its margin from the screen edge
+      const [hx, hy] = g.dir, k = g.f.k, m = g.m0 ||= { marginLeft: j.marginLeft ?? j.margin ?? 0, marginRight: j.marginRight ?? j.margin ?? 0, marginTop: j.marginTop ?? j.margin ?? 0, marginBottom: j.marginBottom ?? j.margin ?? 0 };
+      const r4 = (v) => Math.max(0, snap ? Math.round(v / 4) * 4 : Math.round(v));
+      if (hx && /width|both/.test(j.stretch)) { if (hx > 0) j.marginRight = r4(m.marginRight - dx / k); else j.marginLeft = r4(m.marginLeft + dx / k); }
+      if (hy && /height|both/.test(j.stretch)) { if (hy > 0) j.marginBottom = r4(m.marginBottom - dy / k); else j.marginTop = r4(m.marginTop + dy / k); }
+      if (hy && !/height|both/.test(j.stretch)) { const [w0, h0] = g.size0, hgt = Math.max(4, snap ? Math.round((h0 + hy * dy / k) / 4) * 4 : h0 + hy * dy / k); setSize(j, w0, hgt); j.y = round(g.orig.y + hy * (hgt - h0) / 2, 2); }
+      g.label = `margins ${j.marginLeft ?? j.margin ?? 0} · ${j.marginRight ?? j.margin ?? 0}${/height|both/.test(j.stretch) ? ` · top ${j.marginTop ?? j.margin ?? 0} · bottom ${j.marginBottom ?? j.margin ?? 0}` : ''}`;
+      requestRebuild();
     } else if (g.type === 'rect') {
       const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
       let w = w0 + hx * dx / k / scX, hgt = h0 + hy * dy / k / scY;
@@ -1471,7 +1494,7 @@ const endPointer = (ev) => {
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
     const now = performance.now();
     if (now - lastEmptyTap < 320) { resetCamera(); applyCamera(); lastEmptyTap = 0; }
-    else { lastEmptyTap = now; if (tool !== 'hand') select(null); }
+    else { lastEmptyTap = now; if (tool !== 'hand') select(g.pickId || null); }
   }
   if (ptrs.size === 0 || g.type === 'pinch') gesture = null;
 };

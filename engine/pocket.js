@@ -4600,6 +4600,7 @@ function glyph(ctx, kind, x, y, s, color) {
       break;
     case 'star': for (let i = 0; i < 10; i++) { const r = i % 2 ? h * 0.45 : h, a = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); break;
     case 'search': ctx.arc(-h * 0.15, -h * 0.15, h * 0.55, 0, Math.PI * 2); ctx.moveTo(h * 0.25, h * 0.25); ctx.lineTo(h * 0.8, h * 0.8); ctx.stroke(); break;
+    case 'mic': UK.rr(ctx, -h * 0.3, -h * 0.95, h * 0.6, h * 1.2, h * 0.3); ctx.fill(); ctx.beginPath(); ctx.arc(0, -h * 0.1, h * 0.62, 0.12 * Math.PI, 0.88 * Math.PI); ctx.moveTo(0, h * 0.52); ctx.lineTo(0, h * 0.9); ctx.stroke(); break;
     case 'close': ctx.moveTo(-h * 0.5, -h * 0.5); ctx.lineTo(h * 0.5, h * 0.5); ctx.moveTo(h * 0.5, -h * 0.5); ctx.lineTo(-h * 0.5, h * 0.5); ctx.stroke(); break;
     case 'list': for (const yy of [-0.55, 0, 0.55]) { ctx.moveTo(-h * 0.85, yy * h); ctx.arc(-h * 0.75, yy * h, h * 0.1, 0, Math.PI * 2); ctx.moveTo(-h * 0.35, yy * h); ctx.lineTo(h * 0.85, yy * h); } ctx.stroke(); break;
     case 'right': tri(0); break;
@@ -9968,71 +9969,181 @@ registerBehavior('typewriter', {
 
 /** Text Input: tap to type a name or answer into a variable. */
 registerBehavior('uiInput', {
-  label: 'Text Input', description: 'An input bar: tap it and type right there (the phone keyboard opens) into a variable. Text, numbers, passwords or e-mail. Show it anywhere with {name}.',
+  label: 'Text Input', description: 'An input bar: tap it and type right there (the phone keyboard opens) into a variable. Text, numbers, passwords, e-mail or search (with suggestions, recent searches and voice). Show it anywhere with {name}.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'name', suggest: 'vars' },
     { key: 'kind', label: 'Type of input', type: 'select', options: ['text', 'number', 'password', 'email', 'search'], default: 'text' },
-    { key: 'placeholder', label: 'Shown when empty', type: 'text', default: 'Tap to type…' },
+    { key: 'placeholder', label: 'Shown when empty', type: 'text', default: 'Tap to type…', info: 'For a search bar, several hints split by | take turns: Search recipes | Try “pasta” | Search by ingredient' },
     { key: 'maxLength', label: 'Max letters', type: 'number', default: 16 },
     { key: 'style', label: 'Typing happens', type: 'select', options: ['right in the bar', 'in a pop-up box'], default: 'right in the bar' },
     { key: 'question', label: 'Question (pop-up)', type: 'text', default: 'What is your name?', showIf: { style: ['in a pop-up box'] } },
+    { key: 'suggestFrom', label: 'Suggestions while typing', type: 'select', options: ['nothing', 'words listed here', 'a list variable', 'a data collection'], default: 'nothing', group: 'Search', showIf: { kind: ['search'] }, info: { 'a data collection': 'Suggests the records that match, by the field you pick (Game Settings › Data).' } },
+    { key: 'suggestWords', label: 'Words to suggest (one per line)', type: 'code', default: 'Apples\nBananas\nCherries', group: 'Search', showIf: (b) => b.kind === 'search' && b.suggestFrom === 'words listed here' },
+    { key: 'suggestVar', label: 'List variable', type: 'text', default: '', suggest: 'vars', group: 'Search', showIf: (b) => b.kind === 'search' && b.suggestFrom === 'a list variable' },
+    { key: 'suggestCollection', label: 'Collection', type: 'text', default: 'Tasks', group: 'Search', showIf: (b) => b.kind === 'search' && b.suggestFrom === 'a data collection' },
+    { key: 'suggestField', label: 'Field to suggest', type: 'text', default: 'title', group: 'Search', showIf: (b) => b.kind === 'search' && b.suggestFrom === 'a data collection' },
+    { key: 'maxSuggestions', label: 'Most suggestions shown', type: 'number', default: 6, range: [1, 12], step: 1, group: 'Search', showIf: { kind: ['search'] } },
+    { key: 'recent', label: 'Remember recent searches', type: 'bool', default: true, group: 'Search', showIf: { kind: ['search'] }, info: 'Shown when you tap the empty bar, and first among the suggestions. Kept on the phone.' },
+    { key: 'recentCount', label: 'Recent searches kept', type: 'number', default: 5, range: [1, 20], step: 1, group: 'Search', showIf: (b) => b.kind === 'search' && b.recent !== false },
+    { key: 'clearButton', label: '✕ button to clear', type: 'bool', default: true, group: 'Search', showIf: { kind: ['search'] } },
+    { key: 'cancelButton', label: 'Cancel button while typing (iPhone style)', type: 'bool', default: false, group: 'Search', showIf: { kind: ['search'] } },
+    { key: 'voice', label: 'Microphone button (search by voice)', type: 'bool', default: false, group: 'Search', showIf: { kind: ['search'] }, info: 'Where the phone’s browser can listen (Chrome, Safari). Elsewhere the button says it isn’t available.' },
+    { key: 'searchMessage', label: 'Message when the search changes', type: 'text', default: '', suggest: 'messages', group: 'Search', showIf: { kind: ['search'] }, info: 'Sent once typing pauses (not on every letter): load results from a server, update a list…' },
+    { key: 'searchDelay', label: 'Pause before that message (seconds)', type: 'number', default: 0.35, range: [0, 2], step: 0.05, group: 'Search', showIf: (b) => b.kind === 'search' && !!b.searchMessage },
+    { key: 'pickMessage', label: 'Message when a suggestion is picked', type: 'text', default: '', suggest: 'messages', group: 'Search', showIf: { kind: ['search'] } },
     { key: 'placeholderColor', label: 'Hint colour', type: 'color', default: '#8a93a8', group: 'Look' },
     { key: 'focusColor', label: 'Outline while typing', type: 'color', default: '#3a8dff', group: 'Look' },
+    { key: 'listBg', label: 'Suggestions background', type: 'color', default: '', optional: true, group: 'Look', showIf: { kind: ['search'] }, info: 'Blank: the bar’s own colour.' },
     { key: 'live', label: 'Update the variable while typing', type: 'bool', default: true, group: 'Feel' },
     { key: 'message', label: 'Message when done (Enter)', type: 'text', default: '', suggest: 'messages', group: 'Feel' },
   ],
   create(p) {
-    let box = null, color0 = null, stroke0 = null;
+    let box = null, color0 = null, stroke0 = null, sug = null, cancelBtn = null, clearBtn = null, shrink = null, timer = 0, listening = null, sugAt = 0;
+    const search = p.kind === 'search';
     const valOf = (s) => (s.vars[p.var] == null ? '' : String(s.vars[p.var]));
     const commit = (s, v) => s.setVar(p.var, p.kind === 'number' ? (v === '' ? 0 : +v || 0) : String(v).slice(0, +p.maxLength || 16));
+    const hints = () => String(p.placeholder ?? '').split('|').map((x) => x.trim()).filter(Boolean);
+    const hint = (s) => { const H = hints(); return listening ? 'Listening…' : H.length ? H[Math.floor((s.time || 0) / 3) % H.length] : ''; }; // several hints take turns
+    // recent searches, kept on the phone per game and variable
+    const recKey = (s) => 'pocket.recent.' + (s.engine.gameKey || 'game') + '.' + p.var;
+    const recents = (s) => { try { const L = JSON.parse(store.get(recKey(s), '[]')); return Array.isArray(L) ? L.map(String) : []; } catch { return []; } };
+    const addRecent = (s, v) => { v = String(v || '').trim(); if (!search || p.recent === false || !v) return; const L = [v, ...recents(s).filter((x) => x.toLowerCase() !== v.toLowerCase())].slice(0, Math.max(1, +p.recentCount || 5)); store.set(recKey(s), JSON.stringify(L)); };
+    const searched = (s, now) => { clearTimeout(timer); if (!p.searchMessage) return; if (now) s.send(p.searchMessage); else timer = setTimeout(() => s.send(p.searchMessage), Math.max(0, +p.searchDelay || 0) * 1000); };
+    /** What to suggest for what's typed: recent searches first, then words that start with it, then words that contain it. */
+    const suggestions = (s, typed) => {
+      const q = String(typed || '').trim().toLowerCase(), max = Math.max(1, +p.maxSuggestions || 6), R = p.recent !== false ? recents(s) : [];
+      if (!q) return R.slice(0, max).map((v) => ({ v, recent: true }));
+      let src = [];
+      if (p.suggestFrom === 'words listed here') src = String(p.suggestWords || '').split(/\n|,/);
+      else if (p.suggestFrom === 'a list variable') { const L = s.vars[p.suggestVar]; src = Array.isArray(L) ? L : String(L ?? '').split(/\n|,/); }
+      else if (p.suggestFrom === 'a data collection') { const D = s.engine.data; try { src = (D?.def?.(p.suggestCollection) ? D.query(p.suggestCollection, { search: q }) : []).map((r) => r[p.suggestField || 'title'] ?? r[Object.keys(r).find((k) => k !== 'id')]); } catch { src = []; } }
+      src = [...new Set(src.map((x) => String(x ?? '').trim()).filter(Boolean))];
+      const low = (v) => v.toLowerCase(), rec = R.filter((v) => low(v).includes(q)), seen = new Set(rec.map(low));
+      const rest = [...src.filter((v) => low(v).startsWith(q)), ...src.filter((v) => !low(v).startsWith(q) && low(v).includes(q))].filter((v) => !seen.has(low(v)) && low(v) !== q);
+      return [...rec.map((v) => ({ v, recent: true })), ...rest.map((v) => ({ v }))].slice(0, max);
+    };
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const bold = (v, q) => { const i = q ? v.toLowerCase().indexOf(q.toLowerCase()) : -1; return i < 0 ? esc(v) : esc(v.slice(0, i)) + '<b>' + esc(v.slice(i, i + q.length)) + '</b>' + esc(v.slice(i + q.length)); };
+    const ICON = { recent: '<path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="8.5" />', find: '<circle cx="10.5" cy="10.5" r="6" /><path d="M15 15l5 5" />' };
+    const svg = (k, c) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex:none">${ICON[k]}</svg>`;
+    const noFocusLoss = (el) => ['pointerdown', 'mousedown', 'touchstart'].forEach((ev) => el.addEventListener(ev, (x) => { x.stopPropagation(); if (ev !== 'touchstart') x.preventDefault(); })); // tapping it keeps the keyboard up
+    const colours = (e, s) => {
+      const t = e.text || TEXT_DEFAULTS, ink = tok(color0 || t.color) || '#fff', fill = tok(e.shape?.fill) || '';
+      const bg = tok(p.listBg) || (fill && !/^rgba\([^)]*,\s*0(\.0+)?\)$|transparent/.test(fill) ? fill : '#1f2433');
+      return { ink, bg, sub: tok(p.placeholderColor) || '#8a93a8', ac: tok(p.focusColor) || '#3a8dff', font: fontOf(t.font) };
+    };
+    /** The suggestions under the bar while typing. */
+    const drawSug = (e, s) => {
+      if (!box || !search) { sug?.remove(); sug = null; return; }
+      const L = suggestions(s, box.value);
+      if (!L.length) { if (sug) sug.style.display = 'none'; return; }
+      const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, C = colours(e, s), q = box.value.trim();
+      if (!sug) { sug = document.createElement('div'); sug.className = 'pk-sug'; noFocusLoss(sug); s.engine.root.appendChild(sug); sugAt = performance.now(); }
+      sug.style.cssText = `position:absolute;left:${r.x - r.w / 2}px;top:${r.y + r.h / 2 + 6 * k}px;width:${r.w}px;z-index:31;background:${C.bg};color:${C.ink};border-radius:${14 * k}px;box-shadow:0 ${10 * k}px ${28 * k}px rgba(0,0,0,.28);overflow:hidden;font:600 ${Math.round(16 * k)}px ${C.font};` +
+        `transform-origin:top;animation:${performance.now() - sugAt < 60 ? 'pkSugIn .16s ease-out' : 'none'}`;
+      const head = !q && L[0]?.recent ? `<div style="display:flex;align-items:center;justify-content:space-between;padding:${10 * k}px ${14 * k}px ${4 * k}px;font-size:${Math.round(13 * k)}px;color:${C.sub};font-weight:700"><span>Recent</span><span data-clear style="color:${C.ac};cursor:pointer;padding:${4 * k}px">Clear</span></div>` : '';
+      sug.innerHTML = head + L.map((it, i) => `<div data-i="${i}" style="display:flex;align-items:center;gap:${12 * k}px;padding:0 ${14 * k}px;height:${44 * k}px;cursor:pointer;${i ? `border-top:1px solid ${withAlpha(C.sub, 0.15)};` : ''}">${svg(it.recent ? 'recent' : 'find', C.sub)}<span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500">${bold(it.v, q)}</span></div>`).join('');
+      sug.style.display = '';
+      sug.onclick = (ev) => {
+        if (ev.target.closest('[data-clear]')) { store.set(recKey(s), '[]'); drawSug(e, s); return; }
+        const row = ev.target.closest('[data-i]'); if (!row) return;
+        const v = L[+row.dataset.i].v; box.value = v; commit(s, v); s.engine.vibrate(6);
+        if (p.pickMessage) s.send(p.pickMessage);
+        close(e, s, true);
+      };
+    };
+    const restore = (e, s) => { if (!shrink) return; for (const [on, from] of shrink.parts) { s.killTweens(on, true); Object.assign(on, from); } shrink = null; };
     const close = (e, s, done) => {
       if (!box) return; const b = box, v = b.value; box = null; b.remove(); // (clear first: removing it fires blur, which calls close again)
+      for (const x of [sug, cancelBtn, clearBtn]) x?.remove(); sug = cancelBtn = clearBtn = null; restore(e, s);
       commit(s, v); if (e.shape) { e.shape.stroke = stroke0; } s.engine.input.reset();
-      if (done && p.message) s.send(p.message);
+      if (done) { addRecent(s, v); searched(s, true); if (p.message) s.send(p.message); }
     };
     const inLeft = (e) => (+e.text?.inset > 0 && e.text.align === 'left' ? +e.text.inset : 12); // where the typing starts: after a search icon, or a little in
+    const place = (e, s) => { // the typing box (and Cancel / ✕) follow the bar
+      const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, padL = inLeft(e) * k, padR = search ? 40 * k : 12 * k;
+      Object.assign(box.style, { left: (r.x - r.w / 2 + padL) + 'px', top: (r.y - r.h / 2) + 'px', width: Math.max(20, r.w - padL - padR) + 'px', height: r.h + 'px' });
+      if (cancelBtn) Object.assign(cancelBtn.style, { left: (r.x + r.w / 2 + 6 * k) + 'px', top: (r.y - r.h / 2) + 'px', height: r.h + 'px', opacity: String(clamp((performance.now() - (shrink?.t || 0)) / 220, 0, 1)) });
+      if (clearBtn) { Object.assign(clearBtn.style, { left: (r.x + r.w / 2 - 40 * k) + 'px', top: (r.y - r.h / 2) + 'px', width: 40 * k + 'px', height: r.h + 'px' }); clearBtn.style.visibility = box.value ? 'visible' : 'hidden'; }
+      if (sug) { sug.style.left = (r.x - r.w / 2) + 'px'; sug.style.top = (r.y + r.h / 2 + 6 * k) + 'px'; sug.style.width = r.w + 'px'; }
+    };
     const open = (e, s) => {
-      const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, t = e.text || TEXT_DEFAULTS;
+      const k = uiK(s.engine.safe) || 1, t = e.text || TEXT_DEFAULTS, C = colours(e, s);
+      if (search && !document.getElementById('pk-search-css')) { const st = document.createElement('style'); st.id = 'pk-search-css'; st.textContent = '.pk-search::-webkit-search-cancel-button,.pk-search::-webkit-search-decoration{-webkit-appearance:none;display:none}.pk-sug b{font-weight:800}@keyframes pkSugIn{from{opacity:0;transform:translateY(-6px) scaleY(.96)}to{opacity:1;transform:none}}'; document.head.appendChild(st); }
       const inp = box = document.createElement('input');
-      inp.type = { number: 'text', password: 'password', email: 'email', search: 'search' }[p.kind] || 'text';
+      inp.type = { number: 'text', password: 'password', email: 'email', search: 'search' }[p.kind] || 'text'; if (search) inp.className = 'pk-search';
       if (p.kind === 'number') inp.inputMode = 'decimal';
-      inp.maxLength = Math.max(1, +p.maxLength || 16); inp.placeholder = p.placeholder || ''; inp.value = valOf(s); inp.enterKeyHint = 'done'; inp.autocapitalize = p.kind === 'text' ? 'sentences' : 'off';
-      const pad = 12 * k, padL = inLeft(e) * k, padR = p.kind === 'search' ? 40 * k : pad;
-      inp.style.cssText = `position:absolute;left:${r.x - r.w / 2 + padL}px;top:${r.y - r.h / 2}px;width:${Math.max(20, r.w - padL - padR)}px;height:${r.h}px;z-index:30;border:0;outline:0;background:transparent;` +
-        `color:${tok(color0 || t.color) || '#fff'};font:${t.weight || '600'} ${Math.round((t.size || 18) * k)}px ${fontOf(t.font)};text-align:${t.align === 'left' ? 'left' : t.align === 'right' ? 'right' : 'center'};padding:0;margin:0;caret-color:${tok(p.focusColor)};touch-action:auto;`;
+      inp.maxLength = Math.max(1, +p.maxLength || 16); inp.placeholder = hint(s); inp.value = valOf(s); inp.enterKeyHint = search ? 'search' : 'done'; inp.autocapitalize = p.kind === 'text' ? 'sentences' : 'off'; if (search) inp.autocomplete = 'off';
+      inp.style.cssText = `position:absolute;z-index:30;border:0;outline:0;background:transparent;-webkit-appearance:none;appearance:none;` +
+        `color:${C.ink};font:${t.weight || '600'} ${Math.round((t.size || 18) * k)}px ${C.font};text-align:${t.align === 'left' ? 'left' : t.align === 'right' ? 'right' : 'center'};padding:0;margin:0;caret-color:${C.ac};touch-action:auto;`;
       ['pointerdown', 'pointerup', 'touchstart'].forEach((ev) => inp.addEventListener(ev, (x) => x.stopPropagation()));
-      inp.addEventListener('input', () => { if (p.live) commit(s, inp.value); });
+      inp.addEventListener('input', () => { if (p.live) commit(s, inp.value); if (search) { searched(s); drawSug(e, s); } });
       inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { close(e, s, true); } else if (ev.key === 'Escape') close(e, s, false); });
       inp.addEventListener('blur', () => close(e, s, false));
       s.engine.root.appendChild(inp);
+      if (search && p.clearButton !== false) { // ✕ while typing: clears and keeps typing
+        clearBtn = document.createElement('button'); clearBtn.type = 'button'; clearBtn.setAttribute('aria-label', 'Clear');
+        clearBtn.innerHTML = `<span style="display:grid;place-items:center;width:${20 * k}px;height:${20 * k}px;border-radius:50%;background:${withAlpha(C.sub, 0.3)};color:${C.ink};font:700 ${Math.round(12 * k)}px system-ui">✕</span>`;
+        clearBtn.style.cssText = 'position:absolute;z-index:31;border:0;background:none;padding:0;display:grid;place-items:center;cursor:pointer;';
+        noFocusLoss(clearBtn); clearBtn.onclick = () => { inp.value = ''; commit(s, ''); searched(s, true); drawSug(e, s); place(e, s); };
+        s.engine.root.appendChild(clearBtn);
+      }
+      if (search && p.cancelButton) { // the bar makes room for Cancel beside it
+        const W = 76, sh = e.stretch === 'width' || e.stretch === 'both', T = { ease: 'outCubic' };
+        shrink = { t: performance.now(), parts: sh ? [[e, { marginRight: e.marginRight ?? e.margin }]] : e.shape ? [[e.shape, { w: e.shape.w }], [e, { x: e.x }]] : [] };
+        if (sh) { e.marginRight ??= e.margin; s.to(e, { marginRight: e.marginRight + W }, 0.22, T); }
+        else if (e.shape) { s.to(e.shape, { w: e.shape.w - W }, 0.22, T); s.to(e, { x: e.x - W / 2 }, 0.22, T); } // its left edge stays put
+        cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.textContent = 'Cancel';
+        cancelBtn.style.cssText = `position:absolute;z-index:31;border:0;background:none;padding:0 ${4 * k}px;color:${C.ac};font:600 ${Math.round(16 * k)}px ${C.font};cursor:pointer;opacity:0;`;
+        noFocusLoss(cancelBtn); cancelBtn.onclick = () => { inp.value = ''; commit(s, ''); searched(s, true); close(e, s, false); };
+        s.engine.root.appendChild(cancelBtn);
+      }
       if (e.shape) { stroke0 = e.shape.stroke; e.shape.stroke = p.focusColor; e.shape.lineWidth = Math.max(2, e.shape.lineWidth || 2); }
+      place(e, s); drawSug(e, s);
       setTimeout(() => inp.focus(), 30);
+    };
+    /** Search by voice: the phone listens, the words go in the bar. */
+    const listen = (e, s) => {
+      const SR = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+      if (!SR) { s.engine.notify?.({ type: 'info', title: 'Voice search isn’t available here', text: 'Try Chrome or Safari.' }); return; }
+      if (listening) { try { listening.stop(); } catch { /* already stopped */ } return; }
+      const R = listening = new SR(); R.lang = navigator.language || 'en-US'; R.interimResults = true; R.maxAlternatives = 1;
+      R.onresult = (ev) => { const res = ev.results[ev.results.length - 1], v = res[0].transcript.trim(); commit(s, v); if (res.isFinal) { addRecent(s, v); searched(s, true); if (p.message) s.send(p.message); } };
+      R.onend = R.onerror = () => { if (listening === R) listening = null; };
+      try { R.start(); s.engine.vibrate(10); } catch { listening = null; }
     };
     return {
       uiAlways: true,
       start(e) { e.text ||= { ...TEXT_DEFAULTS, size: 18 }; color0 = e.text.color; },
       update(e, dt, s) {
-        if (box) { const r = uiRect(s, e), k = uiK(s.engine.safe) || 1; box.style.left = (r.x - r.w / 2 + inLeft(e) * k) + 'px'; box.style.top = (r.y - r.h / 2) + 'px'; if (!e.visible || e._parentHidden) close(e, s, false); }
-        else if (p.kind === 'search' && valOf(s) !== '' && UK.taps(s, e).some((t) => { const b = UK.box(e); return UK.in(t, { x: b.x + b.w - 46, y: b.y, w: 46, h: b.h }); })) { s.setVar(p.var, ''); s.engine.vibrate(6); s.engine.input.taps.length = 0; } // the ✕ clears the search
+        const taps = UK.taps(s, e), b = UK.box(e), right = (t) => UK.in(t, { x: b.x + b.w - 46, y: b.y, w: 46, h: b.h });
+        if (box) { place(e, s); if (!box.value) box.placeholder = hint(s); if (!e.visible || e._parentHidden) close(e, s, false); }
+        else if (search && valOf(s) !== '' && p.clearButton !== false && taps.some((t) => right(t))) { s.setVar(p.var, ''); searched(s, true); s.engine.vibrate(6); s.engine.input.taps.length = 0; } // the ✕ clears the search
+        else if (search && p.voice && valOf(s) === '' && taps.some((t) => right(t))) { listen(e, s); s.engine.input.taps.length = 0; } // 🎤
         else if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
-          if (p.style === 'in a pop-up box') { s.engine.input.reset(); askTextBox(s, { question: p.question, placeholder: p.placeholder, max: p.maxLength, value: valOf(s) }, (v) => { if (v != null) { commit(s, v); if (p.message) s.send(p.message); } }); }
+          if (p.style === 'in a pop-up box') { s.engine.input.reset(); askTextBox(s, { question: p.question, placeholder: hints()[0] || '', max: p.maxLength, value: valOf(s) }, (v) => { if (v != null) { commit(s, v); addRecent(s, v); searched(s, true); if (p.message) s.send(p.message); } }); }
           else open(e, s);
         }
         const v = valOf(s), empty = v === '' || (p.kind === 'number' && s.vars[p.var] == null);
-        e.text.value = box ? '' : empty ? p.placeholder : p.kind === 'password' ? '•'.repeat(v.length) : v;
+        e.text.value = box ? '' : empty ? hint(s) : p.kind === 'password' ? '•'.repeat(v.length) : v;
         e.text.color = empty && !box ? p.placeholderColor : color0;
       },
       drawUI(ctx, e, s) {
-        if (s.engine.editing && !box && !e.text?.value && p.placeholder) { // the editor: show the hint, where the typing will go
+        if (s.engine.editing && !box && !e.text?.value && hints()[0]) { // the editor: show the hint, where the typing will go
           const b = UK.box(e), t = e.text || {}, al = t.align === 'left' || t.align === 'right' ? t.align : 'center', ins = +t.inset > 0 ? +t.inset : 12;
-          UK.text(ctx, p.placeholder, al === 'left' ? b.x + ins : al === 'right' ? b.x + b.w - ins : b.cx, b.cy, { size: t.size || 16, weight: t.weight || 600, color: tok(p.placeholderColor) || '#8a93a8', align: al, maxW: b.w - ins - (p.kind === 'search' ? 40 : 12) });
+          UK.text(ctx, hints()[0], al === 'left' ? b.x + ins : al === 'right' ? b.x + b.w - ins : b.cx, b.cy, { size: t.size || 16, weight: t.weight || 600, color: tok(p.placeholderColor) || '#8a93a8', align: al, maxW: b.w - ins - (search ? 40 : 12) });
         }
-        if (p.kind !== 'search' || s.engine.editing && !e.shape) return;
-        const b = UK.box(e), c = p.placeholderColor || '#8a93a8', isz = Math.min(18, b.h * 0.4);
+        if (!search || s.engine.editing && !e.shape) return;
+        const b = UK.box(e), c = p.placeholderColor || '#8a93a8', isz = Math.min(18, b.h * 0.4), rx = b.x + b.w - 22;
         glyph(ctx, 'search', b.x + 14 + isz / 2, b.cy, isz, c);
-        if (valOf(s) !== '' && !box) { ctx.fillStyle = withAlpha(c, 0.25); ctx.beginPath(); ctx.arc(b.x + b.w - 22, b.cy, 11, 0, Math.PI * 2); ctx.fill(); glyph(ctx, 'close', b.x + b.w - 22, b.cy, 11, c); }
+        if (box) return;
+        if (valOf(s) !== '' && p.clearButton !== false) { ctx.fillStyle = withAlpha(c, 0.25); ctx.beginPath(); ctx.arc(rx, b.cy, 11, 0, Math.PI * 2); ctx.fill(); glyph(ctx, 'close', rx, b.cy, 11, c); }
+        else if (valOf(s) === '' && p.voice) {
+          if (listening) { const k = 0.5 + 0.5 * Math.sin((s.time || 0) * 8), ac = tok(p.focusColor) || '#3a8dff'; ctx.fillStyle = withAlpha(ac, 0.18 + 0.2 * k); ctx.beginPath(); ctx.arc(rx, b.cy, 13 + 3 * k, 0, Math.PI * 2); ctx.fill(); glyph(ctx, 'mic', rx, b.cy, isz, ac); }
+          else glyph(ctx, 'mic', rx, b.cy, isz, c);
+        }
       },
-      destroy(e, s) { if (box) { box.remove(); box = null; } },
+      destroy(e, s) { clearTimeout(timer); for (const x of [box, sug, cancelBtn, clearBtn]) x?.remove(); box = sug = cancelBtn = clearBtn = null; try { listening?.abort(); } catch { /* not listening */ } listening = null; },
     };
   },
 });
@@ -12171,6 +12282,7 @@ registerBehavior('uiDataList', {
       const D = s.engine.data, def = D.def(p.collection);
       if (!def) return s.engine.editing ? SAMPLE.map((r) => ({ r, vars: { ...r, done: r.done ? '✓' : '' } })) : [];
       const F = fieldsOf(def), L = D.query(p.collection, { filter: p.filter, search: p.search ? s.vars[p.search] : '', sort: p.sort, vars: s.vars });
+      if (p.search && !s.engine.editing) s.vars[p.search + 'Results'] = L.length; // {searchResults}: how many match
       return L.map((r) => { const v = Object.create(s.vars); for (const f of F) v[f.key] = fieldText(f, r[f.key], def); return { r, vars: v }; });
     };
     const layout = (e, s) => { // rows and headings with their y (from the top of the list)

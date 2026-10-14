@@ -668,6 +668,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - Touch buttons dip and light up while held; pause, sound and D-pad buttons draw their own icons.
 - A text showing a variable (`{score}`) pops when the value changes (*Pop when the value changes* in the Text card).
 - **Apps:** search bars with a magnifier and a clear ✕, *No results* and empty-list states, and app bars that get a shadow once you scroll.
+- **Search bars:** suggestions while typing (from a word list, a list variable or a data collection, with the typed part in bold), recent searches kept on the phone, ✕ while typing, an iPhone-style **Cancel**, **voice search** 🎤, hints that take turns (`Search recipes | Try “pasta”`), a message once typing pauses, and `{searchResults}` from the Data List. New preset: *Search Bar (suggestions + voice)*.
 
 ### Page transitions and Build Settings
 

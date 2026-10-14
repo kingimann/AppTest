@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
+import { Engine, Scene, SaveFiles, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -1103,6 +1103,42 @@ function tagLayerRows(j) {
   ];
 }
 /** The Tags & Layers manager: add, rename and delete tags (everywhere at once), rename layers, see what uses them. */
+/** Easy Save-style save data browser: the save files Play mode wrote on this device, their keys and values (view, edit, back up, export). */
+function openSaveData(openFile = '') {
+  const sv = new SaveFiles({ gameKey: root.name || 'game', levels: [root] }), files = sv.files(), redo = (f = openFile) => { closeLayer(); openSaveData(f); };
+  const preview = (v) => { const t = typeof v === 'string' ? `“${v}”` : JSON.stringify(v); return t.length > 60 ? t.slice(0, 59) + '…' : t; };
+  const ago = (t) => { if (!t) return 'never'; const s = Math.round((Date.now() - t) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : new Date(t).toLocaleDateString(); };
+  const editKey = (f, k) => {
+    const cur = sv.load(k, f), txt = prompt(`Value of “${k}” (JSON: 12, "text", [1,2], {"hp":3})`, JSON.stringify(cur)); if (txt === null) return;
+    let v; try { v = JSON.parse(txt); } catch { v = txt; }
+    sv.save(k, v, f); redo(f);
+  };
+  const fileCard = (f) => {
+    const d = sv.read(f), keys = Object.keys(d?.keys || {}), raw = store.get(sv.key(f), ''), open = f === openFile;
+    return h('div', { class: 'sd-file' + (open ? ' open' : '') },
+      h('button', { class: 'sd-fh', onclick: () => redo(open ? '' : f) }, icon('chevron'), icon('save'), h('b', {}, f),
+        h('small', {}, d ? `${keys.length} key${keys.length === 1 ? '' : 's'} · ${(raw.length / 1024).toFixed(1)} KB · ${ago(d.saved)}${raw.startsWith('PES1:') ? ' · 🔒' : ''}` : 'Locked or damaged (wrong password?)')),
+      open && h('div', { class: 'sd-fb' },
+        keys.length ? h('div', { class: 'sd-keys' }, keys.map((k) => h('div', { class: 'sd-key' }, h('code', {}, k), h('span', { title: JSON.stringify(d.keys[k].v) }, preview(d.keys[k].v)),
+          h('button', { class: 'btn', title: 'Edit', onclick: () => editKey(f, k) }, icon('edit')),
+          h('button', { class: 'btn', title: 'Delete key', onclick: () => { sv.deleteKey(k, f); redo(f); } }, icon('trash'))))) : h('p', { class: 'desc' }, 'No keys yet.'),
+        h('div', { class: 'btns' },
+          h('button', { class: 'btn', onclick: () => { const k = prompt('New key name')?.trim(); if (k) editKey(f, k); } }, icon('plus'), 'Add Key'),
+          h('button', { class: 'btn', onclick: () => { const t = sv.exportFile(f); navigator.clipboard?.writeText(t).then(() => toast('Save copied as text'), () => prompt('Save as text', t)); } }, icon('copy'), 'Export'),
+          h('button', { class: 'btn', onclick: () => { const t = prompt('Paste a save exported from a game'); if (t && !sv.importFile(f, t)) toast('That is not a save file'); redo(f); } }, icon('paste'), 'Import'),
+          h('button', { class: 'btn', onclick: () => { sv.backup(f); toast('Backup kept'); redo(f); } }, icon('download'), 'Back Up'),
+          sv.hasBackup(f) && h('button', { class: 'btn', onclick: () => { if (sv.restore(f)) toast('Backup restored'); redo(f); } }, icon('rotate'), 'Restore'),
+          h('button', { class: 'btn', onclick: () => { const n = prompt('Copy to file', f + ' copy')?.trim(); if (n) { sv.copyFile(f, n); redo(n); } } }, icon('layers'), 'Duplicate'),
+          h('button', { class: 'btn', onclick: () => { if (confirm(`Delete the save file “${f}”?`)) { sv.deleteFile(f); redo(''); } } }, icon('trash'), 'Delete'))));
+  };
+  openDialog('Save Data', [
+    h('p', { class: 'desc' }, 'Save files written while you play this game on this device (Save Key / Save Variables nodes, Auto Save and Save Manager components). Players each have their own. Edit values to test, or delete a file to start fresh.'),
+    files.length ? h('div', { class: 'sd-list' }, files.map(fileCard)) : h('p', { class: 'empty' }, 'No save files yet. Play the game and save something.'),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn', onclick: () => { const n = prompt('New save file name', 'save')?.trim(); if (n) { sv.saveMany({}, n); redo(n); } } }, icon('plus'), 'New File'),
+      files.length > 0 && h('button', { class: 'btn', onclick: () => { if (confirm(`Delete all ${files.length} save file${files.length === 1 ? '' : 's'} of this game?`)) { files.forEach((f) => sv.deleteFile(f)); redo(''); } } }, icon('trash'), 'Delete All')),
+  ]);
+}
 function openTagsLayers() {
   const ents = allEnts(), names = layerNames();
   const used = (t) => ents.filter((e) => (e.tags || []).includes(t)).length;
@@ -2171,14 +2207,17 @@ function scrubber(labelEl, inputEl, get, set, step) {
 
 /** An input bound to target()[path]. spec: { type, label, options, def, structure, step } */
 function control(target, path, spec) {
+  let rowEl = null; // the finished row (deco)
   const get = () => { const v = getPath(target(), path); return v === undefined ? spec.def : v; };
   const set = (v) => {
-    setPath(target(), path, v);
+    setPath(target(), path, v); markMod();
     if (path === 'name' && target() === project) refreshAll();
     changed({ structure: spec.structure || ['name', 'tags', 'template', 'locked'].includes(path) });
   };
   const val = get();
-  const text = String(spec.label ?? '').replace(/ \((2D|3D)\)$/, ''); // the other mode's fields are hidden, so no need to say which
+  let text = String(spec.label ?? '').replace(/ \((2D|3D)\)$/, ''), unit = spec.unit || ''; // the other mode's fields are hidden, so no need to say which
+  const um = !unit && spec.type === 'number' && text.match(/\s*\((s|sec|seconds|px|°|%|deg|degrees|ms|m|m\/s)\)$/); // Odin-style [SuffixLabel]: "Speed (px)" → a px chip in the field
+  if (um) { unit = { sec: 's', seconds: 's', deg: '°', degrees: '°' }[um[1]] || um[1]; text = text.slice(0, um.index); }
   const label = h('label', { title: text }, text);
   let el;
   switch (spec.type) {
@@ -2189,7 +2228,7 @@ function control(target, path, spec) {
       const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path,
         oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) { set(n); if (slider) slider.value = n; } }, onchange: lazy });
       const bump = (d) => { let v = round((+get() || 0) + d * step, 3); if (spec.range) v = Math.min(spec.range[1], Math.max(spec.range[0], v)); inp.value = v; if (slider) slider.value = v; set(v); buzz(4); lazy(); };
-      el = h('div', { class: 'num' }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), inp,
+      el = h('div', { class: 'num' + (unit ? ' has-unit' : '') }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), unit ? h('span', { class: 'num-u' }, inp, h('i', { class: 'unit' }, unit)) : inp,
         h('button', { type: 'button', 'aria-label': 'Increase', onclick: () => bump(1) }, '+'));
       scrubber(label, inp, get, set, step);
       if (spec.range) { // Odin-style [Range] slider under the number
@@ -2200,13 +2239,20 @@ function control(target, path, spec) {
       break;
     }
     case 'bool':
-      el = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
-      return h('div', { class: 'row inline' }, label, el);
-    case 'select':
+      el = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => { set(e.target.checked); markMod(); } });
+      return deco(h('div', { class: 'row inline' }, label, el));
+    case 'select': {
+      const opts = spec.options.map((o) => (Array.isArray(o) ? o : [o, o]));
+      if (!spec.ease && !spec.dropdown && opts.length >= 2 && opts.length <= 4 && opts.reduce((n, [, l]) => n + String(l).length, 0) <= 24) { // Odin [EnumToggleButtons]: few short choices are buttons
+        el = h('div', { class: 'etb', role: 'radiogroup' }, opts.map(([v, l]) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(v === val), class: v === val ? 'on' : '', 'data-v': v,
+          onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) { b.classList.toggle('on', b === e.currentTarget); b.setAttribute('aria-checked', String(b === e.currentTarget)); } markMod(); buzz(4); } }, l)));
+        break;
+      }
       el = h('select', { onchange: (e) => { set(e.target.value); if (spec.ease) drawEase(cv, e.target.value); } },
         spec.options.map((o) => { const [v, l] = Array.isArray(o) ? o : [o, o]; return h('option', { value: v, selected: v === val }, l); }));
       if (spec.ease) { var cv = h('canvas', { class: 'ease-cv', width: 96, height: 60 }); drawEase(cv, val); el = h('div', { class: 'ease-row' }, el, cv); }
       break;
+    }
     case 'color': {
       const norm = (c) => (/^#[0-9a-f]{6}$/i.test(c || '') ? c : /^#[0-9a-f]{3}$/i.test(c || '') ? '#' + c.slice(1).split('').map((d) => d + d).join('') : '#ffffff');
       if (spec.optional) {
@@ -2239,6 +2285,7 @@ function control(target, path, spec) {
       break;
     }
     case 'code':
+      if (/\|/.test(text) && !rawTables.has(path)) { el = tableList(get, set, text, path); label.textContent = text.replace(/\s*\(.*$/, '') || text; break; } // the columns say the rest
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
       break;
     case 'tags':
@@ -2267,6 +2314,7 @@ function control(target, path, spec) {
       break;
     }
     default: {
+      if (/comma list|comma-separated|separated by commas/i.test(text) && !rawTables.has(path)) { el = chipList(get, set, spec, text, path); break; }
       el = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', placeholder: spec.placeholder, oninput: (e) => set(e.target.value) });
       const list = spec.suggest && suggestions(spec.suggest);
       if (list?.length) { // Odin-style [ValueDropdown]: type or pick from what exists in the game
@@ -2277,10 +2325,78 @@ function control(target, path, spec) {
       }
     }
   }
-  const side = ['number', 'select', 'color', 'template', undefined, 'text'].includes(spec.type) && !spec.ease; // label left, control right
+  const wide = el.classList?.contains('tlist') || el.classList?.contains('chips-ed');
+  const side = ['number', 'select', 'color', 'template', undefined, 'text'].includes(spec.type) && !spec.ease && !wide; // label left, control right
   const row = h('div', { class: 'row' + (spec.type === 'code' || spec.type === 'json' ? ' full' : side ? ' side' : '') }, label, el);
   if (spec.infoText) row.append(h('div', { class: 'obox info' }, spec.infoText));
-  return row;
+  return deco(row);
+  /** Odin-style override marks: a dot and a reset button on values changed from the default (and "Changed only" uses them). */
+  function deco(r) { rowEl = r; markMod(); if (spec.required && String(get() ?? '').trim() === '') { r.classList.add('req'); r.append(h('div', { class: 'obox error' }, `${text} is required.`)); } return r; } // Odin [Required]
+  function markMod() {
+    if (!rowEl || spec.def === undefined || NO_RESET.has(spec.type)) return;
+    const raw = getPath(target(), path), mod = raw !== undefined && raw !== '' && JSON.stringify(raw) !== JSON.stringify(spec.def) && !(raw === false && !spec.def);
+    rowEl.classList.toggle('mod', mod);
+    let b = label.querySelector('.rst');
+    if (mod && !b) {
+      b = h('button', { type: 'button', class: 'rst', title: 'Reset to ' + (typeof spec.def === 'string' ? `“${spec.def}”` : JSON.stringify(spec.def)), 'aria-label': 'Reset to default',
+        onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.preventDefault(); e.stopPropagation(); set(clone(spec.def)); renderInspector(); toast(`${text}: back to default`); } }, '↺');
+      label.prepend(b);
+    } else if (!mod && b) b.remove();
+  }
+}
+const NO_RESET = new Set(['rules', 'clips', 'triggers', 'fsm', 'graph', 'tweenSteps']);
+const rawTables = new Set(); // table / chip fields switched to plain text
+/** Odin [TableList]: "a | b | c" lines (shop items, tabs, camera shots…) as a table with a column per part. */
+function tableList(get, set, text, path) {
+  const inner = (text.match(/\(([^)]*\|[^)]*)\)/) || [, text])[1].replace(/^one per line:\s*/i, '').split(';')[0];
+  const cols = inner.split('|').map((c) => c.trim()).filter(Boolean);
+  const special = (l) => !l.includes('|') && /^\s*(#|-\s*$)/.test(l);
+  let rows = String(get() ?? '').split('\n').filter((l) => l.trim()).map((l) => (special(l) ? l.trim() : l.split('|').map((c) => c.trim())));
+  const save = () => set(rows.map((r) => { if (typeof r === 'string') return r; const c = [...r]; while (c.length > 1 && c[c.length - 1] === '') c.pop(); return c.join(' | '); }).join('\n'));
+  const box = h('div', { class: 'tlist' });
+  const draw = () => {
+    const grid = `repeat(${cols.length}, minmax(84px, 1fr)) 40px`;
+    box.replaceChildren(
+      h('div', { class: 'tl-scroll' },
+        h('div', { class: 'tl-row tl-head', style: `grid-template-columns:${grid}` }, cols.map((c) => h('span', { title: c }, c)), h('span')),
+        rows.map((r, i) => h('div', { class: 'tl-row', style: `grid-template-columns:${grid}` },
+          typeof r === 'string'
+            ? h('input', { type: 'text', class: 'tl-sp', value: r, style: `grid-column:1 / span ${cols.length}`, oninput: (e) => { rows[i] = e.target.value; save(); } })
+            : cols.map((c, k) => h('input', { type: 'text', value: r[k] ?? '', placeholder: c, autocapitalize: 'off', 'aria-label': c, oninput: (e) => { r[k] = e.target.value; save(); } })),
+          h('button', { type: 'button', class: 'tl-m', title: 'Row', onclick: (e) => popMenu(e.currentTarget, [
+            i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(); draw(); } },
+            i < rows.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { rows.splice(i + 1, 0, rows.splice(i, 1)[0]); save(); draw(); } },
+            { icon: 'copy', label: 'Duplicate', fn: () => { rows.splice(i + 1, 0, clone(r)); save(); draw(); } },
+            { icon: 'trash', label: 'Delete Row', fn: () => { rows.splice(i, 1); save(); draw(); } },
+          ].filter(Boolean)) }, icon('more'))))),
+      h('div', { class: 'tl-foot' },
+        h('button', { type: 'button', class: 'btn', onclick: () => { rows.push(cols.map(() => '')); save(); draw(); box.querySelector('.tl-row:last-child input')?.focus(); } }, icon('plus'), 'Add Row'),
+        h('span', { class: 'tl-n' }, `${rows.length} row${rows.length === 1 ? '' : 's'}`),
+        h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')));
+  };
+  draw();
+  return box;
+}
+/** Odin-style list drawer for comma lists: chips you can remove or tap to rename, plus an add field with suggestions. */
+function chipList(get, set, spec, text, path) {
+  const items = () => String(get() ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+  const put = (a) => set(a.join(', '));
+  const kind = spec.suggest || (/variable/i.test(text) ? 'vars' : /tag/i.test(text) ? 'tags' : /message/i.test(text) ? 'messages' : '');
+  const box = h('div', { class: 'chips-ed' });
+  const draw = () => {
+    const a = items(), id = 'dl-c' + Math.random().toString(36).slice(2, 7), sug = kind ? suggestions(kind).filter((v) => !a.includes(v)) : [];
+    const add = h('input', { type: 'text', placeholder: a.length ? 'Add…' : spec.placeholder || (/blank/i.test(text) ? 'Add (none = all)' : 'Add…'), autocapitalize: 'off', list: sug.length ? id : null,
+      onkeydown: (e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); } }, onchange: () => commit() });
+    const commit = () => { const v = add.value.replace(/,/g, ' ').trim(); if (!v) return; put([...items(), v]); draw(); box.querySelector('input')?.focus(); };
+    box.replaceChildren(
+      ...a.map((t, i) => h('span', { class: 'chip' },
+        h('button', { type: 'button', class: 'chip-t', title: 'Rename', onclick: () => { const n = prompt('Rename', t)?.replace(/,/g, ' ').trim(); if (n) { const b = items(); b[i] = n; put(b); draw(); } } }, t),
+        h('button', { type: 'button', class: 'chip-x', 'aria-label': 'Remove ' + t, onclick: () => { const b = items(); b.splice(i, 1); put(b); draw(); } }, '×'))),
+      add, sug.length ? h('datalist', { id }, sug.map((v) => h('option', { value: v }))) : null,
+      h('button', { type: 'button', class: 'chip-raw', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text')));
+  };
+  draw();
+  return box;
 }
 
 // ---- Odin-style inspector helpers ----
@@ -2384,8 +2500,44 @@ function validate(b, j) {
   if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
   if (b.type === 'waveSpawner' && (b.waves || []).some((w) => !all.some((e) => e.template && e.name === w.template))) out.push(['error', 'A wave uses a template that does not exist. Tick “Template” on the enemy object.']);
   if (b.type === 'tween' && b.effect === 'path' && !(Array.isArray(b.points) && b.points.length)) out.push(['error', 'The path needs at least one point.']);
+  if (b.type === 'autoSave' && j.template && !b.key) out.push(['warn', 'On a template every copy gets a new name, so copies are saved but never found again. Give it a Key, or save copies with nodes.']);
+  if ((b.type === 'autoSave' || b.type === 'saveManager') && /[.]bak$/.test(b.file || '')) out.push(['error', 'Save file names can\'t end in .bak (used for backups).']);
+  if (b.type === 'cameraMixer' && b.camA && !has(b.camA)) out.push(['warn', `No object named “${b.camA}” in this level.`]);
+  if (b.type === 'cameraMixer' && b.camB && !has(b.camB)) out.push(['warn', `No object named “${b.camB}” in this level.`]);
   if (['move', 'platformer', 'firstPerson', 'thirdPerson'].includes(b.type) && !(j.tags || []).includes('player')) out.push(['info', 'Tip: tag this object “player” so enemies, coins and cameras find it.']);
   return out;
+}
+
+/** Odin-style Project Validator: every level, object and component checked at once; tap a problem to go to it. */
+function projectProblems() {
+  const out = [], keep = project;
+  levelList().forEach((lv, li) => {
+    project = lv;
+    try {
+      for (const e of lv.entities || []) {
+        const add = (lvl, comp, msg) => out.push({ lvl, li, id: e.id, name: e.name || 'Object', comp, msg });
+        if (e.sprite && !e.sprite.src) add('warn', 'Image', 'The Image has no picture.');
+        for (const b of e.behaviors || []) {
+          const def = Behaviors[b.type];
+          if (!def) { add('error', b.type, 'Unknown component (from a newer version?).'); continue; }
+          for (const [lvl, msg] of validate(b, e)) if (lvl !== 'info') add(lvl, def.label, msg);
+          for (const p of def.params) if (p.required && (b[p.key] ?? '') === '') add('error', def.label, `${p.label || p.key} is required.`);
+        }
+      }
+    } finally { project = keep; }
+  });
+  for (const sc of userScripts()) if (!(sc.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push({ lvl: 'warn', li: -1, name: sc.name || 'Script', comp: 'Script', msg: 'This reusable script has no Event node.' });
+  return out.sort((a, b) => (a.lvl === b.lvl ? 0 : a.lvl === 'error' ? -1 : 1));
+}
+function openProblems() {
+  const list = projectProblems(), errs = list.filter((p) => p.lvl === 'error').length;
+  const go = (p) => { if (p.li < 0) return; closeLayer(); if (p.li !== levelIdx) setLevel(p.li); select(p.id); if (!isDesktop()) setDock('inspector'); };
+  openDialog('Problems', [
+    h('p', { class: 'desc' }, list.length ? `${errs} error${errs === 1 ? '' : 's'} and ${list.length - errs} warning${list.length - errs === 1 ? '' : 's'} across ${levelList().length} level${levelList().length === 1 ? '' : 's'}. Tap one to go to it.` : 'No problems found in any level. 🎉'),
+    h('div', { class: 'pb-list' }, list.map((p) => h('button', { class: 'pb-item ' + p.lvl, onclick: () => go(p) },
+      icon(p.lvl === 'error' ? 'close' : 'warn'), h('span', {}, h('b', {}, p.name), h('small', {}, `${p.comp}${levelList().length > 1 && p.li >= 0 ? ` · level ${p.li + 1}` : ''}`), h('em', {}, p.msg))))),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); openProblems(); } }, icon('rotate'), 'Check Again')),
+  ]);
 }
 
 /** Node-based coding: a summary card that opens the full-screen Node Editor. */
@@ -2768,6 +2920,8 @@ function renderInspector() {
     h('input', { type: 'search', placeholder: `Search (${idx + 1}/${project.entities.length})`, value: inspQuery, autocapitalize: 'off', oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
     h('button', { class: 'ib adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
       onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear')),
+    h('button', { class: 'ib mod-btn' + (onlyChanged ? ' on' : ''), title: 'Show only settings changed from their defaults', 'aria-pressed': String(onlyChanged),
+      onclick: () => { onlyChanged = !onlyChanged; renderInspector(); toast(onlyChanged ? 'Showing only changed settings' : 'Showing all settings'); } }, icon('edit')),
     h('button', { class: 'ib', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('chevron')),
     h('button', { class: 'ib next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
 
@@ -2823,7 +2977,9 @@ function renderInspector() {
   }
 
   const copyItem = (kind, get) => ({ icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind, data: clone(get()) }; toast('Component copied'); } });
-  const removeMenu = (fn, kind) => [kind && copyItem(kind, () => j[kind]), { icon: 'trash', label: 'Remove Component', fn }].filter(Boolean);
+  const removeMenu = (fn, kind) => [kind && copyItem(kind, () => j[kind]),
+    kind && compClipboard?.kind === kind && { icon: 'paste', label: 'Paste Values', fn: () => { j[kind] = clone(compClipboard.data); changed({ structure: true }); pushHistory(); toast('Values pasted'); } },
+    { icon: 'trash', label: 'Remove Component', fn }].filter(Boolean);
   if (j.shape) {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
@@ -3096,6 +3252,8 @@ function renderInspector() {
     const def = Behaviors[b.type];
     const menu = [
       { icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind: 'behavior', data: clone(b) }; toast('Component copied'); } },
+      compClipboard?.kind === 'behavior' && compClipboard.data.type === b.type && compClipboard.data !== b && { icon: 'paste', label: 'Paste Values', fn: () => { j.behaviors[i] = { ...clone(compClipboard.data), ...(b.enabled === false ? { enabled: false } : {}) }; changed({ structure: true }); pushHistory(); toast('Values pasted'); } },
+      { icon: 'text', label: 'Copy as Text', fn: () => navigator.clipboard?.writeText(JSON.stringify(b, null, 1)).then(() => toast('Copied as text'), () => {}) },
       { icon: 'trash', label: 'Remove Component', fn: () => { j.behaviors.splice(i, 1); changed({ structure: true }); } },
       i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { j.behaviors.splice(i - 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       i < j.behaviors.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { j.behaviors.splice(i + 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
@@ -3119,7 +3277,21 @@ function renderInspector() {
     h('button', { class: 'btn', onclick: () => deleteEntity(j.id) }, icon('trash'), 'Delete')));
   if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
   if (inspQuery) applyInspSearch(box);
+  if (onlyChanged) applyOnlyChanged(box);
   box.scrollTop = scroll;
+}
+let onlyChanged = false;
+/** Odin-style "show only overrides": keep rows changed from their defaults, open their groups, hide the rest. */
+function applyOnlyChanged(box) {
+  let any = false;
+  for (const c of box.querySelectorAll('.comp')) {
+    if (c.dataset.key === 'transform') continue;
+    const mods = c.querySelectorAll('.row.mod');
+    for (const el of c.querySelectorAll('.comp-b > *, .og-b > *')) if (!el.classList.contains('og') && !el.classList.contains('mod')) el.style.display = 'none';
+    for (const g of c.querySelectorAll('.og')) { const has = !!g.querySelector('.row.mod'); g.style.display = has ? '' : 'none'; if (has) g.classList.add('open'); }
+    if (!mods.length) c.style.display = 'none'; else { c.classList.remove('closed'); any = true; }
+  }
+  if (!any) box.querySelector('.comp-tools')?.after(h('p', { class: 'empty' }, 'Nothing here is changed from its defaults.'));
 }
 
 // ---- physics materials: presets for bounce / friction / drag ----
@@ -3182,7 +3354,7 @@ function applyTheme(list) {
 // ---- scene settings (shown when the scene root is selected) ----
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
-  const game = levelList()[0];
+  const game = levelList()[0], GS = (path, spec) => control(() => levelList()[0], path, spec); // game-wide settings live on the first level
   box.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
     h('span'), h('input', { type: 'text', value: game.name, placeholder: 'Game name', oninput: (e) => { game.name = e.target.value; changed(); renderHierarchy(); } }),
     h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} game · Pocket Engine ${VERSION}`)));
@@ -3248,6 +3420,13 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Save games keep variables, the level, where things are and what was collected. Save with a Save Point, a Button (Do → save game) or the Save Game node; load with Load Game. Amount = slot number.'),
     C('settings.loadOnStart', { label: 'Continue from save slot 1 on start', type: 'bool', def: false }),
     C('settings.saveProgress', { label: 'Auto-save variables (clicker games)', type: 'bool', def: false }),
+    fold('s-save:files', 'Save files (Easy Save)', [
+      h('p', { class: 'desc' }, 'Named save files hold any value under a key: numbers, text, lists, dictionaries, whole objects. Use the Save Files nodes, or add Auto Save (remembers an object) and Save Manager (remembers game variables) components.'),
+      GS('settings.saveEncrypt', { label: 'Encrypt save files', type: 'bool', def: false, structure: true, infoText: game.settings?.saveEncrypt ? 'Players can\'t read or change their saves; a changed file is refused. Changing the password makes old saves unreadable.' : null }),
+      game.settings?.saveEncrypt && GS('settings.savePassword', { label: 'Password', type: 'text', def: '', placeholder: 'pocket' }),
+      GS('settings.saveBackup', { label: 'Keep the previous save as a backup', type: 'bool', def: false }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openSaveData() }, icon('folder'), 'Save Data…')),
+    ], !!(game.settings?.saveEncrypt || game.settings?.saveBackup)),
   ], { icon: 'save', key: 's-save' }));
   box.append(comp('Start Screen', [
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),
@@ -3441,7 +3620,7 @@ const BEH_META = {
   emitter: ['Effects', 'star'], blink: ['Effects', 'eye'], chase: ['AI', 'ghost'],
   gridMove: ['Turn-Based', 'move'], gridEnemy: ['Turn-Based', 'enemy'], boardCell: ['Turn-Based', 'grid'],
   turnAction: ['Turn-Based', 'hand'], turnOpponent: ['Turn-Based', 'ghost'], condition: ['Logic', 'bolt'],
-  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
+  voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'], autoSave: ['Saving', 'save'], saveManager: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
   navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiAppBar: ['UI', 'menu'], uiDropdown: ['UI', 'list'], uiKeypad: ['UI', 'key'], uiColorPicker: ['UI', 'brush'], uiCarousel: ['UI', 'layers'], uiSkillButton: ['UI', 'bolt'], uiRadialMenu: ['UI', 'circle'], uiSpinWheel: ['UI', 'star'],
@@ -4336,6 +4515,8 @@ function openFileMenu() {
     { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
     { icon: 'key', label: 'Tags & Layers…', fn: openTagsLayers },
+    { icon: 'warn', label: 'Find Problems…', k: 'all levels', fn: openProblems },
+    { icon: 'save', label: 'Save Data…', k: 'play saves', fn: () => openSaveData() },
     '-',
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },

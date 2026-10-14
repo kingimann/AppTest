@@ -204,6 +204,15 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Quick add** chips for common components, next to Add Component.
   - **Add Component** opens with suggestions for the selected object (e.g. Rigidbody, Health, Triggers for a player that lacks them), your recently used components, and category folders with counts (Physics, Controllers, Combat, AI, Logic…). Tap a folder to browse it, or search everything at once.
   - Components have a coloured edge by category.
+  - **Odin-style fields:**
+    - Settings changed from their default get a blue edge and a **↺ reset** button. The **✎ Changed only** button next to search hides everything else.
+    - A dropdown with 2–4 short choices becomes **toggle buttons**.
+    - Numbers whose label ends in a unit, like *(s)*, *(px)*, *(°)* or *(%)*, show it as a chip inside the field.
+    - "One per line: A | B | C" settings become a **table** with a column for each part. These include Bottom Nav tabs, shop items, camera shots and side menu items. Rows have a ⋯ menu to move them up or down, duplicate or delete them. **Text** switches back to the plain box.
+    - Comma lists (variables, tags, messages) become **chips**. Tap × to remove one, tap a chip to rename it, or add new ones with suggestions from your game.
+    - Required fields (like a Camera Mixer's cameras) show an error while they are empty.
+  - Each component's ⋯ menu has **Paste Values**, which copies another component of the same type onto this one, and **Copy as Text**.
+  - **☰ → Find Problems…** checks every level, object, component and reusable script at once. Examples: missing templates, objects that don't exist, scripts with no Event node, empty Images. Tap a problem to go straight to that object.
 
 ### Node coding (Visual Script)
 
@@ -799,6 +808,27 @@ Each game uses **your own free accounts**: Game Settings › **Online (PlayFab &
 - **Send Network Message** (with a number) arrives at everyone else as a normal game message and fires **On Network Message**; **Set Shared Variable** keeps a variable the same for everyone (late joiners get it too).
 - Events **On Joined Room**, **On Player Joined**, **On Player Left**, **On PlayFab Logged In**, **On Online Error**; values **Players In Room**, **Is Room Host**, **Is In Room**, **Network Message Value**. Show `{netState}`, `{netPlayers}`, `{netRoom}`, `{pfName}`, `{pfRank}` or `{onlineError}` in any text.
 - Scripts: `engine.online` has `join()`, `leave()`, `sendMessage()`, `setShared()`, `pfLogin()`, `pfSubmit()`, `pfLeaderboard()`, `pfSave()`, `pfLoad()`, `pfTitleData()`, `pfEvent()`.
+
+### Save files (Easy Save style)
+
+Games can keep anything between plays in **named save files** of keys, like Unity's Easy Save.
+
+- **Save Files nodes** (their own node folder):
+  - Save and load keys: **Save Key**, **Save Variable To Key**, **Load Key Into Variable** (with a *not saved yet* way out), and **Load Key** as text or as a number with a default.
+  - A key can hold a number, text, a list, a dictionary or a whole object.
+  - Check what is there: **Key Exists**, **Save File Exists**, **Number Of Saved Keys**, **Seconds Since Saved** (useful for offline earnings).
+  - Delete: **Delete Key**, **Delete Save File** (for New Game).
+  - In bulk: **Save / Load Variables** (all of them, or a comma list), **Save / Load Object** (position, rotation, scale, shown or hidden, its own variables, text).
+  - **Save Everything Now**, **Saved Keys To List**, **Save Files To List** (for save-slot menus).
+  - Files: **Copy Save File** (or move / rename), **Back Up Save File** and **Restore Backup**.
+  - **Export Save As Text** turns a save into one line (and copies it) so a player can move progress to another phone. **Import Save From Text** loads it back.
+  - **On Game Saved** is an event that runs whenever a file is written.
+- **Auto Save component** remembers one object between plays: where it is, whether it's shown, its own variables, and whether it was destroyed or collected (collected coins stay gone). It loads when the level starts. It saves when the player leaves the app, when the level ends, on a timer, on a message, or on *Save Everything Now*.
+- **Save Manager component** does the same for game variables: coins, upgrades, unlocked levels. Pick which ones, or keep them all.
+- **Game Settings › Saving › Save files:**
+  - **Encrypt save files** with a password. Players can't read or edit them, and a file changed outside the game is refused.
+  - **Keep the previous save as a backup.**
+  - **Save Data…** (also in ☰) is a save browser for the saves Play mode wrote on this device. It lists every file and key with its value, size and when it was saved. From there you can edit a value, add or delete keys, export or import, back up or restore, duplicate, or delete one file or all of them to start fresh.
 
 ### Saving, restore points and backups
 

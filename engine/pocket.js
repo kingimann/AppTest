@@ -2038,6 +2038,119 @@ class Permissions {
   }
 }
 
+/**
+ * Easy Save-style save files (engine.saves): named files of keys, each holding any value (numbers, text, lists,
+ * dictionaries, whole objects). Optional encryption with a password (tampered files are refused), automatic backups,
+ * export / import as text (move a save to another phone), key timestamps.
+ */
+export class SaveFiles {
+  constructor(engine) { this.engine = engine; this.cache = new Map(); }
+  get settings() { return this.engine.levels?.[0]?.settings || this.engine.scene?.settings || {}; }
+  name(file) { return String(file ?? '').trim() || 'save'; }
+  prefix() { return 'pocket.es.' + (this.engine.gameKey || 'game') + '.'; }
+  key(file) { return this.prefix() + this.name(file); }
+  static sum(t) { let h = 2166136261; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+  static xor(bytes, pass) { const k = new TextEncoder().encode(pass || 'pocket'); let r = 0x9e3779b9 ^ k.length; return bytes.map((b, i) => { r = Math.imul(r ^ k[i % k.length], 2654435761) >>> 0; return b ^ (r >>> 24); }); }
+  static b64(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); }
+  static unb64(t) { const s = atob(t), out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i); return out; }
+  encode(data) {
+    const json = JSON.stringify(data), st = this.settings;
+    if (!st.saveEncrypt) return json;
+    return 'PES1:' + SaveFiles.sum(json) + ':' + SaveFiles.b64(SaveFiles.xor(new TextEncoder().encode(json), st.savePassword));
+  }
+  decode(raw, file) {
+    if (!raw) return null;
+    try {
+      if (raw.startsWith('PES1:')) {
+        const [, sum, body] = raw.split(':'), json = new TextDecoder().decode(SaveFiles.xor(SaveFiles.unb64(body), this.settings.savePassword));
+        if (SaveFiles.sum(json) !== sum) { Log.add('warn', `Save file “${file}” was changed outside the game (or the password changed): ignored`, 'Save'); return null; }
+        return JSON.parse(json);
+      }
+      const d = JSON.parse(raw);
+      return d && typeof d === 'object' && d.keys ? d : null;
+    } catch { Log.add('warn', `Save file “${file}” is damaged: ignored`, 'Save'); return null; }
+  }
+  read(file) {
+    const k = this.key(file);
+    if (!this.cache.has(k)) this.cache.set(k, this.decode(store.get(k, ''), this.name(file)));
+    return this.cache.get(k);
+  }
+  data(file) { return this.read(file) || { keys: {}, created: Date.now() }; }
+  write(file, d) {
+    const k = this.key(file), old = store.get(k, '');
+    if (old && this.settings.saveBackup) store.set(k + '.bak', old); // the previous version, for Restore Backup
+    d.saved = Date.now(); this.cache.set(k, d); store.set(k, this.encode(d));
+    this.engine.scene?.emit('saved', this.name(file));
+  }
+  static plain(v) { try { return v === undefined ? null : JSON.parse(JSON.stringify(v)); } catch { return null; } }
+  save(key, value, file) { const d = this.data(file); d.keys[String(key)] = { v: SaveFiles.plain(value), t: Date.now() }; this.write(file, d); }
+  /** Save many keys at once (one write). */
+  saveMany(obj, file) { const d = this.data(file), t = Date.now(); for (const [k, v] of Object.entries(obj)) d.keys[k] = { v: SaveFiles.plain(v), t }; this.write(file, d); }
+  load(key, file, def) { const e = this.read(file)?.keys[String(key)]; return e ? SaveFiles.plain(e.v) : def; }
+  has(key, file) { return !!this.read(file)?.keys[String(key)]; }
+  keyTime(key, file) { return this.read(file)?.keys[String(key)]?.t || 0; }
+  deleteKey(key, file) { const d = this.read(file); if (!d?.keys[String(key)]) return false; delete d.keys[String(key)]; this.write(file, d); return true; }
+  keys(file) { return Object.keys(this.read(file)?.keys || {}); }
+  hasFile(file) { return !!this.read(file); }
+  savedAt(file) { return this.read(file)?.saved || 0; }
+  files() {
+    const pre = this.prefix(), out = [];
+    try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k?.startsWith(pre) && !k.endsWith('.bak')) out.push(k.slice(pre.length)); } } catch { /* storage unavailable */ }
+    return out.sort();
+  }
+  deleteFile(file) { const k = this.key(file); this.cache.delete(k); try { localStorage.removeItem(k); localStorage.removeItem(k + '.bak'); } catch { /* storage unavailable */ } }
+  copyFile(from, to) { const d = this.read(from); if (!d) return false; this.write(to, SaveFiles.plain(d)); return true; }
+  renameFile(from, to) { if (!this.copyFile(from, to)) return false; if (this.name(from) !== this.name(to)) this.deleteFile(from); return true; }
+  backup(file) { const raw = store.get(this.key(file), ''); if (!raw) return false; store.set(this.key(file) + '.bak', raw); return true; }
+  hasBackup(file) { return !!store.get(this.key(file) + '.bak', ''); }
+  restore(file) {
+    const k = this.key(file), raw = store.get(k + '.bak', ''), d = this.decode(raw, this.name(file));
+    if (!d) return false;
+    store.set(k, raw); this.cache.set(k, d); this.engine.scene?.emit('loadedSave', this.name(file)); return true;
+  }
+  /** The whole file as one line of text (paste it on another phone with importFile). */
+  exportFile(file) { const d = this.read(file); return d ? 'PSAVE1:' + SaveFiles.b64(new TextEncoder().encode(JSON.stringify(d))) : ''; }
+  importFile(file, text) {
+    try {
+      const t = String(text || '').trim(), d = t.startsWith('PSAVE1:') ? JSON.parse(new TextDecoder().decode(SaveFiles.unb64(t.slice(7)))) : JSON.parse(t);
+      if (!d || typeof d !== 'object' || !d.keys) return false;
+      this.write(file, d); return true;
+    } catch { return false; }
+  }
+  /** Where an object is and its own variables (Save Object / Auto Save). */
+  static snapshot(e, what = {}) {
+    const o = {};
+    if (what.transform !== false) Object.assign(o, { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz });
+    if (what.visible !== false) o.visible = e.visible;
+    if (what.data !== false) o.data = SaveFiles.plain(Object.fromEntries(Object.entries(e.data).filter(([k, v]) => !k.startsWith('_') && typeof v !== 'function')));
+    if (e.text && what.data !== false) o.text = e.text.value;
+    return o;
+  }
+  static apply(e, o) {
+    if (!o || typeof o !== 'object') return false;
+    for (const k of ['x', 'y', 'z', 'rx', 'ry', 'rz', 'sx', 'sy', 'sz', 'visible']) if (o[k] !== undefined && o[k] !== null) e[k] = o[k];
+    if (o.data) Object.assign(e.data, o.data);
+    if (o.text !== undefined && e.text) e.text.value = o.text;
+    if (e.body?.vel) e.body.vel = { x: 0, y: 0, z: 0 };
+    return true;
+  }
+  saveObject(key, e, file, what) { if (!e) return false; this.save(key, SaveFiles.snapshot(e, what), file); return true; }
+  loadObject(key, e, file) { return !!e && SaveFiles.apply(e, this.load(key, file)); }
+  /** Game variables: names = list or comma text (blank = all of them). */
+  saveVars(names, file) {
+    const s = this.engine.scene; if (!s) return 0;
+    const list = SaveFiles.list(names, Object.keys(s.vars).filter((k) => k !== 'time'));
+    this.saveMany(Object.fromEntries(list.map((k) => ['var.' + k, s.vars[k] ?? 0])), file); return list.length;
+  }
+  loadVars(names, file) {
+    const s = this.engine.scene, d = this.read(file); if (!s || !d) return 0;
+    const list = SaveFiles.list(names, Object.keys(d.keys).filter((k) => k.startsWith('var.')).map((k) => k.slice(4)));
+    let n = 0; for (const k of list) if (d.keys['var.' + k]) { s.setVar(k, SaveFiles.plain(d.keys['var.' + k].v)); n++; }
+    return n;
+  }
+  static list(names, all) { const l = (Array.isArray(names) ? names : String(names ?? '').split(',')).map((q) => String(q).trim()).filter(Boolean); return l.length ? l : all; }
+}
+
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -4562,8 +4675,8 @@ registerBehavior('cameraSequence', {
 registerBehavior('cameraMixer', {
   label: 'Camera Mixer', description: 'Mixes two cameras by a number from 0 to 1 (Cinemachine Mixing Camera): 0 = all Camera A, 1 = all Camera B, in between = a blend. Drive it with a variable (speed, health, a slider) or the Set Camera Mix node. It goes live like a camera, by priority or name.',
   params: [
-    { key: 'camA', label: 'Camera A', type: 'text', default: 'Camera 1', suggest: 'objects' },
-    { key: 'camB', label: 'Camera B', type: 'text', default: 'Camera 2', suggest: 'objects' },
+    { key: 'camA', label: 'Camera A', type: 'text', default: 'Camera 1', suggest: 'objects', required: true },
+    { key: 'camB', label: 'Camera B', type: 'text', default: 'Camera 2', suggest: 'objects', required: true },
     { key: 'var', label: 'Mix from variable (blank = the value below)', type: 'text', default: '', suggest: 'vars' },
     { key: 'weight', label: 'Mix (0 = A, 1 = B)', type: 'number', default: 0.5, range: [0, 1], step: 0.05 },
     { key: 'max', label: 'Variable value that means all B', type: 'number', default: 1, showIf: (b) => !!b.var },
@@ -5102,6 +5215,67 @@ registerBehavior('savePoint', {
         cool = 2;
         if (s.saveGame(p.slot)) { if (p.text) s.message(p.text, 1.5); s.burst(e.x, e.y, e.z, '#7cf7a0', 14); s.engine.audio.sfx('power'); }
       },
+    };
+  },
+});
+
+const SAVE_WHEN = [
+  { key: 'onLeave', label: 'When the player leaves the app', type: 'bool', default: true, group: 'When to save' },
+  { key: 'onLevelEnd', label: 'When the level ends', type: 'bool', default: true, group: 'When to save' },
+  { key: 'every', label: 'Every (seconds, 0 = off)', type: 'number', default: 0, range: [0, 60], step: 1, group: 'When to save' },
+  { key: 'message', label: 'On message', type: 'text', default: 'save', suggest: 'messages', group: 'When to save' },
+];
+/** Shared timing for Auto Save / Save Manager: leaving the app, level end, a timer, a message, Save Everything Now. */
+function saveHooks(p, e, s, save) {
+  s.on('appVisible', (v) => { if (!v && p.onLeave !== false && !e.dead) save(); });
+  s.on('sceneEnd', () => { if (p.onLevelEnd !== false && !e.dead) save(); });
+  s.on('message', (m) => { if (p.message && m === p.message && !e.dead) save(); });
+  s.on('saveAll', (f) => { if (!e.dead && (!f || f === (p.file || 'save'))) save(); });
+}
+registerBehavior('autoSave', {
+  label: 'Auto Save', description: 'Remembers this object between plays (Easy Save Auto Save): where it is, if it is shown, its own variables (hp, ammo, opened…) and whether it was destroyed or collected. It loads when the level starts and saves when the player leaves, the level ends, on a timer or a message. Clear it with the Delete Save File node.',
+  params: [
+    { key: 'file', label: 'Save file', type: 'text', default: 'save' },
+    { key: 'key', label: 'Key (blank = this object)', type: 'text', default: '' },
+    { key: 'transform', label: 'Position, rotation & scale', type: 'bool', default: true, group: 'What to save' },
+    { key: 'visible', label: 'Shown / hidden', type: 'bool', default: true, group: 'What to save' },
+    { key: 'data', label: 'Its own variables', type: 'bool', default: true, group: 'What to save' },
+    { key: 'removed', label: 'Stay gone once destroyed or collected', type: 'bool', default: true, group: 'What to save' },
+    { key: 'loadOnStart', label: 'Load when the level starts', type: 'bool', default: true },
+    ...SAVE_WHEN,
+  ],
+  create(p) {
+    let key = '', t = 0;
+    const what = () => ({ transform: p.transform !== false, visible: p.visible !== false, data: p.data !== false });
+    const save = (e, s) => { if (!s.engine.editing && !e.dead) s.engine.saves.saveObject(key, e, p.file, what()); };
+    return {
+      start(e, s) {
+        key = p.key || 'obj.' + (e.id || e.name);
+        const o = s.engine.saves.load(key, p.file);
+        if (p.loadOnStart !== false && o && !s.engine.editing) { if (o.removed && p.removed !== false) { e.dead = true; return; } SaveFiles.apply(e, o); }
+        saveHooks(p, e, s, () => save(e, s));
+      },
+      update(e, dt, s) { if (+p.every > 0 && (t += dt) >= +p.every) { t = 0; save(e, s); } },
+      destroy(e, s) { if (p.removed !== false && !s.engine.editing && key && s.engine.scene === s) s.engine.saves.save(key, { removed: true }, p.file); },
+    };
+  },
+});
+registerBehavior('saveManager', {
+  label: 'Save Manager', description: 'Keeps game variables between plays (Easy Save Manager): coins, upgrades, settings, unlocked levels. Loads them when the game starts and saves them when the player leaves, the level ends, on a timer or a message. Pick which variables, or leave it blank for all of them.',
+  params: [
+    { key: 'file', label: 'Save file', type: 'text', default: 'save' },
+    { key: 'vars', label: 'Variables (comma list, blank = all)', type: 'text', default: '' },
+    { key: 'loadOnStart', label: 'Load when the level starts', type: 'bool', default: true },
+    { key: 'savedText', label: 'Message when saved (blank = none)', type: 'text', default: '' },
+    ...SAVE_WHEN,
+  ],
+  create(p) {
+    let t = 0;
+    const names = (s) => SaveFiles.list(p.vars, Object.keys(s.vars).filter((k) => !['time', 'best'].includes(k)));
+    const save = (s) => { if (s.engine.editing) return; s.engine.saves.saveVars(names(s), p.file); if (p.savedText) s.message(p.savedText, 1.2); };
+    return {
+      start(e, s) { if (p.loadOnStart !== false && !s.engine.editing) s.engine.saves.loadVars(p.vars, p.file); saveHooks(p, e, s, () => save(s)); },
+      update(e, dt, s) { if (+p.every > 0 && (t += dt) >= +p.every) { t = 0; save(s); } },
     };
   },
 });
@@ -10694,6 +10868,31 @@ Object.assign(NODE_TYPES, {
 });
 // ---- app & device nodes: the phone around the game (switching apps, notifications, battery, menus) ----
 Object.assign(NODE_TYPES, {
+  // Easy Save-style save files: keys in named files, any value type, objects, backups, export / import
+  esSave: { cat: 'Save Files', label: 'Save Key', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key')], inputs: [T_IN('value', '0')] },
+  esSaveVar: { cat: 'Save Files', label: 'Save Variable To Key', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), sug(txt('var', 'coins', 'variable'), 'vars'), txt('key', '', 'key (blank = variable name)')] },
+  esLoadVar: { cat: 'Save Files', label: 'Load Key Into Variable', exec: true, outs: ['loaded', 'not saved yet'], params: [txt('file', 'save', 'file'), sug(txt('var', 'coins', 'variable'), 'vars'), txt('key', '', 'key (blank = variable name)')] },
+  esLoad: { cat: 'Save Files', label: 'Load Key (text)', value: 'text', params: [txt('file', 'save', 'file'), txt('key', 'playerName', 'key'), txt('def', '', 'if not saved')] },
+  esLoadNum: { cat: 'Save Files', label: 'Load Key (number)', value: 'number', params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key'), num('def', 0, 'if not saved')] },
+  esKeyExists: { cat: 'Save Files', label: 'Key Exists', value: 'bool', params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key')] },
+  esFileExists: { cat: 'Save Files', label: 'Save File Exists', value: 'bool', params: [txt('file', 'save', 'file')] },
+  esKeyCount: { cat: 'Save Files', label: 'Number Of Saved Keys', value: 'number', params: [txt('file', 'save', 'file')] },
+  esSavedAgo: { cat: 'Save Files', label: 'Seconds Since Saved', value: 'number', params: [txt('file', 'save', 'file'), txt('key', '', 'key (blank = whole file)')] },
+  esDeleteKey: { cat: 'Save Files', label: 'Delete Key', exec: true, outs: ['then', 'was not saved'], params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key')] },
+  esDeleteFile: { cat: 'Save Files', label: 'Delete Save File', exec: true, outs: ['then'], params: [txt('file', 'save', 'file')] },
+  esSaveVars: { cat: 'Save Files', label: 'Save Variables', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('names', '', 'variables (comma list, blank = all)')] },
+  esLoadVars: { cat: 'Save Files', label: 'Load Variables', exec: true, outs: ['loaded', 'no save file'], params: [txt('file', 'save', 'file'), txt('names', '', 'variables (comma list, blank = all saved)')] },
+  esSaveObject: { cat: 'Save Files', label: 'Save Object', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('object', 'self', 'object (self / other / name)'), txt('key', '', 'key (blank = object name)')] },
+  esLoadObject: { cat: 'Save Files', label: 'Load Object', exec: true, outs: ['loaded', 'not saved yet'], params: [txt('file', 'save', 'file'), txt('object', 'self', 'object (self / other / name)'), txt('key', '', 'key (blank = object name)')] },
+  esSaveAll: { cat: 'Save Files', label: 'Save Everything Now', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), bool('vars', true, 'game variables too')] },
+  esKeysToList: { cat: 'Save Files', label: 'Saved Keys To List', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('list', 'keys', 'list variable')] },
+  esFilesToList: { cat: 'Save Files', label: 'Save Files To List', exec: true, outs: ['then'], params: [txt('list', 'saves', 'list variable')] },
+  esCopyFile: { cat: 'Save Files', label: 'Copy Save File', exec: true, outs: ['then', 'no file'], params: [txt('from', 'save', 'from'), txt('to', 'save backup', 'to'), bool('move', false, 'move (rename)')] },
+  esBackup: { cat: 'Save Files', label: 'Back Up Save File', exec: true, outs: ['then', 'no file'], params: [txt('file', 'save', 'file')] },
+  esRestore: { cat: 'Save Files', label: 'Restore Backup', exec: true, outs: ['restored', 'no backup'], params: [txt('file', 'save', 'file')] },
+  esExport: { cat: 'Save Files', label: 'Export Save As Text', exec: true, outs: ['then', 'no file'], params: [txt('file', 'save', 'file'), txt('var', 'saveCode', 'into text variable'), bool('copy', true, 'copy to clipboard')] },
+  esImport: { cat: 'Save Files', label: 'Import Save From Text', exec: true, outs: ['imported', 'not a save'], params: [txt('file', 'save', 'file'), txt('var', 'saveCode', 'from text variable')] },
+  onSaveFile: { cat: 'Events', label: 'On Game Saved', outs: ['then'], params: [txt('file', '', 'file (blank = any)')] },
   onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
   onAppShown: { cat: 'Events', label: 'On App Back', outs: ['then'] },
   onNotifyOpened: { cat: 'Events', label: 'On Phone Notification Tapped', outs: ['then'], params: [txt('id', '', 'id (blank = any)')] },
@@ -11268,6 +11467,12 @@ registerBehavior('graph', {
         case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
+        case 'esLoad': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined ? asText(P('def')) : Array.isArray(v) ? v.map(asText).join(', ') : v && typeof v === 'object' ? JSON.stringify(v) : asText(v); }
+        case 'esLoadNum': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined || !Number.isFinite(+v) ? +P('def') || 0 : +v; }
+        case 'esKeyExists': return s.engine.saves.has(P('key'), P('file'));
+        case 'esFileExists': return s.engine.saves.hasFile(P('file'));
+        case 'esKeyCount': return s.engine.saves.keys(P('file')).length;
+        case 'esSavedAgo': { const t = P('key') ? s.engine.saves.keyTime(P('key'), P('file')) : s.engine.saves.savedAt(P('file')); return t ? Math.max(0, (Date.now() - t) / 1000) : 0; }
         case 'menuIsOpen': return !!s.openMenus?.has(P('menu') || 'menu');
         case 'permStatus': case 'hasPermission': { const pm = s.engine.perms, k = P('kind'); if (!pm._st?.[k] || s.time - pm._st[k].t > 1) { (pm._st ||= {})[k] = { v: pm._st?.[k]?.v ?? pm.known[k] ?? 'prompt', t: s.time }; pm.status(k).then((v) => { pm._st[k].v = v; }); } const v = pm._st[k].v; return n.type === 'hasPermission' ? v === 'granted' : v; }
         case 'micLevel': return s.engine.perms.micLevel();
@@ -11521,6 +11726,23 @@ registerBehavior('graph', {
           break;
         }
         case 'setTextVar': s.setVar(P('name') || 'text', fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data))); break;
+        case 'esSave': s.engine.saves.save(P('key') || 'value', listVal(I('value')), P('file')); break;
+        case 'esSaveVar': { const v = P('var') || 'coins'; s.engine.saves.save(P('key') || v, s.vars[v] ?? 0, P('file')); break; }
+        case 'esLoadVar': { const v = P('var') || 'coins', k = P('key') || v; if (!s.engine.saves.has(k, P('file'))) return follow(n, 'not saved yet', ctx); s.setVar(v, s.engine.saves.load(k, P('file'))); return follow(n, 'loaded', ctx); }
+        case 'esDeleteKey': return follow(n, s.engine.saves.deleteKey(P('key'), P('file')) ? 'then' : 'was not saved', ctx);
+        case 'esDeleteFile': s.engine.saves.deleteFile(P('file')); break;
+        case 'esSaveVars': s.engine.saves.saveVars(P('names'), P('file')); break;
+        case 'esLoadVars': return follow(n, s.engine.saves.hasFile(P('file')) && s.engine.saves.loadVars(P('names'), P('file')) ? 'loaded' : 'no save file', ctx);
+        case 'esSaveObject': { const t = target(ctx, P('object')); if (t) s.engine.saves.saveObject(P('key') || 'obj.' + t.name, t, P('file')); break; }
+        case 'esLoadObject': { const t = target(ctx, P('object')); return follow(n, t && s.engine.saves.loadObject(P('key') || 'obj.' + t.name, t, P('file')) ? 'loaded' : 'not saved yet', ctx); }
+        case 'esSaveAll': s.emit('saveAll', P('file')); if (P('vars') !== false) s.engine.saves.saveVars('', P('file')); break;
+        case 'esKeysToList': s.setVar(P('list') || 'keys', s.engine.saves.keys(P('file'))); break;
+        case 'esFilesToList': s.setVar(P('list') || 'saves', s.engine.saves.files()); break;
+        case 'esCopyFile': { const sv = s.engine.saves, ok = P('move') ? sv.renameFile(P('from'), P('to')) : sv.copyFile(P('from'), P('to')); return follow(n, ok ? 'then' : 'no file', ctx); }
+        case 'esBackup': return follow(n, s.engine.saves.backup(P('file')) ? 'then' : 'no file', ctx);
+        case 'esRestore': return follow(n, s.engine.saves.restore(P('file')) ? 'restored' : 'no backup', ctx);
+        case 'esExport': { const t = s.engine.saves.exportFile(P('file')); if (!t) return follow(n, 'no file', ctx); s.setVar(P('var') || 'saveCode', t); if (P('copy') !== false) navigator.clipboard?.writeText(t).catch(() => {}); break; }
+        case 'esImport': return follow(n, s.engine.saves.importFile(P('file'), s.vars[P('var') || 'saveCode']) ? 'imported' : 'not a save', ctx);
         case 'saveVar': { const k = P('name') || 'coins'; store.set(savedVarKey(s, k), JSON.stringify(s.vars[k] ?? 0)); break; }
         case 'loadVar': { const k = P('name') || 'coins', raw = store.get(savedVarKey(s, k), ''); if (raw === '') return follow(n, 'not saved yet', ctx); try { s.setVar(k, JSON.parse(raw)); } catch { s.setVar(k, raw); } return follow(n, 'loaded', ctx); }
         case 'deleteSavedVar': try { localStorage.removeItem(savedVarKey(s, P('name') || 'coins')); } catch { /* storage unavailable */ } break;
@@ -11882,6 +12104,7 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
+        if (has('onSaveFile')) s.on('saved', (f) => { if (!e.dead) fire('onSaveFile', e, s, null, (n) => !param(n, 'file') || param(n, 'file') === f); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
         if (has('onPermission')) s.on('permission', (k, ok) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onPermission' && (param(n, 'kind') === 'any' || param(n, 'kind') === k)) follow(n, ok ? 'allowed' : 'not allowed', { s, e, steps: 0 }); });
         if (has('onLocation')) s.on('location', () => { if (!e.dead) fire('onLocation', e, s); });
@@ -12386,6 +12609,7 @@ export class Engine {
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
     this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.perms = new Permissions(this); // location, camera, microphone, motion… (Ask Permission node)
+    this.saves = new SaveFiles(this); // Easy Save-style save files (Save Key / Load Key nodes, Auto Save component)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -12530,6 +12754,7 @@ export class Engine {
   }
 
   setScene(scene, { skipRestore = false } = {}) {
+    if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
     this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe();
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1

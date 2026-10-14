@@ -3831,6 +3831,7 @@ function renderUI(engine, scene) {
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
   for (const f of scene.overlays || []) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
+  drawStatBars(ctx, scene, engine);
   if (scene.popups?.length) { // floating "+10" texts
     const now = scene.time;
     scene.popups = scene.popups.filter((q) => now - q.t < q.life);
@@ -4039,7 +4040,7 @@ registerBehavior('move', {
         // the on-screen joystick is a game setting: a Move set to "joystick" (or "both") switches it on for this play, or nothing would appear to steer with
         if ((p.control === 'joystick' || p.control === 'both') && !s.settings.joystick && (!s.settings.controls || ['auto', 'joystick'].includes(s.settings.controls))) { s.settings.joystick = true; s.engine.layoutButtons?.(); } // (a D-pad or arrows chosen in Game Settings steer instead)
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, b = e.body, three = is3D(e), z = three ? 1 : s.engine.renderer.zoomFor(s), M = e.move || { speedMul: 1 };
         let a = p.control === 'drag' || M.locked ? { x: 0, y: 0 } : inp.axis();
         let ax = p.axes === 'vertical' ? 0 : a.x, ay = p.axes === 'horizontal' ? 0 : a.y;
@@ -4165,7 +4166,7 @@ registerBehavior('platformer', {
         e.ensureBody({ type: 'dynamic' });
         if (!s.gravity) s.gravity = is3D(e) ? -25 : 1600;
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body, up = is3D(e) ? 1 : -1;
         const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
         const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
@@ -4375,6 +4376,8 @@ registerBehavior('hazard', {
           return;
         }
         if (p.destroySelf) e.destroy();
+        const hb = p.action === 'damage' && other.getBehavior('health');
+        if (hb) { hb.damage(1, other, e); return; } // a player with Health loses health, not a life
         respawnOrEnd(other, s, p.action);
       },
     };
@@ -8654,49 +8657,311 @@ registerBehavior('touchButton', {
   },
 });
 
+/** Status effects that Health understands (Damage Dealer, nodes and triggers give them). */
+export const STATUS_FX = {
+  poison: { label: 'Poison', col: '#7dff5a', type: 'poison' },
+  burn: { label: 'Burn', col: '#ff8a3d', type: 'fire' },
+  bleed: { label: 'Bleed', col: '#ff3d5a', type: 'bleed' },
+  regen: { label: 'Heal over time', col: '#5dff9a', heal: true },
+  slow: { label: 'Slow', col: '#7ad7ff', speed: 0.5 },
+  freeze: { label: 'Freeze', col: '#bfefff', speed: 0 },
+};
+const tagList = (t) => String(t || '').split(',').map((q) => q.trim()).filter(Boolean);
+/** "fire 0.5, ice: 2, poison=0" → { fire: 0.5, ice: 2, poison: 0 } */
+const parseAmounts = (t) => { const m = {}; for (const part of String(t || '').split(',')) { const g = part.trim().match(/^(.+?)\s*[:= ]\s*(-?[\d.]+)$/); if (g) m[g[1].trim().toLowerCase()] = +g[2]; } return m; };
+/** Multiply a movement component's speed by its object's slow / freeze / hunger effects (e.data.speedFx). */
+function scaleSpeed(p, e) {
+  const fx = e.data.speedFx; if (!fx && p._baseSpeed === undefined) return;
+  if (p.speed !== p._lastSpeed) p._baseSpeed = p.speed; // someone changed the setting: that's the new normal
+  let k = 1; for (const v of Object.values(fx || {})) k *= v;
+  p.speed = p._lastSpeed = p._baseSpeed * k;
+}
+/** Floating text over an object, in 2D or 3D. */
+function popOver(s, e, text, color, size = 22) {
+  const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
+  const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh);
+  const bars = e._bars ? Object.values(e._bars).filter((b) => b.show).length : 0;
+  if (!q.behind) popText(s, q.x, q.y - 6 - (bars ? 10 + bars * 9 : 0), text, color, size);
+}
+const fmtHp = (n) => String(Math.round(n * 10) / 10);
+/** Small bars over objects: Health (with shield), Hunger, Thirst… set in e._bars by the components. */
+function drawStatBars(ctx, scene, engine) {
+  for (const e of scene.entities) {
+    const B = e._bars; if (!B || e.dead || e.visible === false || e.ui) continue;
+    const list = Object.values(B).filter((b) => b.show); if (!list.length) continue;
+    const ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = scene.mode === '3d', r = engine.renderer;
+    const q = three ? r.worldToScreen(scene, e.x, e.y + hh, e.z) : r.worldToScreen(scene, e.x, e.y - hh); if (q.behind) continue;
+    const w = three ? 46 : clamp((ex.sphere ? ex.r : ex.hx) * 2 * r.zoomFor(scene), 30, 70);
+    list.forEach((b, i) => {
+      const y = q.y - 12 - i * 9, x = q.x - w / 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(x - 1, y - 1, w + 2, 7);
+      ctx.fillStyle = b.col; ctx.fillRect(x, y, w * clamp(b.k, 0, 1), 5);
+      if (b.k2 > 0) { ctx.fillStyle = '#7ad7ff'; ctx.fillRect(x, y + 3, w * clamp(b.k2, 0, 1), 2); } // shield: a strip along the bottom
+    });
+  }
+}
+/** Who is touching `e` right now, for those that match `ok`. */
+function touchingNow(s, e, ok) {
+  const out = []; for (const [a, b] of s.engine.physics.contacts.values()) { const o = a === e ? b : b === e ? a : null; if (o && !o.dead && ok(o)) out.push(o); }
+  return out;
+}
+
 // ---- advanced components ----
-/** Health & Damage: hit points, damage from tags, invulnerability, knockback, regeneration and what happens on death. */
+/** Health & Damage: hit points, armour, shields, damage types, status effects, knockback, regeneration, lives and what happens on death. */
 registerBehavior('health', {
-  label: 'Health & Damage', description: 'Hit points that go down when touched by dangerous tags. Brief invulnerability, knockback, regeneration, a health variable for your HUD, and a death action.',
+  label: 'Health & Damage', description: 'Hit points that go down when touched by dangerous tags. Armour, shields, damage types, poison and burning, health pickups, fall damage, a health bar over it, damage numbers, lives and a death action.',
   params: [
     { key: 'hp', label: 'Max health', type: 'number', default: 3, range: [1, 100], step: 1 },
     { key: 'hurtBy', label: 'Hurt by tags (comma separated)', type: 'text', default: 'enemy, hazard', suggest: 'tags' },
     { key: 'damage', label: 'Damage per hit', type: 'number', default: 1, step: 1 },
     { key: 'invuln', label: 'Invulnerable after a hit (sec)', type: 'number', default: 1, range: [0, 5], step: 0.1 },
     { key: 'knockback', label: 'Knockback', type: 'number', default: 300, default3d: 8 },
-    { key: 'regen', label: 'Heal per second', type: 'number', default: 0, step: 0.1, group: 'More' },
-    { key: 'syncVar', label: 'Show health in variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “hp”: show it with a Progress Bar or {hp} in a text.', group: 'More' },
-    { key: 'onDeath', label: 'When health reaches 0', type: 'select', options: ['destroy', 'game over', 'respawn', 'send message', 'nothing'], default: 'destroy' },
+    { key: 'onDeath', label: 'When health reaches 0', type: 'select', options: ['destroy', 'game over', 'respawn', 'lose a life', 'send message', 'nothing'], default: 'destroy', info: '“Lose a life” takes one from the lives variable and respawns; game over when none are left.' },
     { key: 'message', label: 'Message to send', type: 'text', default: 'died', suggest: 'messages', showIf: { onDeath: ['send message'] } },
+    { key: 'armor', label: 'Armour (taken off every hit)', type: 'number', default: 0, step: 1, group: 'Defence' },
+    { key: 'defense', label: 'Damage reduction (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'Defence' },
+    { key: 'resist', label: 'Damage types (×)', type: 'text', default: '', info: 'How much each damage type hurts: “fire 0.5, poison 0, ice 2” (0 = immune, 2 = double).', group: 'Defence' },
+    { key: 'shield', label: 'Shield (soaks up hits first)', type: 'number', default: 0, step: 1, group: 'Defence' },
+    { key: 'shieldRegen', label: 'Shield refills per second', type: 'number', default: 1, step: 0.5, group: 'Defence' },
+    { key: 'god', label: 'Can’t be hurt', type: 'bool', default: false, group: 'Defence' },
+    { key: 'hurtWhileTouching', label: 'Keeps hurting while touching', type: 'bool', default: true, info: 'After the invulnerable time, standing in a hazard or on an enemy hurts again.', group: 'Defence' },
+    { key: 'regen', label: 'Heal per second', type: 'number', default: 0, step: 0.1, group: 'Healing' },
+    { key: 'regenDelay', label: 'Wait after a hit before healing (sec)', type: 'number', default: 0, step: 0.5, group: 'Healing', info: 'Also when the shield starts refilling.' },
+    { key: 'healTags', label: 'Health pickups (tags)', type: 'text', default: '', suggest: 'tags', info: 'e.g. “medkit”: touching one heals and uses it up.', group: 'Healing' },
+    { key: 'healAmount', label: 'Health per pickup', type: 'number', default: 1, step: 1, group: 'Healing' },
+    { key: 'fallDamage', label: 'Fall damage (0 = off)', type: 'number', default: 0, step: 1, group: 'Healing' },
+    { key: 'fallSpeed', label: 'Hurts when landing faster than', type: 'number', default: 900, default3d: 18, group: 'Healing' },
+    { key: 'showBar', label: 'Health bar over it', type: 'select', options: ['never', 'when hurt', 'always'], default: 'never', group: 'Look & sound' },
+    { key: 'numbers', label: 'Damage numbers', type: 'bool', default: false, group: 'Look & sound' },
+    { key: 'hitSound', label: 'Hit sound', type: 'text', default: 'hit', suggest: 'sounds', info: 'hit, click, power… or one of your sounds; “none” for silence.', group: 'Look & sound' },
+    { key: 'shake', label: 'Shake the camera when hit', type: 'bool', default: true, group: 'Look & sound' },
+    { key: 'deathFx', label: 'Death effect', type: 'select', options: ['burst', 'fade out', 'burst + fade', 'none'], default: 'burst', group: 'Look & sound' },
+    { key: 'syncVar', label: 'Show health in variable', type: 'text', default: '', suggest: 'vars', info: 'e.g. “hp”: show it with a Progress Bar or {hp} in a text.', group: 'More' },
     { key: 'points', label: 'Points when it dies', type: 'number', default: 0, step: 5, group: 'More' },
   ],
   create(p) {
-    let hp = 0, home = null;
-    const tags = String(p.hurtBy || '').split(',').map((t) => t.trim()).filter(Boolean);
+    let hp = 0, max = 0, sh = 0, shMax = 0, home = null, since = 99, dead = false;
+    const tags = tagList(p.hurtBy), healTags = tagList(p.healTags), resist = parseAmounts(p.resist), effects = new Map();
+    const hurtsMe = (e, o) => tags.some((t) => o.has(t)) && !o.getBehavior('damager')?.hits(e); // a Damage Dealer hurts with its own settings
     const inst = {
-      get hp() { return hp; },
-      sync(e, s) { e.data.hp = hp; e.data.hpMax = p.hp; if (p.syncVar) s.setVar(p.syncVar, Math.ceil(hp)); },
-      heal(n, e = inst.entity) { hp = Math.min(p.hp, hp + n); inst.sync(e, e.scene); },
-      damage(n, e = inst.entity, from = null) {
-        const s = e.scene; if (e.dead || hp <= 0 || (e.data.invuln || 0) > 0) return;
-        hp -= n; e.data.invuln = +p.invuln || 0; inst.sync(e, s);
-        s.emit('damage', e, n); s.engine.audio.sfx('hit'); s.impulse(6, e);
-        if (from && p.knockback && e.body) { const dx = e.x - from.x, dy = e.y - from.y, dz = e.z - from.z, l = Math.hypot(dx, dy, dz) || 1, up = is3D(e) ? 1 : -1; e.body.vel.x = dx / l * p.knockback; e.body.vel.z = dz / l * p.knockback; e.body.vel.y = up * Math.abs(p.knockback) * 0.6; }
-        if (hp > 0) return;
-        s.emit('death', e); if (p.points) s.addVar('score', p.points);
-        s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 24);
-        if (p.onDeath === 'destroy') e.destroy();
-        else if (p.onDeath === 'game over') s.gameOver();
-        else if (p.onDeath === 'respawn') { Object.assign(e, home); if (e.body) e.body.vel = { x: 0, y: 0, z: 0 }; hp = p.hp; inst.sync(e, s); }
-        else if (p.onDeath === 'send message') s.send(p.message);
+      get hp() { return hp; }, get max() { return max; }, get shield() { return sh; }, get dead() { return dead; }, effects,
+      sync(e = inst.entity, s = e.scene) {
+        e.data.hp = hp; e.data.hpMax = max; e.data.hpShield = sh; e.data.status = [...effects.keys()].join(',');
+        if (p.syncVar) s.setVar(p.syncVar, Math.ceil(hp));
+        const k = max ? hp / max : 0;
+        (e._bars ||= {}).health = { k, k2: shMax ? sh / shMax : 0, col: k > 0.5 ? '#5dff8a' : k > 0.25 ? '#ffd23d' : '#ff4d4d', show: !dead && (p.showBar === 'always' || (p.showBar === 'when hurt' && (hp < max || sh < shMax))) };
       },
-      start(e, s) { inst.entity = e; hp = p.hp; home = { x: e.x, y: e.y, z: e.z }; inst.sync(e, s); for (const t of tags) s.want(t); },
-      update(e, dt, s) { if (p.regen && hp > 0 && hp < p.hp) { hp = Math.min(p.hp, hp + p.regen * dt); inst.sync(e, s); } },
-      collide(e, other) { if (tags.some((t) => other.has(t))) inst.damage(+p.damage || 1, e, other); },
+      heal(n, e = inst.entity, quiet = false) {
+        const was = hp; hp = Math.min(max, hp + Math.max(0, +n || 0)); if (hp > 0) dead = false;
+        const got = hp - was; inst.sync(e, e.scene);
+        if (got > 0) { e.scene.emit('heal', e, got); if (p.numbers && !quiet) popOver(e.scene, e, '+' + fmtHp(got), '#5dff8a', 18); }
+        return got;
+      },
+      /** Hurt it. o: { type, crit, pierce (ignores armour), dot (poison tick: no invulnerability), knockback, ignoreInvuln }. Returns the damage done. */
+      damage(n, e = inst.entity, from = null, o = {}) {
+        const s = e.scene; if (e.dead || dead || hp <= 0 || p.god) return 0;
+        if (!o.dot && !o.ignoreInvuln && (e.data.invuln || 0) > 0) return 0;
+        let d = +n || 0; if (d <= 0) return 0;
+        const type = String(o.type || '').toLowerCase(); if (type && resist[type] != null) d *= resist[type];
+        if (!o.pierce) d = d * (1 - clamp(+p.defense || 0, 0, 100) / 100) - (o.dot ? 0 : +p.armor || 0);
+        if (d <= 0.001) { if (p.numbers && !o.dot) popOver(s, e, resist[type] === 0 ? 'Immune' : 'Blocked', '#9fb3c8', 18); return 0; }
+        d = Math.round(d * 100) / 100;
+        let soak = 0; if (sh > 0) { soak = Math.min(sh, d); sh -= soak; if (sh <= 0) s.emit('shieldBreak', e); }
+        const total = d; d -= soak; hp = Math.max(0, hp - d); since = 0;
+        if (!o.dot) e.data.invuln = +p.invuln || 0;
+        e.data.lastHit = { amount: total, type, crit: !!o.crit };
+        inst.sync(e, s);
+        s.emit('damage', e, total, from, type);
+        if (!o.dot) { if (p.hitSound !== 'none') s.engine.audio.sfx(p.hitSound || 'hit'); if (p.shake !== false) s.impulse(6, e); }
+        if (p.numbers) popOver(s, e, (o.crit ? 'CRIT ' : '') + '-' + fmtHp(total), o.crit ? '#ff5d8f' : !d ? '#7ad7ff' : o.color || '#ff4d4d', o.crit ? 30 : o.dot ? 16 : 22);
+        const kb = o.knockback ?? p.knockback;
+        if (from && kb && e.body && !o.dot) { const dx = e.x - from.x, dy = e.y - from.y, dz = e.z - from.z, l = Math.hypot(dx, dy, dz) || 1, up = is3D(e) ? 1 : -1; e.body.vel.x = dx / l * kb; e.body.vel.z = dz / l * kb; e.body.vel.y = up * Math.abs(kb) * 0.6; }
+        if (hp <= 0) inst.die(e, s);
+        return total;
+      },
+      die(e = inst.entity, s = e.scene) {
+        if (dead || e.dead) return; dead = true; hp = 0; effects.clear(); delete (e.data.speedFx || {}).status; inst.sync(e, s);
+        s.emit('death', e); if (p.points) s.addVar('score', p.points);
+        const fx = p.deathFx || 'burst', fade = fx.includes('fade');
+        if (fx.includes('burst')) s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#ff8a3d', 24);
+        const act = p.onDeath === 'lose a life' ? ((+s.vars.lives || 0) > 1 ? 'life' : 'game over') : p.onDeath;
+        if (act === 'life') s.addVar('lives', -1);
+        if (act === 'destroy') {
+          if (!fade) return e.destroy();
+          if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+          const t0 = s.time, a0 = e.alpha ?? 1, tick = () => { const k = (s.time - t0) / 0.4; if (e.dead) return; if (k >= 1) return e.destroy(); e.alpha = a0 * (1 - k); s.after(1 / 60, tick); }; tick();
+        } else if (act === 'game over') { if (p.onDeath === 'lose a life') s.setVar('lives', 0); s.gameOver(); }
+        else if (act === 'respawn' || act === 'life') inst.respawn(e, s);
+        else if (act === 'send message') s.send(p.message);
+      },
+      respawn(e = inst.entity, s = e.scene) {
+        Object.assign(e, home); if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+        hp = max; sh = shMax; dead = false; effects.clear(); e.data.invuln = Math.max(+p.invuln || 0, 1); inst.sync(e, s);
+      },
+      kill(e = inst.entity) { if (!dead && !p.god) inst.die(e, e.scene); },
+      setMax(n, refill = false, e = inst.entity) { max = Math.max(1, +n || 1); hp = refill ? max : Math.min(hp, max); inst.sync(e, e.scene); },
+      addShield(n, e = inst.entity) { sh = Math.max(0, sh + (+n || 0)); shMax = Math.max(shMax, sh); inst.sync(e, e.scene); },
+      addEffect(name, perSec = 1, seconds = 3, e = inst.entity) {
+        if (dead || !STATUS_FX[name] || (p.god && !STATUS_FX[name].heal)) return;
+        const type = STATUS_FX[name].type; if (type && resist[type] === 0) return; // immune
+        effects.set(name, { dps: +perSec || 0, left: +seconds || 0, tick: 0 }); inst.sync(e, e.scene); e.scene.emit('status', e, name);
+      },
+      cure(name = 'any', e = inst.entity) { if (!name || name === 'any') effects.clear(); else effects.delete(name); inst.sync(e, e.scene); },
+      start(e, s) {
+        inst.entity = e; max = Math.max(1, +p.hp || 1); hp = max; shMax = sh = Math.max(0, +p.shield || 0);
+        home = { x: e.x, y: e.y, z: e.z }; inst.sync(e, s); for (const t of [...tags, ...healTags]) s.want(t);
+      },
+      update(e, dt, s) {
+        since += dt; let changed = false, slow = 1;
+        for (const [k, f] of effects) {
+          const def = STATUS_FX[k]; f.left -= dt;
+          if (def.speed != null) slow = Math.min(slow, def.speed);
+          else if ((f.tick += dt) >= 0.5) { f.tick -= 0.5; const amt = f.dps * 0.5; if (def.heal) inst.heal(amt, e, true); else inst.damage(amt, e, null, { type: def.type, dot: true, pierce: true, color: def.col }); }
+          if (f.left <= 0) { effects.delete(k); changed = true; if (def.speed == null && f.tick > 0.01 && !dead) { const amt = f.dps * f.tick; if (def.heal) inst.heal(amt, e, true); else inst.damage(amt, e, null, { type: def.type, dot: true, pierce: true, color: def.col }); } } // the last part-tick, so it always deals per second × seconds
+          if (dead) break;
+        }
+        if (slow < 1 || e.data.speedFx?.status !== undefined) { e.data.speedFx ||= {}; if (slow < 1) e.data.speedFx.status = slow; else delete e.data.speedFx.status; }
+        if (changed) inst.sync(e, s);
+        if (dead) return;
+        const calm = since >= (+p.regenDelay || 0);
+        if (p.regen && calm && hp < max) { hp = Math.min(max, hp + p.regen * dt); inst.sync(e, s); }
+        if (shMax && calm && sh < shMax && +p.shieldRegen) { sh = Math.min(shMax, sh + p.shieldRegen * dt); inst.sync(e, s); }
+        if (+p.fallDamage > 0 && e.body?.landed > (+p.fallSpeed || 900)) { const v = e.body.landed, f = +p.fallSpeed || 900; inst.damage(+p.fallDamage * (1 + (v - f) / f), e, null, { type: 'fall', ignoreInvuln: true }); }
+        if (p.hurtWhileTouching !== false && tags.length && !(e.data.invuln > 0) && s.state === 'play') { const o = touchingNow(s, e, (q) => hurtsMe(e, q))[0]; if (o) inst.damage(+p.damage || 1, e, o); }
+      },
+      collide(e, other) {
+        if (healTags.length && healTags.some((t) => other.has(t)) && !other.dead) { if (hp < max) { inst.heal(+p.healAmount || 1, e); other.destroy(); e.scene.engine.audio.sfx('power'); } return; }
+        if (hurtsMe(e, other)) inst.damage(+p.damage || 1, e, other);
+      },
+      destroy(e) { if (e._bars) delete e._bars.health; },
     };
     return inst;
   },
 });
+
+/** Damage Dealer: hurts objects with Health (weapons, bullets, spikes, lava, explosions). */
+registerBehavior('damager', {
+  label: 'Damage Dealer', description: 'Hurts objects with Health that it touches: swords, bullets, spikes, lava, explosions. Damage types, critical hits, poison / burn / slow, area damage and knockback.',
+  params: [
+    { key: 'targets', label: 'Hurts tags', type: 'text', default: 'enemy', suggest: 'tags' },
+    { key: 'amount', label: 'Damage', type: 'number', default: 1, step: 1 },
+    { key: 'dtype', label: 'Damage type', type: 'select', options: ['normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall'], default: 'normal', info: 'Health can resist or be weak to types.' },
+    { key: 'mode', label: 'Hurts', type: 'select', options: ['when it touches', 'while touching (every few seconds)'], default: 'when it touches' },
+    { key: 'every', label: 'Every (sec)', type: 'number', default: 0.5, step: 0.1, showIf: { mode: ['while touching (every few seconds)'] } },
+    { key: 'cooldown', label: 'Wait before hurting the same one again (sec)', type: 'number', default: 0.3, step: 0.1 },
+    { key: 'knockback', label: 'Knockback (0 = their own)', type: 'number', default: 0 },
+    { key: 'effect', label: 'Also gives', type: 'select', options: ['nothing', 'poison', 'burn', 'bleed', 'slow', 'freeze'], default: 'nothing' },
+    { key: 'effectDps', label: 'Effect damage per second', type: 'number', default: 1, step: 0.5, showIf: { effect: ['poison', 'burn', 'bleed'] } },
+    { key: 'effectTime', label: 'Effect lasts (sec)', type: 'number', default: 3, step: 0.5, showIf: { effect: ['poison', 'burn', 'bleed', 'slow', 'freeze'] } },
+    { key: 'destroyOnHit', label: 'Destroy itself after a hit (bullets)', type: 'bool', default: false },
+    { key: 'critChance', label: 'Critical hit chance (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'More' },
+    { key: 'critTimes', label: 'Critical hit ×', type: 'number', default: 2, step: 0.5, group: 'More' },
+    { key: 'area', label: 'Area damage radius (0 = only what it touches)', type: 'number', default: 0, group: 'More', info: 'Explosions: everything with a target tag this close is hurt, less at the edge.' },
+    { key: 'pierce', label: 'Goes through armour', type: 'bool', default: false, group: 'More' },
+    { key: 'noHealth', label: 'Destroys targets without Health', type: 'bool', default: false, group: 'More' },
+    { key: 'points', label: 'Points per hit', type: 'number', default: 0, step: 1, group: 'More' },
+  ],
+  create(p) {
+    const tags = tagList(p.targets), last = new Map(); let tick = 0;
+    const inst = {
+      hits(t) { return tags.some((g) => t.has(g)); },
+      hit(e, t, s, k = 1) {
+        const now = s.time; if (now - (last.get(t) ?? -99) < (+p.cooldown || 0)) return 0; last.set(t, now);
+        const hb = t.getBehavior('health');
+        if (!hb) { if (p.noHealth) { s.burst(t.x, t.y, t.z, t.mesh?.color || t.shape?.fill || '#ff8a3d', 16); t.destroy(); } return 0; }
+        const crit = +p.critChance > 0 && Math.random() * 100 < +p.critChance;
+        const d = (+p.amount || 0) * k * (crit ? +p.critTimes || 2 : 1);
+        const dealt = hb.damage(d, t, e, { type: p.dtype === 'normal' ? '' : p.dtype, crit, pierce: !!p.pierce, knockback: +p.knockback || undefined, ignoreInvuln: p.mode !== 'when it touches' });
+        if (p.effect && p.effect !== 'nothing') hb.addEffect(p.effect, +p.effectDps || 1, +p.effectTime || 3, t);
+        if (dealt > 0) { if (p.points) s.addVar('score', +p.points); s.emit('dealtDamage', e, t, dealt); }
+        return dealt;
+      },
+      strike(e, t, s) {
+        if (+p.area > 0) { for (const q of s.entities) if (!q.dead && q !== e && inst.hits(q)) { const d = Math.hypot(q.x - e.x, q.y - e.y, (q.z || 0) - (e.z || 0)); if (d <= +p.area) inst.hit(e, q, s, 1 - 0.5 * d / +p.area); } }
+        else inst.hit(e, t, s);
+        if (p.destroyOnHit) e.destroy();
+      },
+      start(e, s) { for (const t of tags) s.want(t); },
+      update(e, dt, s) {
+        if (p.mode === 'when it touches' || s.state !== 'play') return;
+        if ((tick -= dt) > 0) return; tick = Math.max(0.05, +p.every || 0.5);
+        for (const o of touchingNow(s, e, (q) => inst.hits(q))) { inst.strike(e, o, s); if (e.dead) break; }
+      },
+      collide(e, other, s) { if (p.mode === 'when it touches' && inst.hits(other) && !other.dead && other !== e && s.state === 'play') inst.strike(e, other, s); },
+    };
+    return inst;
+  },
+});
+
+/** Hunger and Thirst: a need that drains over time, is refilled by food / drink and hurts or slows when empty. */
+function needComponent(key, o) {
+  registerBehavior(key, {
+    label: o.label, description: o.desc,
+    params: [
+      { key: 'max', label: 'Full at', type: 'number', default: 100, step: 10 },
+      { key: 'drain', label: o.drainLabel, type: 'number', default: o.drain, step: 0.1 },
+      { key: 'moveDrain', label: 'Faster while moving (×)', type: 'number', default: o.move, step: 0.1 },
+      { key: 'items', label: o.itemsLabel, type: 'text', default: o.tag, suggest: 'tags', info: `Touching an object with this tag (or name) ${o.verb}s it.` },
+      { key: 'perItem', label: 'Each one gives', type: 'number', default: o.per, step: 5 },
+      { key: 'amounts', label: 'Different amounts', type: 'text', default: '', info: `By name or tag: “${o.example}”.` },
+      { key: 'consume', label: 'Uses the item up', type: 'bool', default: true },
+      { key: 'syncVar', label: 'Show in variable', type: 'text', default: key, suggest: 'vars', info: `Show it with a Progress Bar bound to “${key}”, or {${key}} in a text.` },
+      { key: 'lowAt', label: 'Low at (%)', type: 'number', default: 25, range: [0, 100], step: 5 },
+      { key: 'lowMessage', label: 'Message when it gets low', type: 'text', default: o.lowMsg, suggest: 'messages' },
+      { key: 'whenEmpty', label: 'When it runs out', type: 'select', options: ['hurts health', 'slows down', 'hurts and slows', 'game over', 'nothing'], default: 'hurts health' },
+      { key: 'emptyDamage', label: 'Health lost per second', type: 'number', default: 1, step: 0.5, showIf: { whenEmpty: ['hurts health', 'hurts and slows'] } },
+      { key: 'slowTo', label: 'Speed when empty (×)', type: 'number', default: 0.5, range: [0, 1], step: 0.1, showIf: { whenEmpty: ['slows down', 'hurts and slows'] } },
+      { key: 'start', label: 'Starts at (%)', type: 'number', default: 100, range: [0, 100], step: 5, group: 'More' },
+      { key: 'healAbove', label: 'Heals health while above (%)', type: 'number', default: 0, range: [0, 100], step: 5, group: 'More', info: '0 = off. Well-fed players slowly heal.' },
+      { key: 'healRate', label: 'Health per second while above', type: 'number', default: 0.2, step: 0.1, group: 'More' },
+      { key: 'showBar', label: 'Bar over it', type: 'select', options: ['never', 'when low', 'always'], default: 'never', group: 'More' },
+      { key: 'sound', label: o.verb[0].toUpperCase() + o.verb.slice(1) + ' sound', type: 'text', default: 'power', suggest: 'sounds', group: 'More' },
+    ],
+    create(p) {
+      let v = 0, max = 1, low = false, empty = false, hurtT = 0;
+      const items = tagList(p.items), amounts = parseAmounts(p.amounts);
+      const inst = {
+        get value() { return v; }, get max() { return max; },
+        sync(e = inst.entity, s = e.scene) {
+          e.data[key] = v; e.data[key + 'Max'] = max; if (p.syncVar) s.setVar(p.syncVar, Math.round(v));
+          const k = v / max; (e._bars ||= {})[key] = { k, col: o.col, show: p.showBar === 'always' || (p.showBar === 'when low' && k * 100 <= (+p.lowAt || 0)) };
+        },
+        add(n, e = inst.entity) { v = clamp(v + (+n || 0), 0, max); inst.check(e, e.scene); inst.sync(e, e.scene); },
+        set(n, e = inst.entity) { v = clamp(+n || 0, 0, max); inst.check(e, e.scene); inst.sync(e, e.scene); },
+        check(e, s) {
+          const pc = v / max * 100, nowLow = pc <= (+p.lowAt || 0) && v > 0, nowEmpty = v <= 0;
+          if (nowLow && !low) { if (p.lowMessage) s.send(p.lowMessage); s.emit('needLow', e, key); }
+          if (nowEmpty && !empty) { s.emit('needEmpty', e, key); if (p.whenEmpty === 'game over') s.gameOver(); }
+          low = nowLow; empty = nowEmpty;
+          const slows = empty && /slows/.test(p.whenEmpty);
+          if (slows) (e.data.speedFx ||= {})[key] = clamp(+p.slowTo, 0, 1); else if (e.data.speedFx) delete e.data.speedFx[key];
+        },
+        worth(t) { const n = String(t.name || '').toLowerCase(); if (amounts[n] != null) return amounts[n]; for (const g of t.tags || []) if (amounts[String(g).toLowerCase()] != null) return amounts[String(g).toLowerCase()]; return +p.perItem || 0; },
+        isItem(t) { const n = String(t.name || '').toLowerCase(); return items.some((g) => t.has(g) || n === g.toLowerCase()); },
+        start(e, s) { inst.entity = e; max = Math.max(1, +p.max || 100); v = max * clamp(+(p.start ?? 100), 0, 100) / 100; for (const t of items) s.want(t); inst.check(e, s); inst.sync(e, s); },
+        update(e, dt, s) {
+          if (s.state !== 'play') return;
+          const b = e.body, moving = b && Math.hypot(b.vel.x || 0, is3D(e) ? b.vel.z || 0 : b.vel.y || 0) > (is3D(e) ? 0.5 : 20);
+          const was = v; v = Math.max(0, v - (+p.drain || 0) * (moving ? +p.moveDrain || 1 : 1) * dt);
+          if (v !== was) { inst.check(e, s); if (Math.round(v) !== Math.round(was) || v === 0) inst.sync(e, s); else e.data[key] = v; }
+          const hb = e.getBehavior('health');
+          if (empty && /hurts/.test(p.whenEmpty) && hb && (hurtT += dt) >= 1) { hurtT -= 1; hb.damage(+p.emptyDamage || 1, e, null, { dot: true, pierce: true, type: key === 'thirst' ? 'thirst' : 'hunger', color: o.col }); }
+          if (!empty) hurtT = 0;
+          if (+p.healAbove > 0 && hb && v / max * 100 >= +p.healAbove && hb.hp < hb.max && hb.hp > 0) hb.heal(+p.healRate * dt, e, true);
+        },
+        collide(e, other, s) {
+          if (!items.length || other.dead || !inst.isItem(other) || v >= max) return;
+          inst.add(inst.worth(other), e); if (p.sound && p.sound !== 'none') s.engine.audio.sfx(p.sound);
+          s.emit(o.verb, e, other); if (p.consume !== false) other.destroy();
+        },
+        destroy(e) { if (e._bars) delete e._bars[key]; if (e.data.speedFx) delete e.data.speedFx[key]; },
+      };
+      return inst;
+    },
+  });
+}
+needComponent('hunger', { label: 'Hunger', desc: 'Goes down over time (faster while moving). Eating food fills it up; when it runs out the object loses health or slows down. Show it with a Progress Bar.', drainLabel: 'Gets hungry by (per second)', drain: 0.5, move: 1.5, itemsLabel: 'Food (tags or names)', tag: 'food', verb: 'eat', per: 25, example: 'apple 15, bread 30, steak 60', lowMsg: 'hungry', col: '#ffa63d' });
+needComponent('thirst', { label: 'Thirst', desc: 'Goes down over time, faster than hunger. Drinking water fills it up; when it runs out the object loses health or slows down. Show it with a Progress Bar.', drainLabel: 'Gets thirsty by (per second)', drain: 0.8, move: 1.5, itemsLabel: 'Drinks (tags or names)', tag: 'water', verb: 'drink', per: 30, example: 'water 30, juice 40, soda 20', lowMsg: 'thirsty', col: '#4db8ff' });
 
 /** Enemy AI: patrol → chase when it sees the target → attack in range → give up and go home. */
 registerBehavior('enemyAI', {
@@ -9074,7 +9339,7 @@ registerBehavior('thirdPerson', {
         yaw = (e.ry || 0) * DEG; tilt = p.height * DEG;
         s.settings.joystick = true; s.engine.layoutButtons();
       },
-      update(e, dt, s) {
+      update(e, dt, s) { scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body;
         { const L = s.engine.lookScale(); yaw -= inp.drag.dx * p.look * DEG * L.x; tilt = clamp(tilt + inp.drag.dy * p.look * DEG * 0.6 * L.y, 0.05, 1.3); }
         const f = fwd3(yaw), r = right3(yaw);
@@ -9713,6 +9978,7 @@ registerBehavior('controller2d', {
       },
       update(e, dt, s) {
         if (s.state !== 'play') return;
+        scaleSpeed(p, e);
         const inp = s.engine.input, a = inp.axis(), b = e.body, damp = Math.max(0, 1 - (+p.friction || 0) * dt);
         switch (p.mode) {
           case 'topdown4': {
@@ -10485,7 +10751,7 @@ export const NODE_TYPES = {
   onMessage: { cat: 'Events', label: 'On Message', outs: ['then'], params: [txt('message', 'go', 'message')] },
   touchEnd: { cat: 'Events', label: 'On Touch End', outs: ['then'], params: [txt('tag', 'player', 'by tag')] },
   varChanged: { cat: 'Events', label: 'On Variable Changed', outs: ['then'], params: [txt('name', 'score', 'variable')] },
-  damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'] },
+  damaged: { cat: 'Events', label: 'On Damaged', outs: ['then'], params: [opt('dtype', ['any', 'normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'any', 'damage type')] },
   death: { cat: 'Events', label: 'On Death', outs: ['then'] },
   holding: { cat: 'Events', label: 'While Touching Screen', outs: ['then'] },
   released: { cat: 'Events', label: 'On Finger Lifted', outs: ['then'] },
@@ -10619,6 +10885,7 @@ export const NODE_TYPES = {
   countTag: { cat: 'Values', label: 'Count With Tag', value: 'number', params: [txt('tag', 'enemy', 'tag')] },
   exists: { cat: 'Values', label: 'Object Exists', value: 'bool', params: [txt('object', 'Boss', 'object or tag')] },
   health: { cat: 'Values', label: 'My Health', value: 'number' },
+  healthOf: { cat: 'Values', label: 'Health / Hunger / Thirst', value: 'number', params: [txt('object', '', 'object (empty = this)'), opt('what', ['health', 'max health', 'health %', 'shield', 'hunger', 'hunger %', 'thirst', 'thirst %'], 'health', 'what')] },
   itemCount: { cat: 'Values', label: 'Item Count', value: 'number', params: [txt('item', 'key', 'item')] },
   joystick: { cat: 'Values', label: 'Joystick', value: 'number', params: [opt('axis', ['x', 'y'], 'x', 'axis')] },
   screen: { cat: 'Values', label: 'Screen Size', value: 'number', params: [opt('what', ['width', 'height'], 'width', 'what')] },
@@ -11216,8 +11483,14 @@ export const LOGIC_EVENTS = {
   near: { label: 'Comes near tag', icon: 'crosshair', params: [sug(txt('tag', 'player', 'tag'), 'tags'), num('distance', 120, 'distance')], say: (p) => `${p.tag} comes within ${p.distance}` },
   sees: { label: 'Starts seeing tag', icon: 'eye', params: [sug(txt('tag', 'player', 'tag'), 'tags')], say: (p) => `Sees ${p.tag}` },
   landed: { label: 'Lands on the ground', icon: 'platform' },
-  damaged: { label: 'Takes damage (Health)', icon: 'heart' },
+  damaged: { label: 'Takes damage (Health)', icon: 'heart', params: [opt('dtype', ['any', 'normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'any', 'damage type')], say: (p) => (p.dtype && p.dtype !== 'any' ? `Takes ${p.dtype} damage` : 'Takes damage') },
   died: { label: 'Dies (Health runs out)', icon: 'enemy' },
+  healed: { label: 'Gets healed (Health)', icon: 'heart' },
+  shieldBreak: { label: 'Shield breaks (Health)', icon: 'heart' },
+  statusGot: { label: 'Gets poisoned / burnt / slowed…', icon: 'heart', params: [opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], say: (p) => (p.effect === 'any' ? 'Gets a status effect' : `Gets ${p.effect}`) },
+  needLow: { label: 'Gets hungry / thirsty', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Gets thirsty' : p.need === 'hunger' ? 'Gets hungry' : 'Gets hungry or thirsty') },
+  needEmpty: { label: 'Starving / out of water', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Out of water' : p.need === 'hunger' ? 'Starving' : 'Starving or out of water') },
+  ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
   appHidden: { label: 'Player leaves the app', icon: 'phone' },
@@ -11252,6 +11525,9 @@ export const LOGIC_CONDITIONS = {
   myVar: { label: 'Compare its own variable', icon: 'key', params: [txt('name', 'hp', 'object variable'), opt('op', OPS6, '≤', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data[p.name] || 0, p.op, +p.value || 0), say: (p) => `its ${p.name} ${p.op} ${p.value}` },
   textVar: { label: 'Text variable', icon: 'text', params: [sug(txt('name', 'playerName', 'variable'), 'vars'), opt('op', ['equals', 'contains', 'starts with', 'is empty'], 'equals', 'test'), txt('text', 'Hero', 'text')], test: (c, p) => { const v = String(c.s.vars[p.name] ?? '').toLowerCase(), t = String(p.text ?? '').toLowerCase(); return p.op === 'is empty' ? !v : p.op === 'contains' ? v.includes(t) : p.op === 'starts with' ? v.startsWith(t) : v === t; }, say: (p) => (p.op === 'is empty' ? `${p.name} is empty` : `${p.name} ${p.op} “${p.text}”`) },
   health: { label: 'Health', icon: 'heart', params: [opt('op', OPS6, '≤', 'is'), num('value', 1, 'value'), bool('percent', false, 'as a percent of full')], test: (c, p) => { const hp = +c.e.data.hp || 0, v = p.percent ? hp / (+c.e.data.hpMax || 1) * 100 : hp; return cmp(v, p.op, +p.value || 0); }, say: (p) => `health ${p.op} ${p.value}${p.percent ? '%' : ''}` },
+  need: { label: 'Hunger / thirst', icon: 'heart', params: [opt('need', ['hunger', 'thirst'], 'hunger', 'which'), opt('op', OPS6, '≤', 'is'), num('value', 25, 'value'), bool('percent', true, 'as a percent of full')], test: (c, p) => { const v = c.e.data[p.need]; if (v === undefined) return false; return cmp(p.percent ? (+v || 0) / (+c.e.data[p.need + 'Max'] || 100) * 100 : +v || 0, p.op, +p.value || 0); }, say: (p) => `${p.need} ${p.op} ${p.value}${p.percent ? '%' : ''}` },
+  hasStatus: { label: 'Has status effect', icon: 'heart', params: [opt('effect', ['any', ...Object.keys(STATUS_FX)], 'poison', 'effect')], test: (c, p) => { const st = String(c.e.data.status || ''); return p.effect === 'any' ? !!st : st.split(',').includes(p.effect); }, say: (p) => (p.effect === 'any' ? 'has a status effect' : `is ${p.effect === 'regen' ? 'healing over time' : p.effect === 'freeze' ? 'frozen' : p.effect === 'slow' ? 'slowed' : p.effect === 'burn' ? 'burning' : p.effect === 'bleed' ? 'bleeding' : 'poisoned'}`) },
+  shieldUp: { label: 'Shield left', icon: 'heart', params: [opt('op', OPS6, '>', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data.hpShield || 0, p.op, +p.value || 0), say: (p) => `shield ${p.op} ${p.value}` },
   tagCount: { label: 'Number of objects with tag', icon: 'enemy', params: [sug(txt('tag', 'enemy', 'tag'), 'tags'), opt('op', OPS6, '=', 'is'), num('value', 0, 'count')], test: (c, p) => cmp(c.s.findAll(p.tag).filter((q) => !q.dead && !q.template).length, p.op, +p.value || 0), say: (p) => `${p.tag} count ${p.op} ${p.value}` },
   moving: { label: 'Is moving', icon: 'move', params: [num('speed', 10, 'faster than')], test: (c, p) => { const v = c.e.body?.vel; return !!v && Math.hypot(v.x, v.y, v.z || 0) > (+p.speed || 0); }, say: (p) => `moving faster than ${p.speed}` },
   level: { label: 'Level number', icon: 'flag', params: [opt('op', OPS6, '=', 'is'), num('value', 1, 'level')], test: (c, p) => cmp(c.s.level || 1, p.op, +p.value || 1), say: (p) => `level ${p.op} ${p.value}` },
@@ -11294,7 +11570,12 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
-  damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}`) },
+  damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)'), opt('dtype', ['normal', 'fire', 'ice', 'poison', 'electric', 'explosion', 'magic', 'fall', 'bleed', 'hunger', 'thirst'], 'normal', 'damage type'), bool('pierce', false, 'goes through armour')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e, { type: p.dtype && p.dtype !== 'normal' ? p.dtype : '', pierce: !!p.pierce }); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}${p.dtype && p.dtype !== 'normal' ? ' ' + p.dtype : ''}`) },
+  statusFx: { cat: 'Objects', label: 'Poison / burn / slow…', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', Object.keys(STATUS_FX), 'poison', 'effect'), num('perSecond', 1, 'damage (or healing) per second'), num('seconds', 3, 'seconds')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.addEffect(p.effect, +p.perSecond, +p.seconds, t); }, say: (p) => `${STATUS_FX[p.effect]?.label || p.effect}: ${p.object} for ${p.seconds}s` },
+  cure: { cat: 'Objects', label: 'Cure status effects', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('effect', ['any', ...Object.keys(STATUS_FX)], 'any', 'effect')], run: (c, p) => { const t = target(c, p.object); t?.getBehavior('health')?.cure(p.effect, t); }, say: (p) => `Cure ${p.effect === 'any' ? 'everything' : p.effect} on ${p.object}` },
+  healthSet: { cat: 'Objects', label: 'Refill / revive / max health', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('what', ['refill health', 'set max health', 'set max health and refill', 'add shield', 'kill'], 'refill health', 'what'), num('amount', 5, 'amount')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (!hb) return; const n = +p.amount || 0; if (p.what === 'refill health') hb.heal(hb.max, t); else if (p.what === 'add shield') hb.addShield(n, t); else if (p.what === 'kill') hb.kill(t); else hb.setMax(n, p.what.endsWith('refill'), t); }, say: (p) => (p.what === 'refill health' || p.what === 'kill' ? `${p.what[0].toUpperCase() + p.what.slice(1)}: ${p.object}` : `${p.what[0].toUpperCase() + p.what.slice(1)} ${p.amount}: ${p.object}`) },
+  invulnerable: { cat: 'Objects', label: 'Make invulnerable', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), num('seconds', 3, 'seconds')], run: (c, p) => { const t = target(c, p.object); if (t) t.data.invuln = +p.seconds || 0; }, say: (p) => `${p.object} can’t be hurt for ${p.seconds}s` },
+  eat: { cat: 'Objects', label: 'Eat / drink (hunger, thirst)', icon: 'heart', params: [sug(txt('object', 'self', 'who (self / other / name)'), 'objects'), opt('need', ['hunger', 'thirst'], 'hunger', 'fills'), opt('mode', ['add', 'set to'], 'add', 'how'), num('amount', 25, 'amount')], run: (c, p) => { const t = target(c, p.object), nb = t?.getBehavior(p.need); if (nb) { if (p.mode === 'set to') nb.set(+p.amount, t); else nb.add(+p.amount, t); } }, say: (p) => (p.mode === 'set to' ? `Set ${p.need} to ${p.amount}` : `${p.need === 'thirst' ? 'Drink' : 'Eat'} +${p.amount}`) + (p.object && p.object !== 'self' ? ` (${p.object})` : '') },
   talk: { cat: 'Game', label: 'Say dialogue', icon: 'sign', params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello there!', 'text'), bool('wait', true, 'wait until closed')], run: (c, p) => { if (!c.s.dialog) c.s.dialog = { lines: [{ who: p.who, text: fillTemplate(p.text, c.s.vars) }], i: 0, chars: 0, pause: true }; return p.wait ? { until: () => !c.s.dialog } : 0; }, say: (p) => `${p.who}: “${p.text}”` },
   // motion & animation
   moveBy: { cat: 'Motion', label: 'Move by', icon: 'move', params: [num('x', 0, 'x'), num('y', -40, 'y'), num('z', 0, 'z (3D)'), num('seconds', 0.3, 'over seconds'), opt('ease', EASES, 'outQuad', 'ease'), bool('wait', false, 'wait until done')], run: (c, p) => { const d = +p.seconds || 0; if (d <= 0) { c.e.x += +p.x || 0; c.e.y += +p.y || 0; c.e.z += +p.z || 0; return; } c.s.to(c.e, { x: +p.x || 0, y: +p.y || 0, z: +p.z || 0 }, d, { ease: p.ease, relative: true }); return p.wait ? d : 0; }, say: (p) => `Move by ${p.x}, ${p.y}${+p.z ? ', ' + p.z : ''}${+p.seconds ? ` in ${p.seconds}s` : ''}` },
@@ -11459,6 +11740,9 @@ function evOk(type, p, q) {
     case 'online': return (p.mode === 'comes back') === !!q.on;
     case 'orientation': return p.to === 'any' || q.o === p.to;
     case 'menu': return p.mode === 'any' || (p.mode === 'opens') === !!q.open;
+    case 'damaged': return !p.dtype || p.dtype === 'any' || q.dtype === p.dtype;
+    case 'statusGot': return !p.effect || p.effect === 'any' || q.effect === p.effect;
+    case 'needLow': case 'needEmpty': case 'ate': return !p.need || p.need === 'any' || q.need === p.need;
     default: return true;
   }
 }
@@ -11469,7 +11753,14 @@ class LogicWatcher {
     s.on('message', (n, data) => this.queue.push({ type: 'message', name: n, value: data }));
     s.on('animationEnd', (ent, clip) => { if (ent === e) this.queue.push({ type: 'animEnd', clip }); });
     s.on('var', (k) => this.queue.push({ type: 'varChanged', name: k }));
-    s.on('damage', (who) => { if (who === e) this.queue.push({ type: 'damaged' }); });
+    s.on('damage', (who, n, from, type) => { if (who === e) this.queue.push({ type: 'damaged', value: Math.round((+n || 0) * 100) / 100, other: from, dtype: type || 'normal' }); });
+    s.on('heal', (who, n) => { if (who === e) this.queue.push({ type: 'healed', value: Math.round((+n || 0) * 100) / 100 }); });
+    s.on('shieldBreak', (who) => { if (who === e) this.queue.push({ type: 'shieldBreak' }); });
+    s.on('status', (who, k) => { if (who === e) this.queue.push({ type: 'statusGot', effect: k }); });
+    s.on('needLow', (who, k) => { if (who === e) this.queue.push({ type: 'needLow', need: k }); });
+    s.on('needEmpty', (who, k) => { if (who === e) this.queue.push({ type: 'needEmpty', need: k }); });
+    s.on('eat', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'hunger' }); });
+    s.on('drink', (who, item) => { if (who === e) this.queue.push({ type: 'ate', other: item, need: 'thirst' }); });
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -11842,6 +12133,11 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'healthOf': {
+          const t = P('object') ? target(ctx, P('object')) : e; if (!t) return 0;
+          const d = t.data, pc = (a, b) => (+b ? (+a || 0) / +b * 100 : 0);
+          switch (P('what')) { case 'max health': return +d.hpMax || 0; case 'health %': return pc(d.hp, d.hpMax); case 'shield': return +d.hpShield || 0; case 'hunger': return +d.hunger || 0; case 'hunger %': return pc(d.hunger, d.hungerMax); case 'thirst': return +d.thirst || 0; case 'thirst %': return pc(d.thirst, d.thirstMax); default: return +d.hp || 0; }
+        }
         case 'itemCount': return s.itemCount(P('item'));
         case 'joystick': { const a = s.engine.input.axis(); return P('axis') === 'y' ? a.y : a.x; }
         case 'screen': return P('what') === 'height' ? s.engine.height : s.engine.width;
@@ -12718,7 +13014,7 @@ registerBehavior('graph', {
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
         if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
-        if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
+        if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who, n, from, type) => { if (who === e) fire('damaged', e, s, from, (q) => { const f = q.params?.dtype; return !f || f === 'any' || f === (type || 'normal'); }, 0, { eventValue: Math.round((+n || 0) * 100) / 100 }); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });

@@ -231,7 +231,9 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 
 | Component | What it does |
 | --- | --- |
-| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, message) |
+| **Health & Damage** | Max health, hurt by tags, invulnerability, knockback, regeneration, a HUD variable, and death action (destroy, game over, respawn, lose a life, message). Also armour, shields, damage types, status effects, health pickups, fall damage, a health bar over it and damage numbers (see *Health, damage and survival*) |
+| **Damage Dealer** | Hurts objects with Health that it touches (weapons, bullets, spikes, lava, explosions): damage type, on touch or every few seconds while touching, critical hits, poison / burn / bleed / slow / freeze, area damage, knockback |
+| **Hunger** / **Thirst** | Drain over time (faster while moving), refilled by food / drink objects, hurt or slow the player when empty, can heal Health while full |
 | **Enemy AI** | Patrols, chases when it sees the target (walls block its view), attacks in range (damaging Health), gives up and returns home |
 | **Pathfinding (Navigator)** | A* around walls to a tag or object, for smart chasers, pets and NPCs (2D and 3D) |
 | **Joint** | Spring, rope (pendulums, swings) or rod to another object, with a drawn rope |
@@ -461,6 +463,53 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - **Looks:** **Fade Light** (to a brightness, range and colour), **Set Light Effect**, **Set Darkness / Ambient** (2D, it now fades), **Set Sun (3D)**, **Lighting Preset** (fades the whole level to a mood, with *done*).
   - **Values:** **Light Brightness**.
 - **From code:** `engine.takePhoto()` returns a PNG data URL. `LIGHT_PRESETS` is exported.
+
+### Health, damage and survival
+
+- **Health & Damage** has new settings, in folders:
+  - **Defence:**
+    - **armour** (taken off every hit);
+    - **damage reduction %**;
+    - **damage types ×**, e.g. `fire 0.5, poison 0, ice 2` (0 = immune);
+    - a **shield** that soaks up hits first and refills;
+    - **can't be hurt**;
+    - **keeps hurting while touching**: after the invulnerable time, standing on an enemy or in lava hurts again.
+  - **Healing:**
+    - heal per second, with a **wait after a hit**;
+    - **health pickups** by tag (`medkit`) and the amount each gives;
+    - **fall damage** when landing faster than a speed.
+  - **Look & sound:**
+    - a **health bar over it** (never, when hurt, always), with the shield as a blue strip;
+    - **damage numbers** (CRIT in pink, shield hits in blue, poison in green);
+    - hit sound, camera shake;
+    - death effect: burst, fade out, both or none.
+  - **When health reaches 0** can also **lose a life**: it takes one from `lives` and respawns, and it's game over when none are left.
+- **Status effects:** **poison**, **burn**, **bleed** (damage every half second), **heal over time**, **slow** and **freeze** (slow the object's movement). Each lasts some seconds. An object immune to a damage type can't get that effect.
+- **Damage Dealer** (component): put it on swords, bullets, spikes, lava, bombs. You can set:
+  - which tags it hurts and how much;
+  - the **damage type**;
+  - whether it hurts **when it touches** or **every few seconds while touching**;
+  - a cooldown per target and knockback;
+  - an effect it **also gives**;
+  - **critical hits** (chance and ×), **area damage** (explosions, weaker at the edge);
+  - going **through armour**, destroying targets without Health, **destroying itself after a hit** (bullets) and points per hit.
+- **Hunger** and **Thirst** (components). You can set:
+  - how fast each drains, and how much **faster while moving**;
+  - the **food / drink** tags or names, how much each one gives, and **different amounts** by name (`apple 15, steak 60`);
+  - a variable for your HUD (`hunger`, `thirst`);
+  - a **low** level, with a message (`hungry`, `thirsty`);
+  - what happens when it runs out: hurts health, slows down, both, game over or nothing;
+  - **heals health while above** a % (well-fed players heal);
+  - a bar over the object.
+- **Create → Gameplay** has **Survivor** (a player with Health, Hunger and Thirst), **Apple (food)**, **Water (drink)**, **Medkit**, **Spikes**, **Fire** (burns, with a flickering light) and **Poison Pool**, in 2D and 3D. **UI → Hunger Bar** and **Thirst Bar** go under the Health Bar.
+- **Triggers:**
+  - **Events:** *Takes damage* (by damage type), *Gets healed*, *Shield breaks*, *Gets poisoned / burnt / slowed…*, *Gets hungry / thirsty*, *Starving / out of water*, *Eats or drinks*.
+  - **Conditions:** *Hunger / thirst*, *Has status effect*, *Shield left*.
+  - **Instructions:** *Damage / heal* (with damage type and "goes through armour"), *Poison / burn / slow…*, *Cure status effects*, *Refill / revive / max health* (also add shield, kill), *Make invulnerable*, *Eat / drink*.
+  - All of these are nodes too.
+- **Nodes:** **On Damaged** filters by damage type; its Event Value is how much, and "other" is who hurt it. The value node **Health / Hunger / Thirst** reads health, max, %, shield, hunger or thirst of any object.
+- **Hazards** set to *damage* now take health from a player that has Health, instead of a life.
+- **From code:** `health.damage(n, target, from, { type, crit, pierce, knockback })` returns the damage done. Health also has `heal`, `addShield`, `setMax`, `addEffect(name, perSecond, seconds)`, `cure`, `kill` and `respawn`. Hunger and Thirst have `add` and `set`. `STATUS_FX` is exported.
 
 ### Move: joystick, tilt and drag
 

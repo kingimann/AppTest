@@ -262,6 +262,7 @@ export class Entity {
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
     this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
+    this.ignoreBars = !!props.ignoreBars; this.overlap = !!props.overlap; // UI: may go under the nav bars / may overlap other UI (Keep UI apart)
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
     this.collider = props.collider ? { ...props.collider } : null; // Unity-style collider: alone it makes a solid (static) object
     this.body = null;
@@ -1620,7 +1621,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -1721,7 +1722,7 @@ class NotifyCenter {
     });
   }
   draw(ctx) {
-    const E = this.engine, now = this.now(), W = E.width, H = E.height, safe = E.safe;
+    const E = this.engine, now = this.now(), W = E.width, H = E.height, safe = E.safe, B = safe.bars || { top: 0, bottom: 0 }; // B: space the nav bars hold (notifications stay clear of them)
     this.list = this.list.filter((n) => { if (!n.closing && now - n.t0 > n.life) n.closing = now; return !(n.closing && now - n.closing > 0.4); });
     this.rects = [];
     if (!this.list.length) return;
@@ -1730,14 +1731,14 @@ class NotifyCenter {
     for (const n of this.list) (groups[n.T.position] ||= []).push(n);
     for (const [pos, list] of Object.entries(groups)) {
       const bottom = pos.startsWith('bottom'), left = pos.endsWith('left'), right = pos.endsWith('right');
-      let y = bottom ? H - safe.bottom - 16 : pos === 'center' ? H * 0.3 : safe.top + 12;
+      let y = bottom ? H - safe.bottom - B.bottom - 16 : pos === 'center' ? H * 0.3 : safe.top + B.top + 12;
       for (const n of [...list].reverse()) {
         const T = n.T, look = T.look || 'card', w = T.width > 0 ? Math.min(+T.width, W - 16) : look === 'banner' ? W : look === 'pill' || look === 'toast' ? Math.min(W - 40, 340) : look === 'bubble' ? Math.min(W - 60, 300) : Math.min(W - 24, 380);
         const lines = wrapLines(ctx, n.text, w - (n.icon || n.image ? 90 : 36), T.textSize, look === 'pill' ? 1 : 2), hasBtns = n.buttons.length > 0;
-        const top = look === 'banner' && !bottom && pos !== 'center' ? safe.top : 0;
+        const top = look === 'banner' && !bottom && pos !== 'center' && !B.top ? safe.top : 0;
         const h = top + (look === 'pill' ? 46 : look === 'minimal' ? 40 : Math.max(62, 22 + (T.label ? 14 : 0) + T.titleSize * 1.3 + lines.length * T.textSize * 1.35)) + (hasBtns ? 42 : 0) + (look === 'picture' ? 30 : 0);
         const inK = clamp((now - n.t0) / 0.35, 0, 1), outK = n.closing ? clamp((now - n.closing) / 0.35, 0, 1) : 0;
-        const x0 = look === 'banner' ? 0 : left ? 12 + safe.left : right ? W - w - 12 - safe.right : (W - w) / 2, y0 = bottom ? y - h : look === 'banner' && !bottom && pos !== 'center' ? 0 : y;
+        const x0 = look === 'banner' ? 0 : left ? 12 + safe.left : right ? W - w - 12 - safe.right : (W - w) / 2, y0 = bottom ? y - h : look === 'banner' && !bottom && pos !== 'center' ? (B.top ? safe.top + B.top : 0) : y;
         ctx.save();
         const k = applyNotifyAnim(ctx, T, inK, outK, x0, y0, w, h, bottom, left, right, now - n.t0);
         drawNotifyCard(ctx, n, x0, y0, w, h, top, lines, now, E);
@@ -1831,6 +1832,110 @@ function drawNotifyCard(ctx, n, x, y, w, h, top, lines, now, E) {
 }
 const isLightColor = (c) => { try { const [r, g, b] = hexToRgb(c); return r * 0.299 + g * 0.587 + b * 0.114 > 0.62; } catch { return false; } };
 
+// ============================================================================
+// Phone notifications: the device's notification area. In an iOS / Android app (Capacitor, from
+// Build Settings › App stores) they can be scheduled and arrive while the game is closed; in a
+// browser they use the Notification API and only fire while the game is open.
+// ============================================================================
+const hashId = (s) => { let h = 0; for (const c of String(s ?? 'n')) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 || 1; };
+class PhoneNotify {
+  constructor(engine) { this.engine = engine; this.timers = new Map(); this.listening = false; this.asked = false; }
+  get native() {
+    const C = typeof window !== 'undefined' && window.Capacitor;
+    if (!C?.isNativePlatform?.()) return null;
+    return C.Plugins?.LocalNotifications || (C.isPluginAvailable?.('LocalNotifications') && C.registerPlugin ? (this.plugin ||= C.registerPlugin('LocalNotifications')) : null);
+  }
+  /** 'native' (app), 'web' (browser Notification API) or 'none'. */
+  get kind() { return this.native ? 'native' : typeof window !== 'undefined' && 'Notification' in window ? 'web' : 'none'; }
+  listen() {
+    if (this.listening) return; this.listening = true;
+    const N = this.native;
+    N?.addListener?.('localNotificationActionPerformed', (ev) => { const id = ev?.notification?.extra?.key || ''; this.opened(id); });
+    // browsers: the service worker tells the open game, or opens it with ?notification=ID
+    navigator.serviceWorker?.addEventListener?.('message', (ev) => { if (ev.data && ev.data.pocketNotify != null) this.opened(String(ev.data.pocketNotify)); });
+    const q = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('notification') : null;
+    if (q != null) setTimeout(() => this.opened(q), 600);
+  }
+  /** Android 8+: notifications go in a channel; ours pops up on screen (high importance). */
+  async channel(N) {
+    if (this.channelMade || !N.createChannel) return; this.channelMade = true;
+    try { await N.createChannel({ id: 'game', name: document.title || 'Game', description: 'Reminders and news from the game', importance: 4, visibility: 1, vibration: true }); } catch { /* iOS has no channels */ }
+  }
+  opened(id) { const s = this.engine.scene; s?.send('notification opened', id); if (id) s?.send('notification opened ' + id); }
+  /** Current permission: 'granted', 'denied', 'prompt' or 'unsupported'. */
+  async status() {
+    const N = this.native;
+    try { if (N) { const r = await N.checkPermissions(); return r.display === 'granted' ? 'granted' : r.display === 'denied' ? 'denied' : 'prompt'; } } catch { /* plugin missing */ }
+    if (this.kind === 'web') return Notification.permission === 'default' ? 'prompt' : Notification.permission;
+    return 'unsupported';
+  }
+  /** Ask the player for permission (browsers need a tap first). Resolves true when allowed. */
+  async ask() {
+    this.asked = true; this.listen();
+    const N = this.native;
+    try { if (N) { const r = await N.requestPermissions(); return r.display === 'granted'; } } catch { return false; }
+    if (this.kind !== 'web') return false;
+    if (Notification.permission === 'granted') return true;
+    if (Notification.permission === 'denied') return false;
+    try { return (await Notification.requestPermission()) === 'granted'; } catch { return false; }
+  }
+  /**
+   * Send or schedule one. o: { id, title, text, when: 'now' | 'in' | 'daily' | 'every', seconds, time: 'HH:MM', every: 'minute'|'hour'|'day'|'week' }.
+   * The same id replaces an earlier one. Resolves true if it was sent / scheduled.
+   */
+  async send(o = {}) {
+    const s = this.engine.scene, fill = (x) => (s ? fillTemplate(String(x ?? ''), s.vars) : String(x ?? ''));
+    const title = fill(o.title) || document.title || 'Game', body = fill(o.text), key = String(o.id || title), id = hashId(key), when = o.when || 'now';
+    if (!(await this.ask())) { s?.emit?.('phoneNotifyDenied', key); return false; }
+    await this.cancel(key, true);
+    const N = this.native;
+    if (N) {
+      const n = { id, title, body, extra: { key }, channelId: 'game' };
+      await this.channel(N);
+      if (when === 'in') n.schedule = { at: new Date(Date.now() + Math.max(1, +o.seconds || 1) * 1000), allowWhileIdle: true }; // (arrives on time even in Android's battery saver)
+      else if (when === 'daily') { const [h, m] = String(o.time || '20:00').split(':').map((x) => parseInt(x, 10) || 0); n.schedule = { on: { hour: clamp(h, 0, 23), minute: clamp(m, 0, 59) } }; }
+      else if (when === 'every') n.schedule = { every: o.every || 'day' };
+      try { await N.schedule({ notifications: [n] }); return true; } catch (err) { Log.add?.('warn', 'Phone notification failed: ' + err.message); return false; }
+    }
+    // browser: show now, or later while the game is still open
+    const fire = () => this.webShow(key, title, body);
+    if (when === 'now') return fire();
+    let ms = 0;
+    if (when === 'in') ms = Math.max(1, +o.seconds || 1) * 1000;
+    else if (when === 'daily') { const [h, m] = String(o.time || '20:00').split(':').map((x) => parseInt(x, 10) || 0), d = new Date(); d.setHours(h, m, 0, 0); if (d <= new Date()) d.setDate(d.getDate() + 1); ms = d - Date.now(); }
+    else if (when === 'every') ms = { minute: 60e3, hour: 3600e3, day: 864e5, week: 6048e5 }[o.every || 'day'] || 864e5;
+    const repeat = when === 'daily' ? 864e5 : when === 'every' ? ms : 0;
+    const t = setTimeout(function tick() { fire(); if (repeat) this?.timers?.set(key, setTimeout(tick.bind(this), repeat)); }.bind(this), Math.min(ms, 2147483000));
+    this.timers.set(key, t);
+    return true;
+  }
+  async webShow(key, title, body) {
+    if (this.kind !== 'web' || Notification.permission !== 'granted') return false;
+    const icon = document.querySelector('link[rel="apple-touch-icon"]')?.href || document.querySelector('link[rel="icon"]')?.href || undefined;
+    try { const reg = await navigator.serviceWorker?.getRegistration?.(); if (reg?.showNotification) { await reg.showNotification(title, { body, icon, tag: key, data: { key } }); return true; } } catch { /* fall back */ }
+    try { const n = new Notification(title, { body, icon, tag: key }); n.onclick = () => { window.focus?.(); this.opened(key); n.close(); }; return true; } catch { return false; }
+  }
+  /** Cancel one by id (blank = all of this game's). */
+  async cancel(key, quiet) {
+    if (key) { clearTimeout(this.timers.get(String(key))); this.timers.delete(String(key)); } else { for (const t of this.timers.values()) clearTimeout(t); this.timers.clear(); }
+    const N = this.native; if (!N) return;
+    try {
+      if (key) await N.cancel({ notifications: [{ id: hashId(key) }] });
+      else { const p = await N.getPending(); if (p?.notifications?.length) await N.cancel({ notifications: p.notifications.map((n) => ({ id: n.id })) }); }
+    } catch (err) { if (!quiet) Log.add?.('warn', 'Cancel failed: ' + err.message); }
+  }
+  /** Game Settings › Phone notifications: "come back" reminders and a daily reminder, re-planned each time the game opens. */
+  async planReminders(settings) {
+    const P = settings?.phoneNotify; if (!P) return;
+    const lines = String(P.reminders || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((l) => l[1]);
+    if (!lines.length && !P.dailyTitle) return;
+    if ((await this.status()) !== 'granted') return; // only once the player has allowed it
+    for (let i = 0; i < 8; i++) await this.cancel('comeback-' + i, true);
+    lines.slice(0, 8).forEach(([hours, title, text], i) => this.send({ id: 'comeback-' + i, title, text, when: 'in', seconds: Math.max(0.01, +hours || 24) * 3600 }));
+    if (P.dailyTitle) this.send({ id: 'daily-reminder', title: P.dailyTitle, text: P.dailyText || '', when: 'daily', time: P.dailyTime || '19:00' });
+  }
+}
+
 export class Input {
   constructor(engine, el) {
     this.engine = engine;
@@ -1840,6 +1945,7 @@ export class Input {
     this.pointers = new Map();
     this.taps = [];
     this.drag = { dx: 0, dy: 0 };
+    this.wheel = { dx: 0, dy: 0, x: 0, y: 0 }; // mouse wheel / trackpad this frame (Scroll Views)
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
@@ -1858,6 +1964,7 @@ export class Input {
     }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
+    el.addEventListener('wheel', (e) => { const p = this.local(e), k = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 400 : 1; this.wheel.dx += e.deltaX * k; this.wheel.dy += e.deltaY * k; this.wheel.x = p.x; this.wheel.y = p.y; e.preventDefault(); }, { passive: false });
     // iPhone only lets a page ask for motion access from a finger lifting (touchend) or a click, never from pointerdown / pointerup
     const askMotion = () => { if (this.enabled && (this.useTilt || this.wantMotion) && !this.tiltOn) this.requestMotion(); };
     el.addEventListener('touchend', askMotion); el.addEventListener('click', askMotion);
@@ -1875,7 +1982,7 @@ export class Input {
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
-    const btn = this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
+    const btn = this.engine.scene?.modal ? null : this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
@@ -2056,7 +2163,7 @@ export class Input {
   endFrame() {
     if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
     if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
-    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
+    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.wheel.dx = 0; this.wheel.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
   /** Forget fingers and presses. `full` (a new level) also turns tilt off until a component asks again. */
   reset(full = false) { this.pointers.clear(); this.stick = null; if (full) { this.useTilt = false; this.tiltBase = null; } this.endFrame(); }
 }
@@ -2315,6 +2422,7 @@ const fillTemplate = (str, vars, fmt) => String(str).replace(/\{(\w+)\}/g, (_, k
   const v = vars[k];
   if (fmt && typeof v === 'number') return fmtNumber(v, fmt, k);
   if (Array.isArray(v)) return v.map((q) => (typeof q === 'number' ? formatNumber(q) : q)).join(', ') || '—'; // lists read "1, 2, 3"
+  if (v && typeof v === 'object') return Object.entries(v).map(([a, b]) => `${a}: ${typeof b === 'number' ? formatNumber(b) : b}`).join(', ') || '—'; // dictionaries read "hp: 100, xp: 5"
   if (typeof v !== 'number') return v ?? '';
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
@@ -3218,7 +3326,7 @@ function drawMessage(ctx, scene, W, H, engine) {
     if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
   }
   if (line) lines.push(line);
-  const h = lines.length * (size + 6) + 24, y = scene.settings.messageTop ? engine.safe.top + H * 0.2 : H - engine.safe.bottom - 130 - h;
+  const h = lines.length * (size + 6) + 24, B = engine.safe.bars || { top: 0, bottom: 0 }, y = scene.settings.messageTop ? engine.safe.top + B.top + H * 0.2 : H - engine.safe.bottom - B.bottom - 130 - h;
   ctx.globalAlpha = Math.min(1, m.t * 3);
   ctx.fillStyle = 'rgba(15,15,25,0.85)';
   ctx.beginPath();
@@ -3232,9 +3340,77 @@ function drawMessage(ctx, scene, W, H, engine) {
 const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
 /** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
 export function uiOrigin(e, W, H, safe) {
-  const p = e.parentEnt;
-  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w, y: r.y - r.h / 2 + f.y * r.h }; }
-  return anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe);
+  const p = e.parentEnt, P = e._push;
+  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w + (P ? P.x : 0), y: r.y - r.h / 2 + f.y * r.h + (P ? P.y : 0) }; }
+  const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = safe?.bars;
+  if (B && !e._dock && !e.ignoreSafe && !e.ignoreBars) { // nav bars hold their edge of the screen: everything else is laid out in what's left
+    const a = e.anchor || 'top-left';
+    pt.x += a.includes('left') ? B.left : a.includes('right') ? -B.right : (B.left - B.right) / 2;
+    pt.y += a.startsWith('top') ? B.top : a.startsWith('bottom') ? -B.bottom : (B.top - B.bottom) / 2;
+  }
+  if (P) { pt.x += P.x; pt.y += P.y; }
+  return pt;
+}
+/** The screen area left for UI once the safe area and the nav bars are taken out. */
+export function uiArea(W, H, safe, e) {
+  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && safe?.bars || { top: 0, right: 0, bottom: 0, left: 0 };
+  const l = sf.left + B.left, t = sf.top + B.top;
+  return { l, t, w: Math.max(1, W - l - sf.right - B.right), h: Math.max(1, H - t - sf.bottom - B.bottom) };
+}
+/**
+ * Every frame: how much of each screen edge the nav bars hold (Bottom Nav, App Bar, an Icon Rail), so other UI is laid out
+ * clear of them; and, if the game asks, pushes UI elements apart so none overlap (Game Settings › Screen › Keep UI apart).
+ */
+function layoutUI(E, s) {
+  const S = E.safe, mode = s.settings.uiOverlap || 'bars', screen = E.paused ? 'paused' : s.state;
+  const b = { top: 0, right: 0, bottom: 0, left: 0 };
+  for (const e of s.entities) {
+    if (!e.ui || e.dead) continue;
+    for (const bh of e.behaviors) {
+      if (!bh.dock) continue;
+      e._dock = true;
+      if (mode === 'off' || !e.visible || e._parentHidden || e._clipHidden || (!E.editing && ![screen, 'always'].includes(uiScreenOf(e)))) continue;
+      const d = bh.dock(e, s);
+      if (d && d.size > 0) b[d.edge] = Math.max(b[d.edge], d.size);
+    }
+  }
+  S.bars = b.top || b.right || b.bottom || b.left ? b : null;
+  if (mode === 'push apart') pushApart(E, s, screen);
+  else if (E._pushed) { for (const e of s.entities) delete e._push; E._pushed = false; }
+}
+/** Keep UI apart: within each parent, a later element that overlaps an earlier one moves away from it (up or down, away from its anchor edge). */
+function pushApart(E, s, screen) {
+  const W = E.width, H = E.height, S = E.safe, groups = new Map();
+  for (const e of s.entities) {
+    delete e._push;
+    if (!e.ui || e.dead || !e.visible || e._parentHidden || e._dock || e.overlap || (e.stretch && e.stretch !== 'none') || e.ignoreSafe) continue;
+    if (!E.editing && ![screen, 'always'].includes(uiScreenOf(e))) continue;
+    if (E.editing && E.uiFilter && !E.uiFilter(e)) continue;
+    if (s.modal === e || e.behaviors.some((b) => b.uiAlways && !b.dock && b.open !== undefined)) continue; // menus and popups sit on top on purpose
+    const key = e.parentEnt?.ui ? e.parentEnt : null;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(e);
+  }
+  E._pushed = true;
+  const gap = 6;
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const placed = [];
+    for (const e of list) {
+      const r0 = uiBox(e, W, H, S);
+      if (r0.w <= 1 || r0.h <= 1 || (r0.w > W * 0.8 && r0.h > H * 0.5)) continue; // backgrounds and full-screen panels hold other things
+      const a = e.anchor || 'top-left', dir = a.startsWith('bottom') ? -1 : 1;
+      let dy = 0;
+      for (let pass = 0; pass < 6; pass++) {
+        const r = { x: r0.x, y: r0.y + dy, w: r0.w, h: r0.h };
+        const hit = placed.find((q) => Math.abs(q.x - r.x) * 2 < q.w + r.w && Math.abs(q.y - r.y) * 2 < q.h + r.h + gap * 2);
+        if (!hit) break;
+        dy = dir > 0 ? hit.y + hit.h / 2 + gap - (r0.y - r0.h / 2) : hit.y - hit.h / 2 - gap - (r0.y + r0.h / 2);
+      }
+      if (dy) e._push = { x: 0, y: dy };
+      placed.push({ x: r0.x, y: r0.y + dy, w: r0.w, h: r0.h });
+    }
+  }
 }
 /** UI scale (Canvas Scaler): screen pixels per UI unit. It rides along on the safe-area object. */
 export const uiK = (safe) => safe?.k || 1;
@@ -3268,8 +3444,7 @@ export function anchorPoint(anchor, W, H, safe) {
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
 function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
-  const sf = e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe;
-  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : { l: sf.left, t: sf.top, w: W - sf.left - sf.right, h: H - sf.top - sf.bottom };
+  const box = p ? { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h } : uiArea(W, H, safe, e);
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
   if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - m * 2)); e.x = (box.l + box.w / 2 - ao.x) / K; }
   if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - m * 2)); e.y = (box.t + box.h / 2 - ao.y) / K; }
@@ -3323,7 +3498,13 @@ function renderUI(engine, scene) {
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
-      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); drawEntity2D(ctx, e, scene.vars, scene.time);
+      if (scene.uiShift && !engine.editing) { let mine = false; for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === scene.uiShiftBy) { mine = true; break; } if (!mine) o.x += scene.uiShift; } // a side menu that pushes the screen aside
+      let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
+      if (pa <= 0.002) continue;
+      ctx.save();
+      if (!engine.editing) for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
+      ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
+      const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
       ctx.restore();
@@ -3355,7 +3536,7 @@ function renderUI(engine, scene) {
   const dim = (a = 0.6) => { ctx.fillStyle = withAlpha(TH.overlay, a); ctx.fillRect(0, 0, W, H); };
   const pulse = 0.6 + Math.sin(performance.now() / 300) * 0.4;
 
-  if (scene.state === 'play' && !engine.paused && !scene.loading) { // (a Loading Screen hides the touch controls)
+  if (scene.state === 'play' && !engine.paused && !scene.loading && !scene.modal) { // (a Loading Screen, side menu or popup hides the touch controls)
     ctx.save();
     ctx.globalAlpha = clamp((+scene.settings.controlsOpacity || 1) * (engine.prefs?.opacity ?? 1), 0.1, 1);
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
@@ -3443,7 +3624,7 @@ function renderUI(engine, scene) {
 export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
-  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification',
+  'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification',
   'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
@@ -4648,6 +4829,7 @@ function hitTest(s, e, sx, sy) {
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
+    for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren && !eng.editing) { const r = uiBox(q, eng.width, eng.height, eng.safe); if (Math.abs(sx - r.x) > r.w / 2 || Math.abs(sy - r.y) > r.h / 2) return false; } // cut off by a Scroll View: the hidden part can't be tapped
     return Math.abs(sx - o.x - e.x * k) <= hx + 8 && Math.abs(sy - o.y - e.y * k) <= hy + 8;
   }
   const ex = e.extents();
@@ -5026,11 +5208,44 @@ function drawNavIcon(ctx, icon, x, y, size, color, alpha = 1) {
   ctx.drawImage(c, x - size / 2, y - size / 2, size, size);
   ctx.globalAlpha /= alpha;
 }
+/** Hiding and showing a nav bar on its own: on scroll, after a while without touches, or on a message. */
+const BAR_HIDE_PARAMS = (msg) => [
+  { key: 'autoHide', label: 'Hides by itself', type: 'select', options: ['never', 'when scrolling down', 'after a few seconds', 'when scrolling or idle'], default: 'never', group: 'Hide & show', info: { never: 'Stays (unless a page hides it).', 'when scrolling down': 'Slides away while a Scroll View or List scrolls down, comes back when it scrolls up or reaches the top.', 'after a few seconds': 'Slides away when nobody touches the screen for a while; a touch brings it back.', 'when scrolling or idle': 'Both.' } },
+  { key: 'idleTime', label: 'Seconds without touches', type: 'number', default: 4, range: [1, 30], step: 0.5, group: 'Hide & show', showIf: { autoHide: ['after a few seconds', 'when scrolling or idle'] } },
+  { key: 'hideAnim', label: 'Goes away by', type: 'select', options: ['sliding', 'fading', 'sliding and fading'], default: 'sliding and fading', group: 'Hide & show' },
+  { key: 'hideSpeed', label: 'Hide / show speed', type: 'number', default: 14, range: [2, 40], step: 1, group: 'Hide & show' },
+  { key: 'barMessage', label: 'Listens for messages', type: 'text', default: msg, suggest: 'messages', group: 'Hide & show', infoText: `"${msg} hide", "${msg} show" and "${msg} toggle" (also the Show / Hide Nav Bars node).` },
+];
+class BarHider {
+  constructor(p) { this.p = p; this.byScroll = false; this.byMsg = null; this.idle = 0; }
+  start(s, e) {
+    const p = this.p, base = (p.barMessage || '').trim();
+    s.on('uiScroll', (d, who, frac) => { if (e.dead || !/scroll/.test(p.autoHide || '')) return; if (d < -1.5 && frac > 0.01) this.byScroll = true; else if (d > 1.5 || frac <= 0.01) this.byScroll = false; });
+    if (base) s.on('message', (m) => { if (e.dead) return; if (m === base + ' hide') this.byMsg = true; else if (m === base + ' show') { this.byMsg = false; this.idle = 0; this.byScroll = false; } else if (m === base + ' toggle') this.byMsg = !(this.byMsg ?? this.hidden); });
+  }
+  /** True when the bar wants to be hidden right now. */
+  update(s, dt) {
+    const p = this.p, inp = s.engine.input;
+    if (inp.downs.length || inp.pointers.size) this.idle = 0; else this.idle += dt;
+    const idleHide = /idle|few seconds/.test(p.autoHide || '') && this.idle > (+p.idleTime || 4);
+    if (this.byMsg === false && (idleHide || this.byScroll)) this.byMsg = null; // a new reason to hide wins over an old "show"
+    this.hidden = this.byMsg ?? (idleHide || this.byScroll);
+    return this.hidden;
+  }
+  /** Transform for the hide amount h (0–1): slide by dist and/or fade. */
+  apply(ctx, h, dist) {
+    if (h <= 0.001) return;
+    const a = this.p.hideAnim || 'sliding and fading';
+    if (a !== 'fading') ctx.translate(0, dist * h);
+    if (a !== 'sliding') ctx.globalAlpha *= 1 - h; else ctx.globalAlpha *= 1 - h * 0.6;
+  }
+}
+
 const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
-    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile' },
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
@@ -5055,17 +5270,34 @@ registerBehavior('uiBottomNav', {
     { key: 'centerMessage', label: 'Middle button sends message (blank = acts as a tab)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: { style: ['raised center'] } },
     { key: 'mode', label: 'When tapped', type: 'select', options: ['switch tab', 'open page (Back returns)'], default: 'switch tab', group: 'Behaviour' },
     { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour', infoText: 'e.g. game, levels: the bar slides away while the variable is one of these.' },
+    { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'otherPage', label: 'On a page that isn\'t a tab', type: 'select', options: ['no tab lit', 'keep the last tab lit', 'hide the bar'], default: 'keep the last tab lit', group: 'Behaviour', infoText: 'e.g. Settings opened from the Side Menu.' },
+    { key: 'reselect', label: 'Tapping the current tab again sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', infoText: 'e.g. scroll top. The message gets the page name too.' },
     { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Layout', infoText: 'Pages, buttons and pop-ups anchored to the bottom sit above the bar instead of under it.' },
+    { key: 'maxWidth', label: 'Widest the bar gets (0 = full width)', type: 'number', default: 0, range: [0, 900], step: 10, group: 'Layout', infoText: 'On tablets and sideways phones the bar stays this wide, in the middle.' },
+    { key: 'badgeStyle', label: 'Badges', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Colours' },
+    { key: 'activeLift', label: 'Selected icon lifts up', type: 'number', default: 0, range: [0, 12], step: 1, group: 'Animation' },
+    { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape', infoText: 'How tall the bar is. Icons and labels stay centred; change their sizes above.' },
+    { key: 'barOpacity', label: 'Bar opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Colours' },
+    ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
-    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => ({ label, icon, page: page || label.toLowerCase(), badge }));
-    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1;
-    const pulse = new Map(), ripples = [];
-    const hidden = (s) => !!p.hideOn && String(p.hideOn).split(',').map((x) => x.trim()).filter(Boolean).some((v) => sameVal(s.vars[p.var], v));
-    const activeIdx = (s) => T.findIndex((t) => sameVal(s.vars[p.var], t.page));
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => { const a = page || label.toLowerCase(); return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge } : { label, icon, page: a, badge }; });
+    let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1;
+    const pulse = new Map(), ripples = [], BH = new BarHider(p);
+    const sizeBar = (e) => { const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
+    const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
+    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || s.barsHidden > 0 || !!s.navBarsOff;
+    const activeIdx = (s) => {
+      const m = T.findIndex((t) => t.msg && s.openMenus?.has(t.msg)); if (m >= 0) return m; // a "menu" tab lights up while its menu is open
+      const i = tabIdx(s); if (i >= 0) return i;
+      return (p.otherPage || 'keep the last tab lit') === 'keep the last tab lit' && lastTab >= 0 && lastTab < T.length ? lastTab : -1;
+    };
     const floatingStyle = () => p.style === 'floating' || p.style === 'glass';
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
-      const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
+      const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
       const bw = w - m * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
       const n = Math.max(1, T.length), tw = bw / n;
       return { w, h, bx, by, bw, bh, tw, n, cx: (i) => bx + tw * (i + 0.5), cy: by + bh / 2 };
@@ -5073,12 +5305,22 @@ registerBehavior('uiBottomNav', {
     const showLabel = (i, on) => { const l = p.labels === 'auto' ? ({ minimal: 'never', bubble: 'selected only', 'raised center': 'always' }[p.style] || 'always') : p.labels; return l === 'always' || (l === 'selected only' && on); };
     return {
       uiAlways: true, var: p.var,
-      start(e, s) { T = tabs(); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
+      pageLabel(page, v) { if (v !== p.var) return null; const t = T.find((q) => q.page != null && sameVal(q.page, page)); return t ? t.label : null; },
+      /** The bar holds the bottom (or top) of the screen: other UI is laid out above it. */
+      dock(e, s) {
+        if (p.reserve === false || hide > 0.99) return null;
+        const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe), top = o.y + G.by * K, bot = o.y + (G.by + G.bh) * K;
+        if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide) };
+        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide) };
+      },
+      start(e, s) { T = tabs(); BH.start(s, e); sizeBar(e); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
       update(e, dt, s) {
-        const k = Math.min(1, dt * (+p.speed || 14));
-        hide += ((hidden(s) ? 1 : 0) - hide) * k;
+        const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
+        sizeBar(e);
+        hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
+        const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
         const a = activeIdx(s), G = geo(e);
         if (a >= 0) { const tx = G.cx(a); ind = ind == null || p.anim === 'none' ? tx : p.anim === 'fade' ? tx : ind + (tx - ind) * k; }
         if (a !== lastActive) { if (p.anim === 'fade') fade = 0; lastActive = a; }
@@ -5096,7 +5338,8 @@ registerBehavior('uiBottomNav', {
           if (p.haptics !== false) s.engine.vibrate(8);
           if (p.sound) s.engine.audio.sfx(p.sound);
           if (raised && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
-          if (sameVal(s.vars[p.var], tab.page)) continue;
+          if (tab.msg) { s.send(tab.msg); continue; }
+          if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } continue; }
           const cur = activeIdx(s);
           s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 });
           if (p.message) s.send(p.message);
@@ -5104,16 +5347,18 @@ registerBehavior('uiBottomNav', {
       },
       drawUI(ctx, e, s) {
         if (!T.length) T = tabs();
+        if (s.engine.editing) sizeBar(e);
         const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || act;
         if (hide > 0.99) return;
-        if (hide > 0.001) { ctx.translate(0, (G.bh + 40) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
         // the bar
         if (st !== 'minimal') {
           if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
           ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.barColor || '#12141f';
-          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill();
+          const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
+          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
           if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); }
           else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
@@ -5154,7 +5399,7 @@ registerBehavior('uiBottomNav', {
             ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
             ctx.restore();
           } else {
-            const iy = lab ? -lsz * 0.85 : 0;
+            const iy = (lab ? -lsz * 0.85 : 0) - (on ? +p.activeLift || 0 : 0);
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
             if (st === 'glass' && on) { ctx.shadowColor = act; ctx.shadowBlur = 12; }
             drawNavIcon(ctx, t.icon, 0, iy, isz, col, on || /^(art:|ui-|[a-z])/.test(t.icon) ? 1 : 0.5); // emoji can't be recoloured: dim them instead
@@ -5165,7 +5410,7 @@ registerBehavior('uiBottomNav', {
           // badge
           const bv = t.badge ? s.vars[t.badge] : null;
           if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
-            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = p.badgeStyle !== 'dot only' && Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
             ctx.fillStyle = p.badgeColor || '#ff3b5c'; ctx.strokeStyle = st === 'minimal' ? 'transparent' : p.barColor || '#12141f'; ctx.lineWidth = 2;
             if (!txt) { ctx.beginPath(); ctx.arc(bxp, byp, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
             else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(txt).width + 8); rr(bxp - 6, byp - 8, w, 16, 8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bxp - 6 + w / 2, byp + 0.5); }
@@ -5175,6 +5420,7 @@ registerBehavior('uiBottomNav', {
     };
   },
 });
+
 
 const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal'];
 registerBehavior('uiSideBar', {
@@ -5213,6 +5459,12 @@ registerBehavior('uiSideBar', {
     { key: 'closeOnPick', label: 'Close when an item is picked', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'startOpen', label: 'Start open', type: 'bool', default: false, group: 'Behaviour' },
     { key: 'mode', label: 'Items', type: 'select', options: ['switch page', 'open page (Back returns)'], default: 'switch page', group: 'Behaviour' },
+    { key: 'edgeWidth', label: 'Edge swipe area (px)', type: 'number', default: 22, range: [8, 80], step: 2, group: 'Behaviour' },
+    { key: 'openVar', label: 'Set variable while open (blank = none)', type: 'text', default: '', suggest: 'vars', group: 'Behaviour', infoText: 'e.g. menuOpen: true while the menu is open, for Show If or nodes.' },
+    { key: 'bars', label: 'With a Bottom Nav / App Bar', type: 'select', options: ['stay between them', 'cover them', 'hide them while open'], default: 'stay between them', group: 'Works with', info: { 'stay between them': 'The menu fits between the bars, which stay usable (tapping one closes the menu).', 'cover them': 'The menu goes over everything.', 'hide them while open': 'The bars slide away while the menu is open.' } },
+    { key: 'openMode', label: 'Opening', type: 'select', options: ['over the screen', 'push the screen'], default: 'over the screen', group: 'Works with', infoText: 'Push slides the rest of the UI aside, so nothing is hidden under the menu.' },
+    { key: 'button', label: 'Built-in ☰ button', type: 'select', options: ['none', 'top corner', 'bottom corner'], default: 'none', group: 'Works with', infoText: 'On its own side. Hidden while an App Bar shows its own ☰.' },
+    { key: 'buttonColor', label: 'Button colour', type: 'color', default: '#ffffff', group: 'Works with' },
   ],
   create(p) {
     const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
@@ -5221,40 +5473,72 @@ registerBehavior('uiSideBar', {
       const [label = '', icon = '', act = '', badge = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
       return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge } : { kind: 'page', label, icon, page: a, badge };
     });
-    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9; // age: seconds since it started opening (items flow in by it)
+    let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => st() === 'floating' || st() === 'glass';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     const inst = {
       uiAlways: true,
       get open() { return want; }, get rows() { return rows; },
-      set(e, s, v) { if (v === want) return; want = v; if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null; },
+      pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
+      set(e, s, v) {
+        if (v === want) return; want = v;
+        if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null;
+        (s.openMenus ||= new Set())[v ? 'add' : 'delete'](p.message); s.emit('menu', p.message, v);
+        if (p.bars === 'hide them while open') s.barsHidden = Math.max(0, (s.barsHidden || 0) + (v ? 1 : -1));
+        if (p.openVar) s.setVar(p.openVar, v);
+      },
+      /** Space a Bottom Nav / App Bar holds above and below the menu ('stay between them'). */
+      between(s) { const B = s.engine.safe.bars; return p.bars === 'stay between them' || p.bars === undefined ? { top: B?.top || 0, bottom: B?.bottom || 0 } : { top: 0, bottom: 0 }; },
       rect(s) { // the panel when fully open, in screen pixels
-        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0;
-        if (full()) return { x: 0, y: 0, w: W, h: H, m: 0 };
+        const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0, bt = inst.between(s), S = E.safe;
+        const top = bt.top ? S.top + bt.top : 0, bot = bt.bottom ? S.bottom + bt.bottom : 0; // with bars, the menu fits between them
+        if (full()) return { x: 0, y: top, w: W, h: H - top - bot, m: 0, top, bot };
         const w = Math.min(+p.width || 290, W - 56), x = p.side === 'right' ? W - m - w : m;
-        return { x, y: m + (floaty() ? E.safe.top : 0), w, h: H - m * 2 - (floaty() ? E.safe.top + E.safe.bottom : 0), m };
+        const y0 = top || (floaty() ? S.top : 0), y1 = bot || (floaty() ? S.bottom : 0);
+        return { x, y: m + y0, w, h: H - m * 2 - y0 - y1, m, top, bot };
+      },
+      /** An Icon Rail holds its side of the screen, so other UI stays clear of it. */
+      dock(e, s) { if (!rail()) return null; const m = floaty() ? +p.margin || 0 : 0; return { edge: p.side === 'right' ? 'right' : 'left', size: 72 + m }; },
+      /** The built-in ☰ button (screen pixels), or null. */
+      btn(s) {
+        if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
+        const E = s.engine, S = E.safe, B = S.bars || { top: 0, bottom: 0, left: 0, right: 0 }, left = p.side !== 'right', K = uiK(S);
+        const x = left ? S.left + B.left + 34 * K : E.width - S.right - B.right - 34 * K, y = p.button === 'bottom corner' ? E.height - S.bottom - B.bottom - 34 * K : S.top + B.top + 34 * K;
+        return { x, y, r: 24 * K };
       },
       start(e, s) {
         I = parse(p.items); F = parse(p.footer);
         e._dismiss = () => inst.set(e, s, false);
-        if (want) s.modal = e;
+        e._modalPass = () => { if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
+        if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
         s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
-      destroy(e, s) { if (s.modal === e) s.modal = null; },
+      destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {
-        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72;
+        const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72, edge = +p.edgeWidth || 22;
+        // the built-in ☰ button
+        const B = inst.btn(s);
+        if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
         // swipe from the edge / drag to close
-        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if (left ? d.x < 22 : d.x > E.width - 22) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
-        if (!drag && p.dragClose !== false && want && !full()) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w) { drag = { id: d.id, x0: d.x, t0: t, open: true, moved: false }; break; } }
+        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
+        if (!drag && want && ((p.dragClose !== false && !full()) || overflow > 0)) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w && d.y >= R.y && d.y <= R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, s0: scroll, open: true, moved: false, mode: null }; break; } }
         if (drag) {
           const q = inp.pointers.get(drag.id), span = Math.max(1, R.w - (rail() ? railW : 0));
-          if (q) { const dx = (q.x - drag.x0) * (left ? 1 : -1); if (Math.abs(dx) > 10) drag.moved = true; if (drag.moved || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1); }
-          else { if (drag.moved || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
+          if (q) {
+            const dx = (q.x - drag.x0) * (left ? 1 : -1), dy = q.y - (drag.y0 ?? q.y);
+            if (drag.open && !drag.mode && Math.hypot(dx, dy) > 10) drag.mode = Math.abs(dy) > Math.abs(dx) && overflow > 0 ? 'scroll' : p.dragClose !== false && !full() ? 'close' : 'none'; // up/down scrolls a long menu, sideways closes it
+            if (drag.mode) drag.moved = true;
+            if (drag.mode === 'scroll') scroll = clamp(drag.s0 - dy, 0, overflow);
+            else if (drag.mode === 'close' || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1);
+          } else { if (drag.mode === 'close' || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
         } else {
           const step = dt / Math.max(0.05, +p.duration || 0.28);
           t = want ? Math.min(1, t + step) : Math.max(0, t - step);
         }
+        scroll = clamp(scroll, 0, overflow);
         age += dt;
+        // "push the screen": the rest of the UI slides aside by as much as the menu is open
+        if (p.openMode === 'push the screen' && !rail()) { const sh = (left ? 1 : -1) * (R.w + R.m) * ease(t); if (sh || s.uiShiftBy === e) { s.uiShift = sh; s.uiShiftBy = sh ? e : null; } }
         // keep the entity the size of the open panel, so taps outside it close the menu (scene.modal)
         if (e.shape) { const k = uiK(E.safe) || 1; e.shape.w = R.w / k; e.shape.h = R.h / k; e.stretch = 'none'; placeUI(e, R.x + R.w / 2, R.y + R.h / 2, E.width, E.height, E.safe); }
         for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
@@ -5263,7 +5547,7 @@ registerBehavior('uiSideBar', {
         if (!visible || (drag && drag.moved)) return;
         for (const tp of inp.taps) {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
-          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
           if (!r) continue;
           const it = r.item; press.set(it, 1);
           if (p.haptics !== false) E.vibrate(8);
@@ -5279,12 +5563,17 @@ registerBehavior('uiSideBar', {
         const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
         if (!I.length && !F.length) { I = parse(p.items); F = parse(p.footer); }
         ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
-        const sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? 1 : ease(t), raw = editing ? 1 : t;
+        const shown = editing ? (E.editSelected === e.id ? 1 : 0) : t, sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? shown : ease(t), raw = shown; // the editor shows it open while it's selected
         rows = [];
+        const Bt = inst.btn(s);
+        if (Bt && tt < 0.99) { // the ☰ button fades out as the menu opens
+          ctx.save(); ctx.globalAlpha *= 1 - tt; ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.arc(Bt.x, Bt.y, Bt.r, 0, Math.PI * 2); ctx.fill();
+          drawNavIcon(ctx, 'menu', Bt.x, Bt.y, Bt.r * 1.0, p.buttonColor || '#ffffff'); ctx.restore();
+        }
         if (tt <= 0.001 && !rail()) return;
         const txt = p.text || '#e8eaf2', acc = p.accent || '#4fa3ff', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
         // dim behind
-        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.restore(); }
+        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, R.top || 0, W, H - (R.top || 0) - (R.bot || 0)); ctx.restore(); }
         // panel placement for this frame
         let w = R.w, x = R.x, alpha = 1, zoom = 1;
         if (rail()) { w = railW + (R.w - railW) * tt; x = left ? R.x : R.x + R.w - w; }
@@ -5355,12 +5644,171 @@ registerBehavior('uiSideBar', {
           return yy;
         };
         if (full()) { const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih * 1.25), 0); y = Math.max(y, R.y + (R.h - total) / 2); }
-        drawList(I, y);
-        if (F.length) { const fh = F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0), fy = R.y + R.h - safeB - fh - 10; if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        // the list scrolls when it doesn't fit above the footer, so items never run under it
+        const fh = F.length ? F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0) : 0, fy = R.y + R.h - safeB - fh - 10, listEnd = F.length ? fy - 8 : R.y + R.h - safeB - 6;
+        const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? (compact ? 6 : 32) : full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih), 0);
+        overflow = editing ? 0 : Math.max(0, total - (listEnd - y));
+        ctx.save(); ctx.beginPath(); ctx.rect(x - 40, y, w + 80, Math.max(0, listEnd - y)); ctx.clip();
+        const n0 = rows.length; drawList(I, y - (overflow ? scroll : 0));
+        for (let i = n0; i < rows.length; i++) rows[i].clipped = [y, listEnd];
+        ctx.restore();
+        if (overflow > 0) { const vh = listEnd - y, bh = Math.max(24, vh * vh / (vh + overflow)), by = y + (vh - bh) * (scroll / overflow); ctx.fillStyle = withAlpha(txt, 0.25); rr(left ? x + w - 5 : x + 2, by, 3, bh, 2); ctx.fill(); }
+        if (F.length) { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
         ctx.restore(); ctx.restore();
       },
     };
     return inst;
+  },
+});
+
+const APPBAR_STYLES = ['solid', 'transparent', 'glass', 'large title', 'centered'];
+registerBehavior('uiAppBar', {
+  label: 'App Bar', description: 'A top bar like a phone app: ☰ (opens the Side Menu) or ‹ Back on the left, a logo, the page title and subtitle, and action buttons with badges. It can hide itself while scrolling or when idle and come back. Works with Bottom Nav and Side Menu: the title follows the page, and other UI stays below it.',
+  params: [
+    { key: 'title', label: 'Title (blank = the page\'s name; variables in braces)', type: 'text', default: '' },
+    { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '' },
+    { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
+    { key: 'titles', label: 'Page titles (page = Title, one per line)', type: 'code', default: '', infoText: 'Optional. Otherwise the title comes from the Bottom Nav / Side Menu label for the page.' },
+    { key: 'left', label: 'Left button', type: 'select', options: ['back, else menu', 'menu', 'back', 'custom', 'none'], default: 'back, else menu', info: { 'back, else menu': '‹ when there is a page to go back to, otherwise ☰.', menu: 'Always ☰ (sends the menu message).', back: '‹ only when there is somewhere to go back to.', custom: 'Your own icon and message.', none: 'No button.' } },
+    { key: 'menuMessage', label: '☰ sends message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'leftIcon', label: 'Custom button icon', type: 'text', default: 'gear', showIf: { left: ['custom'] } },
+    { key: 'leftMessage', label: 'Custom button sends', type: 'text', default: 'settings', suggest: 'messages', showIf: { left: ['custom'] } },
+    { key: 'logo', label: 'Logo next to the title (icon, emoji or blank)', type: 'text', default: '' },
+    { key: 'actions', label: 'Right buttons (icon | message | badge variable)', type: 'code', default: 'bell | notifications | unread\nsearch | search' },
+    { key: 'titleTap', label: 'Tapping the title sends', type: 'text', default: '', suggest: 'messages', infoText: 'e.g. scroll top' },
+    { key: 'style', label: 'Style', type: 'select', options: APPBAR_STYLES, default: 'solid', info: { solid: 'A coloured bar.', transparent: 'No bar, just buttons and title over the game.', glass: 'See-through frosted bar.', 'large title': 'A tall bar with a big title on the left (iOS style). It can shrink to a normal bar when you scroll.', centered: 'Title in the middle.' } },
+    { key: 'collapse', label: 'Large title shrinks when scrolling', type: 'bool', default: true, showIf: { style: ['large title'] } },
+    { key: 'titleAlign', label: 'Title position', type: 'select', options: ['auto', 'left', 'center'], default: 'auto' },
+    { key: 'bg', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
+    { key: 'bg2', label: 'Gradient to (blank = none)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'barOpacity', label: 'Bar opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Colours' },
+    { key: 'text', label: 'Title', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'iconColor', label: 'Icons (blank = same as title)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'accent', label: 'Pressed / lit', type: 'color', default: '#4fa3ff', group: 'Colours' },
+    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'borderColor', label: 'Bottom line colour', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape' },
+    { key: 'titleSize', label: 'Title size', type: 'number', default: 19, range: [12, 40], step: 1, group: 'Size & shape' },
+    { key: 'titleWeight', label: 'Title weight', type: 'select', options: ['bold', 'heavy', 'normal'], default: 'bold', group: 'Size & shape' },
+    { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [14, 40], step: 1, group: 'Size & shape' },
+    { key: 'radius', label: 'Bottom corner radius', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Size & shape' },
+    { key: 'shadow', label: 'Shadow', type: 'select', options: ['always', 'once scrolled', 'never'], default: 'always', group: 'Size & shape', info: { 'once scrolled': 'Flat at the top of a list; a shadow appears once it scrolls (Material style).' } },
+    { key: 'border', label: 'Line along the bottom', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'fillSafe', label: 'Fill the notch area above', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Behaviour' },
+    ...BAR_HIDE_PARAMS('appbar'),
+    { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Feel' },
+    { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
+  ],
+  create(p) {
+    const acts = () => String(p.actions || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).slice(0, 4).map(([icon, msg = '', badge = '']) => ({ icon, msg, badge }));
+    const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
+    let A = acts(), hide = 0, press = new Map(), hits = [], scrolled = 0, shrink = 0;
+    const BH = new BarHider(p);
+    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
+    const canBack = (s) => Object.values(s.navStacks || {}).some((st) => st.length);
+    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'custom' ? 'custom' : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' ? null : 'menu'; };
+    const titleOf = (s) => {
+      if (p.title) return fillTemplate(String(p.title), s.vars);
+      const page = s.vars[p.var];
+      for (const l of String(p.titles || '').split('\n')) { const m = /^\s*([^=]+?)\s*=\s*(.*)$/.exec(l); if (m && sameVal(m[1], page)) return fillTemplate(m[2], s.vars); }
+      for (const q of s.entities) for (const b of q.behaviors || []) { const t = b.pageLabel?.(page, p.var); if (t) return t; }
+      const t = String(page ?? ''); return t ? t[0].toUpperCase() + t.slice(1) : '';
+    };
+    const big = () => p.style === 'large title';
+    let baseH = null; // the object's own height (before a large title shrinks it)
+    const fullH = (e) => +p.height > 0 ? +p.height : (baseH ??= e.extents().hy * 2);
+    const curH = (e) => { const H = fullH(e); return big() && p.collapse !== false ? H + (Math.min(H, 56) - H) * shrink : H; }; // a large title shrinks to a normal bar as you scroll
+    const sizeBar = (e) => { if (!e.shape) return; const h = curH(e); if (+p.height > 0 || (big() && p.collapse !== false)) { e.shape.h = h; if ((e.anchor || 'top').startsWith('top') && !e.parentEnt?.ui) { e.y = h / 2; if (e.local) e.local.y = e.y; } } };
+    const geo = (e) => { const ex = e.extents(); return { x: e.x - ex.hx, y: e.y - ex.hy, w: ex.hx * 2, h: ex.hy * 2 }; };
+    return {
+      uiAlways: true,
+      dock(e, s) {
+        if (p.reserve === false || hide > 0.99) return null;
+        const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe);
+        return { edge: 'top', size: Math.max(0, o.y + (G.y + G.h) * K - E.safe.top) * (1 - hide) };
+      },
+      start(e, s) {
+        BH.start(s, e); sizeBar(e);
+        s.on('uiScroll', (d, who, frac) => { if (!e.dead) { scrolled = frac; } });
+      },
+      update(e, dt, s) {
+        A = acts();
+        const autoHid = BH.update(s, dt);
+        hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
+        shrink += ((scrolled > 0.01 ? 1 : 0) - shrink) * Math.min(1, dt * 10);
+        sizeBar(e);
+        for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
+        const lk = leftKind(s), on = hide < 0.5 && e.visible && !e._parentHidden;
+        (s.appBarMenu ||= new Set())[on && lk === 'menu' ? 'add' : 'delete'](p.menuMessage || 'menu'); // a Side Menu's own ☰ steps aside
+        if (!on || s.engine.editing) return;
+        const E = s.engine, r = uiRect(s, e), K = uiK(E.safe);
+        for (const t of E.input.taps) {
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, h = hits.find((q) => (q.w ? Math.abs(lx - q.x) < q.w / 2 : Math.abs(lx - q.x) < q.r) && Math.abs(ly - q.y) < q.r + 6);
+          if (!h) continue;
+          press.set(h.key, 1); UK.tap(s, p);
+          if (h.key === 'left') { if (lk === 'back') s.navBack(); else if (lk === 'custom') s.send(p.leftMessage || ''); else s.send(p.menuMessage || 'menu'); }
+          else if (h.msg) s.send(h.msg);
+        }
+      },
+      drawUI(ctx, e, s) {
+        if (s.engine.editing) sizeBar(e);
+        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = p.text || '#ffffff', icol = p.iconColor || col, acc = p.accent || '#4fa3ff', isz = +p.iconSize || 24;
+        if (hide > 0.99) return;
+        BH.apply(ctx, hide, -(G.h + safeT + 10));
+        const R = +p.radius || 0, rr = (x, y, w, h) => { ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(x, y, w, h, [0, 0, R, R]); else ctx.rect(x, y, w, h); };
+        if (st !== 'transparent') {
+          const sh = p.shadow === 'never' || p.shadow === false ? 0 : p.shadow === 'once scrolled' ? clamp(scrolled * 40, 0, 1) : 1;
+          if (sh && st !== 'glass') { ctx.shadowColor = `rgba(0,0,0,${0.35 * sh})`; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
+          let fill = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.bg || '#12141f';
+          if (p.bg2 && st !== 'glass') { const g = ctx.createLinearGradient(G.x, 0, G.x + G.w, 0); g.addColorStop(0, p.bg || '#12141f'); g.addColorStop(1, p.bg2); fill = g; }
+          const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
+          ctx.fillStyle = fill; rr(G.x, G.y - safeT, G.w, G.h + safeT); ctx.fill(); ctx.shadowColor = 'transparent'; ctx.globalAlpha = ba;
+          if ((p.border !== false || st === 'glass') && !R) { ctx.fillStyle = p.borderColor || 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')'; ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
+        }
+        hits = [];
+        const bigNow = big() && (p.collapse === false || shrink < 0.99), rowH = Math.min(G.h, 56), rowY = big() ? G.y + rowH / 2 : G.y + G.h / 2, lk = leftKind(s);
+        const button = (key, icon, x, msg, badge) => {
+          const pr = press.get(key) || 0, lit = key === 'left' && lk === 'menu' && s.openMenus?.has(p.menuMessage || 'menu');
+          if (pr || lit) { ctx.save(); ctx.globalAlpha *= lit ? 0.25 : 0.2 * pr; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(x, rowY, isz * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
+          drawNavIcon(ctx, icon, x, rowY, isz, lit ? acc : icol);
+          const bv = badge ? s.vars[badge] : null;
+          if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
+            const n = +bv, t = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '', bx = x + isz * 0.45, by = rowY - isz * 0.45;
+            ctx.fillStyle = p.badgeColor || '#ff3b5c';
+            if (!t) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(t).width + 8); UK.rr(ctx, bx - w / 2, by - 8, w, 16, 8); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, bx, by + 0.5); }
+          }
+          hits.push({ key, x, y: rowY, r: Math.max(22, isz), msg });
+        };
+        let lx = G.x + 10;
+        if (lk) { button('left', lk === 'back' ? 'back' : lk === 'custom' ? p.leftIcon || 'gear' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
+        let rx = G.x + G.w - 28;
+        A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= 46; });
+        const title = titleOf(s), sub = p.subtitle ? fillTemplate(String(p.subtitle), s.vars) : '', tsz = +p.titleSize || 19, wt = { heavy: 900, normal: 600 }[p.titleWeight] || 800;
+        const center = p.titleAlign === 'center' || (p.titleAlign !== 'left' && st === 'centered'), room = center ? Math.max(40, Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2) : Math.max(40, rx + 22 - lx - 12);
+        const drawTitle = (x, y, size, align, alpha) => {
+          if (alpha <= 0.01) return;
+          ctx.save(); ctx.globalAlpha *= alpha; ctx.textAlign = align; ctx.textBaseline = 'middle';
+          let tx = x; ctx.font = `${wt} ${size}px ${THEME.font}`;
+          if (p.logo) { const lw = size * 1.15; drawNavIcon(ctx, p.logo, align === 'center' ? x - (ctx.measureText(title).width / 2) - lw * 0.7 : x + lw / 2, y - (sub ? size * 0.35 : 0), lw, icol); if (align !== 'center') tx += lw + 8; }
+          ctx.fillStyle = col; ctx.font = `${wt} ${size}px ${THEME.font}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; // (drawing an emoji logo changes these)
+          ctx.fillText(title, tx, y - (sub ? size * 0.35 : 0), room);
+          if (sub) { ctx.globalAlpha *= 0.7; ctx.font = `600 ${Math.max(10, Math.round(size * 0.62))}px ${THEME.font}`; ctx.fillText(sub, tx, y + size * 0.55, room); }
+          ctx.restore();
+        };
+        if (title || sub) {
+          const tAlign = center ? 'center' : 'left', tX = center ? G.x + G.w / 2 : lx + (lk ? 4 : 8);
+          if (big()) { // the big title sits under the buttons; it fades into a normal one as the bar shrinks
+            const k = p.collapse === false ? 0 : shrink;
+            drawTitle(G.x + 18, G.y + G.h - tsz * 1.05, Math.round(tsz * 1.5), 'left', 1 - k);
+            drawTitle(tX, rowY, tsz, tAlign, k);
+          } else drawTitle(tX, rowY, tsz, tAlign, 1);
+          if (p.titleTap) hits.push({ key: 'title', x: center ? G.x + G.w / 2 : lx + room / 2, w: room, y: big() && !bigNow ? rowY : big() ? G.y + G.h - tsz : rowY, r: Math.max(18, tsz), msg: p.titleTap });
+        }
+      },
+    };
   },
 });
 
@@ -6783,44 +7231,222 @@ registerBehavior('uiSelector', {
   },
 });
 
+/** Scrolling settings shared by Scroll View and List View. */
+const SCROLL_PARAMS = [
+  { key: 'fling', label: 'Flick to keep scrolling', type: 'select', options: ['smooth', 'short', 'off'], default: 'smooth', group: 'Scrolling' },
+  { key: 'bounce', label: 'Stretch at the ends', type: 'bool', default: true, group: 'Scrolling', infoText: 'Pulling past the first or last item stretches and springs back, like a phone list.' },
+  { key: 'snap', label: 'Stop on', type: 'select', options: ['anywhere', 'items', 'pages'], default: 'anywhere', group: 'Scrolling', info: { anywhere: 'Stops wherever the flick ends.', items: 'Settles so an item lines up with the start.', pages: 'One screenful at a time (onboarding, shop pages). The page number goes in the page variable.' } },
+  { key: 'pageVar', label: 'Page number goes in', type: 'text', default: '', suggest: 'vars', group: 'Scrolling', showIf: { snap: ['pages'] } },
+  { key: 'scrollbar', label: 'Scroll bar', type: 'select', options: ['while scrolling', 'always', 'never'], default: 'while scrolling', group: 'Scrolling' },
+  { key: 'barColor', label: 'Scroll bar colour', type: 'color', default: '#ffffff', group: 'Scrolling' },
+  { key: 'clip', label: 'Cut items off at the edges', type: 'bool', default: true, group: 'Scrolling', infoText: 'Items half in view are cut cleanly at the edge (in play).' },
+  { key: 'refresh', label: 'Pull down to refresh sends', type: 'text', default: '', suggest: 'messages', group: 'Scrolling', infoText: 'Blank = off. The spinner stays until the game sends the same message + " done" (e.g. refresh done), or 3 seconds.' },
+  { key: 'endMessage', label: 'Reaching the end sends', type: 'text', default: '', suggest: 'messages', group: 'Scrolling', infoText: 'e.g. load more, for lists that grow.' },
+  { key: 'posVar', label: 'Scroll position (0–1) goes in', type: 'text', default: '', suggest: 'vars', group: 'Scrolling' },
+  { key: 'scrollMessage', label: 'Listens for messages starting with', type: 'text', default: 'scroll', group: 'Scrolling', infoText: '"scroll top", "scroll bottom", "scroll to Item Name", "scroll next" / "scroll prev" (pages).' },
+];
+/**
+ * Drag-to-scroll physics for Scroll View and List View: momentum, rubber band, snapping, mouse wheel,
+ * pull to refresh, end-of-list message and a scroll bar. Offsets are in UI units (0 = the start).
+ */
+class Scroller {
+  constructor(p, axes) { this.p = p; this.axes = axes; this.off = { x: 0, y: 0 }; this.vel = { x: 0, y: 0 }; this.drag = null; this.moved = 0; this.goal = null; this.seen = -9; this.refreshing = 0; this.pull = 0; this.atEnd = false; this.range = { x: [0, 0], y: [0, 0] }; this.view = { x: 1, y: 1 }; this.page = 0; }
+  /** Scroll so this offset is reached (animated). */
+  to(axis, v) { this.goal = { ...(this.goal || {}), [axis]: v }; this.vel.x = this.vel.y = 0; }
+  frac(axis) { const [mn, mx] = this.range[axis]; return mn === mx ? 0 : clamp((mx - this.off[axis]) / (mx - mn), 0, 1); }
+  /** r: the view's screen rect; ranges: { x: [min, max], y: [min, max] } offsets allowed; snaps: { x: [...], y: [...] } offsets to settle on. */
+  update(s, e, dt, r, K, ranges, snaps, view) {
+    const inp = s.engine.input, p = this.p, now = s.engine.time ?? performance.now() / 1000, inside = (q) => Math.abs(q.x - r.x) <= r.w / 2 && Math.abs(q.y - r.y) <= r.h / 2;
+    this.range = ranges; this.view = view;
+    const live = e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing;
+    const start = { x: this.off.x, y: this.off.y };
+    if (live && this.drag == null) for (const d of inp.downs) if (inside(d)) { this.drag = { id: d.id, x: d.x, y: d.y, lock: null, from: { ...this.off } }; this.moved = 0; this.vel.x = this.vel.y = 0; this.goal = null; this.seen = now; }
+    const ptr = this.drag != null && inp.pointers.get(this.drag.id);
+    if (ptr) {
+      const dx = (ptr.x - this.drag.x) / K, dy = (ptr.y - this.drag.y) / K; this.drag.x = ptr.x; this.drag.y = ptr.y;
+      this.moved += Math.hypot(dx, dy);
+      if (!this.drag.lock && this.moved > 6 && this.axes.length === 1) this.drag.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'; // a sideways drag on a vertical list isn't a scroll (swipes, sliders inside)
+      for (const a of this.axes) {
+        if (this.axes.length === 1 && this.drag.lock && this.drag.lock !== a) continue;
+        const [mn, mx] = ranges[a], d = a === 'x' ? dx : dy, over = this.off[a] > mx ? this.off[a] - mx : this.off[a] < mn ? mn - this.off[a] : 0;
+        const res = p.bounce === false ? 0 : 1 / (1 + over / 60); // rubber band: harder to pull the further past the end
+        this.off[a] += d * (over && Math.sign(d) === Math.sign(this.off[a] > mx ? 1 : -1) ? res : 1);
+        if (p.bounce === false) this.off[a] = clamp(this.off[a], mn, mx);
+        this.vel[a] = this.vel[a] * 0.6 + (d / Math.max(dt, 1e-3)) * 0.4;
+      }
+      if (this.moved > 2) this.seen = now;
+      if (p.refresh && this.axes.includes('y')) this.pull = Math.max(0, this.off.y - ranges.y[1]);
+    } else {
+      if (this.drag) { // let go
+        const from = this.drag.from; this.drag = null;
+        if (p.refresh && this.pull > 70 && !this.refreshing) { this.refreshing = now; s.send(p.refresh); s.engine.vibrate?.(10); }
+        if (p.fling === 'off') this.vel.x = this.vel.y = 0;
+        if (p.snap && p.snap !== 'anywhere') for (const a of this.axes) { // settle on the nearest stop, a little ahead in the flick's direction
+          const list = snaps?.[a]; if (!list?.length) continue;
+          const ahead = this.off[a] + this.vel[a] * (p.snap === 'pages' ? 0.12 : 0.3);
+          let best = list[0]; for (const q of list) if (Math.abs(q - ahead) < Math.abs(best - ahead)) best = q;
+          if (p.snap === 'pages') { const cur = list.reduce((b, q) => (Math.abs(q - from[a]) < Math.abs(b - from[a]) ? q : b), list[0]), ci = list.indexOf(cur), dir = Math.abs(this.vel[a]) > 250 ? -Math.sign(this.vel[a]) : 0; best = dir ? list[clamp(ci + dir, 0, list.length - 1)] : best; }
+          this.to(a, best);
+        }
+      }
+      // mouse wheel / trackpad
+      const w = inp.wheel;
+      if (live && (w.dx || w.dy) && inside(w)) {
+        const a0 = this.axes.length === 1 ? this.axes[0] : null;
+        for (const a of this.axes) { const d = a0 ? (Math.abs(w.dy) > Math.abs(w.dx) ? w.dy : w.dx) : a === 'x' ? w.dx : w.dy; this.off[a] = clamp(this.off[a] - d / K, ranges[a][0], ranges[a][1]); }
+        this.goal = null; this.seen = now;
+      }
+      if (this.goal) {
+        for (const a of Object.keys(this.goal)) { const g = clamp(this.goal[a], ranges[a][0], ranges[a][1]); this.off[a] += (g - this.off[a]) * Math.min(1, dt * 12); if (Math.abs(g - this.off[a]) < 0.4) { this.off[a] = g; delete this.goal[a]; } }
+        if (!Object.keys(this.goal).length) this.goal = null;
+        this.seen = now;
+      } else for (const a of this.axes) {
+        const [mn, mx] = ranges[a], held = this.refreshing && a === 'y' ? mx + 56 : mx;
+        this.off[a] += this.vel[a] * dt;
+        this.vel[a] *= Math.pow(p.fling === 'short' ? 0.002 : 0.04, dt);
+        if (Math.abs(this.vel[a]) < 5) this.vel[a] = 0;
+        if (this.off[a] > held) { this.off[a] += (held - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] > 0) this.vel[a] = 0; }
+        else if (this.off[a] < mn) { this.off[a] += (mn - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] < 0) this.vel[a] = 0; }
+        if (Math.abs(this.vel[a]) > 5) this.seen = now;
+      }
+      this.pull = this.refreshing ? 56 : Math.max(0, this.off.y - ranges.y[1]);
+      if (this.refreshing && now - this.refreshing > 3) this.refreshing = 0;
+    }
+    if (this.moved > 8 || (this.drag && this.moved > 8)) inp.taps = inp.taps.filter((t) => !inside(t)); // a drag isn't a tap
+    // pages, position, end of the list
+    const a = this.axes.includes('y') ? 'y' : 'x';
+    if (p.snap === 'pages' && snaps?.[a]?.length) { const list = snaps[a]; let i = 0; for (let j = 0; j < list.length; j++) if (Math.abs(list[j] - this.off[a]) < Math.abs(list[i] - this.off[a])) i = j; if (i !== this.page) { this.page = i; if (p.pageVar) s.setVar(p.pageVar, i + 1); } }
+    if (p.posVar) { const f = Math.round(this.frac(a) * 1000) / 1000; if (s.vars[p.posVar] !== f) s.setVar(p.posVar, f); }
+    const [mn] = ranges[a], end = mn < ranges[a][1] - 1 && this.off[a] <= mn + 4;
+    if (end && !this.atEnd && p.endMessage) s.send(p.endMessage);
+    this.atEnd = end || (this.atEnd && this.off[a] <= mn + 40);
+    const dy = this.off.y - start.y, dx = this.off.x - start.x;
+    if (dx || dy) s.emit('uiScroll', a === 'y' ? dy : dx, e, this.frac(a)); // App Bar / Bottom Nav can hide on scroll
+  }
+  /** Listens for "scroll top / bottom / next / prev / to NAME" and "<refresh> done". */
+  listen(s, e, itemPos) {
+    const p = this.p, base = (p.scrollMessage || 'scroll').trim(), a = this.axes.includes('y') ? 'y' : 'x';
+    s.on('message', (m) => {
+      if (e.dead) return;
+      if (p.refresh && m === p.refresh + ' done') { this.refreshing = 0; return; }
+      if (!m.startsWith(base + ' ')) return;
+      const rest = m.slice(base.length + 1).trim(), [mn, mx] = this.range[a];
+      if (rest === 'top' || rest === 'start') this.to(a, mx);
+      else if (rest === 'bottom' || rest === 'end') this.to(a, mn);
+      else if (rest === 'next' || rest === 'prev') this.to(a, this.off[a] + (rest === 'next' ? -1 : 1) * this.view[a]);
+      else if (rest.startsWith('to ')) { const v = itemPos(rest.slice(3).trim()); if (v != null) this.to(a, v); }
+    });
+  }
+  /** Scroll bar and refresh spinner, drawn over the content (screen pixels). */
+  overlay(s, e, rectOf) {
+    const p = this.p;
+    (s.overlays ||= []).push((ctx) => {
+      if (e.dead || !e.visible || e._parentHidden || s.engine.editing) return;
+      const r = rectOf(), now = s.engine.time ?? performance.now() / 1000, show = p.scrollbar === 'always' ? 1 : p.scrollbar === 'never' ? 0 : clamp(1.2 - (now - this.seen) * 1.5, 0, 1);
+      ctx.save();
+      for (const a of this.axes) {
+        if (!show) break;
+        const [mn, mx] = this.range[a]; if (mx - mn < 1) continue;
+        const viewPx = a === 'y' ? r.h : r.w, content = this.view[a] + (mx - mn), len = Math.max(24, viewPx * this.view[a] / content), f = this.frac(a), pos = (viewPx - len - 8) * f + 4;
+        ctx.globalAlpha = 0.45 * show; ctx.fillStyle = p.barColor || '#ffffff'; ctx.beginPath();
+        if (a === 'y') UK.rr(ctx, r.x + r.w / 2 - 6, r.y - r.h / 2 + pos, 3.5, len, 2); else UK.rr(ctx, r.x - r.w / 2 + pos, r.y + r.h / 2 - 6, len, 3.5, 2);
+        ctx.fill();
+      }
+      if (p.refresh && this.pull > 2) { // pull-to-refresh spinner
+        const k = clamp(this.pull / 70, 0, 1), cx = r.x, cy = r.y - r.h / 2 + Math.min(this.pull, 70) * 0.5 + 6;
+        ctx.globalAlpha = k; ctx.strokeStyle = p.barColor || '#ffffff'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+        const spin = this.refreshing ? now * 7 : k * 5; ctx.arc(cx, cy, 10, spin, spin + (this.refreshing ? 4.4 : k * 5.5)); ctx.stroke();
+      }
+      ctx.restore();
+    });
+  }
+}
 registerBehavior('uiScroll', {
-  label: 'Scroll View', description: 'Drag to scroll the UI inside it (a list of items, a shop, levels…). Items outside its box are hidden.',
+  label: 'Scroll View', description: 'Drag (or flick, or use the mouse wheel) to scroll the UI inside it: lists, shops, level maps, long text. Items are cut off cleanly at its edges. It can line its items up for you, snap to items or pages, pull down to refresh and send a message at the end.',
   params: [
-    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal'], default: 'vertical' },
+    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal', 'both'], default: 'vertical' },
     { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
+    { key: 'arrange', label: 'Line up the items inside', type: 'select', options: ['as placed', 'one per row', 'grid'], default: 'as placed', info: { 'as placed': 'Items stay where you put them.', 'one per row': 'A list: items one after another (down, or across for a horizontal view), in Hierarchy order.', grid: 'Rows of items, the number of columns below.' } },
+    { key: 'spacing', label: 'Gap between items', type: 'number', default: 10, step: 1, showIf: { arrange: ['one per row', 'grid'] } },
+    { key: 'columns', label: 'Columns', type: 'number', default: 3, step: 1, range: [1, 12], showIf: { arrange: ['grid'] } },
+    { key: 'align', label: 'Line up along', type: 'select', options: ['middle', 'start', 'end'], default: 'middle', showIf: { arrange: ['one per row'] } },
+    ...SCROLL_PARAMS,
   ],
   create(p) {
-    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0, goal = null;
-    const v = p.direction !== 'horizontal';
-    const bounds = (s, e) => { // how far the content can move
-      const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
-      let lo = Infinity, hi = -Infinity;
-      for (const q of kids) { const b = base.get(q), ex = q.extents(), h = (v ? ex.hy : ex.hx) || 0; lo = Math.min(lo, (v ? b.y : b.x) - h); hi = Math.max(hi, (v ? b.y : b.x) + h); }
-      if (!kids.length) return [0, 0];
-      const view = (v ? r.h : r.w) / k, top = -view / 2 + pad, bottom = view / 2 - pad;
-      const min = Math.min(0, bottom - hi), max = Math.max(0, top - lo);
-      return [Math.min(min, max), max];
+    const axes = p.direction === 'both' ? ['x', 'y'] : p.direction === 'horizontal' ? ['x'] : ['y'];
+    const S = new Scroller(p, axes);
+    let kids = [], base = new Map(), sig = '';
+    const lay = (e) => { // positions in the view, with the scroll at 0
+      if (p.arrange !== 'one per row' && p.arrange !== 'grid') return;
+      const ex = e.extents(), W = ex.hx * 2, H = ex.hy * 2, pad = +p.padding || 0, gap = +p.spacing || 0, horiz = p.direction === 'horizontal';
+      if (p.arrange === 'grid') {
+        const cols = Math.max(1, Math.round(+p.columns || 3)), cw = (W - pad * 2 - gap * (cols - 1)) / cols;
+        let y = pad, rowH = 0;
+        kids.forEach((q, i) => { const c = i % cols; if (c === 0 && i) { y += rowH + gap; rowH = 0; } const qe = q.extents(), f = AFRAC(q.anchor); rowH = Math.max(rowH, qe.hy * 2); base.set(q, { x: pad + c * (cw + gap) + cw / 2 - f.x * W - (qe.ox || 0), y: y + qe.hy - f.y * H - (qe.oy || 0) }); });
+        return;
+      }
+      let at = pad;
+      for (const q of kids) {
+        const qe = q.extents(), f = AFRAC(q.anchor);
+        if (horiz) { const cy = p.align === 'start' ? pad + qe.hy : p.align === 'end' ? H - pad - qe.hy : H / 2; base.set(q, { x: at + qe.hx - f.x * W - (qe.ox || 0), y: cy - f.y * H - (qe.oy || 0) }); at += qe.hx * 2 + gap; }
+        else { const cx = p.align === 'start' ? pad + qe.hx : p.align === 'end' ? W - pad - qe.hx : W / 2; base.set(q, { x: cx - f.x * W - (qe.ox || 0), y: at + qe.hy - f.y * H - (qe.oy || 0) }); at += qe.hy * 2 + gap; }
+      }
+    };
+    // each child's box in the view's own units (centre relative to the view's centre), with the scroll at 0
+    const boxOf = (e, q) => { const b = base.get(q), ex = e.extents(), f = AFRAC(q.anchor), qe = q.extents(); return { x: b.x + (qe.ox || 0) + f.x * ex.hx * 2 - ex.hx, y: b.y + (qe.oy || 0) + f.y * ex.hy * 2 - ex.hy, hx: qe.hx, hy: qe.hy }; };
+    const ranges = (e) => {
+      const ex = e.extents(), pad = +p.padding || 0, out = { x: [0, 0], y: [0, 0] };
+      if (!kids.length) return out;
+      for (const a of ['x', 'y']) {
+        let lo = Infinity, hi = -Infinity;
+        for (const q of kids) { const b = boxOf(e, q), h = a === 'x' ? b.hx : b.hy, c = b[a]; lo = Math.min(lo, c - h); hi = Math.max(hi, c + h); }
+        const half = a === 'x' ? ex.hx : ex.hy, top = -half + pad, bottom = half - pad, max = Math.max(0, top - lo), min = Math.min(0, bottom - hi);
+        out[a] = [Math.min(min, max), max];
+      }
+      return out;
+    };
+    const snapsOf = (e, R) => {
+      const out = {};
+      for (const a of axes) {
+        const [mn, mx] = R[a], ex = e.extents(), half = a === 'x' ? ex.hx : ex.hy, pad = +p.padding || 0;
+        if (p.snap === 'pages') { const view = half * 2 - pad * 2, list = []; for (let o = mx; o > mn - 1; o -= view) list.push(Math.max(o, mn)); if (list[list.length - 1] > mn + 1) list.push(mn); out[a] = list; }
+        else if (p.snap === 'items') out[a] = [...new Set(kids.map((q) => { const b = boxOf(e, q), h = a === 'x' ? b.hx : b.hy; return clamp(-half + pad - (b[a] - h), mn, mx); }))].sort((u, v) => v - u);
+      }
+      return out;
+    };
+    const collect = (s, e) => { // children can come and go (spawned rows, removed items)
+      const now = uiKids(s, e), key = now.map((q) => q.id).join(',');
+      if (key === sig) return;
+      sig = key;
+      for (const q of now) if (!base.has(q)) base.set(q, { x: q.x - (axes.includes('x') ? S.off.x : 0), y: q.y - (axes.includes('y') ? S.off.y : 0) });
+      for (const q of [...base.keys()]) if (!now.includes(q)) base.delete(q);
+      kids = now;
     };
     return {
       uiAlways: true,
-      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); e._scrollTo = (f) => { goal = clamp(+f || 0, 0, 1); vel = 0; }; },
+      start(e, s) {
+        collect(s, e); lay(e);
+        e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
+        e._scrollTo = (f) => { const a = axes.includes('y') ? 'y' : 'x', [mn, mx] = S.range[a]; S.to(a, mx + (mn - mx) * clamp(+f || 0, 0, 1)); };
+        S.listen(s, e, (name) => { const q = kids.find((k) => k.name === name || k.tags?.includes?.(name)); if (!q) return null; const a = axes.includes('y') ? 'y' : 'x', b = boxOf(e, q), ex = e.extents(), half = a === 'x' ? ex.hx : ex.hy; return -half + (+p.padding || 0) - (b[a] - (a === 'x' ? b.hx : b.hy)); });
+        S.overlay(s, e, () => uiRect(s, e));
+      },
       update(e, dt, s) {
-        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
-        if (goal != null) { const [a, b] = bounds(s, e), want = b + (a - b) * goal; off += (want - off) * Math.min(1, dt * 10); if (Math.abs(want - off) < 0.5) { off = want; goal = null; } } // Scroll To node (0 = top, 1 = bottom)
-        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
-        const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { goal = null; const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
-        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
-        const [mn, mx] = bounds(s, e);
-        if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
-        else off = clamp(off, mn - 60, mx + 60);
-        if (moved > 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2)); // a drag isn't a tap
+        collect(s, e); lay(e);
+        const r = uiRect(s, e), K = uiK(s.engine.safe) || 1, R = ranges(e), ex = e.extents(), pad = +p.padding || 0;
+        S.update(s, e, dt, r, K, R, snapsOf(e, R), { x: ex.hx * 2 - pad * 2, y: ex.hy * 2 - pad * 2 });
         for (const q of kids) {
           const b = base.get(q); if (!b) continue;
-          if (v) q.y = b.y + off; else q.x = b.x + off;
+          q.x = b.x + (axes.includes('x') ? S.off.x : 0); q.y = b.y + (axes.includes('y') ? S.off.y : 0);
+          if (q.local) { q.local.x = q.x; q.local.y = q.y; }
           const qb = uiRect(s, q);
-          q._clipHidden = v ? qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 : qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2;
+          q._clipHidden = qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 || qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2; // fully outside: not drawn, not tappable
         }
+      },
+      drawUI(ctx, e, s) { // the editor shows the items lined up (drawn before its children, so they follow)
+        if (!s.engine.editing || (p.arrange !== 'one per row' && p.arrange !== 'grid')) return;
+        sig = ''; base.clear(); collect(s, e); lay(e);
+        for (const q of kids) { const b = base.get(q); if (b) { q.x = b.x; q.y = b.y; } }
       },
     };
   },
@@ -7066,9 +7692,11 @@ registerBehavior('uiList', {
     { key: 'numbered', label: 'Number the rows (1. 2. 3.)', type: 'bool', default: false, group: 'Look' },
     { key: 'arrow', label: 'Arrow on the right ›', type: 'bool', default: false, group: 'Look' },
     { key: 'appear', label: 'Rows appear', type: 'select', options: ['one after another', 'all at once'], default: 'one after another', group: 'Look' },
+    ...SCROLL_PARAMS,
   ],
   create(p) {
-    let rows = [], sig = null, off = 0, vel = 0, drag = null, last = 0, moved = 0, picked = 0;
+    let rows = [], sig = null, picked = 0;
+    const S = new Scroller(p, ['y']);
     const itemsOf = (s) => p.source === 'a list variable' ? (Array.isArray(s.vars[p.listVar]) ? s.vars[p.listVar] : String(s.vars[p.listVar] ?? '').split(',').map((x) => x.trim()).filter(Boolean))
       : p.source === 'numbers 1 to N' ? Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => i + 1) : String(p.items || '').split(',').map((x) => x.trim()).filter(Boolean);
     const geo = (e) => { const ex = e.extents(); return { W: (ex.hx || 150) * 2, H: (ex.hy || 150) * 2, rh: Math.max(16, +p.rowHeight || 52), gap: +p.spacing || 0, pad: +p.padding || 0 }; };
@@ -7091,7 +7719,13 @@ registerBehavior('uiList', {
     };
     return {
       uiAlways: true,
-      start(e, s) { picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); }; },
+      start(e, s) {
+        picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); };
+        e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
+        e._scrollTo = (f) => { const [mn, mx] = S.range.y; S.to('y', mx + (mn - mx) * clamp(+f || 0, 0, 1)); };
+        S.listen(s, e, (name) => { const i = rows.findIndex((q) => String(q.item) === name); if (i < 0) return null; const { rh, gap } = geo(e); return -i * (rh + gap); });
+        S.overlay(s, e, () => uiRect(s, e));
+      },
       update(e, dt, s) {
         const refs = [...String(p.row || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => k !== 'item' && k !== 'i'); // variables the rows show: rebuild when they change
         const items = itemsOf(s), key = JSON.stringify(items) + '|' + p.row + '|' + JSON.stringify(refs.map((k) => s.vars[k]));
@@ -7099,12 +7733,10 @@ registerBehavior('uiList', {
         if (!e.visible || e._parentHidden) return;
         const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, { H, rh, gap, pad } = geo(e);
         const content = pad * 2 + rows.length * rh + Math.max(0, rows.length - 1) * gap, mn = Math.min(0, H - content);
-        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = d.y; moved = 0; vel = 0; }
-        const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { const dd = (ptr.y - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = ptr.y; moved += Math.abs(dd); off = clamp(off, mn - 60, 60); }
-        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); if (off > 0) { off += (0 - off) * Math.min(1, dt * 12); vel = 0; } else if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } }
+        S.update(s, e, dt, r, k, { x: [0, 0], y: [mn, 0] }, { y: rows.map((_, i) => Math.max(mn, -i * (rh + gap))) }, { x: 1, y: H - pad * 2 });
+        const off = S.off.y;
         // tap a row (not a drag) to pick it
-        if (moved < 8) for (const t of inp.taps) {
+        if (S.moved < 8) for (const t of inp.taps) {
           if (Math.abs(t.x - r.x) > r.w / 2 || Math.abs(t.y - r.y) > r.h / 2) continue;
           const i = rows.findIndex((q) => !q._clipHidden && hitTest(s, q, t.x, t.y));
           if (i < 0) continue;
@@ -7113,12 +7745,11 @@ registerBehavior('uiList', {
           s.punch(rows[i], { sx: -0.04, sy: -0.08 }, 0.25, { add: true }); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
           if (p.message) s.send(p.message);
         }
-        if (moved >= 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2));
         for (const q of rows) {
           if (s.tweensOf(q).length) { q.baseY ??= q.y; } else q.y = q.baseY + off;
           if (q.local) q.local.y = q.y;
           const top = q.y - rh / 2, bot = q.y + rh / 2;
-          q._clipHidden = bot < rh * 0.5 || top > H - rh * 0.5; // more than half outside the list: hidden
+          q._clipHidden = p.clip !== false ? bot < 0 || top > H : bot < rh * 0.5 || top > H - rh * 0.5; // cut at the edge (or hidden once more than half is outside)
         }
       },
       destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
@@ -8009,6 +8640,7 @@ function runAction(s, e, p, other) {
     case 'pause game': s.engine.paused = !s.engine.paused; break;
     case 'resume game': s.engine.paused = false; break;
     case 'open settings': s.engine.openSettings(); break;
+    case 'phone notification': { const [title = '', text = ''] = String(v || '').split('|').map((x) => x.trim()); s.engine.phone.send({ title, text, when: +p.amount > 0 ? 'in' : 'now', seconds: +p.amount }); break; }
     case 'show notification': { const m = /^([\w-]+):\s*([\s\S]*)$/.exec(String(v || '')), known = m && notifyType(s.settings, m[1], s.engine.notifyTypes).name === m[1]; const [title = '', text = '', icon = ''] = String(known ? m[2] : v || '').split('|').map((x) => x.trim()); s.engine.notify({ type: known ? m[1] : 'default', title, text, icon: icon || undefined }); break; }
     case 'add score': s.addVar('score', p.amount); break;
     case 'win': s.win(); break;
@@ -9293,6 +9925,9 @@ export const NODE_TYPES = {
   moveToFinger: { cat: 'Move', label: 'Move To Finger', exec: true, outs: ['then'], inputs: [{ key: 'speed', type: 'number', default: 0 }] },
   lookAtFinger: { cat: 'Move', label: 'Look At Finger', exec: true, outs: ['then'] },
   openSettings: { cat: 'Game', label: 'Open Settings', exec: true, outs: ['then'] },
+  phoneNotify: { cat: 'Game', label: 'Phone Notification', exec: true, outs: ['then', 'not allowed'], params: [txt('title', 'Come back!', 'title ({variables})'), txt('text', 'Your energy is full', 'text'), opt('when', ['now', 'in', 'daily', 'every'], 'now', 'when'), num('amount', 1, 'amount (for “in”)'), opt('unit', ['seconds', 'minutes', 'hours', 'days'], 'hours', 'unit (for “in”)'), txt('time', '19:00', 'time HH:MM (for “daily”)'), opt('every', ['minute', 'hour', 'day', 'week'], 'day', 'repeat (for “every”)'), txt('id', '', 'id (same id replaces it)')] },
+  phoneCancel: { cat: 'Game', label: 'Cancel Phone Notification', exec: true, outs: ['then'], params: [txt('id', '', 'id (blank = all)')] },
+  phoneAsk: { cat: 'Game', label: 'Ask Notification Permission', exec: true, outs: ['allowed', 'not allowed'] },
   notify: { cat: 'Game', label: 'Notify', exec: true, outs: ['then', 'tapped'], params: [{ ...txt('type', 'default', 'type'), suggest: 'notifyTypes' }, txt('title', 'Well done!', 'title ({variables})'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)'), txt('buttons', '', 'buttons (Label > message, …)')] },
   celebrate: { cat: 'Game', label: 'Celebrate (confetti)', exec: true, outs: ['then'] },
   playerSetting: { cat: 'Game', label: 'Player Setting', value: 'number', params: [opt('setting', ['left-handed', 'joystick sensitivity', 'drag sensitivity', 'tilt sensitivity', 'look sensitivity', 'sound effects', 'music', 'vibration'], 'left-handed', 'setting')] },
@@ -9556,6 +10191,69 @@ Object.assign(NODE_TYPES, {
   uiEnabled: { cat: 'UI', label: 'Is Enabled', value: 'bool', params: [txt('object', 'Shop Button', 'object')] },
   safeArea: { cat: 'UI', label: 'Safe Area', value: 'number', params: [opt('side', ['top', 'bottom', 'left', 'right'], 'top', 'side')] },
 });
+// ---- more logic: loops with break, arrays of anything, dictionaries, events with values, delegates ----
+const listVal = (v) => { const t = String(v ?? ''); return t.trim() !== '' && Number.isFinite(+t) ? +t : t; }; // "12" → 12, "sword" stays text
+Object.assign(NODE_TYPES, {
+  whileLoop: { cat: 'Flow', label: 'While (repeat while true)', exec: true, outs: ['each', 'done'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('max', 1000, 'at most (rounds)')] },
+  repeatUntil: { cat: 'Flow', label: 'Repeat Until', exec: true, outs: ['each', 'done'], inputs: [{ key: 'stop when', type: 'bool', default: false }], params: [num('max', 1000, 'at most (rounds)')] },
+  breakLoop: { cat: 'Flow', label: 'Break (stop the loop)', exec: true, outs: [] },
+  continueLoop: { cat: 'Flow', label: 'Next Round (skip the rest)', exec: true, outs: [] },
+  switchText: { cat: 'Flow', label: 'Switch On Text', exec: true, outs: ['case 1', 'case 2', 'case 3', 'case 4', 'case 5', 'other'], inputs: [T_IN('text', 'shop')], params: [txt('cases', 'home, shop, map', 'cases (comma list, up to 5)')] },
+  arrAdd: { cat: 'Lists', label: 'Array: Add Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('where', ['at the end', 'at the start'], 'at the end', 'where')], inputs: [T_IN('value', 'sword')] },
+  arrInsert: { cat: 'Lists', label: 'Array: Insert At', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')], inputs: [N_IN('position', 1), T_IN('value', 'shield')] },
+  arrGetText: { cat: 'Lists', label: 'Array: Item At (text)', value: 'text', params: [txt('name', 'items', 'array')], inputs: [N_IN('position', 1)] },
+  arrJoin: { cat: 'Lists', label: 'Array As Text', value: 'text', params: [txt('name', 'items', 'array'), txt('sep', ', ', 'between items')] },
+  arrSplit: { cat: 'Lists', label: 'Text To Array', exec: true, outs: ['then'], params: [txt('name', 'items', 'into array'), txt('sep', ',', 'split at')], inputs: [T_IN('text', 'a, b, c')] },
+  arrCount: { cat: 'Lists', label: 'Array: Count Of', value: 'number', params: [txt('name', 'items', 'array')], inputs: [T_IN('value', 'sword')] },
+  arrSlice: { cat: 'Lists', label: 'Array: Copy Part', exec: true, outs: ['then'], params: [txt('name', 'items', 'from array'), txt('to', 'part', 'into array')], inputs: [N_IN('from', 1), N_IN('to position', 3)] },
+  arrConcat: { cat: 'Lists', label: 'Array: Join Two', exec: true, outs: ['then'], params: [txt('a', 'items', 'first'), txt('b', 'more', 'then'), txt('to', 'all', 'into array')] },
+  arrUnique: { cat: 'Lists', label: 'Array: Remove Duplicates', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')] },
+  arrFilter: { cat: 'Lists', label: 'Array: Keep Only', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['=', '≠', '>', '<', '≥', '≤', 'contains', 'starts with'], '>', 'items that are'), txt('to', '', 'into array (blank = same)')], inputs: [T_IN('value', '10')] },
+  arrMap: { cat: 'Lists', label: 'Array: Change Every Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['add', 'multiply', 'round', 'abs', 'UPPER', 'lower', 'add text before', 'add text after'], 'add', 'do')], inputs: [T_IN('value', '1')] },
+  arrSwap: { cat: 'Lists', label: 'Array: Swap Two', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')], inputs: [N_IN('a', 1), N_IN('b', 2)] },
+  arrIndexOfMax: { cat: 'Lists', label: 'Array: Position Of Biggest / Smallest', value: 'number', params: [txt('name', 'items', 'array'), opt('which', ['biggest', 'smallest'], 'biggest', 'which')] },
+  loopItemText: { cat: 'Lists', label: 'Loop Item (text)', value: 'text' },
+  mapSet: { cat: 'Lists', label: 'Dictionary: Set', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp'), T_IN('value', '100')] },
+  mapGet: { cat: 'Lists', label: 'Dictionary: Get', value: 'text', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapGetNum: { cat: 'Lists', label: 'Dictionary: Get Number', value: 'number', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapAdd: { cat: 'Lists', label: 'Dictionary: Add To', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'xp'), N_IN('amount', 1)] },
+  mapHas: { cat: 'Lists', label: 'Dictionary: Has Key', value: 'bool', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapRemove: { cat: 'Lists', label: 'Dictionary: Remove', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapClear: { cat: 'Lists', label: 'Dictionary: Clear', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')] },
+  mapSize: { cat: 'Lists', label: 'Dictionary: Size', value: 'number', params: [txt('name', 'stats', 'dictionary')] },
+  mapKeys: { cat: 'Lists', label: 'Dictionary: Keys To Array', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary'), txt('to', 'keys', 'into array')] },
+  mapForEach: { cat: 'Lists', label: 'Dictionary: For Each', exec: true, outs: ['each', 'done'], params: [txt('name', 'stats', 'dictionary')] },
+  loopKey: { cat: 'Lists', label: 'Loop Key', value: 'text' },
+  sendValue: { cat: 'Functions', label: 'Send Message With Value', exec: true, outs: ['then'], params: [{ ...txt('message', 'hit', 'message'), suggest: 'messages' }], inputs: [T_IN('value', '10')] },
+  eventText: { cat: 'Functions', label: 'Event Value (text)', value: 'text' },
+  waitEvent: { cat: 'Flow', label: 'Wait For Message', exec: true, outs: ['then', 'timed out'], params: [{ ...txt('message', 'ready', 'message'), suggest: 'messages' }, num('timeout', 0, 'give up after (sec, 0 = never)')] },
+  setDelegate: { cat: 'Functions', label: 'Set Delegate', exec: true, outs: ['then'], params: [txt('var', 'onHit', 'delegate variable'), txt('func', 'double', 'function name')] },
+  callDelegate: { cat: 'Functions', label: 'Call Delegate', exec: true, outs: ['then', 'empty'], params: [txt('var', 'onHit', 'delegate variable'), txt('store', '', 'put the result in variable (optional)')], inputs: [N_IN('a', 0), N_IN('b', 0), N_IN('c', 0)] },
+  callDelegateV: { cat: 'Functions', label: 'Call Delegate (value)', value: 'number', params: [txt('var', 'onHit', 'delegate variable')], inputs: [N_IN('a', 0), N_IN('b', 0), N_IN('c', 0)] },
+  bindMessage: { cat: 'Functions', label: 'Listen: Message → Function', exec: true, outs: ['then'], params: [{ ...txt('message', 'hit', 'when message'), suggest: 'messages' }, txt('func', 'double', 'run function'), opt('mode', ['start listening', 'stop listening'], 'start listening', 'do')] },
+  hasFunction: { cat: 'Functions', label: 'Function Exists', value: 'bool', params: [txt('func', 'double', 'function name')] },
+});
+// ---- app & device nodes: the phone around the game (switching apps, notifications, battery, menus) ----
+Object.assign(NODE_TYPES, {
+  onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
+  onAppShown: { cat: 'Events', label: 'On App Back', outs: ['then'] },
+  onNotifyOpened: { cat: 'Events', label: 'On Phone Notification Tapped', outs: ['then'], params: [txt('id', '', 'id (blank = any)')] },
+  onMenu: { cat: 'Events', label: 'On Side Menu Opened / Closed', outs: ['opened', 'closed'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
+  onOrientation: { cat: 'Events', label: 'On Screen Turned', outs: ['portrait', 'landscape'] },
+  onOnline: { cat: 'Events', label: 'On Connection Changed', outs: ['online', 'offline'] },
+  menuOpen: { cat: 'UI', label: 'Open / Close Side Menu', exec: true, outs: ['then'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }, opt('mode', ['toggle', 'open', 'close'], 'toggle', 'make it')] },
+  menuIsOpen: { cat: 'UI', label: 'Side Menu Is Open', value: 'bool', params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
+  navBars: { cat: 'UI', label: 'Show / Hide Nav Bars', exec: true, outs: ['then'], params: [opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make them')] },
+  vibratePattern: { cat: 'Device', label: 'Vibrate Pattern', exec: true, outs: ['then'], params: [txt('pattern', '80, 60, 80, 60, 200', 'buzz, pause, buzz… (ms)')] },
+  appBadge: { cat: 'Device', label: 'App Icon Badge', exec: true, outs: ['then'], inputs: [N_IN('count', 1)] },
+  fullScreen: { cat: 'Device', label: 'Full Screen', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off', 'toggle'], 'toggle', 'make it')] },
+  keepScreenOn: { cat: 'Device', label: 'Keep Screen On', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off'], 'on', 'make it')] },
+  batteryLevel: { cat: 'Device', label: 'Battery Level', value: 'number' },
+  deviceLanguage: { cat: 'Device', label: 'Phone Language', value: 'text', params: [opt('form', ['short (en)', 'full (en-GB)'], 'short (en)', 'form')] },
+  notifyAllowed: { cat: 'Device', label: 'Notifications Allowed', value: 'bool' },
+  everyNth: { cat: 'Flow', label: 'Every Nth Time', exec: true, outs: ['then', 'skip'], params: [num('n', 3, 'every')] },
+  firstTimeEver: { cat: 'Flow', label: 'First Time Ever', exec: true, outs: ['first time', 'seen before'], params: [txt('key', 'tutorial', 'name (remembered on this device)')] },
+});
 /** A ready-made dialog for Show Alert / Ask Yes / No: a dimmed backdrop, a themed panel, title, text and buttons. */
 function nodeDialog(s, o, onPick) {
   const TH = themeOf(s.settings), btnW = o.buttons.length > 1 ? 120 : 200;
@@ -9685,6 +10383,7 @@ export const LOGIC_ACTIONS = {
   win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
   gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
   nextLevel: { cat: 'Game', label: 'Next level', icon: 'flag', run: (c) => { if (c.s.engine.hasNextLevel()) c.s.win(); }, say: () => 'Next level' },
+  phoneNotify: { cat: 'Game', label: 'Phone notification', icon: 'bell', params: [txt('title', 'Come back!', 'title'), txt('text', '', 'text'), num('minutes', 0, 'in minutes (0 = now)'), txt('id', '', 'id (same id replaces it)')], run: (c, p) => { c.s.engine.phone.send({ id: p.id, title: p.title, text: p.text, when: +p.minutes > 0 ? 'in' : 'now', seconds: +p.minutes * 60 }); }, say: (p) => `Phone notification: ${p.title || ''}${+p.minutes > 0 ? ` in ${p.minutes} min` : ''}` },
   notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
 };
@@ -9921,6 +10620,8 @@ export function compileFormula(src) {
 /** Lists live in game variables as arrays (text shows them as 1, 2, 3). Positions start at 1. */
 const listOf = (s, name) => { const v = s.vars[name]; return Array.isArray(v) ? v : v == null || v === '' || v === 0 ? [] : [v]; };
 const listSave = (s, name, arr) => s.setVar(name, arr);
+/** Dictionaries (key → value) live in game variables as objects. */
+const mapOf = (s, name) => { const v = s.vars[name]; return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; };
 const savedVarKey = (s, name) => `pocket.var.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
 const OPS_CHANGE = { set: (a, b) => b, add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => (b ? a / b : a), min: Math.min, max: Math.max, power: (a, b) => a ** b, mod: (a, b) => (b ? ((a % b) + b) % b : a) };
 const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
@@ -10106,6 +10807,23 @@ registerBehavior('graph', {
         case 'gameValue': { const w = P('what'); return w === 'time left' ? +s.vars.time || 0 : w === 'level' ? s.level || 1 : w === 'levels' ? s.levelCount || 1 : +s.vars[w] || 0; }
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
+        case 'menuIsOpen': return !!s.openMenus?.has(P('menu') || 'menu');
+        case 'arrGetText': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1); return asText(a[i < 0 ? a.length + i : i - 1]); }
+        case 'arrJoin': return listOf(s, P('name')).map(asText).join(P('sep') ?? ', ');
+        case 'arrCount': { const v = listVal(I('value')); return listOf(s, P('name')).filter((x) => sameVal(x, v)).length; }
+        case 'arrIndexOfMax': { const a = listOf(s, P('name')).map(Number); if (!a.length) return 0; let b = 0; for (let i = 1; i < a.length; i++) if (P('which') === 'smallest' ? a[i] < a[b] : a[i] > a[b]) b = i; return b + 1; }
+        case 'loopItemText': return asText(ctx.item);
+        case 'loopKey': return asText(ctx.key);
+        case 'mapGet': { const m = mapOf(s, P('name')); return asText(m[asText(I('key'))]); }
+        case 'mapGetNum': { const m = mapOf(s, P('name')); return +m[asText(I('key'))] || 0; }
+        case 'mapHas': return Object.prototype.hasOwnProperty.call(mapOf(s, P('name')), asText(I('key')));
+        case 'mapSize': return Object.keys(mapOf(s, P('name'))).length;
+        case 'eventText': return asText(ctx.eventValue);
+        case 'callDelegateV': { const f = asText(s.vars[P('var')]); return f ? callFunction(s, e, ctx, f, { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }) : 0; }
+        case 'hasFunction': return g.nodes.some((q) => q.type === 'funcDef' && param(q, 'name') === P('func'));
+        case 'batteryLevel': { const E = s.engine; if (!E._batt && navigator.getBattery) { E._batt = 1; navigator.getBattery().then((b) => { E.battery = b; }).catch(() => {}); } return E.battery ? Math.round(E.battery.level * 100) : 100; }
+        case 'deviceLanguage': { const l = (typeof navigator !== 'undefined' && navigator.language) || 'en'; return String(P('form')).startsWith('full') ? l : l.slice(0, 2); }
+        case 'notifyAllowed': { const ph = s.engine.phone; if (!ph._checking) { ph._checking = true; ph.status().then((v) => { ph.perm = v; ph._checking = false; }); } return ph.perm === 'granted'; }
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
         case 'netInRoom': return s.engine.online.inRoom();
@@ -10169,7 +10887,7 @@ registerBehavior('graph', {
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
         case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
-        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))); for (let i = 0; i < c; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps }); return follow(n, 'done', ctx); }
+        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))), L = { stop: false }; for (let i = 0; i < c && !L.stop; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
         case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
         case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
         case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
@@ -10351,7 +11069,7 @@ registerBehavior('graph', {
           listSave(s, P('name'), a); break;
         }
         case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
-        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); a.forEach((v, i) => follow(n, 'each', { ...ctx, index: i + 1, item: v, steps: ctx.steps })); return follow(n, 'done', ctx); }
+        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000), L = { stop: false }; for (let i = 0; i < a.length && !L.stop; i++) follow(n, 'each', { ...ctx, index: i + 1, item: a[i], steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
         case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
         case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
         case 'callLater': {
@@ -10360,7 +11078,8 @@ registerBehavior('graph', {
         }
         case 'forRange': {
           const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
-          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps });
+          const L = { stop: false };
+          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000 && !L.stop; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L });
           return follow(n, 'done', ctx);
         }
         case 'repeatEvery': {
@@ -10404,6 +11123,9 @@ registerBehavior('graph', {
         case 'moveToFinger': { const f = fingerWorld(s); if (!f) break; const sp = +I('speed') || 0; if (!sp) { e.x = f.x; e.y = f.y; if (s.mode === '3d' && f.z != null) e.z = f.z; } else { const dx = f.x - e.x, dy = f.y - e.y, dz = s.mode === '3d' && f.z != null ? f.z - e.z : 0, d = Math.hypot(dx, dy, dz), st = Math.min(d, sp * (ctx.dt ?? 1 / 60)); if (d > 0) { e.x += dx / d * st; e.y += dy / d * st; e.z += dz / d * st; } } break; }
         case 'lookAtFinger': { const f = fingerWorld(s); if (!f) break; if (s.mode === '3d') e.ry = Math.atan2(-(f.x - e.x), -((f.z ?? e.z) - e.z)) / DEG; else e.rz = Math.atan2(f.y - e.y, f.x - e.x) / DEG; break; }
         case 'openSettings': s.engine.openSettings(); break;
+        case 'phoneNotify': { const later = { ...ctx, steps: 0 }, unit = { seconds: 1, minutes: 60, hours: 3600, days: 86400 }[P('unit')] || 3600; s.engine.phone.send({ id: P('id'), title: P('title'), text: P('text'), when: P('when'), seconds: (+P('amount') || 1) * unit, time: P('time'), every: P('every') }).then((ok) => { if (!e.dead && !ok) follow(n, 'not allowed', later); }); break; }
+        case 'phoneCancel': s.engine.phone.cancel(P('id')); break;
+        case 'phoneAsk': { const later = { ...ctx, steps: 0 }; s.engine.phone.ask().then((ok) => { if (!e.dead) follow(n, ok ? 'allowed' : 'not allowed', later); }); return; }
         case 'notify': { const later = { ...ctx, steps: 0 }, nn = s.engine.notify({ type: P('type') || 'default', title: P('title'), text: P('text'), icon: P('icon') || undefined, buttons: P('buttons') || undefined }); s.on('notifyTap', (q) => { if (q === nn && !e.dead) follow(n, 'tapped', later); }); break; }
         case 'celebrate': s.send('celebrate'); break;
         case 'pauseGame': { const m = P('mode'); s.engine.paused = m === 'pause' ? true : m === 'resume' ? false : !s.engine.paused; break; }
@@ -10457,6 +11179,52 @@ registerBehavior('graph', {
         case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
+        case 'whileLoop': case 'repeatUntil': {
+          const L = { stop: false }, max = clamp(Math.round(+P('max') || 1000), 1, 10000), until = n.type === 'repeatUntil';
+          for (let i = 0; i < max && !L.stop; i++) { const c = !!input(n, until ? 'stop when' : 'condition', ctx); if (until ? c : !c) break; follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); }
+          return follow(n, 'done', ctx);
+        }
+        case 'breakLoop': if (ctx.loop) ctx.loop.stop = true; return;
+        case 'continueLoop': return;
+        case 'switchText': { const t = asText(I('text')).trim().toLowerCase(), cs = String(P('cases') || '').split(',').map((x) => x.trim().toLowerCase()).slice(0, 5), i = cs.indexOf(t); return follow(n, i >= 0 ? 'case ' + (i + 1) : 'other', ctx); }
+        case 'arrAdd': { const a = [...listOf(s, P('name'))], v = listVal(I('value')); if (P('where') === 'at the start') a.unshift(v); else a.push(v); listSave(s, P('name'), a); break; }
+        case 'arrInsert': { const a = [...listOf(s, P('name'))], i = clamp(Math.round(+I('position') || 1) - 1, 0, a.length); a.splice(i, 0, listVal(I('value'))); listSave(s, P('name'), a); break; }
+        case 'arrSplit': { const sep = P('sep') ?? ','; listSave(s, P('name'), asText(I('text')).split(sep === '' ? '' : sep).map((x) => x.trim()).filter((x) => x !== '').map(listVal)); break; }
+        case 'arrSlice': { const a = listOf(s, P('name')), f = Math.max(1, Math.round(+I('from') || 1)), t = Math.round(+I('to position') || a.length); listSave(s, P('to') || 'part', a.slice(f - 1, Math.max(f - 1, t))); break; }
+        case 'arrConcat': listSave(s, P('to') || 'all', [...listOf(s, P('a')), ...listOf(s, P('b'))]); break;
+        case 'arrUnique': { const out = []; for (const v of listOf(s, P('name'))) if (!out.some((q) => sameVal(q, v))) out.push(v); listSave(s, P('name'), out); break; }
+        case 'arrFilter': {
+          const v = listVal(I('value')), op = P('op'), test = (x) => { const a = +x, b = +v, num = Number.isFinite(a) && Number.isFinite(b); switch (op) { case '=': return sameVal(x, v); case '≠': return !sameVal(x, v); case '>': return num && a > b; case '<': return num && a < b; case '≥': return num && a >= b; case '≤': return num && a <= b; case 'contains': return asText(x).toLowerCase().includes(asText(v).toLowerCase()); case 'starts with': return asText(x).toLowerCase().startsWith(asText(v).toLowerCase()); default: return true; } };
+          listSave(s, P('to') || P('name'), listOf(s, P('name')).filter(test)); break;
+        }
+        case 'arrMap': { const v = I('value'), op = P('op'), f = (x) => { switch (op) { case 'add': return (+x || 0) + (+v || 0); case 'multiply': return (+x || 0) * (+v || 0); case 'round': return Math.round(+x || 0); case 'abs': return Math.abs(+x || 0); case 'UPPER': return asText(x).toUpperCase(); case 'lower': return asText(x).toLowerCase(); case 'add text before': return asText(v) + asText(x); case 'add text after': return asText(x) + asText(v); default: return x; } }; listSave(s, P('name'), listOf(s, P('name')).map(f)); break; }
+        case 'arrSwap': { const a = [...listOf(s, P('name'))], i = Math.round(+I('a') || 1) - 1, j = Math.round(+I('b') || 1) - 1; if (a[i] !== undefined && a[j] !== undefined) { [a[i], a[j]] = [a[j], a[i]]; listSave(s, P('name'), a); } break; }
+        case 'mapSet': { const m = { ...mapOf(s, P('name')) }; m[asText(I('key'))] = listVal(I('value')); s.setVar(P('name'), m); break; }
+        case 'mapAdd': { const m = { ...mapOf(s, P('name')) }, k = asText(I('key')); m[k] = (+m[k] || 0) + (+I('amount') || 0); s.setVar(P('name'), m); break; }
+        case 'mapRemove': { const m = { ...mapOf(s, P('name')) }; delete m[asText(I('key'))]; s.setVar(P('name'), m); break; }
+        case 'mapClear': s.setVar(P('name'), {}); break;
+        case 'mapKeys': listSave(s, P('to') || 'keys', Object.keys(mapOf(s, P('name')))); break;
+        case 'mapForEach': { const L = { stop: false }; for (const [i, [k, v]] of Object.entries(mapOf(s, P('name'))).slice(0, 1000).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, index: i + 1, key: k, item: v, steps: ctx.steps, loop: L }); } return follow(n, 'done', ctx); }
+        case 'sendValue': s.send(P('message'), listVal(I('value'))); break;
+        case 'waitEvent': {
+          const later = { ...ctx, steps: 0 }, name = P('message'), to = +P('timeout') || 0; let done = false;
+          const fn = (m, data) => { if (done || e.dead || m !== name) return; finish(); follow(n, 'then', { ...later, eventValue: data }); };
+          const finish = () => { done = true; Promise.resolve().then(() => { const L = s.listeners.message || [], i = L.indexOf(fn); if (i >= 0) L.splice(i, 1); }); }; // stop listening once it has fired
+          s.on('message', fn);
+          if (to > 0) s.after(to, () => { if (!done && !e.dead) { finish(); follow(n, 'timed out', later); } });
+          return;
+        }
+        case 'setDelegate': s.setVar(P('var'), P('func') || ''); break;
+        case 'callDelegate': { const f = asText(s.vars[P('var')]); if (!f) return follow(n, 'empty', ctx); const v = callFunction(s, e, ctx, f, { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
+        case 'bindMessage': { const key = P('message'), fn = P('func'); if (P('mode') === 'stop listening') bindings.delete(key + '|' + fn); else bindings.set(key + '|' + fn, { message: key, func: fn }); break; }
+        case 'menuOpen': { const m = P('menu') || 'menu', md = P('mode'); s.send(md === 'open' ? m + ' open' : md === 'close' ? m + ' close' : m); break; }
+        case 'navBars': s.navBarsOff = P('mode') === 'toggle' ? !s.navBarsOff : P('mode') === 'hide'; break;
+        case 'vibratePattern': { const pat = String(P('pattern') || '').split(/[\s,]+/).map(Number).filter((x) => x >= 0 && x < 10000); if (pat.length) s.engine.vibrate(pat); break; }
+        case 'appBadge': { const c = Math.max(0, Math.round(+I('count') || 0)); try { if (c) navigator.setAppBadge?.(c)?.catch?.(() => {}); else navigator.clearAppBadge?.()?.catch?.(() => {}); } catch { /* not supported */ } break; }
+        case 'fullScreen': { const on = !!document.fullscreenElement, want = P('mode') === 'toggle' ? !on : P('mode') === 'on'; if (want && !on) document.documentElement.requestFullscreen?.().catch(() => {}); else if (!want && on) document.exitFullscreen?.().catch(() => {}); break; }
+        case 'keepScreenOn': { const E = s.engine, on = P('mode') !== 'off'; E.stayAwake = on; if (on) E.keepAwake(); else { E.wakeLock?.release?.().catch?.(() => {}); E.wakeLock = null; } break; }
+        case 'everyNth': { const c = (state.get(n.id) || 0) + 1; state.set(n.id, c); return follow(n, c % Math.max(1, Math.round(+P('n') || 1)) === 0 ? 'then' : 'skip', ctx); }
+        case 'firstTimeEver': { const key = 'pocket.first.' + (s.engine.gameKey || 'game') + '.' + (P('key') || 'x'); let seen = false; try { seen = !!localStorage.getItem(key); if (!seen) localStorage.setItem(key, '1'); } catch { /* private mode */ } return follow(n, seen ? 'seen before' : 'first time', ctx); }
         case 'setTextTo': s.setVar(P('name') || 'text', asText(I('text'))); break;
         case 'showText': { const k = P('object'), t = k ? s.find(k) || s.findAll(k)[0] : e; if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = asText(I('text')); } break; }
         case 'timerStart': { const k = P('name') || 'timer', sec = Math.max(0, +I('seconds') || 0), down = P('mode') !== 'count up (stopwatch)'; (s.namedTimers ||= {})[k] = { t: down ? sec : 0, total: sec, down, running: true }; s.setVar(k, down ? Math.ceil(sec) : 0); break; }
@@ -10536,7 +11304,7 @@ registerBehavior('graph', {
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
         case 'setObjLayer': { const w = P('target'), t = w === 'other' ? ctx.other : w === 'object' ? uiFind(s, e, P('object')) : e; if (t) s.setLayer(t, P('layer')); break; }
-        case 'forEachInLayer': { s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 })); return follow(n, 'done', ctx); }
+        case 'forEachInLayer': { const L = { stop: false }; for (const [i, q] of s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); } return follow(n, 'done', ctx); }
         case 'uiShow': {
           const t = uiFind(s, e, P('object')); if (!t) break;
           const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };
@@ -10590,7 +11358,7 @@ registerBehavior('graph', {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
           const list = s.entities.filter((q) => q !== e && !q.dead && !q.ui && !q.template && (n.type === 'overlap' ? tagOk(q, tag) : tag && q.has(tag)) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r)
             .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z)).slice(0, 100);
-          list.forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 }));
+          const L = { stop: false }; for (const [i, q] of list.entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); }
           if (n.type === 'forEachTag') return follow(n, 'done', ctx);
           return list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx);
         }
@@ -10607,17 +11375,23 @@ registerBehavior('graph', {
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
     const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
-    const timers = new Map();
+    const timers = new Map(), bindings = new Map();
     return {
       uiAlways: true,
       start(e, s) {
-        if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name); });
+        if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
+        if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });
         if (g.nodes.some((n) => n.type === 'onWin')) s.on('win', () => fire('onWin', e, s));
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onAppHidden', 'onAppShown')) s.on('appVisible', (v) => { if (!e.dead) fire(v ? 'onAppShown' : 'onAppHidden', e, s); });
+        if (has('onNotifyOpened')) s.on('message', (name, id) => { if (!e.dead && name === 'notification opened') fire('onNotifyOpened', e, s, null, (n) => !param(n, 'id') || param(n, 'id') === id); });
+        if (has('onMenu')) s.on('menu', (m, open) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onMenu' && (param(n, 'menu') || 'menu') === m) follow(n, open ? 'opened' : 'closed', { s, e, steps: 0 }); });
+        if (has('onOrientation')) s.on('orientation', (o) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onOrientation') follow(n, o, { s, e, steps: 0 }); });
+        if (has('onOnline')) s.on('online', (on) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onOnline') follow(n, on ? 'online' : 'offline', { s, e, steps: 0 }); });
         if (has('onTimerDone')) s.on('timerDone', (k) => { if (!e.dead) fire('onTimerDone', e, s, null, (n) => !param(n, 'name') || param(n, 'name') === k); });
         if (has('onShake', 'tiltValue')) s.engine.input.wantMotion = true;
         if (has('onMyVarChanged', 'whenMyVarReaches')) {
@@ -11077,6 +11851,7 @@ export class Engine {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
+    this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.pauseOnHide = opts.pauseOnHide !== false; // switching apps pauses the game (builds can turn this off)
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
@@ -11121,12 +11896,15 @@ export class Engine {
     this.ro = new ResizeObserver(() => this.resize());
     this.ro.observe(this.root);
     this.onVis = () => {
-      if (document.hidden) this.saveProgress();
+      if (!this.editing) this.scene?.emit('appVisible', !document.hidden);
+      if (document.hidden) { this.saveProgress(); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
     document.addEventListener('visibilitychange', this.onVis);
+    this.onNet = () => { if (!this.editing) this.scene?.emit('online', navigator.onLine !== false); };
+    window.addEventListener('online', this.onNet); window.addEventListener('offline', this.onNet);
     this.last = performance.now();
     this.running = true;
     this.frame = this.frame.bind(this);
@@ -11141,6 +11919,9 @@ export class Engine {
     const cs = getComputedStyle(this.safeProbe);
     this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
     this.updateSafe();
+    const orient = this.width > this.height ? 'landscape' : 'portrait';
+    if (this.orient && orient !== this.orient && !this.editing) this.scene?.emit('orientation', orient);
+    this.orient = orient;
     if (this.scene && !this.editing) this.render();
   }
 
@@ -11172,12 +11953,13 @@ export class Engine {
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     this.loadPrefs();
     this.setScene(this.factory());
+    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
     return this.scene;
   }
 
   buildLevel() {
     const first = this.levels[0], lv = this.levels[this.levelIndex], i = this.levelIndex;
-    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes } }; // the UI theme, fonts, online services and notification types are game-wide
+    const json = i === 0 ? lv : { ...lv, physicsLayers: first.physicsLayers, settings: { ...(lv.settings || {}), title: this.carry ? '' : lv.settings?.title || '', saveBest: first.settings?.saveBest || '', uiTheme: first.settings?.uiTheme, theme: first.settings?.theme, fonts: first.settings?.fonts, playfab: first.settings?.playfab, photon: first.settings?.photon, notifyTypes: first.settings?.notifyTypes, uiOverlap: first.settings?.uiOverlap } }; // the UI theme, fonts, online services and notification types are game-wide
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); if (s.state === 'title') s.state = 'play'; }
@@ -11245,16 +12027,17 @@ export class Engine {
   }
 
   layoutButtons() {
+    const B = this.safe.bars || { top: 0, right: 0, bottom: 0, left: 0 }, sf = { top: this.safe.top + B.top, right: this.safe.right + B.right, bottom: this.safe.bottom + B.bottom, left: this.safe.left + B.left }; // touch controls stay clear of nav bars too
     const s = this.scene, b = [], m = 24;
     if (s && !this.editing) {
-      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1) * (this.prefs?.controlScale || 1), bottom = this.height - this.safe.bottom - m - r;
+      const r = Math.min(44, this.width * 0.11) * (CONTROL_SCALE[s.settings.controlSize] || 1) * (this.prefs?.controlScale || 1), bottom = this.height - sf.bottom - m - r;
       // buttons go on the side opposite the joystick (left-handed players can swap)
       const left = this.stickSide === 'right';
-      const X = (off) => (left ? this.safe.left + m + r + off : this.width - this.safe.right - m - r - off);
+      const X = (off) => (left ? sf.left + m + r + off : this.width - sf.right - m - r - off);
       if (s.settings.jumpButton) b.push({ action: 'jump', label: s.settings.jumpLabel || 'JUMP', x: X(0), y: bottom, r, id: null });
       if (s.settings.actionButton) b.push({ action: 'action', label: s.settings.actionLabel || 'FIRE', x: X(s.settings.jumpButton ? r * 2.4 : 0), y: bottom - (s.settings.jumpButton ? r * 0.9 : 0), r, id: null });
       // D-pad or left/right arrows instead of a joystick
-      const c = s.settings.controls, DX = (off) => (left ? this.width - this.safe.right - m - off : this.safe.left + m + off);
+      const c = s.settings.controls, DX = (off) => (left ? this.width - sf.right - m - off : sf.left + m + off);
       if (c === 'arrows') {
         b.push({ action: 'dleft', label: '◀', x: DX(r), y: bottom, r, id: null });
         b.push({ action: 'dright', label: '▶', x: DX(r * 3.4), y: bottom, r, id: null });
@@ -11270,12 +12053,12 @@ export class Engine {
       // a hotbar row of square slots along the bottom middle (the block builder's blocks); it moves up when the screen is too narrow
       const hb = (s.customButtons || []).filter((cb) => cb.hotbar);
       if (hb.length) {
-        const side = m + r * 2 + 12, room = this.width - this.safe.left - this.safe.right - side * 2, fits = room / hb.length >= 34;
-        const size = Math.min(48, fits ? room / hb.length : (this.width - this.safe.left - this.safe.right - 16) / hb.length), cx = (this.safe.left + this.width - this.safe.right) / 2;
-        const y = fits ? this.height - this.safe.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
+        const side = m + r * 2 + 12, room = this.width - sf.left - sf.right - side * 2, fits = room / hb.length >= 34;
+        const size = Math.min(48, fits ? room / hb.length : (this.width - sf.left - sf.right - 16) / hb.length), cx = (sf.left + this.width - sf.right) / 2;
+        const y = fits ? this.height - sf.bottom - 10 - size / 2 : bottom - r - 16 - size / 2;
         hb.forEach((cb, i) => b.push({ ...cb, x: cx + (i - (hb.length - 1) / 2) * size, y, w: size - 4, h: size - 4, r: size / 2, id: null }));
       }
-      const top = this.safe.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
+      const top = sf.top + 30, both = s.settings.pauseButton && s.settings.muteButton;
       if (s.settings.pauseButton) b.push({ action: 'pause', label: 'II', x: this.width / 2 + (both ? 26 : 0), y: top, r: 20, id: null });
       if (s.settings.muteButton) b.push({ action: 'mute', label: '♪', x: this.width / 2 - (both ? 26 : 0), y: top, r: 20, id: null });
     }
@@ -11393,9 +12176,10 @@ export class Engine {
     const m = s.modal;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
     const inp = this.input, r = m._modalRect?.() || uiBox(m, this.width, this.height, this.safe); // a component can claim the whole screen while open
-    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2;
+    const pass = m._modalPass?.() || []; // areas whose taps still reach the game (a side menu between nav bars)
+    const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2, through = (t) => pass.some((q) => t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h);
     const out = inp.taps.some((t) => !inside(t));
-    inp.taps = inp.taps.filter(inside); inp.downs = inp.downs.filter(inside);
+    inp.taps = inp.taps.filter((t) => inside(t) || through(t)); inp.downs = inp.downs.filter((t) => inside(t) || through(t));
     if (out) m._dismiss?.();
   }
 
@@ -11410,6 +12194,8 @@ export class Engine {
   onFirstGesture() {
     const s = this.scene;
     if (!s || this.editing) return;
+    const P = this.levels?.[0]?.settings?.phoneNotify;
+    if (P?.ask === 'first tap' && !this.phone.asked) this.phone.ask().then((ok) => ok && this.phone.planReminders(this.levels?.[0]?.settings)); // browsers only allow the question from a tap
     if (s.settings.fullscreen && !document.fullscreenElement) {
       document.documentElement.requestFullscreen?.().then(() => {
         if (s.settings.orientation !== 'any') screen.orientation?.lock?.(s.settings.orientation).catch(() => {});
@@ -11527,7 +12313,8 @@ export class Engine {
 
   update(dt) {
     const s = this.scene, inp = this.input;
-    if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; }
+    const bk = this.safe.bars ? `${Math.round(this.safe.bars.top)},${Math.round(this.safe.bars.bottom)},${Math.round(this.safe.bars.left)},${Math.round(this.safe.bars.right)}` : '';
+    if (this.width !== this.lastLayoutW || this.height !== this.lastLayoutH || bk !== this.lastLayoutB) { this.layoutButtons(); this.lastLayoutW = this.width; this.lastLayoutH = this.height; this.lastLayoutB = bk; }
     if (inp.pressed('btn:mute')) { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); }
     if (s.vars.volume != null) this.audio.volume = clamp((+s.vars.volume || 0) / 100, 0, 1); // a Slider bound to {volume} (0–100) controls sound
     if (!this.editing) this.fitScreen();
@@ -11540,6 +12327,7 @@ export class Engine {
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
       this.runUIOnly(s, dt);
+      this.stepUITweens(s, dt); // menus keep animating while the game is paused
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
@@ -11591,6 +12379,12 @@ export class Engine {
     if (s.kids.length) s.syncHierarchy(false);
   }
 
+  /** Only the tweens moving UI (pages, popups, menus): used while the game is paused. */
+  stepUITweens(s, dt) {
+    let any = false;
+    for (const tw of s.tweens) { const t = tw.target; if (t && !t.dead && (t.ui || t.e?.ui || t._uiTween)) { tw.update(dt); any = true; } } // UI entities and the dimming behind side bars / popups
+    if (any && s.tweens.some((t) => t.done)) s.tweens = s.tweens.filter((t) => !t.done);
+  }
   stepEffects(dt) {
     const s = this.scene;
     if (s.namedTimers && s.state === 'play' && !s.loading) for (const [k, t] of Object.entries(s.namedTimers)) { // Start Timer nodes; the timer's name is also a variable ({timer} in text)
@@ -11629,6 +12423,7 @@ export class Engine {
     const k = this.editing && !this.safeOverride?.scale ? 1 : uiScaleFor(this.width, this.height, st, this.scene?.view);
     const S = this.safe;
     S.top = side('top'); S.right = side('right'); S.bottom = side('bottom'); S.left = side('left'); S.k = k;
+    if (this.scene) layoutUI(this, this.scene);
     return S;
   }
 
@@ -11688,6 +12483,7 @@ export class Engine {
     this.running = false;
     this.ro.disconnect();
     document.removeEventListener('visibilitychange', this.onVis);
+    window.removeEventListener('online', this.onNet); window.removeEventListener('offline', this.onNet);
     this.root.remove();
   }
 }

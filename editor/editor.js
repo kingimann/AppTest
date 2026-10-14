@@ -1573,6 +1573,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 
 function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
+  engine.editSelected = selectedId; // a Side Menu previews open only while it's selected
   if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   renderHierarchy();
   renderInspector();
@@ -2703,6 +2704,8 @@ function renderInspector() {
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
       !inParent && C('ignoreSafe', { label: 'Ignore safe area (go under the notch)', type: 'bool', def: false, structure: true }),
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
+      !inParent && !j.ignoreSafe && !(j.behaviors || []).some((b) => ['uiBottomNav', 'uiAppBar', 'uiSideBar'].includes(b.type)) && C('ignoreBars', { label: 'Go under the nav bars', type: 'bool', def: false, structure: true, infoText: 'Normally UI stays clear of a Bottom Nav, App Bar or Icon Rail. Turn this on for backgrounds that should fill the whole screen.' }),
+      (root.settings?.uiOverlap === 'push apart') && C('overlap', { label: 'Allowed to overlap other UI', type: 'bool', def: false, structure: true, infoText: 'Game Settings › Screen keeps UI apart; this element may sit on top of others (badges, labels on pictures).' }),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
       h('div', { class: 'btns' },
@@ -3057,6 +3060,7 @@ function applyTheme(list) {
   const byId = new Map(list.map((e) => [e.id, e])), onButton = (e) => btn(e) || (e.parent && btn(byId.get(e.parent) || ent(e.parent) || {}));
   for (const e of list) {
     for (const b of e.behaviors || []) if (b.type === 'uiBottomNav') { b.activeColor = T.accent; b.barColor = T.panel; b.idleColor = mixHex(T.text, T.panel, 0.4); }
+    for (const b of e.behaviors || []) if (b.type === 'uiAppBar') { b.accent = T.accent; b.bg = T.panel; b.text = T.text; }
     for (const b of e.behaviors || []) if (b.type === 'uiSideBar') { b.accent = T.accent; b.bg = T.panel; b.text = T.text; }
     if (e.text) { e.text.font = 'theme'; e.text.color = onButton(e) ? (isLight(T.accent) ? '#1b1b1b' : '#ffffff') : T.text; delete e.text.color2; }
     if (e.shape && e.shape.type !== 'emoji' && e.shape.fill) {
@@ -3186,6 +3190,21 @@ function renderSceneSettings(box) {
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const name = uniqueNotifyName('custom'); gameSettings().notifyTypes = [...(gameSettings().notifyTypes || []), { name, look: 'card', icon: '🔔' }]; changed({ inspector: true }); pushHistory(); openNotifyEditor(name); } }, icon('plus'), 'New type'),
       h('button', { class: 'btn', onclick: () => ['default', 'achievement', 'reward', 'warning'].forEach((n, i) => setTimeout(() => testNotify(n), i * 450)) }, icon('play'), 'Test a few')),
   ], { icon: 'bell', key: 's-notify', summary: `${allNotifyTypes().length} types` }));
+  const G = (path, spec) => control(() => game, 'settings.phoneNotify.' + path, spec), PN = game.settings?.phoneNotify || {};
+  box.append(comp('Phone Notifications', [
+    h('p', { class: 'desc' }, 'Real notifications in the phone\'s notification area, like "Your energy is full!". Send them from the Phone Notification node or a trigger\'s "Phone notification". Tapping one opens the game and sends the message notification opened (and notification opened ID).'),
+    h('div', { class: 'obox info' }, 'Full support (scheduled, arrives while the game is closed) is in iOS / Android apps made with Build Settings › App stores. On a website (menu › Build Web App) they appear while the game is open; on iPhone once it is added to the Home Screen.'),
+    G('ask', { label: 'Ask the player', type: 'select', options: [['first tap', 'On their first tap'], ['when asked', 'When a node asks'], ['never', 'Only when one is sent']], def: 'when asked', infoText: 'Phones need the player to allow notifications once. Asking at a good moment (after a win, from a "Remind me" button) gets more yeses.' }),
+    G('reminders', { label: 'Come-back reminders', type: 'code', def: '', infoText: 'One per line: hours | Title | text. Counted from when the player leaves the game, and replaced each time they come back. E.g. 24 | We miss you! | Your daily chest is ready' }),
+    G('dailyTitle', { label: 'Daily reminder title', type: 'text', def: '' }),
+    PN.dailyTitle && [
+      G('dailyText', { label: 'Daily reminder text', type: 'text', def: '' }),
+      G('dailyTime', { label: 'Time (HH:MM)', type: 'text', def: '19:00' }),
+    ],
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'This is a test notification 🔔', when: 'now' }); toast(ok ? 'Sent. Check your notifications' : engine.phone.kind === 'none' ? 'This browser has no notifications' : 'Notifications are blocked for this site'); } }, icon('bell'), 'Test on this device'),
+      h('button', { class: 'btn', onclick: async () => { const ok = await engine.phone.send({ id: 'editor-test', title: game.name || 'My game', text: 'Sent 10 seconds later', when: 'in', seconds: 10 }); toast(ok ? 'Coming in 10 seconds (keep this tab open)' : 'Notifications are blocked for this site'); } }, icon('play'), 'In 10 seconds')),
+  ], { icon: 'bell', key: 's-phone', summary: PN.reminders || PN.dailyTitle ? 'reminders on' : '' }));
   box.append(comp('Screen & Safe Area', [
     h('p', { class: 'desc' }, 'Phones come in many sizes, and many have a notch, rounded corners or a home bar. UI anchored to corners and edges stays inside the safe area, and grows or shrinks to suit the screen.'),
     C('settings.safeArea', { label: 'Safe area', type: 'select', options: [['device', 'Keep UI clear of notches & home bar'], ['off', 'Use the whole screen']], def: 'device' }),
@@ -3193,6 +3212,7 @@ function renderSceneSettings(box) {
     C('settings.uiScale', { label: 'UI size', type: 'select', options: [['scale with screen', 'Scale with screen size'], ['constant', 'Same size on every screen']], def: 'scale with screen', structure: true }),
     (project.settings?.uiScale || 'scale with screen') === 'scale with screen' && C('settings.uiMatch', { label: 'Match width ↔ height', type: 'number', def: 0.5, range: [0, 1], step: 0.1, infoText: `Your design size is ${project.view?.width || 400} × ${project.view?.height || 700}. 0 = scale by width, 1 = by height, 0.5 = a mix (good for portrait and landscape).` }),
     C('settings.uiScaleFactor', { label: 'UI size multiplier', type: 'number', def: 1, range: [0.5, 2], step: 0.05 }),
+    control(() => game, 'settings.uiOverlap', { label: 'Keep UI from overlapping', type: 'select', options: [['bars', 'Stay clear of nav bars'], ['push apart', 'Nav bars + push UI apart'], ['off', 'Off (place everything yourself)']], def: 'bars', structure: true, infoText: 'Nav bars (Bottom Nav, App Bar, Icon Rail) hold their edge of the screen and everything else is laid out in the rest. "Push apart" also moves UI elements that overlap each other (up or down, away from their anchor).' }),
     h('p', { class: 'desc' }, 'Check it in the UI editor: the Phone button shows a notch, Dynamic Island or home bar.'),
   ], { icon: 'hud', key: 's-safe' }));
   const R = (path, spec) => control(() => root, path, spec), T = themeOf(root.settings), custom = root.settings.theme || {};
@@ -3302,7 +3322,7 @@ const BEH_META = {
   voxelBuilder: ['Voxel', 'cube'], button: ['UI', 'hand'], rules: ['Logic', 'bolt'], graph: ['Logic', 'nodes'], camera: ['Camera', 'camera'], forceZone: ['Physics', 'arrow'], savePoint: ['Saving', 'save'],
   tween: ['Animation', 'play'], tweenSequence: ['Animation', 'list'], flipbook: ['Animation', 'image'], spriteSheet: ['Animation', 'image'], animator: ['Animation', 'clock'],
   netSync: ['Online', 'globe'], pfLeaderboard: ['Online', 'trophy'], uiBack: ['UI', 'left'], uiPager: ['UI', 'layers'], uiTabIndicator: ['UI', 'minus'],
-  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiDropdown: ['UI', 'list'], uiKeypad: ['UI', 'key'], uiColorPicker: ['UI', 'brush'], uiCarousel: ['UI', 'layers'], uiSkillButton: ['UI', 'bolt'], uiRadialMenu: ['UI', 'circle'], uiSpinWheel: ['UI', 'star'],
+  navItem: ['UI', 'list'], uiBottomNav: ['UI', 'list'], uiSideBar: ['UI', 'menu'], uiAppBar: ['UI', 'menu'], uiDropdown: ['UI', 'list'], uiKeypad: ['UI', 'key'], uiColorPicker: ['UI', 'brush'], uiCarousel: ['UI', 'layers'], uiSkillButton: ['UI', 'bolt'], uiRadialMenu: ['UI', 'circle'], uiSpinWheel: ['UI', 'star'],
   uiChart: ['UI', 'stats'], uiXPBar: ['UI', 'hud'], uiTimerRing: ['UI', 'clock'], uiOffscreen: ['UI', 'target'], uiCrosshair: ['UI', 'crosshair'], uiTicker: ['UI', 'text'], uiNotifications: ['UI', 'trophy'], uiScreenFX: ['UI', 'star'],
   uiShop: ['UI', 'coin'], uiInventoryGrid: ['UI', 'key'], uiQuestLog: ['UI', 'list'], uiDailyReward: ['UI', 'clock'], uiLevelMap: ['UI', 'flag'], uiTutorial: ['UI', 'bulb'], uiShowIf: ['UI', 'eye'], drawer: ['UI', 'menu'], loader: ['UI', 'clock'], uiList: ['UI', 'list'], uiSegmented: ['UI', 'list'], uiStepper: ['UI', 'plus'], uiAnim: ['UI', 'star'], uiPopup: ['UI', 'square'], uiSelector: ['UI', 'arrow'], uiScroll: ['UI', 'list'], uiRating: ['UI', 'star'],
   uiSlider: ['UI', 'minus'], uiToggle: ['UI', 'check'], uiLayout: ['UI', 'list'], uiCounter: ['UI', 'trophy'], typewriter: ['UI', 'text'], uiInput: ['UI', 'edit'], touchButton: ['UI', 'gamepad'],
@@ -4188,6 +4208,7 @@ function openFileMenu() {
     { icon: 'gear', label: 'Scene Settings', fn: () => { select(SCENE_ID); if (!isDesktop()) setDock('inspector'); } },
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
+    { icon: 'download', label: 'Build Web App (.zip)', k: 'for a website', fn: exportWebApp },
     { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
@@ -4728,6 +4749,43 @@ function buildFileName() { const o = buildOpts(); return slug(o.file || o.title 
 async function exportHTML() {
   try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
   catch (err) { toast('Build failed: ' + err.message); }
+}
+/**
+ * A folder for a website: the game plus a service worker and manifest, so it installs to the Home Screen, works offline
+ * and can show Phone Notifications on Android and on iPhone (once added to the Home Screen). Upload it to any https host.
+ */
+async function exportWebApp() {
+  try {
+    toast('Making the web app…');
+    const o = buildOpts(), b = await buildHTML(), title = o.title || root.name || 'My Game', bg = hexOr(root.background, '#000000');
+    const icon = await makeIcon(o, 512).then(dataBytes), theme = hexOr(o.themeColor, bg), splashBg = hexOr(o.splashBg, bg);
+    const manifest = { name: title, short_name: (o.shortName || title).slice(0, 12), display: o.display || 'fullscreen', orientation: o.orientation || { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any',
+      background_color: splashBg, theme_color: theme, start_url: './', scope: './', icons: [{ src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' }] };
+    const html = b.html.replace(/<link rel="manifest" href="data:[^"]*">/, '<link rel="manifest" href="manifest.webmanifest">')
+      .replace('</head>', `<script>if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});</script>\n</head>`);
+    const sw = `// ${title}: offline play and Phone Notifications (made with Pocket Engine)
+const CACHE = 'game-${Date.now().toString(36)}', FILES = ['./', './index.html', './manifest.webmanifest', './icon-512.png'];
+self.addEventListener('install', (e) => e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting())));
+self.addEventListener('activate', (e) => e.waitUntil(caches.keys().then((k) => Promise.all(k.filter((x) => x !== CACHE).map((x) => caches.delete(x)))).then(() => self.clients.claim())));
+self.addEventListener('fetch', (e) => {
+  if (e.request.method !== 'GET' || new URL(e.request.url).origin !== location.origin) return;
+  e.respondWith(fetch(e.request).then((r) => { if (r.ok) { const c = r.clone(); caches.open(CACHE).then((x) => x.put(e.request, c)); } return r; }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((h) => h || caches.match('./index.html'))));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const key = (e.notification.data && e.notification.data.key) || '';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    const c = list.find((w) => 'focus' in w);
+    if (c) { c.postMessage({ pocketNotify: key }); return c.focus(); }
+    return self.clients.openWindow('./?notification=' + encodeURIComponent(key));
+  }));
+});
+`;
+    const readme = `# ${title} (web app)\n\nUpload everything in this folder to a website with **https** (GitHub Pages, Netlify, itch.io, your own host).\nOpen it on a phone and choose **Add to Home Screen**: it then runs full screen, works offline and can show Phone Notifications.\n\n- index.html: the game\n- sw.js: offline play, and opening the game when a notification is tapped\n- manifest.webmanifest, icon-512.png: the Home Screen app\n\nNotifications in a browser only arrive while the game is open (on iPhone, only once it's on the Home Screen). For reminders that arrive while the game is closed, make an iOS / Android app: Build Settings › App stores.\n`;
+    const zip = makeZip([{ name: 'index.html', data: html }, { name: 'sw.js', data: sw }, { name: 'manifest.webmanifest', data: JSON.stringify(manifest, null, 2) }, { name: 'icon-512.png', data: icon }, { name: 'README.md', data: readme }]);
+    const a = h('a', { href: URL.createObjectURL(zip), download: slug(title) + '-web.zip' }); document.body.append(a); a.click(); a.remove();
+    toast(`Web app ready (${kb(zip.size)}): upload the folder to an https website`);
+  } catch (err) { toast('Could not make the web app: ' + err.message); }
 }
 async function shareBuild() {
   try {

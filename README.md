@@ -115,6 +115,7 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
     - `www/index.html`: the game, without the Home Screen prompts.
     - `capacitor.config.json` and the icon / splash images in `assets/`.
     - `codemagic.yaml` with an iOS and / or Android workflow.
+    - `@capacitor/local-notifications`, so Phone Notifications work in the app.
     - `scripts/prepare-native.mjs`: sets the version, build number, release signing, orientation and full screen in the native projects that Codemagic generates on each build.
     - A `README.md` with the one-time setup: Apple / Google accounts, App Store Connect key, certificates, keystore, Play service account, and the first manual Play upload.
   - Put the folder on GitHub, add it in Codemagic, and start a workflow. Build numbers go up by themselves; raise **Version** for a store update.
@@ -214,6 +215,11 @@ The editor fills the screen:
   - **Game, more:** **Add Score** (with a "+10" pop-up), **Lose a Life** (*no lives left* → game over if you like), **Gain a Life** (up to a maximum), **Check Best Score** (*new best* saves it), **Add / Set Time**, **Restart Level**, **Set Checkpoint** + **Respawn Player**, **Use Item** (*used* / *not enough*) and **Has Item**, **Add Combo** (`{combo}` resets after a pause), **Unlock Achievement** (once per device, with a 🏆 message; *first time* / *already*) and **Is Unlocked**, **Hit Stop** (a freeze-frame on big hits), **Set Game Speed**, **Say** (a dialogue box with a *closed* output), **Game Value** (score, lives, best, time left, combo, level, levels) and **Game State Is**.
   - **Variables** (gold): **Set / Add To My Variable** and **My Variable** (each object keeps its own, so every enemy has its own hp; text on the object shows it with `{hp}`), **Set Other's Variable / Other's Variable**, **Variable Of Object**, and **When Variable Reaches** (runs once when, say, score ≥ 100).
   - **Variables, more:** **Change Variable** (set, add, subtract, multiply, divide, min, max, power or mod; for the game, this object, or *other*), **Clamp Variable**, **Copy Variable**, **Toggle My Variable**, **Reset Variables** (back to their starting values), **Set Text Variable** (words, with `{braces}`) and **Text Variable Is** (equals / contains / starts with / empty), **Save / Load / Forget Variable** on the device (coins, settings, unlocked levels; *loaded* / *not saved yet*), and per-object events **On My Variable Changed** and **When My Variable Reaches** (hp ≤ 0 → die).
+  - **Arrays and dictionaries** (brown, in Lists):
+    - **Arrays** hold words or numbers (`"12"` is stored as a number). **Add Item**, **Insert At**, **Item At (text)** (−1 = last), **Array As Text** (with a separator), **Text To Array** (`a, b, c` → 3 items), **Count Of**, **Copy Part**, **Join Two**, **Remove Duplicates**, **Keep Only** (=, ≠, >, <, contains, starts with; into the same or another array), **Change Every Item** (add, multiply, round, abs, UPPER, lower, text before / after), **Swap Two**, **Position Of Biggest / Smallest**, **Loop Item (text)**. All the List nodes work on arrays too.
+    - **Dictionaries** (key → value, like `hp: 100, xp: 5`): **Set**, **Get** (text) / **Get Number**, **Add To** (counts per key), **Has Key**, **Remove**, **Clear**, **Size**, **Keys To Array**, **For Each** (with **Loop Key** and Loop Item). Text shows a dictionary as `hp: 100, xp: 5`.
+  - **Loops:** **While** (repeats while a condition is true) and **Repeat Until**, both with a safety limit; **Break** stops any loop (Repeat, For Range, For Each, While, Dictionary For Each, For Each In Layer / Radius) and **Next Round** skips the rest of a round. **Switch On Text** picks one of up to 5 ways by text (or *other*).
+  - **Events and delegates:** **Send Message With Value** (a number or text), and **On Message** now passes it on: read it with **Event Value** or **Event Value (text)**. **Wait For Message** pauses a script until a message arrives (or a timeout). **Set Delegate** stores which Function to run in a variable and **Call Delegate** (step or value) runs it, so behaviour can be swapped without rewiring. **Listen: Message → Function** subscribes a Function to a message (and *stop listening* unsubscribes). **Function Exists**.
   - **Lists** (brown): lists of numbers kept in a variable and shown in text as `1, 2, 3`. **Add** (end or start), **Remove** (last, first, a position or a value; *nothing removed*), **Set At**, **Clear**, **Shuffle / Sort / Reverse**, **Fill With Numbers** (1–10 → a deck), **For Each** (with **Loop Item**); values **Item At**, **Length**, **Contains**, **Position Of**, **Random Item**, **Sum / Min / Max / Average**. Positions start at 1.
   - **Functions, more:** **Function** (a named piece of script) with **Function Input** (a, b, c) and **Return Value**, used through **Call Function** (as a number, e.g. inside a Formula) or **Run Function** (as a step, optionally storing the result); functions can call each other and themselves (20 deep). **Call Event Later** runs a Custom Event after a delay; **Caller Has Tag** checks who called a Custom Event.
   - **Functions** (indigo): **Custom Event** + **Call Custom Event** (on this object, *other*, everything with a tag, or everywhere, with a number read by **Event Value**), and **Comment** sticky notes.
@@ -239,6 +245,11 @@ The editor fills the screen:
     - **Changing elements:** **Enable / Disable UI** (greyed out and not tappable), **Set Image**, **Set Badge** (a red number bubble), **Set Progress Bar** (variable, maximum, colour), **Set UI Theme**, **Bring To Front / Back**, **Set UI Size**, **Scroll To** (top, bottom or part of the way).
     - **Values:** **Is A Popup Open**, **Is Shown**, **Is Enabled**, **Safe Area**.
   - **Device**: **Share**, **Copy To Clipboard**, **Open Website**, **Device Is** (portrait, landscape, touch screen, online, installed app, dark mode, reduced motion).
+  - **App & device** (new):
+    - **Events:** **On App Hidden** (the player switched apps or locked the phone) and **On App Back**, **On Phone Notification Tapped** (any, or one id), **On Side Menu Opened / Closed**, **On Screen Turned** (*portrait* / *landscape*), **On Connection Changed** (*online* / *offline*).
+    - **Steps:** **Open / Close Side Menu**, **Show / Hide Nav Bars** (slides the Bottom Nav and App Bar away, e.g. during a level), **Vibrate Pattern** (`80, 60, 80`), **App Icon Badge** (the number on the Home Screen icon of an installed web app; 0 clears it), **Full Screen**, **Keep Screen On**.
+    - **Flow:** **Every Nth Time** (*then* every 3rd time, *skip* otherwise: tips, ads, bonuses) and **First Time Ever** (once per device: tutorials, welcome messages).
+    - **Values:** **Side Menu Is Open**, **Battery Level** (0–100), **Phone Language** (`en`, or `en-GB`), **Notifications Allowed**.
 - ★ Templates include Chase the player, Tap 5 times → win, Spawn a ring of 8, Hit → blink + hurt animation, Run / idle by speed, Collect: hop, fade, remove, and Tap → score counts up.
 - **Reusable scripts.** The 💾 button (or *Save as Reusable Script* on the component) names and saves the graph. Add it to any other object from **Add Component → My Scripts**. Copies stay **linked**: edit any of them and every copy updates (the component shows the script's name and how many objects use it; ⋮ → *Unlink* to change one copy on its own, or *Rename*). Saved scripts are also kept on your device, so **My Scripts** and ★ list the ones from your other games too.
 - **Live debug:** after you Play, each node shows how often it ran (**×12**) and value nodes show their last value (**= 3.5**); nodes that never ran are faded, so you can see at a glance which part of a script didn't happen.
@@ -248,7 +259,13 @@ The editor fills the screen:
 - If a node is selected, the new node is **wired to it automatically** and placed next to it, so a script grows as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot (or drag from dot to dot). White diamonds set the order things happen in; round dots carry numbers (blue) and true/false (orange). An input with no wire uses the value typed on the node.
 - Tap a wired input dot to unplug it, or tap a wire to delete it. ⋮ on a node duplicates it, removes its wires or deletes it.
-- Drag nodes to move them, drag empty space to pan, pinch to zoom. ⟲ undoes, ⛶ fits everything on screen, and **Done** or the back gesture closes the editor.
+- Drag nodes to move them, drag empty space to pan, pinch to zoom. **Done** or the back gesture closes the editor.
+- **Top bar:** **Undo** and **Redo** (moving nodes can be undone too), **🔍 Find a node** (search this script by name, category, help or the values typed in; tap a result to jump to it), and **⋮ More**:
+  - **Select Several:** tap nodes to pick them, or drag a box around them. The bar at the bottom copies, duplicates (with their wires), turns on / off or deletes them; drag any picked node to move them all.
+  - **Tidy Up:** lays the script out in the order it runs, left to right, one row per event, with value nodes under the node they feed. Notes go in a column on the left. Nothing overlaps afterwards.
+  - **Check for Problems:** finds nodes that never run (nothing wired into their white dot), events with nothing after them, values that aren't used, nodes turned off, and wires from removed nodes. They get an orange outline and a note, and the list jumps to each one.
+  - **Collapse All / Expand All**, **Fit All Nodes**, **Ready-made Scripts** and **Save / Reuse Script**. ⋮ on a node can also **Collapse** just that node (it keeps its wired dots and shows its values in one line).
+- **Keyboard** (tablets and computers): Ctrl/⌘ Z undo, Shift Z or Y redo, F find, C / V copy and paste, A select all, Delete removes the selection, Esc cancels.
 
 Graphs are saved as JSON on the behavior (`{ nodes: [{ id, type, x, y, params }], links: [{ from: { node, port }, to: { node, port } }] }`), so they work in exported games too. `NODE_TYPES` in the engine lists every node.
 
@@ -550,6 +567,24 @@ Pop-up notifications are built in; there's no component to add. Every game has *
 - **Test** shows a type in the editor. From the type editor, the dialog steps aside while the preview plays. *Test a few* shows several at once.
 - Types are game-wide: every level uses them. A *Notifications* component (Project › UI › HUD) still works, and handles plain `notify` messages in scenes that have one.
 
+### Phone notifications (Game Settings › Phone Notifications)
+
+Real notifications in the phone's own notification area (the lock screen and pull-down list), such as "Your energy is full!".
+
+- **Where they work:**
+  - **iOS / Android apps** made with *Build Settings › App stores*: full support. They can be scheduled and arrive while the game is closed (on time even in Android's battery saver). The app project includes `@capacitor/local-notifications`, an Android status-bar icon (a bell) and a notification channel that pops up on screen.
+  - **Websites:** menu › **Build Web App (.zip)** makes a folder to upload to any https host (index.html, a service worker, a manifest and an icon). It installs to the Home Screen, plays offline, and shows notifications through the service worker, which is what Android Chrome and iPhone Home Screen apps need. They arrive while the game is open; on iPhone, only once it's on the Home Screen.
+  - A single **Build HTML** file can show them on a computer browser while it's open.
+- **Sending one:**
+  - The **Phone Notification** node: title and text (with `{variables}`), and *when*: now, in N seconds / minutes / hours / days, daily at a time (HH:MM), or every minute / hour / day / week. An **id** lets a newer one replace an older one. Its *not allowed* output runs if the player said no.
+  - **Cancel Phone Notification** cancels one by id, or all of them if the id is blank.
+  - A trigger's **Phone notification** (in N minutes, 0 = now), or the action **phone notification** with `Title|text` (amount = seconds from now).
+- **Permission:** the player has to allow notifications once. *Ask the player* can be: on their first tap, when the **Ask Notification Permission** node runs (outputs *allowed* / *not allowed*), or only when the first one is sent.
+- **Come-back reminders:** one per line, `hours | Title | text` (e.g. `24 | We miss you! | Your daily chest is ready`). They count from when the player leaves the game, and are replaced each time they come back.
+- **Daily reminder:** a title, text and time that repeats every day.
+- Tapping a notification opens the game (or brings it forward) and sends the message `notification opened` (and `notification opened ID`); the node **On Phone Notification Tapped** does the same.
+- **Test on this device** and **In 10 seconds** send a test notification from the editor.
+
 ### UI components pack (21 new components, 43 presets)
 
 Each of these is one object with one component: it draws itself, handles taps and shows a live preview in the editor. Find them in *Project › UI* under **Controls**, **Charts**, **HUD** and **Game Systems**, or in *Add Component › UI*. Lists are typed one item per line, with `|` between the parts.
@@ -598,6 +633,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Tabs:** one per line, `Label | icon | page | badge variable`.
     - The icon is a built-in UI icon (`home`, `shop`, `trophy`, `user`, `chat`, `gear`, `play`, `plus`, `star`, `heart`, `bell`…) or an emoji.
     - A badge variable shows a red count (99+) when it is a number, or a dot when it is `true`.
+  - **Page changes** cross-fade in about a quarter of a second: everything inside a page fades with it, and it still finishes while the game is paused or on the title screen.
   - **9 styles:**
 
     | Style | Look |
@@ -615,7 +651,13 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Colours:** bar, selected, other tabs, indicator and badge. *Apply theme* recolours the bar too.
   - **Size & shape:** icon and label size, corner radius, floating gap, line along the top, shadow, and filling the home-bar area.
   - **Animation:** the indicator slides, fades or jumps, at a set speed. Tap effects: bounce, ripple, grow or none. Also a tap sound and vibration.
-  - **Behaviour:** switch tab, or open as a page (Back returns). **Hide on these pages** slides the bar away (e.g. during `game`), and it can also send a message when the tab changes.
+  - **Behaviour:** switch tab, or open as a page (Back returns). **Hide on these pages** slides the bar away (e.g. during `game`), **Only show on these pages**, and it can also send a message when the tab changes.
+    - A tab can be `msg:menu`: it opens the Side Menu instead of being a page, and lights up while the menu is open.
+    - **On a page that isn't a tab** (say Settings, opened from the Side Menu): no tab lit, keep the last tab lit, or hide the bar.
+    - **Tapping the current tab again sends** a message (e.g. `scroll top`).
+  - **Layout:** **Keep other UI clear of the bar** (on by default; see *Safe area* below) and **Widest the bar gets** (it stays centred on tablets and sideways phones). Also **dot-only badges** and **Selected icon lifts up**.
+  - **Bar height** (0 = the object's height): the bar grows up from the bottom edge and everything else makes room. **Bar opacity** for see-through bars.
+  - **Hide & show** (also on the App Bar): **Hides by itself** never, *when scrolling down* (a Scroll View or List scrolling down slides it away; scrolling up or reaching the top brings it back), *after a few seconds* without touches (a touch brings it back), or both. **Goes away by** sliding, fading or both, at a set speed. The messages `navbar hide`, `navbar show` and `navbar toggle` (`appbar …` for the App Bar) and the **Show / Hide Nav Bars** node do it by hand. While a bar is away, its space goes back to the page.
   - Tapping a tab sets the variable `page`. Ready-made **Pages** show when it matches, and they slide toward the tab you picked. The bar is drawn in the editor too, so you see it while designing.
 - **Side Menus:** one **Side Menu** component draws and runs the whole menu.
   - **Presets:** Side Menu (left), Side Menu (right) (settings switches behind a ⚙ button), Floating, Glass, Banner header, Icon Rail (always visible), Full-screen Menu and Minimal. The older menus made of separate objects are still there as *Side Bar (left / right, separate items)*.
@@ -632,10 +674,38 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     - Open: the ☰ button, the message (`menu`, or `menu open` / `menu close`), or a **swipe from the screen edge**.
     - Close: **drag it back**, tap outside, use the phone's Back gesture, or pick an item.
     - Choose whether picking an item switches page or opens it as a page that Back returns from.
+  - **Works with the bars:**
+    - **With a Bottom Nav / App Bar:** *stay between them* (the menu fits between the bars, which stay tappable; tapping one closes the menu), *cover them*, or *hide them while open*.
+    - **Opening:** *over the screen*, or *push the screen* (the rest of the UI slides aside, so nothing is hidden under the menu).
+    - **Built-in ☰ button** in the top or bottom corner of its side (it steps aside while an App Bar shows its own ☰).
+    - **Icon Rail** keeps its column of the screen: other UI is laid out next to it.
+  - Long menus **scroll** (drag up and down; sideways still closes it) with a thin scroll bar, and never run under the footer.
+  - **Set variable while open** (e.g. `menuOpen`), and **Edge swipe area** (how close to the edge a swipe has to start).
+  - In the editor the menu shows open only while it's selected, so it doesn't hide the rest of your UI.
   - **Bottom Sheet:** a + button slides up a panel.
-- **Tab Bar, Page, App Bar** (menu + title + settings).
+- **App Bar** (new component): a top bar like a phone app's.
+  - Left: **‹ Back** when there's a page to go back to, else **☰** (opens the Side Menu), or always ☰, only Back, or nothing.
+  - The **title follows the page**: it uses the Bottom Nav or Side Menu name for the page, a list of `page = Title` lines, or your own text with `{variables}`.
+  - Up to 4 **right buttons**, `icon | message | badge variable` (e.g. `bell | notifications | unread`).
+  - **5 styles:** solid, transparent, glass, large title (iOS style) and centered. Hide on / only show on pages.
+  - **Large title shrinks when scrolling:** the tall bar with a big title becomes a normal bar as a list scrolls, and grows back at the top.
+  - **More settings:** a **subtitle** (with `{variables}`, e.g. `Score: {score}`), a **logo** (icon or emoji) next to the title, **title position** (left or centre), **title weight**, a **custom left button** (your icon and message), **tapping the title sends** a message (e.g. `scroll top`), **bar height**, **gradient** colour, **bar opacity**, separate **icon colour**, bottom **corner radius** and **line colour**, and a **shadow** that's always there, only once the list has scrolled, or never.
+  - **Hide & show** by itself (on scroll down, when idle, or both) or by message, like the Bottom Nav above.
+  - Presets: App Bar, App Bar (large title), (centered), (glass), (transparent), **(hides on scroll)** and **(gradient)**.
+- **App Layout (App Bar + Side Menu + Bottom Nav):** the three parts set up to work together. The App Bar ☰ and the Bottom Nav's *More* tab open the Side Menu, which fits between the bars; all three share `page`, so the right tab lights up and the title follows; the pages fill the space between the bars.
+- **Tab Bar, Page** (and the older App Bar made of separate objects).
 - **Popups:** **Popup Dialog** (opens on the message `popup`, OK sends `close`), **Toast** (slides in for 2 s on `toast`), **Badge** (a red counter that hides at 0).
-- **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List** (drag to scroll, items outside are hidden), **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
+- **Controls:** **Checkbox**, **Segmented** choice, **Option Picker** (‹ Easy / Normal / Hard ›), **Stepper** (− value +), **Star Rating**, **Scroll List**, **Card**, **Icon Button**, **UI Image**, **Loading Spinner**.
+- **Scroll View** (rebuilt; also used by the List View):
+  - **Scrolls** vertically, horizontally or both. Drag, **flick** (it keeps going and slows down: smooth, short or off), or use a **mouse wheel / trackpad**. Pulling past the ends **stretches and springs back** (can be turned off).
+  - **Cuts items off cleanly at its edges** (rounded corners too) instead of hiding whole items, and the hidden part can't be tapped. A sideways drag on a vertical list isn't taken as a scroll, so sliders and swipes inside still work; a drag is never taken as a tap.
+  - **Lines up the items inside** for you: *as placed*, *one per row* (a list; down, or across for a horizontal view, with a gap and alignment), or a *grid* with N columns. Add or remove children (also while playing) and the rest move up.
+  - **Stop on:** anywhere, **items** (settles with an item at the start, like a carousel) or **pages** (one screenful per flick; the page number goes in a variable).
+  - **Scroll bar:** while scrolling, always or never, in your colour.
+  - **Pull down to refresh** sends a message and shows a spinner until the game sends the message + ` done` (or 3 s). **Reaching the end** sends a message (e.g. `load more`). **Scroll position** (0–1) can go in a variable.
+  - **Messages:** `scroll top`, `scroll bottom`, `scroll next` / `scroll prev` (a page or a screenful), `scroll to Item Name`. The Bottom Nav's *tapping the current tab again* and the App Bar's *tapping the title* can send `scroll top`.
+  - Scrolling tells the App Bar and Bottom Nav, so they can hide while scrolling down and shrink a large title.
+  - **Presets:** Scroll List, Scroll List (pull to refresh), Scroll Grid (shop), Horizontal Scroller (snap) and Paged Scroller (swipe pages).
 - **New components** (Add Component › UI):
   - **Bottom Nav** and **Side Menu:** complete navigation bars and menus (styles, badges, animations). See above.
   - **Nav Item (tab):** sets a variable when tapped and lights up while selected.
@@ -716,9 +786,15 @@ The editor, home page and player check for a new release when they open, when yo
 - **Safe area:** UI anchored to corners and edges stays clear of notches, the Dynamic Island, camera holes, rounded corners and the home bar, using the phone's real safe-area insets. Stretched UI fills the safe area.
   - Tick **Ignore safe area** on a UI element (UI Element card) for full-screen backgrounds that should go under the notch.
   - *Game Settings → Screen & Safe Area*: turn the safe area off, or add **extra edge space** on every side.
+- **UI never hides under the nav bars:** a Bottom Nav, an App Bar and an Icon Rail hold their edge of the screen, and everything else is laid out in the space that's left:
+  - UI anchored to that edge sits next to the bar instead of under it (a bottom button sits above the Bottom Nav), stretched pages fill the space between the bars, and centred popups are centred in it.
+  - Notifications, messages and the touch controls (joystick, buttons, pause and mute) stay clear of the bars too. While a side menu or popup is open, the touch controls hide.
+  - When a bar slides away (Hide on pages, the Show / Hide Nav Bars node), its space is given back.
+  - **Go under the nav bars** (UI Element card) lets a background fill the whole screen anyway; the bar's own **Keep other UI clear** setting turns it off for that bar.
+  - **Game Settings › Screen & Safe Area › Keep UI from overlapping:** *stay clear of nav bars* (the default), *nav bars + push UI apart*, or *off*. **Push apart** also moves UI elements that overlap each other: within the same parent, a later element moves down (or up, if it's anchored to the bottom) until it's clear. Full-screen panels, menus and popups are left alone, and **Allowed to overlap other UI** on an element lets it sit on top (badges, labels on pictures). It shows in the editor too.
 - **UI scaling (like Unity's Canvas Scaler):** UI grows or shrinks with the screen, using the game's design size (*view width × height*) as the reference. **Match width ↔ height** picks what to follow (0 = width, 1 = height, 0.5 = both), **UI size multiplier** makes everything bigger or smaller, and *Same size on every screen* turns scaling off. Taps, sliders, buttons and layouts all follow the scale.
 - **Preview phones in the UI editor:** the phone button on the screen bar shows an iPhone notch, Dynamic Island, Android camera hole, a sideways iPhone, no notch, or this device. The safe area is outlined, the unsafe edges are tinted, and the preview also applies when you press Play.
-- From code: `uiBox(e, W, H, engine.safe)` gives an element's on-screen box, `placeUI(e, x, y, W, H, engine.safe)` moves it to a screen point, `engine.safe` holds the insets and the scale `k`, and `engine.safeOverride` fakes insets for testing.
+- From code: `uiBox(e, W, H, engine.safe)` gives an element's on-screen box, `uiArea(W, H, engine.safe)` the space left between the nav bars, `engine.safe.bars` how much each bar holds, `placeUI(e, x, y, W, H, engine.safe)` moves it to a screen point, `engine.safe` holds the insets and the scale `k`, and `engine.safeOverride` fakes insets for testing.
 
 ### Parenting, UI anchoring and UI zoom
 

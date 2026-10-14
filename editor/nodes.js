@@ -20,6 +20,8 @@ const NEXT = {
   update: ['branch', 'moveToward', 'lookAt', 'rotateBy', 'cooldown'],
   every: ['spawn', 'spawnAt', 'chance', 'randomBranch', 'addVar'],
   start: ['setVar', 'playAnim', 'message', 'loadGame', 'loop'],
+  whileLoop: ['addVar', 'breakLoop', 'branch'], forEachList: ['branch', 'breakLoop', 'addVar'], mapForEach: ['textJoin', 'branch'], waitEvent: ['toast', 'addVar'], setDelegate: ['callDelegate'], switchText: ['goToPage', 'toast', 'sound'],
+  onAppHidden: ['phoneNotify', 'saveGame', 'pauseGame'], onAppShown: ['phoneCancel', 'toast', 'addVar'], onNotifyOpened: ['toast', 'addVar', 'goToPage', 'giveItem'], onMenu: ['pauseGame', 'sound'], firstTimeEver: ['toast', 'goToPage', 'sayLine'], everyNth: ['toast', 'alert', 'goToPage'],
   damaged: ['blink', 'playAnim', 'impulse', 'sound'], death: ['playAnim', 'fadeTo', 'particles', 'destroy', 'gameOver'],
   animEnd: ['playAnim', 'destroy', 'sendMessage'], playAnim: ['wait', 'sound', 'particles'],
   tweenMove: ['punch', 'sound', 'particles'], tweenVar: ['popText', 'sound'], delayedCall: ['destroy', 'tweenMove', 'message'],
@@ -83,7 +85,7 @@ export const NODE_HELP = {
   clock: 'The phone\'s real time and date', dailyCheck: 'Once a day: “new day” (daily reward) or “same day”. Keeps a streak of days in a row',
   stampTime: 'Remember the time now on this device (e.g. when lives ran out)', timeSince: 'Seconds since Remember Time Now (0 if never): refill energy while away',
   onKey: 'A keyboard key (Space, Up, Down, Left, Right, Enter, A–Z, 0–9) pressed, released or held', keyHeld: 'Is a key down right now',
-  keyAxis: '−1, 0 or 1 from the arrow keys or WASD', tiltValue: 'How far the phone is tilted, −1 to 1 (on iPhone a "Tap to turn on tilt" button asks for motion access)', calibrateTilt: 'Makes the way the phone is held right now count as level (no tilt)', setMoveSpeed: 'Changes the Move component\'s speed (1 = normal, 2 = double). Good for power-ups and slow zones', lockMove: 'Stops (or gives back) the player\'s control over Move, e.g. while talking or stunned', dashNow: 'A quick burst from the Move component. "not ready" while it cools down', onDash: 'Runs when this object dashes (Move component)', isRunning: 'True while the Move component is running', notify: 'Shows a pop-up through a Notifications component (Project › UI › HUD › Achievement Popups / Toast Messages)', celebrate: 'Confetti through a Screen Effects component', openSettings: 'Opens the player Settings panel (left-handed, sensitivity, sound…). Pauses the game while open', playerSetting: 'One of the player\'s own settings (left-handed and vibration are 1 or 0)',
+  keyAxis: '−1, 0 or 1 from the arrow keys or WASD', tiltValue: 'How far the phone is tilted, −1 to 1 (on iPhone a "Tap to turn on tilt" button asks for motion access)', calibrateTilt: 'Makes the way the phone is held right now count as level (no tilt)', setMoveSpeed: 'Changes the Move component\'s speed (1 = normal, 2 = double). Good for power-ups and slow zones', lockMove: 'Stops (or gives back) the player\'s control over Move, e.g. while talking or stunned', dashNow: 'A quick burst from the Move component. "not ready" while it cools down', onDash: 'Runs when this object dashes (Move component)', isRunning: 'True while the Move component is running', whileLoop: 'Runs "each" again and again while the condition is true (checked before every round), then "done". Stops after "at most" rounds so a mistake can\'t freeze the game', repeatUntil: 'Runs "each" until "stop when" turns true (checked before every round), then "done"', breakLoop: 'Inside any loop (Repeat, For Range, For Each, While…): stops the loop now; it goes on from "done"', continueLoop: 'Inside any loop: skips the rest of this round and goes on with the next one', switchText: 'Picks a way by text: the first case that matches (not case-sensitive), or "other". Great with the page variable', arrAdd: 'Adds an item to an array (a list that can hold words or numbers: "12" is stored as a number)', arrInsert: 'Puts an item at a position (1 = first); the rest move along', arrGetText: 'The item at a position, as text (−1 = the last one)', arrJoin: 'The whole array as one text, with your separator between items', arrSplit: 'Cuts a text into an array, e.g. "a, b, c" → three items', arrCount: 'How many times an item appears in the array', arrSlice: 'Copies positions from…to into another array', arrConcat: 'Puts two arrays one after the other into a third', arrUnique: 'Removes repeated items, keeping the first of each', arrFilter: 'Keeps only items that pass a test (bigger than, contains…), in the same or another array', arrMap: 'Changes every item: add, multiply, round, UPPER / lower case, add text before / after', arrSwap: 'Swaps two positions (shuffles, sorting by hand, inventory slots)', arrIndexOfMax: 'Where the biggest (or smallest) number is: 1 = first', loopItemText: 'The current item of a For Each, as text (words in arrays)', mapSet: 'Stores a value under a key in a dictionary (stats: hp = 100, xp = 5). Text shows it as hp: 100, xp: 5', mapGet: 'The value stored under a key, as text (blank if missing)', mapGetNum: 'The value stored under a key, as a number (0 if missing)', mapAdd: 'Adds to the number under a key (counts per item, scores per player)', mapHas: 'True if the dictionary has this key', mapRemove: 'Removes a key and its value', mapClear: 'Empties the dictionary', mapSize: 'How many keys the dictionary has', mapKeys: 'Puts all the keys into an array (to sort, show or loop over)', mapForEach: 'Runs "each" for every key; Loop Key and Loop Item give the key and its value', loopKey: 'The current key of a Dictionary: For Each', sendValue: 'Sends a message carrying a value (number or text); On Message reads it with Event Value / Event Value (text)', eventText: 'The value that came with a message or custom event, as text', waitEvent: 'Pauses this script until a message arrives (its value is in Event Value), or gives up after a timeout', setDelegate: 'Stores which Function to run in a variable, so you can swap behaviour (on hit: explode, freeze, bounce…) without rewiring', callDelegate: 'Runs the Function whose name is in the delegate variable ("empty" if none), with inputs a–c', callDelegateV: 'Runs the delegate\'s Function and gives back its Return Value', bindMessage: 'From now on, whenever this message arrives, run a Function (its value goes in as a). "Stop listening" removes it', hasFunction: 'True if this script has a Function with that name', onAppHidden: 'Runs when the player switches to another app or locks the phone. Good for saving or scheduling a "come back" notification', onAppShown: 'Runs when the player comes back to the game', onNotifyOpened: 'Runs when the player opens the game by tapping one of its phone notifications (blank id = any)', onMenu: 'Runs when a Side Menu opens or closes', onOrientation: 'Runs when the phone is turned sideways or upright', onOnline: 'Runs when the internet connection drops or comes back', menuOpen: 'Opens, closes or toggles a Side Menu (by its message, usually menu)', menuIsOpen: 'True while a Side Menu is open', navBars: 'Slides the Bottom Nav and App Bar away (e.g. during a level) or brings them back', vibratePattern: 'Buzzes in a rhythm: buzz, pause, buzz… in milliseconds (Android phones; iPhones don\'t vibrate from the web)', appBadge: 'The number on the game\'s Home Screen icon (0 clears it). Installed web apps', fullScreen: 'Turns full screen on or off (needs a tap first in a browser)', keepScreenOn: 'Stops the screen dimming and locking while the game runs, or lets it again', batteryLevel: 'The phone\'s battery, 0–100 (100 where the browser doesn\'t tell)', deviceLanguage: 'The phone\'s language, like en or fr, to pick texts', notifyAllowed: 'True once the player has allowed phone notifications', everyNth: 'Lets every Nth run through (e.g. show an ad or a tip every 3rd game); the others go to skip', firstTimeEver: 'Takes the "first time" way only once ever on this device (tutorials, welcome messages), then always "seen before"', phoneNotify: 'A real notification in the phone\'s notification area: now, in a while, daily at a time, or repeating. The same id replaces an earlier one. Asks the player first if needed ("not allowed" if they say no). Scheduled ones arrive while the game is closed only in iOS / Android apps', phoneCancel: 'Cancels a scheduled phone notification by its id (blank = all of them)', phoneAsk: 'Asks the player to allow phone notifications. Best after a win or from a "Remind me" button', notify: 'Shows a pop-up through a Notifications component (Project › UI › HUD › Achievement Popups / Toast Messages)', celebrate: 'Confetti through a Screen Effects component', openSettings: 'Opens the player Settings panel (left-handed, sensitivity, sound…). Pauses the game while open', playerSetting: 'One of the player\'s own settings (left-handed and vibration are 1 or 0)',
   onShake: 'When the phone is shaken', onScreenTouch: 'A finger lands anywhere, or in one half of the screen', dragAmount: 'How far a finger moved this frame',
   pinchAmount: 'Two fingers: 1 = no pinch, bigger = spread apart, smaller = pinched in', camMoveTo: 'Glide the camera to a point (without a Camera component following something)',
   camToObject: 'Glide the camera to an object', camZoomTo: 'Smoothly zoom (3D: narrows the view)', camValue: 'Where the camera is, or its zoom',
@@ -262,10 +264,13 @@ export function openNodeEditor(opts) {
   let k = 0.85, tx = 20, ty = 20;
   let pending = null; // { node, port, dir, kind }
   let selected = null;
-  const undo = [];
+  const undo = [], redo = [];
+  let selMode = false, warn = null; // selMode: "Select several" (tap nodes or drag a box); warn: node ids with problems (Check)
+  const multi = new Set();
 
-  const emit = () => opts.onChange(JSON.parse(JSON.stringify(g)));
-  const snap = () => { undo.push(JSON.stringify(g)); if (undo.length > 60) undo.shift(); undoBtn.disabled = false; };
+  const emit = () => { warn = null; opts.onChange(JSON.parse(JSON.stringify(g))); };
+  const syncUndo = () => { undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length; };
+  const snap = () => { undo.push(JSON.stringify(g)); if (undo.length > 60) undo.shift(); redo.length = 0; syncUndo(); };
   const nid = () => { let i = g.nodes.length + 1; while (g.nodes.some((n) => n.id === 'n' + i)) i++; return 'n' + i; };
 
   // ---------- DOM ----------
@@ -276,24 +281,31 @@ export function openNodeEditor(opts) {
   const area = h('div', { class: 'ne-area' }, world);
   const empty = h('div', { class: 'ne-empty' }, h('b', {}, 'No nodes yet'), 'Tap “Add Node” and start with a green Event, like On Tap.');
   const hint = h('div', { class: 'ne-hint' });
-  const undoBtn = h('button', { class: 'ne-btn', title: 'Undo', disabled: true, onclick: () => {
-    if (!undo.length) return;
-    const prev = JSON.parse(undo.pop()); g.nodes = prev.nodes; g.links = prev.links;
-    undoBtn.disabled = !undo.length; pending = null; render(); emit();
-  } }, icon('undo'));
+  const restore = (from, to) => { if (!from.length) return; to.push(JSON.stringify(g)); const prev = JSON.parse(from.pop()); g.nodes = prev.nodes; g.links = prev.links; multi.clear(); syncUndo(); pending = null; render(); emit(); };
+  const undoBtn = h('button', { class: 'ne-btn', title: 'Undo', disabled: true, onclick: () => restore(undo, redo) }, icon('undo'));
+  const redoBtn = h('button', { class: 'ne-btn', title: 'Redo', disabled: true, onclick: () => restore(redo, undo) }, icon('redo'));
+  const selCount = h('b', {}, '');
+  const selBar = h('div', { class: 'ne-selbar', hidden: true },
+    selCount,
+    h('button', { onclick: () => { const L = g.nodes.filter((q) => multi.has(q.id)); if (L.length) copyNodes(L); } }, icon('copy'), 'Copy'),
+    h('button', { onclick: () => duplicateSel() }, icon('plus'), 'Duplicate'),
+    h('button', { onclick: () => { const L = g.nodes.filter((q) => multi.has(q.id) && !def(q).comment); if (!L.length) return; snap(); const off = !L.every((q) => q.off); for (const q of L) { if (off) q.off = true; else delete q.off; } emit(); render(); } }, icon('eyeoff'), 'On / Off'),
+    h('button', { class: 'danger', onclick: () => { if (!multi.size) return; snap(); g.nodes = g.nodes.filter((q) => !multi.has(q.id)); g.links = g.links.filter((l) => !multi.has(l.from.node) && !multi.has(l.to.node)); multi.clear(); emit(); render(); } }, icon('trash'), 'Delete'),
+    h('button', { class: 'done', onclick: () => setSelMode(false) }, 'Done'));
+  const band = h('div', { class: 'ne-band', hidden: true });
   const fmtStat = (v) => (typeof v === 'boolean' ? (v ? 'true' : 'false') : typeof v === 'number' ? String(Math.round(v * 100) / 100) : v == null ? '—' : String(v).slice(0, 8));
   const hasStats = () => g.nodes.some((q) => opts.stats?.(q.id)?.runs);
   const root = h('div', { class: 'ne' },
     h('div', { class: 'ne-top' },
       h('button', { class: 'ne-btn done', onclick: () => close() }, icon('check'), 'Done'),
       h('div', { class: 'ne-title' }, h('b', {}, opts.title || 'Visual Script'), h('small', {}, opts.linked?.()?.name ? 'Saved script: ' + opts.linked().name : 'Visual Script')),
-      undoBtn,
-      h('button', { class: 'ne-btn', title: 'Save / reuse scripts', onclick: (e) => scriptMenu(e.currentTarget) }, icon('save')),
-      h('button', { class: 'ne-btn', title: 'Templates', onclick: (e) => templateMenu(e.currentTarget) }, icon('star')),
-      h('button', { class: 'ne-btn', title: 'Fit all nodes', onclick: () => fit() }, icon('frame'))),
-    area, empty, hint,
+      undoBtn, redoBtn,
+      h('button', { class: 'ne-btn', title: 'Find a node', onclick: () => openFind() }, icon('search')),
+      h('button', { class: 'ne-btn', title: 'More', onclick: (e) => moreMenu(e.currentTarget) }, icon('more'))),
+    area, empty, hint, selBar,
     h('button', { class: 'ne-add', onclick: () => openPicker() }, icon('plus'), 'Add Node'));
   document.body.append(root);
+  area.append(band);
 
   // ---------- view ----------
   const applyView = () => { world.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
@@ -427,13 +439,16 @@ export function openNodeEditor(opts) {
     if (d.value) rows.push(h('div', { class: 'ne-row out' }, h('span', { class: 'lbl' }, d.value === 'bool' ? 'true / false' : d.value === 'text' ? 'text' : 'value'), port(n, 'value', 'out', d.value)));
     for (const inp of d.inputs || []) {
       const wired = linkedIn(inp.key);
+      if (n.min && !wired) continue; // collapsed: only wired inputs keep their dot
       rows.push(h('div', { class: 'ne-row in' + (wired ? ' wired' : '') }, port(n, inp.key, 'in', inp.type, inp.key),
         h('span', { class: 'lbl' }, inp.key), wired ? h('span', { class: 'wired-tag' }, 'wired') : field(n, inp)));
     }
-    for (const p of d.params || []) rows.push(h('div', { class: 'ne-row param' }, h('span', { class: 'lbl' }, p.label || p.key), field(n, p)));
-    if (!rows.length) rows.push(h('div', { class: 'ne-row note' }, NODE_HELP[n.type] || ''));
+    if (n.min) { const sum = (d.params || []).map((p) => n.params?.[p.key]).filter((v) => v !== '' && v != null && typeof v !== 'object').slice(0, 3).join(' · '); if (sum) rows.push(h('div', { class: 'ne-row note ne-sum' }, String(sum).slice(0, 60))); }
+    else for (const p of d.params || []) rows.push(h('div', { class: 'ne-row param' }, h('span', { class: 'lbl' }, p.label || p.key), field(n, p)));
+    if (!rows.length && !n.min) rows.push(h('div', { class: 'ne-row note' }, NODE_HELP[n.type] || ''));
     if (n.off) rows.unshift(h('div', { class: 'ne-row note off-note' }, 'Turned off: the script passes straight through'));
-    return h('div', { class: 'ne-node' + (selected === n.id ? ' sel' : '') + (n.off ? ' off' : '') + (opts.stats && !st?.runs && !d.comment && hasStats() ? ' idle' : ''), 'data-id': n.id, style: `left:${n.x}px;top:${n.y}px;width:${NODE_W}px` }, head, h('div', { class: 'ne-body' }, rows));
+    if (warn?.has(n.id)) rows.unshift(h('div', { class: 'ne-row note warn-note' }, icon('warn'), warn.get(n.id)));
+    return h('div', { class: 'ne-node' + (selected === n.id ? ' sel' : '') + (multi.has(n.id) ? ' msel' : '') + (n.off ? ' off' : '') + (n.min ? ' min' : '') + (warn?.has(n.id) ? ' warn' : '') + (opts.stats && !st?.runs && !d.comment && hasStats() ? ' idle' : ''), 'data-id': n.id, style: `left:${n.x}px;top:${n.y}px;width:${NODE_W}px` }, head, h('div', { class: 'ne-body' }, rows));
   }
   function render() {
     for (const el of world.querySelectorAll('.ne-node')) el.remove();
@@ -449,9 +464,122 @@ export function openNodeEditor(opts) {
       { icon: 'copy', label: 'Copy', fn: () => copyNodes([n]) },
       def(n).outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
       !def(n).comment && { icon: n.off ? 'eye' : 'eyeoff', label: n.off ? 'Turn On' : 'Turn Off (skip it)', fn: () => { snap(); n.off = !n.off; if (!n.off) delete n.off; emit(); render(); } },
+      !def(n).comment && { icon: 'collapse', label: n.min ? 'Expand' : 'Collapse (smaller)', fn: () => { if (n.min) delete n.min; else n.min = true; emit(); render(); } },
+      { icon: 'select', label: 'Select Several…', fn: () => { setSelMode(true); multi.add(n.id); refreshSel(); } },
       { icon: 'close', label: 'Remove Wires', fn: () => { snap(); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); emit(); render(); } },
       '-',
       { icon: 'trash', label: 'Delete Node', fn: () => { snap(); g.nodes = g.nodes.filter((q) => q !== n); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); if (selected === n.id) selected = null; emit(); render(); } },
+    ]);
+  }
+
+  // ---------- select several ----------
+  function setSelMode(on) {
+    selMode = on; if (!on) multi.clear();
+    root.classList.toggle('selecting', on); refreshSel();
+    if (on) toast('Tap nodes to pick them, or drag a box around them');
+  }
+  function refreshSel() {
+    selBar.hidden = !selMode;
+    selCount.textContent = multi.size ? `${multi.size} selected` : 'Tap nodes or drag a box';
+    for (const el of world.querySelectorAll('.ne-node')) el.classList.toggle('msel', multi.has(el.dataset.id));
+  }
+  function duplicateSel() {
+    const L = g.nodes.filter((q) => multi.has(q.id)); if (!L.length) return;
+    snap();
+    const map = {}, ids = new Set(L.map((q) => q.id)), dy = Math.max(...L.map((q) => q.y)) - Math.min(...L.map((q) => q.y)) + 200;
+    for (const q of L) { const id = nid(); map[q.id] = id; g.nodes.push({ ...JSON.parse(JSON.stringify(q)), id, y: q.y + dy }); }
+    for (const l of g.links.filter((l) => ids.has(l.from.node) && ids.has(l.to.node))) g.links.push({ from: { node: map[l.from.node], port: l.from.port }, to: { node: map[l.to.node], port: l.to.port } });
+    multi.clear(); for (const id of Object.values(map)) multi.add(id);
+    emit(); render(); refreshSel(); toast(`Duplicated ${L.length} node${L.length > 1 ? 's' : ''}`);
+  }
+
+  // ---------- find, tidy, check ----------
+  function focusNode(id) {
+    const n = g.nodes.find((q) => q.id === id); if (!n) return;
+    const A = area.getBoundingClientRect();
+    k = Math.max(k, 0.7); tx = A.width / 2 - (n.x + NODE_W / 2) * k; ty = A.height / 3 - n.y * k; applyView(); drawLinks();
+    selected = id; for (const el of world.querySelectorAll('.ne-node')) el.classList.toggle('sel', el.dataset.id === id);
+    const el = world.querySelector(`[data-id="${id}"]`); if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  }
+  const summary = (n) => (def(n).params || []).map((p) => n.params?.[p.key]).filter((v) => v !== '' && v != null && typeof v !== 'object').slice(0, 3).join(' · ');
+  function sheet(titleText, build) {
+    closePicker();
+    const list = h('div', { class: 'ne-plist' });
+    picker = h('div', { class: 'ne-picker', onpointerdown: (e) => { if (e.target === picker) closePicker(); } },
+      h('div', { class: 'ne-psheet' }, h('div', { class: 'ne-phead' }, h('b', {}, titleText), h('small', {}), h('button', { class: 'ne-btn', onclick: closePicker }, icon('close'))), ...build(list)));
+    root.append(picker);
+    return list;
+  }
+  function openFind() {
+    if (!g.nodes.length) { toast('No nodes yet'); return; }
+    const search = h('input', { type: 'search', placeholder: `Find among ${g.nodes.length} nodes`, autocapitalize: 'off', oninput: () => draw() });
+    const list = sheet('Find a node', (L) => [search, L]);
+    function draw() {
+      const q = search.value.trim().toLowerCase();
+      const hits = g.nodes.filter((n) => { const d = def(n); return !q || d.label.toLowerCase().includes(q) || n.type.toLowerCase().includes(q) || summary(n).toLowerCase().includes(q) || d.cat?.toLowerCase().includes(q) || (NODE_HELP[n.type] || '').toLowerCase().includes(q); })
+        .sort((a, b) => a.y - b.y || a.x - b.x);
+      list.replaceChildren(...(hits.length ? [h('div', { class: 'ne-pgrid' }, hits.map((n) => { const d = def(n); return h('button', { class: 'ne-pitem', style: `--c:${CAT_COLOR[d.cat] || '#666'}`, onclick: () => { closePicker(); focusNode(n.id); } },
+        h('b', {}, d.comment ? '📝 ' + String(n.params?.text || 'Note').slice(0, 30) : d.label), h('em', { class: 'ne-pcatname', style: `color:${CAT_COLOR[d.cat] || '#999'}` }, d.cat || ''), h('small', {}, (n.off ? 'off · ' : '') + summary(n))); }))] : [h('div', { class: 'ne-pnone' }, 'Nothing matches')]));
+    }
+    draw(); setTimeout(() => search.focus(), 50);
+  }
+  /** Lays scripts out left to right in the order they run: one band per event, value nodes under the node they feed. */
+  function tidy() {
+    if (!g.nodes.length) return;
+    snap();
+    const byId = new Map(g.nodes.map((n) => [n.id, n])), isVal = (n) => !!def(n).value, H = (n) => world.querySelector(`[data-id="${n.id}"]`)?.offsetHeight || 140;
+    const execOut = (id) => g.links.filter((l) => l.from.node === id && l.from.port !== 'value').map((l) => byId.get(l.to.node)).filter(Boolean);
+    const hasExecIn = (n) => g.links.some((l) => l.to.node === n.id && l.from.port !== 'value' && byId.has(l.from.node) && !isVal(byId.get(l.from.node)));
+    const feeders = (id) => g.links.filter((l) => l.to.node === id && l.from.port === 'value').map((l) => byId.get(l.from.node)).filter(Boolean);
+    const roots = g.nodes.filter((n) => !isVal(n) && !def(n).comment && !hasExecIn(n)).sort((a, b) => a.y - b.y || a.x - b.x);
+    const done = new Set(), GAPX = 80, GAPY = 30;
+    let top = 40;
+    const placeBand = (start) => {
+      const cols = new Map(), queue = [[start, 0]];
+      while (queue.length) {
+        const [n, c] = queue.shift(); if (done.has(n.id)) continue; done.add(n.id);
+        (cols.get(c) || cols.set(c, []).get(c)).push(n);
+        const addFeeders = (m, depth) => { if (depth > 6) return; for (const f of feeders(m.id)) if (!done.has(f.id)) { done.add(f.id); cols.get(c).push(f); addFeeders(f, depth + 1); } };
+        addFeeders(n, 0);
+        for (const m of execOut(n.id)) if (!done.has(m.id)) queue.push([m, c + 1]);
+      }
+      let bandH = 0;
+      for (const [c, list] of cols) { let y = top; for (const n of list) { n.x = 40 + c * (NODE_W + GAPX); n.y = y; y += H(n) + GAPY; } bandH = Math.max(bandH, y - top); }
+      top += bandH + 50;
+    };
+    for (const r of roots) if (!done.has(r.id)) placeBand(r);
+    for (const n of g.nodes) if (!done.has(n.id) && !def(n).comment) placeBand(n); // loops and loose value nodes
+    let cy = 40; for (const n of g.nodes.filter((q) => def(q).comment)) { n.x = -NODE_W - GAPX; n.y = cy; cy += H(n) + GAPY; } // notes in a column on the left
+    emit(); render(); requestAnimationFrame(fit); toast('Tidied up');
+  }
+  function checkProblems() {
+    const byId = new Map(g.nodes.map((n) => [n.id, n])), W = new Map();
+    for (const n of g.nodes) {
+      const d = def(n);
+      if (!NODE_TYPES[n.type]) { W.set(n.id, 'Unknown node (from a newer version?)'); continue; }
+      if (d.comment) continue;
+      if (n.off) W.set(n.id, 'Turned off: it is skipped');
+      else if (d.value && !g.links.some((l) => l.from.node === n.id)) W.set(n.id, 'Its value isn’t wired to anything');
+      else if (d.exec && !g.links.some((l) => l.to.node === n.id && l.to.port === 'in')) W.set(n.id, 'Never runs: nothing is wired into its white dot');
+      else if (!d.exec && !d.value && (d.outs || []).length && !g.links.some((l) => l.from.node === n.id)) W.set(n.id, 'Does nothing yet: wire something to it');
+      for (const l of g.links) if (l.to.node === n.id && !byId.has(l.from.node)) W.set(n.id, 'A wire comes from a node that was removed');
+    }
+    warn = W.size ? W : null; render();
+    if (!W.size) { toast('No problems found ✓'); return; }
+    const list = sheet(`${W.size} thing${W.size > 1 ? 's' : ''} to check`, (L) => [L]);
+    list.replaceChildren(h('div', { class: 'ne-pgrid' }, [...W].map(([id, why]) => { const n = byId.get(id), d = def(n); return h('button', { class: 'ne-pitem', style: `--c:${CAT_COLOR[d.cat] || '#c77'}`, onclick: () => { closePicker(); focusNode(id); } }, h('b', {}, d.label || n.type), h('small', {}, why)); })));
+  }
+  function moreMenu(anchor) {
+    const anyMin = g.nodes.some((n) => n.min);
+    popMenu(anchor, [
+      { icon: 'select', label: selMode ? 'Stop Selecting' : 'Select Several…', fn: () => setSelMode(!selMode) },
+      { icon: 'tidy', label: 'Tidy Up (arrange in order)', fn: tidy },
+      { icon: 'warn', label: 'Check for Problems', fn: checkProblems },
+      { icon: 'collapse', label: anyMin ? 'Expand All' : 'Collapse All', fn: () => { for (const n of g.nodes) { if (anyMin) delete n.min; else if (!def(n).comment) n.min = true; } emit(); render(); } },
+      { icon: 'frame', label: 'Fit All Nodes', fn: () => fit() },
+      '-',
+      { icon: 'star', label: 'Ready-made Scripts…', fn: () => templateMenu(anchor) },
+      { icon: 'save', label: 'Save / Reuse Script…', fn: () => scriptMenu(anchor) },
     ]);
   }
 
@@ -636,9 +764,13 @@ export function openNodeEditor(opts) {
     const portEl = e.target.closest('.port'), nodeEl = e.target.closest('.ne-node'), hit = e.target.closest('.ne-hit');
     const base = { x: e.clientX, y: e.clientY, moved: false };
     if (portEl) drag = { ...base, type: 'port', el: portEl };
-    else if (nodeEl) { const n = g.nodes.find((q) => q.id === nodeEl.dataset.id); drag = { ...base, type: 'node', n, el: nodeEl, nx: n.x, ny: n.y }; }
+    else if (nodeEl) {
+      const n = g.nodes.find((q) => q.id === nodeEl.dataset.id);
+      const group = selMode && multi.has(n.id) ? g.nodes.filter((q) => multi.has(q.id)).map((q) => ({ n: q, x: q.x, y: q.y, el: world.querySelector(`[data-id="${q.id}"]`) })) : null; // dragging a picked node moves all of them
+      drag = { ...base, type: 'node', n, el: nodeEl, nx: n.x, ny: n.y, group };
+    }
     else if (hit) drag = { ...base, type: 'wire', i: +hit.dataset.link, tx, ty };
-    else drag = { ...base, type: 'pan', tx, ty };
+    else drag = { ...base, type: selMode ? 'box' : 'pan', tx, ty };
   });
   area.addEventListener('pointermove', (e) => {
     if (!ptrs.has(e.pointerId)) return;
@@ -655,9 +787,12 @@ export function openNodeEditor(opts) {
     if (!drag) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.moved && Math.hypot(dx, dy) < 8) return;
+    if (!drag.moved && drag.type === 'node') snap(); // moving nodes can be undone
     drag.moved = true;
     if (drag.type === 'pan' || drag.type === 'wire') { tx = drag.tx + dx; ty = drag.ty + dy; applyView(); }
+    else if (drag.type === 'node' && drag.group) { for (const q of drag.group) { q.n.x = Math.round(q.x + dx / k); q.n.y = Math.round(q.y + dy / k); if (q.el) { q.el.style.left = q.n.x + 'px'; q.el.style.top = q.n.y + 'px'; } } drawLinks(); }
     else if (drag.type === 'node') { drag.n.x = Math.round(drag.nx + dx / k); drag.n.y = Math.round(drag.ny + dy / k); drag.el.style.left = drag.n.x + 'px'; drag.el.style.top = drag.n.y + 'px'; drawLinks(); }
+    else if (drag.type === 'box') { const A = area.getBoundingClientRect(), x0 = Math.min(drag.x, e.clientX) - A.left, y0 = Math.min(drag.y, e.clientY) - A.top; band.hidden = false; Object.assign(band.style, { left: x0 + 'px', top: y0 + 'px', width: Math.abs(dx) + 'px', height: Math.abs(dy) + 'px' }); }
     else if (drag.type === 'port') {
       const q = portInfo(drag.el), a = portPos(q.node, q.port, q.dir);
       temp = { a, b: toWorld(e.clientX, e.clientY), dir: q.dir, kind: q.kind };
@@ -677,8 +812,14 @@ export function openNodeEditor(opts) {
       const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.port');
       if (!(target && connect(portInfo(d.el), portInfo(target)))) drawLinks();
       setPending(null);
+    } else if (d.type === 'box') {
+      band.hidden = true;
+      if (d.moved) { const a = toWorld(Math.min(d.x, e.clientX), Math.min(d.y, e.clientY)), b = toWorld(Math.max(d.x, e.clientX), Math.max(d.y, e.clientY));
+        for (const n of g.nodes) { const hgt = world.querySelector(`[data-id="${n.id}"]`)?.offsetHeight || 120; if (n.x < b.x && n.x + NODE_W > a.x && n.y < b.y && n.y + hgt > a.y) multi.add(n.id); }
+        refreshSel(); }
     } else if (d.type === 'node') {
       if (d.moved) { emit(); return; }
+      if (selMode) { if (multi.has(d.n.id)) multi.delete(d.n.id); else multi.add(d.n.id); refreshSel(); return; }
       selected = selected === d.n.id ? null : d.n.id;
       for (const el of world.querySelectorAll('.ne-node')) el.classList.toggle('sel', el.dataset.id === selected);
     } else if (d.type === 'wire' && !d.moved) {
@@ -695,10 +836,26 @@ export function openNodeEditor(opts) {
   // variable suggestions for "variable" fields
   if (opts.vars?.length) root.append(h('datalist', { id: 'ne-vars' }, opts.vars.map((v) => h('option', { value: v }))));
 
+  // keyboard (tablets with keyboards, computers): undo / redo, delete, copy / paste, find
+  const onKey = (e) => {
+    if (e.target.closest?.('input, textarea, select')) return;
+    const mod = e.ctrlKey || e.metaKey, key = e.key.toLowerCase();
+    if (mod && key === 'z') { e.preventDefault(); if (e.shiftKey) restore(redo, undo); else restore(undo, redo); }
+    else if (mod && key === 'y') { e.preventDefault(); restore(redo, undo); }
+    else if (mod && key === 'f') { e.preventDefault(); openFind(); }
+    else if (mod && key === 'c') { const L = g.nodes.filter((q) => multi.has(q.id) || q.id === selected); if (L.length) copyNodes(L); }
+    else if (mod && key === 'v') paste();
+    else if (mod && key === 'a') { e.preventDefault(); if (!selMode) setSelMode(true); for (const n of g.nodes) multi.add(n.id); refreshSel(); }
+    else if (key === 'delete' || key === 'backspace') { const ids = new Set(multi.size ? multi : selected ? [selected] : []); if (!ids.size) return; snap(); g.nodes = g.nodes.filter((q) => !ids.has(q.id)); g.links = g.links.filter((l) => !ids.has(l.from.node) && !ids.has(l.to.node)); multi.clear(); selected = null; emit(); render(); refreshSel(); }
+    else if (key === 'escape') { if (picker) closePicker(); else if (selMode) setSelMode(false); else if (pending) setPending(null); }
+  };
+  window.addEventListener('keydown', onKey);
+
   let closed = false;
   function close() {
     if (closed) return;
     closed = true;
+    window.removeEventListener('keydown', onKey);
     closePicker();
     root.remove();
     opts.onClose?.();

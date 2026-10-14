@@ -3,7 +3,7 @@
 // projects are generated on Codemagic's machines (npx cap add), then scripts/prepare-native.mjs patches in the
 // version, build number, signing, orientation and full screen, and @capacitor/assets makes the icons and splash.
 
-export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5';
+export const CAPACITOR_VERSION = '^8.5.0', ASSETS_VERSION = '^3.0.5', NOTIFY_VERSION = '^8.3.0';
 
 /** A valid reverse-domain app ID from a name (letters, digits and underscores; no part starts with a digit). */
 export function suggestAppId(author, title) {
@@ -126,7 +126,7 @@ export function prepareScript(o) {
   return `// Patches the generated iOS / Android projects for this game: version and build number, release signing,
 // orientation and full screen. Run after \`npx cap add <platform>\`: node scripts/prepare-native.mjs ios|android
 // Codemagic sets BUILD_NUMBER (the codemagic.yaml passes APP_BUILD_NUMBER) and the CM_KEYSTORE_* variables.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 
 const APP = ${cfg};
 const platform = process.argv[2];
@@ -157,6 +157,10 @@ if (platform === 'android') {
     s = s.replace(/\\s+android:screenOrientation="[^"]*"/g, '');
     return orient ? s.replace(/<activity\\b/, '<activity\\n            android:screenOrientation="' + orient + '"') : s;
   });
+  // Phone Notifications: Android shows a small one-colour icon in the status bar (a bell; capacitor.config.json points at it)
+  mkdirSync('android/app/src/main/res/drawable', { recursive: true });
+  writeFileSync('android/app/src/main/res/drawable/ic_stat_notify.xml', '<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">\n  <path android:fillColor="#FFFFFFFF" android:pathData="M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z"/>\n</vector>\n');
+  console.log('wrote the notification icon');
   if (APP.fullscreen) edit('android/app/src/main/res/values/styles.xml', (s) => s.includes('android:windowFullscreen') ? s
     : s.replace(/(<style name="AppTheme.NoActionBar"[^>]*>)/, '$1\\n        <item name="android:windowFullscreen">true</item>\\n        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>'));
 } else if (platform === 'ios') {
@@ -228,6 +232,7 @@ Make your changes in Pocket Engine, open **Build Settings → App stores → Dow
 ## What's inside
 - \`www/index.html\`: the whole game (the same file as Build HTML, without the "Add to Home Screen" bits).
 - \`capacitor.config.json\`: the app name, ID and background colour.
+- \`@capacitor/local-notifications\` (in \`package.json\`): lets the game put notifications in the phone's notification area, even while it is closed (Game Settings › Phone Notifications).
 - \`assets/\`: the icon and splash screen. Codemagic makes every size from these (\`@capacitor/assets\`).
 - \`scripts/prepare-native.mjs\`: sets the version, build number, signing, orientation${o.fullscreen ? ' and full screen' : ''} in the generated native projects.
 - \`codemagic.yaml\`: the build${both ? 's' : ''}.
@@ -244,10 +249,11 @@ export function storeFiles(o, { html, icon, fg, splash }) {
     name: slugName, version: /^\d+\.\d+\.\d+$/.test(o.version) ? o.version : (String(o.version || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.')),
     private: true, description: `${o.name} (made with Pocket Engine)`,
     scripts: { 'add:ios': 'cap add ios --packagemanager CocoaPods && node scripts/prepare-native.mjs ios', 'add:android': 'cap add android && node scripts/prepare-native.mjs android', assets: 'capacitor-assets generate', sync: 'cap sync' },
-    dependencies: { '@capacitor/core': CAPACITOR_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
+    dependencies: { '@capacitor/core': CAPACITOR_VERSION, '@capacitor/local-notifications': NOTIFY_VERSION, ...(o.android ? { '@capacitor/android': CAPACITOR_VERSION } : {}), ...(o.ios ? { '@capacitor/ios': CAPACITOR_VERSION } : {}) },
     devDependencies: { '@capacitor/cli': CAPACITOR_VERSION, '@capacitor/assets': ASSETS_VERSION },
   };
-  const cap = { appId: o.appId, appName: o.name, webDir: 'www', backgroundColor: o.splashBg, ios: { contentInset: 'never', scrollEnabled: false }, android: { backgroundColor: o.splashBg } };
+  const cap = { appId: o.appId, appName: o.name, webDir: 'www', backgroundColor: o.splashBg, ios: { contentInset: 'never', scrollEnabled: false }, android: { backgroundColor: o.splashBg },
+    plugins: { LocalNotifications: { smallIcon: 'ic_stat_notify', iconColor: o.notifyColor || '#4fa3ff' } } }; // Android's status-bar icon for Phone Notifications (prepare-native.mjs draws it)
   return [
     { name: 'README.md', data: readme(o) },
     { name: 'codemagic.yaml', data: codemagicYaml(o) },

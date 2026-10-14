@@ -450,7 +450,7 @@ export const UI_WIDGETS_MORE = [
     props: { name: 'Record Form', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 8, marginTop: 12, shape: { type: 'rect', w: 380, h: 600, radius: 0, fill: '' },
       behaviors: [{ type: 'uiForm', collection: 'Tasks' }] } },
   { icon: 'search', label: 'Search Bar', group: 'App', note: 'Types into the variable “search”. Set a Data List’s “Search with variable” to search.',
-    props: { name: 'Search Bar', ui: true, anchor: 'top', x: 0, y: 30, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 44, radius: 12, fill: '#ffffff', stroke: '#e5e7eb', lineWidth: 1 }, text: { value: '', size: 16, color: '#1c1f26', weight: '600' },
+    props: { name: 'Search Bar', ui: true, anchor: 'top', x: 0, y: 30, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 44, radius: 12, fill: '#ffffff', stroke: '#e5e7eb', lineWidth: 1 }, text: { value: '', size: 16, color: '#1c1f26', weight: '600', align: 'left', inset: 42 },
       behaviors: [{ type: 'uiInput', var: 'search', kind: 'search', placeholder: 'Search', maxLength: 40, style: 'right in the bar', placeholderColor: '#9aa1ad', focusColor: '#3a7bfd', live: true, message: '' }] } },
   { icon: 'plus', label: 'Add Button (+)', group: 'App', note: 'Opens the page “add” with an empty Record Form. Change the page in its Value.',
     props: { name: 'Add Button', ui: true, anchor: 'bottom-right', x: -46, y: -50, layer: 4, shape: { type: 'circle', r: 30, fill: '#3a7bfd' }, text: { value: '+', size: 34, color: '#ffffff', weight: '700' },

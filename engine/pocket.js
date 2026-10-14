@@ -2164,7 +2164,7 @@ class NotifyCenter {
     this.list = this.list.filter((n) => { if (!n.closing && now - n.t0 > n.life) n.closing = now; return !(n.closing && now - n.closing > 0.4); });
     this.rects = [];
     if (!this.list.length) return;
-    ctx.save(); ctx.setTransform(E.dpr, 0, 0, E.dpr, 0, 0);
+    ctx.save(); ctx.setTransform(E.uiDpr, 0, 0, E.uiDpr, 0, 0);
     const groups = {};
     for (const n of this.list) (groups[n.T.position] ||= []).push(n);
     for (const [pos, list] of Object.entries(groups)) {
@@ -3331,6 +3331,8 @@ function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.text) {
     const t = e.text;
     let size = t.size;
+    const inset = +t.inset > 0 && t.align !== 'center' && e.shape && e.shape.type !== 'circle' && e.shape.w ? (e.shape.w / 2 - +t.inset) * (t.align === 'right' ? 1 : -1) : 0; // left / right text sits this far in from the box's edge (search bars, fields)
+    if (inset) ctx.translate(inset, 0);
     const setFont = () => { ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${size}px ${fontOf(t.font)}`; };
     setFont();
     ctx.textAlign = t.align; ctx.textBaseline = 'middle';
@@ -3398,6 +3400,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
     });
     ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    if (inset) ctx.translate(-inset, 0);
   }
   if (e.data.badge != null && e.data.badge !== '' && e.data.badge !== 0) { // Set Badge node: a red bubble with a number on the top-right corner
     const ex = e.extents(), hx = ex.sphere ? ex.r * 0.75 : ex.hx || 12, hy = ex.sphere ? ex.r * 0.75 : ex.hy || 12, txt = String(typeof e.data.badge === 'number' && e.data.badge > 99 ? '99+' : e.data.badge);
@@ -4109,6 +4112,15 @@ function drawMessage(ctx, scene, W, H, engine) {
   ctx.restore();
 }
 
+/** Text that is too wide for its space ends in "…" (squeezing the letters looks blurry and cramped); a hair too wide is just squeezed a little. */
+export function fitText(ctx, str, maxW) {
+  if (!(maxW > 0)) return '';
+  const w = ctx.measureText(str).width;
+  if (w <= maxW * 1.04) return str;
+  let lo = 0, hi = str.length;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (ctx.measureText(str.slice(0, m).trimEnd() + '…').width <= maxW) lo = m; else hi = m - 1; }
+  return lo ? str.slice(0, lo).trimEnd() + '…' : '';
+}
 const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
 /** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
 export function uiOrigin(e, W, H, safe) {
@@ -4272,7 +4284,7 @@ function ownScreen(scene, screen) {
 
 function renderUI(engine, scene) {
   const ctx = engine.uiCtx, W = engine.width, H = engine.height, inp = engine.input;
-  ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
+  ctx.setTransform(engine.uiDpr, 0, 0, engine.uiDpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
   THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
@@ -4314,7 +4326,7 @@ function renderUI(engine, scene) {
   }
   drawSnackbar(ctx, scene, engine, W, H);
   engine.notifier?.draw(ctx); // notifications sit above the game's UI (and show in the editor's Test)
-  ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
+  ctx.setTransform(engine.uiDpr, 0, 0, engine.uiDpr, 0, 0);
   if (engine.editing) return;
   for (const f of scene.overlays || []) if (!f.world) f(ctx, scene); // components that draw on screen (aim lines, hold rings)
   drawStatBars(ctx, scene, engine);
@@ -7465,7 +7477,7 @@ const UK = {
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
   in(p, r, pad = 0) { return p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad; },
   rr(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.max(0, Math.min(r, h / 2, w / 2))); else ctx.rect(x, y, w, h); },
-  text(ctx, str, x, y, { size = 16, weight = 700, color = '#fff', align = 'center', base = 'middle', maxW } = {}) { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; if (maxW) ctx.fillText(String(str), x, y, maxW); else ctx.fillText(String(str), x, y); },
+  text(ctx, str, x, y, { size = 16, weight = 700, color = '#fff', align = 'center', base = 'middle', maxW } = {}) { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(maxW ? fitText(ctx, String(str), maxW) : String(str), x, y); },
   lines(txt) { return String(txt || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//')).map((l) => l.split('|').map((x) => x.trim())); },
   tap(s, p) { if (p.haptics !== false) s.engine.vibrate(8); if (p.sound !== '' && p.sound !== undefined) s.engine.audio.sfx(p.sound || 'click'); },
   /** Full-screen modal while open: taps reach this component only (it closes itself on outside taps). */
@@ -9502,15 +9514,16 @@ registerBehavior('uiInput', {
       commit(s, v); if (e.shape) { e.shape.stroke = stroke0; } s.engine.input.reset();
       if (done && p.message) s.send(p.message);
     };
+    const inLeft = (e) => (+e.text?.inset > 0 && e.text.align === 'left' ? +e.text.inset : 12); // where the typing starts: after a search icon, or a little in
     const open = (e, s) => {
       const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, t = e.text || TEXT_DEFAULTS;
       const inp = box = document.createElement('input');
       inp.type = { number: 'text', password: 'password', email: 'email', search: 'search' }[p.kind] || 'text';
       if (p.kind === 'number') inp.inputMode = 'decimal';
       inp.maxLength = Math.max(1, +p.maxLength || 16); inp.placeholder = p.placeholder || ''; inp.value = valOf(s); inp.enterKeyHint = 'done'; inp.autocapitalize = p.kind === 'text' ? 'sentences' : 'off';
-      const pad = 12 * k;
-      inp.style.cssText = `position:absolute;left:${r.x - r.w / 2 + pad}px;top:${r.y - r.h / 2}px;width:${Math.max(20, r.w - pad * 2)}px;height:${r.h}px;z-index:30;border:0;outline:0;background:transparent;` +
-        `color:${t.color || '#fff'};font:${t.weight || '600'} ${Math.round((t.size || 18) * k)}px ${fontOf(t.font)};text-align:${t.align === 'left' ? 'left' : t.align === 'right' ? 'right' : 'center'};padding:0;margin:0;caret-color:${p.focusColor};touch-action:auto;`;
+      const pad = 12 * k, padL = inLeft(e) * k, padR = p.kind === 'search' ? 40 * k : pad;
+      inp.style.cssText = `position:absolute;left:${r.x - r.w / 2 + padL}px;top:${r.y - r.h / 2}px;width:${Math.max(20, r.w - padL - padR)}px;height:${r.h}px;z-index:30;border:0;outline:0;background:transparent;` +
+        `color:${tok(color0 || t.color) || '#fff'};font:${t.weight || '600'} ${Math.round((t.size || 18) * k)}px ${fontOf(t.font)};text-align:${t.align === 'left' ? 'left' : t.align === 'right' ? 'right' : 'center'};padding:0;margin:0;caret-color:${tok(p.focusColor)};touch-action:auto;`;
       ['pointerdown', 'pointerup', 'touchstart'].forEach((ev) => inp.addEventListener(ev, (x) => x.stopPropagation()));
       inp.addEventListener('input', () => { if (p.live) commit(s, inp.value); });
       inp.addEventListener('keydown', (ev) => { ev.stopPropagation(); if (ev.key === 'Enter') { close(e, s, true); } else if (ev.key === 'Escape') close(e, s, false); });
@@ -9523,7 +9536,7 @@ registerBehavior('uiInput', {
       uiAlways: true,
       start(e) { e.text ||= { ...TEXT_DEFAULTS, size: 18 }; color0 = e.text.color; },
       update(e, dt, s) {
-        if (box) { const r = uiRect(s, e), k = uiK(s.engine.safe) || 1; box.style.left = (r.x - r.w / 2 + 12 * k) + 'px'; box.style.top = (r.y - r.h / 2) + 'px'; if (!e.visible || e._parentHidden) close(e, s, false); }
+        if (box) { const r = uiRect(s, e), k = uiK(s.engine.safe) || 1; box.style.left = (r.x - r.w / 2 + inLeft(e) * k) + 'px'; box.style.top = (r.y - r.h / 2) + 'px'; if (!e.visible || e._parentHidden) close(e, s, false); }
         else if (p.kind === 'search' && valOf(s) !== '' && UK.taps(s, e).some((t) => { const b = UK.box(e); return UK.in(t, { x: b.x + b.w - 46, y: b.y, w: 46, h: b.h }); })) { s.setVar(p.var, ''); s.engine.vibrate(6); s.engine.input.taps.length = 0; } // the ✕ clears the search
         else if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
           if (p.style === 'in a pop-up box') { s.engine.input.reset(); askTextBox(s, { question: p.question, placeholder: p.placeholder, max: p.maxLength, value: valOf(s) }, (v) => { if (v != null) { commit(s, v); if (p.message) s.send(p.message); } }); }
@@ -9545,7 +9558,7 @@ registerBehavior('uiInput', {
 });
 
 /** Editor previews: components that build their parts when you press Play draw a still picture of them in the Scene and UI views. */
-const previewText = (ctx, str, x, y, size, color, weight = 600, align = 'center', maxW) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(String(str), x, y, maxW); };
+const previewText = (ctx, str, x, y, size, color, weight = 600, align = 'center', maxW) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(maxW ? fitText(ctx, String(str), maxW) : String(str), x, y); };
 /** List View: rows made from text, a list variable or numbers; scroll by dragging, tap a row to pick it. */
 registerBehavior('uiList', {
   label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The editor shows a preview of the rows.',
@@ -11762,7 +11775,7 @@ registerBehavior('uiDataList', {
         for (const it of out) {
           const an = it.head ? null : A.get(it.r.id) || { y: it.y, a: 1, g: 1 };
           const y = G.b.y + (an ? an.y : it.y) - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
-          if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 14, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
+          if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 20, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
           const id = it.r.id, sw = swX[id] || 0, k = gone.has(id) ? gone.get(id) : 0, x = G.b.x + 4 + sw - k * G.b.w, w = G.b.w - 8, h = G.rh, done = ck && truthy(it.r[ck]);
           if (sw < -4 || k) { ctx.globalAlpha = Math.min(1, -sw / 60 + k); ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, '🗑  Delete', G.b.x + w - 50, y + h / 2, { size: 13, weight: 800, color: '#fff' }); ctx.globalAlpha = 1; }
           ctx.save();
@@ -16375,7 +16388,7 @@ export class Engine {
     this.paused = false;
     this.timeScale = 1;
     this.fps = 60;
-    this.width = 1; this.height = 1; this.dpr = 1;
+    this.width = 1; this.height = 1; this.dpr = 1; this.uiDpr = 1;
 
     this.resize();
     this.ro = new ResizeObserver(() => this.resize());
@@ -16401,7 +16414,9 @@ export class Engine {
     const r = this.root.getBoundingClientRect();
     this.width = Math.max(1, r.width); this.height = Math.max(1, r.height);
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
-    for (const c of [this.uiCanvas, this.canvas]) if (c) { c.width = Math.round(this.width * this.dpr); c.height = Math.round(this.height * this.dpr); }
+    this.uiDpr = Math.min(window.devicePixelRatio || 1, 3); // UI, text and apps are always drawn at the screen's full sharpness (cheap), whatever the game's graphics quality
+    if (this.canvas) { this.canvas.width = Math.round(this.width * this.dpr); this.canvas.height = Math.round(this.height * this.dpr); }
+    if (this.uiCanvas) { this.uiCanvas.width = Math.round(this.width * this.uiDpr); this.uiCanvas.height = Math.round(this.height * this.uiDpr); }
     const cs = getComputedStyle(this.safeProbe);
     this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
     this.updateSafe();
@@ -17000,7 +17015,7 @@ export class Engine {
     this.applyPost(this.scene.post);
     const F = this.editing && this.uiFrame?.(this.scene); // the editor's Scene view: UI laid out for the game's screen and drawn inside the camera frame (it zooms and pans with the level)
     if (F) {
-      this.uiCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); this.uiCtx.clearRect(0, 0, this.width, this.height);
+      this.uiCtx.setTransform(this.uiDpr, 0, 0, this.uiDpr, 0, 0); this.uiCtx.clearRect(0, 0, this.width, this.height);
       const keep = [this.width, this.height, this.safe, this.uiView];
       this.width = F.w; this.height = F.h; this.safe = F.safe; this.uiView = F.v;
       layoutUI(this, this.scene); // nav bars for this screen

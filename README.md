@@ -605,6 +605,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 ### Apps (not just games)
 
 - **New Game or App › Apps:** Blank App, To-Do List, Notes, Expense Tracker and Arcade. Each one is a working app with pages, an app bar, lists, forms, search and saving.
+- **Sharp and lined up:** UI and app screens are drawn at the phone's full sharpness (up to 3×), even when the game world is drawn at lower quality. Templates share one 16 px edge margin. Search text starts after the magnifier, and text that doesn't fit ends in "…" instead of being squeezed.
 - **App mode** (*Game Settings › App*): opens straight on its first page, with no title screen and no pause, sound or share buttons. App projects get an **App** badge and their own filter on the home screen.
 - **Data collections** (*Game Settings › Data*):
   - records with fields: text, long text, number, money, yes/no, date, choice, stars and icon;

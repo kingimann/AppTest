@@ -106,6 +106,8 @@ Nodes: Go To Page, Go Back, On Page Opened, On Back, Page Is, Can Go Back.
 
 - **Fonts:** eleven built-in fonts plus any Google Font (downloaded the first time a player opens the game).
 - **Images:** rounded corners, and **9-slice** (the *UI Frames* sprites are drawn for it).
+- **Inset from the box edge:** left- or right-aligned text on a box starts this far from the box's edge, leaving room for an icon (*Text › Wrapping and line spacing*). Search bars use it so the text starts after the magnifier.
+- **Long text** that doesn't fit its space ends in **…**.
 - **Copy Style / Paste Style** copies colours, fonts, outlines and shadows between elements.
 
 ## Animation

@@ -1,7 +1,31 @@
 // Logic editor: PlayMaker-style State Machines and Game Creator-style Triggers, built from friendly cards.
 // Events start things, Conditions check things, Instructions do things (top to bottom, waits included).
-import { LOGIC_EVENTS, LOGIC_CONDITIONS, LOGIC_ACTIONS, logicSay, setCustomLogic } from '../engine/pocket.js';
+import { LOGIC_EVENTS, LOGIC_CONDITIONS, LOGIC_ACTIONS, NODE_TYPES, logicSay, setCustomLogic } from '../engine/pocket.js';
 import { icon } from './icons.js';
+import { NODE_HELP } from './nodes.js';
+
+/** Every visual-script node can be used here too: node events, value nodes as conditions, action nodes as instructions. */
+const NODE_SKIP = new Set(['funcDef', 'funcReturn', 'breakLoop', 'continueLoop', 'comment', '_signal', 'funcArg', 'loopItem', 'loopItemText', 'loopKey', 'loopIndex']);
+const nodeLib = (kind) => {
+  const out = {};
+  for (const [t, d] of Object.entries(NODE_TYPES)) {
+    if (d.hidden || d.fromLogic || d.comment || NODE_SKIP.has(t)) continue;
+    if (kind === 'events' && (d.exec || d.value || !(d.outs || []).length)) continue; // event nodes: outputs but no input (any folder: On Touch, On Collision Enter…)
+    if (kind === 'conditions' && !d.value) continue;
+    if (kind === 'actions' && (!d.exec || (d.outs || []).some((o) => ['each', 'loop', 'body', 'repeat'].includes(o)))) continue;
+    out['node:' + t] = { cat: 'Nodes · ' + d.cat, label: d.label, icon: 'nodes', desc: NODE_HELP[t] || '' };
+  }
+  return out;
+};
+const nodeDefFor = (it, kind) => {
+  const d = NODE_TYPES[it?.node]; if (!d) return null;
+  const params = [...(d.params || []), ...(d.inputs || []).map((q) => ({ key: q.key, label: q.label || q.key, type: q.type === 'number' ? 'number' : q.type === 'bool' ? 'bool' : 'text', default: q.default }))];
+  if (kind === 'actions' && (d.outs || []).length > 1) params.push({ key: '_need', label: 'continue only if its output is', type: 'select', options: ['any', ...d.outs], default: 'any' });
+  if (kind === 'conditions' && d.value && d.value !== 'bool') params.push({ key: '_op', label: 'is', type: 'select', options: ['true', '=', '≠', '>', '<', '≥', '≤'], default: 'true' }, { key: '_than', label: 'than / value', type: 'text', default: '' });
+  if (kind === 'events' && (d.outs || []).length > 1) params.push({ key: '_port', label: 'when its output is', type: 'select', options: ['any', ...d.outs], default: 'any' });
+  return { cat: 'Nodes · ' + d.cat, label: d.label, icon: 'nodes', params };
+};
+const nodeItem = (t, kind) => { const it = { type: 'node', node: t }; for (const q of nodeDefFor(it, kind)?.params || []) it[q.key] = q.default; return it; };
 
 const CAT_COLOR = { Variables: '#a86b16', Lists: '#8d6e63', Objects: '#2c6cb0', Motion: '#7e57c2', Physics: '#00897b', Camera: '#455a64', Flow: '#5c6bc0', Scripts: '#6a5acd', Game: '#c0392b', 'My Instructions': '#2e7d6b', 'My Conditions': '#2e7d6b' };
 const LIB_KEY = 'pocket.editor.customLogic';
@@ -58,11 +82,12 @@ export function openLogic(opts) {
   const customDef = (kind, id) => custom[kind].find((q) => q.id === id);
   /** A My Instruction / Condition looks like a built-in one to the rows and pickers. */
   const asDef = (d, kind) => d && { cat: kind === 'actions' ? 'My Instructions' : 'My Conditions', label: d.name, desc: d.desc, icon: d.icon || 'script', params: (d.params || []).map((q) => ({ key: q.key, label: q.label || q.key, type: q.type === 'number' ? 'number' : 'text', default: q.default })) };
-  const actDef = (it) => (it?.type === 'custom' ? asDef(customDef('actions', it.ref), 'actions') : LOGIC_ACTIONS[it?.type]);
-  const condDef = (cd) => (cd?.type === 'custom' ? asDef(customDef('conditions', cd.ref), 'conditions') : LOGIC_CONDITIONS[cd?.type]);
+  const actDef = (it) => (it?.type === 'custom' ? asDef(customDef('actions', it.ref), 'actions') : it?.type === 'node' ? nodeDefFor(it, 'actions') : LOGIC_ACTIONS[it?.type]);
+  const condDef = (cd) => (cd?.type === 'custom' ? asDef(customDef('conditions', cd.ref), 'conditions') : cd?.type === 'node' ? nodeDefFor(cd, 'conditions') : LOGIC_CONDITIONS[cd?.type]);
   const libWith = (base, kind) => ({ ...base, ...Object.fromEntries(custom[kind].map((d) => ['custom:' + d.id, asDef(d, kind)])), ['new:' + kind]: { cat: kind === 'actions' ? 'My Instructions' : 'My Conditions', label: kind === 'actions' ? 'New instruction…' : 'New condition…', icon: 'plus' } });
   /** Picking from a list: built-ins add themselves; "custom:id" adds a call to a My Instruction; "new:…" makes one and opens it. */
   const itemFor = (k, kind) => {
+    if (k.startsWith('node:')) return nodeItem(k.slice(5), kind);
     if (k.startsWith('custom:')) { const d = customDef(kind, k.slice(7)); const it = { type: 'custom', ref: d.id }; for (const q of d.params || []) it[q.key] = q.default ?? ''; return it; }
     return { type: k };
   };
@@ -135,12 +160,13 @@ export function openLogic(opts) {
   document.body.append(root);
 
   // ---------- shared pieces ----------
-  function picker(lib, title, onPick, { fsm = false } = {}) {
+  function picker(lib, title, onPick, { fsm = false, more = null } = {}) {
     const list = h('div', { class: 'ne-plist' });
-    const search = h('input', { type: 'search', placeholder: 'Search', autocapitalize: 'off', oninput: () => draw() });
+    const search = h('input', { type: 'search', placeholder: more ? 'Search (includes every node)' : 'Search', autocapitalize: 'off', oninput: () => draw() });
+    let showMore = false;
     function draw() {
-      const q = search.value.toLowerCase(), groups = {};
-      for (const [k, d] of Object.entries(lib)) {
+      const q = search.value.toLowerCase(), groups = {}, all = more && (q || showMore) ? { ...lib, ...more } : lib;
+      for (const [k, d] of Object.entries(all)) {
         if ((d.fsm && !fsm) || d.hidden) continue;
         if (q && !d.label.toLowerCase().includes(q) && !(d.cat || '').toLowerCase().includes(q)) continue;
         (groups[d.cat || ''] ||= []).push([k, d]);
@@ -148,7 +174,8 @@ export function openLogic(opts) {
       list.replaceChildren(...Object.entries(groups).flatMap(([cat, items]) => [
         cat ? h('div', { class: 'ne-pcat' }, h('i', { style: `background:${CAT_COLOR[cat] || '#666'}` }), cat) : '',
         h('div', { class: 'ne-pgrid' }, items.map(([k, d]) => h('button', { class: 'ne-pitem lg-pitem', style: `--c:${CAT_COLOR[d.cat] || '#4c8bd6'}`, onclick: () => { sheet.remove(); onPick(k); } },
-          h('span', { class: 'lg-pic' }, icon(d.icon || 'bolt')), h('span', { class: 'lg-pt' }, h('b', {}, d.label), d.desc ? h('small', {}, d.desc) : ''))))]));
+          h('span', { class: 'lg-pic' }, icon(d.icon || 'bolt')), h('span', { class: 'lg-pt' }, h('b', {}, d.label), d.desc ? h('small', {}, d.desc) : ''))))]),
+        more && !q && !showMore ? h('button', { class: 'btn wide lg-more', onclick: () => { showMore = true; draw(); } }, icon('nodes'), `Show ${Object.keys(more).length} more from visual-script nodes`) : '');
     }
     draw();
     const sheet = h('div', { class: 'ne-picker', onpointerdown: (e) => { if (e.target === sheet) sheet.remove(); } },
@@ -186,10 +213,10 @@ export function openLogic(opts) {
   }
   /** "On …" event button + its settings. */
   function eventBlock(holder, key, fsm) {
-    const ev = holder[key] ||= { type: 'tap' }, def = LOGIC_EVENTS[ev.type], say = h('span', {}, logicSay(LOGIC_EVENTS, ev));
+    const ev = holder[key] ||= { type: 'tap' }, def = ev.type === 'node' ? nodeDefFor(ev, 'events') : LOGIC_EVENTS[ev.type], say = h('span', {}, logicSay(LOGIC_EVENTS, ev));
     return h('div', { class: 'lg-sec' },
       h('div', { class: 'lg-kw on' }, 'ON'),
-      h('button', { class: 'lg-chip ev', onclick: () => picker(LOGIC_EVENTS, 'When should this happen?', (k) => { snap(); holder[key] = { type: k }; change(); }, { fsm }) }, icon(def?.icon || 'bolt'), say, icon('chevron')),
+      h('button', { class: 'lg-chip ev', onclick: () => picker(LOGIC_EVENTS, 'When should this happen?', (k) => { snap(); holder[key] = k.startsWith('node:') ? nodeItem(k.slice(5), 'events') : { type: k }; change(); }, { fsm, more: fsm ? null : nodeLib('events') }) }, icon(def?.icon || 'bolt'), say, icon('chevron')),
       def?.params?.length ? h('div', { class: 'lg-form' }, form(def, ev, () => { emit(); say.textContent = logicSay(LOGIC_EVENTS, ev); })) : '');
   }
   function condBlock(holder) {
@@ -207,7 +234,7 @@ export function openLogic(opts) {
             h('button', { class: 'lg-x', title: 'Remove', onclick: (e) => { e.stopPropagation(); snap(); list.splice(i, 1); change(); } }, icon('close'))),
           isOpen && def?.params?.length ? h('div', { class: 'lg-form' }, form(def, cd, () => { emit(); say.textContent = logicSay(LOGIC_CONDITIONS, cd); })) : '');
       }),
-      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_CONDITIONS, 'conditions'), 'Add a condition', (k) => { if (k === 'new:conditions') return openNew('conditions', (d) => { snap(); list.push(itemFor('custom:' + d.id, 'conditions')); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); openCustom('conditions', d); }); snap(); list.push(itemFor(k, 'conditions')); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); }) }, icon('plus'), 'Condition'));
+      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_CONDITIONS, 'conditions'), 'Add a condition', (k) => { if (k === 'new:conditions') return openNew('conditions', (d) => { snap(); list.push(itemFor('custom:' + d.id, 'conditions')); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); openCustom('conditions', d); }); snap(); list.push(itemFor(k, 'conditions')); open.add('c' + holderId(holder) + ':' + (list.length - 1)); change(); }, { more: nodeLib('conditions') }) }, icon('plus'), 'Condition'));
   }
   function actionBlock(holder, key, label, kw = 'do') {
     const list = holder[key] ||= [];
@@ -231,7 +258,7 @@ export function openLogic(opts) {
             ].filter(Boolean)); } }, icon('more'))),
           isOpen && def?.params?.length ? h('div', { class: 'lg-form' }, form(def, it, () => { emit(); say.textContent = logicSay(LOGIC_ACTIONS, it); })) : '');
       }),
-      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_ACTIONS, 'actions'), 'Add an instruction', (k) => { if (k === 'new:actions') return openNew('actions', (d) => { snap(); list.push(itemFor('custom:' + d.id, 'actions')); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); openCustom('actions', d); }); snap(); list.push(itemFor(k, 'actions')); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); }) }, icon('plus'), 'Instruction'));
+      h('button', { class: 'lg-add', onclick: () => picker(libWith(LOGIC_ACTIONS, 'actions'), 'Add an instruction', (k) => { if (k === 'new:actions') return openNew('actions', (d) => { snap(); list.push(itemFor('custom:' + d.id, 'actions')); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); openCustom('actions', d); }); snap(); list.push(itemFor(k, 'actions')); open.add('a' + holderId(holder) + key + ':' + (list.length - 1)); change(); }, { more: nodeLib('actions') }) }, icon('plus'), 'Instruction'));
   }
   const ids = new WeakMap(); let nextId = 1;
   const holderId = (o) => { if (!ids.has(o)) ids.set(o, nextId++); return ids.get(o); };

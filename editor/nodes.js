@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', 'Save Files': '#2e7d6b', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', 'Save Files': '#2e7d6b', Instructions: '#5c6bc0', Conditions: '#8d6e00', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: '#8bd347' };
-const CATS = ['Events', 'Flow', 'Actions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', 'Save Files': 'save', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud' };
+const CATS = ['Events', 'Flow', 'Actions', 'Instructions', 'Conditions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', 'Save Files': 'save', Instructions: 'list', Conditions: 'check', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -52,6 +52,8 @@ const CAT_HELP = {
   Math: 'Work numbers out: formulas, random, noise, angles, easing, rounding…',
   Physics: 'Triggers, collisions, landing, forces and bodies.',
   Variables: 'Game and per-object variables: change, clamp, text, saved on the device, “when it reaches…”.',
+  Instructions: 'Every Triggers instruction as a node (the same ones you pick in Triggers): it runs, then “then” goes on when it finishes.',
+  Conditions: 'Every Triggers condition as a true / false value node: plug it into Branch or any yes/no input.',
   'Save Files': 'Easy Save-style save files: keys holding numbers, text, lists, dictionaries or whole objects; backups, export / import, save slots.',
   Lists: 'Lists of numbers: add, remove, shuffle, sort, pick at random, sum, for each (decks, waypoints, high scores).',
   Functions: 'Functions with inputs and a result, your own events (now or later) and Comments.',
@@ -203,6 +205,8 @@ export const NODE_HELP = {
   objPos: 'Where another object is', deltaTime: 'Seconds since the last frame',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
+for (const [t, d] of Object.entries(NODE_TYPES)) if (d.fromLogic && !NODE_HELP[t]) NODE_HELP[t] = t.startsWith('le_') ? `The Triggers event “${d.label.replace(/^When: /, '')}”, as an event node` : t.startsWith('lc_') ? `The Triggers condition “${d.label}”: true or false` : `The Triggers instruction “${d.label}”; waits for it to finish, then “then”`;
+
 
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
@@ -717,7 +721,7 @@ export function openNodeEditor(opts) {
       back.hidden = !folder || !!q;
       title.textContent = q ? 'Search' : folder || 'Add Node';
       if (q) {
-        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => match(t, d, q)).map(([t]) => t);
+        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && match(t, d, q)).map(([t]) => t);
         list.replaceChildren(...(hits.length ? section(`${hits.length} found`, hits, true) : [h('div', { class: 'ne-pnone' }, `No node matches “${search.value}”`)]));
         return;
       }

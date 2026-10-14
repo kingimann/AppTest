@@ -195,6 +195,16 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **Triggers and visual scripts can do the same things:**
+  - Every **visual-script node** can be used in Triggers.
+    - Node events (On Touch, On Collision Enter, On Message…) are trigger events, with a choice of output when a node has several.
+    - Value nodes are conditions: true/false nodes directly; number and text nodes compared with = ≠ > < ≥ ≤.
+    - Action nodes are instructions. The trigger waits for the node to finish, and can *continue only if* a chosen output fires (e.g. Random Chance → yes).
+    - The pickers show the usual list first, then **Show N more from visual-script nodes**. Search covers everything.
+  - Every **trigger event, condition and instruction** is a node.
+    - Instructions and conditions have their own **Instructions** and **Conditions** folders.
+    - Trigger events are in **Events** as "When: …" (When: double-tapped, When: comes near tag…).
+    - A trigger instruction node goes on from "then" once it finishes, so trigger waits work in scripts too.
 - **Scripts, triggers and state machines talk to each other:**
   - **Functions across objects:** **Call Function On Object** gives back another script's Return Value (e.g. the Game Manager's `canAfford`). **Run Function On Objects** runs it on one object, everything with a tag, or everything, and can store the result. **Object Has Function** checks first.
   - **Other objects' variables:** **Get / Set Variable Of Object** (a door's `open`, an enemy's `hp`), by name, tag or *other*.
@@ -234,7 +244,8 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **Inspector**:
   - Short fields (numbers, dropdowns, colours, text) sit beside their label; component headers stay pinned while you scroll.
   - Only fields for the game's mode (2D or 3D) are shown. **Advanced** next to search shows the rarely used ones.
-  - Category filters: Visual, Physics, Logic, Animation, Gameplay, and one fold / unfold-all button.
+  - Category filters: Visual, Physics, Logic, Animation, Gameplay.
+  - **Collapse all / Expand all** folds every component at once. It is in Game Settings too, and remembered, so the next object you select opens collapsed as well.
   - **Quick add** chips for common components, next to Add Component.
   - **Add Component** opens with suggestions for the selected object (e.g. Rigidbody, Health, Triggers for a player that lacks them), your recently used components, and category folders with counts (Physics, Controllers, Combat, AI, Logic…). Tap a folder to browse it, or search everything at once.
   - Components have a coloured edge by category.

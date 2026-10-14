@@ -2904,6 +2904,7 @@ function comp(title, kids, opts = {}) {
     if (e.target.closest('input,button')) return;
     el.classList.toggle('closed');
     if (el.classList.contains('closed')) closedComps.add(key); else closedComps.delete(key);
+    const ib = el.closest('#inspector'); if (ib) syncFoldBtn(ib);
   } },
   h('span', { class: 'fold' }, icon('chevron')),
   opts.onToggle && h('input', { type: 'checkbox', checked: opts.enabled !== false, title: 'Enabled', onchange: (e) => opts.onToggle(e.target.checked) }),
@@ -2944,15 +2945,19 @@ function renderInspector() {
   const box = $('#inspector');
   const scroll = box.scrollTop;
   box.replaceChildren();
-  if (selectedId === SCENE_ID) { renderSceneSettings(box); box.scrollTop = scroll; return; }
+  if (selectedId === SCENE_ID) {
+    const fresh = lastInspected !== SCENE_ID; lastInspected = SCENE_ID;
+    renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); box.scrollTop = scroll; return;
+  }
   const j = ent(selectedId);
   if (!j) { box.append(h('div', { class: 'empty' }, 'Nothing selected.', h('br'), 'Tap an object in the Scene or Hierarchy.')); return; }
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
   const idx = project.entities.indexOf(j);
+  let freshSel = false;
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
-    lastInspected = j.id; selectedPart = -1;
+    lastInspected = j.id; selectedPart = -1; freshSel = true;
     closedComps.clear();
     const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
     if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
@@ -2988,8 +2993,7 @@ function renderInspector() {
   if (nComps < 5 && inspCat !== 'all') inspCat = 'all';
   box.append(h('div', { class: 'comp-tools' + (nComps < 5 ? ' few' : '') },
     h('div', { class: 'cf' }, nComps < 5 ? h('span', { class: 'cf-n' }, `${nComps} component${nComps === 1 ? '' : 's'}`) : INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
-    h('button', { class: 'ct', title: 'Fold or unfold all components', onclick: () => { const comps = [...box.querySelectorAll('.comp')], allShut = comps.every((el) => closedComps.has(el.dataset.key));
-      if (allShut) closedComps.clear(); else for (const el of comps) closedComps.add(el.dataset.key); renderInspector(); } }, icon('list'))));
+    foldAllBtn(box)));
 
   // Transform
   box.append(comp(j.ui ? 'Rect Transform' : 'Transform', threeD
@@ -3323,6 +3327,8 @@ function renderInspector() {
   if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
   if (inspQuery) applyInspSearch(box);
   if (onlyChanged) applyOnlyChanged(box);
+  if (freshSel && foldAllPref) foldAll(box, true);
+  syncFoldBtn(box);
   box.scrollTop = scroll;
 }
 let onlyChanged = false;
@@ -3397,12 +3403,29 @@ function applyTheme(list) {
 }
 
 // ---- scene settings (shown when the scene root is selected) ----
+/** Collapse / expand every component; the choice is remembered, so the next object opens the same way. */
+let foldAllPref = store.get('pocket.editor.foldAll', '0') === '1';
+function foldAll(box, shut) {
+  for (const el of box.querySelectorAll('.comp')) { el.classList.toggle('closed', shut); if (shut) closedComps.add(el.dataset.key); else closedComps.delete(el.dataset.key); }
+}
+function foldAllBtn(box) {
+  return h('button', { class: 'ct fold-all', title: 'Collapse or expand all components', onclick: () => {
+    const comps = [...box.querySelectorAll('.comp')], allShut = comps.length && comps.every((el) => el.classList.contains('closed'));
+    foldAll(box, !allShut); foldAllPref = !allShut; store.set('pocket.editor.foldAll', foldAllPref ? '1' : '0'); syncFoldBtn(box); buzz(6);
+  } }, icon('collapse'), h('span', {}, 'Collapse all'));
+}
+function syncFoldBtn(box) {
+  const b = box.querySelector('.fold-all'); if (!b) return;
+  const comps = [...box.querySelectorAll('.comp')], allShut = comps.length && comps.every((el) => el.classList.contains('closed'));
+  b.querySelector('span').textContent = allShut ? 'Expand all' : 'Collapse all'; b.classList.toggle('on', !!allShut);
+}
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
   const game = levelList()[0], GS = (path, spec) => control(() => levelList()[0], path, spec); // game-wide settings live on the first level
   box.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
     h('span'), h('input', { type: 'text', value: game.name, placeholder: 'Game name', oninput: (e) => { game.name = e.target.value; changed(); renderHierarchy(); } }),
     h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} game · Pocket Engine ${VERSION}`)));
+  box.append(h('div', { class: 'comp-tools few' }, h('div', { class: 'cf' }, h('span', { class: 'cf-n' }, 'Game Settings')), foldAllBtn(box)));
   box.append(comp('Level', [
     C('levelName', { label: 'Level Name', type: 'text', def: levelName(project, levelIdx) }),
     h('p', { class: 'desc' }, `This is level ${levelIdx + 1} of ${levelList().length}. Reaching a Goal moves on to the next level; score and lives carry over.`),

@@ -11190,6 +11190,39 @@ export const LOGIC_ACTIONS = {
   burst: { cat: 'Game', label: 'Particle burst', icon: 'star', params: [{ key: 'color', type: 'color', default: '#ffd23f', label: 'colour' }, num('count', 16, 'how many'), opt('at', ['this', 'other'], 'this', 'at')], run: (c, p) => { const t = p.at === 'other' ? c.other : c.e; if (t) c.s.burst(t.x, t.y, t.z, p.color, clamp(+p.count || 16, 1, 200)); }, say: (p) => `Burst of ${p.count}` },
   toast: { cat: 'Game', label: 'Pop-up text here', icon: 'text', params: [txt('text', '+1', 'text ({braces} work)'), { key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], run: (c, p) => popText(c.s, c.e.x, c.e.y, fillTemplate(p.text, c.s.vars), p.color || '#ffffff', 26), say: (p) => `Pop-up “${p.text}”` },
 };
+// ---- nodes ⇄ triggers: every trigger event / condition / instruction is a node, and every node can be used in triggers ----
+NODE_TYPES._signal = { cat: '(internal)', label: 'Signal', exec: true, outs: [], hidden: true, params: [txt('port', 'then'), txt('tag', '')] };
+for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden) NODE_TYPES['la_' + k] = { cat: 'Instructions', label: d.label, exec: true, outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+for (const [k, d] of Object.entries(LOGIC_CONDITIONS)) if (!d.hidden) NODE_TYPES['lc_' + k] = { cat: 'Conditions', label: d.label, value: 'bool', params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+const evLabel = (l) => 'When: ' + l.charAt(0).toLowerCase() + l.slice(1);
+for (const [k, d] of Object.entries(LOGIC_EVENTS)) if (!d.hidden && !d.fsm && !['always'].includes(k)) NODE_TYPES['le_' + k] = { cat: 'Events', label: evLabel(d.label), outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+const nodeParams = (d, p) => Object.fromEntries([...(d.params || []), ...(d.inputs || [])].map((q) => [q.key, p[q.key] ?? q.default]));
+/** A one-node visual script: Triggers run any action node through it (its outputs call back), read any value node, or listen for any event node. */
+function nodeGraph(type, params, tag = '') {
+  const d = NODE_TYPES[type] || {}, nodes = [{ id: 'n', type, params: { ...params } }], links = [];
+  (d.outs || []).forEach((o, i) => { nodes.push({ id: 's' + i, type: '_signal', params: { port: o, tag } }); links.push({ from: { node: 'n', port: o }, to: { node: 's' + i, port: 'in' } }); });
+  return Behaviors.graph.create({ graph: { nodes, links } });
+}
+function nodeHost(e, key, type, params) { const m = (e._nodeHosts ||= new Map()); if (!m.has(key)) m.set(key, nodeGraph(type, params)); return m.get(key); }
+const nodeSay = (p) => { const d = NODE_TYPES[p.node]; if (!d) return 'Missing node'; const vals = [...(d.params || []), ...(d.inputs || [])].slice(0, 2).map((q) => p[q.key] ?? q.default).filter((v) => v !== '' && v != null && typeof v !== 'object'); return d.label + (vals.length ? ': ' + vals.join(', ') : ''); };
+LOGIC_EVENTS.node = { label: 'Node event', icon: 'nodes', hidden: true, say: nodeSay };
+LOGIC_CONDITIONS.node = { label: 'Node', icon: 'nodes', hidden: true, say: (p) => nodeSay(p) + (NODE_TYPES[p.node]?.value && NODE_TYPES[p.node].value !== 'bool' && p._op && p._op !== 'true' ? ` ${p._op} ${p._than ?? ''}` : ''),
+  test: (c, p) => {
+    const d = NODE_TYPES[p.node]; if (!d) return false;
+    const np = nodeParams(d, p), v = nodeHost(c.e, 'v' + p.node + JSON.stringify(np), p.node, np)._value('n', { s: c.s, e: c.e, other: c.other, eventValue: c.eventValue, steps: 0, dt: 1 / 60 });
+    if (d.value === 'bool' || !p._op || p._op === 'true') return !!v;
+    const t = p._than ?? '';
+    return Number.isFinite(+v) && String(t).trim() !== '' && Number.isFinite(+t) ? cmp(+v, p._op, +t) : (p._op === '≠') !== sameVal(v, t);
+  } };
+LOGIC_ACTIONS.node = { cat: 'Nodes', label: 'Node', icon: 'nodes', hidden: true, say: (p) => nodeSay(p) + (p._need && p._need !== 'any' ? ` (only if ${p._need})` : ''),
+  run: (c, p) => {
+    const d = NODE_TYPES[p.node]; if (!d) return;
+    const np = nodeParams(d, p), host = nodeHost(c.e, 'a' + p.node + JSON.stringify(np), p.node, np);
+    let fin = !(d.outs || []).length, port = null;
+    host._run('n', { s: c.s, e: c.e, other: c.other, eventValue: c.eventValue, steps: 0, dt: 1 / 60, onSignal: (pt) => { if (!fin) { fin = true; port = pt; } } });
+    if (fin) return p._need && p._need !== 'any' && port && port !== p._need ? 'stop' : undefined;
+    return { until: () => fin };
+  } };
 const withDefaults = (def, it) => { const p = { ...it }; for (const q of def?.params || []) if (p[q.key] === undefined) p[q.key] = q.default; return p; };
 export const logicSay = (lib, it) => { const def = lib[it?.type]; if (!def) return it?.type || '?'; const p = withDefaults(def, it); return (def.say ? def.say(p) : def.label) || def.label; };
 /** Run an instruction list; waits pause it. ctx.cancelled stops it. */
@@ -11324,6 +11357,14 @@ registerBehavior('triggers', {
     const list = Array.isArray(p.triggers) ? p.triggers : [];
     const st = list.map(() => ({ runs: 0, last: -1e9, run: null })); // per copy: how often each trigger ran, when, and what is running now
     let w = null;
+    const tagBase = 't' + Math.random().toString(36).slice(2, 8) + ':';
+    const evHosts = list.map((t, i) => (t.event?.type === 'node' && NODE_TYPES[t.event.node] ? nodeGraph(t.event.node, nodeParams(NODE_TYPES[t.event.node], t.event), tagBase + i) : null)); // node events listen through a hidden one-node script
+    const drain = (e, s) => {
+      if (!e._sig?.length) return;
+      const mine = e._sig.filter((q) => String(q.tag).startsWith(tagBase)); if (!mine.length) return;
+      e._sig = e._sig.filter((q) => !String(q.tag).startsWith(tagBase));
+      for (const q of mine) { const i = +String(q.tag).slice(tagBase.length), t = list[i]; if (t && !t.off && (!t.event._port || t.event._port === 'any' || t.event._port === q.port)) fire(t, i, e, s, q.other, q.value); }
+    };
     /** Options: once / max runs, cooldown, chance, delay, if any / all conditions, else, overlap (allow, skip while running, restart). */
     const fire = (t, i, e, s, other, value) => {
       const S = st[i], max = t.once ? 1 : Math.round(+t.maxRuns || 0);
@@ -11343,17 +11384,19 @@ registerBehavior('triggers', {
     };
     return {
       uiAlways: true,
-      start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); },
+      start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); for (const hst of evHosts) hst?.start(e, s); },
       update(e, dt, s) {
         w.frame(dt);
+        for (const hst of evHosts) hst?.update(e, dt, s);
+        drain(e, s);
         list.forEach((t, i) => {
           if (t.off || (s.state !== 'play' && !['tap', 'message', 'called', 'win', 'lose', 'appHidden', 'appShown', 'varChanged', 'pageChanged', 'permission', 'online', 'orientation', 'menu', 'inventory'].includes(t.event?.type))) return;
           for (const hit of w.matchAll(t.event, i)) fire(t, i, e, s, hit.other, hit.value);
         });
       },
-      collide(e, other) { w?.push({ type: 'touch', other }); },
-      separate(e, other) { w?.push({ type: 'touchEnd', other }); },
-      destroy(e, s) { list.forEach((t, i) => { if (t.event?.type === 'destroyed' && !t.off) fire(t, i, e, s); }); },
+      collide(e, other, s, m) { w?.push({ type: 'touch', other }); for (const hst of evHosts) hst?.collide(e, other, s, m); },
+      separate(e, other, s) { w?.push({ type: 'touchEnd', other }); for (const hst of evHosts) hst?.separate(e, other, s); },
+      destroy(e, s) { list.forEach((t, i) => { if (t.event?.type === 'destroyed' && !t.off) fire(t, i, e, s); }); for (const hst of evHosts) hst?.destroy(e, s); drain(e, s); },
     };
   },
 });
@@ -11570,6 +11613,7 @@ registerBehavior('graph', {
     };
     const valueOf = (n, ctx, depth) => {
       if (!n) return 0;
+      if (n.type.startsWith('lc_')) { const k = n.type.slice(3), d = LOGIC_CONDITIONS[k]; if (!d) return false; const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key); return conditionsPass([it], { s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue }); } // a Triggers condition as a node
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
       switch (n.type) {
         case 'number': return +P('value') || 0;
@@ -11779,9 +11823,17 @@ registerBehavior('graph', {
       const st = ctx.s.engine.graphStats;
       if (st) { const k = ctx.e.id + '|' + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
       if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
+      if (n.type.startsWith('la_')) { // a Triggers instruction as a node
+        const k = n.type.slice(3), d = LOGIC_ACTIONS[k], later = { ...ctx, steps: 0 }; if (!d) return;
+        const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key);
+        let sync = true, doneNow = false;
+        runInstructions([it], { s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue }, () => { if (sync) doneNow = true; else if (!ctx.e.dead) follow(n, 'then', later); });
+        sync = false; if (doneNow) follow(n, 'then', ctx); return;
+      }
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
+        case '_signal': if (ctx.onSignal) ctx.onSignal(P('port'), ctx); else (e._sig ||= []).push({ tag: P('tag'), port: P('port'), other: ctx.other, value: ctx.eventValue }); return; // a node run by Triggers reports its output
         case 'wait': { s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
@@ -12335,11 +12387,14 @@ registerBehavior('graph', {
       for (const n of g.nodes) if (n.type === type && (!filter || filter(n))) follow(n, 'then', { s, e, other, steps: 0, dt, ...extra });
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
+    const leNodes = g.nodes.filter((n) => n.type.startsWith('le_') && !n.off); let lw = null;
+    const leEvent = (n) => { const k = n.type.slice(3), d = LOGIC_EVENTS[k], ev = { type: k }; for (const q of d?.params || []) ev[q.key] = param(n, q.key); return ev; };
     const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
     const timers = new Map(), bindings = new Map();
     return {
       uiAlways: true,
       start(e, s) {
+        if (leNodes.length) { lw = new LogicWatcher(e, s); needsSensor(leNodes.map((n) => leEvent(n)), e, s); } // Triggers events used as nodes
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
         if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
@@ -12413,6 +12468,7 @@ registerBehavior('graph', {
       },
       update(e, dt, s) {
         const inp = s.engine.input, playing = s.state === 'play';
+        if (lw) { lw.frame(dt); for (const n of leNodes) for (const hit of lw.matchAll(leEvent(n), n.id)) if (playing || ['tap', 'message', 'called'].includes(n.type.slice(3))) follow(n, 'then', { s, e, other: hit.other, eventValue: hit.value, steps: 0, dt }); }
         if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
         if (!playing) return;
         fire('update', e, s, null, null, dt);
@@ -12460,6 +12516,7 @@ registerBehavior('graph', {
         }
       },
       collide(e, other, s, m) {
+        lw?.push({ type: 'touch', other });
         fire('touch', e, s, other, (n) => other.has(param(n, 'tag')));
         if (e.body?.sensor || other.body?.sensor) { fire('triggerEnter', e, s, other, (n) => tagOk(other, param(n, 'tag'))); return; }
         if (!has('collisionEnter')) return;
@@ -12469,10 +12526,13 @@ registerBehavior('graph', {
         fire('collisionEnter', e, s, other, (n) => tagOk(other, param(n, 'tag')) && impact >= (+param(n, 'minSpeed') || 0), null, { impact, hit: { dist: 0, point: { x: e.x, y: e.y, z: e.z }, normal: { x: -nrm.nx, y: -nrm.ny, z: -nrm.nz } } });
       },
       separate(e, other, s) {
+        lw?.push({ type: 'touchEnd', other });
         fire('touchEnd', e, s, other, (n) => other.has(param(n, 'tag')));
         fire(e.body?.sensor || other.body?.sensor ? 'triggerExit' : 'collisionExit', e, s, other, (n) => tagOk(other, param(n, 'tag')));
       },
       destroy(e, s) { fire('destroyed', e, s); if (rayOverlay) s.overlays = (s.overlays || []).filter((f) => f !== rayOverlay); },
+      _run(id, ctx) { run(byId.get(id), ctx); }, // Triggers run single nodes through these
+      _value(id, ctx) { return value(byId.get(id), ctx, 0); },
     };
   },
 });

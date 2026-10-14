@@ -1487,3 +1487,5 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .lg-ck.on { border-color: #3a6ea5; background: #2a3a4d; }
 .lg-ck input { width: 22px; height: 22px; }
 .lg-pt { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.comp-tools .ct.fold-all { width: auto; padding: 0 12px; gap: 6px; display: inline-flex; align-items: center; color: #d6d6d6; font-size: 13.5px; font-weight: 600; }
+.comp-tools .ct.fold-all.on { background: #2f4a66; border-color: #3a6ea5; color: #fff; }

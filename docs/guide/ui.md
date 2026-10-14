@@ -55,6 +55,24 @@ To make your own, set any UI element's **Show when** to `title`, `paused`, `over
 ## Showing values
 
 - **Text** with `{variables}`: `Score {score}`, `♥ {lives}`, `{coins}` (shown as 1.2K when big). Number format, shrink to fit, wrapping and text animations are in the Text card.
+
+### Text settings
+
+| Setting | What it does |
+|---|---|
+| **Rich text** (Style) | Style single words with tags: `<b>bold</b>`, `<i>italic</i>`, `<u>underline</u>`, `<s>strike</s>`, `<color=#e53935>red</color>` (or `<color=@accent>`), `<size=30>big</size>` (or `150%`), `<mark=#ffeb3b>highlight</mark>`, and icons: `<icon=star>`, `<icon=heart>`, `<icon=play>` |
+| **Gradient to** + direction | Two colours, top to bottom, left to right or diagonal |
+| **Letters** | As typed, UPPERCASE, lowercase or Title Case |
+| **Wrap to fit its box** | On a shape, lines break at the shape's width (it follows when you resize it) |
+| **At most lines** | Longer text is cut and ends in "…" |
+| **Inset**, **Padding top and bottom** | Room between the text and its box's edges |
+| **Auto size** | Like Unity's *Best Fit*: as big as its Font Size, smaller when it would not fit its box, wrap width or line limit (down to *Smallest size*) |
+| **Numbers count up / down** | A number in the text rolls to its new value (coins, score) |
+| **Shadow across / down / softness** | A shadow anywhere; softness 0 makes a hard cartoon shadow |
+| **Box behind the text** | Padding for the sides and for top and bottom, roundness, and a border |
+| **Appear: Typewriter** | Letters appear one by one (letters per second), again whenever the text changes, and a message when it's done |
+
+Long text that doesn't fit its space ends in "…" instead of being squeezed. Taps on a text button hit exactly the text you see, whatever its alignment.
 - **Progress Bar** (`bar`): bound to a variable, with looks (flat, striped, blocks, glossy, glowing), fill directions, a damage trail, a warning colour, a label with `{value}`, `{max}`, `{percent}`, and ring or heart-icon styles.
 - **Animated Counter**, **XP Bar**, **Timer**, **Chart**, **News Ticker**, **Minimap**, **Off-screen Arrows**, **Crosshair**, **Screen Effects**.
 
@@ -92,7 +110,31 @@ scene.navBack();
 scene.canGoBack();
 ```
 
-Nodes: Go To Page, Go Back, On Page Opened, On Back, Page Is, Can Go Back.
+Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Can Go Back.
+
+**Page settings** (in the page's *Show If*, group *Page*):
+
+- **Scroll when it is taller than the screen:** drag up and down (with a flick, a rubber band at the ends and a thin scroll bar). Lists and scroll views inside it still scroll on their own, and a scroll never presses a button. The App Bar can hide or gain its shadow as the page scrolls.
+- **Remember where it was scrolled to**, or start at the top each time.
+- **Message when it opens / closes.**
+
+While a page is sliding away it no longer takes taps, so one tap can't press buttons on two pages.
+
+In the editor, the **page button** above the UI editor lists the pages and has **New Page…**, **Duplicate**, **Rename** (it also updates the buttons, tabs, lists and titles that lead to the page) and **Delete**.
+
+## Panels and windows
+
+Any rectangle can be a panel: **Corner Radius** with **Rounded corners** (all four, top only, bottom only, left or right), fill, gradient, outline and shadow.
+
+Add **Panel (window)** to make it a window (or add *UI › Window* / *Glass Panel*):
+
+- A **header** with a title (left or centred), its own colour and a line under it.
+- A **✕ close button** that hides it and can send a message. *Open on message* / *Close on message* show and hide it.
+- **Drag to move** by the header or anywhere, kept on the screen.
+- **Tap the header to fold it** to just the header (what's inside hides), tap again to open.
+- **Resize from the corner**, with a smallest width and height.
+- **Grow to fit what is inside** (children anchored to its top) plus padding.
+- **Frosted glass**: blurs the game behind the panel (use a see-through fill).
 
 ## Popups, toasts and notifications
 

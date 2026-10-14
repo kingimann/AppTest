@@ -368,7 +368,8 @@ export class Entity {
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       for (const k of def.passthrough || []) if (b[k] !== undefined) params[k] = b[k]; // extra data a component keeps without an Inspector field
-      for (const k of Object.keys(params)) if (isTok(params[k])) { const raw = params[k]; Object.defineProperty(params, k, { get: () => tok(raw), set: (v) => { Object.defineProperty(params, k, { value: v, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true }); } // theme colours follow light / dark
+      const rawTok = {}; Object.defineProperty(params, '__raw', { value: rawTok, enumerable: false }); // the @tokens as written, for parts a component builds (they follow dark mode)
+      for (const k of Object.keys(params)) if (isTok(params[k])) { const raw = rawTok[k] = params[k]; Object.defineProperty(params, k, { get: () => tok(raw), set: (v) => { Object.defineProperty(params, k, { value: v, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true }); } // theme colours follow light / dark
       inst = def.create(params, this) || {};
       inst.type = b.type; inst.params ||= params;
     }
@@ -444,9 +445,11 @@ export class Entity {
     if (this.sprite) return { sphere: false, hx: this.sprite.w * sx / 2, hy: this.sprite.h * sy / 2, hz: Infinity, ...this.rot2D() };
     if (this.bar) return { sphere: false, hx: this.bar.w * sx / 2, hy: this.bar.h * sy / 2, hz: Infinity };
     if (this.minimap) return { sphere: false, hx: this.minimap.w * sx / 2, hy: this.minimap.h * sy / 2, hz: Infinity };
-    if (this.text) {
-      const len = String(this.text.value).length;
-      return { sphere: false, hx: this.text.size * len * 0.3 * sx, hy: this.text.size * 0.6 * sy, hz: Infinity };
+    if (this.text) { // the size it was last drawn at (a rough guess before that), offset for left / right alignment
+      const m = this._tm, t = this.text;
+      if (m) return { sphere: false, hx: Math.max(2, m.w / 2) * sx, hy: Math.max(2, m.h / 2) * sy, hz: Infinity, ox: m.ox * sx, oy: m.oy * sy };
+      const hx = t.size * Math.min(String(t.value).length, +t.wrap > 0 ? +t.wrap / (t.size * 0.6) : 1e9) * 0.3;
+      return { sphere: false, hx: hx * sx, hy: t.size * 0.6 * sy, hz: Infinity, ox: (t.align === 'left' ? hx : t.align === 'right' ? -hx : 0) * sx };
     }
     return { sphere: false, hx: 10, hy: 10, hz: is2D ? Infinity : 0.5 };
   }
@@ -659,6 +662,8 @@ function setPalette(s) {
   PAL = a ? { ...base, accent: a } : base;
 }
 /** A colour, with theme tokens (@bg, @card, @text, @sub, @line, @field, @bar, @accent, @onAccent, @danger, @good, @shadow, @dim) replaced. */
+/** A component setting as written (an @token stays a token, so what it builds keeps following light / dark mode). */
+const RAW = (p, k) => p.__raw?.[k] ?? p[k];
 export function tok(c) { return typeof c === 'string' && c.charCodeAt(0) === 64 ? PAL[c.slice(1)] ?? c : c; }
 const isTok = (c) => typeof c === 'string' && c.charCodeAt(0) === 64;
 /** A damped spring as an ease: zeta = damping ratio (below 1 overshoots), w = stiffness. */
@@ -2057,7 +2062,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -3215,12 +3220,226 @@ function drawBar(ctx, e, b, k, v, max, time, alpha) {
     else { ctx.textAlign = 'center'; ctx.fillText(txt, 0, 1); }
   }
 }
+/**
+ * Rich text: tags like Unity's TextMeshPro. <b> <i> <u> <s> <color=#f00> (or @accent) <size=24> <mark=#ff0> <icon=star>,
+ * closed with </b>, </color>…  Anything that isn't a tag is shown as written.
+ */
+/** A rectangle's corner rounding: the same on all four, or only some corners (top, bottom, left, right, or "tl tr br bl"). */
+function cornerRadii(s) {
+  const r = Math.max(0, +s.radius || 0), c = s.corners;
+  if (!r) return 0;
+  if (!c || c === 'all') return r;
+  if (c === 'top') return [r, r, 0, 0]; if (c === 'bottom') return [0, 0, r, r]; if (c === 'left') return [r, 0, 0, r]; if (c === 'right') return [0, r, r, 0];
+  const n = String(c).split(/[\s,]+/).map((v) => Math.max(0, +v || 0));
+  return n.length === 4 ? n : r;
+}
+const RICH_TAG = /<(\/?)(b|i|u|s|color|size|mark|icon)(?:=([^>]*))?>/gi;
+function parseRich(str) {
+  const out = [], stack = [{}];
+  let last = 0;
+  const push = (text) => { if (text) out.push({ text, st: stack[stack.length - 1] }); };
+  for (const m of String(str).matchAll(RICH_TAG)) {
+    push(str.slice(last, m.index)); last = m.index + m[0].length;
+    const [, close, tag0, val] = m, tag = tag0.toLowerCase(), top = stack[stack.length - 1];
+    if (tag === 'icon') { if (!close) out.push({ icon: (val || 'star').trim(), text: '', st: top }); continue; }
+    if (close) { for (let i = stack.length - 1; i > 0; i--) if (stack[i]._tag === tag) { stack.length = i; break; } continue; }
+    const st = { ...top, _tag: tag };
+    if (tag === 'b') st.bold = true; else if (tag === 'i') st.italic = true; else if (tag === 'u') st.u = true; else if (tag === 's') st.s = true;
+    else if (tag === 'color') st.color = tok((val || '').trim()); else if (tag === 'mark') st.mark = tok((val || '').trim() || 'rgba(255,230,0,0.45)');
+    else if (tag === 'size') { const v = String(val || '').trim(); st.size = v.endsWith('%') ? { rel: parseFloat(v) / 100 } : +v || null; }
+    stack.push(st);
+  }
+  push(str.slice(last));
+  return out;
+}
+/** "Hello world" → "Hello World". */
+const titleCase = (s) => s.replace(/(^|[\s\-(])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+
+/** Text on an object: wrapping, rich tags, auto size, line limits, reveal and rolling numbers, effects, a box behind it. */
+function drawText2D(ctx, e, vars, time) {
+  const t = e.text, now = performance.now() / 1000, M = e.scene ? motionOf(e.scene) : { reduced: false };
+  const box = e.shape && e.shape.type !== 'circle' && e.shape.type !== 'ring' && e.shape.w ? { w: e.shape.w, h: e.shape.h } : null;
+  const padX = +t.inset > 0 ? +t.inset : 0, padY = +t.padY || 0;
+  const inset = padX && t.align !== 'center' && box ? (box.w / 2 - padX) * (t.align === 'right' ? 1 : -1) : 0; // left / right text sits this far in from the box's edge (search bars, fields)
+  ctx.save();
+  if (inset) ctx.translate(inset, 0);
+  const V = Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars;
+  // rolling numbers: a number shown in the text counts up or down to its new value
+  let VV = V;
+  if (t.roll && !M.reduced) {
+    const k = (String(t.value).match(/\{(\w+)\}/) || [])[1], v = k != null ? V[k] : undefined;
+    if (typeof v === 'number') {
+      const R = e._roll ||= { from: v, to: v, t0: 0 };
+      if (v !== R.to) { R.from = R.shown ?? R.to; R.to = v; R.t0 = now; }
+      const d = Math.max(0.05, +t.rollTime || 0.6), p = Math.min(1, (now - R.t0) / d), q = 1 - Math.pow(1 - p, 3);
+      R.shown = p >= 1 ? v : R.from + (R.to - R.from) * q;
+      if (R.shown !== v) { VV = Object.create(V); VV[k] = Number.isInteger(R.to) && Number.isInteger(R.from) ? Math.round(R.shown) : Math.round(R.shown * 100) / 100; }
+    }
+  }
+  let str = fillTemplate(t.value, VV, t.format);
+  if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase(); else if (t.case === 'title') str = titleCase(str);
+  if (e.ui && t.bump !== false && !t.roll && str.length <= 24 && String(t.value).includes('{')) { // a score, coin count or timer pops when its value changes
+    if (e._txt !== undefined && e._txt !== str && !M.reduced) e._bump = now;
+    e._txt = str;
+    const p = (now - (e._bump || -9)) / 0.4;
+    if (p < 1) { const k = 1 + 0.26 * Math.sin(Math.PI * Math.min(1, p * 1.5)) * (1 - p); ctx.scale(k, k); }
+  }
+  if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
+  const runs = t.rich ? parseRich(str) : [{ text: str, st: {} }];
+  const baseW = String(t.weight || '700'), boldW = +baseW >= 700 ? '900' : '800';
+  const fontFor = (st, size) => `${t.italic || st.italic ? 'italic ' : ''}${st.bold ? boldW : baseW} ${st.size ? (st.size.rel ? size * st.size.rel : st.size) : size}px ${fontOf(t.font)}`;
+  const sizeOf = (st, size) => (st.size ? (st.size.rel ? size * st.size.rel : st.size) : size);
+  // the width to wrap at: a number, or the box it sits on ("wrap to the box")
+  const wrapW = t.wrap === 'box' || t.wrapBox ? (box ? Math.max(10, box.w - 2 * Math.max(padX, 8)) : 0) : +t.wrap || 0;
+  const maxLines = Math.max(0, Math.round(+t.maxLines || 0));
+  /** Lay the runs out into lines of pieces { text, st, w } at a font size. */
+  const layout = (size) => {
+    const lines = [[]], widths = [0];
+    const add = (piece) => { lines[lines.length - 1].push(piece); widths[widths.length - 1] += piece.w; };
+    const br = () => { lines.push([]); widths.push(0); };
+    for (const r of runs) {
+      if (r.icon) { const s = sizeOf(r.st, size), w = s * 1.1; if (wrapW && widths[widths.length - 1] + w > wrapW && lines[lines.length - 1].length) br(); add({ icon: r.icon, st: r.st, w, size: s }); continue; }
+      ctx.font = fontFor(r.st, size);
+      const paras = r.text.split(/\n|\\n/);
+      paras.forEach((para, pi) => {
+        if (pi) br();
+        if (!wrapW) { if (para) add({ text: para, st: r.st, w: ctx.measureText(para).width }); return; }
+        for (const word of para.split(/(\s+)/)) { // words and the spaces between them
+          if (!word) continue;
+          const w = ctx.measureText(word).width, cur = widths[widths.length - 1];
+          if (/^\s+$/.test(word)) { if (lines[lines.length - 1].length) add({ text: word, st: r.st, w }); continue; }
+          if (cur + w > wrapW && lines[lines.length - 1].length) { // to the next line (without the trailing space)
+            const L = lines[lines.length - 1]; while (L.length && /^\s+$/.test(L[L.length - 1].text || '')) widths[widths.length - 1] -= L.pop().w;
+            br();
+          }
+          add({ text: word, st: r.st, w });
+        }
+      });
+    }
+    return { lines, widths };
+  };
+  let size = +t.size || 24, L = layout(size);
+  const lhK = +t.lineHeight || 1.2;
+  const fits = (Lx, s) => {
+    const n = maxLines ? Math.min(maxLines, Lx.lines.length) : Lx.lines.length, w = Math.max(...Lx.widths, 0);
+    const limW = wrapW ? Infinity : +t.fit > 0 ? +t.fit : box ? box.w - 2 * Math.max(padX, 6) : Infinity, limH = box ? box.h - 2 * padY : Infinity;
+    return w <= limW + 0.5 && n * s * lhK <= limH + 0.5 && (!maxLines || Lx.lines.length <= maxLines);
+  };
+  if (t.autoSize) { // the biggest size (up to its size) that fits its box, wrap width and line limit
+    const lo0 = Math.max(4, +t.minSize || 8);
+    if (!fits(L, size)) {
+      let lo = lo0, hi = size;
+      for (let i = 0; i < 8; i++) { const mid = (lo + hi) / 2; if (fits(layout(mid), mid)) lo = mid; else hi = mid; }
+      size = lo; L = layout(size);
+    }
+  } else if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
+    const w = Math.max(...L.widths, 1);
+    if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); L = layout(size); }
+  }
+  let { lines, widths } = L;
+  // a line limit: the last line ends in "…"
+  if (maxLines && lines.length > maxLines) {
+    lines = lines.slice(0, maxLines); widths = widths.slice(0, maxLines);
+    const last = lines[maxLines - 1], lim = (wrapW || Math.max(...widths)) , ell = '…';
+    ctx.font = fontFor(last[last.length - 1]?.st || {}, size);
+    const ew = ctx.measureText(ell).width;
+    let w = widths[maxLines - 1];
+    while (last.length && (w + ew > lim || /^\s+$/.test(last[last.length - 1].text || ''))) {
+      const p = last[last.length - 1];
+      if (p.icon || p.text.length <= 1 || /^\s+$/.test(p.text)) { w -= p.w; last.pop(); continue; }
+      ctx.font = fontFor(p.st, size); p.text = p.text.slice(0, -1); const nw = ctx.measureText(p.text).width; w -= p.w - nw; p.w = nw;
+    }
+    const st = last[last.length - 1]?.st || {}; ctx.font = fontFor(st, size); last.push({ text: ell, st, w: ew }); widths[maxLines - 1] = w + ew;
+  }
+  // typewriter: letters appear one by one (restarts when the text changes)
+  let budget = Infinity;
+  if (t.reveal && t.reveal !== 'none' && !(e.scene?.engine?.editing)) {
+    if (e._revStr !== str) { e._revStr = str; e._revT0 = now; e._revDone = false; }
+    const total = runs.reduce((n, r) => n + (r.icon ? 1 : r.text.length), 0), sp = Math.max(1, +t.revealSpeed || 30);
+    budget = M.reduced ? Infinity : Math.floor((now - e._revT0) * sp);
+    if (budget >= total && !e._revDone) { e._revDone = true; if (t.revealMessage && e.scene) e.scene.send(t.revealMessage); }
+  }
+  const lh = size * lhK, n = lines.length, block = n * lh;
+  const vy = t.valign === 'top' ? block / 2 - lh / 2 : t.valign === 'bottom' ? -block / 2 + lh / 2 : 0; // top: the first line sits at the object's position
+  const y0 = -(n - 1) * lh / 2 + vy, maxW = Math.max(...widths, 0);
+  const leftOf = (w) => (t.align === 'left' ? 0 : t.align === 'right' ? -w : -w / 2);
+  e._tm = { w: maxW, h: block, ox: (t.align === 'left' ? maxW / 2 : t.align === 'right' ? -maxW / 2 : 0) + inset, oy: vy }; // the measured size, for taps and layout
+  if (t.bg) { // a label box behind the text
+    const pad = t.bgPad != null && t.bgPad !== '' ? +t.bgPad : 8, py = t.bgPadY != null && t.bgPadY !== '' ? +t.bgPadY : pad * 0.6;
+    const x = leftOf(maxW) - pad, y = y0 - lh / 2 - py, w = maxW + pad * 2, hgt = block + py * 2;
+    ctx.fillStyle = t.bg; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hgt, +t.bgRadius || 0); else ctx.rect(x, y, w, hgt); ctx.fill();
+    if (t.bgBorder && +t.bgBorderWidth !== 0) { ctx.strokeStyle = t.bgBorder; ctx.lineWidth = +t.bgBorderWidth || 1.5; ctx.stroke(); }
+  }
+  const fx = t.effect || 'none', perLetter = ['wave', 'shake', 'rainbow', 'bounce'].includes(fx);
+  if (fx === 'pulse') { const k = 1 + Math.sin(time * 5) * 0.06; ctx.scale(k, k); }
+  if (fx === 'float') ctx.translate(0, Math.sin(time * 2.5) * size * 0.12);
+  // a gradient over the whole text block, in the chosen direction
+  const gd = t.gradDir || 'down', bx = leftOf(maxW);
+  let base = t.color;
+  if (t.color2 && t.color) {
+    const g = gd === 'across' ? ctx.createLinearGradient(bx, 0, bx + maxW, 0) : gd === 'diagonal' ? ctx.createLinearGradient(bx, y0 - lh / 2, bx + maxW, y0 - lh / 2 + block) : ctx.createLinearGradient(0, y0 - lh / 2, 0, y0 - lh / 2 + block);
+    g.addColorStop(0, t.color); g.addColorStop(1, t.color2); base = g;
+  }
+  const shade = (s) => {
+    if (t.glow) { ctx.shadowColor = t.glow; ctx.shadowBlur = s * 0.6; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; }
+    else if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = t.shadowBlur != null && t.shadowBlur !== '' ? +t.shadowBlur : s * 0.25; ctx.shadowOffsetX = +t.shadowX || 0; ctx.shadowOffsetY = t.shadowY != null && t.shadowY !== '' ? +t.shadowY : s * 0.08; }
+  };
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  let shownChars = 0, j = 0;
+  for (let i = 0; i < n; i++) {
+    const y = y0 + i * lh;
+    let x = leftOf(widths[i]);
+    for (const p of lines[i]) {
+      if (shownChars >= budget) break;
+      const s = p.size || sizeOf(p.st, size), col = p.st.color || base;
+      if (p.st.mark) { ctx.shadowColor = 'transparent'; ctx.fillStyle = p.st.mark; ctx.fillRect(x - 1, y - s * 0.62, p.w + 2, s * 1.24); }
+      if (p.icon) { shade(s); glyph(ctx, p.icon, x + p.w / 2, y, s * 0.92, typeof col === 'string' ? col : t.color || '#fff'); ctx.shadowColor = 'transparent'; x += p.w; shownChars++; continue; }
+      ctx.font = fontFor(p.st, size);
+      let txt = p.text;
+      if (shownChars + txt.length > budget) txt = txt.slice(0, Math.max(0, budget - shownChars));
+      shownChars += p.text.length;
+      ctx.fillStyle = col; shade(s);
+      if (!perLetter) {
+        if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(txt, x, y); if (!t.glow) ctx.shadowColor = 'transparent'; }
+        ctx.fillText(txt, x, y);
+      } else { // each letter moves on its own
+        let cx = x;
+        for (const ch of txt) {
+          const cw = ctx.measureText(ch).width, ph = time * 6 - j * 0.5;
+          let dx = 0, dy = 0;
+          if (fx === 'wave') dy = Math.sin(ph) * s * 0.15;
+          else if (fx === 'bounce') dy = -Math.abs(Math.sin(ph * 0.8)) * s * 0.25;
+          else if (fx === 'shake') { const r = Math.sin((j + 1) * 99.1 + Math.floor(time * 20) * 7.3); dx = r * s * 0.05; dy = Math.cos(r * 13) * s * 0.05; }
+          if (fx === 'rainbow') ctx.fillStyle = `hsl(${(time * 120 + j * 25) % 360}, 90%, 62%)`;
+          if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ch, cx + dx, y + dy); }
+          ctx.fillText(ch, cx + dx, y + dy);
+          cx += cw; j++;
+        }
+      }
+      const u = t.underline || p.st.u, k = t.strike || p.st.s;
+      if (u || k) { // lines under / through the text, in its colour
+        ctx.shadowColor = 'transparent'; const w = txt === p.text ? p.w : ctx.measureText(txt).width, th = Math.max(1, s * 0.07);
+        if (u) ctx.fillRect(x, y + s * 0.42, w, th);
+        if (k) ctx.fillRect(x, y + s * 0.02, w, th);
+      }
+      x += p.w;
+    }
+    if (shownChars >= budget) break;
+  }
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+  if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  ctx.restore();
+}
 /** Draw an entity, with theme colour tokens in its shape and text resolved. */
 function drawEntity2D(ctx, e, vars, time) {
-  const sh = e.shape, tx = e.text;
-  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.shadow))) || (tx && (isTok(tx.color) || isTok(tx.stroke) || isTok(tx.bg))))) return drawEntity2DRaw(ctx, e, vars, time);
+  const sh = e.shape, tx = e.text, br = e.bar;
+  if (br && (isTok(br.fill) || isTok(br.bg) || isTok(br.border) || isTok(br.labelColor) || isTok(br.trail) || isTok(br.fill2))) { // a bar with theme colours
+    e.bar = { ...br, fill: tok(br.fill), fill2: tok(br.fill2), bg: tok(br.bg), border: tok(br.border), labelColor: tok(br.labelColor), trail: tok(br.trail) };
+    try { return drawEntity2D(ctx, e, vars, time); } finally { e.bar = br; }
+  }
+  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.shadow))) || (tx && (isTok(tx.color) || isTok(tx.color2) || isTok(tx.outline) || isTok(tx.glow) || isTok(tx.shadowColor) || isTok(tx.bg) || isTok(tx.bgBorder))))) return drawEntity2DRaw(ctx, e, vars, time);
   if (sh) e.shape = { ...sh, fill: tok(sh.fill), fill2: tok(sh.fill2), stroke: tok(sh.stroke), shadow: tok(sh.shadow) };
-  if (tx) e.text = { ...tx, color: tok(tx.color), stroke: tok(tx.stroke), bg: tok(tx.bg) };
+  if (tx) e.text = { ...tx, color: tok(tx.color), color2: tok(tx.color2), outline: tok(tx.outline), glow: tok(tx.glow), shadowColor: tok(tx.shadowColor), bg: tok(tx.bg), bgBorder: tok(tx.bgBorder) };
   try { return drawEntity2DRaw(ctx, e, vars, time); } finally { if (sh) e.shape = sh; if (tx) e.text = tx; }
 }
 function drawEntity2DRaw(ctx, e, vars, time) {
@@ -3267,9 +3486,11 @@ function drawEntity2DRaw(ctx, e, vars, time) {
         for (const [cx, cy, cr] of [[-0.25, 0.1, 0.25], [0, -0.1, 0.32], [0.27, 0.08, 0.24], [0, 0.18, 0.22]]) { ctx.moveTo(cx * s.w + cr * s.w, cy * s.h); ctx.arc(cx * s.w, cy * s.h, cr * s.w, 0, Math.PI * 2); }
         break;
       case 'emoji': break;
-      default:
-        if (s.radius && ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, s.radius);
+      default: {
+        const R = cornerRadii(s);
+        if (R && ctx.roundRect) ctx.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, R);
         else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h);
+      }
     }
     if (s.type === 'emoji') { // emoji sprites: thousands of ready-made characters, items and props
       ctx.font = `${Math.round(s.h * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
@@ -3306,7 +3527,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.bar) { // progress / health bar bound to a variable (or this object's own value with "self.hp")
     const b = e.bar, src = b.var.startsWith('self.') ? e.data : vars, key = b.var.replace(/^self\./, '');
     const max = (b.maxVar ? +(b.maxVar.startsWith('self.') ? e.data : vars)[b.maxVar.replace(/^self\./, '')] : +b.max) || 1;
-    const k = clamp((+src[key] || 0) / max, 0, 1);
+    const mn = +b.min || 0, k = clamp(((+src[key] || 0) - mn) / ((max - mn) || 1), 0, 1); // (a bar can start above 0: a slider from 50 to 150)
     if (b.style === 'ring') { // radial / circular progress
       const r = Math.min(b.w, b.h) / 2, lw = Math.max(3, r * (+b.thick || 0.22)), kk = barSmooth(e, b, k, time), a0 = -Math.PI / 2;
       ctx.lineWidth = lw; ctx.lineCap = b.look === 'segments' ? 'butt' : 'round';
@@ -3328,80 +3549,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
       ctx.globalAlpha = alpha;
     } else drawBar(ctx, e, b, k, +src[key] || 0, max, time, alpha);
   }
-  if (e.text) {
-    const t = e.text;
-    let size = t.size;
-    const inset = +t.inset > 0 && t.align !== 'center' && e.shape && e.shape.type !== 'circle' && e.shape.w ? (e.shape.w / 2 - +t.inset) * (t.align === 'right' ? 1 : -1) : 0; // left / right text sits this far in from the box's edge (search bars, fields)
-    if (inset) ctx.translate(inset, 0);
-    const setFont = () => { ctx.font = `${t.italic ? 'italic ' : ''}${t.weight} ${size}px ${fontOf(t.font)}`; };
-    setFont();
-    ctx.textAlign = t.align; ctx.textBaseline = 'middle';
-    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
-    let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars, t.format);
-    if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
-    if (e.ui && t.bump !== false && str.length <= 24 && String(t.value).includes('{')) { // a score, coin count or timer pops when its value changes
-      const now = performance.now() / 1000;
-      if (e._txt !== undefined && e._txt !== str && !motionOf(e.scene).reduced) e._bump = now;
-      e._txt = str;
-      const p = (now - (e._bump || -9)) / 0.4;
-      if (p < 1) { const k = 1 + 0.26 * Math.sin(Math.PI * Math.min(1, p * 1.5)) * (1 - p); ctx.scale(k, k); }
-    }
-    let lines = textLines(ctx, str, +t.wrap || 0);
-    if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
-      const w = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
-      if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); setFont(); }
-    }
-    const lh = size * (+t.lineHeight || 1.2), block = lines.length * lh;
-    const vy = t.valign === 'top' ? block / 2 - lh / 2 : t.valign === 'bottom' ? -block / 2 + lh / 2 : 0; // top: the first line sits at the object's position
-    const y0 = -(lines.length - 1) * lh / 2 + vy;
-    const widths = lines.map((l) => ctx.measureText(l).width), maxW = Math.max(...widths, 0);
-    const leftOf = (w) => (t.align === 'left' ? 0 : t.align === 'right' ? -w : -w / 2);
-    if (t.bg) { // a label box behind the text
-      const pad = +t.bgPad || 8, x = leftOf(maxW) - pad, y = y0 - lh / 2 - pad * 0.6, w = maxW + pad * 2, hgt = block + pad * 1.2;
-      ctx.fillStyle = t.bg; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hgt, +t.bgRadius || 0); else ctx.rect(x, y, w, hgt); ctx.fill();
-    }
-    const fx = t.effect || 'none', perLetter = ['wave', 'shake', 'rainbow', 'bounce'].includes(fx);
-    let pulseK = 1;
-    if (fx === 'pulse') { pulseK = 1 + Math.sin(time * 5) * 0.06; ctx.scale(pulseK, pulseK); }
-    if (fx === 'float') ctx.translate(0, Math.sin(time * 2.5) * size * 0.12);
-    ctx.fillStyle = paintOf(ctx, t.color, t.color2, 'down', 0, block);
-    const shade = () => {
-      if (t.glow) { ctx.shadowColor = t.glow; ctx.shadowBlur = size * 0.6; ctx.shadowOffsetY = 0; }
-      else if (t.shadow) { ctx.shadowColor = t.shadowColor || 'rgba(0,0,0,0.6)'; ctx.shadowBlur = size * 0.25; ctx.shadowOffsetY = size * 0.08; }
-    };
-    lines.forEach((ln, i) => {
-      const y = y0 + i * lh;
-      shade();
-      if (!perLetter) {
-        if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ln, 0, y); if (!t.glow) ctx.shadowColor = 'transparent'; }
-        ctx.fillText(ln, 0, y);
-      } else { // each letter moves on its own
-        const align = ctx.textAlign; ctx.textAlign = 'left';
-        let x = leftOf(widths[i]);
-        [...ln].forEach((ch, j) => {
-          const cw = ctx.measureText(ch).width, ph = time * 6 - j * 0.5;
-          let dx = 0, dy = 0;
-          if (fx === 'wave') dy = Math.sin(ph) * size * 0.15;
-          else if (fx === 'bounce') dy = -Math.abs(Math.sin(ph * 0.8)) * size * 0.25;
-          else if (fx === 'shake') { const r = Math.sin((j + 1) * 99.1 + Math.floor(time * 20) * 7.3); dx = r * size * 0.05; dy = Math.cos(r * 13) * size * 0.05; }
-          if (fx === 'rainbow') ctx.fillStyle = `hsl(${(time * 120 + j * 25) % 360}, 90%, 62%)`;
-          if (t.outline) { ctx.strokeStyle = t.outline; ctx.lineWidth = t.outlineWidth || 4; ctx.lineJoin = 'round'; ctx.strokeText(ch, x + dx, y + dy); }
-          ctx.fillText(ch, x + dx, y + dy);
-          x += cw;
-        });
-        ctx.textAlign = align;
-      }
-      if (t.underline || t.strike) { // lines under / through the text, in the text colour
-        ctx.shadowColor = 'transparent'; ctx.fillStyle = typeof ctx.fillStyle === 'string' ? ctx.fillStyle : t.color;
-        const x = leftOf(widths[i]), th = Math.max(1, size * 0.07);
-        if (t.underline) ctx.fillRect(x, y + size * 0.42, widths[i], th);
-        if (t.strike) ctx.fillRect(x, y + size * 0.02, widths[i], th);
-      }
-    });
-    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
-    if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = '0px';
-    if (inset) ctx.translate(-inset, 0);
-  }
+  if (e.text) drawText2D(ctx, e, vars, time);
   if (e.data.badge != null && e.data.badge !== '' && e.data.badge !== 0) { // Set Badge node: a red bubble with a number on the top-right corner
     const ex = e.extents(), hx = ex.sphere ? ex.r * 0.75 : ex.hx || 12, hy = ex.sphere ? ex.r * 0.75 : ex.hy || 12, txt = String(typeof e.data.badge === 'number' && e.data.badge > 99 ? '99+' : e.data.badge);
     ctx.globalAlpha = 1; ctx.font = `800 12px system-ui, sans-serif`; const w = Math.max(20, ctx.measureText(txt).width + 10);
@@ -4125,7 +4273,7 @@ const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('rig
 /** Screen point a UI element is positioned from: its anchor on the screen, or inside its parent UI element's box. */
 export function uiOrigin(e, W, H, safe) {
   const p = e.parentEnt, P = e._push;
-  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w + (P ? P.x : 0), y: r.y - r.h / 2 + f.y * r.h + (P ? P.y : 0) }; }
+  if (p && p.ui && !p.dead) { const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor); return { x: r.x - r.w / 2 + f.x * r.w + (P ? P.x : 0), y: r.y - r.h / 2 + f.y * r.h + (P ? P.y : 0) - (p._scrollY || 0) * uiK(safe) }; } // (a page scrolled by its Show If moves what is inside it)
   const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = safe?.bars;
   if (B && !e._dock && !e.ignoreSafe && !e.ignoreBars) { // nav bars hold their edge of the screen: everything else is laid out in what's left
     const a = e.anchor || 'top-left';
@@ -4317,6 +4465,7 @@ function renderUI(engine, scene) {
       // scroll views and lists cut off what's outside them (in the editor too, except what you have selected)
       for (let q = e.parentEnt, n = 0, mine = e.id === engine.editSelected; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren || (engine.editing && !mine && q.behaviors.some((b) => b.clipsKids))) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius ?? (engine.editing ? q.shape?.radius || 0 : 0); ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
       ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
+      for (const b of e.behaviors) if (b.drawUnder) { ctx.save(); b.drawUnder(ctx, e, scene); ctx.restore(); } // under the element (a panel's frosted glass)
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
@@ -4497,7 +4646,11 @@ function drawGameScreens(ctx, engine, scene, W, H, TH) {
     ctx.shadowColor = withAlpha(acc, 0.6); ctx.shadowBlur = 28; text(title, 0, 0, size, TH.text, 900);
     ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 3; text(title, 0, 0, size, TH.text, 900); ctx.restore();
     let y = ty + size * 0.62 + 22;
-    if (st.subtitle) { text(String(st.subtitle), W / 2, y + (1 - spring(0.22)) * 12, fit(String(st.subtitle), 17, W * 0.84, 600), withAlpha(TH.text, 0.85), 600, P(0.22, 0.4)); y += 34; }
+    if (st.subtitle) { // one line, or a few when it's long (never off the screen)
+      const sub = String(st.subtitle), sz = fit(sub, 17, W * 0.84, 600);
+      if (sz >= 15) { text(sub, W / 2, y + (1 - spring(0.22)) * 12, sz, withAlpha(TH.text, 0.85), 600, P(0.22, 0.4)); y += 34; }
+      else { ctx.font = font(600, 15); const L = textLines(ctx, sub, W * 0.84).slice(0, 3); L.forEach((l, i) => text(l, W / 2, y + i * 20 + (1 - spring(0.22)) * 12, 15, withAlpha(TH.text, 0.85), 600, P(0.22, 0.4))); y += 14 + L.length * 20; }
+    }
     if (scene.vars.best) {
       const lab = `Best  ${formatNumber(scene.vars.best)}`, pw = (ctx.font = font(800, 15), ctx.measureText(lab).width) + 50, ph = 32, k = bouncy(0.32);
       if (k > 0) { ctx.save(); ctx.globalAlpha = P(0.32, 0.2); ctx.translate(W / 2, y + ph / 2); ctx.scale(k, k); ctx.fillStyle = withAlpha(TH.button, 0.13); UK.rr(ctx, -pw / 2, -ph / 2, pw, ph, ph / 2); ctx.fill();
@@ -6186,13 +6339,14 @@ registerBehavior('sound', {
 function uiScreenOf(e) { for (let q = e, n = 0; q && n < 20; q = q.parentEnt, n++) if (q.showWhen && q.showWhen !== 'always') return q.showWhen; return 'always'; }
 function hitTest(s, e, sx, sy) {
   const eng = s.engine;
-  if (e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (Enable / Disable UI node)
+  if (!e.visible || e.dead || e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (hidden, or Enable / Disable UI node)
+  if (e.ui && !eng.editing && uiHiding(e)) return false; // a page on its way out
   if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
     for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren && !eng.editing) { const r = uiBox(q, eng.width, eng.height, eng.safe); if (Math.abs(sx - r.x) > r.w / 2 || Math.abs(sy - r.y) > r.h / 2) return false; } // cut off by a Scroll View: the hidden part can't be tapped
-    return Math.abs(sx - o.x - e.x * k) <= hx + 8 && Math.abs(sy - o.y - e.y * k) <= hy + 8;
+    return Math.abs(sx - o.x - (e.x + (ex.ox || 0)) * k) <= hx + 8 && Math.abs(sy - o.y - (e.y + (ex.oy || 0)) * k) <= hy + 8; // (text: its drawn box, which a left / right alignment moves)
   }
   const ex = e.extents();
   if (s.mode === '2d') {
@@ -6422,22 +6576,23 @@ registerBehavior('uiSlider', {
       uiAlways: true,
       start(e, s) {
         if (s.vars[p.var] == null) s.setVar(p.var, +p.start);
-        if (e.bar) { e.bar.var = p.var; e.bar.max = +p.max - +p.min || 1; if (vert()) e.bar.dir = 'up'; }
+        if (e.bar) { e.bar.var = p.var; e.bar.min = +p.min || 0; e.bar.max = +p.max; if (vert()) e.bar.dir = 'up'; }
         const ex = e.extents(), W = (ex.hx || 80) * 2, H = (ex.hy || 10) * 2, ks = +p.knobSize || Math.max(22, Math.min(vert() ? W : H, 40) * 1.6);
-        if (p.knob !== 'none') knob = s.add({ name: e.name + ' knob', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 1, shape: p.knob === 'square' ? { type: 'rect', w: ks, h: ks, radius: 6, fill: p.knobColor, shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } : { type: 'circle', r: ks / 2, fill: p.knobColor, shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } });
+        if (p.knob !== 'none') knob = s.add({ name: e.name + ' knob', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 1, shape: p.knob === 'square' ? { type: 'rect', w: ks, h: ks, radius: 6, fill: RAW(p, 'knobColor'), shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } : { type: 'circle', r: ks / 2, fill: RAW(p, 'knobColor'), shadow: 'rgba(0,0,0,0.35)', shadowBlur: 6, shadowY: 2 } });
         if (p.showValue !== 'no') label = s.add({ name: e.name + ' value', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: (e.layer || 0) + 2, text: { ...TEXT_DEFAULTS, value: '', size: 15, color: '#ffffff', weight: '800', shadow: true } });
       },
       update(e, dt, s) {
         if (!e.visible) return;
-        const inp = s.engine.input, r = uiRect(s, e), V = vert();
-        if (!dragging) for (const d of inp.downs) if (Math.abs(d.x - r.x) < r.w / 2 + 14 && Math.abs(d.y - r.y) < r.h / 2 + 14) { dragging = d.id; grab = 1; }
+        const inp = s.engine.input, r = uiRect(s, e), V = vert(), live = UK.live(s, e) && !uiHiding(e) && [s.engine.paused ? 'paused' : s.state, 'always'].includes(uiScreenOf(e)); // (not on a hidden page or another screen)
+        if (live && dragging == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) < r.w / 2 + 14 && Math.abs(d.y - r.y) < r.h / 2 + 14) { dragging = d.id; grab = 1; }
         const ptr = dragging != null && inp.pointers.get(dragging);
         if (!ptr && dragging != null) { dragging = null; if (p.message) s.send(p.message); }
         if (ptr) {
           const f = V ? clamp(((r.y + r.h / 2) - ptr.y) / (r.h || 1), 0, 1) : clamp((ptr.x - (r.x - r.w / 2)) / (r.w || 1), 0, 1);
+          const lo = Math.min(+p.min, +p.max), hi = Math.max(+p.min, +p.max);
           let v = +p.min + f * (+p.max - +p.min);
-          if (+p.step > 0) v = Math.round(v / p.step) * p.step;
-          v = +v.toFixed(3);
+          if (+p.step > 0) v = +p.min + Math.round((v - +p.min) / p.step) * p.step; // steps count from the minimum
+          v = +clamp(v, lo, hi).toFixed(3);
           if (v !== s.vars[p.var]) { s.setVar(p.var, v); if (p.ticks && +p.step > 0 && v !== lastStep) { s.engine.vibrate?.(4); lastStep = v; } }
         }
         grab += ((ptr ? 1.25 : 1) - grab) * Math.min(1, dt * 14);
@@ -6465,7 +6620,16 @@ registerBehavior('uiSlider', {
 
 /** Toggle: tap to switch a variable between on (1) and off (0); changes its text and color. */
 // ---- navigation & more UI ----
-const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
+/** Is it (or a page it is on) on its way out? Then it takes no taps. */
+/** Does the page now open show the opened record ({record_title}…)? After a delete there is nothing left on it to see. */
+function pageShowsRecord(s, v = 'page') {
+  const val = s.vars[v];
+  const showIf = (q) => q.behaviors.find((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === v);
+  const onPage = (q) => { for (let a = q, n = 0; a && n < 40; a = a.parentEnt, n++) { const b = showIf(a); if (b) return sameVal(b.params?.value, val); } return false; };
+  return s.entities.some((q) => q.ui && !q.dead && /\{record_/.test(String(q.text?.value || '')) && onPage(q));
+}
+function uiHiding(e) { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q._hiding) return true; return false; }
+const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && !uiHiding(e) && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
 const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
 /** Draw e and everything inside it last within their layers (a page sliding over another). */
@@ -6493,7 +6657,8 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   else if (anim === 'slide (follows navigation)') anim = show ? 'slide from right' : 'slide from left';
   const M = motionOf(s); dur *= M.k;
   if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
-  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; e._uiAnimUntil = 0; done?.(); return; }
+  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = e._restAlpha ?? 1; e._uiAnimUntil = 0; e._hiding = false; done?.(); return; }
+  e._hiding = !show; // on its way out: no more taps
   e._uiAnimUntil = performance.now() / 1000 + dur * 3.5 + 0.15; // stretched pages keep still for the stretch layout meanwhile
   const k = 1;
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
@@ -6506,7 +6671,7 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
     if (group) { FX.z = from; return s.to(FX, { z: to }, d, { ease, ...o }); }
     e.sx = base.sx * from; e.sy = base.sy * from; return s.to(e, { sx: base.sx * to, sy: base.sy * to }, d, { ease, ...o });
   };
-  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; FX.z = 1; FX.clip = null; FX.p = 1; if (!ok) e.visible = false; done?.(); };
+  const fin = (ok) => { e.alpha = e._restAlpha ?? 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; FX.z = 1; FX.clip = null; FX.p = 1; e._hiding = false; e._animBase = null; if (!ok) e.visible = false; done?.(); }; // (the next animation starts from wherever it is then: a popup moved in between stays moved)
   const H = (s.engine?.height || 700) / (uiK(s.engine?.safe) || 1);
   const front = () => queueMicrotask(() => raiseTree(s, e)); // (after this frame's updates) the page that moves over the other one draws on top (with everything inside it)
   const fin2 = fin;
@@ -6616,7 +6781,7 @@ function staggerKids(s, e, how) {
     if (how.startsWith('rise')) { q.y = b.y + 18; s.to(q, { y: b.y }, 0.4 * k, o); }
     else if (how.startsWith('pop')) { q.sx = b.sx * 0.85; q.sy = b.sy * 0.85; s.to(q, { sx: b.sx, sy: b.sy }, 0.55 * k, { ...o, ease: 'springBouncy' }); }
     else if (how.startsWith('slide')) { q.x = b.x + 40; s.to(q, { x: b.x }, 0.4 * k, o); }
-    s.to(q, { alpha: 1 }, 0.3 * k, o);
+    s.to(q, { alpha: q._restAlpha ?? 1 }, 0.3 * k, o); // (a button that can't be used yet stays faded)
   });
 }
 
@@ -7468,10 +7633,10 @@ export function parseIngredients(t) {
 function buildItemDB(list) { const m = new Map(); for (const d of Array.isArray(list) ? list : []) if (d?.name) m.set(String(d.name).trim().toLowerCase(), { ...d, name: String(d.name).trim() }); return m; }
 
 const UK = {
-  box(e) { const ex = e.extents(), w = ex.hx * 2, h = ex.hy * 2; return { x: e.x - ex.hx, y: e.y - ex.hy, w, h, cx: e.x, cy: e.y }; },
+  box(e) { const ex = e.extents(), w = (ex.sphere ? ex.r : ex.hx) * 2, h = (ex.sphere ? ex.r : ex.hy) * 2, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0); return { x: cx - w / 2, y: cy - h / 2, w, h, cx, cy }; },
   /** A screen point in the entity's drawing space. */
   local(s, e, t) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; return { x: (t.x - o.x) / k, y: (t.y - o.y) / k, id: t.id }; },
-  live(s, e) { return e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing; },
+  live(s, e) { return e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing && !uiHiding(e); },
   taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.map((t) => UK.local(s, e, t)) : []; },
   downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.map((t) => UK.local(s, e, t)) : []; },
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
@@ -8781,9 +8946,46 @@ registerBehavior('uiShowIf', {
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
     { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
+    { key: 'scroll', label: 'Scroll when it is taller than the screen', type: 'bool', default: false, group: 'Page', info: 'Drag up and down to see what is below the screen (with a flick, a rubber band at the ends and a thin scroll bar). Lists and scroll views inside it still scroll on their own.' },
+    { key: 'keepScroll', label: 'Remember where it was scrolled to', type: 'bool', default: true, group: 'Page', showIf: (b) => !!b.scroll },
+    { key: 'showMessage', label: 'Message when it opens', type: 'text', default: '', suggest: 'messages', group: 'Page' },
+    { key: 'hideMessage', label: 'Message when it closes', type: 'text', default: '', suggest: 'messages', group: 'Page' },
   ],
   create(p) {
-    let shown = null;
+    let shown = null, drag = null, vel = 0, maxS = 0, barT = -9;
+    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick'];
+    const ownsDrag = (s, e, d) => s.entities.some((q) => q !== e && q.visible && q.ui && !q._parentHidden && q.behaviors.some((b) => SCROLLERS.includes(b.type)) && isInside(q, e) && hitTest(s, q, d.x, d.y));
+    const isInside = (q, e) => { for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === e) return true; return false; };
+    /** How far what is inside reaches below the page's bottom (UI units). */
+    const overflow = (s, e) => {
+      const E = s.engine, k = uiK(E.safe) || 1, pb = uiBox(e, E.width, E.height, E.safe), top = pb.y - pb.h / 2, sy = e._scrollY || 0;
+      let bottom = 0;
+      for (const q of s.entities) { if (q.parentEnt !== e || !q.visible || !q.ui || q.dead) continue; const r = uiBox(q, E.width, E.height, E.safe); bottom = Math.max(bottom, (r.y + r.h / 2 - top) / k + sy); }
+      return Math.max(0, bottom + 16 - pb.h / k);
+    };
+    const scrollTick = (e, dt, s) => {
+      const E = s.engine, inp = E.input, k = uiK(E.safe) || 1, b = uiBox(e, E.width, E.height, E.safe);
+      maxS = overflow(s, e);
+      e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0;
+      for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d)) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; }
+      let y = e._scrollY || 0;
+      if (drag) {
+        const q = inp.pointers.get(drag.id);
+        if (q) {
+          if (!drag.on && Math.abs(q.y - drag.y0) > 9) drag.on = true;
+          if (drag.on) {
+            const raw = drag.s0 - (q.y - drag.y0) / k;
+            y = raw < 0 ? raw * 0.4 : raw > maxS ? maxS + (raw - maxS) * 0.4 : raw; // a rubber band past the ends
+            vel = (drag.last - q.y) / k / Math.max(dt, 1 / 120); drag.last = q.y; barT = performance.now() / 1000;
+            inp.taps.length = 0; // a scroll is not a tap on a button
+          }
+        } else { if (drag.on) inp.taps.length = 0; drag = null; }
+      } else {
+        y += vel * dt; vel *= Math.pow(0.04, dt); if (Math.abs(vel) < 4) vel = 0; else barT = performance.now() / 1000;
+        const c = clamp(y, 0, maxS); y += (c - y) * Math.min(1, dt * 12); if (Math.abs(c - y) < 0.3) y = c;
+      }
+      if (y !== (e._scrollY || 0)) { s.emit('uiScroll', y - (e._scrollY || 0), e, maxS ? clamp(y / maxS, 0, 1) : 0); e._scrollY = y; }
+    };
     const test = (v) => {
       if (v == null || v === '') return !!p.whenUnset;
       const a = +v, b = +p.value, num = p.value !== '' && Number.isFinite(a) && Number.isFinite(b);
@@ -8795,11 +8997,15 @@ registerBehavior('uiShowIf', {
     };
     return {
       uiAlways: true,
-      start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; },
+      start(e, s) { shown = test(s.vars[p.var]); e.visible = shown; if (shown && p.showMessage) queueMicrotask(() => s.send(p.showMessage)); },
       update(e, dt, s) {
         const want = test(s.vars[p.var]);
+        if (p.scroll && shown && e.visible && !s.engine.editing) scrollTick(e, dt, s);
         if (want !== shown) {
-          shown = want;
+          shown = want; drag = null; vel = 0;
+          if (want && p.scroll && p.keepScroll === false) e._scrollY = 0;
+          if (want && p.showMessage) s.send(p.showMessage); else if (!want && p.hideMessage) s.send(p.hideMessage);
+          s.emit('pageChange', want ? 1 : 0, e, String(p.value));
           const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
           const st = s.settings, all = st.pageAnim && st.pageAnim !== 'as each page says' && p.var === (st.pageVar || 'page') && p.op === '=' ? st.pageAnim : null, anim = all || p.anim; // Game Settings › Motion › Page transitions
           const NAV = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe' }[anim];
@@ -8811,6 +9017,12 @@ registerBehavior('uiShowIf', {
           else uiAnimate(s, e, want, anim, 0.22);
           if (want) staggerKids(s, e, p.stagger);
         }
+      },
+      drawUI(ctx, e, s) { // a thin scroll bar while it moves
+        if (!p.scroll || !maxS) return;
+        const a = clamp(1.4 - (performance.now() / 1000 - barT) * 1.6, 0, 1); if (a <= 0) return;
+        const b = UK.box(e), vis = b.h / (b.h + maxS), h = Math.max(30, (b.h - 12) * vis), f = clamp((e._scrollY || 0) / maxS, 0, 1), y = b.y + 6 + (b.h - 12 - h) * f;
+        ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 6, y, 3.5, h, 2); ctx.fill();
       },
     };
   },
@@ -9011,6 +9223,128 @@ registerBehavior('uiPopup', {
 });
 
 /** Bottom Sheet: a panel that slides up from the bottom with a spring, can be dragged to resize or dismiss, and dims what's behind. */
+/** Panel: a box that works like a window: header and title, close, drag, fold, resize, frosted glass, grows to fit. */
+registerBehavior('uiPanel', {
+  label: 'Panel (window)', description: 'Turns a box into a window: a header with a title and a close button, drag it around, tap the header to fold it away, pull a corner to resize, a frosted-glass look over the game, and growing to fit what is inside it.',
+  params: [
+    { key: 'title', label: 'Title (blank = no header)', type: 'text', default: 'Panel' },
+    { key: 'headerH', label: 'Header height', type: 'number', default: 44, range: [24, 120], step: 2, showIf: (b) => !!b.title },
+    { key: 'titleAlign', label: 'Title', type: 'select', options: ['left', 'center'], default: 'left' },
+    { key: 'titleSize', label: 'Title size', type: 'number', default: 17, range: [10, 40], step: 1 },
+    { key: 'closeButton', label: 'Close button (✕)', type: 'bool', default: true },
+    { key: 'closeMessage', label: 'Closing sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'openOn', label: 'Open on message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'closeOn', label: 'Close on message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'drag', label: 'Drag to move', type: 'select', options: ['no', 'by the header', 'anywhere'], default: 'no' },
+    { key: 'keepOnScreen', label: 'Keep on screen', type: 'bool', default: true, showIf: { drag: ['by the header', 'anywhere'] } },
+    { key: 'collapsible', label: 'Tap the header to fold it', type: 'bool', default: false },
+    { key: 'resizable', label: 'Resize from the corner', type: 'bool', default: false },
+    { key: 'minW', label: 'Smallest width', type: 'number', default: 160, showIf: (b) => !!b.resizable },
+    { key: 'minH', label: 'Smallest height', type: 'number', default: 100, showIf: (b) => !!b.resizable },
+    { key: 'fitContent', label: 'Grow to fit what is inside', type: 'bool', default: false, info: 'Its height follows its children (anchored to its top), plus the padding.' },
+    { key: 'padding', label: 'Padding', type: 'number', default: 16, range: [0, 80], step: 1, showIf: (b) => !!b.fitContent },
+    { key: 'glass', label: 'Frosted glass (blur behind, 0 = off)', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Look', info: 'Blurs the game behind the panel. Use a see-through fill (like rgba(255,255,255,0.15)).' },
+    ...colorParams({ headerColor: ['Header', 'rgba(255,255,255,0.08)'], titleColor: ['Title', '#ffffff'], divider: ['Line under the header', 'rgba(255,255,255,0.12)'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let drag = null, folded = false, fold = 0, fullH = null, hidden0 = null;
+    const HH = () => (p.title ? Math.max(24, +p.headerH || 44) : 0);
+    const kids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
+    const keepTop = (e, h) => { const h0 = e.shape.h; e.shape.h = h; e.y += (h - h0) / 2; }; // the top edge stays where it is
+    const setFold = (s, e, on) => {
+      folded = on; if (fullH == null) fullH = e.shape.h;
+      for (const k of kids(s, e)) { if (on) { k._panelHid = k.visible; k.visible = false; } else if (k._panelHid !== undefined) { k.visible = k._panelHid; delete k._panelHid; } }
+      s.emit('uiPanel', on ? 1 : 0, e, on ? 'folded' : 'unfolded');
+    };
+    return {
+      uiAlways: true,
+      start(e, s) {
+        s.on('message', (m) => { if (e.dead) return; if (p.openOn && m === p.openOn) { e.visible = true; if (folded) setFold(s, e, false); } else if (p.closeOn && m === p.closeOn) e.visible = false; });
+      },
+      update(e, dt, s) {
+        if (!e.shape || e.shape.type === 'circle') return;
+        const E = s.engine, k = uiK(E.safe) || 1, b = UK.box(e), hh = HH(), stretched = e.stretch && e.stretch !== 'none';
+        // fold / unfold: the height eases between the header and the full panel
+        const want = folded ? 1 : 0; fold += (want - fold) * Math.min(1, dt * 14);
+        if (Math.abs(want - fold) < 0.002) fold = want;
+        if (fullH != null && (folded || fold > 0)) keepTop(e, Math.max(hh || 20, hh + (fullH - hh) * (1 - fold)));
+        else if (fullH != null && !folded && fold === 0) { keepTop(e, fullH); fullH = null; }
+        // grow to fit the children (anchored to its top)
+        if (p.fitContent && !folded && fullH == null) {
+          let bottom = 0;
+          for (const q of kids(s, e)) { if (!q.visible) continue; const r = uiBox(q, E.width, E.height, E.safe), top = uiBox(e, E.width, E.height, E.safe); bottom = Math.max(bottom, (r.y + r.h / 2 - (top.y - top.h / 2)) / k); }
+          const h = Math.max(hh + (+p.padding || 0) * 2, bottom + (+p.padding || 0));
+          if (Math.abs(h - e.shape.h) > 0.5) keepTop(e, h);
+        }
+        if (!UK.live(s, e)) return;
+        const close = { x: b.x + b.w - hh, y: b.y, w: hh, h: hh }, grip = { x: b.x + b.w - 26, y: b.y + b.h - 26, w: 26, h: 26 };
+        for (const d of UK.downs(s, e)) {
+          if (!UK.in(d, b)) continue;
+          if (p.resizable && !folded && UK.in(d, grip)) { drag = { id: d.id, kind: 'size', x0: d.x, y0: d.y, w0: e.shape.w, h0: e.shape.h, ex: e.x, ey: e.y }; continue; }
+          const onHead = hh && d.y < b.y + hh;
+          if (p.closeButton !== false && hh && UK.in(d, close)) continue;
+          if (!stretched && (p.drag === 'anywhere' || (p.drag === 'by the header' && onHead))) drag = { id: d.id, kind: 'move', x0: d.x, y0: d.y, ex: e.x, ey: e.y, moved: false };
+        }
+        if (drag) {
+          const q = UK.ptr(s, e, drag.id);
+          if (!q) { drag = null; }
+          else if (drag.kind === 'size') {
+            const w = Math.max(+p.minW || 160, drag.w0 + (q.x - drag.x0)), h = Math.max(+p.minH || 100, drag.h0 + (q.y - drag.y0));
+            e.shape.w = w; e.shape.h = h; e.x = drag.ex + (w - drag.w0) / 2; e.y = drag.ey + (h - drag.h0) / 2;
+            E.input.taps.length = 0;
+          } else {
+            if (Math.hypot(q.x - drag.x0, q.y - drag.y0) > 6) drag.moved = true;
+            if (drag.moved) {
+              e.x = drag.ex + (q.x - drag.x0); e.y = drag.ey + (q.y - drag.y0);
+              if (p.keepOnScreen !== false) { // the whole panel stays on the screen
+                const r = uiBox(e, E.width, E.height, E.safe), dx = Math.max(0, -(r.x - r.w / 2)) - Math.max(0, r.x + r.w / 2 - E.width), dy = Math.max(0, E.safe.top - (r.y - r.h / 2)) - Math.max(0, r.y + r.h / 2 - E.height + E.safe.bottom);
+                e.x += dx / k; e.y += dy / k;
+              }
+              E.input.taps.length = 0;
+            }
+          }
+        }
+        for (const t of UK.taps(s, e)) {
+          if (!hh || !UK.in(t, b)) continue;
+          if (p.closeButton !== false && UK.in(t, close)) { UK.tap(s, p); e.visible = false; if (p.closeMessage) s.send(p.closeMessage); s.emit('uiPanel', 0, e, 'closed'); E.input.taps.length = 0; return; }
+          if (p.collapsible && t.y < b.y + hh) { UK.tap(s, p); setFold(s, e, !folded); E.input.taps.length = 0; return; }
+        }
+      },
+      /** Frosted glass: the game behind, blurred, inside the panel's shape. */
+      drawUnder(ctx, e, s) {
+        const E = s.engine, g = +p.glass || 0;
+        if (!g || E.editing || !E.canvas || !e.shape) return;
+        const r = uiBox(e, E.width, E.height, E.safe), R = (e.shape.radius || 0) * (uiK(E.safe) || 1), d = E.dpr || 1, m = g * 2;
+        ctx.save(); ctx.setTransform(E.uiDpr || 1, 0, 0, E.uiDpr || 1, 0, 0);
+        ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(r.x - r.w / 2, r.y - r.h / 2, r.w, r.h, R); else ctx.rect(r.x - r.w / 2, r.y - r.h / 2, r.w, r.h); ctx.clip();
+        const sx = Math.max(0, r.x - r.w / 2 - m), sy = Math.max(0, r.y - r.h / 2 - m), sw = Math.min(E.width - sx, r.w + m * 2), sh = Math.min(E.height - sy, r.h + m * 2);
+        if (sw > 0 && sh > 0) { ctx.filter = `blur(${g}px)`; try { ctx.drawImage(E.canvas, sx * d, sy * d, sw * d, sh * d, sx, sy, sw, sh); } catch { /* a canvas that can't be read */ } ctx.filter = 'none'; }
+        ctx.restore();
+      },
+      drawUI(ctx, e, s) {
+        if (!e.shape || e.shape.type === 'circle') return;
+        const b = UK.box(e), hh = HH(), R = Math.min(e.shape.radius || 0, hh / 2);
+        if (hh) {
+          ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(b.x, b.y, b.w, Math.min(hh, b.h), [R, R, folded && fold > 0.95 ? R : 0, folded && fold > 0.95 ? R : 0]); else ctx.rect(b.x, b.y, b.w, Math.min(hh, b.h));
+          if (p.headerColor) { ctx.fillStyle = tok(p.headerColor); ctx.fill(); }
+          if (p.divider && b.h > hh + 1) { ctx.fillStyle = tok(p.divider); ctx.fillRect(b.x, b.y + hh - 1, b.w, 1); }
+          const ts = +p.titleSize || 17, cb = p.closeButton !== false, tc = tok(p.titleColor) || '#fff';
+          let tx = b.x + 16;
+          if (p.collapsible) { ctx.save(); ctx.translate(b.x + 18, b.y + hh / 2); ctx.rotate(-fold * Math.PI / 2); glyph(ctx, 'down', 0, 0, 14, tc); ctx.restore(); tx += 18; }
+          UK.text(ctx, p.title, p.titleAlign === 'center' ? b.cx : tx, b.y + hh / 2, { size: ts, weight: 800, color: tc, align: p.titleAlign === 'center' ? 'center' : 'left', maxW: b.w - (tx - b.x) - (cb ? hh + 8 : 16) });
+          if (cb) { ctx.globalAlpha *= 0.85; glyph(ctx, 'close', b.x + b.w - hh / 2, b.y + hh / 2, Math.min(16, hh * 0.38), tc); }
+          ctx.restore();
+        }
+        if (p.resizable && !folded) { // the corner grip
+          ctx.save(); ctx.strokeStyle = tok(p.titleColor) || '#fff'; ctx.globalAlpha *= 0.45; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.beginPath();
+          for (const o of [6, 11, 16]) { ctx.moveTo(b.x + b.w - 5, b.y + b.h - o); ctx.lineTo(b.x + b.w - o, b.y + b.h - 5); }
+          ctx.stroke(); ctx.restore();
+        }
+      },
+    };
+  },
+});
 registerBehavior('uiSheet', {
   label: 'Bottom Sheet', description: 'A panel that slides up from the bottom of the screen with a spring (like Maps or Music). Drag its handle to pull it up, down or away; tapping outside or Back closes it. Put buttons, lists and text inside it.',
   params: [
@@ -9596,7 +9930,7 @@ registerBehavior('uiList', {
     const itemsOf = (s) => p.source === 'a list variable' ? (Array.isArray(s.vars[p.listVar]) ? s.vars[p.listVar] : String(s.vars[p.listVar] ?? '').split(',').map((x) => x.trim()).filter(Boolean))
       : p.source === 'numbers 1 to N' ? Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => i + 1) : String(p.items || '').split(',').map((x) => x.trim()).filter(Boolean);
     const geo = (e) => { const ex = e.extents(); return { W: (ex.hx || 150) * 2, H: (ex.hy || 150) * 2, rh: Math.max(16, +p.rowHeight || 52), gap: +p.spacing || 0, pad: +p.padding || 0 }; };
-    const fillOf = (i) => (i + 1 === picked ? p.pickColor : p.altColor && i % 2 ? p.altColor : p.rowColor);
+    const fillOf = (i) => (i + 1 === picked ? RAW(p, 'pickColor') : RAW(p, 'altColor') && i % 2 ? RAW(p, 'altColor') : RAW(p, 'rowColor'));
     const build = (e, s, items) => {
       for (const r of rows) { r.label?.destroy(); r.chev?.destroy(); r.destroy(); }
       rows = [];
@@ -9606,8 +9940,8 @@ registerBehavior('uiList', {
         const txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars);
         const row = s.add({ name: `${e.name} row ${i + 1}`, ui: true, parent: e.id, anchor: 'top', x: 0, y: pad + rh / 2 + i * (rh + gap), layer: L, shape: { type: 'rect', w: W - pad * 2, h: rh, radius: +p.radius || 0, fill: fillOf(i) } });
         const left = p.align === 'left';
-        row.label = s.add({ name: `${e.name} row ${i + 1} text`, ui: true, parent: row.id, anchor: left ? 'left' : 'center', x: left ? 16 : 0, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: txt, size: +p.textSize || 17, color: p.textColor, weight: '600', align: left ? 'left' : 'center', fit: W - pad * 2 - 44 } });
-        if (p.arrow) row.chev = s.add({ name: `${e.name} row ${i + 1} arrow`, ui: true, parent: row.id, anchor: 'right', x: -18, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: '›', size: (+p.textSize || 17) + 8, color: p.textColor, weight: '500' } });
+        row.label = s.add({ name: `${e.name} row ${i + 1} text`, ui: true, parent: row.id, anchor: left ? 'left' : 'center', x: left ? 16 : 0, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: txt, size: +p.textSize || 17, color: RAW(p, 'textColor'), weight: '600', align: left ? 'left' : 'center', fit: W - pad * 2 - 44 } });
+        if (p.arrow) row.chev = s.add({ name: `${e.name} row ${i + 1} arrow`, ui: true, parent: row.id, anchor: 'right', x: -18, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: '›', size: (+p.textSize || 17) + 8, color: RAW(p, 'textColor'), weight: '500' } });
         row.baseY = row.y; row.item = it;
         if (p.appear !== 'all at once' && i < 14) { row.alpha = 0; row.y += 16; s.to(row, { alpha: 1, y: row.baseY }, 0.28, { delay: i * 0.04, ease: 'outCubic' }); }
         rows.push(row);
@@ -9685,14 +10019,14 @@ registerBehavior('uiSegmented', {
     let pill = null, labels = [], i = 0, px = null;
     const opts = () => String(p.options || '').split(',').map((x) => x.trim()).filter(Boolean);
     const geo = (e) => { const ex = e.extents(), n = Math.max(1, opts().length); return { W: (ex.hx || 150) * 2, H: (ex.hy || 22) * 2, n, seg: ((ex.hx || 150) * 2) / n }; };
-    const setI = (e, s, j, tell) => { const o = opts(); i = clamp(j, 0, o.length - 1); s.setVar(p.var, p.store === 'its position (1, 2, 3…)' ? i + 1 : o[i]); labels.forEach((l, k) => { l.text.color = k === i ? p.pickedText : p.textColor; }); if (tell && p.message) s.send(p.message); };
+    const setI = (e, s, j, tell) => { const o = opts(); i = clamp(j, 0, o.length - 1); s.setVar(p.var, p.store === 'its position (1, 2, 3…)' ? i + 1 : o[i]); labels.forEach((l, k) => { l.text.color = k === i ? RAW(p, 'pickedText') : RAW(p, 'textColor'); }); if (tell && p.message) s.send(p.message); };
     return {
       uiAlways: true,
       start(e, s) {
         const o = opts(), { W, H, seg } = geo(e), L = (e.layer || 0) + 1, cur = s.vars[p.var];
         const r0 = Math.min(e.shape?.radius ?? 12, H / 2);
-        pill = s.add({ name: e.name + ' highlight', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, shape: { type: 'rect', w: seg - 6, h: H - 6, radius: Math.max(0, r0 - 3), fill: p.pillColor, shadow: 'rgba(0,0,0,0.25)', shadowBlur: 4, shadowY: 1 } });
-        labels = o.map((t, k) => s.add({ name: `${e.name} ${t}`, ui: true, parent: e.id, anchor: 'center', x: -W / 2 + seg * (k + 0.5), y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: t, size: Math.min(17, Math.round(H * 0.4)), color: p.textColor, weight: '700', fit: seg - 10 } }));
+        pill = s.add({ name: e.name + ' highlight', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, shape: { type: 'rect', w: seg - 6, h: H - 6, radius: Math.max(0, r0 - 3), fill: RAW(p, 'pillColor'), shadow: 'rgba(0,0,0,0.25)', shadowBlur: 4, shadowY: 1 } });
+        labels = o.map((t, k) => s.add({ name: `${e.name} ${t}`, ui: true, parent: e.id, anchor: 'center', x: -W / 2 + seg * (k + 0.5), y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: t, size: Math.min(17, Math.round(H * 0.4)), color: RAW(p, 'textColor'), weight: '700', fit: seg - 10 } }));
         if (e.text) e.text.value = '';
         const j = cur == null ? Math.round(+p.start || 1) - 1 : p.store === 'its position (1, 2, 3…)' ? Math.round(+cur) - 1 : o.indexOf(String(cur));
         setI(e, s, j < 0 ? 0 : j, false); px = -W / 2 + seg * (i + 0.5);
@@ -9735,9 +10069,9 @@ registerBehavior('uiStepper', {
       start(e, s) {
         if (s.vars[p.var] == null) s.setVar(p.var, +p.start);
         const ex = e.extents(), W = (ex.hx || 70) * 2, H = (ex.hy || 22) * 2, L = (e.layer || 0) + 1, bs = H - 8;
-        const btn = (t, x) => s.add({ name: `${e.name} ${t === '−' ? 'minus' : 'plus'}`, ui: true, parent: e.id, anchor: 'center', x, y: 0, layer: L, shape: { type: 'rect', w: bs, h: bs, radius: Math.min(bs / 2, (e.shape?.radius ?? 10)), fill: p.buttonColor }, text: { ...TEXT_DEFAULTS, value: t, size: Math.round(bs * 0.6), color: '#ffffff', weight: '900' } });
+        const btn = (t, x) => s.add({ name: `${e.name} ${t === '−' ? 'minus' : 'plus'}`, ui: true, parent: e.id, anchor: 'center', x, y: 0, layer: L, shape: { type: 'rect', w: bs, h: bs, radius: Math.min(bs / 2, (e.shape?.radius ?? 10)), fill: RAW(p, 'buttonColor') }, text: { ...TEXT_DEFAULTS, value: t, size: Math.round(bs * 0.6), color: '#ffffff', weight: '900' } });
         minus = btn('−', -W / 2 + bs / 2 + 4); plus = btn('+', W / 2 - bs / 2 - 4);
-        label = s.add({ name: e.name + ' value', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, text: { ...TEXT_DEFAULTS, value: '', size: Math.round(H * 0.45), color: p.textColor, weight: '800', fit: W - bs * 2 - 16 } });
+        label = s.add({ name: e.name + ' value', ui: true, parent: e.id, anchor: 'center', x: 0, y: 0, layer: L, text: { ...TEXT_DEFAULTS, value: '', size: Math.round(H * 0.45), color: RAW(p, 'textColor'), weight: '800', fit: W - bs * 2 - 16 } });
         if (e.text) e.text.value = '';
       },
       update(e, dt, s) {
@@ -11903,7 +12237,7 @@ registerBehavior('uiForm', {
           if (!UK.in(t, L.b)) continue;
           const y = t.y - L.b.y + scroll;
           if (y >= L.btnY && y < L.btnY + 52) { UK.tap(s, p); save(e, s); continue; }
-          if (editing && p.deleteButton !== false && y >= L.btnY + 60 && y < L.btnY + 112) { UK.tap(s, p); closeBox(s, false); D(s).remove(p.collection, editing); openRecord(s, p.collection, null); s.emit('formDeleted', fieldKey(p.collection)); if (s.canGoBack()) { s.navBack(); if (s.canGoBack()) s.navBack(); } else load(s); continue; }
+          if (editing && p.deleteButton !== false && y >= L.btnY + 60 && y < L.btnY + 112) { UK.tap(s, p); closeBox(s, false); D(s).remove(p.collection, editing); openRecord(s, p.collection, null); s.emit('formDeleted', fieldKey(p.collection)); if (s.canGoBack()) { s.navBack(); if (s.canGoBack() && pageShowsRecord(s)) s.navBack(); } else load(s); continue; } // (past a page that showed the deleted record, not further)
           const r = L.out.find((q) => y >= q.y && y < q.y + q.h); if (!r) continue;
           const f = r.f, fx = L.b.x + 8, fw = L.b.w - 16, fy = r.y + 22, rect = { x: fx, y: L.b.y + fy - scroll, w: fw, h: r.h - 24 };
           if (f.type === 'yes/no') { draft[f.key] = !truthy(draft[f.key]); UK.tap(s, p); s.spring(knob, { [f.key]: truthy(draft[f.key]) ? 1 : 0 }, { feel: 'bouncy' }); }
@@ -13125,13 +13459,13 @@ registerBehavior('button', {
         wasDown = down;
         if (p.pressColor && e.shape) { if (fill0 === undefined) fill0 = e.shape.fill; e.shape.fill = down ? p.pressColor : fill0; }
         // look disabled when it can't be used (only if something can disable it)
-        if (gated()) { const off = !allowed(s) || s.time < cdUntil; if (off !== lastOff) { e.alpha = off ? +p.disabledAlpha : 1; lastOff = off; } }
+        if (gated()) { const off = !allowed(s) || s.time < cdUntil; e._restAlpha = off ? +p.disabledAlpha : 1; if (off !== lastOff) { e.alpha = e._restAlpha; lastOff = off; } }
       },
       /** Ink ripples, clipped to the button's shape. */
       drawUI(ctx, e, s) {
         if (!ripples.length) return;
         const now = performance.now() / 1000, sh = e.shape, w = (sh.w || (sh.r || 20) * 2) * Math.abs(e.sx), h = (sh.h || (sh.r || 20) * 2) * Math.abs(e.sy), round = sh.type === 'circle';
-        const fill = String(sh.fill || ''), dark = /^#/.test(fill) ? (() => { const c = fill.length === 4 ? fill.slice(1).split('').map((x) => x + x).join('') : fill.slice(1, 7); const n = parseInt(c, 16); return ((n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) < 150; })() : true;
+        const fill = String(tok(sh.fill) || ''), dark = /^#/.test(fill) ? (() => { const c = fill.length === 4 ? fill.slice(1).split('').map((x) => x + x).join('') : fill.slice(1, 7); const n = parseInt(c, 16); return ((n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) < 150; })() : true;
         ctx.save(); ctx.beginPath();
         if (round) ctx.arc(e.x, e.y, Math.min(w, h) / 2, 0, Math.PI * 2); else if (ctx.roundRect) ctx.roundRect(e.x - w / 2, e.y - h / 2, w, h, Math.min((sh.radius || 0) * Math.abs(e.sx), h / 2)); else ctx.rect(e.x - w / 2, e.y - h / 2, w, h);
         ctx.clip();
@@ -13424,6 +13758,8 @@ registerBehavior('rules', {
 // ---- node-based visual scripting ----
 const num = (k, d = 0, label) => ({ key: k, type: 'number', default: d, label: label || k });
 const txt = (k, d = '', label) => ({ key: k, type: 'text', default: d, label: label || k });
+/** "mode = race, map = 2" → { mode: 'race', map: 2 } (numbers stay numbers). */
+function kvText(t) { const o = {}; for (const part of String(t || '').split(/[,\n]/)) { const i = part.indexOf('='); if (i < 1) continue; const k = part.slice(0, i).trim(), v = part.slice(i + 1).trim(); if (k) o[k] = v !== '' && Number.isFinite(+v) ? +v : v; } return o; }
 const opt = (k, options, d, label) => ({ key: k, type: 'select', options, default: d ?? options[0], label: label || k });
 /**
  * Node types. Events start a flow (white "exec" wires); actions run in order; values feed numbers/booleans
@@ -13738,7 +14074,19 @@ export const NODE_TYPES = {
   netConnect: { cat: 'Online', label: 'Connect (Photon)', exec: true, outs: ['then'] },
   netJoin: { cat: 'Online', label: 'Join Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = any open room)'), num('max', 4, 'max players')] },
   netLeave: { cat: 'Online', label: 'Leave Room', exec: true, outs: ['then'] },
-  netSend: { cat: 'Online', label: 'Send Network Message', exec: true, outs: ['then'], params: [txt('message', 'boom', 'message')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  netSend: { cat: 'Online', label: 'Send Network Message', exec: true, outs: ['then'], params: [txt('message', 'boom', 'message'), opt('to', ['everyone else', 'everyone (me too)', 'the host'], 'everyone else', 'to')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
+  netCreate: { cat: 'Online', label: 'Create Room', exec: true, outs: ['then', 'joined'], params: [txt('room', '', 'room name (blank = a code like K7Q2M)'), num('max', 4, 'max players'), { key: 'private', type: 'bool', default: false, label: 'private (join by name only)' }, txt('props', '', 'settings (mode = race, map = 2)')] },
+  netMatch: { cat: 'Online', label: 'Join Matching Room', exec: true, outs: ['then', 'joined'], params: [txt('props', 'mode = race', 'settings to match'), num('max', 4, 'max players')] },
+  netRefreshRooms: { cat: 'Online', label: 'Get Room List', exec: true, outs: ['then'] },
+  netRoomProp: { cat: 'Online', label: 'Set Room Setting', exec: true, outs: ['then'], params: [txt('name', 'round', 'setting (a variable for everyone)')], inputs: [{ key: 'value', type: 'text', default: '0' }] },
+  netPlayerProp: { cat: 'Online', label: 'Set My Player Info', exec: true, outs: ['then'], params: [txt('name', 'ready', 'info (team, ready, skin…)')], inputs: [{ key: 'value', type: 'text', default: '1' }] },
+  netSetName: { cat: 'Online', label: 'Set My Name (Photon)', exec: true, outs: ['then'], params: [txt('name', '{playerName}', 'name (variables in braces)')] },
+  netChatN: { cat: 'Online', label: 'Send Chat', exec: true, outs: ['then'], params: [txt('text', '{chatText}', 'text (variables in braces)')] },
+  onNetChat: { cat: 'Online', label: 'On Chat Message', outs: ['then'] },
+  onHostChanged: { cat: 'Online', label: 'On Became Host', outs: ['then'] },
+  onRoomList: { cat: 'Online', label: 'On Room List Changed', outs: ['then'] },
+  netRoomCount: { cat: 'Online', label: 'Open Rooms', value: 'number' },
+  netAllReady: { cat: 'Online', label: 'Everyone Is Ready', value: 'bool' },
   netSpawn: { cat: 'Online', label: 'Spawn For Everyone', exec: true, outs: ['then'], params: [txt('template', '', 'template'), opt('at', ['this object', 'position'], 'this object', 'at')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }] },
   netShared: { cat: 'Online', label: 'Set Shared Variable', exec: true, outs: ['then'], params: [txt('name', 'roundScore', 'variable')], inputs: [{ key: 'value', type: 'number', default: 0 }] },
   onNetJoined: { cat: 'Online', label: 'On Joined Room', outs: ['then'] },
@@ -13756,6 +14104,20 @@ export const NODE_TYPES = {
   pfLoad: { cat: 'Online', label: 'Cloud Load (PlayFab)', exec: true, outs: ['loaded', 'no save', 'failed'] },
   pfTitle: { cat: 'Online', label: 'Load Remote Config (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'], params: [txt('keys', '', 'title data keys (blank = all)')] },
   pfEventN: { cat: 'Online', label: 'Track Event (PlayFab)', exec: true, outs: ['then'], params: [txt('name', 'level_complete', 'event name')] },
+  pfAddEmail: { cat: 'Online', label: 'Add Email Login (PlayFab)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('email', '{email}', 'email (variables in braces)'), txt('password', '{password}', 'password')] },
+  pfLoginEmail: { cat: 'Online', label: 'Sign In With Email (PlayFab)', exec: true, outs: ['signed in', 'failed'], params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password')] },
+  pfRecover: { cat: 'Online', label: 'Send Password Reset (PlayFab)', exec: true, outs: ['then', 'sent', 'failed'], params: [txt('email', '{email}', 'email')] },
+  pfCurrency: { cat: 'Online', label: 'Add Currency (PlayFab)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('code', 'GC', 'currency code'), num('amount', 10, 'amount (minus takes)')] },
+  pfRefresh: { cat: 'Online', label: 'Get Inventory (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'] },
+  pfBuy: { cat: 'Online', label: 'Buy Item (PlayFab)', exec: true, outs: ['then', 'bought', 'failed'], params: [txt('item', 'sword', 'catalog item id'), txt('code', 'GC', 'currency code'), num('price', 100, 'price')] },
+  pfHasItem: { cat: 'Online', label: 'Owns Item (PlayFab)', value: 'bool', params: [txt('item', 'sword', 'item id')] },
+  pfSetData: { cat: 'Online', label: 'Save Player Data (PlayFab)', exec: true, outs: ['then', 'saved', 'failed'], params: [txt('keys', 'level, skin', 'variables')] },
+  pfGetData: { cat: 'Online', label: 'Load Player Data (PlayFab)', exec: true, outs: ['loaded', 'nothing', 'failed'], params: [txt('keys', '', 'keys (blank = all)')] },
+  pfStats: { cat: 'Online', label: 'Get My Stats (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'], params: [txt('stats', 'score', 'statistics (blank = all)')] },
+  pfFriend: { cat: 'Online', label: 'Add Friend (PlayFab)', exec: true, outs: ['then', 'added', 'failed'], params: [txt('name', '{friendName}', 'their player name')] },
+  pfCloud: { cat: 'Online', label: 'Run Cloud Script (PlayFab)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'grantReward', 'function'), txt('args', '', 'arguments (amount = 5, item = gem)')] },
+  pfNewsN: { cat: 'Online', label: 'Get News (PlayFab)', exec: true, outs: ['then', 'loaded', 'failed'], params: [num('count', 5, 'how many')] },
+  pfTimeN: { cat: 'Online', label: 'Get Server Time (PlayFab)', exec: true, outs: ['then', 'got it', 'failed'] },
   onPfLogin: { cat: 'Online', label: 'On PlayFab Logged In', outs: ['then'] },
   onOnlineError: { cat: 'Online', label: 'On Online Error', outs: ['then'] },
   // UI navigation
@@ -13969,7 +14331,7 @@ Object.assign(NODE_TYPES, {
   arrConcat: { cat: 'Lists', label: 'Array: Join Two', exec: true, outs: ['then'], params: [txt('a', 'items', 'first'), txt('b', 'more', 'then'), txt('to', 'all', 'into array')] },
   arrUnique: { cat: 'Lists', label: 'Array: Remove Duplicates', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')] },
   arrFilter: { cat: 'Lists', label: 'Array: Keep Only', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['=', '≠', '>', '<', '≥', '≤', 'contains', 'starts with'], '>', 'items that are'), txt('to', '', 'into array (blank = same)')], inputs: [T_IN('value', '10')] },
-  arrMap: { cat: 'Lists', label: 'Array: Change Every Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['add', 'multiply', 'round', 'abs', 'UPPER', 'lower', 'add text before', 'add text after'], 'add', 'do')], inputs: [T_IN('value', '1')] },
+  arrMap: { cat: 'Lists', label: 'Array: Change Every Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['add', 'multiply', 'round', 'abs', 'UPPER', 'lower', 'add text before', 'add text after'], 'add', 'do')], inputs: [{ key: 'value', type: 'text', default: '1' }] },
   arrSwap: { cat: 'Lists', label: 'Array: Swap Two', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')], inputs: [N_IN('a', 1), N_IN('b', 2)] },
   arrIndexOfMax: { cat: 'Lists', label: 'Array: Position Of Biggest / Smallest', value: 'number', params: [txt('name', 'items', 'array'), opt('which', ['biggest', 'smallest'], 'biggest', 'which')] },
   loopItemText: { cat: 'Lists', label: 'Loop Item (text)', value: 'text' },
@@ -13996,7 +14358,7 @@ Object.assign(NODE_TYPES, {
 // ---- app & device nodes: the phone around the game (switching apps, notifications, battery, menus) ----
 Object.assign(NODE_TYPES, {
   // Easy Save-style save files: keys in named files, any value type, objects, backups, export / import
-  esSave: { cat: 'Save Files', label: 'Save Key', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key')], inputs: [T_IN('value', '0')] },
+  esSave: { cat: 'Save Files', label: 'Save Key', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), txt('key', 'coins', 'key')], inputs: [{ key: 'value', type: 'text', default: '0' }] },
   esSaveVar: { cat: 'Save Files', label: 'Save Variable To Key', exec: true, outs: ['then'], params: [txt('file', 'save', 'file'), sug(txt('var', 'coins', 'variable'), 'vars'), txt('key', '', 'key (blank = variable name)')] },
   esLoadVar: { cat: 'Save Files', label: 'Load Key Into Variable', exec: true, outs: ['loaded', 'not saved yet'], params: [txt('file', 'save', 'file'), sug(txt('var', 'coins', 'variable'), 'vars'), txt('key', '', 'key (blank = variable name)')] },
   esLoad: { cat: 'Save Files', label: 'Load Key (text)', value: 'text', params: [txt('file', 'save', 'file'), txt('key', 'playerName', 'key'), txt('def', '', 'if not saved')] },
@@ -14056,6 +14418,7 @@ Object.assign(NODE_TYPES, {
   onDialogueEnd: { cat: 'Events', label: 'On Dialogue Finished', outs: ['then'] },
   onCutscene: { cat: 'Events', label: 'On Cutscene', outs: ['starts', 'ends'] },
   onScrolled: { cat: 'Events', label: 'On Scrolled', outs: ['up', 'down'] },
+  onPageClosed: { cat: 'Events', label: 'On Page Closed', outs: ['then'], params: [txt('page', '', 'page (blank = any)')] },
   onSaveLoaded: { cat: 'Events', label: 'On Save Loaded', outs: ['then'] },
   onTimeReaches: { cat: 'Events', label: 'When Level Time Reaches', outs: ['then'], params: [num('seconds', 30, 'seconds')] },
   onClock: { cat: 'Events', label: 'At Clock Time', outs: ['then'], params: [txt('time', '18:00', 'time (HH:MM, phone clock)')] },
@@ -15079,6 +15442,9 @@ registerBehavior('graph', {
         case 'notifyAllowed': { const ph = s.engine.phone; if (!ph._checking) { ph._checking = true; ph.status().then((v) => { ph.perm = v; ph._checking = false; }); } return ph.perm === 'granted'; }
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
+        case 'netRoomCount': return (s.engine.online.rooms || []).length;
+        case 'netAllReady': return !!s.vars.netAllReady;
+        case 'pfHasItem': return s.engine.online.hasItem(P('item'));
         case 'netInRoom': return s.engine.online.inRoom();
         case 'netValue': return +(ctx.netValue ?? s.engine.online.lastValue) || 0;
         case 'textJoin': return [I('a'), I('b'), I('c')].map(asText).filter((x) => x !== '').join(P('sep') ?? '');
@@ -15506,7 +15872,13 @@ registerBehavior('graph', {
         case 'netConnect': s.engine.online.connect(); break;
         case 'netJoin': { const O = s.engine.online, later = { ...ctx, steps: 0 }; if (O.inRoom()) follow(n, 'joined', later); else { let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); } O.join(P('room'), P('max')); break; }
         case 'netLeave': s.engine.online.leave(); break;
-        case 'netSend': s.engine.online.sendMessage(P('message'), +I('value') || 0); break;
+        case 'netSend': s.engine.online.sendMessage(P('message'), +I('value') || 0, { 'everyone (me too)': 'all', 'the host': 'host' }[P('to')] || 'others'); break;
+        case 'netCreate': case 'netMatch': { const O = s.engine.online, later = { ...ctx, steps: 0 }; let done = false; s.on('online', (w) => { if (w === 'joined' && !done) { done = true; if (!e.dead) follow(n, 'joined', later); } }); if (n.type === 'netCreate') O.createRoom(fillTemplate(P('room'), s.vars), { max: P('max'), priv: !!P('private'), props: kvText(P('props')) }); else O.joinMatching(kvText(P('props')), P('max')); break; }
+        case 'netRefreshRooms': s.engine.online.roomsChanged(); break;
+        case 'netRoomProp': s.engine.online.setRoomProp(P('name'), listVal(I('value'))); break;
+        case 'netPlayerProp': s.engine.online.setPlayerProp(P('name'), listVal(I('value'))); break;
+        case 'netSetName': s.engine.online.setNetName(fillTemplate(P('name'), s.vars)); break;
+        case 'netChatN': s.engine.online.chat(fillTemplate(P('text'), s.vars)); break;
         case 'netSpawn': { const at = P('at') === 'position' ? { x: +I('x') || 0, y: +I('y') || 0, z: +I('z') || 0 } : { x: e.x, y: e.y, z: e.z }; const c = s.engine.online.spawnForAll(P('template'), at); if (c) ctx = { ...ctx, other: c }; break; }
         case 'netShared': s.engine.online.setShared(P('name') || 'shared', +I('value') || 0); break;
         case 'pfLogin': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLogin().then((ok) => { if (!e.dead) follow(n, ok ? 'logged in' : 'failed', later); }); return; }
@@ -15516,6 +15888,14 @@ registerBehavior('graph', {
         case 'pfLoad': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLoad().then((r) => { if (!e.dead) follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'no save' : 'failed', later); }); return; }
         case 'pfTitle': { const later = { ...ctx, steps: 0 }; s.engine.online.pfTitleData(P('keys')).then((ok) => { if (!e.dead) follow(n, ok ? 'loaded' : 'failed', later); }); break; }
         case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
+        case 'pfAddEmail': case 'pfLoginEmail': case 'pfRecover': case 'pfCurrency': case 'pfRefresh': case 'pfBuy': case 'pfSetData': case 'pfGetData': case 'pfStats': case 'pfFriend': case 'pfCloud': case 'pfNewsN': case 'pfTimeN': { // PlayFab calls: they answer a moment later
+          const O = s.engine.online, later = { ...ctx, steps: 0 }, F = (k) => fillTemplate(P(k), s.vars);
+          const ok = { pfAddEmail: 'done', pfLoginEmail: 'signed in', pfRecover: 'sent', pfCurrency: 'done', pfRefresh: 'loaded', pfBuy: 'bought', pfSetData: 'saved', pfStats: 'loaded', pfFriend: 'added', pfCloud: 'done', pfNewsN: 'loaded', pfTimeN: 'got it' }[n.type];
+          const call = { pfAddEmail: () => O.pfAddEmail(F('email'), F('password')), pfLoginEmail: () => O.pfLoginEmail(F('email'), F('password')), pfRecover: () => O.pfRecover(F('email')), pfCurrency: () => O.pfAddCurrency(P('code'), +P('amount') || 0), pfRefresh: () => O.pfInventory(), pfBuy: () => O.pfBuy(P('item'), P('code'), +P('price') || 0),
+            pfSetData: () => O.pfSetData(P('keys')), pfGetData: () => O.pfGetData(P('keys')), pfStats: () => O.pfStats(P('stats')), pfFriend: () => O.pfAddFriend(F('name')), pfCloud: () => O.pfCloud(P('fn'), kvText(F('args'))), pfNewsN: () => O.pfNews(P('count')), pfTimeN: () => O.pfTime() }[n.type];
+          call().then((r) => { if (e.dead) return; if (n.type === 'pfGetData') follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'nothing' : 'failed', later); else follow(n, r ? ok : 'failed', later); });
+          if (n.type === 'pfLoginEmail' || n.type === 'pfGetData') return; break;
+        }
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
         case 'whileLoop': case 'repeatUntil': {
@@ -15756,6 +16136,7 @@ registerBehavior('graph', {
       if (list('onItemCollected').length) s.on('inventory', (name, cnt) => { const k = 'inv:' + name, was = state.get(k) ?? 0; state.set(k, cnt); if (cnt > was && !e.dead) for (const n of list('onItemCollected')) if (!param(n, 'item') || param(n, 'item') === name) out(n, 'then', e, s, { eventValue: name }); });
       if (list('onAchievementGot').length) s.on('achievement', (nm) => { if (!e.dead) for (const n of list('onAchievementGot')) if (!param(n, 'name') || param(n, 'name') === nm) out(n, 'then', e, s, { eventValue: nm }); });
       if (list('onAnyMessage').length) s.on('message', (nm) => { if (!e.dead) for (const n of list('onAnyMessage')) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onPageClosed').length) s.on('pageChange', (on, who, pg) => { if (!e.dead && !on) for (const n of list('onPageClosed')) if (!param(n, 'page') || param(n, 'page') === pg) out(n, 'then', e, s, { eventValue: pg }); });
       if (list('onScrolled').length) s.on('uiScroll', (d) => { if (!e.dead && d) for (const n of list('onScrolled')) out(n, d > 0 ? 'down' : 'up', e, s, { eventValue: d }); });
       if (list('onResize').length) s.on('resize', (w, hh) => { if (!e.dead) for (const n of list('onResize')) out(n, 'then', e, s, { eventValue: w + 'x' + hh }); });
       if (list('onDarkMode').length && typeof matchMedia === 'function') { const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', (ev) => { if (!e.dead && E.scene === s) for (const n of list('onDarkMode')) out(n, ev.matches ? 'dark' : 'light', e, s); }); }
@@ -15863,11 +16244,12 @@ registerBehavior('graph', {
           for (const n of g.nodes) if (n.type === 'onVarReaches') varWas.set(n.id, test(n, s.vars[param(n, 'name')]));
           s.on('var', (k, v) => { if (e.dead) return; for (const n of g.nodes) if (n.type === 'onVarReaches' && param(n, 'name') === k) { const now = test(n, v); if (now && !varWas.get(n.id)) follow(n, 'then', { s, e, steps: 0 }); varWas.set(n.id, now); } });
         }
-        if (has('onNetJoined', 'onPlayerJoined', 'onPlayerLeft', 'onPfLogin', 'onOnlineError')) s.on('online', (what) => {
+        if (has('onNetJoined', 'onPlayerJoined', 'onPlayerLeft', 'onPfLogin', 'onOnlineError', 'onHostChanged', 'onRoomList')) s.on('online', (what) => {
           if (e.dead) return;
-          const t = { joined: 'onNetJoined', playerJoined: 'onPlayerJoined', playerLeft: 'onPlayerLeft', login: 'onPfLogin', error: 'onOnlineError' }[what];
+          const t = { joined: 'onNetJoined', playerJoined: 'onPlayerJoined', playerLeft: 'onPlayerLeft', login: 'onPfLogin', error: 'onOnlineError', host: 'onHostChanged', rooms: 'onRoomList' }[what];
           if (t) fire(t, e, s);
         });
+        if (has('onNetChat')) s.on('netChat', (who, text) => { if (!e.dead) fire('onNetChat', e, s, null, null, null, { eventValue: text }); });
         if (has('onNetMessage')) s.on('netMessage', (m, v) => { if (!e.dead) fire('onNetMessage', e, s, null, (n) => !param(n, 'message') || param(n, 'message') === m, null, { netValue: v }); });
         if (g.nodes.some((n) => n.type === 'onGameOver')) s.on('gameover', () => fire('onGameOver', e, s));
         if (g.nodes.some((n) => n.type === 'animEnd')) s.on('animationEnd', (who, clip) => { if (who === e) fire('animEnd', e, s, null, (n) => !param(n, 'clip') || param(n, 'clip') === clip); });
@@ -16000,7 +16382,7 @@ registerBehavior('script', {
 // ============================================================================
 export const PHOTON_SDK = 'https://cdn.jsdelivr.net/npm/photon-realtime@4.4.0/photon-realtime-module.js';
 export const PHOTON_REGIONS = ['eu', 'us', 'usw', 'asia', 'jp', 'kr', 'in', 'au', 'sa', 'cae', 'za', 'uae', 'tr'];
-const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6, SPAWNT: 7, KILL: 8 }; // Photon event codes this engine uses
+const NET = { STATE: 1, SPAWN: 2, MESSAGE: 3, SHARED: 4, DESPAWN: 5, NEED: 6, SPAWNT: 7, KILL: 8, CHAT: 9 }; // Photon event codes this engine uses
 const NET_VISUAL = ['animator', 'spriteSheet', 'flipbook']; // components a remote copy keeps (looks only, no control)
 
 export class Online {
@@ -16041,17 +16423,76 @@ export class Online {
     let id = store.get(key, '');
     if (!id) { id = globalThis.crypto?.randomUUID?.() || 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2); store.set(key, id); }
     this.pf.login = this.pfCall('LoginWithCustomID', { TitleId: title, CustomId: id, CreateAccount: true, InfoRequestParameters: { GetPlayerProfile: true, GetUserVirtualCurrency: true } }, false)
-      .then((d) => {
-        this.pf.ticket = d.SessionTicket; this.pf.id = d.PlayFabId; this.pf.name = d.InfoResultPayload?.PlayerProfile?.DisplayName || '';
-        this.setVar('pfOnline', 1); this.setVar('pfPlayerId', d.PlayFabId); if (this.pf.name) this.setVar('pfName', this.pf.name);
-        for (const [c, v] of Object.entries(d.InfoResultPayload?.UserVirtualCurrency || {})) this.setVar('pf' + c, v);
-        this.scene?.emit('online', 'login', d.NewlyCreated);
-        return true;
-      })
+      .then((d) => this.pfLoggedIn(d))
       .catch((e) => { this.fail('PlayFab login', e); return false; })
       .finally(() => { this.pf.login = null; });
     return this.pf.login;
   }
+  /** A login answer: the session, the player's id and name, their currencies. */
+  pfLoggedIn(d) {
+    this.pf.ticket = d.SessionTicket; this.pf.id = d.PlayFabId; this.pf.name = d.InfoResultPayload?.PlayerProfile?.DisplayName || '';
+    this.setVar('pfOnline', 1); this.setVar('pfPlayerId', d.PlayFabId); if (this.pf.name) this.setVar('pfName', this.pf.name);
+    for (const [c, v] of Object.entries(d.InfoResultPayload?.UserVirtualCurrency || {})) this.setVar('pf' + c, v);
+    this.scene?.emit('online', 'login', d.NewlyCreated);
+    return true;
+  }
+  /** Keep this player's progress safe across phones: add an email and password to the account they already have. */
+  async pfAddEmail(email, password, user) {
+    try { await this.pfCall('AddUsernamePassword', { Email: String(email).trim(), Password: String(password), Username: String(user || '').trim().replace(/[^\w]/g, '').slice(0, 20) || 'p' + String(this.pf.id || Date.now()).slice(-8) }); this.setVar('pfEmail', String(email).trim()); return true; } catch (e) { return !!this.fail('PlayFab add email', e); }
+  }
+  /** Sign in with an email and password (on a new phone): the same player, scores and cloud save. */
+  async pfLoginEmail(email, password) {
+    const title = this.titleId(); this.pf = { ticket: null, id: null, name: '', login: null, title };
+    try { const d = await this.pfCall('LoginWithEmailAddress', { TitleId: title, Email: String(email).trim(), Password: String(password), InfoRequestParameters: { GetPlayerProfile: true, GetUserVirtualCurrency: true } }, false); this.setVar('pfEmail', String(email).trim()); return this.pfLoggedIn(d); }
+    catch (e) { return !!this.fail('PlayFab sign in', e); }
+  }
+  async pfRecover(email) { try { await this.pfCall('SendAccountRecoveryEmail', { TitleId: this.titleId(), Email: String(email).trim() }, false); return true; } catch (e) { return !!this.fail('PlayFab recovery', e); } }
+  /** Add (or, with a minus amount, take) virtual currency: the new balance goes in pf + its code (pfGC). Title settings must allow clients to change currency. */
+  async pfAddCurrency(code, amount) {
+    const c = String(code || 'GC').toUpperCase().slice(0, 2), n = Math.round(+amount || 0); if (!n) return true;
+    try { const d = await this.pfCall(n > 0 ? 'AddUserVirtualCurrency' : 'SubtractUserVirtualCurrency', { VirtualCurrency: c, Amount: Math.abs(n) }); this.setVar('pf' + c, d.Balance); return true; } catch (e) { return !!this.fail('PlayFab currency', e); }
+  }
+  /** Buy a catalog item with virtual currency; the inventory list (pfItems) updates. */
+  async pfBuy(item, code, price, catalog) {
+    try { await this.pfCall('PurchaseItem', { ItemId: String(item), VirtualCurrency: String(code || 'GC').toUpperCase().slice(0, 2), Price: Math.round(+price || 0), ...(catalog ? { CatalogVersion: String(catalog) } : {}) }); await this.pfInventory(); this.scene?.emit('online', 'bought', item); return true; }
+    catch (e) { return !!this.fail('PlayFab purchase', e); }
+  }
+  /** The player's items (pfItems: a list of item ids) and currencies. */
+  async pfInventory() {
+    try { const d = await this.pfCall('GetUserInventory', {}); this.pf.items = (d.Inventory || []).map((i) => i.ItemId); this.setVar('pfItems', [...this.pf.items]); for (const [c, v] of Object.entries(d.VirtualCurrency || {})) this.setVar('pf' + c, v); return true; } catch (e) { return !!this.fail('PlayFab inventory', e); }
+  }
+  hasItem(id) { return (this.pf.items || []).includes(String(id)); }
+  /** Player data by key: a variable's value goes up; down, each key becomes a variable (numbers stay numbers). */
+  async pfSetData(keys) {
+    const s = this.scene, Data = {}; for (const k of String(keys || '').split(',').map((x) => x.trim()).filter(Boolean)) Data[k] = typeof s?.vars[k] === 'object' ? JSON.stringify(s.vars[k]) : String(s?.vars[k] ?? '');
+    try { await this.pfCall('UpdateUserData', { Data }); return true; } catch (e) { return !!this.fail('PlayFab player data', e); }
+  }
+  async pfGetData(keys) {
+    const list = String(keys || '').split(',').map((x) => x.trim()).filter(Boolean);
+    try { const d = await this.pfCall('GetUserData', list.length ? { Keys: list } : {}); let n = 0; for (const [k, v] of Object.entries(d.Data || {})) { if (k === 'pocket_vars') continue; n++; const raw = v.Value; let val = raw; try { if (/^[[{]/.test(raw)) val = JSON.parse(raw); } catch { /* text */ } this.scene?.setVar(k, raw !== '' && Number.isFinite(+raw) ? +raw : val); } return n ? 'loaded' : 'none'; }
+    catch (e) { this.fail('PlayFab player data', e); return 'failed'; }
+  }
+  /** This player's statistics (their leaderboard values): each one becomes a variable named after it. */
+  async pfStats(names) {
+    const list = String(names || '').split(',').map((x) => x.trim()).filter(Boolean);
+    try { const d = await this.pfCall('GetPlayerStatistics', list.length ? { StatisticNames: list } : {}); for (const st of d.Statistics || []) this.setVar(st.StatisticName, st.Value); return true; } catch (e) { return !!this.fail('PlayFab statistics', e); }
+  }
+  async pfAddFriend(name) { try { await this.pfCall('AddFriend', { FriendTitleDisplayName: String(name).trim() }); return true; } catch (e) { return !!this.fail('PlayFab friends', e); } }
+  /** Run a Cloud Script function on PlayFab's servers (rewards, checks players can't cheat). An object result becomes variables, anything else goes in pfResult. */
+  async pfCloud(fn, args = {}) {
+    try {
+      const d = await this.pfCall('ExecuteCloudScript', { FunctionName: String(fn), FunctionParameter: args, GeneratePlayStreamEvent: true });
+      if (d.Error) throw new Error(d.Error.Message || d.Error.Error);
+      const r = d.FunctionResult; if (r && typeof r === 'object' && !Array.isArray(r)) for (const [k, v] of Object.entries(r)) this.scene?.setVar(k, v); else this.setVar('pfResult', r ?? '');
+      return true;
+    } catch (e) { return !!this.fail('PlayFab Cloud Script', e); }
+  }
+  /** Title news (Content › Title News): a list of "Title: text" in pfNews, the newest in pfNewsTitle / pfNewsBody. */
+  async pfNews(count = 5) {
+    try { const d = await this.pfCall('GetTitleNews', { Count: clamp(Math.round(+count || 5), 1, 20) }), N = d.News || []; this.setVar('pfNews', N.map((n) => `${n.Title}: ${n.Body}`)); this.setVar('pfNewsTitle', N[0]?.Title || ''); this.setVar('pfNewsBody', N[0]?.Body || ''); return true; } catch (e) { return !!this.fail('PlayFab news', e); }
+  }
+  /** The server's clock (seconds since 1970, in pfServerTime): daily rewards that changing the phone's clock can't cheat. */
+  async pfTime() { try { const d = await this.pfCall('GetTime', {}); const t = Math.floor(Date.parse(d.Time) / 1000); this.setVar('pfServerTime', t); return t; } catch (e) { this.fail('PlayFab time', e); return 0; } }
   async pfSetName(name) {
     name = String(name || '').trim().slice(0, 25);
     try { await this.pfCall('UpdateUserTitleDisplayName', { DisplayName: name }); this.pf.name = name; this.setVar('pfName', name); store.set('pocket.netName', name); return true; } catch (e) { return !!this.fail('PlayFab name', e); }
@@ -16061,10 +16502,10 @@ export class Online {
     try { await this.pfCall('UpdatePlayerStatistics', { Statistics: [{ StatisticName: String(stat || 'score'), Value: Math.round(+value || 0) }] }); this.scene?.emit('online', 'score', stat); return true; } catch (e) { return !!this.fail('PlayFab score', e); }
   }
   /** Leaderboard rows: [{ rank, name, value, me }] — the top, or the players around you. */
-  async pfLeaderboard(stat, count = 10, around = false) {
+  async pfLeaderboard(stat, count = 10, around = false, friends = false) {
     try {
-      const body = { StatisticName: String(stat || 'score'), MaxResultsCount: clamp(Math.round(+count || 10), 1, 100), ...(around ? {} : { StartPosition: 0 }) };
-      const d = await this.pfCall(around ? 'GetLeaderboardAroundPlayer' : 'GetLeaderboard', body);
+      const body = { StatisticName: String(stat || 'score'), MaxResultsCount: clamp(Math.round(+count || 10), 1, 100), ...(around || friends ? {} : { StartPosition: 0 }) };
+      const d = await this.pfCall(friends ? 'GetFriendLeaderboard' : around ? 'GetLeaderboardAroundPlayer' : 'GetLeaderboard', friends ? { ...body, StartPosition: 0 } : body);
       const rows = (d.Leaderboard || []).map((r) => ({ rank: r.Position + 1, name: r.DisplayName || 'Player ' + String(r.PlayFabId).slice(-4), value: r.StatValue, me: r.PlayFabId === this.pf.id }));
       const mine = rows.find((r) => r.me); if (mine) this.setVar('pfRank', mine.rank);
       return rows;
@@ -16115,8 +16556,10 @@ export class Online {
   isMaster() { return this.inRoom() && this.lbc.myRoomMasterActorNr() === this.myNr(); }
   setState(st) { this.state = st; this.setVar('netState', st); this.setVar('netOnline', st === 'room' ? 1 : 0); }
   counts() {
-    if (!this.inRoom()) { this.setVar('netPlayers', 0); this.setVar('netMaster', 0); return; }
-    this.setVar('netPlayers', this.lbc.myRoomActorCount()); this.setVar('netMaster', this.isMaster() ? 1 : 0); this.setVar('netActor', this.myNr());
+    if (!this.inRoom()) { this.setVar('netPlayers', 0); this.setVar('netMaster', 0); this.wasHost = false; return; }
+    const host = this.isMaster(); if (host && this.wasHost === false && this.state === 'room') this.scene?.emit('online', 'host'); this.wasHost = host; // the host left and this player took over
+    this.players();
+    this.setVar('netPlayers', this.lbc.myRoomActorCount()); this.setVar('netMaster', host ? 1 : 0); this.setVar('netActor', this.myNr());
   }
   async connect() {
     const c = this.cfg('photon');
@@ -16129,18 +16572,22 @@ export class Online {
       this.P = P;
       lbc.setUserId?.(this.pf.id || store.get('pocket.netId', '') || (() => { const id = 'u' + Math.random().toString(36).slice(2, 10); store.set('pocket.netId', id); return id; })());
       lbc.onStateChange = (st) => {
-        if (st === S.JoinedLobby) { this.setState('lobby'); this.scene?.emit('online', 'connected'); if (this.pendingJoin) { const j = this.pendingJoin; this.pendingJoin = null; this.join(j.name, j.max); } }
+        if (st === S.JoinedLobby) { this.setState('lobby'); this.scene?.emit('online', 'connected'); this.roomsChanged(); if (this.pendingCreate) { const c = this.pendingCreate; this.pendingCreate = null; this.createRoom(c.name, c); } else if (this.pendingMatch) { const m = this.pendingMatch; this.pendingMatch = null; this.joinMatching(m.props, m.max); } else if (this.pendingJoin) { const j = this.pendingJoin; this.pendingJoin = null; this.join(j.name, j.max); } }
         else if (st === S.Joined) { this.setState('room'); }
         else if (st === S.Disconnected || st === S.Error) { this.setState('offline'); this.clearProxies(); this.counts(); this.scene?.emit('online', 'disconnected'); }
         else if (st === S.ConnectingToGameserver || st === S.ConnectedToGameserver) this.setState('joining');
       };
       lbc.onJoinRoom = () => {
-        this.setState('room'); this.setVar('netRoom', lbc.myRoom()?.name || ''); this.counts();
+        this.setState('room'); this.setVar('netRoom', lbc.myRoom()?.name || ''); try { lbc.myActor().setName(this.playerName()); } catch { /* old SDK */ } this.counts(); this.players(); this.chatLog = []; this.setVar('netChat', []);
+        { const P = lbc.myRoom()?.getCustomProperties?.() || {}; for (const [k, v] of Object.entries(P)) if (!/^_/.test(k)) this.scene?.setVar(k, v); }
         this.announce(); this.scene?.emit('online', 'joined', lbc.myRoom()?.name);
       };
       lbc.onActorJoin = (a) => { this.counts(); if (a.actorNr !== this.myNr()) { this.announce([a.actorNr]); if (this.isMaster() && Object.keys(this.shared).length) this.raise(NET.SHARED, { all: this.shared }, [a.actorNr]); for (const [o, q] of this.objs) if (!q.e.dead && o.startsWith(this.myNr() + '-')) this.raise(NET.SPAWNT, { t: q.t, o, a: { x: q.e.x, y: q.e.y, z: q.e.z, rx: q.e.rx, ry: q.e.ry, rz: q.e.rz } }, [a.actorNr]); this.scene?.emit('online', 'playerJoined', a.actorNr); } };
       lbc.onActorLeave = (a) => { this.counts(); this.dropActor(a.actorNr); this.scene?.emit('online', 'playerLeft', a.actorNr); };
       lbc.onEvent = (code, data, actor) => this.receive(code, data, actor);
+      lbc.onRoomList = lbc.onRoomListUpdate = () => this.roomsChanged();
+      lbc.onMyRoomPropertiesChange = () => { const P = lbc.myRoom()?.getCustomProperties?.() || {}; for (const [k, v] of Object.entries(P)) if (!/^_/.test(k)) this.scene?.setVar(k, v); this.scene?.emit('online', 'roomProps'); };
+      lbc.onActorPropertiesChange = () => { this.players(); this.scene?.emit('online', 'playerProps'); };
       lbc.onError = (code, msg) => this.fail('Photon', `${msg} (${code})`);
       lbc.connectToRegionMaster(c.region || 'eu');
       return true;
@@ -16156,6 +16603,57 @@ export class Online {
     else this.lbc.joinRandomOrCreateRoom({}, null, { maxPlayers: max });
     return true;
   }
+  /** Open rooms in the lobby: netRooms (a list of names), netRoomCount, and the full list for the Room List. */
+  roomsChanged() {
+    const R = (this.lbc?.availableRooms?.() || []).filter((r) => r.isOpen !== false && r.isVisible !== false);
+    this.rooms = R.map((r) => ({ name: r.name, players: r.playerCount, max: r.maxPlayers, props: r.getCustomProperties?.() || {} }));
+    this.setVar('netRooms', this.rooms.map((r) => r.name)); this.setVar('netRoomCount', this.rooms.length);
+    this.scene?.emit('online', 'rooms');
+  }
+  /** Make a room: a name (blank = a short code to share), private rooms are only found by name, and settings (mode = race) others can match on. */
+  async createRoom(name, { max, priv = false, props = {} } = {}) {
+    max = clamp(Math.round(+max || +this.cfg('photon').maxPlayers || 4), 2, 32);
+    name = String(name || '').trim() || Array.from({ length: 5 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)]).join('');
+    if (!this.lbc || this.state === 'offline' || this.state === 'connecting') { this.pendingCreate = { name, max, priv, props }; this.pendingJoin = null; if (!this.lbc || this.state === 'offline') await this.connect(); return name; }
+    if (this.inRoom()) this.leave();
+    this.setState('joining'); this.setVar('netRoom', name);
+    this.lbc.createRoom(name, { maxPlayers: max, isVisible: !priv, customGameProperties: props, propsListedInLobby: Object.keys(props) });
+    return name;
+  }
+  /** Join any open room whose settings match (mode = race), or make one. */
+  async joinMatching(props = {}, max) {
+    max = clamp(Math.round(+max || +this.cfg('photon').maxPlayers || 4), 2, 32);
+    if (!this.lbc || this.state === 'offline' || this.state === 'connecting') { this.pendingMatch = { props, max }; if (!this.lbc || this.state === 'offline') await this.connect(); return true; }
+    if (this.inRoom()) return true;
+    this.setState('joining');
+    this.lbc.joinRandomOrCreateRoom({ expectedCustomRoomProperties: props }, null, { maxPlayers: max, customGameProperties: props, propsListedInLobby: Object.keys(props) });
+    return true;
+  }
+  /** A room setting everyone shares (it stays for players who join later): it becomes a variable for all of them. */
+  setRoomProp(k, v) { if (!this.inRoom()) return false; this.lbc.myRoom().setCustomProperty(String(k), v); this.scene?.setVar(String(k), v); return true; }
+  /** Something about me other players can see: my team, ready, skin… (in the player list as name, and in netPlayerProps). */
+  setPlayerProp(k, v) { if (!this.inRoom()) return false; this.lbc.myActor().setCustomProperty(String(k), v); this.players(); return true; }
+  setNetName(name) { name = String(name || '').trim().slice(0, 24); store.set('pocket.netName', name); try { this.lbc?.myActor?.()?.setName?.(name); } catch { /* not connected */ } this.players(); return true; }
+  /** Everyone in the room: netPlayerNames (a list) and, for each, their properties. */
+  players() {
+    if (!this.inRoom()) { this.setVar('netPlayerNames', []); return []; }
+    const A = Object.values(this.lbc.myRoomActors?.() || {}).sort((a, b) => a.actorNr - b.actorNr);
+    const out = A.map((a) => ({ nr: a.actorNr, name: a.name || 'Player ' + a.actorNr, me: a.actorNr === this.myNr(), host: a.actorNr === this.lbc.myRoomMasterActorNr(), props: a.getCustomProperties?.() || {} }));
+    this.setVar('netPlayerNames', out.map((q) => q.name)); this.setVar('netPlayerProps', out.map((q) => ({ name: q.name, ...q.props })));
+    const ready = out.length && out.every((q) => q.props.ready); this.setVar('netAllReady', ready ? 1 : 0);
+    return out;
+  }
+  /** Room chat: "name: text" lines in netChat (the last 30), for a Chat Box. */
+  chat(text) {
+    text = String(text || '').trim().slice(0, 200); if (!text) return false;
+    this.addChat(this.playerName(), text, true);
+    return this.raise(NET.CHAT, { n: this.playerName(), t: text });
+  }
+  addChat(name, text, mine = false) {
+    (this.chatLog ||= []).push({ name, text, mine, t: Date.now() }); if (this.chatLog.length > 30) this.chatLog.shift();
+    this.setVar('netChat', this.chatLog.map((c) => `${c.name}: ${c.text}`)); this.setVar('netLastChat', text);
+    this.scene?.emit('netChat', name, text, mine);
+  }
   leave() { if (this.inRoom()) { this.lbc.leaveRoom(); this.clearProxies(); this.setState('lobby'); this.counts(); this.setVar('netRoom', ''); } }
   disconnect() { this.pendingJoin = null; try { this.lbc?.disconnect(); } catch { /* already closed */ } this.lbc = null; this.setState('offline'); this.clearProxies(); this.counts(); }
   raise(code, data, to) {
@@ -16165,7 +16663,11 @@ export class Online {
     return true;
   }
   /** A message to everyone else in the room (they get it as a game message, plus On Network Message). */
-  sendMessage(name, value = 0) { return this.raise(NET.MESSAGE, { m: String(name), v: value }); }
+  sendMessage(name, value = 0, to = 'others') {
+    if (to === 'host') { if (this.isMaster()) { this.scene?.send(String(name), value); return true; } return this.raise(NET.MESSAGE, { m: String(name), v: value }, [this.lbc.myRoomMasterActorNr()]); }
+    if (to === 'all') this.scene?.send(String(name), value); // me too
+    return this.raise(NET.MESSAGE, { m: String(name), v: value });
+  }
   setShared(k, v) { this.shared[k] = v; this.scene?.setVar(k, v); this.raise(NET.SHARED, { k, v }); }
   /** Spawn a template for everyone in the room (just here when offline). Destroying it anywhere removes it everywhere. */
   spawnForAll(tpl, at = {}) {
@@ -16227,6 +16729,7 @@ export class Online {
       case NET.SPAWNT: { if (this.objs.has(data.o)) break; const e = s.spawn(data.t, data.a || { x: data.x, y: data.y, z: data.z }); if (e) { e.data.netObj = data.o; e.spawned = true; this.objs.set(data.o, { e, t: data.t }); } break; }
       case NET.KILL: { const q = this.objs.get(data.o); if (q) { q.e.data.netKilled = true; if (!q.e.dead) q.e.destroy(); this.objs.delete(data.o); } break; }
       case NET.MESSAGE: this.lastValue = data.v; s.emit('netMessage', data.m, data.v, actor); s.send(data.m, data.v); break;
+      case NET.CHAT: this.addChat(String(data.n || 'Player ' + actor).slice(0, 24), String(data.t || '').slice(0, 200)); break;
       default: s.emit('netEvent', code, data, actor);
     }
   }
@@ -16284,6 +16787,7 @@ registerBehavior('pfLeaderboard', {
     { key: 'stat', label: 'Statistic (leaderboard name)', type: 'text', default: 'score' },
     { key: 'count', label: 'How many rows', type: 'number', default: 10, range: [1, 50], step: 1 },
     { key: 'around', label: 'Show the players around me', type: 'bool', default: false },
+    { key: 'friends', label: 'Only my friends', type: 'bool', default: false },
     { key: 'refreshOn', label: 'Refresh on message', type: 'text', default: 'leaderboard', suggest: 'messages' },
     { key: 'format', label: 'Row format', type: 'text', default: '{rank}. {name}  {value}' },
   ],
@@ -16294,7 +16798,7 @@ registerBehavior('pfLeaderboard', {
       e.text ||= { ...TEXT_DEFAULTS, size: 18, align: 'left' };
       if (!s.engine.online.titleId()) { e.text.value = 'Add a PlayFab Title ID\nin Game Settings › Online'; busy = false; return; }
       e.text.value = 'Loading…';
-      const rows = await s.engine.online.pfLeaderboard(p.stat, p.count, p.around);
+      const rows = await s.engine.online.pfLeaderboard(p.stat, p.count, p.around, p.friends);
       busy = false;
       if (e.dead) return;
       e.text.value = !rows ? 'Leaderboard unavailable' : !rows.length ? 'No scores yet — be the first!' : rows.map((r) => String(p.format || '{rank}. {name}  {value}').replace('{rank}', r.rank).replace('{name}', r.name + (r.me ? ' (you)' : '')).replace('{value}', formatNumber(r.value))).join('\n');
@@ -16306,6 +16810,91 @@ registerBehavior('pfLeaderboard', {
         load(e, s);
         s.on('message', (m) => { if (!e.dead && m === (p.refreshOn || 'leaderboard')) load(e, s); });
         s.on('online', (what, stat) => { if (!e.dead && what === 'score' && (stat || 'score') === (p.stat || 'score')) load(e, s); });
+      },
+    };
+  },
+});
+
+/** Room List (Photon): the open rooms in the lobby; tap one to join it. */
+registerBehavior('netRoomList', {
+  label: 'Room List (Photon)', description: 'The open multiplayer rooms, with how many players are in each. Tap a room to join it. It fills in by itself once the game is connected (Connect or Join Room), and empties when you are in a room.',
+  params: [
+    { key: 'rowH', label: 'Row height', type: 'number', default: 56, range: [36, 100], step: 2 },
+    { key: 'empty', label: 'When there are none', type: 'text', default: 'No open rooms yet. Make one!' },
+    { key: 'showSettings', label: 'Show room settings (mode, map…)', type: 'bool', default: true },
+    { key: 'message', label: 'Joining sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ row: ['Rows', 'rgba(255,255,255,0.08)'], text: ['Text', '#ffffff'], sub: ['Second line', 'rgba(255,255,255,0.6)'], accent: ['Join', '#3a7bfd'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const SAMPLE = [{ name: 'K7Q2M', players: 2, max: 4, props: { mode: 'race' } }, { name: 'Friday fun', players: 3, max: 8, props: {} }, { name: 'PRO-ONLY', players: 4, max: 4, props: { mode: 'duel' } }];
+    const rowsOf = (s) => (s.engine.editing ? SAMPLE : s.engine.online?.rooms || []);
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        if (!UK.live(s, e)) return;
+        const b = UK.box(e), rh = Math.max(30, +p.rowH || 56), R = rowsOf(s);
+        for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, b)) continue;
+          const i = Math.floor((t.y - b.y - 4) / (rh + 6)), r = R[i];
+          if (!r || r.players >= r.max) continue;
+          UK.tap(s, p); s.engine.online.join(r.name, r.max); if (p.message) s.send(p.message); s.engine.input.taps.length = 0;
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), rh = Math.max(30, +p.rowH || 56), R = rowsOf(s), txt = p.text || '#fff', sub = p.sub || 'rgba(255,255,255,0.6)', ac = p.accent || '#3a7bfd';
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        if (!R.length) UK.text(ctx, s.engine.online?.state === 'offline' && !s.engine.editing ? 'Not connected' : p.empty, b.cx, b.y + Math.min(60, b.h / 2), { size: 15, weight: 600, color: sub, maxW: b.w - 24 });
+        R.forEach((r, i) => {
+          const y = b.y + 4 + i * (rh + 6); if (y > b.y + b.h) return;
+          ctx.fillStyle = p.row || 'rgba(255,255,255,0.08)'; UK.rr(ctx, b.x + 4, y, b.w - 8, rh, 12); ctx.fill();
+          const full = r.players >= r.max, extra = p.showSettings !== false ? Object.entries(r.props || {}).map(([k, v]) => `${k}: ${v}`).join(' · ') : '';
+          UK.text(ctx, r.name, b.x + 18, y + rh / 2 - (extra ? 8 : 0), { size: 16, weight: 800, color: txt, align: 'left', maxW: b.w - 140 });
+          if (extra) UK.text(ctx, extra, b.x + 18, y + rh / 2 + 11, { size: 12, weight: 600, color: sub, align: 'left', maxW: b.w - 140 });
+          UK.text(ctx, `${r.players}/${r.max}`, b.x + b.w - 92, y + rh / 2, { size: 14, weight: 700, color: sub, align: 'right' });
+          ctx.fillStyle = full ? 'rgba(128,128,128,0.35)' : ac; UK.rr(ctx, b.x + b.w - 78, y + rh / 2 - 15, 64, 30, 15); ctx.fill();
+          UK.text(ctx, full ? 'Full' : 'Join', b.x + b.w - 46, y + rh / 2 + 1, { size: 14, weight: 800, color: '#fff' });
+        });
+        ctx.restore();
+      },
+    };
+  },
+});
+
+/** Chat Box (Photon): the room's chat, newest at the bottom; what is typed in a Text Input goes out on a message. */
+registerBehavior('netChat', {
+  label: 'Chat Box (Photon)', description: 'Shows the room chat as bubbles, newest at the bottom (yours on the right). Put a Text Input (variable chatText) and a Send button (message “send chat”) under it. Also in the netChat variable.',
+  params: [
+    { key: 'inputVar', label: 'Text comes from variable', type: 'text', default: 'chatText', suggest: 'vars' },
+    { key: 'sendOn', label: 'Send on message', type: 'text', default: 'send chat', suggest: 'messages' },
+    { key: 'size', label: 'Text size', type: 'number', default: 14, range: [10, 24], step: 1 },
+    { key: 'bottomSpace', label: 'Room at the bottom (for the input)', type: 'number', default: 0, range: [0, 120], step: 2 },
+    ...colorParams({ mine: ['My bubbles', '#3a7bfd'], theirs: ['Their bubbles', 'rgba(255,255,255,0.12)'], text: ['Text', '#ffffff'], names: ['Names', 'rgba(255,255,255,0.6)'] }),
+  ],
+  create(p) {
+    const SAMPLE = [{ name: 'Sam', text: 'gg! one more?', mine: false }, { name: 'You', text: 'yes, same room', mine: true }, { name: 'Alex', text: 'ready 👍', mine: false }];
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (s.engine.editing) return;
+        s.on('message', (m) => { if (e.dead || m !== p.sendOn) return; const v = String(s.vars[p.inputVar] ?? '').trim(); if (!v) return; s.engine.online.chat(v); s.setVar(p.inputVar, ''); });
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), L = s.engine.editing ? SAMPLE : s.engine.online?.chatLog || [], fs = +p.size || 14, pad = 10, lh = fs * 1.3;
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        let y = b.y + b.h - pad - (+p.bottomSpace || 0);
+        ctx.beginPath(); ctx.rect(b.x, b.y, b.w, Math.max(0, b.h - (+p.bottomSpace || 0))); ctx.clip();
+        for (let i = L.length - 1; i >= 0 && y > b.y; i--) {
+          const c = L[i]; ctx.font = `600 ${fs}px ${THEME.font}`;
+          const lines = textLines(ctx, c.text, b.w * 0.7 - 24), w = Math.min(b.w * 0.75, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 24), h = lines.length * lh + 14;
+          y -= h; const x = c.mine ? b.x + b.w - pad - w : b.x + pad;
+          ctx.fillStyle = c.mine ? p.mine || '#3a7bfd' : p.theirs || 'rgba(255,255,255,0.12)'; UK.rr(ctx, x, y, w, h, 14); ctx.fill();
+          lines.forEach((l, k) => UK.text(ctx, l, x + 12, y + 7 + lh * (k + 0.5), { size: fs, weight: 600, color: p.text || '#fff', align: 'left' }));
+          if (!c.mine) { y -= fs; UK.text(ctx, c.name, x + 4, y + fs * 0.45, { size: fs * 0.8, weight: 700, color: p.names || 'rgba(255,255,255,0.6)', align: 'left' }); }
+          y -= 6;
+        }
+        if (!L.length) UK.text(ctx, 'Say hi 👋', b.cx, b.cy, { size: fs, weight: 600, color: p.names || 'rgba(255,255,255,0.6)' });
+        ctx.restore();
       },
     };
   },

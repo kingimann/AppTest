@@ -508,10 +508,10 @@ function toScreen(e) {
 }
 function boundsOf(e) {
   const ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy;
-  let x = e.x;
-  if (e.text && !e.shape && !e.sprite) x += e.text.align === 'left' ? hx : e.text.align === 'right' ? -hx : 0;
+  let x = e.x, y = e.y;
+  if (e.text && !e.shape && !e.sprite && !e.bar && !e.minimap) { x += ex.ox || 0; y += ex.oy || 0; } // (text: its measured box, offset for its alignment)
   if (ex.tiles) return { x: e.x + ex.ox, y: e.y + ex.oy, hx, hy, sphere: false };
-  return { x, y: e.y, hx, hy, sphere: ex.sphere, r: ex.r };
+  return { x, y, hx, hy, sphere: ex.sphere, r: ex.r };
 }
 function uiBounds(e) { // on screen, with the UI editor's zoom applied
   const S = UIS(), o = uiOrigin(e, S.w, S.h, S.safe), b = boundsOf(e), z = S.v.z, v = uiv(o.x + b.x, o.y + b.y);
@@ -2522,6 +2522,11 @@ function control(target, path, spec) {
         val ? h('button', { type: 'button', class: 'btn', onclick: () => { set(''); renderInspector(); } }, 'Clear') : null);
       break;
     }
+    case 'longtext': { // several lines of words (a text's value): grows with what's typed
+      el = h('textarea', { class: 'longtext', rows: 2, value: val ?? '', oninput: (e) => { set(e.target.value); e.target.style.height = 'auto'; e.target.style.height = Math.min(220, e.target.scrollHeight + 2) + 'px'; } });
+      requestAnimationFrame(() => { if (el.scrollHeight > el.clientHeight) el.style.height = Math.min(220, el.scrollHeight + 2) + 'px'; });
+      break;
+    }
     case 'code':
       if (/\|/.test(text) && !rawTables.has(path)) { el = tableList(get, set, text, path); label.textContent = text.replace(/\s*\(.*$/, '') || text; break; } // the columns say the rest
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
@@ -3341,7 +3346,8 @@ function renderInspector() {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }, icon('image'), 'Use a sprite picture instead')),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
-      t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0 }),
+      t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0, structure: true }),
+      t === 'rect' && +j.shape.radius > 0 && C('shape.corners', { label: 'Rounded corners', type: 'select', options: [['', 'All four'], ['top', 'Top only'], ['bottom', 'Bottom only'], ['left', 'Left only'], ['right', 'Right only']], def: '' }),
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
       fold('shape:more', 'More looks', [
@@ -3371,8 +3377,8 @@ function renderInspector() {
   }
   if (j.text) {
     box.append(comp('Text', [
-      C('text.value', { label: 'Text', type: 'text' }),
-      h('p', { class: 'desc' }, 'Show game variables with braces: {score}, {lives}, {best}.'),
+      C('text.value', { label: 'Text', type: 'longtext' }),
+      h('p', { class: 'desc' }, j.text.rich ? 'Variables in braces: {score}. Tags: <b>bold</b> <i>italic</i> <u>under</u> <s>strike</s> <color=#e53935>red</color> <size=30>big</size> <mark=#ffeb3b>marked</mark> <icon=star>.' : 'Show game variables with braces: {score}, {lives}, {best}. Turn on Rich text (Style) for bold words, colours and icons.'),
       C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
       C('text.color', { label: 'Color', type: 'color' }),
       C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
@@ -3380,38 +3386,50 @@ function renderInspector() {
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openFontPicker((f) => { j.text.font = f; changed({ inspector: true }); pushHistory(); }) }, icon('text'), 'More fonts…')),
       C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
       fold('text:style', 'Style: italic, letters, gradient', [
+      C('text.rich', { label: 'Rich text (tags)', type: 'bool', def: false, structure: true, infoText: 'Style single words: <b>bold</b>, <i>italic</i>, <u>underline</u>, <s>strike</s>, <color=#ff0000>colour</color> (or <color=@accent>), <size=30>size</size> (or 150%), <mark=#ffeb3b>highlight</mark>, and icons like <icon=star> <icon=heart> <icon=coin>.' }),
       C('text.italic', { label: 'Italic', type: 'bool', def: false }),
-      C('text.color2', { label: 'Gradient to', type: 'color', optional: true }),
-      C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase']], def: '' }),
+      C('text.color2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
+      j.text.color2 && C('text.gradDir', { label: 'Gradient direction', type: 'select', options: [['', 'Top to bottom'], ['across', 'Left to right'], ['diagonal', 'Diagonal']], def: '' }),
+      C('text.case', { label: 'Letters', type: 'select', options: [['', 'As typed'], ['upper', 'UPPERCASE'], ['lower', 'lowercase'], ['title', 'Title Case']], def: '' }),
       C('text.spacing', { label: 'Letter spacing', type: 'number', def: 0, range: [-4, 20], step: 0.5 }),
-      ], !!(j.text.italic || j.text.color2 || j.text.case || +j.text.spacing)),
+      ], !!(j.text.rich || j.text.italic || j.text.color2 || j.text.case || +j.text.spacing)),
       fold('text:lines', 'Wrapping and line spacing', [
-      C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Type \\n in the text for a line break anywhere.' }),
+      j.shape && j.shape.type !== 'circle' && C('text.wrapBox', { label: 'Wrap to fit its box', type: 'bool', def: false, structure: true, infoText: 'Lines break at the width of the shape the text sits on, so it stays inside when you resize it.' }),
+      !(j.text.wrapBox && j.shape) && C('text.wrap', { label: 'Wrap width (0 = one line)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long text breaks onto new lines to fit this width. Press Enter (or type \\n) for a line break anywhere.' }),
+      C('text.maxLines', { label: 'At most lines (0 = any)', type: 'number', def: 0, range: [0, 20], step: 1, infoText: 'Longer text is cut and ends in “…”.' }),
       C('text.lineHeight', { label: 'Line spacing', type: 'number', def: 1.2, range: [0.8, 2.5], step: 0.05 }),
       j.shape && j.shape.type !== 'circle' && j.text.align && j.text.align !== 'center' && C('text.inset', { label: 'Inset from the box edge (0 = off)', type: 'number', def: 0, range: [0, 200], step: 1, infoText: 'Left or right text starts this far in from the edge of its box (room for an icon, like a search bar). 0 = from the middle.' }),
-      ], !!(+j.text.wrap || (j.text.lineHeight && +j.text.lineHeight !== 1.2) || +j.text.inset)),
+      j.shape && j.shape.type !== 'circle' && C('text.padY', { label: 'Padding top and bottom', type: 'number', def: 0, range: [0, 100], step: 1 }),
+      ], !!(+j.text.wrap || j.text.wrapBox || +j.text.maxLines || (j.text.lineHeight && +j.text.lineHeight !== 1.2) || +j.text.inset || +j.text.padY)),
       fold('text:fx', 'Outline, shadow, glow, underline', [
       C('text.outline', { label: 'Outline', type: 'color', optional: true }),
       j.text.outline && C('text.outlineWidth', { label: 'Outline Width', type: 'number', def: 4 }),
       C('text.shadow', { label: 'Drop Shadow', type: 'bool', def: false, structure: true }),
-      j.text.shadow && C('text.shadowColor', { label: 'Shadow color', type: 'color', def: '#000000' }),
+      j.text.shadow && [C('text.shadowColor', { label: 'Shadow color', type: 'color', def: '#000000' }), C('text.shadowX', { label: 'Shadow across', type: 'number', def: 0, range: [-20, 20], step: 1 }), C('text.shadowY', { label: 'Shadow down', type: 'number', def: Math.round((j.text.size || 24) * 0.08), range: [-20, 20], step: 1 }), C('text.shadowBlur', { label: 'Shadow softness', type: 'number', def: Math.round((j.text.size || 24) * 0.25), range: [0, 40], step: 1, infoText: '0 = a hard, cartoon-style shadow.' })],
       C('text.glow', { label: 'Glow', type: 'color', optional: true }),
       C('text.underline', { label: 'Underline', type: 'bool', def: false }),
       C('text.strike', { label: 'Strikethrough', type: 'bool', def: false }),
       ], !!(j.text.outline || j.text.shadow || j.text.glow || j.text.underline || j.text.strike)),
       fold('text:numbers', 'Numbers and fitting', [
       C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
-      C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
+      C('text.autoSize', { label: 'Auto size (fit the box)', type: 'bool', def: false, structure: true, infoText: 'The text gets as big as its Font Size, but smaller when it would not fit its box (or its wrap width and line limit). Like Best Fit in Unity.' }),
+      j.text.autoSize && C('text.minSize', { label: 'Smallest size', type: 'number', def: 8, range: [4, 100], step: 1 }),
+      !j.text.autoSize && C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
+      String(j.text.value || '').includes('{') && C('text.roll', { label: 'Numbers count up / down', type: 'bool', def: false, structure: true, infoText: 'When the number changes, it rolls to the new value instead of jumping (coins, score).' }),
+      j.text.roll && C('text.rollTime', { label: 'Count time (s)', type: 'number', def: 0.6, range: [0.1, 5], step: 0.1 }),
       String(j.text.value || '').includes('{') && j.ui && C('text.bump', { label: 'Pop when the value changes', type: 'bool', def: true, infoText: 'A score or coin count grows for a moment whenever it changes.' }),
       C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
-      ], !!(j.text.format || +j.text.fit || j.text.valign)),
+      ], !!(j.text.format || +j.text.fit || j.text.autoSize || j.text.roll || j.text.valign)),
       fold('text:box', 'Label box', [
       C('text.bg', { label: 'Box behind the text', type: 'color', optional: true, structure: true }),
-      j.text.bg && [C('text.bgPad', { label: 'Box padding', type: 'number', def: 8, range: [0, 40], step: 1 }), C('text.bgRadius', { label: 'Box roundness', type: 'number', def: 8, range: [0, 40], step: 1 })],
+      j.text.bg && [C('text.bgPad', { label: 'Box padding (sides)', type: 'number', def: 8, range: [0, 40], step: 1 }), C('text.bgPadY', { label: 'Box padding (top, bottom)', type: 'number', def: Math.round((j.text.bgPad ?? 8) * 0.6), range: [0, 40], step: 1 }), C('text.bgRadius', { label: 'Box roundness', type: 'number', def: 8, range: [0, 40], step: 1 }),
+        C('text.bgBorder', { label: 'Box border', type: 'color', optional: true, structure: true }), j.text.bgBorder && C('text.bgBorderWidth', { label: 'Border width', type: 'number', def: 1.5, range: [0.5, 10], step: 0.5 })],
       ], !!j.text.bg),
       fold('text:anim', 'Animation', [
       C('text.effect', { label: 'Effect', type: 'select', options: [['', 'None'], ['wave', 'Wave (letters)'], ['bounce', 'Bounce (letters)'], ['shake', 'Shake (letters)'], ['rainbow', 'Rainbow (letters)'], ['pulse', 'Pulse'], ['float', 'Float up and down']], def: '' }),
-      ], !!j.text.effect),
+      C('text.reveal', { label: 'Appear', type: 'select', options: [['', 'All at once'], ['typewriter', 'Typewriter (letter by letter)']], def: '', structure: true, infoText: 'Plays when the game starts and again whenever the text changes.' }),
+      j.text.reveal && [C('text.revealSpeed', { label: 'Letters per second', type: 'number', def: 30, range: [1, 200], step: 1 }), C('text.revealMessage', { label: 'Message when done', type: 'text', def: '', suggest: 'messages' })],
+      ], !!(j.text.effect || j.text.reveal)),
     ], { icon: 'text', key: 'text', summary: `“${String(j.text.value || '').slice(0, 18)}${String(j.text.value || '').length > 18 ? '…' : ''}” · ${j.text.size || 24}px`, menu: removeMenu(() => { delete j.text; changed({ structure: true }); }, 'text') }));
   }
   if (j.mesh) {
@@ -6317,11 +6335,64 @@ engine.uiFilter = (e) => {
 function pageMenu(anchor) {
   const pages = uiPages();
   if (!pages.size) { toast('No pages yet: add Project › UI › Navigation › Page or a Bottom Nav Bar'); return; }
-  const cur = curPage();
+  const cur = curPage(), pg = cur !== 'all' && pageEnt(cur);
   popMenu(anchor, [{ cap: 'Show page' }, ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: cur === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) }))),
-    '-', { icon: cur === 'all' ? 'check' : 'layers', label: 'All pages at once', k: 'stacked', fn: () => setUIPage('all') }]);
+    '-', { icon: cur === 'all' ? 'check' : 'layers', label: 'All pages at once', k: 'stacked', fn: () => setUIPage('all') },
+    '-', { icon: 'plus', label: 'New Page…', fn: () => newPage() },
+    pg && { icon: 'copy', label: `Duplicate “${cur.split('=')[1]}”…`, fn: () => newPage(pg) },
+    pg && { icon: 'edit', label: `Rename “${cur.split('=')[1]}”…`, k: 'updates buttons and tabs', fn: () => renamePage(pg) },
+    pg && { icon: 'trash', label: `Delete “${cur.split('=')[1]}”`, danger: true, fn: () => { if (confirm(`Delete the page “${cur.split('=')[1]}” and everything on it?`)) { deleteEntity(pg.id); uiPage = 'auto'; refreshPageBtn(); } } }].filter(Boolean));
 }
 function setUIPage(k) { uiPage = k; refreshPageBtn(); engine.render(); }
+/** The page object for 'var=value' (the outermost UI with that Show If). */
+function pageEnt(k) {
+  const [v, val] = k.split('=');
+  return project.entities.find((j) => { const b = showIfOf(j); if (!b || !j.ui || (b.var || 'page') !== v || String(b.value ?? '') !== val) return false; for (let q = j.parent && ent(j.parent), n = 0; q && n < 40; q = q.parent && ent(q.parent), n++) if (showIfOf(q)) return false; return true; });
+}
+const pageSlug = (t) => String(t || '').trim().toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').slice(0, 40);
+/** A new page (or a copy of one): it opens with a Go To Page button, a tab or a list row set to its name. */
+function newPage(from) {
+  const name = prompt(from ? 'Name of the copy' : 'Name of the new page (e.g. Settings, Shop)', from ? (from.name || 'Page').replace(/ Page$/, '') + ' 2' : '')?.trim(); if (!name) return;
+  const val = pageSlug(name) || 'page' + Math.floor(Math.random() * 1000), v = from ? showIfOf(from).var || 'page' : 'page';
+  if (uiPages().get(v)?.has(val)) { toast(`There is already a page “${val}”`); return; }
+  let top;
+  if (from) {
+    const ids = subtree(from.id), map = new Map(ids.map((x) => [x, uid()]));
+    const copies = ids.map((x) => { const c = clone(ent(x)); c.id = map.get(x); if (c.parent && map.has(c.parent)) c.parent = map.get(c.parent); return c; });
+    top = copies[0]; top.name = name + ' Page'; showIfOf(top).value = val; showIfOf(top).whenUnset = false;
+    project.entities.push(...copies);
+  } else {
+    const app = !!levelList()[0].settings?.app;
+    top = { id: uid(), name: name + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: app ? '@bg' : 'rgba(16,18,28,0.96)' },
+      behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: val, whenUnset: false, anim: app ? 'push (iOS, follows navigation)' : 'slide (follows navigation)', stagger: 'rise one after another', scroll: true }] };
+    project.entities.push(top, { id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
+  }
+  for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
+  setUIPage(`${v}=${val}`); selectedId = top.id;
+  changed({ structure: true }); pushHistory();
+  toast(`Page “${val}” added. Open it with a button set to Go To Page → ${val}`);
+}
+/** Rename a page: its Show If, and the buttons, tabs, lists and titles that lead to it. */
+function renamePage(pg) {
+  const b0 = showIfOf(pg), v = b0.var || 'page', old = String(b0.value ?? '');
+  const name = prompt('New name for the page', old)?.trim(); if (!name) return;
+  const val = pageSlug(name); if (!val || val === old) return;
+  if (uiPages().get(v)?.has(val)) { toast(`There is already a page “${val}”`); return; }
+  b0.value = val; pg.name = name.charAt(0).toUpperCase() + name.slice(1) + ' Page';
+  let n = 0;
+  const swapLines = (txt, re, fn) => String(txt).split('\n').map((l) => (re.test(l) ? (n++, fn(l)) : l)).join('\n');
+  for (const j of project.entities) for (const b of j.behaviors || []) {
+    if (b.type === 'button' && b.action === 'go to page' && String(b.value || '').trim() === old) { b.value = val; n++; }
+    if (b.type === 'uiShowIf' && b !== b0 && (b.var || 'page') === v && String(b.value ?? '') === old) { b.value = val; n++; }
+    if (b.type === 'uiDataList' && b.openPage === old) { b.openPage = val; n++; }
+    if (b.type === 'uiForm' && b.page === old) { b.page = val; n++; }
+    if (b.type === 'uiAppBar' && b.titles) b.titles = swapLines(b.titles, new RegExp(`^\\s*${old}\\s*=`), (l) => l.replace(old, val));
+    if ((b.type === 'uiBottomNav' || b.type === 'uiSideBar') && b.tabs) b.tabs = swapLines(b.tabs, new RegExp(`\\|\\s*${old}\\s*$`), (l) => l.replace(new RegExp(`${old}\\s*$`), val));
+    if ((b.type === 'uiBottomNav' || b.type === 'uiSideBar') && b.items) b.items = swapLines(b.items, new RegExp(`\\|\\s*${old}\\s*$`), (l) => l.replace(new RegExp(`${old}\\s*$`), val));
+  }
+  setUIPage(`${v}=${val}`); changed({ structure: true }); pushHistory();
+  toast(`Renamed to “${val}”${n ? ` · ${n} link${n === 1 ? '' : 's'} updated` : ''}`);
+}
 function refreshPageBtn() { const b = $('.page-btn span'), k = curPage(); $('.page-btn')?.toggleAttribute('hidden', !uiPages().size); /* no pages: no button */ if (b) b.textContent = k === 'all' ? 'All pages' : k.split('=')[1]; }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {

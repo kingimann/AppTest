@@ -1909,3 +1909,12 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .pg-b:hover:not(:disabled) { background: rgba(127,127,127,.16); }
 .pg-b:disabled { opacity: .3; cursor: default; }
 .pg-b svg { width: 18px; height: 18px; }
+/* Side Menu items: sections and lines among the item cards */
+.side-items .si-sec { padding: 2px 0; }
+.side-items .si-sec input { flex: 1; min-width: 0; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; font-size: 13px; }
+.side-items .si-hash { width: 34px; flex: none; text-align: center; color: var(--muted); font-weight: 800; }
+.side-items .si-line { min-height: 36px; }
+.side-items .si-rule { flex: 1; height: 1px; background: var(--g5); margin-left: 6px; }
+.side-items .si-line small { color: var(--muted); font-size: 12px; }
+.side-items .si-sub { color: var(--muted); font-size: 12px; padding: 2px 4px 0; }
+.side-styles { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }

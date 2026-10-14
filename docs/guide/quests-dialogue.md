@@ -37,7 +37,51 @@ An NPC is a **quest giver** for every quest whose *Given by* is the NPC's name. 
 
 What it says comes from each quest's *What the giver says* lines.
 
-The Create menu has ready-made story objects: **Quest Giver**, **Villager**, **Shopkeeper** (sells a potion through choices), **Signpost** (reads itself when you walk up) and **Quest Spot**. The 3D versions are capsule characters.
+### Moving around
+
+*Moves* (in the component's **Moving** group) sets how the NPC gets around:
+
+- **stands still**;
+- **wanders around** its starting spot, within a distance;
+- **patrols a route**: object names or `x,y` points, one per line, waiting at each stop;
+- **follows the player**: a companion that stays close.
+
+Walking NPCs avoid walls and stop while you talk to them. They also stop when you come close, unless you turn that off. They can turn to face you, and 2D emoji characters waddle as they walk.
+
+### Chatter
+
+**Says in a bubble** holds lines, one per line, that the NPC says at random in a speech bubble: *when the player comes close*, or *every few seconds*. The **NPC says** instruction / node makes any NPC say something, and `scene.on('npcSays', (npc, text) => …)` hears it.
+
+### Shops, selling and gifts
+
+In the component's **Shop & gifts** group:
+
+- **Sells:** `Item | price` lines, plus an optional amount (`Apple | 3 | 2`). Talking shows **Buy**: affordable items are listed, others say "not enough", and buying takes the money (*Money variable*, `coins` by default) and gives the item. Without a price it uses the item's *Value*.
+- **Buys from you:** `Item | price`. **Sell** lists what you have that it buys.
+- **Likes these gifts:** items it accepts. **Give a gift** takes one and adds 1 to its **friendship**, which is kept in the variable `friend_Name` (saved, and carried to the next level). In its dialogue, friendship is `my.friendship` (`? my.friendship >= 3 -> best friends`). The name tag shows ♥ for each point, up to 5.
+
+An NPC with no dialogue puts **Buy / Sell / Give a gift / Bye** after its greeting (and after offering a quest). An NPC with its own dialogue gets these as sections, so its script can jump to them: `-> shop`, `-> sell`, `-> gift`, or `-> menu` for all of them. A dialogue that writes its own `# shop` (or `# sell`, `# gift`, `# menu`) section keeps its own.
+
+### Name tags and portraits
+
+- **Show its name above it** draws a name tag.
+- The dialogue box shows the portrait of **whoever is speaking**. That's the NPC, another NPC with that name (or NPC › Name), or a dialogue with that name and a portrait, so a conversation between two characters shows both faces.
+
+### Ready-made NPCs
+
+*Create → Gameplay → Story* has:
+
+- **Quest Giver**;
+- **Villager**;
+- **Shopkeeper** (sells a potion through choices);
+- **Merchant** (a built-in shop that buys and sells);
+- **Wandering Villager** (wanders, chats and likes gifts);
+- **Patrol Guard**;
+- **Companion** (follows you);
+- **Signpost** (reads itself when you walk up);
+- **Quest Spot**.
+
+The 3D versions are capsule characters.
 
 ## Dialogue scripts
 

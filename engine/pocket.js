@@ -903,6 +903,10 @@ export class Scene {
     this.setVar('turnText', this.settings.enemyTurnText || 'Enemy turn');
   }
   get isPlayerTurn() { return this.turnSide === 'player'; }
+  /** Enemy turn: keep it going for this many seconds (enemies walking several tiles, one after another). */
+  holdTurn(sec) { this.turnHoldFor = Math.max(this.turnHoldFor || 0, +sec || 0); }
+  /** Back to the player's turn. */
+  playerTurn() { this.turnSide = 'player'; this.addVar('turn', 1); this.setVar('turnText', this.settings.playerTurnText || 'Your turn'); this.emit('turn'); }
 
   /** Components that react to touching a tag call this so tagged objects always take part in collisions. */
   want(tag) { if (tag) (this.wantedTags ||= new Set()).add(tag); }
@@ -1233,8 +1237,8 @@ export class Scene {
     const s = this;
     return {
       first, chosen: npc ? (npc.data._chosen ||= new Set()) : new Set(),
-      getVar: (k) => (k.startsWith('my.') ? npc?.data[k.slice(3)] : s.vars[k]),
-      setVar: (k, v) => { if (k.startsWith('my.')) { if (npc) npc.data[k.slice(3)] = v; } else s.setVar(k, v); },
+      getVar: (k) => (k.startsWith('my.') ? npc?.getBehavior('npc')?.myVar?.(k.slice(3)) ?? npc?.data[k.slice(3)] : s.vars[k]),
+      setVar: (k, v) => { if (k.startsWith('my.')) { if (npc && !npc.getBehavior('npc')?.setMyVar?.(k.slice(3), v)) npc.data[k.slice(3)] = v; } else s.setVar(k, v); },
       itemCount: (n) => s.itemCount(n),
       give: (n, k) => { if (k > 0) { const got = s.addItem(n, k); if (got < k) s.dropNear(n, k - got); if (got > 0) s.message(`${s.itemDef(n).icon || ''} ${s.itemDef(n).name || n}${got > 1 ? ' ×' + got : ''}`.trim(), 1.2); } else s.addItem(n, k); },
       questState: (n) => s.questState(n),
@@ -3893,10 +3897,20 @@ function drawJoystick(ctx, engine, scene, inp, tint, pulse) {
 // ============================================================================
 // UI overlay (HUD, joystick, buttons, title / game over screens) — always 2D
 // ============================================================================
+/** Whose picture goes with a line: the NPC talking, another NPC with that name, a dialogue with that name, or the conversation's own. */
+function speakerPortrait(s, d, who) {
+  if (!who) return '';
+  const k = String(who).trim().toLowerCase(), c = (d._por ||= {}); if (k in c) return c[k];
+  const own = d.npc ? String(d.npc.getBehavior('npc')?.speaker || d.npc.name).toLowerCase() : '';
+  let r = d.npc && own === k ? d.portrait : '';
+  if (!r) for (const e of s.entities) { const b = !e.dead && e.getBehavior?.('npc'); if (b?.portrait && (String(b.speaker).toLowerCase() === k || String(e.name).toLowerCase() === k)) { r = b.portrait; break; } }
+  if (!r) r = s.dialogueDef(who)?.portrait || (!d.npc ? d.portrait : '') || '';
+  return (c[k] = r);
+}
 /** Dialogue box: speaker name, typewriter text, tap to continue. */
 function drawDialog(ctx, scene, W, H, engine) {
   const d = scene.dialog, line = d.run ? d.run.line : d.lines[d.i]; if (!line) return;
-  const m = 14, bw = Math.min(W - m * 2, 560), x = (W - bw) / 2, pic = d.portrait && line.who ? 64 : 0;
+  const por = speakerPortrait(scene, d, line.who), m = 14, bw = Math.min(W - m * 2, 560), x = (W - bw) / 2, pic = por ? 64 : 0;
   ctx.save();
   ctx.font = `600 17px ${THEME.font}`;
   const rows = []; { const words = String(line.text).split(' '); let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 - pic && row) { rows.push(row); row = w; } else row = t; } rows.push(row); }
@@ -3917,7 +3931,7 @@ function drawDialog(ctx, scene, W, H, engine) {
   }
   ctx.fillStyle = 'rgba(12,12,26,0.92)'; ctx.strokeStyle = 'rgba(255,224,130,0.9)'; ctx.lineWidth = 2.5;
   ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 16); else ctx.rect(x, y, bw, bh); ctx.fill(); ctx.stroke();
-  if (pic) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y + 24, 56, 56, 12); else ctx.rect(x + 14, y + 24, 56, 56); ctx.fill(); drawNavIcon(ctx, d.portrait, x + 42, y + 52, 40, '#fff'); }
+  if (pic) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y + 24, 56, 56, 12); else ctx.rect(x + 14, y + 24, 56, 56); ctx.fill(); drawNavIcon(ctx, por, x + 42, y + 52, 40, '#fff'); }
   if (line.who) {
     ctx.font = '800 15px system-ui, sans-serif'; const tw = ctx.measureText(line.who).width + 24;
     ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
@@ -9859,76 +9873,202 @@ registerBehavior('dialogue', {
 
 /** NPC: someone to talk to. Starts a dialogue, hands in finished quests, offers its quests, and shows ! / ? quest markers. */
 registerBehavior('npc', {
-  label: 'NPC (talk & quests)', description: 'A character the player talks to: tap them (or walk up) to start a dialogue from Game Settings › Dialogues. Quest givers show ! when they have a quest for you and ? when one is ready to hand in. With no dialogue, they offer their quests by themselves.',
+  label: 'NPC (talk & quests)', description: 'A character the player talks to: tap them (or walk up) to start a dialogue from Game Settings › Dialogues. Quest givers show ! when they have a quest for you and ? when one is ready to hand in. NPCs can wander, patrol or follow you, say things as you pass, run a shop, buy your items and take gifts (friendship).',
   params: [
-    { key: 'dialogue', label: 'Dialogue', type: 'text', default: '', suggest: 'dialogues', info: 'From Game Settings › Dialogues. Empty: it offers its quests, or says the lines below.' },
+    { key: 'dialogue', label: 'Dialogue', type: 'text', default: '', suggest: 'dialogues', info: 'From Game Settings › Dialogues. Empty: it offers its quests, its shop, or says the lines below.' },
     { key: 'lines', label: 'Or its own lines (“Name: text”, * choices)', type: 'code', default: '' },
+    { key: 'greeting', label: 'Greeting (when it has nothing else to say)', type: 'text', default: 'Hello there!' },
     { key: 'start', label: 'Talk when', type: 'select', options: ['tapped when close', 'tapped', 'player comes close', 'touched by tag', 'message'], default: 'tapped when close' },
     { key: 'range', label: 'Close means within', type: 'number', default: 100, default3d: 3 },
     { key: 'talkName', label: 'Name (quests and speaker; empty = the object’s name)', type: 'text', default: '' },
     { key: 'portrait', label: 'Portrait (emoji or art:name)', type: 'text', default: '' },
     { key: 'markers', label: 'Quest markers (! has a quest, ? hand one in)', type: 'bool', default: true },
     { key: 'bubble', label: 'Show 💬 when the player is close', type: 'bool', default: true },
+    { key: 'nameTag', label: 'Show its name above it', type: 'bool', default: false },
     { key: 'turnIn', label: 'Talking hands in its finished quests', type: 'bool', default: true },
     { key: 'pause', label: 'Pause the game while talking', type: 'bool', default: true },
+    // moving around
+    { key: 'moveMode', label: 'Moves', type: 'select', options: ['stands still', 'wanders around', 'patrols a route', 'follows the player'], default: 'stands still', group: 'Moving' },
+    { key: 'speed', label: 'Walking speed', type: 'number', default: 60, default3d: 2, group: 'Moving', showIf: (b) => b.moveMode && b.moveMode !== 'stands still' },
+    { key: 'wander', label: 'Wanders within', type: 'number', default: 120, default3d: 4, group: 'Moving', showIf: { moveMode: ['wanders around'] } },
+    { key: 'route', label: 'Route (object names or x,y; one per line)', type: 'code', default: '', group: 'Moving', showIf: { moveMode: ['patrols a route'] } },
+    { key: 'waitAt', label: 'Waits at each stop (sec)', type: 'number', default: 1.5, group: 'Moving', showIf: { moveMode: ['wanders around', 'patrols a route'] } },
+    { key: 'followDist', label: 'Stays this close', type: 'number', default: 70, default3d: 2, group: 'Moving', showIf: { moveMode: ['follows the player'] } },
+    { key: 'stopNear', label: 'Stops when the player comes close', type: 'bool', default: true, group: 'Moving', showIf: (b) => b.moveMode && b.moveMode !== 'stands still' && b.moveMode !== 'follows the player' },
+    { key: 'facePlayer', label: 'Turns to face the player', type: 'bool', default: true, group: 'Moving' },
+    // saying things in passing
+    { key: 'barks', label: 'Says in a bubble (one per line, picked at random)', type: 'code', default: '', group: 'Chatter' },
+    { key: 'barkWhen', label: 'Says it', type: 'select', options: ['when the player comes close', 'every few seconds'], default: 'when the player comes close', group: 'Chatter' },
+    { key: 'barkEvery', label: 'Every (sec)', type: 'number', default: 8, group: 'Chatter', showIf: { barkWhen: ['every few seconds'] } },
+    // trading and gifts
+    { key: 'sells', label: 'Sells (Item | price, one per line)', type: 'code', default: '', group: 'Shop & gifts', info: 'Talking shows Buy. In your own dialogue, jump to it with -> shop (or -> menu for everything).' },
+    { key: 'buys', label: 'Buys from you (Item | price)', type: 'code', default: '', group: 'Shop & gifts', info: 'Talking shows Sell (-> sell).' },
+    { key: 'currency', label: 'Money variable', type: 'text', default: 'coins', suggest: 'vars', group: 'Shop & gifts' },
+    { key: 'likes', label: 'Likes these gifts (comma separated)', type: 'text', default: '', suggest: 'items', group: 'Shop & gifts', info: 'Talking shows Give a gift (-> gift). Each gift adds 1 to its friendship ({friend_Name}, or my.friendship in its dialogue).' },
+    { key: 'giftReply', label: 'Says when given a gift', type: 'text', default: 'For me? Thank you, I love it!', group: 'Shop & gifts' },
     { key: 'tag', label: 'Player tag', type: 'text', default: 'player', suggest: 'tags', group: 'More' },
     { key: 'message', label: 'Message that starts the talk', type: 'text', default: 'talk', suggest: 'messages', showIf: { start: ['message'] }, group: 'More' },
     { key: 'then', label: 'Afterwards, send message', type: 'text', default: '', suggest: 'messages', group: 'More' },
   ],
   create(p) {
-    let near = false, draw = null, cool = 0;
+    let near = false, draw = null, cool = 0, home = null, dest = null, pauseT = 0, routeI = 0, route = [], walking = false, bark = null, barkT = 0, barkCool = 0, lastBark = -1, ent = null, sc = null;
     const who = (e) => (p.talkName || e.name || 'NPC').trim();
+    const fkey = (e) => 'friend_' + who(e).replace(/\W+/g, '_');
     const gives = (s, e) => s.questDefs().filter((q) => String(q.giver || '').trim().toLowerCase() === who(e).toLowerCase());
     const marker = (s, e) => { const g = gives(s, e); if (g.some((q) => s.questState(q.name) === 'ready')) return '?'; if (g.some((q) => s.questState(q.name) === 'available')) return '!'; return ''; };
-    /** A dialogue made up on the spot: thanks for finished quests, then offers the next one. */
+    const rows = (t) => String(t || '').split('\n').map((l) => l.split('|').map((q) => q.trim())).filter((r) => r[0]);
+    const priceOf = (s, r) => (r[1] !== undefined && r[1] !== '' && Number.isFinite(+r[1]) ? +r[1] : Math.max(1, +s.itemDef?.(r[0])?.value || 10));
+    const likes = () => String(p.likes || '').split(',').map((q) => q.trim()).filter(Boolean);
+    /** Shop, sell and gift sections, plus a menu that leads to them. */
+    const extras = (s, e, have = {}) => {
+      const n = who(e), cur = (p.currency || 'coins').trim(), L = [], menu = [];
+      const sells = rows(p.sells), buys = rows(p.buys), lk = likes();
+      if (sells.length && !have.shop) {
+        menu.push('* Buy -> shop');
+        L.push('# shop', `${n}: Take a look!`);
+        sells.forEach((r, i) => { const pr = priceOf(s, r); L.push(`* [if ${cur} >= ${pr}] ${r[0]}${+r[2] > 1 ? ' ×' + r[2] : ''} — ${pr} ${cur} -> buy${i}`, `* [if ${cur} < ${pr}] ${r[0]} — ${pr} ${cur} (not enough) -> broke`); });
+        L.push('* Back -> menu');
+        sells.forEach((r, i) => L.push(`# buy${i}`, `@add ${cur} -${priceOf(s, r)}`, `@give ${r[0]} ${Math.max(1, +r[2] || 1)}`, '@sound coin', `${n}: Thank you!`, '-> shop'));
+        L.push('# broke', `${n}: You don’t have enough ${cur} for that.`, '-> shop');
+      }
+      if (buys.length && !have.sell) {
+        menu.push('* Sell -> sell');
+        L.push('# sell', `${n}: What have you got for me?`);
+        buys.forEach((r, i) => L.push(`* [if has ${r[0]}] ${r[0]} — ${priceOf(s, r)} ${cur} -> sold${i}`));
+        L.push('* Back -> menu');
+        buys.forEach((r, i) => L.push(`# sold${i}`, `@take ${r[0]} 1`, `@add ${cur} ${priceOf(s, r)}`, '@sound coin', `${n}: Pleasure doing business.`, '-> sell'));
+      }
+      if (lk.length && !have.gift) {
+        menu.push('* Give a gift -> gift');
+        L.push('# gift', `${n}: Oh? What is it?`);
+        lk.forEach((it, i) => L.push(`* [if has ${it}] ${it} -> gave${i}`));
+        L.push('* Never mind -> menu');
+        lk.forEach((it, i) => L.push(`# gave${i}`, `@take ${it} 1`, '@add my.friendship 1', '@sound power', `${n}: ${p.giftReply || 'Thank you!'}`, '-> menu'));
+      }
+      if (menu.length && !have.menu) L.push('# menu', ...menu, '* Bye -> END');
+      return { text: L.join('\n'), menu: menu.length > 0 };
+    };
+    /** A dialogue made up on the spot: thanks for finished quests, offers the next one, then the shop / gifts menu. */
     const autoScript = (s, e, handed) => {
-      const n = who(e), L = [];
+      const n = who(e), L = [], x = extras(s, e), next = x.menu ? 'menu' : 'END';
       for (const q of handed) L.push(`${n}: ${q.thanks || `You did it! Thank you.`}`);
       const avail = gives(s, e).find((q) => s.questState(q.name) === 'available'), active = gives(s, e).find((q) => ['active', 'ready'].includes(s.questState(q.name)));
-      if (avail) L.push(`${n}: ${avail.offer || avail.desc || 'I need your help with something.'}`, '* Accept -> accept', '* Not now -> END', '# accept', `@quest start ${avail.name}`, `${n}: ${avail.accepted || 'Thank you! Come back when it’s done.'}`);
+      const lines = String(p.lines || '').trim();
+      if (avail) L.push(`${n}: ${avail.offer || avail.desc || 'I need your help with something.'}`, '* Accept -> accept', `* Not now -> ${next}`, '# accept', `@quest start ${avail.name}`, `${n}: ${avail.accepted || 'Thank you! Come back when it’s done.'}`);
       else if (active) L.push(`${n}: ${active.reminder || `How is “${active.name}” going?`}`);
-      else if (!handed.length) L.push(`${n}: ${p.lines ? '' : 'Hello there!'}`);
-      return L.join('\n');
+      else if (lines && !handed.length) L.push(lines);
+      else if (!handed.length) L.push(`${n}: ${p.greeting || 'Hello there!'}`);
+      if (x.menu && !(lines && /^\s*\*/m.test(lines) && !avail && !active && !handed.length)) L.push('-> menu');
+      return L.join('\n') + (x.text ? '\n' + x.text : '');
     };
     const talk = (e, s) => {
       if (s.dialog || s.state !== 'play') return;
       const handed = [];
       if (p.turnIn !== false) for (const q of gives(s, e)) if (s.questState(q.name) === 'ready' && s.completeQuest(q.name)) handed.push(q);
       const o = { npc: e, pause: p.pause, then: p.then, portrait: p.portrait, name: who(e) };
-      if (p.dialogue) s.startDialogue(p.dialogue, o);
-      else if (String(p.lines || '').trim() && !handed.length) s.startDialogue(String(p.lines), { ...o, inline: true });
+      const def = p.dialogue ? s.dialogueDef(p.dialogue) : null;
+      if (def) { // its own dialogue, plus the shop / sell / gift / menu sections it doesn't write itself
+        const has = parseDialogue(def.script).labels, x = extras(s, e, { shop: 'shop' in has, sell: 'sell' in has, gift: 'gift' in has, menu: 'menu' in has });
+        s.startDialogue(def.script + (x.text ? '\n' + x.text : ''), { ...o, inline: true, name: def.name, portrait: p.portrait || def.portrait });
+      } else if (p.dialogue) s.startDialogue(p.dialogue, o); // warns that it doesn't exist
       else s.startDialogue(autoScript(s, e, handed), { ...o, inline: true });
-      cool = 0.4;
+      bark = null; cool = 0.4;
     };
-    return {
+    const flat = (e) => ({ x: e.x, y: is3D(e) ? e.z : e.y });
+    const face = (e, dx, dy) => {
+      if (is3D(e)) { if (Math.hypot(dx, dy) > 1e-3) e.ry = Math.atan2(-dx, -dy) / DEG; return; }
+      if (Math.abs(dx) < 0.5) return; if (e.shape?.type === 'emoji') e.data.flipX = dx > 0; else if (e.sprite || e.shape) e.sx = Math.abs(e.sx) * (dx < 0 ? -1 : 1);
+    };
+    /** Walk toward a point; true when there. 'blocked' if a wall is in the way. */
+    const walkTo = (e, s, tx, ty, dt, stopAt = 0) => {
+      const three = is3D(e), c = flat(e), dx = tx - c.x, dy = ty - c.y, d = Math.hypot(dx, dy), eps = three ? 0.06 : 2;
+      if (d <= stopAt + eps) return true;
+      const step = Math.min(d - stopAt, (+p.speed || (three ? 2 : 60)) * dt), ex = e.extents(), rad = ex.sphere ? ex.r : Math.max(ex.hx, three ? ex.hz : ex.hy);
+      const hit = s.raycast(three ? { x: c.x, y: e.y, z: c.y } : { x: c.x, y: c.y }, three ? { x: dx, y: 0, z: dy } : { x: dx, y: dy }, step + rad, { ignore: e });
+      if (hit && !hit.entity.has(p.tag)) return 'blocked';
+      if (hit) return true; // the player is in the way: wait
+      e.x += dx / d * step; if (three) e.z += dy / d * step; else e.y += dy / d * step;
+      face(e, dx, dy); walking = true; return false;
+    };
+    const say = (s, text) => { bark = { text: fillTemplate(text, s.vars), t: s.time }; barkT = 2.8; s.emit('npcSays', ent, bark.text); };
+    const self = {
+      get portrait() { return p.portrait; }, get speaker() { return ent ? who(ent) : ''; },
+      /** my.x in its dialogue: friendship lives in a game variable (saved, kept between levels). */
+      myVar(k) { return k === 'friendship' && ent && sc ? +sc.vars[fkey(ent)] || 0 : undefined; },
+      setMyVar(k, v) { if (k !== 'friendship' || !ent || !sc) return false; sc.setVar(fkey(ent), v); return true; },
+      say(text) { if (sc) say(sc, text); },
       start(e, s) {
+        ent = e; sc = s; home = flat(e);
         if (p.start === 'touched by tag') { e.ensureBody({ type: 'kinematic', sensor: true }); s.want(p.tag); }
+        if (p.moveMode && p.moveMode !== 'stands still' && e.body?.type === 'static') e.body.type = 'kinematic'; // it moves: physics must follow it
         if (p.start.startsWith('tapped')) (s.tapTargets ||= new Set()).add(e);
         if (p.start === 'message') s.on('message', (m) => { if (m === p.message && !e.dead) talk(e, s); });
+        if (likes().length && s.vars[fkey(e)] == null) s.vars[fkey(e)] = 0;
+        route = String(p.route || '').split(/[\n;]/).map((q) => q.trim()).filter(Boolean).map((q) => { const m = q.match(/^(-?[\d.]+)\s*,\s*(-?[\d.]+)$/); if (m) return { x: +m[1], y: +m[2] }; const o = s.find(q); return o ? flat(o) : null; }).filter(Boolean);
         s.questHooks?.();
         (s.overlays ||= []).push(draw = (ctx) => {
           if (e.dead || !e.visible) return;
-          const mk = p.markers !== false ? marker(s, e) : '', bub = p.bubble !== false && near && !s.dialog;
-          if (!mk && !bub) return;
+          const mk = p.markers !== false ? marker(s, e) : '', bub = p.bubble !== false && near && !s.dialog && !bark, tag = p.nameTag;
+          if (!mk && !bub && !bark && !tag) return;
           const r = s.engine.renderer, ex = e.extents(), hh = ex.sphere ? ex.r : ex.hy, three = s.mode === '3d';
           const q = three ? r.worldToScreen(s, e.x, e.y + hh, e.z) : r.worldToScreen(s, e.x, e.y - hh); if (q.behind) return;
-          const bob = Math.sin(s.time * 4) * 3, y = q.y - 22 + bob;
-          if (mk) { ctx.save(); ctx.fillStyle = '#ffd23d'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, y, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); UK.text(ctx, mk, q.x, y + 1, { size: 18, weight: 900, color: '#1b1b1b' }); ctx.restore(); }
-          if (bub) { const bx = q.x + (mk ? 26 : 0), by = y; ctx.save(); ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 16, by - 13, 32, 26, 10); else ctx.rect(bx - 16, by - 13, 32, 26); ctx.fill(); UK.text(ctx, '💬', bx, by + 1, { size: 15 }); ctx.restore(); }
+          let y = q.y - 22 + Math.sin(s.time * 4) * 3;
+          ctx.save();
+          if (tag) {
+            const f = likes().length ? Math.min(5, +s.vars[fkey(e)] || 0) : 0, label = who(e) + (f ? '  ' + '♥'.repeat(f) : '');
+            ctx.font = `800 12px ${THEME.font}`; const w = ctx.measureText(label).width + 14, ty = q.y - 12;
+            ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(q.x - w / 2, ty - 9, w, 18, 9); else ctx.rect(q.x - w / 2, ty - 9, w, 18); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(label, q.x, ty + 1); y -= 16;
+          }
+          if (mk) { ctx.fillStyle = '#ffd23d'; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(q.x, y, 13, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); UK.text(ctx, mk, q.x, y + 1, { size: 18, weight: 900, color: '#1b1b1b' }); }
+          if (bub) { const bx = q.x + (mk ? 26 : 0), by = y; ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx - 16, by - 13, 32, 26, 10); else ctx.rect(bx - 16, by - 13, 32, 26); ctx.fill(); UK.text(ctx, '💬', bx, by + 1, { size: 15 }); }
+          if (bark && !s.dialog) { // a speech bubble with what it says in passing
+            const a = Math.min(1, barkT * 3, (s.time - bark.t) * 6); ctx.globalAlpha = a; ctx.font = `700 13px ${THEME.font}`;
+            const words = bark.text.split(' '), L = []; let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > 170 && row) { L.push(row); row = w; } else row = t; } L.push(row);
+            const w = Math.max(...L.map((t) => ctx.measureText(t).width)) + 20, h = L.length * 17 + 12, bx = q.x - w / 2, by = y - (mk ? 20 : 4) - h;
+            ctx.fillStyle = 'rgba(255,255,255,0.96)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(bx, by, w, h, 10); else ctx.rect(bx, by, w, h); ctx.fill();
+            ctx.beginPath(); ctx.moveTo(q.x - 6, by + h - 1); ctx.lineTo(q.x, by + h + 7); ctx.lineTo(q.x + 6, by + h - 1); ctx.fill();
+            ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; L.forEach((t, i) => ctx.fillText(t, q.x, by + 14 + i * 17));
+          }
+          ctx.restore();
         });
         draw.world = true;
       },
       update(e, dt, s) {
-        cool -= dt;
+        cool -= dt; barkT -= dt; barkCool -= dt; pauseT -= dt; walking = false;
+        if (bark && barkT <= 0) bark = null;
         const pl = nearest(s, e, p.tag), d = pl ? Math.hypot(pl.x - e.x, pl.y - e.y, (pl.z || 0) - (e.z || 0)) : Infinity, was = near;
         near = d <= (+p.range || 100);
-        if (s.state !== 'play' || s.dialog || cool > 0) return;
+        if (s.state !== 'play') return;
+        const talking = s.dialog?.npc === e;
+        // chatter
+        const barks = String(p.barks || '').split('\n').map((q) => q.trim()).filter(Boolean);
+        if (barks.length && !s.dialog && barkCool <= 0) {
+          const go = p.barkWhen === 'every few seconds' ? (d < (+p.range || 100) * 4) : near && !was;
+          if (go) { let i = Math.floor(Math.random() * barks.length); if (barks.length > 1 && i === lastBark) i = (i + 1) % barks.length; lastBark = i; say(s, barks[i]); barkCool = p.barkWhen === 'every few seconds' ? Math.max(2, +p.barkEvery || 8) : 6; }
+        }
+        // moving
+        const mode = p.moveMode || 'stands still', three = is3D(e);
+        if (!talking && !s.dialog && mode !== 'stands still' && !(near && p.stopNear !== false && mode !== 'follows the player') && pauseT <= 0) {
+          if (mode === 'follows the player' && pl) { const f = +p.followDist || (three ? 2 : 70), c = flat(pl); if (Math.hypot(c.x - flat(e).x, c.y - flat(e).y) > f * 1.15 || walking) walkTo(e, s, c.x, c.y, dt, f); }
+          else if (mode === 'wanders around') {
+            if (!dest) { const R = +p.wander || (three ? 4 : 120), a = Math.random() * Math.PI * 2, k = Math.sqrt(Math.random()) * R; dest = { x: home.x + Math.cos(a) * k, y: home.y + Math.sin(a) * k }; }
+            const r = walkTo(e, s, dest.x, dest.y, dt); if (r === true || r === 'blocked') { dest = null; pauseT = (+p.waitAt || 1.5) * (0.5 + Math.random()); }
+          } else if (mode === 'patrols a route' && route.length) {
+            const t = route[routeI % route.length], r = walkTo(e, s, t.x, t.y, dt);
+            if (r === true) { routeI = (routeI + 1) % route.length; pauseT = +p.waitAt || 0; } else if (r === 'blocked') pauseT = 0.5;
+          }
+        }
+        if (!three && e.shape?.type === 'emoji') e.rz = walking ? Math.sin(s.time * 14) * 6 : e.rz * 0.8; // a little waddle while walking
+        if (p.facePlayer !== false && pl && (near || talking) && !walking) { const a = flat(pl), b = flat(e); face(e, a.x - b.x, a.y - b.y); }
+        if (s.dialog || cool > 0) return;
         if (p.start === 'player comes close' && near && !was) talk(e, s);
         if (p.start.startsWith('tapped')) for (const t of s.engine.input.taps) if (hitTest(s, e, t.x, t.y)) { if (p.start === 'tapped when close' && !near) s.message('Get closer to talk', 1); else talk(e, s); break; }
       },
       collide(e, other, s) { if (p.start === 'touched by tag' && other.has(p.tag) && cool <= 0) talk(e, s); },
       destroy(e, s) { s.tapTargets?.delete(e); if (draw) s.overlays = (s.overlays || []).filter((f) => f !== draw); },
     };
+    return self;
   },
 });
 
@@ -10919,15 +11059,18 @@ registerBehavior('blink', {
 
 // ---- turn-based games ----
 /** Is a grid cell blocked? Static bodies, objects tagged "wall", other turn enemies, voxel blocks. */
-function blockerAt(s, x, y, z, except) {
+function blockerAt(s, x, y, z, except, skip) {
   for (const o of s.entities) {
-    if (o === except || o.dead || o.ui) continue;
+    if (o === except || o.dead || o.ui || skip?.(o)) continue;
+    const gu = o.getBehavior('gridUnit');
+    if (gu) { const h = gu.tile / 2 - 0.01; if (Math.abs(gu.cx - x) < h && Math.abs(gu.cy - (s.mode === '3d' ? z : y)) < h) return o; continue; } // squad units block the tile they stand on (or are stepping into)
     if (o.voxels) { if (o.voxels.solidAtWorld(o, x, y, z)) return o; continue; }
     if (o.tiles) { if (s.mode !== '3d' && o.tiles.solidAtWorld(o, x, y)) return o; continue; }
     const solid = (o.body && !o.body.sensor && (o.body.type === 'static' || o.tags.has('wall'))) || o.getBehavior('gridEnemy') || o.tags.has('pushable') || (o.has('enemy') && o.getBehavior('health') && !o.getBehavior('health').dead);
     if (!solid) continue;
     const ex = o.extents(), hx = (ex.sphere ? ex.r : ex.hx) - 0.01, hy = (ex.sphere ? ex.r : ex.hy) - 0.01, hz = (ex.sphere ? ex.r : ex.hz) - 0.01;
-    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && Math.abs(o.y - y) < Math.max(hy, 0.6) : Math.abs(o.y - y) < hy)) return o;
+    // 3D: it blocks if it rises above the walker's feet and starts below its head (the floor under it doesn't)
+    if (Math.abs(o.x - x) < hx && (s.mode === '3d' ? Math.abs(o.z - z) < hz && o.y + hy > y - 0.45 && o.y - hy < y + 0.45 : Math.abs(o.y - y) < hy)) return o;
   }
   return null;
 }
@@ -10942,14 +11085,14 @@ function gridOrigin(s, T) {
 }
 function snapToGrid(s, e, T) { const o = gridOrigin(s, T), three = s.mode === '3d'; e.x = Math.round((e.x - o.x) / T) * T + o.x; if (three) e.z = Math.round((e.z - o.y) / T) * T + o.y; else e.y = Math.round((e.y - o.y) / T) * T + o.y; }
 /** Things on a grid that fight back: Turn Enemies, and enemies with Health. */
-const gridFoe = (o) => !!o && !o.dead && (o.getBehavior('gridEnemy') || (o.has('enemy') && o.getBehavior('health')));
+const gridFoe = (o) => !!o && !o.dead && (o.getBehavior('gridEnemy') || o.getBehavior('gridUnit')?.team === 'enemy' || (o.has('enemy') && o.getBehavior('health')));
 /** Shortest 4-way (or 8-way) walk over free tiles. Returns steps [[dx, dy]…] or null. The last tile may be an enemy (to attack it). */
-function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = true } = {}) {
-  const three = s.mode === '3d', sx = e.x, sy = three ? e.z : e.y;
+function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = true, isFoe = gridFoe, skip = null, from = null } = {}) {
+  const three = s.mode === '3d', sx = from ? from.x : e.x, sy = from ? from.y : three ? e.z : e.y;
   const gx = Math.round((tx - sx) / T), gy = Math.round((ty - sy) / T); if (!gx && !gy) return [];
   const R = Math.max(Math.abs(gx), Math.abs(gy)) + 8, key = (i, j) => i + ',' + j, prev = new Map([[key(0, 0), null]]), q = [[0, 0]];
   const dirs = diagonal ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const blockAt = (i, j) => blockerAt(s, sx + i * T, three ? e.y : sy + j * T, three ? sy + j * T : e.z, e);
+  const blockAt = (i, j) => blockerAt(s, sx + i * T, three ? e.y : sy + j * T, three ? sy + j * T : e.z, e, skip);
   while (q.length && prev.size < maxCells) {
     const [i, j] = q.shift();
     if (i === gx && j === gy) { const out = []; for (let k = key(i, j), c = [i, j]; prev.get(k); ) { const p = prev.get(k); out.unshift([c[0] - p[0], c[1] - p[1]]); c = p; k = key(p[0], p[1]); } return out; }
@@ -10957,7 +11100,7 @@ function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = t
       const ni = i + dx, nj = j + dy, k = key(ni, nj); if (prev.has(k) || Math.abs(ni) > R || Math.abs(nj) > R) continue;
       if (dx && dy && (blockAt(i + dx, j) || blockAt(i, j + dy))) continue; // no cutting corners
       const b = blockAt(ni, nj), goal = ni === gx && nj === gy;
-      if (b && !(goal && foeOk && gridFoe(b))) continue;
+      if (b && !(goal && foeOk && isFoe(b))) continue;
       prev.set(k, [i, j]); q.push([ni, nj]);
     }
   }
@@ -10967,7 +11110,7 @@ function gridPath(s, e, tx, ty, T, { diagonal = false, maxCells = 900, foeOk = t
 function gridNudge(s, e, dx, dy, T) { const three = is3D(e), x0 = e.x, y0 = e.y, z0 = e.z, k = T * 0.25; s.tween(e, { x: x0 + dx * k, y: three ? y0 : y0 + dy * k, z: three ? z0 + dy * k : z0 }, 0.06); s.after(0.07, () => s.tween(e, { x: x0, y: y0, z: z0 }, 0.07)); }
 /** Hurt whatever is on a grid tile: a Turn Enemy, or anything with Health. */
 function gridHurt(s, target, amount, from) {
-  const ge = target.getBehavior('gridEnemy'); if (ge) return ge.hurt(target, s, amount, from);
+  const ge = target.getBehavior('gridEnemy') || target.getBehavior('gridUnit'); if (ge) return ge.hurt(target, s, amount, from);
   const hb = target.getBehavior('health'); if (hb) return hb.damage(amount, target, from, { knockback: 0 });
   return 0;
 }
@@ -11192,7 +11335,8 @@ registerBehavior('gridEnemy', {
     const attack = (e, s, pl) => {
       s.tween(e, { sx: e.sx * 1.2, sy: e.sy * 1.2 }, 0.08); s.after(0.1, () => s.tween(e, { sx: e.sx / 1.2, sy: e.sy / 1.2 }, 0.08));
       const hb = pl.getBehavior('health'), dmg = +p.attack || 1;
-      if (hb) hb.damage(dmg, pl, e, { knockback: 0 });
+      if (pl.getBehavior('gridUnit')) gridHurt(s, pl, dmg, e);
+      else if (hb) hb.damage(dmg, pl, e, { knockback: 0 });
       else if (!(pl.data.invuln > 0)) respawnOrEnd(pl, s, 'damage');
       s.emit('gridAttack', e, pl);
     };
@@ -11215,7 +11359,7 @@ registerBehavior('gridEnemy', {
         return dmg;
       },
       act(e, s) {
-        const pl = s.findAll('player')[0]; if (!pl || e.dead) return;
+        const pl = gridTargetFor(s, e, 'enemy'); if (!pl || e.dead) return;
         const t = T(), three = is3D(e), dx = Math.round((pl.x - e.x) / t), dy = Math.round(((three ? pl.z : pl.y) - (three ? e.z : e.y)) / t), d = Math.abs(dx) + Math.abs(dy);
         if (d === 1) return attack(e, s, pl);
         const sees = !+p.sight || d <= +p.sight;
@@ -11241,6 +11385,423 @@ registerBehavior('gridEnemy', {
     };
     return self;
   },
+});
+
+// ---- squads: grid units the player selects (one or many) and moves together: tactics and RTS games ----
+const SQUAD_DEFAULTS = { tapMode: 'adds to the group', drag: 'draws a selection box', formation: 'group', autoEndTurn: true, winWhenNoEnemies: true, loseWhenNoUnits: true, showRange: true, showPaths: true, color: '#4fc3f7', moveColor: '#4fc3f7', attackColor: '#ff5252' };
+const unitOf = (o) => (o && !o.dead ? o.getBehavior('gridUnit') : null);
+const squadUnits = (s, team) => s.entities.filter((o) => !o.dead && unitOf(o)?.team === team);
+/** The nearest thing an enemy goes after (team 'enemy': the player or a player unit), or a player unit goes after (team 'player'). */
+function gridTargetFor(s, e, team = 'enemy', maxDist = Infinity) {
+  let best = null, bd = maxDist;
+  for (const o of s.entities) {
+    if (o.dead || o === e || o.ui) continue;
+    const u = o.getBehavior('gridUnit');
+    if (!(team === 'enemy' ? (u ? u.team === 'player' : o.has('player')) : (u ? u.team === 'enemy' : gridFoe(o)))) continue;
+    const d = Math.hypot(o.x - e.x, o.y - e.y, (o.z || 0) - (e.z || 0)); if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+/** The tile an object stands on: units use the tile they hold, everything else its position. */
+const cellOf = (s, o) => { const u = unitOf(o); return u ? { x: u.cx, y: u.cy } : { x: o.x, y: s.mode === '3d' ? o.z : o.y }; };
+const canAct = (s, e) => { const u = unitOf(e); return !!u && u.team === 'player' && (!s.settings.turnBased || !u.done); };
+/** Free tiles around a spot for a group to stand on, in formation. */
+function formationCells(s, units, gx, gy, mode) {
+  const u0 = unitOf(units[0]), T = u0.tile, three = s.mode === '3d', fy = units[0].y, N = units.length;
+  const skip = (o) => units.includes(o), free = (x, y) => !blockerAt(s, x, three ? fy : y, three ? y : 0, null, skip);
+  const seen = new Set(['0,0']), q = [[0, 0]], out = [];
+  while (q.length && out.length < Math.max(N * 4, N + 10) && seen.size < 900) {
+    const [i, j] = q.shift(), x = gx + i * T, y = gy + j * T;
+    if (free(x, y)) out.push({ i, j, x, y });
+    for (const [a, b] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const k = (i + a) + ',' + (j + b); if (!seen.has(k) && Math.abs(i + a) < 30 && Math.abs(j + b) < 30) { seen.add(k); q.push([i + a, j + b]); } }
+  }
+  const w = mode === 'line' ? (c) => Math.abs(c.j) * 4 + Math.abs(c.i) : mode === 'column' ? (c) => Math.abs(c.i) * 4 + Math.abs(c.j) : (c) => Math.hypot(c.i, c.j);
+  if (mode === 'keep their shape') {
+    const mx = units.reduce((a, e) => a + unitOf(e).cx, 0) / N, my = units.reduce((a, e) => a + unitOf(e).cy, 0) / N, used = new Set(), res = new Map();
+    for (const e of units) { const u = unitOf(e), x = gx + Math.round((u.cx - mx) / T) * T, y = gy + Math.round((u.cy - my) / T) * T, k = x + ',' + y; if (free(x, y) && !used.has(k)) { used.add(k); res.set(e, { x, y }); } }
+    const rest = out.filter((c) => !used.has(c.x + ',' + c.y));
+    for (const e of units) if (!res.has(e)) { const u = unitOf(e); rest.sort((a, b) => Math.hypot(a.x - u.cx, a.y - u.cy) - Math.hypot(b.x - u.cx, b.y - u.cy)); const c = rest.shift(); if (c) res.set(e, c); }
+    return res;
+  }
+  const cells = out.sort((a, b) => w(a) - w(b)).slice(0, N), res = new Map(), left = [...units];
+  while (cells.length && left.length) { // the closest pair first: nobody walks across the whole group
+    let bi = 0, bj = 0, bd = Infinity;
+    cells.forEach((c, i) => left.forEach((e, j) => { const u = unitOf(e), d = Math.hypot(c.x - u.cx, c.y - u.cy); if (d < bd) { bd = d; bi = i; bj = j; } }));
+    res.set(left[bj], cells[bi]); cells.splice(bi, 1); left.splice(bj, 1);
+  }
+  return res;
+}
+/** The squad: what's selected, the selection box, and highlights. One per scene, made by the first unit. */
+function squadOf(s) {
+  if (s.squad) return s.squad;
+  const sq = s.squad = { sel: new Set(), box: null, pan: null, last: null, fx: [], t: -1, ending: false, had: { player: 0, enemy: 0 }, sync: '', reach: new Map() };
+  sq.cfg = () => ({ ...SQUAD_DEFAULTS, ...(s.squadCfg || {}) });
+  s.on('message', (m) => {
+    const k = String(m || '').trim().toLowerCase();
+    if (k === 'select all') squadSelect(s, squadUnits(s, 'player').filter((e) => canAct(s, e)));
+    else if (k === 'select none' || k === 'deselect') squadSelect(s, []);
+    else if (k === 'select next') { const L = squadUnits(s, 'player').filter((e) => canAct(s, e)); if (L.length) { const cur = [...sq.sel][0], i = L.indexOf(cur); squadSelect(s, [L[(i + 1) % L.length]]); } }
+    else if (k === 'stop') for (const e of sq.sel) unitOf(e)?.stop();
+    else if (k === 'end turn' && s.settings.turnBased && s.isPlayerTurn) squadEndTurn(s);
+  });
+  s.on('turn', () => { sq.ending = false; for (const e of squadUnits(s, 'player')) unitOf(e).newTurn(e); });
+  (s.overlays ||= []).push(sq.draw = (ctx) => drawSquad(s, sq, ctx)); sq.draw.world = true;
+  return sq;
+}
+function squadSelect(s, list, quiet) {
+  const sq = squadOf(s), before = [...sq.sel].map((e) => e.id).join();
+  sq.sel = new Set(list.filter((e) => canAct(s, e)));
+  if ([...sq.sel].map((e) => e.id).join() === before) return;
+  if (!quiet && sq.sel.size) { s.engine.audio.tone({ freq: 660, to: 880, dur: 0.06, vol: 0.06 }); s.engine.vibrate(8); }
+  s.setVar('selectedUnits', sq.sel.size); s.emit('unitsSelected', [...sq.sel]);
+}
+function squadEndTurn(s) { const sq = squadOf(s); sq.sel.clear(); s.setVar('selectedUnits', 0); for (const e of squadUnits(s, 'player')) unitOf(e).stop(); s.endTurn(); }
+/** Send units somewhere ({ x, y }: a tile) or after someone ({ attack: entity }). */
+function squadOrder(s, units, cmd) {
+  const sq = squadOf(s), list = units.filter((e) => canAct(s, e) && !e.dead); if (!list.length) return;
+  if (cmd.attack) { for (const e of list) unitOf(e).order(e, { attack: cmd.attack }); sq.fx.push({ k: 'hit', e: cmd.attack, t: s.time }); s.engine.audio.tone({ freq: 300, to: 200, dur: 0.08, vol: 0.07 }); }
+  else {
+    const where = formationCells(s, list, cmd.x, cmd.y, sq.cfg().formation);
+    let n = 0; for (const e of list) { const c = where.get(e); if (c) { unitOf(e).order(e, { x: c.x, y: c.y }) && n++; } }
+    sq.fx.push({ k: 'tap', x: cmd.x, y: cmd.y, t: s.time, ok: n > 0 });
+    if (!n) { s.message?.('Can’t get there', 0.8); s.engine.vibrate(15); } else s.engine.audio.tone({ freq: 520, to: 700, dur: 0.06, vol: 0.06 });
+  }
+  s.emit('unitsOrdered', list, cmd);
+}
+const squadUiTap = (s, t) => s.entities.some((o) => o.ui && !o.dead && o.visible !== false && o.behaviors.length && hitTest(s, o, t.x, t.y))
+  || [...(s.tapTargets || [])].some((o) => !o.dead && o.visible !== false && !unitOf(o) && hitTest(s, o, t.x, t.y));
+const unitAtScreen = (s, x, y, team) => s.entities.find((o) => !o.dead && o.visible !== false && unitOf(o)?.team === team && hitTest(s, o, x, y)) || null;
+/** Where on the grid a screen point is (a tile centre). */
+function squadCellAt(s, sx, sy, ref) {
+  const u = unitOf(ref), T = u.tile, three = s.mode === '3d', w = three ? screenToWorldAt(s, sx, sy, ref.y - (ref.extents().hy || 0.5)) : s.engine.renderer.screenToWorld(s, sx, sy);
+  if (!w) return null;
+  const o = gridOrigin(s, T), wy = three ? w.z : w.y;
+  return { x: Math.round((w.x - o.x) / T) * T + o.x, y: Math.round((wy - o.y) / T) * T + o.y };
+}
+function panCamera(s, dx, dy) {
+  const c = s.camera;
+  if (s.mode !== '3d') { const z = s.engine.renderer.zoomFor(s); c.x -= dx / z; c.y -= dy / z; return; }
+  const cx = s.engine.width / 2, cy = s.engine.height / 2, a = screenToWorldAt(s, cx, cy, 0), b = screenToWorldAt(s, cx + dx, cy + dy, 0); if (!a || !b) return;
+  for (const p of [c.position, c.target]) { p.x -= b.x - a.x; p.z -= b.z - a.z; }
+}
+/** Once a frame: taps, the selection box, dragging units, ending the turn, counting units. */
+function squadTick(s) {
+  const sq = squadOf(s); if (sq.t === s.time) return; sq.t = s.time;
+  const cfg = sq.cfg(), inp = s.engine.input, tb = !!s.settings.turnBased;
+  for (const e of sq.sel) if (!canAct(s, e)) sq.sel.delete(e);
+  const mine = squadUnits(s, 'player'), foes = s.entities.filter((o) => !o.dead && !o.ui && (unitOf(o)?.team === 'enemy' || o.getBehavior('gridEnemy')));
+  sq.had.player = Math.max(sq.had.player, mine.length); sq.had.enemy = Math.max(sq.had.enemy, foes.length);
+  const ready = tb ? mine.filter((e) => !unitOf(e).done).length : mine.length, sig = [sq.sel.size, mine.length, foes.length, ready].join();
+  if (sig !== sq.sync) { sq.sync = sig; s.setVar('selectedUnits', sq.sel.size); s.setVar('unitsLeft', mine.length); s.setVar('enemiesLeft', foes.length); s.setVar('unitsReady', ready); }
+  if (s.state !== 'play') { sq.box = null; return; }
+  if (s.time > 0.3) {
+    if (cfg.winWhenNoEnemies && sq.had.enemy && !foes.length) { s.win(); return; }
+    if (cfg.loseWhenNoUnits && sq.had.player && !mine.length) { s.gameOver(); return; }
+  }
+  const myTurn = !tb || s.isPlayerTurn;
+  if (tb && myTurn && cfg.autoEndTurn && !sq.ending && mine.length && mine.every((e) => unitOf(e).done && !unitOf(e).busy) && mine.some((e) => unitOf(e).acted)) {
+    sq.ending = true; s.after(0.35, () => { if (s.isPlayerTurn && s.state === 'play') squadEndTurn(s); });
+  }
+  // dragging: a box over empty ground, a line from a unit (send it there), or moving the camera
+  for (const [id, ptr] of inp.pointers) {
+    if (ptr.role !== 'free' || Math.hypot(ptr.x - ptr.sx, ptr.y - ptr.sy) < 18) continue;
+    if (!sq.box || sq.box.id !== id) {
+      if (squadUiTap(s, { x: ptr.sx, y: ptr.sy })) continue;
+      const u = myTurn ? unitAtScreen(s, ptr.sx, ptr.sy, 'player') : null;
+      if (u && canAct(s, u)) sq.box = { id, unit: u };
+      else if (cfg.drag === 'moves the camera') sq.box = { id, pan: true, px: ptr.sx, py: ptr.sy };
+      else if (cfg.drag === 'draws a selection box' && myTurn) sq.box = { id };
+      else continue;
+    }
+    const b = sq.box;
+    if (b.pan) { panCamera(s, ptr.x - b.px, ptr.y - b.py); b.px = ptr.x; b.py = ptr.y; }
+    Object.assign(b, { x0: ptr.sx, y0: ptr.sy, x1: ptr.x, y1: ptr.y });
+    break;
+  }
+  if (sq.box) {
+    const b = sq.box, up = inp.ups.find((u) => u.id === b.id);
+    if (up && !b.pan && myTurn) {
+      if (b.unit) { // dragged from a unit: it (and the rest of the group, if it's in it) goes where the finger let go
+        const group = sq.sel.has(b.unit) ? [...sq.sel] : [b.unit]; if (!sq.sel.has(b.unit)) squadSelect(s, [b.unit]);
+        const foe = s.entities.find((o) => !o.dead && !o.ui && gridFoe(o) && hitTest(s, o, up.x, up.y)), c = squadCellAt(s, up.x, up.y, b.unit);
+        if (foe) squadOrder(s, group, { attack: foe }); else if (c) squadOrder(s, group, c);
+      } else {
+        const L = mine.filter((e) => canAct(s, e) && (() => { const q = s.mode === '3d' ? s.engine.renderer.worldToScreen(s, e.x, e.y, e.z) : s.engine.renderer.worldToScreen(s, e.x, e.y); return !q.behind && q.x >= Math.min(b.x0, b.x1) && q.x <= Math.max(b.x0, b.x1) && q.y >= Math.min(b.y0, b.y1) && q.y <= Math.max(b.y0, b.y1); })());
+        squadSelect(s, L);
+      }
+    }
+    if (up || !inp.pointers.has(b.id)) sq.box = null;
+  }
+  if (!myTurn) return;
+  // taps
+  for (const t of inp.taps) {
+    if (squadUiTap(s, t)) continue;
+    const u = unitAtScreen(s, t.x, t.y, 'player');
+    if (u) {
+      const dbl = sq.last && sq.last.e === u && s.time - sq.last.t < 0.35; sq.last = { e: u, t: s.time };
+      if (dbl) { squadSelect(s, mine.filter((e) => canAct(s, e))); sq.last = null; break; }
+      if (!canAct(s, u)) { s.message?.(`${u.name} is done this turn`, 0.9); s.engine.vibrate(15); break; }
+      if (cfg.tapMode === 'picks just that one') squadSelect(s, sq.sel.size === 1 && sq.sel.has(u) ? [] : [u]);
+      else { const L = new Set(sq.sel); if (L.has(u)) L.delete(u); else L.add(u); squadSelect(s, [...L]); }
+      break;
+    }
+    if (!sq.sel.size) break;
+    const foe = s.entities.find((o) => !o.dead && !o.ui && gridFoe(o) && hitTest(s, o, t.x, t.y));
+    if (foe) { squadOrder(s, [...sq.sel], { attack: foe }); break; }
+    const c = squadCellAt(s, t.x, t.y, [...sq.sel][0]); if (c) squadOrder(s, [...sq.sel], c);
+    break;
+  }
+}
+/** Tiles a unit can walk to this turn (turn-based), cached until it moves. */
+function unitReach(s, e) {
+  const u = unitOf(e), sq = squadOf(s), key = `${u.cx},${u.cy},${u.movesLeft},${s.vars.turn}`, c = sq.reach.get(e);
+  if (c && c.key === key) return c.cells;
+  const T = u.tile, three = s.mode === '3d', cells = [], seen = new Map([['0,0', 0]]), q = [[0, 0]];
+  const friend = (o) => unitOf(o)?.team === u.team;
+  while (q.length) {
+    const [i, j] = q.shift(), d = seen.get(i + ',' + j); if (d >= u.movesLeft) continue;
+    for (const [a, b] of u.dirs) {
+      const ni = i + a, nj = j + b, k = ni + ',' + nj; if (seen.has(k)) continue;
+      const x = u.cx + ni * T, y = u.cy + nj * T, bl = blockerAt(s, x, three ? e.y : y, three ? y : e.z, e);
+      if (bl && !friend(bl)) continue;
+      seen.set(k, d + 1); q.push([ni, nj]); if (!bl) cells.push({ x, y });
+    }
+  }
+  sq.reach.set(e, { key, cells }); return cells;
+}
+function drawSquad(s, sq, ctx) {
+  if (s.engine.editing) return;
+  const cfg = sq.cfg(), r = s.engine.renderer, three = s.mode === '3d', tb = !!s.settings.turnBased, now = s.time;
+  const P = (x, y, gy) => (three ? r.worldToScreen(s, x, gy, y) : r.worldToScreen(s, x, y));
+  const feet = (e) => (three ? e.y - (e.extents().hy || 0.5) : 0);
+  const quad = (x, y, T, gy) => { const h = T / 2 - (three ? 0.04 : 1); return [P(x - h, y - h, gy), P(x + h, y - h, gy), P(x + h, y + h, gy), P(x - h, y + h, gy)]; };
+  const poly = (pts) => { ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.closePath(); };
+  const ring = (e, col, k = 1, dash) => {
+    const u = unitOf(e), T = u ? u.tile : (three ? 1 : 40), gy = feet(e), c = P(e.x, three ? e.z : e.y, gy), side = P(e.x + T * 0.45, three ? e.z : e.y, gy);
+    if (c.behind) return; const rx = Math.max(10, Math.hypot(side.x - c.x, side.y - c.y)) * k, ry = three ? rx * 0.55 : rx;
+    ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 3; if (dash) ctx.setLineDash(dash); ctx.beginPath(); ctx.ellipse(c.x, c.y + (three ? 0 : 0), rx, ry, 0, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
+  };
+  ctx.save();
+  const sel = [...sq.sel];
+  // tiles it can reach (turn-based) and foes it can hit
+  if (cfg.showRange !== false && sel.length && tb && s.isPlayerTurn) {
+    ctx.fillStyle = cfg.moveColor; ctx.globalAlpha = 0.18; const done = new Set();
+    for (const e of sel) { const u = unitOf(e); if (u.busy || u.attacked) continue; for (const c of unitReach(s, e)) { const k = c.x + ',' + c.y; if (done.has(k)) continue; done.add(k); const q = quad(c.x, c.y, u.tile, feet(e)); if (q.some((p) => p.behind)) continue; poly(q); ctx.fill(); } }
+    ctx.globalAlpha = 1;
+  }
+  if (sel.length) {
+    const pulse = 0.55 + 0.45 * Math.abs(Math.sin(now * 5));
+    for (const o of s.entities) {
+      if (o.dead || o.ui || !gridFoe(o)) continue;
+      if (sel.some((e) => { const u = unitOf(e); return !(tb && u.attacked) && u.inRange(o); })) { ctx.globalAlpha = pulse; ring(o, cfg.attackColor, 1.05); ctx.globalAlpha = 1; }
+    }
+  }
+  // paths and where each unit is going
+  for (const e of squadUnits(s, 'player')) {
+    const u = unitOf(e); if (!u.path.length || !(cfg.showPaths !== false && (sq.sel.has(e) || !tb))) continue;
+    const gy = feet(e); let x = u.cx, y = u.cy; const pts = [P(e.x, three ? e.z : e.y, gy), P(x, y, gy)];
+    for (const [dx, dy] of u.path) { x += dx * u.tile; y += dy * u.tile; pts.push(P(x, y, gy)); }
+    if (pts.some((p) => p.behind)) continue;
+    ctx.strokeStyle = cfg.color; ctx.globalAlpha = 0.75; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -now * 30;
+    ctx.beginPath(); pts.forEach((q, i) => (i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y))); ctx.stroke(); ctx.setLineDash([]);
+    const end = pts[pts.length - 1]; ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(end.x, end.y, 5, 0, Math.PI * 2); ctx.fillStyle = cfg.color; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  for (const e of sel) ring(e, cfg.color, 1 + 0.06 * Math.sin(now * 6));
+  for (const e of squadUnits(s, 'player')) { const u = unitOf(e); if (u.target && !u.target.dead && (sq.sel.has(e) || !tb)) { const a = P(e.x, three ? e.z : e.y, feet(e)), b = P(u.target.x, three ? u.target.z : u.target.y, feet(e)); if (a.behind || b.behind) continue; ctx.strokeStyle = cfg.attackColor; ctx.globalAlpha = 0.5; ctx.lineWidth = 2; ctx.setLineDash([4, 5]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; } }
+  // effects: tap markers, shots
+  sq.fx = sq.fx.filter((f) => now - f.t < 0.6);
+  for (const f of sq.fx) {
+    const k = (now - f.t) / 0.6;
+    if (f.k === 'tap') { const ref = sel[0] || squadUnits(s, 'player')[0]; const q = P(f.x, f.y, ref ? feet(ref) : 0); if (q.behind) continue; ctx.globalAlpha = 1 - k; ctx.strokeStyle = f.ok ? cfg.color : '#ff5252'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(q.x, q.y, 8 + k * 22, (8 + k * 22) * (three ? 0.55 : 1), 0, 0, Math.PI * 2); ctx.stroke(); }
+    else if (f.k === 'hit' && !f.e.dead) { ctx.globalAlpha = 1 - k; ring(f.e, cfg.attackColor, 1.4 - k * 0.4); }
+    else if (f.k === 'shot' && k < 0.3) {
+      const a = P(f.x0, f.y0, f.gy), b = P(f.x1, f.y1, f.gy); if (a.behind || b.behind) continue; const m = k / 0.3, x = a.x + (b.x - a.x) * m, y = a.y + (b.y - a.y) * m;
+      ctx.globalAlpha = 1; ctx.strokeStyle = f.col; ctx.lineWidth = f.look === 'magic bolt' ? 5 : 3; ctx.beginPath(); ctx.moveTo(x - (b.x - a.x) * 0.12, y - (b.y - a.y) * 0.12); ctx.lineTo(x, y); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  // the selection box, or a line from a dragged unit
+  const b = sq.box;
+  if (b && !b.pan && b.x1 != null) {
+    if (b.unit) { ctx.strokeStyle = cfg.color; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(b.x0, b.y0); ctx.lineTo(b.x1, b.y1); ctx.stroke(); ctx.setLineDash([]); ctx.beginPath(); ctx.arc(b.x1, b.y1, 12, 0, Math.PI * 2); ctx.stroke(); }
+    else { const x = Math.min(b.x0, b.x1), y = Math.min(b.y0, b.y1), w = Math.abs(b.x1 - b.x0), h = Math.abs(b.y1 - b.y0); ctx.fillStyle = cfg.color; ctx.globalAlpha = 0.15; ctx.fillRect(x, y, w, h); ctx.globalAlpha = 1; ctx.strokeStyle = cfg.color; ctx.lineWidth = 2; ctx.setLineDash([6, 4]); ctx.strokeRect(x, y, w, h); ctx.setLineDash([]); }
+  }
+  ctx.restore();
+}
+
+registerBehavior('gridUnit', {
+  label: 'Squad Unit', description: 'A unit on a grid, for tactics and strategy games. Tap units to select them (several at once, or drag a box), then tap a tile to move them all there in formation, or tap an enemy to attack it. Turn-based: each unit moves and attacks once per turn. Real-time: units fight what comes in range. Enemy units find their way to yours.',
+  params: [
+    { key: 'team', label: 'Team', type: 'select', options: [['player', 'yours (you command it)'], ['enemy', 'enemy (the computer plays it)']], default: 'player' },
+    { key: 'tile', label: 'Tile size', type: 'number', default: 40, default3d: 1 },
+    { key: 'hp', label: 'Health (if it has no Health component)', type: 'number', default: 5 },
+    { key: 'damage', label: 'Attack damage', type: 'number', default: 1 },
+    { key: 'range', label: 'Attack range (tiles, 1 = next to it)', type: 'number', default: 1, range: [1, 12], step: 1 },
+    { key: 'moves', label: 'Moves per turn (turn-based)', type: 'number', default: 4, range: [1, 20], step: 1 },
+    { key: 'stepTime', label: 'Time per step (sec)', type: 'number', default: 0.16, range: [0.03, 1], step: 0.01 },
+    { key: 'attackEvery', label: 'Attacks every (sec, real-time)', type: 'number', default: 0.8, step: 0.1 },
+    { key: 'fight', label: 'On its own', type: 'select', options: ['attacks foes in range', 'chases foes it sees', 'only does what it’s told'], default: 'attacks foes in range', info: 'Enemy units always chase what they see.' },
+    { key: 'sight', label: 'Sees foes within (tiles, 0 = anywhere)', type: 'number', default: 6, step: 1 },
+    { key: 'diagonal', label: 'Diagonal steps', type: 'bool', default: false },
+    { key: 'shot', label: 'Ranged attack looks like', type: 'select', options: ['arrow', 'magic bolt', 'nothing'], default: 'arrow', showIf: (b) => +b.range > 1 },
+    { key: 'points', label: 'Points when defeated', type: 'number', default: 10, showIf: { team: ['enemy'] } },
+    { key: 'showBar', label: 'Health bar over it', type: 'select', options: ['when hurt', 'always', 'never'], default: 'always', group: 'More' },
+    { key: 'snap', label: 'Line up with the grid at the start', type: 'bool', default: true, group: 'More' },
+    { key: 'sound', label: 'Sounds', type: 'bool', default: true, group: 'More' },
+  ],
+  create(p) {
+    let hp = 0, max = 1, path = [], goal = null, target = null, autoT = false, stepT = 0, cool = 0, wait = 0, think = 0, ent = null, s0 = null;
+    const T = () => +p.tile || 40, rng = () => Math.max(1, Math.round(+p.range || 1));
+    const dirs = p.diagonal ? [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const isFoe = (o) => !!o && !o.dead && o !== ent && (self.team === 'player' ? gridFoe(o) : (unitOf(o) ? unitOf(o).team === 'player' : o.has('player')));
+    const bar = (e) => { const k = hp / max, mine = self.team === 'player'; (e._bars ||= {}).health = { k, col: mine ? (k > 0.35 ? '#4fc3f7' : '#ffd23d') : (k > 0.5 ? '#ff7043' : '#ff4d4d'), show: p.showBar === 'always' || (p.showBar !== 'never' && hp < max) }; e.data.hp = hp; e.data.hpMax = max; };
+    const face = (e, dx, dy) => { if (is3D(e)) { if (dx || dy) e.ry = Math.atan2(-dx, -dy) / DEG; } else if (dx) { if (e.shape?.type === 'emoji') e.data.flipX = dx > 0; else e.sx = Math.abs(e.sx) * (dx < 0 ? -1 : 1); } };
+    const myPhase = (s) => !s.settings.turnBased || (self.team === 'player' ? s.isPlayerTurn : !s.isPlayerTurn);
+    const friendSkip = (o) => unitOf(o)?.team === self.team;
+    /** Work out the way to the goal or the target. strict: other units of the team block too. */
+    const plan = (e, s, strict) => {
+      const three = is3D(e), from = { x: self.cx, y: self.cy }, opts = { diagonal: !!p.diagonal, maxCells: 1500, from, skip: strict ? null : friendSkip };
+      let route = null;
+      if (target) { const c = cellOf(s, target); route = gridPath(s, e, c.x, c.y, T(), { ...opts, foeOk: true, isFoe: (b) => b === target }); if (route?.length) route.pop(); } // stop next to it
+      else if (goal) route = gridPath(s, e, goal.x, goal.y, T(), { ...opts, foeOk: false });
+      if (!route) { path = []; return false; }
+      if (s.settings.turnBased) route = route.slice(0, Math.max(0, self.movesLeft));
+      path = route; void three; return true;
+    };
+    const attack = (e, s, o) => {
+      const c = cellOf(s, o), dx = Math.sign(Math.round((c.x - self.cx) / T())), dy = Math.sign(Math.round((c.y - self.cy) / T()));
+      face(e, dx, dy); cool = Math.max(0.2, +p.attackEvery || 0.8); self.attacked = true; self.acted = true;
+      const dmg = Math.max(0, +p.damage || 0) + (+e.data.equipDamage || 0), three = is3D(e);
+      const hit = () => { if (!o.dead) gridHurt(s, o, dmg, e); };
+      if (rng() > 1 && p.shot !== 'nothing') {
+        const sq = squadOf(s), gy = three ? e.y - (e.extents().hy || 0.5) + T() * 0.4 : 0;
+        sq.fx.push({ k: 'shot', x0: e.x, y0: three ? e.z : e.y, x1: o.x, y1: three ? o.z : o.y, gy, t: s.time, look: p.shot, col: p.shot === 'magic bolt' ? '#b388ff' : '#ffe082' });
+        if (p.sound !== false) s.engine.audio.tone({ freq: p.shot === 'magic bolt' ? 900 : 1200, to: 400, dur: 0.12, vol: 0.05 });
+        s.after(0.17, hit);
+      } else { gridNudge(s, e, dx, dy, T()); hit(); stepT = Math.max(stepT, 0.17); } // no stepping until the lunge is back
+      s.emit('unitAttack', e, o); s.emit('gridAttack', e, o);
+    };
+    const self = {
+      team: p.team === 'enemy' ? 'enemy' : 'player', cx: 0, cy: 0, movesLeft: Math.round(+p.moves || 4), attacked: false, acted: false, dirs,
+      get tile() { return T(); }, get hp() { return hp; }, get max() { return max; }, get path() { return path; }, get goal() { return goal; }, get target() { return target; },
+      get busy() { return path.length > 0 || stepT > 0.02 || (!!target && !target.dead && !(s0?.settings.turnBased && self.attacked)); },
+      /** Turn-based: nothing left to do this turn. */
+      get done() { if (self.attacked) return true; if (self.movesLeft > 0) return false; return !s0 || !s0.entities.some((o) => isFoe(o) && self.inRange(o)); },
+      inRange(o) {
+        if (!o || o.dead || !s0) return false;
+        const c = cellOf(s0, o), dx = Math.abs(Math.round((c.x - self.cx) / T())), dy = Math.abs(Math.round((c.y - self.cy) / T()));
+        if (dx + dy === 0) return false;
+        return rng() <= 1 ? (p.diagonal ? Math.max(dx, dy) <= 1 : dx + dy <= 1) : (p.diagonal ? Math.max(dx, dy) : dx + dy) <= rng();
+      },
+      /** { x, y }: walk to that tile; { attack: entity }: go and attack it. Returns false if there's no way. */
+      order(e, cmd) {
+        const s = s0; if (!s || e.dead) return false;
+        if (s.settings.turnBased && self.attacked) return false;
+        wait = 0;
+        autoT = false;
+        if (cmd.attack) { target = cmd.attack; goal = null; if (self.inRange(target)) { path = []; return true; } if (!plan(e, s) || !path.length) { if (self.team === 'player') s.message?.('Can’t reach it', 0.8); target = null; return false; } return true; }
+        target = null; goal = { x: cmd.x, y: cmd.y };
+        if (goal.x === self.cx && goal.y === self.cy) { goal = null; path = []; return true; }
+        if (!plan(e, s) || !path.length) { goal = null; return false; }
+        return true;
+      },
+      stop() { path = []; goal = null; target = null; },
+      newTurn(e) { self.movesLeft = Math.round(+p.moves || 4); self.attacked = false; self.acted = false; e.alpha = 1; },
+      hurt(e, s, dmg, from) {
+        const hb = e.getBehavior('health'); if (hb) return hb.damage(dmg, e, from, { knockback: 0 });
+        hp -= dmg; e.data.invuln = 0.2; if (p.sound !== false) s.engine.audio.sfx('hit'); bar(e); s.emit('damage', e, dmg, from, '');
+        { const r = s.engine.renderer, hy = e.extents().hy || 10, q = is3D(e) ? r.worldToScreen(s, e.x, e.y + hy, e.z) : r.worldToScreen(s, e.x, e.y - hy); if (!q.behind) popText(s, q.x, q.y - 10, `-${dmg}`, '#ff6b6b', 20); }
+        const k = e.sx; s.tween(e, { sx: k * 1.15, sy: e.sy * 1.15 }, 0.06); s.after(0.07, () => !e.dead && s.tween(e, { sx: k, sy: Math.abs(k) * Math.sign(e.sy || 1) }, 0.08));
+        // fight back: an idle unit that gets hit goes for whoever hit it
+        if (from && !from.dead && !target && !path.length && isFoe(from) && p.fight !== 'only does what it’s told' && !s.settings.turnBased) { target = from; plan(e, s); }
+        if (hp <= 0) { if (self.team === 'enemy') s.addVar('score', +p.points || 0); s.burst(e.x, e.y, e.z, e.mesh?.color || e.shape?.fill || '#f55', 16); s.emit('death', e); s.emit('unitDefeated', e, self.team); e.destroy(); }
+        return dmg;
+      },
+      start(e, s) {
+        ent = e; s0 = s; max = Math.max(1, +p.hp || 1); hp = max;
+        if (p.snap !== false) snapToGrid(s, e, T());
+        self.cx = e.x; self.cy = is3D(e) ? e.z : e.y;
+        e.tags.add(self.team === 'enemy' ? 'enemy' : 'ally'); e.tags.add('unit');
+        if (!e.getBehavior('health')) bar(e);
+        squadOf(s); s.tapTargets?.delete(e);
+      },
+      update(e, dt, s) {
+        squadTick(s);
+        stepT -= dt; cool -= dt;
+        if (s.state !== 'play' || e.dead) return;
+        const tb = !!s.settings.turnBased;
+        if (tb && self.team === 'player' && s.isPlayerTurn) e.alpha += ((self.done && !self.busy ? 0.5 : 1) - e.alpha) * Math.min(1, dt * 8); // finished units fade a little
+        if (!myPhase(s)) return;
+        // thinking on its own (real-time)
+        if (!tb && (think -= dt) <= 0) {
+          think = 0.35 + Math.random() * 0.2;
+          const chase = self.team === 'enemy' || p.fight === 'chases foes it sees';
+          if (!target && !goal && !path.length && p.fight !== 'only does what it’s told' || (self.team === 'enemy' && !goal)) {
+            const sight = +p.sight || 0, f = gridTargetFor(s, e, self.team === 'enemy' ? 'enemy' : 'player', sight ? (sight + 0.5) * T() : Infinity);
+            if (f && (chase || self.inRange(f)) && f !== target) { target = f; autoT = !chase; plan(e, s); }
+          } else if (target && !target.dead && !self.inRange(target) && self.team === 'enemy') plan(e, s); // keep up with a moving target
+        }
+        if (stepT > 0) return;
+        { const three = is3D(e), k = Math.min(1, dt * 14); e.x += (self.cx - e.x) * k; if (three) e.z += (self.cy - e.z) * k; else e.y += (self.cy - e.y) * k; } // settle on its tile
+        if (target) {
+          if (target.dead) { target = null; path = []; }
+          else if (self.inRange(target)) {
+            path = [];
+            if (tb) { if (!self.attacked) attack(e, s, target); target = null; }
+            else if (cool <= 0) attack(e, s, target);
+            return;
+          } else if (autoT) { target = null; autoT = false; path = []; } // it only fights what's in range: don't chase
+          else if (!path.length) { if (tb && self.movesLeft <= 0) { target = null; return; } if (!plan(e, s) || !path.length) { target = null; return; } }
+        }
+        if (!path.length) { if (goal) { goal = null; s.emit('unitArrived', e); } return; }
+        const [dx, dy] = path[0], three = is3D(e), nx = self.cx + dx * T(), ny = self.cy + dy * T();
+        const b = blockerAt(s, nx, three ? e.y : ny, three ? ny : e.z, e);
+        if (b) {
+          if (b === target) { path = []; return; }
+          if (unitOf(b)?.team === self.team && (wait += dt) < 0.45) return; // a friend is in the way: wait for it a moment
+          wait = 0; if (!plan(e, s, true) || !path.length) { path = []; goal = null; if (!target) s.emit('unitArrived', e); }
+          return;
+        }
+        wait = 0; path.shift(); self.cx = nx; self.cy = ny; self.movesLeft--; self.acted = true;
+        face(e, dx, dy);
+        const st = Math.max(0.03, +p.stepTime || 0.16);
+        s.tween(e, three ? { x: nx, z: ny } : { x: nx, y: ny }, st * 0.92); stepT = st;
+        if (p.sound !== false && self.team === 'player') s.engine.audio.tone({ freq: 480 + Math.random() * 80, to: 560, dur: 0.04, vol: 0.035 });
+        s.emit('unitStep', e, dx, dy);
+        if (!path.length && !target && goal) { goal = null; s.emit('unitArrived', e); }
+      },
+      /** Enemy units take their turn one after another. */
+      turn(e, s) {
+        if (self.team !== 'enemy') return;
+        self.movesLeft = Math.round(+p.moves || 4); self.attacked = false;
+        const list = squadUnits(s, 'enemy'), i = list.indexOf(e), gap = 0.3, st = Math.max(0.03, +p.stepTime || 0.16);
+        s.holdTurn(i * gap + (self.movesLeft + 1) * st + 0.45);
+        s.after(i * gap, () => {
+          if (e.dead || s.state !== 'play') return;
+          const sight = +p.sight || 0, f = gridTargetFor(s, e, 'enemy', sight ? (sight + 0.5) * T() : Infinity); if (!f) return;
+          target = f; if (!self.inRange(f)) plan(e, s);
+        });
+      },
+      destroy(e, s) { if (e._bars) delete e._bars.health; s.squad?.sel.delete(e); },
+    };
+    return self;
+  },
+});
+
+registerBehavior('squadControl', {
+  label: 'Unit Commander', description: 'How the player commands Squad Units: tapping, dragging a selection box or the camera, formations, highlights, ending turns, winning and losing. Optional: without one the defaults are used.',
+  params: [
+    { key: 'tapMode', label: 'Tapping a unit', type: 'select', options: ['adds to the group', 'picks just that one'], default: 'adds to the group', info: 'Double-tap a unit to select all of them.' },
+    { key: 'drag', label: 'Dragging on the ground', type: 'select', options: ['draws a selection box', 'moves the camera', 'nothing'], default: 'draws a selection box', info: 'Dragging from a unit always sends it (and its group) where you let go.' },
+    { key: 'formation', label: 'Formation', type: 'select', options: ['group', 'line', 'column', 'keep their shape'], default: 'group' },
+    { key: 'showRange', label: 'Show where units can go (turn-based)', type: 'bool', default: true },
+    { key: 'showPaths', label: 'Show paths', type: 'bool', default: true },
+    { key: 'autoEndTurn', label: 'End the turn when every unit is done', type: 'bool', default: true },
+    { key: 'winWhenNoEnemies', label: 'Win when every enemy is gone', type: 'bool', default: true },
+    { key: 'loseWhenNoUnits', label: 'Game over when all your units are gone', type: 'bool', default: true },
+    ...colorParams({ color: ['Selection', '#4fc3f7'], moveColor: ['Move tiles', '#4fc3f7'], attackColor: ['Targets', '#ff5252'] }),
+  ],
+  create(p) { return { start(e, s) { s.squadCfg = p; squadOf(s); }, update(e, dt, s) { if (s.squad) squadTick(s); } }; },
 });
 
 registerBehavior('boardCell', {
@@ -12669,6 +13230,10 @@ export const LOGIC_EVENTS = {
   dialogueStarted: { label: 'Dialogue starts', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Talking to ${p.dialogue}` : 'A conversation starts') },
   dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
   dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
+  turnStarted: { label: 'Your turn starts', icon: 'clock', say: () => 'Your turn starts' },
+  unitsSelected: { label: 'Units selected', icon: 'player', say: () => 'Units are selected' },
+  unitArrived: { label: 'Unit arrives', icon: 'flag', params: [sug(txt('unit', '', 'unit name or tag (empty = any)'), 'tags')], say: (p) => (p.unit ? `${p.unit} arrives` : 'A unit arrives') },
+  unitDefeated: { label: 'Unit defeated', icon: 'enemy', params: [opt('team', ['any', 'yours', 'enemy'], 'any', 'team')], say: (p) => (p.team === 'any' ? 'A unit is defeated' : p.team === 'yours' ? 'One of your units is defeated' : 'An enemy unit is defeated') },
   ate: { label: 'Eats or drinks', icon: 'heart', params: [opt('need', ['any', 'hunger', 'thirst'], 'any', 'which')], say: (p) => (p.need === 'thirst' ? 'Drinks' : p.need === 'hunger' ? 'Eats' : 'Eats or drinks') },
   win: { label: 'Level won', icon: 'trophy' },
   lose: { label: 'Game over', icon: 'enemy' },
@@ -12699,6 +13264,8 @@ export const LOGIC_CONDITIONS = {
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  unitCount: { label: 'Number of units', icon: 'player', params: [opt('which', ['selected', 'yours', 'enemy', 'ready this turn'], 'selected', 'units'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(+c.s.vars[{ selected: 'selectedUnits', yours: 'unitsLeft', enemy: 'enemiesLeft', 'ready this turn': 'unitsReady' }[p.which] || 'selectedUnits'] || 0, p.op, +p.value || 0), say: (p) => `${p.which} units ${p.op} ${p.value}` },
+  isPlayerTurn: { label: 'It is your turn', icon: 'clock', test: (c) => c.s.isPlayerTurn, say: () => 'it is your turn' },
   questIs: { label: 'Quest state', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests'), opt('state', ['active', 'ready', 'done', 'failed', 'available', 'locked', 'started', 'not started'], 'active', 'is')], test: (c, p) => storyCond(`quest ${p.quest} is ${p.state}`, c.s.storyEnv()), say: (p) => `“${p.quest}” is ${p.state}` },
   storyCheck: { label: 'Story check (dialogue condition)', icon: 'sign', params: [txt('check', 'has Key and coins >= 10', 'check')], test: (c, p) => storyCond(p.check, c.s.storyEnv(c.e)), say: (p) => p.check },
   canCraft: { label: 'Can craft', icon: 'key', params: [sug(txt('item', 'Wooden Sword', 'item'), 'items'), num('times', 1, 'times')], test: (c, p) => c.s.canCraft(p.item, +p.times || 1), say: (p) => `can craft ${p.item}` },
@@ -12756,6 +13323,15 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  npcSay: { cat: 'Game', label: 'NPC says (bubble)', icon: 'sign', params: [sug(txt('npc', 'Villager', 'NPC (empty = this)'), 'objects'), txt('text', 'Nice day!', 'says')], run: (c, p) => { const e = p.npc ? c.s.find(p.npc) : c.e; e?.getBehavior('npc')?.say(p.text); }, say: (p) => `${p.npc || 'This NPC'} says “${p.text}”` },
+  squadSelect: { cat: 'Game', label: 'Select units', icon: 'player', params: [opt('which', ['all yours', 'none', 'by tag or name', 'next one'], 'all yours', 'select'), sug(txt('tag', 'archer', 'tag or name'), 'tags')], run: (c, p) => { const s = c.s; if (p.which === 'none') return squadSelect(s, []); if (p.which === 'next one') return s.send('select next'); squadSelect(s, squadUnits(s, 'player').filter((e) => p.which === 'all yours' || e.name === p.tag || e.has(p.tag))); }, say: (p) => (p.which === 'by tag or name' ? `Select units: ${p.tag}` : `Select ${p.which}`) },
+  squadMove: { cat: 'Game', label: 'Send units', icon: 'move', params: [opt('who', ['selected', 'all yours', 'by tag or name'], 'selected', 'units'), sug(txt('tag', 'archer', 'tag or name'), 'tags'), opt('to', ['an object', 'a position', 'attack an object'], 'an object', 'to'), sug(txt('object', 'Flag', 'object'), 'objects'), num('x', 0, 'x'), num('y', 0, 'y (z in 3D)')], run: (c, p) => {
+    const s = c.s, list = p.who === 'selected' ? [...squadOf(s).sel] : squadUnits(s, 'player').filter((e) => p.who === 'all yours' || e.name === p.tag || e.has(p.tag)); if (!list.length) return;
+    if (p.to === 'a position') { const T = unitOf(list[0]).tile, o = gridOrigin(s, T); return squadOrder(s, list, { x: Math.round((+p.x - o.x) / T) * T + o.x, y: Math.round((+p.y - o.y) / T) * T + o.y }); }
+    const t = c.s.find(p.object); if (!t) return; if (p.to === 'attack an object') return squadOrder(s, list, { attack: t });
+    const cc = cellOf(s, t); squadOrder(s, list, cc); }, say: (p) => `Send ${p.who === 'by tag or name' ? p.tag : p.who} units to ${p.to === 'a position' ? `${p.x}, ${p.y}` : (p.to === 'attack an object' ? 'attack ' : '') + p.object}` },
+  squadStop: { cat: 'Game', label: 'Stop units', icon: 'move', run: (c) => { for (const e of squadOf(c.s).sel) unitOf(e)?.stop(); }, say: () => 'Stop the selected units' },
+  endTurn: { cat: 'Game', label: 'End turn', icon: 'clock', run: (c) => { if (c.s.squad) squadEndTurn(c.s); else c.s.endTurn(); }, say: () => 'End your turn' },
   questStart: { cat: 'Game', label: 'Start quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.startQuest(p.quest); }, say: (p) => `Start quest “${p.quest}”` },
   questComplete: { cat: 'Game', label: 'Complete / hand in quest', icon: 'trophy', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.completeQuest(p.quest); }, say: (p) => `Complete “${p.quest}”` },
   questFail: { cat: 'Game', label: 'Fail quest', icon: 'flag', params: [sug(txt('quest', 'The Lost Ring', 'quest'), 'quests')], run: (c, p) => { c.s.failQuest(p.quest); }, say: (p) => `Fail “${p.quest}”` },
@@ -12947,6 +13523,8 @@ function evOk(type, p, q) {
     case 'questStarted': case 'questUpdated': case 'questReady': case 'questCompleted': case 'questFailed': return !p.quest || String(q.item).toLowerCase() === String(p.quest).trim().toLowerCase();
     case 'dialogueStarted': case 'dialogueEnded': return !p.dialogue || String(q.item).toLowerCase() === String(p.dialogue).trim().toLowerCase() || String(q.other?.name || '').toLowerCase() === String(p.dialogue).trim().toLowerCase();
     case 'dialogueChoice': return !p.choice || String(q.item).toLowerCase() === String(p.choice).trim().toLowerCase();
+    case 'unitArrived': return !p.unit || q.other?.name === p.unit || !!q.other?.has?.(p.unit);
+    case 'unitDefeated': return !p.team || p.team === 'any' || (p.team === 'yours') === (q.item === 'player');
     case 'equipped': return (!p.mode || p.mode === 'either' || q.mode === p.mode) && (!p.item || sameVal(String(q.item).toLowerCase(), String(p.item).toLowerCase()));
     default: return true;
   }
@@ -12977,6 +13555,10 @@ class LogicWatcher {
     s.on('dialogueStart', (npc, name) => this.queue.push({ type: 'dialogueStarted', item: name || npc?.name || '', other: npc }));
     s.on('dialogueEnd', (npc, name) => this.queue.push({ type: 'dialogueEnded', item: name || npc?.name || '', other: npc }));
     s.on('dialogueChoice', (npc, text) => this.queue.push({ type: 'dialogueChoice', item: text, other: npc }));
+    s.on('turn', () => this.queue.push({ type: 'turnStarted' }));
+    s.on('unitsSelected', (L) => this.queue.push({ type: 'unitsSelected', value: L.length }));
+    s.on('unitArrived', (u) => this.queue.push({ type: 'unitArrived', other: u }));
+    s.on('unitDefeated', (u, team) => this.queue.push({ type: 'unitDefeated', item: team, other: u }));
     s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
     s.on('win', () => this.queue.push({ type: 'win' }));
     s.on('gameover', () => this.queue.push({ type: 'lose' }));
@@ -15304,9 +15886,10 @@ export class Engine {
     s.update(dt, this);
     if (this.quests?.length) s.questTick();
     if (s.turnSide === 'enemy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) {
+      s.turnHoldFor = 0;
       for (const e of s.entities) if (!e.dead) for (const b of e.behaviors) b.turn?.(e, s);
-      if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
-    }
+      if (s.state === 'play') { if (s.turnHoldFor > 0) { s.turnSide = 'enemyBusy'; s.turnDelay = s.turnHoldFor; } else s.playerTurn(); }
+    } else if (s.turnSide === 'enemyBusy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) s.playerTurn(); // enemies that walk several tiles hold the turn until they're done
     const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
     for (const e of s.entities) if (e.body) e.body.landed = 0; // landings this frame (any substep)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);

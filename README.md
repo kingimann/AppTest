@@ -602,6 +602,45 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - The **Quest Info** value node.
 - **From code:** `scene.startQuest`, `questState`, `questObjectives`, `advanceQuest`, `completeQuest`, `failQuest`, `resetQuest`, `startDialogue(name, { npc, start })`, and events such as `questComplete` and `dialogueChoice`. See the [Quests and dialogue guide](docs/guide/quests-dialogue.md).
 
+### Squads: select and move many units (tactics and strategy)
+
+- **Squad Unit** component: units on a grid that you command, on your team or the enemy's.
+- **Select:**
+  - tap units to add them to the group (tap again to remove);
+  - double-tap to select all;
+  - drag a box over the ground to select every unit inside it;
+  - or use the **Select All / Next Unit / End Turn** buttons (messages `select all`, `select none`, `select next`, `stop`, `end turn`).
+- **Highlights:** selection rings, health bars, the tiles each unit can reach (turn-based), enemies in range pulsing red, dashed paths with destinations, tap markers, and arrows or magic bolts for ranged attacks.
+- **Move:**
+  - tap a tile and the whole group walks there in formation (group, line, column or keep their shape), each on its own tile, finding its way around walls and waiting for each other in corridors;
+  - tap an enemy and they all attack it;
+  - or drag from a unit to send it.
+- **Turn-based:**
+  - moves per turn and one attack per unit;
+  - finished units fade, and the turn ends by itself (or with End Turn);
+  - enemy units then move one after another toward your nearest unit, and the enemy turn waits for them.
+- **Real-time:** units attack foes in range on their own, chase them, or only do what they're told. Units fight back when hit, and enemy units hunt yours.
+- **Unit Commander:** tap mode; dragging draws a box or moves the camera; formation; highlights; auto end turn; win / lose rules; colours.
+- **Variables:** `selectedUnits`, `unitsLeft`, `enemiesLeft`, `unitsReady`.
+- **Triggers and nodes:**
+  - **Events:** your turn starts, units selected, unit arrives, unit defeated.
+  - **Conditions:** number of units, it is your turn.
+  - **Instructions:** select units, send units (to an object, a position, or to attack), stop units, end turn.
+- **Create → Gameplay → Squad:** Soldier, Archer, Knight, Mage, Enemy Unit, Enemy Archer, Unit Commander (2D and 3D).
+- **New templates:** **Squad Tactics** (turn-based) and **Squad Battle** (real-time).
+- In 3D the floor no longer blocks grid movement; only things that rise above the walker's feet do.
+
+### NPCs: moving, chatting, trading and gifts
+
+- **Moving:** stand still, wander around, patrol a route (object names or x,y points), or follow the player. They stop to talk, can stop when you come close, and turn to face you.
+- **Chatter:** random lines in a speech bubble when you come close or every few seconds, and the **NPC says** instruction.
+- **Shop:**
+  - *Sells* (`Item | price | amount`) and *Buys from you* add **Buy** and **Sell** to the conversation, with "not enough coins" and any money variable;
+  - *Likes these gifts* adds **Give a gift**, which raises friendship (`friend_Name`, `my.friendship` in dialogue, ♥ on the name tag).
+- **Dialogues:** an NPC's own dialogue can jump to `-> shop`, `-> sell`, `-> gift` or `-> menu`.
+- **Name tags**, and **portraits per speaker** in the dialogue box.
+- **New presets:** Merchant, Wandering Villager, Patrol Guard, Companion.
+
 ### Grid movement (Grid Hero and Turn Enemy)
 
 - **Every input counts:** quick arrow / WASD presses each take a step (before, fast presses could be lost and holding only moved once). Holding a key or the joystick keeps walking.

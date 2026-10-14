@@ -6,6 +6,38 @@ const hud = (extra = []) => [
   ...extra,
 ];
 
+/** A squad battle on a grid: your four units (select one or several, tap to move, tap enemies to attack) against the computer's. */
+function squadGame(turnBased) {
+  const map = ['##########', '#....e...#', '#.e..#..e#', '#..###...#', '#......e.#', '#..#..##.#', '#..#.....#', '#.....#..#', '#.##..#..#', '#........#', '#..S.A...#', '#.K..S...#', '##########'];
+  const out = [], at = (c, r) => ({ x: 20 + c * 40, y: 130 + r * 40 });
+  const unit = (id, name, emoji, x, y, o) => ({ id, name, layer: 3, x, y, shape: { type: 'emoji', emoji, w: 34, h: 34 }, behaviors: [{ type: 'gridUnit', tile: 40, ...o }] });
+  let n = 0;
+  map.forEach((row, r) => [...row].forEach((ch, c) => {
+    const { x, y } = at(c, r), id = `t${r}_${c}`;
+    if (ch === '#') out.push({ id, name: 'Wall', x, y, shape: { type: 'rect', w: 40, h: 40, fill: '#3e4a3a', stroke: '#2a3328', lineWidth: 2 }, body: { type: 'static' } });
+    else out.push({ id: id + 'f', name: 'Grass', layer: -1, x, y, shape: { type: 'rect', w: 40, h: 40, fill: (r + c) % 2 ? '#2f4a2c' : '#2b4428' } });
+    if (ch === 'S') out.push(unit('s' + n++, 'Soldier', '🗡️', x, y, { hp: 6, damage: 2, moves: 4 }));
+    if (ch === 'A') out.push(unit('a' + n++, 'Archer', '🏹', x, y, { hp: 4, damage: 2, range: 3, moves: 3 }));
+    if (ch === 'K') out.push(unit('k' + n++, 'Knight', '🛡️', x, y, { hp: 10, damage: 3, moves: 3 }));
+    if (ch === 'e') out.push(unit('e' + n++, n % 2 ? 'Goblin Archer' : 'Goblin', n % 2 ? '🧝' : '👺', x, y, n % 2 ? { team: 'enemy', hp: 3, damage: 1, range: 3, moves: 3, sight: 7, shot: 'magic bolt', points: 20 } : { team: 'enemy', hp: 4, damage: 2, moves: 4, sight: 7, points: 20 }));
+  }));
+  const btn = (id, name, label, x, msg, fill) => ({ id, name, ui: true, anchor: 'bottom', x, y: -46, shape: { type: 'rect', w: 160, h: 52, radius: 14, fill }, text: { value: label, size: 18, color: '#ffffff', weight: '800' }, behaviors: [{ type: 'button', action: 'send message', value: msg, amount: 1, sound: 'click' }] });
+  out.push(
+    { id: 'cmd', name: 'Unit Commander', x: -100, y: -100, behaviors: [{ type: 'squadControl' }] },
+    { id: 'hud-score', name: 'Score Text', ui: true, anchor: 'top-left', x: 20, y: 34, text: { value: '{score}', size: 26, align: 'left' } },
+    { id: 'hud-units', name: 'Units Text', ui: true, anchor: 'top-right', x: -20, y: 34, text: { value: '⚔️ {unitsLeft}  vs  👺 {enemiesLeft}', size: 18, align: 'right', color: '#ffe082' } },
+    { id: 'hud-sel', name: 'Selected Text', ui: true, anchor: 'top', x: 0, y: 84, text: { value: turnBased ? 'Turn {turn} · {turnText} · selected {selectedUnits}' : 'Selected {selectedUnits}', size: 15, color: '#b2dfdb', weight: '600' } },
+    btn('b-all', 'Select All Button', 'Select all', turnBased ? -90 : 0, 'select all', '#2e6b8f'),
+  );
+  if (turnBased) out.push(btn('b-end', 'End Turn Button', 'End turn ⏭', 90, 'end turn', '#8f4a2e'));
+  return {
+    version: 1, name: turnBased ? 'Squad Tactics' : 'Squad Battle', mode: '2d', background: '#1b2619', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { title: turnBased ? 'SQUAD TACTICS' : 'SQUAD BATTLE', subtitle: turnBased ? 'Tap your units (or drag a box), tap a tile to move, tap a goblin to attack. Each unit moves and attacks once per turn.' : 'Select units, send them anywhere, tap goblins to attack. They fight on their own too!', turnBased, turnDelay: 0.2, orientation: 'portrait', pauseButton: true },
+    vars: { score: 0 },
+    entities: out,
+  };
+}
+
 export const templates = {
   'sky-dodge': {
     version: 1, name: 'Sky Dodge', mode: '2d', background: '#101830', view: { width: 400, height: 700 }, gravity: 0,
@@ -315,6 +347,9 @@ export const templates = {
     })(),
   },
 
+  'squad-tactics': squadGame(true),
+  'squad-rts': squadGame(false),
+
   'tic-tac-toe': {
     version: 1, name: 'Tic-Tac-Toe', mode: '2d', background: '#1b2433', view: { width: 400, height: 700 }, gravity: 0,
     settings: { title: 'TIC-TAC-TOE', subtitle: 'Three in a row beats the computer', turnBased: true, orientation: 'portrait', pauseButton: false },
@@ -398,6 +433,8 @@ export const templateInfo = [
   { key: 'voxel-world', title: 'Voxel Sandbox', blurb: 'Minecraft-style mine & build', icon: 'cube', color: '#4e7d3a' },
   { key: 'rpg-battle', title: 'Turn-Based RPG', blurb: 'Pick attacks, heals and spells', icon: 'bolt', color: '#2e4057' },
   { key: 'dungeon', title: 'Dungeon Crawler', blurb: 'Turn-based grid adventure', icon: 'door', color: '#3b2f4f' },
+  { key: 'squad-tactics', title: 'Squad Tactics', blurb: 'Command a squad, turn by turn', icon: 'flag', color: '#2b4428' },
+  { key: 'squad-rts', title: 'Squad Battle', blurb: 'Select and move units in real time', icon: 'player', color: '#3a4a2a' },
   { key: 'tic-tac-toe', title: 'Board Game', blurb: 'Tic-tac-toe vs the computer', icon: 'grid', color: '#2a3550' },
   { key: 'breakout', title: 'Breakout', blurb: 'Bounce the ball, break bricks', icon: 'square', color: '#2a2450' },
   { key: 'tap-frenzy', title: 'Tap Arcade', blurb: 'Quick tap reflex game', icon: 'circle', color: '#16233b' },

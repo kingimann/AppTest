@@ -2057,7 +2057,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -6385,7 +6385,7 @@ registerBehavior('destructible', {
 // ---- UI components ----
 /** Slider: drag along a bar to set a variable (volume, difficulty, size…). */
 registerBehavior('uiSlider', {
-  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. Optional knob, vertical sliders, steps with a click, and the value shown above the knob (the knob appears when you press Play).',
+  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. Optional knob, vertical sliders, steps with a click, and the value shown above the knob.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'volume', suggest: 'vars' },
     { key: 'min', label: 'Minimum', type: 'number', default: 0 },
@@ -6437,6 +6437,14 @@ registerBehavior('uiSlider', {
           const lx = p.showValue === 'at the end' ? (V ? 0 : W / 2 + 30) : kx, ly = p.showValue === 'at the end' ? (V ? -H / 2 - 18 : 0) : (V ? ky : ky - 30);
           label.x = V && p.showValue !== 'at the end' ? kx + 34 : lx; label.y = ly; if (label.local) { label.local.x = label.x; label.local.y = label.y; label.local.visible = show; }
         }
+      },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || knob || p.knob === 'none') return;
+        const ex = e.extents(), W = (ex.hx || 80) * 2, H = (ex.hy || 10) * 2, V = vert(), ks = +p.knobSize || Math.max(22, Math.min(V ? W : H, 40) * 1.6), f = clamp(((+(s.vars[p.var] ?? p.start) || 0) - +p.min) / ((+p.max - +p.min) || 1), 0, 1);
+        const kx = e.x + (V ? 0 : -W / 2 + f * W), ky = e.y + (V ? H / 2 - f * H : 0);
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2; ctx.fillStyle = p.knobColor; ctx.beginPath();
+        if (p.knob === 'square') UK.rr(ctx, kx - ks / 2, ky - ks / 2, ks, ks, 6); else ctx.arc(kx, ky, ks / 2, 0, Math.PI * 2);
+        ctx.fill(); ctx.restore();
       },
     };
   },
@@ -9534,9 +9542,11 @@ registerBehavior('uiInput', {
   },
 });
 
+/** Editor previews: components that build their parts when you press Play draw a still picture of them in the Scene and UI views. */
+const previewText = (ctx, str, x, y, size, color, weight = 600, align = 'center', maxW) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(String(str), x, y, maxW); };
 /** List View: rows made from text, a list variable or numbers; scroll by dragging, tap a row to pick it. */
 registerBehavior('uiList', {
-  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The rows appear when you press Play.',
+  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The editor shows a preview of the rows.',
   params: [
     { key: 'source', label: 'Rows from', type: 'select', options: ['these items', 'a list variable', 'numbers 1 to N'], default: 'these items' },
     { key: 'items', label: 'Items (comma separated)', type: 'text', default: 'Sword, Shield, Potion, Map, Key, Bow, Lantern', showIf: { source: ['these items'] } },
@@ -9620,13 +9630,27 @@ registerBehavior('uiList', {
         }
       },
       destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || rows.length) return;
+        const { W, H, rh, gap, pad } = geo(e), x0 = e.x - W / 2, y0 = e.y - H / 2, items = itemsOf(s), rw = W - pad * 2, R = Math.min(+p.radius || 0, rh / 2), ts = +p.textSize || 17;
+        ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, W, H); ctx.clip();
+        if (!items.length) previewText(ctx, p.source === 'a list variable' ? `Rows from the list “${p.listVar}”` : 'No rows', e.x, e.y, 14, withAlpha(p.textColor || '#ffffff', 0.6));
+        items.forEach((it, i) => {
+          const cy = y0 + pad + rh / 2 + i * (rh + gap); if (cy - rh / 2 > y0 + H) return;
+          ctx.fillStyle = fillOf(i); UK.rr(ctx, e.x - rw / 2, cy - rh / 2, rw, rh, R); ctx.fill();
+          const vars = Object.assign(Object.create(s.vars), { item: it, i: i + 1 }), txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars), left = p.align === 'left';
+          previewText(ctx, txt, left ? e.x - rw / 2 + 16 : e.x, cy, ts, p.textColor || '#ffffff', 600, left ? 'left' : 'center', rw - 40);
+          if (p.arrow) previewText(ctx, '›', e.x + rw / 2 - 18, cy, ts + 8, p.textColor || '#ffffff', 500);
+        });
+        ctx.restore();
+      },
     };
   },
 });
 
 /** Segmented control: a row of options with a sliding highlight (Easy | Normal | Hard). */
 registerBehavior('uiSegmented', {
-  label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The options appear when you press Play.',
+  label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The editor shows a preview.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'mode', suggest: 'vars' },
     { key: 'options', label: 'Options (comma separated)', type: 'text', default: 'Easy, Normal, Hard' },
@@ -9659,13 +9683,19 @@ registerBehavior('uiSegmented', {
         const want = -W / 2 + seg * (i + 0.5); px += (want - px) * Math.min(1, dt * 16);
         if (pill) { pill.x = px; if (pill.local) pill.local.x = px; }
       },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || pill) return;
+        const o = opts(), { W, H, seg } = geo(e), r0 = Math.min(e.shape?.radius ?? 12, H / 2), k = clamp(Math.round(+p.start || 1) - 1, 0, Math.max(0, o.length - 1));
+        ctx.fillStyle = p.pillColor; UK.rr(ctx, e.x - W / 2 + seg * k + 3, e.y - H / 2 + 3, seg - 6, H - 6, Math.max(0, r0 - 3)); ctx.fill();
+        o.forEach((t, j) => previewText(ctx, t, e.x - W / 2 + seg * (j + 0.5), e.y, Math.min(17, Math.round(H * 0.4)), j === k ? p.pickedText : p.textColor, 700, 'center', seg - 8));
+      },
     };
   },
 });
 
 /** Stepper: − value + to change a number in steps; hold to repeat. */
 registerBehavior('uiStepper', {
-  label: 'Stepper', description: 'A − and + with the value in the middle (amounts, quantities, players). Hold a button to keep counting. The − and + appear when you press Play.',
+  label: 'Stepper', description: 'A − and + with the value in the middle (amounts, quantities, players). Hold a button to keep counting. The editor shows a preview.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'amount', suggest: 'vars' },
     { key: 'min', label: 'Minimum', type: 'number', default: 0 },
@@ -9697,6 +9727,13 @@ registerBehavior('uiStepper', {
         if (!e.visible) return;
         for (const d of inp.downs) for (const [b, dir] of [[minus, -1], [plus, 1]]) if (b && hitTest(s, b, d.x, d.y)) { held = { id: d.id, b, dir }; change(s, dir * (+p.step || 1), b); next = s.time + 0.45; }
         if (held) { const ptr = inp.pointers.get(held.id); if (!ptr || !hitTest(s, held.b, ptr.x, ptr.y)) held = null; else if (s.time >= next) { change(s, held.dir * (+p.step || 1), held.b); next = s.time + 0.09; } }
+      },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || minus) return;
+        const ex = e.extents(), W = (ex.hx || 70) * 2, H = (ex.hy || 22) * 2, bs = H - 8, R = Math.min(bs / 2, e.shape?.radius ?? 10);
+        for (const [t, x] of [['−', e.x - W / 2 + bs / 2 + 4], ['+', e.x + W / 2 - bs / 2 - 4]]) { ctx.fillStyle = p.buttonColor; UK.rr(ctx, x - bs / 2, e.y - bs / 2, bs, bs, R); ctx.fill(); previewText(ctx, t, x, e.y + 1, Math.round(bs * 0.6), '#ffffff', 800); }
+        const v = s.vars[p.var] ?? +p.start;
+        previewText(ctx, String(p.format || '{value}').replace(/\{value\}/g, formatNumber(+v || 0)), e.x, e.y, Math.round(H * 0.45), p.textColor, 800, 'center', W - bs * 2 - 16);
       },
     };
   },

@@ -1,8 +1,8 @@
 // Offline support: serve files from the network when online (always revalidated, so an update never mixes old and new files), from the cache when offline.
-const CACHE = 'pocket-v48';
+const CACHE = 'pocket-v49';
 const CORE = ['./', './index.html', './play.html', './icon.svg', './manifest.webmanifest', './update.js', './engine/pocket.js',
   './editor/', './editor/index.html', './editor/editor.css', './editor/editor.js', './editor/icons.js', './editor/nodes.js', './editor/modeler.js', './editor/meshops.js', './editor/timeline.js', './editor/logic.js',
-  './editor/library.js', './editor/storage.js', './editor/loading.js', './examples/templates.js', './examples/neon-dodge/', './examples/neon-dodge/main.js'];
+  './editor/library.js', './editor/storage.js', './editor/loading.js', './editor/stores.js', './examples/templates.js', './examples/neon-dodge/', './examples/neon-dodge/main.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)).catch(() => {}).then(() => self.skipWaiting()));

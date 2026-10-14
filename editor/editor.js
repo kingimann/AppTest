@@ -14,6 +14,7 @@ import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './l
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { makeCube } from './meshops.js';
+import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -4449,6 +4450,9 @@ const BUILD_DEFAULTS = {
   display: 'fullscreen', shortName: '', themeColor: '', statusBar: 'black-translucent', orientation: '', lang: 'en',
   installHint: 'off', installText: 'Add this game to your Home Screen to play any time, even offline.', pauseHidden: true, keepAwake: true, confirmLeave: false,
   social: true, headHTML: '',
+  // app stores (Codemagic)
+  appId: '', storeIOS: true, storeAndroid: true, iosPublish: 'testflight', iosDevices: 'iphone', androidTrack: 'internal', playDraft: true,
+  ascIntegration: 'codemagic', keystoreRef: 'keystore_reference', playGroup: 'google_play', buildOffset: 0, notifyEmail: '', storeFullscreen: true,
 };
 const QUALITY = { battery: 1, balanced: 2, sharp: 3 };
 const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -4499,8 +4503,8 @@ function sizeReport(game) {
   return { pictures: sum('picture'), sounds: sum('sound'), top: assets.sort((a, b) => b.size - a.size).slice(0, 5) };
 }
 /** One self-contained HTML file: engine + game + app icon, splash screen and player options. */
-async function buildHTML() {
-  const o = buildOpts(), src = await loadEngineSrc(), { game, start } = buildGameJSON();
+async function buildHTML({ native = false } = {}) {
+  const o = { ...buildOpts(), ...(native ? { installable: false, installHint: 'off', confirmLeave: false } : {}) }, src = await loadEngineSrc(), { game, start } = buildGameJSON(); // native: inside the iOS / Android app
   const title = o.title || root.name || 'My Game', bg = hexOr(root.background, '#000000'), splashBg = hexOr(o.splashBg, bg);
   const iconURL = await makeIcon(o, 512), small = await makeIcon(o, 180);
   const orient = o.orientation || { portrait: 'portrait', landscape: 'landscape' }[root.settings?.orientation] || 'any', theme = hexOr(o.themeColor, bg), short = (o.shortName || title).slice(0, 12);
@@ -4595,6 +4599,39 @@ ${payload}
 </script>
 </body></html>`;
   return { html, title, engineBytes, gameBytes };
+}
+/** A square splash for the store apps: the background with the icon in the middle. */
+function makeSplash(o, size = 2732, iconFrac = 0.22, transparent = false) {
+  return makeIcon(o, 1024).then((url) => new Promise((ok) => {
+    const c = h('canvas', { width: size, height: size }), x = c.getContext('2d'), img = new Image(), bg = hexOr(o.splashBg, hexOr(root.background, '#000000'));
+    if (!transparent) { x.fillStyle = bg; x.fillRect(0, 0, size, size); }
+    img.onload = () => { const w = size * iconFrac; if (!transparent) { x.save(); x.beginPath(); x.roundRect?.((size - w) / 2, (size - w) / 2, w, w, w * 0.22); x.clip(); } x.drawImage(img, (size - w) / 2, (size - w) / 2, w, w); x.restore?.(); ok(c.toDataURL('image/png')); };
+    img.src = url;
+  }));
+}
+const dataBytes = async (url) => new Uint8Array(await (await fetch(url)).arrayBuffer());
+/** The app-store settings as the project generator wants them. */
+function storeOpts() {
+  const o = buildOpts(), name = o.title || root.name || 'My Game';
+  return { name, appId: o.appId || suggestAppId(o.author, name), version: o.version || '1.0', ios: o.storeIOS !== false, android: o.storeAndroid !== false,
+    iosPublish: o.iosPublish, iosDevices: o.iosDevices, androidTrack: o.androidTrack, playDraft: !!o.playDraft, ascIntegration: o.ascIntegration, keystoreRef: o.keystoreRef,
+    playGroup: o.playGroup, buildOffset: +o.buildOffset || 0, notifyEmail: o.notifyEmail, fullscreen: o.storeFullscreen !== false,
+    orientation: o.orientation && o.orientation !== 'any' ? o.orientation : orientationOf() === 'any' ? '' : orientationOf(),
+    iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')) };
+}
+/** Build Settings → App stores: a Capacitor project with a codemagic.yaml, as a .zip. */
+async function exportStoreProject() {
+  const so = storeOpts();
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  if (!so.ios && !so.android) return toast('Tick iOS, Android or both');
+  try {
+    toast('Making the app project…');
+    const o = buildOpts(), b = await buildHTML({ native: true });
+    const [icon, fg, splash, bg] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o), makeSplash({ ...o, splashBg: o.iconBg }, 1024, 0, false)].map((p) => p.then(dataBytes)));
+    const zip = makeZip(storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }));
+    const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-app.zip' }); document.body.append(a); a.click(); a.remove();
+    toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
+  } catch (err) { toast('Could not make the app project: ' + err.message); }
 }
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
 async function exportHTML() {
@@ -4784,6 +4821,33 @@ function openBuildSettings() {
       C('lang', { label: 'Language code', def: 'en', placeholder: 'en, fr, es…' }),
       C('headHTML', { label: 'Extra code in <head> (advanced)', type: 'code', def: '', placeholder: '<script>…analytics…</script>', infoText: 'Pasted into every build as-is: analytics, fonts, meta tags. Only paste code you trust.' }),
     ]),
+    sec('App stores (iOS & Android)', 'phone', (() => {
+      const so = storeOpts(), idOk = validAppId(so.appId);
+      return [
+        h('p', { class: 'desc' }, 'Publish to the App Store and Google Play with Codemagic, a cloud build service. No Mac or Android Studio needed. Download the app project, put it on GitHub, open it on codemagic.io and start a build: README.md inside walks you through the one-time setup.'),
+        Cr('appId', { label: 'App ID (bundle ID / package name)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.game. It can never change after the first store release.' }),
+        !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.game (each part starts with a letter).'),
+        h('div', { class: 'row' }, h('label', {}, 'Platforms'), h('div', { class: 'pair' },
+          h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: o.storeIOS !== false, onchange: (e) => { B().storeIOS = e.target.checked; changed(); redo(); } }), 'iOS'),
+          h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: o.storeAndroid !== false, onchange: (e) => { B().storeAndroid = e.target.checked; changed(); redo(); } }), 'Android'))),
+        o.storeIOS !== false && [
+          Cr('iosPublish', { label: 'iOS: send it to', type: 'select', options: [['testflight', 'TestFlight (test on your iPhone)'], ['review', 'TestFlight, then App Store review'], ['none', 'Nowhere (just build the .ipa)']] }),
+          C('iosDevices', { label: 'iOS devices', type: 'select', options: [['iphone', 'iPhone only'], ['universal', 'iPhone and iPad']], infoText: 'iPad needs iPad screenshots in App Store Connect too.' }),
+          C('ascIntegration', { label: 'App Store Connect key name in Codemagic', def: 'codemagic' }),
+        ],
+        o.storeAndroid !== false && [
+          Cr('androidTrack', { label: 'Android: publish to', type: 'select', options: [['internal', 'Internal testing'], ['alpha', 'Closed testing (alpha)'], ['beta', 'Open testing (beta)'], ['production', 'Production (everyone)'], ['none', 'Nowhere (just build the .aab)']] }),
+          o.androidTrack !== 'none' && C('playDraft', { label: 'First release (app still a draft on Google Play)', type: 'bool', infoText: 'Google only accepts drafts until the app has been reviewed once. Turn this off afterwards.' }),
+          C('keystoreRef', { label: 'Keystore name in Codemagic', def: 'keystore_reference' }),
+          o.androidTrack !== 'none' && C('playGroup', { label: 'Google Play key group in Codemagic', def: 'google_play' }),
+        ],
+        C('storeFullscreen', { label: 'Full screen (hide the status bar)', type: 'bool' }),
+        C('buildOffset', { label: 'Add to build numbers', type: 'number', step: 1, infoText: 'Each Codemagic build gets the next number. Add to it if you already uploaded builds from somewhere else.' }),
+        C('notifyEmail', { label: 'Email me when a build finishes', def: '', placeholder: 'you@example.com' }),
+        h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · icon and splash from Icon and Loading screen above.`),
+        h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || (!so.ios && !so.android), onclick: exportStoreProject }, icon('download'), 'Download app project (.zip)')),
+      ];
+    })()),
     sec('File size', 'download', [
       C('compress', { label: 'Compress (much smaller file)', type: 'bool' }),
       h('p', { class: 'desc' }, 'Needs a browser from 2023 or later (iOS 16.4+). Turn it off for very old phones.'),

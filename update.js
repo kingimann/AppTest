@@ -8,7 +8,7 @@
   if (!location.protocol.startsWith('http') || !window.fetch) return;
   var base = new URL('./', document.currentScript ? document.currentScript.src : location.href);
   var FILES = ['index.html', 'play.html', 'engine/pocket.js', 'examples/templates.js', 'editor/', 'editor/index.html', 'editor/editor.css', 'editor/editor.js',
-    'editor/icons.js', 'editor/storage.js', 'editor/loading.js', 'editor/nodes.js', 'editor/modeler.js', 'editor/meshops.js', 'editor/timeline.js', 'editor/logic.js', 'editor/library.js'];
+    'editor/icons.js', 'editor/storage.js', 'editor/loading.js', 'editor/nodes.js', 'editor/modeler.js', 'editor/meshops.js', 'editor/timeline.js', 'editor/logic.js', 'editor/library.js', 'editor/stores.js'];
   var running = null, latest = null, bar = null, busy = false, dismissed = null;
 
   function read() {

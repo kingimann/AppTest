@@ -106,6 +106,18 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
   - **Behaviour:** **pause when switching apps**, **keep the screen on while playing**, and **ask before leaving mid-game**.
   - **Sharing:** a **link preview** (title and description for messages and social posts) and the **language code**.
   - **Extra code in `<head>`** (advanced): analytics, fonts or meta tags, pasted into every build as-is.
+- **App stores (iOS & Android):** publish with **Codemagic** ([codemagic.io](https://codemagic.io)), a cloud build service. You don't need a Mac or Android Studio.
+  - Set the **App ID** (like `com.yourname.game`; it's checked as you type) and tick iOS, Android or both.
+  - **iOS:** send to TestFlight, to TestFlight and then App Store review, or just build the .ipa; iPhone only or iPhone + iPad; the name of your App Store Connect key in Codemagic.
+  - **Android:** publish to internal / closed / open testing or production, or just build the .aab; *First release* (Google only accepts drafts until the first review); the keystore and Google Play key names in Codemagic.
+  - Also: full screen, a number to add to build numbers, and an email when a build finishes.
+  - **Download app project (.zip)** makes a [Capacitor](https://capacitorjs.com) project:
+    - `www/index.html`: the game, without the Home Screen prompts.
+    - `capacitor.config.json` and the icon / splash images in `assets/`.
+    - `codemagic.yaml` with an iOS and / or Android workflow.
+    - `scripts/prepare-native.mjs`: sets the version, build number, release signing, orientation and full screen in the native projects that Codemagic generates on each build.
+    - A `README.md` with the one-time setup: Apple / Google accounts, App Store Connect key, certificates, keystore, Play service account, and the first manual Play upload.
+  - Put the folder on GitHub, add it in Codemagic, and start a workflow. Build numbers go up by themselves; raise **Version** for a store update.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
 - **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
 - **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.

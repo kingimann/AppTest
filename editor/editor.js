@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, SaveFiles, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
+import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -2116,7 +2116,7 @@ function addVisualScript() {
 function openCreate(startCat) {
   $('.cs')?.remove();
   const three = is3D(), objs = three ? OBJECTS_3D : OBJECTS_2D, prefabs = three ? PREFABS_3D : PREFABS_2D;
-  const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light'];
+  const CAMLIGHT = ['Camera', 'Directional Light', 'Global Light 2D', 'Light', 'Spotlight', 'Torch (fire light)'];
   const artOf = (o) => { const src = o.props?.sprite?.src; return typeof src === 'string' && src.startsWith('art:') ? src : null; };
   const fromDef = (o, kind) => ({ label: o.label, icon: o.icon, art: o.art || artOf(o), desc: o.desc || o.note || '', group: o.group, fn: () => (kind === 'entity' ? addEntity(o.props) : addPrefab(o)) });
   const spriteItems = Object.entries(SPRITE_GROUPS).filter(([g]) => g !== 'Icons' && g !== 'UI Frames').flatMap(([g, list]) => list.map((k) => {
@@ -3262,6 +3262,14 @@ function renderInspector() {
       C('light.intensity', { label: 'Brightness', type: 'number', def: 1, step: 0.1 }),
       C('light.range', { label: 'Range', type: 'number', def: threeD ? 8 : 160, step: threeD ? 0.5 : 10 }),
       C('light.flicker', { label: 'Flicker (0–1, like a torch)', type: 'number', def: 0, step: 0.1 }),
+      C('light.type', { label: 'Type', type: 'select', options: [['point', 'Point'], ['spot', 'Spotlight']], def: +j.light.cone > 0 ? 'spot' : 'point', structure: true }),
+      (j.light.type === 'spot' || (!j.light.type && +j.light.cone > 0)) && C('light.cone', { label: 'Spot width (°)', type: 'number', def: 60, range: [5, 179], step: 5 }),
+      (j.light.type === 'spot' || (!j.light.type && +j.light.cone > 0)) && (threeD ? C('light.tilt', { label: 'Aim down (°, 90 = straight down; turn the object to aim it)', type: 'number', def: 90, range: [0, 90], step: 5 })
+        : C('light.aim', { label: 'Aim (°, 0 = right, 90 = down; plus the object’s rotation)', type: 'number', def: 0, range: [-180, 180], step: 15 })),
+      C('light.effect', { label: 'Effect', type: 'select', options: [['', 'Steady'], ['pulse', 'Pulse'], ['blink', 'Blink'], ['fire', 'Fire'], ['rainbow', 'Rainbow']], def: '', structure: true, dropdown: true }),
+      j.light.effect && C('light.speed', { label: 'Effect speed', type: 'number', def: 1, range: [0.1, 6], step: 0.1 }),
+      !threeD && C('light.soft', { label: 'Softness', type: 'number', def: 0.5, range: [0, 1], step: 0.05 }),
+      !threeD && C('light.shadows', { label: 'Casts shadows (solid objects block it)', type: 'bool', def: false }),
     ], { icon: 'bulb', key: 'light', menu: removeMenu(() => { delete j.light; changed({ structure: true }); }, 'light') }));
   }
   if (j.sun) box.append(comp('Directional Light', [
@@ -3485,6 +3493,17 @@ function syncFoldBtn(box) {
   const comps = [...box.querySelectorAll('.comp')], allShut = comps.length && comps.every((el) => el.classList.contains('closed'));
   b.querySelector('span').textContent = allShut ? 'Expand all' : 'Collapse all'; b.classList.toggle('on', !!allShut);
 }
+/** Lighting Presets: through the level's light object (Directional Light / Global Light 2D) when it has one. */
+function applyLightingPreset(name) {
+  const pr = LIGHT_PRESETS[name]; if (!pr) return;
+  const threeD = is3D(), lo = project.entities.find((e) => (threeD ? e.sun : e.globalLight));
+  if (threeD) {
+    const P = pr.d3; if (lo) Object.assign(lo.sun, { color: P.color, intensity: P.intensity, ambient: P.ambient }); else Object.assign(project.light ||= {}, { color: P.color, intensity: P.intensity, ambient: P.ambient });
+    Object.assign(project.light ||= {}, { sky: P.sky, ground: P.ground }); project.background = P.bg;
+  } else if (lo) Object.assign(lo.globalLight, { brightness: pr.d2[0], color: pr.d2[1] });
+  else Object.assign(project.light ||= {}, { darkness: 1 - pr.d2[0], ambientColor: pr.d2[1] });
+  changed({ structure: true }); pushHistory(); renderInspector(); toast(`Lighting: ${name}`);
+}
 function renderSceneSettings(box) {
   const P = () => project, C = (path, spec) => control(P, path, spec), threeD = is3D();
   const game = levelList()[0], GS = (path, spec) => control(() => levelList()[0], path, spec); // game-wide settings live on the first level
@@ -3533,6 +3552,10 @@ function renderSceneSettings(box) {
     threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
     h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
   ], { icon: 'body', key: 's-phys' }));
+  box.append(comp('Lighting Presets', [
+    h('p', { class: 'desc' }, 'One tap sets the whole mood. Change it while playing with the Lighting Preset node (with a fade).'),
+    h('div', { class: 'lp-grid' }, Object.entries(LIGHT_PRESETS).map(([name, pr]) => h('button', { class: 'lp-btn', style: `--a:${threeD ? pr.d3.bg : pr.d2[1]};--b:${threeD ? pr.d3.color : mixHex('#000000', '#ffffff', pr.d2[0])}`, onclick: () => applyLightingPreset(name) }, h('i'), name))),
+  ], { icon: 'sun', key: 's-lightpre' }));
   const lightObj = project.entities.find((e) => (threeD ? e.sun : e.globalLight));
   if (lightObj) box.append(h('div', { class: 'obox info', style: 'margin:16px 14px 0' }, `Lighting comes from “${lightObj.name}”. `, h('button', { class: 'btn', style: 'margin-top:8px;width:100%', onclick: () => select(lightObj.id) }, icon('sun'), `Select ${lightObj.name}`)));
   else box.append(comp('Lighting', threeD ? [
@@ -3737,7 +3760,7 @@ function renderSceneSettings(box) {
 // ============================================================================
 const BEH_META = {
   move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraTargetGroup: ['Camera', 'target'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraControls: ['Camera', 'hand'], cameraTargetGroup: ['Camera', 'target'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
@@ -4184,6 +4207,8 @@ const OBJECTS_2D = [
   { icon: 'image', label: 'Image', props: { name: 'Image', sprite: { src: '', w: 80, h: 80 } }, pickImage: true },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 0, oz: 0, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', light: { color: '#ffd9a0', intensity: 1, range: 160 } } },
+  { icon: 'bulb', label: 'Spotlight', props: { name: 'Spotlight', light: { color: '#fff3c4', intensity: 1.2, range: 260, type: 'spot', cone: 50, aim: 90, shadows: true } } },
+  { icon: 'bulb', label: 'Torch (fire light)', props: { name: 'Torch', shape: { type: 'emoji', emoji: '🔥', w: 30, h: 30 }, light: { color: '#ffb35c', intensity: 1, range: 180, effect: 'fire', shadows: true } } },
   { icon: 'sun', label: 'Global Light 2D', props: { name: 'Global Light 2D', globalLight: { brightness: 1, color: '#0a0a1e' } } },
   { icon: 'grid', label: 'Tilemap', props: { name: 'Tilemap', x: 0, y: 520, tiles: { size: 40, palette: TILE_PALETTE.map((t) => ({ ...t })), cells: Object.fromEntries([...Array(10)].map((_, i) => [i + ',0', 1])) } }, tilemap: true },
 ];
@@ -4209,6 +4234,7 @@ const OBJECTS_3D = [
   { icon: 'hud', label: 'UI Text', props: { name: 'UI Text', ui: true, anchor: 'top', x: 0, y: 80, text: { value: 'Lives {lives}', size: 22, color: '#ffffff' } } },
   { icon: 'camera', label: 'Camera', props: { name: 'Camera', y: 4, z: 8, behaviors: [{ type: 'camera', mode: 'follow', target: 'player', smooth: 6, zoom: 1, fov: 60, ox: 0, oy: 7, oz: 11, lookAhead: 0, deadZone: 0, bounds: 'none', priority: 0 }] } },
   { icon: 'bulb', label: 'Light', props: { name: 'Light', y: 2, light: { color: '#ffd9a0', intensity: 1.5, range: 8 } } },
+  { icon: 'bulb', label: 'Spotlight', props: { name: 'Spotlight', y: 4, light: { color: '#fff3c4', intensity: 2.5, range: 10, type: 'spot', cone: 50, tilt: 90 } } },
   { icon: 'bulb', label: 'Lamp', props: { name: 'Lamp', model: { parts: [{ geometry: 'cylinder', x: 0, y: 1, z: 0, r: 0.06, h: 2, color: '#455a64' }, { geometry: 'sphere', x: 0, y: 2.1, z: 0, r: 0.22, color: '#fff3c4', emissive: 1 }] }, light: { color: '#ffd9a0', intensity: 1.6, range: 7 } } },
   { icon: 'sun', label: 'Directional Light', props: { name: 'Directional Light', y: 6, rx: 50, ry: -30, sun: { color: '#fff4e0', intensity: 1, ambient: 0.45, shadows: true } } },
 ];

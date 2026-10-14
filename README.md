@@ -448,6 +448,20 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - New games start, like a Unity scene, with a **Main Camera** object (follows the player, or stays put if there isn't one) and a light object: **Directional Light** in 3D (its rotation aims the sun and the shadows; colour, intensity, ambient, shadows) or **Global Light 2D** (how bright the level is; Point Lights shine through the dark).
 - Create → **Camera & lights** adds more: Camera, Directional Light / Global Light 2D, Point Light. While a light object exists, the level's Lighting settings defer to it.
 
+### More lighting and camera tools
+
+- **Light types:** a light is a **Point** light (shines all round) or a **Spotlight** (a cone with a width you set). Aim a 2D spotlight with *Aim* (0 = right, 90 = down) plus the object's rotation; in 3D, *Aim down* tilts it and turning the object points it.
+- **Light effects:** Steady, **Pulse**, **Blink**, **Fire** (a flickering warm torch) and **Rainbow**, each with an effect speed.
+- **2D soft light and shadows:** *Softness* sets how gently a 2D light fades at its edge. **Casts shadows** makes solid objects (anything with a body) block the light, so walls throw dark shadows behind them.
+- **Lighting Presets** (Game Settings): one tap for Day, Golden hour, Evening, Night, Overcast, Cave, Spooky, Underwater or Neon. They set brightness, colours, ambient light, sky and background together, on the Global Light 2D / Directional Light object if there is one.
+- **Create → Camera & lights:** new **Spotlight** (2D and 3D) and **Torch (fire light)** objects.
+- **Camera Controls** (component, on a camera): lets players **drag to pan**, **pinch** (or use the mouse wheel) to zoom, flick to glide and **double-tap** to go back. It has zoom limits and a pan limit, and ignores fingers that start on tappable objects. Use it for maps, strategy, idle and building games.
+- **New nodes:**
+  - **Camera:** **Focus Camera On** (zooms on an object for some seconds, then *back*), **Zoom Punch** (a quick zoom in and out for hits and pickups), **Take Photo** (a picture of the game with its UI, which you can share, save to the device or keep in a variable).
+  - **Looks:** **Fade Light** (to a brightness, range and colour), **Set Light Effect**, **Set Darkness / Ambient** (2D, it now fades), **Set Sun (3D)**, **Lighting Preset** (fades the whole level to a mood, with *done*).
+  - **Values:** **Light Brightness**.
+- **From code:** `engine.takePhoto()` returns a PNG data URL. `LIGHT_PRESETS` is exported.
+
 ### Move: joystick, tilt and drag
 
 - **Taps and the joystick get along:**

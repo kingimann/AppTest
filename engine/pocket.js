@@ -46,6 +46,81 @@ export function hexToRgb(hex) {
 }
 
 const rgba = (hex, a) => { const [r, g, b] = hexToRgb(hex); return `rgba(${r * 255 | 0},${g * 255 | 0},${b * 255 | 0},${a})`; };
+/** A colour between two hex colours (light and ambient fades). */
+const mixHexE = (a, b, t) => { const A = hexToRgb(a || '#000000'), B = hexToRgb(b || '#000000'), c = A.map((v, i) => Math.round((v + (B[i] - v) * clamp(t, 0, 1)) * 255)); return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join(''); };
+const hueHex = (h) => { const f = (n) => { const k = (n + h / 30) % 12, a = Math.min(0.5, 1 - 0.5); return Math.round(255 * (0.5 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); }; return '#' + f(0) + f(8) + f(4); };
+/** A light right now: brightness factor and colour after its effect (flicker, pulse, blink, fire, rainbow). */
+function lightNow(L, time, i) {
+  let k = flickerK(L, time, i), col = L.color; const sp = +L.speed || 1;
+  switch (L.effect) {
+    case 'pulse': k *= 0.6 + 0.4 * (0.5 + 0.5 * Math.sin(time * sp * Math.PI * 2 + i)); break;
+    case 'blink': k *= Math.floor(time * sp * 2 + i * 0.37) % 2 ? 0.05 : 1; break;
+    case 'fire': k *= 0.78 + 0.22 * (0.5 + 0.25 * Math.sin(time * 13 * sp + i * 3) + 0.25 * Math.sin(time * 31 * sp + i)); col = mixHexE(L.color, '#ff7a1a', 0.25 + 0.2 * Math.sin(time * 9 * sp + i)); break;
+    case 'rainbow': col = hueHex((time * sp * 90 + i * 50) % 360); break;
+  }
+  return { k, col };
+}
+/** 2D shadows: the area a light reaches, as a polygon (rays to the corners of solid objects nearby). */
+function lightPoly(scene, e, r) {
+  const segs = [], pts = [], x0 = e.x, y0 = e.y;
+  const box = (l, t, rr, b) => { const c = [[l, t], [rr, t], [rr, b], [l, b]]; for (let i = 0; i < 4; i++) { segs.push([c[i], c[(i + 1) % 4]]); pts.push(c[i]); } };
+  box(x0 - r, y0 - r, x0 + r, y0 + r);
+  for (const o of scene.entities) {
+    if (o === e || o.dead || o.ui || o.visible === false || !o.body || o.body.sensor || o.template || o.light) continue;
+    if (e.parentEnt === o || o.parentEnt === e) continue;
+    const ex = o.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, cx = o.x + (ex.ox || 0), cy = o.y + (ex.oy || 0);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy) || Math.abs(cx - x0) > r + hx || Math.abs(cy - y0) > r + hy) continue;
+    box(cx - hx, cy - hy, cx + hx, cy + hy);
+  }
+  const angles = []; for (const [px, py] of pts) { const a = Math.atan2(py - y0, px - x0); angles.push(a - 1e-4, a, a + 1e-4); }
+  const out = [];
+  for (const a of angles) {
+    const dx = Math.cos(a), dy = Math.sin(a); let best = Infinity;
+    for (const [[ax, ay], [bx, by]] of segs) {
+      const sx = bx - ax, sy = by - ay, den = dx * sy - dy * sx; if (Math.abs(den) < 1e-9) continue;
+      const t = ((ax - x0) * sy - (ay - y0) * sx) / den, u = ((ax - x0) * dy - (ay - y0) * dx) / den;
+      if (t > 0 && u >= 0 && u <= 1 && t < best) best = t;
+    }
+    if (best < Infinity) out.push([a, x0 + dx * best, y0 + dy * best]);
+  }
+  out.sort((p, q) => p[0] - q[0]);
+  return out;
+}
+const isSpot = (L) => L.type === 'spot' || (!L.type && +L.cone > 0);
+const spotCone = (L) => clamp(+L.cone || 60, 5, 359);
+/** Shape a 2D light: a spotlight cone and / or its shadow polygon, as a clip. */
+function clipLight2D(g, e, L, r, poly) {
+  if (isSpot(L)) { const a = ((+L.aim || 0) + (e.rz || 0)) * DEG, h = (spotCone(L) / 2) * DEG; g.beginPath(); g.moveTo(e.x, e.y); g.arc(e.x, e.y, r, a - h, a + h); g.closePath(); g.clip(); }
+  if (poly?.length > 2) { g.beginPath(); poly.forEach(([, x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip(); }
+}
+export const LIGHT_PRESETS = {
+  Day: { d2: [1, '#0a0a1e'], d3: { color: '#ffffff', intensity: 1, ambient: 0.45, sky: '#dfe8ff', ground: '#8a7d70', bg: '#87b8e8' } },
+  'Golden hour': { d2: [0.8, '#4a2a10'], d3: { color: '#ffb36b', intensity: 0.9, ambient: 0.35, sky: '#ffd2a0', ground: '#6d4c41', bg: '#f2a65a' } },
+  Evening: { d2: [0.55, '#2a1640'], d3: { color: '#ff9a7a', intensity: 0.55, ambient: 0.28, sky: '#7a6aa8', ground: '#3a2a3a', bg: '#5a4a8a' } },
+  Night: { d2: [0.22, '#070a24'], d3: { color: '#7d93ff', intensity: 0.25, ambient: 0.16, sky: '#1b2a5c', ground: '#101018', bg: '#0b1030' } },
+  Overcast: { d2: [0.75, '#20242c'], d3: { color: '#dfe3ea', intensity: 0.6, ambient: 0.6, sky: '#c9d2dc', ground: '#7a7a7a', bg: '#9aa5b1' } },
+  Cave: { d2: [0.06, '#000000'], d3: { color: '#6b6b6b', intensity: 0.08, ambient: 0.07, sky: '#202020', ground: '#0a0a0a', bg: '#050505' } },
+  Spooky: { d2: [0.2, '#0b2a1a'], d3: { color: '#7dffb0', intensity: 0.3, ambient: 0.15, sky: '#1a3a2a', ground: '#0a120c', bg: '#0a1a12' } },
+  Underwater: { d2: [0.5, '#06304d'], d3: { color: '#7fd4ff', intensity: 0.5, ambient: 0.4, sky: '#2a7aa8', ground: '#0a2a3a', bg: '#0e4a6e' } },
+  Neon: { d2: [0.28, '#1a0033'], d3: { color: '#c050ff', intensity: 0.4, ambient: 0.3, sky: '#40106a', ground: '#100020', bg: '#12001f' } },
+};
+/** Change the scene lighting over some seconds (2D darkness / 3D sun & ambient), through the light objects if there are any. */
+function fadeLighting(s, target, seconds = 0) {
+  const three = s.mode === '3d', gl = s.entities.find((q) => q.globalLight && !q.dead), sun = s.entities.find((q) => q.sun && !q.dead);
+  const from = three ? { ...(sun ? sun.sun : s.light), sky: s.light.sky, ground: s.light.ground, bg: s.background } : { dark: gl ? 1 - (+gl.globalLight.brightness) : +s.light.darkness || 0, col: gl ? gl.globalLight.color : s.light.ambientColor };
+  const apply = (t) => {
+    if (three) {
+      const S = sun ? sun.sun : s.light, P = target;
+      if (P.color) S.color = mixHexE(from.color, P.color, t); if (P.intensity != null) S.intensity = from.intensity + (P.intensity - from.intensity) * t; if (P.ambient != null) S.ambient = from.ambient + (P.ambient - from.ambient) * t;
+      if (P.sky) s.light.sky = mixHexE(from.sky || '#ffffff', P.sky, t); if (P.ground) s.light.ground = mixHexE(from.ground || '#ffffff', P.ground, t); if (P.bg && typeof from.bg === 'string') s.background = mixHexE(from.bg, P.bg, t);
+    } else {
+      const d = target.darkness ?? from.dark, c = target.color || from.col, nd = from.dark + (d - from.dark) * t, nc = mixHexE(from.col || '#0a0a1e', c, t);
+      if (gl) { gl.globalLight.brightness = 1 - nd; gl.globalLight.color = nc; } else { s.light.darkness = nd; s.light.ambientColor = nc; }
+    }
+  };
+  if (!(seconds > 0)) return apply(1);
+  const t0 = s.time; const tick = () => { const t = (s.time - t0) / seconds; apply(Math.min(1, t)); if (t < 1) s.after(1 / 60, tick); }; tick();
+}
 const flickerK = (L, time, i) => (L.flicker ? 1 - L.flicker * 0.25 * (1 + Math.sin(time * 23 + i * 7) * Math.sin(time * 7.3 + i)) : 1);
 
 /** Column-major 4x4 matrix helpers (WebGL layout). */
@@ -2982,13 +3057,14 @@ export class Renderer2D {
     ctx.globalAlpha = 1;
     // lights: a soft additive glow, and holes cut into the darkness layer
     const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible && !e.dead && !e.ui);
-    if (lights.length) {
+    const lit = lights.map((e, i) => { const L = e.light, now = lightNow(L, scene.time, i), r = L.range * (L.effect ? 1 : flickerK(L, scene.time, i)); return { e, L, r, k: now.k, col: now.col, poly: L.shadows ? lightPoly(scene, e, r) : null }; });
+    if (lit.length) {
       ctx.globalCompositeOperation = 'lighter';
-      lights.forEach((e, i) => {
-        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
-        gr.addColorStop(0, rgba(L.color, clamp(0.35 * L.intensity, 0, 1))); gr.addColorStop(1, rgba(L.color, 0));
-        ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2);
-      });
+      for (const { e, L, r, k, col, poly } of lit) {
+        const gr = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, r), soft = clamp(L.soft ?? 0.5, 0, 1);
+        gr.addColorStop(0, rgba(col, clamp(0.35 * L.intensity * k, 0, 1))); gr.addColorStop(clamp(1 - soft * 0.9, 0.05, 0.95), rgba(col, clamp(0.35 * L.intensity * k * 0.6, 0, 1))); gr.addColorStop(1, rgba(col, 0));
+        ctx.save(); clipLight2D(ctx, e, L, r, poly); ctx.fillStyle = gr; ctx.fillRect(e.x - r, e.y - r, r * 2, r * 2); ctx.restore();
+      }
       ctx.globalCompositeOperation = 'source-over';
     }
     engine.onRenderWorld?.(ctx, scene, z);
@@ -3004,11 +3080,11 @@ export class Renderer2D {
       l.fillRect(0, 0, lm.width, lm.height);
       l.globalCompositeOperation = 'destination-out';
       l.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0); l.translate(engine.width / 2, engine.height / 2); l.scale(z, z); l.translate(-c.x, -c.y);
-      lights.forEach((e, i) => {
-        const L = e.light, r = L.range * flickerK(L, scene.time, i), gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r);
-        gr.addColorStop(0, `rgba(0,0,0,${clamp(L.intensity, 0, 1)})`); gr.addColorStop(0.55, `rgba(0,0,0,${clamp(L.intensity * 0.6, 0, 1)})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
-        l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2);
-      });
+      for (const { e, L, r, k, poly } of lit) {
+        const gr = l.createRadialGradient(e.x, e.y, 0, e.x, e.y, r), soft = clamp(L.soft ?? 0.5, 0, 1), a = clamp(L.intensity * k, 0, 1);
+        gr.addColorStop(0, `rgba(0,0,0,${a})`); gr.addColorStop(clamp(1 - soft * 0.9, 0.05, 0.95), `rgba(0,0,0,${a * 0.6})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        l.save(); clipLight2D(l, e, L, r, poly); l.fillStyle = gr; l.fillRect(e.x - r, e.y - r, r * 2, r * 2); l.restore();
+      }
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(lm, 0, 0);
     }
   }
@@ -3027,7 +3103,7 @@ precision mediump float;
 varying vec3 vN; varying vec3 vW; varying vec3 vCol;
 uniform vec3 uColor, uLightDir, uLightColor, uFogColor, uCamPos, uSky, uGround;
 uniform float uAmbient, uEmissive, uFogNear, uFogFar, uOpacity, uVColor;
-uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform int uPLCount; uniform float uDouble;
+uniform vec3 uPLPos[8]; uniform vec3 uPLCol[8]; uniform float uPLRange[8]; uniform vec4 uPLSpot[8]; uniform int uPLCount; uniform float uDouble;
 void main() {
   vec3 base = mix(uColor, vCol, uVColor);
   vec3 n = normalize(vN);
@@ -3043,6 +3119,7 @@ void main() {
     vec3 tl = uPLPos[i] - vW; float dist = length(tl);
     float att = clamp(1.0 - dist / uPLRange[i], 0.0, 1.0); att *= att;
     vec3 pl = tl / max(dist, 0.0001);
+    if (uPLSpot[i].w > -1.5) att *= smoothstep(uPLSpot[i].w, uPLSpot[i].w + 0.06, dot(-pl, uPLSpot[i].xyz));
     lit += base * uPLCol[i] * max(dot(n, pl), 0.0) * att + uPLCol[i] * pow(max(dot(n, normalize(pl + v)), 0.0), 24.0) * 0.2 * att;
   }
   vec3 c = mix(lit, base, uEmissive);
@@ -3231,7 +3308,7 @@ export class Renderer3D {
     this.voxelCache = new WeakMap();
     this.meshCache = new Map(); // editable mesh parts (by their verts array) → GPU buffers, oldest dropped first
     this.u = {};
-    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLCount', 'uDouble']) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['uModel', 'uViewProj', 'uNormalMat', 'uColor', 'uLightDir', 'uLightColor', 'uFogColor', 'uCamPos', 'uAmbient', 'uEmissive', 'uFogNear', 'uFogFar', 'uOpacity', 'uVColor', 'uSky', 'uGround', 'uPLPos', 'uPLCol', 'uPLRange', 'uPLSpot', 'uPLCount', 'uDouble']) this.u[n] = gl.getUniformLocation(prog, n);
     this.geoms = {};
     for (const k of GEOMETRIES) {
       const g = geometry(k), b = { count: g.I.length };
@@ -3437,12 +3514,13 @@ export class Renderer3D {
     // point lights: the 8 nearest to the camera
     const lights = scene.entities.filter((e) => e.light && !e.light.off && e.visible !== false && !e.dead && !e.ui)
       .sort((a, b) => Math.hypot(a.x - eye.x, a.y - eye.y, a.z - eye.z) - Math.hypot(b.x - eye.x, b.y - eye.y, b.z - eye.z)).slice(0, 8);
-    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8);
+    const pos = new Float32Array(24), col = new Float32Array(24), rng = new Float32Array(8), spot = new Float32Array(32).fill(-2);
     lights.forEach((e, i) => {
-      const Lt = e.light, c = hexToRgb(Lt.color), k = (Lt.intensity ?? 1) * flickerK(Lt, scene.time, i);
+      const Lt = e.light, now = lightNow(Lt, scene.time, i), c = hexToRgb(now.col), k = (Lt.intensity ?? 1) * now.k;
       pos.set([e.x, e.y, e.z], i * 3); col.set([c[0] * k, c[1] * k, c[2] * k], i * 3); rng[i] = Math.max(0.1, Lt.range > 50 ? 8 : Lt.range || 8);
+      if (isSpot(Lt)) { const t = (Lt.tilt ?? 90) * DEG, y = (e.ry || 0) * DEG; spot.set([Math.sin(y) * Math.cos(t), -Math.sin(t), Math.cos(y) * Math.cos(t), Math.cos(Math.min(179, spotCone(Lt)) / 2 * DEG)], i * 4); } // spotlight: aimed down by its tilt, turned by the object
     });
-    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform1i(this.u.uPLCount, lights.length);
+    gl.uniform3fv(this.u.uPLPos, pos); gl.uniform3fv(this.u.uPLCol, col); gl.uniform1fv(this.u.uPLRange, rng); gl.uniform4fv(this.u.uPLSpot, spot); gl.uniform1i(this.u.uPLCount, lights.length);
     gl.uniform3fv(this.u.uFogColor, bg);
     gl.uniform1f(this.u.uFogNear, scene.fog.near); gl.uniform1f(this.u.uFogFar, scene.fog.far);
     gl.uniform3f(this.u.uCamPos, eye.x, eye.y, eye.z);
@@ -4712,6 +4790,53 @@ registerBehavior('cameraMixer', {
         else { st.x += (want.x - st.x) * k; st.y += (want.y - st.y) * k; st.zoom += (want.zoom - st.zoom) * k; c.x = st.x; c.y = st.y; c.zoom = st.zoom; }
       },
       destroy(e, s) { s.cameras = (s.cameras || []).filter((q) => q !== e); },
+    };
+  },
+});
+registerBehavior('cameraControls', {
+  label: 'Camera Controls (drag & pinch)', description: 'Lets the player move this camera: drag to pan, pinch (or mouse wheel) to zoom, double-tap to go back. For maps, strategy, idle and building games. Put it on a Camera set to Fixed.',
+  params: [
+    { key: 'pan', label: 'Drag to pan', type: 'bool', default: true },
+    { key: 'zoom', label: 'Pinch / wheel to zoom', type: 'bool', default: true },
+    { key: 'minZoom', label: 'Zoom out to (2D) / widest view (3D °)', type: 'number', default: 0.5, step: 0.1 },
+    { key: 'maxZoom', label: 'Zoom in to (2D) / narrowest view (3D °)', type: 'number', default: 3, step: 0.1 },
+    { key: 'limit', label: 'How far it can pan (0 = anywhere)', type: 'number', default: 0, step: 10 },
+    { key: 'glide', label: 'Keep gliding after a flick', type: 'bool', default: true },
+    { key: 'reset', label: 'Double-tap to go back', type: 'bool', default: true },
+    { key: 'onlyEmpty', label: 'Ignore fingers on tappable objects', type: 'bool', default: true },
+  ],
+  create(p) {
+    let home = null, lastPinch = 0, vx = 0, vy = 0, lastTap = -9;
+    const zoomKey = (s) => (s.mode === '3d' ? 'camFov' : 'camZoom');
+    return {
+      start(e) { home = { x: e.x, y: e.y, z: e.z }; },
+      update(e, dt, s) {
+        if (s.engine.editing) return;
+        const inp = s.engine.input, three = s.mode === '3d', free = [...inp.pointers.values()].filter((q) => q.role === 'free' && !(p.onlyEmpty !== false && q.onTap));
+        for (const q of inp.downs) { const ptr = inp.pointers.get(q.id); if (ptr && p.onlyEmpty !== false && inp.onTapTarget(ptr)) ptr.onTap = true; }
+        const zk = zoomKey(s), zNow = e.data[zk] ?? (three ? s.camera.fov || 60 : s.camera.zoom || 1);
+        const lo = Math.min(+p.minZoom || 0.5, +p.maxZoom || 3), hi = Math.max(+p.minZoom || 0.5, +p.maxZoom || 3);
+        const setZoom = (z) => { e.data[zk] = three ? clamp(z, Math.min(lo, hi) > 5 ? lo : 15, Math.max(lo, hi) > 5 ? hi : 100) : clamp(z, lo, hi); };
+        if (p.zoom !== false && free.length >= 2) {
+          const d = Math.hypot(free[0].x - free[1].x, free[0].y - free[1].y);
+          if (lastPinch) setZoom(three ? zNow * (lastPinch / d) : zNow * (d / lastPinch));
+          lastPinch = d; vx = vy = 0; return;
+        }
+        lastPinch = 0;
+        if (p.zoom !== false && inp.wheel?.dy) setZoom(three ? zNow * (1 + inp.wheel.dy * 0.001) : zNow * (1 - inp.wheel.dy * 0.001));
+        if (p.reset !== false) for (const t of inp.taps) { if (s.time - lastTap < 0.35 && !inp.onTapTarget(t)) { e.x = home.x; e.y = home.y; e.z = home.z; delete e.data[zk]; vx = vy = 0; lastTap = -9; } else lastTap = s.time; }
+        const z = three ? 1 : (e.data.camZoom ?? s.camera.zoom ?? 1);
+        if (p.pan !== false && free.length === 1) {
+          const dx = inp.drag.dx, dy = inp.drag.dy;
+          if (three) { const yaw = (e.ry || 0) * DEG, k = (s.camera.fov || 60) / 60 * 0.02 * Math.max(1, Math.abs(e.y)); const fx = -Math.sin(yaw), fz = -Math.cos(yaw); vx = -(dx * Math.cos(yaw) + dy * fx) * k / Math.max(dt, 1e-3); vy = -(-dx * Math.sin(yaw) + dy * fz) * k / Math.max(dt, 1e-3); e.x += vx * dt; e.z += vy * dt; }
+          else { vx = -dx / z / Math.max(dt, 1e-3); vy = -dy / z / Math.max(dt, 1e-3); e.x += vx * dt; e.y += vy * dt; }
+        } else if (p.glide !== false && (vx || vy)) {
+          const k = Math.exp(-5 * dt); vx *= k; vy *= k; if (Math.hypot(vx, vy) < 2) vx = vy = 0;
+          if (three) { e.x += vx * dt; e.z += vy * dt; } else { e.x += vx * dt; e.y += vy * dt; }
+        } else vx = vy = 0;
+        const L = +p.limit || 0;
+        if (L > 0 && home) { e.x = clamp(e.x, home.x - L, home.x + L); if (three) e.z = clamp(e.z, home.z - L, home.z + L); else e.y = clamp(e.y, home.y - L, home.y + L); }
+      },
     };
   },
 });
@@ -10448,7 +10573,6 @@ export const NODE_TYPES = {
   toggleComp: { cat: 'Objects', label: 'Turn Component On / Off', exec: true, outs: ['then'], params: [txt('component', 'patrol', 'component type'), opt('mode', ['off', 'on', 'toggle'], 'off', 'make it'), txt('object', '', 'object (blank = me)')] },
   waitUntil: { cat: 'Flow', label: 'Wait Until', exec: true, outs: ['then'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('timeout', 0, 'give up after (0 = never)')] },
   randomWait: { cat: 'Flow', label: 'Random Wait', exec: true, outs: ['then'], inputs: [{ key: 'min', type: 'number', default: 0.5 }, { key: 'max', type: 'number', default: 2 }] },
-  setDarkness: { cat: 'Actions', label: 'Set Darkness (2D)', exec: true, outs: ['then'], inputs: [{ key: 'darkness', type: 'number', default: 0.8 }] },
   setPosition: { cat: 'Move', label: 'Set Position', exec: true, outs: ['then'], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: 0 }, { key: 'z', type: 'number', default: 0 }], params: [opt('target', ['self', 'other'], 'self', 'who')] },
   moveToward: { cat: 'Move', label: 'Move Toward', exec: true, outs: ['then', 'arrived'], inputs: [{ key: 'speed', type: 'number', default: 120 }], params: [txt('tag', 'player', 'tag')] },
   lookAt: { cat: 'Move', label: 'Look At', exec: true, outs: ['then'], params: [txt('tag', 'player', 'tag')] },
@@ -10775,6 +10899,15 @@ Object.assign(NODE_TYPES, {
   camLens: { cat: 'Camera', label: 'Set Camera Zoom / Field Of View', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('what', ['zoom (2D)', 'field of view (3D)', 'back to its own'], 'zoom (2D)', 'set')], inputs: [N_IN('value', 1.5)] },
   camMix: { cat: 'Camera', label: 'Set Camera Mix', exec: true, outs: ['then'], params: [txt('mixer', 'Camera Mixer', 'mixer object')], inputs: [N_IN('mix', 0.5)] },
   camHold: { cat: 'Camera', label: 'Freeze Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('mode', ['freeze', 'unfreeze', 'toggle'], 'freeze', 'make it')] },
+  camFocus: { cat: 'Camera', label: 'Focus Camera On', exec: true, outs: ['then', 'back'], params: [txt('object', 'Chest', 'object or tag')], inputs: [N_IN('zoom', 1.6), N_IN('seconds', 1.5)] },
+  zoomPunch: { cat: 'Camera', label: 'Zoom Punch', exec: true, outs: ['then'], inputs: [N_IN('amount', 0.12), N_IN('seconds', 0.25)] },
+  takePhoto: { cat: 'Camera', label: 'Take Photo', exec: true, outs: ['then', 'failed'], params: [opt('then', ['share', 'save to device', 'keep in variable'], 'share', 'then'), txt('var', 'photo', 'variable (keep)'), txt('text', 'Look at this!', 'share text')] },
+  fadeLight: { cat: 'Looks', label: 'Fade Light', exec: true, outs: ['then', 'done'], params: [txt('object', '', 'light object (empty = this)'), { key: 'color', type: 'color', default: '#ffd9a0', label: 'to colour' }, bool('keepColor', true, 'keep its colour')], inputs: [N_IN('brightness', 1), N_IN('range', 0), N_IN('seconds', 1)] },
+  lightEffect: { cat: 'Looks', label: 'Set Light Effect', exec: true, outs: ['then'], params: [txt('object', '', 'light object (empty = this)'), opt('effect', ['steady', 'pulse', 'blink', 'fire', 'rainbow'], 'pulse', 'effect')], inputs: [N_IN('speed', 1)] },
+  setDarkness: { cat: 'Looks', label: 'Set Darkness / Ambient', exec: true, outs: ['then', 'done'], params: [{ key: 'color', type: 'color', default: '#0a0a1e', label: 'colour' }], inputs: [N_IN('darkness', 0.7), N_IN('seconds', 1)] },
+  setSun: { cat: 'Looks', label: 'Set Sun (3D)', exec: true, outs: ['then', 'done'], params: [{ key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], inputs: [N_IN('brightness', 1), N_IN('ambient', 0.45), N_IN('seconds', 1)] },
+  lightingPreset: { cat: 'Looks', label: 'Lighting Preset', exec: true, outs: ['then', 'done'], params: [opt('preset', ['Day', 'Golden hour', 'Evening', 'Night', 'Overcast', 'Cave', 'Spooky', 'Underwater', 'Neon'], 'Night', 'preset')], inputs: [N_IN('seconds', 2)] },
+  lightValue: { cat: 'Values', label: 'Light Brightness', value: 'number', params: [txt('object', '', 'light object (empty = this)')] },
   camFade: { cat: 'Camera', label: 'Fade Screen', exec: true, outs: ['faded out', 'done'], params: [{ key: 'color', type: 'color', default: '#000000', label: 'colour' }], inputs: [N_IN('fade out', 0.4), N_IN('hold', 0.3), N_IN('fade in', 0.4)] },
   camBars: { cat: 'Camera', label: 'Cinematic Bars', exec: true, outs: ['then'], params: [opt('mode', ['show', 'hide'], 'show', 'make them')] },
   groupAdd: { cat: 'Camera', label: 'Add To Target Group', exec: true, outs: ['then'], params: [txt('group', 'Target Group', 'target group'), opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name (for "object")')], inputs: [N_IN('weight', 1), N_IN('radius', 40)] },
@@ -11804,6 +11937,7 @@ registerBehavior('graph', {
         case 'getObjVar': return +target(ctx, P('object'))?.data[P('name')] || 0;
         case 'getObjText': return asText(target(ctx, P('object'))?.data[P('name')] ?? '');
         case 'myCondition': { const def = customLogic.conditions.find((q) => q.name === P('name')); if (!def) return false; const args = {}; (def.params || []).slice(0, 3).forEach((q, i) => { const v = I('abc'[i]); if (v !== '' && v != null) args[q.key] = v; }); return LOGIC_CONDITIONS.custom.test({ s, e, other: ctx.other }, { ref: def.id, ...args }); }
+        case 'lightValue': { const t = P('object') ? s.find(P('object')) : e; return t?.light && !t.light.off ? +t.light.intensity || 0 : 0; }
         case 'esLoad': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined ? asText(P('def')) : Array.isArray(v) ? v.map(asText).join(', ') : v && typeof v === 'object' ? JSON.stringify(v) : asText(v); }
         case 'esLoadNum': { const v = s.engine.saves.load(P('key'), P('file'), undefined); return v === undefined || !Number.isFinite(+v) ? +P('def') || 0 : +v; }
         case 'esKeyExists': return s.engine.saves.has(P('key'), P('file'));
@@ -11962,7 +12096,6 @@ registerBehavior('graph', {
         case 'switchCamera': s.setCamera(P('camera')); break;
         case 'zoomCamera': if (s.mode === '2d') s.tween(s.camera, { zoom: Math.max(0.05, +I('zoom') || 1) }, Math.max(0.01, +P('seconds') || 0.01)); else s.tween(s.camera, { fov: clamp(60 / (+I('zoom') || 1), 10, 120) }, Math.max(0.01, +P('seconds') || 0.01)); break;
         case 'setLight': { const t = P('object') ? s.find(P('object')) : e; if (t) { t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !t.light.off; t.light.intensity = +I('intensity') || 0; } break; }
-        case 'setDarkness': s.light.darkness = clamp(+I('darkness') || 0, 0, 1); break;
         case 'tweenTo': {
           const prop = P('prop'), v = +I('value') || 0, d = Math.max(0.01, +I('seconds') || 0.5);
           const tw = s.to(e, { [prop]: v }, d, { ease: P('ease'), relative: P('mode') === 'by' && prop !== 'scale' });
@@ -12089,6 +12222,48 @@ registerBehavior('graph', {
           const later = { ...ctx, steps: 0 }, c2 = { s, e, other: ctx.other };
           runInstructions([{ type: 'custom', ...it }], c2, () => { if (!e.dead) follow(n, 'then', later); });
           return;
+        }
+        case 'camFocus': {
+          const cam = s.activeCamEntity; if (!cam) break; const tgt = s.find(P('object')) || s.findAll(P('object'))[0]; if (!tgt) break;
+          const prev = { t: cam.data.camTarget, z: cam.data.camZoom, f: cam.data.camFov }, later = { ...ctx, steps: 0 };
+          cam.data.camTarget = tgt.name; if (s.mode === '3d') cam.data.camFov = clamp(60 / Math.max(0.1, +I('zoom') || 1), 10, 120); else cam.data.camZoom = Math.max(0.05, +I('zoom') || 1);
+          s.after(Math.max(0, +I('seconds') || 0), () => { for (const [k, v] of [['camTarget', prev.t], ['camZoom', prev.z], ['camFov', prev.f]]) { if (v === undefined) delete cam.data[k]; else cam.data[k] = v; } if (!e.dead) follow(n, 'back', later); });
+          break;
+        }
+        case 'zoomPunch': {
+          const cam = s.activeCamEntity; if (!cam) break; const three = s.mode === '3d', key = three ? 'camFov' : 'camZoom', had = key in cam.data, base = cam.data[key] ?? (three ? s.camera.fov || 60 : s.camera.zoom || 1), a = +I('amount') || 0.12, d = Math.max(0.05, +I('seconds') || 0.25), t0 = s.time;
+          const tick = () => { const t = (s.time - t0) / d; if (t >= 1) { if (had) cam.data[key] = base; else delete cam.data[key]; return; } const k = Math.sin(Math.PI * t) * a; cam.data[key] = three ? base * (1 - k) : base * (1 + k); s.after(1 / 60, tick); }; tick();
+          break;
+        }
+        case 'takePhoto': {
+          const later = { ...ctx, steps: 0 }, how = P('then');
+          s.engine.takePhoto().then(async (url) => {
+            if (!url) return follow(n, 'failed', later);
+            try {
+              if (how === 'keep in variable') s.setVar(P('var') || 'photo', url);
+              else if (how === 'save to device') { const a = document.createElement('a'); a.href = url; a.download = (s.engine.gameKey || 'game') + '-photo.png'; a.click(); }
+              else { const blob = await (await fetch(url)).blob(), file = new File([blob], 'photo.png', { type: 'image/png' }); if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], text: fillTemplate(P('text') || '', s.vars) }); else { const a = document.createElement('a'); a.href = url; a.download = 'photo.png'; a.click(); } }
+              if (!e.dead) follow(n, 'then', later);
+            } catch { if (!e.dead) follow(n, 'failed', later); }
+          });
+          return;
+        }
+        case 'fadeLight': {
+          const t = P('object') ? s.find(P('object')) : e; if (!t) break; t.light ||= { ...LIGHT_DEFAULTS, range: s.mode === '3d' ? 8 : 160 }; t.light.off = false;
+          const L = t.light, from = { i: +L.intensity || 0, r: +L.range || 0, c: L.color }, to = { i: +I('brightness') || 0, r: +I('range') > 0 ? +I('range') : from.r, c: P('keepColor') === false ? P('color') : from.c }, d = +I('seconds') || 0, t0 = s.time, later = { ...ctx, steps: 0 };
+          const tick = () => { const k = d > 0 ? Math.min(1, (s.time - t0) / d) : 1; L.intensity = from.i + (to.i - from.i) * k; L.range = from.r + (to.r - from.r) * k; L.color = mixHexE(from.c, to.c, k); if (k < 1) s.after(1 / 60, tick); else if (!e.dead) follow(n, 'done', later); }; tick();
+          break;
+        }
+        case 'lightEffect': { const t = P('object') ? s.find(P('object')) : e; if (t?.light) { t.light.effect = P('effect') === 'steady' ? '' : P('effect'); t.light.speed = +I('speed') || 1; } break; }
+        case 'setDarkness': case 'setSun': case 'lightingPreset': {
+          const sec = +I('seconds') || 0, later = { ...ctx, steps: 0 };
+          let tgt;
+          if (n.type === 'setDarkness') tgt = { darkness: clamp(+I('darkness') || 0, 0, 1), color: n.params?.color };
+          else if (n.type === 'setSun') tgt = { color: P('color'), intensity: +I('brightness') || 0, ambient: +I('ambient') || 0 };
+          else { const pr = LIGHT_PRESETS[P('preset')] || LIGHT_PRESETS.Day; tgt = s.mode === '3d' ? pr.d3 : { darkness: 1 - pr.d2[0], color: pr.d2[1] }; }
+          fadeLighting(s, tgt, sec);
+          s.after(sec, () => { if (!e.dead) follow(n, 'done', later); });
+          break;
         }
         case 'esSave': s.engine.saves.save(P('key') || 'value', listVal(I('value')), P('file')); break;
         case 'esSaveVar': { const v = P('var') || 'coins'; s.engine.saves.save(P('key') || v, s.vars[v] ?? 0, P('file')); break; }
@@ -13665,6 +13840,8 @@ export class Engine {
     return S;
   }
 
+  /** The next frame as a PNG data URL (Take Photo node). */
+  takePhoto() { return new Promise((resolve) => { (this.photoWanted ||= []).push(resolve); }); }
   render() {
     if (!this.scene || !this.renderer) return;
     this.updateSafe();
@@ -13674,6 +13851,7 @@ export class Engine {
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);
     this.onRenderUI?.(this.uiCtx, this.scene);
+    if (this.photoWanted) { const cbs = this.photoWanted; this.photoWanted = null; try { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const g = c.getContext('2d'); g.drawImage(this.canvas, 0, 0); if (this.uiCanvas) g.drawImage(this.uiCanvas, 0, 0, c.width, c.height); const url = c.toDataURL('image/png'); for (const f of cbs) f(url); } catch { for (const f of cbs) f(null); } } // Take Photo: the frame just drawn, game + UI
   }
 
   /** Post-processing over the game view (not the HUD): colour grading and bloom on the GPU, vignette and tint as overlays. */

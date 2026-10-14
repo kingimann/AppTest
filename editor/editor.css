@@ -1510,3 +1510,8 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .gs-txt b svg.i { width: 15px; height: 15px; color: #9cc3f0; flex: none; }
 .gs-txt small { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gs-open { flex: none; min-height: 40px; padding: 0 12px; }
+
+/* ---- lighting presets ---- */
+.lp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-top: 8px; }
+.lp-btn { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px; border: 1px solid #2c2c2c; border-radius: 12px; background: #2a2a2a; color: #ddd; font-size: 13px; font-weight: 600; }
+.lp-btn i { width: 100%; height: 34px; border-radius: 8px; background: radial-gradient(circle at 70% 30%, var(--b) 0 22%, transparent 60%), var(--a); border: 1px solid rgba(255,255,255,.1); }

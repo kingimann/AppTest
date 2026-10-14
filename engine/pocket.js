@@ -1621,7 +1621,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -1945,6 +1945,7 @@ export class Input {
     this.pointers = new Map();
     this.taps = [];
     this.drag = { dx: 0, dy: 0 };
+    this.wheel = { dx: 0, dy: 0, x: 0, y: 0 }; // mouse wheel / trackpad this frame (Scroll Views)
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
@@ -1963,6 +1964,7 @@ export class Input {
     }
 
     el.addEventListener('pointerdown', (e) => this.down(e));
+    el.addEventListener('wheel', (e) => { const p = this.local(e), k = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 400 : 1; this.wheel.dx += e.deltaX * k; this.wheel.dy += e.deltaY * k; this.wheel.x = p.x; this.wheel.y = p.y; e.preventDefault(); }, { passive: false });
     // iPhone only lets a page ask for motion access from a finger lifting (touchend) or a click, never from pointerdown / pointerup
     const askMotion = () => { if (this.enabled && (this.useTilt || this.wantMotion) && !this.tiltOn) this.requestMotion(); };
     el.addEventListener('touchend', askMotion); el.addEventListener('click', askMotion);
@@ -2161,7 +2163,7 @@ export class Input {
   endFrame() {
     if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
     if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
-    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
+    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.wheel.dx = 0; this.wheel.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
   /** Forget fingers and presses. `full` (a new level) also turns tilt off until a component asks again. */
   reset(full = false) { this.pointers.clear(); this.stick = null; if (full) { this.useTilt = false; this.tiltBase = null; } this.endFrame(); }
 }
@@ -2420,6 +2422,7 @@ const fillTemplate = (str, vars, fmt) => String(str).replace(/\{(\w+)\}/g, (_, k
   const v = vars[k];
   if (fmt && typeof v === 'number') return fmtNumber(v, fmt, k);
   if (Array.isArray(v)) return v.map((q) => (typeof q === 'number' ? formatNumber(q) : q)).join(', ') || '—'; // lists read "1, 2, 3"
+  if (v && typeof v === 'object') return Object.entries(v).map(([a, b]) => `${a}: ${typeof b === 'number' ? formatNumber(b) : b}`).join(', ') || '—'; // dictionaries read "hp: 100, xp: 5"
   if (typeof v !== 'number') return v ?? '';
   return k === 'time' ? String(Math.ceil(v)) : formatNumber(v);
 });
@@ -3498,7 +3501,9 @@ function renderUI(engine, scene) {
       if (scene.uiShift && !engine.editing) { let mine = false; for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === scene.uiShiftBy) { mine = true; break; } if (!mine) o.x += scene.uiShift; } // a side menu that pushes the screen aside
       let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
       if (pa <= 0.002) continue;
-      ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
+      ctx.save();
+      if (!engine.editing) for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
+      ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
@@ -4824,6 +4829,7 @@ function hitTest(s, e, sx, sy) {
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
+    for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren && !eng.editing) { const r = uiBox(q, eng.width, eng.height, eng.safe); if (Math.abs(sx - r.x) > r.w / 2 || Math.abs(sy - r.y) > r.h / 2) return false; } // cut off by a Scroll View: the hidden part can't be tapped
     return Math.abs(sx - o.x - e.x * k) <= hx + 8 && Math.abs(sy - o.y - e.y * k) <= hy + 8;
   }
   const ex = e.extents();
@@ -5202,6 +5208,39 @@ function drawNavIcon(ctx, icon, x, y, size, color, alpha = 1) {
   ctx.drawImage(c, x - size / 2, y - size / 2, size, size);
   ctx.globalAlpha /= alpha;
 }
+/** Hiding and showing a nav bar on its own: on scroll, after a while without touches, or on a message. */
+const BAR_HIDE_PARAMS = (msg) => [
+  { key: 'autoHide', label: 'Hides by itself', type: 'select', options: ['never', 'when scrolling down', 'after a few seconds', 'when scrolling or idle'], default: 'never', group: 'Hide & show', info: { never: 'Stays (unless a page hides it).', 'when scrolling down': 'Slides away while a Scroll View or List scrolls down, comes back when it scrolls up or reaches the top.', 'after a few seconds': 'Slides away when nobody touches the screen for a while; a touch brings it back.', 'when scrolling or idle': 'Both.' } },
+  { key: 'idleTime', label: 'Seconds without touches', type: 'number', default: 4, range: [1, 30], step: 0.5, group: 'Hide & show', showIf: { autoHide: ['after a few seconds', 'when scrolling or idle'] } },
+  { key: 'hideAnim', label: 'Goes away by', type: 'select', options: ['sliding', 'fading', 'sliding and fading'], default: 'sliding and fading', group: 'Hide & show' },
+  { key: 'hideSpeed', label: 'Hide / show speed', type: 'number', default: 14, range: [2, 40], step: 1, group: 'Hide & show' },
+  { key: 'barMessage', label: 'Listens for messages', type: 'text', default: msg, suggest: 'messages', group: 'Hide & show', infoText: `"${msg} hide", "${msg} show" and "${msg} toggle" (also the Show / Hide Nav Bars node).` },
+];
+class BarHider {
+  constructor(p) { this.p = p; this.byScroll = false; this.byMsg = null; this.idle = 0; }
+  start(s, e) {
+    const p = this.p, base = (p.barMessage || '').trim();
+    s.on('uiScroll', (d, who, frac) => { if (e.dead || !/scroll/.test(p.autoHide || '')) return; if (d < -1.5 && frac > 0.01) this.byScroll = true; else if (d > 1.5 || frac <= 0.01) this.byScroll = false; });
+    if (base) s.on('message', (m) => { if (e.dead) return; if (m === base + ' hide') this.byMsg = true; else if (m === base + ' show') { this.byMsg = false; this.idle = 0; this.byScroll = false; } else if (m === base + ' toggle') this.byMsg = !(this.byMsg ?? this.hidden); });
+  }
+  /** True when the bar wants to be hidden right now. */
+  update(s, dt) {
+    const p = this.p, inp = s.engine.input;
+    if (inp.downs.length || inp.pointers.size) this.idle = 0; else this.idle += dt;
+    const idleHide = /idle|few seconds/.test(p.autoHide || '') && this.idle > (+p.idleTime || 4);
+    if (this.byMsg === false && (idleHide || this.byScroll)) this.byMsg = null; // a new reason to hide wins over an old "show"
+    this.hidden = this.byMsg ?? (idleHide || this.byScroll);
+    return this.hidden;
+  }
+  /** Transform for the hide amount h (0–1): slide by dist and/or fade. */
+  apply(ctx, h, dist) {
+    if (h <= 0.001) return;
+    const a = this.p.hideAnim || 'sliding and fading';
+    if (a !== 'fading') ctx.translate(0, dist * h);
+    if (a !== 'sliding') ctx.globalAlpha *= 1 - h; else ctx.globalAlpha *= 1 - h * 0.6;
+  }
+}
+
 const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal'];
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 9 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
@@ -5239,11 +5278,15 @@ registerBehavior('uiBottomNav', {
     { key: 'maxWidth', label: 'Widest the bar gets (0 = full width)', type: 'number', default: 0, range: [0, 900], step: 10, group: 'Layout', infoText: 'On tablets and sideways phones the bar stays this wide, in the middle.' },
     { key: 'badgeStyle', label: 'Badges', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Colours' },
     { key: 'activeLift', label: 'Selected icon lifts up', type: 'number', default: 0, range: [0, 12], step: 1, group: 'Animation' },
+    { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape', infoText: 'How tall the bar is. Icons and labels stay centred; change their sizes above.' },
+    { key: 'barOpacity', label: 'Bar opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Colours' },
+    ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
     const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '']) => { const a = page || label.toLowerCase(); return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge } : { label, icon, page: a, badge }; });
     let T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1;
-    const pulse = new Map(), ripples = [];
+    const pulse = new Map(), ripples = [], BH = new BarHider(p);
+    const sizeBar = (e) => { const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
     const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || s.barsHidden > 0 || !!s.navBarsOff;
@@ -5270,10 +5313,11 @@ registerBehavior('uiBottomNav', {
         if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide) };
         return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide) };
       },
-      start(e, s) { T = tabs(); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
+      start(e, s) { T = tabs(); BH.start(s, e); sizeBar(e); const i = clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1); if (T[i] && (s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page); },
       update(e, dt, s) {
-        const k = Math.min(1, dt * (+p.speed || 14));
-        hide += ((hidden(s) ? 1 : 0) - hide) * k;
+        const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
+        sizeBar(e);
+        hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
         const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
@@ -5303,16 +5347,18 @@ registerBehavior('uiBottomNav', {
       },
       drawUI(ctx, e, s) {
         if (!T.length) T = tabs();
+        if (s.engine.editing) sizeBar(e);
         const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || act;
         if (hide > 0.99) return;
-        if (hide > 0.001) { ctx.translate(0, (G.bh + 40) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
         // the bar
         if (st !== 'minimal') {
           if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
           ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.barColor || '#12141f';
-          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill();
+          const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
+          rr(G.bx, G.by, G.bw, G.bh + (!fl && p.fillSafe !== false ? safeB : 0), rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
           if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; ctx.stroke(); }
           else if (p.border !== false && !fl) { ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
@@ -5374,6 +5420,7 @@ registerBehavior('uiBottomNav', {
     };
   },
 });
+
 
 const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal'];
 registerBehavior('uiSideBar', {
@@ -5616,37 +5663,53 @@ registerBehavior('uiSideBar', {
 
 const APPBAR_STYLES = ['solid', 'transparent', 'glass', 'large title', 'centered'];
 registerBehavior('uiAppBar', {
-  label: 'App Bar', description: 'A top bar like a phone app: ☰ (opens the Side Menu) or ‹ Back on the left, the page title, and action buttons with badges. Works with Bottom Nav and Side Menu: the title follows the page, and other UI stays below it.',
+  label: 'App Bar', description: 'A top bar like a phone app: ☰ (opens the Side Menu) or ‹ Back on the left, a logo, the page title and subtitle, and action buttons with badges. It can hide itself while scrolling or when idle and come back. Works with Bottom Nav and Side Menu: the title follows the page, and other UI stays below it.',
   params: [
     { key: 'title', label: 'Title (blank = the page\'s name; variables in braces)', type: 'text', default: '' },
+    { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '' },
     { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'titles', label: 'Page titles (page = Title, one per line)', type: 'code', default: '', infoText: 'Optional. Otherwise the title comes from the Bottom Nav / Side Menu label for the page.' },
-    { key: 'left', label: 'Left button', type: 'select', options: ['back, else menu', 'menu', 'back', 'none'], default: 'back, else menu', info: { 'back, else menu': '‹ when there is a page to go back to, otherwise ☰.', menu: 'Always ☰ (sends the menu message).', back: '‹ only when there is somewhere to go back to.', none: 'No button.' } },
+    { key: 'left', label: 'Left button', type: 'select', options: ['back, else menu', 'menu', 'back', 'custom', 'none'], default: 'back, else menu', info: { 'back, else menu': '‹ when there is a page to go back to, otherwise ☰.', menu: 'Always ☰ (sends the menu message).', back: '‹ only when there is somewhere to go back to.', custom: 'Your own icon and message.', none: 'No button.' } },
     { key: 'menuMessage', label: '☰ sends message', type: 'text', default: 'menu', suggest: 'messages' },
+    { key: 'leftIcon', label: 'Custom button icon', type: 'text', default: 'gear', showIf: { left: ['custom'] } },
+    { key: 'leftMessage', label: 'Custom button sends', type: 'text', default: 'settings', suggest: 'messages', showIf: { left: ['custom'] } },
+    { key: 'logo', label: 'Logo next to the title (icon, emoji or blank)', type: 'text', default: '' },
     { key: 'actions', label: 'Right buttons (icon | message | badge variable)', type: 'code', default: 'bell | notifications | unread\nsearch | search' },
-    { key: 'style', label: 'Style', type: 'select', options: APPBAR_STYLES, default: 'solid', info: { solid: 'A coloured bar.', transparent: 'No bar, just buttons and title over the game.', glass: 'See-through frosted bar.', 'large title': 'A tall bar with a big title on the left (iOS style).', centered: 'Title in the middle.' } },
+    { key: 'titleTap', label: 'Tapping the title sends', type: 'text', default: '', suggest: 'messages', infoText: 'e.g. scroll top' },
+    { key: 'style', label: 'Style', type: 'select', options: APPBAR_STYLES, default: 'solid', info: { solid: 'A coloured bar.', transparent: 'No bar, just buttons and title over the game.', glass: 'See-through frosted bar.', 'large title': 'A tall bar with a big title on the left (iOS style). It can shrink to a normal bar when you scroll.', centered: 'Title in the middle.' } },
+    { key: 'collapse', label: 'Large title shrinks when scrolling', type: 'bool', default: true, showIf: { style: ['large title'] } },
+    { key: 'titleAlign', label: 'Title position', type: 'select', options: ['auto', 'left', 'center'], default: 'auto' },
     { key: 'bg', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
-    { key: 'text', label: 'Title & icons', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'bg2', label: 'Gradient to (blank = none)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'barOpacity', label: 'Bar opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Colours' },
+    { key: 'text', label: 'Title', type: 'color', default: '#ffffff', group: 'Colours' },
+    { key: 'iconColor', label: 'Icons (blank = same as title)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'accent', label: 'Pressed / lit', type: 'color', default: '#4fa3ff', group: 'Colours' },
     { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'borderColor', label: 'Bottom line colour', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape' },
     { key: 'titleSize', label: 'Title size', type: 'number', default: 19, range: [12, 40], step: 1, group: 'Size & shape' },
+    { key: 'titleWeight', label: 'Title weight', type: 'select', options: ['bold', 'heavy', 'normal'], default: 'bold', group: 'Size & shape' },
     { key: 'iconSize', label: 'Icon size', type: 'number', default: 24, range: [14, 40], step: 1, group: 'Size & shape' },
-    { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size & shape' },
+    { key: 'radius', label: 'Bottom corner radius', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Size & shape' },
+    { key: 'shadow', label: 'Shadow', type: 'select', options: ['always', 'once scrolled', 'never'], default: 'always', group: 'Size & shape', info: { 'once scrolled': 'Flat at the top of a list; a shadow appears once it scrolls (Material style).' } },
     { key: 'border', label: 'Line along the bottom', type: 'bool', default: true, group: 'Size & shape' },
     { key: 'fillSafe', label: 'Fill the notch area above', type: 'bool', default: true, group: 'Size & shape' },
     { key: 'hideOn', label: 'Hide on these pages (comma list)', type: 'text', default: '', group: 'Behaviour' },
     { key: 'showOn', label: 'Only show on these pages (comma list, blank = all)', type: 'text', default: '', group: 'Behaviour' },
     { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Behaviour' },
+    ...BAR_HIDE_PARAMS('appbar'),
     { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Feel' },
     { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
   ],
   create(p) {
     const acts = () => String(p.actions || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).slice(0, 4).map(([icon, msg = '', badge = '']) => ({ icon, msg, badge }));
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
-    let A = acts(), hide = 0, press = new Map(), hits = [];
+    let A = acts(), hide = 0, press = new Map(), hits = [], scrolled = 0, shrink = 0;
+    const BH = new BarHider(p);
     const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
     const canBack = (s) => Object.values(s.navStacks || {}).some((st) => st.length);
-    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' ? null : 'menu'; };
+    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'custom' ? 'custom' : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' ? null : 'menu'; };
     const titleOf = (s) => {
       if (p.title) return fillTemplate(String(p.title), s.vars);
       const page = s.vars[p.var];
@@ -5654,6 +5717,11 @@ registerBehavior('uiAppBar', {
       for (const q of s.entities) for (const b of q.behaviors || []) { const t = b.pageLabel?.(page, p.var); if (t) return t; }
       const t = String(page ?? ''); return t ? t[0].toUpperCase() + t.slice(1) : '';
     };
+    const big = () => p.style === 'large title';
+    let baseH = null; // the object's own height (before a large title shrinks it)
+    const fullH = (e) => +p.height > 0 ? +p.height : (baseH ??= e.extents().hy * 2);
+    const curH = (e) => { const H = fullH(e); return big() && p.collapse !== false ? H + (Math.min(H, 56) - H) * shrink : H; }; // a large title shrinks to a normal bar as you scroll
+    const sizeBar = (e) => { if (!e.shape) return; const h = curH(e); if (+p.height > 0 || (big() && p.collapse !== false)) { e.shape.h = h; if ((e.anchor || 'top').startsWith('top') && !e.parentEnt?.ui) { e.y = h / 2; if (e.local) e.local.y = e.y; } } };
     const geo = (e) => { const ex = e.extents(); return { x: e.x - ex.hx, y: e.y - ex.hy, w: ex.hx * 2, h: ex.hy * 2 }; };
     return {
       uiAlways: true,
@@ -5662,38 +5730,50 @@ registerBehavior('uiAppBar', {
         const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe);
         return { edge: 'top', size: Math.max(0, o.y + (G.y + G.h) * K - E.safe.top) * (1 - hide) };
       },
+      start(e, s) {
+        BH.start(s, e); sizeBar(e);
+        s.on('uiScroll', (d, who, frac) => { if (!e.dead) { scrolled = frac; } });
+      },
       update(e, dt, s) {
         A = acts();
-        hide += ((hidden(s) ? 1 : 0) - hide) * Math.min(1, dt * 14);
+        const autoHid = BH.update(s, dt);
+        hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
+        shrink += ((scrolled > 0.01 ? 1 : 0) - shrink) * Math.min(1, dt * 10);
+        sizeBar(e);
         for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
         const lk = leftKind(s), on = hide < 0.5 && e.visible && !e._parentHidden;
         (s.appBarMenu ||= new Set())[on && lk === 'menu' ? 'add' : 'delete'](p.menuMessage || 'menu'); // a Side Menu's own ☰ steps aside
         if (!on || s.engine.editing) return;
         const E = s.engine, r = uiRect(s, e), K = uiK(E.safe);
         for (const t of E.input.taps) {
-          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, h = hits.find((q) => Math.abs(lx - q.x) < q.r && Math.abs(ly - q.y) < q.r + 6);
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, h = hits.find((q) => (q.w ? Math.abs(lx - q.x) < q.w / 2 : Math.abs(lx - q.x) < q.r) && Math.abs(ly - q.y) < q.r + 6);
           if (!h) continue;
           press.set(h.key, 1); UK.tap(s, p);
-          if (h.key === 'left') { if (lk === 'back') s.navBack(); else s.send(p.menuMessage || 'menu'); }
+          if (h.key === 'left') { if (lk === 'back') s.navBack(); else if (lk === 'custom') s.send(p.leftMessage || ''); else s.send(p.menuMessage || 'menu'); }
           else if (h.msg) s.send(h.msg);
         }
       },
       drawUI(ctx, e, s) {
-        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = p.text || '#ffffff', acc = p.accent || '#4fa3ff', isz = +p.iconSize || 24;
+        if (s.engine.editing) sizeBar(e);
+        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = p.text || '#ffffff', icol = p.iconColor || col, acc = p.accent || '#4fa3ff', isz = +p.iconSize || 24;
         if (hide > 0.99) return;
-        if (hide > 0.001) { ctx.translate(0, -(G.h + safeT + 10) * hide); ctx.globalAlpha *= 1 - hide * 0.6; }
+        BH.apply(ctx, hide, -(G.h + safeT + 10));
+        const R = +p.radius || 0, rr = (x, y, w, h) => { ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(x, y, w, h, [0, 0, R, R]); else ctx.rect(x, y, w, h); };
         if (st !== 'transparent') {
-          if (p.shadow !== false && st !== 'glass') { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
-          ctx.fillStyle = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.bg || '#12141f';
-          ctx.fillRect(G.x, G.y - safeT, G.w, G.h + safeT); ctx.shadowColor = 'transparent';
-          if (p.border !== false || st === 'glass') { ctx.fillStyle = 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')'; ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
+          const sh = p.shadow === 'never' || p.shadow === false ? 0 : p.shadow === 'once scrolled' ? clamp(scrolled * 40, 0, 1) : 1;
+          if (sh && st !== 'glass') { ctx.shadowColor = `rgba(0,0,0,${0.35 * sh})`; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
+          let fill = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.bg || '#12141f';
+          if (p.bg2 && st !== 'glass') { const g = ctx.createLinearGradient(G.x, 0, G.x + G.w, 0); g.addColorStop(0, p.bg || '#12141f'); g.addColorStop(1, p.bg2); fill = g; }
+          const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
+          ctx.fillStyle = fill; rr(G.x, G.y - safeT, G.w, G.h + safeT); ctx.fill(); ctx.shadowColor = 'transparent'; ctx.globalAlpha = ba;
+          if ((p.border !== false || st === 'glass') && !R) { ctx.fillStyle = p.borderColor || 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')'; ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
         }
         hits = [];
-        const big = st === 'large title', rowY = big ? G.y + Math.min(G.h, 56) / 2 : G.y + G.h / 2, lk = leftKind(s);
+        const bigNow = big() && (p.collapse === false || shrink < 0.99), rowH = Math.min(G.h, 56), rowY = big() ? G.y + rowH / 2 : G.y + G.h / 2, lk = leftKind(s);
         const button = (key, icon, x, msg, badge) => {
           const pr = press.get(key) || 0, lit = key === 'left' && lk === 'menu' && s.openMenus?.has(p.menuMessage || 'menu');
           if (pr || lit) { ctx.save(); ctx.globalAlpha *= lit ? 0.25 : 0.2 * pr; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(x, rowY, isz * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
-          drawNavIcon(ctx, icon, x, rowY, isz, lit ? acc : col);
+          drawNavIcon(ctx, icon, x, rowY, isz, lit ? acc : icol);
           const bv = badge ? s.vars[badge] : null;
           if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
             const n = +bv, t = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '', bx = x + isz * 0.45, by = rowY - isz * 0.45;
@@ -5703,15 +5783,29 @@ registerBehavior('uiAppBar', {
           hits.push({ key, x, y: rowY, r: Math.max(22, isz), msg });
         };
         let lx = G.x + 10;
-        if (lk) { button('left', lk === 'back' ? 'back' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
+        if (lk) { button('left', lk === 'back' ? 'back' : lk === 'custom' ? p.leftIcon || 'gear' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
         let rx = G.x + G.w - 28;
         A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= 46; });
-        const title = titleOf(s), tsz = +p.titleSize || 19;
-        if (title) {
-          ctx.fillStyle = col; ctx.textBaseline = 'middle';
-          if (big) { ctx.font = `900 ${Math.round(tsz * 1.5)}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.fillText(title, G.x + 18, G.y + G.h - tsz * 1.05, G.w - 36); }
-          else if (st === 'centered') { ctx.font = `800 ${tsz}px ${THEME.font}`; ctx.textAlign = 'center'; const room = Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2; ctx.fillText(title, G.x + G.w / 2, rowY, Math.max(40, room)); }
-          else { ctx.font = `800 ${tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.fillText(title, lx + (lk ? 4 : 8), rowY, Math.max(40, rx + 22 - lx - 12)); }
+        const title = titleOf(s), sub = p.subtitle ? fillTemplate(String(p.subtitle), s.vars) : '', tsz = +p.titleSize || 19, wt = { heavy: 900, normal: 600 }[p.titleWeight] || 800;
+        const center = p.titleAlign === 'center' || (p.titleAlign !== 'left' && st === 'centered'), room = center ? Math.max(40, Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2) : Math.max(40, rx + 22 - lx - 12);
+        const drawTitle = (x, y, size, align, alpha) => {
+          if (alpha <= 0.01) return;
+          ctx.save(); ctx.globalAlpha *= alpha; ctx.textAlign = align; ctx.textBaseline = 'middle';
+          let tx = x; ctx.font = `${wt} ${size}px ${THEME.font}`;
+          if (p.logo) { const lw = size * 1.15; drawNavIcon(ctx, p.logo, align === 'center' ? x - (ctx.measureText(title).width / 2) - lw * 0.7 : x + lw / 2, y - (sub ? size * 0.35 : 0), lw, icol); if (align !== 'center') tx += lw + 8; }
+          ctx.fillStyle = col; ctx.font = `${wt} ${size}px ${THEME.font}`; ctx.textAlign = align; ctx.textBaseline = 'middle'; // (drawing an emoji logo changes these)
+          ctx.fillText(title, tx, y - (sub ? size * 0.35 : 0), room);
+          if (sub) { ctx.globalAlpha *= 0.7; ctx.font = `600 ${Math.max(10, Math.round(size * 0.62))}px ${THEME.font}`; ctx.fillText(sub, tx, y + size * 0.55, room); }
+          ctx.restore();
+        };
+        if (title || sub) {
+          const tAlign = center ? 'center' : 'left', tX = center ? G.x + G.w / 2 : lx + (lk ? 4 : 8);
+          if (big()) { // the big title sits under the buttons; it fades into a normal one as the bar shrinks
+            const k = p.collapse === false ? 0 : shrink;
+            drawTitle(G.x + 18, G.y + G.h - tsz * 1.05, Math.round(tsz * 1.5), 'left', 1 - k);
+            drawTitle(tX, rowY, tsz, tAlign, k);
+          } else drawTitle(tX, rowY, tsz, tAlign, 1);
+          if (p.titleTap) hits.push({ key: 'title', x: center ? G.x + G.w / 2 : lx + room / 2, w: room, y: big() && !bigNow ? rowY : big() ? G.y + G.h - tsz : rowY, r: Math.max(18, tsz), msg: p.titleTap });
         }
       },
     };
@@ -7137,44 +7231,222 @@ registerBehavior('uiSelector', {
   },
 });
 
+/** Scrolling settings shared by Scroll View and List View. */
+const SCROLL_PARAMS = [
+  { key: 'fling', label: 'Flick to keep scrolling', type: 'select', options: ['smooth', 'short', 'off'], default: 'smooth', group: 'Scrolling' },
+  { key: 'bounce', label: 'Stretch at the ends', type: 'bool', default: true, group: 'Scrolling', infoText: 'Pulling past the first or last item stretches and springs back, like a phone list.' },
+  { key: 'snap', label: 'Stop on', type: 'select', options: ['anywhere', 'items', 'pages'], default: 'anywhere', group: 'Scrolling', info: { anywhere: 'Stops wherever the flick ends.', items: 'Settles so an item lines up with the start.', pages: 'One screenful at a time (onboarding, shop pages). The page number goes in the page variable.' } },
+  { key: 'pageVar', label: 'Page number goes in', type: 'text', default: '', suggest: 'vars', group: 'Scrolling', showIf: { snap: ['pages'] } },
+  { key: 'scrollbar', label: 'Scroll bar', type: 'select', options: ['while scrolling', 'always', 'never'], default: 'while scrolling', group: 'Scrolling' },
+  { key: 'barColor', label: 'Scroll bar colour', type: 'color', default: '#ffffff', group: 'Scrolling' },
+  { key: 'clip', label: 'Cut items off at the edges', type: 'bool', default: true, group: 'Scrolling', infoText: 'Items half in view are cut cleanly at the edge (in play).' },
+  { key: 'refresh', label: 'Pull down to refresh sends', type: 'text', default: '', suggest: 'messages', group: 'Scrolling', infoText: 'Blank = off. The spinner stays until the game sends the same message + " done" (e.g. refresh done), or 3 seconds.' },
+  { key: 'endMessage', label: 'Reaching the end sends', type: 'text', default: '', suggest: 'messages', group: 'Scrolling', infoText: 'e.g. load more, for lists that grow.' },
+  { key: 'posVar', label: 'Scroll position (0–1) goes in', type: 'text', default: '', suggest: 'vars', group: 'Scrolling' },
+  { key: 'scrollMessage', label: 'Listens for messages starting with', type: 'text', default: 'scroll', group: 'Scrolling', infoText: '"scroll top", "scroll bottom", "scroll to Item Name", "scroll next" / "scroll prev" (pages).' },
+];
+/**
+ * Drag-to-scroll physics for Scroll View and List View: momentum, rubber band, snapping, mouse wheel,
+ * pull to refresh, end-of-list message and a scroll bar. Offsets are in UI units (0 = the start).
+ */
+class Scroller {
+  constructor(p, axes) { this.p = p; this.axes = axes; this.off = { x: 0, y: 0 }; this.vel = { x: 0, y: 0 }; this.drag = null; this.moved = 0; this.goal = null; this.seen = -9; this.refreshing = 0; this.pull = 0; this.atEnd = false; this.range = { x: [0, 0], y: [0, 0] }; this.view = { x: 1, y: 1 }; this.page = 0; }
+  /** Scroll so this offset is reached (animated). */
+  to(axis, v) { this.goal = { ...(this.goal || {}), [axis]: v }; this.vel.x = this.vel.y = 0; }
+  frac(axis) { const [mn, mx] = this.range[axis]; return mn === mx ? 0 : clamp((mx - this.off[axis]) / (mx - mn), 0, 1); }
+  /** r: the view's screen rect; ranges: { x: [min, max], y: [min, max] } offsets allowed; snaps: { x: [...], y: [...] } offsets to settle on. */
+  update(s, e, dt, r, K, ranges, snaps, view) {
+    const inp = s.engine.input, p = this.p, now = s.engine.time ?? performance.now() / 1000, inside = (q) => Math.abs(q.x - r.x) <= r.w / 2 && Math.abs(q.y - r.y) <= r.h / 2;
+    this.range = ranges; this.view = view;
+    const live = e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing;
+    const start = { x: this.off.x, y: this.off.y };
+    if (live && this.drag == null) for (const d of inp.downs) if (inside(d)) { this.drag = { id: d.id, x: d.x, y: d.y, lock: null, from: { ...this.off } }; this.moved = 0; this.vel.x = this.vel.y = 0; this.goal = null; this.seen = now; }
+    const ptr = this.drag != null && inp.pointers.get(this.drag.id);
+    if (ptr) {
+      const dx = (ptr.x - this.drag.x) / K, dy = (ptr.y - this.drag.y) / K; this.drag.x = ptr.x; this.drag.y = ptr.y;
+      this.moved += Math.hypot(dx, dy);
+      if (!this.drag.lock && this.moved > 6 && this.axes.length === 1) this.drag.lock = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y'; // a sideways drag on a vertical list isn't a scroll (swipes, sliders inside)
+      for (const a of this.axes) {
+        if (this.axes.length === 1 && this.drag.lock && this.drag.lock !== a) continue;
+        const [mn, mx] = ranges[a], d = a === 'x' ? dx : dy, over = this.off[a] > mx ? this.off[a] - mx : this.off[a] < mn ? mn - this.off[a] : 0;
+        const res = p.bounce === false ? 0 : 1 / (1 + over / 60); // rubber band: harder to pull the further past the end
+        this.off[a] += d * (over && Math.sign(d) === Math.sign(this.off[a] > mx ? 1 : -1) ? res : 1);
+        if (p.bounce === false) this.off[a] = clamp(this.off[a], mn, mx);
+        this.vel[a] = this.vel[a] * 0.6 + (d / Math.max(dt, 1e-3)) * 0.4;
+      }
+      if (this.moved > 2) this.seen = now;
+      if (p.refresh && this.axes.includes('y')) this.pull = Math.max(0, this.off.y - ranges.y[1]);
+    } else {
+      if (this.drag) { // let go
+        const from = this.drag.from; this.drag = null;
+        if (p.refresh && this.pull > 70 && !this.refreshing) { this.refreshing = now; s.send(p.refresh); s.engine.vibrate?.(10); }
+        if (p.fling === 'off') this.vel.x = this.vel.y = 0;
+        if (p.snap && p.snap !== 'anywhere') for (const a of this.axes) { // settle on the nearest stop, a little ahead in the flick's direction
+          const list = snaps?.[a]; if (!list?.length) continue;
+          const ahead = this.off[a] + this.vel[a] * (p.snap === 'pages' ? 0.12 : 0.3);
+          let best = list[0]; for (const q of list) if (Math.abs(q - ahead) < Math.abs(best - ahead)) best = q;
+          if (p.snap === 'pages') { const cur = list.reduce((b, q) => (Math.abs(q - from[a]) < Math.abs(b - from[a]) ? q : b), list[0]), ci = list.indexOf(cur), dir = Math.abs(this.vel[a]) > 250 ? -Math.sign(this.vel[a]) : 0; best = dir ? list[clamp(ci + dir, 0, list.length - 1)] : best; }
+          this.to(a, best);
+        }
+      }
+      // mouse wheel / trackpad
+      const w = inp.wheel;
+      if (live && (w.dx || w.dy) && inside(w)) {
+        const a0 = this.axes.length === 1 ? this.axes[0] : null;
+        for (const a of this.axes) { const d = a0 ? (Math.abs(w.dy) > Math.abs(w.dx) ? w.dy : w.dx) : a === 'x' ? w.dx : w.dy; this.off[a] = clamp(this.off[a] - d / K, ranges[a][0], ranges[a][1]); }
+        this.goal = null; this.seen = now;
+      }
+      if (this.goal) {
+        for (const a of Object.keys(this.goal)) { const g = clamp(this.goal[a], ranges[a][0], ranges[a][1]); this.off[a] += (g - this.off[a]) * Math.min(1, dt * 12); if (Math.abs(g - this.off[a]) < 0.4) { this.off[a] = g; delete this.goal[a]; } }
+        if (!Object.keys(this.goal).length) this.goal = null;
+        this.seen = now;
+      } else for (const a of this.axes) {
+        const [mn, mx] = ranges[a], held = this.refreshing && a === 'y' ? mx + 56 : mx;
+        this.off[a] += this.vel[a] * dt;
+        this.vel[a] *= Math.pow(p.fling === 'short' ? 0.002 : 0.04, dt);
+        if (Math.abs(this.vel[a]) < 5) this.vel[a] = 0;
+        if (this.off[a] > held) { this.off[a] += (held - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] > 0) this.vel[a] = 0; }
+        else if (this.off[a] < mn) { this.off[a] += (mn - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] < 0) this.vel[a] = 0; }
+        if (Math.abs(this.vel[a]) > 5) this.seen = now;
+      }
+      this.pull = this.refreshing ? 56 : Math.max(0, this.off.y - ranges.y[1]);
+      if (this.refreshing && now - this.refreshing > 3) this.refreshing = 0;
+    }
+    if (this.moved > 8 || (this.drag && this.moved > 8)) inp.taps = inp.taps.filter((t) => !inside(t)); // a drag isn't a tap
+    // pages, position, end of the list
+    const a = this.axes.includes('y') ? 'y' : 'x';
+    if (p.snap === 'pages' && snaps?.[a]?.length) { const list = snaps[a]; let i = 0; for (let j = 0; j < list.length; j++) if (Math.abs(list[j] - this.off[a]) < Math.abs(list[i] - this.off[a])) i = j; if (i !== this.page) { this.page = i; if (p.pageVar) s.setVar(p.pageVar, i + 1); } }
+    if (p.posVar) { const f = Math.round(this.frac(a) * 1000) / 1000; if (s.vars[p.posVar] !== f) s.setVar(p.posVar, f); }
+    const [mn] = ranges[a], end = mn < ranges[a][1] - 1 && this.off[a] <= mn + 4;
+    if (end && !this.atEnd && p.endMessage) s.send(p.endMessage);
+    this.atEnd = end || (this.atEnd && this.off[a] <= mn + 40);
+    const dy = this.off.y - start.y, dx = this.off.x - start.x;
+    if (dx || dy) s.emit('uiScroll', a === 'y' ? dy : dx, e, this.frac(a)); // App Bar / Bottom Nav can hide on scroll
+  }
+  /** Listens for "scroll top / bottom / next / prev / to NAME" and "<refresh> done". */
+  listen(s, e, itemPos) {
+    const p = this.p, base = (p.scrollMessage || 'scroll').trim(), a = this.axes.includes('y') ? 'y' : 'x';
+    s.on('message', (m) => {
+      if (e.dead) return;
+      if (p.refresh && m === p.refresh + ' done') { this.refreshing = 0; return; }
+      if (!m.startsWith(base + ' ')) return;
+      const rest = m.slice(base.length + 1).trim(), [mn, mx] = this.range[a];
+      if (rest === 'top' || rest === 'start') this.to(a, mx);
+      else if (rest === 'bottom' || rest === 'end') this.to(a, mn);
+      else if (rest === 'next' || rest === 'prev') this.to(a, this.off[a] + (rest === 'next' ? -1 : 1) * this.view[a]);
+      else if (rest.startsWith('to ')) { const v = itemPos(rest.slice(3).trim()); if (v != null) this.to(a, v); }
+    });
+  }
+  /** Scroll bar and refresh spinner, drawn over the content (screen pixels). */
+  overlay(s, e, rectOf) {
+    const p = this.p;
+    (s.overlays ||= []).push((ctx) => {
+      if (e.dead || !e.visible || e._parentHidden || s.engine.editing) return;
+      const r = rectOf(), now = s.engine.time ?? performance.now() / 1000, show = p.scrollbar === 'always' ? 1 : p.scrollbar === 'never' ? 0 : clamp(1.2 - (now - this.seen) * 1.5, 0, 1);
+      ctx.save();
+      for (const a of this.axes) {
+        if (!show) break;
+        const [mn, mx] = this.range[a]; if (mx - mn < 1) continue;
+        const viewPx = a === 'y' ? r.h : r.w, content = this.view[a] + (mx - mn), len = Math.max(24, viewPx * this.view[a] / content), f = this.frac(a), pos = (viewPx - len - 8) * f + 4;
+        ctx.globalAlpha = 0.45 * show; ctx.fillStyle = p.barColor || '#ffffff'; ctx.beginPath();
+        if (a === 'y') UK.rr(ctx, r.x + r.w / 2 - 6, r.y - r.h / 2 + pos, 3.5, len, 2); else UK.rr(ctx, r.x - r.w / 2 + pos, r.y + r.h / 2 - 6, len, 3.5, 2);
+        ctx.fill();
+      }
+      if (p.refresh && this.pull > 2) { // pull-to-refresh spinner
+        const k = clamp(this.pull / 70, 0, 1), cx = r.x, cy = r.y - r.h / 2 + Math.min(this.pull, 70) * 0.5 + 6;
+        ctx.globalAlpha = k; ctx.strokeStyle = p.barColor || '#ffffff'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+        const spin = this.refreshing ? now * 7 : k * 5; ctx.arc(cx, cy, 10, spin, spin + (this.refreshing ? 4.4 : k * 5.5)); ctx.stroke();
+      }
+      ctx.restore();
+    });
+  }
+}
 registerBehavior('uiScroll', {
-  label: 'Scroll View', description: 'Drag to scroll the UI inside it (a list of items, a shop, levels…). Items outside its box are hidden.',
+  label: 'Scroll View', description: 'Drag (or flick, or use the mouse wheel) to scroll the UI inside it: lists, shops, level maps, long text. Items are cut off cleanly at its edges. It can line its items up for you, snap to items or pages, pull down to refresh and send a message at the end.',
   params: [
-    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal'], default: 'vertical' },
+    { key: 'direction', label: 'Scrolls', type: 'select', options: ['vertical', 'horizontal', 'both'], default: 'vertical' },
     { key: 'padding', label: 'Padding', type: 'number', default: 12, step: 2 },
+    { key: 'arrange', label: 'Line up the items inside', type: 'select', options: ['as placed', 'one per row', 'grid'], default: 'as placed', info: { 'as placed': 'Items stay where you put them.', 'one per row': 'A list: items one after another (down, or across for a horizontal view), in Hierarchy order.', grid: 'Rows of items, the number of columns below.' } },
+    { key: 'spacing', label: 'Gap between items', type: 'number', default: 10, step: 1, showIf: { arrange: ['one per row', 'grid'] } },
+    { key: 'columns', label: 'Columns', type: 'number', default: 3, step: 1, range: [1, 12], showIf: { arrange: ['grid'] } },
+    { key: 'align', label: 'Line up along', type: 'select', options: ['middle', 'start', 'end'], default: 'middle', showIf: { arrange: ['one per row'] } },
+    ...SCROLL_PARAMS,
   ],
   create(p) {
-    let kids = [], base = new Map(), off = 0, vel = 0, drag = null, last = 0, moved = 0, goal = null;
-    const v = p.direction !== 'horizontal';
-    const bounds = (s, e) => { // how far the content can move
-      const k = uiK(s.engine.safe) || 1, r = uiRect(s, e), pad = +p.padding || 0;
-      let lo = Infinity, hi = -Infinity;
-      for (const q of kids) { const b = base.get(q), ex = q.extents(), h = (v ? ex.hy : ex.hx) || 0; lo = Math.min(lo, (v ? b.y : b.x) - h); hi = Math.max(hi, (v ? b.y : b.x) + h); }
-      if (!kids.length) return [0, 0];
-      const view = (v ? r.h : r.w) / k, top = -view / 2 + pad, bottom = view / 2 - pad;
-      const min = Math.min(0, bottom - hi), max = Math.max(0, top - lo);
-      return [Math.min(min, max), max];
+    const axes = p.direction === 'both' ? ['x', 'y'] : p.direction === 'horizontal' ? ['x'] : ['y'];
+    const S = new Scroller(p, axes);
+    let kids = [], base = new Map(), sig = '';
+    const lay = (e) => { // positions in the view, with the scroll at 0
+      if (p.arrange !== 'one per row' && p.arrange !== 'grid') return;
+      const ex = e.extents(), W = ex.hx * 2, H = ex.hy * 2, pad = +p.padding || 0, gap = +p.spacing || 0, horiz = p.direction === 'horizontal';
+      if (p.arrange === 'grid') {
+        const cols = Math.max(1, Math.round(+p.columns || 3)), cw = (W - pad * 2 - gap * (cols - 1)) / cols;
+        let y = pad, rowH = 0;
+        kids.forEach((q, i) => { const c = i % cols; if (c === 0 && i) { y += rowH + gap; rowH = 0; } const qe = q.extents(), f = AFRAC(q.anchor); rowH = Math.max(rowH, qe.hy * 2); base.set(q, { x: pad + c * (cw + gap) + cw / 2 - f.x * W - (qe.ox || 0), y: y + qe.hy - f.y * H - (qe.oy || 0) }); });
+        return;
+      }
+      let at = pad;
+      for (const q of kids) {
+        const qe = q.extents(), f = AFRAC(q.anchor);
+        if (horiz) { const cy = p.align === 'start' ? pad + qe.hy : p.align === 'end' ? H - pad - qe.hy : H / 2; base.set(q, { x: at + qe.hx - f.x * W - (qe.ox || 0), y: cy - f.y * H - (qe.oy || 0) }); at += qe.hx * 2 + gap; }
+        else { const cx = p.align === 'start' ? pad + qe.hx : p.align === 'end' ? W - pad - qe.hx : W / 2; base.set(q, { x: cx - f.x * W - (qe.ox || 0), y: at + qe.hy - f.y * H - (qe.oy || 0) }); at += qe.hy * 2 + gap; }
+      }
+    };
+    // each child's box in the view's own units (centre relative to the view's centre), with the scroll at 0
+    const boxOf = (e, q) => { const b = base.get(q), ex = e.extents(), f = AFRAC(q.anchor), qe = q.extents(); return { x: b.x + (qe.ox || 0) + f.x * ex.hx * 2 - ex.hx, y: b.y + (qe.oy || 0) + f.y * ex.hy * 2 - ex.hy, hx: qe.hx, hy: qe.hy }; };
+    const ranges = (e) => {
+      const ex = e.extents(), pad = +p.padding || 0, out = { x: [0, 0], y: [0, 0] };
+      if (!kids.length) return out;
+      for (const a of ['x', 'y']) {
+        let lo = Infinity, hi = -Infinity;
+        for (const q of kids) { const b = boxOf(e, q), h = a === 'x' ? b.hx : b.hy, c = b[a]; lo = Math.min(lo, c - h); hi = Math.max(hi, c + h); }
+        const half = a === 'x' ? ex.hx : ex.hy, top = -half + pad, bottom = half - pad, max = Math.max(0, top - lo), min = Math.min(0, bottom - hi);
+        out[a] = [Math.min(min, max), max];
+      }
+      return out;
+    };
+    const snapsOf = (e, R) => {
+      const out = {};
+      for (const a of axes) {
+        const [mn, mx] = R[a], ex = e.extents(), half = a === 'x' ? ex.hx : ex.hy, pad = +p.padding || 0;
+        if (p.snap === 'pages') { const view = half * 2 - pad * 2, list = []; for (let o = mx; o > mn - 1; o -= view) list.push(Math.max(o, mn)); if (list[list.length - 1] > mn + 1) list.push(mn); out[a] = list; }
+        else if (p.snap === 'items') out[a] = [...new Set(kids.map((q) => { const b = boxOf(e, q), h = a === 'x' ? b.hx : b.hy; return clamp(-half + pad - (b[a] - h), mn, mx); }))].sort((u, v) => v - u);
+      }
+      return out;
+    };
+    const collect = (s, e) => { // children can come and go (spawned rows, removed items)
+      const now = uiKids(s, e), key = now.map((q) => q.id).join(',');
+      if (key === sig) return;
+      sig = key;
+      for (const q of now) if (!base.has(q)) base.set(q, { x: q.x - (axes.includes('x') ? S.off.x : 0), y: q.y - (axes.includes('y') ? S.off.y : 0) });
+      for (const q of [...base.keys()]) if (!now.includes(q)) base.delete(q);
+      kids = now;
     };
     return {
       uiAlways: true,
-      start(e, s) { kids = uiKids(s, e); for (const q of kids) base.set(q, { x: q.x, y: q.y }); e._scrollTo = (f) => { goal = clamp(+f || 0, 0, 1); vel = 0; }; },
+      start(e, s) {
+        collect(s, e); lay(e);
+        e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
+        e._scrollTo = (f) => { const a = axes.includes('y') ? 'y' : 'x', [mn, mx] = S.range[a]; S.to(a, mx + (mn - mx) * clamp(+f || 0, 0, 1)); };
+        S.listen(s, e, (name) => { const q = kids.find((k) => k.name === name || k.tags?.includes?.(name)); if (!q) return null; const a = axes.includes('y') ? 'y' : 'x', b = boxOf(e, q), ex = e.extents(), half = a === 'x' ? ex.hx : ex.hy; return -half + (+p.padding || 0) - (b[a] - (a === 'x' ? b.hx : b.hy)); });
+        S.overlay(s, e, () => uiRect(s, e));
+      },
       update(e, dt, s) {
-        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1;
-        if (goal != null) { const [a, b] = bounds(s, e), want = b + (a - b) * goal; off += (want - off) * Math.min(1, dt * 10); if (Math.abs(want - off) < 0.5) { off = want; goal = null; } } // Scroll To node (0 = top, 1 = bottom)
-        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = v ? d.y : d.x; moved = 0; vel = 0; }
-        const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { goal = null; const now = v ? ptr.y : ptr.x, dd = (now - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = now; moved += Math.abs(dd); }
-        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); }
-        const [mn, mx] = bounds(s, e);
-        if (!ptr) { if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } else if (off > mx) { off += (mx - off) * Math.min(1, dt * 12); vel = 0; } }
-        else off = clamp(off, mn - 60, mx + 60);
-        if (moved > 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2)); // a drag isn't a tap
+        collect(s, e); lay(e);
+        const r = uiRect(s, e), K = uiK(s.engine.safe) || 1, R = ranges(e), ex = e.extents(), pad = +p.padding || 0;
+        S.update(s, e, dt, r, K, R, snapsOf(e, R), { x: ex.hx * 2 - pad * 2, y: ex.hy * 2 - pad * 2 });
         for (const q of kids) {
           const b = base.get(q); if (!b) continue;
-          if (v) q.y = b.y + off; else q.x = b.x + off;
+          q.x = b.x + (axes.includes('x') ? S.off.x : 0); q.y = b.y + (axes.includes('y') ? S.off.y : 0);
+          if (q.local) { q.local.x = q.x; q.local.y = q.y; }
           const qb = uiRect(s, q);
-          q._clipHidden = v ? qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 : qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2;
+          q._clipHidden = qb.y + qb.h / 2 < r.y - r.h / 2 || qb.y - qb.h / 2 > r.y + r.h / 2 || qb.x + qb.w / 2 < r.x - r.w / 2 || qb.x - qb.w / 2 > r.x + r.w / 2; // fully outside: not drawn, not tappable
         }
+      },
+      drawUI(ctx, e, s) { // the editor shows the items lined up (drawn before its children, so they follow)
+        if (!s.engine.editing || (p.arrange !== 'one per row' && p.arrange !== 'grid')) return;
+        sig = ''; base.clear(); collect(s, e); lay(e);
+        for (const q of kids) { const b = base.get(q); if (b) { q.x = b.x; q.y = b.y; } }
       },
     };
   },
@@ -7420,9 +7692,11 @@ registerBehavior('uiList', {
     { key: 'numbered', label: 'Number the rows (1. 2. 3.)', type: 'bool', default: false, group: 'Look' },
     { key: 'arrow', label: 'Arrow on the right ›', type: 'bool', default: false, group: 'Look' },
     { key: 'appear', label: 'Rows appear', type: 'select', options: ['one after another', 'all at once'], default: 'one after another', group: 'Look' },
+    ...SCROLL_PARAMS,
   ],
   create(p) {
-    let rows = [], sig = null, off = 0, vel = 0, drag = null, last = 0, moved = 0, picked = 0;
+    let rows = [], sig = null, picked = 0;
+    const S = new Scroller(p, ['y']);
     const itemsOf = (s) => p.source === 'a list variable' ? (Array.isArray(s.vars[p.listVar]) ? s.vars[p.listVar] : String(s.vars[p.listVar] ?? '').split(',').map((x) => x.trim()).filter(Boolean))
       : p.source === 'numbers 1 to N' ? Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => i + 1) : String(p.items || '').split(',').map((x) => x.trim()).filter(Boolean);
     const geo = (e) => { const ex = e.extents(); return { W: (ex.hx || 150) * 2, H: (ex.hy || 150) * 2, rh: Math.max(16, +p.rowHeight || 52), gap: +p.spacing || 0, pad: +p.padding || 0 }; };
@@ -7445,7 +7719,13 @@ registerBehavior('uiList', {
     };
     return {
       uiAlways: true,
-      start(e, s) { picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); }; },
+      start(e, s) {
+        picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); };
+        e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
+        e._scrollTo = (f) => { const [mn, mx] = S.range.y; S.to('y', mx + (mn - mx) * clamp(+f || 0, 0, 1)); };
+        S.listen(s, e, (name) => { const i = rows.findIndex((q) => String(q.item) === name); if (i < 0) return null; const { rh, gap } = geo(e); return -i * (rh + gap); });
+        S.overlay(s, e, () => uiRect(s, e));
+      },
       update(e, dt, s) {
         const refs = [...String(p.row || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => k !== 'item' && k !== 'i'); // variables the rows show: rebuild when they change
         const items = itemsOf(s), key = JSON.stringify(items) + '|' + p.row + '|' + JSON.stringify(refs.map((k) => s.vars[k]));
@@ -7453,12 +7733,10 @@ registerBehavior('uiList', {
         if (!e.visible || e._parentHidden) return;
         const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, { H, rh, gap, pad } = geo(e);
         const content = pad * 2 + rows.length * rh + Math.max(0, rows.length - 1) * gap, mn = Math.min(0, H - content);
-        if (drag == null) for (const d of inp.downs) if (Math.abs(d.x - r.x) <= r.w / 2 && Math.abs(d.y - r.y) <= r.h / 2) { drag = d.id; last = d.y; moved = 0; vel = 0; }
-        const ptr = drag != null && inp.pointers.get(drag);
-        if (ptr) { const dd = (ptr.y - last) / k; off += dd; vel = dd / Math.max(dt, 1e-3); last = ptr.y; moved += Math.abs(dd); off = clamp(off, mn - 60, 60); }
-        else { drag = null; off += vel * dt; vel *= Math.pow(0.04, dt); if (off > 0) { off += (0 - off) * Math.min(1, dt * 12); vel = 0; } else if (off < mn) { off += (mn - off) * Math.min(1, dt * 12); vel = 0; } }
+        S.update(s, e, dt, r, k, { x: [0, 0], y: [mn, 0] }, { y: rows.map((_, i) => Math.max(mn, -i * (rh + gap))) }, { x: 1, y: H - pad * 2 });
+        const off = S.off.y;
         // tap a row (not a drag) to pick it
-        if (moved < 8) for (const t of inp.taps) {
+        if (S.moved < 8) for (const t of inp.taps) {
           if (Math.abs(t.x - r.x) > r.w / 2 || Math.abs(t.y - r.y) > r.h / 2) continue;
           const i = rows.findIndex((q) => !q._clipHidden && hitTest(s, q, t.x, t.y));
           if (i < 0) continue;
@@ -7467,12 +7745,11 @@ registerBehavior('uiList', {
           s.punch(rows[i], { sx: -0.04, sy: -0.08 }, 0.25, { add: true }); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
           if (p.message) s.send(p.message);
         }
-        if (moved >= 8) inp.taps = inp.taps.filter((t) => !(Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2));
         for (const q of rows) {
           if (s.tweensOf(q).length) { q.baseY ??= q.y; } else q.y = q.baseY + off;
           if (q.local) q.local.y = q.y;
           const top = q.y - rh / 2, bot = q.y + rh / 2;
-          q._clipHidden = bot < rh * 0.5 || top > H - rh * 0.5; // more than half outside the list: hidden
+          q._clipHidden = p.clip !== false ? bot < 0 || top > H : bot < rh * 0.5 || top > H - rh * 0.5; // cut at the edge (or hidden once more than half is outside)
         }
       },
       destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
@@ -9914,6 +10191,48 @@ Object.assign(NODE_TYPES, {
   uiEnabled: { cat: 'UI', label: 'Is Enabled', value: 'bool', params: [txt('object', 'Shop Button', 'object')] },
   safeArea: { cat: 'UI', label: 'Safe Area', value: 'number', params: [opt('side', ['top', 'bottom', 'left', 'right'], 'top', 'side')] },
 });
+// ---- more logic: loops with break, arrays of anything, dictionaries, events with values, delegates ----
+const listVal = (v) => { const t = String(v ?? ''); return t.trim() !== '' && Number.isFinite(+t) ? +t : t; }; // "12" → 12, "sword" stays text
+Object.assign(NODE_TYPES, {
+  whileLoop: { cat: 'Flow', label: 'While (repeat while true)', exec: true, outs: ['each', 'done'], inputs: [{ key: 'condition', type: 'bool', default: false }], params: [num('max', 1000, 'at most (rounds)')] },
+  repeatUntil: { cat: 'Flow', label: 'Repeat Until', exec: true, outs: ['each', 'done'], inputs: [{ key: 'stop when', type: 'bool', default: false }], params: [num('max', 1000, 'at most (rounds)')] },
+  breakLoop: { cat: 'Flow', label: 'Break (stop the loop)', exec: true, outs: [] },
+  continueLoop: { cat: 'Flow', label: 'Next Round (skip the rest)', exec: true, outs: [] },
+  switchText: { cat: 'Flow', label: 'Switch On Text', exec: true, outs: ['case 1', 'case 2', 'case 3', 'case 4', 'case 5', 'other'], inputs: [T_IN('text', 'shop')], params: [txt('cases', 'home, shop, map', 'cases (comma list, up to 5)')] },
+  arrAdd: { cat: 'Lists', label: 'Array: Add Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('where', ['at the end', 'at the start'], 'at the end', 'where')], inputs: [T_IN('value', 'sword')] },
+  arrInsert: { cat: 'Lists', label: 'Array: Insert At', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')], inputs: [N_IN('position', 1), T_IN('value', 'shield')] },
+  arrGetText: { cat: 'Lists', label: 'Array: Item At (text)', value: 'text', params: [txt('name', 'items', 'array')], inputs: [N_IN('position', 1)] },
+  arrJoin: { cat: 'Lists', label: 'Array As Text', value: 'text', params: [txt('name', 'items', 'array'), txt('sep', ', ', 'between items')] },
+  arrSplit: { cat: 'Lists', label: 'Text To Array', exec: true, outs: ['then'], params: [txt('name', 'items', 'into array'), txt('sep', ',', 'split at')], inputs: [T_IN('text', 'a, b, c')] },
+  arrCount: { cat: 'Lists', label: 'Array: Count Of', value: 'number', params: [txt('name', 'items', 'array')], inputs: [T_IN('value', 'sword')] },
+  arrSlice: { cat: 'Lists', label: 'Array: Copy Part', exec: true, outs: ['then'], params: [txt('name', 'items', 'from array'), txt('to', 'part', 'into array')], inputs: [N_IN('from', 1), N_IN('to position', 3)] },
+  arrConcat: { cat: 'Lists', label: 'Array: Join Two', exec: true, outs: ['then'], params: [txt('a', 'items', 'first'), txt('b', 'more', 'then'), txt('to', 'all', 'into array')] },
+  arrUnique: { cat: 'Lists', label: 'Array: Remove Duplicates', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')] },
+  arrFilter: { cat: 'Lists', label: 'Array: Keep Only', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['=', '≠', '>', '<', '≥', '≤', 'contains', 'starts with'], '>', 'items that are'), txt('to', '', 'into array (blank = same)')], inputs: [T_IN('value', '10')] },
+  arrMap: { cat: 'Lists', label: 'Array: Change Every Item', exec: true, outs: ['then'], params: [txt('name', 'items', 'array'), opt('op', ['add', 'multiply', 'round', 'abs', 'UPPER', 'lower', 'add text before', 'add text after'], 'add', 'do')], inputs: [T_IN('value', '1')] },
+  arrSwap: { cat: 'Lists', label: 'Array: Swap Two', exec: true, outs: ['then'], params: [txt('name', 'items', 'array')], inputs: [N_IN('a', 1), N_IN('b', 2)] },
+  arrIndexOfMax: { cat: 'Lists', label: 'Array: Position Of Biggest / Smallest', value: 'number', params: [txt('name', 'items', 'array'), opt('which', ['biggest', 'smallest'], 'biggest', 'which')] },
+  loopItemText: { cat: 'Lists', label: 'Loop Item (text)', value: 'text' },
+  mapSet: { cat: 'Lists', label: 'Dictionary: Set', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp'), T_IN('value', '100')] },
+  mapGet: { cat: 'Lists', label: 'Dictionary: Get', value: 'text', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapGetNum: { cat: 'Lists', label: 'Dictionary: Get Number', value: 'number', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapAdd: { cat: 'Lists', label: 'Dictionary: Add To', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'xp'), N_IN('amount', 1)] },
+  mapHas: { cat: 'Lists', label: 'Dictionary: Has Key', value: 'bool', params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapRemove: { cat: 'Lists', label: 'Dictionary: Remove', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')], inputs: [T_IN('key', 'hp')] },
+  mapClear: { cat: 'Lists', label: 'Dictionary: Clear', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary')] },
+  mapSize: { cat: 'Lists', label: 'Dictionary: Size', value: 'number', params: [txt('name', 'stats', 'dictionary')] },
+  mapKeys: { cat: 'Lists', label: 'Dictionary: Keys To Array', exec: true, outs: ['then'], params: [txt('name', 'stats', 'dictionary'), txt('to', 'keys', 'into array')] },
+  mapForEach: { cat: 'Lists', label: 'Dictionary: For Each', exec: true, outs: ['each', 'done'], params: [txt('name', 'stats', 'dictionary')] },
+  loopKey: { cat: 'Lists', label: 'Loop Key', value: 'text' },
+  sendValue: { cat: 'Functions', label: 'Send Message With Value', exec: true, outs: ['then'], params: [{ ...txt('message', 'hit', 'message'), suggest: 'messages' }], inputs: [T_IN('value', '10')] },
+  eventText: { cat: 'Functions', label: 'Event Value (text)', value: 'text' },
+  waitEvent: { cat: 'Flow', label: 'Wait For Message', exec: true, outs: ['then', 'timed out'], params: [{ ...txt('message', 'ready', 'message'), suggest: 'messages' }, num('timeout', 0, 'give up after (sec, 0 = never)')] },
+  setDelegate: { cat: 'Functions', label: 'Set Delegate', exec: true, outs: ['then'], params: [txt('var', 'onHit', 'delegate variable'), txt('func', 'double', 'function name')] },
+  callDelegate: { cat: 'Functions', label: 'Call Delegate', exec: true, outs: ['then', 'empty'], params: [txt('var', 'onHit', 'delegate variable'), txt('store', '', 'put the result in variable (optional)')], inputs: [N_IN('a', 0), N_IN('b', 0), N_IN('c', 0)] },
+  callDelegateV: { cat: 'Functions', label: 'Call Delegate (value)', value: 'number', params: [txt('var', 'onHit', 'delegate variable')], inputs: [N_IN('a', 0), N_IN('b', 0), N_IN('c', 0)] },
+  bindMessage: { cat: 'Functions', label: 'Listen: Message → Function', exec: true, outs: ['then'], params: [{ ...txt('message', 'hit', 'when message'), suggest: 'messages' }, txt('func', 'double', 'run function'), opt('mode', ['start listening', 'stop listening'], 'start listening', 'do')] },
+  hasFunction: { cat: 'Functions', label: 'Function Exists', value: 'bool', params: [txt('func', 'double', 'function name')] },
+});
 // ---- app & device nodes: the phone around the game (switching apps, notifications, battery, menus) ----
 Object.assign(NODE_TYPES, {
   onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
@@ -10301,6 +10620,8 @@ export function compileFormula(src) {
 /** Lists live in game variables as arrays (text shows them as 1, 2, 3). Positions start at 1. */
 const listOf = (s, name) => { const v = s.vars[name]; return Array.isArray(v) ? v : v == null || v === '' || v === 0 ? [] : [v]; };
 const listSave = (s, name, arr) => s.setVar(name, arr);
+/** Dictionaries (key → value) live in game variables as objects. */
+const mapOf = (s, name) => { const v = s.vars[name]; return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; };
 const savedVarKey = (s, name) => `pocket.var.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
 const OPS_CHANGE = { set: (a, b) => b, add: (a, b) => a + b, subtract: (a, b) => a - b, multiply: (a, b) => a * b, divide: (a, b) => (b ? a / b : a), min: Math.min, max: Math.max, power: (a, b) => a ** b, mod: (a, b) => (b ? ((a % b) + b) % b : a) };
 const achKey = (s, name) => `pocket.ach.${s.settings?.saveBest || s.json?.name || 'game'}.${name}`;
@@ -10487,6 +10808,19 @@ registerBehavior('graph', {
         case 'gameStateIs': { const st = P('state'); return st === 'paused' ? !!s.engine.paused : !s.engine.paused && s.state === ({ playing: 'play', title: 'title', 'game over': 'over', won: 'win' }[st]); }
         case 'canGoBack': return s.canGoBack();
         case 'menuIsOpen': return !!s.openMenus?.has(P('menu') || 'menu');
+        case 'arrGetText': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1); return asText(a[i < 0 ? a.length + i : i - 1]); }
+        case 'arrJoin': return listOf(s, P('name')).map(asText).join(P('sep') ?? ', ');
+        case 'arrCount': { const v = listVal(I('value')); return listOf(s, P('name')).filter((x) => sameVal(x, v)).length; }
+        case 'arrIndexOfMax': { const a = listOf(s, P('name')).map(Number); if (!a.length) return 0; let b = 0; for (let i = 1; i < a.length; i++) if (P('which') === 'smallest' ? a[i] < a[b] : a[i] > a[b]) b = i; return b + 1; }
+        case 'loopItemText': return asText(ctx.item);
+        case 'loopKey': return asText(ctx.key);
+        case 'mapGet': { const m = mapOf(s, P('name')); return asText(m[asText(I('key'))]); }
+        case 'mapGetNum': { const m = mapOf(s, P('name')); return +m[asText(I('key'))] || 0; }
+        case 'mapHas': return Object.prototype.hasOwnProperty.call(mapOf(s, P('name')), asText(I('key')));
+        case 'mapSize': return Object.keys(mapOf(s, P('name'))).length;
+        case 'eventText': return asText(ctx.eventValue);
+        case 'callDelegateV': { const f = asText(s.vars[P('var')]); return f ? callFunction(s, e, ctx, f, { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }) : 0; }
+        case 'hasFunction': return g.nodes.some((q) => q.type === 'funcDef' && param(q, 'name') === P('func'));
         case 'batteryLevel': { const E = s.engine; if (!E._batt && navigator.getBattery) { E._batt = 1; navigator.getBattery().then((b) => { E.battery = b; }).catch(() => {}); } return E.battery ? Math.round(E.battery.level * 100) : 100; }
         case 'deviceLanguage': { const l = (typeof navigator !== 'undefined' && navigator.language) || 'en'; return String(P('form')).startsWith('full') ? l : l.slice(0, 2); }
         case 'notifyAllowed': { const ph = s.engine.phone; if (!ph._checking) { ph._checking = true; ph.status().then((v) => { ph.perm = v; ph._checking = false; }); } return ph.perm === 'granted'; }
@@ -10553,7 +10887,7 @@ registerBehavior('graph', {
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
         case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
-        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))); for (let i = 0; i < c; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps }); return follow(n, 'done', ctx); }
+        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))), L = { stop: false }; for (let i = 0; i < c && !L.stop; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
         case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
         case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
         case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
@@ -10735,7 +11069,7 @@ registerBehavior('graph', {
           listSave(s, P('name'), a); break;
         }
         case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
-        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); a.forEach((v, i) => follow(n, 'each', { ...ctx, index: i + 1, item: v, steps: ctx.steps })); return follow(n, 'done', ctx); }
+        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000), L = { stop: false }; for (let i = 0; i < a.length && !L.stop; i++) follow(n, 'each', { ...ctx, index: i + 1, item: a[i], steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
         case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
         case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
         case 'callLater': {
@@ -10744,7 +11078,8 @@ registerBehavior('graph', {
         }
         case 'forRange': {
           const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
-          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps });
+          const L = { stop: false };
+          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000 && !L.stop; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L });
           return follow(n, 'done', ctx);
         }
         case 'repeatEvery': {
@@ -10844,6 +11179,44 @@ registerBehavior('graph', {
         case 'pfEventN': s.engine.online.pfEvent(P('name'), { level: s.level, score: s.vars.score }); break;
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
+        case 'whileLoop': case 'repeatUntil': {
+          const L = { stop: false }, max = clamp(Math.round(+P('max') || 1000), 1, 10000), until = n.type === 'repeatUntil';
+          for (let i = 0; i < max && !L.stop; i++) { const c = !!input(n, until ? 'stop when' : 'condition', ctx); if (until ? c : !c) break; follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); }
+          return follow(n, 'done', ctx);
+        }
+        case 'breakLoop': if (ctx.loop) ctx.loop.stop = true; return;
+        case 'continueLoop': return;
+        case 'switchText': { const t = asText(I('text')).trim().toLowerCase(), cs = String(P('cases') || '').split(',').map((x) => x.trim().toLowerCase()).slice(0, 5), i = cs.indexOf(t); return follow(n, i >= 0 ? 'case ' + (i + 1) : 'other', ctx); }
+        case 'arrAdd': { const a = [...listOf(s, P('name'))], v = listVal(I('value')); if (P('where') === 'at the start') a.unshift(v); else a.push(v); listSave(s, P('name'), a); break; }
+        case 'arrInsert': { const a = [...listOf(s, P('name'))], i = clamp(Math.round(+I('position') || 1) - 1, 0, a.length); a.splice(i, 0, listVal(I('value'))); listSave(s, P('name'), a); break; }
+        case 'arrSplit': { const sep = P('sep') ?? ','; listSave(s, P('name'), asText(I('text')).split(sep === '' ? '' : sep).map((x) => x.trim()).filter((x) => x !== '').map(listVal)); break; }
+        case 'arrSlice': { const a = listOf(s, P('name')), f = Math.max(1, Math.round(+I('from') || 1)), t = Math.round(+I('to position') || a.length); listSave(s, P('to') || 'part', a.slice(f - 1, Math.max(f - 1, t))); break; }
+        case 'arrConcat': listSave(s, P('to') || 'all', [...listOf(s, P('a')), ...listOf(s, P('b'))]); break;
+        case 'arrUnique': { const out = []; for (const v of listOf(s, P('name'))) if (!out.some((q) => sameVal(q, v))) out.push(v); listSave(s, P('name'), out); break; }
+        case 'arrFilter': {
+          const v = listVal(I('value')), op = P('op'), test = (x) => { const a = +x, b = +v, num = Number.isFinite(a) && Number.isFinite(b); switch (op) { case '=': return sameVal(x, v); case '≠': return !sameVal(x, v); case '>': return num && a > b; case '<': return num && a < b; case '≥': return num && a >= b; case '≤': return num && a <= b; case 'contains': return asText(x).toLowerCase().includes(asText(v).toLowerCase()); case 'starts with': return asText(x).toLowerCase().startsWith(asText(v).toLowerCase()); default: return true; } };
+          listSave(s, P('to') || P('name'), listOf(s, P('name')).filter(test)); break;
+        }
+        case 'arrMap': { const v = I('value'), op = P('op'), f = (x) => { switch (op) { case 'add': return (+x || 0) + (+v || 0); case 'multiply': return (+x || 0) * (+v || 0); case 'round': return Math.round(+x || 0); case 'abs': return Math.abs(+x || 0); case 'UPPER': return asText(x).toUpperCase(); case 'lower': return asText(x).toLowerCase(); case 'add text before': return asText(v) + asText(x); case 'add text after': return asText(x) + asText(v); default: return x; } }; listSave(s, P('name'), listOf(s, P('name')).map(f)); break; }
+        case 'arrSwap': { const a = [...listOf(s, P('name'))], i = Math.round(+I('a') || 1) - 1, j = Math.round(+I('b') || 1) - 1; if (a[i] !== undefined && a[j] !== undefined) { [a[i], a[j]] = [a[j], a[i]]; listSave(s, P('name'), a); } break; }
+        case 'mapSet': { const m = { ...mapOf(s, P('name')) }; m[asText(I('key'))] = listVal(I('value')); s.setVar(P('name'), m); break; }
+        case 'mapAdd': { const m = { ...mapOf(s, P('name')) }, k = asText(I('key')); m[k] = (+m[k] || 0) + (+I('amount') || 0); s.setVar(P('name'), m); break; }
+        case 'mapRemove': { const m = { ...mapOf(s, P('name')) }; delete m[asText(I('key'))]; s.setVar(P('name'), m); break; }
+        case 'mapClear': s.setVar(P('name'), {}); break;
+        case 'mapKeys': listSave(s, P('to') || 'keys', Object.keys(mapOf(s, P('name')))); break;
+        case 'mapForEach': { const L = { stop: false }; for (const [i, [k, v]] of Object.entries(mapOf(s, P('name'))).slice(0, 1000).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, index: i + 1, key: k, item: v, steps: ctx.steps, loop: L }); } return follow(n, 'done', ctx); }
+        case 'sendValue': s.send(P('message'), listVal(I('value'))); break;
+        case 'waitEvent': {
+          const later = { ...ctx, steps: 0 }, name = P('message'), to = +P('timeout') || 0; let done = false;
+          const fn = (m, data) => { if (done || e.dead || m !== name) return; finish(); follow(n, 'then', { ...later, eventValue: data }); };
+          const finish = () => { done = true; Promise.resolve().then(() => { const L = s.listeners.message || [], i = L.indexOf(fn); if (i >= 0) L.splice(i, 1); }); }; // stop listening once it has fired
+          s.on('message', fn);
+          if (to > 0) s.after(to, () => { if (!done && !e.dead) { finish(); follow(n, 'timed out', later); } });
+          return;
+        }
+        case 'setDelegate': s.setVar(P('var'), P('func') || ''); break;
+        case 'callDelegate': { const f = asText(s.vars[P('var')]); if (!f) return follow(n, 'empty', ctx); const v = callFunction(s, e, ctx, f, { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
+        case 'bindMessage': { const key = P('message'), fn = P('func'); if (P('mode') === 'stop listening') bindings.delete(key + '|' + fn); else bindings.set(key + '|' + fn, { message: key, func: fn }); break; }
         case 'menuOpen': { const m = P('menu') || 'menu', md = P('mode'); s.send(md === 'open' ? m + ' open' : md === 'close' ? m + ' close' : m); break; }
         case 'navBars': s.navBarsOff = P('mode') === 'toggle' ? !s.navBarsOff : P('mode') === 'hide'; break;
         case 'vibratePattern': { const pat = String(P('pattern') || '').split(/[\s,]+/).map(Number).filter((x) => x >= 0 && x < 10000); if (pat.length) s.engine.vibrate(pat); break; }
@@ -10931,7 +11304,7 @@ registerBehavior('graph', {
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
         case 'setObjLayer': { const w = P('target'), t = w === 'other' ? ctx.other : w === 'object' ? uiFind(s, e, P('object')) : e; if (t) s.setLayer(t, P('layer')); break; }
-        case 'forEachInLayer': { s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 })); return follow(n, 'done', ctx); }
+        case 'forEachInLayer': { const L = { stop: false }; for (const [i, q] of s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); } return follow(n, 'done', ctx); }
         case 'uiShow': {
           const t = uiFind(s, e, P('object')); if (!t) break;
           const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };
@@ -10985,7 +11358,7 @@ registerBehavior('graph', {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
           const list = s.entities.filter((q) => q !== e && !q.dead && !q.ui && !q.template && (n.type === 'overlap' ? tagOk(q, tag) : tag && q.has(tag)) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r)
             .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z)).slice(0, 100);
-          list.forEach((q, i) => follow(n, 'each', { ...ctx, other: q, index: i, steps: 0 }));
+          const L = { stop: false }; for (const [i, q] of list.entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); }
           if (n.type === 'forEachTag') return follow(n, 'done', ctx);
           return list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx);
         }
@@ -11002,11 +11375,12 @@ registerBehavior('graph', {
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
     const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
-    const timers = new Map();
+    const timers = new Map(), bindings = new Map();
     return {
       uiAlways: true,
       start(e, s) {
-        if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name); });
+        if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
+        if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
         if (g.nodes.some((n) => n.type === 'damaged')) s.on('damage', (who) => { if (who === e) fire('damaged', e, s); });
         if (g.nodes.some((n) => n.type === 'death')) s.on('death', (who) => { if (who === e) fire('death', e, s); });

@@ -122,6 +122,19 @@ Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Ca
 
 - Its name (**Rename**, which updates the buttons and tabs that open it), **Show** it in the UI editor, **The app opens on this page**, its **Title in the App Bar**, and **Add to the bottom bar**.
 - **Look:** background colour or gradient, a **background picture** (cover, fit, tile or stretch, with opacity and a tint over it so text stays readable), and space at the top and bottom.
+- **What's on this page:** everything on it, top to bottom. Tap one to select it; ↑ and ↓ move it (things side by side move together); its ⋯ menu has *Duplicate* (right under it), *Add under it…* and *Delete*.
+- **Add to page** (also **+ Add** in the UI editor while a page is shown) offers ready blocks in your app's theme colours:
+
+  | Block | What it is |
+  |---|---|
+  | Heading, Text | A big title; a paragraph that wraps |
+  | Button, Outline Button, Menu Row | Open a page: pick one of yours or *A new page…* (made for you) |
+  | Card | A title with a line under it |
+  | Two Numbers, Two Buttons | Side by side, sharing the width on every screen |
+  | Switch Row, Text Box, Search Bar | A setting, typing into a variable, searching |
+  | Picture, Divider, Data List | A photo from your device, a thin line, your data's records |
+
+  Each block goes under the last thing on the page, or under the one selected (what's below moves down to make room). *Any UI…* opens the full list; whatever you add while a page is shown goes on that page. **Line up** spaces everything evenly from top to bottom, and a page turns on scrolling by itself when its content gets taller than the screen.
 - **Opening and closing**, **Scrolling**, **Bottom bar and access**, **Messages** (the settings below).
 
 A page only moves when you drag it if there's something below the screen to scroll to (or pull to refresh is on).

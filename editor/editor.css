@@ -1832,3 +1832,16 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .page-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0 8px; }
 .page-head .page-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--accent-strong); color: #fff; font-weight: 800; margin-right: auto; }
 .page-head .page-chip svg.i { width: 16px; height: 16px; }
+/* Page card: what's on the page, top to bottom */
+.pg-content { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.pg-list { display: flex; flex-direction: column; gap: 4px; }
+.pg-item { display: flex; align-items: center; gap: 4px; padding: 3px; border-radius: 12px; background: rgba(127,127,127,.08); }
+.pg-item.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pg-nm { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; background: none; color: inherit; font: inherit; font-weight: 650; text-align: left; cursor: pointer; }
+.pg-nm span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-nm small { color: var(--muted); font-weight: 500; font-size: 12px; white-space: nowrap; }
+.pg-nm svg { width: 18px; height: 18px; flex: none; opacity: .8; }
+.pg-b { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: inherit; cursor: pointer; }
+.pg-b:hover:not(:disabled) { background: rgba(127,127,127,.16); }
+.pg-b:disabled { opacity: .3; cursor: default; }
+.pg-b svg { width: 18px; height: 18px; }

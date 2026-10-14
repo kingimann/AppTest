@@ -337,6 +337,7 @@ export class Entity {
     this.minimap = props.minimap ? { w: 120, h: 120, range: 800, bg: 'rgba(0,0,0,0.5)', border: '#ffffff', round: false, ...props.minimap } : null; // UI: overview of the level
     this.stretch = props.stretch || 'none'; this.margin = props.margin ?? 16; // UI: fill the screen width / height minus margins
     for (const k of ['marginTop', 'marginBottom', 'marginLeft', 'marginRight']) if (props[k] != null && props[k] !== '') this[k] = +props[k]; // per side (room for an app bar…)
+    this.row = props.row != null && props.row !== '' ? +props.row || 0 : null; // UI row: children stretched to its width sit side by side, sharing it, this far apart
     this.ignoreSafe = !!props.ignoreSafe; // UI: lay out against the whole screen, notch and all
     this.ignoreBars = !!props.ignoreBars; this.overlap = !!props.overlap; // UI: may go under the nav bars / may overlap other UI (Keep UI apart)
     this.parentId = props.parent || null; this.parentEnt = null; this.local = null; // hierarchy: x/y/z… are relative to the parent
@@ -1052,6 +1053,8 @@ export class Scene {
       if (e.parentEnt && !e.local) { e.local = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, sx: e.sx, sy: e.sy, sz: e.sz, visible: e.visible }; e._lw = null; }
     }
     this.kids = this.entities.filter((e) => e.parentEnt).sort((a, b) => depth(a) - depth(b));
+    for (const e of this.entities) e._rowKids = null;
+    for (const e of this.entities) if (e.parentEnt?.row != null && e.stretch === 'width') (e.parentEnt._rowKids ||= []).push(e); // a UI row: its stretched children share its width
     this.syncHierarchy(true);
   }
   /** Children follow their parents (position, rotation, scale, visibility). Moves made to a child this frame are kept. */
@@ -4397,7 +4400,9 @@ function applyStretch(e, W, H, safe) {
   // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
   const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
   const moving = e._uiAnimUntil > performance.now() / 1000; // a show / hide animation is moving it: keep the size up to date, leave the position to the animation
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); if (!moving) e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
+  const RK = p && e.parentEnt._rowKids, ri = RK ? RK.indexOf(e) : -1;
+  if (ri >= 0) { const g = +e.parentEnt.row || 0, cw = Math.max(4, (box.w / K - ml - mr - g * (RK.length - 1)) / RK.length); set('w', cw); if (!moving) e.x = (box.l - ao.x) / K + ml + cw / 2 + ri * (cw + g); } // a cell of a row
+  else if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); if (!moving) e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
   if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); if (!moving) e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */

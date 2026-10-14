@@ -14,11 +14,12 @@ Your games are saved automatically on the device, in the browser's storage.
 
 ## Start from a template, or from nothing
 
-The **Home** screen offers two things:
+The **Home** screen (*☰ → Home*) has, from the top:
 
-- **Game types:** complete, playable starters you can change any way you like. There are platformers, third and first person 3D, top-down, shooters, racing, runners, clickers, Breakout, a voxel sandbox, a turn-based RPG, a dungeon crawler, board games and more. Opening one is the fastest way to see how a kind of game is put together.
-- **Blank 2D / Blank 3D:** an empty level with a camera and a light, to build your own. You can pick portrait or landscape.
-- **Apps:** a blank app, a to-do list, notes and an expense tracker. Apps have pages, lists and forms instead of levels, and save what people add on their phone. See [Making apps](#/guide/apps).
+- **Continue:** the game you have open, with a picture of it, *Play* and *Keep editing*.
+- **Create:** *New 2D game*, *New 3D game* and *New app* in one tap: an empty level with a camera and a light (or an app with pages and a tab bar). *New games start* picks portrait or landscape.
+- **My games and apps:** your projects as picture cards, newest first, showing when you last edited them. The picture is the game as it was when you last stopped Play. Each card's ⋯ menu opens, plays, renames, duplicates or deletes. With more than a few, filter by 2D, 3D or Apps.
+- **Start from a template:** complete, playable starters you can change any way you like. There are platformers, third and first person 3D, top-down, shooters, racing, runners, clickers, Breakout, a voxel sandbox, a turn-based RPG, a dungeon crawler, board games and more. Opening one is the fastest way to see how a kind of game is put together. The **Apps** tab has a to-do list, notes and an expense tracker. Apps have pages, lists and forms instead of levels, and save what people add on their phone. See [Making apps](#/guide/apps).
 
 > **Tip:** Templates are the best documentation for "how would I make X?". Open one, select its objects and look at their components in the Inspector.
 

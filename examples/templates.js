@@ -42,7 +42,7 @@ function squadGame(turnBased) {
 const INK = '@text', MUTED = '@sub'; // theme colours: they follow light / dark mode
 const app = {
   bar: (titles, accent) => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions: 'moon | dark mode toggle', style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'never' }] }),
+    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions: 'moon | dark mode toggle', style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'once scrolled' }] }),
   page: (id, value, home, kids, o = {}) => [{ id, name: value[0].toUpperCase() + value.slice(1) + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
     behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value, whenUnset: !!home, anim: o.anim || 'push (iOS, follows navigation)', stagger: o.stagger || 'rise one after another' }] }, ...kids.map((k) => ({ ...k, parent: id }))],
   text: (id, name, value, y, o = {}) => ({ id, name, ui: true, anchor: 'top-left', x: 20, y, text: { value, size: o.size || 16, color: o.color || INK, weight: o.weight || '600', align: 'left', wrap: o.wrap ?? 360 } }),
@@ -600,7 +600,8 @@ function arcadeApp() {
     entities: [
       app.bar('home = Arcade\nscores = My Scores', A),
       { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: games.map(([, title]) => ({ type: 'dataStat', collection: 'Scores', how: 'max', field: 'score', filter: `game = ${title}`, var: 'best_' + title.toLowerCase().replace(/[^a-z0-9]+/g, '_') })) },
-      ...app.page('p-home', 'home', true, [app.text('last', 'Last Game Text', 'Last game: {lastGame} · {lastScore}', 20, { size: 14, color: MUTED, weight: '700' })]),
+      ...app.page('p-home', 'home', true, [{ ...app.text('last', 'Last Game Text', 'Last game: {lastGame} · {lastScore} points', 20, { size: 14, color: MUTED, weight: '700' }), behaviors: [{ type: 'uiShowIf', var: 'gamesPlayed', op: '>', value: '0', whenUnset: false, anim: 'fade' }] },
+        { ...app.text('hello', 'Hello Text', 'Pick a game and beat your best!', 20, { size: 14, color: MUTED, weight: '700' }), behaviors: [{ type: 'uiShowIf', var: 'gamesPlayed', op: '≤', value: '0', whenUnset: true, anim: 'fade' }] }]),
       ...games.flatMap((g, gi) => card(gi, g)),
       ...app.page('p-scores', 'scores', false, [app.list('list', { top: 8, bottom: 90, list: { collection: 'Scores', title: '{game}', subtitle: '{result} · {date}', right: '{score}', sort: 'score (high-low)', empty: 'Play a game: every score lands here.' } })]),
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },

@@ -649,6 +649,17 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - *Game Settings › Motion:* animation speed and **Reduce motion** (follows the phone's setting by default).
 - **Snackbars:** the *Show snackbar* instruction, or `scene.snackbar(text, 'Undo', fn)`.
 
+### Game screens and HUD
+
+- **Title screen:** the title springs in and floats, with your best score and a **Play** button.
+- **Pause:** a card with **Resume**, **Restart**, **Sound on / off** (and *Back to app* in a game inside an app); ⚙ Settings sits under it.
+- **Game over / You win / Level complete:** a card with the score counting up, a **NEW BEST!** badge, **Play again** or **Next level**, Share and Back to app. Wins, finished levels and new bests throw confetti.
+- Tapping anywhere outside the buttons still starts, resumes or plays again.
+- Messages, the dialogue box (its choices slide in one by one) and the *LEVEL 2* banner animate in and follow the UI Theme. Messages no longer show through the pause and end screens.
+- Touch buttons dip and light up while held; pause, sound and D-pad buttons draw their own icons.
+- A text showing a variable (`{score}`) pops when the value changes (*Pop when the value changes* in the Text card).
+- **Apps:** search bars with a magnifier and a clear ✕, *No results* and empty-list states, and app bars that get a shadow once you scroll.
+
 ### Squads: select and move many units (tactics and strategy)
 
 - **Squad Unit** component: units on a grid that you command, on your team or the enemy's.

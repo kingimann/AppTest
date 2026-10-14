@@ -3224,6 +3224,7 @@ function renderInspector() {
       fold('text:numbers', 'Numbers and fitting', [
       C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
       C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
+      String(j.text.value || '').includes('{') && j.ui && C('text.bump', { label: 'Pop when the value changes', type: 'bool', def: true, infoText: 'A score or coin count grows for a moment whenever it changes.' }),
       C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
       ], !!(j.text.format || +j.text.fit || j.text.valign)),
       fold('text:box', 'Label box', [

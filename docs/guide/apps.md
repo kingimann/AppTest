@@ -172,6 +172,9 @@ Everything in an app moves with **springs**, which feel natural and settle quick
 - **Data Lists** stagger their rows in, glide rows to their new place when the order changes, highlight a row you press, stretch past the ends and show a scroll bar while scrolling. Ticks pop, done rows strike through, and a deleted row shrinks away.
 - **Record Forms** bring their fields in one by one. The focused field glows, switches slide, choice buttons have a highlight that slides between them, stars fill one at a time, and a missing field shakes.
 
+- **Search bars** show a magnifier, and an ✕ that clears the search. While a search finds nothing, the Data List says *No results*; an empty list shows its *When there is nothing* line under a soft icon.
+- The **App Bar** of the app templates is flat at the top of a page and gets a shadow once you scroll (*Shadow: once scrolled*).
+
 *Game Settings › Motion* sets the **speed** of every animation and **Reduce motion**: *follow the phone* (the default, which uses the phone's accessibility setting), *always* or *never*. With reduced motion, transitions become short fades.
 
 ### Snackbar and Undo

@@ -28,6 +28,9 @@ On a phone, panels open full size above the bottom bar. Drag the handle to make 
 | Two-finger tap / three-finger tap | Undo / Redo |
 | ⟲ button (− / + too on a computer) | Reset the view (zoom out, zoom in) |
 | 👁 button next to snap and grid | **Clean view:** hide the buttons over the Scene |
+| HUD button (next to 👁) | **Hide UI:** hide the game's UI in the Scene while you build the level. The UI editor still shows it |
+
+In a 2D Scene the game's **UI sits inside the camera frame** (the white rectangle), laid out for the game's screen size, so it zooms and pans with the level and shows where it really goes. Anything outside the frame is hidden, as it would be in the game. In 3D, the UI is drawn over the whole view.
 
 When something is selected, a small **quick-action bar** floats next to it (never over it): Inspect, Duplicate, Focus, Attach / Detach (parenting) and Delete. While you drag, the buttons over the Scene fade out of the way.
 

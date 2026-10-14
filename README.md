@@ -97,10 +97,31 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
   - **Text and tips:** extra text, rotating tips (separate with `|`) and an optional "Made with Pocket Engine" line.
   - **Finish:** minimum time, **Tap to Start** with your own text (so music can play straight away), and how it leaves (fade, slide up, zoom, circle wipe or cut).
 - **Levels:** untick unfinished levels to leave them out, and pick the level to start at (handy for testing).
-- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, blocking long-press menus, and whether it can be added to the Home Screen as an app.
+- **Player:** graphics quality (battery saver, balanced, sharpest), the back gesture, and blocking long-press menus.
+- **Web app:** how the game behaves once it is on the Home Screen or in a browser.
+  - **Can be added to the Home Screen**, with a short **Home Screen name**.
+  - **Opens:** full screen, like an app (keeps the status bar), with small browser buttons, or in the browser.
+  - **Suggest installing:** never, shortly after it starts, or after a game ends. A small bar shows an **Install** button where the browser offers one (Android / Chrome) or the steps on iPhone ("Tap Share, then Add to Home Screen"). It never shows once installed, the player can close it, and the message is yours to write.
+  - **Screen:** orientation (same as the game, portrait, landscape, either), **browser bar colour** and the **iPhone status bar** (see-through, black, white).
+  - **Behaviour:** **pause when switching apps**, **keep the screen on while playing**, and **ask before leaving mid-game**.
+  - **Sharing:** a **link preview** (title and description for messages and social posts) and the **language code**.
+  - **Extra code in `<head>`** (advanced): analytics, fonts or meta tags, pasted into every build as-is.
 - **File size:** **Compress** makes the file about 3× smaller (needs iOS 16.4+ or a 2023 browser). A report shows the total size, the engine, the game data, pictures, sounds and the biggest files.
 - **Testing:** a frame-rate counter and errors on screen, for trying the build on another phone.
 - **Build** downloads it, **Share** sends it with the phone's share sheet, and **Test** opens the build in a new tab.
+
+### Editor Preferences (☰ → Preferences…)
+
+Settings for you on this device (games keep their own settings):
+
+| Group | Settings |
+|---|---|
+| Look | theme (Dark, Black, Slate, Warm), accent colour, panel text size, reduce motion |
+| Editing | snap on / off, snap step for 2D (1–50 px) and 3D (0.1–1), rotation snap (5°–90°), grid, all colliders, vibration on taps |
+| Saving | save straight away, after a few seconds, every 10 seconds, or only on Save / leaving; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
+| App | open on the Home screen or straight into the last game, keep the screen on while editing, version and **Check for updates**, **Install app**, storage used and **Protect my games** (asks the browser not to clear them) |
+
+**Reset preferences** puts them back.
 
 ### Easy logic: Triggers (Game Creator style) and State Machines (PlayMaker style)
 
@@ -374,6 +395,25 @@ The **Move** component steers with the joystick, a finger drag, both, or tilting
 - **Drag smoothing** and **Max drag speed**.
 - **Walls stop it**: dragging moves the body by velocity, so colliders block it.
 - **Keep sliding when you let go**: a flick throws it.
+
+### Player settings (⚙)
+
+Players get their own **Settings** panel. Their choices are saved on their device for each game.
+
+| Section | Settings | Shows when the game uses |
+|---|---|---|
+| Controls | **Left-handed** (joystick and buttons swap sides), **Control size**, **Control opacity** | a joystick, D-pad / arrows or touch buttons |
+| Movement | **Joystick sensitivity** (higher = less push for full speed) | the joystick |
+| | **Drag sensitivity** | Move with drag |
+| | **Tilt sensitivity**, **Invert tilt forward / back**, **Set level to how I'm holding it** | tilt |
+| | **Look sensitivity**, **Invert look up / down** | First / Third Person, orbit camera |
+| Sound & feel | **Sound effects**, **Music** (volume), **Vibration** | always |
+
+- **Reset** puts everything back. Opening the panel pauses the game; **Done** carries on.
+- Game Settings › Touch Controls › **Player Settings (⚙)** sets where it opens: on the pause screen (default), also as a ⚙ in the top-right corner, or off.
+  - A Button (Do → **open settings**) or the **Open Settings** node opens it too.
+  - The **Player Setting** node reads a choice (left-handed and vibration are 1 / 0).
+  - Games with *Custom Screens* open it with their own button.
 
 ### Character Controller 2D
 
@@ -855,6 +895,7 @@ registerBehavior('blink', {
 | `engine.input.axis()` | `{x, y}` from the joystick or tilt |
 | `engine.input.pressed('jump' \| 'action' \| 'tap' \| 'swipe:left')`, `isDown('jump' \| 'action')` | touch buttons, taps, swipes |
 | `engine.input.taps`, `engine.input.pointers`, `engine.input.useTilt = true` | raw touches, tilt controls |
+| `engine.prefs`, `engine.setPref(key, value)`, `engine.openSettings()`, `engine.stickSide` | the player's saved settings (`lefty`, `controlScale`, `opacity`, `stickSens`, `dragSens`, `tiltSens`, `tiltInvert`, `lookSens`, `invertLook`, `sfx`, `music`, `vibration`), the Settings panel, the joystick side after left-handed |
 | `engine.input.requestMotion()`, `engine.input.calibrateTilt()`, `engine.input.tiltCfg` | ask for motion access from a tap (iPhone), set level, tilt range / dead zone / smoothing |
 | `engine.audio.sfx('coin' \| 'jump' \| 'hit' \| 'power' \| 'win' \| 'lose')`, `audio.play(url)` | sound |
 | `engine.vibrate(ms)`, `engine.timeScale`, `engine.paused`, `engine.restart()` | misc |
@@ -869,7 +910,7 @@ registerBehavior('blink', {
 
 **Custom UI:** UI entities can have a `bar: { var, max, maxVar, w, h, fill, bg, radius, label }` (health/progress bar; `var: "self.hp"` reads an object's own health from the Health component) and `showWhen: 'always' | 'play' | 'title' | 'paused' | 'over' | 'win'`. `settings.customScreens` turns off the built-in title/pause/end screens so your own UI and Buttons run them. Anchors include `left`, `center` and `right` edges.
 
-**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` / `'static'` / `'fixed'`; `joystickZone` (`half`/`third`/`full`), `joystickDirections` (`all`/`8`/`4`/`horizontal`/`vertical`), `joystickResponse` (`analog`/`curve`/`full`), `joystickDeadZone`, `joystickSize`, `joystickKnob`, `joystickStyle` (`classic`/`ring`/`dot`/`arrows`), `joystickColor`, `joystickVisible` (`touch`/`always`), `joystickIdleOpacity`, `joystickHaptics` (`tap`/`edge`/`off`), `joystickHint`; `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
+**Controls:** `settings.controls` = `'auto'` (joystick when `joystick` is on) / `'joystick'` / `'dpad'` / `'arrows'`; `joystickMode` `'floating'` / `'static'` / `'fixed'`; `joystickZone` (`half`/`third`/`full`), `joystickDirections` (`all`/`8`/`4`/`horizontal`/`vertical`), `joystickResponse` (`analog`/`curve`/`full`), `joystickDeadZone`, `joystickSize`, `joystickKnob`, `joystickStyle` (`classic`/`ring`/`dot`/`arrows`), `joystickColor`, `joystickVisible` (`touch`/`always`), `joystickIdleOpacity`, `joystickHaptics` (`tap`/`edge`/`off`), `joystickHint`; `playerSettings` (`pause`/`corner`/`off`); `controlsOpacity`; `jumpLabel` / `actionLabel`. Platformer has acceleration, air control and short hops when the jump button is released early.
 
 **Physics:** bodies support `oneWay` platforms (jump up through, land on top), riding moving (kinematic) platforms, `mass` (heavier pushes lighter), `friction`, `drag`, `maxFall`, and collider offsets `ox/oy/oz`.
 

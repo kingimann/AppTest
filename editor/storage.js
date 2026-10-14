@@ -9,7 +9,9 @@
 
 const DB_NAME = 'pocket-editor', DB_VERSION = 1;
 const LS_PROJECTS = 'pocket.editor.projects', LS_RESCUE = 'pocket.editor.rescue', LS_BACKUP = 'pocket.editor.lastBackup';
-const SNAP_EVERY = 3 * 60 * 1000, SNAP_KEEP = 12;
+let SNAP_EVERY = 3 * 60 * 1000, SNAP_KEEP = 12;
+/** Editor Preferences: how often restore points are taken and how many are kept. */
+export function setSnapshotPolicy(everyMin, keep) { SNAP_EVERY = Math.max(1, +everyMin || 3) * 60 * 1000; SNAP_KEEP = Math.max(2, Math.min(50, Math.round(+keep || 12))); }
 
 let db = null, cache = {}, lastSnap = {}, writeErr = null;
 const ls = {

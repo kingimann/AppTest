@@ -2062,7 +2062,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -8998,6 +8998,10 @@ registerBehavior('uiShowIf', {
     { key: 'refreshMessage', label: 'Pull down to refresh sends', type: 'text', default: '', suggest: 'messages', group: 'Page', info: 'Pull the page down from the top and let go: a spinner shows and this message is sent (reload a list, check for news).' },
     { key: 'scrollTopOn', label: 'Scroll to the top on message', type: 'text', default: '', suggest: 'messages', group: 'Page', showIf: (b) => !!b.scroll },
     { key: 'animSpeed', label: 'Transition speed', type: 'number', default: 1, range: [0.25, 3], step: 0.05, group: 'Page', info: '1 = normal, 2 = twice as fast, 0.5 = slower.' },
+    { key: 'bgImage', label: 'Background picture', type: 'image', default: '', group: 'Look' },
+    { key: 'bgFit', label: 'Picture fills', type: 'select', options: ['cover', 'fit', 'tile', 'stretch'], default: 'cover', group: 'Look', showIf: (b) => !!b.bgImage, info: { cover: 'Fills the page; edges may be cut off.', fit: 'The whole picture shows; there may be space around it.', tile: 'Repeats like wallpaper.', stretch: 'Fills the page exactly (may squash it).' } },
+    { key: 'bgOpacity', label: 'Picture opacity', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Look', showIf: (b) => !!b.bgImage },
+    { key: 'bgTint', label: 'Tint over the picture', type: 'color', default: '', optional: true, group: 'Look', showIf: (b) => !!b.bgImage, info: 'A see-through colour (rgba(0,0,0,0.4)) makes text on top easier to read.' },
   ],
   create(p) {
     let shown = null, drag = null, vel = 0, maxS = 0, barT = -9, goal = null, pulled = false, refreshT = -9, firstDone = false;
@@ -9016,7 +9020,8 @@ registerBehavior('uiShowIf', {
       const E = s.engine, inp = E.input, k = uiK(E.safe) || 1, b = uiBox(e, E.width, E.height, E.safe);
       maxS = overflow(s, e);
       e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0;
-      for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d)) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; }
+      const canScroll = maxS > 0.5, canPull = !!p.refreshMessage;
+      if (canScroll || canPull) for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d)) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; } // (nothing below the screen and no pull-to-refresh: the page stays put)
       let y = e._scrollY || 0;
       if (drag) {
         const q = inp.pointers.get(drag.id);
@@ -9024,7 +9029,7 @@ registerBehavior('uiShowIf', {
           if (!drag.on && Math.abs(q.y - drag.y0) > 9) drag.on = true;
           if (drag.on) {
             const raw = drag.s0 - (q.y - drag.y0) / k;
-            y = raw < 0 ? raw * 0.4 : raw > maxS ? maxS + (raw - maxS) * 0.4 : raw; // a rubber band past the ends
+            y = raw < 0 ? (canPull || canScroll ? raw * 0.4 : 0) : raw > maxS ? (canScroll ? maxS + (raw - maxS) * 0.4 : maxS) : raw; // a rubber band past the ends (only where it can go)
             pulled = !!p.refreshMessage && y < -56; goal = null;
             vel = (drag.last - q.y) / k / Math.max(dt, 1 / 120); drag.last = q.y; barT = performance.now() / 1000;
             inp.taps.length = 0; // a scroll is not a tap on a button
@@ -9050,6 +9055,7 @@ registerBehavior('uiShowIf', {
     return {
       uiAlways: true,
       start(e, s) {
+        if (s.engine.editing) return; // (the editor shows the pages itself)
         shown = test(s.vars[p.var]); e.visible = shown;
         if (shown && p.showMessage) queueMicrotask(() => s.send(p.showMessage));
         if (shown && p.firstMessage && !s.engine.editing) { firstDone = true; queueMicrotask(() => s.send(p.firstMessage)); }
@@ -9078,7 +9084,19 @@ registerBehavior('uiShowIf', {
           if (want) staggerKids(s, e, p.stagger);
         }
       },
-      drawUI(ctx, e, s) { // a thin scroll bar while it moves, and the pull-to-refresh spinner
+      drawUI(ctx, e, s) { // its background picture, a thin scroll bar while it moves, and the pull-to-refresh spinner
+        if (p.bgImage) {
+          const img = loadImage(artURL(p.bgImage)), b = UK.box(e);
+          if (img.complete && img.naturalWidth) {
+            ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip(); ctx.globalAlpha *= clamp(p.bgOpacity ?? 1, 0, 1);
+            const iw = img.naturalWidth, ih = img.naturalHeight, fit = p.bgFit || 'cover';
+            if (fit === 'tile') { const tw = Math.min(iw, 256), th = tw * ih / iw; for (let y = b.y; y < b.y + b.h; y += th) for (let x = b.x; x < b.x + b.w; x += tw) ctx.drawImage(img, x, y, tw, th); }
+            else if (fit === 'stretch') ctx.drawImage(img, b.x, b.y, b.w, b.h);
+            else { const k = fit === 'fit' ? Math.min(b.w / iw, b.h / ih) : Math.max(b.w / iw, b.h / ih), w = iw * k, hh = ih * k; ctx.drawImage(img, b.cx - w / 2, b.cy - hh / 2, w, hh); }
+            ctx.globalAlpha = 1; if (p.bgTint) { ctx.fillStyle = tok(p.bgTint); ctx.fillRect(b.x, b.y, b.w, b.h); }
+            ctx.restore();
+          }
+        }
         const y0 = e._scrollY || 0;
         if (p.refreshMessage && y0 < -4) {
           const b = UK.box(e), pull = clamp(-y0 / 56, 0, 1), t = performance.now() / 1000, spin = t - refreshT < 0.9, cx = b.cx, cy = b.y + Math.min(-y0, 56) / 2 + 4, col = isDark(s) ? '#ffffff' : '#000000';

@@ -3654,6 +3654,7 @@ function renderInspector() {
       def && { icon: 'help', label: 'Docs', fn: () => openDocs('ref/component/' + b.type) },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    if (b.type === 'uiShowIf' && j.ui && j.stretch === 'both' && (b.op || '=') === '=') { box.append(pageCard(j, b, i, threeD, C, menu)); return; } // a page: its own card
     const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
       .map((p) => { const v = b[p.key] ?? paramDefault(p, threeD); const t = String(v ?? ''); return t === '' ? null : `${String(p.label || p.key).replace(/\s*\(.*\)$/, '').split(' ').slice(0, 2).join(' ').toLowerCase()} ${t.length > 14 ? t.slice(0, 13) + '…' : t}`; }).filter(Boolean).join(' · ');
     box.append(comp(def.label, behaviorBody(def, b, i, j, threeD, C), {
@@ -6356,6 +6357,38 @@ function pageMenu(anchor) {
     pg && { icon: 'trash', label: `Delete “${cur.split('=')[1]}”`, danger: true, fn: () => { if (confirm(`Delete the page “${cur.split('=')[1]}” and everything on it?`)) { deleteEntity(pg.id); uiPage = 'auto'; refreshPageBtn(); } } }].filter(Boolean));
 }
 function setUIPage(k) { uiPage = k; refreshPageBtn(); engine.render(); }
+/** A page's settings in one place: its name and title, how it looks, how it opens, scrolling, the bottom bar, messages. */
+function pageCard(j, b, i, threeD, C, menu) {
+  const def = Behaviors.uiShowIf, spec = (k, o = {}) => { const q = def.params.find((x) => x.key === k); return { ...q, def: paramDefault(q, threeD), ...o }; };
+  const P = (k, o = {}) => (shown(spec(k), b, threeD) ? C(`behaviors.${i}.${k}`, spec(k, o)) : null);
+  const v = b.var || 'page', val = String(b.value ?? ''), navs = navBars(v), inTab = navs.some((n) => navTabs(n).some((r) => r[2] === val));
+  const bar = project.entities.flatMap((q) => (q.behaviors || []).filter((x) => x.type === 'uiAppBar' && (x.var || 'page') === v))[0];
+  const lineRe = new RegExp(`^\\s*${val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`);
+  const titleOf = () => (String(bar?.titles || '').split('\n').find((l) => lineRe.test(l)) || '').split('=').slice(1).join('=').trim();
+  const setTitle = (t) => { const L = String(bar.titles || '').split('\n').filter((l) => l.trim()), k = L.findIndex((l) => lineRe.test(l)); if (t.trim()) { if (k >= 0) L[k] = `${val} = ${t.trim()}`; else L.push(`${val} = ${t.trim()}`); } else if (k >= 0) L.splice(k, 1); bar.titles = L.join('\n'); changed(); };
+  const kids = [
+    h('div', { class: 'page-head' }, h('span', { class: 'page-chip' }, icon('layers'), val || '(no name)'),
+      h('button', { class: 'btn', onclick: () => renamePage(j) }, icon('edit'), 'Rename'),
+      h('button', { class: 'btn', onclick: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${val}`); } }, icon('eye'), 'Show')),
+    C(`behaviors.${i}.whenUnset`, { label: 'The app opens on this page', type: 'bool', def: false }),
+    bar ? h('div', { class: 'row' }, h('label', {}, 'Title in the App Bar'), h('input', { type: 'text', value: titleOf(), placeholder: val, oninput: (e) => setTitle(e.target.value) })) : null,
+    navs.length && !inTab ? h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const nm = (j.name || val).replace(/ Page$/, ''); for (const n of navs) n.tabs = navTabsText([...navTabs(n), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } }, icon('plus'), 'Add to the bottom bar')) : null,
+    fold('page:look', 'Look', [
+      C('shape.fill', { label: 'Background', type: 'color' }),
+      C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
+      j.shape?.fill2 && C('shape.gradDir', { label: 'Gradient direction', type: 'select', options: [['down', 'Top to bottom'], ['right', 'Left to right'], ['diagonal', 'Diagonal'], ['radial', 'From the centre']], def: 'down' }),
+      P('bgImage', { structure: true }), P('bgFit'), P('bgOpacity'), P('bgTint'),
+      C('marginTop', { label: 'Space at the top', type: 'number', def: j.margin ?? 0, range: [0, 200], step: 2 }),
+      C('marginBottom', { label: 'Space at the bottom', type: 'number', def: j.margin ?? 0, range: [0, 200], step: 2 }),
+    ], true),
+    fold('page:motion', 'Opening and closing', [P('anim'), P('stagger'), P('animSpeed')], !!(b.anim || b.stagger || (b.animSpeed && +b.animSpeed !== 1))),
+    fold('page:scroll', 'Scrolling', [P('scroll', { structure: true }), P('keepScroll'), P('scrollTopOn'), P('refreshMessage')], !!(b.scroll || b.refreshMessage)),
+    fold('page:nav', 'Bottom bar and access', [P('hideNav'), P('requireVar', { structure: true }), P('otherwise')], !!(b.hideNav || b.requireVar)),
+    fold('page:msg', 'Messages', [P('showMessage'), P('hideMessage'), P('firstMessage')], !!(b.showMessage || b.hideMessage || b.firstMessage)),
+    fold('page:adv', 'Advanced: the variable behind pages', [P('var'), P('value'), P('op')]),
+  ];
+  return comp('Page', kids, { icon: 'layers', key: 'b' + i + 'page', desc: 'A full page of your app. Open it with a Go To Page button, a bottom bar tab, a side menu item or a list row. Everything inside it shows and hides with it.', menu, summary: `“${val}”${b.whenUnset ? ' · opens first' : ''}${b.scroll ? ' · scrolls' : ''}`, enabled: b.enabled, onToggle: (on) => { if (on) delete b.enabled; else b.enabled = false; changed(); } });
+}
 /** The page object for 'var=value' (the outermost UI with that Show If). */
 function pageEnt(k) {
   const [v, val] = k.split('=');

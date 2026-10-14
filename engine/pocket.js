@@ -909,6 +909,7 @@ export class Scene {
     const base = typeof templateOrProps === 'string' ? this.templates[templateOrProps] : templateOrProps;
     if (!base) { Log.add('warn', `Spawn: there is no template called "${templateOrProps}"`); return null; }
     const e = this.add(new Entity({ ...base, template: false, id: undefined, ...overrides }));
+    e.spawned = true; this.emit('spawned', e); // On Spawned / On Object Spawned nodes
     const spawnKids = (srcId, parent) => { for (const k of this.templateKids[srcId] || []) { const c = this.add(new Entity({ ...k, template: false, id: undefined, parent: parent.id })); spawnKids(k.id, c); } };
     if (base.id) spawnKids(base.id, e);
     return e;
@@ -921,7 +922,7 @@ export class Scene {
       if (linked) this.linkHierarchy();
     }
     if (this.entities.some((e) => e.dead)) {
-      for (const e of this.entities) if (e.dead) for (const b of e.behaviors) b.destroy?.(e, this);
+      for (const e of this.entities) if (e.dead) { for (const b of e.behaviors) b.destroy?.(e, this); this.emit('objectGone', e); }
       this.entities = this.entities.filter((e) => !e.dead);
     }
   }
@@ -1191,6 +1192,7 @@ export class Scene {
   endWith(state) {
     if (this.state !== 'play') return;
     this.state = state; this.emit(state === 'win' ? 'win' : 'gameover');
+    queueMicrotask(() => { if (this.newBest) this.emit('newBest', this.vars.best); });
     this.endTime = this.time;
     const key = this.settings.saveBest;
     if (key && (+this.vars.score || 0) > (+this.vars.best || 0)) {
@@ -1467,7 +1469,7 @@ export class Physics {
       if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
       b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.grounded = false; b.groundedOn = null;
+      b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
     }
     // dynamic bodies collide with voxel worlds block by block
     const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
@@ -1489,7 +1491,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
-            if (gd && m.ny * gd > 0.5) b.grounded = true;
+            if (gd && m.ny * gd > 0.5) b.grounded = true; else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -1524,7 +1526,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
-            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -10905,6 +10907,50 @@ Object.assign(NODE_TYPES, {
   esImport: { cat: 'Save Files', label: 'Import Save From Text', exec: true, outs: ['imported', 'not a save'], params: [txt('file', 'save', 'file'), txt('var', 'saveCode', 'from text variable')] },
   onSaveFile: { cat: 'Events', label: 'On Game Saved', outs: ['then'], params: [txt('file', '', 'file (blank = any)')] },
   onAppHidden: { cat: 'Events', label: 'On App Hidden', outs: ['then'] },
+  // more events: gestures, movement, objects coming and going, game flow, time and the device
+  onFingerDown: { cat: 'Events', label: 'On Finger Down', outs: ['then'], params: [opt('where', ['anywhere', 'on this object'], 'on this object', 'where')] },
+  onDragThis: { cat: 'Events', label: 'On Drag This Object', outs: ['start', 'dragging', 'dropped'] },
+  onTwoFingerTap: { cat: 'Events', label: 'On Two-Finger Tap', outs: ['then'] },
+  onPinch: { cat: 'Events', label: 'On Pinch', outs: ['zoom in', 'zoom out'], params: [num('amount', 1.25, 'how far (1.25 = 25%)')] },
+  onKeyUp: { cat: 'Events', label: 'On Key Released', outs: ['then'], params: [txt('key', 'space', 'key')] },
+  onAnyKey: { cat: 'Events', label: 'On Any Key', outs: ['then'] },
+  onTilt: { cat: 'Events', label: 'On Phone Tilted', outs: ['then'], params: [opt('dir', ['left', 'right', 'forward', 'back'], 'left', 'toward'), num('amount', 0.5, 'how far (0–1)')] },
+  onJoystick: { cat: 'Events', label: 'On Joystick', outs: ['pushed', 'released'] },
+  onIdle: { cat: 'Events', label: 'When Player Is Idle', outs: ['then'], params: [num('seconds', 5, 'no touches or keys for (seconds)')] },
+  onHitWall: { cat: 'Events', label: 'On Hit Wall', outs: ['then'] },
+  onHitCeiling: { cat: 'Events', label: 'On Hit Ceiling', outs: ['then'] },
+  onMovement: { cat: 'Events', label: 'On Starts / Stops Moving', outs: ['starts moving', 'stops'], params: [num('speed', 10, 'moving means faster than')] },
+  onFalling: { cat: 'Events', label: 'On Starts Falling', outs: ['then'], params: [num('speed', 60, 'falling faster than')] },
+  onFellFar: { cat: 'Events', label: 'On Fell Far', outs: ['then'], params: [num('distance', 800, 'below where it started (2D; 3D uses a 40th)')] },
+  onSpeedAbove: { cat: 'Events', label: 'When Speed Goes Above', outs: ['then'], params: [num('speed', 400, 'speed')] },
+  onObjectFar: { cat: 'Events', label: 'On Object Moves Away', outs: ['then'], params: [txt('tag', 'player', 'tag'), num('distance', 200, 'farther than')] },
+  onSight: { cat: 'Events', label: 'On Sees / Loses Sight', outs: ['sees', 'loses sight'], params: [txt('tag', 'player', 'tag')] },
+  onHealed: { cat: 'Events', label: 'On Healed', outs: ['then'] },
+  onHealthLow: { cat: 'Events', label: 'When Health Gets Low', outs: ['then'], params: [num('percent', 30, 'at or below (%)')] },
+  onSpawnedSelf: { cat: 'Events', label: 'On Spawned (as a copy)', outs: ['then'] },
+  onAnySpawned: { cat: 'Events', label: 'On Object Spawned', outs: ['then'], params: [txt('tag', '', 'tag or name (blank = any)')] },
+  onAnyDestroyed: { cat: 'Events', label: 'On Object Destroyed', outs: ['then'], params: [txt('tag', 'enemy', 'tag or name (blank = any)')] },
+  onNoneLeft: { cat: 'Events', label: 'When None Left', outs: ['then'], params: [txt('tag', 'enemy', 'tag')] },
+  onShownHidden: { cat: 'Events', label: 'On Shown / Hidden', outs: ['shown', 'hidden'] },
+  onSpriteFrame: { cat: 'Events', label: 'On Sprite Frame', outs: ['then'], params: [num('frame', 0, 'frame number')] },
+  onPauseChange: { cat: 'Events', label: 'On Paused / Resumed', outs: ['paused', 'resumed'] },
+  onGameState: { cat: 'Events', label: 'On Game State', outs: ['title screen', 'playing', 'game over', 'won'] },
+  onNewBest: { cat: 'Events', label: 'On New High Score', outs: ['then'] },
+  onItemCollected: { cat: 'Events', label: 'On Item Collected', outs: ['then'], params: [txt('item', '', 'item (blank = any)')] },
+  onAchievementGot: { cat: 'Events', label: 'On Achievement', outs: ['then'], params: [txt('name', '', 'achievement (blank = any)')] },
+  onAnyMessage: { cat: 'Events', label: 'On Any Message', outs: ['then'] },
+  onDialogueEnd: { cat: 'Events', label: 'On Dialogue Finished', outs: ['then'] },
+  onCutscene: { cat: 'Events', label: 'On Cutscene', outs: ['starts', 'ends'] },
+  onScrolled: { cat: 'Events', label: 'On Scrolled', outs: ['up', 'down'] },
+  onSaveLoaded: { cat: 'Events', label: 'On Save Loaded', outs: ['then'] },
+  onTimeReaches: { cat: 'Events', label: 'When Level Time Reaches', outs: ['then'], params: [num('seconds', 30, 'seconds')] },
+  onClock: { cat: 'Events', label: 'At Clock Time', outs: ['then'], params: [txt('time', '18:00', 'time (HH:MM, phone clock)')] },
+  onFirstPlay: { cat: 'Events', label: 'On First Time Ever', outs: ['then'] },
+  onNewDay: { cat: 'Events', label: 'On New Day', outs: ['then'] },
+  onWelcomeBack: { cat: 'Events', label: 'On Welcome Back', outs: ['then'], params: [num('hours', 1, 'away at least (hours)')] },
+  onBatteryLow: { cat: 'Events', label: 'On Battery Low', outs: ['then'], params: [num('percent', 20, 'at or below (%)')] },
+  onResize: { cat: 'Events', label: 'On Screen Resized', outs: ['then'] },
+  onDarkMode: { cat: 'Events', label: 'On Dark Mode Changed', outs: ['dark', 'light'] },
   onAppShown: { cat: 'Events', label: 'On App Back', outs: ['then'] },
   onNotifyOpened: { cat: 'Events', label: 'On Phone Notification Tapped', outs: ['then'], params: [txt('id', '', 'id (blank = any)')] },
   onMenu: { cat: 'Events', label: 'On Side Menu Opened / Closed', outs: ['opened', 'closed'], params: [{ ...txt('menu', 'menu', 'menu (its message)'), suggest: 'messages' }] },
@@ -12388,6 +12434,80 @@ registerBehavior('graph', {
     };
     const has = (...types) => g.nodes.some((n) => types.includes(n.type));
     const leNodes = g.nodes.filter((n) => n.type.startsWith('le_') && !n.off); let lw = null;
+    // ---- more event nodes: listeners and per-frame checks ----
+    const MORE_EV = new Set(['onFingerDown', 'onDragThis', 'onTwoFingerTap', 'onPinch', 'onKeyUp', 'onAnyKey', 'onTilt', 'onJoystick', 'onIdle', 'onHitWall', 'onHitCeiling', 'onMovement', 'onFalling', 'onFellFar', 'onSpeedAbove', 'onObjectFar', 'onSight', 'onHealed', 'onHealthLow', 'onSpawnedSelf', 'onNoneLeft', 'onShownHidden', 'onSpriteFrame', 'onGameState', 'onDialogueEnd', 'onCutscene', 'onSaveLoaded', 'onTimeReaches', 'onClock']);
+    const moreEv = g.nodes.filter((n) => MORE_EV.has(n.type) && !n.off);
+    const out = (n, port, e, s, extra = {}) => follow(n, port, { s, e, steps: 0, ...extra });
+    const nodesOf = (type) => g.nodes.filter((n) => n.type === type && !n.off);
+    const edge = (n, key, now) => { const k = n.id + ':' + key, was = state.get(k); state.set(k, now); return was; };
+    const onceEver = (s, key) => { const k = 'pocket.ev.' + (s.engine.gameKey || 'game') + '.' + key; const seen = store.get(k, ''); return seen; };
+    function startMoreEvents(e, s) {
+      const E = s.engine, list = (type) => nodesOf(type);
+      if (list('onAnySpawned').length) s.on('spawned', (q) => { if (!e.dead) for (const n of list('onAnySpawned')) if (!param(n, 'tag') || q.has(param(n, 'tag'))) out(n, 'then', e, s, { other: q, eventValue: q.name }); });
+      if (list('onAnyDestroyed').length) s.on('objectGone', (q) => { if (q !== e && !e.dead) for (const n of list('onAnyDestroyed')) if (!param(n, 'tag') || q.has(param(n, 'tag'))) out(n, 'then', e, s, { other: q, eventValue: q.name }); });
+      if (list('onGameState').length) { s.on('gameover', () => { if (!e.dead) for (const n of list('onGameState')) out(n, 'game over', e, s); }); s.on('win', () => { if (!e.dead) for (const n of list('onGameState')) out(n, 'won', e, s); }); }
+      if (list('onPauseChange').length) s.on('pauseChanged', (p) => { if (!e.dead) for (const n of list('onPauseChange')) out(n, p ? 'paused' : 'resumed', e, s); });
+      if (list('onNewBest').length) s.on('newBest', (v) => { if (!e.dead) for (const n of list('onNewBest')) out(n, 'then', e, s, { eventValue: v }); });
+      if (list('onItemCollected').length) s.on('inventory', (name, cnt) => { const k = 'inv:' + name, was = state.get(k) ?? 0; state.set(k, cnt); if (cnt > was && !e.dead) for (const n of list('onItemCollected')) if (!param(n, 'item') || param(n, 'item') === name) out(n, 'then', e, s, { eventValue: name }); });
+      if (list('onAchievementGot').length) s.on('achievement', (nm) => { if (!e.dead) for (const n of list('onAchievementGot')) if (!param(n, 'name') || param(n, 'name') === nm) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onAnyMessage').length) s.on('message', (nm) => { if (!e.dead) for (const n of list('onAnyMessage')) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onScrolled').length) s.on('uiScroll', (d) => { if (!e.dead && d) for (const n of list('onScrolled')) out(n, d > 0 ? 'down' : 'up', e, s, { eventValue: d }); });
+      if (list('onResize').length) s.on('resize', (w, hh) => { if (!e.dead) for (const n of list('onResize')) out(n, 'then', e, s, { eventValue: w + 'x' + hh }); });
+      if (list('onDarkMode').length && typeof matchMedia === 'function') { const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', (ev) => { if (!e.dead && E.scene === s) for (const n of list('onDarkMode')) out(n, ev.matches ? 'dark' : 'light', e, s); }); }
+      if (list('onBatteryLow').length && navigator.getBattery) navigator.getBattery().then((bat) => { const chk = () => { if (e.dead || E.scene !== s) return; for (const n of list('onBatteryLow')) { const low = bat.level * 100 <= (+param(n, 'percent') || 20); if (low && !edge(n, 'bat', low)) out(n, 'then', e, s, { eventValue: Math.round(bat.level * 100) }); else edge(n, 'bat', low); } }; chk(); bat.addEventListener?.('levelchange', chk); }).catch(() => {});
+      // once per app session: first time ever, new day, welcome back
+      const fired = (E._evFired ||= new Set()), now = Date.now(), gk = E.gameKey || 'game';
+      if (E._lastSeen === undefined) { E._lastSeen = +store.get('pocket.ev.' + gk + '.lastSeen', 0) || 0; store.set('pocket.ev.' + gk + '.lastSeen', String(now)); setInterval(() => store.set('pocket.ev.' + gk + '.lastSeen', String(Date.now())), 15000); }
+      const sessionOnce = (type, fn) => { for (const n of list(type)) { const k = type + ':' + e.name + ':' + n.id; if (fired.has(k)) continue; fired.add(k); fn(n); } };
+      sessionOnce('onFirstPlay', (n) => { if (!onceEver(s, 'first')) { store.set('pocket.ev.' + gk + '.first', '1'); s.after(0, () => out(n, 'then', e, s)); } });
+      sessionOnce('onNewDay', (n) => { const today = new Date().toDateString(), k = 'pocket.ev.' + gk + '.day'; if (store.get(k, '') !== today) { store.set(k, today); s.after(0, () => out(n, 'then', e, s)); } });
+      sessionOnce('onWelcomeBack', (n) => { const away = E._lastSeen ? (now - E._lastSeen) / 3600000 : 0; if (E._lastSeen && away >= (+param(n, 'hours') || 0)) s.after(0, () => out(n, 'then', e, s, { eventValue: Math.round(away * 10) / 10 })); });
+      for (const n of list('onSpawnedSelf')) if (e.spawned) s.after(0, () => { if (!e.dead) out(n, 'then', e, s); });
+      for (const n of list('onFellFar')) state.set(n.id + ':y0', e.y);
+    }
+    function pollMoreEvents(e, dt, s, inp, playing) {
+      const E = s.engine, three = s.mode === '3d', b = e.body, v = b?.vel, speed = v ? Math.hypot(v.x, v.y, three ? v.z : 0) : 0;
+      for (const n of moreEv) {
+        const P = (k) => param(n, k), t = n.type;
+        if (t === 'onGameState') { const st = s.state, was = edge(n, 'st', st); if (was !== undefined && was !== st) { const port = { title: 'title screen', play: 'playing' }[st]; /* game over / won come from the scene's own events */ if (port) out(n, port, e, s); } continue; }
+        if (!playing && !e.ui) continue;
+        switch (t) {
+          case 'onFingerDown': for (const d of inp.downs) if (P('where') === 'anywhere' || hitTest(s, e, d.x, d.y)) out(n, 'then', e, s, { eventValue: d.x + ',' + d.y }); break;
+          case 'onDragThis': {
+            const id = state.get(n.id + ':drag');
+            if (id == null) { const d = inp.downs.find((q) => hitTest(s, e, q.x, q.y)); if (d) { state.set(n.id + ':drag', d.id); out(n, 'start', e, s); } }
+            else if (inp.pointers.has(id)) { const q = inp.pointers.get(id); out(n, 'dragging', e, s, { eventValue: Math.round(Math.hypot(q.x - q.sx, q.y - q.sy)), dt }); }
+            else { state.delete(n.id + ':drag'); out(n, 'dropped', e, s); }
+            break;
+          }
+          case 'onTwoFingerTap': { const k = n.id + ':2f'; if (inp.downs.length) { const tm = state.get(k) || []; const nowT = s.time; const recent = [...tm.filter((x) => nowT - x < 0.2), ...inp.downs.map(() => nowT)]; state.set(k, recent); if (recent.length >= 2 && inp.pointers.size >= 2) { state.set(k, []); out(n, 'then', e, s); } } break; }
+          case 'onPinch': { const ps = [...inp.pointers.values()]; if (ps.length < 2) { state.delete(n.id + ':p0'); state.delete(n.id + ':pf'); break; } const d = Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y); if (!state.has(n.id + ':p0')) state.set(n.id + ':p0', d || 1); const r = d / state.get(n.id + ':p0'), a = Math.max(1.01, +P('amount') || 1.25); if (!state.get(n.id + ':pf') && (r >= a || r <= 1 / a)) { state.set(n.id + ':pf', true); out(n, r >= a ? 'zoom in' : 'zoom out', e, s, { eventValue: Math.round(r * 100) / 100 }); } break; }
+          case 'onKeyUp': if (inp.keysUp?.includes(String(P('key') || '').toLowerCase().trim())) out(n, 'then', e, s); break;
+          case 'onAnyKey': for (const k of inp.keysDown) out(n, 'then', e, s, { eventValue: k }); break;
+          case 'onTilt': { inp.wantMotion = true; const ta = inp.tiltAxis; if (!ta) break; const dir = P('dir'), val = dir === 'left' ? -ta.x : dir === 'right' ? ta.x : dir === 'forward' ? -ta.y : ta.y, on = val >= (+P('amount') || 0.5); if (on && !edge(n, 'tilt', on)) out(n, 'then', e, s); else edge(n, 'tilt', on); break; }
+          case 'onJoystick': { const on = !!inp.stick, was = edge(n, 'stick', on); if (on && !was) out(n, 'pushed', e, s); else if (!on && was) out(n, 'released', e, s); break; }
+          case 'onIdle': { const busy = inp.pointers.size || inp.keys?.size || inp.stick; const k = n.id + ':idle'; if (busy) { state.set(k, 0); state.delete(n.id + ':idf'); break; } const t2 = (state.get(k) || 0) + dt; state.set(k, t2); if (t2 >= (+P('seconds') || 5) && !state.get(n.id + ':idf')) { state.set(n.id + ':idf', true); out(n, 'then', e, s); } break; }
+          case 'onHitWall': { const w = b?.wall || 0, was = edge(n, 'wall', w); if (w && !was) out(n, 'then', e, s, { eventValue: w }); break; }
+          case 'onHitCeiling': { const c = !!b?.ceiling; if (c && !edge(n, 'ceil', c)) out(n, 'then', e, s); else edge(n, 'ceil', c); break; }
+          case 'onMovement': { const m = speed > (+P('speed') || 10), was = edge(n, 'mv', m); if (was === undefined) break; if (m && !was) out(n, 'starts moving', e, s); else if (!m && was) out(n, 'stops', e, s); break; }
+          case 'onFalling': { const f = !!v && !b.grounded && (three ? -v.y : v.y) > (+P('speed') || 60); if (f && !edge(n, 'fall', f)) out(n, 'then', e, s); else edge(n, 'fall', f); break; }
+          case 'onFellFar': { const y0 = state.get(n.id + ':y0') ?? e.y, d = three ? (y0 - e.y) * 40 : e.y - y0, far = d > (+P('distance') || 800); if (far && !edge(n, 'far', far)) out(n, 'then', e, s); else edge(n, 'far', far); break; }
+          case 'onSpeedAbove': { const f = speed > (+P('speed') || 400); if (f && !edge(n, 'spd', f)) out(n, 'then', e, s, { eventValue: Math.round(speed) }); else edge(n, 'spd', f); break; }
+          case 'onObjectFar': { const q = nearest(s, e, P('tag')); const far = !q || Math.hypot(q.x - e.x, q.y - e.y, (q.z || 0) - (e.z || 0)) > (+P('distance') || 200), was = edge(n, 'far', far); if (far && was === false) out(n, 'then', e, s, { other: q }); break; }
+          case 'onSight': { const q = nearest(s, e, P('tag')), see = !!q && s.canSee(e, q), was = edge(n, 'see', see); if (see && !was) out(n, 'sees', e, s, { other: q }); else if (!see && was) out(n, 'loses sight', e, s, { other: q }); break; }
+          case 'onHealed': { const hp = +e.data.hp; if (!Number.isFinite(hp)) break; const was = edge(n, 'hp', hp); if (was !== undefined && hp > was) out(n, 'then', e, s, { eventValue: hp - was }); break; }
+          case 'onHealthLow': { const max = +e.data.hpMax || 0; if (!max) break; const low = (+e.data.hp || 0) / max * 100 <= (+P('percent') || 30); if (low && !edge(n, 'low', low)) out(n, 'then', e, s); else edge(n, 'low', low); break; }
+          case 'onNoneLeft': { const cnt = s.findAll(P('tag')).filter((q) => !q.dead && !q.template).length, was = edge(n, 'cnt', cnt); if (cnt === 0 && was > 0) out(n, 'then', e, s); break; }
+          case 'onShownHidden': { const vis = e.visible !== false, was = edge(n, 'vis', vis); if (was !== undefined && vis !== was) out(n, vis ? 'shown' : 'hidden', e, s); break; }
+          case 'onSpriteFrame': { const f = e.sprite?.frame | 0, was = edge(n, 'fr', f); if (f === (+P('frame') | 0) && was !== f) out(n, 'then', e, s); break; }
+          case 'onDialogueEnd': { const on = !!s.dialog, was = edge(n, 'dlg', on); if (!on && was) out(n, 'then', e, s); break; }
+          case 'onCutscene': { const on = !!s.cutscene, was = edge(n, 'cut', on); if (on && !was) out(n, 'starts', e, s); else if (!on && was) out(n, 'ends', e, s); break; }
+          case 'onSaveLoaded': if (E.loadedSave && !state.get(n.id + ':ld')) { state.set(n.id + ':ld', true); E.loadedSave = false; out(n, 'then', e, s); } break;
+          case 'onTimeReaches': if ((s.time || 0) >= (+P('seconds') || 0) && !state.get(n.id + ':t')) { state.set(n.id + ':t', true); out(n, 'then', e, s); } break;
+          case 'onClock': { const d = new Date(), hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'), want = String(P('time') || '').trim().padStart(5, '0'), key = d.toDateString() + hm; if (hm === want && state.get(n.id + ':clk') !== key) { state.set(n.id + ':clk', key); out(n, 'then', e, s); } break; }
+        }
+      }
+    }
     const leEvent = (n) => { const k = n.type.slice(3), d = LOGIC_EVENTS[k], ev = { type: k }; for (const q of d?.params || []) ev[q.key] = param(n, q.key); return ev; };
     const near = new Map(); let wasGround = null, wasOn = null, rayOverlay = null, wasDash = false;
     const timers = new Map(), bindings = new Map();
@@ -12395,6 +12515,7 @@ registerBehavior('graph', {
       uiAlways: true,
       start(e, s) {
         if (leNodes.length) { lw = new LogicWatcher(e, s); needsSensor(leNodes.map((n) => leEvent(n)), e, s); } // Triggers events used as nodes
+        startMoreEvents(e, s);
         if (g.nodes.some((n) => n.type === 'onMessage')) s.on('message', (name, data) => { if (!e.dead) fire('onMessage', e, s, null, (n) => param(n, 'message') === name, null, { eventValue: data }); });
         if (has('bindMessage')) s.on('message', (name, data) => { if (e.dead || !bindings.size) return; for (const b of [...bindings.values()]) if (b.message === name) callFunction(s, e, { s, e, steps: 0 }, b.func, { a: +data || 0, b: 0, c: 0 }); }); // Listen: Message → Function
         if (g.nodes.some((n) => n.type === 'varChanged')) s.on('var', (k) => { if (!e.dead) fire('varChanged', e, s, null, (n) => param(n, 'name') === k); });
@@ -12470,6 +12591,7 @@ registerBehavior('graph', {
         const inp = s.engine.input, playing = s.state === 'play';
         if (lw) { lw.frame(dt); for (const n of leNodes) for (const hit of lw.matchAll(leEvent(n), n.id)) if (playing || ['tap', 'message', 'called'].includes(n.type.slice(3))) follow(n, 'then', { s, e, other: hit.other, eventValue: hit.value, steps: 0, dt }); }
         if (e.visible && g.nodes.some((n) => n.type === 'tap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y)) && (playing || e.ui)) fire('tap', e, s);
+        if (moreEv.length) pollMoreEvents(e, dt, s, inp, playing);
         if (!playing) return;
         fire('update', e, s, null, null, dt);
         if (inp.pointers.size && g.nodes.some((n) => n.type === 'holding')) fire('holding', e, s, null, null, dt);
@@ -12980,6 +13102,7 @@ export class Engine {
   }
 
   resize() {
+    queueMicrotask(() => this.scene?.emit('resize', this.width, this.height));
     const r = this.root.getBoundingClientRect();
     this.width = Math.max(1, r.width); this.height = Math.max(1, r.height);
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
@@ -13186,6 +13309,7 @@ export class Engine {
     return true;
   }
   loadGame(slot = 1, { keepTitle = false } = {}) {
+    this.loadedSave = true; // On Save Loaded
     const d = this.readSave(slot);
     if (!d || !this.factory) return false;
     if (this.levels && d.level !== this.levelIndex && d.level < this.levels.length) this.levelIndex = d.level;
@@ -13404,6 +13528,7 @@ export class Engine {
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     this.navTick(s);
+    if (this.paused !== this._wasPaused) { if (this._wasPaused !== undefined && !this.editing) s.emit('pauseChanged', !!this.paused); this._wasPaused = this.paused; } // On Paused / Resumed nodes
     this.online.update(dt);
     this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
     this.modalTaps(s);

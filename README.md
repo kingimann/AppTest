@@ -195,6 +195,15 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
   - **Any State** transitions work from every state. Drag states to arrange them; the start state has a green border.
   - The current state is in `{state}`-style data and the "State is" condition. The *Patrol Guard (FSM)* prefab is a complete example.
 - **Node scripts** now have **Templates** too (★ in the Node Editor).
+- **43 new event nodes** (Events folder; each also works as a trigger event):
+  - **Touch and keys:** On Finger Down (anywhere or on this object), On Drag This Object (start / dragging / dropped), On Two-Finger Tap, On Pinch (zoom in / out), On Key Released, On Any Key, On Phone Tilted, On Joystick (pushed / released), When Player Is Idle.
+  - **Movement and physics:** On Hit Wall, On Hit Ceiling, On Starts / Stops Moving, On Starts Falling, On Fell Far, When Speed Goes Above, On Object Moves Away, On Sees / Loses Sight.
+  - **Health:** On Healed, When Health Gets Low.
+  - **Objects coming and going:** On Spawned (as a copy), On Object Spawned / Destroyed (by tag or name), When None Left, On Shown / Hidden, On Sprite Frame.
+  - **Game flow:** On Paused / Resumed, On Game State (title / playing / game over / won), On New High Score, On Item Collected, On Achievement, On Any Message, On Dialogue Finished, On Cutscene (starts / ends), On Scrolled (up / down), On Save Loaded.
+  - **Time and returning players:** When Level Time Reaches, At Clock Time, On First Time Ever, On New Day, On Welcome Back (hours away as Event Value).
+  - **Device:** On Battery Low, On Screen Resized, On Dark Mode Changed.
+  - Physics bodies now report touching a wall (`body.wall` = −1 / 1) and a ceiling (`body.ceiling`) each frame.
 - **Triggers and visual scripts can do the same things:**
   - Every **visual-script node** can be used in Triggers.
     - Node events (On Touch, On Collision Enter, On Message…) are trigger events, with a choice of output when a node has several.

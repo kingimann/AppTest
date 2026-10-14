@@ -3331,6 +3331,7 @@ function renderInspector() {
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),
       j.stretch && j.stretch !== 'none' && C('marginTop', { label: 'Top margin (blank = Margin)', type: 'number', def: '', step: 2 }),
       j.stretch && j.stretch !== 'none' && C('marginBottom', { label: 'Bottom margin (blank = Margin)', type: 'number', def: '', step: 2 }),
+      j.row != null && C('row', { label: 'Row: gap between the things side by side', type: 'number', def: 12, range: [0, 60], step: 2, infoText: 'Children set to Full width share this row’s width evenly.' }),
       !inParent && C('ignoreSafe', { label: 'Ignore safe area (go under the notch)', type: 'bool', def: false, structure: true }),
       !inParent && j.ignoreSafe && h('p', { class: 'desc' }, 'For full-screen backgrounds and images. Keep buttons and text inside the safe area so notches and the home bar never cover them.'),
       !inParent && !j.ignoreSafe && !(j.behaviors || []).some((b) => ['uiBottomNav', 'uiAppBar', 'uiSideBar'].includes(b.type)) && C('ignoreBars', { label: 'Go under the nav bars', type: 'bool', def: false, structure: true, infoText: 'Normally UI stays clear of a Bottom Nav, App Bar or Icon Rail. Turn this on for backgrounds that should fill the whole screen.' }),
@@ -4733,6 +4734,7 @@ function addEntity(props, at) {
   return j;
 }
 function addPrefab(def, at) {
+  const selBefore = selectedId;
   if (def.userPrefab) { instantiatePrefab(def.userPrefab, at); return; }
   if (def.scene) {
     if (def.scene.gravity != null && !project.gravity) project.gravity = def.scene.gravity;
@@ -4768,6 +4770,8 @@ function addPrefab(def, at) {
   const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
   for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
   if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
+  const adopted = j.ui && !def.before && !def.after && adoptIntoPage(j, selBefore); // added while a page is shown: it goes on that page
+  if (adopted) { selectedId = j.id; changed({ structure: true }); pushHistory(); }
   if (def.note) setTimeout(() => tipOnce('note-' + (def.label || ''), def.note, 1), 900); // a widget explains itself the first time you add it
   if (def.pickImage) pickImage((url) => { const e = ent(j.id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } });
   if (def.tilemap) { // centre the starter row under the drop point and get ready to paint
@@ -4775,7 +4779,7 @@ function addPrefab(def, at) {
     tileBrush.mode = 'paint'; tileBrush.tile = 1; changed({ structure: true }); setTool('paint');
     toast('Tilemap added: drag on the Scene to paint tiles'); return;
   }
-  toast(`Added ${j.name}`);
+  if (!adopted) toast(`Added ${j.name}`);
 }
 function placePrefab(def, sx, sy) {
   const s = engine.scene;
@@ -6373,6 +6377,7 @@ function pageCard(j, b, i, threeD, C, menu) {
     C(`behaviors.${i}.whenUnset`, { label: 'The app opens on this page', type: 'bool', def: false }),
     bar ? h('div', { class: 'row' }, h('label', {}, 'Title in the App Bar'), h('input', { type: 'text', value: titleOf(), placeholder: val, oninput: (e) => setTitle(e.target.value) })) : null,
     navs.length && !inTab ? h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const nm = (j.name || val).replace(/ Page$/, ''); for (const n of navs) n.tabs = navTabsText([...navTabs(n), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } }, icon('plus'), 'Add to the bottom bar')) : null,
+    fold('page:content', 'What’s on this page', [pageContent(j)], true),
     fold('page:look', 'Look', [
       C('shape.fill', { label: 'Background', type: 'color' }),
       C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
@@ -6503,13 +6508,167 @@ function renamePage(pg) {
   setUIPage(`${v}=${val}`); changed({ structure: true }); pushHistory();
   toast(`Renamed to “${val}”${n ? ` · ${n} link${n === 1 ? '' : 's'} updated` : ''}`);
 }
+// ---- Content on a page: blocks that stack under what's there (or under the selected one), rows you can reorder ----
+const PAGE_GAP = 16;
+const PAGE_SKIP = new Set(['uiShowIf', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiPopup', 'uiSheet', 'uiNotifications', 'uiScreenFX', 'uiTutorial', 'uiOffscreen', 'uiCrosshair']); // bars, pop-ups and screen effects aren't page content
+/** The page shown in the UI editor (or the one the selected object is on). */
+function shownPageEnt() {
+  const k = (selectedId && pageOf(selectedId)) || curPage();
+  return (k && k !== 'all' && pageEnt(k)) || null;
+}
+/** What's on a page from top to bottom, in rows (things side by side share a row). Only the things anchored to its top edge stack. */
+function pageRows(pg, skip) {
+  if (!playing) { rebuild(); engine.render(); } // measure text as it's drawn
+  const S = engine.scene, items = [];
+  for (const j of project.entities) {
+    if (skip?.has(j.id) || j.parent !== pg.id || !j.ui || j.stretch === 'both' || !/^top/.test(j.anchor || 'center')) continue;
+    const e = S.byId(j.id); if (!e) continue;
+    const ex = e.extents(), hy = ex.sphere ? ex.r : ex.hy, c = (+j.y || 0) + (ex.oy || 0);
+    items.push({ j, top: c - hy, bot: c + hy });
+  }
+  items.sort((a, b) => a.top - b.top);
+  const rows = [];
+  for (const it of items) { const r = rows[rows.length - 1]; if (r && it.top < r.bot - 2) { r.items.push(it); r.bot = Math.max(r.bot, it.bot); } else rows.push({ top: it.top, bot: it.bot, items: [it] }); }
+  return rows;
+}
+const moveRow = (row, top) => { const d = Math.round(top - row.top); for (const it of row.items) it.j.y = Math.round((+it.j.y || 0) + d); row.top += d; row.bot += d; };
+/** The page grows a scroll when what's on it no longer fits. */
+function fitPageScroll(pg, rows = pageRows(pg)) {
+  const b = showIfOf(pg), e = engine.scene.byId(pg.id); if (!b || !e || b.scroll || !rows.length) return;
+  const H = e.extents().hy * 2; if (rows[rows.length - 1].bot + PAGE_GAP > H) { b.scroll = true; toast('The page scrolls now: there’s more than fits'); }
+}
+/** Put new things on a page: under the selected one (what's below moves down to make room), else at the end. */
+function placeOnPage(pg, made, after = selectedId) {
+  const roots = made.filter((j) => j.parent === pg.id && /^top/.test(j.anchor || '') && j.stretch !== 'both'); if (!roots.length) return;
+  const rows = pageRows(pg, new Set(roots.map((j) => j.id)));
+  const S = engine.scene, size = (j) => { const ex = S.byId(j.id).extents(); return { hy: ex.sphere ? ex.r : ex.hy, oy: ex.oy || 0 }; };
+  const sel = rows.findIndex((r) => r.items.some((it) => it.j.id === after));
+  const top = sel >= 0 ? rows[sel].bot + PAGE_GAP : rows.length ? rows[rows.length - 1].bot + PAGE_GAP : 24;
+  let h = 0; for (const j of roots) { const z = size(j); j.y = Math.round(top + z.hy - z.oy); h = Math.max(h, z.hy * 2); }
+  if (sel >= 0) for (const r of rows.slice(sel + 1)) moveRow(r, r.top + h + PAGE_GAP);
+  fitPageScroll(pg);
+}
+/** Line everything up top to bottom with even gaps. */
+function stackPage(pg, gap = PAGE_GAP) {
+  const rows = pageRows(pg); if (!rows.length) { toast('Nothing to line up yet'); return; }
+  let at = Math.max(16, Math.min(rows[0].top, 40));
+  for (const r of rows) { moveRow(r, at); at = r.bot + gap; }
+  fitPageScroll(pg, rows); changed({ structure: true }); pushHistory(); toast(`Lined up ${rows.length} row${rows.length === 1 ? '' : 's'}`);
+}
+/** Swap a row with the one above (-1) or below (+1), keeping the gap between them. */
+function swapPageRow(pg, id, dir) {
+  const rows = pageRows(pg), i = rows.findIndex((r) => r.items.some((it) => it.j.id === id)), k = i + dir;
+  if (i < 0 || k < 0 || k >= rows.length) return;
+  const [a, b] = dir < 0 ? [rows[k], rows[i]] : [rows[i], rows[k]], gap = b.top - a.bot, top = a.top;
+  moveRow(b, top); moveRow(a, b.bot + gap);
+  changed({ structure: true }); pushHistory();
+}
+/** A copy right under the original, with what's below moved down. */
+function duplicateOnPage(pg, id) {
+  const j = ent(id); if (!j) return;
+  const ids = subtree(id), map = new Map(ids.map((x) => [x, uid()]));
+  const copies = ids.map((x) => { const c = clone(ent(x)); c.id = map.get(x); if (c.parent && map.has(c.parent)) c.parent = map.get(c.parent); return c; });
+  copies[0].name = (j.name || 'Object') + ' (copy)';
+  project.entities.splice(project.entities.indexOf(j) + ids.length, 0, ...copies);
+  selectedId = id; placeOnPage(pg, copies); selectedId = copies[0].id;
+  changed({ structure: true }); pushHistory();
+}
+/** A UI widget added while a page is shown goes on that page, under what's already there. */
+function adoptIntoPage(j, before) {
+  if (!j?.ui || j.parent) return;
+  const k = (before && pageOf(before)) || (uiMode && curPage()), pg = k && k !== 'all' ? pageEnt(k) : null; if (!pg || pg.id === j.id) return; // the page you're working on: the selected thing's, or the one shown in the UI editor
+  if ((j.behaviors || []).some((b) => PAGE_SKIP.has(b.type))) return;
+  j.parent = pg.id;
+  if (j.stretch === 'both' || /^bottom/.test(j.anchor || '')) { toast(`Added ${j.name} to the “${showIfOf(pg).value}” page`); return true; } // fills the page, or sits at its bottom (a + button)
+  if (!/^top/.test(j.anchor || 'center')) { j.anchor = 'top'; j.x = 0; }
+  placeOnPage(pg, [j], before);
+  toast(`Added ${j.name} to the “${showIfOf(pg).value}” page`); return true;
+}
+/** Ready-made page blocks, in the app's theme colours (or light-on-dark on a game's pages). */
+function pageBlocks() {
+  const app = !!levelList()[0].settings?.app;
+  const T = app ? { text: '@text', sub: '@sub', card: '@card', accent: '@accent', on: '@onAccent', line: '@line', shadow: '@shadow' }
+    : { text: '#ffffff', sub: 'rgba(255,255,255,0.7)', card: 'rgba(255,255,255,0.1)', accent: '#3a7bfd', on: '#ffffff', line: 'rgba(255,255,255,0.18)', shadow: 'rgba(0,0,0,0.35)' };
+  const ui = { ui: true, anchor: 'top', x: 0 }, wide = { ...ui, stretch: 'width', margin: 16 };
+  const tx = (value, o = {}) => ({ value, size: 16, color: T.text, weight: '600', ...o });
+  const card = (h, o = {}) => ({ type: 'rect', w: 368, h, radius: 16, fill: T.card, ...(app ? { shadow: T.shadow, shadowBlur: 12, shadowY: 3 } : {}), ...o });
+  const go = (page) => [{ type: 'button', action: 'go to page', value: page || '', amount: 1, sound: 'click', feel: 'spring', ripple: true }];
+  return [
+    { key: 'heading', label: 'Heading', icon: 'text', desc: 'A big title', make: () => [{ ...ui, name: 'Heading', anchor: 'top-left', x: 20, text: tx('Heading', { size: 26, weight: '900', align: 'left', wrap: 360 }) }] },
+    { key: 'text', label: 'Text', icon: 'text', desc: 'A paragraph that wraps', make: () => [{ ...ui, name: 'Text', anchor: 'top-left', x: 20, text: tx('Write something here. Select it to change the words.', { color: T.sub, weight: '500', align: 'left', wrap: 360 }) }] },
+    { key: 'button', label: 'Button', icon: 'play', desc: 'Opens a page', page: true, make: (pgv) => [{ ...wide, name: 'Button', shape: { type: 'rect', w: 368, h: 52, radius: 16, fill: T.accent }, text: tx(pgv ? pgv.charAt(0).toUpperCase() + pgv.slice(1).replace(/-/g, ' ') : 'Button', { size: 17, color: T.on, weight: '800' }), behaviors: go(pgv) }] },
+    { key: 'outline', label: 'Outline Button', icon: 'square', desc: 'A quieter button', page: true, make: (pgv) => [{ ...wide, name: 'Outline Button', shape: { type: 'rect', w: 368, h: 50, radius: 16, fill: '', stroke: T.accent, lineWidth: 2 }, text: tx(pgv ? pgv.charAt(0).toUpperCase() + pgv.slice(1).replace(/-/g, ' ') : 'Button', { size: 16, color: T.accent, weight: '800' }), behaviors: go(pgv) }] },
+    { key: 'row', label: 'Menu Row', icon: 'menu', desc: 'A row with › that opens a page', page: true, make: (pgv) => [{ ...wide, name: 'Menu Row', shape: card(56, { radius: 14 }), behaviors: go(pgv), children: [
+      { name: 'Menu Row Label', anchor: 'left', x: 20, y: 0, text: tx(pgv ? pgv.charAt(0).toUpperCase() + pgv.slice(1).replace(/-/g, ' ') : 'Open a page', { size: 17, weight: '700', align: 'left' }) },
+      { name: 'Menu Row Arrow', anchor: 'right', x: -22, y: 0, text: tx('›', { size: 26, color: T.sub, weight: '700' }) }] }] },
+    { key: 'card', label: 'Card', icon: 'square', desc: 'A title and a line under it', make: () => [{ ...wide, name: 'Card', shape: card(96, { radius: 18 }), children: [
+      { name: 'Card Title', anchor: 'top-left', x: 18, y: 32, text: tx('Card title', { size: 18, weight: '800', align: 'left' }) },
+      { name: 'Card Text', anchor: 'top-left', x: 18, y: 62, text: tx('A line about it', { size: 14, color: T.sub, weight: '500', align: 'left' }) }] }] },
+    { key: 'stats', label: 'Two Numbers', icon: 'stats', desc: 'Two tiles side by side: {coins}, {level}…', make: () => { project.vars.coins ??= 0; project.vars.level ??= 1; return [{ ...wide, name: 'Numbers Row', row: 12, shape: { type: 'rect', w: 368, h: 88, radius: 0, fill: '' }, children: [['coins', 'Coins'], ['level', 'Level']].map(([v, l]) => ({ name: `${l} Tile`, anchor: 'center', x: 0, y: 0, stretch: 'width', margin: 0, shape: card(88, { w: 178 }), children: [
+      { name: `${l} Value`, anchor: 'center', x: 0, y: -10, text: tx(`{${v}}`, { size: 26, weight: '900' }) },
+      { name: `${l} Label`, anchor: 'center', x: 0, y: 22, text: tx(l, { size: 13, color: T.sub, weight: '600' }) }] })) }]; } },
+    { key: 'buttons2', label: 'Two Buttons', icon: 'play', desc: 'Side by side, sharing the width', make: () => [{ ...wide, name: 'Buttons Row', row: 12, shape: { type: 'rect', w: 368, h: 50, radius: 0, fill: '' }, children: [
+      { name: 'Left Button', anchor: 'center', x: 0, y: 0, stretch: 'width', margin: 0, shape: { type: 'rect', w: 178, h: 50, radius: 14, fill: '', stroke: T.accent, lineWidth: 2 }, text: tx('Cancel', { color: T.accent, weight: '800' }), behaviors: [{ type: 'button', action: 'go back', value: '', amount: 1, sound: 'click', feel: 'spring', ripple: true }] },
+      { name: 'Right Button', anchor: 'center', x: 0, y: 0, stretch: 'width', margin: 0, shape: { type: 'rect', w: 178, h: 50, radius: 14, fill: T.accent }, text: tx('OK', { color: T.on, weight: '800' }), behaviors: [{ type: 'button', action: 'send message', value: 'ok', amount: 1, sound: 'click', feel: 'spring', ripple: true }] }] }] },
+    { key: 'toggle', label: 'Switch Row', icon: 'check', desc: 'A setting that turns on and off', make: () => [{ ...wide, name: 'Switch Row', shape: card(60, { radius: 16 }), children: [
+      { name: 'Switch Label', anchor: 'left', x: 20, y: 0, text: tx('Notifications', { size: 17, weight: '700', align: 'left' }) },
+      { name: 'Switch', anchor: 'right', x: -44, y: 0, shape: { type: 'rect', w: 52, h: 30, radius: 15, fill: '#9aa1ad' }, behaviors: [{ type: 'uiToggle', var: 'notifications', start: true, onText: '', offText: '', onColor: T.accent, offColor: '#9aa1ad', style: 'switch', message: '' }] }] }] },
+    { key: 'input', label: 'Text Box', icon: 'edit', desc: 'Type into a variable', make: () => [{ ...wide, name: 'Text Box', shape: { type: 'rect', w: 368, h: 48, radius: 12, fill: T.card, stroke: T.line, lineWidth: 1 }, text: tx('', { align: 'left', inset: 16 }), behaviors: [{ type: 'uiInput', var: 'name', kind: 'text', placeholder: 'Your name', maxLength: 40, style: 'right in the bar', placeholderColor: T.sub, focusColor: T.accent, live: true, message: '' }] }] },
+    { key: 'search', label: 'Search Bar', icon: 'search', desc: 'Types into {search}', make: () => [{ ...wide, name: 'Search', shape: { type: 'rect', w: 368, h: 44, radius: 12, fill: T.card, stroke: T.line, lineWidth: 1 }, text: tx('', { align: 'left', inset: 42 }), behaviors: [{ type: 'uiInput', var: 'search', kind: 'search', placeholder: 'Search', maxLength: 40, style: 'right in the bar', placeholderColor: T.sub, focusColor: T.accent, live: true, message: '' }] }] },
+    { key: 'image', label: 'Picture', icon: 'image', desc: 'A photo from your device', image: true, make: () => [{ ...ui, name: 'Picture', sprite: { src: '', w: 368, h: 200 } }] },
+    { key: 'divider', label: 'Divider', icon: 'menu', desc: 'A thin line between parts', make: () => [{ ...wide, name: 'Divider', shape: { type: 'rect', w: 368, h: 1, radius: 0, fill: T.line } }] },
+    app && { key: 'list', label: 'Data List', icon: 'list', desc: 'Records from your data', make: () => { const c = ensureCollection('Tasks'); return [{ ...wide, name: 'Data List', margin: 8, shape: { type: 'rect', w: 384, h: 360, radius: 0, fill: '' }, behaviors: [{ type: 'uiDataList', collection: c, title: '{title}', subtitle: '', sort: 'newest first', openPage: '', bg: '', row: T.card, text: T.text, sub: T.sub, danger: '@danger', accent: T.accent }] }]; } },
+  ].filter(Boolean);
+}
+/** Add a block to a page. */
+function addPageBlock(pg, blk, pgv) {
+  const made = [], add = (p, parent) => { const { children, ...rest } = p; const j = { id: uid(), ui: true, ...clone(rest), parent }; let n = 1; const base = j.name; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; project.entities.push(j); made.push(j); for (const c of children || []) add(c, j.id); return j; };
+  const roots = blk.make(pgv).map((p) => add(p, pg.id));
+  placeOnPage(pg, roots);
+  selectedId = roots[0].id; changed({ structure: true }); pushHistory();
+  if (blk.image) pickImage((url) => { const e = ent(roots[0].id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } }, 1024);
+  toast(`Added ${blk.label} to the “${showIfOf(pg).value}” page`);
+}
+/** The "Add to page" menu: blocks, then any UI. A button or row asks which page it opens. */
+function pageAddMenu(anchor, pg = shownPageEnt()) {
+  if (!pg) { openCreate('ui'); return; }
+  const v = showIfOf(pg).var || 'page', here = String(showIfOf(pg).value ?? ''), others = [...(uiPages().get(v) || [])].filter((x) => x !== here);
+  const pickPage = (blk) => popMenu(anchor, [{ cap: 'It opens' }, ...others.map((x) => ({ icon: 'layers', label: x, fn: () => addPageBlock(pg, blk, x) })), '-',
+    { icon: 'plus', label: 'A new page…', k: 'made for you', fn: () => { const nv = newPage(null, { name: prompt('Name of the new page (e.g. Settings, Shop)') || '', tab: false, stay: true }); if (nv) addPageBlock(pg, blk, nv); } },
+    { icon: 'square', label: 'Choose later', fn: () => addPageBlock(pg, blk, '') }]);
+  const sel = ent(selectedId), under = sel && sel.parent === pg.id ? ` under “${sel.name}”` : '';
+  popMenu(anchor, [{ cap: `Add to “${here}”${under}` }, ...pageBlocks().map((blk) => ({ icon: blk.icon, label: blk.label, k: blk.desc, fn: () => (blk.page && others.length ? setTimeout(() => pickPage(blk)) : addPageBlock(pg, blk, '')) })),
+    '-', { icon: 'hud', label: 'Any UI…', k: 'buttons, inputs, lists, charts…', fn: () => openCreate('ui') }]);
+}
+/** The page's content as a list: tap to select, move up or down, copy, delete; add more; line it all up. */
+function pageContent(pg) {
+  const box = h('div', { class: 'pg-content' });
+  const kids = kidsOf(pg.id).filter((j) => j.ui);
+  const rows = kids.length ? pageRows(pg) : [], order = new Map(); rows.forEach((r, i) => r.items.forEach((it) => order.set(it.j.id, i)));
+  const list = [...kids].sort((a, b) => (order.get(a.id) ?? 1e9) - (order.get(b.id) ?? 1e9));
+  box.append(
+    list.length ? h('div', { class: 'pg-list' }, list.map((j) => { const r = order.get(j.id), stacked = r != null;
+      return h('div', { class: 'pg-item' + (j.id === selectedId ? ' on' : '') },
+        h('button', { type: 'button', class: 'pg-nm', onclick: () => select(j.id) }, icon(iconFor(j)), h('span', {}, j.name || 'Object'), stacked ? null : h('small', {}, j.stretch === 'both' ? 'fills the page' : 'pinned')),
+        stacked ? h('button', { type: 'button', class: 'pg-b', title: 'Move up', disabled: r === 0, onclick: () => swapPageRow(pg, j.id, -1) }, icon('upload')) : null,
+        stacked ? h('button', { type: 'button', class: 'pg-b', title: 'Move down', disabled: r === rows.length - 1, onclick: () => swapPageRow(pg, j.id, 1) }, icon('download')) : null,
+        h('button', { type: 'button', class: 'pg-b', title: 'More', onclick: (e) => popMenu(e.currentTarget, [
+          stacked && { icon: 'copy', label: 'Duplicate', k: 'right under it', fn: () => duplicateOnPage(pg, j.id) },
+          { icon: 'plus', label: 'Add under it…', fn: () => { select(j.id); setTimeout(() => pageAddMenu(box.querySelector('.pg-add'), pg)); } },
+          { icon: 'trash', label: 'Delete', danger: true, fn: () => deleteEntity(j.id) }].filter(Boolean)) }, icon('more'))); }))
+      : h('p', { class: 'desc' }, 'This page is empty. Add a heading, text, buttons, cards or a list: each one goes under the last.'),
+    h('div', { class: 'btns' },
+      h('button', { type: 'button', class: 'btn primary pg-add', onclick: (e) => pageAddMenu(e.currentTarget, pg) }, icon('plus'), 'Add to page'),
+      rows.length > 1 ? h('button', { type: 'button', class: 'btn', title: 'Even gaps, top to bottom', onclick: () => stackPage(pg) }, icon('layers'), 'Line up') : null));
+  return box;
+}
 function refreshPageBtn() { const b = $('.page-btn span'), k = curPage(); $('.page-btn')?.toggleAttribute('hidden', !uiPages().size); /* no pages: no button */ if (b) b.textContent = k === 'all' ? 'All pages' : k.split('=')[1]; }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));
   const orientBtn = h('button', { class: 'orient-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Game orientation' }, ...[['portrait', 'Portrait'], ['landscape', 'Landscape'], ['any', 'Either way']].map(([k, l]) => ({ icon: orientationOf() === k ? 'check' : 'phone', label: l, fn: () => setOrientation(k) }))]) });
   const pageBtn = h('button', { class: 'page-btn', onclick: (ev) => pageMenu(ev.currentTarget) }, icon('layers'), h('span', {}, 'Pages'));
-  const addBtn = h('button', { class: 'add-ui-btn', title: 'Add UI', onclick: () => openCreate() }, icon('plus'), h('span', {}, 'Add'));
+  const addBtn = h('button', { class: 'add-ui-btn', title: 'Add UI', onclick: (ev) => (shownPageEnt() ? pageAddMenu(ev.currentTarget) : openCreate()) }, icon('plus'), h('span', {}, 'Add'));
   const bar = h('div', { id: 'uiScreens', hidden: true }, addBtn, pageBtn, orientBtn, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
   $('#viewport').before(bar);
 }

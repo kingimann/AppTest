@@ -15,6 +15,7 @@ import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
+import { expoFiles } from './expo.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -3423,7 +3424,7 @@ function renderSceneSettings(box) {
 // ============================================================================
 const BEH_META = {
   move: ['Controllers', 'player'], platformer: ['Controllers', 'jumper'], controller2d: ['Controllers', 'player'], patrol: ['Movement', 'arrow'], velocity: ['Movement', 'arrow'],
-  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'],
+  rotate: ['Movement', 'rotate'], wrap: ['Movement', 'frame'], cameraFollow: ['Camera', 'camera'], cameraZone: ['Camera', 'square'], cameraSwitcher: ['Camera', 'camera'], cameraImpulse: ['Camera', 'bolt'], cameraBrain: ['Camera', 'camera'], cameraSequence: ['Camera', 'clock'], cameraMixer: ['Camera', 'layers'], cameraTargetGroup: ['Camera', 'target'],
   collectible: ['Gameplay', 'coin'], hazard: ['Gameplay', 'enemy'], goal: ['Gameplay', 'flag'], spring: ['Gameplay', 'jumper'],
   timeScore: ['Gameplay', 'trophy'], lifetime: ['Gameplay', 'clock'], destroyOffscreen: ['Gameplay', 'close'],
   spawner: ['Spawning', 'spawner'], shooter: ['Combat', 'bolt'], script: ['Scripting', 'script'],
@@ -3785,6 +3786,12 @@ const PREFABS_2D = [
   { icon: 'square', label: 'Camera Zone', props: { name: 'Camera Zone', shape: { type: 'rect', w: 300, h: 260, fill: 'rgba(120,180,255,0.12)', stroke: 'rgba(120,180,255,0.6)', lineWidth: 2 }, behaviors: [{ type: 'cameraZone', camera: 'Zone Camera', tag: 'player', mode: 'go back to the camera before' }] },
     extra: [{ name: 'Zone Camera', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'fixed', target: '', zoom: 1.4, blend: 0.8, priority: -1 }] }] },
   { icon: 'camera', label: 'Dolly Camera (cart)', props: { name: 'Dolly Camera', behaviors: [{ type: 'camera', mode: 'dolly', dollyMode: 'travel by itself', dollySpeed: 0.08, dollyLoop: 'back and forth', path: [{ x: 0, y: 350 }, { x: 900, y: 350 }], zoom: 1, blend: 1.2, priority: -1 }] } },
+  { icon: 'clock', label: 'Camera Sequence (cutscene)', props: { name: 'Camera Sequence', behaviors: [{ type: 'cameraSequence', shots: 'Wide Cam | 1.5 | 0\nMain Camera | 0.3 | 1.2', start: 'when the level starts', loop: false, skip: true, bars: true, endMessage: 'cutscene done' }] },
+    extra: [{ name: 'Wide Cam', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'fixed', target: '', zoom: 0.6, blend: 1, priority: -1 }] }] },
+  { icon: 'target', label: 'Target Group', props: { name: 'Target Group', behaviors: [{ type: 'cameraTargetGroup', members: 'player | 1 | 60\nenemy | 0.5 | 40' }] },
+    extra: [{ name: 'Group Cam', offset: { x: 0, y: 0 }, behaviors: [{ type: 'camera', mode: 'group', target: 'Target Group', smooth: 4, zoom: 1, padding: 80, blend: 0.8, priority: -1 }] }] },
+  { icon: 'layers', label: 'Camera Mixer', props: { name: 'Camera Mixer', behaviors: [{ type: 'cameraMixer', camA: 'Main Camera', camB: 'Zone Camera', var: '', weight: 0.5, priority: -1 }] } },
+  { icon: 'camera', label: 'Camera Brain (custom blends)', props: { name: 'Camera Brain', behaviors: [{ type: 'cameraBrain', defaultBlend: '', defaultEase: 'inOutCubic', blends: 'Wide Cam > * = 1.5 inOutSine' }] } },
   { icon: 'camera', label: 'Camera Switcher', props: { name: 'Camera Switcher', behaviors: [{ type: 'cameraSwitcher', mode: 'a variable', var: 'state', map: 'run = Main Camera\nzoom = Zone Camera', hold: 0.3 }] } },
   { icon: 'enemy', label: 'Smart Enemy', props: { name: 'Smart Enemy', tags: ['enemy'], sprite: { src: 'art:zombie', w: 44, h: 44 }, body: { type: 'dynamic' }, behaviors: [{ type: 'enemyAI', target: 'player', sight: 260, needLineOfSight: true, patrol: 100, speed: 60, chaseSpeed: 140, attackRange: 44, attackEvery: 1, damage: 1, giveUp: 3 }, { type: 'health', hp: 3, hurtBy: 'bullet', damage: 1, invuln: 0.2, knockback: 200, onDeath: 'destroy', points: 10 }] } },
   { icon: 'sign', label: 'Talking NPC', props: { name: 'Villager', sprite: { src: 'art:wizard', w: 48, h: 48 }, behaviors: [{ type: 'dialogue', lines: 'Villager: Welcome, hero!\nVillager: Bring me 3 gems and I will open the gate.', trigger: 'touched by tag', tag: 'player', once: true, pause: true }] } },
@@ -4885,6 +4892,26 @@ async function exportStoreProject() {
     toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
   } catch (err) { toast('Could not make the app project: ' + err.message); }
 }
+/** Android's notification icon: a white bell on transparent (PNG). */
+async function notifIconPNG(size = 96) {
+  const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d'), k = size / 24;
+  g.scale(k, k); g.fillStyle = '#ffffff';
+  g.fill(new Path2D('M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.9,2 2,2zM18,16v-5c0,-3.07 -1.64,-5.64 -4.5,-6.32V4c0,-0.83 -0.67,-1.5 -1.5,-1.5s-1.5,0.67 -1.5,1.5v0.68C7.63,5.36 6,7.92 6,11v5l-2,2v1h16v-1l-2,-2z'));
+  return dataBytes(c.toDataURL('image/png'));
+}
+/** Build Settings → App stores: the game as an Expo app (WebView + native bridge), built with EAS. */
+async function exportExpoProject() {
+  const so = { ...storeOpts(), perms: usedPermissions().map((k) => ({ kind: k, why: levelList()[0]?.settings?.permissions?.[k]?.why || PERMISSIONS[k].why })) };
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  try {
+    toast('Making the Expo project…');
+    const o = buildOpts(), b = await buildHTML({ native: true });
+    const [icon, fg, splash] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o)].map((p) => p.then(dataBytes)));
+    const zip = makeZip(expoFiles(so, { html: b.html, icon, fg, splash, notif: await notifIconPNG() }));
+    const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-expo.zip' }); document.body.append(a); a.click(); a.remove();
+    toast(`Expo project ready (${kb(zip.size)}): npm install, then npx expo start to try it, or eas build. README.md has the steps.`);
+  } catch (err) { toast('Could not make the Expo project: ' + err.message); }
+}
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
 async function exportHTML() {
   try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
@@ -5135,6 +5162,9 @@ function openBuildSettings() {
         C('notifyEmail', { label: 'Email me when a build finishes', def: '', placeholder: 'you@example.com' }),
         h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · icon and splash from Icon and Loading screen above.`),
         h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || (!so.ios && !so.android), onclick: exportStoreProject }, icon('download'), 'Download app project (.zip)')),
+        h('h4', { class: 'sub-h' }, 'Or with Expo'),
+        h('p', { class: 'desc' }, 'Prefer Expo (expo.dev)? Download an Expo project instead: the game in a full-screen WebView, with phone notifications, haptics, permissions and the Android Back button through Expo’s modules (SDK 57). Try it in the Expo Go app with npx expo start, then build and publish with EAS (eas build, eas submit). Uses the same App ID, version, orientation, icon and splash as above.'),
+        h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk, onclick: exportExpoProject }, icon('download'), 'Download Expo project (.zip)')),
       ];
     })()),
     sec('File size', 'download', [

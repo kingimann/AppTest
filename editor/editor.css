@@ -1356,3 +1356,4 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .perm-row { border: 1px solid #2c2c2c; border-radius: 14px; padding: 6px 10px 10px; margin: 10px 0; background: rgba(255,255,255,.02); }
 .perm-h { display: flex; align-items: center; gap: 10px; padding: 4px 0 2px; }
 .perm-h b { flex: 1; font-size: 15px; } .perm-ic { font-size: 22px; }
+.sub-h { margin: 18px 0 4px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #8fb4e8; }

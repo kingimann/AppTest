@@ -2823,12 +2823,13 @@ export class Renderer2D {
     return scene.camera.zoom * Math.min(e.width / scene.view.width, e.height / scene.view.height);
   }
   screenToWorld(scene, sx, sy) {
-    const z = this.zoomFor(scene), e = scene.engine, c = scene.camera;
-    return { x: (sx - e.width / 2) / z + c.x, y: (sy - e.height / 2) / z + c.y };
+    const z = this.zoomFor(scene), e = scene.engine, c = scene.camera, a = (c.roll || 0) * DEG, dx = (sx - e.width / 2) / z, dy = (sy - e.height / 2) / z;
+    return a ? { x: dx * Math.cos(a) - dy * Math.sin(a) + c.x, y: dx * Math.sin(a) + dy * Math.cos(a) + c.y } : { x: dx + c.x, y: dy + c.y };
   }
   worldToScreen(scene, x, y) {
-    const z = this.zoomFor(scene), e = scene.engine, c = scene.camera;
-    return { x: (x - c.x) * z + e.width / 2, y: (y - c.y) * z + e.height / 2 };
+    const z = this.zoomFor(scene), e = scene.engine, c = scene.camera, a = (c.roll || 0) * DEG, dx = x - c.x, dy = y - c.y;
+    const rx = a ? dx * Math.cos(a) + dy * Math.sin(a) : dx, ry = a ? -dx * Math.sin(a) + dy * Math.cos(a) : dy;
+    return { x: rx * z + e.width / 2, y: ry * z + e.height / 2 };
   }
   render(scene, engine) {
     const ctx = this.ctx, c = scene.camera, z = this.zoomFor(scene);
@@ -2837,7 +2838,9 @@ export class Renderer2D {
     ctx.fillRect(0, 0, engine.width, engine.height);
     ctx.save();
     ctx.translate(engine.width / 2, engine.height / 2);
-    if (c.shake > 0) ctx.translate(rand(-1, 1) * c.shake, rand(-1, 1) * c.shake);
+    const sk = (c.shake || 0) * (c.shakeGain ?? 1);
+    if (sk > 0) ctx.translate(rand(-1, 1) * sk, rand(-1, 1) * sk);
+    if (c.roll) ctx.rotate(-c.roll * DEG); // Dutch tilt
     ctx.scale(z, z);
     ctx.translate(-c.x, -c.y);
     if (engine.editing && engine.drawGrid) engine.drawGrid(ctx, scene, z);
@@ -3283,12 +3286,19 @@ export class Renderer3D {
     gl.clearColor(bg[0], bg[1], bg[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     let eye = c.position;
-    if (c.shake > 0) eye = { x: eye.x + rand(-1, 1) * c.shake * 0.02, y: eye.y + rand(-1, 1) * c.shake * 0.02, z: eye.z };
+    const sk = (c.shake || 0) * (c.shakeGain ?? 1);
+    if (sk > 0) eye = { x: eye.x + rand(-1, 1) * sk * 0.02, y: eye.y + rand(-1, 1) * sk * 0.02, z: eye.z };
     const aspect = engine.width / engine.height;
     // On portrait screens widen the vertical FOV a little so the scene doesn't feel cramped sideways
     const fovy = aspect < 1 ? 2 * Math.atan(Math.tan(c.fov * DEG / 2) / Math.sqrt(aspect)) : c.fov * DEG;
     const hh = (c.orthoSize || 14) / 2, proj = c.ortho ? M4.ortho(-hh * aspect, hh * aspect, -hh, hh, -c.far, c.far) : M4.perspective(fovy, aspect, c.near, c.far);
-    const up = c.ortho && Math.abs(eye.x - c.target.x) < 1e-3 && Math.abs(eye.z - c.target.z) < 1e-2 ? { x: 0, y: 0, z: -1 } : undefined; // straight-down views
+    let up = c.ortho && Math.abs(eye.x - c.target.x) < 1e-3 && Math.abs(eye.z - c.target.z) < 1e-2 ? { x: 0, y: 0, z: -1 } : undefined; // straight-down views
+    if (c.roll && !up) { // Dutch tilt: turn "up" around the view direction
+      const f = [c.target.x - eye.x, c.target.y - eye.y, c.target.z - eye.z], fl = Math.hypot(...f) || 1; f[0] /= fl; f[1] /= fl; f[2] /= fl;
+      let r = [-f[2], 0, f[0]]; const rl = Math.hypot(...r) || 1; r = r.map((v) => v / rl);
+      const u0 = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]], a = c.roll * DEG;
+      up = { x: u0[0] * Math.cos(a) + r[0] * Math.sin(a), y: u0[1] * Math.cos(a) + r[1] * Math.sin(a), z: u0[2] * Math.cos(a) + r[2] * Math.sin(a) };
+    }
     this.viewProj = M4.mul(proj, M4.lookAt(eye, c.target, up));
     const L = scene.light, ld = L.dir, ll = Math.hypot(ld.x, ld.y, ld.z) || 1;
     gl.uniformMatrix4fv(this.u.uViewProj, false, this.viewProj);
@@ -4257,6 +4267,12 @@ registerBehavior('camera', {
     { key: 'deadZoneY', label: 'Dead zone up / down (blank = same)', type: 'number', default: '', optional: true, group: 'Framing' },
     { key: 'smoothY', label: 'Up / down damping (blank = same)', type: 'number', default: '', optional: true, group: 'Framing', infoText: 'e.g. follow sideways quickly but jumps slowly, so the screen doesn\'t bounce with every jump.' },
     { key: 'pixelSnap', label: 'Pixel perfect (2D: no blurry in-between positions)', type: 'bool', default: false, only2d: true, group: 'Framing' },
+    { key: 'binding', label: 'Offset turns with', type: 'select', options: ['the world (fixed)', 'the way the target faces', 'the way the target moves'], default: 'the world (fixed)', only3d: true, group: 'Framing', showIf: { mode: ['follow', 'group'] }, info: { 'the way the target faces': 'Third person: the camera stays behind the target as it turns.', 'the way the target moves': 'The camera swings round behind the direction of travel (cars, runners).' } },
+    { key: 'shoulder', label: 'Shoulder offset (sideways, 3rd person)', type: 'number', default: 0, step: 0.1, only3d: true, group: 'Framing', showIf: { mode: ['follow'] } },
+    { key: 'followZoom', label: 'Keep the target this big (% of screen height, 0 = off)', type: 'number', default: 0, range: [0, 90], step: 1, group: 'Framing', infoText: 'Follow Zoom: zooms (2D) or changes the field of view (3D) so the target always looks the same size.' },
+    { key: 'speedZoom', label: 'Zoom out with speed', type: 'number', default: 0, range: [0, 10], step: 0.5, group: 'Framing', infoText: 'The faster the target goes, the more you see (racing, flying).' },
+    { key: 'snapJump', label: 'Snap when the target jumps more than (0 = off)', type: 'number', default: 0, group: 'Framing', infoText: 'A teleport or respawn cuts straight there instead of a long glide.' },
+    { key: 'deocclude', label: 'When something blocks the view (3D)', type: 'select', options: ['do nothing', 'move in front of it'], default: 'do nothing', only3d: true, group: 'Framing', showIf: { mode: ['follow', 'orbit', 'group'] }, info: { 'move in front of it': 'Like Cinemachine Deoccluder: a wall between the camera and the target pulls the camera in front of the wall.' } },
     { key: 'bounds', label: 'Keep inside (2D confiner)', type: 'select', options: ['none', 'level', 'custom'], default: 'none', only2d: true, group: 'Framing' },
     { key: 'minX', label: 'Bounds min X', type: 'number', default: 0, showIf: { bounds: ['custom'] }, group: 'Framing' },
     { key: 'maxX', label: 'Bounds max X', type: 'number', default: 400, showIf: { bounds: ['custom'] }, group: 'Framing' },
@@ -4266,6 +4282,8 @@ registerBehavior('camera', {
     { key: 'box3d', label: 'Box: min X, max X, min Y, max Y, min Z, max Z', type: 'text', default: '-20, 20, 1, 30, -20, 20', only3d: true, showIf: { bounds3d: ['box'] }, group: 'Framing' },
     { key: 'noise', label: 'Handheld noise (shake amount)', type: 'number', default: 0, range: [0, 20], step: 0.5, group: 'Noise & blend' },
     { key: 'noiseSpeed', label: 'Noise speed', type: 'number', default: 1, range: [0.1, 5], step: 0.1, group: 'Noise & blend', showIf: (b) => +b.noise > 0 },
+    { key: 'dutch', label: 'Dutch tilt (°)', type: 'number', default: 0, range: [-45, 45], step: 1, group: 'Noise & blend', infoText: 'Tilts the view: tension, dizziness, action.' },
+    { key: 'impulseGain', label: 'Feels shakes (×, 0 = ignores them)', type: 'number', default: 1, range: [0, 3], step: 0.1, group: 'Noise & blend' },
     { key: 'noiseProfile', label: 'Noise feel', type: 'select', options: ['handheld', 'gentle sway', 'earthquake', 'engine rumble'], default: 'handheld', group: 'Noise & blend', showIf: (b) => +b.noise > 0 },
     { key: 'blend', label: 'Blend in from previous camera (sec)', type: 'number', default: 0.8, range: [0, 4], step: 0.1, group: 'Noise & blend' },
     { key: 'blendEase', label: 'Blend ease', type: 'select', options: EASES, default: 'inOutCubic', ease: true, group: 'Noise & blend' },
@@ -4299,6 +4317,13 @@ registerBehavior('camera', {
       return best || pts[0];
     };
     const group = (s, e, T = p.target) => {
+      const TG = s.find(T)?._groupMembers?.(s); // a Target Group object: weighted members with a radius each
+      if (TG) {
+        if (!TG.length) return null;
+        let W = 0, x = 0, y = 0, z = 0, l = Infinity, r = -Infinity, t = Infinity, b = -Infinity, n = Infinity, f = -Infinity;
+        for (const m of TG) { W += m.w; x += m.x * m.w; y += m.y * m.w; z += m.z * m.w; l = Math.min(l, m.x - m.r); r = Math.max(r, m.x + m.r); t = Math.min(t, m.y - m.r); b = Math.max(b, m.y + m.r); n = Math.min(n, m.z - m.r); f = Math.max(f, m.z + m.r); }
+        return { x: x / W, y: y / W, z: z / W, w: r - l, h: b - t, d: f - n, vel: { x: 0, y: 0, z: 0 } };
+      }
       const list = s.findAll(T).filter((q) => q !== e);
       if (!list.length) return null;
       let l = Infinity, r = -Infinity, t = Infinity, b = -Infinity, n = Infinity, f = -Infinity;
@@ -4315,18 +4340,23 @@ registerBehavior('camera', {
       }
     };
     /** Where this camera wants to be right now. */
+    let head = null, lastTP = null, tgtNow = null;
     const desired = (e, s, cur) => {
+      const O = e.data.camOffset || {}, OX = O.x ?? (+p.ox || 0), OY = O.y ?? (+p.oy || 0), OZ = O.z ?? (+p.oz || 0); // Set Camera Offset node
       const T = e.data.camTarget ?? p.target, three = is3D(e), tgt = p.mode === 'fixed' ? null : p.mode === 'group' ? group(s, e, T) : T ? s.findAll(T).find((q) => q !== e) : null;
       const vel = tgt?.vel || tgt?.body?.vel || { x: 0, y: 0, z: 0 }, la = +p.lookAhead || 0, dz = +p.deadZone || 0, dzy = p.deadZoneY === '' || p.deadZoneY == null ? dz : +p.deadZoneY || 0;
       const travel = p.mode === 'dolly' && p.dollyMode === 'travel by itself' && Array.isArray(p.path) && p.path.length > 1;
+      tgtNow = tgt; const speed = Math.hypot(vel.x || 0, vel.y || 0, vel.z || 0);
       if (!three) {
-        let zoom = +p.zoom || 1, fx = e.x, fy = e.y;
+        let zoom = e.data.camZoom ?? (+p.zoom || 1), fx = e.x, fy = e.y;
         if (travel) { const c = trackPoint(p.path, dollyT); fx = c.x; fy = c.y; }
         else if (tgt) {
-          fx = tgt.x + p.ox + vel.x * la; fy = p.mode === 'side scroller' ? e.y : tgt.y + p.oy + (p.mode === 'top down' ? vel.y * la : 0);
+          fx = tgt.x + OX + vel.x * la; fy = p.mode === 'side scroller' ? e.y : tgt.y + OY + (p.mode === 'top down' ? vel.y * la : 0);
+          if (+p.followZoom > 0 && p.mode !== 'group') { const th = Math.max(4, (tgt.extents?.().hy || 20) * 2 * (tgt.sy || 1)); zoom = clamp(s.view.height * (+p.followZoom / 100) / th, 0.1, 8); }
           if (p.mode === 'group') zoom = clamp(Math.min(s.view.width / (tgt.w + 2 * p.padding), s.view.height / (tgt.h + 2 * p.padding)), 0.15, +p.zoom || 1);
           if (p.mode === 'dolly' && Array.isArray(p.path) && p.path.length > 1) { const c = closestOnPath(p.path, tgt); fx = c.x; fy = c.y; }
         }
+        if (+p.speedZoom > 0 && tgt) zoom /= 1 + speed * +p.speedZoom * 0.0004;
         fx -= (+p.screenX || 0) * s.view.width / zoom; fy -= (+p.screenY || 0) * s.view.height / zoom;
         if ((dz || dzy) && tgt && cur && !travel) { const ax = fx - cur.x, ay = fy - cur.y; fx = Math.abs(ax) < dz ? cur.x : fx - Math.sign(ax) * dz; fy = Math.abs(ay) < dzy ? cur.y : fy - Math.sign(ay) * dzy; }
         return { x: fx, y: fy, zoom };
@@ -4363,10 +4393,10 @@ registerBehavior('camera', {
         } else if (p.mode === 'top down') pos = [L[0], L[1] + (+p.oy || dist), L[2] + 0.001];
         else if (p.mode === 'dolly' && Array.isArray(p.path) && p.path.length > 1) { const c = closestOnPath(p.path, { x: L[0], y: L[1], z: L[2] }); pos = [c.x, c.y, c.z]; }
         else if (p.mode === 'group') {
-          const off = [p.ox, p.oy, p.oz], ol = Math.hypot(...off) || 1, rad = Math.hypot(tgt.w, tgt.h, tgt.d) / 2 + (+p.padding || 0);
+          const off = turned([OX, OY, OZ], tgt, vel), ol = Math.hypot(...off) || 1, rad = Math.hypot(tgt.w, tgt.h, tgt.d) / 2 + (+p.padding || 0);
           const need = Math.max(ol, rad / Math.tan(((+p.fov || 60) * DEG) / 2));
           pos = off.map((o, k) => L[k] + o / ol * need);
-        } else pos = [L[0] + p.ox, L[1] + p.oy, L[2] + p.oz];
+        } else { const off = turned([OX + (+p.shoulder || 0), OY, OZ], tgt, vel); pos = [L[0] + off[0], L[1] + off[1], L[2] + off[2]]; }
         look = lookTag ? [lookTag.x, lookTag.y, lookTag.z] : L;
       }
       if (p.screenX || p.screenY) { // composer: put the target off-centre on screen
@@ -4374,11 +4404,30 @@ registerBehavior('camera', {
         const sx = -(+p.screenX || 0) * fl, sy = (+p.screenY || 0) * fl;
         for (const k of [0, 1, 2]) { const d = r[k] / rl * sx + (k === 1 ? sy : 0); look[k] += d; pos[k] += d; }
       }
-      return { pos, look, fov: +p.fov || 60 };
+      let fov = e.data.camFov ?? (+p.fov || 60);
+      if (tgt && !travel && p.deocclude === 'move in front of it') { // a wall between the target and the camera: come in front of it
+        const d = [pos[0] - look[0], pos[1] - look[1], pos[2] - look[2]], dl = Math.hypot(...d) || 1;
+        const hit = s.raycast({ x: look[0], y: look[1], z: look[2] }, { x: d[0], y: d[1], z: d[2] }, dl, { ignore: tgt });
+        if (hit && hit.entity !== e && hit.dist < dl) { const k = Math.max(0.6, hit.dist - 0.4) / dl; pos = look.map((v, i) => v + d[i] * k); }
+      }
+      if (tgt && +p.followZoom > 0 && p.mode !== 'group') { const h = Math.max(0.2, (tgt.extents?.().hy || 1) * 2), dd = Math.hypot(pos[0] - look[0], pos[1] - look[1], pos[2] - look[2]) || 1; fov = clamp(2 * Math.atan(h / (2 * (+p.followZoom / 100) * dd)) / DEG, 8, 110); }
+      if (tgt && +p.speedZoom > 0) fov = Math.min(120, fov + Math.min(30, speed * +p.speedZoom * 0.5));
+      return { pos, look, fov };
+    };
+    /** The offset turned to stay behind the target (the way it faces or moves), with the heading smoothed. */
+    const turned = (off, tgt, vel) => {
+      if (!p.binding || p.binding === 'the world (fixed)' || !tgt) return off;
+      let want = head ?? 0;
+      if (p.binding === 'the way the target faces') want = (tgt.ry || 0) * DEG;
+      else { const sp = Math.hypot(vel.x || 0, vel.z || 0); if (sp > 0.3) want = Math.atan2(-(vel.x || 0), -(vel.z || 0)); }
+      if (head == null) head = want; else { let d = want - head; d = Math.atan2(Math.sin(d), Math.cos(d)); head += d * Math.min(1, 0.08 * (+p.smooth || 6) / 6); }
+      const c = Math.cos(head), s = Math.sin(head);
+      return [off[0] * c + off[2] * s, off[1], -off[0] * s + off[2] * c];
     };
     return {
       start(e, s) {
         (s.cameras ||= []).push(e); e.data.camPriority = +p.priority || 0;
+        e._camWant = () => desired(e, s, null); // a Camera Mixer blends these
         e._camRecenter = () => { yaw = yaw0; pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); dist = Math.hypot(p.ox, p.oy, p.oz) || 10; };
         if (is3D(e)) { dist = Math.hypot(p.ox, p.oy, p.oz) || 10; yaw = yaw0 = Math.atan2(p.ox, p.oz); pitch = Math.atan2(p.oy, Math.hypot(p.ox, p.oz)); }
         else if (p.bounds === 'level') box = levelBounds(s);
@@ -4393,16 +4442,21 @@ registerBehavior('camera', {
         if (!s.isActiveCamera(e)) { st = null; return; }
         const c = s.camera, three = is3D(e);
         if (s.activeCamEntity !== e) { // just became active: cut, or blend from wherever the view is now
-          const had = !!s.activeCamEntity && !s.activeCamEntity.dead;
+          const had = !!s.activeCamEntity && !s.activeCamEntity.dead, prevName = s.activeCamEntity?.name;
           s.activeCamEntity = e; st = null;
-          const nb = s.nextBlend; s.nextBlend = null; // Blend To Camera node: this switch's own time and ease
-          const dur = nb ? +nb.dur : +p.blend, ease = nb?.ease || p.blendEase;
+          const nb = s.nextBlend; s.nextBlend = null; // Make Camera Live / zones / sequences: this switch's own time and ease
+          const bb = !nb && s.camBrain?.blendFor(prevName, e.name); // Camera Brain: custom blends between particular cameras
+          const dur = nb ? +nb.dur : bb ? bb.dur : +p.blend, ease = nb?.ease || bb?.ease || p.blendEase;
           s.emit('cameraLive', e.name, e);
           s.camBlend = had && dur > 0 ? { t: 0, dur, ease: easeFn(ease), from: three ? { pos: [c.position.x, c.position.y, c.position.z], look: [c.target.x, c.target.y, c.target.z], fov: c.fov } : { x: c.x, y: c.y, zoom: c.zoom } } : null;
         }
         if (s.cameraCut) { st = null; s.cameraCut = false; }
-        const want = desired(e, s, st), k = !st ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt), ky = !st ? 1 : p.smoothY === '' || p.smoothY == null ? k : 1 - Math.exp(-(+p.smoothY || 6) * dt);
-        if (!st) st = JSON.parse(JSON.stringify(want));
+        if (e.data.camHold) return; // Freeze Camera node: the view stays put
+        let want = desired(e, s, st), k = !st ? 1 : 1 - Math.exp(-(+p.smooth || 6) * dt), ky = !st ? 1 : p.smoothY === '' || p.smoothY == null ? k : 1 - Math.exp(-(+p.smoothY || 6) * dt);
+        const tp = tgtNow ? { x: tgtNow.x, y: tgtNow.y, z: tgtNow.z || 0 } : null;
+        if (st && +p.snapJump > 0 && tp && lastTP && Math.hypot(tp.x - lastTP.x, tp.y - lastTP.y, tp.z - lastTP.z) > +p.snapJump) st = null; // teleported: cut
+        lastTP = tp;
+        if (!st) { st = JSON.parse(JSON.stringify(want)); k = 1; ky = 1; }
         const nz = noise(s, e.id.length, e);
         let out;
         if (!three) {
@@ -4427,6 +4481,8 @@ registerBehavior('camera', {
           else out = { pos: out.pos.map((v, q) => lerp(B.from.pos[q], v, u)), look: out.look.map((v, q) => lerp(B.from.look[q], v, u)), fov: lerp(B.from.fov, out.fov, u) };
           if (B.t >= B.dur) s.camBlend = null;
         }
+        const roll = e.data.camDutch ?? (+p.dutch || 0); c.roll = (c.roll || 0) + (roll - (c.roll || 0)) * (s.camBlend ? 0.15 : Math.min(1, dt * 8)); if (Math.abs(c.roll) < 0.01 && !roll) c.roll = 0;
+        c.shakeGain = p.impulseGain ?? 1;
         if (!three) { c.x = p.pixelSnap ? Math.round(out.x) : out.x; c.y = p.pixelSnap ? Math.round(out.y) : out.y; c.zoom = out.zoom; }
         else {
           c.position = { x: out.pos[0], y: out.pos[1], z: out.pos[2] }; c.target = { x: out.look[0], y: out.look[1], z: out.look[2] }; c.fov = out.fov;
@@ -4443,6 +4499,117 @@ function inZone(s, e, tag) {
   const ex = e.extents(), three = is3D(e), hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, hz = ex.sphere ? ex.r : ex.hz ?? hx;
   return s.findAll(tag).some((q) => q !== e && !q.dead && Math.abs(q.x - e.x) <= hx && (three ? Math.abs(q.z - e.z) <= hz && Math.abs(q.y - e.y) <= Math.max(hy, 50) : Math.abs(q.y - e.y) <= hy));
 }
+registerBehavior('cameraBrain', {
+  label: 'Camera Brain', description: 'Sets how cameras blend into each other (Cinemachine Brain): a default blend, and your own blends for particular pairs (Menu Cam → Game Cam takes 2 s). Put one in the level.',
+  params: [
+    { key: 'defaultBlend', label: 'Default blend (sec, blank = each camera\'s own)', type: 'number', default: '', optional: true },
+    { key: 'defaultEase', label: 'Default ease', type: 'select', options: EASES, default: 'inOutCubic', ease: true },
+    { key: 'blends', label: 'Custom blends (From > To = seconds ease; * = any camera)', type: 'code', default: 'Menu Cam > * = 2 inOutSine\n* > Boss Cam = 0.4 outCubic\nBoss Cam > * = 0' },
+  ],
+  create(p) {
+    const rules = () => String(p.blends || '').split('\n').map((l) => /^\s*(.+?)\s*>\s*(.+?)\s*=\s*([\d.]+)\s*(\w+)?\s*$/.exec(l)).filter(Boolean).map((m) => ({ from: m[1], to: m[2], dur: +m[3], ease: m[4] }));
+    return {
+      start(e, s) {
+        s.camBrain = { blendFor: (from, to) => {
+          const R = rules(), hit = R.find((r) => r.from === from && r.to === to) || R.find((r) => r.from === from && r.to === '*') || R.find((r) => r.from === '*' && r.to === to);
+          if (hit) return { dur: hit.dur, ease: hit.ease && EASES.includes(hit.ease) ? hit.ease : p.defaultEase };
+          return p.defaultBlend !== '' && p.defaultBlend != null ? { dur: +p.defaultBlend || 0, ease: p.defaultEase } : null;
+        } };
+      },
+      destroy(e, s) { s.camBrain = null; },
+    };
+  },
+});
+registerBehavior('cameraSequence', {
+  label: 'Camera Sequence', description: 'A cutscene from your cameras (Cinemachine Blend List / Sequencer): each shot is a camera, how long it holds and how it blends in. Cinematic black bars, skip on tap, loop, and a message at the end; then the usual camera takes over again.',
+  params: [
+    { key: 'shots', label: 'Shots (Camera | hold sec | blend sec)', type: 'code', default: 'Wide Cam | 2 | 0\nDolly Camera | 3 | 1.2\nMain Camera | 0.5 | 1' },
+    { key: 'start', label: 'Plays', type: 'select', options: ['when the level starts', 'on a message'], default: 'when the level starts' },
+    { key: 'message', label: 'Message', type: 'text', default: 'cutscene', suggest: 'messages', showIf: { start: ['on a message'] } },
+    { key: 'loop', label: 'Loop', type: 'bool', default: false },
+    { key: 'skip', label: 'Tap to skip', type: 'bool', default: true },
+    { key: 'bars', label: 'Cinematic bars', type: 'bool', default: true },
+    { key: 'pauseGame', label: 'Players can\'t move meanwhile', type: 'bool', default: false },
+    { key: 'endMessage', label: 'At the end send', type: 'text', default: 'cutscene done', suggest: 'messages' },
+  ],
+  create(p) {
+    let i = -1, t = 0, before = null, bars = 0, playing = false;
+    const shots = () => String(p.shots || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((r) => r[0]).map(([cam, hold = '2', blend = '1']) => ({ cam, hold: Math.max(0, +hold || 0), blend: Math.max(0, +blend || 0) }));
+    const go = (s, k) => { const S = shots(); if (!S[k]) return false; i = k; t = 0; s.nextBlend = { dur: S[k].blend, ease: null }; s.activeCamera = S[k].cam; return true; };
+    const stop = (s, e, done) => { if (!playing) return; playing = false; i = -1; s.activeCamera = before; if (p.pauseGame) s.engine.input.enabled = true; s.cutscene = null; if (done && p.endMessage) s.send(p.endMessage); };
+    const play = (s, e) => { if (playing) return; before = s.activeCamera || null; playing = true; if (p.pauseGame) s.engine.input.enabled = false; s.cutscene = e; if (!go(s, 0)) stop(s, e, true); };
+    return {
+      start(e, s) {
+        e._seqPlay = () => play(s, e); e._seqStop = () => stop(s, e, true);
+        if (p.start === 'on a message') s.on('message', (m) => { if (!e.dead && m === p.message) play(s, e); }); else play(s, e);
+        (s.overlays ||= []).push((ctx) => { // cinematic bars
+          if (bars <= 0.002 || e.dead) return;
+          const E = s.engine, h = E.height * 0.11 * bars; ctx.save(); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, E.width, h); ctx.fillRect(0, E.height - h, E.width, h); ctx.restore();
+        });
+      },
+      update(e, dt, s) {
+        bars += (((playing && p.bars !== false) || (s.cineBars && e.name === '(cinematic bars)') ? 1 : 0) - bars) * Math.min(1, dt * 6); // (the Cinematic Bars node uses a hidden sequence too)
+        if (!playing) return;
+        if (p.skip !== false && s.engine.input.taps.length && t > 0.2) { s.engine.input.taps.length = 0; s.nextBlend = { dur: 0.3, ease: null }; return stop(s, e, true); }
+        t += dt;
+        const S = shots(), sh = S[i]; if (!sh) return stop(s, e, true);
+        if (t >= sh.blend + sh.hold) { if (!go(s, i + 1)) { if (p.loop) go(s, 0); else stop(s, e, true); } }
+      },
+      destroy(e, s) { stop(s, e, false); },
+    };
+  },
+});
+registerBehavior('cameraMixer', {
+  label: 'Camera Mixer', description: 'Mixes two cameras by a number from 0 to 1 (Cinemachine Mixing Camera): 0 = all Camera A, 1 = all Camera B, in between = a blend. Drive it with a variable (speed, health, a slider) or the Set Camera Mix node. It goes live like a camera, by priority or name.',
+  params: [
+    { key: 'camA', label: 'Camera A', type: 'text', default: 'Camera 1', suggest: 'objects' },
+    { key: 'camB', label: 'Camera B', type: 'text', default: 'Camera 2', suggest: 'objects' },
+    { key: 'var', label: 'Mix from variable (blank = the value below)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'weight', label: 'Mix (0 = A, 1 = B)', type: 'number', default: 0.5, range: [0, 1], step: 0.05 },
+    { key: 'max', label: 'Variable value that means all B', type: 'number', default: 1, showIf: (b) => !!b.var },
+    { key: 'smooth', label: 'Damping', type: 'number', default: 8, range: [0.5, 30], step: 0.5 },
+    { key: 'priority', label: 'Priority', type: 'number', default: 0, step: 1 },
+  ],
+  create(p) {
+    let st = null;
+    return {
+      start(e, s) { (s.cameras ||= []).push(e); e.data.camPriority = +p.priority || 0; },
+      update(e, dt, s) {
+        if (!s.isActiveCamera(e)) { st = null; return; }
+        if (s.activeCamEntity !== e) { s.activeCamEntity = e; s.emit('cameraLive', e.name, e); }
+        const A = s.find(p.camA)?._camWant?.(), B = s.find(p.camB)?._camWant?.(); if (!A && !B) return;
+        const w = clamp(e.data.camMix ?? (p.var ? (+s.vars[p.var] || 0) / (+p.max || 1) : +p.weight || 0), 0, 1), a = A || B, b = B || A, c = s.camera, three = !!a.pos;
+        const want = three ? { pos: a.pos.map((v, i) => lerp(v, b.pos[i], w)), look: a.look.map((v, i) => lerp(v, b.look[i], w)), fov: lerp(a.fov, b.fov, w) } : { x: lerp(a.x, b.x, w), y: lerp(a.y, b.y, w), zoom: lerp(a.zoom, b.zoom, w) };
+        const k = !st ? 1 : 1 - Math.exp(-(+p.smooth || 8) * dt);
+        if (!st) st = JSON.parse(JSON.stringify(want));
+        if (three) { for (const q of [0, 1, 2]) { st.pos[q] += (want.pos[q] - st.pos[q]) * k; st.look[q] += (want.look[q] - st.look[q]) * k; } st.fov += (want.fov - st.fov) * k; c.position = { x: st.pos[0], y: st.pos[1], z: st.pos[2] }; c.target = { x: st.look[0], y: st.look[1], z: st.look[2] }; c.fov = st.fov; }
+        else { st.x += (want.x - st.x) * k; st.y += (want.y - st.y) * k; st.zoom += (want.zoom - st.zoom) * k; c.x = st.x; c.y = st.y; c.zoom = st.zoom; }
+      },
+      destroy(e, s) { s.cameras = (s.cameras || []).filter((q) => q !== e); },
+    };
+  },
+});
+registerBehavior('cameraTargetGroup', {
+  label: 'Target Group', description: 'A group of things for a camera to frame together (Cinemachine Target Group), each with a weight (how much the camera cares) and a radius (room around it). Set a Group camera\'s Follow tag to this object\'s name.',
+  params: [
+    { key: 'members', label: 'Members (name or tag | weight | radius)', type: 'code', default: 'player | 1 | 40\nenemy | 0.5 | 30' },
+  ],
+  create(p) {
+    const extra = [];
+    return {
+      start(e, s) {
+        e._groupAdd = (q, w = 1, r = 30) => { const i = extra.findIndex((x) => x.q === q); if (i >= 0) extra.splice(i, 1); extra.push({ q, w, r }); };
+        e._groupRemove = (q) => { const i = extra.findIndex((x) => x.q === q); if (i >= 0) extra.splice(i, 1); };
+        e._groupMembers = (s2) => {
+          const out = [];
+          for (const l of String(p.members || '').split('\n')) { const [key, w = '1', r = '0'] = l.split('|').map((x) => x.trim()); if (!key || !(+w > 0)) continue; for (const q of s2.findAll(key)) if (q !== e && !q.dead) out.push({ x: q.x, y: q.y, z: q.z || 0, w: +w, r: +r || 0 }); }
+          for (const x of extra) if (!x.q.dead && x.w > 0) out.push({ x: x.q.x, y: x.q.y, z: x.q.z || 0, w: x.w, r: x.r });
+          return out;
+        };
+      },
+    };
+  },
+});
 registerBehavior('cameraZone', {
   label: 'Camera Zone', description: 'An area that switches the camera (like Cinemachine trigger zones): when the player walks in, the chosen camera takes over and blends in; when they leave, it goes back. Size it like any object; it\'s invisible while playing.',
   params: [
@@ -10402,6 +10569,21 @@ Object.assign(NODE_TYPES, {
   camImpulse: { cat: 'Camera', label: 'Camera Impulse', exec: true, outs: ['then'], params: [opt('from', ['this object', 'everywhere'], 'this object', 'from')], inputs: [N_IN('strength', 12)] },
   camNoise: { cat: 'Camera', label: 'Set Camera Noise', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera')], inputs: [N_IN('amount', 4)] },
   camRecenter: { cat: 'Camera', label: 'Recenter Orbit Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera')] },
+  camSeqPlay: { cat: 'Camera', label: 'Play Camera Sequence', exec: true, outs: ['then', 'finished'], params: [txt('object', 'Camera Sequence', 'sequence object')] },
+  camSeqStop: { cat: 'Camera', label: 'Stop Camera Sequence', exec: true, outs: ['then'], params: [txt('object', 'Camera Sequence', 'sequence object')] },
+  camDutch: { cat: 'Camera', label: 'Set Camera Tilt (Dutch)', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera')], inputs: [N_IN('degrees', 12)] },
+  camOffset: { cat: 'Camera', label: 'Set Camera Offset', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), { key: 'reset', type: 'bool', default: false, label: 'back to its own offset' }], inputs: [N_IN('x', 0), N_IN('y', 0), N_IN('z', 0)] },
+  camLens: { cat: 'Camera', label: 'Set Camera Zoom / Field Of View', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('what', ['zoom (2D)', 'field of view (3D)', 'back to its own'], 'zoom (2D)', 'set')], inputs: [N_IN('value', 1.5)] },
+  camMix: { cat: 'Camera', label: 'Set Camera Mix', exec: true, outs: ['then'], params: [txt('mixer', 'Camera Mixer', 'mixer object')], inputs: [N_IN('mix', 0.5)] },
+  camHold: { cat: 'Camera', label: 'Freeze Camera', exec: true, outs: ['then'], params: [txt('camera', 'Camera', 'camera'), opt('mode', ['freeze', 'unfreeze', 'toggle'], 'freeze', 'make it')] },
+  camFade: { cat: 'Camera', label: 'Fade Screen', exec: true, outs: ['faded out', 'done'], params: [{ key: 'color', type: 'color', default: '#000000', label: 'colour' }], inputs: [N_IN('fade out', 0.4), N_IN('hold', 0.3), N_IN('fade in', 0.4)] },
+  camBars: { cat: 'Camera', label: 'Cinematic Bars', exec: true, outs: ['then'], params: [opt('mode', ['show', 'hide'], 'show', 'make them')] },
+  groupAdd: { cat: 'Camera', label: 'Add To Target Group', exec: true, outs: ['then'], params: [txt('group', 'Target Group', 'target group'), opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name (for "object")')], inputs: [N_IN('weight', 1), N_IN('radius', 40)] },
+  groupRemove: { cat: 'Camera', label: 'Remove From Target Group', exec: true, outs: ['then'], params: [txt('group', 'Target Group', 'target group'), opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name (for "object")')] },
+  liveCamera: { cat: 'Camera', label: 'Live Camera', value: 'text' },
+  screenPos: { cat: 'Camera', label: 'Screen Position Of', value: 'number', params: [opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name'), opt('part', ['x', 'y'], 'x', 'part')] },
+  camDistance: { cat: 'Camera', label: 'Distance From Camera', value: 'number', params: [opt('who', ['this object', 'other', 'object'], 'this object', 'who'), txt('object', '', 'object name')] },
+  isCutscene: { cat: 'Camera', label: 'Cutscene Playing', value: 'bool' },
   onCamLive: { cat: 'Camera', label: 'On Camera Live', outs: ['then'], params: [txt('camera', '', 'camera (blank = any)')] },
   camIsLive: { cat: 'Camera', label: 'Camera Is Live', value: 'bool', params: [txt('camera', 'Camera', 'camera')] },
   camMoveTo: { cat: 'Camera', label: 'Move Camera To', exec: true, outs: ['then', 'arrived'], inputs: [N_IN('x', 200), N_IN('y', 350), N_IN('seconds', 0.6)] },
@@ -11091,6 +11273,10 @@ registerBehavior('graph', {
         case 'micLevel': return s.engine.perms.micLevel();
         case 'location': { const L = s.engine.perms.location; if (!L) return 0; return { latitude: L.lat, longitude: L.lon, 'accuracy (m)': L.accuracy, 'speed (m/s)': L.speed, 'heading (°)': L.heading, 'altitude (m)': L.altitude, 'seconds since update': (Date.now() - L.t) / 1000 }[P('part')] ?? 0; }
         case 'distanceTo': { const L = s.engine.perms.location; if (!L) return 0; const R = 6371000, r = Math.PI / 180, la1 = L.lat * r, la2 = (+I('latitude') || 0) * r, dla = la2 - la1, dlo = ((+I('longitude') || 0) - L.lon) * r, h = Math.sin(dla / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dlo / 2) ** 2; return Math.round(2 * R * Math.asin(Math.min(1, Math.sqrt(h)))); }
+        case 'liveCamera': return s.activeCamEntity && !s.activeCamEntity.dead ? s.activeCamEntity.name : '';
+        case 'isCutscene': return !!s.cutscene;
+        case 'screenPos': { const w = P('who'), t = w === 'other' ? ctx.other : w === 'object' ? s.find(P('object')) : e; if (!t) return 0; const R = s.engine.renderer, pt = s.mode === '3d' ? R.project?.(s, t.x, t.y, t.z) || R.worldToScreen?.(s, t.x, t.y, t.z) : R.worldToScreen(s, t.x, t.y); return pt ? Math.round(P('part') === 'y' ? pt.y : pt.x) : 0; }
+        case 'camDistance': { const w = P('who'), t = w === 'other' ? ctx.other : w === 'object' ? s.find(P('object')) : e; if (!t) return 0; const c = s.camera; return s.mode === '3d' ? Math.hypot(t.x - c.position.x, t.y - c.position.y, t.z - c.position.z) : Math.hypot(t.x - c.x, t.y - c.y); }
         case 'camIsLive': return !!s.activeCamEntity && !s.activeCamEntity.dead && s.activeCamEntity.name === P('camera');
         case 'arrGetText': { const a = listOf(s, P('name')), i = Math.round(+I('position') || 1); return asText(a[i < 0 ? a.length + i : i - 1]); }
         case 'arrJoin': return listOf(s, P('name')).map(asText).join(P('sep') ?? ', ');
@@ -11534,6 +11720,22 @@ registerBehavior('graph', {
         case 'askPermission': { const later = { ...ctx, steps: 0 }; s.engine.perms.ask(P('kind'), { title: P('title'), why: P('why'), soft: P('soft') !== false }).then((r) => { if (!e.dead) follow(n, r === 'granted' ? 'allowed' : r === 'unsupported' ? 'not supported' : 'not allowed', later); }); return; }
         case 'camLive': { const sec = +P('seconds'); if (sec >= 0) s.nextBlend = { dur: sec, ease: P('ease') }; s.activeCamera = P('camera') || null; break; }
         case 'camAuto': s.activeCamera = null; break;
+        case 'camSeqPlay': { const q = s.find(P('object')); if (!q?._seqPlay) break; const later = { ...ctx, steps: 0 }; q._seqPlay(); const fn = (m) => { if (!e.dead && q.getBehavior?.('cameraSequence') && m === (q.getBehavior('cameraSequence').params?.endMessage || 'cutscene done')) { follow(n, 'finished', later); const L = s.listeners.message, i = L.indexOf(fn); if (i >= 0) Promise.resolve().then(() => { const j = L.indexOf(fn); if (j >= 0) L.splice(j, 1); }); } }; s.on('message', fn); break; }
+        case 'camSeqStop': s.find(P('object'))?._seqStop?.(); break;
+        case 'camDutch': { const c = s.find(P('camera')); if (c) c.data.camDutch = +I('degrees') || 0; break; }
+        case 'camOffset': { const c = s.find(P('camera')); if (c) { if (P('reset')) delete c.data.camOffset; else c.data.camOffset = { x: +I('x') || 0, y: +I('y') || 0, z: +I('z') || 0 }; } break; }
+        case 'camLens': { const c = s.find(P('camera')); if (!c) break; const w = P('what'); if (w === 'back to its own') { delete c.data.camZoom; delete c.data.camFov; } else if (w === 'field of view (3D)') c.data.camFov = clamp(+I('value') || 60, 5, 140); else c.data.camZoom = clamp(+I('value') || 1, 0.05, 20); break; }
+        case 'camMix': { const c = s.find(P('mixer')); if (c) c.data.camMix = clamp(+I('mix') || 0, 0, 1); break; }
+        case 'camHold': { const c = s.find(P('camera')); if (c) c.data.camHold = P('mode') === 'toggle' ? !c.data.camHold : P('mode') === 'freeze'; break; }
+        case 'camFade': {
+          const col = P('color') || '#000000', a = Math.max(0.01, +I('fade out') || 0), hold = Math.max(0, +I('hold') || 0), b = Math.max(0.01, +I('fade in') || 0), later = { ...ctx, steps: 0 }, f = { t: 0 };
+          const draw = (g) => { const k = f.t < a ? f.t / a : f.t < a + hold ? 1 : 1 - (f.t - a - hold) / b; if (k <= 0) return; g.save(); g.globalAlpha = clamp(k, 0, 1); g.fillStyle = col; g.fillRect(0, 0, g.canvas.width, g.canvas.height); g.restore(); };
+          (s.overlays ||= []).push(draw);
+          let out = false; const t0 = s.time; const tick = () => { if (e.dead) return; f.t = s.time - t0; /* game time: keeps pace however fast the phone draws */ if (!out && f.t >= a) { out = true; follow(n, 'faded out', later); } if (f.t >= a + hold + b) { s.overlays = s.overlays.filter((q) => q !== draw); follow(n, 'done', later); return; } s.after(1 / 60, tick); };
+          s.after(1 / 60, tick); return;
+        }
+        case 'camBars': { let q = s.find('(cinematic bars)'); if (!q) { q = s.add({ name: '(cinematic bars)', behaviors: [{ type: 'cameraSequence', shots: '', start: 'on a message', message: '(none)', bars: true, skip: false, endMessage: '' }] }); } s.cineBars = P('mode') !== 'hide'; break; }
+        case 'groupAdd': case 'groupRemove': { const g2 = s.find(P('group')), w = P('who'), t = w === 'other' ? ctx.other : w === 'object' ? s.find(P('object')) : e; if (!g2 || !t) break; if (n.type === 'groupAdd') g2._groupAdd?.(t, +I('weight') || 1, +I('radius') || 0); else g2._groupRemove?.(t); break; }
         case 'camPriority': { const c = s.find(P('camera')); if (c) c.data.camPriority = +I('priority') || 0; break; }
         case 'camTarget': { const c = s.find(P('camera')); if (c) c.data.camTarget = P('tag') || null; break; }
         case 'camImpulse': { const k = +I('strength') || 12; if (P('from') === 'everywhere') { s.camera.shake = Math.max(s.camera.shake, k); s.engine.vibrate(Math.min(60, k * 3)); } else s.impulse(k, e); break; }

@@ -1069,7 +1069,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     - The icon is a built-in UI icon (`home`, `shop`, `trophy`, `user`, `chat`, `gear`, `play`, `plus`, `star`, `heart`, `bell`…) or an emoji.
     - A badge variable shows a red count (99+) when it is a number, or a dot when it is `true`.
   - **Page changes** cross-fade in about a quarter of a second: everything inside a page fades with it, and it still finishes while the game is paused or on the title screen.
-  - **9 styles:**
+  - **16 styles:**
 
     | Style | Look |
     |---|---|
@@ -1082,6 +1082,14 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     | raised center | a big round middle button that sticks up; it can send a message instead of being a tab |
     | glass | a see-through floating bar with a glow |
     | minimal | just icons |
+    | segmented | a floating capsule; a solid highlight slides to the selected tab |
+    | curved | the selected icon sits in a circle above the bar, in a notch that slides with it |
+    | neon | a glowing line and a glowing icon on a dark bar |
+    | dock | a floating dock of big icons; the selected one lifts and its neighbours grow |
+    | spotlight | a beam of light shines down on the selected tab |
+    | outline | a ring around the selected icon |
+    | chips | every tab is a chip; the selected one is filled |
+  - **The newly selected icon** bounces, pops, spins, wiggles or flips. **Glow** for neon and spotlight, and the colour of the icon and text **on the highlight** for segmented, curved and chips.
   - **Labels:** auto, always, selected only, or never.
   - **Colours:** bar, selected, other tabs, indicator and badge. *Apply theme* recolours the bar too.
   - **Size & shape:** icon and label size, corner radius, floating gap, line along the top, shadow, and filling the home-bar area.

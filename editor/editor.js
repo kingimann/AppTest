@@ -116,6 +116,7 @@ let showGrid = store.get('pocket.editor.grid', '1') === '1';
 let showColliders = store.get('pocket.editor.colliders', '1') === '1'; // Unity-style green collider outlines on every object
 let tool = 'move';
 let uiMode = false; // UI editor view
+let uiPage = 'auto'; // the app page shown while editing: 'auto' = the page the app opens on, 'all', or 'var=value'
 let viewMode = 'scene'; // scene | top (3D levels laid out from above, no perspective) | ui
 let uiScreen = 'all'; // which screen's UI the UI editor previews
 let playing = false;
@@ -404,7 +405,22 @@ let sceneUI = null;
 engine.uiFrame = (s) => {
   sceneUI = null;
   engine.showUI = uiMode || !EP.hideUI; // Hide UI (Scene view): build the level without the HUD in the way
-  if (uiMode || playing || s.mode === '3d' || !engine.showUI) return null;
+  if (playing || !engine.showUI) return null;
+  if (uiMode) { // the UI editor: the game's screen at its real size (design width × height), fitted into the view, then your zoom and pan on top
+    const land = orientationOf() === 'landscape', v = s.mode === '3d' || !s.view ? (land ? { width: 700, height: 400 } : { width: 400, height: 700 }) : s.view, w = +v.width || 400, hh = +v.height || 700, pad = 18;
+    const zW = (engine.width - pad * 2) / w, zH = (engine.height - pad * 2) / hh, sel = selectedId && engine.scene.byId(selectedId);
+    const follow = sel?.ui && zH < zW * 0.6 && uiView.z === 1 && !uiView.x && !uiView.y; // a short view (a panel is open) and a UI element selected: fill the width and keep that element in sight
+    const z0 = Math.max(0.05, follow ? zW : Math.min(zW, zH)), z = z0 * uiView.z;
+    let cx = engine.width / 2; // keep the screen clear of the tool bar when there's room beside it
+    const rail = $('#toolRail'), rr = rail?.offsetParent ? rail.getBoundingClientRect() : null, vr = rr && engine.root.getBoundingClientRect();
+    if (rr) { const fw = w * z0; cx = Math.max(cx, Math.min(rr.right - vr.left + 8 + fw / 2, engine.width - 6 - fw / 2)); }
+    const ox = cx + uiView.x - w / 2 * z;
+    let oy = engine.height / 2 + uiView.y - hh / 2 * z;
+    if (follow) { const r = uiBox(sel, w, hh, { top: 0, right: 0, bottom: 0, left: 0, ...(PHONES[phone]?.safe || {}), k: 1 }); oy = Math.min(pad, Math.max(engine.height - pad - hh * z, engine.height / 2 - r.y * z)); }
+    sceneUI = { w, h: hh, safe: { top: 0, right: 0, bottom: 0, left: 0, ...(PHONES[phone]?.safe || {}), k: 1 }, v: { z, x: ox + w / 2 * z - w / 2, y: oy + hh / 2 * z - hh / 2 }, clip: null, editor: true };
+    return sceneUI;
+  }
+  if (s.mode === '3d') return null;
   const v = s.view || { width: 400, height: 700 }, w = +v.width || 400, hh = +v.height || 700, R = engine.renderer;
   const a = R.worldToScreen(s, 0, 0), b = R.worldToScreen(s, w, hh), z = (b.x - a.x) / w;
   if (!(z > 0)) return null;
@@ -439,7 +455,7 @@ function rebuild() {
 }
 /** The UI editor and Play show the game's screen in its own shape (a landscape box on a portrait phone, and the other way). */
 function fitEditorScreen() {
-  engine.letterbox = !!(uiMode || playing);
+  engine.letterbox = !!playing;
   engine.fitScreen();
 }
 const orientationOf = () => (root ? levelList()[0].settings?.orientation || 'any' : 'any');
@@ -666,8 +682,9 @@ engine.onRenderUI = (ctx, s) => {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   for (const e of s.entities) {
     if (e.ui || hasVisual(e)) continue;
-    const p = toScreen(e); if (!p) continue;
     const isSel = e.id === selectedId;
+    if (uiMode || (project.settings?.app && !isSel)) continue; // the UI editor shows only the screen; apps don't need their camera and light in the way
+    const p = toScreen(e); if (!p) continue;
     ctx.fillStyle = isSel ? 'rgba(247,160,44,0.25)' : 'rgba(30,30,30,0.6)';
     ctx.strokeStyle = isSel ? ORANGE : 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.rect(p.x - 12, p.y - 12, 24, 24); ctx.fill(); ctx.stroke();
@@ -805,10 +822,12 @@ function drawRectGizmo(ctx, f) {
   ctx.save();
   ctx.strokeStyle = '#4c8bd6'; ctx.lineWidth = 2; ctx.setLineDash([]);
   ctx.strokeRect(cx - hw, cy - hh, hw * 2, hh * 2);
+  const hs = Math.max(4, Math.min(7, Math.min(hw, hh) * 0.28)); // smaller handles on small things, so they don't hide them
   for (const [i, j] of RECT_HANDLES) {
+    if (Math.min(hw, hh) < 18 && i && j === 0 && hh < 10 || Math.min(hw, hh) < 18 && j && i === 0 && hw < 10) continue; // no middle handles on a tiny side
     const x = cx + i * hw, y = cy + j * hh, hot = live && gesture.dir[0] === i && gesture.dir[1] === j;
     ctx.fillStyle = hot ? HOT : '#ffffff'; ctx.strokeStyle = '#2f6db5'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.rect(x - 7, y - 7, 14, 14); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.rect(x - hs, y - hs, hs * 2, hs * 2); ctx.fill(); ctx.stroke();
   }
   ctx.fillStyle = 'rgba(76,139,214,0.85)'; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
   if (live && gesture.label) {
@@ -875,6 +894,7 @@ function hitGizmo(x, y) {
     if (f) {
       let best = null, bd = 26;
       for (const dir of RECT_HANDLES) { const d = Math.hypot(x - (f.cx + dir[0] * f.hw), y - (f.cy + dir[1] * f.hh)); if (d < bd) { bd = d; best = dir; } }
+      if (best && Math.abs(x - f.cx) < f.hw && Math.abs(y - f.cy) < f.hh && Math.hypot(x - f.cx, y - f.cy) < bd) best = null; // a small thing (zoomed out): its middle moves it, the handles are only at its edges
       if (best) return { handle: 'rect', dir: best, f, g: { o: { x: f.cx, y: f.cy } } };
       if (Math.abs(x - f.cx) < f.hw && Math.abs(y - f.cy) < f.hh) return { handle: 'free', g: { o: { x: f.cx, y: f.cy } } };
       return null;
@@ -896,13 +916,28 @@ function hitGizmo(x, y) {
 // ============================================================================
 // Picking
 // ============================================================================
+/** A page or panel that fills (most of) the screen: you pan over it rather than drag it. */
+function isBackdrop(e) {
+  if (e.stretch === 'both') return true;
+  const S = UIS(), b = uiBounds(e), z = S.v.z;
+  return b.hx * 2 >= S.w * z * 0.85 && b.hy * 2 >= S.h * z * 0.6;
+}
+/** Is this UI element drawn in the editor right now (its page and screen are the ones shown)? */
+function uiShown(e) {
+  if (!e.visible || e._parentHidden || e._clipHidden) return false;
+  if (!engine.uiFilter(e)) return false;
+  return ['always', 'play'].includes(e.showWhen) || engine.screenFilter(e);
+}
 function pick(sx, sy) {
   const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui) && (uiMode || !e.ui || !EP.hideUI)); // hidden UI can't be tapped
+  let bestUI = null, bestA = Infinity; // UI: the smallest thing under the finger (a button over a card over a page), with a little room around small ones
   for (const e of list) {
     if (!e.ui) continue;
-    const b = uiBounds(e);
-    if (Math.abs(sx - b.x) <= b.hx + 6 && Math.abs(sy - b.y) <= b.hy + 6) return e;
+    if (!uiShown(e)) continue; // on another page or screen: not drawn, so not tappable
+    const b = uiBounds(e), pad = Math.max(6, 22 - Math.min(b.hx, b.hy)); // thin text and small icons get a bigger target
+    if (Math.abs(sx - b.x) <= b.hx + pad && Math.abs(sy - b.y) <= b.hy + pad) { const a = (b.hx + 4) * (b.hy + 4) + (Math.abs(sx - b.x) > b.hx || Math.abs(sy - b.y) > b.hy ? 1e6 : 0); if (a < bestA) { bestA = a; bestUI = e; } } // (a hit right on it beats one only near it)
   }
+  if (bestUI) return bestUI;
   for (const e of list) {
     if (e.ui || hasVisual(e)) continue;
     const p = toScreen(e);
@@ -1006,13 +1041,19 @@ surface.addEventListener('pointerdown', (ev) => {
   }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
-    const giz = !panBtn && hitGizmo(x, y);
+    let giz = !panBtn && hitGizmo(x, y);
+    if (giz?.handle === 'free' && uiMode) { const under = pick(x, y); if (under && under.id !== selectedId || isBackdrop(engine.scene.byId(selectedId))) giz = null; } // inside a selected card or page: the thing under the finger wins (and a page pans)
     if (giz) {
       beginTransform(giz, x, y);
       if (giz.handle === 'free') armLongPress(() => { if (gesture && !gesture.moved) { const id = gesture.id; gesture = null; buzz(15); openObjectMenu(id, x, y); } });
       return;
     }
     const hit = panBtn || tool === 'hand' ? null : pick(x, y);
+    if (hit && uiMode && isBackdrop(hit)) { // a full-screen page or panel: dragging it pans the view (it can't move anyway), a tap selects it
+      gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: false, pickId: hit.id };
+      armLongPress(() => { if (gesture && !gesture.moved) { gesture = null; buzz(15); openObjectMenu(hit.id, x, y); } });
+      return;
+    }
     if (hit) {
       const was = selectedId === hit.id;
       select(hit.id, { fromScene: true });
@@ -1030,7 +1071,8 @@ surface.addEventListener('pointerdown', (ev) => {
       armLongPress(() => { if (gesture && !gesture.moved && (gesture.type === 'pan' || gesture.type === 'orbit')) { gesture = null; buzz(15); openSpaceMenu(x, y); } });
     }
   } else if (ptrs.size === 2) {
-    if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
+    if (gesture?.ui && gesture.moved && (gesture.type === 'free' || gesture.type === 'rect')) { const j = ent(gesture.id); if (j) { j.x = gesture.orig.x; j.y = gesture.orig.y; if (gesture.m0) Object.assign(j, gesture.m0); if (gesture.size0) setSize(j, gesture.size0[0], gesture.size0[1]); requestRebuild(); } } // a pinch that started on a UI element: the first finger didn't mean to move it
+    else if (gesture && gesture.moved && gesture.type !== 'pan' && gesture.type !== 'orbit') pushHistory();
     const [a, b] = [...ptrs.values()];
     gesture = { type: 'pinch', d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, zoom0: cam2d.zoom, dist0: orbit.dist };
   }
@@ -1097,7 +1139,7 @@ surface.addEventListener('pointermove', (ev) => {
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { const z = UIS().v.z; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); }
+      if (g.ui) { const z = UIS().v.z, st = j.stretch || 'none'; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); if (st === 'width' || st === 'both') j.x = g.orig.x; if (st === 'height' || st === 'both') j.y = g.orig.y; } // a stretched side follows the screen
       else if (childOf(g)) { // a child: move it in the world, store the result relative to its parent
         let W;
         if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
@@ -1120,6 +1162,14 @@ surface.addEventListener('pointermove', (ev) => {
       let v = key === 'ry' ? g.orig.ry - deg : g.orig.rz + deg;
       v = snap ? Math.round(v / (+EP.rotSnap || 15)) * (+EP.rotSnap || 15) : round(v, 1);
       j[key] = v;
+    } else if (g.type === 'rect' && g.ui && j.stretch && j.stretch !== 'none' && (g.dir[0] && /width|both/.test(j.stretch) || g.dir[1] && /height|both/.test(j.stretch))) { // stretched: pulling an edge changes its margin from the screen edge
+      const [hx, hy] = g.dir, k = g.f.k, m = g.m0 ||= { marginLeft: j.marginLeft ?? j.margin ?? 0, marginRight: j.marginRight ?? j.margin ?? 0, marginTop: j.marginTop ?? j.margin ?? 0, marginBottom: j.marginBottom ?? j.margin ?? 0 };
+      const r4 = (v) => Math.max(0, snap ? Math.round(v / 4) * 4 : Math.round(v));
+      if (hx && /width|both/.test(j.stretch)) { if (hx > 0) j.marginRight = r4(m.marginRight - dx / k); else j.marginLeft = r4(m.marginLeft + dx / k); }
+      if (hy && /height|both/.test(j.stretch)) { if (hy > 0) j.marginBottom = r4(m.marginBottom - dy / k); else j.marginTop = r4(m.marginTop + dy / k); }
+      if (hy && !/height|both/.test(j.stretch)) { const [w0, h0] = g.size0, hgt = Math.max(4, snap ? Math.round((h0 + hy * dy / k) / 4) * 4 : h0 + hy * dy / k); setSize(j, w0, hgt); j.y = round(g.orig.y + hy * (hgt - h0) / 2, 2); }
+      g.label = `margins ${j.marginLeft ?? j.margin ?? 0} · ${j.marginRight ?? j.margin ?? 0}${/height|both/.test(j.stretch) ? ` · top ${j.marginTop ?? j.margin ?? 0} · bottom ${j.marginBottom ?? j.margin ?? 0}` : ''}`;
+      requestRebuild();
     } else if (g.type === 'rect') {
       const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
       let w = w0 + hx * dx / k / scX, hgt = h0 + hy * dy / k / scY;
@@ -1448,7 +1498,7 @@ const endPointer = (ev) => {
   if ((g.type === 'pan' || g.type === 'orbit') && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) {
     const now = performance.now();
     if (now - lastEmptyTap < 320) { resetCamera(); applyCamera(); lastEmptyTap = 0; }
-    else { lastEmptyTap = now; if (tool !== 'hand') select(null); }
+    else { lastEmptyTap = now; if (tool !== 'hand') select(g.pickId || null); }
   }
   if (ptrs.size === 0 || g.type === 'pinch') gesture = null;
 };
@@ -1872,6 +1922,7 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 function select(id, { fromScene = false } = {}) {
   selectedId = id === SCENE_ID || ent(id) ? id : null;
   engine.editSelected = selectedId; // a Side Menu previews open only while it's selected
+  const pg = selectedId && pageOf(selectedId); if (pg && pg !== curPage()) setUIPage(pg); // picking something on another page shows that page
   $('#app')?.classList.toggle('has-sel', !!selectedId && selectedId !== SCENE_ID);
   if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   renderHierarchy();
@@ -1900,7 +1951,7 @@ function updateCtxBar() {
   const bar = $('#ctxBar'), j = ent(selectedId);
   bar.hidden = !j || playing || !!attachFor;
   if (j) $('#hint').hidden = true;
-  if (j) { $('#ctxBar [data-act="detach"]').hidden = !j.parent; $('#ctxBar [data-act="attach"]').hidden = !parentChoices(j).length; }
+  if (j) { const lean = uiMode && j.ui; $('#ctxBar [data-act="detach"]').hidden = lean || !j.parent; $('#ctxBar [data-act="attach"]').hidden = lean || !parentChoices(j).length; $('#ctxBar [data-act="focus"]').hidden = lean; } // the UI editor keeps it short: Inspect, Duplicate, Delete (parents: Hierarchy)
 }
 // ---- Attach mode: tap "Attach", then tap the object (in the scene or the Hierarchy) it should go inside ----
 function startAttach(id) {
@@ -1937,6 +1988,7 @@ function stepSelection(d) {
 }
 
 function refreshAll() {
+  refreshPageBtn(); $('#uiScreens')?.classList.toggle('app', !!levelList()[0].settings?.app); // apps have pages, not title / pause / game-over screens
   $('#sceneTab').replaceChildren(icon(uiMode ? 'hud' : is3D() ? 'cube' : 'grid'), uiMode ? 'UI' : viewMode === 'top' ? 'Top' : is3D() ? '3D' : '2D', icon('chevron'));
   $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
   const n = levelList().length;
@@ -6232,32 +6284,52 @@ function drawPhoneCutouts(ctx, W, H) {
   ctx.restore();
 }
 /** Pages (UI with "Show If": page = shop…): preview one at a time in the UI editor. */
-let uiPage = 'all';
 const showIfOf = (j) => (j?.behaviors || []).find((b) => b.type === 'uiShowIf' && (b.op || '=') === '=');
 function uiPages() {
   const out = new Map();
   for (const j of project.entities) { const b = showIfOf(j); if (b && j.ui) { const v = b.var || 'page'; if (!out.has(v)) out.set(v, new Set()); out.get(v).add(String(b.value ?? '')); } }
   return out;
 }
+/** The page being shown: the one picked, else the one the app opens on (its home page). */
+function curPage() {
+  const pages = uiPages(); if (!pages.size) return 'all';
+  if (uiPage === 'all') return 'all';
+  if (uiPage !== 'auto') { const [v0, val0] = uiPage.split('='); if (pages.get(v0)?.has(val0)) return uiPage; } // (a page that was deleted, or another game's: back to the home page)
+  const v = pages.has('page') ? 'page' : [...pages.keys()][0], vals = [...pages.get(v)];
+  const home = project.entities.find((j) => { const b = showIfOf(j); return b && j.ui && (b.var || 'page') === v && b.whenUnset; });
+  const start = project.vars?.[v];
+  const val = start != null && vals.includes(String(start)) ? String(start) : home ? String(showIfOf(home).value ?? '') : vals[0];
+  return `${v}=${val}`;
+}
+/** The page an object is on ('var=value'), or null if it's on every page. */
+function pageOf(id) {
+  const seen = new Set();
+  for (let j = ent(id); j && !seen.has(j.id); j = j.parent ? ent(j.parent) : null) { seen.add(j.id); const b = showIfOf(j); if (b && j.ui) return `${b.var || 'page'}=${b.value ?? ''}`; }
+  return null;
+}
 engine.uiFilter = (e) => {
-  if (uiPage === 'all' || !uiMode) return true;
-  const [v, val] = uiPage.split('='), seen = new Set();
+  const cur = curPage();
+  if (cur === 'all' || playing) return true;
+  const [v, val] = cur.split('='), seen = new Set();
   for (let j = ent(e.id); j && !seen.has(j.id); j = j.parent ? ent(j.parent) : null) { seen.add(j.id); const b = showIfOf(j); if (b && (b.var || 'page') === v && String(b.value ?? '') !== val) return false; }
   return true;
 };
 function pageMenu(anchor) {
   const pages = uiPages();
   if (!pages.size) { toast('No pages yet: add Project › UI › Navigation › Page or a Bottom Nav Bar'); return; }
-  popMenu(anchor, [{ cap: 'Preview page' }, { icon: uiPage === 'all' ? 'check' : 'layers', label: 'All pages', fn: () => setUIPage('all') },
-    ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: uiPage === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) })))]);
+  const cur = curPage();
+  popMenu(anchor, [{ cap: 'Show page' }, ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: cur === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) }))),
+    '-', { icon: cur === 'all' ? 'check' : 'layers', label: 'All pages at once', k: 'stacked', fn: () => setUIPage('all') }]);
 }
-function setUIPage(k) { uiPage = k; const b = $('.page-btn span'); if (b) b.textContent = k === 'all' ? 'Pages' : k.split('=')[1]; engine.render(); }
+function setUIPage(k) { uiPage = k; refreshPageBtn(); engine.render(); }
+function refreshPageBtn() { const b = $('.page-btn span'), k = curPage(); $('.page-btn')?.toggleAttribute('hidden', !uiPages().size); /* no pages: no button */ if (b) b.textContent = k === 'all' ? 'All pages' : k.split('=')[1]; }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));
   const orientBtn = h('button', { class: 'orient-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Game orientation' }, ...[['portrait', 'Portrait'], ['landscape', 'Landscape'], ['any', 'Either way']].map(([k, l]) => ({ icon: orientationOf() === k ? 'check' : 'phone', label: l, fn: () => setOrientation(k) }))]) });
   const pageBtn = h('button', { class: 'page-btn', onclick: (ev) => pageMenu(ev.currentTarget) }, icon('layers'), h('span', {}, 'Pages'));
-  const bar = h('div', { id: 'uiScreens', hidden: true }, orientBtn, phoneBtn, pageBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
+  const addBtn = h('button', { class: 'add-ui-btn', title: 'Add UI', onclick: () => openCreate() }, icon('plus'), h('span', {}, 'Add'));
+  const bar = h('div', { id: 'uiScreens', hidden: true }, addBtn, pageBtn, orientBtn, phoneBtn, SCREENS.map(([k, l]) => h('button', { class: k === uiScreen ? 'on' : '', 'data-s': k, onclick: () => { uiScreen = k; for (const b of bar.children) b.classList.toggle('on', b.dataset.s === k); } }, l)));
   $('#viewport').before(bar);
 }
 // title / pause / game-over UI shows in the UI editor (filtered by screen) or when selected
@@ -6270,11 +6342,10 @@ engine.uiView = uiView; // the engine draws UI with the editor's zoom while edit
 engine.screenFilter = (e) => e.id === selectedId || (uiMode && (uiScreen === 'all' || e.showWhen === uiScreen));
 engine.onBeforeUI = (ctx) => {
   if (!uiMode || playing) return;
-  const W = engine.width, H = engine.height, sf = engine.safe;
-  ctx.fillStyle = '#0d0e12'; ctx.fillRect(0, 0, W, H); // UI editor: the world steps away, only the screen is left
-  ctx.save(); ctx.translate(W / 2 + uiView.x, H / 2 + uiView.y); ctx.scale(uiView.z, uiView.z); ctx.translate(-W / 2, -H / 2);
-  ctx.fillStyle = '#16171d'; ctx.fillRect(0, 0, W, H);
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5 / uiView.z; ctx.strokeRect(0, 0, W, H); // the phone screen
+  const W = engine.width, H = engine.height, sf = engine.safe, V = engine.uiView || uiView;
+  ctx.fillStyle = '#0d0e12'; ctx.fillRect(-1e4, -1e4, 3e4, 3e4); // UI editor: the world steps away, only the screen is left
+  ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2);
+  ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.55)'; ctx.shadowBlur = 24; ctx.fillStyle = project.background && !String(project.background).startsWith('@') ? project.background : '#16171d'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(0, 0, W, H, 22); else ctx.rect(0, 0, W, H); ctx.fill(); ctx.restore(); // the phone screen
   if (sf.top || sf.bottom || sf.left || sf.right) { // shade what is outside the safe area
     ctx.fillStyle = 'rgba(255,90,90,0.10)';
     ctx.fillRect(0, 0, W, sf.top); ctx.fillRect(0, H - sf.bottom, W, sf.bottom); ctx.fillRect(0, sf.top, sf.left, H - sf.top - sf.bottom); ctx.fillRect(W - sf.right, sf.top, sf.right, H - sf.top - sf.bottom);
@@ -6285,20 +6356,20 @@ engine.onBeforeUI = (ctx) => {
   ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(120,170,255,0.6)';
   for (const a of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) { const p = anchorPoint(a, W, H, sf); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
-  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5 / uiView.z; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
+  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5 / V.z; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
   ctx.restore();
 };
 let uiGuide = null;
 /** UI drags snap to the screen centre and to the element's anchor point. */
 function snapUI(j) {
-  const live = engine.scene.byId(j.id), W = engine.width, H = engine.height, a = live ? uiOrigin(live, W, H, engine.safe) : anchorPoint(j.anchor || 'top-left', W, H, engine.safe), T = 10 / uiView.z;
+  const S = UIS(), live = engine.scene.byId(j.id), W = S.w, H = S.h, a = live ? uiOrigin(live, W, H, S.safe) : anchorPoint(j.anchor || 'top-left', W, H, S.safe), T = 10 / S.v.z;
   uiGuide = {};
   const sx = a.x + j.x, sy = a.y + j.y;
   if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;
   if (Math.abs(sy - H / 2) < T) { j.y = Math.round(H / 2 - a.y); uiGuide.y = H / 2; } else if (Math.abs(j.y) < T) { j.y = 0; uiGuide.y = a.y; } else if (snap) j.y = Math.round(j.y / 4) * 4;
   if (!live) return;
   // line up with the other elements in the same parent (centres and edges)
-  const W2 = engine.width, H2 = engine.height, flat = (q) => { const o = uiOrigin(q, W2, H2, engine.safe), b = boundsOf(q); return { x: o.x + b.x, y: o.y + b.y, hx: b.hx, hy: b.hy }; }; // (the same space as the centre snapping above)
+  const W2 = S.w, H2 = S.h, flat = (q) => { const o = uiOrigin(q, W2, H2, S.safe), b = boundsOf(q); return { x: o.x + b.x, y: o.y + b.y, hx: b.hx, hy: b.hy }; }; // (the same space as the centre snapping above)
   const me = boundsOf(live), cx = a.x + j.x + (me.x - (live.x || 0)), cy = a.y + j.y + (me.y - (live.y || 0)), K = 1;
   let bx = null, by = null;
   for (const q of engine.scene.entities) {

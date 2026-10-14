@@ -49,7 +49,14 @@ The view button above the Scene switches between:
 
 - **Scene:** the normal view.
 - **Top:** a 3D level seen from straight above with no perspective, like a map.
-- **UI:** only the screen and its UI. You get safe-area and centre guides, the 9 anchor points, and chips to preview each screen (Playing, Title, Paused, Game Over, Win). The Hierarchy lists only UI, and **Create** offers UI widgets.
+- **UI:** only the screen and its UI. The game's screen is shown at its real size (the design width × height, 400 × 700 by default), fitted into the space you have, so the layout matches the phone; pinch to zoom in. You get safe-area and centre guides, the 9 anchor points, and chips to preview each screen (Playing, Title, Paused, Game Over, Win). The Hierarchy lists only UI, and **Create** offers UI widgets.
+  - **+ Add** sits in the bar above the screen, so it never covers your own buttons.
+  - Apps show **one page at a time**: the page the app opens on, or the one picked in the page button. Selecting something on another page (from the Hierarchy) shows that page. *All pages at once* stacks them.
+  - The quick-action bar keeps to Inspect, Duplicate and Delete; small things are moved by their middle and resized by the handles at their edges.
+  - **Tap** picks the smallest thing under your finger (a button rather than the card or page behind it). **Drag** moves it straight away.
+  - Dragging a full-screen **page** pans the view instead of moving it (tap it to select it). **Pinch** zooms, or use − / + / fit; a pinch that starts on a button doesn't move the button.
+  - With a panel open (little room left), the screen fills the width and follows the selected element, so you see your changes to it; the floating bars step aside.
+  - Things **stretched** to the screen width (search bars, app bars) move only up and down, and pulling their left or right edge changes their **margin** from the screen edge.
 
 ## Create screen
 

@@ -1108,7 +1108,9 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     - *What it does* is a page name (sets `page`), `msg:name` (sends a message, shown with ›), or `toggle:var` (an on/off switch that keeps the menu open).
     - `# Title` starts a section and `-` draws a line.
     - **Footer items** sit at the bottom (e.g. Help).
-  - **7 styles:** classic (tinted row with a bar on its edge), rounded, floating, glass, rail (a slim icon column that opens to the full menu), fullscreen (big centred items) and minimal.
+  - **9 styles** (picked from pictures): classic (tinted row with a bar on its edge), rounded, floating, glass (frosted, the page blurred behind it), rail (a slim icon column that opens to the full menu), fullscreen (big centred items, with their switches), minimal, grouped (items in rounded cards, like iPhone Settings) and gradient.
+  - **Items as cards** in the Inspector: an icon, a name, and a page, a switch or a message; a badge and a line of small text under it; section titles and lines.
+  - **Selected row** (soft, filled, edge bar, text only), a background gradient, corner roundness, blur and shadow. The header can show a photo and send a message when tapped (a profile), and small print can sit at the bottom.
   - **Header:** a title and subtitle (with `{variables}`), a picture (icon or emoji), simple / banner / none, and a ✕ close button.
   - **Colours:** background, text, accent, banner and badge.
   - **Size:** width, row height, text and icon size, icons on or off, and the floating gap.

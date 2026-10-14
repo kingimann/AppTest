@@ -8,7 +8,7 @@ const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', '
 import { templates, templateInfo } from '../examples/templates.js';
 import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
-import { NAV_STYLE_THUMBS } from './navstyles.js';
+import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS } from './navstyles.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openSprite2D, newDrawing } from './sprite2d.js';
@@ -2481,6 +2481,11 @@ function control(target, path, spec) {
         } }, NAV_STYLE_THUMBS[v] ? h('img', { src: NAV_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l + (v === 'raised center' && n % 2 === 0 ? ' (odd tabs)' : '')))));
         label.textContent = 'Style'; break;
       }
+      if (/\.style$/.test(path) && getPath(target(), path.replace(/\.style$/, '.type')) === 'uiSideBar') { // Side Menu: pick a style by its picture
+        el = h('div', { class: 'nav-styles side-styles' }, opts.map(([v, l]) => h('button', { type: 'button', class: 'ns' + (v === val ? ' on' : ''), title: l, onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); buzz(4); renderInspector(); } },
+          SIDE_STYLE_THUMBS[v] ? h('img', { src: SIDE_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l))));
+        label.textContent = 'Style'; break;
+      }
       if (!spec.ease && !spec.dropdown && opts.length >= 2 && opts.length <= 4 && opts.reduce((n, [, l]) => n + String(l).length, 0) <= 24) { // Odin [EnumToggleButtons]: few short choices are buttons
         el = h('div', { class: 'etb', role: 'radiogroup' }, opts.map(([v, l]) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(v === val), class: v === val ? 'on' : '', 'data-v': v,
           onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) { b.classList.toggle('on', b === e.currentTarget); b.setAttribute('aria-checked', String(b === e.currentTarget)); } markMod(); buzz(4); } }, l)));
@@ -2537,6 +2542,7 @@ function control(target, path, spec) {
       break;
     }
     case 'code':
+      if (/\.(items|footer)$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.(items|footer)$/, '.type')) === 'uiSideBar') { el = sideItemEditor(get, set, path, getPath(target(), path.replace(/\.(items|footer)$/, ''))); label.textContent = /footer$/.test(path) ? 'Footer items' : 'Items'; break; } // pick icons, pages, switches
       if (/\.tabs$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.tabs$/, '.type')) === 'uiBottomNav') { el = navTabEditor(get, set, path, getPath(target(), path.replace(/\.tabs$/, ''))); label.textContent = 'Tabs'; break; } // pick pages and icons
       if (/\|/.test(text) && !rawTables.has(path)) { el = tableList(get, set, text, path); label.textContent = text.replace(/\s*\(.*$/, '') || text; break; } // the columns say the rest
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
@@ -6558,6 +6564,59 @@ function navTabEditor(get, set, path, b) {
   draw();
   return box;
 }
+/** The Side Menu's items as cards: pick an icon, type the name, choose what it does (a page, a switch, a message); sections and lines too. */
+function sideItemEditor(get, set, path, b) {
+  const box = h('div', { class: 'navtabs side-items' });
+  const v = b?.var || 'page';
+  const parse = () => String(get() ?? '').split('\n').filter((l) => l.trim()).map((l) => { const t = l.trim(); if (/^-+$/.test(t)) return { kind: 'line' }; if (t.startsWith('#')) return { kind: 'section', label: t.replace(/^#+\s*/, '') }; return { kind: 'item', c: t.split('|').map((x) => x.trim()) }; });
+  const text = (rows) => rows.map((r) => (r.kind === 'line' ? '-' : r.kind === 'section' ? '# ' + r.label : (() => { const c = [...r.c].map((x) => x ?? ''); while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); })())).join('\n');
+  const draw = () => {
+    const rows = parse(), save = (r) => { set(text(r)); if (box.isConnected) draw(); else renderInspector(); };
+    const pages = [...(uiPages().get(v) || [])];
+    const actLabel = (a) => (!a ? '(its name)' : a.startsWith('msg:') ? `sends “${a.slice(4)}”` : a.startsWith('toggle:') ? `switch: ${a.slice(7)}` : '→ ' + a + (pages.includes(a) ? '' : ' (no page yet)'));
+    const askAct = (r, kind) => {
+      if (kind === 'toggle') { const n = prompt('Variable the switch turns on and off (e.g. music, sound, darkMode)', (r.c[2] || '').startsWith('toggle:') ? r.c[2].slice(7) : '')?.trim(); if (n) { r.c[2] = 'toggle:' + n; save(rows); } else draw(); }
+      else if (kind === 'msg') { const n = prompt('Message it sends (e.g. help, logout, open shop)', (r.c[2] || '').startsWith('msg:') ? r.c[2].slice(4) : '')?.trim(); if (n) { r.c[2] = 'msg:' + n; save(rows); } else draw(); }
+      else if (kind === 'new') { const nv = newPage(null, { name: prompt('Name of the new page', r.c[0] || '') || '', tab: false, stay: true }); if (nv) { r.c[2] = nv; save(rows); } else draw(); }
+    };
+    const more = (i, extra) => [...extra,
+      i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+      i < rows.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { rows.splice(i + 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+      { icon: 'trash', label: 'Remove', danger: true, fn: () => { rows.splice(i, 1); save(rows); } }].filter(Boolean);
+    box.replaceChildren(
+      ...rows.map((r, i) => {
+        if (r.kind === 'line') return h('div', { class: 'nt-row si-line' }, h('span', { class: 'si-rule' }), h('small', {}, 'line'), h('button', { type: 'button', class: 'tl-m', title: 'Line', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
+        if (r.kind === 'section') return h('div', { class: 'nt-row si-sec' }, h('span', { class: 'si-hash' }, '#'), h('input', { type: 'text', value: r.label, placeholder: 'Section title', 'aria-label': 'Section title', oninput: (e) => { r.label = e.target.value; set(text(rows)); } }), h('button', { type: 'button', class: 'tl-m', title: 'Section', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
+        const c = r.c, a = c[2] || '';
+        return h('div', { class: 'nt-row' },
+          h('button', { type: 'button', class: 'nt-icbtn', title: 'Pick an icon', onclick: () => pickNavIcon(c[1], (ic) => { c[1] = ic; save(rows); }) }, navIconImg(c[1] || '')),
+          h('div', { class: 'nt-mid' },
+            h('input', { type: 'text', value: c[0] ?? '', placeholder: 'Label', 'aria-label': 'Item label', oninput: (e) => { c[0] = e.target.value; set(text(rows)); } }),
+            h('select', { 'aria-label': 'What it does', onchange: (e) => { const x = e.target.value; if (x.startsWith('\u0000')) { askAct(r, x.slice(1)); return; } c[2] = x; save(rows); } },
+              [...new Set([...pages, a].filter(Boolean))].map((pg) => h('option', { value: pg, selected: pg === a }, actLabel(pg))),
+              !a ? h('option', { value: '', selected: true }, '(choose)') : null,
+              h('option', { value: '\u0000toggle' }, '⇄ A switch for a variable…'), h('option', { value: '\u0000msg' }, '✉ Send a message…'), h('option', { value: '\u0000new' }, '+ New page…')),
+            c[4] ? h('small', { class: 'si-sub' }, c[4]) : null),
+          h('button', { type: 'button', class: 'tl-m', title: 'Item', onclick: (e) => popMenu(e.currentTarget, more(i, [
+            a && !a.includes(':') && pages.includes(a) && { icon: 'eye', label: `Show the “${a}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${a}`); } },
+            { icon: 'bell', label: c[3] ? `Badge: {${c[3]}}…` : 'Badge from a variable…', k: 'a count beside it', fn: () => { const n = prompt('Variable for the badge count (blank = none)', c[3] || ''); if (n !== null) { while (c.length < 3) c.push(''); c[3] = n.trim(); save(rows); } } },
+            { icon: 'text', label: c[4] ? `Line under it: ${c[4]}…` : 'Line under it…', k: 'small text, {variables} work', fn: () => { const n = prompt('Small text under the name (blank = none)', c[4] || ''); if (n !== null) { while (c.length < 4) c.push(''); c[4] = n.trim(); save(rows); } } },
+          ].filter(Boolean))) }, icon('more')));
+      }),
+      h('div', { class: 'tl-foot' },
+        h('button', { type: 'button', class: 'btn primary', onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Add' },
+          ...pages.filter((pg) => !rows.some((r) => r.kind === 'item' && r.c[2] === pg)).map((pg) => ({ icon: 'layers', label: pg, k: 'a page you have', fn: () => save([...rows, { kind: 'item', c: [pg.charAt(0).toUpperCase() + pg.slice(1).replace(/-/g, ' '), guessIcon(pg), pg] }]) })),
+          { icon: 'plus', label: 'A new page…', k: 'makes the page too', fn: () => { const name = prompt('Name of the new page (e.g. Settings, Shop)')?.trim(); if (!name) return; const nv = newPage(null, { name, tab: false, stay: true }); if (nv) save([...rows, { kind: 'item', c: [name, guessIcon(name), nv] }]); } },
+          { icon: 'check', label: 'A switch…', k: 'music, sound, dark mode', fn: () => { const n = prompt('Name of the switch (e.g. Music)')?.trim(); if (!n) return; save([...rows, { kind: 'item', c: [n, guessIcon(n) === 'star' ? 'check' : guessIcon(n), 'toggle:' + n.toLowerCase().replace(/\s+(\w)/g, (_, ch) => ch.toUpperCase()).replace(/[^\w]/g, '')] }]); } },
+          { icon: 'bolt', label: 'A message…', k: 'help, log out, share', fn: () => { const n = prompt('Name of the item (e.g. Help)')?.trim(); if (!n) return; save([...rows, { kind: 'item', c: [n, guessIcon(n), 'msg:' + n.toLowerCase()] }]); } },
+          '-', { icon: 'text', label: 'A section title', fn: () => save([...rows, { kind: 'section', label: 'Section' }]) },
+          { icon: 'minus', label: 'A line', fn: () => save([...rows, { kind: 'line' }]) }]) }, icon('plus'), 'Add'),
+        h('span', { class: 'tl-n' }, `${rows.filter((r) => r.kind === 'item').length} item${rows.filter((r) => r.kind === 'item').length === 1 ? '' : 's'}`),
+        h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')));
+  };
+  draw();
+  return box;
+}
 /** Rename a page: its Show If, and the buttons, tabs, lists and titles that lead to it. */
 function renamePage(pg) {
   const b0 = showIfOf(pg), v = b0.var || 'page', old = String(b0.value ?? '');
@@ -6573,8 +6632,10 @@ function renamePage(pg) {
     if (b.type === 'uiDataList' && b.openPage === old) { b.openPage = val; n++; }
     if (b.type === 'uiForm' && b.page === old) { b.page = val; n++; }
     if (b.type === 'uiAppBar' && b.titles) b.titles = swapLines(b.titles, new RegExp(`^\\s*${old}\\s*=`), (l) => l.replace(old, val));
-    if ((b.type === 'uiBottomNav' || b.type === 'uiSideBar') && b.tabs) b.tabs = swapLines(b.tabs, new RegExp(`\\|\\s*${old}\\s*$`), (l) => l.replace(new RegExp(`${old}\\s*$`), val));
-    if ((b.type === 'uiBottomNav' || b.type === 'uiSideBar') && b.items) b.items = swapLines(b.items, new RegExp(`\\|\\s*${old}\\s*$`), (l) => l.replace(new RegExp(`${old}\\s*$`), val));
+    const third = (txt) => String(txt).split('\n').map((l) => { const c = l.split('|'); if (c.length >= 3 && c[2].trim() === old) { c[2] = c[2].replace(old, val); n++; return c.join('|'); } return l; }).join('\n'); // the page is the third column (a badge or a line may follow)
+    if ((b.type === 'uiBottomNav' || b.type === 'uiSideBar') && b.tabs) b.tabs = third(b.tabs);
+    if (b.type === 'uiSideBar' && b.items) b.items = third(b.items);
+    if (b.type === 'uiSideBar' && b.footer) b.footer = third(b.footer);
   }
   setUIPage(`${v}=${val}`); changed({ structure: true }); pushHistory();
   toast(`Renamed to “${val}”${n ? ` · ${n} link${n === 1 ? '' : 's'} updated` : ''}`);

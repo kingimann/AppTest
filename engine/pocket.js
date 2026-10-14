@@ -6899,9 +6899,9 @@ class BarHider {
 
 /** Frosted glass: what's already drawn behind a box (the game and the UI under it), blurred into it. Call with a clip set. */
 let blurTmp = null;
-function blurBehind(ctx, e, s, lx, ly, lw, lh, blur) {
+function blurBehind(ctx, e, s, lx, ly, lw, lh, blur, screen = false) { // (screen: the rect is in screen pixels, and so is ctx)
   const E = s.engine; if (!E.canvas || !E.uiCanvas) return;
-  const r = uiRect(s, e), K = uiK(E.safe) || 1, m = blur * 2;
+  const r = screen ? { x: e.x, y: e.y } : uiRect(s, e), K = screen ? 1 : uiK(E.safe) || 1, m = blur * 2;
   const sx = Math.max(0, r.x + (lx - e.x) * K - m), sy = Math.max(0, r.y + (ly - e.y) * K - m), sw = Math.min(E.width - sx, lw * K + m * 2), sh = Math.min(E.height - sy, lh * K + m * 2);
   if (!(sw > 1 && sh > 1)) return;
   const d = E.uiDpr || 1, gd = E.dpr || 1; blurTmp ||= document.createElement('canvas');
@@ -7197,26 +7197,33 @@ registerBehavior('uiBottomNav', {
 });
 
 
-const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal'];
+const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal', 'grouped', 'gradient'];
 registerBehavior('uiSideBar', {
-  label: 'Side Menu', description: 'A complete side menu: header, items with icons and badges, sections, switches and a footer, in 7 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
+  label: 'Side Menu', description: 'A complete side menu: header, items with icons, badges and a line under them, sections, switches and a footer, in 9 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
   params: [
-    { key: 'items', label: 'Items (Label | icon | page or msg:name or toggle:var | badge variable; "# Title" = section, "-" = line)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings' },
+    { key: 'items', label: 'Items (Label | icon | page or msg:name or toggle:var | badge variable | line under it; "# Title" = section, "-" = line)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings' },
     { key: 'footer', label: 'Footer items (same format)', type: 'code', default: 'Help | info | msg:help' },
     { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'side', label: 'Side', type: 'select', options: ['left', 'right'], default: 'left' },
     { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
-    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
+    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { grouped: 'Items in rounded cards, a section each, like iPhone Settings.', gradient: 'A colourful gradient panel with white text.', classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
     { key: 'title', label: 'Title', type: 'text', default: 'My Game', group: 'Header' },
     { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '', group: 'Header' },
     { key: 'avatar', label: 'Picture (icon or emoji, blank = none)', type: 'text', default: '🙂', group: 'Header' },
     { key: 'header', label: 'Header look', type: 'select', options: ['simple', 'banner', 'none'], default: 'simple', group: 'Header' },
     { key: 'closeButton', label: 'Close button (✕)', type: 'bool', default: true, group: 'Header' },
+    { key: 'headerMessage', label: 'Tapping the header sends', type: 'text', default: '', suggest: 'messages', group: 'Header', infoText: 'e.g. open profile. The menu closes too.' },
+    { key: 'footerText', label: 'Small print at the bottom (variables in braces)', type: 'text', default: '', group: 'Header', infoText: 'e.g. Version 1.2 or Signed in as {name}.' },
     { key: 'bg', label: 'Background', type: 'color', default: '#151826', group: 'Colours' },
     { key: 'text', label: 'Text', type: 'color', default: '#e8eaf2', group: 'Colours' },
     { key: 'accent', label: 'Selected / accent', type: 'color', default: '#4fa3ff', group: 'Colours' },
     { key: 'headerColor', label: 'Banner colour (blank = accent)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'bg2', label: 'Gradient to', type: 'color', default: '', optional: true, group: 'Colours', showIf: { style: ['gradient', 'classic', 'rounded', 'floating', 'fullscreen', 'minimal', 'grouped'] }, info: 'The background fades into this colour, top to bottom. Gradient style: blank = a darker accent.' },
+    { key: 'highlight', label: 'Selected row', type: 'select', options: ['soft', 'filled', 'edge bar', 'text only'], default: 'soft', group: 'Colours', info: { soft: 'A light tint of the accent.', filled: 'Solid accent with white text.', 'edge bar': 'A tint and a bar on the edge.', 'text only': 'Just the accent colour on its name.' } },
+    { key: 'blur', label: 'Frosted glass blur', type: 'number', default: 14, range: [0, 30], step: 1, group: 'Colours', showIf: { style: ['glass'] } },
+    { key: 'corner', label: 'Corner roundness', type: 'number', default: 22, range: [0, 40], step: 1, group: 'Size', showIf: { style: ['floating', 'glass', 'grouped', 'gradient'] } },
+    { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size' },
     { key: 'width', label: 'Width', type: 'number', default: 290, range: [180, 420], step: 10, group: 'Size' },
     { key: 'itemHeight', label: 'Row height', type: 'number', default: 50, range: [36, 80], step: 2, group: 'Size' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 28], step: 1, group: 'Size' },
@@ -7245,11 +7252,11 @@ registerBehavior('uiSideBar', {
     const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
       if (/^-+$/.test(l)) return { kind: 'line' };
       if (l.startsWith('#')) return { kind: 'section', label: l.replace(/^#+\s*/, '') };
-      const [label = '', icon = '', act = '', badge = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
-      return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge } : { kind: 'page', label, icon, page: a, badge };
+      const [label = '', icon = '', act = '', badge = '', sub = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
+      return a.startsWith('msg:') ? { kind: 'msg', label, icon, msg: a.slice(4).trim(), badge, sub } : a.startsWith('toggle:') ? { kind: 'toggle', label, icon, v: a.slice(7).trim(), badge, sub } : { kind: 'page', label, icon, page: a, badge, sub };
     });
     let I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
-    const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => st() === 'floating' || st() === 'glass';
+    const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     const inst = {
       uiAlways: true,
@@ -7322,6 +7329,8 @@ registerBehavior('uiSideBar', {
         if (!visible || (drag && drag.moved)) return;
         for (const tp of inp.taps) {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
+          const hd = rows.find((r) => r.head && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          if (hd && p.headerMessage) { if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); s.send(p.headerMessage); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; }
           const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
           if (!r) continue;
           const it = r.item; press.set(it, 1);
@@ -7346,7 +7355,7 @@ registerBehavior('uiSideBar', {
           drawNavIcon(ctx, 'menu', Bt.x, Bt.y, Bt.r * 1.0, p.buttonColor || '#ffffff'); ctx.restore();
         }
         if (tt <= 0.001 && !rail()) return;
-        const txt = p.text || '#e8eaf2', acc = p.accent || '#4fa3ff', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
+        const acc = p.accent || '#4fa3ff', txt = st() === 'gradient' ? '#ffffff' : p.text || '#e8eaf2', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
         // dim behind
         if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, R.top || 0, W, H - (R.top || 0) - (R.bot || 0)); ctx.restore(); }
         // panel placement for this frame
@@ -7358,11 +7367,14 @@ registerBehavior('uiSideBar', {
         ctx.save(); ctx.globalAlpha *= alpha;
         if (zoom !== 1) { const ox = left ? R.x : R.x + R.w, oy = R.y + R.h / 2; ctx.translate(ox, oy); ctx.scale(zoom, zoom); ctx.translate(-ox, -oy); }
         const rr = (X, Y, Wd, Hd, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(X, Y, Wd, Hd, Math.max(0, Math.min(r, Hd / 2, Wd / 2))); else ctx.rect(X, Y, Wd, Hd); };
-        const rad = floaty() ? 22 : 0;
+        const rad = floaty() ? Math.max(0, +p.corner >= 0 && p.corner !== '' ? +p.corner : 22) : 0;
         {
-          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = left ? 4 : -4;
-          ctx.fillStyle = sty === 'glass' ? 'rgba(255,255,255,0.1)' : full() ? withAlpha(bg, 0.97) : bg;
-          rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();
+          if (sty === 'glass' && +(p.blur ?? 14) > 0 && !editing) { ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip(); blurBehind(ctx, e, s, x, R.y, w, R.h, +(p.blur ?? 14), true); ctx.restore(); } // frosted: what's behind, blurred
+          ctx.save(); if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = left ? 4 : -4; }
+          let paint = sty === 'glass' ? withAlpha(bg, 0.62) : full() ? withAlpha(bg, 0.97) : bg;
+          const g2 = sty === 'gradient' ? (p.bg2 || (/^#[0-9a-f]{6}$/i.test(acc) ? mixHexE(acc, '#000000', 0.55) : bg)) : p.bg2;
+          if (g2 && sty !== 'glass') { const g = ctx.createLinearGradient(x, R.y, x + w * 0.35, R.y + R.h); g.addColorStop(0, sty === 'gradient' ? acc : bg); g.addColorStop(1, g2); paint = g; }
+          ctx.fillStyle = paint; rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();
           if (sty === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; rr(x, R.y, w, R.h, rad); ctx.stroke(); }
         }
         ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
@@ -7374,7 +7386,10 @@ registerBehavior('uiSideBar', {
           const banner = p.header === 'banner', hh = full() ? 120 : banner ? 132 : 96;
           if (banner) { const g = ctx.createLinearGradient(x, R.y, x + w, R.y + hh + safeT); const hc = p.headerColor || acc; g.addColorStop(0, hc); g.addColorStop(1, withAlpha(hc, 0.55)); ctx.fillStyle = g; ctx.fillRect(x, R.y, w, hh + safeT + 10); }
           const cx = full() ? x + w / 2 : x + pad + 26, cy = y + (full() ? 30 : banner ? 40 : 30);
-          if (p.avatar) { ctx.fillStyle = banner ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, 28, banner ? '#ffffff' : acc); }
+          const light = banner || sty === 'gradient';
+          if (p.avatar && /^(data:|https?:)/.test(p.avatar)) { const im = loadImage(p.avatar); ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fillStyle = withAlpha(acc, 0.22); ctx.fill(); ctx.clip(); if (im.complete && im.naturalWidth) { const k2 = 52 / Math.min(im.naturalWidth, im.naturalHeight); ctx.drawImage(im, cx - im.naturalWidth * k2 / 2, cy - im.naturalHeight * k2 / 2, im.naturalWidth * k2, im.naturalHeight * k2); } ctx.restore(); ctx.strokeStyle = light ? 'rgba(255,255,255,0.6)' : withAlpha(acc, 0.5); ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.stroke(); } // a photo
+          else if (p.avatar) { ctx.fillStyle = light ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); ctx.beginPath(); ctx.arc(cx, cy, 26, 0, Math.PI * 2); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, 28, light ? '#ffffff' : acc); }
+          if (p.headerMessage) { rows.push({ head: true, x, y: R.y, w, h: hh + safeT + 6 }); if (!full()) { ctx.strokeStyle = withAlpha(light ? '#ffffff' : txt, 0.4); ctx.lineWidth = 2; const ax = x + w - pad - 14, ay = cy + (p.closeButton !== false ? 26 : 0); ctx.beginPath(); ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); ctx.stroke(); } } // the header opens something (a profile)
           ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle';
           const tx = full() ? x + w / 2 : p.avatar ? cx + 38 : x + pad, ty = full() ? cy + 50 : cy;
           ctx.fillStyle = banner ? '#ffffff' : txt; ctx.font = `800 ${full() ? 26 : 19}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle ? 10 : 0));
@@ -7383,25 +7398,44 @@ registerBehavior('uiSideBar', {
         } else y += compact ? 8 : 4;
         if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = full() ? x + w - 34 : x + w - 28, by = R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = p.header === 'banner' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
         // items
+        const rowH = (it) => (full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih) + (it.sub && !full() && !compact ? 12 : 0);
+        const hl = sty === 'classic' ? 'edge bar' : p.highlight || 'soft';
         const drawList = (list, startY, dirUp) => {
-          let yy = startY, idx = 0;
-          for (const it of list) {
+          let yy = startY, idx = 0, card = null;
+          list.forEach((it, li) => {
+            if (grouped() && !compact && it.kind !== 'line' && it.kind !== 'section' && !card) { // iPhone Settings: a card per run of items
+              let hh = 0; for (let j = li; j < list.length && list[j].kind !== 'line' && list[j].kind !== 'section'; j++) hh += rowH(list[j]);
+              card = { y: yy, h: hh }; ctx.save(); ctx.fillStyle = withAlpha(txt, 0.07); rr(x + 12, yy, w - 24, hh, 14); ctx.fill(); ctx.restore();
+            }
+            if (it.kind === 'line' || it.kind === 'section') card = null;
+            drawItem(it, li);
+          });
+          function drawItem(it, li) {
             const delay = p.stagger !== false && !editing && want ? idx * 0.035 : 0, ip = rail() || !want || drag ? (rail() ? 1 : tt) : clamp((age - delay) / Math.max(0.05, (+p.duration || 0.28) * 0.6), 0, 1), slide = (1 - ease(ip)) * 30 * (left ? -1 : 1);
-            if (it.kind === 'line') { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; continue; }
-            if (it.kind === 'section') { if (!compact) { ctx.save(); ctx.globalAlpha *= 0.55 * ease(ip); ctx.fillStyle = txt; ctx.font = `800 11.5px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(it.label.toUpperCase(), full() ? x + w / 2 : x + pad + 8 + slide, yy + 16); ctx.restore(); } yy += compact ? 6 : 32; continue; }
+            if (it.kind === 'line') { if (!compact && !grouped()) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; return; }
+            if (it.kind === 'section') { if (!compact) { ctx.save(); ctx.globalAlpha *= 0.55 * ease(ip); ctx.fillStyle = txt; ctx.font = `800 11.5px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(it.label.toUpperCase(), full() ? x + w / 2 : x + pad + 8 + slide, yy + 16); ctx.restore(); } yy += compact ? 6 : 32; return; }
             idx++;
-            const hgt = full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih, on = it.kind === 'page' && sameVal(s.vars[p.var], it.page);
-            const rx = x + (sty === 'classic' || compact ? 0 : 8), rw = w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
+            const hgt = rowH(it), on = it.kind === 'page' && sameVal(s.vars[p.var], it.page), inCard = grouped() && !compact;
+            const rx = inCard ? x + 12 : x + (sty === 'classic' || compact ? 0 : 8), rw = inCard ? w - 24 : w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
             ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
-            if (on || pr) { ctx.fillStyle = withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr); if (sty === 'classic') { ctx.fillRect(rx, yy, rw, hgt); if (on) { ctx.fillStyle = acc; ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); } } else { rr(rx + (compact ? 12 : 0), yy + 3, rw - (compact ? 24 : 0), hgt - 6, full() ? hgt / 2 : 14); ctx.fill(); } }
-            const col = on ? acc : txt, cy = yy + hgt / 2;
+            if (inCard && card && yy > card.y + 1) { ctx.fillStyle = withAlpha(txt, 0.08); ctx.fillRect(rx + (icons && it.icon ? 50 : 16), yy, rw - (icons && it.icon ? 50 : 16), 1); } // a hairline between rows in a card
+            if ((on && hl !== 'text only') || pr) {
+              ctx.fillStyle = on && hl === 'filled' ? acc : withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr);
+              if (sty === 'classic' || (on && hl === 'edge bar' && !compact && !full())) { if (sty === 'classic') ctx.fillRect(rx, yy, rw, hgt); else { rr(rx, yy + 3, rw, hgt - 6, 10); ctx.fill(); } if (on) { ctx.fillStyle = acc; if (sty === 'classic') ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); else { rr(left ? rx : rx + rw - 4, yy + 8, 4, hgt - 16, 2); ctx.fill(); } } }
+              else { const inset = inCard ? 4 : 0; rr(rx + (compact ? 12 : 0) + inset, yy + 3, rw - (compact ? 24 : 0) - inset * 2, hgt - 6, full() ? hgt / 2 : inCard ? 10 : 14); ctx.fill(); }
+            }
+            const col = on ? (hl === 'filled' ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc) : txt, cy = yy + hgt / 2 - (it.sub && !full() && !compact ? 6 : 0);
             if (compact) drawNavIcon(ctx, it.icon || it.label.slice(0, 1), x + w / 2, cy, isz, col);
-            else if (full()) { ctx.font = `800 ${tsz + 8}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(it.label, x + w / 2, cy); }
+            else if (full()) {
+              ctx.font = `800 ${tsz + 8}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(it.label, x + w / 2, cy);
+              if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sw = 40, sh = 24, sx = x + w / 2 + ctx.measureText(it.label).width / 2 + 16; ctx.fillStyle = v ? acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); } // its switch, beside the name
+            }
             else {
               const ix = x + pad + 14 + (sty === 'classic' ? 4 : 0);
               if (icons && it.icon) drawNavIcon(ctx, it.icon, ix, cy, isz, col);
               ctx.font = `${on ? 800 : 650} ${sty === 'minimal' ? tsz + 6 : tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
               ctx.fillText(it.label, icons && it.icon ? ix + isz / 2 + 14 : x + pad + 8, cy);
+              if (it.sub) { ctx.save(); ctx.globalAlpha *= 0.62; ctx.font = `600 ${Math.max(10, tsz - 3)}px ${THEME.font}`; ctx.fillStyle = on && hl === 'filled' ? '#ffffff' : txt; ctx.fillText(fillTemplate(it.sub, s.vars), icons && it.icon ? ix + isz / 2 + 14 : x + pad + 8, cy + tsz * 0.5 + 8); ctx.restore(); } // the line under it
               if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sx = x + w - pad - 46, sw = 40, sh = 24; ctx.fillStyle = v ? acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); }
               else if (it.kind === 'msg' && sty !== 'minimal') { ctx.strokeStyle = withAlpha(txt, 0.35); ctx.lineWidth = 2; const ax = x + w - pad - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); }
             }
@@ -7420,15 +7454,16 @@ registerBehavior('uiSideBar', {
         };
         if (full()) { const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih * 1.25), 0); y = Math.max(y, R.y + (R.h - total) / 2); }
         // the list scrolls when it doesn't fit above the footer, so items never run under it
-        const fh = F.length ? F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : ih), 0) : 0, fy = R.y + R.h - safeB - fh - 10, listEnd = F.length ? fy - 8 : R.y + R.h - safeB - 6;
-        const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? (compact ? 6 : 32) : full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih), 0);
+        const small = p.footerText && !compact ? 26 : 0, fh = F.length ? F.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? 32 : rowH(it)), 0) : 0, fy = R.y + R.h - safeB - fh - 10 - small, listEnd = F.length ? fy - 8 : R.y + R.h - safeB - 6;
+        const total = I.reduce((n, it) => n + (it.kind === 'line' ? 17 : it.kind === 'section' ? (compact ? 6 : 32) : rowH(it)), 0);
         overflow = editing ? 0 : Math.max(0, total - (listEnd - y));
         ctx.save(); ctx.beginPath(); ctx.rect(x - 40, y, w + 80, Math.max(0, listEnd - y)); ctx.clip();
         const n0 = rows.length; drawList(I, y - (overflow ? scroll : 0));
         for (let i = n0; i < rows.length; i++) rows[i].clipped = [y, listEnd];
         ctx.restore();
         if (overflow > 0) { const vh = listEnd - y, bh = Math.max(24, vh * vh / (vh + overflow)), by = y + (vh - bh) * (scroll / overflow); ctx.fillStyle = withAlpha(txt, 0.25); rr(left ? x + w - 5 : x + 2, by, 3, bh, 2); ctx.fill(); }
-        if (F.length) { if (!compact) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        if (F.length) { if (!compact && !grouped()) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        if (small) { ctx.save(); ctx.globalAlpha *= 0.5; ctx.fillStyle = txt; ctx.font = `600 12px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(fillTemplate(String(p.footerText), s.vars), full() ? x + w / 2 : x + pad + 8, R.y + R.h - safeB - 18); ctx.restore(); } // small print
         ctx.restore(); ctx.restore();
       },
     };

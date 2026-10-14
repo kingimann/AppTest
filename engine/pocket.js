@@ -1446,6 +1446,8 @@ export class Physics {
 
   step(scene, dt) {
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
+    const minHit = Math.abs(g || 0) * 0.02; // slower than this is just settling, not a landing
+    const land = (b, speed) => { if (!b.wasGrounded && speed > minHit) b.landed = Math.max(b.landed || 0, speed); }; // remembered for the whole frame, so a quick bounce still counts
     const gx = scene.gravityX || 0, gz = scene.gravityZ || 0;
     if (scene.wantedTags) {
       for (const e of scene.entities) {
@@ -1470,7 +1472,7 @@ export class Physics {
       if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
       b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
+      b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
     }
     // dynamic bodies collide with voxel worlds block by block
     const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
@@ -1492,7 +1494,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
-            if (gd && m.ny * gd > 0.5) b.grounded = true; else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -1527,7 +1529,7 @@ export class Physics {
             e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
             const vn = b.vel.x * m.nx + b.vel.y * m.ny;
             if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
-            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
           }
         }
       }
@@ -1568,7 +1570,7 @@ export class Physics {
           const vn = ba.vel.x * m.nx + ba.vel.y * m.ny + ba.vel.z * m.nz;
           if (vn > 0) { const k = vn * (1 + Math.max(ba.bounce, bb.bounce * 0.5)); ba.vel.x -= m.nx * k; ba.vel.y -= m.ny * k; ba.vel.z -= m.nz * k; }
           if (gd && m.ny * gd > 0.5) {
-            ba.grounded = true; ba.groundedOn = b;
+            ba.grounded = true; ba.groundedOn = b; land(ba, vn);
             if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
           }
@@ -1579,7 +1581,7 @@ export class Physics {
           const vn = bb.vel.x * m.nx + bb.vel.y * m.ny + bb.vel.z * m.nz;
           if (vn < 0) { const k = vn * (1 + Math.max(bb.bounce, ba.bounce * 0.5)); bb.vel.x -= m.nx * k; bb.vel.y -= m.ny * k; bb.vel.z -= m.nz * k; }
           if (gd && m.ny * gd < -0.5) {
-            bb.grounded = true; bb.groundedOn = a;
+            bb.grounded = true; bb.groundedOn = a; land(bb, -vn);
             if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
           }
@@ -4819,7 +4821,7 @@ registerBehavior('cameraImpulse', {
       },
       update(e, dt, s) {
         if (p.when === 'every few seconds') { t += dt; if (t >= Math.max(0.1, +p.every || 3)) { t = 0; fire(e, s); } }
-        if (p.when === 'it lands' && e.body) { const g = !!e.body.grounded; if (g && !wasGround) { const sp = Math.abs(e.body.lastImpact ?? e.body.vel?.y ?? 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); } wasGround = g; }
+        if (p.when === 'it lands' && e.body) { const g = !!e.body.grounded; if (e.body.landed > 0 || (g && !wasGround)) { const sp = e.body.landed || Math.abs(e.body.vel?.y ?? 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); } wasGround = g; }
       },
       collide(e, other, s) { if (p.when !== 'it hits something') return; const v = e.body?.vel || { x: 0, y: 0 }, sp = Math.hypot(v.x || 0, v.y || 0, v.z || 0); if (sp >= (+p.minSpeed || 0)) fire(e, s); },
       destroy(e, s) { if (p.when === 'it is destroyed') fire(e, s); },
@@ -11373,7 +11375,7 @@ class LogicWatcher {
       case 'always': return {};
       case 'delay': { if (this.edges.get(key) || this.age < (+p.seconds || 0)) return null; this.edges.set(key, true); return {}; }
       case 'random': return Math.random() < this.dt / Math.max(0.1, +p.seconds || 3) ? {} : null;
-      case 'landed': { const g = !!this.e.body?.grounded, was = this.edges.get(key); this.edges.set(key, g); return g && was === false ? {} : null; }
+      case 'landed': { const b = this.e.body, g = !!b?.grounded, was = this.edges.get(key); this.edges.set(key, g); return b?.landed > 0 || (g && was === false) ? { value: Math.round(b?.landed || 0) } : null; }
       case 'near': case 'sees': {
         const t = nearest(this.s, this.e, p.tag), now = !!t && (x.type === 'near' ? Math.hypot(t.x - this.e.x, t.y - this.e.y, (t.z || 0) - (this.e.z || 0)) < (+p.distance || 120) : this.s.canSee(this.e, t));
         const was = this.edges.get(key); this.edges.set(key, now); return now && !was ? { other: t } : null;
@@ -12629,7 +12631,12 @@ registerBehavior('graph', {
           if (has('onDoubleTap') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { if (s.time - lastTapT < 0.35) { lastTapT = -9; fire('onDoubleTap', e, s); } else lastTapT = s.time; }
         }
         if (has('triggerStay', 'collisionStay')) for (const [o, sensor] of contactsOf(e, s)) fire(sensor ? 'triggerStay' : 'collisionStay', e, s, o, (n) => tagOk(o, param(n, 'tag')), dt);
-        if (e.body && has('landed', 'leftGround')) { const gr = !!e.body.grounded; if (wasGround !== null && gr !== wasGround) fire(gr ? 'landed' : 'leftGround', e, s); wasGround = gr; }
+        if (e.body && has('landed', 'leftGround')) {
+          const gr = !!e.body.grounded, hit = e.body.landed > 0;
+          if (hit || (wasGround === false && gr)) fire('landed', e, s, null, null, null, { eventValue: Math.round(e.body.landed || 0) }); // a quick bounce lands and leaves within one frame
+          else if (wasGround && !gr) fire('leftGround', e, s);
+          wasGround = gr;
+        }
         if (has('onDash')) { const d = !!e.move?.dashing; if (d && !wasDash) fire('onDash', e, s); wasDash = d; }
         if (has('screenEnter', 'screenExit')) { const on = onScreen(s, e); if (wasOn !== null && on !== wasOn) fire(on ? 'screenEnter' : 'screenExit', e, s); wasOn = on; }
         for (const n of g.nodes) if (n.type === 'objectNear') {
@@ -13597,6 +13604,7 @@ export class Engine {
       if (s.state === 'play') { s.turnSide = 'player'; s.addVar('turn', 1); s.setVar('turnText', s.settings.playerTurnText || 'Your turn'); s.emit('turn'); }
     }
     const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
+    for (const e of s.entities) if (e.body) e.body.landed = 0; // landings this frame (any substep)
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();

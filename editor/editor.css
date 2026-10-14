@@ -1587,3 +1587,70 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .tokval > .csw:last-child { width: 34px; height: 34px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); }
 .tok-prev { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
 .tok-prev .tp { border-radius: 12px; padding: 10px; font-size: 13px; border: 1px solid var(--line); }
+
+/* Game Settings › Motion: little looping previews of the page transitions (tap one to use it everywhere) */
+.anim-demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 6px 0 10px; }
+.anim-demo .ad { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px 6px; border: 1px solid var(--line, #333); border-radius: 12px; background: transparent; color: inherit; cursor: pointer; }
+.anim-demo .ad.on { border-color: var(--accent, #3a8dff); background: color-mix(in srgb, var(--accent, #3a8dff) 14%, transparent); }
+.anim-demo .ad small { font-size: 11px; opacity: .85; }
+.ad-ph { position: relative; width: 34px; height: 56px; border-radius: 7px; overflow: hidden; background: #2a3040; box-shadow: inset 0 0 0 2px #555d70; }
+.ad-ph i, .ad-ph b { position: absolute; inset: 3px; border-radius: 4px; }
+.ad-ph i { background: #8a94ad; }
+.ad-ph b { background: var(--accent, #3a8dff); }
+.ad-push .ad-ph i { animation: adPushOld 2.4s infinite; } .ad-push .ad-ph b { animation: adPushNew 2.4s infinite; }
+.ad-axis .ad-ph i { animation: adAxisOld 2.4s infinite; } .ad-axis .ad-ph b { animation: adAxisNew 2.4s infinite; }
+.ad-zoom .ad-ph i { animation: adZoomOld 2.4s infinite; } .ad-zoom .ad-ph b { animation: adZoomNew 2.4s infinite; }
+.ad-stack .ad-ph i { animation: adStackOld 2.4s infinite; } .ad-stack .ad-ph b { animation: adStackNew 2.4s infinite; }
+.ad-reveal .ad-ph b { animation: adReveal 2.4s infinite; }
+.ad-wipe .ad-ph b { animation: adWipe 2.4s infinite; }
+@keyframes adPushNew { 0%, 15% { transform: translateX(110%); } 45%, 100% { transform: none; } }
+@keyframes adPushOld { 0%, 15% { transform: none; opacity: 1; } 45%, 100% { transform: translateX(-30%); opacity: .4; } }
+@keyframes adAxisNew { 0%, 25% { transform: translateX(30%); opacity: 0; } 50%, 100% { transform: none; opacity: 1; } }
+@keyframes adAxisOld { 0%, 15% { transform: none; opacity: 1; } 32%, 100% { transform: translateX(-30%); opacity: 0; } }
+@keyframes adZoomNew { 0%, 15% { transform: scale(.8); opacity: 0; } 45%, 100% { transform: none; opacity: 1; } }
+@keyframes adZoomOld { 0%, 15% { transform: none; opacity: 1; } 40%, 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes adStackNew { 0%, 15% { transform: translateY(110%); } 45%, 100% { transform: translateY(8%); } }
+@keyframes adStackOld { 0%, 15% { transform: none; opacity: 1; } 45%, 100% { transform: scale(.88); opacity: .5; } }
+@keyframes adReveal { 0%, 15% { clip-path: circle(0% at 70% 75%); } 50%, 100% { clip-path: circle(140% at 70% 75%); } }
+@keyframes adWipe { 0%, 15% { clip-path: inset(0 0 0 100%); } 50%, 100% { clip-path: inset(0 0 0 0); } }
+@media (prefers-reduced-motion: reduce) { .ad-ph i, .ad-ph b { animation: none !important; } }
+
+/* Build Settings: what you're making, the ready check, jump chips, icon picks and a Home Screen preview */
+.bt-q { margin: 2px 0 8px; font-size: 15px; }
+.build-targets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.build-targets .bt { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center; text-align: left; padding: 10px; border-radius: 14px; border: 1.5px solid var(--line, #333); background: transparent; color: inherit; cursor: pointer; transition: border-color .15s, background .15s, transform .1s; }
+.build-targets .bt:active { transform: scale(.97); }
+.build-targets .bt svg { grid-row: span 2; width: 22px; height: 22px; opacity: .8; }
+.build-targets .bt b { font-size: 14px; }
+.build-targets .bt small { grid-column: 2; font-size: 11.5px; line-height: 1.3; opacity: .7; }
+.build-targets .bt.on { border-color: var(--accent, #3a8dff); background: color-mix(in srgb, var(--accent, #3a8dff) 14%, transparent); }
+.build-targets .bt.on svg { color: var(--accent, #3a8dff); opacity: 1; }
+.build-last { margin: 0 0 8px; }
+.build-check { border: 1px solid var(--line, #333); border-radius: 14px; padding: 8px 10px; margin: 6px 0 10px; }
+.bc-head { display: flex; align-items: center; gap: 8px; padding: 2px 0 6px; }
+.bc-head b { flex: 1; font-size: 14px; }
+.bc-head.ok svg { color: #3ccf7a; } .bc-head.warn svg { color: #f7a02c; } .bc-head.bad svg { color: #ff6b6b; }
+.bc-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line, #333); font-size: 13px; }
+.bc-row .bc-t { flex: 1; min-width: 0; }
+.bc-row .btn { padding: 4px 10px; min-height: 0; font-size: 12px; white-space: nowrap; }
+.bc-dot { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 800; color: #fff; }
+.bc-row.ok .bc-dot { background: #2fae63; } .bc-row.warn .bc-dot { background: #f7a02c; } .bc-row.bad .bc-dot { background: #e5484d; }
+.bc-row.ok { opacity: .75; }
+.build-jump { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; }
+.build-jump .chip { border: 1px solid var(--line, #333); background: transparent; color: inherit; border-radius: 99px; padding: 4px 11px; font-size: 12.5px; cursor: pointer; }
+.build-jump .bj-all { margin-left: auto; font-size: 12.5px; display: flex; align-items: center; gap: 4px; }
+.flash { animation: bsFlash 1.2s ease; border-radius: 10px; }
+@keyframes bsFlash { 0%, 40% { box-shadow: 0 0 0 3px var(--accent, #3a8dff); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.icon-picks { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.icon-picks .ip { width: 36px; height: 36px; border-radius: 10px; border: 1.5px solid var(--line, #333); background: transparent; font-size: 20px; line-height: 1; cursor: pointer; padding: 0; }
+.icon-picks .ip.on { border-color: var(--accent, #3a8dff); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent, #3a8dff) 40%, transparent); }
+.icon-picks.bg .ip { width: 28px; height: 28px; border-radius: 50%; }
+.home-mock { display: flex; gap: 8px; margin: 6px 0; }
+.home-mock .hm { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 14px 6px 10px; border-radius: 14px; }
+.home-mock .hm.light { background: linear-gradient(160deg, #cfe3ff, #f9d9ec); color: #111; }
+.home-mock .hm.dark { background: linear-gradient(160deg, #1b2440, #3a1d3a); color: #fff; }
+.home-mock .hm-ic { width: 54px; height: 54px; border-radius: 13px; box-shadow: 0 4px 10px rgba(0,0,0,.25); }
+.home-mock small { font-size: 11px; font-weight: 600; }
+.bc-head .btn { padding: 5px 12px; min-height: 0; font-size: 12.5px; white-space: nowrap; }
+.bc-head .btn svg { width: 15px; height: 15px; }
+.build-btns .btn { white-space: nowrap; }

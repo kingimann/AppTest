@@ -2057,7 +2057,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -2646,6 +2646,7 @@ export class Input {
       if (st.joystickHaptics !== false && st.joystickHaptics !== 'off') this.engine.vibrate(6);
     }
     this.pointers.set(e.pointerId, ptr);
+    this.lastDown = { x: p.x, y: p.y }; // where a "reveal from tap" page transition grows from
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
   }
 
@@ -3336,6 +3337,13 @@ function drawEntity2DRaw(ctx, e, vars, time) {
     if (t.spacing && 'letterSpacing' in ctx) ctx.letterSpacing = `${t.spacing}px`;
     let str = fillTemplate(t.value, Object.keys(e.data).length ? Object.assign(Object.create(vars), e.data) : vars, t.format);
     if (t.case === 'upper') str = str.toUpperCase(); else if (t.case === 'lower') str = str.toLowerCase();
+    if (e.ui && t.bump !== false && str.length <= 24 && String(t.value).includes('{')) { // a score, coin count or timer pops when its value changes
+      const now = performance.now() / 1000;
+      if (e._txt !== undefined && e._txt !== str && !motionOf(e.scene).reduced) e._bump = now;
+      e._txt = str;
+      const p = (now - (e._bump || -9)) / 0.4;
+      if (p < 1) { const k = 1 + 0.26 * Math.sin(Math.PI * Math.min(1, p * 1.5)) * (1 - p); ctx.scale(k, k); }
+    }
     let lines = textLines(ctx, str, +t.wrap || 0);
     if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
       const w = Math.max(...lines.map((l) => ctx.measureText(l).width), 1);
@@ -3995,40 +4003,57 @@ function speakerPortrait(s, d, who) {
   if (!r) r = s.dialogueDef(who)?.portrait || (!d.npc ? d.portrait : '') || '';
   return (c[k] = r);
 }
-/** Dialogue box: speaker name, typewriter text, tap to continue. */
+/** Dialogue box: speaker name, typewriter text, tap to continue. It springs up when a conversation starts, and choices slide in one after another. */
 function drawDialog(ctx, scene, W, H, engine) {
   const d = scene.dialog, line = d.run ? d.run.line : d.lines[d.i]; if (!line) return;
+  const TH = THEME, acc = TH.accent, now = performance.now() / 1000, M = motionOf(scene);
+  if (d._t0 == null) d._t0 = now;
+  const inK = M.reduced ? 1 : Ease.springSnappy(clamp((now - d._t0) / (0.5 * M.k), 0, 1));
   const por = speakerPortrait(scene, d, line.who), m = 14, bw = Math.min(W - m * 2, 560), x = (W - bw) / 2, pic = por ? 64 : 0;
+  const R = TH.radius ? Math.min(20, TH.radius * 1.5) : 0, rr = (X, Y, w, h, r = R) => UK.rr(ctx, X, Y, w, h, r);
   ctx.save();
-  ctx.font = `600 17px ${THEME.font}`;
-  const rows = []; { const words = String(line.text).split(' '); let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 36 - pic && row) { rows.push(row); row = w; } else row = t; } rows.push(row); }
-  const bh = Math.max(pic ? 96 : 0, 132, 44 + rows.length * 24), y = H - engine.safe.bottom - bh - 20;
+  ctx.font = `600 17px ${TH.font}`;
+  const rows = []; { const words = String(line.text).split(' '); let row = ''; for (const w of words) { const t = row ? row + ' ' + w : w; if (ctx.measureText(t).width > bw - 40 - pic && row) { rows.push(row); row = w; } else row = t; } rows.push(row); }
+  const bh = Math.max(pic ? 100 : 0, 128, 48 + rows.length * 24), y = H - engine.safe.bottom - bh - 20 + (1 - inK) * (bh + 30);
+  ctx.globalAlpha = Math.min(1, inK * 1.5);
   // choices stack above the box once the line has been read
   const ch = d.run?.choices, ready = d.chars >= line.text.length;
+  if (d._chKey !== line.text) { d._chKey = line.text; d._chT = null; }
   d._rects = [];
   if (ch && ready) {
-    const rh = 46, gap = 8; let cy = y - 12 - ch.length * (rh + gap);
+    if (d._chT == null) d._chT = now;
+    const rh = 50, gap = 8; let cy = y - 12 - ch.length * (rh + gap);
     ch.forEach((c, i) => {
       const r = { x: x + 10, y: cy, w: bw - 20, h: rh }; d._rects.push(r);
-      ctx.fillStyle = 'rgba(20,22,44,0.94)'; ctx.strokeStyle = 'rgba(255,224,130,0.85)'; ctx.lineWidth = 2;
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(r.x, r.y, r.w, r.h, 14); else ctx.rect(r.x, r.y, r.w, r.h); ctx.fill(); ctx.stroke();
-      ctx.fillStyle = '#ffe082'; ctx.font = `800 13px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), r.x + 14, r.y + rh / 2);
-      ctx.fillStyle = '#fff'; ctx.font = `700 16px ${THEME.font}`; ctx.fillText(c.text, r.x + 34, r.y + rh / 2, r.w - 46);
+      const k = M.reduced ? 1 : Ease.springSnappy(clamp((now - d._chT - i * 0.06) / (0.45 * M.k), 0, 1));
+      ctx.save(); ctx.globalAlpha *= Math.min(1, k * 1.6); ctx.translate((1 - k) * 40, 0);
+      ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3;
+      ctx.fillStyle = withAlpha(TH.panel, 0.96); rr(r.x, r.y, r.w, r.h, TH.radius ? r.h / 2 : 0); ctx.fill(); ctx.shadowColor = 'transparent';
+      ctx.strokeStyle = withAlpha(acc, 0.55); ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(r.x + 25, r.y + rh / 2, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = inkOn(acc); ctx.font = `900 13px ${TH.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), r.x + 25, r.y + rh / 2 + 1);
+      ctx.fillStyle = TH.text; ctx.font = `700 16px ${TH.font}`; ctx.textAlign = 'left'; ctx.fillText(c.text, r.x + 48, r.y + rh / 2 + 1, r.w - 60);
+      ctx.restore();
       cy += rh + gap;
     });
   }
-  ctx.fillStyle = 'rgba(12,12,26,0.92)'; ctx.strokeStyle = 'rgba(255,224,130,0.9)'; ctx.lineWidth = 2.5;
-  ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, bw, bh, 16); else ctx.rect(x, y, bw, bh); ctx.fill(); ctx.stroke();
-  if (pic) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y + 24, 56, 56, 12); else ctx.rect(x + 14, y + 24, 56, 56); ctx.fill(); drawNavIcon(ctx, por, x + 42, y + 52, 40, '#fff'); }
+  ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 26; ctx.shadowOffsetY = 8;
+  const g = ctx.createLinearGradient(0, y, 0, y + bh); g.addColorStop(0, withAlpha(mixHexE(TH.panel, '#ffffff', 0.06), 0.97)); g.addColorStop(1, withAlpha(TH.panel, 0.97));
+  ctx.fillStyle = g; rr(x, y, bw, bh); ctx.fill(); ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = withAlpha(acc, 0.5); ctx.lineWidth = 1.5; ctx.stroke();
+  if (pic) { ctx.fillStyle = withAlpha(TH.button, 0.08); rr(x + 14, y + 26, 56, 56, Math.min(14, R)); ctx.fill(); drawNavIcon(ctx, por, x + 42, y + 54, 40, TH.text); }
   if (line.who) {
-    ctx.font = '800 15px system-ui, sans-serif'; const tw = ctx.measureText(line.who).width + 24;
-    ctx.fillStyle = '#ffe082'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 14, y - 14, tw, 28, 14); else ctx.rect(x + 14, y - 14, tw, 28); ctx.fill();
-    ctx.fillStyle = '#1b1b1b'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 26, y + 1);
+    ctx.font = `800 15px ${TH.font}`; const tw = ctx.measureText(line.who).width + 28;
+    ctx.fillStyle = acc; rr(x + 16, y - 15, tw, 30, TH.radius ? 15 : 0); ctx.fill();
+    ctx.fillStyle = inkOn(acc); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(line.who, x + 30, y + 1);
   }
-  ctx.fillStyle = '#fff'; ctx.font = `600 17px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-  let left = Math.floor(d.chars), ty = y + 26;
-  for (const r of rows) { if (left <= 0) break; ctx.fillText(r.slice(0, left), x + 18 + pic, ty); left -= r.length + 1; ty += 24; }
-  if (ready && !(ch && ch.length)) { const more = d.run ? !d.run.done : d.i < d.lines.length - 1; ctx.fillStyle = `rgba(255,224,130,${0.5 + Math.sin(performance.now() / 200) * 0.5})`; ctx.textAlign = 'right'; ctx.fillText(more ? '▼' : '✓', x + bw - 16, y + bh - 28); }
+  ctx.fillStyle = TH.text; ctx.font = `600 17px ${TH.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  let left = Math.floor(d.chars), ty = y + 28;
+  for (const r of rows) { if (left <= 0) break; ctx.fillText(r.slice(0, left), x + 20 + pic, ty); left -= r.length + 1; ty += 24; }
+  if (ready && !(ch && ch.length)) { // tap to go on: a bobbing arrow (or a tick on the last line)
+    const more = d.run ? !d.run.done : d.i < d.lines.length - 1, bob = M.reduced ? 0 : Math.sin(now * 5) * 3;
+    ctx.globalAlpha *= 0.85; if (more) glyph(ctx, 'down', x + bw - 22, y + bh - 20 + bob, 13, acc); else { ctx.strokeStyle = acc; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x + bw - 30, y + bh - 20); ctx.lineTo(x + bw - 25, y + bh - 15); ctx.lineTo(x + bw - 16, y + bh - 26); ctx.stroke(); }
+  }
   ctx.restore();
 }
 /** Advance the dialogue: typewriter, tap to finish the line, tap again for the next (or pick a choice). Returns true if it used the tap. */
@@ -4061,23 +4086,27 @@ function stepDialog(s, dt, tapped) {
 function drawMessage(ctx, scene, W, H, engine) {
   const m = scene.msg;
   if (!m) return;
-  const maxW = Math.min(W - 40, 460), size = 18, lines = [];
+  const now = performance.now() / 1000; if (m.t0 == null) m.t0 = now;
+  const M = motionOf(scene), inK = M.reduced ? 1 : Ease.springSnappy(clamp((now - m.t0) / (0.5 * M.k), 0, 1)), out = clamp(m.t * 4, 0, 1);
+  const maxW = Math.min(W - 40, 440), size = 17, lh = size + 7, lines = [];
+  ctx.save();
   ctx.font = `700 ${size}px ${THEME.font}`;
-  let line = '';
+  let line = '', widest = 0;
   for (const word of m.text.split(/\s+/)) {
     const test = line ? line + ' ' + word : word;
-    if (ctx.measureText(test).width > maxW - 32 && line) { lines.push(line); line = word; } else line = test;
+    if (ctx.measureText(test).width > maxW - 40 && line) { lines.push(line); line = word; } else line = test;
   }
   if (line) lines.push(line);
-  const h = lines.length * (size + 6) + 24, B = engine.safe.bars || { top: 0, bottom: 0 }, y = scene.settings.messageTop ? engine.safe.top + B.top + H * 0.2 : H - engine.safe.bottom - B.bottom - 130 - h;
-  ctx.globalAlpha = Math.min(1, m.t * 3);
-  ctx.fillStyle = 'rgba(15,15,25,0.85)';
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect((W - maxW) / 2, y, maxW, h, 12); else ctx.rect((W - maxW) / 2, y, maxW, h);
-  ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  lines.forEach((l, i) => ctx.fillText(l, W / 2, y + 12 + (size + 6) * i + (size + 6) / 2));
-  ctx.globalAlpha = 1;
+  for (const l of lines) widest = Math.max(widest, ctx.measureText(l).width);
+  const w = Math.min(maxW, widest + 40), h = lines.length * lh + 26, B = engine.safe.bars || { top: 0, bottom: 0 }, y = scene.settings.messageTop ? engine.safe.top + B.top + H * 0.2 : H - engine.safe.bottom - B.bottom - 130 - h;
+  ctx.globalAlpha = Math.min(1, inK * 1.6) * out;
+  ctx.translate(W / 2, y + h / 2 + (1 - inK) * (scene.settings.messageTop ? -20 : 24)); const k = 0.9 + 0.1 * inK; ctx.scale(k, k);
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = withAlpha(THEME.panel, 0.94); UK.rr(ctx, -w / 2, -h / 2, w, h, Math.min(h / 2, 18)); ctx.fill(); ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = withAlpha(THEME.button, 0.12); ctx.lineWidth = 1; ctx.stroke();
+  ctx.fillStyle = THEME.text; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  lines.forEach((l, i) => ctx.fillText(l, 0, -h / 2 + 13 + lh * i + lh / 2));
+  ctx.restore();
 }
 
 const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('right') ? 1 : 0.5, y: a.startsWith('top') ? 0 : a.startsWith('bottom') ? 1 : 0.5 });
@@ -4247,6 +4276,7 @@ function renderUI(engine, scene) {
   ctx.clearRect(0, 0, W, H);
   if (!scene) return;
   THEME = themeOf(scene.settings); // read every frame so Game Settings edits show at once
+  engine._prevBtns = engine.screenBtns || []; engine.screenBtns = []; engine.appRect = null; engine.shareRect = null; // the built-in screens' buttons, laid out again each frame
   engine.onBeforeUI?.(ctx, scene);
   if (!engine.editing) for (const f of scene.overlays || []) if (f.world) f(ctx, scene); // markers that belong to the world (NPC !, ?) sit under the UI
   if (!engine.editing || engine.showUI) {
@@ -4264,7 +4294,16 @@ function renderUI(engine, scene) {
       let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= q.alpha ?? 1; // a page fading in or out fades everything inside it
       if (pa <= 0.002) continue;
       ctx.save();
-      if (!engine.editing) for (let q = e.parentEnt, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
+      if (!engine.editing) { // page transitions: a scale for a whole page (with everything in it), or a clip (reveal from tap, wipe)
+        let chain = null; for (let q = e, n = 0; q && n < 30; q = q.parentEnt, n++) if (q._fx && (q._fx.z !== 1 || q._fx.clip)) (chain ||= []).unshift(q);
+        if (chain) for (const q of chain) {
+          const F = q._fx;
+          if (F.clip) { ctx.beginPath(); if (F.clip.kind === 'circle') ctx.arc(F.clip.x, F.clip.y, Math.max(0.01, F.clip.r * F.p), 0, Math.PI * 2); else ctx.rect(W * (1 - F.p), -H, W * F.p + 1, H * 3); ctx.clip(); }
+          if (F.z !== 1) { const r = uiBox(q, W, H, engine.safe); ctx.translate(r.x, r.y); ctx.scale(F.z, F.z); ctx.translate(-r.x, -r.y); }
+        }
+      }
+      // scroll views and lists cut off what's outside them (in the editor too, except what you have selected)
+      for (let q = e.parentEnt, n = 0, mine = e.id === engine.editSelected; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren || (engine.editing && !mine && q.behaviors.some((b) => b.clipsKids))) { const r = uiBox(q, W, H, engine.safe), R = q._clipRadius ?? (engine.editing ? q.shape?.radius || 0 : 0); ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + (scene.uiShift || 0), r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
       ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
@@ -4317,26 +4356,33 @@ function renderUI(engine, scene) {
         if (b.label) { ctx.fillStyle = '#fff'; ctx.font = `800 ${Math.round(b.h * 0.3)}px system-ui, sans-serif`; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom'; ctx.fillText(b.label, x + b.w - 3, y + b.h - 1); }
         continue;
       }
-      ctx.fillStyle = tint(b.id != null ? 0.35 : 0.12);
-      ctx.strokeStyle = tint(0.4); ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-      if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.stroke(); }
-      ctx.fillStyle = TH.button; ctx.font = `800 ${b.r * (b.action === 'pause' || b.action === 'mute' ? 0.7 : 0.42)}px ${TH.font}`;
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, b.x, b.y + 1);
-      if (b.action === 'mute' && engine.audio.muted) {
-        ctx.strokeStyle = '#ff5d8f'; ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.moveTo(b.x - b.r * 0.5, b.y - b.r * 0.5); ctx.lineTo(b.x + b.r * 0.5, b.y + b.r * 0.5); ctx.stroke();
-      }
+      b._p = (b._p || 0) + ((b.id != null ? 1 : 0) - (b._p || 0)) * 0.4; // pressed: dips and lights up
+      const small = b.action === 'pause' || b.action === 'mute', k = 1 - 0.09 * b._p;
+      ctx.save(); ctx.translate(b.x, b.y); ctx.scale(k, k);
+      ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = small ? 8 : 14; ctx.shadowOffsetY = 3;
+      ctx.fillStyle = small ? `rgba(0,0,0,${0.3 + 0.15 * b._p})` : `rgba(0,0,0,${0.18 + 0.1 * b._p})`;
+      ctx.beginPath(); ctx.arc(0, 0, b.r, 0, Math.PI * 2); ctx.fill(); ctx.shadowColor = 'transparent';
+      if (!small) { const g = ctx.createLinearGradient(0, -b.r, 0, b.r); g.addColorStop(0, tint(0.24 + 0.25 * b._p)); g.addColorStop(1, tint(0.06 + 0.2 * b._p)); ctx.fillStyle = g; ctx.fill(); }
+      ctx.strokeStyle = tint(small ? 0.3 : 0.5 + 0.35 * b._p); ctx.lineWidth = small ? 1.5 : 2.5; ctx.stroke();
+      if (b.color) { ctx.fillStyle = b.color; ctx.beginPath(); ctx.arc(0, 0, b.r * 0.55, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 2; ctx.stroke(); }
+      const ar = { dleft: 'left', dright: 'right', dup: 'up', ddown: 'down' }[b.action];
+      if (b.action === 'pause') glyph(ctx, 'pause', 0, 0, b.r * 0.72, TH.button);
+      else if (b.action === 'mute') glyph(ctx, engine.audio.muted ? 'mute' : 'sound', 0, 0, b.r * 0.82, TH.button);
+      else if (ar) glyph(ctx, ar, 0, 0, b.r * 0.62, TH.button);
+      else { ctx.fillStyle = TH.button; ctx.font = `900 ${Math.round(b.r * 0.4)}px ${TH.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(b.label, 0, 1, b.r * 1.7); }
+      ctx.restore();
     }
     ctx.restore();
   }
   const lt = scene.time - (scene.loadedAt || 0); // the level banner shows once a Loading Screen is gone
   if (scene.state === 'play' && scene.levelCount > 1 && lt < 1.6 && !scene.loading && !scene.settings.app && !scene.fromApp) { // apps and the games inside them have no "LEVEL 2" banner
-    ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2);
-    big(`LEVEL ${scene.level}`, H * 0.3, 36, '#ffffff');
-    ctx.globalAlpha = 1;
+    const e = motionOf(scene).reduced ? 1 : Ease.springBouncy(clamp(lt / 0.7, 0, 1)), lab = `LEVEL ${scene.level}`;
+    ctx.save(); ctx.globalAlpha = Math.min(1, (1.6 - lt) * 2.5, lt * 6); ctx.font = `900 22px ${TH.font}`;
+    const pw = ctx.measureText(lab).width + 56, ph = 48; ctx.translate(W / 2, H * 0.28 + (1 - e) * -50); ctx.scale(0.7 + 0.3 * e, 0.7 + 0.3 * e);
+    ctx.shadowColor = withAlpha(TH.accent, 0.5); ctx.shadowBlur = 24; ctx.fillStyle = TH.accent; UK.rr(ctx, -pw / 2, -ph / 2, pw, ph, TH.radius ? ph / 2 : 0); ctx.fill(); ctx.shadowColor = 'transparent';
+    ctx.fillStyle = inkOn(TH.accent); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, 0, 1); ctx.restore();
   }
-  if (!scene.loading) drawMessage(ctx, scene, W, H, engine);
+  if (!scene.loading && !engine.paused && (scene.state === 'play' || scene.state === 'title')) drawMessage(ctx, scene, W, H, engine);
   if (scene.dialog) drawDialog(ctx, scene, W, H, engine);
   if (scene.rotateNeeded) {
     dim(0.9);
@@ -4347,46 +4393,152 @@ function renderUI(engine, scene) {
   if (scene.loading && !engine.paused) return; // a Loading Screen covers everything until it's done
   if (scene.settings.customScreens) return; // the game draws its own title / pause / end screens with UI elements
   if (ownScreen(scene, engine.paused ? 'paused' : scene.state) || (engine.paused && (engine.inspecting || engine.quietPause))) return; // the editor's Inspect (and a permission card) keep the view clear
-  // a game opened from an app: a button back to the app on its pause and end screens
-  const appBtn = (y) => {
-    if (!scene.fromApp) { engine.appRect = null; return; }
-    const w = 190, h = 46, x = W / 2 - w / 2; engine.appRect = { x, y, w, h };
-    ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
-    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
-    big('‹ Back to app', y + h / 2, 17);
+  drawGameScreens(ctx, engine, scene, W, H, TH);
+}
+/** Light or dark text for something drawn on this colour. */
+function inkOn(hex) { const c = hexToRgb(hex); return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] > 0.62 ? '#14161c' : '#ffffff'; }
+/** Small vector icons for the built-in screens and touch buttons (emoji arrows look different on every phone). */
+function glyph(ctx, kind, x, y, s, color) {
+  const h = s / 2;
+  ctx.save(); ctx.translate(x, y); ctx.fillStyle = color; ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.8, s * 0.14); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  const tri = (a) => { ctx.rotate(a); ctx.moveTo(h * 0.75, 0); ctx.lineTo(-h * 0.55, -h * 0.75); ctx.lineTo(-h * 0.55, h * 0.75); ctx.closePath(); ctx.fill(); };
+  switch (kind) {
+    case 'play': ctx.moveTo(-h * 0.6, -h * 0.82); ctx.lineTo(h * 0.85, 0); ctx.lineTo(-h * 0.6, h * 0.82); ctx.closePath(); ctx.fill(); break;
+    case 'pause': { const bw = s * 0.24; UK.rr(ctx, -h * 0.62, -h * 0.72, bw, h * 1.44, bw / 2); ctx.fill(); UK.rr(ctx, h * 0.62 - bw, -h * 0.72, bw, h * 1.44, bw / 2); ctx.fill(); break; }
+    case 'again': { const r = h * 0.72, a0 = -Math.PI * 0.3; ctx.arc(0, 0, r, a0, a0 + Math.PI * 1.65); ctx.stroke(); ctx.beginPath(); const px = Math.cos(a0) * r, py = Math.sin(a0) * r, k = h * 0.42; ctx.moveTo(px + k * 0.9, py - k * 0.1); ctx.lineTo(px - k * 0.15, py - k * 0.9); ctx.lineTo(px - k * 0.3, py + k * 0.45); ctx.closePath(); ctx.fill(); break; }
+    case 'next': ctx.moveTo(-h * 0.3, -h * 0.7); ctx.lineTo(h * 0.4, 0); ctx.lineTo(-h * 0.3, h * 0.7); ctx.stroke(); break;
+    case 'back': ctx.moveTo(h * 0.3, -h * 0.7); ctx.lineTo(-h * 0.4, 0); ctx.lineTo(h * 0.3, h * 0.7); ctx.stroke(); break;
+    case 'share': ctx.moveTo(-h * 0.35, -h * 0.05); ctx.lineTo(-h * 0.7, -h * 0.05); ctx.lineTo(-h * 0.7, h * 0.85); ctx.lineTo(h * 0.7, h * 0.85); ctx.lineTo(h * 0.7, -h * 0.05); ctx.lineTo(h * 0.35, -h * 0.05); ctx.moveTo(0, h * 0.4); ctx.lineTo(0, -h * 0.85); ctx.moveTo(-h * 0.35, -h * 0.5); ctx.lineTo(0, -h * 0.85); ctx.lineTo(h * 0.35, -h * 0.5); ctx.stroke(); break;
+    case 'sound': case 'mute':
+      ctx.moveTo(-h * 0.9, -h * 0.32); ctx.lineTo(-h * 0.45, -h * 0.32); ctx.lineTo(h * 0.05, -h * 0.78); ctx.lineTo(h * 0.05, h * 0.78); ctx.lineTo(-h * 0.45, h * 0.32); ctx.lineTo(-h * 0.9, h * 0.32); ctx.closePath(); ctx.fill(); ctx.beginPath();
+      if (kind === 'sound') { ctx.arc(h * 0.1, 0, h * 0.42, -0.85, 0.85); ctx.stroke(); ctx.beginPath(); ctx.arc(h * 0.1, 0, h * 0.8, -0.85, 0.85); ctx.stroke(); }
+      else { ctx.moveTo(h * 0.38, -h * 0.34); ctx.lineTo(h * 0.95, h * 0.34); ctx.moveTo(h * 0.95, -h * 0.34); ctx.lineTo(h * 0.38, h * 0.34); ctx.stroke(); }
+      break;
+    case 'star': for (let i = 0; i < 10; i++) { const r = i % 2 ? h * 0.45 : h, a = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); break;
+    case 'search': ctx.arc(-h * 0.15, -h * 0.15, h * 0.55, 0, Math.PI * 2); ctx.moveTo(h * 0.25, h * 0.25); ctx.lineTo(h * 0.8, h * 0.8); ctx.stroke(); break;
+    case 'close': ctx.moveTo(-h * 0.5, -h * 0.5); ctx.lineTo(h * 0.5, h * 0.5); ctx.moveTo(h * 0.5, -h * 0.5); ctx.lineTo(-h * 0.5, h * 0.5); ctx.stroke(); break;
+    case 'list': for (const yy of [-0.55, 0, 0.55]) { ctx.moveTo(-h * 0.85, yy * h); ctx.arc(-h * 0.75, yy * h, h * 0.1, 0, Math.PI * 2); ctx.moveTo(-h * 0.35, yy * h); ctx.lineTo(h * 0.85, yy * h); } ctx.stroke(); break;
+    case 'right': tri(0); break;
+    case 'down': tri(Math.PI / 2); break;
+    case 'left': tri(Math.PI); break;
+    case 'up': tri(-Math.PI / 2); break;
+  }
+  ctx.restore();
+}
+const CONFETTI = ['#ffd23d', '#5dff8a', '#ff5d8f', '#4fc3f7', '#ffffff', '#b388ff'];
+/**
+ * The built-in title, pause, game over, win and level complete screens: a dimmed backdrop, then cards and buttons that spring in.
+ * Buttons go into engine.screenBtns (tapping anywhere else still does the main thing: start, resume, play again, next level).
+ */
+function drawGameScreens(ctx, engine, scene, W, H, TH) {
+  const key = engine.paused ? 'paused' : scene.state === 'title' ? 'title' : scene.state === 'over' || scene.state === 'win' ? scene.state + (scene.levelComplete ? 'L' : '') : '';
+  if (!key) { engine._scr = null; return; }
+  const now = performance.now() / 1000, M = motionOf(scene);
+  let S = engine._scr; if (!S || S.key !== key) S = engine._scr = { key, t0: now, last: now, fx: [], burst: false };
+  if ((key === 'over' || key === 'win' || key === 'overL' || key === 'winL') && scene.time - (scene.endTime ?? scene.time) < 0.5) { S.t0 = now; drawMessage(ctx, scene, W, H, engine); return; } // the moment it ends: let the last message show first
+  const t = M.reduced ? 9 : (now - S.t0) / M.k, dt = Math.min(0.05, Math.max(0, now - S.last)); S.last = now;
+  const P = (d, len = 0.5) => clamp((t - d) / len, 0, 1), spring = (d, len = 0.55) => Ease.springSnappy(P(d, len)), bouncy = (d, len = 0.8) => Ease.springBouncy(P(d, len));
+  const acc = TH.accent, font = (w, sz) => `${w} ${sz}px ${TH.font}`;
+  let held = null; // a finger on a button: it dips
+  for (const q of engine.input.pointers?.values?.() || []) { const b = (engine._prevBtns || []).find((r) => q.x >= r.x && q.x <= r.x + r.w && q.y >= r.y && q.y <= r.y + r.h); if (b) held = b.id; }
+  const fit = (str, size, maxW, w = 900) => { ctx.font = font(w, size); const tw = ctx.measureText(str).width; return tw > maxW ? Math.max(12, Math.floor(size * maxW / tw)) : size; };
+  const text = (str, x, y, size, color, w = 800, alpha = 1) => { ctx.save(); ctx.globalAlpha *= alpha; ctx.font = font(w, size); ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(str, x, y); ctx.restore(); };
+  const button = (id, label, icon, cx, y, w, h, primary, d, breathe = 0) => {
+    const a = P(d, 0.45); if (a <= 0) return;
+    engine.screenBtns.push({ id, x: cx - w / 2, y, w, h });
+    const k = (0.86 + 0.14 * Ease.springSnappy(a)) * (held === id ? 0.94 : 1) * (1 + breathe * Math.sin(t * 3.2));
+    ctx.save(); ctx.globalAlpha *= Math.min(1, a * 2); ctx.translate(cx, y + h / 2); ctx.scale(k, k);
+    const R = TH.radius ? Math.min(h / 2, TH.radius * 1.6) : 0;
+    if (primary) { ctx.shadowColor = withAlpha(acc, 0.45); ctx.shadowBlur = 20; ctx.shadowOffsetY = 6; const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2); g.addColorStop(0, mixHexE(acc, '#ffffff', 0.2)); g.addColorStop(1, acc); ctx.fillStyle = g; }
+    else ctx.fillStyle = withAlpha(TH.button, held === id ? 0.2 : 0.11);
+    UK.rr(ctx, -w / 2, -h / 2, w, h, R); ctx.fill(); ctx.shadowColor = 'transparent';
+    if (!primary) { ctx.strokeStyle = withAlpha(TH.button, 0.24); ctx.lineWidth = 1.5; ctx.stroke(); }
+    const c = primary ? inkOn(acc) : TH.button, sz = primary ? 19 : 16, isz = primary ? 17 : 15;
+    ctx.font = font(800, sz); const tw = ctx.measureText(label).width, gap = icon ? isz + 9 : 0, x0 = -(tw + gap) / 2;
+    if (icon) glyph(ctx, icon, x0 + isz / 2, 0, isz, c);
+    ctx.fillStyle = c; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(label, x0 + gap, 1);
+    ctx.restore();
   };
-  if (engine.paused) {
-    dim(0.7); big('PAUSED', H * 0.42, 40); big('Tap to resume', H * 0.52, 18, `rgba(255,255,255,${pulse})`);
-    appBtn(H * 0.62);
-  } else if (scene.state === 'title') {
-    dim(0.55);
-    const t = scene.settings.title;
-    big(t, H * 0.38, Math.min(64, W * 0.9 / Math.max(4, t.length) * 1.6), TH.text);
-    if (scene.settings.subtitle) big(scene.settings.subtitle, H * 0.47, 17, withAlpha(TH.text, 0.85));
-    if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.53, 16, withAlpha(TH.text, 0.7));
-    big('Tap to start', H * 0.66, 22, withAlpha(TH.text, pulse));
-  } else if (scene.state === 'over' || scene.state === 'win') {
-    if (scene.time - (scene.endTime ?? scene.time) < 0.5) { drawMessage(ctx, scene, W, H, engine); return; }
-    dim(0.65);
-    if (scene.levelComplete) {
-      big(`LEVEL ${scene.level} COMPLETE`, H * 0.34, Math.min(40, W / 11), TH.good);
-      big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
-      big('Tap for the next level', H * 0.62, 20, withAlpha(TH.text, pulse));
-      return;
+  const card = (y, w, h) => { // returns how far it still has to rise, so its contents ride along
+    const a = P(0.04, 0.45), e = Ease.springSnappy(a), off = (1 - e) * 46, k = 0.94 + 0.06 * e;
+    ctx.save(); ctx.globalAlpha *= Math.min(1, a * 1.8); ctx.translate(W / 2, y + h / 2 + off); ctx.scale(k, k);
+    ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 44; ctx.shadowOffsetY = 16;
+    const g = ctx.createLinearGradient(0, -h / 2, 0, h / 2); g.addColorStop(0, withAlpha(mixHexE(TH.panel, '#ffffff', 0.07), 0.97)); g.addColorStop(1, withAlpha(TH.panel, 0.97));
+    ctx.fillStyle = g; UK.rr(ctx, -w / 2, -h / 2, w, h, TH.radius ? Math.min(28, TH.radius * 2) : 0); ctx.fill(); ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = withAlpha(TH.button, 0.12); ctx.lineWidth = 1; ctx.stroke(); ctx.restore();
+    return off;
+  };
+  // the backdrop: dim, with a soft vignette
+  const fade = Ease.outCubic(P(0, 0.3));
+  ctx.save();
+  ctx.fillStyle = withAlpha(TH.overlay, (key === 'title' ? 0.42 : key === 'paused' ? 0.55 : 0.5) * fade); ctx.fillRect(0, 0, W, H);
+  const vg = ctx.createRadialGradient(W / 2, H * 0.45, Math.min(W, H) * 0.15, W / 2, H * 0.45, Math.max(W, H) * 0.8);
+  vg.addColorStop(0, withAlpha(TH.overlay, 0)); vg.addColorStop(1, withAlpha(TH.overlay, 0.6 * fade)); ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H);
+  ctx.restore();
+  const cw = Math.min(W - 40, 330), bw = cw - 40, bh = 54, gap = 10;
+
+  if (key === 'title') {
+    const st = scene.settings, title = String(st.title || ''), e = bouncy(0.05, 0.9), float = M.reduced ? 0 : Math.sin(t * 1.6) * 4;
+    const size = fit(title, Math.min(64, W * 0.15), W * 0.86), ty = H * 0.34;
+    ctx.save(); ctx.globalAlpha = P(0.05, 0.25); ctx.translate(W / 2, ty + float); ctx.scale(0.55 + 0.45 * e, 0.55 + 0.45 * e);
+    ctx.shadowColor = withAlpha(acc, 0.6); ctx.shadowBlur = 28; text(title, 0, 0, size, TH.text, 900);
+    ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 3; text(title, 0, 0, size, TH.text, 900); ctx.restore();
+    let y = ty + size * 0.62 + 22;
+    if (st.subtitle) { text(String(st.subtitle), W / 2, y + (1 - spring(0.22)) * 12, fit(String(st.subtitle), 17, W * 0.84, 600), withAlpha(TH.text, 0.85), 600, P(0.22, 0.4)); y += 34; }
+    if (scene.vars.best) {
+      const lab = `Best  ${formatNumber(scene.vars.best)}`, pw = (ctx.font = font(800, 15), ctx.measureText(lab).width) + 50, ph = 32, k = bouncy(0.32);
+      if (k > 0) { ctx.save(); ctx.globalAlpha = P(0.32, 0.2); ctx.translate(W / 2, y + ph / 2); ctx.scale(k, k); ctx.fillStyle = withAlpha(TH.button, 0.13); UK.rr(ctx, -pw / 2, -ph / 2, pw, ph, ph / 2); ctx.fill();
+        glyph(ctx, 'star', -pw / 2 + 20, 0, 15, acc); ctx.font = font(800, 15); ctx.fillStyle = TH.text; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(lab, -pw / 2 + 34, 1); ctx.restore(); }
     }
-    big(scene.state === 'win' ? 'YOU WIN!' : 'GAME OVER', H * 0.34, 44, scene.state === 'win' ? TH.good : TH.bad);
-    big(String(Math.floor(scene.vars.score || 0)), H * 0.46, 64, TH.accent);
-    if (scene.newBest) big('NEW BEST!', H * 0.54, 16, TH.good);
-    else if (scene.vars.best) big(`Best: ${scene.vars.best}`, H * 0.54, 16, withAlpha(TH.text, 0.7));
-    big('Tap to play again', H * 0.66, 20, withAlpha(TH.text, pulse));
-    appBtn(H * 0.74);
-    if (scene.settings.shareButton && (navigator.share || navigator.clipboard)) {
-      const w = 150, h = 46, x = W / 2 - w / 2, y = H * (scene.fromApp ? 0.83 : 0.74);
-      engine.shareRect = { x, y, w, h };
-      ctx.fillStyle = withAlpha(TH.button, 0.14); ctx.strokeStyle = withAlpha(TH.button, 0.45); ctx.lineWidth = 2;
-      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(23, TH.radius * 2)); else ctx.rect(x, y, w, h); ctx.fill(); ctx.stroke();
-      big('Share score', y + h / 2, 17);
-    } else engine.shareRect = null;
+    const py = Math.max(y + 40, H * 0.6);
+    button('start', 'Play', 'play', W / 2, py, Math.min(240, W * 0.62), 60, true, 0.42, M.reduced ? 0 : 0.025);
+    text('or tap anywhere', W / 2, py + 84, 14, TH.text, 600, 0.5 * P(0.7, 0.5));
+    return;
+  }
+
+  if (key === 'paused') {
+    const rows = [['resume', 'Resume', 'play', true], ['restart', 'Restart', 'again'], ['sound', engine.audio.muted ? 'Sound off' : 'Sound on', engine.audio.muted ? 'mute' : 'sound']];
+    if (scene.fromApp) rows.push(['app', 'Back to app', 'back']);
+    const ch = 84 + rows.length * (bh + gap) + 14, cy = Math.max(engine.safe.top + 20, (H - ch) / 2 - 24), off = card(cy, cw, ch);
+    text('Paused', W / 2, cy + off + 46, 28, TH.text, 900, P(0.08, 0.3));
+    rows.forEach(([id, lab, ic, pri], i) => { button(id, lab, ic, W / 2, cy + off + 84 + i * (bh + gap), bw, bh, !!pri, 0.1 + i * 0.05); if (id === 'app') { const r = engine.screenBtns.at(-1); if (r?.id === 'app') engine.appRect = r; } });
+    const gear = engine.settingsBtn; // the ⚙ Settings button (a page button) sits under the card, in the theme's colours
+    if (gear?.dataset.where === 'pause') { gear.style.top = `${Math.round(cy + ch + 18)}px`; gear.style.color = TH.button; gear.style.background = withAlpha(TH.button, 0.12); gear.style.borderRadius = TH.radius ? '999px' : '0'; gear.style.font = `700 16px ${TH.font}`; }
+    return;
+  }
+
+  // game over, you win, level complete
+  const L = !!scene.levelComplete, win = scene.state === 'win', good = L || win, newBest = !!scene.newBest && !L;
+  const head = L ? `Level ${scene.level} complete` : win ? 'You win!' : 'Game over', hc = good ? TH.good : TH.bad;
+  const score = Math.floor(scene.vars.score || 0), shown = Math.round(score * Ease.outCubic(P(0.35, 0.9)));
+  const canShare = !L && scene.settings.shareButton && typeof navigator !== 'undefined' && (navigator.share || navigator.clipboard), app = !!scene.fromApp;
+  const extra = canShare || app ? bh + gap : 0, ch = 224 + bh + extra + 18, cy = Math.max(engine.safe.top + 20, (H - ch) / 2 - 30), off = card(cy, cw, ch), Y = cy + off;
+  const hk = bouncy(0.12); ctx.save(); ctx.globalAlpha = P(0.12, 0.25); ctx.translate(W / 2, Y + 44); ctx.scale(0.7 + 0.3 * hk, 0.7 + 0.3 * hk); text(head.toUpperCase(), 0, 0, fit(head.toUpperCase(), 30, cw - 64), hc, 900); ctx.restore();
+  text('SCORE', W / 2, Y + 84, 12, withAlpha(TH.text, 0.6), 800, P(0.25, 0.3));
+  text(formatNumber(shown), W / 2, Y + 126, fit(formatNumber(score), 58, cw - 40), acc, 900, P(0.25, 0.3));
+  if (newBest) {
+    const k = bouncy(1.2), lab = 'NEW BEST!', pw = (ctx.font = font(900, 14), ctx.measureText(lab).width) + 46, ph = 30;
+    if (k > 0) { ctx.save(); ctx.translate(W / 2, Y + 176); ctx.rotate(-0.04); ctx.scale(k, k); ctx.fillStyle = TH.good; ctx.shadowColor = withAlpha(TH.good, 0.5); ctx.shadowBlur = 14; UK.rr(ctx, -pw / 2, -ph / 2, pw, ph, ph / 2); ctx.fill(); ctx.shadowColor = 'transparent';
+      glyph(ctx, 'star', -pw / 2 + 18, 0, 14, inkOn(TH.good)); ctx.font = font(900, 14); ctx.fillStyle = inkOn(TH.good); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(lab, -pw / 2 + 30, 1); ctx.restore(); }
+  } else if (scene.vars.best && !L) text(`Best  ${formatNumber(scene.vars.best)}`, W / 2, Y + 176, 15, withAlpha(TH.text, 0.7), 700, P(0.5, 0.3));
+  const by = Y + 212;
+  button(L ? 'next' : 'again', L ? 'Next level' : 'Play again', L ? 'next' : 'again', W / 2, by, bw, bh, true, 0.55);
+  const sec = [canShare && ['share', 'Share', 'share'], app && ['app', 'Back to app', 'back']].filter(Boolean);
+  const sw = sec.length > 1 ? (bw - gap) / 2 : bw;
+  sec.forEach(([id, lab, ic], i) => { button(id, lab, ic, W / 2 - bw / 2 + sw / 2 + i * (sw + gap), by + bh + gap, sw, bh, false, 0.62 + i * 0.05); const r = engine.screenBtns.at(-1); if (r?.id === 'app') engine.appRect = r; if (r?.id === 'share') engine.shareRect = r; });
+  text(L ? 'or tap anywhere for the next level' : 'or tap anywhere to play again', W / 2, cy + ch + 26, 14, TH.text, 600, 0.5 * P(0.9, 0.5));
+  // confetti for a win, a finished level or a new best
+  if ((good || newBest) && !S.burst && t > 0.45 && !M.reduced) {
+    S.burst = true;
+    for (let i = 0; i < 110; i++) { const side = i % 2 ? 1 : -1; S.fx.push({ x: W / 2 + side * W * 0.42, y: H * 0.42, vx: -side * (120 + Math.random() * 380), vy: -(350 + Math.random() * 520), r: Math.random() * 6, vr: (Math.random() - 0.5) * 14, c: CONFETTI[i % CONFETTI.length], w: 5 + Math.random() * 5, life: 2.4 + Math.random() }); }
+  }
+  if (S.fx.length) {
+    ctx.save();
+    for (const p of S.fx) { p.vy += 900 * dt; p.vx *= 1 - 1.2 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.vr * dt; p.life -= dt;
+      ctx.globalAlpha = clamp(p.life, 0, 1); ctx.fillStyle = p.c; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.scale(1, Math.cos(p.r * 1.7)); ctx.fillRect(-p.w / 2, -p.w * 0.35, p.w, p.w * 0.7); ctx.restore(); }
+    S.fx = S.fx.filter((p) => p.life > 0 && p.y < H + 40);
+    ctx.restore();
   }
 }
 
@@ -6234,7 +6386,7 @@ registerBehavior('destructible', {
 // ---- UI components ----
 /** Slider: drag along a bar to set a variable (volume, difficulty, size…). */
 registerBehavior('uiSlider', {
-  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. Optional knob, vertical sliders, steps with a click, and the value shown above the knob (the knob appears when you press Play).',
+  label: 'Slider', description: 'Drag along it to change a variable between a minimum and maximum. Put it on a Progress Bar. Optional knob, vertical sliders, steps with a click, and the value shown above the knob.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'volume', suggest: 'vars' },
     { key: 'min', label: 'Minimum', type: 'number', default: 0 },
@@ -6287,6 +6439,14 @@ registerBehavior('uiSlider', {
           label.x = V && p.showValue !== 'at the end' ? kx + 34 : lx; label.y = ly; if (label.local) { label.local.x = label.x; label.local.y = label.y; label.local.visible = show; }
         }
       },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || knob || p.knob === 'none') return;
+        const ex = e.extents(), W = (ex.hx || 80) * 2, H = (ex.hy || 10) * 2, V = vert(), ks = +p.knobSize || Math.max(22, Math.min(V ? W : H, 40) * 1.6), f = clamp(((+(s.vars[p.var] ?? p.start) || 0) - +p.min) / ((+p.max - +p.min) || 1), 0, 1);
+        const kx = e.x + (V ? 0 : -W / 2 + f * W), ky = e.y + (V ? H / 2 - f * H : 0);
+        ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2; ctx.fillStyle = p.knobColor; ctx.beginPath();
+        if (p.knob === 'square') UK.rr(ctx, kx - ks / 2, ky - ks / 2, ks, ks, 6); else ctx.arc(kx, ky, ks / 2, 0, Math.PI * 2);
+        ctx.fill(); ctx.restore();
+      },
     };
   },
 });
@@ -6300,9 +6460,10 @@ const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : Str
 function raiseTree(s, e) {
   const L = s.entities, inTree = (q) => { for (let p = q, n = 0; p && n < 60; p = p.parentEnt, n++) if (p === e) return true; return false; };
   const tree = L.filter(inTree); if (!tree.length) return;
-  const rest = L.filter((q) => !tree.includes(q));
-  for (const q of tree) { let i = rest.length; while (i > 0 && (rest[i - 1].layer || 0) > (q.layer || 0)) i--; rest.splice(i, 0, q); }
-  L.length = 0; L.push(...rest);
+  // the page goes over everything else on screen (even a raised + button on the old page), but stays under nav bars and popups
+  const top = (q) => { for (let a = q, n = 0; a && n < 60; a = a.parentEnt, n++) if (a._dock || (a.layer || 0) >= 10 || s.modal === a) return true; return false; };
+  const rest = L.filter((q) => !tree.includes(q)), under = rest.filter((q) => !top(q)), over = rest.filter(top);
+  L.length = 0; L.push(...under, ...tree, ...over);
 }
 /** Game Settings › Motion: how fast UI animations play, and whether to keep motion to a minimum (the phone's "Reduce motion"). */
 let reducedMQ = null;
@@ -6315,6 +6476,9 @@ function motionOf(s) {
 /** Show or hide a UI element with a little animation. */
 function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
+  const NAVF = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe', 'push (iOS, follows navigation)': 'push', 'shared axis (follows navigation)': 'shared axis' }[anim];
+  if (NAVF) anim = `${NAVF} ${show ? 'in' : 'out'}`; // used outside of page navigation (a popup, a Show / Hide UI node): the forward version
+  else if (anim === 'slide (follows navigation)') anim = show ? 'slide from right' : 'slide from left';
   const M = motionOf(s); dur *= M.k;
   if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
   if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; e._uiAnimUntil = 0; done?.(); return; }
@@ -6323,7 +6487,14 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
   const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
   const R = (e._animBase.rz ??= e.rz || 0);
-  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; if (!ok) e.visible = false; done?.(); };
+  // transition-only state the renderer reads: z scales the element with everything inside it, clip shows only part of it (reveal, wipe)
+  const FX = (e._fx ||= { e, z: 1, clip: null, p: 1 }); s.killTweens(FX, true); FX.z = 1; FX.clip = null; FX.p = 1;
+  const group = uiKids(s, e).length > 0; // a panel or page with things inside: scale them all together
+  const zoom = (from, to, d, ease, o = {}) => {
+    if (group) { FX.z = from; return s.to(FX, { z: to }, d, { ease, ...o }); }
+    e.sx = base.sx * from; e.sy = base.sy * from; return s.to(e, { sx: base.sx * to, sy: base.sy * to }, d, { ease, ...o });
+  };
+  const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; FX.z = 1; FX.clip = null; FX.p = 1; if (!ok) e.visible = false; done?.(); };
   const H = (s.engine?.height || 700) / (uiK(s.engine?.safe) || 1);
   const front = () => queueMicrotask(() => raiseTree(s, e)); // (after this frame's updates) the page that moves over the other one draws on top (with everything inside it)
   const fin2 = fin;
@@ -6337,16 +6508,40 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       else { front(); s.to(e, { y: base.y + H }, dur * 1.2, { ease: 'inCubic', onComplete: () => fin2(false) }); }
       return;
     case 'fade through': // Material: the old page fades quickly, then the new one fades and grows in
-      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.94; e.sy = base.sy * 0.94; s.to(e, { alpha: 1, sx: base.sx, sy: base.sy }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
+      if (show) { e.visible = true; e.alpha = 0; zoom(0.92, 1, dur * 1.1, 'outCubic', { delay: dur * 0.4 }); s.to(e, { alpha: 1 }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
       else s.to(e, { alpha: 0 }, dur * 0.4, { ease: 'linear', onComplete: () => fin(false) });
       return;
     case 'shared axis in': e.visible = true; e.alpha = 0; e.x = base.x + 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
     case 'shared axis in back': e.visible = true; e.alpha = 0; e.x = base.x - 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
     case 'shared axis out': s.to(e, { x: base.x - 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
     case 'shared axis out back': s.to(e, { x: base.x + 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    // zoom (follows navigation): the new page grows in while the old one grows past you and fades; Back shrinks them the other way
+    case 'zoom nav in': front(); e.visible = true; e.alpha = 0; zoom(0.86, 1, dur * 1.6, 'outQuart'); s.to(e, { alpha: 1 }, dur * 0.9, { ease: 'outQuad', onComplete: () => {} }); s.to(FX, { p: 1 }, dur * 1.6, { onComplete: () => fin(true) }); return;
+    case 'zoom nav in back': e.visible = true; e.alpha = 0; zoom(1.1, 1, dur * 1.6, 'outQuart'); s.to(e, { alpha: 1 }, dur * 1.2, { ease: 'outQuad' }); s.to(FX, { p: 1 }, dur * 1.6, { onComplete: () => fin(true) }); return;
+    case 'zoom nav out': zoom(1, 1.1, dur * 1.4, 'outQuart'); s.to(e, { alpha: 0 }, dur * 0.9, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'zoom nav out back': front(); zoom(1, 0.86, dur * 1.4, 'outQuart'); s.to(e, { alpha: 0 }, dur * 1.1, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    // card stack (follows navigation): the new page rises from the bottom over the old one, which sinks back a little and dims (like an iPhone sheet)
+    case 'stack in': front(); e.visible = true; e.alpha = 1; e.y = base.y + H; s.to(e, { y: base.y }, dur * 2.6, { ease: 'springSnappy', onComplete: () => fin(true) }); return;
+    case 'stack out': e._uiAnimUntil += dur; zoom(1, 0.92, dur * 2, 'outCubic'); s.to(e, { alpha: 0.35 }, dur * 2, { ease: 'outCubic', onComplete: () => fin(false) }); return;
+    case 'stack in back': e.visible = true; e.alpha = 0.35; zoom(0.92, 1, dur * 2, 'outCubic'); s.to(e, { alpha: 1 }, dur * 2, { ease: 'outCubic', onComplete: () => fin(true) }); return;
+    case 'stack out back': front(); s.to(e, { y: base.y + H }, dur * 1.5, { ease: 'inCubic', onComplete: () => fin(false) }); return;
+    // reveal from tap: the new page opens as a growing circle from where you tapped; Back closes it the same way
+    case 'reveal in': case 'reveal out back': {
+      const t = s.engine?.input?.lastDown, W = s.engine?.width || 400, HH = s.engine?.height || 700, cx = t ? t.x : W / 2, cy = t ? t.y : HH / 2;
+      const r = Math.hypot(Math.max(cx, W - cx), Math.max(cy, HH - cy)) + 20, inn = anim === 'reveal in';
+      front(); e.visible = true; e.alpha = 1; FX.clip = { kind: 'circle', x: cx, y: cy, r }; FX.p = inn ? 0 : 1;
+      s.to(FX, { p: inn ? 1 : 0 }, dur * (inn ? 2.2 : 1.6), { ease: inn ? 'outCubic' : 'inCubic', onComplete: () => fin(inn) }); return;
+    }
+    case 'reveal out': case 'wipe out': s.to(FX, { p: 1 }, dur * 2.2, { onComplete: () => fin(false) }); return; // stays put underneath until the new page covers it
+    case 'reveal in back': case 'wipe in back': e.visible = true; e.alpha = 1; fin(true); return;
+    // wipe (follows navigation): the new page is uncovered from the right edge; Back wipes it away to the right
+    case 'wipe in': case 'wipe out back': {
+      const inn = anim === 'wipe in'; front(); e.visible = true; e.alpha = 1; FX.clip = { kind: 'wipe' }; FX.p = inn ? 0 : 1;
+      s.to(FX, { p: inn ? 1 : 0 }, dur * (inn ? 2 : 1.5), { ease: inn ? 'inOutCubic' : 'inCubic', onComplete: () => fin(inn) }); return;
+    }
     case 'spring pop':
-      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.5; e.sy = base.sy * 0.5; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'springBouncy', onComplete: () => fin(true) }); }
-      else s.to(e, { sx: base.sx * 0.6, sy: base.sy * 0.6, alpha: 0 }, dur * 0.8, { ease: 'inBack', onComplete: () => fin(false) });
+      if (show) { e.visible = true; e.alpha = 0; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); zoom(0.5, 1, dur * 3, 'springBouncy', { onComplete: () => fin(true) }); }
+      else { zoom(1, 0.6, dur * 0.8, 'inBack'); s.to(e, { alpha: 0 }, dur * 0.8, { ease: 'inQuad', onComplete: () => fin(false) }); }
       return;
   }
   switch (anim) { // the newer entrances / exits
@@ -6363,8 +6558,8 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       else s.to(e, { rz: R + 180, sx: base.sx * 0.3, sy: base.sy * 0.3, alpha: 0 }, dur * 1.2, { ease: 'inBack', onComplete: () => fin(false) });
       return;
     case 'elastic pop':
-      if (show) { e.visible = true; e.alpha = 1; e.sx = base.sx * 0.2; e.sy = base.sy * 0.2; s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'outElastic', onComplete: () => fin(true) }); }
-      else s.to(e, { sx: base.sx * 1.15, sy: base.sy * 1.15, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
+      if (show) { e.visible = true; e.alpha = 1; zoom(0.2, 1, dur * 3, 'outElastic', { onComplete: () => fin(true) }); }
+      else { zoom(1, 1.15, dur, 'inQuad'); s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) }); }
       return;
     case 'swing in': // hangs from the top and swings into place
       if (show) { e.visible = true; e.alpha = 0; e.rz = R - 25; e.y = base.y - 30; s.to(e, { rz: R, y: base.y, alpha: 1 }, dur * 2.4, { ease: 'outElastic', onComplete: () => fin(true) }); }
@@ -6380,22 +6575,22 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
       return;
   }
   if (anim === 'zoom') { // pages that grow in and fade out a little larger
-    if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.92; e.sy = base.sy * 0.92; s.to(e, { sx: base.sx, sy: base.sy, alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => done?.() }); }
-    else s.to(e, { sx: base.sx * 1.06, sy: base.sy * 1.06, alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    if (show) { e.visible = true; e.alpha = 0; zoom(0.92, 1, dur, 'outCubic'); s.to(e, { alpha: 1 }, dur, { ease: 'outCubic', onComplete: () => fin(true) }); }
+    else { zoom(1, 1.06, dur, 'inQuad'); s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) }); }
     return;
   }
   if (show) {
     e.visible = true; e.alpha = 0;
     if (off) { e.x = base.x + (off.x || 0) * k; e.y = base.y + (off.y || 0) * k; s.to(e, { x: base.x, y: base.y }, dur, { ease: 'outCubic' }); }
-    if (anim === 'pop') { e.sx = base.sx * 0.6; e.sy = base.sy * 0.6; s.to(e, { sx: base.sx, sy: base.sy }, dur * 1.4, { ease: 'outBack' }); }
+    if (anim === 'pop') zoom(0.6, 1, dur * 1.4, 'outBack');
     s.to(e, { alpha: 1 }, dur, { ease: 'outQuad', onComplete: () => done?.() });
   } else {
     if (off) s.to(e, { x: base.x + (off.x || 0) * k, y: base.y + (off.y || 0) * k }, dur, { ease: 'inCubic' });
-    if (anim === 'pop') s.to(e, { sx: base.sx * 0.7, sy: base.sy * 0.7 }, dur, { ease: 'inBack' });
-    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
+    if (anim === 'pop') zoom(1, 0.7, dur, 'inBack');
+    s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => fin(false) });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'zoom (follows navigation)', 'card stack (follows navigation)', 'reveal from tap (follows navigation)', 'wipe (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
 const STAGGERS = ['none', 'rise one after another', 'fade one after another', 'pop one after another', 'slide in one after another'];
 /** A page's contents arrive one after another (after the page itself shows). */
 function staggerKids(s, e, how) {
@@ -8572,7 +8767,7 @@ registerBehavior('uiShowIf', {
     { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
     { key: 'value', label: 'Value', type: 'text', default: 'home' },
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
-    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
   ],
   create(p) {
@@ -8594,11 +8789,14 @@ registerBehavior('uiShowIf', {
         if (want !== shown) {
           shown = want;
           const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
-          if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
+          const st = s.settings, all = st.pageAnim && st.pageAnim !== 'as each page says' && p.var === (st.pageVar || 'page') && p.op === '=' ? st.pageAnim : null, anim = all || p.anim; // Game Settings › Motion › Page transitions
+          const NAV = { 'zoom (follows navigation)': 'zoom nav', 'card stack (follows navigation)': 'stack', 'reveal from tap (follows navigation)': 'reveal', 'wipe (follows navigation)': 'wipe' }[anim];
+          if (NAV) uiAnimate(s, e, want, `${NAV} ${want ? 'in' : 'out'}${fwd ? '' : ' back'}`, 0.24);
+          else if (anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
             uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
-          } else if (p.anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
-          else if (p.anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
-          else uiAnimate(s, e, want, p.anim, 0.22);
+          } else if (anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
+          else if (anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
+          else uiAnimate(s, e, want, anim, 0.22);
           if (want) staggerKids(s, e, p.stagger);
         }
       },
@@ -9095,6 +9293,7 @@ registerBehavior('uiScroll', {
     };
     return {
       uiAlways: true,
+      clipsKids: p.clip !== false, // (the editor cuts its contents off at its edges too)
       start(e, s) {
         collect(s, e); lay(e);
         e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
@@ -9325,22 +9524,31 @@ registerBehavior('uiInput', {
       start(e) { e.text ||= { ...TEXT_DEFAULTS, size: 18 }; color0 = e.text.color; },
       update(e, dt, s) {
         if (box) { const r = uiRect(s, e), k = uiK(s.engine.safe) || 1; box.style.left = (r.x - r.w / 2 + 12 * k) + 'px'; box.style.top = (r.y - r.h / 2) + 'px'; if (!e.visible || e._parentHidden) close(e, s, false); }
+        else if (p.kind === 'search' && valOf(s) !== '' && UK.taps(s, e).some((t) => { const b = UK.box(e); return UK.in(t, { x: b.x + b.w - 46, y: b.y, w: 46, h: b.h }); })) { s.setVar(p.var, ''); s.engine.vibrate(6); s.engine.input.taps.length = 0; } // the ✕ clears the search
         else if (e.visible && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y))) {
           if (p.style === 'in a pop-up box') { s.engine.input.reset(); askTextBox(s, { question: p.question, placeholder: p.placeholder, max: p.maxLength, value: valOf(s) }, (v) => { if (v != null) { commit(s, v); if (p.message) s.send(p.message); } }); }
           else open(e, s);
         }
         const v = valOf(s), empty = v === '' || (p.kind === 'number' && s.vars[p.var] == null);
-        e.text.value = box ? '' : empty ? p.placeholder : p.kind === 'password' ? '•'.repeat(v.length) : (p.kind === 'search' ? '🔍 ' : '') + v;
+        e.text.value = box ? '' : empty ? p.placeholder : p.kind === 'password' ? '•'.repeat(v.length) : v;
         e.text.color = empty && !box ? p.placeholderColor : color0;
+      },
+      drawUI(ctx, e, s) {
+        if (p.kind !== 'search' || s.engine.editing && !e.shape) return;
+        const b = UK.box(e), c = p.placeholderColor || '#8a93a8', isz = Math.min(18, b.h * 0.4);
+        glyph(ctx, 'search', b.x + 14 + isz / 2, b.cy, isz, c);
+        if (valOf(s) !== '' && !box) { ctx.fillStyle = withAlpha(c, 0.25); ctx.beginPath(); ctx.arc(b.x + b.w - 22, b.cy, 11, 0, Math.PI * 2); ctx.fill(); glyph(ctx, 'close', b.x + b.w - 22, b.cy, 11, c); }
       },
       destroy(e, s) { if (box) { box.remove(); box = null; } },
     };
   },
 });
 
+/** Editor previews: components that build their parts when you press Play draw a still picture of them in the Scene and UI views. */
+const previewText = (ctx, str, x, y, size, color, weight = 600, align = 'center', maxW) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(String(str), x, y, maxW); };
 /** List View: rows made from text, a list variable or numbers; scroll by dragging, tap a row to pick it. */
 registerBehavior('uiList', {
-  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The rows appear when you press Play.',
+  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The editor shows a preview of the rows.',
   params: [
     { key: 'source', label: 'Rows from', type: 'select', options: ['these items', 'a list variable', 'numbers 1 to N'], default: 'these items' },
     { key: 'items', label: 'Items (comma separated)', type: 'text', default: 'Sword, Shield, Potion, Map, Key, Bow, Lantern', showIf: { source: ['these items'] } },
@@ -9390,6 +9598,7 @@ registerBehavior('uiList', {
     };
     return {
       uiAlways: true,
+      clipsKids: p.clip !== false, // (the editor cuts its contents off at its edges too)
       start(e, s) {
         picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); };
         e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
@@ -9424,13 +9633,27 @@ registerBehavior('uiList', {
         }
       },
       destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || rows.length) return;
+        const { W, H, rh, gap, pad } = geo(e), x0 = e.x - W / 2, y0 = e.y - H / 2, items = itemsOf(s), rw = W - pad * 2, R = Math.min(+p.radius || 0, rh / 2), ts = +p.textSize || 17;
+        ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, W, H); ctx.clip();
+        if (!items.length) previewText(ctx, p.source === 'a list variable' ? `Rows from the list “${p.listVar}”` : 'No rows', e.x, e.y, 14, withAlpha(p.textColor || '#ffffff', 0.6));
+        items.forEach((it, i) => {
+          const cy = y0 + pad + rh / 2 + i * (rh + gap); if (cy - rh / 2 > y0 + H) return;
+          ctx.fillStyle = fillOf(i); UK.rr(ctx, e.x - rw / 2, cy - rh / 2, rw, rh, R); ctx.fill();
+          const vars = Object.assign(Object.create(s.vars), { item: it, i: i + 1 }), txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars), left = p.align === 'left';
+          previewText(ctx, txt, left ? e.x - rw / 2 + 16 : e.x, cy, ts, p.textColor || '#ffffff', 600, left ? 'left' : 'center', rw - 40);
+          if (p.arrow) previewText(ctx, '›', e.x + rw / 2 - 18, cy, ts + 8, p.textColor || '#ffffff', 500);
+        });
+        ctx.restore();
+      },
     };
   },
 });
 
 /** Segmented control: a row of options with a sliding highlight (Easy | Normal | Hard). */
 registerBehavior('uiSegmented', {
-  label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The options appear when you press Play.',
+  label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The editor shows a preview.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'mode', suggest: 'vars' },
     { key: 'options', label: 'Options (comma separated)', type: 'text', default: 'Easy, Normal, Hard' },
@@ -9463,13 +9686,19 @@ registerBehavior('uiSegmented', {
         const want = -W / 2 + seg * (i + 0.5); px += (want - px) * Math.min(1, dt * 16);
         if (pill) { pill.x = px; if (pill.local) pill.local.x = px; }
       },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || pill) return;
+        const o = opts(), { W, H, seg } = geo(e), r0 = Math.min(e.shape?.radius ?? 12, H / 2), k = clamp(Math.round(+p.start || 1) - 1, 0, Math.max(0, o.length - 1));
+        ctx.fillStyle = p.pillColor; UK.rr(ctx, e.x - W / 2 + seg * k + 3, e.y - H / 2 + 3, seg - 6, H - 6, Math.max(0, r0 - 3)); ctx.fill();
+        o.forEach((t, j) => previewText(ctx, t, e.x - W / 2 + seg * (j + 0.5), e.y, Math.min(17, Math.round(H * 0.4)), j === k ? p.pickedText : p.textColor, 700, 'center', seg - 8));
+      },
     };
   },
 });
 
 /** Stepper: − value + to change a number in steps; hold to repeat. */
 registerBehavior('uiStepper', {
-  label: 'Stepper', description: 'A − and + with the value in the middle (amounts, quantities, players). Hold a button to keep counting. The − and + appear when you press Play.',
+  label: 'Stepper', description: 'A − and + with the value in the middle (amounts, quantities, players). Hold a button to keep counting. The editor shows a preview.',
   params: [
     { key: 'var', label: 'Variable', type: 'text', default: 'amount', suggest: 'vars' },
     { key: 'min', label: 'Minimum', type: 'number', default: 0 },
@@ -9501,6 +9730,13 @@ registerBehavior('uiStepper', {
         if (!e.visible) return;
         for (const d of inp.downs) for (const [b, dir] of [[minus, -1], [plus, 1]]) if (b && hitTest(s, b, d.x, d.y)) { held = { id: d.id, b, dir }; change(s, dir * (+p.step || 1), b); next = s.time + 0.45; }
         if (held) { const ptr = inp.pointers.get(held.id); if (!ptr || !hitTest(s, held.b, ptr.x, ptr.y)) held = null; else if (s.time >= next) { change(s, held.dir * (+p.step || 1), held.b); next = s.time + 0.09; } }
+      },
+      drawUI(ctx, e, s) {
+        if (!s.engine.editing || minus) return;
+        const ex = e.extents(), W = (ex.hx || 70) * 2, H = (ex.hy || 22) * 2, bs = H - 8, R = Math.min(bs / 2, e.shape?.radius ?? 10);
+        for (const [t, x] of [['−', e.x - W / 2 + bs / 2 + 4], ['+', e.x + W / 2 - bs / 2 - 4]]) { ctx.fillStyle = p.buttonColor; UK.rr(ctx, x - bs / 2, e.y - bs / 2, bs, bs, R); ctx.fill(); previewText(ctx, t, x, e.y + 1, Math.round(bs * 0.6), '#ffffff', 800); }
+        const v = s.vars[p.var] ?? +p.start;
+        previewText(ctx, String(p.format || '{value}').replace(/\{value\}/g, formatNumber(+v || 0)), e.x, e.y, Math.round(H * 0.45), p.textColor, 800, 'center', W - bs * 2 - 16);
       },
     };
   },
@@ -11514,7 +11750,15 @@ registerBehavior('uiDataList', {
         const G = geo(e), { out, total } = layout(e, s), Ac = p.accent || '#3a7bfd', ck = checkKey(), txt = p.text || '#1c1f26', sub = p.sub || '#6b7280', t = now();
         if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 0); ctx.fill(); }
         ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.b.y, G.b.w, G.b.h); ctx.clip();
-        if (!out.length) { ctx.globalAlpha = Math.min(1, (t - firstT) * 3); UK.text(ctx, p.empty || '', G.b.cx, G.b.y + 60, { size: 15, weight: 600, color: sub }); ctx.globalAlpha = 1; }
+        if (!out.length) { // an empty list: a soft icon and a line of text (or "no results" while searching)
+          const q = p.search ? String(s.vars[p.search] ?? '').trim() : '', k = Ease.springSnappy(clamp((t - firstT) / 0.5, 0, 1)), cy = G.b.y + Math.min(110, G.b.h * 0.3);
+          ctx.save(); ctx.globalAlpha = Math.min(1, (t - firstT) * 3); ctx.translate(G.b.cx, cy); ctx.scale(0.8 + 0.2 * k, 0.8 + 0.2 * k);
+          ctx.fillStyle = withAlpha(Ac, 0.12); ctx.beginPath(); ctx.arc(0, 0, 38, 0, Math.PI * 2); ctx.fill(); glyph(ctx, q ? 'search' : 'list', 0, 0, 30, Ac); ctx.restore();
+          ctx.globalAlpha = Math.min(1, (t - firstT) * 3);
+          if (q) { UK.text(ctx, 'No results', G.b.cx, cy + 66, { size: 17, weight: 800, color: txt }); UK.text(ctx, `Nothing matches “${q}”`, G.b.cx, cy + 92, { size: 14, weight: 600, color: sub, maxW: G.b.w - 40 }); }
+          else UK.text(ctx, p.empty || '', G.b.cx, cy + 68, { size: 15, weight: 600, color: sub, maxW: G.b.w - 40 });
+          ctx.globalAlpha = 1;
+        }
         for (const it of out) {
           const an = it.head ? null : A.get(it.r.id) || { y: it.y, a: 1, g: 1 };
           const y = G.b.y + (an ? an.y : it.y) - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
@@ -16629,24 +16873,28 @@ export class Engine {
     else if (this.paused) {
       this.runUIOnly(s, dt);
       this.stepUITweens(s, dt); // menus keep animating while the game is paused
-      const t0 = inp.taps[0], ar = this.appRect;
-      if (s.fromApp && ar && t0 && t0.x >= ar.x && t0.x <= ar.x + ar.w && t0.y >= ar.y && t0.y <= ar.y + ar.h) { this.backToApp(); return; }
+      const hit = inp.taps.length && !ownScreen(s, 'paused') ? this.screenHit(inp.taps[0]) : null;
+      if (hit === 'app' && s.fromApp) { this.backToApp(); return; }
+      if (hit === 'restart') { this.audio.sfx('click'); this.vibrate(8); this.paused = false; this.restart(); return; }
+      if (hit === 'sound') { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); this.vibrate(8); return; }
+      if (hit === 'resume') this.vibrate(8);
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
     if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
     if (s.state === 'title') {
       this.runUIOnly(s, dt);
-      if (inp.pressed('tap') && !ownScreen(s, 'title') && !s.loading) { s.state = 'play'; this.audio.sfx('click'); }
+      if (inp.pressed('tap') && !ownScreen(s, 'title') && !s.loading) { s.state = 'play'; this.audio.sfx('click'); if (this.screenHit(inp.taps[0])) this.vibrate(8); }
       s.time += dt; this.stepEffects(dt); return;
     }
     if (s.state !== 'play') {
       s.time += dt; this.stepEffects(dt);
       this.runUIOnly(s, dt);
       if (s.time - s.endTime > 0.8 && inp.pressed('tap') && !ownScreen(s, s.state)) {
-        const t = inp.taps[0], r = this.shareRect, ar = this.appRect;
-        if (s.fromApp && ar && t && t.x >= ar.x && t.x <= ar.x + ar.w && t.y >= ar.y && t.y <= ar.y + ar.h) { this.backToApp(); return; }
-        if (r && t && t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h && !s.levelComplete) this.shareScore();
+        const hit = this.screenHit(inp.taps[0]);
+        if (hit === 'app' && s.fromApp) { this.backToApp(); return; }
+        if (hit) this.vibrate(8);
+        if (hit === 'share' && !s.levelComplete) this.shareScore();
         else if (s.levelComplete) this.nextLevel(); else this.restart();
       }
       return;
@@ -16686,6 +16934,12 @@ export class Engine {
     if (s.kids.length) s.syncHierarchy(false);
   }
 
+  /** Which button of the built-in title / pause / end screens a tap is on (null: somewhere else). */
+  screenHit(t) {
+    if (!t) return null;
+    const b = (this.screenBtns || []).find((r) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h);
+    return b ? b.id : null;
+  }
   /** Only the tweens moving UI (pages, popups, menus): used while the game is paused. */
   stepUITweens(s, dt) {
     let any = false;

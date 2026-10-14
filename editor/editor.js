@@ -3224,6 +3224,7 @@ function renderInspector() {
       fold('text:numbers', 'Numbers and fitting', [
       C('text.format', { label: 'Show numbers as', type: 'select', options: [['', 'Normal (1,234)'], ['short (1.2K)', 'Short (1.2K, 3.4M)'], ['whole number', 'Whole number'], ['2 decimals', '2 decimals'], ['time (m:ss)', 'Time (1:05)'], ['percent', 'Percent (0.5 → 50%)'], ['plain', 'Plain']], def: '' }),
       C('text.fit', { label: 'Shrink to fit width (0 = off)', type: 'number', def: 0, range: [0, 600], step: 10, infoText: 'Long names or big numbers get smaller instead of spilling out.' }),
+      String(j.text.value || '').includes('{') && j.ui && C('text.bump', { label: 'Pop when the value changes', type: 'bool', def: true, infoText: 'A score or coin count grows for a moment whenever it changes.' }),
       C('text.valign', { label: 'Lines grow', type: 'select', options: [['', 'From the middle'], ['top', 'Downward (first line here)'], ['bottom', 'Upward (last line here)']], def: '' }),
       ], !!(j.text.format || +j.text.fit || j.text.valign)),
       fold('text:box', 'Label box', [
@@ -3672,6 +3673,10 @@ function renderSceneSettings(box) {
   box.append(comp('Motion', [
     C('settings.motionSpeed', { label: 'Animation speed (1 = normal, 2 = twice as fast)', type: 'number', def: 1, step: 0.1, range: [0.25, 3] }),
     C('settings.reduceMotion', { label: 'Reduce motion', type: 'select', options: [['follow the phone', 'Follow the phone (Reduce Motion setting)'], ['always', 'Always (quick fades only)'], ['never', 'Never']], def: 'follow the phone' }),
+    C('settings.pageAnim', { label: 'Page transitions', type: 'select', def: 'as each page says', options: [['as each page says', 'As each page says (its Show If)'], ['push (iOS, follows navigation)', 'Push (iPhone style)'], ['shared axis (follows navigation)', 'Shared axis (Android style)'], ['zoom (follows navigation)', 'Zoom'], ['card stack (follows navigation)', 'Card stack (sheets)'], ['reveal from tap (follows navigation)', 'Reveal from where you tap'], ['wipe (follows navigation)', 'Wipe'], ['slide (follows navigation)', 'Slide'], ['fade through', 'Fade through'], ['fade', 'Fade'], ['none', 'None (instant)']],
+      infoText: 'One transition for every page (everything with Show If on the page variable): try them in ▶ Play. Back always plays it in reverse.' }),
+    h('div', { class: 'anim-demo' }, [['push', 'push (iOS, follows navigation)', 'Push'], ['axis', 'shared axis (follows navigation)', 'Shared axis'], ['zoom', 'zoom (follows navigation)', 'Zoom'], ['stack', 'card stack (follows navigation)', 'Card stack'], ['reveal', 'reveal from tap (follows navigation)', 'Reveal'], ['wipe', 'wipe (follows navigation)', 'Wipe']]
+      .map(([k, v, l]) => h('button', { type: 'button', class: 'ad ad-' + k + ((project.settings?.pageAnim || '') === v ? ' on' : ''), title: l, onclick: () => { (project.settings ||= {}).pageAnim = v; changed(); renderInspector(); toast(l + ' for every page: press ▶ Play and open a page'); } }, h('span', { class: 'ad-ph' }, h('i'), h('b')), h('small', {}, l)))),
     h('p', { class: 'desc' }, 'Page transitions, staggered lists, button springs, ripples, switches and sheets all follow these. People who turn on Reduce Motion on their phone get quick fades instead of movement.'),
   ], { icon: 'star', key: 's-motion' }));
   box.append(comp('Data', [dataEditor()], { icon: 'list', key: 's-data' }));
@@ -5366,7 +5371,7 @@ async function exportStoreProject() {
     const [icon, fg, splash, bg] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o), makeSplash({ ...o, splashBg: o.iconBg }, 1024, 0, false)].map((p) => p.then(dataBytes)));
     const zip = makeZip(storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }));
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-app.zip' }); document.body.append(a); a.click(); a.remove();
-    toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
+    noteBuild('store', zip.size); toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
   } catch (err) { toast('Could not make the app project: ' + err.message); }
 }
 /** Android's notification icon: a white bell on transparent (PNG). */
@@ -5386,12 +5391,12 @@ async function exportExpoProject() {
     const [icon, fg, splash] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o)].map((p) => p.then(dataBytes)));
     const zip = makeZip(expoFiles(so, { html: b.html, icon, fg, splash, notif: await notifIconPNG() }));
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-expo.zip' }); document.body.append(a); a.click(); a.remove();
-    toast(`Expo project ready (${kb(zip.size)}): npm install, then npx expo start to try it, or eas build. README.md has the steps.`);
+    noteBuild('expo', zip.size); toast(`Expo project ready (${kb(zip.size)}): npm install, then npx expo start to try it, or eas build. README.md has the steps.`);
   } catch (err) { toast('Could not make the Expo project: ' + err.message); }
 }
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
 async function exportHTML() {
-  try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
+  try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); noteBuild('html', b.html.length); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
   catch (err) { toast('Build failed: ' + err.message); }
 }
 /**
@@ -5428,7 +5433,7 @@ self.addEventListener('notificationclick', (e) => {
     const readme = `# ${title} (web app)\n\nUpload everything in this folder to a website with **https** (GitHub Pages, Netlify, itch.io, your own host).\nOpen it on a phone and choose **Add to Home Screen**: it then runs full screen, works offline and can show Phone Notifications.\n\n- index.html: the game\n- sw.js: offline play, and opening the game when a notification is tapped\n- manifest.webmanifest, icon-512.png: the Home Screen app\n\nNotifications in a browser only arrive while the game is open (on iPhone, only once it's on the Home Screen). For reminders that arrive while the game is closed, make an iOS / Android app: Build Settings › App stores.\n`;
     const zip = makeZip([{ name: 'index.html', data: html }, { name: 'sw.js', data: sw }, { name: 'manifest.webmanifest', data: JSON.stringify(manifest, null, 2) }, { name: 'icon-512.png', data: icon }, { name: 'README.md', data: readme }]);
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(title) + '-web.zip' }); document.body.append(a); a.click(); a.remove();
-    toast(`Web app ready (${kb(zip.size)}): upload the folder to an https website`);
+    noteBuild('web', zip.size); toast(`Web app ready (${kb(zip.size)}): upload the folder to an https website`);
   } catch (err) { toast('Could not make the web app: ' + err.message); }
 }
 async function shareBuild() {
@@ -5535,12 +5540,61 @@ function loadingDesigner(B, C, o, redo) {
   return wrap;
 }
 
+/** Remember the last build (Build Settings shows it, and warns when a store upload would reuse a version number). */
+function noteBuild(target, size) {
+  const B = (root.build ||= {}), v = B.version || BUILD_DEFAULTS.version;
+  B.last = { target, at: Date.now(), size, version: v };
+  if (target === 'store' || target === 'expo') B.lastStoreVersion = v;
+  changed(); if ($('.dialog .build-sec')) setTimeout(() => { const db = $('.dialog .db'), sc = db?.scrollTop; openBuildSettings(); if ($('.dialog .db')) $('.dialog .db').scrollTop = sc; }, 50);
+}
+const BUILD_TARGETS = [
+  ['html', 'newfile', 'Play file', 'One .html file. Send it or open it in any browser; works offline.', 'Build play file'],
+  ['web', 'globe', 'Website', 'A folder for itch.io, GitHub Pages or Netlify. Installs to the Home Screen.', 'Download website (.zip)'],
+  ['store', 'phone', 'App Store & Google Play', 'An app project that Codemagic builds and uploads for you.', 'Download app project (.zip)'],
+  ['expo', 'bolt', 'Expo app', 'An Expo project to build and publish with EAS.', 'Download Expo project (.zip)'],
+];
+const ICON_EMOJI = ['🎮', '🚀', '⭐', '👾', '🐱', '🐶', '🦄', '🐉', '🧩', '🏎️', '⚔️', '🏰', '💎', '🍀', '🎵', '📝', '✅', '💰', '📚', '❤️'];
+const ICON_BG = ['#3a8dff', '#6c5ce7', '#e84393', '#ff4757', '#ff7a1a', '#f5b700', '#22b573', '#00b8d9', '#111827', '#ffffff'];
+/** "1.4" → "1.5" (small update) or "2.0" (big update); "1.4.2" → "1.4.3". */
+function bumpVersion(v, big) {
+  const n = String(v || '1.0').split('.').map((x) => parseInt(x, 10) || 0);
+  if (big) return `${n[0] + 1}.0`;
+  if (n.length >= 3) { n[n.length - 1]++; return n.join('.'); }
+  return `${n[0]}.${(n[1] || 0) + 1}`;
+}
+/** What to look at before building: each check is ok / warn / bad (bad stops a store build), with a Fix where one helps. */
+function buildChecks(o, target, jump) {
+  const B = () => (root.build ||= {}), out = [], add = (lvl, text, fix) => out.push({ lvl, text, fix });
+  const name = (o.title || root.name || '').trim(), store = target === 'store' || target === 'expo';
+  if (!name || /^(untitled|my game|new game|my app|new app)( \d+)?$/i.test(name)) add('warn', `The name is still “${name || 'empty'}”`, ['Change', () => jump('title')]);
+  else add('ok', `Name: ${name}`);
+  if (!o.icon && (o.iconEmoji || '🎮') === '🎮' && hexOr(o.iconBg, '#3a8dff') === '#3a8dff') add('warn', 'Still the default icon', ['Pick one', () => jump('icon')]);
+  else add('ok', 'Icon chosen');
+  if (!/^\d+(\.\d+){0,2}$/.test(String(o.version || ''))) add('bad', `“${o.version}” is not a version number (use 1.0, 1.2 or 2.0.1)`, ['Use 1.0', () => { B().version = '1.0'; }]);
+  else if (store && B().lastStoreVersion && B().lastStoreVersion === o.version) add('warn', `Version ${o.version} was already sent to the stores: they need a new number for every upload`, [`Make it ${bumpVersion(o.version)}`, () => { B().version = bumpVersion(o.version); }]);
+  else add('ok', `Version ${o.version}`);
+  if ((target !== 'html') && !String(o.description || '').trim()) add('warn', 'No description (used for link previews and store listings)', ['Write one', () => jump('description')]);
+  const lv = levelList();
+  if (lv.length > 1 && +o.startLevel > 1) add('warn', `Starts at level ${o.startLevel} (handy for testing, but players start there too)`, ['Start at 1', () => { B().startLevel = '1'; }]);
+  const skipped = lv.filter((l) => l.buildSkip).length; if (skipped) add('warn', `${skipped} level${skipped > 1 ? 's are' : ' is'} left out`, ['Show', () => jump('levels')]);
+  if (o.showFps || o.showErrors) add('warn', 'Testing options are on (frame rate / errors on screen)', ['Turn off', () => { B().showFps = false; B().showErrors = false; }]);
+  if (!o.compress) add('warn', 'Compression is off: the file is about 3× bigger', ['Turn on', () => { B().compress = true; }]);
+  if (store) {
+    const so = storeOpts();
+    if (!validAppId(so.appId)) add('bad', 'The App ID needs to look like com.yourname.game', ['Use ' + suggestAppId(o.author, name), () => { B().appId = suggestAppId(o.author, name); }]);
+    else add('ok', `App ID: ${so.appId}${o.appId ? '' : ' (suggested)'}`, !o.appId ? ['Keep it', () => { B().appId = so.appId; }] : null);
+    if (target === 'store' && !so.ios && !so.android) add('bad', 'Pick iOS, Android or both', ['Both', () => { B().storeIOS = true; B().storeAndroid = true; }]);
+    if (!o.author) add('warn', 'No “Made by” name (shown in the stores)', ['Add it', () => jump('author')]);
+  }
+  return out;
+}
 function openBuildSettings() {
   saveNow();
   const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
-  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const SEC_ID = { App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'File size': 'size', Testing: 'testing' };
+  const sec = (title, ic, kids) => h('div', { class: 'build-sec', id: 'bs-' + (SEC_ID[title] || title) }, h('h4', {}, icon(ic), title), kids);
   const Cr = (path, spec) => { const el = C(path, spec); el.addEventListener('change', redo); return el; }; // a field that shows or hides others
   const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
   const report = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Working out the size…'));
@@ -5562,14 +5616,47 @@ function openBuildSettings() {
     } catch (err) { report.replaceChildren(h('div', { class: 'muted' }, 'Could not measure: ' + err.message)); }
   };
 
+  const target = BUILD_TARGETS.some((t) => t[0] === o.target) ? o.target : 'html', T = BUILD_TARGETS.find((t) => t[0] === target);
+  let showAll = false; try { showAll = localStorage.getItem('pocket.build.all') === '1'; } catch { /* storage unavailable */ }
+  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'] }[k] || []).includes(target); // sections that only matter for some kinds of build
+  const jump = (key) => { // scroll to a field (or section) and highlight it
+    const el = $(`.dialog [data-bkey="${key}"]`) || $(`.dialog #bs-${key}`); if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+    setTimeout(() => el.querySelector('input, select, textarea')?.focus({ preventScroll: true }), 350);
+    return true; // (a Fix that only shows where to look: no need to redraw)
+  };
+  const tag = (el, key) => { el?.setAttribute?.('data-bkey', key); return el; };
+  const checkBox = h('div', { class: 'build-check' });
+  const drawChecks = () => {
+    const list = buildChecks(buildOpts(), target, jump), bad = list.filter((c) => c.lvl === 'bad').length, warn = list.filter((c) => c.lvl === 'warn').length;
+    checkBox.replaceChildren(
+      h('div', { class: 'bc-head ' + (bad ? 'bad' : warn ? 'warn' : 'ok') }, icon(bad ? 'warn' : warn ? 'info' : 'check'), h('b', {}, bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix first` : warn ? `Ready, with ${warn} thing${warn > 1 ? 's' : ''} to look at` : 'Ready to build'),
+        h('button', { type: 'button', class: 'btn', onclick: () => { Object.assign(B(), { compress: true, showFps: false, showErrors: false, startLevel: '1', keepAwake: true, pauseHidden: true, backGesture: true, noMenu: true }); changed(); redo(); toast('Recommended settings on'); } }, icon('star'), 'Recommended')),
+      ...list.map((c) => h('div', { class: 'bc-row ' + c.lvl }, h('span', { class: 'bc-dot' }, c.lvl === 'ok' ? '✓' : c.lvl === 'bad' ? '✕' : '!'), h('span', { class: 'bc-t' }, c.text),
+        c.fix && h('button', { type: 'button', class: 'btn', onclick: () => { const r = c.fix[1](); if (r === undefined) { changed(); redo(); } } }, c.fix[0]))));
+  };
+  const last = o.last;
+  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject }[target];
+  const homeMock = h('div', { class: 'home-mock' }, ['light', 'dark'].map((m) => h('div', { class: 'hm ' + m }, h('img', { class: 'hm-ic', alt: '' }), h('small', {}, (o.shortName || o.title || root.name || 'Game').slice(0, 12)))));
+  makeIcon(o, 120).then((u) => homeMock.querySelectorAll('.hm-ic').forEach((i) => { i.src = u; }));
+  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', target === 'expo' ? 'Expo' : 'Stores'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
+
   openDialog('Build Settings', [
-    h('p', { class: 'desc' }, 'Your game becomes one HTML file that plays in any phone or computer browser, offline, and can be added to the Home Screen like an app.'),
+    h('h4', { class: 'bt-q' }, 'What are you making?'),
+    h('div', { class: 'build-targets' }, BUILD_TARGETS.map(([k, ic, label, desc]) => h('button', { type: 'button', class: 'bt' + (k === target ? ' on' : ''), onclick: () => { B().target = k; changed(); redo(); } }, icon(ic), h('b', {}, label), h('small', {}, desc)))),
+    last && h('p', { class: 'desc build-last' }, `Last built ${ago(last.at)}: ${BUILD_TARGETS.find((t) => t[0] === last.target)?.[2] || last.target}, version ${last.version}, ${kb(last.size || 0)}`),
+    checkBox,
+    h('div', { class: 'build-jump' }, sections.map(([k, l]) => h('button', { type: 'button', class: 'chip', onclick: () => jump(k) }, l)),
+      h('label', { class: 'chk bj-all' }, h('input', { type: 'checkbox', checked: showAll, onchange: (e) => { try { localStorage.setItem('pocket.build.all', e.target.checked ? '1' : '0'); } catch { /* storage unavailable */ } redo(); } }), 'Every setting')),
     sec('App', 'phone', [
       h('div', { class: 'build-app' }, preview, h('div', { class: 'build-app-t' }, h('b', {}, o.title || root.name), h('small', {}, [o.version && 'Version ' + o.version, o.author].filter(Boolean).join(' · ') || 'Pocket Engine game'))),
-      C('title', { label: 'Name', def: root.name }),
-      C('version', { label: 'Version' }),
-      C('author', { label: 'Made by' }),
-      C('description', { label: 'Description' }),
+      tag(C('title', { label: 'Name', def: root.name }), 'title'),
+      tag(C('version', { label: 'Version' }), 'version'),
+      h('div', { class: 'row' }, h('label', {}, 'Next version'), h('div', { class: 'pair' },
+        h('button', { type: 'button', class: 'btn', onclick: () => { B().version = bumpVersion(o.version); changed(); redo(); } }, `Small update → ${bumpVersion(o.version)}`),
+        h('button', { type: 'button', class: 'btn', onclick: () => { B().version = bumpVersion(o.version, true); changed(); redo(); } }, `Big → ${bumpVersion(o.version, true)}`))),
+      tag(C('author', { label: 'Made by' }), 'author'),
+      tag(C('description', { label: 'Description' }), 'description'),
       C('file', { label: 'File name', def: slug(o.title || root.name) }),
     ]),
     sec('Icon', 'image', [
@@ -5578,8 +5665,11 @@ function openBuildSettings() {
         h('button', { type: 'button', class: 'btn', onclick: () => pickImage((url) => { B().icon = url; changed(); redo(); }, 512) }, o.icon ? 'Change' : 'Choose image'),
         o.icon ? h('button', { type: 'button', class: 'btn', onclick: () => { B().icon = ''; changed(); redo(); } }, 'Clear') : null)),
       !o.icon && h('div', { class: 'row' }, h('label', {}, 'Emoji'), h('input', { type: 'text', value: o.iconEmoji, maxLength: 8, onchange: (e) => { B().iconEmoji = e.target.value.trim() || '🎮'; changed(); redo(); } })),
+      !o.icon && h('div', { class: 'icon-picks' }, ICON_EMOJI.map((em) => h('button', { type: 'button', class: 'ip' + ((o.iconEmoji || '🎮') === em ? ' on' : ''), onclick: () => { B().iconEmoji = em; changed(); redo(); } }, em))),
       h('div', { class: 'row' }, h('label', {}, 'Background'), h('input', { type: 'color', value: hexOr(o.iconBg, '#3a8dff').slice(0, 7), onchange: (e) => { B().iconBg = e.target.value; changed(); redo(); } })),
-      h('p', { class: 'desc' }, 'Shown on the Home Screen, in the browser tab and on the loading screen.'),
+      h('div', { class: 'icon-picks bg' }, ICON_BG.map((c) => h('button', { type: 'button', class: 'ip sw' + (hexOr(o.iconBg, '#3a8dff').toLowerCase() === c ? ' on' : ''), style: `background:${c}`, title: c, onclick: () => { B().iconBg = c; changed(); redo(); } }))),
+      homeMock,
+      h('p', { class: 'desc' }, 'Shown on the Home Screen (above, on a light and a dark wallpaper), in the browser tab and on the loading screen.'),
     ]),
     sec('Loading screen', 'clock', loadingDesigner(B, C, o, redo)),
     sec('Levels', 'layers', [
@@ -5595,7 +5685,7 @@ function openBuildSettings() {
       C('noMenu', { label: 'Block long-press menus and text selection', type: 'bool' }),
       h('p', { class: 'desc' }, `Plays ${{ portrait: 'in portrait', landscape: 'in landscape', any: 'either way up' }[orientationOf()]} (change it in Scene Settings). Fullscreen, pause, mute and save options are in Scene Settings too.`),
     ]),
-    sec('Web app', 'globe', [
+    want('web') && sec('Web app', 'globe', [
       h('p', { class: 'desc' }, 'How the game looks and behaves once it is added to the Home Screen (or opened in a browser).'),
       Cr('installable', { label: 'Can be added to the Home Screen', type: 'bool' }),
       o.installable !== false && [
@@ -5614,7 +5704,7 @@ function openBuildSettings() {
       C('lang', { label: 'Language code', def: 'en', placeholder: 'en, fr, es…' }),
       C('headHTML', { label: 'Extra code in <head> (advanced)', type: 'code', def: '', placeholder: '<script>…analytics…</script>', infoText: 'Pasted into every build as-is: analytics, fonts, meta tags. Only paste code you trust.' }),
     ]),
-    sec('App stores (iOS & Android)', 'phone', (() => {
+    want('stores') && sec('App stores (iOS & Android)', 'phone', (() => {
       const so = storeOpts(), idOk = validAppId(so.appId);
       return [
         h('p', { class: 'desc' }, 'Publish to the App Store and Google Play with Codemagic, a cloud build service. No Mac or Android Studio needed. Download the app project, put it on GitHub, open it on codemagic.io and start a build: README.md inside walks you through the one-time setup.'),
@@ -5655,13 +5745,14 @@ function openBuildSettings() {
       h('p', { class: 'desc' }, 'Handy while testing on another phone. Turn them off for the finished game.'),
     ]),
     h('div', { class: 'btns build-btns' },
-      h('button', { class: 'btn primary', onclick: exportHTML }, icon('download'), 'Build'),
-      h('button', { class: 'btn', onclick: shareBuild }, icon('external'), 'Share'),
+      h('button', { class: 'btn primary', onclick: () => { if (buildChecks(buildOpts(), target, jump).some((c) => c.lvl === 'bad')) { checkBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); return toast('Fix the red items first'); } go(); } }, icon('download'), T[4]),
+      target === 'html' && h('button', { class: 'btn', onclick: shareBuild }, icon('external'), 'Share'),
       h('button', { class: 'btn', onclick: testBuild }, icon('play'), 'Test')),
   ]);
+  drawChecks();
   // settings that change the look or size refresh the report when edited
   $('.dialog .db').addEventListener('change', () => {
-    if (root.build && !root.build.title) delete root.build.title; updateReport();
+    if (root.build && !root.build.title) delete root.build.title; updateReport(); drawChecks();
   });
   updateReport();
 }

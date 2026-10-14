@@ -1579,3 +1579,11 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .dt-table td { padding: 4px; border-top: 1px solid var(--line); }
 .dt-table td input, .dt-table td select { width: 100%; min-width: 90px; min-height: 34px; padding: 2px 8px; border-radius: 8px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); font-size: 14px; }
 .dt-table td input[type=checkbox] { width: 22px; min-width: 0; min-height: 0; height: 22px; }
+/* theme colour tokens in colour fields */
+.csw.tokbtn { width: 34px; min-width: 34px; height: 34px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); color: var(--accent, #4c8bd6); font-weight: 900; font-size: 16px; display: grid; place-items: center; }
+.tokval { align-items: center; gap: 6px; }
+.tokchip { flex: 1; display: flex; align-items: center; gap: 6px; min-height: 38px; padding: 4px 10px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); font-size: 14px; font-weight: 700; }
+.tokchip i { width: 16px; height: 16px; border-radius: 5px; border: 1px solid rgba(127,127,127,.5); flex: none; }
+.tokval > .csw:last-child { width: 34px; height: 34px; border-radius: 10px; background: var(--field); border: 1px solid var(--field-b); color: var(--text); }
+.tok-prev { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.tok-prev .tp { border-radius: 12px; padding: 10px; font-size: 13px; border: 1px solid var(--line); }

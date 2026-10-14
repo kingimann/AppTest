@@ -624,7 +624,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - **Conditions:** number of records, a record is open.
   - **Instructions:** add, change, delete or open a record, clear a collection, and data summary into a variable.
   - The **Data Value** node.
-- **UI & Menus › App:** Data List, Checklist, Record Form, Search Bar, Add Button (+), Edit and Delete Buttons, Record Text, Total / Count Text, App Page and App Bar (light).
+- **UI & Menus › App:** Data List, Checklist, Record Form, Search Bar, Add Button (+), Edit and Delete Buttons, Record Text, Total / Count Text, App Page, App Bar (light) and Spring Sheet.
 - Stretched UI can have its own top and bottom margins.
 - **From code:** `engine.data.add / rows / query / update / remove / stat / reset`.
 - **Games inside apps:** apps and games live in one project.
@@ -635,6 +635,19 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - New **Arcade** app type: three games, best scores, and a score list.
 - Data Lists, Record Forms and Data Summaries work in games too.
 - See the [Making apps guide](docs/guide/apps.md).
+
+### UI motion, light and dark mode
+
+- **Springs:** `scene.spring(obj, props, { feel: 'bouncy' })` and the eases `springGentle`, `springBouncy` and `springSnappy`.
+- **Buttons** squash and spring back with an ink ripple (*Feel*: spring, squash, jelly or none).
+- **Page transitions:** push (iOS), shared axis, fade through, spring pop and sheet. *Stagger* brings a page's children in one after another.
+- **Data Lists:** rows stagger in and glide when the order changes, with a press highlight, rubber-band ends, a fading scroll bar, ticks that pop, and swipe-delete with an **Undo snackbar**.
+- **Record Forms:** fields come in one by one; focus glow, sliding switches and choices, stars that fill, and a shake for a missing field.
+- **Spring Sheet:** a Bottom Sheet that springs up, with a drag handle, half and full stops, and flick to close.
+- **Theme colours** (`@bg`, `@card`, `@text`, `@accent`…) follow **light and dark mode**. The **@** button in every colour box picks one. *Game Settings › Theme & Dark Mode* chooses light, dark or follow the phone, and the accent colour.
+- The message `dark mode toggle` (or the variable `darkMode`) switches it while the app runs, and the phone remembers the choice. Every app template has a 🌙 button.
+- *Game Settings › Motion:* animation speed and **Reduce motion** (follows the phone's setting by default).
+- **Snackbars:** the *Show snackbar* instruction, or `scene.snackbar(text, 'Undo', fn)`.
 
 ### Squads: select and move many units (tactics and strategy)
 

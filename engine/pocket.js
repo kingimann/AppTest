@@ -368,6 +368,7 @@ export class Entity {
       const params = {};
       for (const p of def.params || []) params[p.key] = b[p.key] ?? paramDefault(p, !!this.mesh);
       for (const k of def.passthrough || []) if (b[k] !== undefined) params[k] = b[k]; // extra data a component keeps without an Inspector field
+      for (const k of Object.keys(params)) if (isTok(params[k])) { const raw = params[k]; Object.defineProperty(params, k, { get: () => tok(raw), set: (v) => { Object.defineProperty(params, k, { value: v, writable: true, enumerable: true, configurable: true }); }, enumerable: true, configurable: true }); } // theme colours follow light / dark
       inst = def.create(params, this) || {};
       inst.type = b.type; inst.params ||= params;
     }
@@ -636,6 +637,32 @@ export class Camera3D {
 // ============================================================================
 const PI = Math.PI, c1 = 1.70158, c2 = c1 * 1.525, c3 = c1 + 1, c4 = (2 * PI) / 3, c5 = (2 * PI) / 4.5;
 const bounceOut = (x) => { const n = 7.5625, d = 2.75; if (x < 1 / d) return n * x * x; if (x < 2 / d) return n * (x -= 1.5 / d) * x + 0.75; if (x < 2.5 / d) return n * (x -= 2.25 / d) * x + 0.9375; return n * (x -= 2.625 / d) * x + 0.984375; };
+/** Theme colours for apps (and any UI): write @bg, @card, @text… instead of a colour and it follows light / dark mode. */
+export const APP_PALETTES = {
+  light: { bg: '#f4f6fb', card: '#ffffff', text: '#1c1f26', sub: '#6b7280', line: '#e5e7eb', field: '#f2f4f7', bar: '#ffffff', accent: '#3a7bfd', onAccent: '#ffffff', danger: '#ef4444', good: '#10b981', shadow: 'rgba(15,23,42,0.10)', dim: 'rgba(0,0,0,0.45)' },
+  dark: { bg: '#0f1115', card: '#1b1e25', text: '#f3f4f6', sub: '#9ca3af', line: '#2a2f38', field: '#252a33', bar: '#16191f', accent: '#6ea0ff', onAccent: '#0b1020', danger: '#f87171', good: '#34d399', shadow: 'rgba(0,0,0,0.45)', dim: 'rgba(0,0,0,0.6)' },
+};
+export const THEME_TOKENS = Object.keys(APP_PALETTES.light);
+let PAL = APP_PALETTES.light, darkMQ = null;
+/** Is the app in dark mode? settings.appTheme (light / dark / follow the phone), or the variable darkMode when it is set. */
+export function isDark(s) {
+  const v = s?.vars?.darkMode;
+  if (v !== undefined && v !== '' && v !== null) return v === true || v === 1 || v === '1' || v === 'on' || v === 'yes' || v === 'dark';
+  const t = s?.settings?.appTheme || 'light';
+  if (t === 'dark') return true;
+  if (t === 'follow the phone') { if (darkMQ === null) try { darkMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : false; } catch { darkMQ = false; } return !!darkMQ?.matches; }
+  return false;
+}
+/** The palette for this frame (with the game's own accent, if it set one). */
+function setPalette(s) {
+  const base = isDark(s) ? APP_PALETTES.dark : APP_PALETTES.light, a = s?.settings?.appAccent;
+  PAL = a ? { ...base, accent: a } : base;
+}
+/** A colour, with theme tokens (@bg, @card, @text, @sub, @line, @field, @bar, @accent, @onAccent, @danger, @good, @shadow, @dim) replaced. */
+export function tok(c) { return typeof c === 'string' && c.charCodeAt(0) === 64 ? PAL[c.slice(1)] ?? c : c; }
+const isTok = (c) => typeof c === 'string' && c.charCodeAt(0) === 64;
+/** A damped spring as an ease: zeta = damping ratio (below 1 overshoots), w = stiffness. */
+function springEase(zeta, w) { const wd = w * Math.sqrt(1 - zeta * zeta); return (x) => (x >= 1 ? 1 : 1 - Math.exp(-zeta * w * x) * (Math.cos(wd * x) + (zeta * w / wd) * Math.sin(wd * x))); }
 export const Ease = {
   linear: (x) => x,
   inSine: (x) => 1 - Math.cos((x * PI) / 2), outSine: (x) => Math.sin((x * PI) / 2), inOutSine: (x) => -(Math.cos(PI * x) - 1) / 2,
@@ -654,6 +681,7 @@ export const Ease = {
 };
 Object.assign(Ease, {
   smoothStep: (x) => x * x * (3 - 2 * x),
+  springGentle: springEase(0.75, 9), springBouncy: springEase(0.42, 14), springSnappy: springEase(0.82, 15), // damped springs: settle softly, overshoot and bounce, or snap with a tiny overshoot
   spring: (x) => 1 - Math.cos(x * PI * 4.5) * Math.exp(-x * 6),
   flash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? 1 : x), // blinks between the start and the end while it moves
   inFlash: (x) => (x >= 1 ? 1 : Math.floor(x * 8) % 2 ? x * x : 0),
@@ -1428,6 +1456,36 @@ export class Scene {
   addVar(k, d = 1) { this.setVar(k, (+this.vars[k] || 0) + d); }
 
   after(sec, fn) { this.timers.push({ t: sec, fn, every: 0 }); }
+  /**
+   * Physics springs: move numbers on obj toward props with a real spring (interruptible: a new target keeps the speed it has).
+   * o: { stiffness 300, damping 24, mass 1, onRest }. Presets: o.feel = 'gentle' | 'bouncy' | 'snappy' | 'slow'.
+   */
+  spring(obj, props, o = {}) {
+    const F = { gentle: [170, 26], bouncy: [380, 14], snappy: [520, 38], slow: [90, 20] }[o.feel] || [o.stiffness ?? 300, o.damping ?? 24];
+    const L = (this.springs ||= []);
+    for (const [k, to] of Object.entries(props)) {
+      let sp = L.find((q) => q.obj === obj && q.k === k);
+      if (!sp) { sp = { obj, k, v: 0 }; L.push(sp); }
+      Object.assign(sp, { to: +to, stiffness: F[0], damping: F[1], mass: o.mass || 1, onRest: o.onRest, rest: false });
+      if (motionOf(this).reduced) { obj[k] = +to; sp.v = 0; } // reduce motion: jump there
+    }
+  }
+  /** A snackbar at the bottom of the screen with an optional action button: snackbar('Deleted', 'Undo', () => …). */
+  snackbar(text, action = '', fn = null, sec = 4) { this.snack = { text: String(text), action: String(action || ''), fn, t0: performance.now() / 1000, sec: Math.max(1, +sec || 4), out: 0 }; this.emit('snackbar', text); }
+  /** Stop springs on obj (all, or one property). */
+  stopSpring(obj, k) { if (this.springs) this.springs = this.springs.filter((q) => !(q.obj === obj && (!k || q.k === k))); }
+  stepSprings(dt) {
+    const L = this.springs; if (!L?.length) return;
+    const n = Math.max(1, Math.ceil(Math.min(dt, 0.1) / (1 / 120))), h = Math.min(dt, 0.1) / n;
+    for (const sp of L) {
+      let x = +sp.obj[sp.k] || 0;
+      for (let i = 0; i < n; i++) { const a = (-sp.stiffness * (x - sp.to) - sp.damping * sp.v) / sp.mass; sp.v += a * h; x += sp.v * h; }
+      const scale = Math.max(1, Math.abs(sp.to)) * 0.0005;
+      if (Math.abs(x - sp.to) < scale && Math.abs(sp.v) < scale * 20) { x = sp.to; sp.v = 0; sp.rest = true; }
+      sp.obj[sp.k] = x;
+    }
+    if (L.some((q) => q.rest)) { const done = L.filter((q) => q.rest); this.springs = L.filter((q) => !q.rest); for (const q of done) q.onRest?.(); }
+  }
   every(sec, fn) { this.timers.push({ t: sec, fn, every: sec }); }
   /** Quick tween (kept for older code): animate `to` over `duration`. */
   tween(target, to, duration = 0.3, ease = 'outCubic') { return this.to(target, to, duration, { ease }); }
@@ -2960,6 +3018,26 @@ export const SPRITE_ART = {
   'ui-sound': artIcon('M10 24h10l14-12v40L20 40H10zM42 22q8 10 0 20M48 16q14 16 0 32'),
   'ui-lock': artIcon('M18 30h28v24H18zM24 30v-8a8 8 0 0 1 16 0v8'),
   'ui-check': artIcon('M12 34l14 14 26-30'),
+  'ui-moon': artIcon('M44 40A20 20 0 0 1 24 14a20 20 0 1 0 26 26z'),
+  'ui-sun': artIcon('M32 6v6M32 52v6M6 32h6M52 32h6M13 13l4 4M47 47l4 4M13 51l4-4M47 17l4-4', '<circle cx="32" cy="32" r="11" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-calendar': artIcon('M10 16h44v38H10zM10 26h44M22 10v10M42 10v10'),
+  'ui-clock': artIcon('M32 18v15l10 6', '<circle cx="32" cy="32" r="23" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-edit': artIcon('M40 12l12 12-28 28H12V40zM34 18l12 12'),
+  'ui-trash': artIcon('M12 18h40M26 18v-6h12v6M16 18l3 36h26l3-36M28 28v18M36 28v18'),
+  'ui-filter': artIcon('M10 14h44L38 34v16l-12 6V34z'),
+  'ui-sort': artIcon('M22 10v44M12 44l10 10 10-10M42 54V10M32 20l10-10 10 10'),
+  'ui-share': artIcon('M32 40V10M20 22l12-12 12 12M14 34v20h36V34'),
+  'ui-camera': artIcon('M8 20h12l4-6h16l4 6h12v32H8z', '<circle cx="32" cy="35" r="9" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-image': artIcon('M8 12h48v40H8zM8 44l14-14 12 12 8-8 14 14', '<circle cx="42" cy="24" r="4" fill="#fff"/>'),
+  'ui-mail': artIcon('M8 14h48v36H8zM8 16l24 18 24-18'),
+  'ui-phone': artIcon('M22 6h20v52H22zM29 50h6'),
+  'ui-pin': artIcon('M32 58S14 38 14 26a18 18 0 0 1 36 0c0 12-18 32-18 32z', '<circle cx="32" cy="26" r="6" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-list': artIcon('M22 16h32M22 32h32M22 48h32', '<circle cx="11" cy="16" r="3.5" fill="#fff"/><circle cx="11" cy="32" r="3.5" fill="#fff"/><circle cx="11" cy="48" r="3.5" fill="#fff"/>'),
+  'ui-grid': artIcon('M10 10h18v18H10zM36 10h18v18H36zM10 36h18v18H10zM36 36h18v18H36z'),
+  'ui-chart': artIcon('M10 54h44M16 46V30M28 46V16M40 46V26M52 46V36'),
+  'ui-download': artIcon('M32 10v32M20 30l12 12 12-12M12 54h40'),
+  'ui-refresh': artIcon('M50 20a20 20 0 1 0 4 16M50 8v12H38'),
+  'ui-more': `<circle cx="14" cy="32" r="5" fill="#fff"/><circle cx="32" cy="32" r="5" fill="#fff"/><circle cx="50" cy="32" r="5" fill="#fff"/>`,
   'ui-coin': `<circle cx="32" cy="32" r="20" fill="none" stroke="#fff" stroke-width="5"/><path d="M32 22v20" stroke="#fff" stroke-width="5" stroke-linecap="round"/>`,
   'ui-gem': artIcon('M18 12h28l12 14-26 30L6 26zM6 26h52'),
   'ui-shop': artIcon('M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'),
@@ -3136,7 +3214,15 @@ function drawBar(ctx, e, b, k, v, max, time, alpha) {
     else { ctx.textAlign = 'center'; ctx.fillText(txt, 0, 1); }
   }
 }
+/** Draw an entity, with theme colour tokens in its shape and text resolved. */
 function drawEntity2D(ctx, e, vars, time) {
+  const sh = e.shape, tx = e.text;
+  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.shadow))) || (tx && (isTok(tx.color) || isTok(tx.stroke) || isTok(tx.bg))))) return drawEntity2DRaw(ctx, e, vars, time);
+  if (sh) e.shape = { ...sh, fill: tok(sh.fill), fill2: tok(sh.fill2), stroke: tok(sh.stroke), shadow: tok(sh.shadow) };
+  if (tx) e.text = { ...tx, color: tok(tx.color), stroke: tok(tx.stroke), bg: tok(tx.bg) };
+  try { return drawEntity2DRaw(ctx, e, vars, time); } finally { if (sh) e.shape = sh; if (tx) e.text = tx; }
+}
+function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
   ctx.translate(e.x, e.y);
@@ -3333,7 +3419,7 @@ export class Renderer2D {
   render(scene, engine) {
     const ctx = this.ctx, c = scene.camera, z = this.zoomFor(scene);
     ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
-    ctx.fillStyle = scene.background;
+    ctx.fillStyle = tok(scene.background);
     ctx.fillRect(0, 0, engine.width, engine.height);
     ctx.save();
     ctx.translate(engine.width / 2, engine.height / 2);
@@ -3783,7 +3869,7 @@ export class Renderer3D {
   render(scene, engine) {
     const gl = this.gl, c = scene.camera, w = this.canvas.width, h = this.canvas.height;
     gl.viewport(0, 0, w, h);
-    const bg = hexToRgb(scene.background);
+    const bg = hexToRgb(tok(scene.background));
     gl.clearColor(bg[0], bg[1], bg[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     let eye = c.position;
@@ -4105,8 +4191,9 @@ function applyStretch(e, W, H, safe) {
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
   // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
   const ml = e.marginLeft ?? m, mr = e.marginRight ?? m, mt = e.marginTop ?? m, mb = e.marginBottom ?? m;
-  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
+  const moving = e._uiAnimUntil > performance.now() / 1000; // a show / hide animation is moving it: keep the size up to date, leave the position to the animation
+  if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); if (!moving) e.x = (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2; }
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); if (!moving) e.y = (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2; }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -4133,6 +4220,21 @@ function drawMinimap(ctx, e, s) {
 /** Screen rectangle of a UI element: { x, y (center), w, h }. */
 function uiRect(s, e) { const eng = s.engine; return uiBox(e, eng.width, eng.height, eng.safe); }
 
+/** The snackbar: slides up above the bottom bars, waits, slides away; its action is a tappable word. */
+function drawSnackbar(ctx, s, engine, W, H) {
+  const k = s.snack; if (!k || engine.editing) { engine.snackRect = null; return; }
+  const t = performance.now() / 1000 - k.t0, outT = k.out || (t > k.sec ? k.t0 + k.sec : 0), o = outT ? (performance.now() / 1000 - outT) / 0.22 : 0;
+  if (o >= 1) { s.snack = null; engine.snackRect = null; return; }
+  const inK = Ease.springSnappy(Math.min(1, t / 0.45)), shown = Math.min(inK, 1 - Ease.inCubic(Math.min(1, o)));
+  ctx.save(); ctx.font = `600 15px ${THEME.font}`;
+  const aw = k.action ? ctx.measureText(k.action.toUpperCase()).width + 28 : 0, w = Math.min(W - 24, Math.max(220, ctx.measureText(k.text).width + aw + 40)), h = 50;
+  const bottom = H - (engine.safe.bottom || 0) - (engine.safe.bars?.bottom || 0) - 14, x = (W - w) / 2, y = bottom - h + (1 - shown) * (h + 30);
+  ctx.globalAlpha = Math.max(0, Math.min(1, shown * 1.4));
+  ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.shadowOffsetY = 4; ctx.fillStyle = '#262a33'; UK.rr(ctx, x, y, w, h, 12); ctx.fill(); ctx.shadowColor = 'transparent';
+  UK.text(ctx, k.text, x + 18, y + h / 2, { size: 15, weight: 600, color: '#fff', align: 'left', maxW: w - aw - 30 });
+  if (k.action) { UK.text(ctx, k.action.toUpperCase(), x + w - 16, y + h / 2, { size: 14, weight: 800, color: '#8ab4ff', align: 'right' }); engine.snackRect = { x: x + w - aw - 6, y, w: aw + 6, h }; } else engine.snackRect = null;
+  ctx.restore();
+}
 /** Does the game have its own UI for this screen (title, paused, over, win)? Then the built-in one steps aside. */
 function ownScreen(scene, screen) {
   if (scene.settings.customScreens) return true;
@@ -4171,6 +4273,7 @@ function renderUI(engine, scene) {
     }
     if (V) ctx.restore();
   }
+  drawSnackbar(ctx, scene, engine, W, H);
   engine.notifier?.draw(ctx); // notifications sit above the game's UI (and show in the editor's Test)
   ctx.setTransform(engine.dpr, 0, 0, engine.dpr, 0, 0);
   if (engine.editing) return;
@@ -6193,15 +6296,59 @@ registerBehavior('uiSlider', {
 const uiTapped = (s, e) => e.visible && !e._parentHidden && !e._clipHidden && s.engine.input.taps.some((t) => hitTest(s, e, t.x, t.y));
 const uiKids = (s, e) => s.entities.filter((q) => q.parentEnt === e && q.ui && !q.dead);
 const sameVal = (a, b) => (a == null ? '' : String(a)) === (b == null ? '' : String(b));
+/** Draw e and everything inside it last within their layers (a page sliding over another). */
+function raiseTree(s, e) {
+  const L = s.entities, inTree = (q) => { for (let p = q, n = 0; p && n < 60; p = p.parentEnt, n++) if (p === e) return true; return false; };
+  const tree = L.filter(inTree); if (!tree.length) return;
+  const rest = L.filter((q) => !tree.includes(q));
+  for (const q of tree) { let i = rest.length; while (i > 0 && (rest[i - 1].layer || 0) > (q.layer || 0)) i--; rest.splice(i, 0, q); }
+  L.length = 0; L.push(...rest);
+}
+/** Game Settings › Motion: how fast UI animations play, and whether to keep motion to a minimum (the phone's "Reduce motion"). */
+let reducedMQ = null;
+function motionOf(s) {
+  const st = s?.settings || {}, sp = +st.motionSpeed > 0 ? +st.motionSpeed : 1;
+  if (reducedMQ === null) try { reducedMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : false; } catch { reducedMQ = false; }
+  const reduced = st.reduceMotion === 'always' || ((st.reduceMotion || 'follow the phone') === 'follow the phone' && !!reducedMQ?.matches);
+  return { k: 1 / sp, reduced };
+}
 /** Show or hide a UI element with a little animation. */
 function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
   s.killTweens(e, true);
+  const M = motionOf(s); dur *= M.k;
+  if (M.reduced && anim !== 'none') { anim = 'fade'; dur = Math.min(dur, 0.12); } // reduce motion: a quick fade instead of moving things
+  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; e._uiAnimUntil = 0; done?.(); return; }
+  e._uiAnimUntil = performance.now() / 1000 + dur * 3.5 + 0.15; // stretched pages keep still for the stretch layout meanwhile
   const k = 1;
-  if (anim === 'none' || dur <= 0) { e.visible = show; e.alpha = 1; done?.(); return; }
   const base = (e._animBase ||= { x: e.x, y: e.y, sx: e.sx, sy: e.sy });
   const off = { 'slide from right': { x: dist }, 'slide from left': { x: -dist }, 'slide from bottom': { y: dist }, 'slide from top': { y: -dist } }[anim];
   const R = (e._animBase.rz ??= e.rz || 0);
   const fin = (ok) => { e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; e.rz = R; if (!ok) e.visible = false; done?.(); };
+  const H = (s.engine?.height || 700) / (uiK(s.engine?.safe) || 1);
+  const front = () => queueMicrotask(() => raiseTree(s, e)); // (after this frame's updates) the page that moves over the other one draws on top (with everything inside it)
+  const fin2 = fin;
+  switch (anim) { // phone-style page transitions (uiShowIf passes the direction)
+    case 'push in': front(); e.visible = true; e.alpha = 1; e.x = base.x + dist; s.to(e, { x: base.x }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(true) }); return;
+    case 'push in back': e.visible = true; e.alpha = 0.4; e.x = base.x - dist * 0.3; s.to(e, { x: base.x, alpha: 1 }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(true) }); return;
+    case 'push out': s.to(e, { x: base.x - dist * 0.3, alpha: 0.35 }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(false) }); return;
+    case 'push out back': front(); s.to(e, { x: base.x + dist }, dur * 1.5, { ease: 'outQuart', onComplete: () => fin2(false) }); return;
+    case 'sheet (from bottom)':
+      if (show) { front(); e.visible = true; e.alpha = 1; e.y = base.y + H; s.to(e, { y: base.y }, dur * 2.4, { ease: 'springSnappy', onComplete: () => fin2(true) }); }
+      else { front(); s.to(e, { y: base.y + H }, dur * 1.2, { ease: 'inCubic', onComplete: () => fin2(false) }); }
+      return;
+    case 'fade through': // Material: the old page fades quickly, then the new one fades and grows in
+      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.94; e.sy = base.sy * 0.94; s.to(e, { alpha: 1, sx: base.sx, sy: base.sy }, dur * 1.1, { ease: 'outCubic', delay: dur * 0.4, onComplete: () => fin(true) }); }
+      else s.to(e, { alpha: 0 }, dur * 0.4, { ease: 'linear', onComplete: () => fin(false) });
+      return;
+    case 'shared axis in': e.visible = true; e.alpha = 0; e.x = base.x + 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
+    case 'shared axis in back': e.visible = true; e.alpha = 0; e.x = base.x - 36; s.to(e, { x: base.x, alpha: 1 }, dur * 1.3, { ease: 'outCubic', delay: dur * 0.25, onComplete: () => fin(true) }); return;
+    case 'shared axis out': s.to(e, { x: base.x - 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'shared axis out back': s.to(e, { x: base.x + 36, alpha: 0 }, dur * 0.7, { ease: 'inQuad', onComplete: () => fin(false) }); return;
+    case 'spring pop':
+      if (show) { e.visible = true; e.alpha = 0; e.sx = base.sx * 0.5; e.sy = base.sy * 0.5; s.to(e, { alpha: 1 }, dur * 0.6, { ease: 'outQuad' }); s.to(e, { sx: base.sx, sy: base.sy }, dur * 3, { ease: 'springBouncy', onComplete: () => fin(true) }); }
+      else s.to(e, { sx: base.sx * 0.6, sy: base.sy * 0.6, alpha: 0 }, dur * 0.8, { ease: 'inBack', onComplete: () => fin(false) });
+      return;
+  }
   switch (anim) { // the newer entrances / exits
     case 'drop in': // falls from above and bounces
       if (show) { e.visible = true; e.alpha = 1; e.y = base.y - dist; s.to(e, { y: base.y }, dur * 2.2, { ease: 'outBounce', onComplete: () => fin(true) }); }
@@ -6248,7 +6395,23 @@ function uiAnimate(s, e, show, anim = 'fade', dur = 0.22, done, dist = 220) {
     s.to(e, { alpha: 0 }, dur, { ease: 'inQuad', onComplete: () => { e.visible = false; e.alpha = 1; e.x = base.x; e.y = base.y; e.sx = base.sx; e.sy = base.sy; done?.(); } });
   }
 }
-const SHOW_ANIMS = ['none', 'fade', 'pop', 'zoom', 'slide (follows navigation)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const SHOW_ANIMS = ['none', 'fade', 'pop', 'spring pop', 'zoom', 'slide (follows navigation)', 'push (iOS, follows navigation)', 'shared axis (follows navigation)', 'fade through', 'sheet (from bottom)', 'slide from right', 'slide from left', 'slide from bottom', 'slide from top', 'drop in', 'flip', 'spin in', 'elastic pop', 'swing in', 'rise', 'stretch'];
+const STAGGERS = ['none', 'rise one after another', 'fade one after another', 'pop one after another', 'slide in one after another'];
+/** A page's contents arrive one after another (after the page itself shows). */
+function staggerKids(s, e, how) {
+  if (!how || how === 'none' || motionOf(s).reduced) return;
+  const kids = uiKids(s, e).filter((q) => q.visible !== false).sort((a, b) => (a.y - b.y) || (a.x - b.x)), k = motionOf(s).k;
+  kids.slice(0, 24).forEach((q, i) => {
+    s.killTweens(q, true);
+    const b = (q._stagBase ||= { x: q.x, y: q.y, sx: q.sx, sy: q.sy }), d = (0.06 + i * 0.045) * k, o = { delay: d, ease: 'outCubic' };
+    Object.assign(q, b); // an interrupted stagger starts from the real place
+    q.alpha = 0;
+    if (how.startsWith('rise')) { q.y = b.y + 18; s.to(q, { y: b.y }, 0.4 * k, o); }
+    else if (how.startsWith('pop')) { q.sx = b.sx * 0.85; q.sy = b.sy * 0.85; s.to(q, { sx: b.sx, sy: b.sy }, 0.55 * k, { ...o, ease: 'springBouncy' }); }
+    else if (how.startsWith('slide')) { q.x = b.x + 40; s.to(q, { x: b.x }, 0.4 * k, o); }
+    s.to(q, { alpha: 1 }, 0.3 * k, o);
+  });
+}
 
 registerBehavior('navItem', {
   label: 'Nav Item (tab)', description: 'A tab or menu entry: tap it to switch pages (it sets a variable, e.g. page = home). It lights up while its page is showing. Use it in bottom navigation bars, tab bars, side menus and option groups.',
@@ -8409,7 +8572,8 @@ registerBehavior('uiShowIf', {
     { key: 'op', label: 'Is', type: 'select', options: ['=', '≠', '>', '<', '≥', '≤'], default: '=' },
     { key: 'value', label: 'Value', type: 'text', default: 'home' },
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
-    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade' },
+    { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
+    { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
   ],
   create(p) {
     let shown = null;
@@ -8429,10 +8593,13 @@ registerBehavior('uiShowIf', {
         const want = test(s.vars[p.var]);
         if (want !== shown) {
           shown = want;
+          const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
           if (p.anim === 'slide (follows navigation)') { // forward: the new page comes in from the right and the old one leaves left; Back reverses it
-            const fwd = s.navDirection() > 0, w = uiRect(s, e).w / (uiK(s.engine.safe) || 1);
             uiAnimate(s, e, want, want ? (fwd ? 'slide from right' : 'slide from left') : (fwd ? 'slide from left' : 'slide from right'), 0.3, null, Math.max(120, w));
-          } else uiAnimate(s, e, want, p.anim, 0.22);
+          } else if (p.anim === 'push (iOS, follows navigation)') uiAnimate(s, e, want, (want ? 'push in' : 'push out') + (fwd ? '' : ' back'), 0.24, null, Math.max(120, w));
+          else if (p.anim === 'shared axis (follows navigation)') uiAnimate(s, e, want, (want ? 'shared axis in' : 'shared axis out') + (fwd ? '' : ' back'), 0.24);
+          else uiAnimate(s, e, want, p.anim, 0.22);
+          if (want) staggerKids(s, e, p.stagger);
         }
       },
     };
@@ -8628,6 +8795,68 @@ registerBehavior('uiPopup', {
         else if (p.tapCloses && timer > 0.2 && uiTapped(s, e)) inst.set(e, s, false);
       },
       destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+    return inst;
+  },
+});
+
+/** Bottom Sheet: a panel that slides up from the bottom with a spring, can be dragged to resize or dismiss, and dims what's behind. */
+registerBehavior('uiSheet', {
+  label: 'Bottom Sheet', description: 'A panel that slides up from the bottom of the screen with a spring (like Maps or Music). Drag its handle to pull it up, down or away; tapping outside or Back closes it. Put buttons, lists and text inside it.',
+  params: [
+    { key: 'openOn', label: 'Open on message', type: 'text', default: 'open sheet', suggest: 'messages' },
+    { key: 'closeOn', label: 'Close on message', type: 'text', default: 'close sheet', suggest: 'messages' },
+    { key: 'startOpen', label: 'Start open', type: 'bool', default: false },
+    { key: 'stops', label: 'Stops at', type: 'select', options: ['full height', 'half, then full'], default: 'full height', info: { 'half, then full': 'Opens half way; drag it up for all of it.' } },
+    { key: 'dim', label: 'Dim behind and tap outside closes', type: 'bool', default: true },
+    { key: 'handle', label: 'Drag handle', type: 'bool', default: true },
+    { key: 'dragAnywhere', label: 'Drag anywhere on it (not just the handle)', type: 'bool', default: false },
+    { key: 'message', label: 'Closing sends message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'handleColor', label: 'Handle', type: 'color', default: 'rgba(0,0,0,0.22)', group: 'Colours' },
+  ],
+  create(p) {
+    const st = { off: 1 }, dim = { e: null, a: 0 };
+    let open = false, base = null, drag = null, vel = 0, lastY = 0;
+    const H = (e) => e.extents().hy * 2;
+    const half = () => (p.stops === 'half, then full' ? 0.5 : 0);
+    const go = (s, e, to, o = {}) => { s.spring(st, { off: to }, o.fast ? { stiffness: 500, damping: 40 } : { stiffness: 360, damping: 30 }); };
+    const inst = {
+      uiAlways: true,
+      get open() { return open; },
+      set(e, s, want) {
+        if (want === open) return; open = want;
+        go(s, e, want ? half() : 1.08, { fast: !want });
+        if (want) { e.visible = true; s.modal = e; } else { if (s.modal === e) s.modal = null; if (p.message) s.send(p.message); }
+        s.engine.vibrate(want ? 8 : 4);
+      },
+      start(e, s) {
+        base = e.y; e._dismiss = () => inst.set(e, s, false);
+        if (p.startOpen) { open = true; st.off = half(); s.modal = e; } else { st.off = 1.08; e.visible = false; }
+        s.on('message', (m) => { if (e.dead) return; if (m === p.openOn) inst.set(e, s, true); else if (m === p.closeOn) inst.set(e, s, false); else if (m === p.openOn + ' toggle') inst.set(e, s, !open); });
+      },
+      update(e, dt, s) {
+        if (s.engine.editing) { e.y = base ?? e.y; return; }
+        const h = H(e), b = UK.box(e);
+        // drag the handle (or anywhere): follow the finger, then snap by where it ended and how fast it moved
+        if (open && !drag) for (const d of UK.downs(s, e)) if (UK.in(d, b) && (p.dragAnywhere || d.y < b.y + 44)) { drag = { id: d.id, y0: d.y, o0: st.off }; s.stopSpring(st); vel = 0; lastY = d.y; break; }
+        if (drag) {
+          const q = UK.ptr(s, e, drag.id);
+          if (q) { const o = drag.o0 + (q.y - drag.y0) / h; st.off = o < 0 ? o * 0.25 : o; vel = vel * 0.6 + ((q.y - lastY) / Math.max(dt, 1 / 120)) * 0.4; lastY = q.y; s.engine.input.taps.length = 0; }
+          else {
+            drag = null; const stops = [half(), 0].filter((v, i, a) => a.indexOf(v) === i);
+            if (vel > 900 || st.off > (stops[0] + 1) / 2 + 0.08) inst.set(e, s, false);
+            else if (vel < -900) go(s, e, 0); else go(s, e, stops.reduce((a, v) => (Math.abs(v - st.off) < Math.abs(a - st.off) ? v : a), stops[0]));
+          }
+        }
+        e.y = base + st.off * h;
+        if (!open && st.off >= 1.07 && !drag) e.visible = false;
+        if (p.dim) { dim.e = e; dim.a = 0.5 * clamp(1 - st.off, 0, 1); if (dim.a > 0.005) s.uiDim = dim; else if (s.uiDim === dim) s.uiDim = null; }
+      },
+      drawUI(ctx, e, s) {
+        if (p.handle === false) return;
+        const b = UK.box(e); ctx.fillStyle = p.handleColor || 'rgba(0,0,0,0.22)'; UK.rr(ctx, b.cx - 20, b.y + 8, 40, 5, 3); ctx.fill();
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; if (s.uiDim === dim) s.uiDim = null; },
     };
     return inst;
   },
@@ -11204,8 +11433,10 @@ registerBehavior('uiDataList', {
     ...UI_COMMON,
   ],
   create(p) {
-    let scroll = 0, drag = null, swipe = null, swX = {}, flick = 0, gone = new Map();
+    let scroll = 0, drag = null, swX = {}, flick = 0, gone = new Map(), seen = false, firstT = 0, pressId = null, scrollT = -9, lastScroll = 0;
+    const A = new Map(), checkAt = {}; // per row: shown y / alpha / grow; when a box was ticked
     const SAMPLE = [{ id: 'a', title: 'Buy milk', done: false, note: 'Today' }, { id: 'b', title: 'Call Sam', done: true, note: 'Tomorrow' }, { id: 'c', title: 'Book flights', done: false, note: 'Friday' }];
+    const now = () => performance.now() / 1000;
     const geo = (e) => { const b = UK.box(e); return { b, rh: Math.max(30, +p.rowH || 64), gap: +p.gap || 0 }; };
     const rowsOf = (s) => {
       const D = s.engine.data, def = D.def(p.collection);
@@ -11222,61 +11453,109 @@ registerBehavior('uiDataList', {
       return { out, total: y };
     };
     const checkKey = () => (p.check ? fieldKey(p.check) : '');
+    /** Rows glide to their places: they arrive one after another, new ones grow in, the rest slide to fill gaps. */
+    const animate = (s, out, dt) => {
+      const t = now(), M = motionOf(s), k = M.reduced ? 1 : Math.min(1, dt * 13 / M.k);
+      let i = 0;
+      for (const it of out) {
+        if (it.head) continue;
+        let a = A.get(it.r.id);
+        if (!a) { const first = t - firstT < 0.3; a = first && !M.reduced ? { y: it.y + 28, a: 0, g: 1, at: t + i * 0.045 * M.k } : { y: it.y, a: M.reduced ? 1 : 0, g: M.reduced ? 1 : 0, at: t }; A.set(it.r.id, a); }
+        if (t >= a.at) { a.y += (it.y - a.y) * k; a.a += (1 - a.a) * k; a.g += (1 - a.g) * Math.min(1, dt * 9 / M.k); }
+        i++;
+      }
+      if (A.size > out.length + 20) for (const id of [...A.keys()]) if (!out.some((q) => q.r?.id === id)) A.delete(id);
+    };
+    const del = (s, id) => { // delete, with Undo
+      const D = s.engine.data, rows = D.rows(p.collection), rec = rows.find((r) => r.id === id); if (!rec) return;
+      D.remove(p.collection, id);
+      s.snackbar?.(`Deleted “${String(rec[fieldsOf(D.def(p.collection))[0]?.key] ?? '').slice(0, 24) || 'item'}”`, 'Undo', () => { if (!D.get(p.collection, rec.id)) { D.rows(p.collection).push(rec); D.changed(p.collection, 'added', rec); } });
+    };
     return {
       uiAlways: true,
       update(e, dt, s) {
+        const live = UK.live(s, e) || s.engine.editing;
+        if (live && !seen) { A.clear(); firstT = now(); scroll = 0; } seen = live;
         const G = geo(e), { out, total } = layout(e, s), maxS = Math.max(0, total - G.b.h + 12);
-        for (const d of UK.downs(s, e)) if (UK.in(d, G.b)) { drag = { id: d.id, x0: d.x, y0: d.y, s0: scroll, row: out.find((q) => !q.head && d.y >= G.b.y + q.y - scroll && d.y < G.b.y + q.y - scroll + q.h) || null, axis: '' }; flick = 0; }
+        animate(s, out, dt);
+        const rowAt = (y) => out.find((q) => !q.head && y >= G.b.y + q.y - scroll && y < G.b.y + q.y - scroll + q.h) || null;
+        for (const d of UK.downs(s, e)) if (UK.in(d, G.b)) { drag = { id: d.id, x0: d.x, y0: d.y, s0: scroll, row: rowAt(d.y), axis: '' }; flick = 0; pressId = drag.row?.r.id ?? null; }
         if (drag) {
           const q = UK.ptr(s, e, drag.id);
           if (q) {
             const dx = q.x - drag.x0, dy = q.y - drag.y0;
-            if (!drag.axis && Math.hypot(dx, dy) > 10) drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && p.swipeDelete !== false && drag.row ? 'x' : 'y';
-            if (drag.axis === 'y') { const ns = clamp(drag.s0 - dy, -40, maxS + 40); flick = (ns - scroll) / Math.max(dt, 1 / 120); scroll = ns; }
+            if (!drag.axis && Math.hypot(dx, dy) > 10) { drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && p.swipeDelete !== false && drag.row ? 'x' : 'y'; pressId = null; }
+            if (drag.axis === 'y') { const ns = clamp(drag.s0 - dy, -60, maxS + 60), over = ns < 0 ? -ns : ns > maxS ? ns - maxS : 0; const ns2 = over ? (ns < 0 ? -over * 0.5 : maxS + over * 0.5) : ns; flick = (ns2 - scroll) / Math.max(dt, 1 / 120); scroll = ns2; scrollT = now(); } // rubber band past the ends
             if (drag.axis === 'x') swX[drag.row.r.id] = Math.min(0, dx);
           } else {
             if (drag.axis === 'x') { const id = drag.row.r.id; if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else swX[id] = 0; }
-            drag = null;
+            drag = null; pressId = null;
           }
-        } else { scroll += flick * dt; flick *= Math.pow(0.04, dt); if (Math.abs(flick) < 5) flick = 0; scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12); }
+        } else {
+          scroll += flick * dt; flick *= Math.pow(0.03, dt); if (Math.abs(flick) < 5) flick = 0; else scrollT = now();
+          scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12);
+        }
+        if (Math.abs(scroll - lastScroll) > 0.5) { lastScroll = scroll; s.emit('uiScroll', 0, e, maxS ? scroll / maxS : 0); }
         for (const id of Object.keys(swX)) if (!drag || drag.row?.r.id !== id) { swX[id] *= Math.pow(0.001, dt); if (Math.abs(swX[id]) < 0.5) delete swX[id]; }
-        for (const [id, t] of gone) { const k = t + dt * 4; if (k >= 1) { gone.delete(id); s.engine.data.remove(p.collection, id); } else gone.set(id, k); }
+        for (const [id, t] of gone) { const k = t + dt * 4; if (k >= 1) { gone.delete(id); del(s, id); } else gone.set(id, k); }
         // taps: the checkbox, else open the row
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, G.b)) continue;
-          const row = out.find((q) => !q.head && t.y >= G.b.y + q.y - scroll && t.y < G.b.y + q.y - scroll + q.h); if (!row || s.engine.editing) continue;
+          const row = rowAt(t.y); if (!row || s.engine.editing) continue;
           UK.tap(s, p);
           const ck = checkKey();
-          if (ck && t.x < G.b.x + 8 + G.rh * 0.75) { s.engine.data.update(p.collection, row.r.id, { [ck]: !truthy(row.r[ck]) }); continue; }
+          if (ck && t.x < G.b.x + 8 + G.rh * 0.75) { checkAt[row.r.id] = now(); s.engine.data.update(p.collection, row.r.id, { [ck]: !truthy(row.r[ck]) }); continue; }
           openRecord(s, p.collection, row.r);
           if (p.openPage) s.navTo(p.openPage);
           if (p.message) s.send(p.message);
         }
       },
       drawUI(ctx, e, s) {
-        const G = geo(e), { out } = layout(e, s), A = p.accent || '#3a7bfd', ck = checkKey(), txt = p.text || '#1c1f26', sub = p.sub || '#6b7280';
+        const G = geo(e), { out, total } = layout(e, s), Ac = p.accent || '#3a7bfd', ck = checkKey(), txt = p.text || '#1c1f26', sub = p.sub || '#6b7280', t = now();
         if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, G.b.x, G.b.y, G.b.w, G.b.h, 0); ctx.fill(); }
         ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.b.y, G.b.w, G.b.h); ctx.clip();
-        if (!out.length) UK.text(ctx, p.empty || '', G.b.cx, G.b.y + 60, { size: 15, weight: 600, color: sub });
+        if (!out.length) { ctx.globalAlpha = Math.min(1, (t - firstT) * 3); UK.text(ctx, p.empty || '', G.b.cx, G.b.y + 60, { size: 15, weight: 600, color: sub }); ctx.globalAlpha = 1; }
         for (const it of out) {
-          const y = G.b.y + it.y - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
+          const an = it.head ? null : A.get(it.r.id) || { y: it.y, a: 1, g: 1 };
+          const y = G.b.y + (an ? an.y : it.y) - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
           if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 14, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
           const id = it.r.id, sw = swX[id] || 0, k = gone.has(id) ? gone.get(id) : 0, x = G.b.x + 4 + sw - k * G.b.w, w = G.b.w - 8, h = G.rh, done = ck && truthy(it.r[ck]);
-          if (sw < -4 || k) { ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, 'Delete', G.b.x + w - 30, y + h / 2, { size: 13, weight: 800, color: '#fff' }); }
-          ctx.globalAlpha = (done && p.doneLook !== false ? 0.55 : 1) * (1 - k);
-          ctx.fillStyle = p.row || '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.08)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 1; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); ctx.shadowColor = 'transparent';
+          if (sw < -4 || k) { ctx.globalAlpha = Math.min(1, -sw / 60 + k); ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, '🗑  Delete', G.b.x + w - 50, y + h / 2, { size: 13, weight: 800, color: '#fff' }); ctx.globalAlpha = 1; }
+          ctx.save();
+          const pr = pressId === id ? 0.985 : 1, gs = 0.94 + 0.06 * an.g;
+          ctx.translate(x + w / 2, y + h / 2); ctx.scale(pr * gs, pr * gs); ctx.translate(-(x + w / 2), -(y + h / 2));
+          ctx.globalAlpha = (done && p.doneLook !== false ? 0.55 : 1) * (1 - k) * an.a;
+          ctx.fillStyle = p.row || '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.08)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); ctx.shadowColor = 'transparent';
+          if (pressId === id) { ctx.fillStyle = 'rgba(0,0,0,0.05)'; UK.rr(ctx, x, y, w, h, +p.radius || 0); ctx.fill(); }
           let tx = x + 16;
-          if (ck) { const cx = x + 14 + h * 0.2, r = Math.min(13, h * 0.22); ctx.lineWidth = 2.5; ctx.strokeStyle = done ? A : withAlpha(sub, 0.7); ctx.fillStyle = done ? A : 'transparent'; ctx.beginPath(); ctx.arc(cx, y + h / 2, r, 0, Math.PI * 2); if (done) ctx.fill(); ctx.stroke(); if (done) UK.text(ctx, '✓', cx, y + h / 2 + 1, { size: r * 1.3, weight: 900, color: '#fff' }); tx = cx + r + 14; }
+          if (ck) { // a round checkbox: pops and draws its tick when checked
+            const cx = x + 14 + h * 0.2, cy = y + h / 2, r = Math.min(13, h * 0.22), at = checkAt[id], pk = at ? Math.min(1, (t - at) / 0.32) : 1;
+            const pop = at && pk < 1 ? 1 + 0.28 * Math.sin(Math.PI * pk) : 1;
+            ctx.save(); ctx.translate(cx, cy); ctx.scale(pop, pop);
+            ctx.lineWidth = 2.5; ctx.strokeStyle = done ? Ac : withAlpha(sub, 0.7); ctx.fillStyle = Ac;
+            ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2); if (done) { ctx.globalAlpha *= at ? Math.min(1, pk * 2) : 1; ctx.fill(); } ctx.stroke();
+            if (done) { const q = at ? Math.min(1, pk / 0.8) : 1, P = [[-r * 0.45, 0], [-r * 0.12, r * 0.36], [r * 0.5, -r * 0.34]], l1 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), l2 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]), d = q * (l1 + l2);
+              ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.beginPath(); ctx.moveTo(...P[0]);
+              if (d <= l1) ctx.lineTo(P[0][0] + (P[1][0] - P[0][0]) * d / l1, P[0][1] + (P[1][1] - P[0][1]) * d / l1); else { ctx.lineTo(...P[1]); const f = (d - l1) / l2; ctx.lineTo(P[1][0] + (P[2][0] - P[1][0]) * f, P[1][1] + (P[2][1] - P[1][1]) * f); }
+              ctx.stroke(); }
+            ctx.restore(); tx = cx + r + 14;
+          }
           const ic = p.icon ? fillTemplate(p.icon, it.vars) : '';
-          if (ic) { drawNavIcon(ctx, ic, tx + h * 0.22, y + h / 2, h * 0.42, A); tx += h * 0.44 + 12; }
+          if (ic) { drawNavIcon(ctx, ic, tx + h * 0.22, y + h / 2, h * 0.42, Ac); tx += h * 0.44 + 12; }
           const right = p.right ? fillTemplate(p.right, it.vars) : '', st = p.subtitle ? fillTemplate(p.subtitle, it.vars) : '';
           let rw = 0; if (right) { ctx.font = `800 15px ${THEME.font}`; rw = ctx.measureText(right).width + 16; UK.text(ctx, right, x + w - 14, y + h / 2, { size: 15, weight: 800, color: /^[−-]/.test(right) ? (p.danger || '#ef4444') : txt, align: 'right' }); }
           const title = fillTemplate(p.title || '{title}', it.vars);
           UK.text(ctx, title, tx, y + h / 2 - (st ? 9 : 0), { size: 16, weight: 700, color: txt, align: 'left', maxW: x + w - tx - rw - 8 });
-          if (done && p.doneLook !== false) { ctx.font = `700 16px ${THEME.font}`; const tw = Math.min(ctx.measureText(title).width, x + w - tx - rw - 8); ctx.strokeStyle = txt; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(tx, y + h / 2 - (st ? 9 : 0)); ctx.lineTo(tx + tw, y + h / 2 - (st ? 9 : 0)); ctx.stroke(); }
+          if (done && p.doneLook !== false) { // the strike-through draws across with the tick
+            const at = checkAt[id], q = at ? Math.min(1, Math.max(0, (t - at - 0.1) / 0.3)) : 1;
+            ctx.font = `700 16px ${THEME.font}`; const tw = Math.min(ctx.measureText(title).width, x + w - tx - rw - 8) * q; ctx.strokeStyle = txt; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(tx, y + h / 2 - (st ? 9 : 0)); ctx.lineTo(tx + tw, y + h / 2 - (st ? 9 : 0)); ctx.stroke();
+          }
           if (st) UK.text(ctx, st, tx, y + h / 2 + 11, { size: 13, weight: 600, color: sub, align: 'left', maxW: x + w - tx - rw - 8 });
-          ctx.globalAlpha = 1;
+          ctx.restore();
         }
+        // a thin scroll bar while scrolling
+        const sa = Math.max(0, 1 - (t - scrollT - 0.6) / 0.4);
+        if (sa > 0 && total > G.b.h) { const bh = Math.max(30, G.b.h * G.b.h / total), by = G.b.y + clamp(scroll / Math.max(1, total - G.b.h), 0, 1) * (G.b.h - bh); ctx.globalAlpha = 0.35 * Math.min(1, sa); ctx.fillStyle = txt; UK.rr(ctx, G.b.x + G.b.w - 4, by, 3, bh, 2); ctx.fill(); ctx.globalAlpha = 1; }
         ctx.restore();
       },
     };
@@ -11300,7 +11579,9 @@ registerBehavior('uiForm', {
     ...UI_COMMON,
   ],
   create(p) {
-    let draft = {}, editing = null, shown = false, scroll = 0, drag = null, box = null, bad = '', boxField = null;
+    let draft = {}, editing = null, shown = false, scroll = 0, drag = null, box = null, bad = '', boxField = null, shownAt = 0, badAt = -9, savePress = null, sc = null;
+    const M = { focus: 0 }, knob = {}, chip = {}, chipTo = {}, starAt = {}; // animated bits: switch knobs, the choice highlight, star pops, the focus glow
+    const now = () => performance.now() / 1000;
     const D = (s) => s.engine.data, def = (s) => D(s).def(p.collection);
     const fields = (s) => { const F = fieldsOf(def(s)); if (!p.fields) return F; const want = String(p.fields).split(',').map((q) => fieldKey(q)); return want.map((k) => F.find((f) => f.key === k)).filter(Boolean); };
     const fh = () => Math.max(36, +p.fieldH || 50);
@@ -11310,7 +11591,9 @@ registerBehavior('uiForm', {
       const intent = s.formIntent; s.formIntent = null;
       const wantEdit = p.mode === 'always changes the opened record' || (p.mode !== 'always adds a new record' && intent === 'edit');
       const rec = wantEdit ? openedRecord(s) : null;
-      editing = rec ? rec.id : null; draft = rec ? { ...rec } : D(s).newRecord(p.collection); bad = ''; scroll = 0;
+      editing = rec ? rec.id : null; draft = rec ? { ...rec } : D(s).newRecord(p.collection); bad = ''; scroll = 0; shownAt = now();
+      for (const f of fields(s)) if (f.type === 'yes/no') knob[f.key] = truthy(draft[f.key]) ? 1 : 0;
+      for (const k of Object.keys(chipTo)) delete chipTo[k];
     };
     const closeBox = (s, keep = true) => { if (!box) return; if (keep) setVal(s, boxField, box.value); box.remove(); box = null; boxField = null; s.engine.input.reset(); };
     const setVal = (s, f, v) => { draft[f.key] = ['number', 'money'].includes(f.type) ? (v === '' ? '' : +String(v).replace(',', '.') || 0) : v; bad = ''; };
@@ -11331,7 +11614,7 @@ registerBehavior('uiForm', {
     const save = (e, s) => {
       closeBox(s);
       const miss = required(s).find((k) => String(draft[k] ?? '').trim() === '');
-      if (miss) { bad = miss; s.message(`${fields(s).find((f) => f.key === miss)?.name || miss} is needed`, 1.2); s.engine.vibrate(30); return; }
+      if (miss) { bad = miss; badAt = now(); s.message(`${fields(s).find((f) => f.key === miss)?.name || miss} is needed`, 1.2); s.engine.vibrate(30); return; }
       const data = {}; for (const f of fields(s)) data[f.key] = draft[f.key];
       let rec;
       if (editing && D(s).get(p.collection, editing)) { rec = D(s).update(p.collection, editing, data); openRecord(s, p.collection, rec); }
@@ -11351,8 +11634,10 @@ registerBehavior('uiForm', {
         shown = live; if (!live) { closeBox(s); return; }
         const L = layout(e, s), maxS = Math.max(0, L.total - L.b.h);
         if (box) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1, r = L.out.find((q) => q.f === boxField); if (r) { box.style.top = (o.y + (L.b.y + r.y - scroll + 22) * k) + 'px'; } }
-        for (const d of UK.downs(s, e)) if (UK.in(d, L.b)) drag = { id: d.id, y0: d.y, s0: scroll };
-        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); else drag = null; }
+        sc = s;
+        for (const d of UK.downs(s, e)) if (UK.in(d, L.b)) { drag = { id: d.id, y0: d.y, s0: scroll }; const y = d.y - L.b.y + scroll; savePress = y >= L.btnY && y < L.btnY + 52 ? d.id : null; }
+        if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { scroll = clamp(drag.s0 - (q.y - drag.y0), 0, maxS); if (Math.abs(q.y - drag.y0) > 10) savePress = null; } else { drag = null; savePress = null; } }
+        s.spring(M, { focus: box ? 1 : 0 }, { feel: 'snappy' });
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, L.b)) continue;
           const y = t.y - L.b.y + scroll;
@@ -11360,8 +11645,8 @@ registerBehavior('uiForm', {
           if (editing && p.deleteButton !== false && y >= L.btnY + 60 && y < L.btnY + 112) { UK.tap(s, p); closeBox(s, false); D(s).remove(p.collection, editing); openRecord(s, p.collection, null); s.emit('formDeleted', fieldKey(p.collection)); if (s.canGoBack()) { s.navBack(); if (s.canGoBack()) s.navBack(); } else load(s); continue; }
           const r = L.out.find((q) => y >= q.y && y < q.y + q.h); if (!r) continue;
           const f = r.f, fx = L.b.x + 8, fw = L.b.w - 16, fy = r.y + 22, rect = { x: fx, y: L.b.y + fy - scroll, w: fw, h: r.h - 24 };
-          if (f.type === 'yes/no') { draft[f.key] = !truthy(draft[f.key]); UK.tap(s, p); }
-          else if (f.type === 'rating') { const n = clamp(Math.ceil((t.x - fx - 6) / 34), 0, 5); draft[f.key] = draft[f.key] === n ? 0 : n; UK.tap(s, p); }
+          if (f.type === 'yes/no') { draft[f.key] = !truthy(draft[f.key]); UK.tap(s, p); s.spring(knob, { [f.key]: truthy(draft[f.key]) ? 1 : 0 }, { feel: 'bouncy' }); }
+          else if (f.type === 'rating') { const n = clamp(Math.ceil((t.x - fx - 6) / 34), 0, 5); draft[f.key] = draft[f.key] === n ? 0 : n; starAt[f.key] = { n: draft[f.key], t: now() }; UK.tap(s, p); }
           else if (f.type === 'choice') { let cx = fx; s.engine.uiCtx.font = `700 14px ${THEME.font}`; for (const o of f.options) { const w = s.engine.uiCtx.measureText(o).width + 26; if (t.x >= cx && t.x < cx + w) { draft[f.key] = o; UK.tap(s, p); break; } cx += w + 8; } }
           else openBox(s, e, f, rect);
         }
@@ -11372,30 +11657,56 @@ registerBehavior('uiForm', {
         const F = s.engine.editing && !def(s) ? [{ key: 'title', name: 'Title', type: 'text' }, { key: 'done', name: 'Done', type: 'yes/no' }] : null;
         const rows = F ? F.map((f, i) => ({ f, y: 8 + i * (fh() + 30), h: hOf(f) })) : L.out;
         ctx.save(); ctx.beginPath(); ctx.rect(L.b.x, L.b.y, L.b.w, L.b.h); ctx.clip();
-        const req = required(s);
+        const req = required(s), t = now(), mk = motionOf(s);
+        let fi = 0;
         for (const { f, y: ry, h } of rows) {
+          // fields arrive one after another; a missing one shakes
+          const fa = mk.reduced || s.engine.editing ? 1 : Ease.outCubic(clamp((t - shownAt - fi++ * 0.045 * mk.k) / (0.32 * mk.k), 0, 1));
+          const shake = bad === f.key && !mk.reduced ? Math.sin((t - badAt) * 48) * 7 * Math.max(0, 1 - (t - badAt) / 0.5) : 0;
+          ctx.save(); ctx.globalAlpha *= fa; ctx.translate(shake, (1 - fa) * 18);
           const y = L.b.y + ry - scroll, x = L.b.x + 8, w = L.b.w - 16, fy = y + 22, ih = h - 24, v = draft[f.key];
           UK.text(ctx, f.name + (req.includes(f.key) ? ' *' : ''), x + 4, y + 9, { size: 12.5, weight: 800, color: bad === f.key ? (p.danger || '#ef4444') : lab, align: 'left' });
           if (f.type === 'yes/no') {
             const on = truthy(v); ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
             UK.text(ctx, on ? 'Yes' : 'No', x + 14, fy + ih / 2, { size: 16, weight: 600, color: txt, align: 'left' });
-            const sw = 50, sh = 30, sx = x + w - sw - 12, sy = fy + ih / 2 - sh / 2; ctx.fillStyle = on ? A : withAlpha(lab, 0.35); UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(on ? sx + sw - sh / 2 : sx + sh / 2, sy + sh / 2, sh / 2 - 3, 0, Math.PI * 2); ctx.fill();
+            const sw = 50, sh = 30, sx = x + w - sw - 12, sy = fy + ih / 2 - sh / 2, kv = knob[f.key] ?? (on ? 1 : 0), kc = clamp(kv, 0, 1);
+            ctx.fillStyle = withAlpha(lab, 0.35); UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill();
+            ctx.save(); ctx.globalAlpha *= kc; ctx.fillStyle = A; UK.rr(ctx, sx, sy, sw, sh, sh / 2); ctx.fill(); ctx.restore(); // the colour fades in as the knob moves
+            const kr = sh / 2 - 3, stretch = 1 + Math.min(0.25, Math.abs(kv - Math.round(kv)) * 1.2);
+            ctx.save(); ctx.translate(sx + sh / 2 + kv * (sw - sh), sy + sh / 2); ctx.scale(stretch, 1); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1; ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 0, kr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
           } else if (f.type === 'rating') {
-            for (let i = 1; i <= 5; i++) UK.text(ctx, i <= (+v || 0) ? '★' : '☆', x + 6 + (i - 0.5) * 34, fy + ih / 2, { size: 28, weight: 400, color: i <= (+v || 0) ? '#f5b301' : withAlpha(lab, 0.6) });
+            const sa = starAt[f.key];
+            for (let i = 1; i <= 5; i++) { // stars fill one after another, the tapped one pops
+              const on = i <= (+v || 0), d = sa ? t - sa.t - (i - 1) * 0.04 : 1, pk = sa && on && d > 0 && d < 0.35 ? 1 + 0.45 * Math.sin(Math.PI * d / 0.35) : 1, lit = on && (!sa || d > 0);
+              ctx.save(); ctx.translate(x + 6 + (i - 0.5) * 34, fy + ih / 2); ctx.scale(pk, pk); UK.text(ctx, lit ? '★' : '☆', 0, 0, { size: 28, weight: 400, color: lit ? '#f5b301' : withAlpha(lab, 0.6) }); ctx.restore();
+            }
           } else if (f.type === 'choice') {
-            let cx = x; for (const o of f.options) { ctx.font = `700 14px ${THEME.font}`; const cw = ctx.measureText(o).width + 26, on = v === o; ctx.fillStyle = on ? A : fb; UK.rr(ctx, cx, fy, cw, 36, 18); ctx.fill(); UK.text(ctx, o, cx + cw / 2, fy + 18, { size: 14, weight: 700, color: on ? '#fff' : txt }); cx += cw + 8; }
+            // chips, with the highlight sliding to the chosen one
+            let cx = x; const pos = [];
+            ctx.font = `700 14px ${THEME.font}`; for (const o of f.options) { const cw = ctx.measureText(o).width + 26; pos.push({ o, x: cx, w: cw }); ctx.fillStyle = fb; UK.rr(ctx, cx, fy, cw, 36, 18); ctx.fill(); cx += cw + 8; }
+            const sel = pos.find((q) => q.o === v);
+            if (sel) {
+              const c = (chip[f.key] ||= { x: sel.x, w: sel.w }), key = sel.x + ',' + sel.w;
+              if (chipTo[f.key] !== key) { if (chipTo[f.key] == null) Object.assign(c, { x: sel.x, w: sel.w }); else sc?.spring(c, { x: sel.x, w: sel.w }, { stiffness: 420, damping: 30 }); chipTo[f.key] = key; }
+              ctx.fillStyle = A; UK.rr(ctx, c.x, fy, c.w, 36, 18); ctx.fill();
+            }
+            for (const q of pos) { const inHi = sel && chip[f.key] && q.x + q.w / 2 > chip[f.key].x && q.x + q.w / 2 < chip[f.key].x + chip[f.key].w; UK.text(ctx, q.o, q.x + q.w / 2, fy + 18, { size: 14, weight: 700, color: inHi ? '#fff' : txt }); }
           } else {
             ctx.fillStyle = fb; UK.rr(ctx, x, fy, w, ih, 12); ctx.fill();
-            if (bad === f.key || boxField === f) { ctx.strokeStyle = bad === f.key ? (p.danger || '#ef4444') : A; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); }
+            if (bad === f.key) { ctx.strokeStyle = p.danger || '#ef4444'; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); }
+            else if (boxField === f) { ctx.save(); ctx.globalAlpha *= clamp(M.focus, 0, 1); ctx.shadowColor = A; ctx.shadowBlur = 10; ctx.strokeStyle = A; ctx.lineWidth = 2; UK.rr(ctx, x, fy, w, ih, 12); ctx.stroke(); ctx.restore(); }
             if (boxField !== f) {
               const shown2 = v === '' || v == null ? '' : f.type === 'date' || f.type === 'money' ? fieldText(f, v, def(s)) : String(v);
               if (f.type === 'long text' && shown2) { const words = shown2.split(/\s+/), Lx = []; let row = ''; ctx.font = `600 15px ${THEME.font}`; for (const wd of words) { const tt = row ? row + ' ' + wd : wd; if (ctx.measureText(tt).width > w - 28 && row) { Lx.push(row); row = wd; } else row = tt; } Lx.push(row); Lx.slice(0, Math.floor((ih - 8) / 19)).forEach((t2, i) => UK.text(ctx, t2, x + 12, fy + 16 + i * 19, { size: 15, weight: 600, color: txt, align: 'left' })); }
               else UK.text(ctx, shown2 || f.name, x + 12, fy + ih / 2, { size: 16, weight: 600, color: shown2 ? txt : withAlpha(lab, 0.7), align: 'left', maxW: w - 24 });
             }
           }
+          ctx.restore();
         }
-        const by = L.b.y + L.btnY - scroll; ctx.fillStyle = A; UK.rr(ctx, L.b.x + 8, by, L.b.w - 16, 52, 16); ctx.fill(); UK.text(ctx, (editing ? '✓ ' : '') + (p.saveLabel || 'Save'), L.b.cx, by + 26, { size: 17, weight: 800, color: '#fff' });
+        const by = L.b.y + L.btnY - scroll, bk = savePress != null ? 0.97 : 1, ba = mk.reduced || s.engine.editing ? 1 : Ease.outCubic(clamp((t - shownAt - fi * 0.045 * mk.k) / (0.32 * mk.k), 0, 1));
+        ctx.save(); ctx.globalAlpha *= ba; ctx.translate(L.b.cx, by + 26 + (1 - ba) * 18); ctx.scale(bk, bk); ctx.translate(-L.b.cx, -(by + 26));
+        ctx.shadowColor = withAlpha(A, 0.35); ctx.shadowBlur = 12; ctx.shadowOffsetY = 4; ctx.fillStyle = A; UK.rr(ctx, L.b.x + 8, by, L.b.w - 16, 52, 16); ctx.fill(); ctx.shadowColor = 'transparent';
+        UK.text(ctx, (editing ? '✓ ' : '') + (p.saveLabel || 'Save'), L.b.cx, by + 26, { size: 17, weight: 800, color: '#fff' }); ctx.restore();
         if (editing && p.deleteButton !== false) { ctx.strokeStyle = p.danger || '#ef4444'; ctx.lineWidth = 2; UK.rr(ctx, L.b.x + 8, by + 60, L.b.w - 16, 52, 16); ctx.stroke(); UK.text(ctx, 'Delete', L.b.cx, by + 86, { size: 16, weight: 800, color: p.danger || '#ef4444' }); }
         ctx.restore();
       },
@@ -12459,6 +12770,8 @@ registerBehavior('button', {
     { key: 'holdTime', label: 'Hold for (sec)', type: 'number', default: 0.6, range: [0.2, 3], step: 0.1, group: 'When it fires', showIf: { when: ['on long press'] } },
     { key: 'once', label: 'Only works once', type: 'bool', default: false, group: 'When it fires' },
     { key: 'pressScale', label: 'Squash when pressed', type: 'number', default: 0.92, range: [0.6, 1.1], step: 0.02, group: 'Look & feel' },
+    { key: 'feel', label: 'Feel', type: 'select', options: ['spring', 'squash', 'jelly', 'none'], default: 'spring', group: 'Look & feel', info: { spring: 'Presses in, then springs back with a little bounce.', squash: 'Presses in and eases back.', jelly: 'Wobbles like jelly when let go.', none: 'No movement.' } },
+    { key: 'ripple', label: 'Ripple where you touch (UI)', type: 'bool', default: true, group: 'Look & feel' },
     { key: 'pressColor', label: 'Colour while pressed', type: 'color', default: '', optional: true, group: 'Look & feel' },
     { key: 'haptic', label: 'Buzz the phone', type: 'bool', default: true, group: 'Look & feel' },
     { key: 'enableVar', label: 'Only works when variable', type: 'text', default: '', suggest: 'vars', group: 'Only works when…' },
@@ -12471,7 +12784,8 @@ registerBehavior('button', {
     { key: 'denied', label: 'Message when it can\'t be used', type: 'text', default: '', group: 'Cost & cooldown' },
   ],
   create(p) {
-    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null;
+    let held = null, heldT = 0, nextRep = 0, longDone = false, cdUntil = -1, used = false, base = null, fill0, ring = null, lastOff = null, wasDown = false;
+    const ripples = [];
     const gated = () => !!(p.enableVar || p.costVar || p.once || +p.cooldown > 0);
     const allowed = (s) => {
       if (p.once && used) return false;
@@ -12513,7 +12827,11 @@ registerBehavior('button', {
         if (!e.visible) { held = null; return; }
         base ??= { sx: e.sx, sy: e.sy };
         const inp = s.engine.input, mode = p.when || 'on tap';
-        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) { held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s); break; }
+        if (held == null) for (const d of inp.downs) if (hitTest(s, e, d.x, d.y)) {
+          held = d.id; heldT = 0; nextRep = 0; longDone = false; if (mode === 'on press') fireIt(e, s);
+          if (e.ui && p.ripple !== false && e.shape && !motionOf(s).reduced) { const q = UK.local(s, e, d); ripples.push({ x: q.x, y: q.y, t: performance.now() / 1000, up: 0 }); if (ripples.length > 4) ripples.shift(); }
+          break;
+        }
         const ptr = held != null && inp.pointers.get(held);
         if (ptr) {
           heldT += dt;
@@ -12521,16 +12839,49 @@ registerBehavior('button', {
           if (mode === 'on long press' && !longDone && heldT >= (+p.holdTime || 0.6)) { longDone = true; fireIt(e, s); }
         } else held = null;
         if (mode === 'on tap') for (const t of inp.taps) if (hitTest(s, e, t.x, t.y)) { fireIt(e, s); break; }
-        // feel: squash while the finger is on it, optional pressed colour
-        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y);
-        if (down || e.data._btnSq) {
+        // feel: pressed in while the finger is on it, then back (with a spring, a jelly wobble or an ease), optional pressed colour
+        const down = !!ptr && hitTest(s, e, ptr.x, ptr.y), feel = motionOf(s).reduced ? 'squash' : p.feel || 'squash';
+        if (!ptr) for (const r of ripples) r.up ||= performance.now() / 1000;
+        if (feel === 'none') { /* stays still */ }
+        else if (feel === 'spring' || feel === 'jelly') {
+          if (down !== wasDown) {
+            const k = +p.pressScale || 0.92;
+            if (down) s.spring(e, { sx: base.sx * k, sy: base.sy * k }, { stiffness: 600, damping: 34 });
+            else if (feel === 'jelly') { e.sx = base.sx * (1 + (1 - k) * 1.6); e.sy = base.sy * (1 - (1 - k) * 1.2); s.spring(e, { sx: base.sx, sy: base.sy }, { stiffness: 320, damping: 9 }); }
+            else s.spring(e, { sx: base.sx, sy: base.sy }, { feel: 'bouncy' });
+          }
+        } else if (down || e.data._btnSq) {
           const k = down ? +p.pressScale || 0.92 : 1, a = Math.min(1, dt * 25);
           e.sx += (base.sx * k - e.sx) * a; e.sy += (base.sy * k - e.sy) * a;
           e.data._btnSq = down || Math.abs(e.sx - base.sx) > 0.002; if (!e.data._btnSq) { e.sx = base.sx; e.sy = base.sy; }
         }
+        if (!down && !wasDown && (feel === 'spring' || feel === 'jelly') && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { // a quick tap (down and up at once): press in and spring back
+          const k = +p.pressScale || 0.92;
+          if (feel === 'jelly') { e.sx = base.sx * (1 + (1 - k) * 1.6); e.sy = base.sy * (1 - (1 - k) * 1.2); s.spring(e, { sx: base.sx, sy: base.sy }, { stiffness: 320, damping: 9 }); }
+          else { e.sx = base.sx * k; e.sy = base.sy * k; s.spring(e, { sx: base.sx, sy: base.sy }, { feel: 'bouncy' }); }
+          if (e.ui && p.ripple !== false && e.shape && !motionOf(s).reduced) { const t0 = inp.taps.find((t) => hitTest(s, e, t.x, t.y)), q = UK.local(s, e, t0); ripples.push({ x: q.x, y: q.y, t: performance.now() / 1000, up: performance.now() / 1000 + 0.1 }); }
+        }
+        wasDown = down;
         if (p.pressColor && e.shape) { if (fill0 === undefined) fill0 = e.shape.fill; e.shape.fill = down ? p.pressColor : fill0; }
         // look disabled when it can't be used (only if something can disable it)
         if (gated()) { const off = !allowed(s) || s.time < cdUntil; if (off !== lastOff) { e.alpha = off ? +p.disabledAlpha : 1; lastOff = off; } }
+      },
+      /** Ink ripples, clipped to the button's shape. */
+      drawUI(ctx, e, s) {
+        if (!ripples.length) return;
+        const now = performance.now() / 1000, sh = e.shape, w = (sh.w || (sh.r || 20) * 2) * Math.abs(e.sx), h = (sh.h || (sh.r || 20) * 2) * Math.abs(e.sy), round = sh.type === 'circle';
+        const fill = String(sh.fill || ''), dark = /^#/.test(fill) ? (() => { const c = fill.length === 4 ? fill.slice(1).split('').map((x) => x + x).join('') : fill.slice(1, 7); const n = parseInt(c, 16); return ((n >> 16) * 0.3 + ((n >> 8) & 255) * 0.59 + (n & 255) * 0.11) < 150; })() : true;
+        ctx.save(); ctx.beginPath();
+        if (round) ctx.arc(e.x, e.y, Math.min(w, h) / 2, 0, Math.PI * 2); else if (ctx.roundRect) ctx.roundRect(e.x - w / 2, e.y - h / 2, w, h, Math.min((sh.radius || 0) * Math.abs(e.sx), h / 2)); else ctx.rect(e.x - w / 2, e.y - h / 2, w, h);
+        ctx.clip();
+        const max = Math.hypot(w, h);
+        for (let i = ripples.length - 1; i >= 0; i--) {
+          const r = ripples[i], age = now - r.t, grow = 1 - Math.pow(1 - Math.min(1, age / 0.45), 3), fade = r.up ? Math.max(0, 1 - (now - Math.max(r.up, r.t + 0.15)) / 0.35) : 1;
+          if (r.up && fade <= 0) { ripples.splice(i, 1); continue; }
+          ctx.globalAlpha = 0.26 * fade; ctx.fillStyle = dark ? '#ffffff' : '#000000';
+          ctx.beginPath(); ctx.arc(r.x, r.y, 6 + grow * max, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
       },
       destroy(e, s) { if (ring) s.overlays = (s.overlays || []).filter((f) => f !== ring); },
     };
@@ -13694,6 +14045,7 @@ export const LOGIC_ACTIONS = {
   saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
   loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
+  snackbar: { cat: 'UI', label: 'Show snackbar', icon: 'info', params: [txt('text', 'Saved', 'text ({variables} work)'), txt('action', '', 'button (optional, e.g. Undo)'), txt('message', '', 'the button sends message'), num('seconds', 4, 'for (sec)')], run: (c, p) => c.s.snackbar(fillTemplate(p.text, c.s.vars), p.action, p.message ? () => c.s.send(p.message) : null, +p.seconds || 4), say: (p) => `Snackbar “${p.text}”${p.action ? ` [${p.action}]` : ''}` },
   playGame: { cat: 'Game', label: 'Play a game (from an app)', icon: 'gamepad', params: [txt('level', '2', 'level (number or name)')], run: (c, p) => { c.s.engine.playGame(p.level); }, say: (p) => `Play the game in level ${p.level}` },
   backToApp: { cat: 'Game', label: 'Back to the app', icon: 'home', run: (c) => { c.s.engine.backToApp(); }, say: () => 'Back to the app' },
   dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
@@ -15916,10 +16268,17 @@ export class Engine {
     this.setScene(s);
   }
 
+  /** Apps: "dark mode toggle / on / off" messages, and the choice is remembered on the device. */
+  wireDarkMode(scene) {
+    const key = 'pocket.dark.' + (this.gameKey || 'game'), saved = store.get(key, '');
+    if (saved !== '' && (scene.vars.darkMode === undefined || scene.vars.darkMode === '')) scene.vars.darkMode = +saved;
+    scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
+    scene.on('var', (k, v) => { if (k === 'darkMode' && !this.editing) store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); });
+  }
   setScene(scene, { skipRestore = false } = {}) {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
-    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene);
+    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
       this.loadedOnce = true;
       return this.loadGame(1, { keepTitle: true });
@@ -16257,9 +16616,14 @@ export class Engine {
     s.rotateNeeded = this.wrongOrientation(s);
     if (s.rotateNeeded) return;
     this.navTick(s);
+    s.stepSprings(dt * (s.settings.motionSpeed > 0 ? +s.settings.motionSpeed : 1));
     if (this.paused !== this._wasPaused) { if (this._wasPaused !== undefined && !this.editing) s.emit('pauseChanged', !!this.paused); this._wasPaused = this.paused; } // On Paused / Resumed nodes
     this.online.update(dt);
     this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
+    if (s.snack && this.snackRect && inp.taps.length) { // the snackbar's action (Undo…)
+      const r = this.snackRect, i = inp.taps.findIndex((t) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h);
+      if (i >= 0) { inp.taps.splice(i, 1); const fn = s.snack.fn; s.snack.out = performance.now() / 1000; this.vibrate(8); this.audio.sfx('click'); try { fn?.(); } catch (err) { Log.add('error', String(err), 'Snackbar'); } }
+    }
     this.modalTaps(s);
     if (this.paused && this.stepFrames > 0) this.stepFrames--; // editor "Step": run exactly one frame, then stay paused
     else if (this.paused) {
@@ -16377,6 +16741,7 @@ export class Engine {
     this.updateSafe();
     if (this.editing && this.scene.kids.length) this.scene.syncHierarchy(true);
     this.scene.syncLights();
+    setPalette(this.scene);
     this.renderer.render(this.scene, this);
     this.applyPost(this.scene.post);
     renderUI(this, this.scene);

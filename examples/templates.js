@@ -39,50 +39,50 @@ function squadGame(turnBased) {
 }
 
 // ---- apps: pages shown by the `page` variable, an app bar, data lists and forms ----
-const INK = '#1c1f26', MUTED = '#6b7280';
+const INK = '@text', MUTED = '@sub'; // theme colours: they follow light / dark mode
 const app = {
   bar: (titles, accent) => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions: '', style: 'solid', bg: '#ffffff', text: INK, iconColor: accent, accent, borderColor: '#e5e7eb', shadow: 'never' }] }),
-  page: (id, value, home, kids) => [{ id, name: value[0].toUpperCase() + value.slice(1) + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '#f4f6fb' },
-    behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value, whenUnset: !!home, anim: 'slide (follows navigation)' }] }, ...kids.map((k) => ({ ...k, parent: id }))],
+    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions: 'moon | dark mode toggle', style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'never' }] }),
+  page: (id, value, home, kids, o = {}) => [{ id, name: value[0].toUpperCase() + value.slice(1) + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
+    behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value, whenUnset: !!home, anim: o.anim || 'push (iOS, follows navigation)', stagger: o.stagger || 'rise one after another' }] }, ...kids.map((k) => ({ ...k, parent: id }))],
   text: (id, name, value, y, o = {}) => ({ id, name, ui: true, anchor: 'top-left', x: 20, y, text: { value, size: o.size || 16, color: o.color || INK, weight: o.weight || '600', align: 'left', wrap: o.wrap ?? 360 } }),
-  button: (id, name, label, action, value, o) => ({ id, name, ui: true, anchor: o.anchor || 'bottom', x: o.x || 0, y: o.y, shape: { type: o.r ? 'circle' : 'rect', w: o.w || 360, h: o.h || 52, r: o.r, radius: 16, fill: o.fill, stroke: o.stroke, lineWidth: o.stroke ? 2 : 0 },
-    text: { value: label, size: o.size || 17, color: o.color || '#ffffff', weight: '800' }, behaviors: [{ type: 'button', action, value, amount: 1, sound: 'click' }] }),
-  search: (id, v, hint, accent) => ({ id, name: 'Search', ui: true, anchor: 'top', x: 0, y: 30, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 44, radius: 12, fill: '#ffffff', stroke: '#e5e7eb', lineWidth: 1 },
-    text: { value: '', size: 16, color: INK, weight: '600' }, behaviors: [{ type: 'uiInput', var: v, kind: 'search', placeholder: hint, maxLength: 40, style: 'right in the bar', placeholderColor: '#9aa1ad', focusColor: accent, live: true, message: '' }] }),
+  button: (id, name, label, action, value, o) => ({ id, name, ui: true, anchor: o.anchor || 'bottom', x: o.x || 0, y: o.y, shape: { type: o.r ? 'circle' : 'rect', w: o.w || 360, h: o.h || 52, r: o.r, radius: 16, fill: o.fill, stroke: o.stroke, lineWidth: o.stroke ? 2 : 0, ...(o.stroke ? {} : { shadow: '@shadow', shadowBlur: 12, shadowY: 4 }) },
+    text: { value: label, size: o.size || 17, color: o.color || '@onAccent', weight: '800' }, behaviors: [{ type: 'button', action, value, amount: 1, sound: 'click', feel: 'spring', ripple: true }] }),
+  search: (id, v, hint) => ({ id, name: 'Search', ui: true, anchor: 'top', x: 0, y: 30, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 44, radius: 12, fill: '@card', stroke: '@line', lineWidth: 1 },
+    text: { value: '', size: 16, color: INK, weight: '600' }, behaviors: [{ type: 'uiInput', var: v, kind: 'search', placeholder: hint, maxLength: 40, style: 'right in the bar', placeholderColor: '@sub', focusColor: '@accent', live: true, message: '' }] }),
   list: (id, o) => ({ id, name: o.name || 'List', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 6, marginTop: o.top ?? 64, marginBottom: o.bottom ?? 8, shape: { type: 'rect', w: 380, h: 500, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiDataList', bg: '', row: '#ffffff', text: INK, sub: MUTED, ...o.list }] }),
+    behaviors: [{ type: 'uiDataList', bg: '', row: '@card', text: INK, sub: MUTED, danger: '@danger', ...o.list, accent: '@accent' }] }),
   form: (id, o) => ({ id, name: id === 'form-edit' ? 'Edit Form' : 'Add Form', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 8, marginTop: 12, shape: { type: 'rect', w: 380, h: 600, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiForm', field: '#ffffff', text: INK, label: MUTED, ...o }] }),
-  fab: (id, page, accent) => ({ id, name: 'Add Button', ui: true, anchor: 'bottom-right', x: -46, y: -50, layer: 4, shape: { type: 'circle', r: 30, fill: accent }, text: { value: '+', size: 34, color: '#ffffff', weight: '700' },
-    behaviors: [{ type: 'button', action: 'new record', value: page, amount: 1, sound: 'click' }] }),
+    behaviors: [{ type: 'uiForm', field: '@card', text: INK, label: MUTED, danger: '@danger', ...o, accent: '@accent' }] }),
+  fab: (id, page) => ({ id, name: 'Add Button', ui: true, anchor: 'bottom-right', x: -46, y: -50, layer: 4, shape: { type: 'circle', r: 30, fill: '@accent', shadow: '@shadow', shadowBlur: 16, shadowY: 6 }, text: { value: '+', size: 34, color: '@onAccent', weight: '700' },
+    behaviors: [{ type: 'button', action: 'new record', value: page, amount: 1, sound: 'click', feel: 'jelly', ripple: true, pressScale: 0.88 }] }),
 };
-const appSettings = (title) => ({ app: true, orientation: 'portrait', title: '', subtitle: '', appName: title });
+const appSettings = (title, accent) => ({ app: true, orientation: 'portrait', title: '', subtitle: '', appName: title, appTheme: 'follow the phone', appAccent: accent });
 
 function todoApp() {
   const A = '#3a7bfd';
   return {
-    version: 1, name: 'To-Do List', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('To-Do List'), vars: { page: 'home', search: '' },
+    version: 1, name: 'To-Do List', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('To-Do List', A), vars: { page: 'home', search: '' },
     collections: [{ name: 'Tasks', fields: [{ name: 'Title', type: 'text' }, { name: 'Notes', type: 'long text' }, { name: 'Due', type: 'date', default: 'today' }, { name: 'Priority', type: 'choice', options: 'Low, Medium, High', default: 'Medium' }, { name: 'Done', type: 'yes/no' }],
       rows: [{ title: 'Try the To-Do app', notes: 'Tap the circle to tick a task off, tap a task to see it, swipe left to delete.', priority: 'High', done: false }, { title: 'Add your own task with +', notes: '', priority: 'Medium', done: false }, { title: 'Open Pocket Engine', notes: '', priority: 'Low', done: true }] }],
     entities: [
       app.bar('home = My Tasks\nadd = New task\ndetail = Task\nedit = Edit task', A),
       { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: [{ type: 'dataStat', collection: 'Tasks', how: 'count', filter: 'done = no', var: 'left' }, { type: 'dataStat', collection: 'Tasks', how: 'count', filter: 'done = yes', var: 'finished' }] },
       ...app.page('p-home', 'home', true, [
-        app.search('search', 'search', 'Search tasks', A),
+        app.search('search', 'search', 'Search tasks'),
         { ...app.text('summary', 'Summary', '{left} to do · {finished} done', 64, { size: 14, color: MUTED, weight: '700' }) },
-        app.list('list', { top: 84, bottom: 8, list: { collection: 'Tasks', title: '{title}', subtitle: '{priority} · {due}', check: 'done', search: 'search', sort: 'newest first', openPage: 'detail', empty: 'No tasks. Tap + to add one.', accent: A } }),
-        app.fab('add-btn', 'add', A),
+        app.list('list', { top: 84, bottom: 8, list: { collection: 'Tasks', title: '{title}', subtitle: '{priority} · {due}', check: 'done', search: 'search', sort: 'newest first', openPage: 'detail', empty: 'No tasks. Tap + to add one.' } }),
+        app.fab('add-btn', 'add'),
       ]),
-      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Tasks', fields: 'Title, Notes, Due, Priority', mode: 'always adds a new record', saveLabel: 'Add task', accent: A })]),
+      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Tasks', fields: 'Title, Notes, Due, Priority', mode: 'always adds a new record', saveLabel: 'Add task' })]),
       ...app.page('p-detail', 'detail', false, [
         app.text('d-title', 'Task Title', '{record_title}', 40, { size: 26, weight: '900' }),
         app.text('d-meta', 'Task Info', '{record_priority} priority · due {record_due} · done: {record_done}', 82, { size: 14, color: MUTED, weight: '700' }),
         app.text('d-notes', 'Task Notes', '{record_notes}', 120, { size: 16 }),
-        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: A }),
-        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '#ffffff', stroke: '#ef4444', color: '#ef4444' }),
+        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: '@accent' }),
+        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '@card', stroke: '@danger', color: '@danger' }),
       ]),
-      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Tasks', mode: 'always changes the opened record', saveLabel: 'Save', accent: A })]),
+      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Tasks', mode: 'always changes the opened record', saveLabel: 'Save' })]),
     ],
   };
 }
@@ -90,24 +90,24 @@ function todoApp() {
 function notesApp() {
   const A = '#f59e0b';
   return {
-    version: 1, name: 'Notes', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Notes'), vars: { page: 'home', search: '' },
+    version: 1, name: 'Notes', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Notes', A), vars: { page: 'home', search: '' },
     collections: [{ name: 'Notes', fields: [{ name: 'Title', type: 'text' }, { name: 'Body', type: 'long text' }, { name: 'Mood', type: 'choice', options: '🙂, 😐, 🙁, 🤩', default: '🙂' }, { name: 'Pinned', type: 'yes/no' }],
       rows: [{ title: 'Welcome to Notes', body: 'Write anything here. Notes are saved on your phone and stay there when you close the app.', mood: '🤩', pinned: true }, { title: 'Ideas', body: 'A game about a cat who runs a café.', mood: '🙂' }] }],
     entities: [
       app.bar('home = Notes\nadd = New note\ndetail = Note\nedit = Edit note', A),
       ...app.page('p-home', 'home', true, [
-        app.search('search', 'search', 'Search notes', A),
-        app.list('list', { top: 64, list: { collection: 'Notes', title: '{title}', subtitle: '{body}', icon: '{mood}', sort: 'newest first', search: 'search', openPage: 'detail', empty: 'No notes yet. Tap + to write one.', rowH: 74, accent: A } }),
-        app.fab('add-btn', 'add', A),
+        app.search('search', 'search', 'Search notes'),
+        app.list('list', { top: 64, list: { collection: 'Notes', title: '{title}', subtitle: '{body}', icon: '{mood}', sort: 'newest first', search: 'search', openPage: 'detail', empty: 'No notes yet. Tap + to write one.', rowH: 74 } }),
+        app.fab('add-btn', 'add'),
       ]),
-      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Notes', fields: 'Title, Body, Mood', mode: 'always adds a new record', saveLabel: 'Save note', accent: A })]),
+      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Notes', fields: 'Title, Body, Mood', mode: 'always adds a new record', saveLabel: 'Save note' })]),
       ...app.page('p-detail', 'detail', false, [
         app.text('d-title', 'Note Title', '{record_mood} {record_title}', 40, { size: 26, weight: '900' }),
         app.text('d-body', 'Note Body', '{record_body}', 90, { size: 17 }),
-        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: A }),
-        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '#ffffff', stroke: '#ef4444', color: '#ef4444' }),
+        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: '@accent' }),
+        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '@card', stroke: '@danger', color: '@danger' }),
       ]),
-      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Notes', mode: 'always changes the opened record', accent: A })]),
+      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Notes', mode: 'always changes the opened record' })]),
     ],
   };
 }
@@ -116,28 +116,28 @@ function expensesApp() {
   const A = '#10b981';
   const day = (n) => { const d = new Date(Date.now() - n * 864e5); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
   return {
-    version: 1, name: 'Expense Tracker', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Expense Tracker'), vars: { page: 'home' },
+    version: 1, name: 'Expense Tracker', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Expense Tracker', A), vars: { page: 'home' },
     collections: [{ name: 'Expenses', currency: '$', fields: [{ name: 'Title', type: 'text' }, { name: 'Amount', type: 'money' }, { name: 'Category', type: 'choice', options: 'Food, Transport, Shopping, Bills, Fun, Other', default: 'Food' }, { name: 'Date', type: 'date', default: 'today' }],
       rows: [{ title: 'Groceries', amount: 42.5, category: 'Food', date: day(0) }, { title: 'Bus pass', amount: 20, category: 'Transport', date: day(1) }, { title: 'Cinema', amount: 12, category: 'Fun', date: day(2) }] }],
     entities: [
       app.bar('home = Expenses\nadd = New expense\ndetail = Expense\nedit = Edit expense', A),
       { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: [{ type: 'dataStat', collection: 'Expenses', how: 'sum', field: 'amount', var: 'total', format: 'money' }, { type: 'dataStat', collection: 'Expenses', how: 'count', var: 'howMany' }] },
       ...app.page('p-home', 'home', true, [
-        { id: 'card', name: 'Total Card', ui: true, anchor: 'top', x: 0, y: 64, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 100, radius: 18, fill: A } },
+        { id: 'card', name: 'Total Card', ui: true, anchor: 'top', x: 0, y: 64, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 100, radius: 18, fill: '#10b981', fill2: '#0e9f6e', gradDir: 'diagonal', shadow: 'rgba(16,185,129,0.35)', shadowBlur: 18, shadowY: 6 } },
         { id: 'card-l', name: 'Total Label', parent: 'card', ui: true, anchor: 'top-left', x: 20, y: 26, text: { value: 'Spent so far ({howMany})', size: 14, color: 'rgba(255,255,255,0.85)', weight: '700', align: 'left' } },
         { id: 'card-v', name: 'Total', parent: 'card', ui: true, anchor: 'top-left', x: 20, y: 62, text: { value: '{total_text}', size: 34, color: '#ffffff', weight: '900', align: 'left' } },
-        app.list('list', { top: 126, list: { collection: 'Expenses', title: '{title}', subtitle: '{category} · {date}', right: '{amount}', sort: 'date (high-low)', groupBy: 'date', openPage: 'detail', empty: 'No expenses yet. Tap + to add one.', accent: A } }),
-        app.fab('add-btn', 'add', A),
+        app.list('list', { top: 126, list: { collection: 'Expenses', title: '{title}', subtitle: '{category} · {date}', right: '{amount}', sort: 'date (high-low)', groupBy: 'date', openPage: 'detail', empty: 'No expenses yet. Tap + to add one.' } }),
+        app.fab('add-btn', 'add'),
       ]),
-      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Expenses', mode: 'always adds a new record', saveLabel: 'Add expense', accent: A })]),
+      ...app.page('p-add', 'add', false, [app.form('form-add', { collection: 'Expenses', mode: 'always adds a new record', saveLabel: 'Add expense' })]),
       ...app.page('p-detail', 'detail', false, [
         app.text('d-amt', 'Amount', '{record_amount}', 44, { size: 36, weight: '900' }),
         app.text('d-title', 'What', '{record_title}', 92, { size: 20, weight: '800' }),
         app.text('d-meta', 'Info', '{record_category} · {record_date}', 124, { size: 15, color: MUTED, weight: '700' }),
-        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: A }),
-        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '#ffffff', stroke: '#ef4444', color: '#ef4444' }),
+        app.button('d-edit', 'Edit Button', 'Edit', 'edit opened record', 'edit', { y: -110, fill: '@accent' }),
+        app.button('d-del', 'Delete Button', 'Delete', 'delete opened record', '', { y: -46, fill: '@card', stroke: '@danger', color: '@danger' }),
       ]),
-      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Expenses', mode: 'always changes the opened record', accent: A })]),
+      ...app.page('p-edit', 'edit', false, [app.form('form-edit', { collection: 'Expenses', mode: 'always changes the opened record' })]),
     ],
   };
 }
@@ -145,14 +145,17 @@ function expensesApp() {
 function blankApp() {
   const A = '#6366f1';
   return {
-    version: 1, name: 'My App', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('My App'), vars: { page: 'home' },
+    version: 1, name: 'My App', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('My App', A), vars: { page: 'home' },
     entities: [
       app.bar('home = Home\nexplore = Explore\nprofile = Profile', A),
       ...app.page('p-home', 'home', true, [app.text('h1', 'Home Title', 'Welcome!', 40, { size: 28, weight: '900' }), app.text('h2', 'Home Text', 'This is your app’s home page. Add lists, forms, buttons and pages from + Add → UI & Menus → App.', 86, { color: MUTED })]),
       ...app.page('p-explore', 'explore', false, [app.text('e1', 'Explore Title', 'Explore', 40, { size: 28, weight: '900' })]),
-      ...app.page('p-profile', 'profile', false, [app.text('pr1', 'Profile Title', 'Profile', 40, { size: 28, weight: '900' })]),
+      ...app.page('p-profile', 'profile', false, [app.text('pr1', 'Profile Title', 'Profile', 40, { size: 28, weight: '900' }),
+        { id: 'dm-row', name: 'Dark Mode Row', ui: true, anchor: 'top', x: 0, y: 120, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 60, radius: 16, fill: '@card', shadow: '@shadow', shadowBlur: 10, shadowY: 2 } },
+        { id: 'dm-label', name: 'Dark Mode Label', parent: 'dm-row', ui: true, anchor: 'left', x: 20, y: 0, text: { value: '🌙  Dark mode', size: 17, color: INK, weight: '700', align: 'left' } },
+        { id: 'dm-switch', name: 'Dark Mode Switch', parent: 'dm-row', ui: true, anchor: 'right', x: -44, y: 0, shape: { type: 'rect', w: 52, h: 30, radius: 15, fill: '#9aa1ad' }, behaviors: [{ type: 'uiToggle', var: 'darkMode', start: false, onText: '', offText: '', onColor: '@accent', offColor: '#9aa1ad', style: 'switch', message: '' }] }]),
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
-        behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nProfile | user | profile', var: 'page', start: 1, style: 'pill', barColor: '#ffffff', activeColor: A, idleColor: '#9aa1ad', otherPage: 'keep the last tab lit' }] },
+        behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nProfile | user | profile', var: 'page', start: 1, style: 'pill', barColor: '@bar', activeColor: '@accent', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],
   };
 }
@@ -582,26 +585,26 @@ function arcadeApp() {
   const card = (gi, [key, title, emoji]) => {
     const y = 40 + gi * 116, k = title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
     return [
-      { id: 'card' + gi, name: title + ' Card', parent: 'p-home', ui: true, anchor: 'top', x: 0, y: y + 50, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 100, radius: 18, fill: '#ffffff' },
-        behaviors: [{ type: 'button', action: 'play game', value: title, amount: 1, sound: 'click' }] },
+      { id: 'card' + gi, name: title + ' Card', parent: 'p-home', ui: true, anchor: 'top', x: 0, y: y + 50, stretch: 'width', margin: 14, shape: { type: 'rect', w: 372, h: 100, radius: 18, fill: '@card', shadow: '@shadow', shadowBlur: 14, shadowY: 4 },
+        behaviors: [{ type: 'button', action: 'play game', value: title, amount: 1, sound: 'click', feel: 'spring', pressScale: 0.96 }] },
       { id: 'card' + gi + 'e', name: title + ' Icon', parent: 'card' + gi, ui: true, anchor: 'left', x: 46, y: 0, text: { value: emoji, size: 40 } },
       { id: 'card' + gi + 't', name: title + ' Name', parent: 'card' + gi, ui: true, anchor: 'left', x: 90, y: -14, text: { value: title, size: 20, color: INK, weight: '800', align: 'left' } },
       { id: 'card' + gi + 'b', name: title + ' Best', parent: 'card' + gi, ui: true, anchor: 'left', x: 90, y: 16, text: { value: 'Best: {best_' + k + '}', size: 14, color: MUTED, weight: '700', align: 'left' } },
-      { id: 'card' + gi + 'p', name: title + ' Play', parent: 'card' + gi, ui: true, anchor: 'right', x: -50, y: 0, shape: { type: 'rect', w: 76, h: 40, radius: 20, fill: A }, text: { value: '▶ Play', size: 15, color: '#ffffff', weight: '800' } },
+      { id: 'card' + gi + 'p', name: title + ' Play', parent: 'card' + gi, ui: true, anchor: 'right', x: -50, y: 0, shape: { type: 'rect', w: 76, h: 40, radius: 20, fill: '@accent' }, text: { value: '▶ Play', size: 15, color: '@onAccent', weight: '800' } },
     ];
   };
   return {
-    version: 1, name: 'Arcade', mode: '2d', background: '#f4f6fb', view: { width: 400, height: 700 }, gravity: 0,
-    settings: { ...appSettings('Arcade'), recordPlays: 'Scores' }, vars: { page: 'home', lastGame: '—', lastScore: 0 },
+    version: 1, name: 'Arcade', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0,
+    settings: { ...appSettings('Arcade', A), recordPlays: 'Scores' }, vars: { page: 'home', lastGame: '—', lastScore: 0 },
     collections: [{ name: 'Scores', fields: [{ name: 'Game', type: 'text' }, { name: 'Score', type: 'number' }, { name: 'Result', type: 'choice', options: 'won, lost, quit' }, { name: 'Date', type: 'date', default: 'today' }], rows: [] }],
     entities: [
       app.bar('home = Arcade\nscores = My Scores', A),
       { id: 'logic', name: 'App Logic', x: -100, y: -100, behaviors: games.map(([, title]) => ({ type: 'dataStat', collection: 'Scores', how: 'max', field: 'score', filter: `game = ${title}`, var: 'best_' + title.toLowerCase().replace(/[^a-z0-9]+/g, '_') })) },
       ...app.page('p-home', 'home', true, [app.text('last', 'Last Game Text', 'Last game: {lastGame} · {lastScore}', 20, { size: 14, color: MUTED, weight: '700' })]),
       ...games.flatMap((g, gi) => card(gi, g)),
-      ...app.page('p-scores', 'scores', false, [app.list('list', { top: 8, bottom: 90, list: { collection: 'Scores', title: '{game}', subtitle: '{result} · {date}', right: '{score}', sort: 'score (high-low)', empty: 'Play a game: every score lands here.', accent: A } })]),
+      ...app.page('p-scores', 'scores', false, [app.list('list', { top: 8, bottom: 90, list: { collection: 'Scores', title: '{game}', subtitle: '{result} · {date}', right: '{score}', sort: 'score (high-low)', empty: 'Play a game: every score lands here.' } })]),
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
-        behaviors: [{ type: 'uiBottomNav', tabs: 'Games | play | home\nScores | trophy | scores', var: 'page', start: 1, style: 'pill', barColor: '#ffffff', activeColor: A, idleColor: '#9aa1ad', otherPage: 'keep the last tab lit' }] },
+        behaviors: [{ type: 'uiBottomNav', tabs: 'Games | play | home\nScores | trophy | scores', var: 'page', start: 1, style: 'pill', barColor: '@bar', activeColor: '@accent', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],
     levels,
   };

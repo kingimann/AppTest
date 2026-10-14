@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS } from '../engine/pocket.js';
+import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -2329,9 +2329,18 @@ function control(target, path, spec) {
         const col = h('input', { type: 'color', value: norm(val), oninput: (e) => { cb.checked = true; set(e.target.value); } });
         el = h('div', { class: 'pair' }, cb, col);
       } else el = h('input', { type: 'color', value: norm(val), oninput: (e) => set(e.target.value), onchange: (e) => rememberColor(e.target.value) });
+      // theme colours (@bg, @card…): follow the app's light / dark mode
+      const TL = { bg: 'Background', card: 'Cards', text: 'Text', sub: 'Second text', line: 'Lines', field: 'Fields', bar: 'Bars', accent: 'Accent', onAccent: 'On accent', danger: 'Danger', good: 'Good', shadow: 'Shadow', dim: 'Dim' };
+      const tokBtn = h('button', { type: 'button', class: 'csw tokbtn', title: 'Use a theme colour (follows light / dark mode)', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Theme colours (light / dark)' }, ...THEME_TOKENS.map((t) => ({ icon: 'sun', label: `${TL[t] || t}  @${t}`, fn: () => { set('@' + t); renderInspector(); } }))]) }, '@');
+      if (typeof val === 'string' && val.startsWith('@')) {
+        const t = val.slice(1);
+        el = h('div', { class: 'pair tokval' }, h('span', { class: 'tokchip' }, h('i', { style: `background:${APP_PALETTES.light[t] || '#888'}` }), h('i', { style: `background:${APP_PALETTES.dark[t] || '#888'}` }), `${TL[t] || t} (theme)`), tokBtn,
+          h('button', { type: 'button', class: 'csw', title: 'Use a fixed colour instead', onclick: () => { set(APP_PALETTES.light[t] && /^#/.test(APP_PALETTES.light[t]) ? APP_PALETTES.light[t] : '#ffffff'); renderInspector(); } }, '✕'));
+        break;
+      }
       // Odin-style color palette: recently used colors, one tap to reuse
       const sw = recentColors.slice(0, 8).map((c) => h('button', { type: 'button', class: 'csw', style: `background:${c}`, title: c, onclick: () => { set(c); renderInspector(); } }));
-      if (sw.length) el = h('div', { class: 'color-wrap' }, el, h('div', { class: 'csws' }, sw));
+      el = h('div', { class: 'color-wrap' }, h('div', { class: 'pair' }, el, tokBtn), sw.length ? h('div', { class: 'csws' }, sw) : null);
       break;
     }
     case 'range': {
@@ -3652,6 +3661,19 @@ function renderSceneSettings(box) {
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),
     C('settings.recordPlays', { label: 'Record every game played in collection (blank = don’t)', type: 'text', def: '', infoText: 'Each play adds a record with game, score, result (won / lost / quit) and date. Make the collection in Data below.' }),
   ], { icon: 'phone', key: 's-app' }));
+  box.append(comp('Theme & Dark Mode', [
+    C('settings.appTheme', { label: 'Look', type: 'select', options: [['light', 'Light'], ['dark', 'Dark'], ['follow the phone', 'Follow the phone (light or dark)']], def: 'light' }),
+    C('settings.appAccent', { label: 'Accent colour (blank = blue)', type: 'color', def: '', optional: true }),
+    h('p', { class: 'desc' }, 'Colours written as theme colours (the @ button next to any colour: Background, Cards, Text, Accent…) follow light and dark mode. The variable darkMode (1 / 0) switches it while playing: bind a Toggle to it for a Dark mode switch.'),
+    h('div', { class: 'tok-prev' }, ['light', 'dark'].map((m) => h('div', { class: 'tp ' + m, style: `background:${APP_PALETTES[m].bg};color:${APP_PALETTES[m].text}` }, h('b', {}, m === 'light' ? 'Light' : 'Dark'),
+      h('div', { style: `background:${APP_PALETTES[m].card};border-radius:10px;padding:8px 10px;margin-top:6px` }, 'A card', h('small', { style: `display:block;color:${APP_PALETTES[m].sub}` }, 'Second line')),
+      h('span', { style: `display:inline-block;margin-top:8px;padding:4px 12px;border-radius:99px;background:${project.settings?.appAccent || APP_PALETTES[m].accent};color:${APP_PALETTES[m].onAccent}` }, 'Accent')))),
+  ], { icon: 'sun', key: 's-theme' }));
+  box.append(comp('Motion', [
+    C('settings.motionSpeed', { label: 'Animation speed (1 = normal, 2 = twice as fast)', type: 'number', def: 1, step: 0.1, range: [0.25, 3] }),
+    C('settings.reduceMotion', { label: 'Reduce motion', type: 'select', options: [['follow the phone', 'Follow the phone (Reduce Motion setting)'], ['always', 'Always (quick fades only)'], ['never', 'Never']], def: 'follow the phone' }),
+    h('p', { class: 'desc' }, 'Page transitions, staggered lists, button springs, ripples, switches and sheets all follow these. People who turn on Reduce Motion on their phone get quick fades instead of movement.'),
+  ], { icon: 'star', key: 's-motion' }));
   box.append(comp('Data', [dataEditor()], { icon: 'list', key: 's-data' }));
   box.append(comp('Start Screen', [
     levelIdx > 0 && h('p', { class: 'desc' }, 'The start screen only shows before level 1.'),

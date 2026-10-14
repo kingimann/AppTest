@@ -138,13 +138,69 @@ The **Arcade** app type is a complete example: three mini games, a card with **P
 
 Going the other way, a game can use app pieces directly. A Data List, Record Form or Data Summary works in any level: for a level editor, a high-score table, a shop catalogue, or a player's journal.
 
+## Look and motion
+
+### Light and dark mode
+
+App colours can be **theme colours** instead of fixed ones. In any colour box, the **@** button picks one:
+
+| Colour | Light | Dark | For |
+|---|---|---|---|
+| `@bg` | very light grey | near black | Page backgrounds |
+| `@card` | white | dark grey | Rows, cards, sheets |
+| `@text`, `@sub` | near black, grey | white, light grey | Titles and lines under them |
+| `@line`, `@field`, `@bar` | | | Dividers, text boxes, app bar and tabs |
+| `@accent`, `@onAccent` | your accent colour, and text on it | | Buttons, the + button, ticks |
+| `@danger`, `@good`, `@shadow`, `@dim` | | | Delete, success, shadows, dimming |
+
+*Game Settings › Theme & Dark Mode* chooses **light**, **dark** or **follow the phone**, and the accent colour, with a preview of both.
+
+- Every app template uses theme colours, and its app bar has a 🌙 button.
+- Send the message `dark mode toggle`, `dark mode on` or `dark mode off` (from a Button or a Trigger), or put a **Toggle** on the variable `darkMode` (the Blank App's profile page has one).
+- The app remembers the choice on the phone.
+
+### Motion
+
+Everything in an app moves with **springs**, which feel natural and settle quickly:
+
+- **Buttons** squash when pressed and spring back, with an ink ripple. Their *Feel* is `spring` (the default), `squash`, `jelly` or `none`.
+- **Pages** have five more transitions in *Show If › Animation*:
+  - `push (iOS, follows navigation)`: the new page slides over the old one, which moves a little to the side;
+  - `shared axis (follows navigation)`: slides and fades;
+  - `fade through`, `spring pop` and `sheet (from bottom)`.
+- *Show If › Stagger* brings in the page's children **one after another** (`rise`, `fade`, `pop` or `slide`).
+- **Data Lists** stagger their rows in, glide rows to their new place when the order changes, highlight a row you press, stretch past the ends and show a scroll bar while scrolling. Ticks pop, done rows strike through, and a deleted row shrinks away.
+- **Record Forms** bring their fields in one by one. The focused field glows, switches slide, choice buttons have a highlight that slides between them, stars fill one at a time, and a missing field shakes.
+
+*Game Settings › Motion* sets the **speed** of every animation and **Reduce motion**: *follow the phone* (the default, which uses the phone's accessibility setting), *always* or *never*. With reduced motion, transitions become short fades.
+
+### Snackbar and Undo
+
+Swipe-deleting a row shows a **snackbar** at the bottom: *Deleted · Undo*. Undo puts the same record back. Show your own with the **Show snackbar** instruction, or in code:
+
+```js
+scene.snackbar('Saved', 'Undo', () => { /* undo it */ }, 4);   // text, button, what it does, seconds
+```
+
+### Bottom Sheet
+
+**Spring Sheet** (*Add → UI & Menus → App*) is a panel that springs up from the bottom, like in Maps or Music. It opens on the message `open sheet` and closes on `close sheet`, a tap outside, Back, or a drag down on its handle (a fast flick closes it too). *Stops at: half, then full* opens it half way first.
+
+### Springs in code
+
+```js
+scene.spring(entity, { x: 200, scale: 1.2 }, { feel: 'bouncy' });          // gentle, bouncy, snappy or slow
+scene.spring(obj, { y: 0 }, { stiffness: 300, damping: 20, onRest: () => {} });
+scene.to(entity, { alpha: 0 }, 0.4, { ease: 'springBouncy' });             // spring eases work in tweens too
+```
+
 ## Triggers, visual scripts and code
 
 | Kind | Pieces |
 |---|---|
 | Events | Back from a game (game, won / lost / quit), Record added, Record changed, Record deleted, Record opened (for one collection or any) |
 | Conditions | Number of records (with a filter), A record is open |
-| Instructions | Play a game, Back to the app, Add record (`title = {name}, done = no`), Change the opened record, Delete the opened record, Open a record (first match), Clear a collection (empty it, or back to the starting records), Data summary into variable |
+| Instructions | Show snackbar, Play a game, Back to the app, Add record (`title = {name}, done = no`), Change the opened record, Delete the opened record, Open a record (first match), Clear a collection (empty it, or back to the starting records), Data summary into variable |
 | Nodes | All of the above, plus **Data Value** (count / sum / average / min / max) |
 | Button actions | play game, back to app, new record, edit opened record, delete opened record |
 
@@ -177,5 +233,6 @@ On the phone, each collection is kept under the app's name, so two apps never sh
 ## Tips
 
 - Use **Bottom Nav** for the app's main sections and **App Bar** for titles and Back.
-- Light colours suit apps. The templates use a white app bar, a `#f4f6fb` background and white rows. Set the **UI Theme** font for everything at once.
+- Use theme colours (`@bg`, `@card`, `@text`…) so the app looks right in light and dark mode. Set the **UI Theme** font for everything at once.
+- Keep motion on *follow the phone*: people who turn on Reduce Motion get calm fades instead.
 - Ask for **notifications** (reminders) and **permissions** (camera, location) like a game does, from *Game Settings*.

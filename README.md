@@ -150,17 +150,27 @@ Settings for you on this device (games keep their own settings):
 Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in the Inspector.
 
 - **Triggers** are friendly cards: **ON** something happens → **IF** conditions are true → **DO** instructions, top to bottom.
-  - **14 events**: game starts, every N seconds, tapped, touched / stops touching a tag, jump/fire button, swipe, message, variable reaches, destroyed, animation finished, and more.
-  - **12 conditions**, each flippable with NOT: compare variable, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
-  - **34 instructions** in 6 groups:
-    - Variables: change variable, give/use item.
+  - **30 events**: game starts, every N seconds, tapped, **double-tapped**, **pressed and held**, touched / stops touching a tag, jump/fire button, swipe, **keyboard key**, message, variable reaches, **variable changes**, **after a delay (once)**, **at random times**, **comes near a tag**, **starts seeing a tag**, **lands**, **takes damage**, **dies**, destroyed, animation finished, **level won**, **game over**, **player leaves / comes back to the app**, **run by another trigger**, and more.
+  - **22 conditions**, each flippable with NOT: compare variable, **compare two variables**, **its own variable**, **text variable**, **health** (or health %), **number of objects with a tag** (e.g. no enemies left), **is moving**, **level number**, **time in this level**, **phone held upright**, **save file has key**, chance, touching, on ground, distance, can see, exists, visible, state is, has item, has save, game playing.
+  - **54 instructions** in 6 groups:
+    - Variables: change variable, **toggle**, **random number**, **set text**, **change its own variable**, **save / load a variable (save files)**, give/use item.
     - Objects: show/hide, destroy, spawn, set text, set colour, move to, damage/heal.
     - Motion: move/rotate/scale/fade with easing and "wait until done", punch, play animation.
     - Physics: push, set velocity, jump, gravity.
-    - Flow: **wait**, send message, go to state.
-    - Game: show message, dialogue, sound, vibrate, camera shake/switch, save/load, win, game over, next level, restart.
+    - Flow: **wait**, **wait a random time**, **wait until a variable…**, **continue only if…**, **repeat the steps above N times**, **stop here**, **run another trigger** (by name, on any object), send message, go to state.
+    - Game: show message, **pop-up text**, **particle burst**, dialogue, sound, **music**, vibrate, camera shake/switch, save/load, win, game over, next level, **go to level N**, restart.
+    - Spawn can now spawn at the *other* object (what touched it).
+  - **Per-trigger options** (⚙ on each trigger, shown as chips on its header):
+    - a **name**;
+    - runs every time, only once, or up to N times;
+    - a **cooldown**, a **delay** before the steps, and a **chance %**;
+    - **all** conditions or **any** one;
+    - what happens if it fires again while running: run another copy, ignore it, or start over;
+    - **write to the Console** when it runs.
+  - **ELSE** steps run when the event happens but the conditions are false (e.g. a chest with a 30% rare drop, else coins).
+  - Fold triggers to a one-line summary (tap the name), **Fold all**, and move triggers up or down. Find Problems warns about a "Run another trigger" with no matching trigger.
   - Tap a row to edit it in place; ⋮ moves, duplicates, disables or deletes it.
-  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, talk to an NPC.
+  - **Templates** add ready-made triggers: tap to score, touch to collect, door opens with a key, hazard hurts, spawn every 2s, win at 100, double tap for a super jump, hold to charge, all enemies gone → win, a treasure chest with a rare drop, a clicker with a cooldown, blink 3 times, random spawns, save coins when the player leaves, talk to an NPC.
 - **State Machine**:
   - The object is always in one state (Patrol, Look Around, Alert…). States are cards on a map with arrows between them.
   - Tap a state to edit what it does **when entering**, **every frame** and **when leaving**.
@@ -769,6 +779,29 @@ Everything inside a panel that has *Show when* (title, game over, paused…) now
 - **Nav Item** can *switch tab* (no history) or *open page (Back returns)*. Buttons, triggers and rules have the actions **go to page** (`shop`, or `tab = weekly` for another variable) and **go back**.
 - **Nodes:** **Go To Page** (open / switch / start over), **Go Back** (*then* / *nowhere to go*), **On Page Opened**, **On Back**, and the values **Page Is** and **Can Go Back**.
 - Scripts: `scene.navTo(page, variable, { history, dir, clear })`, `scene.navBack()`, `scene.canGoBack()`.
+
+### 2D Sprite Editor (draw your own sprites)
+
+The 2D cousin of the 3D Modeler. Open it from **Create → Characters & Sprites → Draw Your Own** or **+ → Draw a Sprite**. On any object, use **Draw** in the Image component, or **Draw your own** in the Shape Renderer, which starts from the shape it already has.
+
+- **Shapes as parts:** box, rounded box, circle, triangle, star, polygon, heart, line, text / emoji, and pictures from your phone.
+  - **Select** a part to drag it. Corners scale it while the opposite corner stays put, and the round knob rotates it. Pinch or drag empty space to pan and zoom.
+  - **Style:** fill colour, **gradient** (down, across, diagonal or radial), outline and width, opacity, corner radius, number of sides or points, glow and drop shadow.
+  - Flip, **cut out** (makes a hole in the parts below), bring to front / send to back, centre, copy, and **mirror copy** for symmetric characters.
+- **Pen:** tap points to draw your own shape; tap the first point to close it.
+- **Brush:** draw freely with a finger.
+- **Edit points:** drag any point of a shape, or tap the small dots to add points. Turn on **Smooth** for curves. **To points** turns any box, circle or star into an editable shape.
+- **Pixel art:** pixel layers with pencil, eraser, fill bucket and colour picker. There are 1×–3× brushes, **mirror painting**, a grid, and **pixel art mode** for crisp pixels and snapping. The fill bucket also recolours a shape when you tap it.
+- **Layers:** a thumbnail for each part, with show/hide and lock. You can also rename, reorder, duplicate or delete parts, and merge pixel layers.
+- **Frames for animation:**
+  - Copy a frame and change it a little. **Onion skin** shows the previous frame faintly.
+  - **Play** previews the animation, at your choice of **FPS**.
+  - Give frames **clip names** (idle, run…). Done saves the frames as a sprite sheet, with a **Sprite Sheet Animator** already set up with those clips.
+- **Starting points:** Smiley, Coin, Tree, Slime, Button and Heart. The ⋯ menu has:
+  - canvas size and background;
+  - snap, grid and keep proportions;
+  - **Save to / Open from My Drawings**, to reuse a drawing in other games.
+- Undo / redo throughout. Done saves a picture plus the editable drawing, so the sprite works everywhere a picture does (game, UI, exports) and opens again with every part still editable.
 
 ### Sprites (drawn art, no emoji)
 

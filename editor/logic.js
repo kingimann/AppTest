@@ -11,6 +11,14 @@ const TRIGGER_TEMPLATES = [
   { label: 'Hazard hurts the player', make: () => ({ event: { type: 'touch', tag: 'player' }, conditions: [], actions: [{ type: 'damage', object: 'other', amount: 1 }, { type: 'shake', strength: 12 }] }) },
   { label: 'Spawn every 2 seconds', make: () => ({ event: { type: 'every', seconds: 2 }, conditions: [{ type: 'playing' }], actions: [{ type: 'spawn', template: '', ox: 0, oy: 0 }] }) },
   { label: 'Win at 100 points', make: () => ({ event: { type: 'variable', name: 'score', op: '≥', value: 100 }, conditions: [], actions: [{ type: 'message', text: 'You did it!', seconds: 2 }, { type: 'wait', seconds: 1 }, { type: 'win' }] }) },
+  { label: 'Double tap for a super jump', make: () => ({ name: 'Super jump', event: { type: 'doubleTap' }, conditions: [], cooldown: 1, actions: [{ type: 'jump', power: 900 }, { type: 'burst', color: '#33f0ff', count: 20, at: 'this' }] }) },
+  { label: 'Hold to charge, then launch', make: () => ({ event: { type: 'longPress', seconds: 0.8 }, conditions: [], actions: [{ type: 'scaleTo', scale: 1.3, seconds: 0.2 }, { type: 'push', who: 'self', x: 0, y: -900 }, { type: 'scaleTo', scale: 1, seconds: 0.3 }] }) },
+  { label: 'All enemies gone → win', make: () => ({ name: 'Cleared', event: { type: 'every', seconds: 0.5 }, once: true, conditions: [{ type: 'tagCount', tag: 'enemy', op: '=', value: 0 }, { type: 'playing' }], actions: [{ type: 'message', text: 'Level cleared!', seconds: 1.5 }, { type: 'wait', seconds: 1 }, { type: 'win' }] }) },
+  { label: 'Treasure chest with a 30% rare drop', make: () => ({ event: { type: 'tap' }, once: true, conditions: [{ type: 'chance', percent: 30 }], actions: [{ type: 'toast', text: 'RARE!', color: '#e056fd' }, { type: 'setVar', name: 'gems', op: 'add', value: 5 }], elseActions: [{ type: 'toast', text: '+10 coins', color: '#ffd23f' }, { type: 'setVar', name: 'coins', op: 'add', value: 10 }] }) },
+  { label: 'Tap with a cooldown (clicker)', make: () => ({ event: { type: 'tap' }, cooldown: 0.25, overlap: 'skip', conditions: [], actions: [{ type: 'setVar', name: 'coins', op: 'add', value: 1 }, { type: 'toast', text: '+1', color: '#ffd23f' }, { type: 'punch', what: 'scale', amount: 0.2, seconds: 0.25 }] }) },
+  { label: 'Blink 3 times', make: () => ({ event: { type: 'message', message: 'blink' }, conditions: [], overlap: 'restart', actions: [{ type: 'fade', alpha: 0.2, seconds: 0.15, wait: true }, { type: 'fade', alpha: 1, seconds: 0.15, wait: true }, { type: 'repeat', times: 2 }] }) },
+  { label: 'Random spawns (only while playing)', make: () => ({ event: { type: 'random', seconds: 2 }, conditions: [{ type: 'playing' }, { type: 'tagCount', tag: 'enemy', op: '<', value: 5 }], actions: [{ type: 'spawn', template: '', ox: 0, oy: 0 }] }) },
+  { label: 'Save coins when the player leaves', make: () => ({ event: { type: 'appHidden' }, conditions: [], actions: [{ type: 'saveKey', name: 'coins', file: 'save' }] }) },
   { label: 'Talk to an NPC', make: () => ({ event: { type: 'tap' }, conditions: [], actions: [{ type: 'talk', who: 'Villager', text: 'Hello traveler!', wait: true }, { type: 'talk', who: 'Villager', text: 'The cave is to the east.', wait: true }] }) },
 ];
 
@@ -118,19 +126,60 @@ export function openLogic(opts) {
   const holderId = (o) => { if (!ids.has(o)) ids.set(o, nextId++); return ids.get(o); };
 
   // ---------- Triggers ----------
+  const folded = new Set(), optsOpen = new Set();
+  /** The small chips that say how a trigger runs (once, cooldown, chance…). */
+  function optionChips(t) {
+    const c = [];
+    if (t.once) c.push('once'); else if (+t.maxRuns > 0) c.push(`max ${t.maxRuns}×`);
+    if (+t.cooldown > 0) c.push(`cooldown ${t.cooldown}s`);
+    if (+t.delay > 0) c.push(`delay ${t.delay}s`);
+    if (t.chance != null && t.chance !== '' && +t.chance < 100) c.push(`${t.chance}% chance`);
+    if (t.match === 'any') c.push('any condition');
+    if (t.overlap === 'skip') c.push('no overlap'); else if (t.overlap === 'restart') c.push('restarts');
+    if (t.log) c.push('logs');
+    return c;
+  }
+  function optionsForm(t) {
+    const set = (k, v, re = false) => { if (v === '' || v == null || v === false) delete t[k]; else t[k] = v; emit(); if (re) render(); };
+    const numF = (k, label, ph) => h('label', { class: 'lg-f' }, h('span', {}, label), h('input', { type: 'text', inputMode: 'decimal', value: t[k] ?? '', placeholder: ph, onfocus: () => snap(), oninput: (e) => { const n = parseFloat(e.target.value); set(k, Number.isNaN(n) ? '' : n); }, onchange: () => render() }));
+    const selF = (k, label, options) => h('label', { class: 'lg-f' }, h('span', {}, label), h('select', { onchange: (e) => { snap(); set(k, e.target.value === options[0][0] ? '' : e.target.value, true); } }, options.map(([v, l]) => h('option', { value: v, selected: (t[k] || options[0][0]) === v }, l))));
+    return h('div', { class: 'lg-form lg-opts' },
+      h('label', { class: 'lg-f' }, h('span', {}, 'Name (for “Run another trigger”)'), h('input', { type: 'text', value: t.name || '', placeholder: 'Open door', onfocus: () => snap(), oninput: (e) => set('name', e.target.value.trim()), onchange: () => render() })),
+      h('label', { class: 'lg-f' }, h('span', {}, 'Runs'), h('select', { onchange: (e) => { snap(); const v = e.target.value; delete t.once; delete t.maxRuns; if (v === 'once') t.once = true; if (v === 'max') t.maxRuns = 3; emit(); render(); } },
+        [['every', 'Every time'], ['once', 'Only once'], ['max', 'Up to a number of times']].map(([v, l]) => h('option', { value: v, selected: (t.once ? 'once' : +t.maxRuns > 0 ? 'max' : 'every') === v }, l)))),
+      +t.maxRuns > 0 && numF('maxRuns', 'How many times', '3'),
+      numF('cooldown', 'Cooldown (seconds between runs)', '0'),
+      numF('delay', 'Delay before the steps (seconds)', '0'),
+      numF('chance', 'Chance it runs (%)', '100'),
+      (t.conditions || []).length > 1 && selF('match', 'Conditions', [['all', 'All must be true'], ['any', 'Any one is enough']]),
+      selF('overlap', 'If it fires again while running', [['allow', 'Run another copy'], ['skip', 'Ignore it until done'], ['restart', 'Start over']]),
+      h('label', { class: 'lg-f inline' }, h('span', {}, 'Write to the Console when it runs'), h('input', { type: 'checkbox', checked: !!t.log, onchange: (e) => { snap(); set('log', e.target.checked, true); } })));
+  }
   function renderTriggers() {
     const list = data;
     body.replaceChildren(
-      h('p', { class: 'lg-intro' }, 'Each trigger: ON something happening → IF conditions are true → DO instructions, one after another.'),
-      ...list.map((t, i) => h('div', { class: 'lg-card' + (t.off ? ' off' : '') },
-        h('div', { class: 'lg-ch' }, h('b', {}, `Trigger ${i + 1}`), t.once ? h('span', { class: 'tagchip' }, 'once') : '',
-          h('button', { class: 'lg-x', onclick: (e) => popMenu(e.currentTarget, [
-            { icon: 'copy', label: 'Duplicate', fn: () => { snap(); list.splice(i + 1, 0, JSON.parse(JSON.stringify(t))); change(); } },
-            { icon: 'clock', label: t.once ? 'Run every time' : 'Run only once', fn: () => { snap(); t.once = !t.once; change(); } },
-            { icon: t.off ? 'eye' : 'eyeoff', label: t.off ? 'Enable' : 'Disable', fn: () => { snap(); t.off = !t.off; change(); } },
-            '-', { icon: 'trash', label: 'Delete Trigger', fn: () => { snap(); list.splice(i, 1); change(); } },
-          ]) }, icon('more'))),
-        eventBlock(t, 'event', false), condBlock(t), actionBlock(t, 'actions', 'DO'))),
+      h('p', { class: 'lg-intro' }, 'Each trigger: ON something happening → IF conditions are true → DO instructions, one after another (ELSE runs when the conditions are false). Tap a trigger’s name to fold it.'),
+      list.length > 2 ? h('div', { class: 'lg-tools' },
+        h('button', { class: 'btn', onclick: () => { if (folded.size >= list.length) folded.clear(); else list.forEach((t, i) => folded.add(i)); render(); } }, icon('list'), folded.size >= list.length ? 'Unfold all' : 'Fold all')) : '',
+      ...list.map((t, i) => {
+        const fold = folded.has(i), chips = optionChips(t), name = t.name || `Trigger ${i + 1}`;
+        const sum = `${logicSay(LOGIC_EVENTS, t.event)}${(t.conditions || []).length ? ` · if ${t.conditions.length}` : ''} → ${(t.actions || []).length} step${(t.actions || []).length === 1 ? '' : 's'}`;
+        return h('div', { class: 'lg-card' + (t.off ? ' off' : '') + (fold ? ' folded' : '') },
+          h('div', { class: 'lg-ch' },
+            h('button', { class: 'lg-name', onclick: () => { fold ? folded.delete(i) : folded.add(i); render(); } }, icon('chevron'), h('b', {}, name), fold ? h('small', {}, sum) : ''),
+            ...chips.map((c) => h('span', { class: 'tagchip' }, c)),
+            h('button', { class: 'lg-x' + (optsOpen.has(i) ? ' on' : ''), title: 'Options', onclick: () => { optsOpen.has(i) ? optsOpen.delete(i) : optsOpen.add(i); folded.delete(i); render(); } }, icon('gear')),
+            h('button', { class: 'lg-x', onclick: (e) => popMenu(e.currentTarget, [
+              { icon: 'copy', label: 'Duplicate', fn: () => { snap(); list.splice(i + 1, 0, JSON.parse(JSON.stringify(t))); change(); } },
+              i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { snap(); list.splice(i - 1, 0, list.splice(i, 1)[0]); change(); } },
+              i < list.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { snap(); list.splice(i + 1, 0, list.splice(i, 1)[0]); change(); } },
+              { icon: 'clock', label: t.once ? 'Run every time' : 'Run only once', fn: () => { snap(); t.once = !t.once; delete t.maxRuns; change(); } },
+              { icon: t.off ? 'eye' : 'eyeoff', label: t.off ? 'Enable' : 'Disable', fn: () => { snap(); t.off = !t.off; change(); } },
+              '-', { icon: 'trash', label: 'Delete Trigger', fn: () => { snap(); list.splice(i, 1); folded.clear(); optsOpen.clear(); change(); } },
+            ].filter(Boolean)) }, icon('more'))),
+          !fold && optsOpen.has(i) ? optionsForm(t) : '',
+          !fold && [eventBlock(t, 'event', false), condBlock(t), actionBlock(t, 'actions', 'DO'), (t.conditions || []).length || (t.elseActions || []).length ? actionBlock(t, 'elseActions', 'ELSE (conditions false)', 'else') : '']);
+      }),
       h('div', { class: 'lg-foot' },
         h('button', { class: 'btn primary', onclick: () => { snap(); list.push({ event: { type: 'tap' }, conditions: [], actions: [] }); change(); body.scrollTop = 1e6; } }, icon('plus'), 'Add Trigger'),
         h('button', { class: 'btn', onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Ready-made triggers' }, ...TRIGGER_TEMPLATES.map((tp) => ({ icon: 'bolt', label: tp.label, fn: () => { snap(); list.push(tp.make()); change(); body.scrollTop = 1e6; toast(`Added “${tp.label}”`); } }))]) }, icon('star'), 'Templates')));

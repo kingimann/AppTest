@@ -5142,7 +5142,8 @@ registerBehavior('spriteSheet', {
       start(e, s) {
         inst.entity = e;
         e.sprite = { ...SPRITE_DEFAULTS, ...(e.sprite || {}), src: p.image || e.sprite?.src || '', w: p.size, h: p.size, cols: p.cols, rows: p.rows, frame: 0 };
-        if (p.image) { const img = loadImage(p.image); const fit = () => { if (img.naturalWidth) e.sprite.h = p.size * (img.naturalHeight / p.rows) / (img.naturalWidth / p.cols); }; if (img.complete) fit(); else img.addEventListener('load', fit, { once: true }); }
+        const sheetSrc = p.image || e.sprite.src; // a drawn sprite (2D Sprite Editor) brings its own sheet
+        if (sheetSrc) { const img = loadImage(sheetSrc); const fit = () => { if (img.naturalWidth) e.sprite.h = p.size * (img.naturalHeight / p.rows) / (img.naturalWidth / p.cols); }; if (img.complete) fit(); else img.addEventListener('load', fit, { once: true }); }
         if (p.autoplay) inst.play(p.autoplay);
         s.on('message', (n) => { if (!e.dead && clips[n]) inst.play(n); });
       },
@@ -10978,6 +10979,22 @@ export const LOGIC_EVENTS = {
   destroyed: { label: 'Destroyed', icon: 'trash' },
   animEnd: { label: 'Animation finished', icon: 'clock', params: [sug(txt('clip', '', 'clip (empty = any)'), 'clips')], say: (p) => (p.clip ? `${p.clip} finished` : 'Animation finished') },
   always: { label: 'Every frame (while conditions are true)', icon: 'bolt', say: () => 'When conditions are true' },
+  doubleTap: { label: 'Double-tapped', icon: 'hand' },
+  longPress: { label: 'Pressed and held', icon: 'hand', params: [num('seconds', 0.6, 'hold for (seconds)')], say: (p) => `Held for ${p.seconds}s` },
+  key: { label: 'Key pressed (keyboard)', icon: 'gamepad', params: [txt('key', 'space', 'key (space, a, arrowup, enter…)')], say: (p) => `Key ${p.key}` },
+  varChanged: { label: 'Variable changes', icon: 'trophy', params: [sug(txt('name', 'score', 'variable (empty = any)'), 'vars')], say: (p) => (p.name ? `${p.name} changes` : 'Any variable changes') },
+  delay: { label: 'After a delay (once)', icon: 'clock', params: [num('seconds', 2, 'seconds after it starts')], say: (p) => `${p.seconds}s after start` },
+  random: { label: 'At random times', icon: 'star', params: [num('seconds', 3, 'about every (seconds)')], say: (p) => `Randomly, about every ${p.seconds}s` },
+  near: { label: 'Comes near tag', icon: 'crosshair', params: [sug(txt('tag', 'player', 'tag'), 'tags'), num('distance', 120, 'distance')], say: (p) => `${p.tag} comes within ${p.distance}` },
+  sees: { label: 'Starts seeing tag', icon: 'eye', params: [sug(txt('tag', 'player', 'tag'), 'tags')], say: (p) => `Sees ${p.tag}` },
+  landed: { label: 'Lands on the ground', icon: 'platform' },
+  damaged: { label: 'Takes damage (Health)', icon: 'heart' },
+  died: { label: 'Dies (Health runs out)', icon: 'enemy' },
+  win: { label: 'Level won', icon: 'trophy' },
+  lose: { label: 'Game over', icon: 'enemy' },
+  appHidden: { label: 'Player leaves the app', icon: 'phone' },
+  appShown: { label: 'Player comes back to the app', icon: 'phone' },
+  called: { label: 'Run by another trigger', icon: 'link', params: [txt('name', 'Open door', 'name')], say: (p) => `Run “${p.name}”` },
   after: { label: 'After time in this state', icon: 'clock', fsm: true, params: [num('seconds', 1, 'seconds')], say: (p) => `After ${p.seconds}s` },
   finished: { label: 'When this state’s actions finish', icon: 'check', fsm: true, say: () => 'When done' },
 };
@@ -10995,6 +11012,16 @@ export const LOGIC_CONDITIONS = {
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
   playing: { label: 'Game is playing', icon: 'play', test: (c) => c.s.state === 'play' && !c.s.engine.paused, say: () => 'game is playing' },
+  compareVars: { label: 'Compare two variables', icon: 'trophy', params: [sug(txt('a', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), sug(txt('b', 'best', 'other variable'), 'vars')], test: (c, p) => cmp(+c.s.vars[p.a] || 0, p.op, +c.s.vars[p.b] || 0), say: (p) => `${p.a} ${p.op} ${p.b}` },
+  myVar: { label: 'Compare its own variable', icon: 'key', params: [txt('name', 'hp', 'object variable'), opt('op', OPS6, '≤', 'is'), num('value', 0, 'value')], test: (c, p) => cmp(+c.e.data[p.name] || 0, p.op, +p.value || 0), say: (p) => `its ${p.name} ${p.op} ${p.value}` },
+  textVar: { label: 'Text variable', icon: 'text', params: [sug(txt('name', 'playerName', 'variable'), 'vars'), opt('op', ['equals', 'contains', 'starts with', 'is empty'], 'equals', 'test'), txt('text', 'Hero', 'text')], test: (c, p) => { const v = String(c.s.vars[p.name] ?? '').toLowerCase(), t = String(p.text ?? '').toLowerCase(); return p.op === 'is empty' ? !v : p.op === 'contains' ? v.includes(t) : p.op === 'starts with' ? v.startsWith(t) : v === t; }, say: (p) => (p.op === 'is empty' ? `${p.name} is empty` : `${p.name} ${p.op} “${p.text}”`) },
+  health: { label: 'Health', icon: 'heart', params: [opt('op', OPS6, '≤', 'is'), num('value', 1, 'value'), bool('percent', false, 'as a percent of full')], test: (c, p) => { const hp = +c.e.data.hp || 0, v = p.percent ? hp / (+c.e.data.hpMax || 1) * 100 : hp; return cmp(v, p.op, +p.value || 0); }, say: (p) => `health ${p.op} ${p.value}${p.percent ? '%' : ''}` },
+  tagCount: { label: 'Number of objects with tag', icon: 'enemy', params: [sug(txt('tag', 'enemy', 'tag'), 'tags'), opt('op', OPS6, '=', 'is'), num('value', 0, 'count')], test: (c, p) => cmp(c.s.findAll(p.tag).filter((q) => !q.dead && !q.template).length, p.op, +p.value || 0), say: (p) => `${p.tag} count ${p.op} ${p.value}` },
+  moving: { label: 'Is moving', icon: 'move', params: [num('speed', 10, 'faster than')], test: (c, p) => { const v = c.e.body?.vel; return !!v && Math.hypot(v.x, v.y, v.z || 0) > (+p.speed || 0); }, say: (p) => `moving faster than ${p.speed}` },
+  level: { label: 'Level number', icon: 'flag', params: [opt('op', OPS6, '=', 'is'), num('value', 1, 'level')], test: (c, p) => cmp(c.s.level || 1, p.op, +p.value || 1), say: (p) => `level ${p.op} ${p.value}` },
+  timeIn: { label: 'Time in this level', icon: 'clock', params: [opt('op', OPS6, '≥', 'is'), num('value', 10, 'seconds')], test: (c, p) => cmp(c.s.time || 0, p.op, +p.value || 0), say: (p) => `time ${p.op} ${p.value}s` },
+  portrait: { label: 'Phone held upright', icon: 'phone', test: (c) => c.s.engine.height >= c.s.engine.width, say: () => 'phone upright' },
+  savedKey: { label: 'Save file has key', icon: 'save', params: [txt('key', 'coins', 'key'), txt('file', 'save', 'file')], test: (c, p) => c.s.engine.saves.has(p.key, p.file), say: (p) => `saved “${p.key}”` },
 };
 const target = (c, name) => (!name || name === 'self' ? c.e : name === 'other' ? c.other : c.s.find(name) || c.s.findAll(name)[0]);
 const obj = (k = 'object', label = 'object (empty = this)') => sug(txt(k, '', label), 'objects');
@@ -11007,10 +11034,16 @@ export const LOGIC_ACTIONS = {
   // objects
   showHide: { cat: 'Objects', label: 'Show / hide object', icon: 'eye', params: [obj(), opt('mode', ['hide', 'show', 'toggle'], 'hide', 'make it')], run: (c, p) => { const t = target(c, p.object); if (t) t.visible = p.mode === 'show' ? true : p.mode === 'hide' ? false : !t.visible; }, say: (p) => `${p.mode[0].toUpperCase() + p.mode.slice(1)} ${p.object || 'this'}` },
   destroy: { cat: 'Objects', label: 'Destroy object', icon: 'trash', params: [sug(txt('object', 'self', 'object (self / other / name)'), 'objects'), bool('burst', true, 'particle burst')], run: (c, p) => { const t = target(c, p.object); if (t) { if (p.burst) c.s.burst(t.x, t.y, t.z, '#fff', 14); t.destroy(); } }, say: (p) => `Destroy ${p.object || 'self'}` },
-  spawn: { cat: 'Objects', label: 'Spawn template', icon: 'spawner', params: [sug(txt('template', '', 'template'), 'templates'), num('ox', 0, 'offset x'), num('oy', 0, 'offset y')], run: (c, p) => { if (p.template) c.s.spawn(p.template, { x: c.e.x + (+p.ox || 0), y: c.e.y + (+p.oy || 0), z: c.e.z }); }, say: (p) => `Spawn ${p.template || '…'}` },
+  spawn: { cat: 'Objects', label: 'Spawn template', icon: 'spawner', params: [sug(txt('template', '', 'template'), 'templates'), num('ox', 0, 'offset x'), num('oy', 0, 'offset y'), opt('at', ['this', 'other'], 'this', 'at')], run: (c, p) => { const t = (p.at === 'other' && c.other) || c.e; if (p.template) c.s.spawn(p.template, { x: t.x + (+p.ox || 0), y: t.y + (+p.oy || 0), z: t.z }); }, say: (p) => `Spawn ${p.template || '…'}` },
   setText: { cat: 'Objects', label: 'Set text', icon: 'text', params: [obj(), txt('text', 'Hello {score}', 'text')], run: (c, p) => { const t = target(c, p.object); if (t) { t.text ||= { ...TEXT_DEFAULTS }; t.text.value = p.text; } }, say: (p) => `Text: “${p.text}”` },
   setColor: { cat: 'Objects', label: 'Set color', icon: 'brush', params: [obj(), { key: 'color', type: 'color', default: '#ff5252', label: 'color' }, num('seconds', 0.3, 'fade time')], run: (c, p) => { const t = target(c, p.object); if (!t) return; const key = t.mesh ? 'mesh.color' : t.shape ? 'shape.fill' : 'text.color'; c.s.to(t, { [key]: p.color }, Math.max(0.01, +p.seconds || 0.01)); }, say: (p) => `Color ${p.object || 'this'} ${p.color}` },
   teleport: { cat: 'Objects', label: 'Move to object', icon: 'portal', params: [obj('to', 'object to go to')], run: (c, p) => { const t = c.s.find(p.to); if (t) { c.e.x = t.x; c.e.y = t.y; c.e.z = t.z; } }, say: (p) => `Move to ${p.to || '…'}` },
+  toggleVar: { cat: 'Variables', label: 'Toggle variable (0 ↔ 1)', icon: 'trophy', params: [sug(txt('name', 'open', 'variable'), 'vars')], run: (c, p) => c.s.setVar(p.name, +c.s.vars[p.name] ? 0 : 1), say: (p) => `Toggle ${p.name}` },
+  randomVar: { cat: 'Variables', label: 'Random number', icon: 'star', params: [sug(txt('name', 'roll', 'into variable'), 'vars'), num('min', 1, 'from'), num('max', 6, 'to'), bool('whole', true, 'whole numbers')], run: (c, p) => { const a = +p.min || 0, b = +p.max || 0, v = a + Math.random() * (b - a + (p.whole ? 1 : 0)); c.s.setVar(p.name, p.whole ? Math.floor(v) : +v.toFixed(2)); }, say: (p) => `${p.name} = random ${p.min}–${p.max}` },
+  textVar: { cat: 'Variables', label: 'Set text variable', icon: 'text', params: [sug(txt('name', 'playerName', 'variable'), 'vars'), txt('text', 'Hero {level}', 'text ({braces} work)')], run: (c, p) => c.s.setVar(p.name, fillTemplate(p.text, c.s.vars)), say: (p) => `${p.name} = “${p.text}”` },
+  myVar: { cat: 'Variables', label: 'Change its own variable', icon: 'key', params: [txt('name', 'hp', 'object variable'), opt('op', ['add', 'set', 'subtract', 'multiply'], 'add', 'how'), num('value', 1, 'value'), sug(txt('object', '', 'object (empty = this)'), 'objects')], run: (c, p) => { const t = target(c, p.object); if (!t) return; const v = +p.value || 0, cur = +t.data[p.name] || 0; t.data[p.name] = p.op === 'set' ? v : p.op === 'subtract' ? cur - v : p.op === 'multiply' ? cur * v : cur + v; c.s.emit('myvar', t, p.name, t.data[p.name]); }, say: (p) => `${p.object || 'its'} ${p.name} ${p.op} ${p.value}` },
+  saveKey: { cat: 'Variables', label: 'Save variable to file', icon: 'save', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => c.s.engine.saves.save(p.name, c.s.vars[p.name] ?? 0, p.file), say: (p) => `Save ${p.name}` },
+  loadKey: { cat: 'Variables', label: 'Load variable from file', icon: 'folder', params: [sug(txt('name', 'coins', 'variable'), 'vars'), txt('file', 'save', 'save file')], run: (c, p) => { if (c.s.engine.saves.has(p.name, p.file)) c.s.setVar(p.name, c.s.engine.saves.load(p.name, p.file)); }, say: (p) => `Load ${p.name}` },
   giveItem: { cat: 'Variables', label: 'Give / use item', icon: 'key', params: [txt('item', 'Key', 'item'), num('amount', 1, 'amount (− to use up)'), txt('icon', '', 'icon (emoji)')], run: (c, p) => c.s.addItem(p.item, +p.amount || 0, p.icon), say: (p) => (+p.amount < 0 ? `Use ${-p.amount} ${p.item}` : `Give ${p.amount} ${p.item}`) },
   damage: { cat: 'Objects', label: 'Damage / heal', icon: 'heart', params: [sug(txt('object', 'other', 'who (self / other / name)'), 'objects'), num('amount', 1, 'damage (− heals)')], run: (c, p) => { const t = target(c, p.object), hb = t?.getBehavior('health'); if (hb) { if (+p.amount < 0) hb.heal(-p.amount, t); else hb.damage(+p.amount || 1, t, c.e); } }, say: (p) => (+p.amount < 0 ? `Heal ${p.object} ${-p.amount}` : `Damage ${p.object} ${p.amount}`) },
   talk: { cat: 'Game', label: 'Say dialogue', icon: 'sign', params: [txt('who', 'Guide', 'speaker'), txt('text', 'Hello there!', 'text'), bool('wait', true, 'wait until closed')], run: (c, p) => { if (!c.s.dialog) c.s.dialog = { lines: [{ who: p.who, text: fillTemplate(p.text, c.s.vars) }], i: 0, chars: 0, pause: true }; return p.wait ? { until: () => !c.s.dialog } : 0; }, say: (p) => `${p.who}: “${p.text}”` },
@@ -11028,6 +11061,12 @@ export const LOGIC_ACTIONS = {
   setGravity: { cat: 'Physics', label: 'Set gravity', icon: 'body', params: [num('y', 1600, 'gravity y'), num('x', 0, 'gravity x')], run: (c, p) => { c.s.gravity = +p.y || 0; c.s.gravityX = +p.x || 0; }, say: (p) => `Gravity ${p.y}` },
   // flow
   wait: { cat: 'Flow', label: 'Wait', icon: 'clock', params: [num('seconds', 1, 'seconds')], run: (c, p) => Math.max(0, +p.seconds || 0), say: (p) => `Wait ${p.seconds}s` },
+  waitRandom: { cat: 'Flow', label: 'Wait a random time', icon: 'clock', params: [num('min', 0.5, 'at least'), num('max', 2, 'at most')], run: (c, p) => Math.max(0, (+p.min || 0) + Math.random() * Math.max(0, (+p.max || 0) - (+p.min || 0))), say: (p) => `Wait ${p.min}–${p.max}s` },
+  waitUntil: { cat: 'Flow', label: 'Wait until variable', icon: 'clock', params: [sug(txt('name', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), num('value', 10, 'value')], run: (c, p) => ({ until: () => cmp(+c.s.vars[p.name] || 0, p.op, +p.value || 0) }), say: (p) => `Wait until ${p.name} ${p.op} ${p.value}` },
+  onlyIf: { cat: 'Flow', label: 'Continue only if', icon: 'check', params: [sug(txt('name', 'score', 'variable'), 'vars'), opt('op', OPS6, '≥', 'is'), num('value', 10, 'value')], run: (c, p) => (cmp(+c.s.vars[p.name] || 0, p.op, +p.value || 0) ? undefined : 'stop'), say: (p) => `Stop unless ${p.name} ${p.op} ${p.value}` },
+  repeat: { cat: 'Flow', label: 'Repeat the steps above', icon: 'rotate', params: [num('times', 2, 'more times')], run: (c, p) => { const n = (c.reps ||= {}); n[c.at] = (n[c.at] || 0) + 1; if (n[c.at] <= clamp(Math.round(+p.times || 0), 0, 1000)) return { goto: 0 }; n[c.at] = 0; }, say: (p) => `Repeat above ${p.times} more time${+p.times === 1 ? '' : 's'}` },
+  stop: { cat: 'Flow', label: 'Stop here', icon: 'close', run: () => 'stop', say: () => 'Stop' },
+  runTrigger: { cat: 'Flow', label: 'Run another trigger', icon: 'link', params: [txt('name', 'Open door', 'trigger name (its "Run by another trigger" event)')], run: (c, p) => c.s.emit('runTrigger', p.name), say: (p) => `Run “${p.name}”` },
   sendMessage: { cat: 'Flow', label: 'Send message', icon: 'sign', params: [sug(txt('message', 'go', 'message'), 'messages')], run: (c, p) => c.s.send(p.message), say: (p) => `Send “${p.message}”` },
   setState: { cat: 'Flow', label: 'Go to state', icon: 'nodes', params: [txt('state', 'Idle', 'state')], run: (c, p) => c.e.getBehavior('fsm')?.goTo(p.state), say: (p) => `Go to ${p.state}` },
   // game
@@ -11046,6 +11085,10 @@ export const LOGIC_ACTIONS = {
   phoneNotify: { cat: 'Game', label: 'Phone notification', icon: 'bell', params: [txt('title', 'Come back!', 'title'), txt('text', '', 'text'), num('minutes', 0, 'in minutes (0 = now)'), txt('id', '', 'id (same id replaces it)')], run: (c, p) => { c.s.engine.phone.send({ id: p.id, title: p.title, text: p.text, when: +p.minutes > 0 ? 'in' : 'now', seconds: +p.minutes * 60 }); }, say: (p) => `Phone notification: ${p.title || ''}${+p.minutes > 0 ? ` in ${p.minutes} min` : ''}` },
   notify: { cat: 'Game', label: 'Show notification', icon: 'bell', params: [sug(txt('type', 'default', 'type'), 'notifyTypes'), txt('title', 'Well done!', 'title'), txt('text', '', 'text'), txt('icon', '', 'icon (blank = the type\'s)')], run: (c, p) => { c.s.engine.notify({ type: p.type, title: p.title, text: p.text, icon: p.icon || undefined }); }, say: (p) => `Notify (${p.type || 'default'}): ${p.title || ''}` },
   restart: { cat: 'Game', label: 'Restart', icon: 'rotate', run: (c) => c.s.engine.restart(), say: () => 'Restart' },
+  goLevel: { cat: 'Game', label: 'Go to level', icon: 'flag', params: [num('level', 1, 'level')], run: (c, p) => c.s.engine.goToLevel(+p.level || 1), say: (p) => `Go to level ${p.level}` },
+  music: { cat: 'Game', label: 'Play music', icon: 'bell', params: [txt('sound', '', 'imported sound or URL (empty = stop)'), num('volume', 0.6, 'volume (0–1)')], run: (c, p) => { if (p.sound) c.s.engine.audio.music(p.sound, { loop: true, vol: clamp(+p.volume || 0, 0, 1) }); else c.s.engine.audio.stopMusic(0.5); }, say: (p) => (p.sound ? `Music: ${p.sound}` : 'Stop music') },
+  burst: { cat: 'Game', label: 'Particle burst', icon: 'star', params: [{ key: 'color', type: 'color', default: '#ffd23f', label: 'colour' }, num('count', 16, 'how many'), opt('at', ['this', 'other'], 'this', 'at')], run: (c, p) => { const t = p.at === 'other' ? c.other : c.e; if (t) c.s.burst(t.x, t.y, t.z, p.color, clamp(+p.count || 16, 1, 200)); }, say: (p) => `Burst of ${p.count}` },
+  toast: { cat: 'Game', label: 'Pop-up text here', icon: 'text', params: [txt('text', '+1', 'text ({braces} work)'), { key: 'color', type: 'color', default: '#ffffff', label: 'colour' }], run: (c, p) => popText(c.s, c.e.x, c.e.y, fillTemplate(p.text, c.s.vars), p.color || '#ffffff', 26), say: (p) => `Pop-up “${p.text}”` },
 };
 const withDefaults = (def, it) => { const p = { ...it }; for (const q of def?.params || []) if (p[q.key] === undefined) p[q.key] = q.default; return p; };
 export const logicSay = (lib, it) => { const def = lib[it?.type]; if (!def) return it?.type || '?'; const p = withDefaults(def, it); return (def.say ? def.say(p) : def.label) || def.label; };
@@ -11054,11 +11097,14 @@ export function runInstructions(list, ctx, done) {
   let i = 0;
   const next = () => {
     while (i < (list || []).length) {
-      if (ctx.cancelled || ctx.e.dead || ctx.s.engine?.scene !== ctx.s) return;
+      if (ctx.cancelled || (ctx.e.dead && !ctx.afterDeath) || ctx.s.engine?.scene !== ctx.s) return; // (Destroyed triggers still finish their list)
       const it = list[i++], def = LOGIC_ACTIONS[it?.type];
       if (!def || it.off) continue;
       let r;
+      ctx.at = i - 1; // which step is running (Repeat counts per step)
       try { r = def.run(ctx, withDefaults(def, it)); } catch (err) { Log.add('error', `${def.label || it.type} failed: ${err.message}`, ctx.e?.name, err); }
+      if (r === 'stop') break;
+      if (r && typeof r.goto === 'number') { i = r.goto; continue; }
       if (typeof r === 'number' && r > 0) { ctx.s.after(r, next); return; }
       if (r && typeof r.until === 'function') { const poll = () => (ctx.cancelled ? null : r.until() ? next() : ctx.s.after(0.05, poll)); ctx.s.after(0.05, poll); return; }
     }
@@ -11066,7 +11112,8 @@ export function runInstructions(list, ctx, done) {
   };
   next();
 }
-export function conditionsPass(list, ctx) {
+export function conditionsPass(list, ctx, any = false) {
+  if (any && (list || []).length) return list.some((cd) => conditionsPass([cd], ctx));
   for (const cd of list || []) { const def = LOGIC_CONDITIONS[cd.type]; if (!def) continue; const ok = !!def.test(ctx, withDefaults(def, cd)); if (ok === !!cd.not) return false; }
   return true;
 }
@@ -11076,12 +11123,22 @@ class LogicWatcher {
     this.e = e; this.s = s; this.queue = []; this.now = []; this.timers = new Map(); this.edges = new Map(); this.first = true;
     s.on('message', (n) => this.queue.push({ type: 'message', name: n }));
     s.on('animationEnd', (ent, clip) => { if (ent === e) this.queue.push({ type: 'animEnd', clip }); });
+    s.on('var', (k) => this.queue.push({ type: 'varChanged', name: k }));
+    s.on('damage', (who) => { if (who === e) this.queue.push({ type: 'damaged' }); });
+    s.on('death', (who) => { if (who === e) this.queue.push({ type: 'died' }); });
+    s.on('win', () => this.queue.push({ type: 'win' }));
+    s.on('gameover', () => this.queue.push({ type: 'lose' }));
+    s.on('appVisible', (v) => this.queue.push({ type: v ? 'appShown' : 'appHidden' }));
+    s.on('runTrigger', (n) => this.queue.push({ type: 'called', name: n }));
+    this.lastTap = -9; this.age = 0;
   }
   push(ev) { this.queue.push(ev); }
   frame(dt) {
     const s = this.s, e = this.e, inp = s.engine.input, ev = this.queue;
     this.queue = []; this.dt = dt;
-    if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) ev.push({ type: 'tap' });
+    this.age += dt;
+    if (e.visible && inp.taps.some((t) => hitTest(s, e, t.x, t.y))) { ev.push({ type: 'tap' }); if (s.time - this.lastTap < 0.35) { ev.push({ type: 'doubleTap' }); this.lastTap = -9; } else this.lastTap = s.time; }
+    for (const k of inp.keysDown) ev.push({ type: 'key', key: k });
     if (inp.pressed('jump')) ev.push({ type: 'button', button: 'jump' });
     if (inp.pressed('action')) ev.push({ type: 'button', button: 'fire' });
     for (const d of ['up', 'down', 'left', 'right']) if (inp.pressed('swipe:' + d)) ev.push({ type: 'swipe', dir: d });
@@ -11095,10 +11152,23 @@ class LogicWatcher {
       case 'every': { const t = (this.timers.get(key) || 0) + this.dt; if (t >= Math.max(0.05, +p.seconds || 1)) { this.timers.set(key, 0); return {}; } this.timers.set(key, t); return null; }
       case 'variable': { const now = cmp(+this.s.vars[p.name] || 0, p.op, +p.value || 0), was = this.edges.get(key); this.edges.set(key, now); return now && !was ? {} : null; }
       case 'always': return {};
+      case 'delay': { if (this.edges.get(key) || this.age < (+p.seconds || 0)) return null; this.edges.set(key, true); return {}; }
+      case 'random': return Math.random() < this.dt / Math.max(0.1, +p.seconds || 3) ? {} : null;
+      case 'landed': { const g = !!this.e.body?.grounded, was = this.edges.get(key); this.edges.set(key, g); return g && was === false ? {} : null; }
+      case 'near': case 'sees': {
+        const t = nearest(this.s, this.e, p.tag), now = !!t && (x.type === 'near' ? Math.hypot(t.x - this.e.x, t.y - this.e.y, (t.z || 0) - (this.e.z || 0)) < (+p.distance || 120) : this.s.canSee(this.e, t));
+        const was = this.edges.get(key); this.edges.set(key, now); return now && !was ? { other: t } : null;
+      }
+      case 'longPress': {
+        const inp = this.s.engine.input, held = [...inp.pointers.values()].find((q) => q.role === 'free' && (performance.now() - q.t) / 1000 >= (+p.seconds || 0.6) && hitTest(this.s, this.e, q.x, q.y));
+        if (!held) { this.edges.delete(key); return null; }
+        if (this.edges.get(key) === held.id) return null;
+        this.edges.set(key, held.id); return {};
+      }
       case 'after': return (extra.stateTime || 0) >= (+p.seconds || 0) ? {} : null;
       case 'finished': return extra.finished ? {} : null;
       default: {
-        const hit = this.now.find((q) => q.type === x?.type && (x.type !== 'touch' && x.type !== 'touchEnd' || q.other?.has(p.tag)) && (x.type !== 'button' || q.button === p.button) && (x.type !== 'swipe' || q.dir === p.dir) && (x.type !== 'message' || q.name === p.message) && (x.type !== 'animEnd' || !p.clip || q.clip === p.clip));
+        const hit = this.now.find((q) => q.type === x?.type && (x.type !== 'touch' && x.type !== 'touchEnd' || q.other?.has(p.tag)) && (x.type !== 'button' || q.button === p.button) && (x.type !== 'swipe' || q.dir === p.dir) && (x.type !== 'message' || q.name === p.message) && (x.type !== 'animEnd' || !p.clip || q.clip === p.clip) && (x.type !== 'varChanged' || !p.name || q.name === p.name) && (x.type !== 'called' || q.name === p.name) && (x.type !== 'key' || q.key === String(p.key || '').toLowerCase().trim()));
         return hit ? { other: hit.other } : null;
       }
     }
@@ -11111,30 +11181,42 @@ const needsSensor = (events, e, s) => {
 
 /** Triggers (Game Creator style): On [event] → If [conditions] → Do [instructions, one after another]. */
 registerBehavior('triggers', {
-  label: 'Triggers', description: 'Easy logic: On something happening → If conditions are true → Do a list of instructions in order (with waits). Like Game Creator.',
+  label: 'Triggers', description: 'Easy logic: On something happening → If conditions are true → Do a list of instructions in order (with waits). Like Game Creator. Each trigger can have a cooldown, a delay, a chance, a run limit and an Else list.',
   params: [{ key: 'triggers', label: 'Triggers', type: 'triggers', default: [{ event: { type: 'tap' }, conditions: [], actions: [{ type: 'setVar', name: 'score', op: 'add', value: 1 }, { type: 'punch', what: 'scale', amount: 0.3, seconds: 0.4 }] }] }],
   create(p) {
     const list = Array.isArray(p.triggers) ? p.triggers : [];
+    const st = list.map(() => ({ runs: 0, last: -1e9, run: null })); // per copy: how often each trigger ran, when, and what is running now
     let w = null;
+    /** Options: once / max runs, cooldown, chance, delay, if any / all conditions, else, overlap (allow, skip while running, restart). */
+    const fire = (t, i, e, s, other) => {
+      const S = st[i], max = t.once ? 1 : Math.round(+t.maxRuns || 0);
+      if (max > 0 && S.runs >= max) return;
+      if (+t.cooldown > 0 && s.time - S.last < +t.cooldown) return;
+      if (t.chance != null && t.chance !== '' && +t.chance < 100 && Math.random() * 100 >= +t.chance) return;
+      const c = { s, e, other, afterDeath: e.dead };
+      const ok = conditionsPass(t.conditions, c, t.match === 'any');
+      const steps = ok ? t.actions : t.elseActions;
+      if (!ok && !steps?.length) return;
+      if (S.run && !S.run.done) { if (t.overlap === 'skip') return; if (t.overlap === 'restart') S.run.cancelled = true; }
+      if (ok) { S.runs++; S.last = s.time; }
+      if (t.log) Log.add('info', `Trigger “${t.name || 'Trigger ' + (i + 1)}” ${ok ? 'ran' : 'ran its Else'}`, e.name);
+      const go = () => { if (c.cancelled || (e.dead && !c.afterDeath)) return; S.run = c; runInstructions(steps, c, () => { c.done = true; }); };
+      if (+t.delay > 0) { S.run = c; s.after(+t.delay, go); } else go();
+    };
     return {
       uiAlways: true,
       start(e, s) { w = new LogicWatcher(e, s); needsSensor(list.map((t) => t.event), e, s); },
       update(e, dt, s) {
         w.frame(dt);
         list.forEach((t, i) => {
-          if (t.off || (s.state !== 'play' && t.event?.type !== 'tap' && t.event?.type !== 'message')) return;
-          if (t.once && t.fired) return;
+          if (t.off || (s.state !== 'play' && !['tap', 'message', 'called', 'win', 'lose', 'appHidden', 'appShown', 'varChanged'].includes(t.event?.type))) return;
           const hit = w.match(t.event, i);
-          if (!hit) return;
-          const c = { s, e, other: hit.other };
-          if (!conditionsPass(t.conditions, c)) return;
-          t.fired = true;
-          runInstructions(t.actions, c);
+          if (hit) fire(t, i, e, s, hit.other);
         });
       },
       collide(e, other) { w?.push({ type: 'touch', other }); },
       separate(e, other) { w?.push({ type: 'touchEnd', other }); },
-      destroy(e, s) { for (const t of list) if (t.event?.type === 'destroyed' && conditionsPass(t.conditions, { s, e })) runInstructions(t.actions, { s, e }); },
+      destroy(e, s) { list.forEach((t, i) => { if (t.event?.type === 'destroyed' && !t.off) fire(t, i, e, s); }); },
     };
   },
 });

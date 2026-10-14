@@ -10,6 +10,7 @@ import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snaps
 import { icon } from './icons.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
+import { openSprite2D, newDrawing } from './sprite2d.js';
 import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
@@ -2111,7 +2112,7 @@ function openCreate(startCat) {
   ];
   const cats = [
     { key: 'gameplay', title: 'Gameplay', icon: 'player', color: '#3a6ea5', desc: 'Players, enemies, coins, goals…', items: prefabs.map((o) => fromDef(o)) },
-    !three && { key: 'sprites', title: 'Characters & Sprites', icon: 'image', color: '#8e44ad', desc: 'Drawn characters, items, nature, blocks', items: spriteItems },
+    !three && { key: 'sprites', title: 'Characters & Sprites', icon: 'image', color: '#8e44ad', desc: 'Drawn characters, items, nature, blocks, or draw your own', items: [{ label: 'Draw Your Own', icon: 'brush', group: 'Draw', desc: '2D Sprite Editor: shapes, pen, pixels, frames', fn: () => editSprite2D(null) }, ...spriteItems] },
     { key: 'objects', title: three ? 'Shapes' : 'Shapes & Objects', icon: 'square', color: '#2e7d5b', desc: three ? 'Cube, sphere, plane, text…' : 'Boxes, circles, text, images…', items: objs.filter((o) => !CAMLIGHT.includes(o.label)).map((o) => fromDef(o, 'entity')) },
     three && { key: 'models', title: '3D Models', icon: 'cube', color: '#2e7d5b', desc: 'Trees, houses, cars… or build your own', items: [{ label: 'New Model (Modeler)', icon: 'edit', desc: 'Model it like in Blender', fn: newModel }, ...MODELS_3D.map((m) => ({ label: m.label, icon: m.icon, fn: () => addEntity({ name: m.label, y: 0, model: { parts: clone(m.parts) } }) }))] },
     { key: 'ui', title: 'UI & Menus', icon: 'hud', color: '#c2185b', desc: 'Buttons, nav bars, side bars, popups…', items: UI_WIDGETS.map((o) => fromDef(o)) },
@@ -2178,6 +2179,7 @@ function openCreateMenu(anchor) {
     { icon: 'nodes', label: 'State Machine', fn: () => addLogic('fsm') },
     { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
     is3D() && { icon: 'cube', label: 'New 3D Model (Modeler)', fn: newModel },
+    { icon: 'brush', label: 'Draw a Sprite (2D Editor)', fn: () => editSprite2D(null) },
   ]);
 }
 
@@ -2500,6 +2502,10 @@ function validate(b, j) {
   if (b.type === 'joint' && !b.connectTo) out.push(['warn', 'Pick the object to connect to.']);
   if (b.type === 'waveSpawner' && (b.waves || []).some((w) => !all.some((e) => e.template && e.name === w.template))) out.push(['error', 'A wave uses a template that does not exist. Tick “Template” on the enemy object.']);
   if (b.type === 'tween' && b.effect === 'path' && !(Array.isArray(b.points) && b.points.length)) out.push(['error', 'The path needs at least one point.']);
+  if (b.type === 'triggers') {
+    const called = new Set(all.flatMap((e) => (e.behaviors || []).filter((q) => q.type === 'triggers').flatMap((q) => (q.triggers || []).filter((t) => t.event?.type === 'called').map((t) => t.event.name))));
+    for (const t of b.triggers || []) for (const a of [...(t.actions || []), ...(t.elseActions || [])]) if (a.type === 'runTrigger' && !called.has(a.name)) out.push(['warn', `“Run another trigger: ${a.name || '…'}” finds no trigger with the event “Run by another trigger” named that.`]);
+  }
   if (b.type === 'autoSave' && j.template && !b.key) out.push(['warn', 'On a template every copy gets a new name, so copies are saved but never found again. Give it a Key, or save copies with nodes.']);
   if ((b.type === 'autoSave' || b.type === 'saveManager') && /[.]bak$/.test(b.file || '')) out.push(['error', 'Save file names can\'t end in .bak (used for backups).']);
   if (b.type === 'cameraMixer' && b.camA && !has(b.camA)) out.push(['warn', `No object named “${b.camA}” in this level.`]);
@@ -2789,6 +2795,41 @@ function editModel(j, { edit = false } = {}) {
   });
   pushBack(back);
 }
+/** 2D Sprite Editor: draw a sprite from shapes, pen lines and pixels (with frames), saved as the object's picture. */
+function drawingFromLooks(j) { // start from what the object looks like now
+  const sh = j?.shape;
+  if (!sh) return newDrawing(64, 64);
+  const w0 = sh.type === 'circle' || sh.type === 'ring' ? (sh.r || 20) * 2 : sh.w || 40, h0 = sh.type === 'circle' || sh.type === 'ring' ? w0 : sh.h || 40;
+  const d = newDrawing(64, Math.max(8, Math.min(256, Math.round(64 * h0 / w0)))), pad = 4, base = { x: pad, y: pad, w: d.w - pad * 2, h: d.h - pad * 2, fill: sh.fill || '', ...(sh.stroke ? { stroke: sh.stroke, lw: Math.max(1, (sh.lineWidth || 2) * 64 / w0) } : {}), ...(sh.fill2 ? { fill2: sh.fill2, gradDir: sh.gradDir } : {}) };
+  const t = { rect: ['rect'], circle: ['ellipse'], ellipse: ['ellipse'], triangle: ['triangle'], star: ['star', { sides: 5 }], heart: ['heart'], diamond: ['polygon', { sides: 4 }], hexagon: ['polygon', { sides: 6 }], pentagon: ['polygon', { sides: 5 }], octagon: ['polygon', { sides: 8 }], capsule: ['rect', { radius: 999 }], emoji: ['text', { text: sh.emoji || '⭐', fill: '#ffffff' }] }[sh.type];
+  if (t) d.frames[0].parts.push({ type: t[0], ...base, ...(sh.type === 'rect' && sh.radius ? { radius: sh.radius * 64 / w0 } : {}), ...(t[1] || {}) });
+  return d;
+}
+function editSprite2D(j) {
+  const id = j?.id, back = () => ed.close();
+  const ed = openSprite2D({
+    drawing: j?.sprite?.drawing || drawingFromLooks(j), title: j?.name || 'New sprite', h, popMenu, toast, buzz, pickImage: (cb) => pickImage(cb, 512),
+    onDone: ({ drawing, src, cols, clips }) => {
+      const e = id ? ent(id) : addEntity({ name: 'Drawing', sprite: { src: '', w: 64, h: 64 } });
+      if (!e) return;
+      const old = e.sprite || {}, w = old.drawing || old.src ? old.w || 64 : e.shape ? (e.shape.type === 'circle' || e.shape.type === 'ring' ? (e.shape.r || 20) * 2 : e.shape.w || 64) : 64;
+      e.sprite = { ...old, src, drawing, w, h: Math.round(w * drawing.h / drawing.w) };
+      delete e.sprite.slice; delete e.shape;
+      const bs = (e.behaviors ||= []), sheet = bs.find((b) => b.type === 'spriteSheet' && b.drawn);
+      if (cols > 1) {
+        Object.assign(e.sprite, { cols, rows: 1, frame: 0 });
+        const conf = { image: '', cols, rows: 1, size: w, fps: drawing.fps || 8, clips, autoplay: clips.split(':')[0] || 'idle', drawn: true };
+        if (sheet) Object.assign(sheet, conf); else bs.push({ type: 'spriteSheet', flip: false, auto: false, ...conf });
+      } else {
+        delete e.sprite.cols; delete e.sprite.rows; delete e.sprite.frame;
+        if (sheet) bs.splice(bs.indexOf(sheet), 1);
+      }
+      changed({ structure: true }); pushHistory(); toast(cols > 1 ? `Sprite saved with ${cols} frames` : 'Sprite saved');
+    },
+    onClose: () => { dropBack(back); renderInspector(); },
+  });
+  pushBack(back);
+}
 function newModel() {
   const j = addEntity({ name: 'Model', y: 0, model: { parts: [{ geometry: 'mesh', ...makeCube(), x: 0, y: 0.5, z: 0, color: '#b0bec5' }] } });
   editModel(j, { edit: true });
@@ -2984,6 +3025,7 @@ function renderInspector() {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
       C('shape.type', { label: 'Shape', type: 'select', options: [['rect', 'Rectangle'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['triangle', 'Triangle'], ['star', 'Star'], ['heart', 'Heart'], ['diamond', 'Diamond'], ['hexagon', 'Hexagon'], ['pentagon', 'Pentagon'], ['octagon', 'Octagon'], ['capsule', 'Capsule'], ['ring', 'Ring'], ['arrow', 'Arrow'], ['cloud', 'Cloud'], ['emoji', 'Emoji (text)']], structure: true }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => editSprite2D(j) }, icon('brush'), 'Draw your own (2D Sprite Editor)')),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }, icon('image'), 'Use a sprite picture instead')),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
@@ -3005,8 +3047,9 @@ function renderInspector() {
     box.append(comp('Image', [
       C('sprite.src', { label: 'Source URL', type: 'text' }),
       j.sprite.src ? h('div', { class: 'row side' }, h('label', {}, 'Picture'), h('img', { class: 'img-thumb', src: artURL(j.sprite.src), alt: '' })) : null,
-      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => pickSprite((url) => { j.sprite.src = url; if (frameSlice(url) && !j.sprite.slice) j.sprite.slice = frameSlice(url); changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
-        h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; changed({ inspector: true }); }) }, icon('image'), 'From device')),
+      h('div', { class: 'btns' }, h('button', { class: 'btn' + (j.sprite.drawing ? '' : ' primary'), onclick: () => pickSprite((url) => { j.sprite.src = url; delete j.sprite.drawing; if (frameSlice(url) && !j.sprite.slice) j.sprite.slice = frameSlice(url); changed({ inspector: true }); }, { device: false }) }, icon('star'), 'Sprite library'),
+        h('button', { class: 'btn', onclick: () => pickImage((url) => { j.sprite.src = url; delete j.sprite.drawing; changed({ inspector: true }); }) }, icon('image'), 'From device'),
+        h('button', { class: 'btn' + (j.sprite.drawing ? ' primary' : ''), onclick: () => editSprite2D(j) }, icon('brush'), j.sprite.drawing ? 'Edit Drawing' : 'Draw')),
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
       C('sprite.radius', { label: 'Round corners', type: 'number', def: 0, range: [0, 100], step: 1 }),

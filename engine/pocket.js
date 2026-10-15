@@ -7355,6 +7355,17 @@ registerBehavior('uiSideBar', {
     { key: 'filterVar', label: 'Search the items with variable', type: 'text', default: '', suggest: 'vars', group: 'Items', info: 'e.g. search: while it has text, the menu shows only the items (from every submenu too) whose name has it. Put a Search Bar inside the menu that types into the same variable.' },
     { key: 'noResults', label: 'When nothing matches', type: 'text', default: 'No matches', group: 'Items', showIf: (b) => !!b.filterVar },
     { key: 'lockedTap', label: 'Tapping a locked item sends', type: 'text', default: '', suggest: 'messages', group: 'Items', infoText: 'Items with a "?" show-if (e.g. ?level >= 5) show greyed with a lock until it is true. e.g. locked: show a popup.' },
+    { key: 'topBar', label: 'Top bar', type: 'bool', default: false, group: 'Top bar', info: 'A bar across the top of the menu: the ✕ (or ‹ in a submenu), a title, and icon buttons. The header, if any, sits under it.' },
+    { key: 'topTitle', label: 'Title (variables in braces)', type: 'text', default: 'Menu', group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topIcons', label: 'Buttons (icon | page, msg:name, toggle:var, menu:Name or url: | badge)', type: 'code', default: 'search | msg:search\nbell | msg:notifications | unread', group: 'Top bar', showIf: (b) => !!b.topBar, infoText: 'One per line, shown from the left. Leave the action blank to send the icon\'s name as a message. A badge is a variable (a count) or a word in quotes ("NEW").' },
+    { key: 'topClose', label: 'Close button (✕) side', type: 'select', options: ['left', 'right'], default: 'left', group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topAlign', label: 'Title position', type: 'select', options: ['left', 'centre'], default: 'left', group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topBack', label: 'In a submenu: ‹ and its name in the bar', type: 'bool', default: true, group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topHeight', label: 'Height', type: 'number', default: 52, range: [40, 80], step: 2, group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topTitleSize', label: 'Title size', type: 'number', default: 17, range: [12, 26], step: 1, group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topBg', label: 'Bar colour (blank = the menu\'s)', type: 'color', default: '', optional: true, group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topText', label: 'Bar text and icons (blank = text colour)', type: 'color', default: '', optional: true, group: 'Top bar', showIf: (b) => !!b.topBar },
+    { key: 'topLine', label: 'Line under the bar', type: 'bool', default: true, group: 'Top bar', showIf: (b) => !!b.topBar },
     { key: 'subVar', label: 'Set variable to the open submenu', type: 'text', default: '', suggest: 'vars', group: 'Behaviour', infoText: 'Blank = none. It holds the submenu\'s name while one is open, "" otherwise.' },
   ],
   create(p) {
@@ -7398,6 +7409,8 @@ registerBehavior('uiSideBar', {
       for (const it of [...I, ...Object.values(G).flat()]) if (it.kind === 'section' && it.fold && !foldSeen.has(it.label)) { foldSeen.add(it.label); if (it.fold === '-' && !(p.rememberFolds !== false && memo?.open?.has(it.label))) folded.add(it.label); if (p.rememberFolds !== false && memo?.shut?.has(it.label)) folded.add(it.label); }
     };
     let memo = null; // folded sections remembered on this phone
+    let topSrc = null, topList = [];
+    const topItems = () => { if (p.topIcons !== topSrc) { topSrc = p.topIcons; topList = String(p.topIcons || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [icon = '', act = '', badge = '', color = ''] = l.split('|').map((x) => x.trim()); return actOf(act || 'msg:' + icon, { label: icon, icon, badge, sub: '', right: '', color, cond: '' }); }); } return topList; };
     const truthy = (v) => !(v == null || v === false || v === 0 || v === '' || v === '0' || v === 'false');
     /** An item's show-if: "loggedIn", "!loggedIn", "level >= 5", "plan = pro"; a leading ? shows it locked instead of hiding it. */
     const condOk = (s, it) => {
@@ -7416,7 +7429,7 @@ registerBehavior('uiSideBar', {
     const visibleItems = (s, list, main) => {
       const q = main && p.filterVar ? String(s.vars[p.filterVar] ?? '').trim().toLowerCase() : '';
       if (q) { const hits = [...I, ...Object.values(G).flat()].filter((it) => ITEMISH(it) && condOk(s, it) !== false && it.label.toLowerCase().includes(q)); return hits.length ? hits : [{ kind: 'text', label: p.noResults || 'No matches' }]; }
-      const src = main && sub ? [{ kind: 'back', label: sub, icon: 'back' }, ...(G[sub] || [])] : list, out = []; let hide = false;
+      const src = main && sub ? [...(p.topBar && p.topBack !== false ? [] : [{ kind: 'back', label: sub, icon: 'back' }]), ...(G[sub] || [])] : list, out = []; let hide = false;
       for (const it of src) { if (it.kind === 'section') { hide = !!it.fold && folded.has(it.label); out.push(it); continue; } if (it.kind === 'line') { hide = false; out.push(it); continue; } if (hide || condOk(s, it) === false) continue; out.push(it); }
       return out;
     };
@@ -7506,6 +7519,19 @@ registerBehavior('uiSideBar', {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
           const hd = rows.find((r) => r.head && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
           if (hd && p.headerMessage) { if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); s.send(p.headerMessage); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; }
+          const tbh = rows.find((r) => r.top && Math.hypot(tp.x - r.x, tp.y - r.y) < 22);
+          if (tbh) { // the top bar
+            if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound);
+            if (tbh.top === 'close') inst.set(e, s, false);
+            else if (tbh.top === 'back') openSub(s, null);
+            else { const it = tbh.item; press.set(it, 1);
+              if (it.kind === 'toggle') s.setVar(it.v, !truthy(s.vars[it.v] ?? true));
+              else if (it.kind === 'sub') openSub(s, it.name);
+              else if (it.kind === 'msg') s.send(it.msg);
+              else if (it.kind === 'url') { if (/^https?:\/\//.test(it.url)) try { window.open(it.url, '_blank', 'noopener'); } catch { /* blocked */ } }
+              else if (it.kind === 'page') { s.navTo(it.page, p.var, { history: p.mode === 'open page (Back returns)', dir: 1 }); if (p.closeOnPick !== false && want) inst.set(e, s, false); } }
+            continue;
+          }
           const sr = rows.find((r) => r.sect && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
           if (sr) { const l = sr.sect.label; if (folded.has(l)) folded.delete(l); else folded.add(l); saveFolds(); if (p.haptics !== false) E.vibrate(6); continue; } // fold or unfold a section
           const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
@@ -7576,6 +7602,36 @@ registerBehavior('uiSideBar', {
         ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
         const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
         let y = R.y + safeT + 10;
+        // the top bar: ✕ (or ‹ in a submenu), a title, and icon buttons
+        const tb = !!p.topBar && !compact, TH = Math.max(36, +p.topHeight || 52);
+        let hR = R.y, hS = safeT;
+        if (tb) {
+          const bh = safeT + TH, cyB = R.y + safeT + TH / 2, onSub = !!sub && p.topBack !== false, fg = p.topText || txt, side = p.topClose || 'left';
+          if (p.topBg) { ctx.fillStyle = p.topBg; ctx.fillRect(x, R.y, w, bh); }
+          if (p.topLine !== false) { ctx.fillStyle = lineC || withAlpha(txt, 0.1); ctx.fillRect(x, R.y + bh - 1, w, 1); }
+          const drawX = (cx) => { ctx.strokeStyle = fg; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(cx - 6, cyB - 6); ctx.lineTo(cx + 6, cyB + 6); ctx.moveTo(cx + 6, cyB - 6); ctx.lineTo(cx - 6, cyB + 6); ctx.stroke(); };
+          let lx = x + pad, rx2 = x + w - pad;
+          if (onSub) { drawNavIcon(ctx, 'back', lx + 12, cyB, 22, fg); rows.push({ top: 'back', x: lx + 12, y: cyB }); lx += 34; }
+          else if (side === 'left' && p.closeButton !== false) { drawX(lx + 12); rows.push({ top: 'close', x: lx + 12, y: cyB }); lx += 34; }
+          if (side === 'right' && p.closeButton !== false) { drawX(rx2 - 12); rows.push({ top: 'close', x: rx2 - 12, y: cyB }); rx2 -= 34; }
+          for (const it of [...topItems()].reverse()) { // buttons, from the right
+            const bx = rx2 - 12, offT = it.kind === 'toggle' && !truthy(s.vars[it.v] ?? true), pr = press.get(it) || 0;
+            if (pr) { ctx.fillStyle = withAlpha(fg, 0.12 * pr); ctx.beginPath(); ctx.arc(bx, cyB, 18, 0, Math.PI * 2); ctx.fill(); }
+            drawNavIcon(ctx, it.icon || 'more', bx, cyB, 22, it.color || fg, offT ? 0.35 : 1);
+            const lit = /^(["']).+\1$/.test(it.badge || '') ? fillTemplate(it.badge.slice(1, -1), s.vars) : null, bv = lit ?? (it.badge ? s.vars[it.badge] : null);
+            if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') { const n = +bv, tx = lit != null ? lit : Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : ''; ctx.fillStyle = p.badgeColor || '#ff3b5c'; if (!tx) { ctx.beginPath(); ctx.arc(bx + 9, cyB - 9, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 10px ${THEME.font}`; const bw = Math.max(16, ctx.measureText(tx).width + 8); rr(bx + 9 - bw / 2 + 4, cyB - 18, bw, 16, 8); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(tx, bx + 13, cyB - 10); } }
+            rows.push({ top: 'item', item: it, x: bx, y: cyB }); rx2 -= 38;
+          }
+          const title = onSub ? sub : fillTemplate(String(p.topTitle || ''), s.vars);
+          if (title) {
+            const ts = +p.topTitleSize || 17, mid = p.topAlign === 'centre'; ctx.font = `800 ${ts}px ${THEME.font}`; ctx.fillStyle = fg; ctx.textBaseline = 'middle';
+            const room = Math.min(x + w / 2 - lx, rx2 - (x + w / 2)) * 2 - 8;
+            if (mid && ctx.measureText(title).width <= room) { ctx.textAlign = 'center'; ctx.fillText(title, x + w / 2, cyB); } // centred, when it fits between the buttons
+            else { ctx.textAlign = 'left'; ctx.fillText(title, lx + 4, cyB, Math.max(30, rx2 - lx - 12)); }
+          }
+          hR = R.y + bh; hS = 0;
+        }
+        y = hR + hS + 10;
         // header
         const look = p.header || 'simple', hasHead = look !== 'none' && !compact && (p.title || p.avatar || p.headerImage);
         let headLight = false, closeAt = null;
@@ -7584,7 +7640,7 @@ registerBehavior('uiSideBar', {
           const tsz0 = full() && (+p.titleSize || 19) === 19 ? 26 : +p.titleSize || 19, subH = p.subtitle ? 22 : 0;
           const autoH = centred ? av + tsz0 + subH + 40 : Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0));
           const hh = +p.headerHeight > 0 ? +p.headerHeight : autoH;
-          const hx = cardH ? x + 12 : x, hw = cardH ? w - 24 : w, hy = cardH ? y - 2 : R.y, hH = cardH ? hh - 8 : hh + safeT + 10; // the header's own box
+          const hx = cardH ? x + 12 : x, hw = cardH ? w - 24 : w, hy = cardH ? y - 2 : hR, hH = cardH ? hh - 8 : hh + hS + 10; // the header's own box
           const hImg = p.headerImage ? loadImage(artURL(p.headerImage)) : null, hasImg = !!(hImg && hImg.complete && hImg.naturalWidth);
           if (banner || cardH || hasImg) {
             ctx.save(); if (cardH) { rr(hx, hy, hw, hH, 16); ctx.clip(); } else { ctx.beginPath(); ctx.rect(hx, hy, hw, hH); ctx.clip(); }
@@ -7598,19 +7654,19 @@ registerBehavior('uiSideBar', {
           }
           if (cardH) closeAt = { x: hx + hw - 26, y: hy + 26 }; // the ✕ sits inside the card
           const light = headLight = banner || hasImg || sty === 'gradient' || (cardH && !!p.headerColor);
-          const bleed = banner || hasImg, blockH = centred ? av + 8 + tsz0 + subH : av, midY = bleed ? R.y + safeT + (hh + 10) / 2 : cardH ? hy + hH / 2 : 0; // a coloured header: its picture and name sit in the middle of it
+          const bleed = banner || hasImg, blockH = centred ? av + 8 + tsz0 + subH : av, midY = bleed ? hR + hS + (hh + 10) / 2 : cardH ? hy + hH / 2 : 0; // a coloured header: its picture and name sit in the middle of it
           const inX = cardH ? 14 : 0, cx = centred ? x + w / 2 : x + pad + inX + av / 2, cy = midY ? (centred ? midY - blockH / 2 + av / 2 : midY) : centred ? y + av / 2 + 6 : y + 4 + av / 2;
           const avPath = () => { ctx.beginPath(); const sh = p.avatarShape || 'circle'; if (sh === 'circle' || !ctx.roundRect) ctx.arc(cx, cy, av / 2, 0, Math.PI * 2); else ctx.roundRect(cx - av / 2, cy - av / 2, av, av, sh === 'rounded' ? av * 0.26 : 6); };
           if (p.avatar && /^(data:|https?:|art:|blob:)/.test(p.avatar)) { const im = loadImage(artURL(p.avatar)); ctx.save(); avPath(); ctx.fillStyle = withAlpha(acc, 0.22); ctx.fill(); ctx.clip(); if (im.complete && im.naturalWidth) { const k2 = av / Math.min(im.naturalWidth, im.naturalHeight); ctx.drawImage(im, cx - im.naturalWidth * k2 / 2, cy - im.naturalHeight * k2 / 2, im.naturalWidth * k2, im.naturalHeight * k2); } ctx.restore(); ctx.strokeStyle = light ? 'rgba(255,255,255,0.6)' : withAlpha(acc, 0.5); ctx.lineWidth = 2; avPath(); ctx.stroke(); } // a photo
           else if (p.avatar) { ctx.fillStyle = light ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); avPath(); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, av * 0.54, light ? '#ffffff' : acc); }
-          if (p.headerMessage) { rows.push({ head: true, x, y: R.y, w, h: (cardH ? hy + hH : R.y + hh + safeT + 6) - R.y }); if (!centred) { ctx.strokeStyle = withAlpha(light ? '#ffffff' : txt, 0.4); ctx.lineWidth = 2; const ax = x + w - pad - 14 - inX, ay = cy + (p.closeButton !== false && !cardH ? 26 : 0); ctx.beginPath(); ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); ctx.stroke(); } } // the header opens something (a profile)
+          if (p.headerMessage) { rows.push({ head: true, x, y: hR, w, h: (cardH ? hy + hH : hR + hh + hS + 6) - hR }); if (!centred) { ctx.strokeStyle = withAlpha(light ? '#ffffff' : txt, 0.4); ctx.lineWidth = 2; const ax = x + w - pad - 14 - inX, ay = cy + (p.closeButton !== false && !cardH ? 26 : 0); ctx.beginPath(); ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); ctx.stroke(); } } // the header opens something (a profile)
           ctx.textAlign = centred ? 'center' : 'left'; ctx.textBaseline = 'middle';
           const tx = centred ? x + w / 2 : p.avatar ? cx + av / 2 + 12 : x + pad + inX, ty = centred ? cy + av / 2 + 8 + tsz0 / 2 : cy, maxW = Math.max(40, centred ? w - pad * 2 : x + w - tx - pad - 36);
           ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 ${tsz0}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle && !centred ? 10 : 0), maxW);
           if (p.subtitle) { ctx.globalAlpha *= 0.75; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, centred ? ty + tsz0 / 2 + 12 : ty + 12, maxW); ctx.globalAlpha /= 0.75; }
-          y = bleed ? R.y + hh + safeT + 10 + (full() ? 6 : 10) : cardH ? hy + hH + 12 : y + hh - (full() ? 0 : 6); // the list starts clear of the header
+          y = bleed ? hR + hh + hS + 10 + (full() ? 6 : 10) : cardH ? hy + hH + 12 : y + hh - (full() ? 0 : 6); // the list starts clear of the header
         } else y += compact ? 8 : 4;
-        if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = closeAt ? closeAt.x : full() ? x + w - 34 : x + w - 28, by = closeAt ? closeAt.y : R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
+        if (p.closeButton !== false && !compact && !tb && (full() || !rail())) { const bx = closeAt ? closeAt.x : full() ? x + w - 34 : x + w - 28, by = closeAt ? closeAt.y : R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
         // items
         const gapV = compact ? 0 : Math.max(0, +p.itemGap || 0) + (sty === 'cards' ? 8 : sty === 'pills' ? 6 : 0), boxedSty = sty === 'pills' || sty === 'cards';
         const ctlX = (it) => (compact ? 0 : it.kind === 'slider' ? 22 : it.kind === 'progress' ? 16 : it.kind === 'choice' ? 40 : it.button ? 6 : 0); // room for a control under the name

@@ -113,6 +113,21 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - **Items:** space between items, roundness of the highlight, **icons in coloured circles**, **lines between items** and a **line along its edge**.
   - **Selected row:** soft tint, filled with the accent, a bar on its edge, or text only. **Gradient to** fades the background into a second colour. Corner roundness, blur and shadow.
   - **Header:** a title, a subtitle with variables, and a picture: an icon, an emoji or a **photo** (an image address or data URL). **Tapping the header sends** a message (open a profile page). **Small print at the bottom** for a version or *Signed in as {name}*.
+  - **More kinds of items** (+ Add, or *What it does* on an item):
+    - **a slider** for a variable (volume, brightness), with its lowest and highest values;
+    - **a choice** (Light / Dark / Auto): a segmented control that sets a variable;
+    - **a progress bar** (XP, health), full at a number or at another variable;
+    - **a button**: any item can *Show as a button* in its ⋯ menu, filled with the accent (Log out, Upgrade);
+    - **a website link**;
+    - **some text** (a paragraph, `{variables}` work), **a row of numbers** in little cards (`Coins: {coins} | Gems: {gems}`) and **some space**.
+    - An item's ⋯ menu also adds **a value on the right** (`{coins}`, *3 new*) and **its own colour**.
+  - **UI inside the menu:** put anything inside the Side Menu: a search bar, a profile card, buttons, a picture, Coins & Gems, a slider row… Tap **UI inside** under the items (or **+ Add › UI inside the menu**) and pick a block, or drag any UI object onto the menu in the Hierarchy. They show only while the menu is open, slide and fade with it, are cut off at its edges, and their buttons work.
+    - **Objects inside › go:** **under the header** (the items move down to make room), **after the items** (they scroll with the list), **above the footer**, or **where I put them**. Set the space between them and line them up in the centre, left or right. Objects set to stretch across fill the menu's width. **Their buttons close the menu** is optional.
+  - **More looks:**
+    - Header: **card** look (the header in a rounded card), **picture beside** or **centred**, the picture's **shape** (circle, rounded, square) and **size**, the **title size**, a **background picture** (darkened at the bottom so the name stays readable) and the **header height**.
+    - Items: names on the **left** or **centred**, **regular / bold / heavy** text, **arrows (›)** on page items, and section titles as **small capitals**, a **title** or **accent capitals**.
+    - Colours: a **background picture** (and how strong it is), and separate colours for **icons**, the **selected item's text**, **section titles** and **lines**.
+    - Size: **width as a % of the screen**.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
 - **App Layout:** all three set up to work together.
 - **Back Button**, **Sliding Page**, **Swipe Pages**, **Tab Bar**.

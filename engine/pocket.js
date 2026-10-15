@@ -9691,7 +9691,7 @@ registerBehavior('uiFeed', {
     };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
-    const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, like, share', photos: 'like, comment, share, save', cards: 'like, comment, share' };
+    const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, repost, like, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
@@ -12750,7 +12750,7 @@ registerBehavior('uiShowIf', {
   create(p) {
     let shown = null, drag = null, vel = 0, maxS = 0, barT = -9, goal = null, pulled = false, refreshT = -9, firstDone = false;
     const D = (d) => d / clamp(+p.animSpeed || 1, 0.25, 3); // Transition speed
-    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick'];
+    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick', 'uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']; // (a feed scrolls itself: the page doesn't move with it)
     const ownsDrag = (s, e, d) => s.entities.some((q) => q !== e && q.visible && q.ui && !q._parentHidden && q.behaviors.some((b) => SCROLLERS.includes(b.type)) && isInside(q, e) && hitTest(s, q, d.x, d.y));
     const isInside = (q, e) => { for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === e) return true; return false; };
     /** How far what is inside reaches below the page's bottom (UI units). */

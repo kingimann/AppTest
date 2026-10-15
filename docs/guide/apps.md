@@ -116,6 +116,45 @@ Data Summary   Tasks · count where done = no → left
 Text           {left} to do
 ```
 
+## Accounts and online data (Supabase)
+
+Apps can have their own accounts and keep data online with a free [Supabase](https://supabase.com) project: people sign up and sign in, and data collections are stored in Supabase tables. (For games, PlayFab and Photon fit better: leaderboards, cloud saves, multiplayer.)
+
+### Connect your project
+
+1. Create a project at supabase.com.
+2. *Game Settings › Supabase (accounts & online data)*: paste the **Project URL** and the **anon public key** (Supabase › Project Settings › API). **Test Supabase** checks them and lists the sign-in methods that are on.
+3. In Supabase, *Authentication › URL Configuration*: put your app's address (where it is published) in **Site URL** and **Redirect URLs**, so email links and Google sign-in come back to it. *Sign In / Providers* turns on Google, Apple and others; turn **Confirm email** off while testing if you like.
+
+The anon key is safe in your app. Never use the *service_role* key.
+
+### Sign-in
+
+- *Add → UI & Menus → App → **Sign-in Page***: a page (`page = signin`) with Email, Password and Name boxes, **Sign in**, **Create account**, **Forgot password?**, **Continue with Google**, and `{authError}` for what went wrong.
+- *Game Settings › Supabase › Sign-in page* (`signin`): while nobody is signed in, the app shows that page. After signing in it goes on to its first page (or *Page after signing in*). Signing out goes back to it. Leave it blank to make signing in optional.
+- *Add → UI & Menus → App → **Account Page***: `{userName}`, `{userEmail}` and **Sign out**.
+- **Buttons:** *sign in*, *create account*, *sign out*, *send password reset* and *continue with google* (the value can be `apple`, `github`…). They use the variables **email**, **password** and **name**, which the Text Inputs on the Sign-in Page fill in.
+- **Variables:** `{signedIn}` (1 or 0), `{userName}`, `{userEmail}`, `{userId}`, `{authError}`.
+- **Nodes** (Online): *Sign In*, *Create Account* (outputs: signed in, check email, failed), *Sign Out*, *Send Password Reset*, *Continue With Google / Apple…*, *Change My Name*, *Is Signed In*, *Signed-in Person*, and the events *On Signed In* / *On Signed Out*.
+- **Triggers:** the events *Signed in*, *Signed out* and *Sign-in failed*; the condition *Signed in*; and the instructions to sign in, create an account, sign out, send a reset email and refresh online data.
+
+### Online data collections
+
+In *Game Settings › Data*, open a collection and set **Store online (Supabase)**:
+
+| Choice | Who sees what | Good for |
+|---|---|---|
+| **Private to each person** | Each signed-in person sees only their own records, on every phone they sign in on. Signing out hides them. | Notes, to-dos, journals, a wallet |
+| **Shared with everyone** | Everyone sees every record (even before signing in). Signed-in people add records and change or delete only their own. | Feeds, chats, reviews, a catalogue, leaderboards |
+
+- **Copy setup SQL** (on the collection, or in Game Settings › Supabase for all of them) copies the SQL that makes the table and its security rules. Paste it in Supabase › **SQL Editor** and press **Run**. Each table keeps the record's fields in one `data` column, so adding fields later needs no change in Supabase.
+- **Table name** defaults to the collection's name (`posts` for Posts).
+- **Check for new records every … seconds** keeps a chat or feed up to date (0 = only when the app opens and after signing in).
+- A field called **author** is filled in with the writer's name, for "Ana: Hello!" rows. Records also know `_mine` (written by you).
+- Data Lists, Record Forms, Data Summaries, the Data nodes and Triggers work as before: adding, changing and deleting records goes to Supabase too. A copy is kept on the phone, so the app opens instantly and works offline. Changes made without a connection wait on the phone and are sent, in order, when it is back online.
+- `{dataError}` says why something could not be saved online (for example "Sign in to save this online").
+- *Refresh Online Data* (node or instruction) loads the latest records.
+
 ## Games inside apps
 
 An app can hold games, and a game can use everything an app has. They live in the **same project**: the app is level 1, and each game is one or more further levels (each one 2D or 3D).

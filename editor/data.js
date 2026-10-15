@@ -1,6 +1,6 @@
 // App Data (Game Settings): collections of records (Tasks, Notes, Expenses…), their fields and starting rows.
 // Data Lists, Record Forms, Data Summaries, Triggers and nodes use them; apps save what users add on the device.
-import { FIELD_TYPES, fieldKey, fieldsOf } from '../engine/pocket.js';
+import { FIELD_TYPES, fieldKey, fieldsOf, supabaseSQL } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 function h(tag, attrs = {}, ...kids) {
@@ -64,7 +64,16 @@ export function openCollectionEditor(i) {
     h('div', { class: 'it-grid' },
       h('label', { class: 'it-f' }, h('span', {}, 'Name (Data Lists and Forms use it)'), h('input', { type: 'text', value: c.name, onchange: (e) => { const n = e.target.value.trim(); if (!n || (byName(n) && byName(n) !== c)) { X.toast('Pick a different name'); re(); return; } c.name = n; X.save(); X.redraw?.(); re(); } })),
       keys.some((f) => f.type === 'money') && h('label', { class: 'it-f' }, h('span', {}, 'Money symbol'), h('input', { type: 'text', value: c.currency ?? '$', onchange: (e) => { c.currency = e.target.value; X.save(); } }))),
-    h('label', { class: 'it-f bool' }, h('span', {}, 'Save what people add on their phone'), h('input', { type: 'checkbox', checked: c.keep !== false, onchange: (e) => { if (e.target.checked) delete c.keep; else c.keep = false; X.save(); } })),
+    h('label', { class: 'it-f' }, h('span', {}, 'Store online (Supabase)'), h('select', { onchange: (e) => { const v = e.target.value; if (v === 'off') delete c.online; else c.online = v; X.save(); re(); } },
+      [['off', 'No: on the phone only'], ['private to each person', 'Yes, private to each person'], ['shared with everyone', 'Yes, shared with everyone']].map(([v, l]) => h('option', { value: v, selected: (c.online || 'off') === v }, l)))),
+    c.online && h('div', { class: 'it-grid' },
+      h('label', { class: 'it-f' }, h('span', {}, 'Table name in Supabase'), h('input', { type: 'text', value: c.table || fieldKey(c.name), onchange: (e) => { c.table = e.target.value.trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase() || fieldKey(c.name); X.save(); re(); } })),
+      h('label', { class: 'it-f' }, h('span', {}, 'Check for new records every … seconds (0 = only when it opens)'), h('input', { type: 'number', min: 0, step: 1, value: c.refresh || 0, onchange: (e) => { c.refresh = Math.max(0, +e.target.value || 0); if (!c.refresh) delete c.refresh; X.save(); } }))),
+    c.online && h('p', { class: 'desc' }, c.online === 'shared with everyone'
+      ? 'Everyone sees every record; signed-in people add records, and only change or delete their own. A field called “author” is filled in with the writer\'s name. Good for feeds, chats, reviews and leaderboards.'
+      : 'Each signed-in person sees only their own records, on every phone they sign in on. Signing out hides them.'),
+    c.online && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const sql = supabaseSQL(c); navigator.clipboard?.writeText(sql).then(() => X.toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => X.toast('Copy failed: see Game Settings › Supabase')); } }, icon('copy'), 'Copy setup SQL')),
+    h('label', { class: 'it-f bool' }, h('span', {}, c.online ? 'Keep a copy on the phone (works offline)' : 'Save what people add on their phone'), h('input', { type: 'checkbox', checked: c.keep !== false, onchange: (e) => { if (e.target.checked) delete c.keep; else c.keep = false; X.save(); } })),
     h('h4', { class: 'tl-h' }, icon('list'), 'Fields'),
     h('p', { class: 'desc' }, `In text, a field is {${keys[0]?.key || 'title'}} in a Data List row, and {record_${keys[0]?.key || 'title'}} on the page of an opened record.`),
     h('div', { class: 'dt-fields' }, F.map(fieldRow)),

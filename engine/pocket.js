@@ -13195,6 +13195,96 @@ function openRecord(s, name, rec) {
   s.setVar('record_id', rec.id); s.emit('recordOpened', fieldKey(def.name), rec);
 }
 const openedRecord = (s) => (s.openRecord ? s.engine.data.get(s.openRecord.col, s.openRecord.id) : null);
+/** The record an App node works on: the one For Each Record / Find Record / On Data Changed is on, else the opened one. */
+function recordOf(s, ctx) {
+  if (ctx.record?.rec) return ctx.record;
+  const r = openedRecord(s); return r ? { col: s.openRecord.col, rec: r } : null;
+}
+const fieldOf = (def, name) => { const k = fieldKey(name), t = String(name ?? '').trim().toLowerCase(); return fieldsOf(def).find((f) => f.key === k || String(f.name || '').toLowerCase() === t) || null; };
+/** A record's field as people read it: yes / no, the text itself, or formatted money, dates and numbers. */
+function recordFieldText(s, R, name) {
+  const def = s.engine.data.def(R.col), f = def && fieldOf(def, name);
+  if (!f) { const v = String(name).trim() === 'id' ? R.rec.id : R.rec[fieldKey(name)]; return v == null ? '' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v); }
+  const v = R.rec[f.key];
+  return f.type === 'yes/no' ? (truthy(v) ? 'yes' : 'no') : ['long text', 'text', 'choice', 'icon'].includes(f.type) ? String(v ?? '') : fieldText(f, v, def);
+}
+// ---- dates for App nodes: a date is a number (milliseconds); 0 means now ----
+const dateOf = (v) => { const n = +v; return new Date(Number.isFinite(n) && n > 0 ? n : Date.now()); };
+let LOCALE = null;
+const localeOf = () => LOCALE || (LOCALE = (() => { const l = (typeof navigator !== 'undefined' && navigator.language) || 'en'; try { return Intl.NumberFormat.supportedLocalesOf([l]).length ? l : 'en'; } catch { return 'en'; } })()); // the phone's language, if the browser knows it
+const midnight = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+function datePartOf(d, what) {
+  switch (what) {
+    case 'year': return d.getFullYear();
+    case 'month': return d.getMonth() + 1;
+    case 'day': return d.getDate();
+    case 'weekday (1 = Monday)': return ((d.getDay() + 6) % 7) + 1;
+    case 'hour': return d.getHours();
+    case 'minute': return d.getMinutes();
+    case 'day of the year': return Math.round((midnight(d) - new Date(d.getFullYear(), 0, 1).getTime()) / 864e5) + 1;
+    default: return d.getTime();
+  }
+}
+function dateTextOf(v, fmt) {
+  const d = dateOf(v), L = localeOf(), f = (o) => { try { return d.toLocaleString(L, o); } catch { return d.toLocaleString('en', o); } };
+  switch (fmt) {
+    case 'short date': return f({ year: 'numeric', month: '2-digit', day: '2-digit' });
+    case 'time (14:05)': return f({ hour: '2-digit', minute: '2-digit' });
+    case 'date and time': return f({ day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    case 'weekday (Thursday)': return f({ weekday: 'long' });
+    case 'month and year': return f({ month: 'long', year: 'numeric' });
+    case 'YYYY-MM-DD': return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    case 'relative (3 min ago)': {
+      const diff = d.getTime() - Date.now(), a = Math.abs(diff), past = diff < 0, say = (n, u) => (past ? `${n} ${u}${n === 1 ? '' : 's'} ago` : `in ${n} ${u}${n === 1 ? '' : 's'}`);
+      if (a < 45e3) return past ? 'just now' : 'in a moment';
+      if (a < 45 * 6e4) return say(Math.round(a / 6e4), 'min').replace('mins', 'min');
+      const days = Math.round((midnight(d) - midnight(new Date())) / 864e5);
+      if (days === 0) return say(Math.round(a / 36e5), 'hour');
+      if (days === -1) return 'yesterday';
+      if (days === 1) return 'tomorrow';
+      if (Math.abs(days) < 7) return say(Math.abs(days), 'day');
+      if (Math.abs(days) < 30) return say(Math.round(Math.abs(days) / 7), 'week');
+      return f({ day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    default: return f({ day: 'numeric', month: 'short', year: 'numeric' });
+  }
+}
+/** "2026-12-25", "25 Dec 2026", "2026-12-25 18:30" → a date number (0 if it isn't a date). */
+function textToDate(t) {
+  t = String(t ?? '').trim(); if (!t) return 0;
+  const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2}))?$/); // local time, not UTC
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0)).getTime();
+  const n = Date.parse(t); return Number.isFinite(n) ? n : 0;
+}
+function moneyTextOf(amount, cur, dec) {
+  const v = +amount || 0, c = String(cur || 'USD').trim(), o = dec === 'none' ? { minimumFractionDigits: 0, maximumFractionDigits: 0 } : dec === '2' ? { minimumFractionDigits: 2, maximumFractionDigits: 2 } : {};
+  if (/^[A-Za-z]{3}$/.test(c)) try { return v.toLocaleString(localeOf(), { style: 'currency', currency: c.toUpperCase(), ...o }); } catch { /* unknown code: fall through */ }
+  const auto = Number.isInteger(v) && dec === 'auto' ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+  return (v < 0 ? '-' : '') + c + Math.abs(v).toLocaleString(localeOf(), dec === 'auto' ? auto : o);
+}
+const VALID = {
+  'not empty': (t) => t.trim() !== '',
+  email: (t) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(t.trim()),
+  'phone number': (t) => /^\+?[\d\s().-]{6,}$/.test(t.trim()) && t.replace(/\D/g, '').length >= 6,
+  number: (t) => t.trim() !== '' && Number.isFinite(+t.trim().replace(',', '.')),
+  'whole number': (t) => /^-?\d+$/.test(t.trim()),
+  website: (t) => /^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(t.trim()),
+  'date (YYYY-MM-DD)': (t) => /^\d{4}-\d{1,2}-\d{1,2}$/.test(t.trim()) && textToDate(t) > 0,
+};
+/** A dimmed screen with a card and a busy bar ("Loading…") over everything, until Hide. */
+function showLoadingOverlay(s, on, text) {
+  const was = s._loading?.[0];
+  for (const q of s._loading || []) if (!q.dead) q.destroy();
+  if (was && s.modal === was) s.modal = s._loadingPrev && !s._loadingPrev.dead ? s._loadingPrev : null;
+  s._loading = null; if (!on) return;
+  const L = 9500, W = 230;
+  const dim = s.add({ name: '(loading)', ui: true, anchor: 'center', x: 0, y: 0, layer: L, shape: { type: 'rect', w: 6000, h: 6000, fill: 'rgba(0,0,0,0.45)' } });
+  const card = s.add({ name: '(loading card)', ui: true, anchor: 'center', x: 0, y: 0, layer: L + 1, shape: { type: 'rect', w: W, h: 104, radius: 18, fill: '#1f2433', stroke: 'rgba(255,255,255,0.12)', lineWidth: 1.5 } });
+  const label = s.add({ name: '(loading text)', ui: true, anchor: 'center', x: 0, y: -16, layer: L + 2, text: { ...TEXT_DEFAULTS, value: text, size: 16, color: '#ffffff', weight: '700', fit: W - 30 } });
+  const bar = s.add({ name: '(loading bar)', ui: true, anchor: 'center', x: 0, y: 24, layer: L + 2, bar: { var: '__loading', max: 100, w: W - 60, h: 6, fill: '#6ea0ff', bg: 'rgba(255,255,255,0.15)', radius: 3, busy: true } });
+  s._loading = [dim, card, label, bar];
+  s._loadingPrev = s.modal; s.modal = dim; dim._modalRect = () => ({ x: 0, y: 0, w: s.engine.width, h: s.engine.height }); // nothing underneath can be tapped while loading
+}
 
 registerBehavior('uiDataList', {
   label: 'Data List', description: 'A scrolling list of the records in a data collection (Game Settings › Data): a title, a line under it, an icon, a value on the right and a checkbox. Search, filter and sort it; tap a row to open it on a page; swipe left to delete. It updates by itself when records change.',
@@ -16038,6 +16128,39 @@ NODE_TYPES.onGameDone = { cat: 'Events', label: 'On Back From a Game', outs: ['w
 NODE_TYPES.playGameN = { cat: 'Actions', label: 'Play Game', exec: true, outs: ['then', 'no such game'], params: [txt('game', '2', 'game (level number or name)')] };
 NODE_TYPES.backToAppN = { cat: 'Actions', label: 'Back to App', exec: true, outs: ['then', 'not in an app'] };
 NODE_TYPES.inApp = { cat: 'Values', label: 'Opened From an App', value: 'bool' };
+// ---- App nodes: pages, records, forms, dates, money, theme, loading, phone links ----
+{
+  const COL = () => sug(txt('collection', 'Tasks', 'collection'), 'collections');
+  Object.assign(NODE_TYPES, {
+    curPage: { cat: 'App', label: 'Current Page', value: 'text', params: [txt('var', 'page', 'page variable')] },
+    pageDepth: { cat: 'App', label: 'Pages To Go Back', value: 'number', params: [txt('var', 'page', 'page variable')] },
+    goPageWith: { cat: 'App', label: 'Go To Page With Value', exec: true, outs: ['then'], params: [txt('page', 'details', 'page'), sug(txt('name', 'selected', 'put the value in variable'), 'vars'), txt('var', 'page', 'page variable')], inputs: [T_IN('value', '')] },
+    onDataChanged: { cat: 'App', label: 'On Data Changed', outs: ['added', 'changed', 'deleted', 'any change'], params: [{ ...COL(), label: 'collection (blank = any)' }] },
+    forEachRecord: { cat: 'App', label: 'For Each Record', exec: true, outs: ['each', 'done'], params: [COL(), txt('filter', '', 'only where (e.g. done = no)'), txt('sort', 'newest first', 'sort'), num('max', 100, 'at most')] },
+    recordField: { cat: 'App', label: 'Record Field', value: 'text', params: [txt('field', 'title', 'field')] },
+    recordNum: { cat: 'App', label: 'Record Field (number)', value: 'number', params: [txt('field', 'amount', 'field')] },
+    findRecord: { cat: 'App', label: 'Find Record', exec: true, outs: ['found', 'not found'], params: [COL(), txt('field', 'title', 'where field'), opt('op', ['is', 'contains', 'starts with'], 'is', 'is'), txt('page', '', 'then go to page (optional)')], inputs: [T_IN('value', 'Milk')] },
+    setRecordField: { cat: 'App', label: 'Set Record Field', exec: true, outs: ['then', 'no record'], params: [txt('field', 'done', 'field')], inputs: [T_IN('value', 'yes')] },
+    toggleField: { cat: 'App', label: 'Toggle Yes / No Field', exec: true, outs: ['then', 'no record'], params: [txt('field', 'done', 'field')] },
+    updateRecords: { cat: 'App', label: 'Change Records Where', exec: true, outs: ['then'], params: [COL(), txt('filter', 'done = yes', 'where (blank = all)'), txt('field', 'archived', 'set field'), txt('value', 'yes', 'to ({variables} work)')] },
+    deleteRecords: { cat: 'App', label: 'Delete Records Where', exec: true, outs: ['then'], params: [COL(), txt('filter', 'done = yes', 'where (blank = all)')] },
+    recordsToArray: { cat: 'App', label: 'Records To Array', exec: true, outs: ['then'], params: [COL(), txt('field', 'title', 'field'), txt('filter', '', 'only where'), txt('sort', 'newest first', 'sort'), txt('name', 'titles', 'into array')] },
+    textValid: { cat: 'App', label: 'Text Is Valid', value: 'bool', inputs: [T_IN('text', '')], params: [opt('kind', ['not empty', 'email', 'phone number', 'number', 'whole number', 'website', 'date (YYYY-MM-DD)', 'at least N letters', 'at most N letters'], 'email', 'is'), num('n', 6, 'N')] },
+    clearVars: { cat: 'App', label: 'Clear Form Fields', exec: true, outs: ['then'], params: [txt('names', 'title, amount, note', 'variables (comma separated)')] },
+    moneyText: { cat: 'App', label: 'Money As Text', value: 'text', inputs: [N_IN('amount', 12.5)], params: [txt('currency', 'USD', 'currency (USD, EUR, GBP… or a symbol like $)'), opt('decimals', ['auto', 'none', '2'], 'auto', 'decimals')] },
+    dateNow: { cat: 'App', label: 'Now / Today', value: 'number', params: [opt('what', ['date (number)', 'year', 'month', 'day', 'weekday (1 = Monday)', 'hour', 'minute', 'day of the year'], 'date (number)', 'give')] },
+    dateText: { cat: 'App', label: 'Date As Text', value: 'text', inputs: [N_IN('date', 0)], params: [opt('format', ['date (12 Mar 2026)', 'short date', 'time (14:05)', 'date and time', 'weekday (Thursday)', 'month and year', 'relative (3 min ago)', 'YYYY-MM-DD'], 'date (12 Mar 2026)', 'show as')] },
+    datePart: { cat: 'App', label: 'Part Of Date', value: 'number', inputs: [N_IN('date', 0)], params: [opt('what', ['year', 'month', 'day', 'weekday (1 = Monday)', 'hour', 'minute'], 'day', 'give')] },
+    dateAdd: { cat: 'App', label: 'Date Plus', value: 'number', inputs: [N_IN('date', 0), N_IN('amount', 1)], params: [opt('unit', ['minutes', 'hours', 'days', 'weeks', 'months', 'years'], 'days', 'unit')] },
+    dateDiff: { cat: 'App', label: 'Time Between Dates', value: 'number', inputs: [N_IN('from', 0), N_IN('to', 0)], params: [opt('unit', ['seconds', 'minutes', 'hours', 'days', 'weeks'], 'days', 'in')] },
+    textToDate: { cat: 'App', label: 'Text To Date', value: 'number', inputs: [T_IN('text', '2026-12-25')] },
+    setDarkMode: { cat: 'App', label: 'Set Dark Mode', exec: true, outs: ['then'], params: [opt('mode', ['on', 'off', 'toggle', 'follow the phone'], 'toggle', 'dark mode')] },
+    isDarkMode: { cat: 'App', label: 'Is Dark Mode', value: 'bool' },
+    showLoading: { cat: 'App', label: 'Show / Hide Loading', exec: true, outs: ['then'], params: [opt('mode', ['show', 'hide'], 'show', 'loading'), txt('text', 'Loading…', 'text ({variables} work)')] },
+    openPhoneApp: { cat: 'App', label: 'Call / Email / Text / Map', exec: true, outs: ['then'], params: [opt('app', ['phone call', 'email', 'text message', 'map'], 'email', 'open'), txt('to', 'hello@example.com', 'to (number, email or place; {variables} work)'), txt('subject', '', 'subject (email)'), txt('body', '', 'message ({variables} work)')] },
+    appInfo: { cat: 'App', label: 'App Info', value: 'text', params: [opt('what', ['name', 'platform (ios, android, web)', 'installed (yes / no)', 'language', 'screen (phone / tablet)', 'online (yes / no)'], 'platform (ios, android, web)', 'give')] },
+  });
+}
 // nodes for apps and pages also show in the App folder (they keep their own category, so events stay events)
 for (const k of ['onPage', 'onPageClosed', 'onBack', 'onGameDone', 'onAppHidden', 'onAppShown', 'onDarkMode', 'onMenu', 'le_gameFinished', 'le_recordAdded', 'le_recordChanged', 'le_recordDeleted', 'le_recordOpened', 'le_pageChanged',
   'goToPage', 'goBack', 'canGoBack', 'pageIs', 'playGameN', 'backToAppN', 'inApp', 'menuOpen', 'menuIsOpen', 'navBars', 'toast', 'alert', 'confirm', 'askText', 'dataValue',
@@ -16538,6 +16661,30 @@ registerBehavior('graph', {
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
         case 'inApp': return !!s.fromApp;
+        case 'curPage': return asText(s.vars[P('var') || 'page'] ?? '');
+        case 'pageDepth': return (s.navStacks?.[P('var') || 'page'] || []).length;
+        case 'recordField': { const R = recordOf(s, ctx); return R ? recordFieldText(s, R, P('field')) : ''; }
+        case 'recordNum': { const R = recordOf(s, ctx); if (!R) return 0; const v = R.rec[fieldKey(P('field'))]; return typeof v === 'boolean' ? +v : +v || 0; }
+        case 'textValid': { const t = asText(I('text')), k = P('kind'), N = +P('n') || 0; return k === 'at least N letters' ? t.trim().length >= N : k === 'at most N letters' ? t.length <= N : (VALID[k] || VALID['not empty'])(t); }
+        case 'moneyText': return moneyTextOf(I('amount'), P('currency'), P('decimals'));
+        case 'dateNow': return datePartOf(new Date(), P('what'));
+        case 'dateText': return dateTextOf(I('date'), P('format'));
+        case 'datePart': return datePartOf(dateOf(I('date')), P('what'));
+        case 'dateAdd': { const d = dateOf(I('date')), a = +I('amount') || 0, u = P('unit'); if (u === 'months') d.setMonth(d.getMonth() + a); else if (u === 'years') d.setFullYear(d.getFullYear() + a); else if (u === 'days' || u === 'weeks') d.setDate(d.getDate() + a * (u === 'weeks' ? 7 : 1)); else d.setTime(d.getTime() + a * (u === 'hours' ? 36e5 : 6e4)); return d.getTime(); }
+        case 'dateDiff': { const a = dateOf(I('from')), b = dateOf(I('to')), u = P('unit'); if (u === 'days' || u === 'weeks') { const days = Math.round((midnight(b) - midnight(a)) / 864e5); return u === 'days' ? days : Math.round(days / 7 * 100) / 100; } return Math.round((b - a) / ({ seconds: 1e3, minutes: 6e4, hours: 36e5 }[u] || 1e3) * 100) / 100; }
+        case 'textToDate': return textToDate(asText(I('text')));
+        case 'isDarkMode': return isDark(s);
+        case 'appInfo': {
+          const mm = (q) => typeof matchMedia === 'function' && matchMedia(q).matches, ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+          switch (P('what')) {
+            case 'name': return String(s.engine.levels?.[0]?.name || s.engine.gameName || document.title || '');
+            case 'installed (yes / no)': return mm('(display-mode: standalone)') || mm('(display-mode: fullscreen)') || navigator.standalone || window.Capacitor ? 'yes' : 'no';
+            case 'language': return localeOf().slice(0, 2).toLowerCase();
+            case 'screen (phone / tablet)': return Math.min(screen.width, screen.height) >= 600 ? 'tablet' : 'phone';
+            case 'online (yes / no)': return navigator.onLine === false ? 'no' : 'yes';
+            default: return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'ios' : /Android/.test(ua) ? 'android' : 'web';
+          }
+        }
         case 'slotInfo': { const I = s.engine.slotInfo(P('slot') || 1), w = P('what'); return w === 'is saved' ? I.exists : !I.exists ? '' : w === 'date and time' ? I.when : w === 'play time' ? I.playTime : w === 'level' ? I.level : w === 'level name' ? I.levelName : w === 'name' ? I.label : I.ago; }
         case 'newestSlot': return String(s.engine.newestSlot() || '');
         case 'supaSignedIn': return !!s.engine.supa.user();
@@ -17380,6 +17527,54 @@ registerBehavior('graph', {
         case 'pickNearest': { const t = nearest(s, e, P('tag')), mx = +I('maxDistance') || Infinity; return t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= mx ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
         case 'pickObject': { const k = P('object'), t = s.find(k) && !s.find(k).dead ? s.find(k) : nearest(s, e, k); return t ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
         case 'lineOfSight': { const t = nearest(s, e, P('tag')); return t && s.canSee(e, t, +P('range') || Infinity) ? follow(n, 'visible', { ...ctx, other: t }) : follow(n, 'blocked', { ...ctx, other: t || ctx.other }); }
+        case 'goPageWith': { const nm = P('name'); if (nm) s.setVar(nm, listVal(asText(I('value')))); s.navTo(P('page'), P('var') || 'page', { history: true }); break; }
+        case 'forEachRecord': {
+          const D = s.engine.data, def = D.def(P('collection')); if (!def) { Log.add('warn', `There is no data collection called “${P('collection')}”`, 'Data'); return follow(n, 'done', ctx); }
+          const col = fieldKey(def.name), rows = D.query(col, { filter: P('filter'), sort: P('sort') || 'newest first', vars: s.vars }).slice(0, Math.max(0, Math.min(1000, +P('max') || 100))), L = { stop: false };
+          for (let i = 0; i < rows.length && !L.stop; i++) follow(n, 'each', { ...ctx, index: i + 1, item: rows[i].id, record: { col, rec: rows[i] }, steps: ctx.steps, loop: L });
+          return follow(n, 'done', ctx);
+        }
+        case 'findRecord': {
+          const D = s.engine.data, def = D.def(P('collection')); if (!def) return follow(n, 'not found', ctx);
+          const col = fieldKey(def.name), f = fieldOf(def, P('field')), k = f ? f.key : fieldKey(P('field')), want = asText(I('value')).trim().toLowerCase(), op = P('op');
+          const r = D.query(col, { vars: s.vars }).find((q) => { let v = q[k]; v = typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v ?? '').toLowerCase(); return op === 'contains' ? v.includes(want) : op === 'starts with' ? v.startsWith(want) : v === want; });
+          if (!r) return follow(n, 'not found', ctx);
+          openRecord(s, col, r); if (P('page')) s.navTo(P('page'), 'page', { history: true });
+          return follow(n, 'found', { ...ctx, record: { col, rec: r }, eventValue: r.id });
+        }
+        case 'setRecordField': case 'toggleField': {
+          const R = recordOf(s, ctx); if (!R) return follow(n, 'no record', ctx);
+          const def = s.engine.data.def(R.col), f = def && fieldOf(def, P('field')), k = f ? f.key : fieldKey(P('field'));
+          const v = n.type === 'toggleField' ? !truthy(R.rec[k]) : fillTemplate(asText(I('value')), s.vars);
+          const rec = s.engine.data.update(R.col, R.rec.id, { [k]: v }); if (!rec) return follow(n, 'no record', ctx);
+          if (s.openRecord?.id === rec.id) openRecord(s, R.col, rec);
+          break;
+        }
+        case 'updateRecords': case 'deleteRecords': {
+          const D = s.engine.data, def = D.def(P('collection')); if (!def) break;
+          const col = fieldKey(def.name), rows = D.query(col, { filter: P('filter'), vars: s.vars }), f = fieldOf(def, P('field'));
+          for (const r of rows) if (n.type === 'deleteRecords') D.remove(col, r.id); else D.update(col, r.id, { [f ? f.key : fieldKey(P('field'))]: fillTemplate(String(P('value') ?? ''), s.vars) });
+          return follow(n, 'then', { ...ctx, eventValue: rows.length });
+        }
+        case 'recordsToArray': {
+          const D = s.engine.data, def = D.def(P('collection')); if (!def) break;
+          const col = fieldKey(def.name); listSave(s, P('name'), D.query(col, { filter: P('filter'), sort: P('sort') || 'newest first', vars: s.vars }).map((r) => listVal(recordFieldText(s, { col, rec: r }, P('field')))));
+          break;
+        }
+        case 'clearVars': for (const k of String(P('names') || '').split(',').map((q) => q.trim()).filter(Boolean)) s.setVar(k, Array.isArray(s.vars[k]) ? [] : ''); break;
+        case 'setDarkMode': { const m = P('mode'); s.setVar('darkMode', m === 'on' ? 1 : m === 'off' ? 0 : m === 'toggle' ? (isDark(s) ? 0 : 1) : ''); break; }
+        case 'showLoading': showLoadingOverlay(s, P('mode') !== 'hide', fillTemplate(String(P('text') || 'Loading…'), s.vars)); break;
+        case 'openPhoneApp': {
+          const to = fillTemplate(String(P('to') ?? ''), s.vars).trim(), body = fillTemplate(String(P('body') ?? ''), s.vars), app = P('app'), enc = encodeURIComponent;
+          const ios = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent || '');
+          const u = app === 'phone call' ? 'tel:' + to.replace(/[^\d+*#]/g, '')
+            : app === 'text message' ? 'sms:' + to.replace(/[^\d+]/g, '') + (body ? (ios ? '&' : '?') + 'body=' + enc(body) : '')
+              : app === 'map' ? (ios ? 'https://maps.apple.com/?q=' : 'https://www.google.com/maps/search/?api=1&query=') + enc(to)
+                : 'mailto:' + to + '?' + [P('subject') && 'subject=' + enc(fillTemplate(String(P('subject')), s.vars)), body && 'body=' + enc(body)].filter(Boolean).join('&');
+          if (s.engine.editing || !to) Log.add('info', `${NODE_TYPES.openPhoneApp.label}: ${u} (opens in the built app)`);
+          else if (app === 'map') window.open(u, '_blank', 'noopener'); else location.href = u;
+          break;
+        }
         default: break;
       }
       follow(n, 'then', ctx);
@@ -17407,6 +17602,12 @@ registerBehavior('graph', {
       if (list('onItemCollected').length) s.on('inventory', (name, cnt) => { const k = 'inv:' + name, was = state.get(k) ?? 0; state.set(k, cnt); if (cnt > was && !e.dead) for (const n of list('onItemCollected')) if (!param(n, 'item') || param(n, 'item') === name) out(n, 'then', e, s, { eventValue: name }); });
       if (list('onAchievementGot').length) s.on('achievement', (nm) => { if (!e.dead) for (const n of list('onAchievementGot')) if (!param(n, 'name') || param(n, 'name') === nm) out(n, 'then', e, s, { eventValue: nm }); });
       if (list('onAnyMessage').length) s.on('message', (nm) => { if (!e.dead) for (const n of list('onAnyMessage')) out(n, 'then', e, s, { eventValue: nm }); });
+      if (list('onDataChanged').length) s.on('data', (col, kind, rec) => {
+        if (e.dead || (s._dataEvDepth || 0) > 2) return; // a script that changes data when data changes can't loop forever
+        const port = { added: 'added', changed: 'changed', deleted: 'deleted' }[kind];
+        s._dataEvDepth = (s._dataEvDepth || 0) + 1;
+        try { for (const n of list('onDataChanged')) { const c = param(n, 'collection'); if (c && fieldKey(c) !== col) continue; const ex = { eventValue: rec?.id ?? '', record: rec ? { col, rec } : null }; if (port) out(n, port, e, s, ex); out(n, 'any change', e, s, ex); } } finally { s._dataEvDepth--; }
+      });
       if (list('onPageClosed').length) s.on('pageChange', (on, who, pg) => { if (!e.dead && !on) for (const n of list('onPageClosed')) if (!param(n, 'page') || param(n, 'page') === pg) out(n, 'then', e, s, { eventValue: pg }); });
       if (list('onScrolled').length) s.on('uiScroll', (d) => { if (!e.dead && d) for (const n of list('onScrolled')) out(n, d > 0 ? 'down' : 'up', e, s, { eventValue: d }); });
       if (list('onResize').length) s.on('resize', (w, hh) => { if (!e.dead) for (const n of list('onResize')) out(n, 'then', e, s, { eventValue: w + 'x' + hh }); });
@@ -18433,7 +18634,7 @@ export class Engine {
     const key = 'pocket.dark.' + (this.gameKey || 'game'), saved = store.get(key, '');
     if (saved !== '' && (scene.vars.darkMode === undefined || scene.vars.darkMode === '')) scene.vars.darkMode = +saved;
     scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
-    scene.on('var', (k, v) => { if (k === 'darkMode' && !this.editing) store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); });
+    scene.on('var', (k, v) => { if (k !== 'darkMode' || this.editing) return; if (v === '' || v == null) { try { localStorage.removeItem(key); } catch { /* storage unavailable */ } } else store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); }); // blank = follow the game's setting again
   }
   setScene(scene, { skipRestore = false } = {}) {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving

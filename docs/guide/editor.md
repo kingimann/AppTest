@@ -91,7 +91,11 @@ The selected object's settings, as **components** (cards).
 - **Quick add** chips sit next to Add Component.
 - **⋯ on a card:** Copy, **Paste Values** (from another component of the same type), Copy as Text, move up / down, turn off, remove, and **Docs** (opens this component's reference page).
 - **Collapse all / Expand all** folds every card. The choice is remembered for the next object you select.
-- **Jump chips:** with four or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. A card's header also sticks to the top while you scroll through it.
+- **Top row:** back to the Hierarchy, **Search settings** (finds a setting in this object's cards), **Advanced** and **Only changed**.
+- **Where it lives:** under the top row, the path to the object (Level › parent › object). Tap a parent to select it, or the level name to go back to nothing selected. On the right, **‹ 2 / 21 ›** steps to the previous or next object in the level.
+- **Jump chips:** with three or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. Once you've scrolled down, an **↑** chip at the start takes you back to the top. A card's header also sticks to the top while you scroll through it.
+- **Remembers where you were:** come back to an object (with ‹ ›, the Hierarchy or the Scene) and its cards are open or closed as you left them, scrolled to the same place.
+- **Nothing selected:** **Find an object…** searches the level by name, tag or component; tap a result to inspect it. Below it are the main objects (the player first).
 
 *Preferences › Compact panels* (on by default) makes Hierarchy rows shorter and Inspector fields smaller, so more fits on a phone screen.
 
@@ -157,6 +161,12 @@ The sections are:
 More settings live in *☰ → Build Settings* (app name, icon, loading screen, exports).
 
 ## Project
+
+- **Tabs:** all six (Prefabs, Objects, Sprites or Models, UI, Sounds, Components) fit on screen in two rows. The panel opens on the tab you used last and keeps each tab's scroll position.
+- **Search all assets:** type to search every tab at once. Results are grouped by tab, and each tab shows how many matches it has.
+- **Section chips:** tabs with several sections (Survival, Crafting, Buttons, Charts…) get a row of chips under the search. Tap one to jump to that section; the chip of the section you're in lights up.
+- **Tiles or list:** the button next to search switches between compact tiles and a one-line-per-item list.
+- **Create** opens the Create screen on the matching category.
 
 - **Prefabs:** ready-made objects, and **My Prefabs** (your own). Tap or drag into the Scene.
 - **Objects:** plain shapes, text, images, tilemaps, 3D primitives, cameras and lights.

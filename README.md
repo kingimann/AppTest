@@ -264,6 +264,12 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 
 Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
 
+### Social app UI
+
+- **Social Feed** with three looks: a text **timeline**, big **photo** posts (double-tap to like) and **cards** with Like / Comment / Share. Pull to refresh; posts come from a *Posts* collection.
+- **Stories** row with a full-screen viewer (progress bars, tap / hold, seen rings), **Like Button** (pop, count, hold for reactions), **Profile Header** (cover, avatar, verified tick, counts, Follow / Following), **New Post Box** and **Photo Grid**.
+- A **Social** app template puts them all together.
+
 ### More UI pieces
 
 - **Tooltip** (tap, long-press, always, once, or on a message) and **Popover Menu** (⋯ / avatar menus) draw above every other UI.

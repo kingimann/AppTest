@@ -208,6 +208,29 @@ Add **Panel (window)** to make it a window (or add *UI › Window* / *Glass Pane
 - Nodes: **Show Toast**, **Show Alert** (*closed*), **Ask Yes / No** (*yes* / *no*), **Ask For Text**.
 - **Notifications** are built in: send `notify:reward Daily gift|+50 coins|🎁`, or use the **Notify** node. Notification types (achievement, reward, level up, info, warning, error, chat…) are styled in *Game Settings › Notifications*.
 
+## Social app UI
+
+Pieces for feeds, stories and profiles, like the big social apps. They're in *Project › UI › Social* and *Add Component › UI*. The **Social** app template (*New › App*) puts them together: a home timeline with stories and a post box, a photo feed, a friends feed, and a profile with a photo grid.
+
+- **Social Feed:** a scrolling list of posts with pull to refresh. Pick a look:
+  - **timeline:** text first, small avatar, name, verified tick, @handle and how long ago. Under each post: comment, repost, like and share, with counts.
+  - **photos:** a header with a ringed avatar, a big square picture, then heart / comment / send / save, the likes, the caption and "View all comments". Double-tap the picture to like it (a heart pops). Posts without a picture are skipped.
+  - **cards:** each post on a card with reaction counts and Like / Comment / Share buttons.
+  - Posts come from a data collection called **Posts**. Fields: author, handle, text, media (an emoji or a picture link), color, likes, liked, comments, reposts, reposted, saved, verified.
+  - Until you make that collection, it shows sample posts.
+  - Likes, reposts and saves are stored in the record.
+  - Tapping a post opens it (`{record_text}`…) and can go to a page. Comment and share send messages.
+- **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
+  - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
+  - One per line: `Name | emoji or picture | colour | text`.
+  - "Your story" (first) sends a message.
+- **Like Button:** a heart (or 👍, or ★) that pops with little sparks, turns a variable on or off and counts. Tick *Hold to pick a reaction* for 👍 ❤️ 😂 😮 😢 😡.
+- **Profile Header:** a cover, a big avatar, name with a verified tick, @handle, bio, and counts (`Label | value` lines; `{variables}` work).
+  - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
+  - Tick *This is my profile* for **Edit profile** instead.
+- **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once.
+- **Photo Grid:** a scrolling grid of square pictures from the collection's media field (or emojis). Tap one to open it.
+
 ## Tooltips, menus and more UI pieces
 
 Each is a component (*Add Component › UI*) and has ready-made versions in *Project › UI*.

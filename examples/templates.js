@@ -160,6 +160,48 @@ function blankApp() {
   };
 }
 
+/** A social app: a timeline with stories and a post box, a photo feed, a friends feed of cards, and a profile with a photo grid. */
+function socialApp() {
+  const A = '#1d9bf0', t = Date.now(), H = 3600e3;
+  const feed = (id, look, top) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
+    behaviors: [{ type: 'uiFeed', collection: 'Posts', look, openPage: 'post', card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
+  return {
+    version: 1, name: 'Social', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Social', A),
+    vars: { page: 'home', playerName: 'Alex Rivera', playerHandle: 'alex', followers: 1280, following: 0 },
+    collections: [{ name: 'Posts', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' },
+      { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Comments', type: 'number' }, { name: 'Reposts', type: 'number' }, { name: 'Reposted', type: 'yes/no' }, { name: 'Saved', type: 'yes/no' }, { name: 'Verified', type: 'yes/no' }],
+    rows: [
+      { author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️', color: '#4f7cff', likes: 1284, comments: 48, reposts: 120, verified: true, _at: t - 0.15 * H },
+      { author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', likes: 312, liked: true, comments: 27, reposts: 41, _at: t - 2.5 * H },
+      { author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, comments: 63, reposts: 12, _at: t - 26 * H },
+      { author: 'Amir Haddad', handle: 'amir', text: 'Practising a new song for Friday. Who is coming? 🎸', media: '🎸', color: '#10b981', likes: 141, comments: 19, reposts: 3, _at: t - 40 * H },
+      { author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', media: '☄️', color: '#2b2d6e', likes: 5420, comments: 410, reposts: 1900, verified: true, _at: t - 72 * H },
+    ] }],
+    entities: [
+      app.bar('home = Home\nphotos = Photos\nfriends = Friends\nprofile = Profile\npost = Post', A),
+      ...app.page('p-home', 'home', true, [
+        { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', text: INK }] },
+        { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
+        feed('feed-home', 'timeline', 156),
+      ]),
+      ...app.page('p-photos', 'photos', false, [feed('feed-photos', 'photos', 0)]),
+      ...app.page('p-friends', 'friends', false, [feed('feed-friends', 'cards', 0)]),
+      ...app.page('p-profile', 'profile', false, [
+        { id: 'profile-head', name: 'Profile Header', ui: true, anchor: 'top', x: 0, y: 140, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 290, radius: 0, fill: '' },
+          behaviors: [{ type: 'uiProfile', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nFollowing | 312', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
+        { id: 'profile-grid', name: 'Photo Grid', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: 258, marginBottom: 0, shape: { type: 'rect', w: 400, h: 300, radius: 0, fill: '' }, behaviors: [{ type: 'uiPhotoGrid', collection: 'Posts', openPage: 'post' }] },
+      ]),
+      ...app.page('p-post', 'post', false, [
+        app.text('pp-author', 'Post Author', '{record_author}  @{record_handle}', 40, { size: 17, weight: '800' }),
+        app.text('pp-text', 'Post Text', '{record_text}', 76, { size: 18, weight: '500' }),
+        app.text('pp-meta', 'Post Counts', '❤️ {record_likes}   💬 {record_comments}   🔁 {record_reposts}', 200, { size: 15, color: MUTED, weight: '700' }),
+      ]),
+      { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
+        behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nPhotos | image | photos\nFriends | users | friends\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
+    ],
+  };
+}
+
 export const templates = {
   'sky-dodge': {
     version: 1, name: 'Sky Dodge', mode: '2d', background: '#101830', view: { width: 400, height: 700 }, gravity: 0,
@@ -473,6 +515,7 @@ export const templates = {
   'app-notes': notesApp(),
   'app-expenses': expensesApp(),
   'app-blank': blankApp(),
+  'app-social': socialApp(),
   'squad-tactics': squadGame(true),
   'squad-rts': squadGame(false),
 
@@ -568,6 +611,7 @@ export const templateInfo = [
   { key: 'app-blank', title: 'Blank App', blurb: 'App bar, tabs and pages', icon: 'phone', color: '#6366f1', kind: 'app' },
   { key: 'app-todo', title: 'To-Do List', blurb: 'Tasks you tick off, saved on the phone', icon: 'check', color: '#3a7bfd', kind: 'app' },
   { key: 'app-notes', title: 'Notes', blurb: 'Write, search and edit notes', icon: 'edit', color: '#f59e0b', kind: 'app' },
+  { key: 'app-social', title: 'Social', blurb: 'Feed, stories, likes and a profile', icon: 'heart', color: '#1d9bf0', kind: 'app' },
   { key: 'app-expenses', title: 'Expense Tracker', blurb: 'Spending with a running total', icon: 'coin', color: '#10b981', kind: 'app' },
   { key: 'empty-3d', title: 'Blank 3D', blurb: 'Just a floor', icon: 'cube', color: '#2f3a44' },
 ];

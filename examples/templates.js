@@ -199,6 +199,17 @@ function socialApp() {
         { id: 'g2', chat: 'g-weekend', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Can I bring my dog? 🐶', _at: t - 1.6 * H },
         { id: 'g3', chat: 'g-weekend', author: 'Maya Chen', handle: 'maya', text: 'Of course! The more the merrier', reply_to: 'g2', reply_text: 'Can I bring my dog? 🐶', reply_author: 'Sofia Ruiz', _at: t - 1.5 * H },
       ] },
+    { name: 'Stories', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' }, { name: 'Text', type: 'text' }, { name: 'Liked By', type: 'text' }],
+      rows: [
+        { author: 'Maya Chen', handle: 'maya', media: '🏔️', color: '#4f7cff', text: 'Made it to the top!', _at: t - 3 * H },
+        { author: 'Maya Chen', handle: 'maya', media: '🌄', color: '#f59e0b', text: 'Worth the 5am alarm', _at: t - 2.8 * H },
+        { author: 'Leo Park', handle: 'leop', media: '🚀', color: '#7b2ff7', text: 'Launch day! 2.0 is out', _at: t - 5 * H },
+        { author: 'Sofia Ruiz', handle: 'sofiaruiz', media: '🍝', color: '#ff7a45', text: 'Pasta night round two', _at: t - 8 * H },
+        { author: 'Sofia Ruiz', handle: 'sofiaruiz', media: '', color: '#e11d48', text: 'Who wants the recipe? Reply 👇', _at: t - 7.5 * H },
+        { author: 'Amir Haddad', handle: 'amir', media: '🎸', color: '#10b981', text: 'New song on Friday', _at: t - 12 * H },
+        { author: 'Pocket News', handle: 'pocketnews', media: '☄️', color: '#111827', text: 'Comet watch: look north-east after sunset', _at: t - 1 * H },
+      ] },
+    { name: 'StoryViews', fields: [{ name: 'Story', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Name', type: 'text' }], rows: [] },
     { name: 'Reads', fields: [{ name: 'Chat', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'At', type: 'number' }],
       rows: [{ chat: 'dm-alex-maya', handle: 'maya', at: t - 0.76 * H }, { chat: 'dm-alex-leop', handle: 'leop', at: t - 25 * H }] },
     { name: 'Follows', fields: [{ name: 'Follower', type: 'text' }, { name: 'Followee', type: 'text' }, { name: 'Follower Name', type: 'text' }, { name: 'Followee Name', type: 'text' }],
@@ -217,7 +228,7 @@ function socialApp() {
     entities: [
       menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
-        { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', text: INK }] },
+        { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
         feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', myProfilePage: 'profile' }),
       ]),

@@ -7443,7 +7443,7 @@ registerBehavior('uiBottomNav', {
           for (const d of inp.downs) { const i = tabAt(d); if (i >= 0) hold = { id: d.id, i, t: 0, x: d.x, y: d.y, done: false }; }
           if (hold) { const q = inp.pointers.get(hold.id); if (!q || Math.hypot(q.x - hold.x, q.y - hold.y) > 12) hold = null; else if (!hold.done && (hold.t += dt) > 0.5) { hold.done = true; pulse.set(hold.i, 1); s.engine.vibrate(18); s.setVar('heldTab', T[hold.i].page ?? T[hold.i].msg ?? ''); s.send(p.holdMessage, T[hold.i].page); } }
         }
-        if (p.swipe && T.length > 1) for (const u of inp.ups) { // a quick sideways swipe on the page: the next or previous tab
+        if (p.swipe && T.length > 1 && !(s.modal && s.modal !== e)) for (const u of inp.ups) { // a quick sideways swipe on the page: the next or previous tab
           const dx = u.x - u.sx, dy = u.y - u.sy, cur = activeIdx(s);
           if (u.time > 0.6 || Math.abs(dx) < 70 || Math.abs(dy) > Math.abs(dx) * 0.6 || u.sx < 30 || cur < 0 || tabAt({ x: u.sx, y: u.sy }) >= 0) continue;
           if (s.entities.some((q) => q.ui && q.visible && !q._parentHidden && q.behaviors.some((b) => ['uiPager', 'uiCarousel', 'uiSlider', 'uiSpinWheel', 'uiColorPicker', 'joystick'].includes(b.type) || (b.type === 'uiScroll' && b.params?.direction !== 'vertical') || (b.type === 'uiDataList' && b.params?.swipeDelete !== false)) && hitTest(s, q, u.sx, u.sy))) continue; // that swipe belongs to something else
@@ -9890,7 +9890,7 @@ registerBehavior('uiFeed', {
         const TBs = TABS();
         if (TBs.length > 1) {
           TSt.input(s.engine.input, (q) => UK.local(s, e, q)); // (more tabs than fit: drag them sideways)
-          if (p.tabSwipe !== false && look0() !== 'reels') for (const u0 of s.engine.input.ups) { // a quick sideways swipe on the posts: the next or previous tab
+          if (p.tabSwipe !== false && look0() !== 'reels' && !(s.modal && s.modal !== e)) for (const u0 of s.engine.input.ups) { // a quick sideways swipe on the posts: the next or previous tab
             const u = UK.local(s, e, u0), st0 = UK.local(s, e, { x: u0.sx, y: u0.sy }), dx = u.x - st0.x, dy = u.y - st0.y; if (u0.time > 0.6 || Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.6 || u0.sx < 24 || st0.y < b.y + inset || !UK.in(st0, b) || sheetUp) continue;
             const j = tab + (dx < 0 ? 1 : -1); if (TBs[j]) { s.engine.vibrate?.(6); setTab(s, j); }
           }
@@ -10364,6 +10364,9 @@ function chatInputBar(s, o) {
     const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', `font-weight:800;font-size:13px;color:${c.acc};`, '↩ Replying to ' + (r.author || '')), el('div', `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${c.sub};font-size:13px;`, r.text || ''));
     const x = el('button', `flex:none;border:0;background:none;color:${c.sub};font-size:18px;cursor:pointer;`, '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Cancel reply'); x.onclick = () => { setReply(null); o.onCancelReply?.(); inp.focus(); };
     rp.append(t, x); bar.append(rp); };
+  if (o.quick?.length) { const qr = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;justify-content:space-around;padding:10px 12px;`); qr.dataset.quickBar = '1';
+    for (const em of o.quick) { const b = el('button', 'border:0;background:none;font-size:30px;cursor:pointer;transition:transform .12s;', em); b.type = 'button'; b.dataset.quick = em; b.onclick = () => { b.style.transform = 'scale(1.3)'; o.onSend({ text: em }); }; qr.append(b); }
+    bar.append(qr); }
   setReply(o.reply);
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
@@ -11103,86 +11106,260 @@ registerBehavior('uiFriends', {
 });
 
 const STORY_SAMPLE = 'Maya | 🏔️ | #4f7cff | Sunrise hike\nLeo | 🚀 | #7b2ff7 | Launch day!\nSofia | 🍝 | #ff7a45 | Pasta night\nAmir | 🎸 | #10b981 | New song soon\nJun | 🐶 | #f59e0b | Meet Biscuit';
+const STORY_BGS = ['#5b6bff', '#f91880', '#ff7a45', '#10b981', '#7c3aed', '#0ea5e9', '#111827', '#e11d48'];
+/** Make a story: a photo, video or GIF from the phone, or words on a colour. Full screen; Share posts it. */
+function storyComposer(s, o) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
+  const font = THEME.font, el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const btn = (css, text) => { const b = el('button', `border:0;cursor:pointer;font:700 15px ${font};-webkit-tap-highlight-color:transparent;${css}`, text); b.type = 'button'; return b; };
+  const st = { media: '', color: STORY_BGS[0], busy: false };
+  const wrap = el('div', `position:absolute;inset:0;z-index:60;background:#000;display:flex;flex-direction:column;font-family:${font};opacity:0;transition:opacity .2s;touch-action:auto;`); wrap.dataset.pocketStoryComposer = '1';
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
+  const stage = el('div', 'position:relative;flex:1;margin:calc(env(safe-area-inset-top,0px) + 8px) 8px 8px;border-radius:18px;overflow:hidden;display:flex;align-items:center;justify-content:center;transition:background .2s;');
+  const pic = el('img', 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;'), vid = el('video', 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:none;'); vid.muted = true; vid.loop = true; vid.playsInline = true; vid.autoplay = true;
+  const txt = el('textarea', `position:relative;z-index:2;width:86%;min-height:60px;max-height:60%;border:0;outline:none;resize:none;background:transparent;color:#fff;font:800 30px ${font};text-align:center;text-shadow:0 2px 10px rgba(0,0,0,.45);`); txt.placeholder = o.placeholder || 'Type something…'; txt.maxLength = 160; txt.rows = 3; txt.dataset.storyText = '1';
+  stage.append(pic, vid, txt);
+  const top = el('div', 'position:absolute;left:0;right:0;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;');
+  const x = btn('width:40px;height:40px;border-radius:50%;background:rgba(0,0,0,.35);color:#fff;font-size:20px;', '✕'); x.setAttribute('aria-label', 'Close');
+  const clr = btn('display:none;padding:8px 12px;border-radius:18px;background:rgba(0,0,0,.35);color:#fff;font-size:13px;', 'Remove photo'); clr.dataset.storyClear = '1';
+  top.append(x, clr); stage.append(top);
+  const bar = el('div', 'flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px calc(env(safe-area-inset-bottom,0px) + 12px);');
+  const file = el('input'); file.type = 'file'; file.accept = 'image/*,video/*'; file.style.display = 'none';
+  const media = btn('flex:none;padding:10px 14px;border-radius:22px;background:#24262e;color:#fff;', '🖼️ Photo / video'); media.dataset.storyMedia = '1';
+  const sw = el('div', 'flex:1;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:4px 2px;');
+  const share = btn('flex:none;padding:11px 18px;border-radius:22px;background:#fff;color:#111;font-weight:800;', 'Share'); share.dataset.storyShare = '1';
+  const swatches = STORY_BGS.map((c) => { const b = btn(`flex:none;width:30px;height:30px;border-radius:50%;background:${c};border:3px solid ${c === st.color ? '#fff' : 'rgba(255,255,255,.25)'};`, ''); b.dataset.storyColor = c; b.onclick = () => { st.color = c; paint(); }; return b; });
+  sw.append(...swatches); bar.append(media, sw, share, file); wrap.append(stage, bar); root.append(wrap);
+  const paint = () => {
+    stage.style.background = st.media ? '#000' : `linear-gradient(160deg, ${st.color}, ${withAlpha(st.color, 0.65)})`;
+    const v = isVid(st.media); pic.style.display = st.media && !v ? 'block' : 'none'; vid.style.display = v ? 'block' : 'none';
+    if (st.media && !v && pic.src !== st.media) pic.src = st.media; if (v) { const src = String(st.media).replace(/^video:/, ''); if (vid.src !== src) { vid.src = src; vid.play?.().catch(() => {}); } }
+    sw.style.visibility = st.media ? 'hidden' : 'visible'; clr.style.display = st.media ? 'block' : 'none';
+    for (const b of swatches) b.style.borderColor = b.dataset.storyColor === st.color ? '#fff' : 'rgba(255,255,255,.25)';
+    share.style.opacity = st.busy || (!st.media && !txt.value.trim()) ? '.45' : '1'; share.textContent = st.busy ? 'Sharing…' : 'Share';
+  };
+  let gone = false; const close = () => { if (gone) return; gone = true; wrap.style.opacity = '0'; vid.pause?.(); setTimeout(() => wrap.remove(), 200); o.onClose?.(); };
+  x.onclick = close; clr.onclick = () => { st.media = ''; paint(); }; media.onclick = () => file.click(); txt.oninput = paint;
+  const read = (f) => new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); });
+  file.onchange = async () => {
+    const f = file.files?.[0]; file.value = ''; if (!f) return; st.busy = true; paint();
+    try {
+      if (o.upload && (f.type.startsWith('video/') || f.size > 2.5e6)) st.media = await o.upload(f); // a big one goes to the media bucket
+      else if (f.type.startsWith('video/')) { if (f.size > 6e6) { st.media = 'video:' + URL.createObjectURL(f); s.snackbar?.('Big video: it stays on this phone only'); } else st.media = await read(f); }
+      else if (f.type === 'image/gif') st.media = f.size <= 3e6 ? await read(f) : URL.createObjectURL(f);
+      else st.media = await shrinkPicture(f, 1080);
+    } catch { s.snackbar?.('That file could not be added'); }
+    st.busy = false; paint();
+  };
+  share.onclick = async () => {
+    if (st.busy || (!st.media && !txt.value.trim())) return; st.busy = true; paint();
+    try { await o.onShare({ media: st.media, color: st.media ? '' : st.color, text: txt.value.trim() }); close(); } catch { st.busy = false; paint(); s.snackbar?.('The story could not be shared'); }
+  };
+  requestAnimationFrame(() => { wrap.style.opacity = '1'; }); paint(); setTimeout(() => txt.focus(), 120);
+  return { close, wrap };
+}
+
 registerBehavior('uiStories', {
-  label: 'Stories', description: 'A row of round story bubbles with a coloured ring (grey once seen). Tap one to watch full screen: progress bars on top, tap right for next, left for back, hold to pause, it moves on by itself. One per line: Name | emoji or picture | colour | text.',
+  label: 'Stories', description: 'Story bubbles with a coloured ring (grey once you have seen them all). Tap to watch full screen: a story per person with several slides, progress bars, tap to go on, hold to pause, swipe sideways for the next person and down to close. Reply by message or with a quick emoji, like a story, and see who viewed yours. “Your story” makes one: a photo, video, GIF or words on a colour. Stories come from a Stories collection (and disappear after a day), else the list below.',
   params: [
-    { key: 'items', label: 'Stories (Name | emoji or picture | colour | text)', type: 'code', default: STORY_SAMPLE },
-    { key: 'yours', label: '“Your story” first (sends a message)', type: 'bool', default: true },
-    { key: 'yoursMessage', label: '“Your story” sends', type: 'text', default: 'add story', suggest: 'messages' },
-    { key: 'seconds', label: 'Each story lasts (sec)', type: 'number', default: 5, step: 0.5 },
+    { key: 'collection', label: 'Stories collection', type: 'text', default: 'Stories', suggest: 'collections', info: 'Fields: author, handle, media, color, text (plus liked_by). When the collection exists, stories come from it, people can post their own, and they disappear after the hours below. Otherwise the list below shows.' },
+    { key: 'items', label: 'Stories when there is no collection (Name | emoji or picture | colour | text; a name again adds a slide)', type: 'code', default: STORY_SAMPLE },
+    { key: 'hours', label: 'Stories disappear after (hours, 0 = never)', type: 'number', default: 24, range: [0, 168], step: 1 },
+    { key: 'yours', label: '“Your story” first', type: 'bool', default: true },
+    { key: 'compose', label: '“Your story” opens a story maker (photo, video, GIF or words)', type: 'bool', default: true, showIf: (b) => b.yours !== false },
+    { key: 'yoursMessage', label: '“Your story” also sends', type: 'text', default: 'add story', suggest: 'messages', showIf: (b) => b.yours !== false },
+    { key: 'onlyFollowing', label: 'Only people I follow (and me)', type: 'bool', default: false },
+    { key: 'seconds', label: 'Each slide lasts (sec)', type: 'number', default: 5, step: 0.5 },
+    { key: 'replies', label: 'Reply by message (and quick emoji)', type: 'bool', default: true, info: 'The reply goes to a direct message with them (Messages collection), quoting the story, and they get a notification.' },
+    { key: 'likes', label: '♥ to like a story', type: 'bool', default: true },
+    { key: 'views', label: '“Seen by” on your own stories', type: 'bool', default: true, info: 'Add a StoryViews collection (story, handle, name) to know who viewed them from other phones.' },
     { key: 'size', label: 'Bubble size', type: 'number', default: 64, step: 2 },
     { key: 'labels', label: 'Names under them', type: 'bool', default: true },
     ...colorParams({ ring1: ['Ring (start)', '#feda75'], ring2: ['Ring (end)', '#d62976'], seenRing: ['Seen ring', 'rgba(128,128,128,0.45)'], text: ['Names', '@text'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('x'); let open = -1, part = 0, prog = 0, paused = false, k = 0, total = 0, view = null, downAt = 0, seen = null;
-    const items = () => UK.lines(p.items).map(([name = '', pic = '', color = '', text = '']) => ({ name, pic, color, text }));
-    const seenKey = (s) => 'pocket.stories.' + (s.engine.gameKey || 'game');
-    const seenSet = (s) => (seen ||= new Set(String(store.get(seenKey(s), '')).split('|').filter(Boolean)));
-    const markSeen = (s, it) => { const ss = seenSet(s); if (!ss.has(it.name)) { ss.add(it.name); store.set(seenKey(s), [...ss].join('|')); } };
-    const close = (e, s) => { open = -1; UK.modal(s, e, false); };
-    const show = (e, s, i) => { const L = items(); if (i < 0 || i >= L.length) return close(e, s); open = i; prog = 0; markSeen(s, L[i]); UK.modal(s, e, true, () => close(e, s)); };
+    const S = makeScroller('x'); let total = 0, seen = null, likedL = null, viewedL = null, sample = null;
+    let order = [], gi = -1, si = 0, prog = 0, k = 0, held = 0, tr = 0, drag = null, replying = null, sheet = false, sharing = null, popT = -9;
+    const D = (s) => s.engine.data, has = (s) => !!(p.collection && D(s).def(p.collection));
+    const me = (s) => { const m = meOfVars(s); return { ...m, handle: handleOf(m.handle) }; };
+    const key = (s, k2) => 'pocket.stories.' + (s.engine.gameKey || 'game') + (k2 ? '.' + k2 : '');
+    const setOf = (s, k2, ref) => { if (ref.v) return ref.v; try { ref.v = new Set(String(store.get(key(s, k2), '')).split('|').filter(Boolean)); } catch { ref.v = new Set(); } return ref.v; };
+    const seenR = { v: null }, likedR = { v: null }, viewedR = { v: null };
+    const seenSet = (s) => setOf(s, '', seenR), likedSet = (s) => setOf(s, 'liked', likedR), viewedSet = (s) => setOf(s, 'viewed', viewedR);
+    const saveSet = (s, k2, set) => store.set(key(s, k2), [...set].slice(-3000).join('|'));
+    const localKey = (s) => key(s, 'mine');
+    const localStories = (s) => { try { return JSON.parse(store.get(localKey(s), '[]')) || []; } catch { return []; } };
+    const fresh = (at) => !(+p.hours > 0) || !at || Date.now() - at < +p.hours * 3600e3;
+    /** Everyone's stories: [{ handle, name, mine, slides: [{ id, pic, color, text, at, row }] }], mine first, then unseen ones, newest first. */
+    const groups = (s) => {
+      const M = me(s), list = [];
+      if (has(s)) for (const r of D(s).rows(p.collection)) { if (!fresh(r._at)) continue; list.push({ id: String(r.id), name: r.author || r.handle || 'Someone', handle: handleOf(r.handle || String(r.author || '').replace(/\s+/g, '')), pic: r.media || '', color: r.color || '', text: r.text || '', at: r._at || 0, row: r }); }
+      else {
+        (sample ||= UK.lines(p.items).map(([name = '', pic = '', color = '', text = ''], i) => ({ id: 'i' + i + ':' + name, name, handle: handleOf(name.replace(/\s+/g, '')), pic, color, text, at: 0 })));
+        list.push(...sample);
+        for (const q of localStories(s)) if (fresh(q.at)) list.push({ ...q, name: M.author, handle: M.handle });
+      }
+      const by = new Map(); for (const q of list) { const g = by.get(q.handle) || by.set(q.handle, { handle: q.handle, name: q.name, mine: q.handle === M.handle, slides: [] }).get(q.handle); g.slides.push(q); }
+      const SG = s.engine.social, ss = seenSet(s); let G = [...by.values()];
+      for (const g of G) { g.slides.sort((a, b) => (a.at || 0) - (b.at || 0)); g.latest = Math.max(0, ...g.slides.map((q) => q.at || 0)); g.seen = g.slides.every((q) => ss.has(q.id)); }
+      if (p.onlyFollowing && SG) G = G.filter((g) => g.mine || SG.isFollowing(g.handle));
+      const mine = G.find((g) => g.mine) || null, others = G.filter((g) => !g.mine).sort((a, b) => (a.seen - b.seen) || (b.latest - a.latest));
+      return { mine, others };
+    };
+    const cur = (s) => { const G = groups(s), all = [G.mine, ...G.others].filter(Boolean), g = all.find((q) => q.handle === order[gi]); return g ? { g, sl: g.slides[clamp(si, 0, g.slides.length - 1)] } : null; };
+    const close = (e, s) => { gi = -1; order = []; replying?.close?.(); replying = null; UK.modal(s, e, false); };
+    const markSeen = (s, sl, g) => {
+      const ss = seenSet(s); if (!ss.has(sl.id)) { ss.add(sl.id); saveSet(s, '', ss); }
+      if (g.mine || p.views === false) return; const vs = viewedSet(s); if (vs.has(sl.id)) return; vs.add(sl.id); saveSet(s, 'viewed', vs);
+      if (D(s).def('StoryViews')) { const M = me(s); D(s).add('StoryViews', { story: sl.id, handle: M.handle, name: M.author }); } // they can see who viewed it
+    };
+    /** Open someone's stories (from their first one you haven't seen). */
+    const openAt = (e, s, handle, list) => {
+      order = list.map((g) => g.handle); gi = order.indexOf(handle); if (gi < 0) return;
+      const g = list[gi], ss = seenSet(s); si = Math.max(0, g.slides.findIndex((q) => !ss.has(q.id))); if (si < 0 || g.seen) si = 0; prog = 0; tr = 0;
+      markSeen(s, g.slides[si], g); UK.modal(s, e, true, () => close(e, s));
+    };
+    const step = (e, s, d) => { // next / previous slide (across people)
+      const c = cur(s); if (!c) return close(e, s); si += d; prog = 0;
+      if (si >= c.g.slides.length) return person(e, s, 1);
+      if (si < 0) { if (gi === 0) { si = 0; return; } return person(e, s, -1, true); }
+      markSeen(s, c.g.slides[si], c.g);
+    };
+    const person = (e, s, d, fromEnd) => { // the next or previous person
+      const G = groups(s), all = [G.mine, ...G.others].filter(Boolean);
+      gi += d; if (gi < 0 || gi >= order.length) return close(e, s);
+      const g = all.find((q) => q.handle === order[gi]); if (!g) return close(e, s);
+      si = fromEnd ? g.slides.length - 1 : Math.max(0, g.slides.findIndex((q) => !seenSet(s).has(q.id))); if (si < 0) si = 0; prog = 0; tr = d * 0.999; // (it slides in)
+      markSeen(s, g.slides[si], g);
+    };
+    const durOf = (sl) => { if (isVid(sl.pic)) { const v = feedVideo(sl.pic), d = v?.duration; return Number.isFinite(d) && d > 0 ? clamp(d, 2, 30) : Math.max(1, +p.seconds || 5); } return Math.max(1, +p.seconds || 5); };
+    const colors = () => ({ bg: '#16181d', text: '#ffffff', sub: '#9aa0a6', line: 'rgba(255,255,255,0.12)', acc: tok('@accent') || '#1d9bf0', field: 'rgba(255,255,255,0.08)' });
+    const reply = (e, s, g, sl, text) => { // a message to them, quoting the story
+      const M = me(s), C = 'Messages', rec = { chat: dmId(M.handle, g.handle), author: M.author, handle: M.handle, text, reply_to: 'story:' + sl.id, reply_text: '📖 ' + (sl.text ? String(sl.text).slice(0, 50) : isVid(sl.pic) ? 'Video story' : 'Photo story'), reply_author: g.name };
+      if (D(s).def(C)) D(s).add(C, rec); s.engine.social?.notify(g.handle, 'story_reply', { text, post: '' }); s.snackbar?.(`Sent to ${g.name.split(' ')[0]}`);
+    };
+    const like = (s, g, sl) => {
+      const L = likedSet(s), on = !L.has(sl.id), M = me(s); if (on) L.add(sl.id); else L.delete(sl.id); saveSet(s, 'liked', L); popT = s.time;
+      if (sl.row && has(s)) { const by = String(sl.row.liked_by || '').split(',').map(handleOf).filter(Boolean), next = on ? [...new Set([...by, M.handle])] : by.filter((h) => h !== M.handle); D(s).update(p.collection, sl.row.id, { liked_by: next.join(',') }); }
+      if (on) { s.engine.vibrate?.(10); s.engine.social?.notify(g.handle, 'story_like', { text: sl.text || '', post: '' }); }
+    };
+    const viewers = (s, sl) => (D(s).def('StoryViews') ? [...new Map(D(s).rows('StoryViews').filter((q) => String(q.story) === sl.id).map((q) => [handleOf(q.handle), q.name || q.handle])).values()] : []);
+    const removeMine = (e, s, sl) => {
+      if (sl.row && has(s)) D(s).remove(p.collection, sl.row.id); else store.set(localKey(s), JSON.stringify(localStories(s).filter((q) => q.id !== sl.id)));
+      s.snackbar?.('Story deleted'); const c = cur(s); if (!c || !c.g.slides.length) close(e, s); else { si = Math.min(si, c.g.slides.length - 1); prog = 0; }
+    };
+    const compose = (e, s) => {
+      if (sharing || s.engine.editing) return; if (p.yoursMessage) s.send(p.yoursMessage); if (p.compose === false) return;
+      sharing = storyComposer(s, { upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'stories') : null, onClose: () => { sharing = null; }, onShare: async (out) => {
+        const M = me(s);
+        if (has(s)) D(s).add(p.collection, { author: M.author, handle: M.handle, media: out.media, color: out.color, text: out.text });
+        else { const L = localStories(s); L.push({ id: 'l' + Date.now().toString(36), pic: out.media, color: out.color, text: out.text, at: Date.now() }); store.set(localKey(s), JSON.stringify(L.slice(-30))); }
+        s.snackbar?.('Your story is up'); s.engine.vibrate?.(10);
+      } });
+    };
     return {
       uiAlways: true,
       update(e, dt, s) {
-        k = clamp(k + (open >= 0 ? dt : -dt) / 0.2, 0, 1);
-        const b = UK.box(e), D = +p.size || 64, gap = 14, n = items().length + (p.yours !== false ? 1 : 0);
-        if (open >= 0) {
+        k = clamp(k + (gi >= 0 ? dt : -dt) / 0.2, 0, 1); tr += (0 - tr) * Math.min(1, dt * 12); if (Math.abs(tr) < 0.002) tr = 0;
+        const b = UK.box(e), Dz = +p.size || 64, gap = 14, G = groups(s), n = G.others.length + (p.yours !== false ? 1 : 0);
+        if (gi >= 0) {
           if (!UK.live(s, e)) return close(e, s);
-          const inp = s.engine.input; paused = inp.pointers.size > 0;
-          if (inp.downs.length) downAt = s.time;
-          if (!paused) { prog += dt / Math.max(1, +p.seconds || 5); if (prog >= 1) show(e, s, open + 1); }
-          for (const t of inp.taps) { if (s.time - downAt > 0.35) continue; const V = view; if (!V) continue; if (t.y < 80) { close(e, s); break; } UK.tap(s, p); show(e, s, t.x < s.engine.width * 0.33 ? Math.max(0, open - 1) : open + 1); break; }
-          inp.taps.length = 0; return;
+          const inp = s.engine.input, E = s.engine, W = E.width, H = E.height, sT = E.safe?.top || 0, sB = E.safe?.bottom || 0, c = cur(s); if (!c) return close(e, s);
+          for (const d of inp.downs) drag = { id: d.id, x: d.x, y: d.y, dx: 0, dy: 0 };
+          if (drag) { const q = inp.pointers.get(drag.id); if (q) { drag.dx = q.x - drag.x; drag.dy = q.y - drag.y; held += dt; } else { drag = null; held = 0; } } else held = 0;
+          const paused = !!replying || sheet || sharing || (drag && (held > 0.18 || Math.abs(drag.dx) > 10 || Math.abs(drag.dy) > 10));
+          if (!paused) { prog += dt / durOf(c.sl); if (prog >= 1) step(e, s, 1); }
+          for (const u of inp.ups) {
+            const dx = u.x - u.sx, dy = u.y - u.sy;
+            if (dy > 110 && dy > Math.abs(dx)) { close(e, s); break; } // swipe down: close
+            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) { person(e, s, dx < 0 ? 1 : -1); break; } // sideways: the next person
+            if (u.time > 0.35 || Math.hypot(dx, dy) > 16) continue; // a hold (paused) or a drag
+            const x = u.sx, y = u.sy, cc = cur(s); if (!cc) break;
+            if (y < sT + 78) { if (x > W - 56) close(e, s); else if (cc.g.mine && x > W - 100) { sheet = true; socialSheet(s, { kind: 'story-more', colors: colors(), items: [{ icon: '🗑️', label: 'Delete story', danger: true, run: () => removeMine(e, s, cc.sl) }], onClose: () => { sheet = false; } }); } break; }
+            if (y > H - sB - 74) { // the bottom bar
+              if (cc.g.mine) { if (p.views !== false) { const V = viewers(s, cc.sl); sheet = true; socialSheet(s, { kind: 'story-viewers', title: V.length ? `Seen by ${V.length}` : 'No views yet', colors: colors(), items: V.length ? V.map((nm) => ({ icon: '👤', label: nm })) : [{ icon: '👀', label: 'No one has seen it yet' }], onClose: () => { sheet = false; } }); } break; }
+              if (p.likes !== false && x > W - 64) { like(s, cc.g, cc.sl); break; }
+              if (p.replies !== false) { const g = cc.g, sl = cc.sl; replying = chatInputBar(s, { colors: colors(), placeholder: `Reply to ${g.name.split(' ')[0]}…`, photos: false, quick: ['❤️', '🔥', '😂', '😮', '😢', '👏'], onSend: (m) => { reply(e, s, g, sl, m.text); replying?.close?.(); }, onClose: () => { replying = null; } }); }
+              break;
+            }
+            UK.tap(s, p); step(e, s, x < W * 0.3 ? -1 : 1); break;
+          }
+          inp.taps.length = 0; inp.ups.length = 0; // (nothing underneath gets them) return;
         }
         S.max = Math.max(0, total - b.w); S.update(s, e, dt, b);
         if (s.engine.editing) return;
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, b) || S.moved) continue;
-          const i = Math.floor((t.x - b.x + S.v - 8) / (D + gap)); if (i < 0 || i >= n) continue;
+          const i = Math.floor((t.x - b.x + S.v - 8) / (Dz + gap)); if (i < 0 || i >= n) continue;
           UK.tap(s, p);
-          if (p.yours !== false && i === 0) { if (p.yoursMessage) s.send(p.yoursMessage); } else show(e, s, i - (p.yours !== false ? 1 : 0));
+          if (p.yours !== false && i === 0) { // your story: the + makes one; the picture watches yours (or makes one)
+            const bx = b.x + 8 - S.v + Dz - 10, by = b.y + 6 + Dz - 12, onPlus = Math.hypot(t.x - bx, t.y - by) < 18;
+            if (G.mine && !onPlus) openAt(e, s, G.mine.handle, [G.mine, ...G.others]); else compose(e, s);
+          } else { const g = G.others[i - (p.yours !== false ? 1 : 0)]; if (g) openAt(e, s, g.handle, [...(G.mine ? [G.mine] : []), ...G.others]); }
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), D = +p.size || 64, gap = 14, L = items(), ss = seenSet(s), lab = p.labels !== false; let x = b.x + 8 - S.v;
+        const b = UK.box(e), Dz = +p.size || 64, gap = 14, G = groups(s), lab = p.labels !== false, ring = [p.ring1 || '#feda75', p.ring2 || '#d62976'], seenC = p.seenRing || 'rgba(128,128,128,0.45)'; let x = b.x + 8 - S.v;
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y - 6, b.w, b.h + 12); ctx.clip();
-        const cy = b.y + D / 2 + 6;
+        const cy = b.y + Dz / 2 + 6, txt = tok(p.text || '@text') || '#fff';
+        const bubble = (name, sl, rng, d) => {
+          const pic = sl && isPic(sl.pic) && !isVid(sl.pic) ? sl.pic : '';
+          miniAvatar(ctx, name, x + Dz / 2, cy, d, pic, rng);
+          if (sl && !pic) { ctx.save(); ctx.beginPath(); ctx.arc(x + Dz / 2, cy, d / 2, 0, Math.PI * 2); ctx.fillStyle = sl.color || (isVid(sl.pic) ? '#222' : '#5b6bff'); ctx.fill(); ctx.restore(); UK.text(ctx, isVid(sl.pic) ? '▶' : sl.pic && !isPic(sl.pic) ? sl.pic : (sl.text ? 'Aa' : ''), x + Dz / 2, cy + 2, { size: Math.round(Dz * (sl.pic && !isPic(sl.pic) ? 0.42 : 0.3)), weight: 900, color: '#fff' }); }
+        };
         if (p.yours !== false) {
-          const me = String(s.vars.playerName || 'You'); miniAvatar(ctx, me, x + D / 2, cy, D - 8);
-          ctx.fillStyle = '#1d9bf0'; ctx.beginPath(); ctx.arc(x + D - 10, cy + D / 2 - 12, 11, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); UK.text(ctx, '+', x + D - 10, cy + D / 2 - 12, { size: 17, weight: 900, color: '#fff' });
-          if (lab) UK.text(ctx, 'Your story', x + D / 2, cy + D / 2 + 16, { size: 12, weight: 500, color: p.text || '#fff', maxW: D + 10 });
-          x += D + gap;
+          const M = me(s), mine = G.mine, last = mine?.slides[mine.slides.length - 1];
+          if (mine) bubble(M.author, last, mine.seen ? seenC : ring, Dz - 10); else miniAvatar(ctx, M.author, x + Dz / 2, cy, Dz - 8);
+          ctx.fillStyle = tok('@accent') || '#1d9bf0'; ctx.beginPath(); ctx.arc(x + Dz - 10, cy + Dz / 2 - 12, 11, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = tok('@bg') || '#fff'; ctx.lineWidth = 2.5; ctx.stroke(); UK.text(ctx, '+', x + Dz - 10, cy + Dz / 2 - 12, { size: 17, weight: 900, color: '#fff' });
+          if (lab) UK.text(ctx, 'Your story', x + Dz / 2, cy + Dz / 2 + 16, { size: 12, weight: 500, color: txt, maxW: Dz + 10 });
+          x += Dz + gap;
         }
-        for (const it of L) {
-          const isSeen = ss.has(it.name);
-          miniAvatar(ctx, it.name, x + D / 2, cy, D - 10, isPic(it.pic) ? it.pic : '', isSeen ? p.seenRing || 'rgba(128,128,128,0.45)' : [p.ring1 || '#feda75', p.ring2 || '#d62976']);
-          if (it.pic && !isPic(it.pic)) { ctx.save(); ctx.beginPath(); ctx.arc(x + D / 2, cy, (D - 10) / 2, 0, Math.PI * 2); ctx.fillStyle = it.color || '#5b6bff'; ctx.fill(); ctx.restore(); UK.text(ctx, it.pic, x + D / 2, cy + 2, { size: Math.round(D * 0.42) }); }
-          if (lab) UK.text(ctx, it.name, x + D / 2, cy + D / 2 + 16, { size: 12, weight: 500, color: p.text || '#fff', maxW: D + 10 });
-          x += D + gap;
+        for (const g of G.others) {
+          const last = g.slides[g.slides.length - 1];
+          bubble(g.name, last, g.seen ? seenC : ring, Dz - 10);
+          if (lab) UK.text(ctx, g.name.split(' ')[0], x + Dz / 2, cy + Dz / 2 + 16, { size: 12, weight: g.seen ? 500 : 700, color: g.seen ? withAlpha(txt.startsWith('#') ? txt : '#888888', 0.6) : txt, maxW: Dz + 10 });
+          x += Dz + gap;
         }
         total = x + S.v - b.x; ctx.restore();
       },
       drawTop(ctx, e, s, v) {
-        const kk = k; if (kk <= 0.01 && open < 0) return;
-        const L = items(), i = open >= 0 ? open : Math.max(0, part), it = L[i]; if (!it) return; part = i;
-        const V = view = viewOf(v), W = V.x1 - V.x0, H = V.y1 - V.y0;
-        ctx.save(); ctx.globalAlpha *= kk; const z = 0.92 + 0.08 * UK.ease(kk); ctx.translate(V.x0 + W / 2, V.y0 + H / 2); ctx.scale(z, z); ctx.translate(-(V.x0 + W / 2), -(V.y0 + H / 2));
-        drawMedia(ctx, isPic(it.pic) ? it.pic : '', it.color || '#5b6bff', V.x0, V.y0, W, H, 0);
-        if (it.pic && !isPic(it.pic)) UK.text(ctx, it.pic, V.x0 + W / 2, V.y0 + H * 0.42, { size: Math.round(W * 0.36) });
-        const g = ctx.createLinearGradient(0, V.y0, 0, V.y0 + 140); g.addColorStop(0, 'rgba(0,0,0,0.45)'); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.fillRect(V.x0, V.y0, W, 140);
-        const n = L.length, gp = 4, bw = (W - 24 - gp * (n - 1)) / n;
-        for (let j = 0; j < n; j++) { const x = V.x0 + 12 + j * (bw + gp), y = V.y0 + 14 + (s.engine.safe?.top || 0); ctx.fillStyle = 'rgba(255,255,255,0.35)'; UK.rr(ctx, x, y, bw, 3, 1.5); ctx.fill(); const f = j < i ? 1 : j === i ? clamp(prog, 0, 1) : 0; if (f) { ctx.fillStyle = '#fff'; UK.rr(ctx, x, y, bw * f, 3, 1.5); ctx.fill(); } }
-        const hy = V.y0 + 44 + (s.engine.safe?.top || 0);
-        miniAvatar(ctx, it.name, V.x0 + 30, hy, 34);
-        UK.text(ctx, it.name, V.x0 + 56, hy, { size: 15, weight: 800, color: '#fff', align: 'left' });
-        UK.text(ctx, '✕', V.x1 - 26, hy, { size: 22, weight: 700, color: '#fff' });
-        if (it.text) { ctx.font = `800 26px ${THEME.font}`; const T = wrapLines(ctx, fillTemplate(it.text, s.vars), W - 60, 26, 4); T.forEach((l, j) => UK.text(ctx, l, V.x0 + W / 2, V.y0 + H * 0.68 + j * 34, { size: 26, weight: 800, color: '#fff' })); }
-        if (paused && open >= 0) UK.text(ctx, 'Ⅱ', V.x0 + W / 2, V.y1 - 60, { size: 20, weight: 900, color: 'rgba(255,255,255,0.7)' });
-        ctx.restore();
+        if (k <= 0.01 && gi < 0) return; const c = cur(s); if (!c) return;
+        const V = viewOf(v), E = s.engine, W = E.width, H = E.height, sT = E.safe?.top || 0, sB = E.safe?.bottom || 0, { g, sl } = c;
+        ctx.save(); ctx.translate(V.x0, V.y0); ctx.scale(1 / v.K, 1 / v.K); // (drawn in screen pixels)
+        const dy = drag && drag.dy > 0 && Math.abs(drag.dy) > Math.abs(drag.dx) ? drag.dy : 0, dx = drag && Math.abs(drag.dx) > Math.abs(drag.dy) ? drag.dx : 0, z = 1 - Math.min(0.25, dy / H * 0.6);
+        ctx.globalAlpha *= k; ctx.fillStyle = `rgba(0,0,0,${0.85 * (1 - Math.min(0.7, dy / H))})`; ctx.fillRect(0, 0, W, H);
+        ctx.translate(W / 2 + dx + tr * W, H / 2 + dy * 0.6); const zk = (0.92 + 0.08 * UK.ease(k)) * z; ctx.scale(zk, zk); ctx.translate(-W / 2, -H / 2);
+        ctx.save(); UK.rr(ctx, 0, 0, W, H, dy ? 18 : 0); ctx.clip();
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); // (opaque: nothing shows through)
+        if (sl.pic && (isPic(sl.pic) || isVid(sl.pic))) { drawMedia(ctx, sl.pic, '#000', 0, 0, W, H, 0, 'cover'); }
+        else { const gg = ctx.createLinearGradient(0, 0, W * 0.4, H); const col = sl.color || '#5b6bff'; gg.addColorStop(0, col); gg.addColorStop(1, withAlpha(col.startsWith('#') ? col : '#5b6bff', 0.6)); ctx.fillStyle = gg; ctx.fillRect(0, 0, W, H); if (sl.pic && !isPic(sl.pic)) UK.text(ctx, sl.pic, W / 2, H * (sl.text ? 0.38 : 0.45), { size: Math.round(W * 0.34) }); }
+        const tg = ctx.createLinearGradient(0, 0, 0, 150 + sT); tg.addColorStop(0, 'rgba(0,0,0,0.5)'); tg.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = tg; ctx.fillRect(0, 0, W, 150 + sT);
+        const bg2 = ctx.createLinearGradient(0, H - 160, 0, H); bg2.addColorStop(0, 'rgba(0,0,0,0)'); bg2.addColorStop(1, 'rgba(0,0,0,0.55)'); ctx.fillStyle = bg2; ctx.fillRect(0, H - 160, W, 160);
+        // progress: one bar per slide of this person
+        const n = g.slides.length, gp = 4, bw = (W - 20 - gp * (n - 1)) / n, py = sT + 10;
+        for (let j = 0; j < n; j++) { const x = 10 + j * (bw + gp); ctx.fillStyle = 'rgba(255,255,255,0.35)'; UK.rr(ctx, x, py, bw, 3, 1.5); ctx.fill(); const f = j < si ? 1 : j === si ? clamp(prog, 0, 1) : 0; if (f) { ctx.fillStyle = '#fff'; UK.rr(ctx, x, py, bw * f, 3, 1.5); ctx.fill(); } }
+        const hy = sT + 42;
+        miniAvatar(ctx, g.name, 30, hy, 34);
+        ctx.font = `800 15px ${THEME.font}`; const nw = ctx.measureText(g.mine ? 'Your story' : g.name).width;
+        UK.text(ctx, g.mine ? 'Your story' : g.name, 56, hy, { size: 15, weight: 800, color: '#fff', align: 'left' });
+        if (sl.at) UK.text(ctx, shortAgo(sl.at), 64 + nw, hy, { size: 14, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
+        UK.text(ctx, '✕', W - 26, hy, { size: 22, weight: 700, color: '#fff' });
+        if (g.mine) UK.text(ctx, '⋯', W - 74, hy, { size: 22, weight: 900, color: '#fff' });
+        if (sl.text) { const media = sl.pic && (isPic(sl.pic) || isVid(sl.pic)), big = !media && !(sl.pic && !isPic(sl.pic)); const sz = big ? 32 : 24; ctx.font = `800 ${sz}px ${THEME.font}`; const T = wrapLines(ctx, fillTemplate(String(sl.text), s.vars), W - 56, sz, 6), lh = sz * 1.3, y0 = big ? H / 2 - (T.length - 1) * lh / 2 : media ? H - sB - 130 - (T.length - 1) * lh : H * 0.66;
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10; T.forEach((l, j) => UK.text(ctx, l, W / 2, y0 + j * lh, { size: sz, weight: 800, color: '#fff' })); ctx.restore(); }
+        // the bottom bar: reply and ♥ (theirs), who saw it (yours)
+        const by = H - sB - 42;
+        if (g.mine) { if (p.views !== false) { const N = viewers(s, sl).length; UK.text(ctx, `👁  ${N ? 'Seen by ' + N : 'No views yet'}`, 18, by, { size: 15, weight: 700, color: '#fff', align: 'left' }); } }
+        else {
+          const likeOn = likedSet(s).has(sl.id), lw = p.likes !== false ? 56 : 0;
+          if (p.replies !== false) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; UK.rr(ctx, 14, by - 22, W - 28 - lw, 44, 22); ctx.stroke(); UK.text(ctx, `Reply to ${g.name.split(' ')[0]}…`, 32, by, { size: 15, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left' }); }
+          if (p.likes !== false) { const a = (s.time - popT) / 0.35, zz = a >= 0 && a < 1 ? 1 + Math.sin(a * Math.PI) * 0.35 : 1; ctx.save(); ctx.translate(W - 36, by); ctx.scale(zz, zz); UK.text(ctx, likeOn ? '♥' : '♡', 0, 1, { size: 30, weight: 700, color: likeOn ? '#ff3b6b' : '#fff' }); ctx.restore(); }
+        }
+        if ((drag && held > 0.18 && !dx && !dy) || replying) UK.text(ctx, 'Ⅱ', W / 2, sT + 76, { size: 18, weight: 900, color: 'rgba(255,255,255,0.75)' });
+        ctx.restore(); ctx.restore();
       },
-      destroy(e, s) { if (s.modal === e) s.modal = null; },
+      destroy(e, s) { if (s.modal === e) s.modal = null; replying?.close?.(); sharing?.close?.(); },
     };
   },
 });
@@ -16119,9 +16296,9 @@ export class SocialGraph {
     else if (newest) this.seenN = newest.id;
   }
 }
-const NOTE_ICON = { comment_like: '❤️', like: '❤️', comment: '💬', reply: '↩️', repost: '🔁', quote: '✏️', mention: '@', follow: '👤', friend_request: '🤝', friend_accept: '🤝', message: '✉️' };
+const NOTE_ICON = { comment_like: '❤️', like: '❤️', comment: '💬', reply: '↩️', repost: '🔁', quote: '✏️', mention: '@', follow: '👤', friend_request: '🤝', friend_accept: '🤝', message: '✉️', story_like: '❤️', story_reply: '💬' };
 /** "Maya liked your post" (with the name) or "liked your post". */
-const NOTE_TEXT = (n, withName = true) => { const who = withName ? (n.from_name || '@' + n.from) + ' ' : ''; return who + ({ like: 'liked your post', comment_like: 'liked your comment', comment: 'commented: ', reply: 'replied to your post', repost: 'reposted your post', quote: 'quoted your post', mention: 'mentioned you', follow: 'started following you', friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message' }[n.type] || n.type) + (n.type === 'comment' && n.text ? '“' + n.text + '”' : n.type === 'comment_like' && n.text ? ': “' + String(n.text).slice(0, 60) + '”' : ''); };
+const NOTE_TEXT = (n, withName = true) => { const who = withName ? (n.from_name || '@' + n.from) + ' ' : ''; return who + ({ like: 'liked your post', comment_like: 'liked your comment', comment: 'commented: ', reply: 'replied to your post', repost: 'reposted your post', quote: 'quoted your post', mention: 'mentioned you', follow: 'started following you', friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message', story_like: 'liked your story', story_reply: 'replied to your story' }[n.type] || n.type) + (n.type === 'comment' && n.text ? '“' + n.text + '”' : (n.type === 'comment_like' || n.type === 'story_reply') && n.text ? ': “' + String(n.text).slice(0, 60) + '”' : ''); };
 
 /**
  * Supabase for apps and games (Game Settings › Supabase): the app's own accounts (sign up, sign in, Google…)

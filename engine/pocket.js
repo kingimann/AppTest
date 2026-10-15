@@ -2067,7 +2067,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
+const EDIT_PREVIEW = new Set(['uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -8881,7 +8881,7 @@ function postComposer(s, o) {
   const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
   const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
   const DKEY = 'pocket.draft.' + (s.engine.gameKey || 'game') + '.' + (o.draftKey || 'post');
-  let draft = null; if (!o.quote) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
+  let draft = null; if (!o.quote && !o.noDraft) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
   const st = { text: draft?.text || o.text || '', media: draft?.media || [], poll: draft?.poll || null, place: draft?.place || '' };
   const wrap = el('div', `position:absolute;inset:0;z-index:55;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;`); wrap.dataset.pocketComposer = '1';
   const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;top:0;background:${c.bg};color:${c.text};display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);padding-bottom:env(safe-area-inset-bottom);`);
@@ -8891,11 +8891,11 @@ function postComposer(s, o) {
   let done = false;
   const close = (posted) => {
     if (done) return; done = true;
-    if (!o.quote) try { if (!posted && (st.text.trim() || st.media.length || st.poll)) localStorage.setItem(DKEY, JSON.stringify(st)); else localStorage.removeItem(DKEY); } catch { /* full, or storage unavailable */ }
+    if (!o.quote && !o.noDraft) try { if (!posted && (st.text.trim() || st.media.length || st.poll)) localStorage.setItem(DKEY, JSON.stringify(st)); else localStorage.removeItem(DKEY); } catch { /* full, or storage unavailable */ }
     if (!posted && draftSaved()) s.snackbar?.('Draft saved');
     sheet.style.transform = 'translateY(100%)'; wrap.style.background = 'rgba(0,0,0,0)'; setTimeout(() => { wrap.remove(); o.onClose?.(); }, 300);
   };
-  const draftSaved = () => !o.quote && !!(st.text.trim() || st.media.length || st.poll);
+  const draftSaved = () => !o.quote && !o.noDraft && !!(st.text.trim() || st.media.length || st.poll);
   // top: Cancel … Post
   const top = el('div', `flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid ${c.line};`);
   const cancel = btn(`font:600 16px ${font};color:${c.text};padding:6px 4px;`, 'Cancel'); cancel.onclick = () => close(false);
@@ -8930,7 +8930,7 @@ function postComposer(s, o) {
   sheet.append(top, body, bar);
   // keep everything up to date
   const pollOpts = () => (st.poll || []).map((q) => q.trim()).filter(Boolean);
-  const ready = () => (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.text.length <= max && (!st.poll || pollOpts().length >= 2);
+  const ready = () => (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.text.length <= max && (!o.noDraft || st.text !== (o.text || '') || o.allowSame) && (!st.poll || pollOpts().length >= 2);
   const sync = () => {
     const n = st.text.length, k = Math.min(1, n / max), L = 2 * Math.PI * 12; fg.setAttribute('stroke-dashoffset', String(L * (1 - k)));
     fg.setAttribute('stroke', n > max ? '#f4212e' : n > max - 20 ? '#ffad1f' : c.acc); left.textContent = n > max - 20 ? String(max - n) : ''; left.style.color = n > max ? '#f4212e' : c.sub;
@@ -9275,6 +9275,11 @@ registerBehavior('uiFeed', {
     { key: 'tapPost', label: 'Tapping a post', type: 'select', options: ['opens the post', 'nothing'], default: 'opens the post', group: 'Behaviour', info: 'Opens it full size with its comments (unless “Tapping a post opens page” is set).' },
     { key: 'postView', label: 'Opened posts show as', type: 'select', options: ['a sheet', 'full screen'], default: 'a sheet', group: 'Behaviour', showIf: (b) => b.tapPost !== 'nothing' },
     { key: 'commentsSheet', label: 'Comment button opens the comments', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'searchChip', label: 'Show what the feed is searching for (✕ clears it)', type: 'bool', default: true, group: 'Behaviour', showIf: (b) => !!b.searchVar },
+    { key: 'messages', label: '⋯ menu has “Message @someone”', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'messagePage', label: 'Messaging opens page (with a Chat)', type: 'text', default: 'chat', group: 'Behaviour', showIf: (b) => b.messages !== false },
+    { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars', group: 'Behaviour', showIf: (b) => b.messages !== false },
+    { key: 'deleteMessage', label: 'Deleting your post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'skeletons', label: 'Grey placeholder posts while loading (Supabase)', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'quotes', label: 'Repost button offers “Quote”', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'quoteMessage', label: 'Quoting a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.quotes !== false },
@@ -9312,7 +9317,7 @@ registerBehavior('uiFeed', {
     const patch = (s, r, o) => { const q = {}; for (const [k, v] of Object.entries(o)) q[K(k)] = v; if (has(s)) D(s).update(p.collection, r.id, q); else Object.assign(r, q); };
     const REACT = ['👍', '❤️', '😂', '😮', '😢', '😡'], REACT_WORD = { '👍': 'Like', '❤️': 'Love', '😂': 'Haha', '😮': 'Wow', '😢': 'Sad', '😡': 'Angry' };
     const domainOf = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./, ''); } catch { return String(u || '').replace(/^https?:\/\//, '').split('/')[0]; } };
-    let tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
+    let searchR = null, tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
     const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
@@ -9332,6 +9337,19 @@ registerBehavior('uiFeed', {
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
+    const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
+    const editIt = (s, r) => {
+      sheetUp = true;
+      const ok = postComposer(s, { me: meOf(s), max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Edit post', button: 'Save', text: String(F(r, 'text') || ''), noDraft: true, photos: false, polls: false, places: false,
+        onPost: (out) => { patch(s, r, { text: out.text, edited: true }); s.snackbar?.('Post updated'); }, onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+      if (!ok) sheetUp = false;
+    };
+    const deleteIt = (s, r) => {
+      if (has(s)) { const name = p.collection, L = D(s).rows(name), i = L.indexOf(r); if (D(s).remove(name, r.id) === null) return; s.snackbar?.('Post deleted', 'Undo', () => { const L2 = D(s).rows(name); if (!L2.some((q) => q.id === r.id)) { L2.splice(Math.min(i, L2.length), 0, r); D(s).changed(name, 'added', r); } }); }
+      else { const L = sample || [], i = L.indexOf(r); if (i < 0) return; L.splice(i, 1); s.snackbar?.('Post deleted', 'Undo', () => { if (!L.includes(r)) L.splice(Math.min(i, L.length), 0, r); }); }
+      if (p.deleteMessage) s.send(p.deleteMessage, r.id);
+    };
+    const messageIt = (s, r) => { const id = dmId(meOf(s).handle, who(r)); if (p.chatVar) s.setVar(p.chatVar, id); s.setVar('chatTitle', F(r, 'author') || who(r)); if (p.messagePage) s.navTo(p.messagePage); else s.snackbar?.(`Set the feed's “Message” page to open chats`); if (p.messageMessage) s.send(p.messageMessage, who(r)); };
     const findPost = (s, id) => { if (id == null || id === '') return null; return has(s) ? D(s).get(p.collection, String(id)) : (sample || []).find((q) => String(q.id) === String(id)) || null; };
     const openQuote = (s, r) => {
       const me0 = meOf(s), c = colorsOf();
@@ -9454,9 +9472,14 @@ registerBehavior('uiFeed', {
             else if (m.k === 'copy') { const tx = String(F(r, 'text') || ''); navigator.clipboard?.writeText(tx).catch(() => {}); s.snackbar?.('Copied to clipboard'); }
             else if (m.k === 'hide' || m.k === 'mute') hideIt(s, r, m.k);
             else if (m.k === 'report') reportIt(s, r);
+            else if (m.k === 'edit') editIt(s, r);
+            else if (m.k === 'pin') flip(s, r, 'pinned');
+            else if (m.k === 'delete') deleteIt(s, r);
+            else if (m.k === 'message') messageIt(s, r);
             continue;
           }
           if (!UK.in(t, b) || S.moved) continue;
+          if (searchR && UK.in(t, searchR, 4)) { UK.tap(s, p); s.setVar(p.searchVar, ''); S.v = 0; continue; }
           if (pillR && UK.in(t, pillR, 4)) { UK.tap(s, p); goTop = true; fresh = 0; continue; }
           if (t.y < b.y + inset) { const i = tabsR.findIndex((r) => UK.in(t, r)); if (i >= 0 && i !== tab) { UK.tap(s, p); tab = i; if (p.tabVar) s.setVar(p.tabVar, TABS()[i].label); S.v = 0; born.clear(); } continue; }
           const it = at(t.y); if (!it) continue;
@@ -9771,15 +9794,332 @@ registerBehavior('uiFeed', {
           ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; ctx.fillStyle = card === 'transparent' ? '#ffffff' : card; UK.rr(ctx, x, yy, w, 52, 26); ctx.fill(); ctx.restore();
           REACT.forEach((q, i) => { const big = i === react.pick; UK.text(ctx, q, x + 6 + step * i + step / 2, yy + 26 - (big ? 14 : 0), { size: big ? 40 : 28 }); if (big) UK.text(ctx, REACT_WORD[q], x + 6 + step * i + step / 2, yy - 26, { size: 12, weight: 800, color: txt }); });
         }
+        searchR = null;
+        if (p.searchVar && p.searchChip !== false && String(s.vars[p.searchVar] ?? '').trim()) { // what the feed is filtered by, with ✕ to clear it
+          const q = String(s.vars[p.searchVar]).trim(), label = /^#/.test(q) ? q : `“${q}”`; ctx.font = `700 14px ${THEME.font}`; const w = Math.min(b.w - 40, ctx.measureText(label).width + 52), x = b.cx - w / 2, y = b.y + inset + 8;
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3; ctx.fillStyle = acc; UK.rr(ctx, x, y, w, 34, 17); ctx.fill(); ctx.restore();
+          UK.text(ctx, label, x + 16, y + 17, { size: 14, weight: 700, color: '#fff', align: 'left', maxW: w - 46 }); UK.text(ctx, '✕', x + w - 18, y + 17, { size: 14, weight: 800, color: '#fff' });
+          searchR = { x, y, w, h: 34 };
+        }
         menuR = [];
         if (menu) { // the ⋯ menu
-          const r = menu.r, sv = truthy(F(r, 'saved')), IT = [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
+          const r = menu.r, sv = truthy(F(r, 'saved')), mine = isMine(s, r), IT = mine
+            ? [['edit', 'Edit post', '✏️'], ['pin', truthy(F(r, 'pinned')) ? 'Unpin' : 'Pin to top', '📌'], ['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['delete', 'Delete post', '🗑️', true]]
+            : [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ...(p.messages !== false ? [['message', `Message @${who(r)}`, '💬']] : []), ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
           const w = 220, rh = 44, hh = IT.length * rh + 12, x = clamp(menu.sx - w, b.x + 8, b.x + b.w - w - 8), yy = menu.sy + hh > b.y + b.h - 8 ? Math.max(b.y + inset + 8, menu.sy - hh - 30) : menu.sy;
           ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8; ctx.fillStyle = card; UK.rr(ctx, x, yy, w, hh, 14); ctx.fill(); ctx.restore();
           IT.forEach(([k, l, ic, danger], i) => { const ry = yy + 6 + i * rh; UK.text(ctx, ic, x + 24, ry + rh / 2, { size: 17 }); UK.text(ctx, l, x + 46, ry + rh / 2 + 1, { size: 15, weight: 600, color: danger ? '#f4212e' : txt, align: 'left', maxW: w - 56 }); menuR.push({ k, x, y: ry, w, h: rh }); });
         }
         if (p.scrollbar && S.max > 0 && s.time - scrollT < 1) { const f = clamp(S.v / S.max, 0, 1), bh = Math.max(30, b.h * b.h / (total + 12)), a = clamp(1 - (s.time - scrollT - 0.6) / 0.4, 0, 1); ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 5, b.y + 2 + f * (b.h - bh - 4), 3, bh, 1.5); ctx.fill(); }
         ctx.restore();
+      },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Messages: a chat (bubbles) and an inbox (conversations), kept in a Messages collection
+// (fields: chat, author, handle, text, media, reaction). With Supabase (shared, live) they arrive straight away.
+const SAMPLE_CHATS = () => { const t = Date.now(), M = 60e3; return [
+  { id: 'm1', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Are you coming hiking on Saturday? 🏔️', _at: t - 50 * M },
+  { id: 'm2', chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: 'Yes! What time?', _at: t - 48 * M, _me: true },
+  { id: 'm3', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Meet at 7 by the lake', _at: t - 47 * M },
+  { id: 'm4', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Bring snacks 😄', _at: t - 46.6 * M, reaction: '❤️' },
+  { id: 'm5', chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: '👍', _at: t - 3 * M, _me: true },
+  { id: 'm6', chat: 'dm-alex-leop', author: 'Leo Park', handle: 'leop', text: 'Did you try the new update?', _at: t - 26 * 60 * M },
+  { id: 'm7', chat: 'general', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome everyone! 🎉', _at: t - 3 * 24 * 60 * M },
+]; };
+const ONLY_EMOJI = (s) => { const t = String(s || '').trim(); return !!t && [...t].length <= 6 && !/[\p{L}\p{N}]/u.test(t) && /\p{Extended_Pictographic}/u.test(t); };
+const chatSeenKey = (s) => 'pocket.chatSeen.' + (s.engine.gameKey || 'game');
+const chatSeen = (s) => { try { return JSON.parse(store.get(chatSeenKey(s), '{}')) || {}; } catch { return {}; } };
+const meOfVars = (s, a, h) => { const author = fillTemplate(String(a ?? '{playerName}'), s.vars).trim(), handle = fillTemplate(String(h ?? '{playerHandle}'), s.vars).trim().replace(/^@/, ''); const A = author && !/[{}]/.test(author) ? author : 'You'; return { author: A, handle: handle && !/[{}]/.test(handle) ? handle : A.toLowerCase().replace(/\s+/g, '') }; };
+const isMineMsg = (r, me) => !!(r._me || r._mine || (r.handle ? String(r.handle).replace(/^@/, '') === me.handle : r.author === me.author));
+/** A direct-message conversation id for two people (the same from both sides). */
+const dmId = (a, b) => 'dm-' + [String(a).replace(/^@/, ''), String(b).replace(/^@/, '')].sort().join('-');
+/** The bar to type a message in: it sits at the bottom of the screen while you're writing. */
+function chatInputBar(s, o) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
+  root.querySelector('[data-pocket-chatbar]')?.remove();
+  const c = o.colors, font = o.font || THEME.font, el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const bar = el('div', `position:absolute;left:0;right:0;bottom:0;z-index:45;display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:${c.bg};border-top:1px solid ${c.line};font-family:${font};transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.8,.2,1);`);
+  bar.dataset.pocketChatbar = '1';
+  const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none';
+  const pic = el('button', `flex:none;border:0;background:none;font-size:22px;width:38px;height:38px;cursor:pointer;`, '🖼️'); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
+  const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:22px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); inp.placeholder = o.placeholder || 'Message…'; inp.maxLength = 1000; inp.setAttribute('enterkeyhint', 'send');
+  const send = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;font-size:18px;cursor:pointer;transition:opacity .15s,transform .15s;`, '➤'); send.type = 'button'; send.setAttribute('aria-label', 'Send');
+  if (o.photos !== false) bar.append(pic); bar.append(inp, send, file); root.append(bar);
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
+  requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
+  let gone = false;
+  const close = () => { if (gone) return; gone = true; bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
+  const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; };
+  const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
+  inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
+  send.onclick = go; pic.onclick = () => file.click();
+  file.onchange = async () => { const f = file.files[0]; file.value = ''; if (!f) return; try { o.onSend({ text: '', media: await shrinkPicture(f, 900) }); } catch { s.snackbar?.('That picture could not be sent'); } };
+  const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
+  setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
+  sync(); setTimeout(() => inp.focus(), 60);
+  return { bar, input: inp, close };
+}
+const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
+
+registerBehavior('uiChat', {
+  label: 'Chat', description: 'A conversation in bubbles, like a messaging app: yours on the right, theirs on the left with avatars, times between, photos, big emoji and double-tap ❤️. Tap the bar to type. Messages are kept in a Messages collection (chat, author, handle, text, media); with Supabase (shared with everyone, live) they arrive instantly.',
+  params: [
+    { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
+    { key: 'chatVar', label: 'Conversation id comes from variable', type: 'text', default: 'chat', suggest: 'vars', info: 'The Inbox and “Message @someone” set it. Blank, or the variable empty = the room below.' },
+    { key: 'room', label: 'Room when no conversation is picked', type: 'text', default: 'general' },
+    { key: 'author', label: 'My name ({variables} work)', type: 'text', default: '{playerName}' },
+    { key: 'handle', label: 'My handle', type: 'text', default: '{playerHandle}' },
+    { key: 'placeholder', label: 'Hint in the bar', type: 'text', default: 'Message…' },
+    { key: 'empty', label: 'When there are no messages', type: 'text', default: 'Say hi 👋' },
+    { key: 'avatars', label: 'Avatars next to their messages', type: 'bool', default: true },
+    { key: 'names', label: 'Names above their messages', type: 'select', options: ['in group chats', 'always', 'never'], default: 'in group chats' },
+    { key: 'times', label: 'Times between messages', type: 'bool', default: true },
+    { key: 'photos', label: 'Send photos', type: 'bool', default: true },
+    { key: 'react', label: 'Double-tap a message for ❤️', type: 'bool', default: true },
+    { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 24], step: 1 },
+    { key: 'sendMessage', label: 'Sending sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams(CHAT_COLORS),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9;
+    const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
+    const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? p.room || 'general' : v); };
+    const me = (s) => meOfVars(s, p.author, p.handle);
+    const rows = (s) => { const c = chatOf(s); const all = has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()); return all.filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
+    const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
+    const sendIt = (s, m) => {
+      const c = chatOf(s), M = me(s), rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}) };
+      if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+      atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.box(e), barH = 58, cov = coveredBottom(s, e, b), list = { x: b.x, y: b.y, w: b.w, h: b.h - barH - cov };
+        barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
+        const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; }
+        const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); S.update(s, e, dt, list);
+        if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length;
+        if (!s.engine.editing) { const seen = chatSeen(s), RR = rows(s), last = RR[RR.length - 1]; const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); if (last && shown && (seen[c] || 0) < (last._at || 0)) { seen[c] = last._at || Date.now(); store.set(chatSeenKey(s), JSON.stringify(seen)); } }
+        for (const t of UK.taps(s, e)) {
+          if (S.moved) continue;
+          if (UK.in(t, barRect)) { if (s.engine.editing || bar) continue; UK.tap(s, p); bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); continue; }
+          if (!UK.in(t, list)) continue;
+          const it = L.find((q) => q.bub && t.x >= q.bx && t.x <= q.bx + q.bw && t.y + S.v - b.y >= q.y && t.y + S.v - b.y <= q.y + q.h); if (!it || p.react === false) continue;
+          if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; const on = !it.r.reaction; if (has(s)) { if (D(s).update(p.collection, it.r.id, { reaction: on ? '❤️' : '' }) === null) continue; } else it.r.reaction = on ? '❤️' : ''; pops.set(it.r.id, s.time); s.engine.vibrate?.(10); }
+          else lastTap = { id: it.r.id, t: s.time };
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32);
+        const dark = isDark(s), mineC = tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        const authors = new Set(R.map((r) => r.handle || r.author)), group = authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
+        const showNames = p.names === 'always' || (p.names !== 'never' && group), avW = p.avatars !== false ? 36 : 0, maxW = Math.min(b.w * 0.74, 420), pad = 12;
+        // lay out
+        L = []; let y = 10, prev = null;
+        ctx.font = `500 ${TS}px ${THEME.font}`;
+        R.forEach((r, i) => {
+          const mine = isMineMsg(r, M), next = R[i + 1], gapPrev = prev ? (r._at || 0) - (prev._at || 0) : 1e12, sameAsPrev = prev && (prev.handle || prev.author) === (r.handle || r.author) && gapPrev < 3 * 60e3;
+          const sameAsNext = next && (next.handle || next.author) === (r.handle || r.author) && (next._at || 0) - (r._at || 0) < 3 * 60e3 && !((next._at || 0) - (r._at || 0) > 15 * 60e3);
+          if (p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 30, t: r._at }); y += 30; }
+          else if (!sameAsPrev) y += 6;
+          if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
+          const big = !r.media && ONLY_EMOJI(r.text), media = r.media ? String(r.media) : '';
+          let bw, bh, lines = [];
+          if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
+          else { lines = r.text ? wrapLines(ctx, String(r.text), maxW - 28, TS, 40) : []; bw = Math.max(44, Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width), 0) + 28)); bh = lines.length ? lines.length * LH + 16 : 0; if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; } }
+          const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, react = r.reaction ? 14 : 0;
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          y += bh + react + (sameAsNext ? 3 : 4); prev = r;
+        });
+        y += 10; total = y;
+        // draw
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, listH); ctx.clip(); ctx.translate(0, b.y - S.v);
+        if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
+        const vis0 = S.v - 60, vis1 = S.v + listH + 60;
+        for (const it of L) {
+          if (it.y + it.h < vis0 || it.y > vis1) continue;
+          if (it.kind === 'time') { const d = new Date(it.t || Date.now()), today = new Date().toDateString() === d.toDateString(); let ts = ''; try { ts = (today ? '' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ') + d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { ts = shortAgo(it.t); } UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: sub }); continue; }
+          if (it.kind === 'name') { UK.text(ctx, it.name, it.x + 12, it.y + 9, { size: 12, weight: 700, color: sub, align: 'left' }); continue; }
+          const r = it.r, pk = pops.get(r.id), sc = pk != null && s.time - pk < 0.35 ? 1 + Math.sin((s.time - pk) / 0.35 * Math.PI) * 0.12 : 1, fresh = it.mine && s.time - sendT < 0.3 && it === L[L.length - 1] ? Ease.outBack(clamp((s.time - sendT) / 0.3, 0, 1)) : 1;
+          ctx.save(); const cx0 = it.bx + it.bw / 2, cy0 = it.y + it.h / 2; ctx.translate(cx0, cy0); ctx.scale(sc * fresh, sc * fresh); ctx.translate(-cx0, -cy0);
+          if (it.big) UK.text(ctx, String(r.text).trim(), it.mine ? it.bx + it.bw : it.bx, it.y + it.h / 2 + 2, { size: 40, align: it.mine ? 'right' : 'left' });
+          else {
+            const rad = 18, small = 6; ctx.fillStyle = it.mine ? mineC : theirsC; ctx.beginPath();
+            const x = it.bx, y0 = it.y, w = it.bw, h = it.h, tl = !it.mine || true ? rad : rad, br = it.mine && it.tail ? small : rad, bl = !it.mine && it.tail ? small : rad;
+            if (ctx.roundRect) ctx.roundRect(x, y0, w, h, [tl, rad, br, bl]); else UK.rr(ctx, x, y0, w, h, rad); ctx.fill();
+            let ty = y0;
+            if (it.media) { const mh = isPic(it.media) ? 170 : 120; ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y0, w, it.lines.length ? mh : h, it.lines.length ? [rad, rad, 0, 0] : [rad, rad, br, bl]); else ctx.rect(x, y0, w, mh); ctx.clip(); drawMedia(ctx, it.media, it.mine ? mineC : '#888', x, y0, w, mh, 0); ctx.restore(); ty += mh; }
+            it.lines.forEach((l, k) => UK.text(ctx, l, x + 14, ty + 8 + LH / 2 + k * LH, { size: TS, weight: 500, color: it.mine ? mineT : txt, align: 'left' }));
+          }
+          ctx.restore();
+          if (r.reaction) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); }
+          if (it.avatar) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
+        }
+        const lastMine = [...L].reverse().find((q) => q.bub); if (lastMine?.mine && lastMine.r === R[R.length - 1]) UK.text(ctx, has(s) && s.engine.supa?.pending?.().some((op) => op.rec?.id === lastMine.r.id) ? 'Sending…' : 'Sent', lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10), { size: 11, weight: 600, color: sub, align: 'right' });
+        ctx.restore();
+        // the bar
+        const br = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
+        ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, br.y - 8, b.w, barH);
+        ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, br.x, br.y, br.w, br.h, br.h / 2); ctx.fill();
+        UK.text(ctx, p.placeholder || 'Message…', br.x + (p.photos !== false ? 44 : 16), br.y + br.h / 2 + 1, { size: 15, weight: 500, color: sub, align: 'left' });
+        if (p.photos !== false) UK.text(ctx, '🖼️', br.x + 22, br.y + br.h / 2 + 1, { size: 18 });
+        ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(br.x + br.w - br.h / 2, br.y + br.h / 2, br.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '➤', br.x + br.w - br.h / 2 + 1, br.y + br.h / 2 + 1, { size: 15, color: '#fff' });
+      },
+      destroy() { bar?.close(); },
+    };
+  },
+});
+
+registerBehavior('uiInbox', {
+  label: 'Inbox', description: 'Your conversations, newest first: the other person, the last message, when, and a dot for unread ones. Tapping one opens it in a Chat (it sets the conversation variable and goes to a page).',
+  params: [
+    { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
+    { key: 'chatVar', label: 'Put the conversation id in variable', type: 'text', default: 'chat', suggest: 'vars' },
+    { key: 'titleVar', label: 'Put the person’s name in variable', type: 'text', default: 'chatTitle', suggest: 'vars' },
+    { key: 'openPage', label: 'Then go to page', type: 'text', default: 'chat' },
+    { key: 'author', label: 'My name ({variables} work)', type: 'text', default: '{playerName}' },
+    { key: 'handle', label: 'My handle', type: 'text', default: '{playerHandle}' },
+    { key: 'empty', label: 'When there are no conversations', type: 'text', default: 'No messages yet' },
+    { key: 'unreadVar', label: 'Unread count goes in variable (for a badge)', type: 'text', default: 'unread', suggest: 'vars' },
+    { key: 'message', label: 'Opening one sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Unread dot', '@accent'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'); let sample = null, rowsR = [];
+    const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
+    const convs = (s) => {
+      const M = meOfVars(s, p.author, p.handle), all = has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()), by = new Map(), seen = chatSeen(s);
+      for (const r of all) { const c = String(r.chat ?? ''); if (!c) continue; if (/^dm-/.test(c) && !c.slice(3).split('-').includes(M.handle) && !all.some((q) => q.chat === c && isMineMsg(q, M)) && has(s)) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
+      return [...by.entries()].map(([c, L]) => { L.sort((a, b) => (a._at || 0) - (b._at || 0)); const last = L[L.length - 1], other = [...L].reverse().find((q) => !isMineMsg(q, M));
+        const title = /^dm-/.test(c) ? other?.author || c.slice(3).split('-').find((h) => h !== M.handle) || 'Chat' : '# ' + c;
+        return { c, title, last, mine: isMineMsg(last, M), unread: L.filter((q) => !isMineMsg(q, M) && (q._at || 0) > (seen[c] || 0)).length, who: other?.author || title };
+      }).sort((a, b) => (b.last._at || 0) - (a.last._at || 0));
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.box(e), H = 76, C = convs(s); S.max = Math.max(0, C.length * H - b.h + coveredBottom(s, e, b)); S.update(s, e, dt, b);
+        if (p.unreadVar && !s.engine.editing) { const n = C.reduce((a, q) => a + q.unread, 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
+        for (const t of UK.taps(s, e)) { if (S.moved || !UK.in(t, b)) continue; const i = Math.floor((t.y - b.y + S.v) / H), q = C[i]; if (!q) continue; UK.tap(s, p);
+          if (p.chatVar) s.setVar(p.chatVar, q.c); if (p.titleVar) s.setVar(p.titleVar, q.title); if (p.openPage) s.navTo(p.openPage); if (p.message) s.send(p.message, q.c); }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), H = 76, C = convs(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), acc = tok(p.accent || '@accent');
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        if (!C.length) UK.text(ctx, p.empty || 'No messages yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
+        C.forEach((q, i) => {
+          const y = b.y + i * H - S.v; if (y + H < b.y || y > b.y + b.h) return;
+          miniAvatar(ctx, q.who, b.x + 16 + 26, y + H / 2, 52, /^# /.test(q.title) ? '#' : '');
+          const tx = b.x + 16 + 52 + 12, tw = b.w - (tx - b.x) - 16, when = shortAgo(q.last._at);
+          ctx.font = `600 12px ${THEME.font}`; const ww = ctx.measureText(when).width;
+          UK.text(ctx, q.title, tx, y + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
+          UK.text(ctx, when, b.x + b.w - 16, y + H / 2 - 11, { size: 12, weight: 600, color: q.unread ? acc : sub, align: 'right' });
+          const last = (q.mine ? 'You: ' : '') + (q.last.text || (q.last.media ? '📷 Photo' : ''));
+          UK.text(ctx, last, tx, y + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - (q.unread ? 34 : 0) });
+          if (q.unread) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = acc; UK.rr(ctx, b.x + b.w - 16 - bw, y + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, y + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }
+          ctx.fillStyle = line; ctx.fillRect(tx, y + H - 0.5, b.w - (tx - b.x), 0.5);
+        });
+        ctx.restore();
+      },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Discovery: trending hashtags and people to follow, from the Posts collection
+const SAMPLE_TAGS = [['#hiking', 1840], ['#pastanight', 960], ['#comet', 5320], ['#indiedev', 712], ['#sunrise', 430]];
+registerBehavior('uiTrending', {
+  label: 'Trending', description: 'The most used #hashtags in recent posts, with how many posts use each. Tapping one puts it in a search variable (a Social Feed with that search variable shows those posts) and can send a message.',
+  params: [
+    { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
+    { key: 'title', label: 'Title', type: 'text', default: 'Trending' },
+    { key: 'days', label: 'From the last … days (0 = all)', type: 'number', default: 7, step: 1 },
+    { key: 'max', label: 'How many', type: 'number', default: 5, step: 1 },
+    { key: 'searchVar', label: 'Tapping puts the tag in variable', type: 'text', default: 'q', suggest: 'vars' },
+    { key: 'openPage', label: 'Then go to page (blank = stay)', type: 'text', default: '' },
+    { key: 'message', label: 'Tapping sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let rowsR = [];
+    const tags = (s) => {
+      const D = s.engine.data; if (!D.def(p.collection)) return SAMPLE_TAGS.slice(0, Math.max(1, +p.max || 5));
+      const since = +p.days > 0 ? Date.now() - +p.days * 86400e3 : 0, n = new Map(), shown = new Map();
+      for (const r of D.rows(p.collection)) { if ((r._at || 0) < since) continue; const T = new Set(); for (const m of String(r.text ?? '').matchAll(/#[\p{L}\p{N}_]{2,40}/gu)) { const k = m[0].toLowerCase(); if (T.has(k)) continue; T.add(k); n.set(k, (n.get(k) || 0) + 1); if (!shown.has(k)) shown.set(k, m[0]); } }
+      return [...n.entries()].sort((a, b) => b[1] - a[1]).slice(0, Math.max(1, +p.max || 5)).map(([k, c]) => [shown.get(k), c]);
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) { for (const t of UK.taps(s, e)) { const r = rowsR.find((q) => UK.in(t, q)); if (!r) continue; UK.tap(s, p); if (p.searchVar) s.setVar(p.searchVar, r.tag); if (p.openPage) s.navTo(p.openPage); if (p.message) s.send(p.message, r.tag); } },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), T = tags(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), head = p.title ? 44 : 6, H = 60;
+        if (p.bg) { ctx.fillStyle = tok(p.bg); UK.rr(ctx, b.x, b.y, b.w, b.h, 16); ctx.fill(); }
+        if (p.title) UK.text(ctx, p.title, b.x + 16, b.y + 24, { size: 20, weight: 900, color: txt, align: 'left' });
+        rowsR = [];
+        if (!T.length) UK.text(ctx, 'Nothing trending yet', b.x + 16, b.y + head + 20, { size: 14, weight: 500, color: sub, align: 'left' });
+        T.forEach(([tag, c], i) => {
+          const y = b.y + head + i * H; if (y + H > b.y + b.h + 2) return;
+          UK.text(ctx, `${i + 1} · Trending`, b.x + 16, y + 16, { size: 12, weight: 500, color: sub, align: 'left' });
+          UK.text(ctx, tag, b.x + 16, y + 35, { size: 16, weight: 800, color: txt, align: 'left', maxW: b.w - 32 });
+          UK.text(ctx, `${shortNum(c)} post${c === 1 ? '' : 's'}`, b.x + 16, y + 53, { size: 12, weight: 500, color: sub, align: 'left' });
+          if (i < T.length - 1) { ctx.fillStyle = line; ctx.fillRect(b.x + 16, y + H - 0.5, b.w - 32, 0.5); }
+          rowsR.push({ x: b.x, y, w: b.w, h: H, tag });
+        });
+      },
+    };
+  },
+});
+
+registerBehavior('uiWhoToFollow', {
+  label: 'Who To Follow', description: 'People you don’t follow yet (posts with following = no), most liked first, each with a Follow button. Following someone marks all their posts as followed.',
+  params: [
+    { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
+    { key: 'title', label: 'Title', type: 'text', default: 'Who to follow' },
+    { key: 'max', label: 'How many', type: 'number', default: 3, step: 1 },
+    { key: 'author', label: 'My name (never suggested)', type: 'text', default: '{playerName}' },
+    { key: 'handle', label: 'My handle', type: 'text', default: '{playerHandle}' },
+    { key: 'message', label: 'Following sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Button', '@text'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let btnR = [], sample = null; const done = new Map();
+    const people = (s) => {
+      const D = s.engine.data, M = meOfVars(s, p.author, p.handle), all = D.def(p.collection) ? D.rows(p.collection) : (sample ||= SAMPLE_POSTS()), by = new Map();
+      for (const r of all) { const h = String(r.handle || r.author || '').replace(/^@/, ''); if (!h || h === M.handle || r.author === M.author) continue; const f = r.following; if (f === undefined || f === '' || truthy(f)) { if (!done.has(h)) continue; } const q = by.get(h) || { h, name: r.author, verified: truthy(r.verified), avatar: r.avatar, likes: 0 }; q.likes += +r.likes || 0; by.set(h, q); }
+      return [...by.values()].sort((a, b) => b.likes - a.likes).slice(0, Math.max(1, +p.max || 3));
+    };
+    const follow = (s, h) => { const D = s.engine.data, has = !!D.def(p.collection); for (const r of has ? D.rows(p.collection) : sample || []) if (String(r.handle || r.author || '').replace(/^@/, '') === h && !truthy(r.following)) { if (has) D.update(p.collection, r.id, { following: true }); else r.following = true; } done.set(h, s.time); if (p.message) s.send(p.message, h); };
+    return {
+      uiAlways: true,
+      update(e, dt, s) { for (const t of UK.taps(s, e)) { const r = btnR.find((q) => UK.in(t, q, 6)); if (!r || done.has(r.handle)) continue; UK.tap(s, p); follow(s, r.handle); s.engine.vibrate?.(10); } for (const [h, t] of done) if (s.time - t > 2.2) done.delete(h); },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), P = people(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), btnC = tok(p.accent || '@text'), head = p.title ? 44 : 6, H = 64, bgC = tok(p.bg || '') || (isDark(s) ? '#000' : '#fff');
+        if (p.bg) { ctx.fillStyle = tok(p.bg); UK.rr(ctx, b.x, b.y, b.w, b.h, 16); ctx.fill(); }
+        if (p.title) UK.text(ctx, p.title, b.x + 16, b.y + 24, { size: 20, weight: 900, color: txt, align: 'left' });
+        btnR = [];
+        if (!P.length) UK.text(ctx, 'You follow everyone here ✨', b.x + 16, b.y + head + 20, { size: 14, weight: 500, color: sub, align: 'left' });
+        P.forEach((q, i) => {
+          const y = b.y + head + i * H; if (y + H > b.y + b.h + 2) return;
+          miniAvatar(ctx, q.name, b.x + 16 + 22, y + H / 2, 44, q.avatar);
+          const on = done.has(q.h), bw = on ? 96 : 78, bx = b.x + b.w - 16 - bw, tx = b.x + 16 + 44 + 12, tw = bx - tx - 10;
+          ctx.font = `800 15px ${THEME.font}`; const nw = Math.min(ctx.measureText(q.name).width, tw - (q.verified ? 20 : 0));
+          UK.text(ctx, q.name, tx, y + H / 2 - 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw - (q.verified ? 20 : 0) });
+          if (q.verified) verifiedBadge(ctx, tx + nw + 10, y + H / 2 - 9, 15, tok('@accent') || '#1d9bf0');
+          UK.text(ctx, '@' + q.h, tx, y + H / 2 + 11, { size: 13, weight: 500, color: sub, align: 'left', maxW: tw });
+          ctx.fillStyle = on ? 'rgba(0,0,0,0)' : btnC; UK.rr(ctx, bx, y + H / 2 - 16, bw, 32, 16); ctx.fill(); if (on) { ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.stroke(); }
+          UK.text(ctx, on ? 'Following' : 'Follow', bx + bw / 2, y + H / 2 + 1, { size: 14, weight: 800, color: on ? txt : bgC });
+          btnR.push({ x: bx, y: y + H / 2 - 16, w: bw, h: 32, handle: q.h });
+        });
       },
     };
   },

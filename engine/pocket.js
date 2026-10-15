@@ -8851,143 +8851,234 @@ const SAMPLE_POSTS = () => { const t = Date.now(); return [
 ]; };
 
 registerBehavior('uiFeed', {
-  label: 'Social Feed', description: 'A scrolling feed of posts like social apps: a text timeline, big photo posts, or cards. Like (or double-tap the picture), comment, repost, share and save; pull down to refresh. Posts come from a data collection (fields: author, handle, text, media, color, likes, liked, comments, reposts, verified), or sample posts.',
+  label: 'Social Feed', description: 'A scrolling feed of posts like social apps: a text timeline, a compact list, big photo posts, or cards. Like (or double-tap the picture), comment, repost, share and save; pull down to refresh. Posts come from a data collection (fields: author, handle, text, media, color, likes, liked, comments, reposts, verified; other names can be mapped), or sample posts.',
   params: [
     { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
-    { key: 'look', label: 'Look', type: 'select', options: ['timeline', 'photos', 'cards'], default: 'timeline', info: { timeline: 'Text first, small avatar, actions under each post.', photos: 'A header, a big square picture, then likes and the caption.', cards: 'Each post on a card with Like / Comment / Share buttons.' } },
-    { key: 'sort', label: 'Sort', type: 'text', default: 'newest first' },
+    { key: 'look', label: 'Look', type: 'select', options: ['timeline', 'compact', 'photos', 'cards'], default: 'timeline', info: { timeline: 'Text first, small avatar, actions under each post.', compact: 'Tighter rows with a small picture on the right.', photos: 'A header, a big picture, then likes and the caption.', cards: 'Each post on a card with buttons along the bottom.' } },
+    { key: 'sort', label: 'Sort', type: 'text', default: 'newest first', info: 'newest first, oldest first, or a field: likes (high-low), author (a-z)…' },
     { key: 'filter', label: 'Only show (e.g. author = Maya Chen)', type: 'text', default: '' },
-    { key: 'openPage', label: 'Tapping a post opens page', type: 'text', default: '', info: 'The post is opened: {record_text}, {record_author}… on that page.' },
-    { key: 'commentMessage', label: 'Comment button sends', type: 'text', default: 'comment', suggest: 'messages' },
-    { key: 'shareMessage', label: 'Share button sends (blank = the phone’s share sheet)', type: 'text', default: '', suggest: 'messages' },
-    { key: 'refreshMessage', label: 'Pull to refresh sends', type: 'text', default: 'refresh', suggest: 'messages' },
+    { key: 'searchVar', label: 'Search with variable (matches name, handle and text)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'max', label: 'Most posts shown (0 = all)', type: 'number', default: 0, step: 1 },
+    { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
-    ...colorParams(SOCIAL_COLORS),
+    // what shows
+    { key: 'actions', label: 'Buttons, in order (blank = the look’s own)', type: 'text', default: '', group: 'Show', info: 'Any of: comment, repost, like, share, save, views. E.g. “like, comment, share”.' },
+    { key: 'likeIcon', label: 'Like icon', type: 'select', options: ['heart', 'thumbs up', 'star', 'fire'], default: 'heart', group: 'Show' },
+    { key: 'showAvatar', label: 'Avatars', type: 'bool', default: true, group: 'Show' },
+    { key: 'showHandle', label: '@handles', type: 'bool', default: true, group: 'Show' },
+    { key: 'showVerified', label: 'Verified ticks', type: 'bool', default: true, group: 'Show' },
+    { key: 'time', label: 'Time', type: 'select', options: ['short (3h)', 'long (3 hours ago)', 'date', 'hidden'], default: 'short (3h)', group: 'Show' },
+    { key: 'showCounts', label: 'Counts next to buttons', type: 'bool', default: true, group: 'Show' },
+    { key: 'showMedia', label: 'Pictures', type: 'bool', default: true, group: 'Show' },
+    { key: 'showMore', label: '⋯ button on each post', type: 'bool', default: true, group: 'Show' },
+    { key: 'maxLines', label: 'Lines of text before “Show more” (0 = all)', type: 'number', default: 0, step: 1, group: 'Show' },
+    // layout
+    { key: 'textSize', label: 'Text size', type: 'number', default: 15, step: 1, group: 'Layout' },
+    { key: 'nameSize', label: 'Name size', type: 'number', default: 15, step: 1, group: 'Layout' },
+    { key: 'avatarSize', label: 'Avatar size (0 = the look’s own)', type: 'number', default: 0, step: 2, group: 'Layout' },
+    { key: 'avatarShape', label: 'Avatar shape', type: 'select', options: ['circle', 'rounded square', 'square'], default: 'circle', group: 'Layout' },
+    { key: 'padding', label: 'Padding', type: 'number', default: 14, step: 1, group: 'Layout' },
+    { key: 'gap', label: 'Space between posts', type: 'number', default: 0, step: 2, group: 'Layout' },
+    { key: 'mediaShape', label: 'Picture shape', type: 'select', options: ['auto', 'wide (16:9)', 'short (2:1)', 'square', 'tall (4:5)'], default: 'auto', group: 'Layout' },
+    { key: 'mediaRadius', label: 'Picture roundness (-1 = auto)', type: 'number', default: -1, step: 1, group: 'Layout' },
+    { key: 'dividers', label: 'Lines between posts', type: 'bool', default: true, group: 'Layout' },
+    { key: 'cardRadius', label: 'Card roundness', type: 'number', default: 12, step: 1, group: 'Layout' },
+    { key: 'cardShadow', label: 'Card shadow', type: 'bool', default: false, group: 'Layout' },
+    // behaviour
+    { key: 'doubleTapLike', label: 'Double-tap a picture to like', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'pullRefresh', label: 'Pull down to refresh', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'refreshMessage', label: 'Refresh sends', type: 'text', default: 'refresh', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.pullRefresh !== false },
+    { key: 'entrance', label: 'Posts appear', type: 'select', options: ['slide up', 'fade in', 'pop', 'at once'], default: 'slide up', group: 'Behaviour' },
+    { key: 'scrollbar', label: 'Scroll bar while scrolling', type: 'bool', default: false, group: 'Behaviour' },
+    { key: 'openPage', label: 'Tapping a post opens page', type: 'text', default: '', group: 'Behaviour', info: 'The post is opened: {record_text}, {record_author}… on that page.' },
+    { key: 'postMessage', label: 'Tapping a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'likeMessage', label: 'Liking sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'commentMessage', label: 'Comment button sends', type: 'text', default: 'comment', suggest: 'messages', group: 'Behaviour' },
+    { key: 'shareMessage', label: 'Share button sends (blank = the phone’s share sheet)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'moreMessage', label: '⋯ button sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    ...colorParams({ ...SOCIAL_COLORS, repost: ['Reposted', '#00ba7c'], verified: ['Verified tick (blank = accent)', ''], cardBorder: ['Card border', ''], ring1: ['Avatar ring (start, photos)', '#feda75'], ring2: ['Avatar ring (end, photos)', '#d62976'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'), pops = new Map(), bursts = []; let L = [], total = 0, lastTap = null, sample = null;
+    const S = makeScroller('y'), pops = new Map(), bursts = [], born = new Map(), open = new Set(); let L = [], total = 0, lastTap = null, sample = null, scrollT = -9, lastV = 0;
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
+    const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
+    const K = (k) => MAP[k] || (k === 'time' ? '_at' : k), F = (r, k) => r[K(k)];
     const posts = (s) => {
-      if (has(s)) return D(s).query(p.collection, { filter: p.filter, sort: p.sort || 'newest first', vars: s.vars });
-      return (sample ||= SAMPLE_POSTS());
+      let P = has(s) ? D(s).query(p.collection, { filter: p.filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
+      if (q) P = P.filter((r) => ['author', 'handle', 'text'].some((k) => String(F(r, k) ?? '').toLowerCase().includes(q)));
+      return +p.max > 0 ? P.slice(0, +p.max) : P;
     };
-    const flip = (s, r, k, countK) => { const on = !truthy(r[k]), patch = { [k]: on }; if (countK) patch[countK] = Math.max(0, (+r[countK] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
+    const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d;
+    const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, like, share', photos: 'like, comment, share, save', cards: 'like, comment, share' };
+    const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
+    const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
+    const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
     return {
       uiAlways: true,
       update(e, dt, s) {
         const b = UK.box(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
-        S.update(s, e, dt, b, () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
+        S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
+        if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
+        if (Math.abs(S.v - lastV) > 0.5) scrollT = s.time; lastV = S.v;
         for (let i = bursts.length - 1; i >= 0; i--) if (s.time - bursts[i].t > 0.9) bursts.splice(i, 1);
         if (s.engine.editing) return;
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, b) || S.moved) continue;
           const it = L.find((q) => t.y >= b.y + q.y - S.v && t.y < b.y + q.y - S.v + q.h); if (!it) continue;
-          const lx = t.x - b.x, ly = t.y - (b.y + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r;
-          const k = hit?.k;
-          if (k === 'like') { UK.tap(s, p); if (flip(s, r, 'liked', 'likes')) { pops.set(r.id, s.time); s.engine.vibrate?.(12); } }
+          const lx = t.x - b.x, ly = t.y - (b.y + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
+          if (k === 'like') { UK.tap(s, p); like(s, r); }
           else if (k === 'repost') { UK.tap(s, p); flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
           else if (k === 'comment') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.commentMessage) s.send(p.commentMessage, r.id); }
-          else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (navigator.share) navigator.share({ text: `${r.author}: ${r.text || ''}` }).catch(() => {}); }
-          else if (k === 'media') { // double-tap the picture to like it
-            if (lastTap && lastTap.id === r.id && s.time - lastTap.t < 0.32) { lastTap = null; if (!truthy(r.liked)) flip(s, r, 'liked', 'likes'); pops.set(r.id, s.time); bursts.push({ id: r.id, t: s.time, x: lx, y: ly }); s.engine.vibrate?.(18); }
-            else lastTap = { id: r.id, t: s.time };
-          } else if (k !== 'none') { if (has(s)) openRecord(s, p.collection, r); if (p.openPage) s.navTo(p.openPage); }
+          else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (navigator.share) navigator.share({ text: `${F(r, 'author') || ''}: ${F(r, 'text') || ''}` }).catch(() => {}); }
+          else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); }
+          else if (k === 'expand') { UK.tap(s, p); open.add(r.id); }
+          else if (k === 'media' && p.doubleTapLike !== false && lastTap && lastTap.id === r.id && s.time - lastTap.t < 0.32) { lastTap = null; if (!truthy(F(r, 'liked'))) like(s, r); else pops.set(r.id, s.time); bursts.push({ id: r.id, t: s.time }); s.engine.vibrate?.(18); }
+          else if (k === 'media' && p.doubleTapLike !== false) lastTap = { id: r.id, t: s.time };
+          else if (k !== 'none') { if (has(s)) openRecord(s, p.collection, r); if (p.openPage) s.navTo(p.openPage); if (p.postMessage) s.send(p.postMessage, r.id); }
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), card = C('card', '#16181c');
+        const b = UK.box(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
+        const TS = Math.max(9, +p.textSize || 15), NS = Math.max(9, +p.nameSize || 15), LH = Math.round(TS * 1.34), pad = Number.isFinite(+p.padding) ? Math.max(0, +p.padding) : 14, gap = Math.max(0, +p.gap || 0), A = acts(), showAv = p.showAvatar !== false;
+        const avShape = p.avatarShape || 'circle', avR = (d) => (avShape === 'circle' ? d / 2 : avShape === 'square' ? 0 : d * 0.22);
+        const mediaH = (w, auto) => { const m = p.mediaShape || 'auto'; return Math.round(w * (m === 'square' ? 1 : m === 'tall (4:5)' ? 1.25 : m === 'short (2:1)' ? 0.5 : m === 'wide (16:9)' ? 0.5625 : auto)); };
+        const mRad = (auto) => (+p.mediaRadius >= 0 ? +p.mediaRadius : auto);
         if (p.bg) { ctx.fillStyle = p.bg; ctx.fillRect(b.x, b.y, b.w, b.h); }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
         const P = posts(s); L = []; let y = 0;
         const pop = (key) => { const t0 = pops.get(key); if (t0 == null) return 1; const a = (s.time - t0) / 0.35; return a >= 1 ? 1 : 1 + Math.sin(a * Math.PI) * 0.45; };
         const icon = (name, x, yy, sz, col) => drawNavIcon(ctx, name, x, yy, sz, col);
-        const heart = (x, yy, sz, on, key) => { const z = pop(key); ctx.save(); ctx.translate(x, yy); ctx.scale(z, z); heartPath(ctx, 0, 0, sz); if (on) { ctx.fillStyle = likeC; ctx.fill(); } else { ctx.strokeStyle = sub; ctx.lineWidth = 1.8; ctx.stroke(); } ctx.restore(); };
+        const likeMark = (x, yy, sz, on, key) => {
+          const z = pop(key); ctx.save(); ctx.translate(x, yy); ctx.scale(z, z);
+          const li = p.likeIcon || 'heart';
+          if (li === 'heart') { heartPath(ctx, 0, 0, sz); if (on) { ctx.fillStyle = likeC; ctx.fill(); } else { ctx.strokeStyle = look === 'photos' ? txt : sub; ctx.lineWidth = 1.8; ctx.stroke(); } }
+          else if (li === 'star') UK.text(ctx, on ? '★' : '☆', 0, 1, { size: sz * 1.15, weight: 900, color: on ? '#ffc400' : sub });
+          else { ctx.globalAlpha *= on ? 1 : 0.55; UK.text(ctx, li === 'fire' ? '🔥' : '👍', 0, 1, { size: sz * 0.95 }); }
+          ctx.restore();
+        };
+        const av = (r, x, yy, d, ring) => {
+          const name = String(F(r, 'author') || 'Someone'), pic = String(F(r, 'avatar') || '');
+          if (avShape === 'circle') return miniAvatar(ctx, name, x, yy, d, isPic(pic) || /\p{Extended_Pictographic}/u.test(pic) ? pic : '', ring);
+          ctx.save(); UK.rr(ctx, x - d / 2, yy - d / 2, d, d, avR(d)); ctx.clip(); miniAvatar(ctx, name, x, yy, d * 1.5, isPic(pic) ? pic : ''); ctx.restore();
+          if (!isPic(pic)) { ctx.save(); UK.rr(ctx, x - d / 2, yy - d / 2, d, d, avR(d)); ctx.clip(); let hsh = 0; for (const ch of name) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0; ctx.fillStyle = AVATAR_COLORS[hsh % AVATAR_COLORS.length]; ctx.fillRect(x - d / 2, yy - d / 2, d, d); ctx.restore(); UK.text(ctx, pic || name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''), x, yy + 1, { size: Math.round(d * 0.38), weight: 800, color: '#fff' }); }
+        };
+        const nameRow = (r, x, yy, maxW, withTime) => { // name, tick, @handle · time
+          const name = String(F(r, 'author') || 'Someone'), handle = String(F(r, 'handle') || '').replace(/^@/, ''), tm = withTime ? when(r) : '';
+          ctx.font = `800 ${NS}px ${THEME.font}`; const nw = Math.min(ctx.measureText(name).width, maxW * 0.6);
+          UK.text(ctx, name, x, yy, { size: NS, weight: 800, color: txt, align: 'left', maxW: maxW * 0.6 });
+          let hx = x + nw + 4; if (p.showVerified !== false && truthy(F(r, 'verified'))) { verifiedBadge(ctx, hx + NS * 0.5, yy, NS * 0.5, verC); hx += NS * 1.25; }
+          const rest = [p.showHandle !== false && handle ? '@' + handle : '', tm].filter(Boolean).join(' · ');
+          if (rest) UK.text(ctx, rest, hx + 2, yy, { size: NS, weight: 500, color: sub, align: 'left', maxW: Math.max(10, x + maxW - hx - 4) });
+        };
+        const textLines = (r, w, max) => { const text = String(F(r, 'text') || ''); ctx.font = `500 ${TS}px ${THEME.font}`; const all = text ? text.split('\n').flatMap((l) => wrapLines(ctx, l, w, TS, 40)) : []; const lim = +p.maxLines > 0 && !open.has(r.id) ? +p.maxLines : max; return { lines: all.slice(0, lim), more: all.length > lim }; };
+        const drawText = (T, x, yy, hits, ox, oy) => { for (const l of T.lines) { UK.text(ctx, l, x, yy, { size: TS, weight: 500, color: txt, align: 'left' }); yy += LH; } if (T.more) { UK.text(ctx, 'Show more', x, yy, { size: TS, weight: 700, color: acc, align: 'left' }); hits.push({ k: 'expand', x: x - ox, y: yy - oy - LH / 2, w: 110, h: LH }); yy += LH; } return yy; };
+        const textH = (T) => (T.lines.length + (T.more ? 1 : 0)) * LH;
+        const countOf = (r, k) => (k === 'comment' ? F(r, 'comments') : k === 'repost' ? F(r, 'reposts') : k === 'like' ? F(r, 'likes') : k === 'views' ? F(r, 'views') : 0);
+        const actionRow = (r, x, w, yy, hits, ox, oy, sz) => { // spread evenly; save sits at the end
+          const list = A.filter((k) => k !== 'save' || look !== 'photos'), step = w / Math.max(1, list.length), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
+          list.forEach((k, i) => {
+            const ix = x + step * i + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? truthy(F(r, 'saved')) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
+            if (k === 'like') likeMark(ix, yy, sz, on, r.id);
+            else { ctx.save(); const z = k === 'repost' ? pop(r.id + 'r') : k === 'save' ? pop(r.id + 's') : 1; ctx.translate(ix, yy); ctx.scale(z, z); icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, sz, col); if (k === 'save' && on) { ctx.fillStyle = col; ctx.fillRect(-sz * 0.25, -sz * 0.38, sz * 0.5, sz * 0.6); } ctx.restore(); }
+            if (p.showCounts !== false && +n) UK.text(ctx, step < 90 && +n >= 1000 ? (+n / 1000).toFixed(+n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K' : shortNum(n), ix + sz * 0.85, yy, { size: Math.round(TS * 0.87), weight: 500, color: col, align: 'left' });
+            hits.push({ k: k === 'views' ? 'none' : k, x: ix - sz / 2 - ox, y: yy - oy - 16, w: Math.min(step, 70), h: 32 });
+          });
+        };
+        const burst = (r, cx, cy, size, kind) => { for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9, z = Math.min(1, a * 5) * (a < 0.25 ? 1 + Math.sin(a / 0.25 * Math.PI) * 0.15 : 1); ctx.save(); ctx.globalAlpha *= a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(cx, cy); ctx.scale(z, z); if (kind === 'thumb' || p.likeIcon === 'thumbs up') UK.text(ctx, '👍', 0, 0, { size }); else if (p.likeIcon === 'fire') UK.text(ctx, '🔥', 0, 0, { size }); else if (p.likeIcon === 'star') UK.text(ctx, '★', 0, 0, { size, color: '#ffc400' }); else { heartPath(ctx, 0, 0, size); ctx.fillStyle = kind === 'white' ? '#fff' : likeC; ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.fill(); } ctx.restore(); } };
         const top = b.y - S.v;
-        // pull to refresh
-        if (S.v < -8) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
+        if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
         if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
+        let idx = 0;
         for (const r of P) {
-          if (look === 'photos' && !r.media && !r.color) continue; // a photo feed shows posts with a picture
-          const hits = [], x0 = b.x, W = b.w, at = top + y, liked = truthy(r.liked), name = String(r.author || 'Someone'), handle = String(r.handle || '').replace(/^@/, ''), text = String(r.text || ''), media = r.media, hasM = !!(media || r.color);
+          const media = p.showMedia === false ? '' : F(r, 'media'), color = p.showMedia === false ? '' : F(r, 'color'), hasM = !!(media || color);
+          if (look === 'photos' && !hasM) continue; // a photo feed shows posts with a picture
+          const hits = [], x0 = b.x, W = b.w, at0 = top + y, liked = truthy(F(r, 'liked')), name = String(F(r, 'author') || 'Someone');
           let h = 0;
+          // entrance: each post arrives once, one after another
+          if (!born.has(r.id)) born.set(r.id, s.time + Math.min(idx, 6) * 0.06); idx++;
+          const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at = at0 + dy;
+          ctx.save(); ctx.globalAlpha *= ek; if (p.entrance === 'pop' && ek < 1) { const z = 0.94 + 0.06 * ek; ctx.translate(b.cx, at + 40); ctx.scale(z, z); ctx.translate(-b.cx, -(at + 40)); }
           if (look === 'photos') {
-            const mh = W; ctx.font = `600 14px ${THEME.font}`; const cap = wrapLines(ctx, `${name}  ${text}`, W - 28, 14, 3);
-            h = 56 + mh + 44 + 22 + cap.length * 19 + 22 + 20 + 14;
+            const AV = +p.avatarSize || 32, head = Math.max(44, AV + 22), mh = mediaH(W, 1), mr = mRad(0); ctx.font = `600 ${TS}px ${THEME.font}`;
+            const T = textLines({ ...r, [K('text')]: `${name}  ${F(r, 'text') || ''}` }, W - pad * 2, 3);
+            const actY = head + mh + 22;
+            h = actY + 22 + 22 + textH(T) + 22 + (p.time === 'hidden' ? 0 : 20) + 14;
             if (at < b.y + b.h && at + h > b.y) {
-              miniAvatar(ctx, name, x0 + 30, at + 28, 32, isPic(r.avatar) || /\p{Extended_Pictographic}/u.test(r.avatar || '') ? r.avatar : '', ['#feda75', '#d62976']);
-              UK.text(ctx, name, x0 + 56, at + 28, { size: 14, weight: 800, color: txt, align: 'left', maxW: W - 120 }); if (truthy(r.verified)) { ctx.font = `800 14px ${THEME.font}`; verifiedBadge(ctx, x0 + 56 + Math.min(ctx.measureText(name).width, W - 120) + 10, at + 28, 7, acc); }
-              icon('ui-more', x0 + W - 22, at + 28, 20, txt);
-              drawMedia(ctx, media, r.color, x0, at + 56, W, mh, 0);
-              for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9, z = a < 0.25 ? Ease.springSnappy?.(a / 0.25) ?? a / 0.25 : 1; ctx.save(); ctx.globalAlpha = a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(x0 + W / 2, at + 56 + mh / 2); ctx.scale(z, z); heartPath(ctx, 0, 0, 96); ctx.fillStyle = '#fff'; ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.fill(); ctx.restore(); }
-              const ay = at + 56 + mh + 22;
-              heart(x0 + 24, ay, 24, liked, r.id); icon('ui-chat', x0 + 64, ay, 24, txt); icon('ui-send', x0 + 102, ay, 23, txt);
-              const sv = truthy(r.saved); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - 24, ay); ctx.scale(sz, sz); icon('ui-bookmark', 0, 0, 24, sv ? txt : txt); if (sv) { ctx.fillStyle = txt; ctx.fillRect(-6, -9, 12, 14); } ctx.restore();
-              let yy = ay + 34; UK.text(ctx, `${shortNum(r.likes)} like${+r.likes === 1 ? '' : 's'}`, x0 + 14, yy, { size: 14, weight: 800, color: txt, align: 'left' }); yy += 21;
-              cap.forEach((l, i) => { if (i === 0 && l.startsWith(name)) { UK.text(ctx, name, x0 + 14, yy, { size: 14, weight: 800, color: txt, align: 'left' }); ctx.font = `800 14px ${THEME.font}`; UK.text(ctx, l.slice(name.length), x0 + 14 + ctx.measureText(name).width, yy, { size: 14, weight: 500, color: txt, align: 'left' }); } else UK.text(ctx, l, x0 + 14, yy, { size: 14, weight: 500, color: txt, align: 'left' }); yy += 19; });
-              yy += 3; UK.text(ctx, +r.comments ? `View all ${shortNum(r.comments)} comments` : 'Add a comment…', x0 + 14, yy, { size: 14, weight: 500, color: sub, align: 'left' }); yy += 20;
-              UK.text(ctx, shortAgo(r._at).replace(/^(\d+)([mhd])$/, (_, n, u) => `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[u]}${n === '1' ? '' : 's'} ago`), x0 + 14, yy, { size: 11, weight: 500, color: sub, align: 'left' });
+              if (showAv) av(r, x0 + pad + AV / 2, at + head / 2, AV, avShape === 'circle' ? [p.ring1 || '#feda75', p.ring2 || '#d62976'] : null);
+              const nx = x0 + pad + (showAv ? AV + 10 : 0); nameRow(r, nx, at + head / 2, W - (nx - x0) - 40, false);
+              if (p.showMore !== false) { icon('ui-more', x0 + W - 22, at + head / 2, 20, txt); hits.push({ k: 'more', x: W - 36, y: head / 2 - 14, w: 28, h: 28 }); }
+              drawMedia(ctx, media, color, x0, at + head, W, mh, mr);
+              burst(r, x0 + W / 2, at + head + mh / 2, 96, 'white');
+              const ay = at + actY; let ix = x0 + pad + 10;
+              for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && truthy(F(r, 'reposted')) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
+              if (A.includes('save')) { const sv = truthy(F(r, 'saved')); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - pad - 10, ay); ctx.scale(sz, sz); icon('ui-bookmark', 0, 0, 24, txt); if (sv) { ctx.fillStyle = txt; ctx.fillRect(-6, -9, 12, 14); } ctx.restore(); hits.push({ k: 'save', x: W - pad - 26, y: actY - 16, w: 32, h: 32 }); }
+              let yy = ay + 34;
+              if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${shortNum(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
+              T.lines.forEach((l, i) => { if (i === 0 && l.startsWith(name)) { UK.text(ctx, name, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); ctx.font = `800 ${TS - 1}px ${THEME.font}`; UK.text(ctx, l.slice(name.length), x0 + pad + ctx.measureText(name).width, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); } else UK.text(ctx, l, x0 + pad, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); yy += LH; });
+              if (T.more) { UK.text(ctx, 'more', x0 + pad, yy, { size: TS - 1, weight: 600, color: sub, align: 'left' }); hits.push({ k: 'expand', x: pad, y: yy - at - LH / 2, w: 80, h: LH }); yy += LH; }
+              yy += 3; if (A.includes('comment')) { UK.text(ctx, +F(r, 'comments') ? `View all ${shortNum(F(r, 'comments'))} comments` : 'Add a comment…', x0 + pad, yy, { size: TS - 1, weight: 500, color: sub, align: 'left' }); hits.push({ k: 'comment', x: pad, y: yy - at - 11, w: W - pad * 2, h: 22 }); } yy += 20;
+              if (p.time !== 'hidden') UK.text(ctx, p.time === 'short (3h)' || !p.time ? when(r).replace(/^(\d+)([mhd])$/, (_, n, u) => `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[u]}${n === '1' ? '' : 's'} ago`) : when(r), x0 + pad, yy, { size: 11, weight: 500, color: sub, align: 'left' });
             }
-            hits.push({ k: 'media', x: 0, y: 56, w: W, h: mh }, { k: 'like', x: 8, y: 56 + mh + 6, w: 32, h: 32 }, { k: 'comment', x: 48, y: 56 + mh + 6, w: 32, h: 32 }, { k: 'share', x: 86, y: 56 + mh + 6, w: 32, h: 32 }, { k: 'save', x: W - 40, y: 56 + mh + 6, w: 32, h: 32 }, { k: 'comment', x: 0, y: h - 54, w: W, h: 22 });
+            hits.push({ k: 'media', x: 0, y: head, w: W, h: mh });
           } else if (look === 'cards') {
-            const pad = 14, cw = W - 16; ctx.font = `500 15px ${THEME.font}`; const lines = text ? String(text).split('\n').flatMap((l) => wrapLines(ctx, l, cw - pad * 2, 15, 12)) : [];
-            const mh = hasM ? Math.round(cw * 0.62) : 0;
-            h = 8 + 58 + lines.length * 21 + (lines.length ? 8 : 0) + mh + 36 + 1 + 44 + 8;
+            const cw = W - 16, AV = +p.avatarSize || 40, head = Math.max(58, AV + 18), T = textLines(r, cw - pad * 2, 14), mh = hasM ? mediaH(cw, 0.62) : 0, mr = mRad(0), tH = textH(T) + (T.lines.length ? 8 : 0);
+            const showCnt = p.showCounts !== false, btnH = A.length ? 44 : 0;
+            h = 8 + head + tH + mh + (showCnt ? 36 : 6) + (btnH ? 1 + btnH : 0) + 8;
             if (at < b.y + b.h && at + h > b.y) {
               const cx = x0 + 8, cy = at + 8, ch = h - 16;
-              ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, 12); ctx.fill();
-              miniAvatar(ctx, name, cx + pad + 20, cy + 30, 40);
-              UK.text(ctx, name, cx + pad + 50, cy + 21, { size: 15, weight: 800, color: txt, align: 'left', maxW: cw - 120 }); if (truthy(r.verified)) { ctx.font = `800 15px ${THEME.font}`; verifiedBadge(ctx, cx + pad + 50 + Math.min(ctx.measureText(name).width, cw - 120) + 10, cy + 21, 7, acc); }
-              UK.text(ctx, `${shortAgo(r._at)} · 🌐`, cx + pad + 50, cy + 41, { size: 12, weight: 500, color: sub, align: 'left' });
-              icon('ui-more', cx + cw - 24, cy + 26, 20, sub);
-              let yy = cy + 58 + 10; for (const l of lines) { UK.text(ctx, l, cx + pad, yy, { size: 15, weight: 500, color: txt, align: 'left' }); yy += 21; } if (lines.length) yy -= 2;
-              if (hasM) { drawMedia(ctx, media, r.color, cx, yy - 8 + (lines.length ? 8 : 0), cw, mh, 0); }
-              const my = cy + 58 + lines.length * 21 + (lines.length ? 8 : 0);
-              for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9; ctx.save(); ctx.globalAlpha = a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(cx + cw / 2, my + mh / 2); const z = Math.min(1, a * 5); ctx.scale(z, z); UK.text(ctx, '👍', 0, 0, { size: 80 }); ctx.restore(); }
-              const ry = my + mh + 18;
-              ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(cx + pad + 9, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '👍', cx + pad + 9, ry + 1, { size: 10 }); ctx.fillStyle = likeC; ctx.beginPath(); ctx.arc(cx + pad + 25, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '❤', cx + pad + 25, ry + 1, { size: 10, color: '#fff' });
-              UK.text(ctx, shortNum(r.likes), cx + pad + 40, ry, { size: 13, weight: 500, color: sub, align: 'left' });
-              UK.text(ctx, `${shortNum(r.comments)} comments${+r.reposts ? ` · ${shortNum(r.reposts)} shares` : ''}`, cx + cw - pad, ry, { size: 13, weight: 500, color: sub, align: 'right' });
-              ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1);
-              const by = ry + 18 + 22, third = cw / 3;
-              [['like', liked ? 'Liked' : 'Like', '👍'], ['comment', 'Comment', 'ui-chat'], ['share', 'Share', 'ui-share']].forEach(([k, l, ic], i) => {
-                const mx = cx + third * i + third / 2, col = k === 'like' && liked ? acc : sub; ctx.font = `700 14px ${THEME.font}`; const tw = ctx.measureText(l).width, x1 = mx - (tw + 26) / 2;
-                const z = k === 'like' ? pop(r.id) : 1; ctx.save(); ctx.translate(x1 + 9, by); ctx.scale(z, z); if (ic.startsWith('ui-')) icon(ic, 0, 0, 18, col); else { ctx.globalAlpha *= liked ? 1 : 0.75; UK.text(ctx, ic, 0, 0, { size: 16 }); } ctx.restore();
-                UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
-              });
+              if (p.cardShadow) { ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, +p.cardRadius || 0); ctx.fill(); ctx.restore(); }
+              ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, +p.cardRadius >= 0 ? +p.cardRadius : 12); ctx.fill();
+              if (p.cardBorder) { ctx.strokeStyle = p.cardBorder; ctx.lineWidth = 1; UK.rr(ctx, cx + 0.5, cy + 0.5, cw - 1, ch - 1, +p.cardRadius || 0); ctx.stroke(); }
+              if (showAv) av(r, cx + pad + AV / 2, cy + head / 2, AV);
+              const nx = cx + pad + (showAv ? AV + 10 : 0); nameRow(r, nx, cy + head / 2 - (p.time === 'hidden' ? 0 : 9), cw - (nx - cx) - 40, false);
+              if (p.time !== 'hidden') UK.text(ctx, `${when(r)} · 🌐`, nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left' });
+              if (p.showMore !== false) { icon('ui-more', cx + cw - 24, cy + head / 2, 20, sub); hits.push({ k: 'more', x: cw - 30, y: 8 + head / 2 - 14, w: 28, h: 28 }); }
+              let yy = cy + head + LH / 2; yy = drawText(T, cx + pad, yy, hits, x0, at);
+              const my = cy + head + tH; if (hasM) { drawMedia(ctx, media, color, cx, my, cw, mh, mr); burst(r, cx + cw / 2, my + mh / 2, 80, 'thumb'); hits.push({ k: 'media', x: 8, y: my - at, w: cw, h: mh }); }
+              let ry = my + mh + 18;
+              if (showCnt) {
+                ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(cx + pad + 9, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '👍', cx + pad + 9, ry + 1, { size: 10 }); ctx.fillStyle = likeC; ctx.beginPath(); ctx.arc(cx + pad + 25, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '❤', cx + pad + 25, ry + 1, { size: 10, color: '#fff' });
+                UK.text(ctx, shortNum(F(r, 'likes')), cx + pad + 40, ry, { size: 13, weight: 500, color: sub, align: 'left' });
+                UK.text(ctx, `${shortNum(F(r, 'comments'))} comments${+F(r, 'reposts') ? ` · ${shortNum(F(r, 'reposts'))} shares` : ''}`, cx + cw - pad, ry, { size: 13, weight: 500, color: sub, align: 'right' });
+              } else ry -= 12;
+              if (btnH) {
+                if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1); }
+                const by = ry + 18 + 22, part = cw / A.length;
+                A.forEach((k, i) => {
+                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? 'Liked' : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: shortNum(F(r, 'views')) }[k], col = on ? acc : sub;
+                  const mx = cx + part * i + part / 2; ctx.font = `700 14px ${THEME.font}`; const tw = A.length > 3 ? 0 : ctx.measureText(l).width, x1 = mx - (tw + (tw ? 26 : 18)) / 2;
+                  ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
+                  if (tw) UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
+                  hits.push({ k: k === 'views' ? 'none' : k, x: 8 + part * i, y: by - at - 22, w: part, h: 44 });
+                });
+              }
             }
-            const my = 8 + 58 + lines.length * 21 + (lines.length ? 8 : 0), by = my + mh + 36 + 1;
-            if (hasM) hits.push({ k: 'media', x: 8, y: my, w: cw, h: mh });
-            hits.push({ k: 'like', x: 8, y: by, w: cw / 3, h: 44 }, { k: 'comment', x: 8 + cw / 3, y: by, w: cw / 3, h: 44 }, { k: 'share', x: 8 + cw * 2 / 3, y: by, w: cw / 3, h: 44 }, { k: 'none', x: 8, y: by - 37, w: cw, h: 36 });
-          } else { // timeline
-            const av = 44, tx = x0 + 14 + av + 12, tw = W - (tx - x0) - 14; ctx.font = `500 15px ${THEME.font}`;
-            const lines = text ? String(text).split('\n').flatMap((l) => wrapLines(ctx, l, tw, 15, 14)) : [], mh = hasM ? Math.round(tw * 0.56) : 0;
-            h = 12 + 22 + lines.length * 20 + (hasM ? 10 + mh : 0) + 42;
+          } else { // timeline and compact
+            const compact = look === 'compact', AV = +p.avatarSize || (compact ? 36 : 44), tx = x0 + pad + (showAv ? AV + 12 : 0), thumb = compact && hasM ? 64 : 0, tw = W - (tx - x0) - pad - (thumb ? thumb + 10 : 0);
+            const T = textLines(r, tw, compact ? 2 : 14), mh = hasM && !compact ? mediaH(tw, 0.56) : 0, mr = mRad(16), actH = A.length ? (compact ? 30 : 38) : 8;
+            h = pad - 2 + NS + 8 + textH(T) + (mh ? 10 + mh : 0) + actH + 4;
+            if (compact && thumb) h = Math.max(h, pad + thumb + 10);
             if (at < b.y + b.h && at + h > b.y) {
-              miniAvatar(ctx, name, x0 + 14 + av / 2, at + 12 + av / 2, av);
-              ctx.font = `800 15px ${THEME.font}`; const nw = Math.min(ctx.measureText(name).width, tw * 0.55);
-              UK.text(ctx, name, tx, at + 22, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw * 0.55 });
-              let hx = tx + nw + 4; if (truthy(r.verified)) { verifiedBadge(ctx, hx + 8, at + 22, 8, acc); hx += 20; }
-              UK.text(ctx, `${handle ? '@' + handle + ' · ' : ''}${shortAgo(r._at)}`, hx + 2, at + 22, { size: 15, weight: 500, color: sub, align: 'left', maxW: Math.max(20, tx + tw - hx - 26) });
-              icon('ui-more', x0 + W - 22, at + 22, 18, sub);
-              let yy = at + 44; for (const l of lines) { UK.text(ctx, l, tx, yy, { size: 15, weight: 500, color: txt, align: 'left' }); yy += 20; }
-              if (hasM) { yy -= 8; drawMedia(ctx, media, r.color, tx, yy + 4, tw, mh, 16); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, yy + 4.5, tw - 1, mh - 1, 16); ctx.stroke(); yy += mh + 10; for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9; ctx.save(); ctx.globalAlpha = a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(tx + tw / 2, yy - mh / 2 - 6); ctx.scale(Math.min(1, a * 5), Math.min(1, a * 5)); heartPath(ctx, 0, 0, 70); ctx.fillStyle = likeC; ctx.fill(); ctx.restore(); } }
-              const ay = at + h - 22, step = tw / 4, rep = truthy(r.reposted);
-              icon('ui-chat', tx + 9, ay, 18, sub); UK.text(ctx, +r.comments ? shortNum(r.comments) : '', tx + 24, ay, { size: 13, weight: 500, color: sub, align: 'left' });
-              ctx.save(); const zr = pop(r.id + 'r'); ctx.translate(tx + step + 9, ay); ctx.scale(zr, zr); icon('ui-repeat', 0, 0, 18, rep ? '#00ba7c' : sub); ctx.restore(); UK.text(ctx, +r.reposts ? shortNum(r.reposts) : '', tx + step + 24, ay, { size: 13, weight: 500, color: rep ? '#00ba7c' : sub, align: 'left' });
-              heart(tx + step * 2 + 9, ay, 17, liked, r.id); UK.text(ctx, +r.likes ? shortNum(r.likes) : '', tx + step * 2 + 24, ay, { size: 13, weight: 500, color: liked ? likeC : sub, align: 'left' });
-              icon('ui-share', tx + step * 3 + 9, ay, 18, sub);
-              ctx.fillStyle = line; ctx.fillRect(x0, at + h - 1, W, 1);
+              if (showAv) av(r, x0 + pad + AV / 2, at + pad - 2 + AV / 2, AV);
+              nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0), true);
+              if (p.showMore !== false && !thumb) { icon('ui-more', x0 + W - pad - 8, at + pad + NS / 2, 18, sub); hits.push({ k: 'more', x: W - pad - 22, y: pad + NS / 2 - 14, w: 28, h: 28 }); }
+              let yy = at + pad + NS + 8 + LH / 2 - 2; yy = drawText(T, tx, yy, hits, x0, at);
+              if (thumb) { drawMedia(ctx, media, color, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10)); hits.push({ k: 'media', x: W - pad - thumb, y: pad, w: thumb, h: thumb }); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
+              if (mh) { const my = yy - LH / 2 + 6; drawMedia(ctx, media, color, tx, my, tw, mh, mr); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); hits.push({ k: 'media', x: tx - x0, y: my - at, w: tw, h: mh }); }
+              if (A.length) actionRow(r, tx, compact ? Math.min(tw + thumb, 240) : tw, at + h - (compact ? 18 : 22), hits, x0, at, compact ? 16 : 18);
+              if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(x0, at + h - 1, W, 1); }
             }
-            const ax = tx - x0, ay = h - 38, step = tw / 4;
-            if (hasM) hits.push({ k: 'media', x: ax, y: 44 + lines.length * 20 - 4, w: tw, h: mh });
-            hits.push({ k: 'comment', x: ax, y: ay, w: step - 8, h: 32 }, { k: 'repost', x: ax + step, y: ay, w: step - 8, h: 32 }, { k: 'like', x: ax + step * 2, y: ay, w: step - 8, h: 32 }, { k: 'share', x: ax + step * 3, y: ay, w: 32, h: 32 });
           }
-          L.push({ r, y, h, hits }); y += h;
+          ctx.restore();
+          L.push({ r, y, h: h + gap, hits }); y += h + gap;
         }
-        total = y; ctx.restore();
+        total = y;
+        if (p.scrollbar && S.max > 0 && s.time - scrollT < 1) { const f = clamp(S.v / S.max, 0, 1), bh = Math.max(30, b.h * b.h / (total + 12)), a = clamp(1 - (s.time - scrollT - 0.6) / 0.4, 0, 1); ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 5, b.y + 2 + f * (b.h - bh - 4), 3, bh, 1.5); ctx.fill(); }
+        ctx.restore();
       },
     };
   },

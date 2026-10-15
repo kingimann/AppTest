@@ -290,6 +290,20 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Follow button:** posts with `following = no` show a *Follow* pill. Tapping it follows that author on all their posts and sends *Following someone sends*.
   - **Reactions:** hold the like button for 👍 ❤️ 😂 😮 😢 😡. Slide to one and let go. It's stored in `reaction`, and cards show *Love*, *Haha*…
   - **⋯ menu:** Save post, Copy text, Not interested (hides the post), Mute @handle (hides all their posts) and Report post. Each has an **Undo** snackbar. Hidden posts and muted people are remembered on the device. Turn it off with *⋯ opens a menu*; *Reporting a post sends* and *Hiding or muting sends* send messages.
+- **Your own posts** get their own ⋯ menu: **Edit post** (opens the composer with the text; saving marks it *Edited*), **Pin to top**, Save, Copy and **Delete post** (with Undo). Other people's posts get **Message @someone**, which opens a chat with them (*Messaging opens page*, default `chat`).
+- **Search chip:** while a feed's search variable has something in it (a tapped #tag, a search box), a pill at the top shows it; ✕ clears it.
+- **Chat:** a conversation in bubbles, like a messaging app.
+  - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
+  - Times appear between messages more than 15 minutes apart. Emoji-only messages show big, and photos show in the bubble.
+  - Double-tap a message for ❤️. *Sent* shows under your last one (*Sending…* while offline).
+  - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.
+  - Messages are kept in a **Messages** collection (chat, author, handle, text, media, reaction). The conversation comes from the variable `chat` (blank = the room in *Room*). With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once.
+- **Inbox:** your conversations, newest first.
+  - Each row shows the other person, the last message (*You:* for yours), when it was sent, and an unread count. The total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`).
+  - Tapping one sets `chat` and `chatTitle` and goes to the page `chat`.
+  - Direct messages use ids like `dm-alex-maya`, the same from both sides. Other ids are group rooms (`# general`).
+- **Trending:** the most used #hashtags in recent posts (*From the last … days*), with post counts. Tapping one puts it in a search variable (`q`) and can go to a page, so a feed with that search variable shows those posts.
+- **Who To Follow:** people whose posts have `following = no`, most liked first, each with a **Follow** button that follows them on all their posts.
 - **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.

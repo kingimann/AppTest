@@ -276,6 +276,13 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **New Post composer:** a character ring, up to 4 photos, polls, a place and drafts.
 - **Quote posts** from the repost button, shown as cards in the feed and opened posts.
 - **Videos** in posts.
+- **Messaging:**
+  - **Chat** (bubbles, avatars, times, big emoji, photos, double-tap ❤️, Sent / Sending…);
+  - **Inbox** (conversations, unread counts and a `{unread}` badge);
+  - **Message @someone** from any post. Live with Supabase.
+- **Your own posts:** edit, pin and delete with Undo.
+- **Discovery:** **Trending** hashtags, **Who To Follow** suggestions, and a search chip on feeds.
+- The **Social** template has Explore (Who to follow + Trending), Messages and Chat pages.
 - **Shimmering placeholders** while online feeds load.
 - Opened posts (as a sheet or full screen) show the whole post: swipeable pictures with a full-screen viewer and double-tap to like, polls, link cards, the full time and views, counts, Comment / Repost / Like / Save / Share buttons and a ⋯ menu. Comments have threaded replies, Top / Newest sorting, Author tags, pinned comments and quick emoji.
 - **Stories** row with a full-screen viewer (progress bars, tap / hold, seen rings), **Like Button** (pop, count, hold for reactions), **Profile Header** (cover, avatar, verified tick, counts, Follow / Following), **New Post Box** and **Photo Grid**.

@@ -2067,7 +2067,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
+const EDIT_PREVIEW = new Set(['uiActivity', 'uiFriends', 'uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -8076,6 +8076,7 @@ registerBehavior('uiAppBar', {
           if (!h) continue;
           press.set(h.key, 1); UK.tap(s, p);
           if (h.key === 'left') { if (lk === 'back') s.navBack(); else if (lk === 'custom') s.send(p.leftMessage || ''); else s.send(p.menuMessage || 'menu'); }
+          else if (h.msg && /^page:/.test(h.msg)) s.navTo(h.msg.slice(5).trim(), p.var || 'page');
           else if (h.msg) s.send(h.msg);
         }
       },
@@ -9349,6 +9350,9 @@ registerBehavior('uiFeed', {
     { key: 'messagePage', label: 'Messaging opens page (with a Chat)', type: 'text', default: 'chat', group: 'Behaviour', showIf: (b) => b.messages !== false },
     { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars', group: 'Behaviour', showIf: (b) => b.messages !== false },
     { key: 'deleteMessage', label: 'Deleting your post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'profilePage', label: 'Tapping a name or avatar opens page (sets {profile})', type: 'text', default: '', group: 'Behaviour', info: 'A page with a Profile Header for {profile} (their handle) and {profile_name}.' },
+    { key: 'myProfilePage', label: 'Tapping my own name opens page', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'openVar', label: 'Opens the post whose id is put in variable', type: 'text', default: 'openPost', suggest: 'vars', group: 'Behaviour', info: 'Notifications put a post id here and come to this feed\'s page; the feed opens that post.' },
     { key: 'threads', label: 'Threads: replies (reply_to) come under their post, joined by a line', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'gridColumns', label: 'Grid: columns', type: 'number', default: 3, range: [2, 5], step: 1, group: 'Layout', showIf: (b) => b.look === 'grid' },
     { key: 'gridShape', label: 'Grid: tile shape', type: 'select', options: ['square', 'tall (4:5)', 'portrait (9:16)'], default: 'square', group: 'Layout', showIf: (b) => b.look === 'grid' },
@@ -9398,8 +9402,9 @@ registerBehavior('uiFeed', {
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
     const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
     const posts = (s) => {
-      const T = TABS(), tw = T.length ? T[clamp(tab, 0, T.length - 1)].where : '', filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
+      const T = TABS(), tw0 = T.length ? T[clamp(tab, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       const H = hid(s); if (H.posts.length || H.authors.length) P = P.filter((r) => !H.posts.includes(r.id) && !H.authors.includes(who(r)));
       if (p.pinnedFirst !== false && P.some((r) => truthy(F(r, 'pinned')))) P = [...P.filter((r) => truthy(F(r, 'pinned'))), ...P.filter((r) => !truthy(F(r, 'pinned')))];
       const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
@@ -9464,19 +9469,21 @@ registerBehavior('uiFeed', {
       if (p.deleteMessage) s.send(p.deleteMessage, r.id);
     };
     const messageIt = (s, r) => { const id = dmId(meOf(s).handle, who(r)); if (p.chatVar) s.setVar(p.chatVar, id); s.setVar('chatTitle', F(r, 'author') || who(r)); if (p.messagePage) s.navTo(p.messagePage); else s.snackbar?.(`Set the feed's “Message” page to open chats`); if (p.messageMessage) s.send(p.messageMessage, who(r)); };
+    /** Someone's profile page: {profile} (their handle) and {profile_name}, then the page in “Tapping a name opens page”. */
+    const openProfile = (s, r) => { const h = who(r); if (!h) return; s.setVar('profile', h); s.setVar('profile_name', F(r, 'author') || h); if (p.profileVerifiedVar !== false) s.setVar('profile_verified', truthy(F(r, 'verified')) ? 1 : 0); if (p.profilePage && h !== meOf(s).handle) s.navTo(p.profilePage); else if (p.myProfilePage && h === meOf(s).handle) s.navTo(p.myProfilePage); if (p.profileMessage) s.send(p.profileMessage, h); };
     const findPost = (s, id) => { if (id == null || id === '') return null; return has(s) ? D(s).get(p.collection, String(id)) : (sample || []).find((q) => String(q.id) === String(id)) || null; };
     const openQuote = (s, r) => {
       const me0 = meOf(s), c = colorsOf();
       sheetUp = true;
       const ok = postComposer(s, { me: me0, max: +p.maxQuote || 280, colors: c, font: fontOf(), button: 'Post', photos: true, polls: false, places: false,
         quote: { author: F(r, 'author'), handle: who(r), text: F(r, 'text'), media: mediaList(r)[0] },
-        onPost: (out) => { const rec = postRecord(me0, out, { quote: r.id }); if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_POSTS()).unshift({ id: 'q' + Date.now().toString(36), ...rec, _at: Date.now() }); patch(s, r, { reposts: (+F(r, 'reposts') || 0) + 1 }); goTop = true; if (p.quoteMessage) s.send(p.quoteMessage, r.id); s.snackbar?.('Posted'); },
+        onPost: (out) => { const rec = postRecord(me0, out, { quote: r.id }); const nr = has(s) ? D(s).add(p.collection, rec) : ((sample ||= SAMPLE_POSTS()).unshift({ id: 'q' + Date.now().toString(36), ...rec, _at: Date.now() }), sample[0]); s.engine.social?.notify(who(r), 'quote', { post: nr?.id, text: out.text }); s.engine.social?.notifyMentions(out.text, nr?.id); patch(s, r, { reposts: (+F(r, 'reposts') || 0) + 1 }); goTop = true; if (p.quoteMessage) s.send(p.quoteMessage, r.id); s.snackbar?.('Posted'); },
         onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
       if (!ok) sheetUp = false;
     };
     const hideIt = (s, r, kind) => { const H = hid(s), list = kind === 'hide' ? H.posts : H.authors, v = kind === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(kind === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); };
     const reportIt = (s, r) => { if (p.reportMessage) s.send(p.reportMessage, r.id); s.snackbar?.('Thanks, we’ll take a look'); };
-    const followIt = (s, r) => { const hd = who(r); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); };
+    const followIt = (s, r) => { const hd = who(r); s.engine.social?.follow(hd, F(r, 'author')); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); };
     const fullWhen = (t0) => { const t = +t0; if (!t) return ''; try { const d = new Date(t); return d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }) + ' · ' + d.toLocaleDateString(localeOf(), { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return shortAgo(t); } };
     const CKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.comments';
     const cDev = (s) => { try { return JSON.parse(store.get(CKEY(s), '{}')) || {}; } catch { return {}; } };
@@ -9520,7 +9527,7 @@ registerBehavior('uiFeed', {
         poll: isPost && pollOf(r) ? () => pollOf(r) : null,
         onVote: (i) => { const P0 = pollOf(r); if (!P0 || P0.voted) return; P0.v[i]++; patch(s, r, { votes: P0.v.join(', '), voted: i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[i]); },
         onLike: (only) => { if (only && truthy(F(r, 'liked'))) return; if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); },
-        onRepost: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }, onSave: () => { flip(s, r, 'saved'); pops.set(r.id + 's', s.time); },
+        onRepost: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); }, onSave: () => { flip(s, r, 'saved'); pops.set(r.id + 's', s.time); },
         onFollow: () => followIt(s, r), onLink: () => { if (!s.engine.editing && /^https?:/.test(String(lnk))) window.open(lnk, '_blank', 'noopener'); },
         onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: isMine(s, r) ? [
           { icon: '✏️', label: 'Edit post', run: () => { sh?.close(); setTimeout(() => editIt(s, r), 280); } },
@@ -9537,6 +9544,7 @@ registerBehavior('uiFeed', {
           const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false, ...(parent ? { parent: String(parent) } : {}) };
           if (cc) D(s).add(cc, { post: r.id, ...c0 }); else cSave(s, r, (L) => L.push({ id: 'c' + Date.now().toString(36), ...c0, at: Date.now() }));
           patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
+          const SG = s.engine.social; if (SG) { SG.notify(who(r), 'comment', { post: r.id, text }); if (parent) { const pc = cmtsOf(s, r).find((q) => String(q.id) === String(parent)); if (pc && pc.handle && pc.handle !== who(r)) SG.notify(pc.handle, 'reply', { post: r.id, text }); } SG.notifyMentions(text, r.id); }
         },
         onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
@@ -9545,13 +9553,14 @@ registerBehavior('uiFeed', {
         onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
       if (!sh) sheetUp = false;
     };
-    const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
+    const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); s.engine.social?.notify(who(r), 'like', { post: r.id, text: F(r, 'text') }); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
     return {
       uiAlways: true,
       update(e, dt, s) {
         const b = UK.box(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
+        if (p.openVar && s.vars[p.openVar] && !s.engine.editing && !sheetUp) { const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); const q = shown && findPost(s, s.vars[p.openVar]); if (q) { s.setVar(p.openVar, ''); openPost(s, q, 'post'); } } // a notification (or anything) asked for a post
         if (look0() === 'reels' && reelH > 0) { // one post per screen: a swipe moves one at a time
           if (S.drag) { if (reelDrag == null) reelDrag = Math.round(S.v / reelH); }
           else { if (reelDrag != null) { const d = S.v - reelDrag * reelH; reelIdx = reelDrag + (d > reelH * 0.18 || S.flick > 600 ? 1 : d < -reelH * 0.18 || S.flick < -600 ? -1 : 0); reelDrag = null; }
@@ -9611,8 +9620,9 @@ registerBehavior('uiFeed', {
           const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
           if (k === 'like') { UK.tap(s, p); if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); }
           else if (k === 'repost') { UK.tap(s, p); if (p.quotes !== false && !s.engine.editing) { sheetUp = true; if (!socialSheet(s, { kind: 'repost', colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet], [data-pocket-composer]'); }, items: [
-              { icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } },
+              { icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); } },
               { icon: '✏️', label: 'Quote', run: () => openQuote(s, r) }] })) sheetUp = false; } else { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } }
+          else if (k === 'profile') { UK.tap(s, p); openProfile(s, r); }
           else if (k === 'gridOpen') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) { if (p.openPage) { if (has(s)) openRecord(s, p.collection, q); s.navTo(p.openPage); } else openPost(s, q, 'post'); } }
           else if (k === 'quote') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) openPost(s, q, 'post'); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
@@ -9791,7 +9801,7 @@ registerBehavior('uiFeed', {
         // the top comment under a post
         const topC = (r) => { const t = String(F(r, 'topComment') || ''); if (!t) return null; const i = t.indexOf(':'); return i > 0 ? { name: t.slice(0, i).trim(), text: t.slice(i + 1).trim() } : { name: '', text: t }; };
         // “Follow” next to someone you don’t follow yet
-        const myHandle = meOf(s).handle, followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following')) && who(r) !== myHandle && !r._mine; // (never on your own posts)
+        const myHandle = meOf(s).handle, followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following')) && who(r) !== myHandle && !r._mine && !s.engine.social?.isFollowing(who(r)); // (never on your own posts)
         const followPill = (r, right, cy, hits, ox, oy) => { ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText('Follow').width + 22; ctx.fillStyle = acc; UK.rr(ctx, right - w, cy - 14, w, 28, 14); ctx.fill(); UK.text(ctx, 'Follow', right - w / 2, cy + 1, { size: 13, weight: 800, color: '#fff' }); if (hits) hits.push({ k: 'follow', x: right - w - ox, y: cy - 16 - oy, w, h: 32 }); return w + 8; };
         const top = b.y + inset - S.v;
         if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
@@ -9839,7 +9849,7 @@ registerBehavior('uiFeed', {
               const gr = ctx.createLinearGradient(0, at0 + ph * 0.55, 0, at0 + ph); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.7)'); ctx.fillStyle = gr; ctx.fillRect(b.x, at0 + ph * 0.55, b.w, ph * 0.45);
               // the side: avatar, like, comment, repost, share, more
               let sy = at0 + ph - 330; const sx = b.x + b.w - 34;
-              av(r, sx, sy, 46); hits.push({ k: followable(r) ? 'follow' : 'none', x: sx - 23 - b.x, y: sy - 23 - at0, w: 46, h: 46 });
+              av(r, sx, sy, 46); hits.push({ k: followable(r) ? 'follow' : 'profile', x: sx - 23 - b.x, y: sy - 23 - at0, w: 46, h: 46 });
               if (followable(r)) { ctx.fillStyle = '#f4212e'; ctx.beginPath(); ctx.arc(sx, sy + 23, 10, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '+', sx, sy + 23, { size: 15, weight: 900, color: '#fff' }); }
               sy += 64;
               const side = (k, draw, n) => { draw(sx, sy); if (n != null) UK.text(ctx, n, sx, sy + 24, { size: 12, weight: 800, color: '#fff' }); hits.push({ k, x: sx - 24 - b.x, y: sy - 22 - at0, w: 48, h: 56 }); sy += 62; };
@@ -9888,6 +9898,7 @@ registerBehavior('uiFeed', {
             h = actY + 22 + 22 + textH(T) + (exP ? exP + 4 : 0) + (tcP ? 20 : 0) + 22 + (p.time === 'hidden' ? 0 : 20) + 14;
             if (at < b.y + b.h && at + h > b.y) {
               if (showAv) av(r, x0 + pad + AV / 2, at + head / 2, AV, avShape === 'circle' ? [p.ring1 || '#feda75', p.ring2 || '#d62976'] : null);
+              hits.push({ k: 'profile', x: pad, y: head / 2 - AV / 2, w: AV + 120, h: AV });
               const nx = x0 + pad + (showAv ? AV + 10 : 0), loc = F(r, 'location'), fw = followable(r) ? followPill(r, x0 + W - (p.showMore !== false ? 40 : pad), at + head / 2, hits, x0, at) : 0;
               nameRow(r, nx, at + head / 2 - (loc ? 8 : 0), W - (nx - x0) - 40 - fw, false);
               if (loc) UK.text(ctx, String(loc), nx, at + head / 2 + 10, { size: 12, weight: 500, color: handleC, align: 'left', maxW: W - (nx - x0) - 40 - fw });
@@ -9917,6 +9928,7 @@ registerBehavior('uiFeed', {
               ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, +p.cardRadius >= 0 ? +p.cardRadius : 12); ctx.fill();
               if (p.cardBorder) { ctx.strokeStyle = p.cardBorder; ctx.lineWidth = 1; UK.rr(ctx, cx + 0.5, cy + 0.5, cw - 1, ch - 1, +p.cardRadius || 0); ctx.stroke(); }
               if (showAv) av(r, cx + pad + AV / 2, cy + head / 2, AV);
+              hits.push({ k: 'profile', x: cx - x0 + pad, y: cy - at + head / 2 - AV / 2, w: AV + 110, h: AV });
               const nx = cx + pad + (showAv ? AV + 10 : 0), fwC = followable(r) ? followPill(r, cx + cw - (p.showMore !== false ? 44 : pad), cy + head / 2, hits, x0, at) : 0;
               nameRow(r, nx, cy + head / 2 - (p.time === 'hidden' ? 0 : 9), cw - (nx - cx) - 40 - fwC, false);
               if (p.time !== 'hidden') UK.text(ctx, [when(r), truthy(F(r, 'edited')) ? 'edited' : '', F(r, 'location') ? '📍 ' + F(r, 'location') : '', '🌐'].filter(Boolean).join(' · '), nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left', maxW: cw - (nx - cx) - 40 - fwC });
@@ -9951,7 +9963,8 @@ registerBehavior('uiFeed', {
             if (compact && thumb) h = Math.max(h, pad + thumb + 10);
             if (at < b.y + b.h && at + h > b.y) {
               if (showAv && (tUp.has(r.id) || tDown.has(r.id))) { ctx.fillStyle = line; const lx = x0 + pad + AV / 2 - 1; if (tUp.has(r.id)) ctx.fillRect(lx, at1 - gap, 2.5, at + pad - 2 - (at1 - gap) - 4); if (tDown.has(r.id)) ctx.fillRect(lx, at + pad - 2 + AV + 4, 2.5, at1 + h - (at + pad - 2 + AV + 4) + (lab ? 20 : 0)); }
-              if (showAv) av(r, x0 + pad + AV / 2, at + pad - 2 + AV / 2, AV);
+              if (showAv) { av(r, x0 + pad + AV / 2, at + pad - 2 + AV / 2, AV); hits.push({ k: 'profile', x: pad, y: pad - 2, w: AV, h: AV }); }
+              hits.push({ k: 'profile', x: tx - x0, y: pad - 6, w: Math.min(150, tw * 0.5), h: NS + 10 });
               const fwT = followable(r) && !thumb ? followPill(r, x0 + W - pad - (p.showMore !== false ? 26 : 0), at + pad + NS / 2, hits, x0, at) : 0;
               nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0) - fwT, true);
               if (p.showMore !== false && !thumb) { icon('ui-more', x0 + W - pad - 8, at + pad + NS / 2, 18, sub); hits.push({ k: 'more', x: W - pad - 22, y: pad + NS / 2 - 14, w: 28, h: 28 }); }
@@ -10078,6 +10091,7 @@ registerBehavior('uiChat', {
       const c = chatOf(s), M = me(s), rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}) };
       if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
+      if (/^dm-/.test(c) && s.engine.social) { const other = c.slice(3).split('-').find((h) => h !== M.handle); if (other) s.engine.social.notify(other, 'message', { text: m.text || '📷 Photo', post: '' }); } // (a direct message: they get a notification)
     };
     return {
       uiAlways: true,
@@ -10278,10 +10292,10 @@ registerBehavior('uiWhoToFollow', {
     let btnR = [], sample = null; const done = new Map();
     const people = (s) => {
       const D = s.engine.data, M = meOfVars(s, p.author, p.handle), all = D.def(p.collection) ? D.rows(p.collection) : (sample ||= SAMPLE_POSTS()), by = new Map();
-      for (const r of all) { const h = String(r.handle || r.author || '').replace(/^@/, ''); if (!h || h === M.handle || r.author === M.author) continue; const f = r.following; if (f === undefined || f === '' || truthy(f)) { if (!done.has(h)) continue; } const q = by.get(h) || { h, name: r.author, verified: truthy(r.verified), avatar: r.avatar, likes: 0 }; q.likes += +r.likes || 0; by.set(h, q); }
+      for (const r of all) { const h = String(r.handle || r.author || '').replace(/^@/, ''); if (!h || h === M.handle || r.author === M.author) continue; const f = r.following; if (f === undefined || f === '' || truthy(f) || s.engine.social?.isFollowing(h)) { if (!done.has(h)) continue; } const q = by.get(h) || { h, name: r.author, verified: truthy(r.verified), avatar: r.avatar, likes: 0 }; q.likes += +r.likes || 0; by.set(h, q); }
       return [...by.values()].sort((a, b) => b.likes - a.likes).slice(0, Math.max(1, +p.max || 3));
     };
-    const follow = (s, h) => { const D = s.engine.data, has = !!D.def(p.collection); for (const r of has ? D.rows(p.collection) : sample || []) if (String(r.handle || r.author || '').replace(/^@/, '') === h && !truthy(r.following)) { if (has) D.update(p.collection, r.id, { following: true }); else r.following = true; } done.set(h, s.time); if (p.message) s.send(p.message, h); };
+    const follow = (s, h) => { const D = s.engine.data, has = !!D.def(p.collection); s.engine.social?.follow(h, (has ? D.rows(p.collection) : sample || []).find((r) => String(r.handle || '').replace(/^@/, '') === h)?.author); for (const r of has ? D.rows(p.collection) : sample || []) if (String(r.handle || r.author || '').replace(/^@/, '') === h && !truthy(r.following)) { if (has) D.update(p.collection, r.id, { following: true }); else r.following = true; } done.set(h, s.time); if (p.message) s.send(p.message, h); };
     return {
       uiAlways: true,
       update(e, dt, s) { for (const t of UK.taps(s, e)) { const r = btnR.find((q) => UK.in(t, q, 6)); if (!r || done.has(r.handle)) continue; UK.tap(s, p); follow(s, r.handle); s.engine.vibrate?.(10); } for (const [h, t] of done) if (s.time - t > 2.2) done.delete(h); },
@@ -10401,6 +10415,172 @@ registerBehavior('uiSearchBar', {
         clearR = null; if (v) { const cx = b.x + b.w - 22; ctx.fillStyle = tok(p.sub || '@sub'); ctx.globalAlpha *= 0.25; ctx.beginPath(); ctx.arc(cx, b.cy, 11, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha /= 0.25; UK.text(ctx, '✕', cx, b.cy + 1, { size: 11, weight: 800, color: tok(p.text || '@text') }); clearR = { x: cx - 14, y: b.cy - 14, w: 28, h: 28 }; }
       },
       destroy() { open?.close(); },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Notifications (likes, comments, replies, reposts, quotes, mentions, follows, friend requests) and Friends, from the social graph
+const peopleFromPosts = (s, coll = 'Posts') => { const D = s.engine.data, rows = D.def(coll) ? D.rows(coll) : SAMPLE_POSTS(), m = new Map(); for (const r of rows) { const h = String(r.handle || '').replace(/^@/, '').toLowerCase(); if (h && !m.has(h)) m.set(h, { handle: h, name: r.author || h, verified: truthy(r.verified), likes: 0 }); if (h) m.get(h).likes += +r.likes || 0; } return m; };
+const tabsRow = (ctx, b, labels, cur, txt, sub, acc, line) => { const R = []; const w = b.w / labels.length; labels.forEach((l, i) => { const x = b.x + i * w; UK.text(ctx, l, x + w / 2, b.y + 22, { size: 14, weight: i === cur ? 800 : 600, color: i === cur ? txt : sub, maxW: w - 8 }); if (i === cur) { ctx.fillStyle = acc; ctx.font = `800 14px ${THEME.font}`; const lw = Math.min(w - 16, ctx.measureText(l).width + 10); UK.rr(ctx, x + w / 2 - lw / 2, b.y + 41, lw, 3, 1.5); ctx.fill(); } R.push({ x, y: b.y, w, h: 44 }); }); ctx.fillStyle = line; ctx.fillRect(b.x, b.y + 44, b.w, 1); return R; };
+const pillBtn = (ctx, x, y, w, label, filled, acc, txt, line) => { if (filled) { ctx.fillStyle = acc; UK.rr(ctx, x, y, w, 30, 15); ctx.fill(); } else { ctx.strokeStyle = line; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, 29, 15); ctx.stroke(); } UK.text(ctx, label, x + w / 2, y + 15, { size: 13, weight: 800, color: filled ? '#fff' : txt }); return { x, y, w, h: 30 }; };
+
+registerBehavior('uiActivity', {
+  label: 'Notifications (social)', description: 'Your notifications, newest first: likes, comments, replies, reposts, quotes, @mentions, new followers and friend requests (Accept / Decline right there; Follow back for new followers). Likes on the same post are grouped. Tapping one opens the post or the person. Unread ones are marked; {notifications_unread} counts them for a badge.',
+  params: [
+    { key: 'tabs', label: 'Tabs: All, Mentions, Requests', type: 'bool', default: true },
+    { key: 'openPage', label: 'Tapping a post notification goes to page (with a Social Feed)', type: 'text', default: 'home' },
+    { key: 'openVar', label: '…and puts the post id in variable (the feed opens it)', type: 'text', default: 'openPost', suggest: 'vars' },
+    { key: 'profilePage', label: 'Tapping a person goes to page (sets {profile})', type: 'text', default: '' },
+    { key: 'chatPage', label: 'Tapping a message notification goes to page (a Chat)', type: 'text', default: 'chat' },
+    { key: 'markRead', label: 'Mark as read when they’re seen', type: 'bool', default: true },
+    { key: 'empty', label: 'When there are none', type: 'text', default: 'No notifications yet' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'], unread: ['Unread rows', ''] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'); let tab = 0, tabsR = [], rows = [], btns = [], shownT = 0, fresh = null, total = 0;
+    const items = (s) => {
+      const G = s.engine.social, all = G.mine(), out = [], by = new Map();
+      for (const n of all) {
+        if (tab === 1 && n.type !== 'mention' && n.type !== 'reply' && n.type !== 'comment') continue;
+        if (tab === 2 && n.type !== 'friend_request') continue;
+        const groupable = ['like', 'repost', 'follow'].includes(n.type), k = groupable ? n.type + '|' + (n.post || '') : 'x' + n.id;
+        if (groupable && by.has(k)) { const g = by.get(k); if (!g.who.some((w) => w.handle === n.from)) g.who.push({ handle: n.from, name: n.from_name || n.from }); g.ids.push(n.id); if (!truthy(n.read)) g.unread = true; continue; }
+        const g = { n, who: [{ handle: n.from, name: n.from_name || n.from }], ids: [n.id], unread: !truthy(n.read) }; by.set(k, g); out.push(g);
+      }
+      return out;
+    };
+    const textOf = (g) => { const n = g.n, names = g.who.length === 1 ? g.who[0].name : g.who.length === 2 ? `${g.who[0].name} and ${g.who[1].name}` : `${g.who[0].name} and ${g.who.length - 1} others`; return names + ' ' + NOTE_TEXT(n, false).replace(/^started following you$/, g.who.length > 1 ? 'followed you' : 'started following you'); };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.box(e), G = s.engine.social, top = p.tabs !== false ? 46 : 0, list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
+        S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
+        const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })();
+        if (shown && !s.engine.editing) { if (!fresh) fresh = new Set(G.mine().filter((n) => !truthy(n.read)).map((n) => n.id)); if ((shownT += dt) > 1.2 && p.markRead !== false && G.unread()) G.markRead((n) => n.type !== 'friend_request'); } else { shownT = 0; fresh = null; }
+        for (const t of UK.taps(s, e)) {
+          if (S.moved) continue;
+          const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { UK.tap(s, p); tab = ti; S.v = 0; continue; }
+          const bt = btns.find((q) => UK.in(t, q, 4));
+          if (bt) { UK.tap(s, p); if (bt.k === 'accept') { G.accept(bt.who); s.snackbar?.(`You and ${bt.name} are friends now`); } else if (bt.k === 'decline') { G.decline(bt.who); } else if (bt.k === 'followback') { G.follow(bt.who, bt.name); s.snackbar?.(`Following @${bt.who}`); } continue; }
+          const r = rows.find((q) => UK.in(t, q)); if (!r || !UK.in(t, list)) continue; UK.tap(s, p);
+          G.markRead((n) => r.g.ids.includes(n.id));
+          const n = r.g.n;
+          if (n.type === 'message' && p.chatPage) { s.setVar('chat', dmId(G.me().handle, n.from)); s.setVar('chatTitle', n.from_name || n.from); s.navTo(p.chatPage); }
+          else if (n.post && p.openPage) { if (p.openVar) s.setVar(p.openVar, n.post); s.navTo(p.openPage); }
+          else { s.setVar('profile', n.from); s.setVar('profile_name', n.from_name || n.from); if (p.profilePage) s.navTo(p.profilePage); }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), dark = isDark(s);
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        const reqN = G.requests().length, top = p.tabs !== false ? 46 : 0;
+        tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', 'Mentions', reqN ? `Requests (${reqN})` : 'Requests'], tab, txt, sub, acc, line) : [];
+        const L = items(s); rows = []; btns = [];
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + top, b.w, b.h - top); ctx.clip();
+        if (!L.length) { UK.text(ctx, '🔔', b.cx, b.y + top + 70, { size: 40 }); UK.text(ctx, tab === 2 ? 'No friend requests' : p.empty || 'No notifications yet', b.cx, b.y + top + 120, { size: 15, weight: 700, color: sub }); }
+        let y = b.y + top - S.v;
+        for (const g of L) {
+          const n = g.n, act = n.type === 'friend_request' && G.friendStatus(n.from) === 'received' ? 'request' : n.type === 'follow' && !G.isFollowing(n.from) ? 'followback' : '', snippet = n.post && n.type !== 'comment' && n.type !== 'mention' && n.type !== 'reply' ? '' : n.text && n.type !== 'comment' ? n.text : '';
+          const tx = b.x + 16 + 48 + 12, tw = b.w - (tx - b.x) - 16 - (act === 'followback' ? 104 : 0);
+          ctx.font = `500 14px ${THEME.font}`; const lines = wrapLines(ctx, textOf(g), tw, 14, 3), h = Math.max(72, 18 + lines.length * 19 + (snippet ? 20 : 0) + (act === 'request' ? 40 : 0) + 22);
+          if (y + h > b.y && y < b.y + b.h) {
+            if (g.unread || fresh?.has(n.id)) { ctx.fillStyle = tok(p.unread) || (dark ? 'rgba(29,155,240,0.10)' : 'rgba(29,155,240,0.07)'); ctx.fillRect(b.x, y, b.w, h); }
+            miniAvatar(ctx, g.who[0].name, b.x + 16 + 24, y + 12 + 24, 48);
+            if (g.who.length > 1) miniAvatar(ctx, g.who[1].name, b.x + 16 + 40, y + 12 + 40, 22);
+            const ic = NOTE_ICON[n.type] || '🔔'; ctx.fillStyle = dark ? '#1c1f26' : '#fff'; ctx.beginPath(); ctx.arc(b.x + 16 + 44, y + 12 + 6, 11, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, ic, b.x + 16 + 44, y + 12 + 7, { size: 12, weight: 900, color: acc });
+            lines.forEach((l, i) => UK.text(ctx, l, tx, y + 22 + i * 19, { size: 14, weight: i === 0 ? 600 : 500, color: txt, align: 'left' }));
+            let yy = y + 22 + lines.length * 19;
+            if (snippet) { UK.text(ctx, snippet, tx, yy + 2, { size: 13, weight: 500, color: sub, align: 'left', maxW: tw }); yy += 20; }
+            UK.text(ctx, shortAgo(n._at), tx, yy + 2, { size: 12, weight: 600, color: g.unread ? acc : sub, align: 'left' });
+            if (act === 'request') { const by0 = yy + 14; btns.push({ ...pillBtn(ctx, tx, by0, 90, 'Accept', true, acc, txt, line), k: 'accept', who: n.from, name: n.from_name || n.from }); btns.push({ ...pillBtn(ctx, tx + 100, by0, 90, 'Decline', false, acc, txt, line), k: 'decline', who: n.from }); }
+            if (act === 'followback') btns.push({ ...pillBtn(ctx, b.x + b.w - 16 - 96, y + h / 2 - 15, 96, 'Follow back', true, acc, txt, line), k: 'followback', who: n.from, name: n.from_name || n.from });
+            if (g.unread) { ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(b.x + 7, y + h / 2, 3.5, 0, Math.PI * 2); ctx.fill(); }
+            ctx.fillStyle = line; ctx.fillRect(b.x, y + h - 0.5, b.w, 0.5);
+          }
+          rows.push({ x: b.x, y, w: b.w, h, g }); y += h;
+        }
+        total = y + S.v - (b.y + top);
+        ctx.restore();
+      },
+    };
+  },
+});
+
+registerBehavior('uiFriends', {
+  label: 'Friends', description: 'Your friends (with Message), friend requests (Accept / Decline, and the ones you sent) and people to find (Add friend, Follow), from the social graph. Tapping a person opens their profile.',
+  params: [
+    { key: 'postsCollection', label: 'People come from posts in', type: 'text', default: 'Posts', suggest: 'collections' },
+    { key: 'profilePage', label: 'Tapping a person goes to page (sets {profile})', type: 'text', default: '' },
+    { key: 'chatPage', label: 'Message opens page (a Chat)', type: 'text', default: 'chat' },
+    { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'); let tab = 0, tabsR = [], rows = [], btns = [], total = 0;
+    const lists = (s) => {
+      const G = s.engine.social, me = G.me().handle.toLowerCase(), people = peopleFromPosts(s, p.postsCollection), friends = G.friends(), req = G.requests(), sent = G.sentRequests();
+      for (const q of [...friends, ...req, ...sent, ...G.followers(), ...G.following()]) if (!people.has(q.handle)) people.set(q.handle, { handle: q.handle, name: q.name || q.handle, likes: 0 });
+      const known = new Set([...friends.map((q) => q.handle), me]);
+      const find = [...people.values()].filter((q) => !known.has(q.handle)).sort((a, b) => b.likes - a.likes);
+      return { friends: friends.map((q) => people.get(q.handle) || q), req: req.map((q) => ({ ...(people.get(q.handle) || q), at: q.at })), sent: sent.map((q) => people.get(q.handle) || q), find };
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.box(e), G = s.engine.social, list = { x: b.x, y: b.y + 46, w: b.w, h: b.h - 46 };
+        S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
+        for (const t of UK.taps(s, e)) {
+          if (S.moved) continue;
+          const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { UK.tap(s, p); tab = ti; S.v = 0; continue; }
+          const bt = btns.find((q) => UK.in(t, q, 4));
+          if (bt) { UK.tap(s, p);
+            if (bt.k === 'add') { const r = G.addFriend(bt.who, bt.name); s.snackbar?.(r === 'friends' ? `You and ${bt.name} are friends now` : 'Friend request sent'); }
+            else if (bt.k === 'accept') { G.accept(bt.who); s.snackbar?.(`You and ${bt.name} are friends now`); }
+            else if (bt.k === 'decline') G.decline(bt.who);
+            else if (bt.k === 'cancel') G.cancel(bt.who);
+            else if (bt.k === 'follow') G.toggleFollow(bt.who, bt.name);
+            else if (bt.k === 'message') { if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, bt.who)); s.setVar('chatTitle', bt.name); if (p.chatPage) s.navTo(p.chatPage); }
+            continue; }
+          const r = rows.find((q) => UK.in(t, q)); if (!r || !UK.in(t, list)) continue; UK.tap(s, p);
+          s.setVar('profile', r.handle); s.setVar('profile_name', r.name); if (p.profilePage) s.navTo(p.profilePage);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), Ls = lists(s);
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        tabsR = tabsRow(ctx, b, [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line);
+        rows = []; btns = [];
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + 46, b.w, b.h - 46); ctx.clip();
+        let y = b.y + 46 - S.v; const H = 68;
+        const head = (t0) => { UK.text(ctx, t0, b.x + 16, y + 20, { size: 15, weight: 900, color: txt, align: 'left' }); y += 36; };
+        const person = (q, buttons) => {
+          if (y + H > b.y && y < b.y + b.h) {
+            miniAvatar(ctx, q.name, b.x + 16 + 23, y + H / 2, 46);
+            let bx = b.x + b.w - 16; const bb = [];
+            for (const [k, label, filled, w] of [...buttons].reverse()) { bx -= w; bb.push({ ...pillBtn(ctx, bx, y + H / 2 - 15, w, label, filled, acc, txt, line), k, who: q.handle, name: q.name }); bx -= 8; }
+            btns.push(...bb);
+            const tx = b.x + 16 + 46 + 12, tw = bx - tx - 4;
+            UK.text(ctx, q.name + (q.verified ? ' ✓' : ''), tx, y + H / 2 - 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw });
+            UK.text(ctx, '@' + q.handle + (G.isFollowing(q.handle) ? ' · following' : '') + (G.isFollowing(G.me().handle, q.handle) ? ' · follows you' : ''), tx, y + H / 2 + 11, { size: 13, weight: 500, color: sub, align: 'left', maxW: tw });
+            ctx.fillStyle = line; ctx.fillRect(tx, y + H - 0.5, b.x + b.w - tx, 0.5);
+          }
+          rows.push({ x: b.x, y, w: b.w, h: H, handle: q.handle, name: q.name }); y += H;
+        };
+        if (tab === 0) { if (!Ls.friends.length) { UK.text(ctx, '👥', b.cx, y + 70, { size: 40 }); UK.text(ctx, 'No friends yet', b.cx, y + 118, { size: 15, weight: 700, color: sub }); UK.text(ctx, 'Find people and add them', b.cx, y + 142, { size: 13, weight: 500, color: sub }); y += 170; } for (const q of Ls.friends) person(q, [['message', 'Message', false, 86]]); }
+        else if (tab === 1) {
+          if (!Ls.req.length && !Ls.sent.length) { UK.text(ctx, 'No friend requests', b.cx, y + 70, { size: 15, weight: 700, color: sub }); y += 100; }
+          if (Ls.req.length) { head('Friend requests'); for (const q of Ls.req) person(q, [['accept', 'Accept', true, 78], ['decline', 'Decline', false, 78]]); }
+          if (Ls.sent.length) { head('Sent'); for (const q of Ls.sent) person(q, [['cancel', 'Cancel', false, 78]]); }
+        } else {
+          if (!Ls.find.length) { UK.text(ctx, 'You know everyone here ✨', b.cx, y + 70, { size: 15, weight: 700, color: sub }); y += 100; }
+          for (const q of Ls.find) { const st = G.friendStatus(q.handle), f = G.isFollowing(q.handle); person(q, [['follow', f ? 'Following' : 'Follow', false, f ? 84 : 68], st === 'received' ? ['accept', 'Accept', true, 72] : st === 'sent' ? ['cancel', 'Requested', false, 90] : ['add', '+ Friend', true, 80]]); }
+        }
+        total = y + S.v - (b.y + 46);
+        ctx.restore();
+      },
     };
   },
 });
@@ -10563,20 +10743,36 @@ registerBehavior('uiProfile', {
     { key: 'followVar', label: 'Following variable (1 / 0)', type: 'text', default: 'following', suggest: 'vars' },
     { key: 'countVar', label: 'Followers count variable', type: 'text', default: 'followers', suggest: 'vars' },
     { key: 'own', label: 'This is my profile (Edit profile instead of Follow)', type: 'bool', default: false },
+    { key: 'social', label: 'Follow, friends and counts from the social graph', type: 'bool', default: false, info: 'Follow / Following, Add friend / Requested / Accept / Friends and Message work for real (with notifications), and the counts come from posts, followers, following and friends.' },
+    { key: 'friendButton', label: 'Add friend button', type: 'bool', default: true, showIf: (b) => !!b.social },
+    { key: 'postsCollection', label: 'Posts collection (for the posts count)', type: 'text', default: 'Posts', suggest: 'collections', showIf: (b) => !!b.social },
+    { key: 'chatPage', label: 'Message opens page (a Chat)', type: 'text', default: 'chat', showIf: (b) => !!b.social },
+    { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars', showIf: (b) => !!b.social },
+    { key: 'listPage', label: 'Tapping the counts opens page (Friends)', type: 'text', default: '', showIf: (b) => !!b.social },
     { key: 'message', label: 'Message / Edit button sends', type: 'text', default: 'message', suggest: 'messages' },
     { key: 'cover', label: 'Cover colour (blank = none)', type: 'color', default: '#4f7cff', group: 'Colours' },
     ...colorParams({ text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Follow button', '@accent'], bg: ['Behind the avatar', '@bg'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    let fb = null, mb = null, popT = -9;
-    const following = (s) => !!+s.vars[p.followVar] || truthy(s.vars[p.followVar]);
+    let fb = null, mb = null, frb = null, statsR = null, popT = -9;
+    const SG = (s) => (p.social ? s.engine.social : null);
+    const who = (s) => { const G = SG(s); if (p.own && G) return { handle: G.me().handle, name: fillTemplate(String(p.name || ''), s.vars) || G.me().author }; return { handle: fillTemplate(String(p.handle || ''), s.vars).replace(/^@/, '').trim().toLowerCase(), name: fillTemplate(String(p.name || ''), s.vars) }; };
+    const following = (s) => { const G = SG(s); return G ? G.isFollowing(who(s).handle) : !!+s.vars[p.followVar] || truthy(s.vars[p.followVar]); };
+    const FRIEND_LABEL = { none: 'Add friend', sent: 'Requested', received: 'Accept', friends: 'Friends ✓' }; const FRIEND_SHORT = { none: '+ Friend', sent: 'Sent', received: 'Accept', friends: 'Friends' };
     return {
       uiAlways: true,
-      start(e, s) { if (p.followVar && s.vars[p.followVar] == null) s.setVar(p.followVar, 0); if (p.countVar && s.vars[p.countVar] == null) s.setVar(p.countVar, 1280); },
+      start(e, s) { if (p.social) return; if (p.followVar && s.vars[p.followVar] == null) s.setVar(p.followVar, 0); if (p.countVar && s.vars[p.countVar] == null) s.setVar(p.countVar, 1280); },
       update(e, dt, s) {
+        const G = SG(s), W = who(s);
         for (const t of UK.taps(s, e)) {
-          if (fb && UK.in(t, fb, 4) && !p.own) { UK.tap(s, p); const on = !following(s); s.setVar(p.followVar, on ? 1 : 0); if (p.countVar) s.setVar(p.countVar, Math.max(0, (+s.vars[p.countVar] || 0) + (on ? 1 : -1))); popT = s.time; }
+          if (fb && UK.in(t, fb, 4) && !p.own) { UK.tap(s, p); if (G) { if (!W.handle) continue; G.toggleFollow(W.handle, W.name); } else { const on = !following(s); s.setVar(p.followVar, on ? 1 : 0); if (p.countVar) s.setVar(p.countVar, Math.max(0, (+s.vars[p.countVar] || 0) + (on ? 1 : -1))); } popT = s.time; }
+          else if (G && frb && UK.in(t, frb, 4) && !p.own) { UK.tap(s, p); const st = G.friendStatus(W.handle);
+            if (st === 'friends') { G.unfriend(W.handle); s.snackbar?.(`Removed ${W.name || '@' + W.handle} from friends`, 'Undo', () => { G.add('friends', { from: G.me().handle, to: W.handle, from_name: G.me().author, to_name: W.name, status: 'accepted' }); }); }
+            else if (st === 'sent') { G.cancel(W.handle); s.snackbar?.('Friend request cancelled'); }
+            else { const r = G.addFriend(W.handle, W.name); s.snackbar?.(r === 'friends' ? `You and ${W.name || '@' + W.handle} are friends now` : 'Friend request sent'); } popT = s.time; }
+          else if (G && mb && UK.in(t, mb, 4) && !p.own) { UK.tap(s, p); if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, W.handle)); s.setVar('chatTitle', W.name || '@' + W.handle); if (p.chatPage) s.navTo(p.chatPage); if (p.message) s.send(p.message, W.handle); }
+          else if (G && statsR && UK.in(t, statsR) && p.listPage) { UK.tap(s, p); s.setVar('people_of', W.handle); s.navTo(p.listPage); }
           else if ((mb && UK.in(t, mb, 4)) || (p.own && fb && UK.in(t, fb, 4))) { UK.tap(s, p); if (p.message) s.send(p.message); }
         }
       },
@@ -10595,12 +10791,18 @@ registerBehavior('uiProfile', {
         else { ctx.fillStyle = acc; UK.rr(ctx, fb.x, fb.y, fw, 36, 18); ctx.fill(); UK.text(ctx, fl, fb.x + fw / 2, by + 1, { size: 14, weight: 800, color: '#fff' }); }
         ctx.restore();
         if (!p.own) { mb = { x: fb.x - 46, y: by - 18, w: 36, h: 36 }; ctx.strokeStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.4); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mb.x + 18, by, 18, 0, Math.PI * 2); ctx.stroke(); drawNavIcon(ctx, 'ui-mail', mb.x + 18, by, 18, txt); } else mb = null;
+        frb = null;
+        if (SG(s) && !p.own && p.friendButton !== false) { const st = SG(s).friendStatus(who(s).handle), room = mb.x - 10 - (ax + av / 2 + 10); ctx.font = `800 13px ${THEME.font}`; let fl2 = FRIEND_LABEL[st], w2 = ctx.measureText(fl2).width + 26; if (w2 > room) { fl2 = FRIEND_SHORT[st]; w2 = ctx.measureText(fl2).width + 22; } /* a narrow phone: the short label, clear of the avatar */ frb = { x: mb.x - 10 - w2, y: by - 16, w: w2, h: 32 };
+          if (st === 'received') { ctx.fillStyle = acc; UK.rr(ctx, frb.x, frb.y, w2, 32, 16); ctx.fill(); UK.text(ctx, fl2, frb.x + w2 / 2, by + 1, { size: 13, weight: 800, color: '#fff' }); }
+          else { ctx.strokeStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.4); ctx.lineWidth = 1.5; UK.rr(ctx, frb.x, frb.y, w2, 32, 16); ctx.stroke(); UK.text(ctx, fl2, frb.x + w2 / 2, by + 1, { size: 13, weight: 800, color: st === 'friends' ? acc : txt }); } }
         let y = ay + av / 2 + 22;
         UK.text(ctx, name, b.x + 16, y, { size: 20, weight: 900, color: txt, align: 'left', maxW: b.w - 60 }); if (p.verified) { ctx.font = `900 20px ${THEME.font}`; verifiedBadge(ctx, b.x + 16 + Math.min(ctx.measureText(name).width, b.w - 60) + 13, y, 9, acc); }
         y += 22; if (handle) { UK.text(ctx, '@' + handle, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left' }); y += 26; }
         const bio = fillTemplate(String(p.bio || ''), s.vars); if (bio) for (const l of wrapLines(ctx, bio, b.w - 32, 15, 3)) { UK.text(ctx, l, b.x + 16, y, { size: 15, weight: 500, color: txt, align: 'left' }); y += 20; }
         y += 8; let x = b.x + 16;
-        for (const [label = '', val = ''] of UK.lines(p.stats)) { const v = fillTemplate(val, s.vars), n = Number.isFinite(+v) && v !== '' ? shortNum(v) : v; ctx.font = `900 15px ${THEME.font}`; const nw = ctx.measureText(n).width; UK.text(ctx, n, x, y, { size: 15, weight: 900, color: txt, align: 'left' }); ctx.font = `500 15px ${THEME.font}`; const lw = ctx.measureText(label).width; UK.text(ctx, label, x + nw + 5, y, { size: 15, weight: 500, color: sub, align: 'left' }); x += nw + lw + 22; }
+        const G = SG(s), W0 = who(s), stats = G ? [['Posts', String((s.engine.data.def(p.postsCollection || 'Posts') ? s.engine.data.rows(p.postsCollection || 'Posts') : []).filter((r) => String(r.handle || '').replace(/^@/, '').toLowerCase() === W0.handle).length)], ['Followers', String(G.followers(W0.handle).length + (+fillTemplate(String(p.baseFollowers ?? ''), s.vars) || 0))], ['Following', String(G.following(W0.handle).length)], ['Friends', String(G.friends(W0.handle).length)]] : UK.lines(p.stats);
+        statsR = { x: b.x, y: y - 12, w: b.w, h: 26 };
+        for (const [label = '', val = ''] of stats) { const v = fillTemplate(val, s.vars), n = Number.isFinite(+v) && v !== '' ? shortNum(v) : v; ctx.font = `900 15px ${THEME.font}`; const nw = ctx.measureText(n).width; UK.text(ctx, n, x, y, { size: 15, weight: 900, color: txt, align: 'left' }); ctx.font = `500 15px ${THEME.font}`; const lw = ctx.measureText(label).width; UK.text(ctx, label, x + nw + 5, y, { size: 15, weight: 500, color: sub, align: 'left' }); x += nw + lw + 22; }
       },
     };
   },
@@ -10638,7 +10840,7 @@ registerBehavior('uiComposer', {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
           const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
-            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } postThread(s.engine.data, p.collection, me, out); if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
+            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
           if (ok) return;
         }
@@ -15309,6 +15511,95 @@ export class Mods {
     return g;
   }
 }
+
+/**
+ * The social graph of an app: who follows whom, friends (requests, accepted) and notifications.
+ * Kept in the collections Follows (follower, followee), Friends (from, to, status) and Notifications (to, from, from_name, type, post, text, read)
+ * when the app has them (so they can be online with Supabase), else on the device. Feeds, profiles, Who To Follow, Friends and Notifications all use it.
+ */
+export class SocialGraph {
+  constructor(engine) { this.engine = engine; this.t = 0; this.seenN = null; }
+  get D() { return this.engine.data; }
+  key() { return 'pocket.social.' + (this.engine.gameKey || 'game'); }
+  local() { try { const o = JSON.parse(store.get(this.key(), 'null')); if (o) return o; } catch { /* storage unavailable */ } return { follows: [], friends: [], notes: [] }; }
+  saveLocal(o) { store.set(this.key(), JSON.stringify(o)); }
+  coll(kind) { const n = { follows: 'Follows', friends: 'Friends', notes: 'Notifications' }[kind]; return this.D.def(n) ? n : null; }
+  rows(kind) { const c = this.coll(kind); return c ? this.D.rows(c) : this.local()[kind]; }
+  add(kind, rec) { const c = this.coll(kind); if (c) return this.D.add(c, rec); const o = this.local(), r = { id: kind[0] + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), _at: Date.now(), ...rec }; o[kind].push(r); this.saveLocal(o); this.changed(kind); return r; }
+  remove(kind, test) { const c = this.coll(kind); if (c) { for (const r of this.D.rows(c).filter(test)) this.D.remove(c, r.id); return; } const o = this.local(); o[kind] = o[kind].filter((r) => !test(r)); this.saveLocal(o); this.changed(kind); }
+  update(kind, test, patch) { const c = this.coll(kind); if (c) { for (const r of this.D.rows(c).filter(test)) this.D.update(c, r.id, patch); return; } const o = this.local(); for (const r of o[kind]) if (test(r)) Object.assign(r, patch); this.saveLocal(o); this.changed(kind); }
+  changed(kind) { const s = this.engine.scene; s?.emit('social', kind); this.vars(); }
+  /** Who I am: the signed-in person (Supabase), or {playerName} / {playerHandle}. */
+  me() {
+    const s = this.engine.scene, v = s?.vars || {}, u = this.engine.supa?.user?.(), md = u?.user_metadata || {};
+    const author = (u && (md.name || this.engine.supa.name(u))) || (typeof v.playerName === 'string' && v.playerName) || 'You';
+    const handle = String(md.username || md.handle || (typeof v.playerHandle === 'string' && v.playerHandle) || author.toLowerCase().replace(/\s+/g, '')).replace(/^@/, '');
+    return { author, handle };
+  }
+  h(x) { return String(x ?? '').trim().replace(/^@/, '').toLowerCase(); }
+  // ---- following ----
+  isFollowing(who, by = this.me().handle) { const a = this.h(by), b = this.h(who); return !!b && this.rows('follows').some((r) => this.h(r.follower) === a && this.h(r.followee) === b); }
+  follow(who, name = '') {
+    const me = this.me(), b = this.h(who); if (!b || b === this.h(me.handle) || this.isFollowing(b)) return false;
+    this.add('follows', { follower: me.handle, followee: b, follower_name: me.author, followee_name: name || b });
+    this.notify(b, 'follow'); this.engine.scene?.emit('followed', b); return true;
+  }
+  unfollow(who) { const a = this.h(this.me().handle), b = this.h(who); this.remove('follows', (r) => this.h(r.follower) === a && this.h(r.followee) === b); this.engine.scene?.emit('unfollowed', b); }
+  toggleFollow(who, name) { if (this.isFollowing(who)) { this.unfollow(who); return false; } this.follow(who, name); return true; }
+  followers(who = this.me().handle) { const b = this.h(who); return this.rows('follows').filter((r) => this.h(r.followee) === b).map((r) => ({ handle: this.h(r.follower), name: r.follower_name || r.follower })); }
+  following(who = this.me().handle) { const a = this.h(who); return this.rows('follows').filter((r) => this.h(r.follower) === a).map((r) => ({ handle: this.h(r.followee), name: r.followee_name || r.followee })); }
+  // ---- friends ----
+  friendRow(who) { const a = this.h(this.me().handle), b = this.h(who); return this.rows('friends').find((r) => (this.h(r.from) === a && this.h(r.to) === b) || (this.h(r.from) === b && this.h(r.to) === a)) || null; }
+  /** 'friends', 'sent' (I asked), 'received' (they asked) or 'none'. */
+  friendStatus(who) { const r = this.friendRow(who); if (!r) return 'none'; if (r.status === 'accepted') return 'friends'; return this.h(r.from) === this.h(this.me().handle) ? 'sent' : 'received'; }
+  addFriend(who, name = '') {
+    const me = this.me(), b = this.h(who), st = this.friendStatus(b); if (!b || b === this.h(me.handle)) return st;
+    if (st === 'received') return this.accept(b);
+    if (st !== 'none') return st;
+    this.add('friends', { from: me.handle, to: b, from_name: me.author, to_name: name || b, status: 'pending' }); this.notify(b, 'friend_request'); return 'sent';
+  }
+  accept(who) {
+    const b = this.h(who), me = this.me(); this.update('friends', (r) => this.h(r.from) === b && this.h(r.to) === this.h(me.handle), { status: 'accepted' });
+    this.notify(b, 'friend_accept'); if (!this.isFollowing(b)) this.follow(b); this.markRead((n) => n.type === 'friend_request' && this.h(n.from) === b); this.engine.scene?.emit('friendAdded', b); return 'friends';
+  }
+  decline(who) { const b = this.h(who), a = this.h(this.me().handle); this.remove('friends', (r) => this.h(r.from) === b && this.h(r.to) === a && r.status !== 'accepted'); this.markRead((n) => n.type === 'friend_request' && this.h(n.from) === b); }
+  cancel(who) { const b = this.h(who), a = this.h(this.me().handle); this.remove('friends', (r) => this.h(r.from) === a && this.h(r.to) === b && r.status !== 'accepted'); }
+  unfriend(who) { const b = this.h(who), a = this.h(this.me().handle); this.remove('friends', (r) => ((this.h(r.from) === a && this.h(r.to) === b) || (this.h(r.from) === b && this.h(r.to) === a))); }
+  friends(who = this.me().handle) { const a = this.h(who); return this.rows('friends').filter((r) => r.status === 'accepted' && (this.h(r.from) === a || this.h(r.to) === a)).map((r) => (this.h(r.from) === a ? { handle: this.h(r.to), name: r.to_name || r.to } : { handle: this.h(r.from), name: r.from_name || r.from })); }
+  requests() { const a = this.h(this.me().handle); return this.rows('friends').filter((r) => r.status !== 'accepted' && this.h(r.to) === a).map((r) => ({ handle: this.h(r.from), name: r.from_name || r.from, at: r._at })); }
+  sentRequests() { const a = this.h(this.me().handle); return this.rows('friends').filter((r) => r.status !== 'accepted' && this.h(r.from) === a).map((r) => ({ handle: this.h(r.to), name: r.to_name || r.to })); }
+  // ---- notifications ----
+  /** Tell someone something happened: like, comment, reply, repost, quote, mention, follow, friend_request, friend_accept, message. */
+  notify(to, type, o = {}) {
+    const me = this.me(), b = this.h(to); if (!b || b === this.h(me.handle)) return null;
+    if (['like', 'repost', 'follow'].includes(type) && this.rows('notes').some((n) => this.h(n.to) === b && this.h(n.from) === this.h(me.handle) && n.type === type && String(n.post ?? '') === String(o.post ?? '') && Date.now() - (n._at || 0) < 864e5)) return null; // (once, not every tap)
+    return this.add('notes', { to: b, from: me.handle, from_name: me.author, type, post: o.post != null ? String(o.post) : '', text: String(o.text || '').slice(0, 140), read: false });
+  }
+  /** The @someones in a text. */
+  mentions(text) { return [...new Set([...String(text || '').matchAll(/(^|[^\w@])@([A-Za-z0-9_.]{2,30})/g)].map((m) => m[2].toLowerCase()))]; }
+  notifyMentions(text, post) { for (const h of this.mentions(text)) this.notify(h, 'mention', { post, text }); }
+  mine() { const a = this.h(this.me().handle); return this.rows('notes').filter((n) => this.h(n.to) === a).sort((x, y) => (y._at || 0) - (x._at || 0)); }
+  unread() { return this.mine().filter((n) => !truthy(n.read)).length; }
+  markRead(test = () => true) { const a = this.h(this.me().handle); this.update('notes', (n) => this.h(n.to) === a && !truthy(n.read) && test(n), { read: true }); }
+  /** {notifications_unread}, {friend_requests}, {followers_count}, {following_count}, {friends_count} */
+  vars() {
+    const s = this.engine.scene; if (!s) return; const me = this.me().handle;
+    const set = (k, v) => { if (s.vars[k] !== v) s.setVar(k, v); };
+    set('notifications_unread', this.unread()); set('friend_requests', this.requests().length);
+    set('followers_count', this.followers(me).length); set('following_count', this.following(me).length); set('friends_count', this.friends(me).length);
+  }
+  tick(dt) {
+    if ((this.t += dt) < 0.5) return; this.t = 0; this.vars();
+    const s = this.engine.scene; if (!s || this.engine.editing) return;
+    const L = this.mine(), newest = L[0]; // a new one arrived (another phone, live): a banner and a buzz
+    if (this.seenN == null) { this.seenN = newest?.id ?? ''; return; }
+    if (newest && newest.id !== this.seenN && !truthy(newest.read)) { this.seenN = newest.id; if (s.settings?.socialBanners !== false) { this.engine.notify?.({ type: 'info', title: newest.from_name || '@' + newest.from, text: NOTE_TEXT(newest, false), icon: NOTE_ICON[newest.type] || '🔔', duration: 3 }); this.engine.vibrate?.(15); } s.emit('notification', newest.type, newest); }
+    else if (newest) this.seenN = newest.id;
+  }
+}
+const NOTE_ICON = { like: '❤️', comment: '💬', reply: '↩️', repost: '🔁', quote: '✏️', mention: '@', follow: '👤', friend_request: '🤝', friend_accept: '🤝', message: '✉️' };
+/** "Maya liked your post" (with the name) or "liked your post". */
+const NOTE_TEXT = (n, withName = true) => { const who = withName ? (n.from_name || '@' + n.from) + ' ' : ''; return who + ({ like: 'liked your post', comment: 'commented: ', reply: 'replied to your post', repost: 'reposted your post', quote: 'quoted your post', mention: 'mentioned you', follow: 'started following you', friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message' }[n.type] || n.type) + (n.type === 'comment' && n.text ? '“' + n.text + '”' : ''); };
 
 /**
  * Supabase for apps and games (Game Settings › Supabase): the app's own accounts (sign up, sign in, Google…)
@@ -21020,6 +21311,7 @@ export class Engine {
     this.input = new Input(this, this.uiCanvas);
     this.online = new Online(this);
     this.supa = new Supa(this); // the app's own accounts and online data (Game Settings › Supabase)
+    this.social = new SocialGraph(this); // follows, friends and notifications
     this.mods = new Mods(this); // mods players add (Game Settings › Plugins & Mods)
     this.audio = new Audio();
     this.physics = new Physics();
@@ -21608,7 +21900,7 @@ export class Engine {
       if (this.slowTime > 2 && this.dpr > 1) { this.maxDpr = Math.max(1, this.dpr - 0.5); this.slowTime = 0; this.resize(); }
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
       this.playTime = (this.playTime || 0) + dt; // time played, kept in save slots
-      this.supa.tick(dt);
+      this.supa.tick(dt); this.social.tick(dt);
       if (pluginHooks.update.length) runHooks('update', this.scene, dt, this);
       const ae = { 'every 30 seconds': 30, 'every minute': 60, 'every 5 minutes': 300 }[this.scene.settings.autoSave];
       if (ae && (this.autoTimer = (this.autoTimer || 0) + dt) > ae) { this.autoTimer = 0; this.autoSlot('timer'); }

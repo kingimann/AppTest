@@ -41,8 +41,8 @@ function squadGame(turnBased) {
 // ---- apps: pages shown by the `page` variable, an app bar, data lists and forms ----
 const INK = '@text', MUTED = '@sub'; // theme colours: they follow light / dark mode
 const app = {
-  bar: (titles, accent) => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions: 'moon | dark mode toggle', style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'once scrolled' }] }),
+  bar: (titles, accent, actions = 'moon | dark mode toggle') => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
+    behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions, style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'once scrolled' }] }),
   page: (id, value, home, kids, o = {}) => [{ id, name: value[0].toUpperCase() + value.slice(1) + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
     behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value, whenUnset: !!home, anim: o.anim || 'push (iOS, follows navigation)', stagger: o.stagger || 'rise one after another' }] }, ...kids.map((k) => ({ ...k, parent: k.parent || id }))],
   text: (id, name, value, y, o = {}) => ({ id, name, ui: true, anchor: 'top-left', x: 20, y, text: { value, size: o.size || 16, color: o.color || INK, weight: o.weight || '600', align: 'left', wrap: o.wrap ?? 360 } }),
@@ -167,7 +167,7 @@ function socialApp() {
     behaviors: [{ type: 'uiFeed', collection: 'Posts', look, ...o, card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
   return {
     version: 1, name: 'Social', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Social', A),
-    vars: { page: 'home', playerName: 'Alex Rivera', playerHandle: 'alex', followers: 1280, following: 0, chat: '', chatTitle: 'Chat', unread: 0, q: '' },
+    vars: { page: 'home', playerName: 'Alex Rivera', playerHandle: 'alex', followers: 1280, following: 0, chat: '', chatTitle: 'Chat', unread: 0, q: '', profile: '', profile_name: '', openPost: '' },
     collections: [{ name: 'Posts', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' },
       { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Comments', type: 'number' }, { name: 'Reposts', type: 'number' }, { name: 'Reposted', type: 'yes/no' }, { name: 'Saved', type: 'yes/no' }, { name: 'Verified', type: 'yes/no' },
       { name: 'Location', type: 'text' }, { name: 'Poll', type: 'text' }, { name: 'Votes', type: 'text' }, { name: 'Voted', type: 'number' }, { name: 'Reaction', type: 'text' }, { name: 'Following', type: 'yes/no' },
@@ -181,6 +181,7 @@ function socialApp() {
       { author: 'Leo Park', handle: 'leop', text: 'Also: the app is now 30% smaller to download 📦', likes: 88, comments: 4, reposts: 6, following: true, reply_to: 's1', _at: t - 2.45 * H },
       { author: 'Leo Park', handle: 'leop', text: 'Full list of changes on the blog 👇 #indiedev', likes: 51, comments: 2, reposts: 3, following: true, reply_to: 's5', link: 'https://example.com/changelog', link_title: 'What’s new in 2.0', link_image: '📝', _at: t - 2.4 * H },
       { author: 'Ava Brooks', handle: 'avab', text: 'Adding this to my list of places to see 😍 #hiking', likes: 64, comments: 5, reposts: 2, following: false, quote: 's0', _at: t - 30 * H },
+      { author: 'Alex Rivera', handle: 'alex', text: 'Just joined! Say hi 👋 #newhere', likes: 3, comments: 1, reposts: 0, following: true, _at: t - 5 * H },
     ] },
     { name: 'Messages', fields: [{ name: 'Chat', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Reaction', type: 'text' }],
       rows: [
@@ -191,24 +192,43 @@ function socialApp() {
         { chat: 'dm-alex-leop', author: 'Leo Park', handle: 'leop', text: 'Did you try the new update? #indiedev', _at: t - 26 * H },
         { chat: 'general', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome to the group chat everyone! 🎉', _at: t - 50 * H },
       ] },
-    { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }], rows: [] }],
+    { name: 'Follows', fields: [{ name: 'Follower', type: 'text' }, { name: 'Followee', type: 'text' }, { name: 'Follower Name', type: 'text' }, { name: 'Followee Name', type: 'text' }],
+      rows: [['alex', 'maya', 'Alex Rivera', 'Maya Chen'], ['alex', 'leop', 'Alex Rivera', 'Leo Park'], ['alex', 'sofiaruiz', 'Alex Rivera', 'Sofia Ruiz'], ['alex', 'pocketnews', 'Alex Rivera', 'Pocket News'], ['maya', 'alex', 'Maya Chen', 'Alex Rivera'], ['leop', 'alex', 'Leo Park', 'Alex Rivera'], ['amir', 'alex', 'Amir Haddad', 'Alex Rivera'], ['maya', 'leop', 'Maya Chen', 'Leo Park'], ['sofiaruiz', 'maya', 'Sofia Ruiz', 'Maya Chen']].map(([follower, followee, follower_name, followee_name]) => ({ follower, followee, follower_name, followee_name })) },
+    { name: 'Friends', fields: [{ name: 'From', type: 'text' }, { name: 'To', type: 'text' }, { name: 'From Name', type: 'text' }, { name: 'To Name', type: 'text' }, { name: 'Status', type: 'text' }],
+      rows: [{ from: 'maya', to: 'alex', from_name: 'Maya Chen', to_name: 'Alex Rivera', status: 'accepted', _at: t - 200 * H }, { from: 'leop', to: 'alex', from_name: 'Leo Park', to_name: 'Alex Rivera', status: 'pending', _at: t - 1.2 * H }] },
+    { name: 'Notifications', fields: [{ name: 'To', type: 'text' }, { name: 'From', type: 'text' }, { name: 'From Name', type: 'text' }, { name: 'Type', type: 'text' }, { name: 'Post', type: 'text' }, { name: 'Text', type: 'text' }, { name: 'Read', type: 'yes/no' }],
+      rows: [
+        { to: 'alex', from: 'maya', from_name: 'Maya Chen', type: 'like', post: 's8', text: 'Just joined! Say hi 👋', read: false, _at: t - 0.3 * H },
+        { to: 'alex', from: 'sofiaruiz', from_name: 'Sofia Ruiz', type: 'comment', post: 's8', text: 'Welcome Alex! 🎉', read: false, _at: t - 0.6 * H },
+        { to: 'alex', from: 'leop', from_name: 'Leo Park', type: 'friend_request', post: '', text: '', read: false, _at: t - 1.2 * H },
+        { to: 'alex', from: 'amir', from_name: 'Amir Haddad', type: 'follow', post: '', text: '', read: false, _at: t - 3 * H },
+        { to: 'alex', from: 'leop', from_name: 'Leo Park', type: 'like', post: 's8', text: 'Just joined! Say hi 👋', read: true, _at: t - 4 * H },
+      ] },
+    { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      app.bar('home = Home\nreels = Reels\nexplore = Explore\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A),
+      app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle'),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
-        feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following = yes', tabStyle: 'underline' }),
+        feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', myProfilePage: 'profile' }),
       ]),
-      ...app.page('p-reels', 'reels', false, [feed('feed-reels', 'reels', 0)]),
+      ...app.page('p-reels', 'reels', false, [feed('feed-reels', 'reels', 0, { profilePage: 'user', myProfilePage: 'profile' })]),
       ...app.page('p-explore', 'explore', false, [
         { id: 'explore-search', name: 'Search Bar', ui: true, anchor: 'top', x: 0, y: 26, stretch: 'width', margin: 12, shape: { type: 'rect', w: 376, h: 44, radius: 22, fill: '' }, behaviors: [{ type: 'uiSearchBar', var: 'q', placeholder: 'Search posts, #tags, @people', collection: 'Posts', text: INK, sub: MUTED }] },
         feed('feed-explore', 'grid', 60, { searchVar: 'q', gridColumns: 3 }),
+      ]),
+      ...app.page('p-notifications', 'notifications', false, [{ id: 'activity', name: 'Notifications', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiActivity', openPage: 'home', profilePage: 'user', text: INK, sub: MUTED }] }]),
+      ...app.page('p-friends', 'friends', false, [{ id: 'friends-list', name: 'Friends', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiFriends', profilePage: 'user', text: INK, sub: MUTED }] }]),
+      ...app.page('p-user', 'user', false, [
+        { id: 'user-head', name: 'Person Header', ui: true, anchor: 'top', x: 0, y: 140, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 290, radius: 0, fill: '' },
+          behaviors: [{ type: 'uiProfile', social: true, name: '{profile_name}', handle: '{profile}', bio: '', verified: false, own: false, listPage: 'friends', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
+        feed('feed-user', 'timeline', 270, { filter: 'handle = {profile}', profilePage: '', empty: 'No posts yet' }),
       ]),
       ...app.page('p-inbox', 'inbox', false, [{ id: 'inbox', name: 'Inbox', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiInbox', collection: 'Messages', openPage: 'chat', text: INK, sub: MUTED }] }]),
       ...app.page('p-chat', 'chat', false, [{ id: 'chat-view', name: 'Chat', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiChat', collection: 'Messages', room: 'general', text: INK, sub: MUTED }] }]),
       ...app.page('p-profile', 'profile', false, [
         { id: 'profile-head', name: 'Profile Header', ui: true, anchor: 'top', x: 0, y: 140, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 290, radius: 0, fill: '' },
-          behaviors: [{ type: 'uiProfile', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nFollowing | 312', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
+          behaviors: [{ type: 'uiProfile', social: true, listPage: 'friends', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nFollowing | 312', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
         { id: 'profile-grid', name: 'Photo Grid', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: 258, marginBottom: 0, shape: { type: 'rect', w: 400, h: 300, radius: 0, fill: '' }, behaviors: [{ type: 'uiPhotoGrid', collection: 'Posts', openPage: 'post' }] },
       ]),
       ...app.page('p-post', 'post', false, [

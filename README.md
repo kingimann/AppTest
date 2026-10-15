@@ -1089,6 +1089,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     | spotlight | a beam of light shines down on the selected tab |
     | outline | a ring around the selected icon |
     | chips | every tab is a chip; the selected one is filled |
+  - **Badges:** colour, number colour, size, shape, ring, position (icon corner, top right, beside the name, over the icon) and nudges, highest number shown (`99+`), words like NEW, dot only, show 0, pop / shake / pulse / glow, hide on the selected tab, and clear when the tab is opened.
   - **The newly selected icon** bounces, pops, spins, wiggles or flips. **Glow** for neon and spotlight, and the colour of the icon and text **on the highlight** for segmented, curved and chips.
   - **Labels:** auto, always, selected only, or never.
   - **Colours:** bar, selected, other tabs, indicator and badge. *Apply theme* recolours the bar too.

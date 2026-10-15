@@ -6938,7 +6938,21 @@ registerBehavior('uiBottomNav', {
     { key: 'activeColor', label: 'Selected colour', type: 'color', default: '#4fa3ff', group: 'Colours' },
     { key: 'idleColor', label: 'Other tabs', type: 'color', default: '#8b90a5', group: 'Colours' },
     { key: 'indicatorColor', label: 'Indicator (blank = selected colour)', type: 'color', default: '', optional: true, group: 'Colours' },
-    { key: 'badgeColor', label: 'Badge colour', type: 'color', default: '#ff3b5c', group: 'Colours' },
+    { key: 'badgeColor', label: 'Colour', type: 'color', default: '#ff3b5c', group: 'Badges' },
+    { key: 'badgeTextColor', label: 'Number colour', type: 'color', default: '#ffffff', group: 'Badges' },
+    { key: 'badgeSize', label: 'Size', type: 'number', default: 1, range: [0.6, 2], step: 0.05, group: 'Badges' },
+    { key: 'badgeShape', label: 'Shape', type: 'select', options: ['round', 'rounded square', 'square'], default: 'round', group: 'Badges' },
+    { key: 'badgePos', label: 'Where', type: 'select', options: ['icon corner', 'top right of the tab', 'beside the name', 'over the icon'], default: 'icon corner', group: 'Badges', info: { 'beside the name': 'Next to the tab\'s name (on its icon when the name is hidden).' } },
+    { key: 'badgeX', label: 'Nudge right', type: 'number', default: 0, range: [-30, 30], step: 1, group: 'Badges' },
+    { key: 'badgeY', label: 'Nudge down', type: 'number', default: 0, range: [-30, 30], step: 1, group: 'Badges' },
+    { key: 'badgeMax', label: 'Highest number shown (then 99+)', type: 'number', default: 99, range: [1, 9999], step: 1, group: 'Badges', showIf: (b) => b.badgeStyle !== 'dot only' },
+    { key: 'badgeWords', label: 'Show words too (a variable set to NEW, SALE…)', type: 'bool', default: true, group: 'Badges', showIf: (b) => b.badgeStyle !== 'dot only' },
+    { key: 'badgeRing', label: 'Ring around it', type: 'bool', default: true, group: 'Badges' },
+    { key: 'badgeRingColor', label: 'Ring colour (blank = the bar\'s)', type: 'color', default: '', optional: true, group: 'Badges', showIf: (b) => b.badgeRing !== false },
+    { key: 'badgeAnim', label: 'Animation', type: 'select', options: ['pop when it changes', 'shake when it changes', 'pulse', 'glow', 'none'], default: 'pop when it changes', group: 'Badges' },
+    { key: 'badgeZero', label: 'Show 0 too', type: 'bool', default: false, group: 'Badges' },
+    { key: 'badgeHideSelected', label: 'Hide it on the selected tab', type: 'bool', default: false, group: 'Badges' },
+    { key: 'badgeClear', label: 'Opening a tab clears its badge (sets it to 0)', type: 'bool', default: false, group: 'Badges', infoText: 'For “unread” counts: seeing the page marks them read.' },
     { key: 'onColor', label: 'Icon and text on the highlight', type: 'color', default: '#ffffff', group: 'Colours', showIf: { style: ['segmented', 'curved', 'chips'] } },
     { key: 'glow', label: 'Glow', type: 'number', default: 16, range: [0, 40], step: 1, group: 'Colours', showIf: { style: ['neon', 'spotlight'] } },
     { key: 'iconMotion', label: 'The newly selected icon', type: 'select', options: ['stays still', 'bounces', 'pops', 'spins', 'wiggles', 'flips'], default: 'stays still', group: 'Animation' },
@@ -6969,7 +6983,7 @@ registerBehavior('uiBottomNav', {
     { key: 'message', label: 'Also send message on change', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'reserve', label: 'Keep other UI clear of the bar', type: 'bool', default: true, group: 'Layout', infoText: 'Pages, buttons and pop-ups anchored to the bottom sit above the bar instead of under it.' },
     { key: 'maxWidth', label: 'Widest the bar gets (0 = full width)', type: 'number', default: 0, range: [0, 900], step: 10, group: 'Layout', infoText: 'On tablets and sideways phones the bar stays this wide, in the middle.' },
-    { key: 'badgeStyle', label: 'Badges', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Colours' },
+    { key: 'badgeStyle', label: 'Shows', type: 'select', options: ['count', 'dot only'], default: 'count', group: 'Badges' },
     { key: 'activeLift', label: 'Selected icon lifts up', type: 'number', default: 0, range: [0, 12], step: 1, group: 'Animation' },
     { key: 'height', label: 'Bar height (0 = the object\'s height)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Size & shape', infoText: 'How tall the bar is. Icons and labels stay centred; change their sizes above.' },
 
@@ -6977,6 +6991,7 @@ registerBehavior('uiBottomNav', {
   ],
   create(p) {
     const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
+    const badgeSeen = new Map(); // per tab: the badge's last value and when it changed (for its pop)
     let selT = 9, W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
     /** What the pages say about the bar (hide it, which tab stays lit, its colour there), looked up now and then. */
@@ -7033,6 +7048,7 @@ registerBehavior('uiBottomNav', {
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
         const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
+        if (p.badgeClear && !s.engine.editing && ti >= 0 && T[ti].badge) { const v = s.vars[T[ti].badge]; if (v != null && v !== 0 && v !== '' && v !== false && v !== '0') s.setVar(T[ti].badge, typeof v === 'number' || /^\d+$/.test(String(v)) ? 0 : ''); } // seeing the page marks it read
         const a = activeIdx(s);
         const c0 = s.engine.uiCtx, chipsFit = p.style === 'chips' && c0 && (() => { const ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity) - 12, isz = +p.iconSize || 24, lsz = +p.labelSize || 11; c0.font = `800 ${lsz + 1}px ${THEME.font}`; return T.every((t) => !showLabel(0, true) || !t.label || isz * 0.85 + 6 + c0.measureText(t.label).width + 24 <= bw / T.length - 10); })();
         if ((p.style === 'bubble' || (p.style === 'chips' && !chipsFit)) && T.length > 1) { // the selected tab grows to fit its name, the others share the rest (chips: when the names don't all fit)
@@ -7194,12 +7210,33 @@ registerBehavior('uiBottomNav', {
             ctx.restore();
           }
           // badge
-          const bv = t.badge ? s.vars[t.badge] : null;
-          if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
-            const bxp = x + isz * 0.55, byp = y - (lab && st !== 'bubble' ? lsz * 0.85 : 0) - isz * 0.45, n = +bv, txt = p.badgeStyle !== 'dot only' && Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
-            ctx.fillStyle = p.badgeColor || '#ff3b5c'; ctx.strokeStyle = st === 'minimal' ? 'transparent' : p.barColor || '#12141f'; ctx.lineWidth = 2;
-            if (!txt) { ctx.beginPath(); ctx.arc(bxp, byp, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-            else { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(txt).width + 8); rr(bxp - 6, byp - 8, w, 16, 8); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bxp - 6 + w / 2, byp + 0.5); }
+          const bv = t.badge ? s.vars[t.badge] : null, now = s.time || 0;
+          const seen = badgeSeen.get(i); if (!seen || seen.v !== bv) badgeSeen.set(i, { v: bv, t: seen ? now : -9 }); // (a change starts its pop; the first look doesn't)
+          const zero = bv === 0 || bv === '0';
+          if (bv != null && bv !== '' && bv !== false && (!zero || p.badgeZero) && !(on && p.badgeHideSelected)) {
+            const n = +bv, num = Number.isFinite(n) && bv !== true && String(bv).trim() !== '', max = Math.max(1, +p.badgeMax || 99);
+            const txt = p.badgeStyle === 'dot only' ? '' : num ? (n > max ? max + '+' : String(Math.round(n))) : p.badgeWords !== false && typeof bv === 'string' ? bv.trim().slice(0, 8) : '';
+            const bs = clamp(+p.badgeSize || 1, 0.4, 3), pos = p.badgePos || 'icon corner', named = lab && st !== 'bubble' && st !== 'chips', iconY = y - (named ? lsz * 0.85 : 0) - lift;
+            let bxp = x + isz * 0.55 - 6, byp = iconY - isz * 0.45, anchorLeft = true; // (the badge's left side, and its middle)
+            if (pos === 'top right of the tab') { bxp = x + G.tws(i) / 2 - 8; byp = G.by + 8; anchorLeft = false; }
+            else if (pos === 'over the icon') { bxp = x; byp = iconY; anchorLeft = null; }
+            else if (pos === 'beside the name' && named) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; bxp = x + ctx.measureText(t.label).width / 2 + 4; byp = iconY + isz * 0.5 + lsz * 1.05; }
+            bxp += +p.badgeX || 0; byp += +p.badgeY || 0;
+            const ch = badgeSeen.get(i), age = now - (ch?.t ?? -9), anim = p.badgeAnim || 'pop when it changes';
+            let k = bs, dx = 0;
+            if (anim === 'pop when it changes' && age < 0.45) k *= 1 + Math.sin(clamp(age / 0.45, 0, 1) * Math.PI) * 0.45;
+            else if (anim === 'shake when it changes' && age < 0.6) dx = Math.sin(age * 45) * 4 * (1 - age / 0.6);
+            else if (anim === 'pulse') k *= 1 + Math.sin(now * 4) * 0.08;
+            const hgt = 16, w = txt ? Math.max(hgt, (ctx.font = `800 10px ${THEME.font}`, ctx.measureText(txt).width + 8)) : 9;
+            const cx0 = anchorLeft === true ? bxp + w * k / 2 : anchorLeft === false ? bxp - w * k / 2 : bxp; // grow from the side it's pinned to
+            ctx.save(); ctx.translate(cx0 + dx, byp); ctx.scale(k, k);
+            ctx.fillStyle = tok(p.badgeColor) || p.badgeColor || '#ff3b5c';
+            ctx.strokeStyle = p.badgeRing === false || st === 'minimal' ? 'transparent' : tok(p.badgeRingColor) || p.badgeRingColor || p.barColor || '#12141f'; ctx.lineWidth = 2;
+            if (anim === 'glow') { ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8 + Math.sin(now * 4) * 4; }
+            const shape = p.badgeShape || 'round', h = txt ? hgt : 9, r = shape === 'square' ? 2 : shape === 'rounded square' ? Math.min(5, h / 2) : h / 2;
+            rr(-w / 2, -h / 2, w, h, r); ctx.fill(); ctx.shadowColor = 'transparent'; ctx.stroke();
+            if (txt) { ctx.fillStyle = tok(p.badgeTextColor) || p.badgeTextColor || '#fff'; ctx.font = `800 10px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(txt, 0, 0.5); }
+            ctx.restore();
           }
         });
       },

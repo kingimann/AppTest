@@ -4277,6 +4277,15 @@ const AFRAC = (a = 'top-left') => ({ x: a.includes('left') ? 0 : a.includes('rig
 /** A full-screen page (or other top-level backdrop): it runs under see-through bars; what's on it doesn't. */
 const isBackdrop = (e) => e.ui && e.stretch === 'both' && !e.parentEnt?.ui && !e._dock && !e.ignoreBars && !e.ignoreSafe;
 /** The bars an element lays itself out around: a backdrop leaves out the ones it goes under. */
+/** UI in draw order: a bar (Bottom Nav, App Bar…) always draws over the full-screen pages, even ones made after it (pages can run under a see-through or floating bar). */
+function uiDrawOrder(s) {
+  const L = s.entities; let last = -1;
+  for (let i = 0; i < L.length; i++) { const e = L[i]; if (e.ui && !e.dead && isBackdrop(e)) last = i; }
+  if (last < 0 || !L.some((e, i) => i < last && e._dock)) return L;
+  const out = [], later = [];
+  for (let i = 0; i < L.length; i++) { const e = L[i]; if (i < last && e._dock) later.push(e); else out.push(e); if (i === last) out.push(...later); }
+  return out;
+}
 function barsFor(e, safe) {
   const B = safe?.bars, U = safe?.under; if (!B || !U || !isBackdrop(e)) return B;
   return { top: U.top >= B.top ? 0 : B.top, right: U.right >= B.right ? 0 : B.right, bottom: U.bottom >= B.bottom ? 0 : B.bottom, left: U.left >= B.left ? 0 : B.left };
@@ -4464,7 +4473,7 @@ function renderUI(engine, scene) {
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
-    for (const e of scene.entities) {
+    for (const e of uiDrawOrder(scene)) {
       if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
       if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
       if (!engine.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== screen) continue; }

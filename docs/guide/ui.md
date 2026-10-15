@@ -237,6 +237,17 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - Messages for tapping a post, liking, comment, share and ⋯.
   - **Colours:** background, cards, text, grey text, lines, accent, liked, reposted, verified tick, card border and the avatar ring.
   - There's also a fourth look, **compact**: tighter rows with a small picture on the right.
+  - **Tabs** on top (*Tabs* setting, one per line: `Label | only where…`, e.g. `For you |` and `Saved | saved = yes`). Pick underline, pills or segmented tabs; the picked tab can go in a variable.
+  - **Pinned posts** (`pinned = yes`) come first with 📌 Pinned. A **label** field puts a small line above a post, like *Sponsored* or *Suggested for you*.
+  - **#hashtags, @mentions and links** are coloured. Tapping a tag fills the search variable and sends a message; tapping a link opens it.
+  - **Font** for the whole feed, colours for names, @handles, links, the post background and a pressed post.
+  - **Verified tick colours:** accent, blue, gold, grey, green, or taken from the verified field (`gold`, `grey`, `green`).
+  - **Buttons:** icons only, or icons with words ("12 likes", "Reply"), and their icon size. Numbers can be auto, short (1.2K) or full (1,234).
+  - **Avatar rings** (none, gradient, accent) on any look, and pictures that fill (crop) or fit (whole picture).
+  - **Lines between posts** can start at the text instead of the edge.
+  - **Messages:** holding a post, tapping a tag, and *load more* when you scroll near the end.
+  - **"↑ New posts"** button when posts arrive while you're scrolled down (tap to jump up).
+  - **End text** like "You're all caught up ✨".
 - **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.

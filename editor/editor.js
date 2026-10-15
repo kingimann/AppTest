@@ -4,7 +4,7 @@
 import { installPlugins, installedPlugins, Mods, supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
-const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
+const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import * as cloud from './cloud.js';
 import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
@@ -5761,7 +5761,7 @@ function quickCreate(sec = 'games') {
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
   const wrap = h('div');
   const apps = sec === 'apps';
-  const picks = apps ? [['app-blank', 'app', 'New app', 'Pages and a tab bar'], ['app-todo', 'app', 'To-do list', 'Saved on the phone', 'check'], ['app-arcade', 'app', 'App with games', 'Games inside, with scores', 'gamepad']]
+  const picks = apps ? [['app-blank', 'app', 'New app', 'Pages and a tab bar'], ['app-todo', 'app', 'To-do list', 'Saved on the phone', 'check'], ['app-social', 'app', 'Social app', 'Feed, stories and a profile', 'heart'], ['app-arcade', 'app', 'App with games', 'Games inside, with scores', 'gamepad']]
     : [['empty-2d', '2d', 'New 2D game'], ['empty-3d', '3d', 'New 3D game']];
   const draw = () => wrap.replaceChildren(...[
     h('div', { class: 'quick' + (apps ? '' : ' two') }, picks.filter(([key]) => templateInfo.some((x) => x.key === key)).map(([key, k, label, sub, ic]) => {

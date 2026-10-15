@@ -1,12 +1,13 @@
 # Publishing your game
 
-There are four ways to get a game to players, from quickest to most involved:
+There are five ways to get a game to players, from quickest to most involved:
 
 | Way | What players get | Needs |
 |---|---|---|
 | **Build HTML** | One file that plays in any phone browser | Nothing |
 | **Build Web App (.zip)** | A website that installs to the Home Screen, plays offline and can send notifications | Any https web host (GitHub Pages, Netlify…) |
 | **App stores via Codemagic** | Real iOS and Android apps | Apple / Google developer accounts, a free Codemagic account |
+| **itch.io** | A page on itch.io that plays in the browser, on phones too | A free itch.io account |
 | **App stores via Expo** | Real iOS and Android apps (React Native WebView) | An Expo account (EAS) |
 
 All of them start from **☰ → Build Settings…**.
@@ -84,6 +85,55 @@ App builds get real haptics, scheduled notifications that arrive while the game 
 - Try it: `npm install`, then `npx expo start`, and scan the QR code with Expo Go.
 - Build: `eas build --profile preview` (a test build) or `--profile production`, then `eas submit`.
 - Update the game by replacing `game/game-html.js`.
+
+The **Expo & EAS** section of Build Settings adds:
+
+- **Apple ID**, **App Store Connect app ID** and **Team ID**, written into `eas.json`, so `eas submit --platform ios` knows where to upload.
+- **Upload to Google Play with a key file**: `eas submit --platform android` uses `google-play-key.json` in the project folder (kept out of git).
+- **Set build numbers myself**: off, EAS counts builds up for you; on, the number you type goes in as iOS `buildNumber` and Android `versionCode`.
+- Always included:
+  - Apple's privacy manifest (no tracking);
+  - an app icon without transparency (the App Store refuses icons that have an alpha channel);
+  - the adaptive Android icon;
+  - the `store-listing/` folder (below).
+
+## itch.io
+
+Pick **itch.io** in Build Settings. The download has:
+
+- `upload-this-to-itch.zip`: the game, with `index.html` at its root, the way itch.io wants HTML5 games.
+- `cover-630x500.png`: the cover image, made from your icon and name.
+- `ITCH-PAGE.md`: the page settings, worked out for your game:
+  - Kind of project: HTML, and "This file will be played in the browser";
+  - the viewport size (portrait games get a tall frame, landscape games a wide one);
+  - **Mobile friendly** with the right orientation;
+  - the fullscreen button;
+  - the genre, tags and description;
+  - a `butler push` command for updating from a computer (fill in your itch.io username in Build Settings).
+
+## Store listing kit
+
+The stores ask for more than the app. **Store listing** in Build Settings (for the App Store & Google Play and Expo targets) takes:
+
+- the subtitle (App Store, 30 letters);
+- the short description (Google Play, 80);
+- keywords (100);
+- the category;
+- the privacy policy link, support link and website.
+
+The checklist warns when something is too long, or when the privacy policy link is missing: both stores require one.
+
+**Download store kit (.zip)** (also inside every app project, as `store-listing/`) contains:
+
+| File | For |
+|---|---|
+| `app-store-icon-1024.png` | App Store Connect: 1024×1024, no transparency |
+| `play-icon-512.png` | Google Play's app icon |
+| `play-feature-graphic-1024x500.png` | Google Play's feature graphic (required): your icon and name |
+| `LISTING.md` | All the text to paste, with each store's limits and category names, the screenshot sizes, age-rating tips, and answers for **App Store › App Privacy** and **Google Play › Data safety** worked out from what your game uses (PlayFab, Photon, Supabase accounts and data, notifications, camera, microphone, location) |
+| `privacy-policy.md` | A starter privacy policy that matches what the game does. Put it online (GitHub Pages works) and paste its address as the privacy policy link |
+
+A game that keeps everything on the phone gets "Data not collected", the simplest answer in both stores.
 
 ## Playing a game from a URL
 

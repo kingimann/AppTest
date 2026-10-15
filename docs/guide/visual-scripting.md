@@ -10,6 +10,8 @@ A **Visual Script** is logic built from **nodes** joined by **wires**. It can do
 
 A script belongs to an object: "this object" in a node means that object.
 
+Apps use the same scripts. In an app, *New Visual Script* puts the script on an **App Logic** object that runs on every page, and the **App** folder in Add Node (first in apps) has the page, menu, data and game nodes. See [Making apps › Visual scripts in apps](#/guide/apps).
+
 ## Reading a script
 
 ```

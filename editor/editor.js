@@ -2303,10 +2303,15 @@ function gettingStarted() {
 /** Add a Visual Script to the selected object (or the player, or a new logic object) and open the Node Editor. */
 function addVisualScript() {
   let j = ent(selectedId);
-  if (!j || j.template) j = project.entities.find((e) => (e.tags || []).includes('player'));
-  if (!j) j = addEntity({ name: 'Game Logic', ...(is3D() ? { y: 0 } : {}) });
+  const app = !!levelList()[0].settings?.app;
+  if (app && j && (j.template || (j.behaviors || []).some((q) => q.type === 'uiShowIf'))) j = null; // a page hides when it isn't shown: app scripts live on an App Logic object that always runs
+  if (!j || j.template) j = app ? project.entities.find((e) => e.name === 'App Logic') : project.entities.find((e) => (e.tags || []).includes('player'));
+  if (!j) j = addEntity(app ? { name: 'App Logic' } : { name: 'Game Logic', ...(is3D() ? { y: 0 } : {}) });
   const b = defaultBehavior('graph', is3D() && !j.ui);
-  if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
+  if (app && !j.ui && !hasVisual(j)) // an app starts from a page opening
+    b.graph = { nodes: [{ id: 'n1', type: 'onPage', x: 20, y: 40, params: { page: '', var: 'page' } }, { id: 'n2', type: 'toast', x: 330, y: 20, params: { text: 'Opened {page}', where: 'bottom' } }],
+      links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
+  else if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
     b.graph = { nodes: [{ id: 'n1', type: 'every', x: 20, y: 40, params: { seconds: 1 } }, { id: 'n2', type: 'addVar', x: 330, y: 20, params: { name: 'score', amount: 1 } }],
       links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
   const bi = (j.behaviors || []).findIndex((q) => q.type === 'graph');
@@ -2880,7 +2885,7 @@ function editGraph(target, path) {
   const B = () => getPath(T(), path.replace(/\.graph$/, ''));
   const back = () => ed.close();
   const ed = openNodeEditor({
-    graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz,
+    graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz, app: !!levelList()[0].settings?.app,
     stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
@@ -3898,6 +3903,7 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
     h('p', { class: 'desc' }, 'Apps can hold games: add one as new levels, and a Play Game button opens it. The game keeps its own title, pause and end screens, with a “Back to app” button.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),
+    C('settings.shareVars', { label: 'Variables shared with games (* = all)', type: 'text', def: '', suggest: 'vars', infoText: 'e.g. coins, gems, name. A game opened from the app starts with them, and they come back to the app as the game left them (coins won in the game are in the app). Blank: games start fresh and only {lastScore}, {lastResult} and {lastGame} come back.' }),
     C('settings.recordPlays', { label: 'Record every game played in collection (blank = don’t)', type: 'text', def: '', infoText: 'Each play adds a record with game, score, result (won / lost / quit) and date. Make the collection in Data below.' }),
   ], { icon: 'phone', key: 's-app' }));
   box.append(comp('Theme & Dark Mode', [

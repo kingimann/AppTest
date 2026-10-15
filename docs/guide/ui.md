@@ -220,6 +220,23 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Until you make that collection, it shows sample posts.
   - Likes, reposts and saves are stored in the record.
   - Tapping a post opens it (`{record_text}`…) and can go to a page. Comment and share send messages.
+- **Feed settings** (in the Inspector, grouped):
+  - **Content:** collection, sort, filter, a search variable (matches name, handle and text), most posts shown, and *My field names* (e.g. `text = body, media = photo`) if your collection uses other names.
+  - **Show:**
+    - Which buttons appear, in what order (`like, comment, repost, share, save, views`), and the like icon (heart, thumbs up, star, fire).
+    - Avatars, @handles and verified ticks on or off.
+    - Time as short (3h), long (3 hours ago), a date, or hidden.
+    - Counts, pictures and the ⋯ button on or off.
+    - *Lines before "Show more"*.
+  - **Layout:**
+    - Text size, name size, avatar size and shape (circle, rounded square, square), padding and space between posts.
+    - Picture shape (16:9, 2:1, square, 4:5) and roundness.
+    - Lines between posts, and card roundness and shadow.
+  - **Behaviour:**
+    - Double-tap to like, pull to refresh, how posts appear (slide up, fade, pop, at once) and a scroll bar.
+    - Messages for tapping a post, liking, comment, share and ⋯.
+  - **Colours:** background, cards, text, grey text, lines, accent, liked, reposted, verified tick, card border and the avatar ring.
+  - There's also a fourth look, **compact**: tighter rows with a small picture on the right.
 - **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.

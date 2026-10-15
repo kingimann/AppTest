@@ -475,6 +475,7 @@ export const UI_WIDGETS_MORE = [
     ['Tutorial (coach marks)', 'Game Systems', 'bulb', 'uiTutorial', 220, 50, { once: false }, { anchor: 'top', y: 160, note: 'Edit Steps: text, then a target object name or x%,y% on the screen. "Only the first time" saves that it was seen.' }],
     // social: feeds, stories, likes, profiles
     ['Social Feed (timeline)', 'Social', 'list', 'uiFeed', 380, 560, { look: 'timeline' }, { note: 'Shows sample posts until you add a data collection called Posts (author, handle, text, media, color, likes, liked, comments, reposts, verified). The Social app template has one ready.' }],
+    ['Compact Feed', 'Social', 'list', 'uiFeed', 380, 560, { look: 'compact', maxLines: 2 }, { note: 'Tighter rows with a small picture on the right. Every feed has Show, Layout, Behaviour and Colours settings.' }],
     ['Photo Feed', 'Social', 'image', 'uiFeed', 380, 600, { look: 'photos' }, { note: 'Big square pictures; double-tap one to like it.' }],
     ['Card Feed', 'Social', 'square', 'uiFeed', 380, 600, { look: 'cards' }],
     ['Stories', 'Social', 'circle', 'uiStories', 390, 92, {}, { anchor: 'top', y: 110 }],

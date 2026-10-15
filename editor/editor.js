@@ -6525,6 +6525,33 @@ function navIconImg(ic) {
   const u = artURL('art:' + (ic.startsWith('ui-') ? ic : 'ui-' + ic));
   return h('span', { class: 'nt-ic', 'data-icon': ic, style: `-webkit-mask-image:url("${u}");mask-image:url("${u}")` });
 }
+/** A tab's badge: the variable it counts, how it shows (count, dot), its own colour, and the number it starts at. */
+function editTabBadge(r, rows, save, b) {
+  const pad = () => { while (r.length < 8) r.push(''); };
+  const vars = Object.keys(project.vars || {}).sort();
+  const name = h('input', { type: 'text', value: r[3] || '', placeholder: 'e.g. unread, shopNew', list: 'tbVars', autocapitalize: 'off', spellcheck: false });
+  const start = h('input', { type: 'number', value: r[3] && project.vars?.[r[3]] != null && typeof project.vars[r[3]] !== 'object' ? project.vars[r[3]] : '', placeholder: 'empty = hidden', step: 1 });
+  let show = r[7] || '', col = r[6] || '';
+  const seg = h('div', { class: 'etb', role: 'radiogroup' }, [['', 'Like the bar'], ['count', 'Count'], ['dot', 'Dot']].map(([v, l]) => h('button', { type: 'button', class: show === v ? 'on' : '', onclick: (e) => { show = v; for (const x of e.currentTarget.parentNode.children) x.classList.toggle('on', x === e.currentTarget); } }, l)));
+  const pick = h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(col) ? col : /^#[0-9a-f]{6}$/i.test(b?.badgeColor || '') ? b.badgeColor : '#ff3b5c', oninput: (e) => { col = e.target.value; same.classList.remove('on'); } });
+  const same = h('button', { type: 'button', class: 'btn' + (col ? '' : ' on'), onclick: () => { col = ''; same.classList.add('on'); } }, 'Like the bar');
+  openDialog(`Badge on “${r[0] || 'tab'}”`, [
+    h('datalist', { id: 'tbVars' }, vars.map((v) => h('option', { value: v }))),
+    h('div', { class: 'row' }, h('label', {}, 'Counts the variable'), name),
+    h('div', { class: 'row' }, h('label', {}, 'Starts at'), start),
+    h('p', { class: 'desc' }, 'Change it while playing with Set Variable (a node, a trigger or a button). 0 or empty hides the badge; a word like NEW shows the word.'),
+    h('div', { class: 'row' }, h('label', {}, 'Shows'), seg),
+    h('div', { class: 'row' }, h('label', {}, 'Colour'), h('div', { class: 'btns' }, pick, same)),
+    h('p', { class: 'desc' }, 'Size, shape, ring, position, animation and the rest are in the Bottom Nav’s Badges section, for every tab.'),
+    h('div', { class: 'btns' },
+      h('button', { type: 'button', class: 'btn primary', onclick: () => {
+        const v = name.value.trim().replace(/[^\w]/g, ''); pad(); r[3] = v; r[6] = v ? col : ''; r[7] = v ? show : '';
+        if (v) { const raw = start.value.trim(); if (raw === '') { if (!(v in (project.vars ||= {}))) project.vars[v] = 0; } else project.vars[v] = +raw; }
+        closeLayer(); save(rows); toast(v ? `The badge counts {${v}}` : 'Badge removed');
+      } }, icon('check'), 'Done'),
+      r[3] ? h('button', { type: 'button', class: 'btn danger', onclick: () => { pad(); r[3] = r[6] = r[7] = ''; closeLayer(); save(rows); toast('Badge removed'); } }, icon('trash'), 'Remove badge') : null),
+  ]);
+}
 /** The Bottom Nav's tabs as cards: an icon to pick, a label, the page it opens, a badge; add a tab from a page (or a new one). */
 function navTabEditor(get, set, path, b) {
   const box = h('div', { class: 'navtabs' });
@@ -6536,7 +6563,8 @@ function navTabEditor(get, set, path, b) {
       ...rows.map((r, i) => h('div', { class: 'nt-row' },
         h('button', { type: 'button', class: 'nt-icbtn', title: 'Pick an icon', onclick: () => pickNavIcon(r[1], (ic) => { r[1] = ic; save(rows); }) }, navIconImg(r[1])),
         h('div', { class: 'nt-mid' },
-          h('input', { type: 'text', value: r[0] ?? '', placeholder: 'Label', 'aria-label': 'Tab label', oninput: (e) => { r[0] = e.target.value; set(navTabsText(rows)); } }),
+          h('div', { class: 'nt-lab' }, h('input', { type: 'text', value: r[0] ?? '', placeholder: 'Label', 'aria-label': 'Tab label', oninput: (e) => { r[0] = e.target.value; set(navTabsText(rows)); } }),
+            r[3] ? h('button', { type: 'button', class: 'nt-badge' + (r[7] === 'dot' ? ' dot' : ''), title: `Badge: {${r[3]}}`, style: r[6] ? `--bc:${r[6]}` : '', onclick: () => editTabBadge(r, rows, save, b) }, r[7] === 'dot' ? '' : String(project.vars?.[r[3]] || 3)) : null),
           h('select', { 'aria-label': 'Opens page', onchange: (e) => { const val = e.target.value; if (val === '\u0000new') { const nv = newPage(null, { name: prompt('Name of the new page', r[0] || '') || '', tab: false, stay: true }); if (nv) { r[2] = nv; save(rows); } else draw(); return; } r[2] = val; save(rows); } },
             [...new Set([...pages, r[2]].filter(Boolean))].map((pg) => h('option', { value: pg, selected: pg === r[2] }, pg.startsWith('msg:') ? (pg === 'msg:menu' ? '☰ opens the side menu' : 'sends ' + pg.slice(4)) : '→ ' + pg + (pages.includes(pg) ? '' : ' (no page yet)'))),
             !r[2]?.startsWith('msg:') && !pages.includes('msg:menu') ? h('option', { value: 'msg:menu' }, '☰ opens the side menu') : null,
@@ -6544,7 +6572,7 @@ function navTabEditor(get, set, path, b) {
         h('button', { type: 'button', class: 'tl-m', title: 'Tab', onclick: (e) => popMenu(e.currentTarget, [
           r[2] && !r[2].startsWith('msg:') && pages.includes(r[2]) && { icon: 'eye', label: `Show the “${r[2]}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${r[2]}`); } },
           r[2] && !r[2].startsWith('msg:') && !pages.includes(r[2]) && { icon: 'plus', label: `Make the “${r[2]}” page`, fn: () => { newPage(null, { name: r[0] || r[2], tab: false, stay: true }); draw(); } },
-          { icon: 'bell', label: r[3] ? `Badge: {${r[3]}}…` : 'Badge from a variable…', k: 'a count on the tab', fn: () => { const n = prompt('Variable for the badge count (blank = none)', r[3] || ''); if (n !== null) { r[3] = n.trim(); save(rows); } } },
+          { icon: 'bell', label: r[3] ? `Badge: {${r[3]}}…` : 'Badge…', k: r[3] ? 'its look, its number' : 'a count or a dot on the tab', fn: () => editTabBadge(r, rows, save, b) },
           { icon: 'star', label: r[4] ? `Icon when selected: ${r[4]}` : 'Icon when selected…', k: 'e.g. a filled heart', fn: () => pickNavIcon(r[4], (ic) => { while (r.length < 4) r.push(''); r[4] = ic; save(rows); }) },
           r[4] && { icon: 'close', label: 'Same icon when selected', fn: () => { r[4] = ''; save(rows); } },
           { icon: 'brush', label: r[5] ? `Colour when selected: ${r[5]}` : 'Colour when selected…', k: 'blank = the bar\'s', fn: () => { const c = prompt('Colour when this tab is selected (#ff5a5f, @accent… blank = the bar\'s colour)', r[5] || ''); if (c !== null) { while (r.length < 5) r.push(''); r[5] = c.trim(); save(rows); } } },

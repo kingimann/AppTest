@@ -7,6 +7,13 @@ UI is everything drawn on the screen rather than in the world: scores, health ba
 - Turn on **UI** in an object's **UI Element** card, or add anything from *Create → UI & Menus* / *Project › UI*.
 - The **UI** button above the Scene switches to the **UI editor**. It shows only the screen, with safe-area and centre guides, the 9 anchor points and screen preview chips.
 - UI is positioned from an **anchor** plus an offset in design pixels, so it stays in the right place on every phone shape.
+- **Snapping:** when you move or resize UI (in the UI editor or the Scene view), it snaps to things near it:
+  - other elements' edges and centres on the same page;
+  - next to another element, touching or a gap away (8 px by default);
+  - its parent's edges and centre (and a gap inside them);
+  - the screen's centre and safe-area edges, and its own anchor point.
+  - Pink guides show what it lined up with, and a small label shows the gap. A little buzz tells you it caught.
+  - *Preferences › Editing* has **UI snaps to other UI** (on/off), **UI snap gap** (none, 4–24 px) and **UI snap strength**.
 
 ### Anchors
 

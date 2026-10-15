@@ -264,6 +264,10 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 
 Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
 
+### UI snapping
+
+- Moving or resizing UI snaps its edges and centre to other elements (edges, centres, side by side touching or with a gap), its parent and the screen, with pink guides and a gap label. The gap, strength and an on/off switch are in *Preferences › Editing*.
+
 ### Social app UI
 
 - **Social Feed** with four looks (timeline, compact, photos, cards) and about 80 settings (tabs, pinned posts and labels, coloured #tags / @mentions / links, fonts, tick colours, button words, avatar rings, hold / tag / load-more messages, a “new posts” button, buttons and their order, like icon, time format, text and avatar sizes, picture shape, Show more, search, field mapping, entrance animation, messages, colours). Three of the looks: a text **timeline**, big **photo** posts (double-tap to like) and **cards** with Like / Comment / Share. Pull to refresh; posts come from a *Posts* collection.

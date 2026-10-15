@@ -284,6 +284,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - Swipe the posts sideways to change tab, and tap the current tab to go back to the top.
     - Each tab remembers where it was scrolled to, and a dot shows on tabs with posts newer than the last time you looked.
     - *Tab widths*, *Tab name size*, *Tab row height* and *Tab row colour* change how they look.
+  - **It stays between the bars:** a feed (and Chat, Inbox, Notifications and Friends) taller than the space between the App Bar and the Bottom Nav is fitted into that space. It never runs under them, on short phones or in the editor's phone frame.
   - **What is above it scrolls away:** scrolling the feed down first moves up whatever is above it on the page (stories, the post box), so the posts get the whole screen while the tabs stay under the App Bar. It all comes back when you scroll to the top. Turn this off with *What is above it scrolls away*.
   - **Pinned posts** (`pinned = yes`) come first with 📌 Pinned. A **label** field puts a small line above a post, like *Sponsored* or *Suggested for you*.
   - **#hashtags, @mentions and links** are coloured. Tapping a tag fills the search variable and sends a message; tapping a link opens it.

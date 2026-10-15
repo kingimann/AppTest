@@ -8470,6 +8470,12 @@ const UK = {
   /** A screen point in the entity's drawing space. */
   local(s, e, t) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; return { x: (t.x - o.x) / k, y: (t.y - o.y) / k, id: t.id }; },
   live(s, e) { return e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing && !uiHiding(e); },
+  /** A tall list kept inside the room the nav bars leave: on a shorter screen (or the editor's phone frame) a feed taller than that space would run under the App Bar and the Bottom Nav. */
+  fit(s, e, b) {
+    if (e.parentEnt?.ui || e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe?.bars) return b;
+    const A = uiArea(E.width, E.height, E.safe, e), t = UK.local(s, e, { x: A.l, y: A.t }), bt = UK.local(s, e, { x: A.l, y: A.t + A.h }), y0 = Math.max(b.y, t.y), y1 = Math.min(b.y + b.h, bt.y);
+    if (y1 - y0 < 40 || (y0 <= b.y + 0.5 && y1 >= b.y + b.h - 0.5)) return b; return { ...b, y: y0, h: y1 - y0, cy: (y0 + y1) / 2 };
+  },
   taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.map((t) => UK.local(s, e, t)) : []; },
   downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.map((t) => UK.local(s, e, t)) : []; },
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
@@ -9555,7 +9561,7 @@ registerBehavior('uiFeed', {
     };
     /** The page this feed is on (things above it scroll away), and how far up they have gone. */
     const hostOf = (e) => (p.collapseAbove !== false && e.parentEnt?.ui && !e.parentEnt.dead ? e.parentEnt : null);
-    const boxOf = (e) => { const b = UK.box(e), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return b; }; // (the feed grows down into the room they leave)
+    const boxOf = (e, s) => { const b = UK.fit(s, e, UK.box(e)), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return b; }; // (the feed grows down into the room they leave)
     /** Scrolling down first moves what is above the feed (stories, the post box) up out of the way, then the posts; scrolling back up brings it back once the posts are at the top. */
     const collapse = (s, e, dt) => {
       const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
@@ -9723,7 +9729,7 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = boxOf(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
+        const b = boxOf(e, s); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         collapse(s, e, dt);
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
@@ -9819,7 +9825,7 @@ registerBehavior('uiFeed', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = boxOf(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
+        const b = boxOf(e, s), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
         const keepTheme = THEME; if (p.font) THEME = { ...THEME, font: /[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}", ${keepTheme.font}` : `${p.font}, ${keepTheme.font}` };
         try { this.paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC); } finally { THEME = keepTheme; }
       },
@@ -10264,7 +10270,7 @@ registerBehavior('uiChat', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e), barH = 58, cov = coveredBottom(s, e, b), list = { x: b.x, y: b.y, w: b.w, h: b.h - barH - cov };
+        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), list = { x: b.x, y: b.y, w: b.w, h: b.h - barH - cov };
         barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
         const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; }
         const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); S.update(s, e, dt, list);
@@ -10280,7 +10286,7 @@ registerBehavior('uiChat', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32);
+        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32);
         const dark = isDark(s), mineC = tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         const authors = new Set(R.map((r) => r.handle || r.author)), group = authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
@@ -10370,13 +10376,13 @@ registerBehavior('uiInbox', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e), H = 76, C = convs(s); S.max = Math.max(0, C.length * H - b.h + coveredBottom(s, e, b)); S.update(s, e, dt, b);
+        const b = UK.fit(s, e, UK.box(e)), H = 76, C = convs(s); S.max = Math.max(0, C.length * H - b.h + coveredBottom(s, e, b)); S.update(s, e, dt, b);
         if (p.unreadVar && !s.engine.editing) { const n = C.reduce((a, q) => a + q.unread, 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
         for (const t of UK.taps(s, e)) { if (S.moved || !UK.in(t, b)) continue; const i = Math.floor((t.y - b.y + S.v) / H), q = C[i]; if (!q) continue; UK.tap(s, p);
           if (p.chatVar) s.setVar(p.chatVar, q.c); if (p.titleVar) s.setVar(p.titleVar, q.title); if (p.openPage) s.navTo(p.openPage); if (p.message) s.send(p.message, q.c); }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), H = 76, C = convs(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), acc = tok(p.accent || '@accent');
+        const b = UK.fit(s, e, UK.box(e)), H = 76, C = convs(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), acc = tok(p.accent || '@accent');
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
         if (!C.length) UK.text(ctx, p.empty || 'No messages yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
@@ -10625,7 +10631,7 @@ registerBehavior('uiActivity', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e), G = s.engine.social, top = p.tabs !== false ? 46 : 0, list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
+        const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, top = p.tabs !== false ? 46 : 0, list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
         S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
         const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })();
         if (shown && !s.engine.editing) { if (!fresh) fresh = new Set(G.mine().filter((n) => !truthy(n.read)).map((n) => n.id)); if ((shownT += dt) > 1.2 && p.markRead !== false && G.unread()) G.markRead((n) => n.type !== 'friend_request'); } else { shownT = 0; fresh = null; }
@@ -10643,7 +10649,7 @@ registerBehavior('uiActivity', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), dark = isDark(s);
+        const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), dark = isDark(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         const reqN = G.requests().length, top = p.tabs !== false ? 46 : 0;
         tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', 'Mentions', reqN ? `Requests (${reqN})` : 'Requests'], tab, txt, sub, acc, line, TSt, p.tabStyle, s) : [];
@@ -10701,7 +10707,7 @@ registerBehavior('uiFriends', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e), G = s.engine.social, list = { x: b.x, y: b.y + 46, w: b.w, h: b.h - 46 };
+        const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, list = { x: b.x, y: b.y + 46, w: b.w, h: b.h - 46 };
         S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
         for (const t of UK.taps(s, e)) {
           if (S.moved) continue;
@@ -10720,7 +10726,7 @@ registerBehavior('uiFriends', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), Ls = lists(s);
+        const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), Ls = lists(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         tabsR = tabsRow(ctx, b, [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line, TSt, p.tabStyle, s);
         rows = []; btns = [];

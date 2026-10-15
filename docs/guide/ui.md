@@ -218,6 +218,26 @@ Add **Panel (window)** to make it a window (or add *UI › Window* / *Glass Pane
 - **Long text** that doesn't fit its space ends in **…**.
 - **Copy Style / Paste Style** copies colours, fonts, outlines and shadows between elements.
 
+## Looks, styles and effects
+
+Every UI element with a shape (buttons, cards, panels, fields…) can be restyled in a few taps. Select it and look at **UI Element** in the Inspector:
+
+- **Looks…** opens 18 ready-made looks, each with a preview: Flat, Soft card, Outline, Pill, **Glass** (frosted, blurs what's behind it), **Soft (neumorphic)**, **Pressed in**, **Neon**, Gradient, Sunset, Ocean, **Gradient border**, **Retro** (a hard offset shadow), **Dots**, **Stripes**, **Grid**, Paper and Clear. Tap one and the element takes its colours, corners, border, shadow and effects (and a readable text colour). Fine-tune it afterwards.
+- **My Styles…** saves an element's look under a name (*Primary Button*, *Card*, *Title*) to use on other elements, on any level. Elements using a style stay linked:
+  - change one, then tap **Update “Primary Button” everywhere** and every element using that style changes with it;
+  - **Reset to it** puts an element back to its style, **Unlink** lets it go its own way;
+  - in My Styles, each style shows how many elements use it, and can be renamed, deleted or used to find one.
+- **Copy Style / Paste Style** copy one element's look onto another.
+
+**Shape Renderer › More looks** has the effects one by one:
+
+- **Gradient to** (fill) and **Outline gradient to** (a two-colour border), each with a direction.
+- **Drop shadow** with softness, distance and **sideways** offset (a hard, offset shadow at softness 0 makes the retro look), or a **Glow**.
+- **Inner shadow** with softness and distance: dark for a pressed-in button, light for a soft raised (neumorphic) one.
+- **Pattern**: dots, stripes, a grid or checks, in any colour and size, over the fill.
+- **Frosted glass**: blurs whatever is behind the element (use a see-through fill, like white at 12%). It shows in Play.
+- **Dashed outline**, **rounded corners** (all, or only some), and all of it works with theme colours.
+
 ## Animation
 
 - **UI Animation** component: an entrance (on start, on show, or on a message, children one by one) and an idle loop (float, pulse, breathe, wiggle, heartbeat, bounce, spin, glow, shake).

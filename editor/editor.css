@@ -2028,3 +2028,17 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ps-cats .chip.on { background: var(--accent-strong, #3a6ea5); color: #fff; }
 .ps-box .comp { margin-bottom: 10px; }
 .ps-open { margin-left: auto; height: 32px; padding: 0 10px; font-size: 12.5px; }
+
+/* ---------- Looks and My Styles (UI Element) ---------- */
+.look-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.look-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border-radius: 14px; background: var(--g2, rgba(255,255,255,0.04)); border: 1px solid var(--line, rgba(255,255,255,0.08)); color: inherit; }
+.look-tile:active { transform: scale(0.97); }
+.look-tile small { font-size: 12px; opacity: 0.85; text-align: center; line-height: 1.2; }
+.look-pv { width: 100%; max-width: 92px; height: 40px; display: flex; align-items: center; justify-content: center; background-clip: padding-box; }
+.look-pv i { font-style: normal; font-weight: 800; font-size: 15px; }
+.look-pv.sm { width: 52px; max-width: 52px; height: 32px; flex: none; }
+.style-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.style-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--g2, rgba(255,255,255,0.04)); border: 1px solid transparent; }
+.style-row.on { border-color: var(--accent, #4fa3ff); }
+.style-nm { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.style-nm small { opacity: 0.65; font-size: 12px; }

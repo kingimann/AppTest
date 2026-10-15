@@ -7245,6 +7245,9 @@ registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete navigation bar along the bottom (16 styles) or the top (10 top styles: tabs, short line, text, pills, chips, segmented, folder, gradient, neon, boxed): tabs with icons, labels and badges, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
     { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected | badge colour | badge shows: count or dot)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
+    { key: 'sync', label: 'Keep in step with', type: 'select', options: ['nothing', 'the Side Menu pages', 'all pages'], default: 'nothing', info: { nothing: 'Just the tabs above.', 'the Side Menu pages': 'The tabs are the pages in the Side Menu (names, icons, badges) and change when it changes. Your own tabs are added to them.', 'all pages': 'A tab for every page of the app, with an icon that fits its name. A new page gets a tab by itself.' } },
+    { key: 'syncMax', label: 'Most tabs', type: 'number', default: 5, range: [2, 8], step: 1, showIf: (b) => !!b.sync && b.sync !== 'nothing' },
+    { key: 'syncOrder', label: 'Your own tabs go', type: 'select', options: ['after them', 'my tabs first'], default: 'after them', showIf: (b) => !!b.sync && b.sync !== 'nothing' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', showIf: (b) => b.position !== 'top' || b.topStyle === 'like the bottom bar', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
@@ -7318,7 +7321,9 @@ registerBehavior('uiBottomNav', {
     ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
-    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '', badgeColor = '', badgeShow = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color, badgeColor, badgeShow }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
+    let navScene = null, navSig = '', navSyncT = -9;
+    const tabsText = () => { if (!p.sync || p.sync === 'nothing' || !navScene) return p.tabs; const L = syncedNavLines(navScene, p.sync, p.var || 'page', p, p.tabs), own = String(p.tabs || '').split('\n').filter((l) => l.trim()), all = p.syncOrder === 'my tabs first' ? [...own, ...L] : [...L, ...own]; return all.slice(0, Math.max(1, +p.syncMax || 5)).join('\n'); }; // (Keep in step with: the Side Menu's pages, or every page)
+    const tabs = () => String(tabsText() || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '', badgeColor = '', badgeShow = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color, badgeColor, badgeShow }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
     const badgeSeen = new Map(); // per tab: the badge's last value and when it changed (for its pop)
     let selT = 9, W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
@@ -7372,13 +7377,14 @@ registerBehavior('uiBottomNav', {
         return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide), under: U };
       },
       start(e, s) {
-        T = tabs(); BH.start(s, e); sizeBar(e); placeTop(e, s);
+        navScene = s; T = tabs(); BH.start(s, e); sizeBar(e); placeTop(e, s);
         const saved = p.remember && !s.engine.editing ? store.get(memKey(s), '') : '', si = saved ? T.findIndex((t) => t.page != null && String(t.page) === saved) : -1;
         const i = si >= 0 ? si : clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1);
         if (T[i] && (si >= 0 || s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page);
       },
       update(e, dt, s) {
         const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
+        navScene = s; if (p.sync && p.sync !== 'nothing' && s.time - navSyncT > 1) { navSyncT = s.time; const sig = tabsText(); if (sig !== navSig) { navSig = sig; T = tabs(); } } // the Side Menu or the pages changed
         sizeBar(e); placeTop(e, s);
         hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
@@ -7431,6 +7437,7 @@ registerBehavior('uiBottomNav', {
         }
       },
       drawUI(ctx, e, s) {
+        if (s.engine.editing && p.sync && p.sync !== 'nothing') { navScene = s; const sig = tabsText(); if (sig !== navSig) { navSig = sig; T = tabs(); } }
         if (!T.length) T = tabs();
         if (s.engine.editing) { sizeBar(e); placeTop(e, s); }
         const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || (T[a]?.color ? tok(T[a].color) : act); // (a tab with its own colour lights up in it)
@@ -7606,6 +7613,36 @@ registerBehavior('uiBottomNav', {
 });
 
 
+/** An icon that fits a page's name (Settings → gear, Messages → chat…). */
+export function guessPageIcon(name) {
+  const n = String(name).toLowerCase(), M = [[/home|start|main|feed/, 'home'], [/search|explore|find|discover/, 'search'], [/profile|account|me$|user|player/, 'user'], [/setting|option|prefer/, 'gear'], [/shop|store|buy/, 'shop'], [/cart|basket|bag/, 'cart'],
+    [/chat|message|inbox|talk|dm/, 'chat'], [/mail/, 'mail'], [/notif|alert|bell|activity/, 'bell'], [/friend|people|follow/, 'users'], [/score|rank|leader|award|trophy|win/, 'trophy'], [/map|world|place|location/, 'map'], [/music|song|sound|audio/, 'music'],
+    [/calendar|event|plan|schedule/, 'calendar'], [/photo|gallery|picture|image/, 'image'], [/video|reel|watch|live/, 'video'], [/camera/, 'camera'], [/stat|chart|graph|report/, 'chart'], [/like|fav|love|heart|saved|bookmark/, 'heart'], [/list|task|todo|note/, 'list'], [/info|about|help/, 'info'], [/time|clock|history/, 'clock']];
+  return (M.find(([re]) => re.test(n)) || [, 'star'])[1];
+}
+/** The app's pages: each outermost page (Show If on the page variable): [{ value, name, icon }]. */
+export function appPages(s, v = 'page') {
+  const L = [], seen = new Set();
+  for (const q of s.entities) {
+    if (!q.ui || q.dead) continue; const b = q.behaviors.find((x) => x.type === 'uiShowIf' && (x.params?.var || 'page') === v && (x.params?.op || '=') === '='); if (!b) continue;
+    let inner = false; for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a.behaviors?.some((x) => x.type === 'uiShowIf')) { inner = true; break; } if (inner) continue;
+    const val = String(b.params.value ?? '').trim(); if (!val || seen.has(val)) continue; seen.add(val);
+    const name = String(q.name || val).replace(/\s*Page$/i, '').trim() || val; L.push({ value: val, name: name.charAt(0).toUpperCase() + name.slice(1), icon: b.params.navIcon || guessPageIcon(name) });
+  }
+  return L;
+}
+/** Tab or menu lines (Label | icon | page | badge) kept in step with the Bottom Nav's tabs, the Side Menu's pages, or every page. own: the lines typed by hand (their pages are not repeated). */
+export function syncedNavLines(s, mode, v, self, own = '') {
+  const out = [], have = new Set(), pageOf = (l) => { const c = l.split('|').map((x) => x.trim()); return (c[2] || c[0] || '').toLowerCase(); };
+  for (const l of String(own || '').split('\n')) if (l.trim() && !/^[#\-=>~]/.test(l.trim())) have.add(pageOf(l));
+  const add = (l) => { const k = pageOf(l); if (!k || have.has(k) || /^(msg|toggle|url|menu|slider|choice|progress|button):/.test(k)) return; have.add(k); out.push(l.trim()); };
+  const m = String(mode || '');
+  if (/bottom nav/i.test(m)) for (const q of s.entities) for (const b of q.behaviors) if (b.type === 'uiBottomNav' && b.params !== self && (b.params?.var || 'page') === v) for (const l of String(b.params.tabs || '').split('\n')) if (l.trim()) add(l.split('|').slice(0, 4).join('|'));
+  if (/side menu/i.test(m)) for (const q of s.entities) for (const b of q.behaviors) if (b.type === 'uiSideBar' && b.params !== self && (b.params?.var || 'page') === v) for (const l of String(b.params.items || '').split('\n')) { const t = l.trim(); if (t && !/^[#\-=>~]/.test(t) && !/^space/i.test(t)) add(t.split('|').slice(0, 4).join('|')); }
+  if (/pages/i.test(m)) for (const pg of appPages(s, v)) add(`${pg.name} | ${pg.icon} | ${pg.value}`);
+  return out;
+}
+
 const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal', 'grouped', 'gradient', 'neon', 'compact', 'pills', 'cards'];
 registerBehavior('uiSideBar', {
   label: 'Side Menu', description: 'A complete side menu: header, items with icons, badges and a line under them, sections, switches and a footer, in 13 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
@@ -7622,6 +7659,10 @@ registerBehavior('uiSideBar', {
     { key: 'header', label: 'Header look', type: 'select', options: ['simple', 'banner', 'none'], default: 'simple', group: 'Header' },
     { key: 'closeButton', label: 'Close button (✕)', type: 'bool', default: true, group: 'Header' },
     { key: 'headerMessage', label: 'Tapping the header sends', type: 'text', default: '', suggest: 'messages', group: 'Header', infoText: 'e.g. open profile. The menu closes too.' },
+    { key: 'social', label: 'Show the signed-in person (social apps)', type: 'bool', default: false, group: 'Header', info: 'The header shows who is signed in (Supabase, or {playerName} / {playerHandle}): their picture or initials, name and @handle, with their Following / Followers / Friends counts from the social graph under it.' },
+    { key: 'profilePage', label: 'Tapping the person goes to page', type: 'text', default: 'profile', group: 'Header', showIf: (b) => !!b.social },
+    { key: 'counts', label: 'Numbers under the name', type: 'select', options: ['following and followers', 'following, followers and friends', 'none'], default: 'following and followers', group: 'Header', showIf: (b) => !!b.social },
+    { key: 'countsPage', label: 'Tapping the numbers goes to page', type: 'text', default: '', group: 'Header', showIf: (b) => !!b.social && b.counts !== 'none', infoText: 'e.g. friends (a page with a Friends component).' },
     { key: 'footerText', label: 'Small print at the bottom (variables in braces)', type: 'text', default: '', group: 'Header', infoText: 'e.g. Version 1.2 or Signed in as {name}.' },
     { key: 'bg', label: 'Background', type: 'color', default: '#151826', group: 'Colours' },
     { key: 'text', label: 'Text', type: 'color', default: '#e8eaf2', group: 'Colours' },
@@ -7674,6 +7715,7 @@ registerBehavior('uiSideBar', {
     { key: 'titleSize', label: 'Title size', type: 'number', default: 19, range: [12, 40], step: 1, group: 'Header' },
     { key: 'headerImage', label: 'Header background picture', type: 'image', default: '', group: 'Header' },
     { key: 'headerHeight', label: 'Header height (0 = automatic)', type: 'number', default: 0, range: [0, 320], step: 2, group: 'Header' },
+    { key: 'sync', label: 'Keep in step with', type: 'select', options: ['nothing', 'the Bottom Nav tabs', 'all pages', 'the Bottom Nav tabs, then the other pages'], default: 'nothing', group: 'Items', info: { nothing: 'Just the items you typed.', 'the Bottom Nav tabs': 'The menu starts with the same pages as the Bottom Nav (names, icons and badges), and changes when the tabs change. Your own items come after them.', 'all pages': 'Every page of the app, with an icon that fits its name. A new page shows up by itself.', 'the Bottom Nav tabs, then the other pages': 'The tabs first, then every page that has no tab.' } },
     { key: 'itemAlign', label: 'Item names', type: 'select', options: ['left', 'centre'], default: 'left', group: 'Items' },
     { key: 'weight', label: 'Item text weight', type: 'select', options: ['regular', 'bold', 'heavy'], default: 'bold', group: 'Items' },
     { key: 'chevrons', label: 'Arrows (›) on page items', type: 'bool', default: false, group: 'Items' },
@@ -7738,12 +7780,15 @@ registerBehavior('uiSideBar', {
     let sl = null; // a slider being dragged
     let G = {}, sub = null, subAge = 9; const folded = new Set(), foldSeen = new Set(); // submenus by name; the open one; folded section titles
     const load = () => {
-      const all = parse(p.items); G = {}; I = []; let g = null;
+      const all = parse(syncText(p.items)); G = {}; I = []; let g = null;
       for (const it of all) { if (it.kind === 'group') { g = it.label ? (G[it.label] ||= []) : null; continue; } (g || I).push(it); }
       F = parse(p.footer).filter((it) => it.kind !== 'group');
       for (const it of [...I, ...Object.values(G).flat()]) if (it.kind === 'section' && it.fold && !foldSeen.has(it.label)) { foldSeen.add(it.label); if (it.fold === '-' && !(p.rememberFolds !== false && memo?.open?.has(it.label))) folded.add(it.label); if (p.rememberFolds !== false && memo?.shut?.has(it.label)) folded.add(it.label); }
     };
     let memo = null; // folded sections remembered on this phone
+    let scene0 = null, syncSig = '', syncT = -9;
+    /** The items, with the pages it keeps in step with first (Keep in step with). */
+    const syncText = (txt) => { if (!p.sync || p.sync === 'nothing' || !scene0) return txt; const L = syncedNavLines(scene0, p.sync, p.var || 'page', p, txt); return L.length ? L.join('\n') + (String(txt || '').trim() ? '\n-\n' + txt : '') : txt; };
     let topSrc = null, topList = [];
     const topItems = () => { if (p.topIcons !== topSrc) { topSrc = p.topIcons; topList = String(p.topIcons || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [icon = '', act = '', badge = '', color = ''] = l.split('|').map((x) => x.trim()); return actOf(act || 'msg:' + icon, { label: icon, icon, badge, sub: '', right: '', color, cond: '' }); }); } return topList; };
     const truthy = (v) => !(v == null || v === false || v === 0 || v === '' || v === '0' || v === 'false');
@@ -7805,6 +7850,7 @@ registerBehavior('uiSideBar', {
         return { x, y, r: 24 * K };
       },
       start(e, s) {
+        scene0 = s;
         try { const r = JSON.parse(localStorage.getItem('pocket.menuFolds.' + (p.message || 'menu')) || 'null'); if (r) memo = { shut: new Set(r.shut || []), open: new Set(r.open || []) }; } catch { /* storage unavailable */ }
         load();
         e._dismiss = () => inst.set(e, s, false);
@@ -7816,12 +7862,13 @@ registerBehavior('uiSideBar', {
       },
       destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {
+        scene0 = s; if (p.sync && p.sync !== 'nothing' && s.time - syncT > 1) { syncT = s.time; const sig = syncText(p.items); if (sig !== syncSig) { syncSig = sig; load(); } } // the tabs or pages changed
         const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72, edge = +p.edgeWidth || 22;
         // the built-in ☰ button
         const B = inst.btn(s);
         if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
         // swipe from the edge / drag to close
-        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
+        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, open: false, side: true }; break; } }
         // a slider in the menu: press and drag along it
         if (sl) { const q = inp.pointers.get(sl.id); if (q) setSlider(s, sl, q.x); else sl = null; }
         else if (want && t > 0.9 && !drag) for (const d of inp.downs) { const r = rows.find((r) => r.track && condOk(s, r.item) === true && d.x >= r.track.x0 - 14 && d.x <= r.track.x1 + 14 && d.y >= r.y && d.y <= r.y + r.h && (!r.clipped || (d.y >= r.clipped[0] && d.y <= r.clipped[1]))); if (r) { sl = { id: d.id, it: r.item, x0: r.track.x0, x1: r.track.x1 }; setSlider(s, sl, d.x); break; } }
@@ -7831,9 +7878,13 @@ registerBehavior('uiSideBar', {
           if (q) {
             const dx = (q.x - drag.x0) * (left ? 1 : -1), dy = q.y - (drag.y0 ?? q.y);
             if (drag.open && !drag.mode && Math.hypot(dx, dy) > 10) drag.mode = Math.abs(dy) > Math.abs(dx) && overflow > 0 ? 'scroll' : p.dragClose !== false && !full() ? 'close' : 'none'; // up/down scrolls a long menu, sideways closes it
-            if (drag.mode) drag.moved = true;
-            if (drag.mode === 'scroll') scroll = clamp(drag.s0 - dy, 0, overflow);
-            else if (drag.mode === 'close' || !drag.open) t = clamp(drag.t0 + dx / span, 0, 1);
+            if (drag.side && !drag.mode && (q.claimed || (Math.hypot(dx, dy) > 10 && Math.abs(dy) > Math.abs(dx) * 0.8))) { t = drag.t0; drag = null; } // a pull down or a scroll (a feed's pull to refresh) is not a swipe to open
+            else {
+              if (drag.side && !drag.mode && Math.hypot(dx, dy) > 10) drag.mode = 'open';
+              if (drag.mode) drag.moved = true;
+              if (drag.mode === 'scroll') scroll = clamp(drag.s0 - dy, 0, overflow);
+              else if (drag.mode === 'close' || drag.mode === 'open') t = clamp(drag.t0 + dx / span, 0, 1);
+            }
           } else { if (drag.mode === 'close' || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
         } else {
           const step = dt / Math.max(0.05, +p.duration || 0.28);
@@ -7852,7 +7903,10 @@ registerBehavior('uiSideBar', {
         if (!visible || (drag && drag.moved)) return;
         for (const tp of inp.taps) {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
+          const cnt = rows.find((r) => r.counts && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          if (cnt && p.countsPage) { if (p.haptics !== false) E.vibrate(8); s.navTo(p.countsPage, p.var || 'page'); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; }
           const hd = rows.find((r) => r.head && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
+          if (hd && p.social && p.profilePage && E.social) { const m = E.social.me(); if (p.haptics !== false) E.vibrate(8); s.setVar('profile', m.handle); s.setVar('profile_name', m.author); s.navTo(p.profilePage, p.var || 'page'); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; } // my profile
           if (hd && p.headerMessage) { if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); s.send(p.headerMessage); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; }
           const tbh = rows.find((r) => r.top && Math.hypot(tp.x - r.x, tp.y - r.y) < 22);
           if (tbh) { // the top bar
@@ -7894,6 +7948,7 @@ registerBehavior('uiSideBar', {
       },
       drawUI(ctx, e, s) {
         const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
+        if (editing && p.sync && p.sync !== 'nothing') { scene0 = s; const sig = syncText(p.items); if (sig !== syncSig) { syncSig = sig; load(); } } // (the editor: the menu follows the tabs and pages as you change them)
         if (!I.length && !F.length) load();
         ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
         const shown = editing ? (selInside(s, e) ? 1 : 0) : t, sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? shown : ease(t), raw = shown; // the editor shows it open while it's selected
@@ -7969,12 +8024,13 @@ registerBehavior('uiSideBar', {
         }
         y = hR + hS + 10;
         // header
-        const look = p.header || 'simple', hasHead = look !== 'none' && !compact && (p.title || p.avatar || p.headerImage);
+        const SOC = p.social ? E.social : null, meP = SOC?.me(), hTitle = SOC ? meP.author : p.title, hSub = SOC ? '@' + meP.handle : p.subtitle, hAv = SOC && (!p.avatar || p.avatar === '🙂') ? '@me' : p.avatar, cntH = SOC && p.counts !== 'none' ? 30 : 0; // a social app: who is signed in
+        const look = p.header || 'simple', hasHead = look !== 'none' && !compact && (hTitle || hAv || p.headerImage);
         let headLight = false, closeAt = null;
         if (hasHead) {
           const banner = look === 'banner', cardH = look === 'card', av = Math.max(20, +p.avatarSize || 52), centred = full() || p.headerAlign === 'centred';
-          const tsz0 = full() && (+p.titleSize || 19) === 19 ? 26 : +p.titleSize || 19, subH = p.subtitle ? 22 : 0;
-          const autoH = centred ? av + tsz0 + subH + 40 : Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0));
+          const tsz0 = full() && (+p.titleSize || 19) === 19 ? 26 : +p.titleSize || 19, subH = hSub ? 22 : 0;
+          const autoH = (centred ? av + tsz0 + subH + 40 : Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0))) + cntH;
           const hh = +p.headerHeight > 0 ? +p.headerHeight : autoH;
           const hx = cardH ? x + 12 : x, hw = cardH ? w - 24 : w, hy = cardH ? y - 2 : hR, hH = cardH ? hh - 8 : hh + hS + 10; // the header's own box
           const hImg = p.headerImage ? loadImage(artURL(p.headerImage)) : null, hasImg = !!(hImg && hImg.complete && hImg.naturalWidth);
@@ -7991,15 +8047,25 @@ registerBehavior('uiSideBar', {
           if (cardH) closeAt = { x: hx + hw - 26, y: hy + 26 }; // the ✕ sits inside the card
           const light = headLight = banner || hasImg || sty === 'gradient' || (cardH && !!p.headerColor);
           const bleed = banner || hasImg, blockH = centred ? av + 8 + tsz0 + subH : av, midY = bleed ? hR + hS + (hh + 10) / 2 : cardH ? hy + hH / 2 : 0; // a coloured header: its picture and name sit in the middle of it
-          const inX = cardH ? 14 : 0, cx = centred ? x + w / 2 : x + pad + inX + av / 2, cy = midY ? (centred ? midY - blockH / 2 + av / 2 : midY) : centred ? y + av / 2 + 6 : y + 4 + av / 2;
+          const inX = cardH ? 14 : 0, cx = centred ? x + w / 2 : x + pad + inX + av / 2, cy = (midY ? (centred ? midY - blockH / 2 + av / 2 : midY) : centred ? y + av / 2 + 6 : y + 4 + av / 2) - (midY ? cntH / 2 : 0);
           const avPath = () => { ctx.beginPath(); const sh = p.avatarShape || 'circle'; if (sh === 'circle' || !ctx.roundRect) ctx.arc(cx, cy, av / 2, 0, Math.PI * 2); else ctx.roundRect(cx - av / 2, cy - av / 2, av, av, sh === 'rounded' ? av * 0.26 : 6); };
-          if (p.avatar && /^(data:|https?:|art:|blob:)/.test(p.avatar)) { const im = loadImage(artURL(p.avatar)); ctx.save(); avPath(); ctx.fillStyle = withAlpha(acc, 0.22); ctx.fill(); ctx.clip(); if (im.complete && im.naturalWidth) { const k2 = av / Math.min(im.naturalWidth, im.naturalHeight); ctx.drawImage(im, cx - im.naturalWidth * k2 / 2, cy - im.naturalHeight * k2 / 2, im.naturalWidth * k2, im.naturalHeight * k2); } ctx.restore(); ctx.strokeStyle = light ? 'rgba(255,255,255,0.6)' : withAlpha(acc, 0.5); ctx.lineWidth = 2; avPath(); ctx.stroke(); } // a photo
-          else if (p.avatar) { ctx.fillStyle = light ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); avPath(); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, av * 0.54, light ? '#ffffff' : acc); }
-          if (p.headerMessage) { rows.push({ head: true, x, y: hR, w, h: (cardH ? hy + hH : hR + hh + hS + 6) - hR }); if (!centred) { ctx.strokeStyle = withAlpha(light ? '#ffffff' : txt, 0.4); ctx.lineWidth = 2; const ax = x + w - pad - 14 - inX, ay = cy + (p.closeButton !== false && !cardH ? 26 : 0); ctx.beginPath(); ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); ctx.stroke(); } } // the header opens something (a profile)
+          if (hAv === '@me') { miniAvatar(ctx, meP.author, cx, cy, av, ''); if (light) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 2; avPath(); ctx.stroke(); } } // their initials (or picture)
+          else if (hAv && /^(data:|https?:|art:|blob:)/.test(hAv)) { const im = loadImage(artURL(hAv)); ctx.save(); avPath(); ctx.fillStyle = withAlpha(acc, 0.22); ctx.fill(); ctx.clip(); if (im.complete && im.naturalWidth) { const k2 = av / Math.min(im.naturalWidth, im.naturalHeight); ctx.drawImage(im, cx - im.naturalWidth * k2 / 2, cy - im.naturalHeight * k2 / 2, im.naturalWidth * k2, im.naturalHeight * k2); } ctx.restore(); ctx.strokeStyle = light ? 'rgba(255,255,255,0.6)' : withAlpha(acc, 0.5); ctx.lineWidth = 2; avPath(); ctx.stroke(); } // a photo
+          else if (hAv) { ctx.fillStyle = light ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); avPath(); ctx.fill(); drawNavIcon(ctx, hAv, cx, cy, av * 0.54, light ? '#ffffff' : acc); }
+          if (p.headerMessage || (SOC && p.profilePage)) { rows.push({ head: true, x, y: hR, w, h: (cardH ? hy + hH : hR + hh + hS + 6) - hR }); if (!centred && !cntH) { ctx.strokeStyle = withAlpha(light ? '#ffffff' : txt, 0.4); ctx.lineWidth = 2; const ax = x + w - pad - 14 - inX, ay = cy + (p.closeButton !== false && !cardH ? 26 : 0); ctx.beginPath(); ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); ctx.stroke(); } } // the header opens something (a profile)
           ctx.textAlign = centred ? 'center' : 'left'; ctx.textBaseline = 'middle';
-          const tx = centred ? x + w / 2 : p.avatar ? cx + av / 2 + 12 : x + pad + inX, ty = centred ? cy + av / 2 + 8 + tsz0 / 2 : cy, maxW = Math.max(40, centred ? w - pad * 2 : x + w - tx - pad - 36);
-          ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 ${tsz0}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle && !centred ? 10 : 0), maxW);
-          if (p.subtitle) { ctx.globalAlpha *= 0.75; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, centred ? ty + tsz0 / 2 + 12 : ty + 12, maxW); ctx.globalAlpha /= 0.75; }
+          const tx = centred ? x + w / 2 : hAv ? cx + av / 2 + 12 : x + pad + inX, ty = centred ? cy + av / 2 + 8 + tsz0 / 2 : cy, maxW = Math.max(40, centred ? w - pad * 2 : x + w - tx - pad - 36);
+          ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 ${tsz0}px ${THEME.font}`; ctx.fillText(fillTemplate(String(hTitle || ''), s.vars), tx, ty - (hSub && !centred ? 10 : 0), maxW);
+          if (hSub) { ctx.globalAlpha *= 0.75; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(hSub), s.vars), tx, centred ? ty + tsz0 / 2 + 12 : ty + 12, maxW); ctx.globalAlpha /= 0.75; }
+          if (cntH) { // 12 Following · 40 Followers (· 3 Friends): from the social graph, tap for the list
+            const me0 = meP.handle, C = [[SOC.following(me0).length, 'Following'], [SOC.followers(me0).length, 'Followers'], ...(p.counts === 'following, followers and friends' ? [[SOC.friends(me0).length, 'Friends']] : [])];
+            const yC = centred ? ty + tsz0 / 2 + (hSub ? 34 : 18) : cy + av / 2 + 18; let xC = centred ? 0 : x + pad + inX; ctx.textBaseline = 'middle';
+            const parts = C.map(([n, l]) => { ctx.font = `800 14px ${THEME.font}`; const nw = ctx.measureText(String(n)).width; ctx.font = `600 14px ${THEME.font}`; return { n, l, nw, lw: ctx.measureText(l).width }; }), tot = parts.reduce((a, q) => a + q.nw + 5 + q.lw, 0) + 16 * (parts.length - 1);
+            if (centred) xC = x + w / 2 - tot / 2; const x00 = xC; ctx.textAlign = 'left';
+            for (const q of parts) { ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 14px ${THEME.font}`; ctx.fillText(String(q.n), xC, yC); xC += q.nw + 5; ctx.globalAlpha *= 0.7; ctx.font = `600 14px ${THEME.font}`; ctx.fillText(q.l, xC, yC); ctx.globalAlpha /= 0.7; xC += q.lw + 16; }
+            rows.push({ counts: true, x: x00 - 6, y: yC - 14, w: tot + 12, h: 28 });
+            ctx.textAlign = centred ? 'center' : 'left';
+          }
           y = bleed ? hR + hh + hS + 10 + (full() ? 6 : 10) : cardH ? hy + hH + 12 : y + hh - (full() ? 0 : 6); // the list starts clear of the header
         } else y += compact ? 8 : p.closeButton !== false && !tb && (full() || !rail()) ? 44 : 4; // (no header: leave room for the ✕)
         if (p.closeButton !== false && !compact && !tb && (full() || !rail())) { const bx = closeAt ? closeAt.x : full() ? x + w - 34 : x + w - 28, by = closeAt ? closeAt.y : R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
@@ -8205,6 +8271,7 @@ registerBehavior('uiAppBar', {
         for (const [k, v] of press) { const n = v - dt * 4; if (n <= 0) press.delete(k); else press.set(k, n); }
         const lk = leftKind(s), on = hide < 0.5 && e.visible && !e._parentHidden;
         (s.appBarMenu ||= new Set())[on && lk === 'menu' ? 'add' : 'delete'](p.menuMessage || 'menu'); // a Side Menu's own ☰ steps aside
+        if (s.engine.input.taps.length) console.log('APPBAR', on, hide, lk, JSON.stringify(s.engine.input.taps), JSON.stringify(hits));
         if (!on || s.engine.editing) return;
         const E = s.engine, r = uiRect(s, e), K = uiK(E.safe);
         for (const t of E.input.taps) {
@@ -8476,8 +8543,10 @@ const UK = {
     const A = uiArea(E.width, E.height, E.safe, e), t = UK.local(s, e, { x: A.l, y: A.t }), bt = UK.local(s, e, { x: A.l, y: A.t + A.h }), y0 = Math.max(b.y, t.y), y1 = Math.min(b.y + b.h, bt.y);
     if (y1 - y0 < 40 || (y0 <= b.y + 0.5 && y1 >= b.y + b.h - 0.5)) return b; return { ...b, y: y0, h: y1 - y0, cy: (y0 + y1) / 2 };
   },
-  taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.map((t) => UK.local(s, e, t)) : []; },
-  downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.map((t) => UK.local(s, e, t)) : []; },
+  /** Is this tap for e? While a menu, sheet or popup holds this frame's taps (it may be closing on them), only it and what is inside it get them, plus taps in the areas it lets through. */
+  mine(s, e, t) { const o = s.tapOwner; if (!o || o === e || o.dead) return true; for (let q = e.parentEnt, n = 0; q && n < 40; q = q.parentEnt, n++) if (q === o) return true; return (s.tapPass || []).some((r) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h); },
+  taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
+  downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
   in(p, r, pad = 0) { return p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad; },
   rr(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.max(0, Math.min(r, h / 2, w / 2))); else ctx.rect(x, y, w, h); },
@@ -9000,7 +9069,7 @@ function makeScroller(axis = 'y') {
       if (q) {
         const dd = q[k] - S.drag.p0, other = q[k === 'y' ? 'x' : 'y'] - S.drag.o0;
         if (!S.drag.on && Math.abs(dd) > 8 && Math.abs(dd) > Math.abs(other)) S.drag.on = true;
-        if (S.drag.on) { S.moved = true; let nv = S.drag.v0 - dd; if (nv < 0) nv = -Math.pow(-nv, 0.82); else if (nv > S.max) nv = S.max + Math.pow(nv - S.max, 0.82); S.flick = (nv - S.v) / Math.max(dt, 1 / 120); S.v = nv; }
+        if (S.drag.on) { const ep = s.engine.input.pointers.get(S.drag.id); if (ep && k === 'y') ep.claimed = true; S.moved = true; let nv = S.drag.v0 - dd; if (nv < 0) nv = -Math.pow(-nv, 0.82); else if (nv > S.max) nv = S.max + Math.pow(nv - S.max, 0.82); S.flick = (nv - S.v) / Math.max(dt, 1 / 120); S.v = nv; }
       } else { if (S.v < -70 && onRefresh) { S.refreshT = s.time; onRefresh(); } S.drag = null; }
     } else {
       S.v += S.flick * dt; S.flick *= Math.pow(0.04, dt); if (Math.abs(S.flick) < 6) S.flick = 0;
@@ -9226,13 +9295,19 @@ function socialSheet(s, o) {
   };
   const badge = (text, bg, css = '') => el('span', `position:absolute;padding:3px 7px;border-radius:6px;background:${bg};color:#fff;font:800 11px ${font};letter-spacing:.4px;${css}`, text);
   const api = { wrap, sheet, body, close, el, avatar };
+  if (o.build) { o.build(api); return api; } // a body of its own (pick people…)
   // a list of actions
   if (o.items) {
     body.style.borderTop = '0';
+    if (o.emojis?.length) { // a row of reactions on top (press and hold a message)
+      const row = el('div', `display:flex;justify-content:space-around;padding:6px 14px 10px;border-bottom:1px solid ${c.line};`);
+      for (const em of o.emojis) { const b = btn(`font-size:28px;width:46px;height:46px;border-radius:50%;${em === o.current ? `background:${c.line};` : ''}`, em); b.dataset.react = em; b.onclick = () => { close(); o.onEmoji?.(em); }; row.append(b); }
+      body.append(row);
+    }
     for (const it of o.items) {
       const b = btn(`display:flex;align-items:center;gap:14px;width:100%;padding:14px 20px;color:${it.danger ? '#f4212e' : c.text};font:600 16px ${font};text-align:left;`);
       b.append(el('span', 'width:24px;text-align:center;font-size:19px;', it.icon || ''), el('span', '', it.label));
-      b.onclick = () => { close(); it.run?.(); }; body.append(b);
+      b.dataset.action = it.label; b.onclick = () => { close(); it.run?.(); }; body.append(b);
     }
     body.append(el('div', 'height:10px;'));
     return api;
@@ -10218,6 +10293,12 @@ function chatInputBar(s, o) {
   const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:22px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); inp.placeholder = o.placeholder || 'Message…'; inp.maxLength = 1000; inp.setAttribute('enterkeyhint', 'send');
   const send = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;font-size:18px;cursor:pointer;transition:opacity .15s,transform .15s;`, '➤'); send.type = 'button'; send.setAttribute('aria-label', 'Send');
   if (o.photos !== false) bar.append(pic); bar.append(inp, send, file); root.append(bar);
+  let rp = null; // "Replying to Maya" above the bar
+  const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:1px solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
+    const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', `font-weight:800;font-size:13px;color:${c.acc};`, '↩ Replying to ' + (r.author || '')), el('div', `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${c.sub};font-size:13px;`, r.text || ''));
+    const x = el('button', `flex:none;border:0;background:none;color:${c.sub};font-size:18px;cursor:pointer;`, '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Cancel reply'); x.onclick = () => { setReply(null); o.onCancelReply?.(); inp.focus(); };
+    rp.append(t, x); bar.append(rp); };
+  setReply(o.reply);
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
@@ -10230,12 +10311,75 @@ function chatInputBar(s, o) {
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
   setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
   sync(); setTimeout(() => inp.focus(), 60);
-  return { bar, input: inp, close };
+  return { bar, input: inp, close, setReply };
 }
 const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
 
+// ---- messaging: conversations, groups, replies, reactions, read receipts ----
+const chatMetaKey = (s) => 'pocket.chatMeta.' + (s.engine.gameKey || 'game');
+/** This phone's own settings for conversations: pinned, muted, deleted (hidden up to a time) and marked unread. */
+const chatMeta = (s) => { try { const o = JSON.parse(store.get(chatMetaKey(s), 'null')); if (o) return { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [] }; } catch { /* storage unavailable */ } return { pin: [], mute: [], hide: {}, unread: [] }; };
+const saveChatMeta = (s, m) => store.set(chatMetaKey(s), JSON.stringify(m));
+const isGroupChat = (c) => /^g-/.test(String(c));
+const handleOf = (h) => String(h ?? '').trim().replace(/^@/, '').toLowerCase();
+/** Who is in a conversation: both people of a direct message, or a group's members (kept on its first message). */
+function chatMembers(rows, c) {
+  if (/^dm-/.test(c)) return c.slice(3).split('-');
+  const m = rows.find((r) => String(r.chat) === c && r.members); return m ? String(m.members).split(',').map(handleOf).filter(Boolean) : [];
+}
+/** When someone last read a conversation: a Reads collection (chat, handle, at) makes it work across phones; else this phone only knows about you. */
+function readAt(s, c, h) {
+  const D = s.engine.data, me = handleOf(meOfVars(s).handle); let t = h === me ? chatSeen(s)[c] || 0 : 0;
+  if (D.def('Reads')) for (const r of D.rows('Reads')) if (String(r.chat) === c && handleOf(r.handle) === h) t = Math.max(t, +r.at || 0);
+  return t;
+}
+function markChatRead(s, c, h, at) {
+  const seen = chatSeen(s); if ((seen[c] || 0) < at) { seen[c] = at; store.set(chatSeenKey(s), JSON.stringify(seen)); }
+  const D = s.engine.data; if (!D.def('Reads')) return;
+  const r = D.rows('Reads').find((q) => String(q.chat) === c && handleOf(q.handle) === h);
+  if (!r) D.add('Reads', { chat: c, handle: h, at }); else if ((+r.at || 0) < at) D.update('Reads', r.id, { at });
+}
+/** People you can message: friends, people you follow, your followers, and everyone who has posted or messaged. */
+function chatPeople(s, me) {
+  const out = new Map(), names = new Map(), D = s.engine.data;
+  for (const c of ['Posts', 'Messages']) if (D.def(c)) for (const r of D.rows(c)) if (r.handle && r.author) names.set(handleOf(r.handle), r.author);
+  const add = (h, n, tag) => { h = handleOf(h); if (!h || h === me.handle || out.has(h)) return; const nm = n && handleOf(n) !== h ? n : names.get(h) || n || h; out.set(h, { handle: h, name: nm, tag }); };
+  const G = s.engine.social; if (G) { for (const q of G.friends()) add(q.handle, q.name, 'Friend'); for (const q of G.following()) add(q.handle, q.name, 'Following'); for (const q of G.followers()) add(q.handle, q.name, 'Follows you'); }
+  for (const [h, n] of names) add(h, n, '');
+  return [...out.values()];
+}
+const nameOfHandle = (s, h) => { h = handleOf(h); const D = s.engine.data; for (const c of ['Messages', 'Posts']) if (D.def(c)) { const r = D.rows(c).find((q) => handleOf(q.handle) === h && q.author); if (r) return r.author; } return h; };
+/** Pick people to message: search, and for a group, tick several and give it a name. */
+function peoplePicker(s, o) {
+  const c = o.colors, font = o.font || THEME.font, sel = new Map();
+  return socialSheet(s, { kind: 'people', title: o.title || 'New message', colors: c, font, onClose: o.onClose, build: (api) => {
+    const { body, el, avatar, close } = api; body.style.borderTop = '0';
+    const field = `display:block;margin:6px 14px;width:calc(100% - 28px);box-sizing:border-box;font:16px ${font};padding:10px 14px;border-radius:12px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`;
+    const q = el('input', field); q.placeholder = 'Search people'; q.dataset.peopleSearch = '1'; q.setAttribute('autocomplete', 'off');
+    const nameIn = o.multi ? el('input', field) : null; if (nameIn) { nameIn.placeholder = 'Group name (optional)'; nameIn.dataset.groupName = '1'; nameIn.maxLength = 40; }
+    const chips = el('div', 'display:flex;flex-wrap:wrap;gap:6px;padding:0 14px;'), list = el('div', 'padding:4px 0 10px;');
+    const go = el('button', `display:block;margin:6px 14px 12px;width:calc(100% - 28px);height:46px;border:0;border-radius:23px;background:${c.acc};color:#fff;font:800 16px ${font};cursor:pointer;`, 'Create group'); go.type = 'button'; go.dataset.createGroup = '1';
+    const sync = () => { go.disabled = sel.size < 2; go.style.opacity = sel.size < 2 ? '.45' : '1'; go.textContent = sel.size < 2 ? 'Pick 2 or more people' : `Create group (${sel.size + 1})`; chips.replaceChildren(...[...sel.values()].map((pp) => el('span', `padding:5px 10px;border-radius:14px;background:${c.field};font:700 13px ${font};`, pp.name))); };
+    const draw = () => {
+      const t = q.value.trim().toLowerCase(), L = o.people.filter((pp) => !t || pp.name.toLowerCase().includes(t) || pp.handle.includes(t));
+      list.replaceChildren(); if (!L.length) list.append(el('div', `padding:26px;text-align:center;color:${c.sub};font:600 15px ${font};`, 'No one found'));
+      for (const pp of L) {
+        const row = el('button', `display:flex;align-items:center;gap:12px;width:100%;padding:10px 16px;border:0;background:none;color:${c.text};font:inherit;text-align:left;cursor:pointer;`); row.type = 'button'; row.dataset.person = pp.handle;
+        const col = el('div', 'flex:1;min-width:0;'); col.append(el('div', `font:800 16px ${font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, pp.name), el('div', `font:500 14px ${font};color:${c.sub};`, '@' + pp.handle + (pp.tag ? ' · ' + pp.tag : '')));
+        row.append(avatar(pp.name, '', 44), col);
+        if (o.multi) { const on = sel.has(pp.handle); row.append(el('span', `flex:none;width:24px;height:24px;border-radius:50%;border:2px solid ${on ? c.acc : c.line};background:${on ? c.acc : 'transparent'};color:#fff;font:900 14px ${font};display:flex;align-items:center;justify-content:center;`, on ? '✓' : '')); }
+        row.onclick = () => { if (!o.multi) { close(); o.onPick([pp]); return; } if (sel.has(pp.handle)) sel.delete(pp.handle); else sel.set(pp.handle, pp); draw(); sync(); };
+        list.append(row);
+      }
+    };
+    go.onclick = () => { if (sel.size < 2) return; close(); o.onPick([...sel.values()], nameIn?.value.trim() || ''); };
+    q.oninput = draw; body.append(q); if (nameIn) body.append(nameIn, chips); body.append(list); if (o.multi) body.append(go);
+    draw(); if (o.multi) sync(); setTimeout(() => q.focus(), 80);
+  } });
+}
+
 registerBehavior('uiChat', {
-  label: 'Chat', description: 'A conversation in bubbles, like a messaging app: yours on the right, theirs on the left with avatars, times between, photos, big emoji and double-tap ❤️. Tap the bar to type. Messages are kept in a Messages collection (chat, author, handle, text, media); with Supabase (shared with everyone, live) they arrive instantly.',
+  label: 'Chat', description: 'A conversation in bubbles, like a messaging app: yours on the right, theirs on the left with avatars, times, photos, big emoji and replies. Press and hold a message to react, reply, copy, edit or unsend it; double-tap for ❤️. "Seen" shows when they have read it. Works for direct messages and group chats. Messages are kept in a Messages collection; with Supabase (shared, live) they arrive instantly.',
   params: [
     { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
     { key: 'chatVar', label: 'Conversation id comes from variable', type: 'text', default: 'chat', suggest: 'vars', info: 'The Inbox and “Message @someone” set it. Blank, or the variable empty = the room below.' },
@@ -10249,64 +10393,99 @@ registerBehavior('uiChat', {
     { key: 'times', label: 'Times between messages', type: 'bool', default: true },
     { key: 'photos', label: 'Send photos', type: 'bool', default: true },
     { key: 'react', label: 'Double-tap a message for ❤️', type: 'bool', default: true },
+    { key: 'hold', label: 'Press and hold a message for reactions and more', type: 'bool', default: true, info: 'React with any of the emoji below, Reply, Copy, and for your own messages Edit and Unsend.' },
+    { key: 'reactions', label: 'Reactions', type: 'text', default: '❤️ 😂 😮 😢 😡 👍', showIf: (b) => b.hold !== false },
+    { key: 'replies', label: 'Replies (quote a message)', type: 'bool', default: true, showIf: (b) => b.hold !== false },
+    { key: 'edits', label: 'Edit and unsend your messages', type: 'bool', default: true, showIf: (b) => b.hold !== false },
+    { key: 'seen', label: '“Seen” under your last message', type: 'bool', default: true, info: 'Add a Reads collection (chat, handle, at) and it works across phones; without one, only this phone knows what it has read.' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 24], step: 1 },
     { key: 'sendMessage', label: 'Sending sends', type: 'text', default: '', suggest: 'messages' },
     ...colorParams(CHAT_COLORS),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9;
+    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? p.room || 'general' : v); };
     const me = (s) => meOfVars(s, p.author, p.handle);
-    const rows = (s) => { const c = chatOf(s); const all = has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()); return all.filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
+    const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
+    const rows = (s) => { const c = chatOf(s); return all(s).filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
+    const patch = (s, r, o) => { if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? '📷 Photo' : '');
     const sendIt = (s, m) => {
-      const c = chatOf(s), M = me(s), rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}) };
+      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
       if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+      replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
-      if (/^dm-/.test(c) && s.engine.social) { const other = c.slice(3).split('-').find((h) => h !== M.handle); if (other) s.engine.social.notify(other, 'message', { text: m.text || '📷 Photo', post: '' }); } // (a direct message: they get a notification)
+      const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || '📷 Photo'), post: '' }); // (they get a notification)
     };
+    const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, reply: replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; }, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); };
+    /** Press and hold: react, reply, copy, edit, unsend. */
+    const msgMenu = (s, r, mine) => {
+      if (r.deleted) return; const items = [];
+      if (p.replies !== false) items.push({ icon: '↩️', label: 'Reply', run: () => { replyTo = r; bar?.close(); bar = null; openBar(s); } });
+      if (r.text) items.push({ icon: '📋', label: 'Copy', run: () => { try { navigator.clipboard?.writeText(String(r.text)); } catch { /* no clipboard */ } s.snackbar?.('Copied'); } });
+      if (mine && p.edits !== false && r.text) items.push({ icon: '✏️', label: 'Edit', run: () => askTextBox(s, { question: 'Edit message', value: String(r.text), max: 1000 }, (v) => { if (v && v !== r.text) patch(s, r, { text: v, edited: true }); }) });
+      if (mine && p.edits !== false) items.push({ icon: '🗑️', label: 'Unsend', danger: true, run: () => { const was = { text: r.text || '', media: r.media || '', reaction: r.reaction || '' }; patch(s, r, { text: '', media: '', reaction: '', deleted: true }); s.snackbar?.('Message unsent', 'Undo', () => patch(s, r, { ...was, deleted: false })); } });
+      sheetOpen = true;
+      socialSheet(s, { kind: 'message', colors: colors(), emojis: String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 8), current: r.reaction || '', onEmoji: (em) => { if (patch(s, r, { reaction: r.reaction === em ? '' : em })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } }, items, onClose: () => { sheetOpen = false; } });
+    };
+    const shown = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; };
     return {
       uiAlways: true,
       update(e, dt, s) {
         const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), list = { x: b.x, y: b.y, w: b.w, h: b.h - barH - cov };
         barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
-        const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; }
+        const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; }
         const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); S.update(s, e, dt, list);
         if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length;
-        if (!s.engine.editing) { const seen = chatSeen(s), RR = rows(s), last = RR[RR.length - 1]; const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); if (last && shown && (seen[c] || 0) < (last._at || 0)) { seen[c] = last._at || Date.now(); store.set(chatSeenKey(s), JSON.stringify(seen)); } }
+        if (!s.engine.editing && shown(e) && (readT += dt) > 0.6) { readT = 0; const RR = rows(s), last = RR[RR.length - 1], M = me(s); if (last && readAt(s, c, handleOf(M.handle)) < (last._at || 0)) markChatRead(s, c, handleOf(M.handle), last._at || Date.now()); } // you have seen it
+        const itemAt = (pt) => L.find((q) => q.bub && pt.x >= q.bx && pt.x <= q.bx + q.bw && pt.y + S.v - b.y >= q.y && pt.y + S.v - b.y <= q.y + q.h);
+        if (p.hold !== false && !s.engine.editing && !sheetOpen) {
+          for (const d of UK.downs(s, e)) if (UK.in(d, list)) { const it = itemAt(d); hold = it ? { id: d.id, t: 0, x: d.x, y: d.y, it } : null; }
+          if (hold) { const q = UK.ptr(s, e, hold.id); if (!q || S.moved || Math.hypot(q.x - hold.x, q.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const it = hold.it; hold = null; s.engine.vibrate?.(15); msgMenu(s, it.r, it.mine); } }
+        }
         for (const t of UK.taps(s, e)) {
           if (S.moved) continue;
-          if (UK.in(t, barRect)) { if (s.engine.editing || bar) continue; UK.tap(s, p); bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); continue; }
+          if (UK.in(t, barRect)) { UK.tap(s, p); openBar(s); continue; }
           if (!UK.in(t, list)) continue;
-          const it = L.find((q) => q.bub && t.x >= q.bx && t.x <= q.bx + q.bw && t.y + S.v - b.y >= q.y && t.y + S.v - b.y <= q.y + q.h); if (!it || p.react === false) continue;
-          if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; const on = !it.r.reaction; if (has(s)) { if (D(s).update(p.collection, it.r.id, { reaction: on ? '❤️' : '' }) === null) continue; } else it.r.reaction = on ? '❤️' : ''; pops.set(it.r.id, s.time); s.engine.vibrate?.(10); }
+          const it = itemAt(t); if (!it) continue;
+          if (it.quote && t.y + S.v - b.y <= it.y + it.quote) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
+          if (p.react === false || it.r.deleted) continue;
+          if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; if (patch(s, it.r, { reaction: it.r.reaction ? '' : '❤️' })) { pops.set(it.r.id, s.time); s.engine.vibrate?.(10); } }
           else lastTap = { id: it.r.id, t: s.time };
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32);
+        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32), c = chatOf(s);
         const dark = isDark(s), mineC = tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
-        const authors = new Set(R.map((r) => r.handle || r.author)), group = authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
+        const authors = new Set(R.filter((r) => !r.system).map((r) => r.handle || r.author)), group = isGroupChat(c) || authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
         const showNames = p.names === 'always' || (p.names !== 'never' && group), avW = p.avatars !== false ? 36 : 0, maxW = Math.min(b.w * 0.74, 420), pad = 12;
         // lay out
         L = []; let y = 10, prev = null;
-        ctx.font = `500 ${TS}px ${THEME.font}`;
         R.forEach((r, i) => {
-          const mine = isMineMsg(r, M), next = R[i + 1], gapPrev = prev ? (r._at || 0) - (prev._at || 0) : 1e12, sameAsPrev = prev && (prev.handle || prev.author) === (r.handle || r.author) && gapPrev < 3 * 60e3;
-          const sameAsNext = next && (next.handle || next.author) === (r.handle || r.author) && (next._at || 0) - (r._at || 0) < 3 * 60e3 && !((next._at || 0) - (r._at || 0) > 15 * 60e3);
+          if (r.system) { ctx.font = `600 13px ${THEME.font}`; const ls = wrapLines(ctx, String(r.text || ''), b.w - 60, 13, 3); L.push({ kind: 'system', y: y + 6, h: ls.length * 17 + 8, lines: ls }); y += ls.length * 17 + 20; prev = null; return; }
+          ctx.font = `500 ${TS}px ${THEME.font}`;
+          const mine = isMineMsg(r, M), next = R[i + 1] && !R[i + 1].system ? R[i + 1] : null, gapPrev = prev ? (r._at || 0) - (prev._at || 0) : 1e12, sameAsPrev = prev && (prev.handle || prev.author) === (r.handle || r.author) && gapPrev < 3 * 60e3;
+          const sameAsNext = next && (next.handle || next.author) === (r.handle || r.author) && (next._at || 0) - (r._at || 0) < 3 * 60e3;
           if (p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 30, t: r._at }); y += 30; }
           else if (!sameAsPrev) y += 6;
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
-          const big = !r.media && ONLY_EMOJI(r.text), media = r.media ? String(r.media) : '';
+          const del = !!r.deleted, big = !del && !r.media && !r.reply_to && ONLY_EMOJI(r.text), media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
-          else { lines = r.text ? wrapLines(ctx, String(r.text), maxW - 28, TS, 40) : []; bw = Math.max(44, Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width), 0) + 28)); bh = lines.length ? lines.length * LH + 16 : 0; if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; } }
-          const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, react = r.reaction ? 14 : 0;
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
-          y += bh + react + (sameAsNext ? 3 : 4); prev = r;
+          else {
+            if (del) ctx.font = `italic 500 ${TS - 1}px ${THEME.font}`;
+            lines = del ? ['Message unsent'] : r.text ? wrapLines(ctx, String(r.text), maxW - 28, TS, 40) : [];
+            bw = Math.max(44, Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width), 0) + 28)); bh = lines.length ? lines.length * LH + 16 : 0;
+            if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; }
+            if (quote) { ctx.font = `600 12px ${THEME.font}`; bw = Math.max(bw, Math.min(maxW, Math.max(ctx.measureText(String(r.reply_text || '')).width, ctx.measureText(String(r.reply_author || '')).width) + 40)); bh += quote; }
+          }
+          const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (r.reaction ? 14 : 0) + (r.edited && !del ? 14 : 0);
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
         y += 10; total = y;
         // draw
@@ -10316,31 +10495,47 @@ registerBehavior('uiChat', {
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
           if (it.kind === 'time') { const d = new Date(it.t || Date.now()), today = new Date().toDateString() === d.toDateString(); let ts = ''; try { ts = (today ? '' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ') + d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { ts = shortAgo(it.t); } UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: sub }); continue; }
+          if (it.kind === 'system') { it.lines.forEach((l, k) => UK.text(ctx, l, b.cx, it.y + 8 + k * 17, { size: 13, weight: 600, color: sub })); continue; }
           if (it.kind === 'name') { UK.text(ctx, it.name, it.x + 12, it.y + 9, { size: 12, weight: 700, color: sub, align: 'left' }); continue; }
           const r = it.r, pk = pops.get(r.id), sc = pk != null && s.time - pk < 0.35 ? 1 + Math.sin((s.time - pk) / 0.35 * Math.PI) * 0.12 : 1, fresh = it.mine && s.time - sendT < 0.3 && it === L[L.length - 1] ? Ease.outBack(clamp((s.time - sendT) / 0.3, 0, 1)) : 1;
           ctx.save(); const cx0 = it.bx + it.bw / 2, cy0 = it.y + it.h / 2; ctx.translate(cx0, cy0); ctx.scale(sc * fresh, sc * fresh); ctx.translate(-cx0, -cy0);
           if (it.big) UK.text(ctx, String(r.text).trim(), it.mine ? it.bx + it.bw : it.bx, it.y + it.h / 2 + 2, { size: 40, align: it.mine ? 'right' : 'left' });
           else {
-            const rad = 18, small = 6; ctx.fillStyle = it.mine ? mineC : theirsC; ctx.beginPath();
-            const x = it.bx, y0 = it.y, w = it.bw, h = it.h, tl = !it.mine || true ? rad : rad, br = it.mine && it.tail ? small : rad, bl = !it.mine && it.tail ? small : rad;
-            if (ctx.roundRect) ctx.roundRect(x, y0, w, h, [tl, rad, br, bl]); else UK.rr(ctx, x, y0, w, h, rad); ctx.fill();
+            const rad = 18, small = 6, x = it.bx, y0 = it.y, w = it.bw, h = it.h, br = it.mine && it.tail ? small : rad, bl = !it.mine && it.tail ? small : rad;
+            ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y0, w, h, [rad, rad, br, bl]); else UK.rr(ctx, x, y0, w, h, rad);
+            if (it.del) { ctx.strokeStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.6); ctx.lineWidth = 1.2; ctx.stroke(); } else { ctx.fillStyle = it.mine ? mineC : theirsC; ctx.fill(); }
             let ty = y0;
-            if (it.media) { const mh = isPic(it.media) ? 170 : 120; ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y0, w, it.lines.length ? mh : h, it.lines.length ? [rad, rad, 0, 0] : [rad, rad, br, bl]); else ctx.rect(x, y0, w, mh); ctx.clip(); drawMedia(ctx, it.media, it.mine ? mineC : '#888', x, y0, w, mh, 0); ctx.restore(); ty += mh; }
-            it.lines.forEach((l, k) => UK.text(ctx, l, x + 14, ty + 8 + LH / 2 + k * LH, { size: TS, weight: 500, color: it.mine ? mineT : txt, align: 'left' }));
+            if (it.quote) { // the message it replies to
+              const qx = x + 8, qy = y0 + 7, qw = w - 16, qh = it.quote - 8; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.18)' : withAlpha(dark ? '#ffffff' : '#000000', 0.06); UK.rr(ctx, qx, qy, qw, qh, 10); ctx.fill();
+              ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.85)' : mineC; ctx.fillRect(qx, qy + 5, 3, qh - 10);
+              UK.text(ctx, r.reply_author && r.reply_author === M.author ? 'You' : String(r.reply_author || ''), qx + 10, qy + 11, { size: 12, weight: 800, color: it.mine ? mineT : mineC, align: 'left', maxW: qw - 16 });
+              UK.text(ctx, String(r.reply_text || ''), qx + 10, qy + 25, { size: 12, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'left', maxW: qw - 16 });
+              ty += it.quote;
+            }
+            if (it.media) { const mh = isPic(it.media) ? 170 : 120; ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, ty, w, it.lines.length ? mh : h - (ty - y0), it.lines.length ? (ty === y0 ? [rad, rad, 0, 0] : 0) : [ty === y0 ? rad : 0, ty === y0 ? rad : 0, br, bl]); else ctx.rect(x, ty, w, mh); ctx.clip(); drawMedia(ctx, it.media, it.mine ? mineC : '#888', x, ty, w, mh, 0); ctx.restore(); ty += mh; }
+            it.lines.forEach((l, k) => UK.text(ctx, l, x + 14, ty + 8 + LH / 2 + k * LH, { size: it.del ? TS - 1 : TS, weight: 500, color: it.del ? sub : it.mine ? mineT : txt, align: 'left', ...(it.del ? { italic: true } : {}) }));
           }
           ctx.restore();
-          if (r.reaction) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); }
+          let uy = it.y + it.h;
+          if (r.reaction && !it.del) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); uy += 14; }
+          if (r.edited && !it.del) UK.text(ctx, 'Edited', it.mine ? it.bx + it.bw - 4 : it.bx + 4, uy + 7, { size: 11, weight: 600, color: sub, align: it.mine ? 'right' : 'left' });
           if (it.avatar) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
         }
-        const lastMine = [...L].reverse().find((q) => q.bub); if (lastMine?.mine && lastMine.r === R[R.length - 1]) UK.text(ctx, has(s) && s.engine.supa?.pending?.().some((op) => op.rec?.id === lastMine.r.id) ? 'Sending…' : 'Sent', lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10), { size: 11, weight: 600, color: sub, align: 'right' });
+        // Sent / Sending… / Seen under my last message
+        const lastMine = [...L].reverse().find((q) => q.bub);
+        if (lastMine?.mine && lastMine.r === R[R.length - 1] && !lastMine.del) {
+          let label = has(s) && s.engine.supa?.pending?.().some((op) => op.rec?.id === lastMine.r.id) ? 'Sending…' : 'Sent';
+          if (label === 'Sent' && p.seen !== false) { const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), by = others.filter((h) => readAt(s, c, h) >= (lastMine.r._at || 0)); if (by.length) label = /^dm-/.test(c) ? 'Seen' : by.length === others.length ? 'Seen by everyone' : 'Seen by ' + by.map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
+          UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: label.startsWith('Seen') ? mineC : sub, align: 'right' });
+        }
         ctx.restore();
         // the bar
-        const br = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
-        ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, br.y - 8, b.w, barH);
-        ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, br.x, br.y, br.w, br.h, br.h / 2); ctx.fill();
-        UK.text(ctx, p.placeholder || 'Message…', br.x + (p.photos !== false ? 44 : 16), br.y + br.h / 2 + 1, { size: 15, weight: 500, color: sub, align: 'left' });
-        if (p.photos !== false) UK.text(ctx, '🖼️', br.x + 22, br.y + br.h / 2 + 1, { size: 18 });
-        ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(br.x + br.w - br.h / 2, br.y + br.h / 2, br.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '➤', br.x + br.w - br.h / 2 + 1, br.y + br.h / 2 + 1, { size: 15, color: '#fff' });
+        const brr = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
+        ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, brr.y - 8, b.w, barH);
+        ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, brr.x, brr.y, brr.w, brr.h, brr.h / 2); ctx.fill();
+        UK.text(ctx, replyTo ? '↩ Replying to ' + (replyTo.author || '') : p.placeholder || 'Message…', brr.x + (p.photos !== false ? 44 : 16), brr.y + brr.h / 2 + 1, { size: 15, weight: 500, color: sub, align: 'left', maxW: brr.w - 100 });
+        if (p.photos !== false) UK.text(ctx, '🖼️', brr.x + 22, brr.y + brr.h / 2 + 1, { size: 18 });
+        ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(brr.x + brr.w - brr.h / 2, brr.y + brr.h / 2, brr.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '➤', brr.x + brr.w - brr.h / 2 + 1, brr.y + brr.h / 2 + 1, { size: 15, color: '#fff' });
       },
       destroy() { bar?.close(); },
     };
@@ -10348,7 +10543,7 @@ registerBehavior('uiChat', {
 });
 
 registerBehavior('uiInbox', {
-  label: 'Inbox', description: 'Your conversations, newest first: the other person, the last message, when, and a dot for unread ones. Tapping one opens it in a Chat (it sets the conversation variable and goes to a page).',
+  label: 'Inbox', description: 'Your conversations, newest first: direct messages and group chats with the last message, when, unread counts and ✓✓ when they have read yours. Search, All / Unread / Groups tabs, a ✏️ button to start a new message or group, and press and hold a conversation to pin, mute, mark unread or delete it. Tapping one opens it in a Chat.',
   params: [
     { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
     { key: 'chatVar', label: 'Put the conversation id in variable', type: 'text', default: 'chat', suggest: 'vars' },
@@ -10357,48 +10552,127 @@ registerBehavior('uiInbox', {
     { key: 'author', label: 'My name ({variables} work)', type: 'text', default: '{playerName}' },
     { key: 'handle', label: 'My handle', type: 'text', default: '{playerHandle}' },
     { key: 'empty', label: 'When there are no conversations', type: 'text', default: 'No messages yet' },
-    { key: 'unreadVar', label: 'Unread count goes in variable (for a badge)', type: 'text', default: 'unread', suggest: 'vars' },
+    { key: 'unreadVar', label: 'Unread count goes in variable (for a badge)', type: 'text', default: 'unread', suggest: 'vars', infoText: 'Muted conversations don’t count.' },
     { key: 'message', label: 'Opening one sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'search', label: 'Search box', type: 'bool', default: true },
+    { key: 'newChat', label: '✏️ New message button', type: 'bool', default: true },
+    { key: 'groups', label: 'Group chats (New group)', type: 'bool', default: true },
+    { key: 'tabs', label: 'Tabs: All, Unread, Groups', type: 'bool', default: true },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'pills', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
+    { key: 'hold', label: 'Press and hold: pin, mute, mark unread, delete', type: 'bool', default: true },
     ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Unread dot', '@accent'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let sample = null, rowsR = [];
+    const S = makeScroller('y'), TSt = new TabStrip(); let sample = null, tab = 0, filter = '', hold = null, tabsR = [], searchR = null, newR = null, top = 0, sheetUp = false;
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
+    const me = (s) => meOfVars(s, p.author, p.handle);
+    const colors = () => ({ bg: tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
+    const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
     const convs = (s) => {
-      const M = meOfVars(s, p.author, p.handle), all = has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()), by = new Map(), seen = chatSeen(s);
-      for (const r of all) { const c = String(r.chat ?? ''); if (!c) continue; if (/^dm-/.test(c) && !c.slice(3).split('-').includes(M.handle) && !all.some((q) => q.chat === c && isMineMsg(q, M)) && has(s)) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
-      return [...by.entries()].map(([c, L]) => { L.sort((a, b) => (a._at || 0) - (b._at || 0)); const last = L[L.length - 1], other = [...L].reverse().find((q) => !isMineMsg(q, M));
-        const title = /^dm-/.test(c) ? other?.author || c.slice(3).split('-').find((h) => h !== M.handle) || 'Chat' : '# ' + c;
-        return { c, title, last, mine: isMineMsg(last, M), unread: L.filter((q) => !isMineMsg(q, M) && (q._at || 0) > (seen[c] || 0)).length, who: other?.author || title };
-      }).sort((a, b) => (b.last._at || 0) - (a.last._at || 0));
+      const M = me(s), mh = handleOf(M.handle), A = all(s), meta = chatMeta(s), by = new Map(), out = [];
+      for (const r of A) { const c = String(r.chat ?? ''); if (!c) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
+      for (const [c, L] of by) {
+        const mem = chatMembers(L, c), mine = L.some((q) => isMineMsg(q, M));
+        if (has(s) && /^dm-/.test(c) && !mem.includes(mh) && !mine) continue; // other people's direct messages
+        if (has(s) && isGroupChat(c) && !mem.includes(mh) && !mine) continue; // groups you are not in
+        L.sort((a, b) => (a._at || 0) - (b._at || 0)); const last = L[L.length - 1]; if ((meta.hide[c] || 0) >= (last._at || 0)) continue; // deleted (until something new arrives)
+        const other = [...L].reverse().find((q) => !isMineMsg(q, M) && !q.system), group = isGroupChat(c);
+        const title = /^dm-/.test(c) ? other?.author || nameOfHandle(s, mem.find((h) => h !== mh) || '') || 'Chat' : group ? L.find((q) => q.title)?.title || mem.filter((h) => h !== mh).map((h) => nameOfHandle(s, h).split(' ')[0]).join(', ') || 'Group' : '# ' + c;
+        const myRead = readAt(s, c, mh); let unread = L.filter((q) => !isMineMsg(q, M) && !q.system && (q._at || 0) > myRead).length; if (!unread && meta.unread.includes(c)) unread = -1; // -1: marked unread (a dot)
+        const lastMine = isMineMsg(last, M) && !last.system, others = mem.filter((h) => h !== mh), seen = lastMine && others.length && others.every((h) => readAt(s, c, h) >= (last._at || 0));
+        out.push({ c, title, last, mine: lastMine, unread, who: other?.author || title, group, room: !group && !/^dm-/.test(c), pin: meta.pin.includes(c), mute: meta.mute.includes(c), seen, mem: others });
+      }
+      return out.sort((a, b) => (b.pin - a.pin) || (b.last._at || 0) - (a.last._at || 0));
     };
+    const shownList = (s) => { const t = filter.toLowerCase(); return convs(s).filter((q) => (tab !== 1 || q.unread) && (tab !== 2 || q.group) && (!t || q.title.toLowerCase().includes(t) || String(q.last.text || '').toLowerCase().includes(t))); };
+    const open = (s, q) => { const meta = chatMeta(s); if (meta.unread.includes(q.c)) { meta.unread = meta.unread.filter((x) => x !== q.c); saveChatMeta(s, meta); } if (p.chatVar) s.setVar(p.chatVar, q.c); if (p.titleVar) s.setVar(p.titleVar, q.title); if (p.openPage) s.navTo(p.openPage); if (p.message) s.send(p.message, q.c); };
+    /** Start a conversation: one person (a direct message) or a new group. */
+    const startChat = (s, people, name) => {
+      const M = me(s), mh = handleOf(M.handle);
+      if (people.length === 1) { const pp = people[0]; open(s, { c: dmId(mh, pp.handle), title: pp.name }); return; }
+      const c = 'g-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), title = name || [M.author.split(' ')[0], ...people.map((pp) => pp.name.split(' ')[0])].slice(0, 4).join(', ');
+      const rec = { chat: c, author: M.author, handle: M.handle, text: `${M.author.split(' ')[0]} created the group “${title}”`, system: true, members: [mh, ...people.map((pp) => pp.handle)].join(','), title };
+      if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'g' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+      const G = s.engine.social; if (G) for (const pp of people) G.notify(pp.handle, 'message', { text: `added you to “${title}”`, post: '' });
+      open(s, { c, title });
+    };
+    const newMenu = (s) => {
+      const pick = (multi) => { sheetUp = true; peoplePicker(s, { colors: colors(), title: multi ? 'New group' : 'New message', multi, people: chatPeople(s, { ...me(s), handle: handleOf(me(s).handle) }), onPick: (L, nm) => startChat(s, L, nm), onClose: () => { sheetUp = false; } }); };
+      if (p.groups === false) { pick(false); return; }
+      sheetUp = true; socialSheet(s, { kind: 'new-chat', colors: colors(), items: [{ icon: '✉️', label: 'New message', run: () => pick(false) }, { icon: '👥', label: 'New group', run: () => pick(true) }], onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+    };
+    const rowMenu = (s, q) => {
+      const meta = chatMeta(s), save = (f) => { const m = chatMeta(s); f(m); saveChatMeta(s, m); };
+      sheetUp = true;
+      socialSheet(s, { kind: 'chat-actions', title: q.title, colors: colors(), onClose: () => { sheetUp = false; }, items: [
+        { icon: '📌', label: meta.pin.includes(q.c) ? 'Unpin' : 'Pin to the top', run: () => save((m) => { m.pin = m.pin.includes(q.c) ? m.pin.filter((x) => x !== q.c) : [...m.pin, q.c]; }) },
+        { icon: meta.mute.includes(q.c) ? '🔔' : '🔕', label: meta.mute.includes(q.c) ? 'Unmute' : 'Mute', run: () => save((m) => { m.mute = m.mute.includes(q.c) ? m.mute.filter((x) => x !== q.c) : [...m.mute, q.c]; }) },
+        q.unread ? { icon: '✓', label: 'Mark as read', run: () => { markChatRead(s, q.c, handleOf(me(s).handle), q.last._at || Date.now()); save((m) => { m.unread = m.unread.filter((x) => x !== q.c); }); } } : { icon: '●', label: 'Mark as unread', run: () => save((m) => { if (!m.unread.includes(q.c)) m.unread.push(q.c); }) },
+        { icon: '🗑️', label: 'Delete conversation', danger: true, run: () => { save((m) => { m.hide[q.c] = q.last._at || Date.now(); }); s.snackbar?.('Conversation deleted', 'Undo', () => save((m) => { delete m.hide[q.c]; })); } },
+      ] });
+    };
+    const H = 76;
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.fit(s, e, UK.box(e)), H = 76, C = convs(s); S.max = Math.max(0, C.length * H - b.h + coveredBottom(s, e, b)); S.update(s, e, dt, b);
-        if (p.unreadVar && !s.engine.editing) { const n = C.reduce((a, q) => a + q.unread, 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
-        for (const t of UK.taps(s, e)) { if (S.moved || !UK.in(t, b)) continue; const i = Math.floor((t.y - b.y + S.v) / H), q = C[i]; if (!q) continue; UK.tap(s, p);
-          if (p.chatVar) s.setVar(p.chatVar, q.c); if (p.titleVar) s.setVar(p.titleVar, q.title); if (p.openPage) s.navTo(p.openPage); if (p.message) s.send(p.message, q.c); }
+        const b = UK.fit(s, e, UK.box(e)), C = shownList(s), list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
+        S.max = Math.max(0, C.length * H - list.h + coveredBottom(s, e, b) + 70); S.update(s, e, dt, list);
+        if (p.unreadVar && !s.engine.editing) { const n = convs(s).reduce((a, q) => a + (q.mute ? 0 : Math.max(0, q.unread)), 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
+        if (s.engine.editing || sheetUp) { hold = null; return; }
+        const rowAt = (pt) => (UK.in(pt, list) ? C[Math.floor((pt.y - list.y + S.v) / H)] : null);
+        if (p.hold !== false) {
+          for (const d of UK.downs(s, e)) { const q = rowAt(d); hold = q ? { id: d.id, t: 0, x: d.x, y: d.y, q } : null; }
+          if (hold) { const pt = UK.ptr(s, e, hold.id); if (!pt || S.moved || Math.hypot(pt.x - hold.x, pt.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const q = hold.q; hold = null; s.engine.vibrate?.(15); rowMenu(s, q); } }
+        }
+        for (const t of UK.taps(s, e)) {
+          if (S.moved || !UK.in(t, b)) continue;
+          if (newR && Math.hypot(t.x - newR.x, t.y - newR.y) < newR.r + 6) { UK.tap(s, p); newMenu(s); continue; }
+          if (searchR && UK.in(t, searchR)) { UK.tap(s, p); if (filter && t.x > searchR.x + searchR.w - 40) { filter = ''; continue; } askTextBox(s, { question: 'Search messages', value: filter, max: 40, placeholder: 'Name or words' }, (v) => { filter = v || ''; S.v = 0; }); continue; }
+          const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { if (ti !== tab) { UK.tap(s, p); TSt.tap(ti); tab = ti; S.v = 0; } continue; }
+          const q = rowAt(t); if (!q) continue; UK.tap(s, p); open(s, q);
+        }
       },
       drawUI(ctx, e, s) {
-        const b = UK.fit(s, e, UK.box(e)), H = 76, C = convs(s), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), acc = tok(p.accent || '@accent');
+        const b = UK.fit(s, e, UK.box(e)), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), line = tok(p.line || '@line'), acc = tok(p.accent || '@accent'), dark = isDark(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
-        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
-        if (!C.length) UK.text(ctx, p.empty || 'No messages yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
+        let y = b.y; searchR = null; newR = null; tabsR = [];
+        if (p.search !== false) { // the search box
+          searchR = { x: b.x + 12, y: y + 8, w: b.w - 24, h: 40 }; ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, searchR.x, searchR.y, searchR.w, searchR.h, 20); ctx.fill();
+          drawNavIcon(ctx, 'search', searchR.x + 20, searchR.y + 20, 17, sub);
+          UK.text(ctx, filter || 'Search', searchR.x + 38, searchR.y + 21, { size: 15, weight: filter ? 700 : 500, color: filter ? txt : sub, align: 'left', maxW: searchR.w - 80 });
+          if (filter) UK.text(ctx, '✕', searchR.x + searchR.w - 20, searchR.y + 21, { size: 15, weight: 700, color: sub });
+          y += 52;
+        }
+        if (p.tabs !== false) { const C0 = convs(s), un = C0.filter((q) => q.unread).length; tabsR = TSt.draw(ctx, { x: b.x, y, w: b.w, h: 44 }, [{ label: 'All' }, { label: un ? `Unread ${un}` : 'Unread' }, ...(p.groups !== false ? [{ label: 'Groups' }] : [])], tab, { style: p.tabStyle || 'pills', act: acc, idle: sub, text: txt, on: ['pills', 'gradient', 'chips'].includes(p.tabStyle || 'pills') ? '#ffffff' : '', line, size: 14, now: s.time, snap: s.engine.editing, layout: 'fit the names (scrolls)', thumb: dark ? '#2a2d36' : '#ffffff' }); y += 46; }
+        top = y - b.y;
+        const C = shownList(s);
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, y, b.w, b.h - top); ctx.clip();
+        if (!C.length) UK.text(ctx, filter ? `No results for “${filter}”` : tab === 1 ? 'You’re all caught up' : tab === 2 ? 'No group chats yet' : p.empty || 'No messages yet', b.cx, y + 60, { size: 15, weight: 600, color: sub });
         C.forEach((q, i) => {
-          const y = b.y + i * H - S.v; if (y + H < b.y || y > b.y + b.h) return;
-          miniAvatar(ctx, q.who, b.x + 16 + 26, y + H / 2, 52, /^# /.test(q.title) ? '#' : '');
-          const tx = b.x + 16 + 52 + 12, tw = b.w - (tx - b.x) - 16, when = shortAgo(q.last._at);
-          ctx.font = `600 12px ${THEME.font}`; const ww = ctx.measureText(when).width;
-          UK.text(ctx, q.title, tx, y + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
-          UK.text(ctx, when, b.x + b.w - 16, y + H / 2 - 11, { size: 12, weight: 600, color: q.unread ? acc : sub, align: 'right' });
-          const last = (q.mine ? 'You: ' : '') + (q.last.text || (q.last.media ? '📷 Photo' : ''));
-          UK.text(ctx, last, tx, y + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - (q.unread ? 34 : 0) });
-          if (q.unread) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = acc; UK.rr(ctx, b.x + b.w - 16 - bw, y + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, y + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }
-          ctx.fillStyle = line; ctx.fillRect(tx, y + H - 0.5, b.w - (tx - b.x), 0.5);
+          const ry = y + i * H - S.v; if (ry + H < y || ry > b.y + b.h) return;
+          if (hold && hold.q.c === q.c) { ctx.fillStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.12); ctx.fillRect(b.x, ry, b.w, H); }
+          const ax = b.x + 16 + 26;
+          if (q.group) { miniAvatar(ctx, nameOfHandle(s, q.mem[0] || ''), ax - 8, ry + H / 2 - 8, 36); ctx.fillStyle = tok(p.bg) || tok('@bg') || (dark ? '#000' : '#fff'); ctx.beginPath(); ctx.arc(ax + 9, ry + H / 2 + 9, 20, 0, Math.PI * 2); ctx.fill(); miniAvatar(ctx, nameOfHandle(s, q.mem[1] || q.mem[0] || ''), ax + 9, ry + H / 2 + 9, 36); }
+          else miniAvatar(ctx, q.who, ax, ry + H / 2, 52, q.room ? '#' : '');
+          const tx = b.x + 16 + 52 + 12, tw = b.w - (tx - b.x) - 16, when = (q.pin ? '📌 ' : '') + (q.mute ? '🔕 ' : '') + shortAgo(q.last._at);
+          ctx.font = `600 12px ${THEME.font}`; const ww = ctx.measureText(when).width + 6;
+          UK.text(ctx, q.title, tx, ry + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
+          UK.text(ctx, when, b.x + b.w - 16, ry + H / 2 - 11, { size: 12, weight: 600, color: q.unread && !q.mute ? acc : sub, align: 'right' });
+          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.text || (l0.media ? '📷 Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
+          const right = q.unread ? 34 : q.mine ? 24 : 0;
+          UK.text(ctx, who0 + body0, tx, ry + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - right });
+          if (q.unread > 0) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = q.mute ? sub : acc; UK.rr(ctx, b.x + b.w - 16 - bw, ry + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, ry + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }
+          else if (q.unread < 0) { ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(b.x + b.w - 24, ry + H / 2 + 12, 5, 0, Math.PI * 2); ctx.fill(); }
+          else if (q.mine) UK.text(ctx, q.seen ? '✓✓' : '✓', b.x + b.w - 16, ry + H / 2 + 12, { size: 13, weight: 800, color: q.seen ? acc : sub, align: 'right' }); // sent, or read
+          ctx.fillStyle = line; ctx.fillRect(tx, ry + H - 0.5, b.w - (tx - b.x), 0.5);
         });
         ctx.restore();
+        if (p.newChat !== false) { // ✏️ new message
+          const cov = coveredBottom(s, e, b); newR = { x: b.x + b.w - 44, y: b.y + b.h - cov - 44, r: 26 };
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 4; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(newR.x, newR.y, newR.r, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          drawNavIcon(ctx, 'edit', newR.x, newR.y, 22, '#ffffff');
+        }
       },
     };
   },
@@ -10995,6 +11269,7 @@ registerBehavior('uiComposer', {
     { key: 'max', label: 'Longest post', type: 'number', default: 280, step: 10 },
     { key: 'button', label: 'Button', type: 'text', default: 'Post' },
     { key: 'message', label: 'After posting, send', type: 'text', default: 'posted', suggest: 'messages' },
+    { key: 'openOn', label: 'Also opens on message', type: 'text', default: 'compose', suggest: 'messages', infoText: 'e.g. a Post button in the Side Menu (Post | edit | button:msg:compose) or the App Bar opens the composer from any page.' },
     { key: 'style', label: 'Tapping it opens', type: 'select', options: ['full composer', 'simple text box'], default: 'full composer', info: { 'full composer': 'A full-screen editor with a character ring, photos, a poll and a place. Unfinished posts are kept as a draft.' } },
     { key: 'photos', label: 'Photos (up to 4)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'videos', label: 'Videos', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' && b.photos !== false, info: 'Small videos (6 MB) are kept in the post; with a Supabase media bucket (Game Settings › Supabase) photos, GIFs and videos are uploaded there.' },
@@ -11006,11 +11281,12 @@ registerBehavior('uiComposer', {
     ...UI_COMMON,
   ],
   create(p) {
-    let busy = false;
+    let busy = false, asked = false;
     return {
       uiAlways: true,
+      start(e, s) { if (p.openOn) s.on('message', (m) => { if (m !== p.openOn || e.dead || busy || s.engine.editing || s._composeAt === s.time) return; s._composeAt = s.time; asked = true; }); }, // (one composer answers, even from another page)
       update(e, dt, s) {
-        if (busy || !UK.taps(s, e).some((t) => UK.in(t, UK.box(e)))) return;
+        if (busy || !(asked || UK.taps(s, e).some((t) => UK.in(t, UK.box(e))))) return; asked = false;
         UK.tap(s, p); busy = true;
         const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
         if (p.style !== 'simple text box' && !s.engine.editing) {
@@ -21907,9 +22183,10 @@ export class Engine {
   modalTaps(s) {
     const m = s.modal;
     s.tapOwner = m && !m.dead && m.visible ? m : null; // this frame's taps belong to it, even if it closes while handling them (a dropdown choice)
+    s.tapPass = null;
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
     const inp = this.input, r = m._modalRect?.() || uiBox(m, this.width, this.height, this.safe); // a component can claim the whole screen while open
-    const pass = m._modalPass?.() || []; // areas whose taps still reach the game (a side menu between nav bars)
+    const pass = m._modalPass?.() || []; s.tapPass = pass; // areas whose taps still reach the game (a side menu between nav bars)
     const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2, through = (t) => pass.some((q) => t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h);
     const out = inp.taps.some((t) => !inside(t));
     inp.taps = inp.taps.filter((t) => inside(t) || through(t)); inp.downs = inp.downs.filter((t) => inside(t) || through(t));

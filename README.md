@@ -289,10 +289,10 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - new-post dots;
   - tapping the current tab scrolls back to the top.
 - **Stories and the post box scroll away** as you scroll the feed, so the posts get the whole screen.
-- **Messaging:**
-  - **Chat** (bubbles, avatars, times, big emoji, photos, double-tap ❤️, Sent / Sending…);
-  - **Inbox** (conversations, unread counts and a `{unread}` badge);
-  - **Message @someone** from any post. Live with Supabase.
+- **Messaging system:**
+  - **Chat:** direct messages and group chats with bubbles, photos and big emoji. Press and hold a message to react, reply (with quotes), copy, edit or unsend it. Read receipts show Seen / Seen by.
+  - **Inbox:** search, All / Unread / Groups tabs, ✏️ new message or **new group** (pick people), pin, mute, mark unread and delete. Unread badges, and ✓✓ once they have read yours.
+  - **Message @someone** from any post. Live with Supabase, with notifications for the people in the conversation.
 - **Your own posts:** edit, pin and delete with Undo.
 - **Discovery:** **Trending** hashtags, **Who To Follow** suggestions, and a search chip on feeds.
 - **Friends, follows and notifications, all connected:**
@@ -1170,6 +1170,8 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
   - **Hide & show** (also on the App Bar): **Hides by itself** never, *when scrolling down* (a Scroll View or List scrolling down slides it away; scrolling up or reaching the top brings it back), *after a few seconds* without touches (a touch brings it back), or both. **Goes away by** sliding, fading or both, at a set speed. The messages `navbar hide`, `navbar show` and `navbar toggle` (`appbar …` for the App Bar) and the **Show / Hide Nav Bars** node do it by hand. While a bar is away, its space goes back to the page.
   - Tapping a tab sets the variable `page`. Ready-made **Pages** show when it matches, and they slide toward the tab you picked. The bar is drawn in the editor too, so you see it while designing.
 - **Side Menus:** one **Side Menu** component draws and runs the whole menu.
+  - **Keep in step with** the Bottom Nav tabs or all pages (and the Bottom Nav with the Side Menu or all pages), so pages, tabs and menu items stay in sync by themselves.
+  - **Social header:** the signed-in person's picture, name and @handle with Following / Followers / Friends counts, which open their profile and lists. A **Post** button opens the composer from any page.
   - **Presets:** Side Menu (left), Side Menu (right) (settings switches behind a ⚙ button), Floating, Glass, Banner header, Icon Rail (always visible), Full-screen Menu, Minimal, Grouped, Gradient, Neon, Cards, Pills, Compact, Hides the page and Page still works. The older menus made of separate objects are still there as *Side Bar (left / right, separate items)*.
   - **Items:** one per line, `Label | icon | what it does | badge variable`.
     - *What it does* is a page name (sets `page`), `msg:name` (sends a message, shown with ›), or `toggle:var` (an on/off switch that keeps the menu open).

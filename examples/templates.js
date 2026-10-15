@@ -161,6 +161,8 @@ function blankApp() {
 }
 
 /** A social app: a timeline with stories and a post box, a photo feed, a friends feed of cards, and a profile with a photo grid. */
+/** The App Bar with ☰ (opens the Side Menu) on pages with nowhere to go back to. */
+const menuBar = (bar) => ({ ...bar, behaviors: [{ ...bar.behaviors[0], left: 'back, else menu' }] });
 function socialApp() {
   const A = '#1d9bf0', t = Date.now(), H = 3600e3;
   const feed = (id, look, top, o = {}) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
@@ -183,7 +185,8 @@ function socialApp() {
       { author: 'Ava Brooks', handle: 'avab', text: 'Adding this to my list of places to see 😍 #hiking', likes: 64, comments: 5, reposts: 2, following: false, quote: 's0', _at: t - 30 * H },
       { author: 'Alex Rivera', handle: 'alex', text: 'Just joined! Say hi 👋 #newhere', likes: 3, comments: 1, reposts: 0, following: true, _at: t - 5 * H },
     ] },
-    { name: 'Messages', fields: [{ name: 'Chat', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Reaction', type: 'text' }],
+    { name: 'Messages', fields: [{ name: 'Chat', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Reaction', type: 'text' },
+      { name: 'Reply To', type: 'text' }, { name: 'Reply Text', type: 'text' }, { name: 'Reply Author', type: 'text' }, { name: 'Edited', type: 'yes/no' }, { name: 'Deleted', type: 'yes/no' }, { name: 'System', type: 'yes/no' }, { name: 'Members', type: 'text' }, { name: 'Title', type: 'text' }],
       rows: [
         { chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Are you coming hiking on Saturday? 🏔️', _at: t - 0.85 * H },
         { chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: 'Yes! What time?', _at: t - 0.8 * H },
@@ -191,7 +194,13 @@ function socialApp() {
         { chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Bring snacks 😄', reaction: '❤️', _at: t - 0.77 * H },
         { chat: 'dm-alex-leop', author: 'Leo Park', handle: 'leop', text: 'Did you try the new update? #indiedev', _at: t - 26 * H },
         { chat: 'general', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome to the group chat everyone! 🎉', _at: t - 50 * H },
+        { id: 'g0', chat: 'g-weekend', author: 'Maya Chen', handle: 'maya', text: 'Maya created the group “Weekend hike 🏔️”', system: true, members: 'maya,alex,leop,sofiaruiz', title: 'Weekend hike 🏔️', _at: t - 30 * H },
+        { id: 'g1', chat: 'g-weekend', author: 'Leo Park', handle: 'leop', text: 'I’m in! 🙌', _at: t - 29.5 * H },
+        { id: 'g2', chat: 'g-weekend', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Can I bring my dog? 🐶', _at: t - 1.6 * H },
+        { id: 'g3', chat: 'g-weekend', author: 'Maya Chen', handle: 'maya', text: 'Of course! The more the merrier', reply_to: 'g2', reply_text: 'Can I bring my dog? 🐶', reply_author: 'Sofia Ruiz', _at: t - 1.5 * H },
       ] },
+    { name: 'Reads', fields: [{ name: 'Chat', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'At', type: 'number' }],
+      rows: [{ chat: 'dm-alex-maya', handle: 'maya', at: t - 0.76 * H }, { chat: 'dm-alex-leop', handle: 'leop', at: t - 25 * H }] },
     { name: 'Follows', fields: [{ name: 'Follower', type: 'text' }, { name: 'Followee', type: 'text' }, { name: 'Follower Name', type: 'text' }, { name: 'Followee Name', type: 'text' }],
       rows: [['alex', 'maya', 'Alex Rivera', 'Maya Chen'], ['alex', 'leop', 'Alex Rivera', 'Leo Park'], ['alex', 'sofiaruiz', 'Alex Rivera', 'Sofia Ruiz'], ['alex', 'pocketnews', 'Alex Rivera', 'Pocket News'], ['maya', 'alex', 'Maya Chen', 'Alex Rivera'], ['leop', 'alex', 'Leo Park', 'Alex Rivera'], ['amir', 'alex', 'Amir Haddad', 'Alex Rivera'], ['maya', 'leop', 'Maya Chen', 'Leo Park'], ['sofiaruiz', 'maya', 'Sofia Ruiz', 'Maya Chen']].map(([follower, followee, follower_name, followee_name]) => ({ follower, followee, follower_name, followee_name })) },
     { name: 'Friends', fields: [{ name: 'From', type: 'text' }, { name: 'To', type: 'text' }, { name: 'From Name', type: 'text' }, { name: 'To Name', type: 'text' }, { name: 'Status', type: 'text' }],
@@ -206,7 +215,7 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle'),
+      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
@@ -236,6 +245,9 @@ function socialApp() {
         app.text('pp-text', 'Post Text', '{record_text}', 76, { size: 18, weight: '500' }),
         app.text('pp-meta', 'Post Counts', '❤️ {record_likes}   💬 {record_comments}   🔁 {record_reposts}', 200, { size: 15, color: MUTED, weight: '700' }),
       ]),
+      { id: 'side', name: 'Side Menu', ui: true, anchor: 'center', x: 0, y: 0, layer: 6, shape: { type: 'rect', w: 10, h: 10, radius: 0, fill: '' },
+        behaviors: [{ type: 'uiSideBar', social: true, profilePage: 'profile', countsPage: 'friends', counts: 'following, followers and friends', sync: 'the Bottom Nav tabs', header: 'simple', title: '', avatar: '', style: 'rounded', bg: '@card', text: INK, accent: '@accent', iconColor: '', badgeColor: '#f91880',
+          items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
         behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nReels | video | reels\nMessages | chat | inbox | unread\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],

@@ -4282,10 +4282,19 @@ const isBackdrop = (e) => e.ui && e.stretch === 'both' && !e.parentEnt?.ui && !e
 function uiDrawOrder(s) {
   const L = s.entities; let last = -1;
   for (let i = 0; i < L.length; i++) { const e = L[i]; if (e.ui && !e.dead && isBackdrop(e)) last = i; }
-  if (last < 0 || !L.some((e, i) => i < last && e._dock)) return L;
-  const out = [], later = [];
-  for (let i = 0; i < L.length; i++) { const e = L[i]; if (i < last && e._dock) later.push(e); else out.push(e); if (i === last) out.push(...later); }
-  return out;
+  let out = L;
+  if (last >= 0 && L.some((e, i) => i < last && e._dock)) {
+    const later = []; out = [];
+    for (let i = 0; i < L.length; i++) { const e = L[i]; if (i < last && e._dock) later.push(e); else out.push(e); if (i === last) out.push(...later); }
+  }
+  // an open Side Menu (with what's inside it) goes over the page's UI, whatever order they were added in; a popup opened from it goes over the menu
+  const ov = s.engine?.editing ? [] : out.filter((e) => e._overlay && e.ui && !e.dead);
+  if (!ov.length) return out;
+  const top = [...ov, ...(s.modal && !ov.includes(s.modal) ? [s.modal] : [])];
+  const under = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) { const i = top.indexOf(q); if (i >= 0) return i; } return -1; };
+  const groups = top.map(() => []), rest = [];
+  for (const e of out) { const i = under(e); if (i >= 0) groups[i].push(e); else rest.push(e); }
+  return rest.concat(...groups);
 }
 function barsFor(e, safe) {
   const B = safe?.bars, U = safe?.under; if (!B || !U || !isBackdrop(e)) return B;
@@ -6376,6 +6385,10 @@ function hitTest(s, e, sx, sy) {
   if (!e.visible || e.dead || e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (hidden, or Enable / Disable UI node)
   if (e.ui && !eng.editing && uiHiding(e)) return false; // a page on its way out
   if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
+  if (e.ui && !eng.editing && s.modal?._overlay && s.modal !== e) { // under an open Side Menu's panel: the menu gets the tap, not the page
+    const R = s.modal._overlay; let mine = false; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === s.modal) { mine = true; break; }
+    if (!mine && sx >= R.x && sx <= R.x + R.w && sy >= R.y && sy <= R.y + R.h) return false;
+  }
   if (e.ui) {
     const o = uiOrigin(e, eng.width, eng.height, eng.safe), ex = e.extents(), k = uiK(eng.safe);
     const hx = (ex.sphere ? ex.r : ex.hx) * k, hy = (ex.sphere ? ex.r : ex.hy) * k;
@@ -7381,6 +7394,7 @@ registerBehavior('uiSideBar', {
         }
         scroll = clamp(scroll, 0, overflow);
         age += dt;
+        { const ow = rail() ? railW + (R.w - railW) * ease(t) : R.w; e._overlay = t > 0.001 || rail() ? { x: left ? R.x : R.x + R.w - ow, y: R.y, w: ow, h: R.h } : null; } // drawn over the page's UI while it shows (uiDrawOrder, hitTest)
         // "push the screen": the rest of the UI slides aside by as much as the menu is open
         if (p.openMode === 'push the screen' && !rail()) { const sh = (left ? 1 : -1) * (R.w + R.m) * ease(t); if (sh || s.uiShiftBy === e) { s.uiShift = sh; s.uiShiftBy = sh ? e : null; } }
         // keep the entity the size of the open panel, so taps outside it close the menu (scene.modal)
@@ -7438,7 +7452,7 @@ registerBehavior('uiSideBar', {
         {
           if (sty === 'glass' && +(p.blur ?? 14) > 0 && !editing) { ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip(); blurBehind(ctx, e, s, x, R.y, w, R.h, +(p.blur ?? 14), true); ctx.restore(); } // frosted: what's behind, blurred
           ctx.save(); if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 24; ctx.shadowOffsetX = left ? 4 : -4; }
-          let paint = sty === 'glass' ? withAlpha(bg, 0.62) : full() ? withAlpha(bg, 0.97) : bg;
+          let paint = sty === 'glass' ? withAlpha(bg, 0.62) : bg;
           const g2 = sty === 'gradient' ? (p.bg2 || (/^#[0-9a-f]{6}$/i.test(acc) ? mixHexE(acc, '#000000', 0.55) : bg)) : p.bg2;
           if (g2 && sty !== 'glass') { const g = ctx.createLinearGradient(x, R.y, x + w * 0.35, R.y + R.h); g.addColorStop(0, sty === 'gradient' ? acc : bg); g.addColorStop(1, g2); paint = g; }
           ctx.fillStyle = paint; rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();

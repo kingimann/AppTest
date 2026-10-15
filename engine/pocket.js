@@ -6924,7 +6924,7 @@ const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating',
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 16 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
-    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
+    { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected | badge colour | badge shows: count or dot)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
@@ -6990,7 +6990,7 @@ registerBehavior('uiBottomNav', {
     ...BAR_HIDE_PARAMS('navbar'),
   ],
   create(p) {
-    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
+    const tabs = () => String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0] || t[1]).map(([label = '', icon = '', page = '', badge = '', iconOn = '', color = '', badgeColor = '', badgeShow = '']) => { const a = page || label.toLowerCase(), more = { iconOn, color, badgeColor, badgeShow }; label = p.labelCase === 'UPPERCASE' ? label.toUpperCase() : label; return a.startsWith('msg:') ? { label, icon, msg: a.slice(4).trim(), page: null, badge, ...more } : { label, icon, page: a, badge, ...more }; });
     const badgeSeen = new Map(); // per tab: the badge's last value and when it changed (for its pop)
     let selT = 9, W8 = null, T = tabs(), ind = null, indW = null, fade = 1, hide = 0, lastActive = -1, lastTab = -1, hold = null, hideCache = { t: -9, list: [] };
     /** Pages that say "hide the bottom bar" (their Show If), looked up now and then. */
@@ -7210,12 +7210,13 @@ registerBehavior('uiBottomNav', {
             ctx.restore();
           }
           // badge
-          const bv = t.badge ? s.vars[t.badge] : null, now = s.time || 0;
+          let bv = t.badge ? s.vars[t.badge] : null; const now = s.time || 0;
+          if (s.engine.editing && t.badge && (bv == null || bv === '' || bv === 0 || bv === false)) bv = t.badgeShow === 'dot' ? true : 3; // the editor shows a sample, so you can see how badges look
           const seen = badgeSeen.get(i); if (!seen || seen.v !== bv) badgeSeen.set(i, { v: bv, t: seen ? now : -9 }); // (a change starts its pop; the first look doesn't)
           const zero = bv === 0 || bv === '0';
           if (bv != null && bv !== '' && bv !== false && (!zero || p.badgeZero) && !(on && p.badgeHideSelected)) {
             const n = +bv, num = Number.isFinite(n) && bv !== true && String(bv).trim() !== '', max = Math.max(1, +p.badgeMax || 99);
-            const txt = p.badgeStyle === 'dot only' ? '' : num ? (n > max ? max + '+' : String(Math.round(n))) : p.badgeWords !== false && typeof bv === 'string' ? bv.trim().slice(0, 8) : '';
+            const txt = p.badgeStyle === 'dot only' || t.badgeShow === 'dot' ? '' : num ? (n > max ? max + '+' : String(Math.round(n))) : p.badgeWords !== false && typeof bv === 'string' ? bv.trim().slice(0, 8) : '';
             const bs = clamp(+p.badgeSize || 1, 0.4, 3), pos = p.badgePos || 'icon corner', named = lab && st !== 'bubble' && st !== 'chips', iconY = y - (named ? lsz * 0.85 : 0) - lift;
             let bxp = x + isz * 0.55 - 6, byp = iconY - isz * 0.45, anchorLeft = true; // (the badge's left side, and its middle)
             if (pos === 'top right of the tab') { bxp = x + G.tws(i) / 2 - 8; byp = G.by + 8; anchorLeft = false; }
@@ -7230,7 +7231,7 @@ registerBehavior('uiBottomNav', {
             const hgt = 16, w = txt ? Math.max(hgt, (ctx.font = `800 10px ${THEME.font}`, ctx.measureText(txt).width + 8)) : 9;
             const cx0 = anchorLeft === true ? bxp + w * k / 2 : anchorLeft === false ? bxp - w * k / 2 : bxp; // grow from the side it's pinned to
             ctx.save(); ctx.translate(cx0 + dx, byp); ctx.scale(k, k);
-            ctx.fillStyle = tok(p.badgeColor) || p.badgeColor || '#ff3b5c';
+            ctx.fillStyle = (t.badgeColor && tok(t.badgeColor)) || tok(p.badgeColor) || p.badgeColor || '#ff3b5c'; // a tab can have its own badge colour
             ctx.strokeStyle = p.badgeRing === false || st === 'minimal' ? 'transparent' : tok(p.badgeRingColor) || p.badgeRingColor || p.barColor || '#12141f'; ctx.lineWidth = 2;
             if (anim === 'glow') { ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8 + Math.sin(now * 4) * 4; }
             const shape = p.badgeShape || 'round', h = txt ? hgt : 9, r = shape === 'square' ? 2 : shape === 'rounded square' ? Math.min(5, h / 2) : h / 2;

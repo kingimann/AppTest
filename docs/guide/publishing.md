@@ -14,6 +14,15 @@ All of them start from **☰ → Build Settings…**.
 
 ## Build Settings
 
+Every section of Build Settings **folds**:
+
+- tap its title to open or close it;
+- a folded section shows a summary, like *2 levels, start at 1*, *compressed*, or *3 of 8* screenshots;
+- App, Icon and the section for what you are making start open, and the window remembers what you open and close;
+- **Search build settings** shows only the sections that match;
+- **Expand all** / **Collapse all** open or fold every section;
+- the chips under the checklist jump to a section and open it, and so do the ready check's buttons.
+
 The top of Build Settings helps you get it right:
 
 - **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play** or **Expo app**. Build Settings then shows only the settings that kind of build needs (tick *Every setting* to see them all), and the big button at the bottom makes it.

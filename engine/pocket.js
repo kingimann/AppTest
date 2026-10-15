@@ -7137,7 +7137,7 @@ registerBehavior('uiBottomNav', {
             ctx.beginPath(); ctx.moveTo(x - w / 2, G.by); ctx.lineTo(x + w / 2, G.by); ctx.lineTo(x + W2 / 2, G.by + G.bh); ctx.lineTo(x - W2 / 2, G.by + G.bh); ctx.closePath(); ctx.fill();
             ctx.fillStyle = indC; ctx.shadowColor = indC; ctx.shadowBlur = glowK * 0.6; rr(x - w / 2, G.by, w, 3, 2); ctx.fill(); }
           else if (st === 'outline') { const R = isz * (labelOn ? 0.7 : 0.95); ctx.globalAlpha *= 0.14; ctx.beginPath(); ctx.arc(x, iy, R, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha /= 0.14; ctx.strokeStyle = indC; ctx.lineWidth = 2; ctx.stroke(); }
-          else if (st === 'dock') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 6, 2.5, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'dock') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - (labelOn ? 4 : 6), labelOn ? 2 : 2.5, 0, Math.PI * 2); ctx.fill(); } // (under the name when there is one)
           else if (st === 'chips') { const ch = Math.min(G.bh - 18, 40); ctx.shadowColor = withAlpha(indC, 0.4); ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; rr(x - G.tws(a) / 2 + 5, G.cy - ch / 2, G.tws(a) - 10, ch, ch / 2); ctx.fill(); }
           ctx.restore();
         }
@@ -7147,8 +7147,8 @@ registerBehavior('uiBottomNav', {
         T.forEach((t, i) => {
           const on = i === a, filled = on && ['segmented', 'chips'].includes(st), col = filled ? onC : on ? (t.color ? tok(t.color) : act) : idle, pz = pulse.get(i) || 0, icon = on && t.iconOn ? t.iconOn : t.icon, lw = p.labelWeight === 'bold' ? 800 : p.labelWeight === 'normal' ? 600 : on ? 800 : 600;
           let sc = 1 + (p.tapEffect === 'bounce' ? Math.sin(pz * Math.PI) * 0.18 : p.tapEffect === 'grow' && on ? 0.12 : 0) + (st === 'minimal' && on ? 0.12 : 0);
-          let x = G.cx(i), y = G.cy, lift = on ? +p.activeLift || 0 : 0, rot = 0, flip = 1;
-          if (st === 'dock') { const m = ind == null ? 0 : Math.max(0, 1 - Math.abs(x - ind) / (G.tws(i) * 1.25)); sc *= 1.08 + 0.22 * m; lift += 6 * m; } // big icons that magnify around the selected one
+          let x = G.cx(i), y = G.cy, lift = on ? +p.activeLift || 0 : 0, rot = 0, flip = 1, dm = 1;
+          if (st === 'dock') { const m = ind == null ? 0 : Math.max(0, 1 - Math.abs(x - ind) / (G.tws(i) * 1.25)), named = showLabel(i, on) && !!t.label; dm = named ? 1 + 0.12 * m : 1.1 + 0.2 * m; lift += (named ? 1.5 : 4) * m; } // big icons that magnify around the selected one (just the icons: the names stay put, and it all stays inside the dock)
           if (on && selT < 0.7) { // the newly selected icon moves
             const mo = p.iconMotion, u = (d) => clamp(selT / d, 0, 1);
             if (mo === 'bounces') sc *= 1 + Math.sin(u(0.38) * Math.PI) * 0.28;
@@ -7183,7 +7183,7 @@ registerBehavior('uiBottomNav', {
             ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(t.label, -total / 2 + isz + 6, 1);
             ctx.restore();
           } else {
-            const iy = (lab ? -lsz * 0.85 : 0) - lift, dz = st === 'dock' ? 1.15 : 1;
+            const iy = (lab ? -lsz * 0.85 : 0) - lift, dz = dm;
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
             if ((st === 'glass' || st === 'neon') && on) { ctx.shadowColor = act; ctx.shadowBlur = st === 'neon' ? glowK : 12; }
             if (st === 'neon' && !on) ctx.globalAlpha *= 0.65;

@@ -322,14 +322,15 @@ function moveLevel(d) {
   pushHistory(); saveSoon(); setLevel(j);
 }
 function openLevelMenu() {
-  const list = levelList();
+  const list = levelList(), app = !!root.settings?.app;
+  const row = (lv, i) => ({ icon: i === levelIdx ? 'right' : app ? (i ? 'gamepad' : 'phone') : 'layers', label: app && !i ? `${root.name || 'App'} · pages` : `${app ? '' : i + 1 + '. '}${levelName(lv, i)} · ${(lv.mode || root.mode) === '3d' ? '3D' : '2D'}`, fn: () => setLevel(i) });
   popMenu($('#levelBtn'), [
-    { cap: 'Levels' },
-    ...list.map((lv, i) => ({ icon: i === levelIdx ? 'right' : 'layers', label: `${i + 1}. ${levelName(lv, i)} · ${(lv.mode || root.mode) === '3d' ? '3D' : '2D'}`, fn: () => setLevel(i) })),
+    ...(app ? [{ cap: 'App' }, row(list[0], 0), list.length > 1 && { cap: `Games inside (${list.length - 1})` }, ...list.slice(1).map((lv, i) => row(lv, i + 1))].filter(Boolean)
+      : [{ cap: 'Levels' }, ...list.map(row)]),
     '-',
-    { icon: 'plus', label: 'New Level', fn: () => addLevel(false) },
-    { icon: 'grid', label: 'New 2D Level', fn: () => addLevel(false, '2d') },
-    { icon: 'cube', label: 'New 3D Level', fn: () => addLevel(false, '3d') },
+    !app && { icon: 'plus', label: 'New Level', fn: () => addLevel(false) },
+    { icon: 'grid', label: app ? 'New Blank 2D Game' : 'New 2D Level', fn: () => addLevel(false, '2d') },
+    { icon: 'cube', label: app ? 'New Blank 3D Game' : 'New 3D Level', fn: () => addLevel(false, '3d') },
     { icon: 'copy', label: 'Duplicate This Level', fn: () => addLevel(true) },
     { icon: 'gamepad', label: root.settings?.app ? 'Add a Game to This App…' : 'Add a Game as New Levels…', fn: openAddGameDialog },
     { icon: 'edit', label: 'Rename Level…', fn: () => { const n = prompt('Level name', levelName(project, levelIdx)); if (n) { project.levelName = n; changed(); refreshAll(); } } },
@@ -1993,7 +1994,8 @@ function refreshAll() {
   $('#sceneTab').replaceChildren(icon(uiMode ? 'hud' : is3D() ? 'cube' : 'grid'), uiMode ? 'UI' : viewMode === 'top' ? 'Top' : is3D() ? '3D' : '2D', icon('chevron'));
   $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
   const n = levelList().length;
-  $('#levelBtn').replaceChildren(...[icon('layers'), h('span', {}, levelName(project, levelIdx)), n > 1 && h('small', {}, `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
+  const appP = !!levelList()[0].settings?.app;
+  $('#levelBtn').replaceChildren(...[icon(appP ? (levelIdx ? 'gamepad' : 'phone') : 'layers'), h('span', {}, appP && !levelIdx ? 'App' : levelName(project, levelIdx)), n > 1 && h('small', {}, appP ? (levelIdx ? 'game' : `+${n - 1} game${n > 2 ? 's' : ''}`) : `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
   renderHierarchy(); renderInspector(); renderProject(); updateUndoButtons(); updateCtxBar(); if (dockTab === 'scripts') renderScripts();
 }
 
@@ -5077,7 +5079,8 @@ function openFileMenu() {
 const TPL_COLORS = { 'tap-frenzy': '#16233b', 'sky-dodge': '#22314f', 'jump-quest': '#2d3f6b', 'gem-garden': '#3f6d4a', 'empty-2d': '#2b2b2b', 'empty-3d': '#2f3a44' };
 /** Game types to start from, split into 2D and 3D (Blank first) with a switch between them. */
 function typeCards(onPick, o = {}) {
-  let mode = ['3d', 'app'].includes(store.get('pocket.editor.newMode', '2d')) ? store.get('pocket.editor.newMode', '2d') : '2d';
+  const kinds = o.kinds || ['2d', '3d', 'app'];
+  let mode = store.get('pocket.editor.newMode', '2d'); if (!kinds.includes(mode)) mode = kinds[0];
   const kindOf = (t) => (t.kind === 'app' ? 'app' : templates[t.key].mode === '3d' ? '3d' : '2d');
   const wrap = h('div', { class: 'type-wrap' });
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
@@ -5085,7 +5088,7 @@ function typeCards(onPick, o = {}) {
   const draw = () => {
     const list = templateInfo.filter((t) => kindOf(t) === mode && !(o.home && /^(empty|app-blank)/.test(t.key))).sort((a, b) => (/^(empty|app-blank)/.test(b.key) ? 1 : 0) - (/^(empty|app-blank)/.test(a.key) ? 1 : 0));
     wrap.replaceChildren(
-      h('div', { class: 'seg' }, ['2d', '3d', 'app'].map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
+      kinds.length < 2 ? null : h('div', { class: 'seg' }, kinds.map((m) => h('button', { class: mode === m ? 'on' : '', onclick: () => { mode = m; store.set('pocket.editor.newMode', m); draw(); } },
         icon(m === '3d' ? 'cube' : m === 'app' ? 'phone' : 'grid'), m === 'app' ? 'Apps' : `${m.toUpperCase()} games`.replace(' games', window.innerWidth < 520 ? '' : ' games'), h('small', {}, String(templateInfo.filter((t) => kindOf(t) === m).length))))),
       ...[mode !== 'app' && !o.home && h('div', { class: 'seg small orient-pick' }, h('span', { class: 'seg-l' }, 'Blank game:'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: (orient() === k ? 'on ' : '') + k, onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, icon('phone'), l)))].filter(Boolean),
       h('div', { class: 'types' }, list.map((t) => h('button', { class: 'type' + (t.key.startsWith('empty') ? ' blank' : ''), onclick: () => onPick(t, t.key.startsWith('empty') ? orient() : null) },
@@ -5105,7 +5108,9 @@ function projectList(all, row) {
     const n = (m) => all.filter(([, p]) => kind(p.json) === m).length, shown = all.filter(([, p]) => f === 'all' || kind(p.json) === f);
     wrap.replaceChildren(h('div', { class: 'seg small' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].map(([k, l, c]) =>
       h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))),
-      shown.length ? h('div', { class: 'mine' }, shown.map(row)) : h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`));
+      !shown.length ? h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`)
+        : f === 'all' ? h('div', {}, [['Games', shown.filter(([, p]) => kind(p.json) !== 'app')], ['Apps', shown.filter(([, p]) => kind(p.json) === 'app')]].filter(([, L]) => L.length).map(([t, L]) => [h('div', { class: 'proj-group' }, t, h('small', {}, String(L.length))), h('div', { class: 'mine' }, L.map(row))]).flat())
+        : h('div', { class: 'mine' }, shown.map(row)));
   };
   draw();
   return wrap;
@@ -5159,35 +5164,38 @@ function projMenu(anchor, id, pr) {
     '-', id !== projectId && { icon: 'trash', label: 'Delete', danger: true, fn: () => { if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return; deleteProject(id); store.set(thumbKey(id), ''); showHome(); } }].filter(Boolean));
 }
 /** Your games and apps as picture cards (the newest first), with All / 2D / 3D / Apps once there are a few. */
-function myProjects(all) {
-  let f = store.get('pocket.editor.projFilter', 'all'), more = false;
+function myProjects(all, kinds = ['2d', '3d', 'app']) {
+  let f = store.get('pocket.editor.projFilter', 'all'), more = false; if (f !== 'all' && !kinds.includes(f)) f = 'all';
   const wrap = h('div', { class: 'pj-wrap' });
   const draw = () => {
     const n = (m) => all.filter(([, p]) => projKind(p.json) === m).length, shown = all.filter(([, p]) => f === 'all' || projKind(p.json) === f), cut = more ? shown : shown.slice(0, 6);
     wrap.replaceChildren(...[
-      all.length > 3 ? h('div', { class: 'chips' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].filter(([k, , c]) => k === 'all' || c).map(([k, l, c]) =>
+      all.length > 3 && kinds.length > 1 ? h('div', { class: 'chips' }, [['all', 'All', all.length], ['2d', '2D', n('2d')], ['3d', '3D', n('3d')], ['app', 'Apps', n('app')]].filter(([k, , c]) => (k === 'all' || kinds.includes(k)) && (k === 'all' || c)).map(([k, l, c]) =>
         h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))) : null,
       shown.length ? h('div', { class: 'pj-grid' }, cut.map(([id, pr]) => { const K = KIND_INFO[projKind(pr.json)];
         return h('div', { class: 'pj' + (id === projectId ? ' cur' : '') },
           h('button', { class: 'pj-open', onclick: () => { saveNow(); if (id !== projectId) openProject(pr.json, id); hideHome(); } }, projArt(id, pr.json, pr.name),
             h('span', { class: 'pj-t' }, h('b', {}, pr.name), h('small', {}, h('i', { style: `--c:${K.color}` }, K.label), ' · ', agoText(pr.updated)))),
           h('button', { class: 'pj-more', 'aria-label': 'More', onclick: (e) => projMenu(e.currentTarget, id, pr) }, icon('more'))); }))
-        : h('div', { class: 'empty' }, f === 'app' ? 'No apps yet.' : `No ${f.toUpperCase()} games yet.`),
+        : h('div', { class: 'empty' }, f === 'app' || kinds[0] === 'app' ? 'No apps yet.' : f === 'all' ? 'No games yet.' : `No ${f.toUpperCase()} games yet.`),
       shown.length > 6 ? h('button', { class: 'btn pj-all', onclick: () => { more = !more; draw(); } }, more ? 'Show fewer' : `Show all ${shown.length}`) : null].filter(Boolean));
   };
   draw();
   return wrap;
 }
 /** Blank 2D game, blank 3D game, blank app: one tap each. */
-function quickCreate() {
+function quickCreate(sec = 'games') {
   const orient = () => store.get('pocket.editor.newOrient', 'portrait');
   const wrap = h('div');
-  const draw = () => wrap.replaceChildren(
-    h('div', { class: 'quick' }, [['empty-2d', '2d', 'New 2D game'], ['empty-3d', '3d', 'New 3D game'], ['app-blank', 'app', 'New app']].map(([key, k, label]) => {
+  const apps = sec === 'apps';
+  const picks = apps ? [['app-blank', 'app', 'New app', 'Pages and a tab bar'], ['app-todo', 'app', 'To-do list', 'Saved on the phone', 'check'], ['app-arcade', 'app', 'App with games', 'Games inside, with scores', 'gamepad']]
+    : [['empty-2d', '2d', 'New 2D game'], ['empty-3d', '3d', 'New 3D game']];
+  const draw = () => wrap.replaceChildren(...[
+    h('div', { class: 'quick' + (apps ? '' : ' two') }, picks.filter(([key]) => templateInfo.some((x) => x.key === key)).map(([key, k, label, sub, ic]) => {
       const t = templateInfo.find((x) => x.key === key) || { key }, K = KIND_INFO[k];
-      return h('button', { class: 'q', style: `--c:${K.color}`, onclick: () => startGame(t, k === 'app' ? null : orient()) }, h('span', { class: 'q-ic' }, icon(K.icon), h('em', {}, icon('plus'))), h('b', {}, label), h('small', {}, k === 'app' ? 'Pages and a tab bar' : orient() === 'landscape' ? 'Landscape' : 'Portrait'));
+      return h('button', { class: 'q', style: `--c:${t.color && ic ? t.color : K.color}`, onclick: () => startGame(t, k === 'app' ? null : orient()) }, h('span', { class: 'q-ic' }, icon(ic || K.icon), h('em', {}, icon('plus'))), h('b', {}, label), h('small', {}, sub || (orient() === 'landscape' ? 'Landscape' : 'Portrait')));
     })),
-    h('div', { class: 'q-or' }, h('span', {}, 'New games start'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: orient() === k ? 'on' : '', onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, l))));
+    apps ? null : h('div', { class: 'q-or' }, h('span', {}, 'New games start'), [['portrait', 'Portrait'], ['landscape', 'Landscape']].map(([k, l]) => h('button', { class: orient() === k ? 'on' : '', onclick: () => { store.set('pocket.editor.newOrient', k); draw(); } }, l)))].filter(Boolean));
   draw();
   return wrap;
 }
@@ -5204,15 +5212,11 @@ function showHome() {
     cur && h('div', { class: 'hero' },
       h('button', { class: 'hero-art', onclick: hideHome, 'aria-label': 'Open' }, projArt(cur[0], root, root.name, true), h('span', { class: 'hero-tag' }, icon('clock'), 'Continue')),
       h('div', { class: 'hero-b' },
-        h('div', { class: 'hero-t' }, h('b', {}, root.name), h('small', {}, `${KIND_INFO[projKind(root)].label} · edited ${agoText(cur[1].updated)}${(root.levels || []).length ? ` · ${(root.levels || []).length + 1} levels` : ''}`)),
+        h('div', { class: 'hero-t' }, h('b', {}, root.name), h('small', {}, `${KIND_INFO[projKind(root)].label} · edited ${agoText(cur[1].updated)}${(root.levels || []).length ? root.settings?.app ? ` · ${root.levels.length} game${root.levels.length > 1 ? 's' : ''} inside` : ` · ${root.levels.length + 1} levels` : ''}`)),
         h('div', { class: 'hero-btns' },
           h('button', { class: 'btn', onclick: () => { hideHome(); play(); } }, icon('play'), 'Play'),
           h('button', { class: 'btn primary continue', onclick: hideHome }, icon('edit'), 'Keep editing')))),
-    h('h2', {}, 'Create'),
-    quickCreate(),
-    all.length ? [h('h2', {}, 'My games and apps', h('small', {}, String(all.length))), myProjects(all)] : null,
-    h('h2', {}, 'Start from a template'),
-    typeCards(startGame, { home: true }),
+    homeSections(all),
     safetyCard(all.length),
     h('div', { class: 'home-actions' },
       h('button', { class: 'btn', onclick: importJSON }, icon('upload'), 'Import'),
@@ -5223,6 +5227,26 @@ function showHome() {
   home.hidden = false;
   home.scrollTop = 0;
   document.body.classList.add('home-open'); engine.sleeping = true;
+}
+/** Home below Continue: a Games | Apps switch, then that section's create buttons, projects and templates. */
+function homeSections(all) {
+  const games = all.filter(([, p]) => projKind(p.json) !== 'app'), apps = all.filter(([, p]) => projKind(p.json) === 'app');
+  let sec = store.get('pocket.editor.homeSection', '') || (root && projKind(root) === 'app' ? 'apps' : 'games');
+  const wrap = h('div', { class: 'home-sec-wrap' });
+  const draw = () => {
+    const A = sec === 'apps', mine = A ? apps : games;
+    wrap.replaceChildren(...[
+      h('div', { class: 'seg home-sec', role: 'tablist' }, [['games', 'Games', 'gamepad', games.length], ['apps', 'Apps', 'phone', apps.length]].map(([k, l, ic, n]) =>
+        h('button', { class: sec === k ? 'on' : '', role: 'tab', 'aria-selected': String(sec === k), 'data-sec': k, onclick: () => { if (sec === k) return; sec = k; store.set('pocket.editor.homeSection', k); draw(); } }, icon(ic), l, h('small', {}, String(n))))),
+      h('h2', {}, A ? 'New app' : 'New game'),
+      quickCreate(sec),
+      mine.length ? [h('h2', {}, A ? 'My apps' : 'My games', h('small', {}, String(mine.length))), myProjects(mine, A ? ['app'] : ['2d', '3d'])] : h('p', { class: 'sub home-none' }, A ? 'No apps yet: start one above, or from a template below.' : 'No games yet: start one above, or from a template below.'),
+      h('h2', {}, A ? 'App templates' : 'Game templates'),
+      typeCards(startGame, { home: true, kinds: A ? ['app'] : ['2d', '3d'] }),
+    ].flat().filter(Boolean));
+  };
+  draw();
+  return wrap;
 }
 function hideHome() { $('#home').hidden = true; document.body.classList.remove('home-open'); engine.sleeping = false; requestAnimationFrame(() => engine.resize()); }
 function openProjectsDialog() {

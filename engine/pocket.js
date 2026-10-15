@@ -7762,6 +7762,7 @@ registerBehavior('uiSideBar', {
         ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
         const shown = editing ? (selInside(s, e) ? 1 : 0) : t, sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? shown : ease(t), raw = shown; // the editor shows it open while it's selected
         rows = [];
+        if (editing) { const Bt0 = inst.btn(s); inst.edArea = { M: ctx.getTransform(), cv: ctx.canvas, open: shown > 0, panel: R, rail: rail() ? { x: left ? R.x : R.x + R.w - railW, y: R.y, w: railW, h: R.h } : null, btn: Bt0 ? { x: Bt0.x - Bt0.r, y: Bt0.y - Bt0.r, w: Bt0.r * 2, h: Bt0.r * 2 } : null, close: () => rows.find((q) => q.close || q.top === 'close') }; } // where the editor can tap it
         e._kidsHidden = tt <= 0.02 || (rail() && tt < 0.5); // what's inside the menu shows only while it's open
         const Bt = inst.btn(s);
         if (Bt && tt < 0.99) { // the ☰ button fades out as the menu opens

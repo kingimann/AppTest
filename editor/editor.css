@@ -2042,3 +2042,22 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .style-row.on { border-color: var(--accent, #4fa3ff); }
 .style-nm { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .style-nm small { opacity: 0.65; font-size: 12px; }
+/* ---------- Shapes gallery and drawing ---------- */
+.shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.shape-tile { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 2px; border-radius: 12px; background: var(--g2, rgba(255,255,255,0.04)); border: 1px solid transparent; color: inherit; }
+.shape-tile.on { border-color: var(--accent, #4fa3ff); }
+.shape-tile canvas { width: 60px; height: 42px; }
+.shape-tile small { font-size: 11px; opacity: 0.8; text-align: center; line-height: 1.15; }
+.shape-draw { border-radius: 12px; background: #0e1018; }
+/* ---------- Fonts and icons pickers ---------- */
+.font-row { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; padding: 8px 14px; text-align: left; height: auto; min-height: 64px; }
+.font-row > * { flex: none; }
+.font-row .fr-name { font-size: 17px; }
+.font-row .fr-pv { font-size: 22px; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.font-row small { opacity: 0.55; font-family: system-ui, sans-serif; }
+.font-row.add .fr-name { font-size: 15px; }
+.font-mine { display: flex; align-items: center; gap: 6px; }
+.font-mine .font-row { flex: 1; }
+.ic-search, .dialog input[type=search] { width: 100%; margin-bottom: 10px; }
+.dialog .font-row, .dialog button.font-row { height: auto !important; min-height: 64px; }
+.font-list > * { flex: none; }

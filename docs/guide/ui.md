@@ -238,6 +238,32 @@ Every UI element with a shape (buttons, cards, panels, fields…) can be restyle
 - **Frosted glass**: blurs whatever is behind the element (use a see-through fill, like white at 12%). It shows in Play.
 - **Dashed outline**, **rounded corners** (all, or only some), and all of it works with theme colours.
 
+## Shapes, icons and fonts
+
+**Shapes.** In **Shape Renderer**, tap **Shapes…** for a gallery with pictures of every shape:
+
+- *Basic*: rectangle, capsule, circle, ellipse, **squircle** (smooth iPhone-style corners), **cut corners**, **slanted**, triangle, diamond, pentagon, hexagon, octagon.
+- *UI*: **speech bubble** (tail on the left, middle or right), **ticket**, **price tag**, **ribbon**, **step arrow**, **bookmark**, **shield**, **wavy edge**, ring.
+- *Fun*: star, **starburst**, **badge** (a wavy edge), heart, **blob** (change its number for a new blob), cloud, **drop**, **leaf**, **lightning**, **moon**, **plus**, arrow.
+
+The UI shapes keep their corners when you stretch them, and every look and effect (gradients, borders, shadows, inner shadow, patterns, glass) works on all of them.
+
+**Your own shapes:**
+
+- **Draw a shape…**: tap to place corners, drag one to move it, tick **Smooth** for curves, then **Use this shape**.
+- **Paste SVG…**: paste an SVG from Figma, Canva or an icon site (or just its path). It fills the element and stretches with it. The path and view box can be edited in the Inspector too.
+
+**Your own UI pieces:** build something once (a card, a shop row, a score panel, with whatever is inside it), then tap **Save to My UI** in UI Element. It shows up under **My UI** when you add to a page, and in My Prefabs. Edit one and *Apply to Prefab* to update every copy.
+
+**Icons.** The icon picker (Bottom Nav tabs, Side Menu items, top bar buttons, App Bar…) has **over 120 icons** with a search box: gift, key, shield, bolt, fire, globe, link, eye, wifi, battery, compass, send, mic, video, headphones, gamepad, dice, crown, rocket, target, medal, users, log in / log out, folder, card, wallet, bag, truck, sparkles, bulb, palette, code, layers, music controls, sword, potion, skull, podium and more. **Upload your own…** turns any picture (PNG or SVG with a clear background) into an icon, coloured like the rest; it's saved in the game as `my:Name`. Emoji still work too.
+
+**Fonts.** Tap **More fonts…** on any text:
+
+- **About 100 Google Fonts** in groups: *Game & display*, *Rounded & friendly*, *Clean (apps)*, *Serif & elegant*, *Handwriting & fun*, *Pixel & retro*, *Mono & tech*.
+- **Search** them all, or type the name of any font on fonts.google.com.
+- **Preview** each font with your own words.
+- **Upload a font file…** (.ttf, .otf, .woff, .woff2): it's saved in the game, works offline, and shows under *Your fonts* (where you can remove it).
+
 ## Animation
 
 - **UI Animation** component: an entrance (on start, on show, or on a message, children one by one) and an idle loop (float, pulse, breathe, wiggle, heartbeat, bounce, spin, glow, shake).

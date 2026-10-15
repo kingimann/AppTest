@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { installPlugins, installedPlugins, Mods, supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
+import { installPlugins, installedPlugins, Mods, supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -3403,7 +3403,8 @@ function renderInspector() {
       h('div', { class: 'btns' },
         h('button', { class: 'btn', onclick: () => { styleClipboard = styleOf(j); toast('Style copied'); } }, icon('copy'), 'Copy Style'),
         h('button', { class: 'btn', onclick: () => { if (!styleClipboard) return toast('Copy a style first'); pasteStyle(j, styleClipboard); changed({ inspector: true }); pushHistory(); toast('Style pasted'); } }, icon('paste'), 'Paste Style'),
-        h('button', { class: 'btn', onclick: () => { applyTheme([j]); changed({ inspector: true }); pushHistory(); } }, icon('brush'), 'Use Theme')),
+        h('button', { class: 'btn', onclick: () => { applyTheme([j]); changed({ inspector: true }); pushHistory(); } }, icon('brush'), 'Use Theme'),
+        !j.prefab && h('button', { class: 'btn', onclick: () => makePrefab(j.id) }, icon('cube'), 'Save to My UI')),
     ], { icon: 'hud', key: 'uiel' }));
   }
 
@@ -3414,12 +3415,16 @@ function renderInspector() {
   if (j.shape) {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
-      C('shape.type', { label: 'Shape', type: 'select', options: [['rect', 'Rectangle'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['triangle', 'Triangle'], ['star', 'Star'], ['heart', 'Heart'], ['diamond', 'Diamond'], ['hexagon', 'Hexagon'], ['pentagon', 'Pentagon'], ['octagon', 'Octagon'], ['capsule', 'Capsule'], ['ring', 'Ring'], ['arrow', 'Arrow'], ['cloud', 'Cloud'], ['emoji', 'Emoji (text)']], structure: true }),
+      C('shape.type', { label: 'Shape', type: 'select', options: SHAPE_OPTIONS(), structure: true }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => shapeGallery(j) }, icon('square'), 'Shapes…'), h('button', { class: 'btn', onclick: () => drawShapeTool(j) }, icon('brush'), 'Draw a shape…'), h('button', { class: 'btn', onclick: () => pasteSvgShape(j) }, icon('paste'), 'Paste SVG…')),
+      t === 'path' && [C('shape.path', { label: 'Path (SVG "d")', type: 'code', def: '' }), C('shape.view', { label: 'View box (x y width height)', def: '0 0 100 100' })],
+      t === 'bubble' && C('shape.tail', { label: 'Tail', type: 'select', options: [['left', 'Left'], ['center', 'Middle'], ['right', 'Right']], def: 'left' }),
+      t === 'blob' && C('shape.seed', { label: 'Blob shape (try numbers)', type: 'number', def: 1, step: 1 }),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => editSprite2D(j) }, icon('brush'), 'Draw your own (2D Sprite Editor)')),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }, icon('image'), 'Use a sprite picture instead')),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
-      t === 'rect' && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0, structure: true }),
+      (t === 'rect' || ['bubble', 'ticket', 'tag', 'bookmark', 'shield', 'cut', 'wave'].includes(t)) && C('shape.radius', { label: t === 'cut' ? 'Corner cut' : 'Corner Radius', type: 'number', def: t === 'rect' ? 0 : 12, structure: true }),
       t === 'rect' && +j.shape.radius > 0 && C('shape.corners', { label: 'Rounded corners', type: 'select', options: [['', 'All four'], ['top', 'Top only'], ['bottom', 'Bottom only'], ['left', 'Left only'], ['right', 'Right only']], def: '' }),
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
@@ -3797,28 +3802,146 @@ function materialOf(b) {
 }
 
 // ---- UI styling: fonts, themes, copy / paste style ----
-const GOOGLE_FONTS = ['Press Start 2P', 'Bangers', 'Luckiest Guy', 'Fredoka', 'Lilita One', 'Bungee', 'Orbitron', 'Russo One', 'Silkscreen', 'Pixelify Sans', 'VT323',
-  'Permanent Marker', 'Creepster', 'Cinzel', 'Baloo 2', 'Titan One', 'Chewy', 'Audiowide', 'Black Ops One', 'Patrick Hand'];
 const fontOptions = (cur) => {
-  const list = [...FONTS, ...(root?.settings?.fonts || []).map((n) => [googleFont(n), n])];
+  const list = [...FONTS, ...(root?.settings?.customFonts || []).map((f) => [googleFont(f.name), f.name]), ...(root?.settings?.fonts || []).filter((n) => !(root?.settings?.customFonts || []).some((f) => f.name === n)).map((n) => [googleFont(n), n])];
   if (cur && !list.some(([v]) => v === cur)) list.push([cur, String(cur).split(',')[0].replace(/"/g, '')]);
   return list;
 };
-/** Pick a font: the built-in ones, or any Google Font (added to the game and loaded). */
+const FONT_GROUPS = {
+  'Game & display': ['Bangers', 'Luckiest Guy', 'Lilita One', 'Bungee', 'Titan One', 'Russo One', 'Black Ops One', 'Audiowide', 'Orbitron', 'Bowlby One', 'Passion One', 'Racing Sans One', 'Rubik Mono One', 'Staatliches', 'Anton', 'Bebas Neue', 'Righteous', 'Monoton', 'Faster One', 'Bungee Shade', 'Rampart One', 'Creepster', 'Nosifer', 'Metal Mania'],
+  'Rounded & friendly': ['Fredoka', 'Baloo 2', 'Nunito', 'Quicksand', 'Varela Round', 'Comfortaa', 'M PLUS Rounded 1c', 'Chewy', 'Sniglet', 'Grandstander', 'Mali', 'Kanit'],
+  'Clean (apps)': ['Inter', 'Roboto', 'Poppins', 'Montserrat', 'Open Sans', 'Lato', 'Work Sans', 'DM Sans', 'Manrope', 'Outfit', 'Plus Jakarta Sans', 'Rubik', 'Space Grotesk', 'Lexend', 'Figtree', 'Sora', 'Urbanist', 'Barlow'],
+  'Serif & elegant': ['Playfair Display', 'Merriweather', 'Lora', 'Cinzel', 'Cormorant Garamond', 'DM Serif Display', 'Libre Baskerville', 'Abril Fatface', 'Bitter', 'Crimson Text', 'EB Garamond', 'Alfa Slab One'],
+  'Handwriting & fun': ['Permanent Marker', 'Patrick Hand', 'Caveat', 'Pacifico', 'Dancing Script', 'Indie Flower', 'Shadows Into Light', 'Gloria Hallelujah', 'Amatic SC', 'Kalam', 'Satisfy', 'Lobster', 'Great Vibes', 'Rock Salt', 'Covered By Your Grace', 'Gochi Hand'],
+  'Pixel & retro': ['Press Start 2P', 'Silkscreen', 'Pixelify Sans', 'VT323', 'Jersey 10', 'Tiny5', 'Micro 5', 'DotGothic16', 'Workbench'],
+  'Mono & tech': ['JetBrains Mono', 'Fira Code', 'Space Mono', 'IBM Plex Mono', 'Source Code Pro', 'Share Tech Mono', 'Major Mono Display', 'Syne Mono'],
+};
+const GOOGLE_FONTS = [...new Set(Object.values(FONT_GROUPS).flat())];
+const fontLabel = (fam) => String(fam).split(',')[0].replace(/"/g, '');
+/** Pick a font: built in, from the Google Fonts library (by kind, searchable, with a preview), or your own font file. */
 function openFontPicker(onPick) {
-  loadFonts(GOOGLE_FONTS);
-  const row = (fam, name, add) => h('button', { class: 'font-row', style: `font-family:${fam === 'theme' ? themeOf(root.settings).font : fam}`, onclick: () => {
-    if (add) { root.settings.fonts = [...new Set([...(root.settings.fonts || []), name])]; loadFonts([name]); }
-    closeLayer(); onPick(fam);
-  } }, name, h('small', {}, add ? 'Google Font' : fam === 'theme' ? 'follows the UI theme' : 'built in'));
-  const inp = h('input', { type: 'text', placeholder: 'Any Google Font name, e.g. Roboto Slab' });
+  const S = (root.settings ||= {}), groups = ['Built in', ...Object.keys(FONT_GROUPS), 'Your fonts'];
+  let g = store.get('pocket.editor.fontGroup', 'Built in'); if (!groups.includes(g)) g = 'Built in';
+  let sample = store.get('pocket.editor.fontSample', 'Level 1 · Start 123');
+  const q = h('input', { type: 'search', placeholder: `Search ${GOOGLE_FONTS.length + FONTS.length} fonts (or type any Google Font)`, autocapitalize: 'off', spellcheck: false });
+  const pv = h('input', { type: 'text', value: sample, placeholder: 'Preview text', oninput: (e) => { sample = e.target.value; store.set('pocket.editor.fontSample', sample); draw(); } });
+  const chips = h('div', { class: 'chips pb-chips' }), list = h('div', { class: 'font-list' });
+  const pick = (fam, gname, fileFont) => { if (gname) { S.fonts = [...new Set([...(S.fonts || []), gname])]; loadFonts([gname]); } closeLayer(); onPick(fam); };
+  const row = (fam, name, kind, gname) => h('button', { class: 'font-row', onclick: () => pick(fam, gname) },
+    h('span', { class: 'fr-name', style: `font-family:${fam === 'theme' ? themeOf(S).font : fam}` }, name), h('span', { class: 'fr-pv', style: `font-family:${fam === 'theme' ? themeOf(S).font : fam}` }, sample || name), h('small', {}, kind));
+  const mineRows = () => [
+    ...(S.customFonts || []).map((f) => h('div', { class: 'font-mine' }, row(googleFont(f.name), f.name, 'your font file'), h('button', { type: 'button', class: 'tl-m', title: 'Remove', onclick: () => { if (!confirm(`Remove the font “${f.name}”? Text using it falls back to a standard font.`)) return; S.customFonts = S.customFonts.filter((x) => x !== f); changed({ inspector: true }); draw(); } }, icon('trash')))),
+    ...(S.fonts || []).filter((n) => !(S.customFonts || []).some((f) => f.name === n)).map((n) => row(googleFont(n), n, 'Google Font in this game'))];
+  const draw = () => {
+    chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.fontGroup', x); q.value = ''; draw(); } }, x)));
+    const t = q.value.trim().toLowerCase();
+    if (t) { // search everything
+      const b = FONTS.filter(([, n]) => n.toLowerCase().includes(t)), gf = GOOGLE_FONTS.filter((n) => n.toLowerCase().includes(t)).slice(0, 40); loadFonts(gf);
+      list.replaceChildren(...b.map(([v, n]) => row(v, n, 'built in')), ...gf.map((n) => row(googleFont(n), n, 'Google Font', n)),
+        h('button', { class: 'font-row add', onclick: () => pick(googleFont(q.value.trim()), q.value.trim()) }, h('span', { class: 'fr-name' }, `Use “${q.value.trim()}” from Google Fonts`), h('small', {}, 'any name from fonts.google.com')));
+      return;
+    }
+    if (g === 'Built in') list.replaceChildren(...FONTS.map(([v, n]) => row(v, n, v === 'theme' ? 'follows the UI theme' : 'built in')));
+    else if (g === 'Your fonts') { const r = mineRows(); list.replaceChildren(...(r.length ? r : [h('p', { class: 'desc' }, 'Fonts you add show here: Google Fonts you use, and font files you upload.')])); }
+    else { loadFonts(FONT_GROUPS[g]); list.replaceChildren(...FONT_GROUPS[g].map((n) => row(googleFont(n), n, 'Google Font', n))); }
+  };
+  q.oninput = draw;
+  const upload = () => {
+    const inp = h('input', { type: 'file', accept: '.ttf,.otf,.woff,.woff2,font/*' });
+    inp.onchange = () => { const f = inp.files?.[0]; if (!f) return; if (f.size > 2.5 * 1048576 && !confirm(`This font is ${(f.size / 1048576).toFixed(1)} MB: it makes the game that much bigger. Use it anyway?`)) return;
+      const rd = new FileReader(); rd.onload = () => {
+        let name = prompt('Name for this font', f.name.replace(/\.\w+$/, '').replace(/[-_]+/g, ' ').replace(/[^\w ]/g, '').trim().slice(0, 30) || 'My Font')?.trim(); if (!name) return; name = name.replace(/["',]/g, '');
+        S.customFonts = [...(S.customFonts || []).filter((x) => x.name !== name), { name, data: rd.result }]; useCustomAssets(S);
+        document.fonts?.load(`16px "${name}"`).catch(() => {}).finally(() => { changed({ inspector: true }); closeLayer(); onPick(googleFont(name)); toast(`Your font “${name}”`); });
+      }; rd.readAsDataURL(f); };
+    inp.click();
+  };
   openDialog('Fonts', [
-    h('p', { class: 'desc' }, 'Google Fonts download the first time a player opens the game (they need the internet once).'),
-    h('div', { class: 'row' }, inp, h('button', { class: 'btn primary', onclick: () => { const n = inp.value.trim(); if (!n) return; root.settings.fonts = [...new Set([...(root.settings.fonts || []), n])]; loadFonts([n]); closeLayer(); onPick(googleFont(n)); } }, 'Add')),
-    h('div', { class: 'font-list' }, FONTS.map(([v, n]) => row(v, n, false)), GOOGLE_FONTS.map((n) => row(googleFont(n), n, true))),
-  ]);
+    q, h('div', { class: 'row' }, h('label', {}, 'Preview'), pv), chips, list,
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: upload }, icon('upload'), 'Upload a font file…')),
+    h('p', { class: 'desc' }, 'Google Fonts download the first time a player opens the game (they need the internet once). Font files you upload (.ttf, .otf, .woff, .woff2) are saved in the game and work offline.')]);
+  draw();
 }
 const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'stroke2', 'strokeDir', 'lineWidth', 'dash', 'radius', 'corners', 'glow', 'shadow', 'shadowBlur', 'shadowX', 'shadowY', 'inner', 'innerBlur', 'innerY', 'pattern', 'patternColor', 'patternSize', 'blur'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
+// ---- Shapes: a picture gallery, your own drawn or pasted shapes ----
+const SHAPE_KINDS = [['Basic', [['rect', 'Rectangle'], ['capsule', 'Capsule'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['squircle', 'Squircle'], ['cut', 'Cut corners'], ['slanted', 'Slanted'], ['triangle', 'Triangle'], ['diamond', 'Diamond'], ['pentagon', 'Pentagon'], ['hexagon', 'Hexagon'], ['octagon', 'Octagon']]],
+  ['UI', [['bubble', 'Speech bubble'], ['ticket', 'Ticket'], ['tag', 'Price tag'], ['ribbon', 'Ribbon'], ['chevron', 'Step arrow'], ['bookmark', 'Bookmark'], ['shield', 'Shield'], ['wave', 'Wavy edge'], ['ring', 'Ring']]],
+  ['Fun', [['star', 'Star'], ['burst', 'Starburst'], ['scallop', 'Badge'], ['heart', 'Heart'], ['blob', 'Blob'], ['cloud', 'Cloud'], ['drop', 'Drop'], ['leaf', 'Leaf'], ['bolt', 'Lightning'], ['moon', 'Moon'], ['cross', 'Plus'], ['arrow', 'Arrow']]]];
+const SHAPE_OPTIONS = () => [...SHAPE_KINDS.flatMap(([, l]) => l), ['path', 'Your own (drawn or SVG)'], ['emoji', 'Emoji (text)']];
+/** A shape type's picture, for the gallery. */
+function shapeThumb(type, col) {
+  const c = h('canvas', { width: 120, height: 84 }), x = c.getContext('2d'); x.scale(2, 2);
+  const round = type === 'circle' || type === 'ring', sh = { type, fill: col, w: type === 'bubble' ? 52 : 50, h: ['bubble', 'ticket', 'tag', 'ribbon', 'chevron', 'wave', 'capsule', 'slanted'].includes(type) ? 30 : 34, r: 17, radius: 8 };
+  if (round) sh.r = 17;
+  try { drawShapePreview(x, sh, 30, 21); } catch { /* preview only */ }
+  return c;
+}
+function shapeGallery(j) {
+  const T = themeOf(root.settings || {}), col = (/^#|^rgb/.test(j.shape?.fill || '') && j.shape.fill) || T.accent || '#4fa3ff';
+  const set = (type) => {
+    const s = j.shape, was = s.type; s.type = type;
+    if ((type === 'circle' || type === 'ring') && !s.r) s.r = Math.round(Math.min(s.w || 40, s.h || 40) / 2);
+    if (type !== 'circle' && type !== 'ring' && !s.w) { s.w = (s.r || 20) * 2; s.h = (s.r || 20) * 2; }
+    if (type === 'emoji') s.emoji ||= '⭐';
+    if (was === 'emoji' && type !== 'emoji' && !s.fill) s.fill = col;
+    closeLayer(); changed({ structure: true }); pushHistory();
+  };
+  openDialog('Shapes', [
+    ...SHAPE_KINDS.map(([g, list]) => [h('h4', { class: 'sub-h' }, g), h('div', { class: 'shape-grid' }, list.map(([k, l]) => h('button', { type: 'button', class: 'shape-tile' + (j.shape.type === k ? ' on' : ''), title: l, onclick: () => set(k) }, shapeThumb(k, col), h('small', {}, l))))]),
+    h('h4', { class: 'sub-h' }, 'Your own'),
+    h('div', { class: 'btns' },
+      h('button', { type: 'button', class: 'btn primary', onclick: () => { closeLayer(); drawShapeTool(j); } }, icon('brush'), 'Draw a shape…'),
+      h('button', { type: 'button', class: 'btn', onclick: () => { closeLayer(); pasteSvgShape(j); } }, icon('paste'), 'Paste an SVG…'),
+      h('button', { type: 'button', class: 'btn', onclick: () => set('emoji') }, icon('star'), 'An emoji')),
+  ]);
+}
+/** Tap to place points (drag to move them); Smooth turns corners into curves. The shape fills its box, so it stretches with the element. */
+function drawShapeTool(j) {
+  const S = 280, cv = h('canvas', { width: S * 2, height: S * 2, class: 'shape-draw', style: `width:${S}px;height:${S}px;touch-action:none` }), x = cv.getContext('2d');
+  let pts = [], smooth = false, dragI = -1;
+  const toD = () => { // the path, in a 0–100 box
+    const P = pts.map(([a, b]) => [+(a * 100).toFixed(1), +(b * 100).toFixed(1)]); if (P.length < 3) return '';
+    if (!smooth) return 'M' + P.map((p) => p.join(' ')).join(' L') + ' Z';
+    const n = P.length, at = (i) => P[(i + n) % n]; let d = `M${((at(0)[0] + at(1)[0]) / 2).toFixed(1)} ${((at(0)[1] + at(1)[1]) / 2).toFixed(1)}`;
+    for (let i = 1; i <= n; i++) { const p = at(i), q = at(i + 1); d += ` Q${p[0]} ${p[1]} ${((p[0] + q[0]) / 2).toFixed(1)} ${((p[1] + q[1]) / 2).toFixed(1)}`; }
+    return d + ' Z';
+  };
+  const draw = () => {
+    x.setTransform(2, 0, 0, 2, 0, 0); x.clearRect(0, 0, S, S); x.fillStyle = 'rgba(255,255,255,0.04)'; x.fillRect(0, 0, S, S);
+    x.strokeStyle = 'rgba(255,255,255,0.08)'; x.lineWidth = 1; for (let i = 1; i < 10; i++) { x.beginPath(); x.moveTo(i * S / 10, 0); x.lineTo(i * S / 10, S); x.moveTo(0, i * S / 10); x.lineTo(S, i * S / 10); x.stroke(); }
+    const d = toD(); if (d) { const P = new Path2D(d); x.save(); x.scale(S / 100, S / 100); x.fillStyle = 'rgba(79,163,255,0.45)'; x.fill(P); x.lineWidth = 100 / S * 2; x.strokeStyle = '#4fa3ff'; x.stroke(P); x.restore(); }
+    else if (pts.length) { x.strokeStyle = '#4fa3ff'; x.lineWidth = 2; x.beginPath(); pts.forEach(([a, b], i) => (i ? x.lineTo(a * S, b * S) : x.moveTo(a * S, b * S))); x.stroke(); }
+    pts.forEach(([a, b], i) => { x.fillStyle = i === 0 ? '#ffd23d' : '#ffffff'; x.beginPath(); x.arc(a * S, b * S, 7, 0, Math.PI * 2); x.fill(); });
+  };
+  const at = (ev) => { const r = cv.getBoundingClientRect(); return [Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))]; };
+  cv.onpointerdown = (ev) => { const p = at(ev); dragI = pts.findIndex(([a, b]) => Math.hypot((a - p[0]) * S, (b - p[1]) * S) < 16); if (dragI < 0) { pts.push(p); dragI = pts.length - 1; } cv.setPointerCapture(ev.pointerId); draw(); };
+  cv.onpointermove = (ev) => { if (dragI < 0) return; pts[dragI] = at(ev); draw(); };
+  cv.onpointerup = () => { dragI = -1; };
+  const sm = h('label', { class: 'chk' }, h('input', { type: 'checkbox', onchange: (e) => { smooth = e.target.checked; draw(); } }), 'Smooth (curves)');
+  openDialog('Draw a shape', [
+    h('p', { class: 'desc' }, 'Tap to add corners, drag one to move it. 3 or more make a shape. It fills the element and stretches with it.'),
+    h('div', { style: 'display:flex;justify-content:center' }, cv), h('div', { class: 'btns' }, sm,
+      h('button', { type: 'button', class: 'btn', onclick: () => { pts.pop(); draw(); } }, icon('undo'), 'Undo'),
+      h('button', { type: 'button', class: 'btn', onclick: () => { pts = []; draw(); } }, icon('trash'), 'Clear')),
+    h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn primary', onclick: () => { const d = toD(); if (!d) return toast('Add at least 3 corners'); Object.assign(j.shape, { type: 'path', path: d, view: '0 0 100 100' }); if (!j.shape.w) { j.shape.w = 80; j.shape.h = 80; } if (!j.shape.fill) j.shape.fill = themeOf(root.settings || {}).accent || '#4fa3ff'; closeLayer(); changed({ structure: true }); pushHistory(); toast('Your own shape'); } }, icon('check'), 'Use this shape')),
+  ]);
+  draw();
+}
+/** Paste an SVG (from Figma, an icon site…) or just its path: it becomes the element's shape. */
+function pasteSvgShape(j) {
+  const ta = h('textarea', { rows: 6, placeholder: '<svg viewBox="0 0 24 24"><path d="M12 2L2 22h20z"/></svg>\n\nor just the path: M12 2L2 22h20z', style: 'width:100%;font-family:ui-monospace,monospace;font-size:13px' });
+  openDialog('Paste an SVG', [h('p', { class: 'desc' }, 'Paste a whole SVG or just a path ("d"). Every path in it is used; it fills the element.'), ta,
+    h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn primary', onclick: () => {
+      const t = ta.value.trim(); if (!t) return;
+      let d = t, view = '';
+      if (/<svg|<path/i.test(t)) { d = [...t.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1]).join(' '); const vb = t.match(/viewBox="([^"]+)"/i); view = vb ? vb[1] : ''; if (!view) { const w = t.match(/width="([\d.]+)/), hh = t.match(/height="([\d.]+)/); if (w && hh) view = `0 0 ${w[1]} ${hh[1]}`; } }
+      if (!d || !/^[\sMmLlHhVvCcSsQqTtAaZz\d.,eE+-]+$/.test(d)) return toast('That doesn’t look like an SVG path');
+      try { new Path2D(d); } catch { return toast('That path could not be read'); }
+      if (!view) { const nums = d.match(/-?\d*\.?\d+(e[-+]?\d+)?/gi)?.map(Number) || [0, 100]; const mx = Math.max(...nums); view = `0 0 ${mx > 30 ? 100 : mx > 24 ? 32 : 24} ${mx > 30 ? 100 : mx > 24 ? 32 : 24}`; } // (a guess: icon sets use 24 or 32)
+      Object.assign(j.shape, { type: 'path', path: d, view }); if (!j.shape.w) { j.shape.w = 80; j.shape.h = 80; } if (!j.shape.fill) j.shape.fill = themeOf(root.settings || {}).accent || '#4fa3ff';
+      closeLayer(); changed({ structure: true }); pushHistory(); toast('Your own shape');
+    } }, icon('check'), 'Use it'))]);
+}
 /** Shape keys that make up a look's effects: cleared when a look or a saved style is applied, so it comes out the same everywhere. */
 const LOOK_FX = ['fill2', 'gradDir', 'stroke', 'stroke2', 'strokeDir', 'lineWidth', 'dash', 'glow', 'shadow', 'shadowBlur', 'shadowX', 'shadowY', 'inner', 'innerBlur', 'innerY', 'pattern', 'patternColor', 'patternSize', 'blur'];
 /** One-tap looks for any UI element (Inspector › UI Element › Looks). */
@@ -5038,6 +5161,7 @@ function instantiatePrefab(pid, at) {
   }
   syncInstance(j, pf, project); j.name = pf.name; // copies share the prefab's name (the Hierarchy folds them into one row)
   changed({ structure: true }); pushHistory(); toast(`Added ${pf.name}`);
+  return j;
 }
 function prefabAssetMenu(pf, anchor) {
   let count = 0; eachInstance(pf.id, () => count++);
@@ -7279,11 +7403,34 @@ function guessIcon(name) {
 const NAV_ICONS = () => (SPRITE_GROUPS.Icons || []).map((k) => k.replace(/^ui-/, ''));
 /** A grid of tab icons (or an emoji). */
 function pickNavIcon(cur, cb) {
-  openDialog('Tab icon', [h('div', { class: 'nt-grid' }, NAV_ICONS().map((ic) => h('button', { type: 'button', class: ic === cur ? 'on' : '', title: ic, onclick: () => { closeLayer(); cb(ic); } }, navIconImg(ic), h('span', {}, ic)))),
-    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); pickEmoji((em) => cb(em)); } }, icon('star'), 'Use an emoji…'))]);
+  const all = NAV_ICONS(), mine = () => (root.settings ||= {}).customIcons ||= [];
+  const grid = h('div', { class: 'nt-grid' }), q = h('input', { type: 'search', class: 'ic-search', placeholder: `Search ${all.length} icons…`, autocapitalize: 'off', spellcheck: false });
+  const tile = (id, name, extra) => h('button', { type: 'button', class: id === cur ? 'on' : '', title: name, onclick: () => { closeLayer(); cb(id); } }, navIconImg(id), h('span', {}, name), extra || null);
+  const draw = () => {
+    const t = q.value.trim().toLowerCase(), m = mine().filter((c) => !t || c.name.toLowerCase().includes(t)), list = all.filter((ic) => !t || ic.includes(t));
+    grid.replaceChildren(...m.map((c) => tile('my:' + c.name, c.name)), ...list.map((ic) => tile(ic, ic)));
+    if (!m.length && !list.length) grid.append(h('p', { class: 'desc' }, 'No icon with that name. Try an emoji, or upload your own.'));
+  };
+  q.oninput = draw; draw();
+  const upload = () => { // your own icon: any picture; its shape is used, coloured like the other icons
+    const inp = h('input', { type: 'file', accept: 'image/*' });
+    inp.onchange = () => { const f = inp.files?.[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const img = new Image(); img.onload = () => {
+      const S = 96, c = document.createElement('canvas'); c.width = c.height = S; const x = c.getContext('2d'), k = Math.min(S / img.width, S / img.height); x.drawImage(img, (S - img.width * k) / 2, (S - img.height * k) / 2, img.width * k, img.height * k);
+      let name = prompt('Name for this icon', f.name.replace(/\.\w+$/, '').replace(/[^\w -]/g, '').slice(0, 24) || 'my icon')?.trim(); if (!name) return; name = name.replace(/[|:]/g, '');
+      const L = mine(), i = L.findIndex((q2) => q2.name === name), rec = { name, data: c.toDataURL('image/png') }; if (i >= 0) L[i] = rec; else L.push(rec);
+      useCustomAssets(root.settings); changed({ inspector: true }); closeLayer(); cb('my:' + name); toast(`Your icon “${name}”`);
+    }; img.src = rd.result; }; rd.readAsDataURL(f); };
+    inp.click();
+  };
+  openDialog('Icon', [q, grid,
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); pickEmoji((em) => cb(em)); } }, icon('star'), 'Use an emoji…'),
+      h('button', { class: 'btn', onclick: upload }, icon('upload'), 'Upload your own…')),
+    h('p', { class: 'desc' }, 'Your own icons use the picture’s shape (its see-through parts), coloured like the others. A PNG or SVG with a clear background works best.')]);
 }
 /** A tab icon in the editor's own text colour (the icon art is a shape to tint), or an emoji. */
 function navIconImg(ic) {
+  if (typeof ic === 'string' && ic.startsWith('my:')) { const u = (root.settings?.customIcons || []).find((c) => c.name === ic.slice(3))?.data; if (u) return h('span', { class: 'nt-ic', 'data-icon': ic, style: `-webkit-mask-image:url("${u}");mask-image:url("${u}")` }); }
+  if (/^(data:|https?:|blob:)/.test(ic || '')) return h('span', { class: 'nt-ic', style: `-webkit-mask-image:url("${ic}");mask-image:url("${ic}")` });
   if (!/^[a-z][a-zA-Z-]*$/.test(ic || '')) return h('span', { class: 'nt-ic nt-emoji' }, ic || '⭐');
   const u = artURL('art:' + (ic.startsWith('ui-') ? ic : 'ui-' + ic));
   return h('span', { class: 'nt-ic', 'data-icon': ic, style: `-webkit-mask-image:url("${u}");mask-image:url("${u}")` });
@@ -7686,10 +7833,11 @@ function pageAddMenu(anchor, pg = shownPageEnt()) {
     { icon: 'plus', label: 'A new page…', k: 'made for you', fn: () => { const nv = newPage(null, { name: prompt('Name of the new page (e.g. Settings, Shop)') || '', tab: false, stay: true }); if (nv) addPageBlock(pg, blk, nv); } },
     { icon: 'square', label: 'Choose later', fn: () => addPageBlock(pg, blk, '') }]);
   const sel = ent(selectedId), under = sel && sel.parent === pg.id ? ` under “${sel.name}”` : '';
-  const blocks = pageBlocks(), groups = [...new Set(blocks.map((b) => b.group || 'Basics'))];
+  const mine = userPrefabs().filter((pf) => pf.entities?.[0]?.ui).map((pf) => ({ key: 'my-' + pf.id, group: 'My UI', label: pf.name, icon: 'cube', desc: 'saved by you', mine: pf.id }));
+  const blocks = [...mine, ...pageBlocks()], groups = [...new Set(blocks.map((b) => b.group || 'Basics'))];
   let g = store.get('pocket.editor.blockGroup', groups[0]); if (!groups.includes(g)) g = groups[0];
   const grid = h('div', { class: 'pb-grid' }), chips = h('div', { class: 'chips pb-chips' });
-  const pickBlock = (blk) => { closeLayer(); if (blk.page && others.length) setTimeout(() => pickPage(blk)); else addPageBlock(pg, blk, ''); };
+  const pickBlock = (blk) => { closeLayer(); if (blk.mine) { const j = instantiatePrefab(blk.mine); if (j) { j.parent = pg.id; placeOnPage(pg, [j]); changed({ structure: true }); } return; } if (blk.page && others.length) setTimeout(() => pickPage(blk)); else addPageBlock(pg, blk, ''); };
   const draw = () => {
     chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.blockGroup', x); draw(); } }, x, h('small', {}, String(blocks.filter((b) => (b.group || 'Basics') === x).length)))));
     grid.replaceChildren(...blocks.filter((b) => (b.group || 'Basics') === g).map((blk) => h('button', { type: 'button', class: 'pb-tile', onclick: () => pickBlock(blk) }, h('span', { class: 'pb-ic' }, icon(blk.icon)), h('b', {}, blk.label), h('small', {}, blk.desc))));

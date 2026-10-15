@@ -8568,10 +8568,23 @@ const UK = {
   /** A screen point in the entity's drawing space. */
   local(s, e, t) { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; return { x: (t.x - o.x) / k, y: (t.y - o.y) / k, id: t.id }; },
   live(s, e) { return e.visible && !e._parentHidden && !e._clipHidden && !s.engine.editing && !uiHiding(e); },
+  /** The lowest edge (screen pixels) of buttons floating over the top of the screen (a ☰ in the corner, not on a page) above a list between x0 and x1: the list starts under them. */
+  floatBottom(s, e, x0, x1, top) {
+    const E = s.engine; let low = -1e9; const mine = (q) => { for (let a = e; a; a = a.parentEnt) if (a === q) return true; return false; };
+    for (const q of s.entities) {
+      if (!q.ui || q.dead || q.parentEnt || !q.visible || q._dock || q.stretch === 'both' || mine(q) || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
+      const sb = q.behaviors.find((b) => b.sideMenu), bt = sb?.btn?.(s); let r = null;
+      if (bt) r = { x0: bt.x - bt.r, x1: bt.x + bt.r, y0: bt.y - bt.r, y1: bt.y + bt.r };
+      else if (!sb && !q.behaviors.some((b) => b.uiAlways && b.open !== undefined)) { const u = uiBox(q, E.width, E.height, E.safe); r = { x0: u.x - u.w / 2, x1: u.x + u.w / 2, y0: u.y - u.h / 2, y1: u.y + u.h / 2 }; }
+      if (r && r.y0 < top + E.height * 0.15 && r.y1 > top && r.y1 - r.y0 < E.height * 0.2 && r.x1 > x0 && r.x0 < x1) low = Math.max(low, r.y1 + 4);
+    }
+    return low;
+  },
   /** A tall list kept inside the room the nav bars leave: on a shorter screen (or the editor's phone frame) a feed taller than that space would run under the App Bar and the Bottom Nav. */
   fit(s, e, b) {
-    if (e.parentEnt?.ui || e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe?.bars) return b;
-    const A = uiArea(E.width, E.height, E.safe, e), t = UK.local(s, e, { x: A.l, y: A.t }), bt = UK.local(s, e, { x: A.l, y: A.t + A.h }), y0 = Math.max(b.y, t.y), y1 = Math.min(b.y + b.h, bt.y);
+    if (e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe) return b; // (on a page too: a feed taller than the room left would scroll its last posts under the bar, out of reach)
+    const A = uiArea(E.width, E.height, E.safe, e), o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1;
+    const fl = UK.floatBottom(s, e, o.x + b.x * k, o.x + (b.x + b.w) * k, A.t), t = UK.local(s, e, { x: A.l, y: Math.max(A.t, fl) }), bt = UK.local(s, e, { x: A.l, y: A.t + A.h }), y0 = Math.max(b.y, t.y), y1 = Math.min(b.y + b.h, bt.y); // (and below a button floating in the top corner)
     if (y1 - y0 < 40 || (y0 <= b.y + 0.5 && y1 >= b.y + b.h - 0.5)) return b; return { ...b, y: y0, h: y1 - y0, cy: (y0 + y1) / 2 };
   },
   /** Is this tap for e? While a menu, sheet or popup holds this frame's taps (it may be closing on them), only it and what is inside it get them, plus taps in the areas it lets through. */
@@ -9667,12 +9680,22 @@ registerBehavior('uiFeed', {
     };
     /** The page this feed is on (things above it scroll away), and how far up they have gone. */
     const hostOf = (e) => (p.collapseAbove !== false && e.parentEnt?.ui && !e.parentEnt.dead ? e.parentEnt : null);
-    const boxOf = (e, s) => { const b = UK.fit(s, e, UK.box(e)), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return b; }; // (the feed grows down into the room they leave)
+    const boxOf = (e, s) => { const b = UK.box(e), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return UK.fit(s, e, b); }; // (the feed grows down into the room they leave)
     /** Scrolling down first moves what is above the feed (stories, the post box) up out of the way, then the posts; scrolling back up brings it back once the posts are at the top. */
     const collapse = (s, e, dt) => {
       const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
       const E = s.engine, k = uiK(E.safe) || 1, pr = uiBox(h, E.width, E.height, E.safe), fr = uiBox(e, E.width, E.height, E.safe);
-      let c = h._collapseBy === e ? h._collapseY || 0 : 0; const A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c);
+      let c = h._collapseBy === e ? h._collapseY || 0 : 0; let A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c);
+      { // not up under a button that floats over the page (a ☰ in the corner): the feed stops below it
+        const top0 = fr.y - fr.h / 2 + c * k, x0 = fr.x - fr.w / 2, x1 = fr.x + fr.w / 2; let lowest = -1e9;
+        for (const q of s.entities) {
+          if (!q.ui || q.dead || q.parentEnt || !q.visible || q._dock || q === h || q.stretch === 'both' || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
+          const sb = q.behaviors.find((b) => b.sideMenu), bt = sb?.btn?.(s); let r = null;
+          if (bt) r = { x0: bt.x - bt.r, x1: bt.x + bt.r, y0: bt.y - bt.r, y1: bt.y + bt.r }; else if (!sb) { const u = uiBox(q, E.width, E.height, E.safe); r = { x0: u.x - u.w / 2, x1: u.x + u.w / 2, y0: u.y - u.h / 2, y1: u.y + u.h / 2 }; }
+          if (r && r.y1 <= top0 + 2 && r.y1 > pr.y - pr.h / 2 && r.x1 > x0 && r.x0 < x1 && r.y1 - r.y0 < E.height * 0.4) lowest = Math.max(lowest, r.y1);
+        }
+        if (lowest > -1e9) A = Math.min(A, Math.max(0, (top0 - lowest - 6) / k));
+      }
       if (A < 12) { h._collapseY = 0; return; }
       if (goTop) c += (0 - c) * Math.min(1, dt * 10);
       else if (S.v > 0 && c < A && S.max > 0) { const t = Math.min(S.v, A - c); c += t; S.v -= t; if (S.drag) S.drag.v0 -= t; }

@@ -1007,6 +1007,7 @@ export class Scene {
       if (!editing && !ep.template && inTpl(ep)) { (s.templateKids[ep.parent] ||= []).push(ep); continue; } // children of templates spawn with them
       if (ep.template && !editing) { s.templates[ep.name] = ep; continue; }
       const e = s.add(new Entity(editing ? { ...ep, behaviors: (ep.behaviors || []).filter((b) => EDIT_PREVIEW.has(b?.type)) } : ep)); // the editor keeps only components that draw a preview
+      if (editing) e._allBehaviors = ep.behaviors || []; // (all of them, as written, for questions like "is there a ☰ button already?")
       if (ep.template) { e.template = true; e.alpha = 0.45; }
     }
     s.flush();
@@ -7294,7 +7295,7 @@ registerBehavior('uiSideBar', {
       /** The built-in ☰ button (screen pixels), or null. */
       btn(s) {
         if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
-        const now = s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && q.behaviors.some((b) => b.type === 'button' && b.params?.action === 'send message' && String(b.params?.value ?? '').trim() === p.message)) };
+        const now = s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && (q._allBehaviors || q.behaviors.map((b) => ({ type: b.type, ...b.params }))).some((b) => b.type === 'button' && b.action === 'send message' && String(b.value ?? '').trim() === p.message)) };
         if (otherBtn.on) return null; // a ☰ button of your own already opens this menu: don't draw a second one on top of it
         const E = s.engine, S = E.safe, B = S.bars || { top: 0, bottom: 0, left: 0, right: 0 }, left = p.side !== 'right', K = uiK(S);
         const x = left ? S.left + B.left + 34 * K : E.width - S.right - B.right - 34 * K, y = p.button === 'bottom corner' ? E.height - S.bottom - B.bottom - 34 * K : S.top + B.top + 34 * K;

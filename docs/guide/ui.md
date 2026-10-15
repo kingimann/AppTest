@@ -228,6 +228,21 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Likes, reposts and saves are stored in the record.
   - **Tapping a post** opens it full size with its comments. If *Tapping a post opens page* is set, it goes to that page instead (`{record_text}`… work there).
   - **Comments:** the comment button opens a comments sheet with a box to write one. You can like comments, reply (which fills in @name) and delete your own. Comments are written as *Comments are written as* (default `{playerName}`). They're stored in a **Comments** collection (fields: post, author, handle, text, likes, liked) if there is one, otherwise on the device. Each comment adds to the post's comment count. *Writing a comment sends* sends a message.
+  - **The opened post** shows everything in the post:
+    - who reposted it, the author with a *Follow* button, the location and the text;
+    - a picture carousel (swipe, double-tap to like with a heart, tap to see the pictures full screen);
+    - the poll (you can vote there), the link card, LIVE / video badges;
+    - the full time (7:36 PM · Oct 15, 2026), *Edited* and views (`views` field);
+    - counts (comments, reposts, likes, saves), and a row of Comment, Repost, Like, Save and Share buttons;
+    - a ⋯ menu: Copy text, Not interested, Mute, Report.
+    *Opened posts show as* a sheet or **full screen** (with a ← back arrow; swipe right to close).
+  - **Comment threads:**
+    - Reply to a comment shows "Replying to @name". The reply goes under that comment, behind "View 2 replies".
+    - Sort comments by **Top** (most liked) or **Newest**, with *Comments sorted by* setting the start.
+    - Comments by the post's author get an *Author* tag, and `pinned = yes` comments come first.
+    - @mentions are coloured, and you can double-tap a comment to like it.
+    - A row of quick emoji (❤️ 🙌 🔥 👏 😢 😍 😮 😂) sits above the comment box.
+    - In a Comments collection, replies use a **parent** field (the comment they answer).
   - **Share:** opens a share menu: *Share via…* (the phone's share sheet), Copy text, Copy link, Repost and Save. Set *Share button sends* to send a message instead.
 - **Feed settings** (in the Inspector, grouped):
   - **Content:** collection, sort, filter, a search variable (matches name, handle and text), most posts shown, and *My field names* (e.g. `text = body, media = photo`) if your collection uses other names.

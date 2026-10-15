@@ -8854,30 +8854,34 @@ const SAMPLE_POSTS = () => { const t = Date.now(); return [
 
 // A bottom sheet over the game for social pieces: a post with its comments (with a box to write one), or a list of actions (share).
 const SAMPLE_COMMENTS = [['Leo Park', 'leop', 'This is so good 🔥'], ['Sofia Ruiz', 'sofiaruiz', 'Wow, love it!'], ['Amir Haddad', 'amir', 'Need to try this 🙌'], ['Ava Brooks', 'avab', 'Saving this one'], ['Maya Chen', 'maya', 'Haha yes 😂'], ['Jon Doe', 'jondoe', 'Where is this?']];
+const QUICK_EMOJI = ['❤️', '🙌', '🔥', '👏', '😢', '😍', '😮', '😂'];
 function socialSheet(s, o) {
   const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
   const c = o.colors, font = o.font || 'system-ui,-apple-system,sans-serif', el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
+  const full = o.kind === 'post' && o.fullScreen;
   const wrap = el('div', `position:absolute;inset:0;z-index:50;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;overflow:hidden;`);
   wrap.dataset.pocketSheet = o.kind || 'sheet';
-  const tall = o.kind === 'post' ? '92%' : o.kind === 'comments' ? '72%' : 'auto';
-  const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;${tall === 'auto' ? 'max-height:80%;' : `height:${tall};`}background:${c.bg};color:${c.text};border-radius:18px 18px 0 0;display:flex;flex-direction:column;transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.8,.2,1);box-shadow:0 -8px 30px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom);`);
-  const head = el('div', 'flex:none;padding:8px 14px 6px;cursor:grab;touch-action:none;');
-  head.append(el('div', `width:38px;height:4px;border-radius:2px;background:${c.sub};opacity:.45;margin:0 auto 8px;`));
-  const titleRow = el('div', 'display:flex;align-items:center;justify-content:center;position:relative;min-height:24px;');
+  const tall = full ? '100%' : o.kind === 'post' ? '92%' : o.kind === 'comments' ? '72%' : 'auto';
+  const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;${tall === 'auto' ? 'max-height:80%;' : `height:${tall};`}background:${c.bg};color:${c.text};border-radius:${full ? 0 : '18px 18px 0 0'};display:flex;flex-direction:column;transform:${full ? 'translateX(100%)' : 'translateY(100%)'};transition:transform .28s cubic-bezier(.2,.8,.2,1);box-shadow:0 -8px 30px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom);`);
+  const head = el('div', `flex:none;padding:${full ? '12px' : '8px'} 14px 6px;cursor:grab;touch-action:none;`);
+  if (!full) head.append(el('div', `width:38px;height:4px;border-radius:2px;background:${c.sub};opacity:.45;margin:0 auto 8px;`));
+  const titleRow = el('div', 'display:flex;align-items:center;justify-content:center;position:relative;min-height:28px;');
   if (o.title) titleRow.append(el('div', 'font-weight:800;font-size:16px;', o.title));
-  const x = el('button', `position:absolute;right:0;top:50%;transform:translateY(-50%);border:0;background:none;color:${c.sub};font-size:20px;width:34px;height:34px;cursor:pointer;`, '✕'); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
+  const x = btn(`position:absolute;${full ? 'left:-6px' : 'right:0'};top:50%;transform:translateY(-50%);color:${full ? c.text : c.sub};font-size:${full ? 24 : 20}px;width:36px;height:36px;`, full ? '←' : '✕'); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
+  if (o.onMore) { const mb = btn(`position:absolute;${full ? 'right:0' : 'right:34px'};top:50%;transform:translateY(-50%);color:${c.sub};font-size:20px;width:36px;height:36px;letter-spacing:1px;`, '⋯'); mb.setAttribute('aria-label', 'More'); mb.onclick = () => o.onMore(); titleRow.append(mb); }
   head.append(titleRow);
   const body = el('div', `flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-top:1px solid ${c.line};`);
   sheet.append(head, body); wrap.append(sheet); root.append(wrap);
   let closed = false;
-  const close = () => { if (closed) return; closed = true; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
-  const key = (ev) => { if (ev.key === 'Escape') close(); }; document.addEventListener('keydown', key);
-  requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.45)'; sheet.style.transform = 'translateY(0)'; }));
+  const close = () => { if (closed) return; closed = true; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = full ? 'translateX(100%)' : 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
+  const key = (ev) => { if (ev.key === 'Escape' && wrap === root.querySelector('[data-pocket-sheet]:last-of-type')) close(); }; document.addEventListener('keydown', key);
+  requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.45)'; sheet.style.transform = 'none'; }));
   wrap.addEventListener('pointerdown', (ev) => { if (ev.target === wrap) close(); }); x.onclick = close;
-  // drag the top down to close
-  let dy0 = null; head.addEventListener('pointerdown', (ev) => { if (ev.target === x) return; dy0 = ev.clientY; sheet.style.transition = 'none'; head.setPointerCapture?.(ev.pointerId); });
-  head.addEventListener('pointermove', (ev) => { if (dy0 == null) return; sheet.style.transform = `translateY(${Math.max(0, ev.clientY - dy0)}px)`; });
-  const up = (ev) => { if (dy0 == null) return; const d = ev.clientY - dy0; dy0 = null; sheet.style.transition = 'transform .28s cubic-bezier(.2,.8,.2,1)'; if (d > 80) close(); else sheet.style.transform = 'translateY(0)'; };
+  // drag the top down (or right, full screen) to close
+  let d0 = null; head.addEventListener('pointerdown', (ev) => { if (ev.target.closest('button')) return; d0 = full ? ev.clientX : ev.clientY; sheet.style.transition = 'none'; head.setPointerCapture?.(ev.pointerId); });
+  head.addEventListener('pointermove', (ev) => { if (d0 == null) return; const d = Math.max(0, (full ? ev.clientX : ev.clientY) - d0); sheet.style.transform = full ? `translateX(${d}px)` : `translateY(${d}px)`; });
+  const up = (ev) => { if (d0 == null) return; const d = (full ? ev.clientX : ev.clientY) - d0; d0 = null; sheet.style.transition = 'transform .28s cubic-bezier(.2,.8,.2,1)'; if (d > 80) close(); else sheet.style.transform = 'none'; };
   head.addEventListener('pointerup', up); head.addEventListener('pointercancel', up);
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
   const avatar = (name, pic, d) => {
@@ -8886,71 +8890,187 @@ function socialSheet(s, o) {
     let h = 0; for (const ch of String(name || '?')) h = (h * 31 + ch.charCodeAt(0)) >>> 0; a.style.background = AVATAR_COLORS[h % AVATAR_COLORS.length];
     a.textContent = pic || String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''); return a;
   };
+  const badge = (text, bg, css = '') => el('span', `position:absolute;padding:3px 7px;border-radius:6px;background:${bg};color:#fff;font:800 11px ${font};letter-spacing:.4px;${css}`, text);
   const api = { wrap, sheet, body, close, el, avatar };
   // a list of actions
   if (o.items) {
     body.style.borderTop = '0';
     for (const it of o.items) {
-      const b = el('button', `display:flex;align-items:center;gap:14px;width:100%;padding:14px 20px;border:0;background:none;color:${it.danger ? '#f4212e' : c.text};font:600 16px ${font};text-align:left;cursor:pointer;`);
+      const b = btn(`display:flex;align-items:center;gap:14px;width:100%;padding:14px 20px;color:${it.danger ? '#f4212e' : c.text};font:600 16px ${font};text-align:left;`);
       b.append(el('span', 'width:24px;text-align:center;font-size:19px;', it.icon || ''), el('span', '', it.label));
       b.onclick = () => { close(); it.run?.(); }; body.append(b);
     }
     body.append(el('div', 'height:10px;'));
     return api;
   }
-  // a post (when tapped) and its comments
-  if (o.post) {
-    const P = o.post, box = el('div', 'padding:14px 16px 10px;'), top = el('div', 'display:flex;align-items:center;gap:10px;');
-    const who = el('div', 'flex:1;min-width:0;'); const nm = el('div', 'font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', P.author || '');
-    if (P.verified) nm.append(el('span', `color:${c.acc};margin-left:4px;`, '✓'));
-    who.append(nm, el('div', `color:${c.sub};font-size:13px;`, [P.handle ? '@' + P.handle : '', P.ago, P.location ? '📍 ' + P.location : ''].filter(Boolean).join(' · ')));
-    top.append(avatar(P.author, P.avatar, 42), who); box.append(top);
-    if (P.text) box.append(el('div', 'font-size:17px;line-height:1.4;margin-top:12px;white-space:pre-wrap;word-wrap:break-word;', P.text));
-    for (const m of P.media || []) {
-      const mm = el('div', `margin-top:12px;border-radius:14px;overflow:hidden;background:${P.color || 'rgba(128,128,128,.18)'};`);
-      if (isPic(m)) { const im = el('img', 'display:block;width:100%;'); im.src = artURL(m); mm.append(im); } else { mm.style.cssText += 'aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:110px;'; mm.textContent = m; }
-      box.append(mm);
+  // pictures: swipe through them, double-tap to like, tap to see them full screen
+  const gallery = (P, start = 0, big = false) => {
+    const media = P.media || [], box = el('div', `position:relative;${big ? 'width:100%;height:100%;' : 'margin-top:12px;border-radius:14px;overflow:hidden;'}`);
+    const strip = el('div', `display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;${big ? 'height:100%;' : ''}`); strip.className = 'pocket-strip';
+    media.forEach((m) => {
+      const cell = el('div', `flex:none;width:100%;scroll-snap-align:center;position:relative;display:flex;align-items:center;justify-content:center;${big ? 'height:100%;' : `aspect-ratio:${isPic(m) ? 'auto' : '4/3'};background:${P.color || 'rgba(128,128,128,.18)'};`}`);
+      if (isPic(m)) { const im = el('img', `display:block;width:100%;${big ? 'height:100%;object-fit:contain;' : 'max-height:70vh;object-fit:cover;'}`); im.src = artURL(m); im.draggable = false; cell.append(im); } else cell.append(el('span', `font-size:${big ? 160 : 110}px;line-height:1;`, m));
+      if (P.video && !big) cell.append(el('span', 'position:absolute;width:62px;height:62px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;padding-left:4px;box-sizing:border-box;', '▶'));
+      strip.append(cell);
+    });
+    box.append(strip);
+    if (!big && P.live) box.append(badge('LIVE', '#f4212e', 'left:10px;top:10px;'));
+    if (!big && P.duration) box.append(badge(String(P.duration), 'rgba(0,0,0,.65)', 'left:10px;bottom:10px;'));
+    if (media.length > 1) {
+      const cnt = badge(`1/${media.length}`, 'rgba(0,0,0,.6)', `${big ? 'left:50%;transform:translateX(-50%);top:18px' : 'right:10px;top:10px'};border-radius:10px;`), dots = el('div', 'position:absolute;left:0;right:0;bottom:8px;display:flex;justify-content:center;gap:5px;pointer-events:none;');
+      const ds = media.map(() => { const d = el('span', 'width:6px;height:6px;border-radius:3px;background:#fff;opacity:.5;transition:all .2s;'); dots.append(d); return d; });
+      const sync = () => { const i = Math.round(strip.scrollLeft / Math.max(1, strip.clientWidth)); cnt.textContent = `${i + 1}/${media.length}`; ds.forEach((d, k) => { d.style.opacity = k === i ? '1' : '.5'; d.style.width = k === i ? '14px' : '6px'; }); box.dataset.index = i; };
+      strip.addEventListener('scroll', sync, { passive: true }); box.append(cnt, dots); requestAnimationFrame(() => { strip.scrollLeft = start * strip.clientWidth; sync(); });
     }
-    const counts = el('div', `display:flex;gap:16px;margin-top:12px;color:${c.sub};font-size:14px;`);
-    const likeB = el('button', `border:0;background:none;padding:0;font:700 14px ${font};cursor:pointer;`);
-    const paintLike = () => { likeB.textContent = `${o.liked() ? '♥' : '♡'} ${shortNum(o.likes())} likes`; likeB.style.color = o.liked() ? c.like : c.sub; };
-    likeB.onclick = () => { o.onLike?.(); paintLike(); }; paintLike();
-    const shareB = el('button', `border:0;background:none;padding:0;color:${c.sub};font:700 14px ${font};cursor:pointer;`, '↗ Share'); shareB.onclick = () => o.onShare?.();
-    counts.append(likeB, el('span', '', ''), shareB); api.countEl = counts.children[1];
-    box.append(counts); body.append(box, el('div', `height:1px;background:${c.line};`));
+    if (!big) {
+      let tap = null;
+      strip.addEventListener('click', (ev) => {
+        if (tap) { clearTimeout(tap); tap = null; o.onLike?.(true); api.paintActs?.();
+          const hrt = el('span', 'position:absolute;left:50%;top:50%;font-size:96px;transform:translate(-50%,-50%) scale(.2);opacity:0;transition:transform .35s cubic-bezier(.2,1.6,.4,1),opacity .35s;pointer-events:none;color:#fff;text-shadow:0 4px 20px rgba(0,0,0,.35);', '♥');
+          box.append(hrt); requestAnimationFrame(() => { hrt.style.transform = 'translate(-50%,-50%) scale(1)'; hrt.style.opacity = '1'; }); setTimeout(() => { hrt.style.opacity = '0'; setTimeout(() => hrt.remove(), 400); }, 650); return; }
+        tap = setTimeout(() => { tap = null; viewer(P, +box.dataset.index || 0); }, 260);
+      });
+    }
+    return box;
+  };
+  const viewer = (P, i) => {
+    const v = el('div', 'position:absolute;inset:0;z-index:2;background:#000;opacity:0;transition:opacity .2s;'); v.dataset.pocketViewer = '1';
+    const g = gallery(P, i, true), xx = btn('position:absolute;right:10px;top:10px;width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;font-size:20px;', '✕');
+    xx.setAttribute('aria-label', 'Close pictures'); xx.onclick = () => { v.style.opacity = '0'; setTimeout(() => v.remove(), 200); };
+    v.append(g, xx); wrap.append(v); requestAnimationFrame(() => { v.style.opacity = '1'; });
+  };
+  // the post itself (when it was tapped)
+  if (o.post) {
+    const P = o.post, box = el('div', 'padding:14px 16px 4px;');
+    if (P.repostedBy) box.append(el('div', `color:${c.sub};font-size:13px;font-weight:700;margin:0 0 8px 6px;`, `🔁 ${P.repostedBy} reposted`));
+    else if (P.label) box.append(el('div', `color:${c.sub};font-size:13px;font-weight:700;margin:0 0 8px 6px;`, P.label));
+    const top = el('div', 'display:flex;align-items:center;gap:10px;'), who = el('div', 'flex:1;min-width:0;');
+    const nm = el('div', 'font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', P.author || '');
+    if (P.verified) nm.append(el('span', `color:${c.acc};margin-left:4px;`, '✓'));
+    who.append(nm, el('div', `color:${c.sub};font-size:13px;`, [P.handle ? '@' + P.handle : '', P.location ? '📍 ' + P.location : ''].filter(Boolean).join(' · ')));
+    top.append(avatar(P.author, P.avatar, 44), who);
+    if (o.onFollow && P.following === false) {
+      const fb = btn(`flex:none;padding:7px 16px;border-radius:18px;background:${c.text};color:${c.bg};font:800 14px ${font};`, 'Follow');
+      fb.onclick = () => { o.onFollow(); fb.textContent = 'Following'; fb.style.background = 'transparent'; fb.style.color = c.text; fb.style.border = `1px solid ${c.line}`; fb.disabled = true; };
+      top.append(fb);
+    }
+    box.append(top);
+    if (P.text) box.append(el('div', 'font-size:18px;line-height:1.4;margin-top:12px;white-space:pre-wrap;word-wrap:break-word;', P.text));
+    if (P.media?.length) box.append(gallery(P));
+    // a poll
+    if (o.poll) {
+      const pb = el('div', 'margin-top:12px;display:flex;flex-direction:column;gap:8px;'); pb.dataset.poll = '1';
+      const paintPoll = () => {
+        pb.textContent = ''; const Q = o.poll(); if (!Q) return; const tot = Q.v.reduce((a, b) => a + b, 0) || 1;
+        Q.o.forEach((opt, i) => {
+          const b = btn(`position:relative;display:flex;align-items:center;justify-content:space-between;width:100%;min-height:40px;padding:0 14px;border-radius:10px;overflow:hidden;font:700 15px ${font};text-align:left;${Q.voted ? '' : `border:2px solid ${c.acc};color:${c.acc};justify-content:center;`}`);
+          if (Q.voted) { const pct = Math.round((Q.v[i] / tot) * 100); const bar = el('span', `position:absolute;left:0;top:0;bottom:0;width:0;background:${Q.voted === i + 1 ? c.acc : c.sub};opacity:${Q.voted === i + 1 ? 0.25 : 0.15};border-radius:10px;transition:width .5s cubic-bezier(.2,.8,.2,1);`);
+            b.append(bar, el('span', 'position:relative;', opt + (Q.voted === i + 1 ? ' ✓' : '')), el('span', 'position:relative;', pct + '%')); requestAnimationFrame(() => { bar.style.width = Math.max(3, pct) + '%'; }); }
+          else { b.textContent = opt; b.onclick = () => { o.onVote(i); paintPoll(); }; }
+          pb.append(b);
+        });
+        const n = Q.v.reduce((a, b) => a + b, 0); pb.append(el('div', `color:${c.sub};font-size:13px;`, `${shortNum(n)} vote${n === 1 ? '' : 's'}${Q.voted ? '' : ' · tap to vote'}`));
+      };
+      paintPoll(); box.append(pb);
+    }
+    // a link preview
+    if (P.link) {
+      const lk = btn(`display:flex;width:100%;margin-top:12px;border:1px solid ${c.line};border-radius:14px;overflow:hidden;text-align:left;`);
+      const im = el('div', `flex:none;width:92px;min-height:76px;display:flex;align-items:center;justify-content:center;font-size:36px;background:rgba(128,128,128,.15);`);
+      if (isPic(P.linkImage)) { im.style.background = `#444 center/cover url("${artURL(P.linkImage)}")`; } else im.textContent = P.linkImage || '🔗';
+      const tx = el('div', 'flex:1;min-width:0;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px;');
+      tx.append(el('div', `color:${c.sub};font-size:12px;`, P.domain || ''), el('div', 'font-weight:700;font-size:15px;line-height:1.3;', P.linkTitle || P.link));
+      lk.append(im, tx); lk.onclick = () => o.onLink?.(); box.append(lk);
+    }
+    // when, views
+    const when = [P.when, P.edited ? 'Edited' : '', P.views ? `${shortNum(P.views)} views` : ''].filter(Boolean).join(' · ');
+    if (when) box.append(el('div', `color:${c.sub};font-size:14px;margin-top:14px;`, when));
+    // counts and buttons
+    const stats = el('div', `display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:12px;padding:10px 0;border-top:1px solid ${c.line};font-size:14px;color:${c.sub};`); stats.dataset.stats = '1';
+    const acts = el('div', `display:flex;justify-content:space-between;padding:6px 6px;border-top:1px solid ${c.line};`);
+    const act = (k, label) => { const b = btn(`display:flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:42px;font:700 21px ${font};color:${c.sub};`); b.dataset.act = k; b.setAttribute('aria-label', label); acts.append(b); return b; };
+    const bC = act('comment', 'Comment'), bR = act('repost', 'Repost'), bL = act('like', 'Like'), bS = act('save', 'Save'), bSh = act('share', 'Share');
+    const pop = (b) => { b.animate?.([{ transform: 'scale(1)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'ease-out' }); };
+    const paintActs = () => {
+      const st = o.stats();
+      stats.textContent = '';
+      const stat = (n, w) => { if (!n) return; const sp = el('span', ''); sp.append(el('b', `color:${c.text};`, shortNum(n)), document.createTextNode(' ' + w + (n === 1 ? '' : 's'))); stats.append(sp); };
+      if (st.reaction) stats.append(el('span', '', st.reaction + ' You reacted'));
+      stat(o.count?.() || 0, 'Comment'); stat(st.reposts, 'Repost'); stat(st.likes, 'Like'); stat(st.saves, 'Save');
+      stats.style.display = stats.childElementCount ? 'flex' : 'none';
+      bC.textContent = '💬'; bR.textContent = '🔁'; bR.style.color = st.reposted ? c.repost : c.sub; bR.style.filter = st.reposted ? 'none' : 'grayscale(1)';
+      bL.textContent = st.liked ? st.reaction || '♥' : '♡'; bL.style.color = st.liked ? c.like : c.sub; bL.style.fontSize = '24px';
+      bS.textContent = st.saved ? '🔖' : '🏷'; bS.style.filter = st.saved ? 'none' : 'grayscale(1)'; bS.style.opacity = st.saved ? '1' : '.7';
+      bSh.textContent = '↗'; bSh.style.fontSize = '24px';
+    };
+    bC.onclick = () => { inp.focus(); }; bR.onclick = () => { o.onRepost?.(); paintActs(); pop(bR); }; bL.onclick = () => { o.onLike?.(); paintActs(); pop(bL); };
+    bS.onclick = () => { o.onSave?.(); paintActs(); pop(bS); }; bSh.onclick = () => o.onShare?.();
+    api.paintActs = paintActs; paintActs();
+    box.append(stats, acts); body.append(box, el('div', `height:1px;background:${c.line};`));
   }
-  const list = el('div', 'padding:6px 0 10px;'); body.append(list);
+  // comments: sort, threads with replies, likes
+  const bar = el('div', `display:flex;align-items:center;justify-content:space-between;padding:12px 16px 4px;`), cnt = el('div', 'font-weight:800;font-size:15px;');
+  const sortB = btn(`color:${c.sub};font:700 13px ${font};padding:4px 10px;border:1px solid ${c.line};border-radius:14px;`); sortB.dataset.sort = '1';
+  let sortBy = o.sort === 'newest' ? 'newest' : 'top'; sortB.onclick = () => { sortBy = sortBy === 'top' ? 'newest' : 'top'; paint(); };
+  bar.append(cnt, sortB); body.append(bar);
+  const list = el('div', 'padding:2px 0 10px;'); body.append(list);
+  const openThreads = new Set(); let replyTo = null;
   const fmt = (n) => (+n ? shortNum(+n) : '');
+  const row = (cm, isReply) => {
+    const r = el('div', `display:flex;gap:10px;padding:8px 16px 8px ${isReply ? 58 : 16}px;`); r.dataset.comment = cm.text;
+    const mid = el('div', 'flex:1;min-width:0;'), line1 = el('div', 'font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;');
+    line1.append(el('span', 'font-weight:800;', cm.author || 'Someone'));
+    if (o.post && cm.author && cm.author === o.post.author) line1.append(el('span', `background:${c.acc};color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;`, 'Author'));
+    if (cm.pinned) line1.append(el('span', `color:${c.sub};`, '📌 Pinned'));
+    line1.append(el('span', `color:${c.sub};`, cm.at ? shortAgo(cm.at) : ''));
+    const txt = el('div', 'font-size:15px;line-height:1.35;margin-top:2px;white-space:pre-wrap;word-wrap:break-word;');
+    for (const part of String(cm.text).split(/(@[\w.]+)/)) txt.append(/^@[\w.]+$/.test(part) ? el('span', `color:${c.acc};font-weight:600;`, part) : document.createTextNode(part));
+    mid.append(line1, txt);
+    const acts = el('div', `display:flex;gap:16px;margin-top:5px;color:${c.sub};font-size:13px;font-weight:700;`);
+    const reply = btn('', 'Reply'); reply.onclick = () => { replyTo = cm.parent || cm.id; chip(cm.handle || String(cm.author || '').split(/\s+/)[0]); inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
+    acts.append(reply);
+    if (cm.mine && o.onDelete) { const del = btn('', 'Delete'); del.onclick = () => { o.onDelete(cm); paint(); }; acts.append(del); }
+    mid.append(acts);
+    const hb = btn(`flex:none;color:${cm.liked ? c.like : c.sub};font:700 12px ${font};display:flex;flex-direction:column;align-items:center;gap:1px;min-width:30px;`);
+    hb.append(el('span', 'font-size:17px;', cm.liked ? '♥' : '♡'), el('span', '', fmt(cm.likes))); hb.setAttribute('aria-label', 'Like comment');
+    hb.onclick = () => { o.onLikeComment?.(cm); paint(); };
+    let lastTap = 0; txt.addEventListener('click', () => { const t = performance.now(); if (t - lastTap < 300 && !cm.liked) { o.onLikeComment?.(cm); paint(); } lastTap = t; });
+    r.append(avatar(cm.author, cm.avatar, isReply ? 26 : 34), mid, hb); return r;
+  };
   const paint = () => {
-    list.textContent = ''; const L = o.comments();
-    if (api.countEl) api.countEl.textContent = `💬 ${shortNum(o.count())} comments`;
-    if (!L.length) { list.append(el('div', `text-align:center;color:${c.sub};padding:28px 20px;font-size:15px;`, 'No comments yet. Start the conversation.')); return; }
-    for (const cm of L) {
-      const row = el('div', 'display:flex;gap:10px;padding:10px 16px;'); row.dataset.comment = cm.text;
-      const mid = el('div', 'flex:1;min-width:0;'), line1 = el('div', 'font-size:13px;');
-      line1.append(el('span', 'font-weight:800;', cm.author || 'Someone'), el('span', `color:${c.sub};margin-left:6px;`, cm.at ? shortAgo(cm.at) : ''));
-      mid.append(line1, el('div', 'font-size:15px;line-height:1.35;margin-top:2px;white-space:pre-wrap;word-wrap:break-word;', cm.text));
-      const acts = el('div', `display:flex;gap:16px;margin-top:5px;color:${c.sub};font-size:13px;font-weight:700;`);
-      const reply = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;`, 'Reply');
-      reply.onclick = () => { inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
-      acts.append(reply);
-      if (cm.mine && o.onDelete) { const del = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;`, 'Delete'); del.onclick = () => { o.onDelete(cm); paint(); }; acts.append(del); }
-      mid.append(acts);
-      const hb = el('button', `flex:none;border:0;background:none;color:${cm.liked ? c.like : c.sub};font:700 12px ${font};cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;min-width:30px;`);
-      hb.append(el('span', 'font-size:17px;', cm.liked ? '♥' : '♡'), el('span', '', fmt(cm.likes)));
-      hb.onclick = () => { o.onLikeComment?.(cm); paint(); };
-      row.append(avatar(cm.author, cm.avatar, 34), mid, hb); list.append(row);
+    list.textContent = ''; const all = o.comments(), ids = new Set(all.map((q) => String(q.id)));
+    const tops = all.filter((q) => !q.parent || !ids.has(String(q.parent))), kids = (id) => all.filter((q) => String(q.parent) === String(id)).sort((a, b) => (a.at || 0) - (b.at || 0));
+    const n = all.length; cnt.textContent = n ? `${shortNum(n)} comment${n === 1 ? '' : 's'}` : 'Comments';
+    sortB.textContent = sortBy === 'top' ? 'Top ▾' : 'Newest ▾';
+    tops.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (sortBy === 'top' ? (+b.likes || 0) - (+a.likes || 0) || (b.at || 0) - (a.at || 0) : (b.at || 0) - (a.at || 0)));
+    if (!tops.length) { list.append(el('div', `text-align:center;color:${c.sub};padding:28px 20px;font-size:15px;`, 'No comments yet. Start the conversation.')); return; }
+    for (const cm of tops) {
+      list.append(row(cm, false));
+      const ks = kids(cm.id); if (!ks.length) continue;
+      if (openThreads.has(String(cm.id))) { for (const k of ks) list.append(row(k, true)); const hide = btn(`display:block;margin:0 0 6px 58px;color:${c.sub};font:700 13px ${font};`, '— Hide replies'); hide.onclick = () => { openThreads.delete(String(cm.id)); paint(); }; list.append(hide); }
+      else { const more = btn(`display:block;margin:0 0 6px 58px;color:${c.sub};font:700 13px ${font};`, `— View ${ks.length} repl${ks.length === 1 ? 'y' : 'ies'}`); more.dataset.replies = cm.id; more.onclick = () => { openThreads.add(String(cm.id)); paint(); }; list.append(more); }
     }
   };
   // the box to write a comment
-  const foot = el('div', `flex:none;display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid ${c.line};background:${c.bg};`);
+  const foot = el('div', `flex:none;border-top:1px solid ${c.line};background:${c.bg};`);
+  const chipRow = el('div', `display:none;align-items:center;justify-content:space-between;padding:8px 16px 0;color:${c.sub};font-size:13px;`);
+  const chipTx = el('span', ''), chipX = btn(`color:${c.sub};font-size:15px;`, '✕'); chipRow.append(chipTx, chipX);
+  const chip = (h) => { chipTx.textContent = `Replying to @${h}`; chipRow.style.display = h ? 'flex' : 'none'; };
+  chipX.onclick = () => { replyTo = null; chip(''); if (/^@\S+\s$/.test(inp.value)) inp.value = ''; sync(); };
+  const emo = el('div', 'display:flex;justify-content:space-around;padding:8px 10px 0;');
+  for (const em of QUICK_EMOJI) { const b = btn('font-size:22px;width:36px;height:32px;', em); b.onclick = () => { inp.value += em; inp.focus(); sync(); }; emo.append(b); }
+  const inRow = el('div', 'display:flex;align-items:center;gap:10px;padding:8px 12px 10px;');
   const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:20px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`);
   inp.placeholder = o.placeholder || 'Add a comment…'; inp.maxLength = 500; inp.setAttribute('enterkeyhint', 'send');
-  const send = el('button', `flex:none;border:0;background:none;color:${c.acc};font:800 15px ${font};cursor:pointer;padding:6px 4px;`, 'Post');
+  const send = btn(`flex:none;color:${c.acc};font:800 15px ${font};padding:6px 4px;`, 'Post');
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.disabled = !on; };
-  const submit = () => { const v = inp.value.trim(); if (!v) return; o.onAdd(v); inp.value = ''; sync(); paint(); requestAnimationFrame(() => { list.lastElementChild?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); }); };
+  const submit = () => {
+    const v = inp.value.trim(); if (!v) return; const parent = replyTo; o.onAdd(v, parent); inp.value = ''; replyTo = null; chip(''); sync();
+    if (parent) openThreads.add(String(parent)); else sortBy = 'newest';
+    paint(); requestAnimationFrame(() => { const rows = [...list.querySelectorAll('[data-comment]')].filter((q) => q.dataset.comment === v); (rows[rows.length - 1] || list).scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); });
+  };
   inp.addEventListener('input', sync); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } }); send.onclick = submit;
-  foot.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send); sheet.append(foot);
+  inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send); foot.append(chipRow, emo, inRow); sheet.append(foot);
   sync(); paint(); if (o.focus) setTimeout(() => inp.focus(), 300);
   api.input = inp; api.paint = paint; return api;
 }
@@ -9014,7 +9134,9 @@ registerBehavior('uiFeed', {
     { key: 'postMessage', label: 'Tapping a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'likeMessage', label: 'Liking sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'tapPost', label: 'Tapping a post', type: 'select', options: ['opens the post', 'nothing'], default: 'opens the post', group: 'Behaviour', info: 'Opens it full size with its comments (unless “Tapping a post opens page” is set).' },
+    { key: 'postView', label: 'Opened posts show as', type: 'select', options: ['a sheet', 'full screen'], default: 'a sheet', group: 'Behaviour', showIf: (b) => b.tapPost !== 'nothing' },
     { key: 'commentsSheet', label: 'Comment button opens the comments', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'commentSort', label: 'Comments sorted by', type: 'select', options: ['top', 'newest'], default: 'top', group: 'Behaviour' },
     { key: 'commentAs', label: 'Comments are written as', type: 'text', default: '{playerName}', group: 'Behaviour', info: 'The name on comments you write. {variables} work; blank = “You”.' },
     { key: 'commentsCollection', label: 'Comments collection (fields: post, author, text)', type: 'text', default: 'Comments', suggest: 'collections', group: 'Behaviour', info: 'If there is no such collection, comments are kept on the device.' },
     { key: 'commentAddedMessage', label: 'Writing a comment sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
@@ -9068,6 +9190,10 @@ registerBehavior('uiFeed', {
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
+    const hideIt = (s, r, kind) => { const H = hid(s), list = kind === 'hide' ? H.posts : H.authors, v = kind === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(kind === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); };
+    const reportIt = (s, r) => { if (p.reportMessage) s.send(p.reportMessage, r.id); s.snackbar?.('Thanks, we’ll take a look'); };
+    const followIt = (s, r) => { const hd = who(r); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); };
+    const fullWhen = (t0) => { const t = +t0; if (!t) return ''; try { const d = new Date(t); return d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }) + ' · ' + d.toLocaleDateString(localeOf(), { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return shortAgo(t); } };
     const CKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.comments';
     const cDev = (s) => { try { return JSON.parse(store.get(CKEY(s), '{}')) || {}; } catch { return {}; } };
     const cColl = (s) => (p.commentsCollection && D(s).def(p.commentsCollection) ? p.commentsCollection : '');
@@ -9079,12 +9205,12 @@ registerBehavior('uiFeed', {
       if (!has(s)) { let h = 0; for (const ch of String(r.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; const n = Math.min(3, +F(r, 'comments') || 0);
         for (let k = 0; k < n; k++) { const [author, handle, text] = SAMPLE_COMMENTS[(h + k * 2) % SAMPLE_COMMENTS.length]; if (author === F(r, 'author')) continue; out.push(mem(r.id + ':s' + k, { id: 's' + k, author, handle, text, at: (+F(r, 'time') || Date.now()) + (k + 2) * 240e3, likes: (h >> k) % 30, liked: false })); } }
       const cc = cColl(s);
-      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: +q.likes || 0, liked: truthy(q.liked), mine: q.author === me0.author }); }
+      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: +q.likes || 0, liked: truthy(q.liked), parent: q.parent || '', pinned: truthy(q.pinned), mine: q.author === me0.author }); }
       else for (const q of cDev(s)[r.id] || []) out.push({ ...q, mine: q.author === me0.author });
       return out;
     };
     const cSave = (s, r, fn) => { const all = cDev(s), L = all[r.id] || (all[r.id] = []); fn(L); if (!L.length) delete all[r.id]; store.set(CKEY(s), JSON.stringify(all)); };
-    const colorsOf = () => { const bg0 = tok(p.card || '@card'); return { bg: bg0 && !/^(transparent|rgba\([^)]*,\s*0\))$/.test(bg0) ? bg0 : tok('@bg') || '#fff', text: tok(C('text', '#e7e9ea')), sub: tok(C('sub', '#71767b')), line: tok(C('line', 'rgba(128,128,128,0.25)')), acc: tok(C('accent', '#1d9bf0')), like: tok(C('like', '#f91880')), field: 'rgba(128,128,128,0.12)' }; };
+    const colorsOf = () => { const bg0 = tok(p.card || '@card'); return { bg: bg0 && !/^(transparent|rgba\([^)]*,\s*0\))$/.test(bg0) ? bg0 : tok('@bg') || '#fff', text: tok(C('text', '#e7e9ea')), sub: tok(C('sub', '#71767b')), line: tok(C('line', 'rgba(128,128,128,0.25)')), acc: tok(C('accent', '#1d9bf0')), like: tok(C('like', '#f91880')), repost: tok(C('repost', '#00ba7c')), field: 'rgba(128,128,128,0.12)' }; };
     const fontOf = () => (p.font ? `${/[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}"` : p.font}, ${THEME.font}` : THEME.font);
     const shareMenu = (s, r) => {
       const tx = `${F(r, 'author') || ''}: ${F(r, 'text') || ''}`.trim(), url = F(r, 'link'), copy = (v, msg) => { navigator.clipboard?.writeText(v).catch(() => {}); s.snackbar?.(msg); };
@@ -9094,25 +9220,39 @@ registerBehavior('uiFeed', {
       if (url) items.push({ icon: '🔗', label: 'Copy link', run: () => copy(String(url), 'Link copied') });
       items.push({ icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } });
       items.push({ icon: '🔖', label: truthy(F(r, 'saved')) ? 'Remove from saved' : 'Save post', run: () => flip(s, r, 'saved') });
-      sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = false; } })) sheetUp = false;
+      sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } })) sheetUp = false;
     };
     const openPost = (s, r, kind, focus) => {
       const cc = cColl(s), me0 = meOf(s);
       sheetUp = true;
-      const sh = socialSheet(s, { kind, title: kind === 'post' ? 'Post' : 'Comments', colors: colorsOf(), font: fontOf(), focus, me: me0,
-        post: kind === 'post' ? { author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), ago: shortAgo(F(r, 'time')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color') } : null,
-        liked: () => truthy(F(r, 'liked')), likes: () => +F(r, 'likes') || 0, count: () => +F(r, 'comments') || 0,
-        onLike: () => like(s, r), onShare: () => shareMenu(s, r),
+      const isPost = kind === 'post', fol = F(r, 'following'), lnk = F(r, 'link');
+      const sh = socialSheet(s, { kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
+        post: isPost ? { author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
+          repostedBy: F(r, 'repostedBy'), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
+          following: p.followButtons !== false && fol != null && fol !== '' ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
+        stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: truthy(F(r, 'reposted')), saved: truthy(F(r, 'saved')), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
+        count: () => +F(r, 'comments') || 0,
+        poll: isPost && pollOf(r) ? () => pollOf(r) : null,
+        onVote: (i) => { const P0 = pollOf(r); if (!P0 || P0.voted) return; P0.v[i]++; patch(s, r, { votes: P0.v.join(', '), voted: i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[i]); },
+        onLike: (only) => { if (only && truthy(F(r, 'liked'))) return; if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); },
+        onRepost: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }, onSave: () => { flip(s, r, 'saved'); pops.set(r.id + 's', s.time); },
+        onFollow: () => followIt(s, r), onLink: () => { if (!s.engine.editing && /^https?:/.test(String(lnk))) window.open(lnk, '_blank', 'noopener'); },
+        onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: [
+          { icon: '📋', label: 'Copy text', run: () => { navigator.clipboard?.writeText(String(F(r, 'text') || '')).catch(() => {}); s.snackbar?.('Copied to clipboard'); } },
+          { icon: '🙈', label: 'Not interested', run: () => { sh?.close(); hideIt(s, r, 'hide'); } },
+          { icon: '🔇', label: `Mute @${who(r)}`, run: () => { sh?.close(); hideIt(s, r, 'mute'); } },
+          { icon: '🚩', label: 'Report post', danger: true, run: () => reportIt(s, r) }] }) : null,
+        onShare: () => shareMenu(s, r),
         comments: () => cmtsOf(s, r),
-        onAdd: (text) => {
-          const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false };
+        onAdd: (text, parent) => {
+          const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false, ...(parent ? { parent: String(parent) } : {}) };
           if (cc) D(s).add(cc, { post: r.id, ...c0 }); else cSave(s, r, (L) => L.push({ id: 'c' + Date.now().toString(36), ...c0, at: Date.now() }));
           patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
         },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
         onLikeComment: (cm) => { const on = !cm.liked, n = Math.max(0, (+cm.likes || 0) + (on ? 1 : -1));
           if (cm.row) D(s).update(cc, cm.id, { liked: on, likes: n }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.liked = on; q.likes = n; } }); else { cm.liked = on; cm.likes = n; } },
-        onClose: () => { sheetUp = false; } });
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
       if (!sh) sheetUp = false;
     };
     const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
@@ -9159,8 +9299,8 @@ registerBehavior('uiFeed', {
             const m = menuR.find((q) => UK.in(t, q)), r = menu.r; menu = null; if (!m) continue; UK.tap(s, p);
             if (m.k === 'save') flip(s, r, 'saved');
             else if (m.k === 'copy') { const tx = String(F(r, 'text') || ''); navigator.clipboard?.writeText(tx).catch(() => {}); s.snackbar?.('Copied to clipboard'); }
-            else if (m.k === 'hide' || m.k === 'mute') { const H = hid(s), list = m.k === 'hide' ? H.posts : H.authors, v = m.k === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(m.k === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); }
-            else if (m.k === 'report') { if (p.reportMessage) s.send(p.reportMessage, r.id); s.snackbar?.('Thanks, we’ll take a look'); }
+            else if (m.k === 'hide' || m.k === 'mute') hideIt(s, r, m.k);
+            else if (m.k === 'report') reportIt(s, r);
             continue;
           }
           if (!UK.in(t, b) || S.moved) continue;
@@ -9175,7 +9315,7 @@ registerBehavior('uiFeed', {
           else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (!s.engine.editing) shareMenu(s, r); }
           else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); if (p.moreMenu !== false) menu = { r, sx: b.x + hit.x + hit.w, sy: b.y + inset + it.y - S.v + hit.y + hit.h }; }
           else if (k === 'vote') { const P0 = pollOf(r); if (P0 && !P0.voted) { UK.tap(s, p); P0.v[hit.i]++; patch(s, r, { votes: P0.v.join(', '), voted: hit.i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[hit.i]); } }
-          else if (k === 'follow') { UK.tap(s, p); const hd = who(r); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); }
+          else if (k === 'follow') { UK.tap(s, p); followIt(s, r); }
           else if (k === 'link') { UK.tap(s, p); if (!s.engine.editing && /^https?:/.test(hit.url)) window.open(hit.url, '_blank', 'noopener'); }
           else if (k === 'expand') { UK.tap(s, p); open.add(r.id); }
           else if (k === 'tag') { UK.tap(s, p); const tg = hit.tag; if (/^https?:/.test(tg)) { if (!s.engine.editing) window.open(tg, '_blank', 'noopener'); } else { if (p.searchVar) s.setVar(p.searchVar, tg); if (p.tagMessage) s.send(p.tagMessage, tg); } }

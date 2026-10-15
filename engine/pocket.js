@@ -881,7 +881,7 @@ const DEFAULT_SETTINGS = {
   muteButton: true, orientation: 'any', fullscreen: false,
   joystickSide: 'left', controlSize: 'medium', shareButton: true, saveProgress: false,
   controls: 'auto', joystickMode: 'floating', controlsOpacity: 1, jumpLabel: 'JUMP', actionLabel: 'FIRE', customScreens: false,
-  turnBased: false, turnDelay: 0.3, loadOnStart: false,
+  turnBased: false, turnDelay: 0.3, loadOnStart: false, saveSlots: 3, autoSave: 'off', saveVersion: 1, slotPictures: true,
 };
 const CONTROL_SCALE = { small: 0.8, medium: 1, large: 1.25 };
 
@@ -4749,7 +4749,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -9017,6 +9017,89 @@ registerBehavior('uiQuestLog', {
   },
 });
 
+registerBehavior('uiSaveSlots', {
+  label: 'Save Slots', description: 'A save / load menu: a card for each save slot with a picture of the game, its name, level, when it was saved and the time played. Tap a card to save there or to load it.',
+  params: [
+    { key: 'mode', label: 'Tapping a slot', type: 'select', options: ['loads it', 'saves there', 'saves or loads (two buttons)'], default: 'loads it' },
+    { key: 'slots', label: 'Number of slots (0 = Game Settings)', type: 'number', default: 0, range: [0, 10], step: 1 },
+    { key: 'showAuto', label: 'Show the auto-save', type: 'bool', default: true, info: 'When Game Settings › Saving › Auto-save is on, its slot shows first (it can be loaded, not saved over).' },
+    { key: 'title', label: 'Title', type: 'text', default: 'Saved games' },
+    { key: 'slotName', label: 'Slot name (when it has none; {n} = number)', type: 'text', default: 'Slot {n}' },
+    { key: 'nameVar', label: 'Name new saves from variable (blank = none)', type: 'text', default: '', suggest: 'vars', infoText: 'e.g. playerName, or a variable you set to the area name.' },
+    { key: 'confirm', label: 'Ask before saving over a slot', type: 'bool', default: true },
+    { key: 'allowDelete', label: 'Delete button on each slot', type: 'bool', default: true },
+    { key: 'pictures', label: 'Show pictures', type: 'bool', default: true },
+    { key: 'message', label: 'Send message after saving or loading', type: 'text', default: '', suggest: 'messages', infoText: 'With “saved” or “loaded” as its value, e.g. to close the popup the menu is in.' },
+    ...colorParams({ bg: ['Background', '#181c2c'], card: ['Cards', '#232842'], text: ['Text', '#ffffff'], accent: ['Accent', '#4fa3ff'], danger: ['Delete', '#ff5c6c'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const pics = new Map(); let pend = null, flash = null, rects = [];
+    const img = (src) => { if (!src) return null; let im = pics.get(src); if (!im) { im = new Image(); im.src = src; pics.set(src, im); } return im.complete && im.naturalWidth ? im : null; };
+    const list = (s) => { const n = +p.slots > 0 ? Math.round(+p.slots) : s.engine.slotCount(), L = Array.from({ length: n }, (_, i) => i + 1); return p.showAuto !== false && (s.settings.autoSave || 'off') !== 'off' && p.mode !== 'saves there' ? ['auto', ...L] : L; };
+    const info = (s, k) => s.engine.editing ? { slot: k, exists: k === 1 || k === 'auto', label: k === 1 ? 'Forest camp' : '', level: 2, levelName: 'Level 2', ago: k === 'auto' ? 'just now' : '2 h ago', playTime: '14 min', pic: '', auto: k === 'auto' } : s.engine.slotInfo(k);
+    const name = (I) => I.auto ? 'Auto-save' : I.label || fillTemplate(p.slotName || 'Slot {n}', { n: I.slot });
+    const done = (s, what) => { if (p.message) s.send(p.message, what); };
+    const doSave = (s, k) => { const lab = p.nameVar ? String(s.vars[p.nameVar] ?? '') : ''; if (s.engine.saveGame(k, { label: lab })) { flash = { k, t: 1.4, text: 'Saved ✓' }; s.engine.audio.sfx('coin'); done(s, 'saved'); } };
+    const doLoad = (s, k) => { if (s.engine.loadGame(k)) s.send(p.message || '', 'loaded'); };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        if (flash && (flash.t -= dt) <= 0) flash = null;
+        if (pend && (pend.t -= dt) <= 0) pend = null;
+        for (const t of UK.taps(s, e)) {
+          const r = rects.find((q) => UK.in(t, q)); if (!r) continue;
+          UK.tap(s, p);
+          if (r.act === 'del') { if (pend?.k === r.k && pend.act === 'del') { s.engine.deleteSave(r.k); pend = null; flash = { k: r.k, t: 1.2, text: 'Deleted' }; } else pend = { k: r.k, act: 'del', t: 2.5 }; break; }
+          if (r.act === 'save') { if (r.exists && p.confirm !== false && !(pend?.k === r.k && pend.act === 'save')) { pend = { k: r.k, act: 'save', t: 2.5 }; break; } pend = null; doSave(s, r.k); break; }
+          if (r.act === 'load') { if (r.exists) doLoad(s, r.k); else flash = { k: r.k, t: 1, text: 'Empty' }; break; }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), txt = p.text || '#fff', acc = p.accent || '#4fa3ff', dg = p.danger || '#ff5c6c', both = p.mode === 'saves or loads (two buttons)', saving = p.mode === 'saves there';
+        if (p.bg) { ctx.fillStyle = p.bg; UK.rr(ctx, b.x, b.y, b.w, b.h, 20); ctx.fill(); }
+        let y = b.y + 12; rects = [];
+        if (p.title) { UK.text(ctx, p.title, b.x + 18, y + 14, { size: 19, weight: 900, color: txt, align: 'left' }); y += 38; }
+        const L = list(s), gap = 10, ch = Math.max(56, Math.min(92, (b.y + b.h - y - 8 - gap * (L.length - 1)) / L.length));
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, y - 4, b.w, b.y + b.h - y + 4); ctx.clip();
+        for (const k of L) {
+          const I = info(s, k), x = b.x + 12, w = b.w - 24, P = pend?.k === k ? pend : null, F = flash?.k === k ? flash : null;
+          ctx.fillStyle = p.card || '#232842'; UK.rr(ctx, x, y, w, ch, 16); ctx.fill();
+          if (F) { ctx.fillStyle = withAlpha(acc, 0.25 * Math.min(1, F.t)); UK.rr(ctx, x, y, w, ch, 16); ctx.fill(); }
+          let tx = x + 14;
+          if (p.pictures !== false) { // a picture of the game when it was saved
+            const ph = ch - 16, pw = Math.round(ph * (both ? 1 : 1.25)), im = img(I.pic);
+            ctx.save(); UK.rr(ctx, x + 8, y + 8, pw, ph, 10); ctx.clip();
+            if (im) { const k2 = Math.max(pw / im.naturalWidth, ph / im.naturalHeight); ctx.drawImage(im, x + 8 + (pw - im.naturalWidth * k2) / 2, y + 8 + (ph - im.naturalHeight * k2) / 2, im.naturalWidth * k2, im.naturalHeight * k2); }
+            else { ctx.fillStyle = I.exists ? withAlpha(acc, 0.35) : 'rgba(255,255,255,0.06)'; ctx.fillRect(x + 8, y + 8, pw, ph); drawNavIcon(ctx, I.auto ? 'clock' : I.exists ? 'download' : 'plus', x + 8 + pw / 2, y + 8 + ph / 2, Math.min(26, ph * 0.45), withAlpha(txt, I.exists ? 0.9 : 0.4)); }
+            ctx.restore(); tx = x + 8 + pw + 12;
+          }
+          const btnW = both ? 70 : 0, delW = p.allowDelete !== false && I.exists && !I.auto ? 34 : 0, tw = x + w - tx - btnW - delW - 12;
+          UK.text(ctx, P ? (P.act === 'del' ? 'Tap again to delete' : 'Tap again to save over it') : F ? F.text : name(I), tx, y + ch / 2 - (I.exists ? 14 : 0), { size: 16, weight: 800, color: P ? (P.act === 'del' ? dg : acc) : txt, align: 'left', maxW: tw });
+          if (I.exists) {
+            UK.text(ctx, [I.levelName, I.ago].filter(Boolean).join(' · '), tx, y + ch / 2 + 6, { size: 12.5, weight: 700, color: withAlpha(txt, 0.65), align: 'left', maxW: tw });
+            if (ch >= 70 && I.playTime) UK.text(ctx, I.playTime + ' played', tx, y + ch / 2 + 23, { size: 11.5, weight: 700, color: withAlpha(txt, 0.45), align: 'left', maxW: tw });
+          } else if (!P && !F) UK.text(ctx, saving ? 'Empty: tap to save' : 'Empty', tx, y + ch / 2 + 18, { size: 12, weight: 700, color: withAlpha(txt, 0.4), align: 'left', maxW: tw });
+          let rx = x + w - 10;
+          if (delW) { rx -= delW; ctx.fillStyle = P?.act === 'del' ? dg : withAlpha(dg, 0.16); UK.rr(ctx, rx, y + ch / 2 - 15, 30, 30, 15); ctx.fill(); drawNavIcon(ctx, 'trash', rx + 15, y + ch / 2, 15, P?.act === 'del' ? '#fff' : dg); rects.push({ x: rx - 4, y: y + ch / 2 - 19, w: 38, h: 38, k, act: 'del' }); rx -= 6; }
+          if (both) { // Save and Load stacked on the right
+            rx -= btnW; const acts = I.auto ? [['load', 'Load']] : [['save', 'Save'], ['load', 'Load']], bh = Math.min(32, (ch - 18) / acts.length);
+            acts.forEach(([act, lab], j) => {
+              const on = act === 'save' || I.exists, by = y + ch / 2 - (acts.length * bh + (acts.length - 1) * 6) / 2 + j * (bh + 6);
+              ctx.fillStyle = act === 'save' ? acc : withAlpha(txt, on ? 0.14 : 0.06); UK.rr(ctx, rx, by, btnW - 6, bh, bh / 2); ctx.fill();
+              UK.text(ctx, lab, rx + (btnW - 6) / 2, by + bh / 2, { size: 13.5, weight: 800, color: act === 'save' ? '#fff' : withAlpha(txt, on ? 1 : 0.35) });
+              rects.push({ x: rx, y: by - 2, w: btnW - 6, h: bh + 4, k, act, exists: I.exists });
+            });
+          }
+          rects.push({ x, y, w: w - (rx < x + w - 10 ? x + w - rx : 0), h: ch, k, act: both ? (I.exists ? 'load' : I.auto ? 'load' : 'save') : saving && !I.auto ? 'save' : 'load', exists: I.exists });
+          y += ch + gap;
+        }
+        ctx.restore();
+      },
+    };
+  },
+});
+
 registerBehavior('uiDailyReward', {
   label: 'Daily Reward', description: 'A 7-day reward calendar: one claim per day, the streak grows each day you come back (and can reset if you miss one). Saved on the player\'s device.',
   params: [
@@ -12093,6 +12176,7 @@ function runAction(s, e, p, other) {
     case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
     case 'save game': if (s.saveGame(p.amount || 1)) s.message(v && v !== 'Hello!' ? v : 'Game saved', 1.5); break;
     case 'load game': if (!s.loadGame(p.amount || 1)) s.message('No saved game yet', 1.5); return;
+    case 'continue from newest save': { const k = s.engine.newestSlot(); if (!k || !s.engine.loadGame(k)) s.message('No saved game yet', 1.5); return; }
     case 'delete save': s.deleteSave(p.amount || 1); s.message('Save deleted', 1.5); break;
     case 'switch camera': s.setCamera(v); break;
     case 'push': { const t = (v ? obj(v) : other) || e, b = t?.ensureBody({ type: 'dynamic' }); const [px, py, pz] = String(p.amount).split(',').map(Number); if (b) { b.vel.x += px || 0; b.vel.y += py || 0; b.vel.z += pz || 0; } break; }
@@ -14238,7 +14322,7 @@ export const NODE_TYPES = {
   gameOver: { cat: 'Actions', label: 'Game Over', exec: true, outs: [] },
   nextLevel: { cat: 'Actions', label: 'Next Level', exec: true, outs: [] },
   restart: { cat: 'Actions', label: 'Restart Game', exec: true, outs: [] },
-  saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message')] },
+  saveGame: { cat: 'Actions', label: 'Save Game', exec: true, outs: ['then'], params: [num('slot', 1, 'slot'), txt('text', 'Game saved', 'message'), txt('name', '', 'slot name (blank = keep; {braces} work)')] },
   loadGame: { cat: 'Actions', label: 'Load Game', exec: true, outs: ['then', 'no save'], params: [num('slot', 1, 'slot')] },
   deleteSave: { cat: 'Actions', label: 'Delete Save', exec: true, outs: ['then'], params: [num('slot', 1, 'slot')] },
   push: { cat: 'Actions', label: 'Push (add velocity)', exec: true, outs: ['then'], params: [opt('target', ['self', 'other'], 'self', 'who')], inputs: [{ key: 'x', type: 'number', default: 0 }, { key: 'y', type: 'number', default: -400 }, { key: 'z', type: 'number', default: 0 }] },
@@ -14832,6 +14916,13 @@ Object.assign(NODE_TYPES, {
   onScrolled: { cat: 'Events', label: 'On Scrolled', outs: ['up', 'down'] },
   onPageClosed: { cat: 'Events', label: 'On Page Closed', outs: ['then'], params: [txt('page', '', 'page (blank = any)')] },
   onSaveLoaded: { cat: 'Events', label: 'On Save Loaded', outs: ['then'] },
+  onSlotSaved: { cat: 'Events', label: 'On Slot Saved', outs: ['then'], params: [txt('slot', '', 'slot (blank = any; auto = auto-save)')] },
+  slotInfo: { cat: 'Save Files', label: 'Save Slot Info', value: 'text', params: [txt('slot', '1', 'slot (number or auto)'), opt('what', ['saved ago', 'date and time', 'play time', 'level', 'level name', 'name', 'is saved'], 'saved ago', 'show')] },
+  newestSlot: { cat: 'Save Files', label: 'Newest Save Slot', value: 'text' },
+  exportSlot: { cat: 'Save Files', label: 'Export Save Slot As Text', exec: true, outs: ['then', 'empty slot'], params: [txt('slot', '1', 'slot (number or auto)'), txt('var', 'saveCode', 'into variable'), { key: 'copy', type: 'bool', default: true, label: 'copy it too' }] },
+  importSlot: { cat: 'Save Files', label: 'Import Save Slot From Text', exec: true, outs: ['imported', 'not a save'], params: [txt('slot', '1', 'slot'), txt('var', 'saveCode', 'from variable')] },
+  cloudSaveSlot: { cat: 'Online', label: 'Cloud Save Slot (PlayFab)', exec: true, outs: ['saved', 'failed'], params: [txt('slot', '1', 'slot (number or auto)')] },
+  cloudLoadSlot: { cat: 'Online', label: 'Cloud Load Slot (PlayFab)', exec: true, outs: ['loaded', 'no save', 'failed'], params: [txt('slot', '1', 'slot'), { key: 'play', type: 'bool', default: true, label: 'load it into the game now' }] },
   onTimeReaches: { cat: 'Events', label: 'When Level Time Reaches', outs: ['then'], params: [num('seconds', 30, 'seconds')] },
   onClock: { cat: 'Events', label: 'At Clock Time', outs: ['then'], params: [txt('time', '18:00', 'time (HH:MM, phone clock)')] },
   onFirstPlay: { cat: 'Events', label: 'On First Time Ever', outs: ['then'] },
@@ -15018,6 +15109,7 @@ export const LOGIC_CONDITIONS = {
   exists: { label: 'Object exists', icon: 'cube', params: [sug(txt('object', '', 'object'), 'objects')], test: (c, p) => !!c.s.find(p.object), say: (p) => `${p.object} exists` },
   visible: { label: 'Is visible', icon: 'eye', params: [sug(txt('object', '', 'object (empty = this)'), 'objects')], test: (c, p) => !!(p.object ? c.s.find(p.object) : c.e)?.visible, say: (p) => `${p.object || 'this'} is visible` },
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
+  anySave: { label: 'Has any save', icon: 'save', test: (c) => !!c.s.engine.newestSlot(), say: () => 'there is a save' },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
   dataCount: { label: 'Number of records', icon: 'list', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'only where (e.g. done = no)'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(c.s.engine.data.stat(p.collection, 'count', '', p.filter, c.s.vars), p.op, +p.value || 0), say: (p) => `${p.collection}${p.filter ? ` (${p.filter})` : ''} count ${p.op} ${p.value}` },
@@ -15151,6 +15243,8 @@ export const LOGIC_ACTIONS = {
   shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
   switchCamera: { cat: 'Game', label: 'Switch camera', icon: 'camera', params: [sug(txt('camera', 'Camera', 'camera object'), 'objects')], run: (c, p) => c.s.setCamera(p.camera), say: (p) => `Camera → ${p.camera}` },
   save: { cat: 'Game', label: 'Save game', icon: 'save', params: [num('slot', 1, 'slot')], run: (c, p) => { if (c.s.saveGame(+p.slot || 1)) c.s.message('Game saved', 1.2); }, say: () => 'Save game' },
+  loadNewest: { cat: 'Game', label: 'Continue (load the newest save)', icon: 'folder', run: (c) => { const k = c.s.engine.newestSlot(); if (k) c.s.engine.loadGame(k); }, say: () => 'Continue from the newest save' },
+  deleteAllSaves: { cat: 'Game', label: 'Delete every save of this game', icon: 'trash', run: (c) => { c.s.engine.deleteAllSaves(); }, say: () => 'Delete every save' },
   load: { cat: 'Game', label: 'Load game', icon: 'folder', params: [num('slot', 1, 'slot')], run: (c, p) => { c.s.loadGame(+p.slot || 1); }, say: () => 'Load game' },
   win: { cat: 'Game', label: 'Win', icon: 'trophy', run: (c) => c.s.win(), say: () => 'Win!' },
   gameOver: { cat: 'Game', label: 'Game over', icon: 'enemy', run: (c) => c.s.gameOver(), say: () => 'Game over' },
@@ -15713,6 +15807,8 @@ registerBehavior('graph', {
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
         case 'inApp': return !!s.fromApp;
+        case 'slotInfo': { const I = s.engine.slotInfo(P('slot') || 1), w = P('what'); return w === 'is saved' ? I.exists : !I.exists ? '' : w === 'date and time' ? I.when : w === 'play time' ? I.playTime : w === 'level' ? I.level : w === 'level name' ? I.levelName : w === 'name' ? I.label : I.ago; }
+        case 'newestSlot': return String(s.engine.newestSlot() || '');
         case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
         case 'questInfo': {
           const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
@@ -15983,7 +16079,11 @@ registerBehavior('graph', {
         case 'gameOver': s.gameOver(); return;
         case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
         case 'restart': s.engine.restart(); return;
-        case 'saveGame': if (s.saveGame(+P('slot') || 1) && P('text')) s.message(P('text'), 1.5); break;
+        case 'saveGame': if (s.engine.saveGame(+P('slot') || 1, { label: P('name') ? fillTemplate(P('name'), s.vars) : '' }) && P('text')) s.message(P('text'), 1.5); break;
+        case 'exportSlot': { const t = s.engine.exportSave(P('slot') || 1); if (t) { s.setVar(P('var') || 'saveCode', t); if (P('copy')) navigator.clipboard?.writeText(t).catch(() => {}); } return follow(n, t ? 'then' : 'empty slot', ctx); }
+        case 'importSlot': return follow(n, s.engine.importSave(P('slot') || 1, s.vars[P('var') || 'saveCode']) ? 'imported' : 'not a save', ctx);
+        case 'cloudSaveSlot': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSaveSlot(P('slot') || 1).then((ok) => { if (!e.dead) follow(n, ok ? 'saved' : 'failed', later); }); return; }
+        case 'cloudLoadSlot': { const later = { ...ctx, steps: 0 }; s.engine.online.pfLoadSlot(P('slot') || 1, P('play')).then((r) => { if (!e.dead || r === 'loaded') follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'no save' : 'failed', later); }); return; }
         case 'loadGame': follow(n, s.loadGame(+P('slot') || 1) ? 'then' : 'no save', ctx); return;
         case 'deleteSave': s.deleteSave(+P('slot') || 1); break;
         case 'push': { const t = P('target') === 'other' ? ctx.other : e, b = t?.ensureBody({ type: 'dynamic' }); if (b) { b.vel.x += +I('x') || 0; b.vel.y += +I('y') || 0; b.vel.z += +I('z') || 0; } break; }
@@ -16636,6 +16736,7 @@ registerBehavior('graph', {
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onSaveFile')) s.on('saved', (f) => { if (!e.dead) fire('onSaveFile', e, s, null, (n) => !param(n, 'file') || param(n, 'file') === f); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onSlotSaved')) s.on('slotSaved', (k) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onSlotSaved' && !n.off && (!param(n, 'slot') || String(param(n, 'slot')).trim() === String(k))) follow(n, 'then', { s, e, steps: 0, eventValue: k }); });
         if (has('onGameDone')) s.on('gameFinished', (name, score, result) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onGameDone' && !n.off && (!param(n, 'game') || String(name).toLowerCase() === String(param(n, 'game')).trim().toLowerCase())) follow(n, result, { s, e, steps: 0, eventValue: score }); });
         if (has('onPermission')) s.on('permission', (k, ok) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onPermission' && (param(n, 'kind') === 'any' || param(n, 'kind') === k)) follow(n, ok ? 'allowed' : 'not allowed', { s, e, steps: 0 }); });
         if (has('onLocation')) s.on('location', () => { if (!e.dead) fire('onLocation', e, s); });
@@ -16950,6 +17051,22 @@ export class Online {
       const j = JSON.parse(raw); for (const [k, v] of Object.entries(j.vars || {})) this.scene?.setVar(k, v);
       return 'loaded';
     } catch (e) { this.fail('PlayFab load', e); return 'failed'; }
+  }
+  /** A whole save slot in the player's PlayFab data (without its picture), to carry it to another phone. */
+  async pfSaveSlot(slot) {
+    const E = this.engine, d = E.readSave(slot); if (!d) return false;
+    if (d.meta) d.meta = { ...d.meta, pic: '' };
+    try { await this.pfCall('UpdateUserData', { Data: { ['pocket_slot_' + slot]: E.encodeSlot(d) } }); return true; } catch (e) { return !!this.fail('PlayFab slot save', e); }
+  }
+  async pfLoadSlot(slot, play = true) {
+    try {
+      const E = this.engine, k = 'pocket_slot_' + slot, d = await this.pfCall('GetUserData', { Keys: [k] }), raw = d.Data?.[k]?.Value;
+      if (!raw) return 'none';
+      if (!E.decodeSlot(raw)) return 'failed';
+      store.set(E.slotKey(slot), raw);
+      if (play) E.loadGame(slot);
+      return 'loaded';
+    } catch (e) { this.fail('PlayFab slot load', e); return 'failed'; }
   }
   /** Remote config: Title Data values become variables (numbers stay numbers), so you can tune a live game. */
   async pfTitleData(keys) {
@@ -17413,7 +17530,7 @@ export class Engine {
     this.ro.observe(this.root);
     this.onVis = () => {
       if (!this.editing) this.scene?.emit('appVisible', !document.hidden);
-      if (document.hidden) { this.saveProgress(); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
+      if (document.hidden) { this.saveProgress(); this.autoSlot('leave'); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
       if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
@@ -17532,7 +17649,7 @@ export class Engine {
     if (!this.levels) return;
     const i = clamp(Math.round(n) - 1, 0, this.levels.length - 1), carry = { ...this.scene.vars, __inv: this.scene.packInv() };
     delete carry.best; delete carry.level; delete carry.time;
-    this.carry = carry; this.levelIndex = i; this.setScene(this.factory()); this.saveProgress();
+    this.carry = carry; this.levelIndex = i; this.setScene(this.factory()); this.saveProgress(); this.autoSlot('level');
   }
 
   nextLevel() {
@@ -17542,7 +17659,7 @@ export class Engine {
     this.carry = carry;
     this.levelIndex++;
     this.setScene(this.factory());
-    this.saveProgress();
+    this.saveProgress(); this.autoSlot('level');
   }
 
   restart(skipTitle = true) {
@@ -17566,9 +17683,9 @@ export class Engine {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
     this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
-    if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.readSave(1)) { // continue from save slot 1
+    if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.newestSlot()) { // continue from the newest save
       this.loadedOnce = true;
-      return this.loadGame(1, { keepTitle: true });
+      return this.loadGame(this.newestSlot(), { keepTitle: true });
     }
     if (scene.settings.saveProgress && !this.editing && !this.restoredOnce && !skipRestore) { // continue where the player left off
       this.restoredOnce = true;
@@ -17664,23 +17781,62 @@ export class Engine {
   }
   clearProgress() { try { localStorage.removeItem(this.saveKey()); } catch { /* storage unavailable */ } }
 
-  // ---- save slots (Save Game / Load Game actions and nodes) ----
+  // ---- save slots (Save Game / Load Game, the Save Slots menu): numbered slots plus an "auto" slot ----
   slotKey(slot) { return this.saveKey() + '.slot' + (slot || 1); }
-  readSave(slot) { try { return JSON.parse(store.get(this.slotKey(slot), 'null')); } catch { return null; } }
+  slotCount(s = this.scene) { return Math.max(1, Math.min(10, Math.round(+s?.settings.saveSlots || 3))); }
+  /** A slot as text in storage: plain JSON, or scrambled with the game's password when Encrypt save files is on. */
+  encodeSlot(d) {
+    const st = this.scene?.settings || {}, json = JSON.stringify(d);
+    return st.saveEncrypt ? 'PES1:' + SaveFiles.sum(json) + ':' + SaveFiles.b64(SaveFiles.xor(new TextEncoder().encode(json), st.savePassword)) : json;
+  }
+  decodeSlot(raw) {
+    if (!raw) return null;
+    try {
+      if (raw.startsWith('PES1:')) {
+        const [, sum, body] = raw.split(':'), json = new TextDecoder().decode(SaveFiles.xor(SaveFiles.unb64(body), this.scene?.settings.savePassword));
+        if (SaveFiles.sum(json) !== sum) { Log.add('warn', 'A save slot was changed outside the game (or the password changed): ignored', 'Save'); return null; }
+        return JSON.parse(json);
+      }
+      return JSON.parse(raw);
+    } catch { return null; }
+  }
+  readSave(slot) { return this.decodeSlot(store.get(this.slotKey(slot), '')); }
   deleteSave(slot) { try { localStorage.removeItem(this.slotKey(slot)); } catch { /* storage unavailable */ } }
-  saveGame(slot = 1) {
+  /** Every save of this game: slots, the auto slot, saved progress and save files (not the best score or settings). */
+  deleteAllSaves() {
+    try {
+      const pre = [this.saveKey(), this.saves.prefix()];
+      for (const k of Object.keys(localStorage)) if (pre.some((q) => k.startsWith(q))) localStorage.removeItem(k);
+      this.saves.cache.clear();
+    } catch { /* storage unavailable */ }
+  }
+  /** A small picture of the screen for a slot card. */
+  slotPicture() {
+    try {
+      this.render?.(); // (a WebGL picture is only readable right after it's drawn)
+      const src = [this.canvas].filter((c) => c?.width), W = 160; if (!src.length) return ''; // the game world, not the menus over it
+      const H = Math.round(W * src[0].height / src[0].width), c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d'); g.fillStyle = this.scene?.background && !String(this.scene.background).startsWith('@') ? this.scene.background : '#111'; g.fillRect(0, 0, W, H);
+      for (const cv of src) g.drawImage(cv, 0, 0, W, H);
+      return c.toDataURL('image/jpeg', 0.6);
+    } catch { return ''; }
+  }
+  saveGame(slot = 1, { label = '', auto = false } = {}) {
     const s = this.scene;
     if (!s || this.editing) return false;
-    const vars = { ...s.vars, __inv: s.packInv() }; delete vars.best;
+    const vars = { ...s.vars, __inv: s.packInv() }; delete vars.best; delete vars.loadedSaveVersion;
     const ids = new Set((s.json?.entities || []).filter((ep) => ep.id && !ep.template).map((ep) => ep.id)), alive = new Set();
-    const entities = {};
+    const entities = {}, spawned = [];
     for (const e of s.entities) {
-      if (e.dead || !ids.has(e.id)) continue;
-      alive.add(e.id);
-      entities[e.id] = { x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz, visible: e.visible, data: Object.fromEntries(Object.entries(e.data).filter(([k, v]) => !k.startsWith('_') && typeof v !== 'object')) };
+      if (e.dead) continue;
+      if (ids.has(e.id)) { alive.add(e.id); entities[e.id] = SaveFiles.snapshot(e); }
+      else if (e.spawned && s.templates[e.name] && !e.data.netObj) spawned.push({ tpl: e.name, ...SaveFiles.snapshot(e) }); // made while playing: made again on load
     }
-    const data = { vars, level: this.levelIndex || 0, entities, removed: [...ids].filter((id) => !alive.has(id)), time: s.time, saved: Date.now() };
-    store.set(this.slotKey(slot), JSON.stringify(data));
+    const old = this.readSave(slot), li = this.levelIndex || 0, st = s.settings;
+    const meta = { label: label || old?.meta?.label || '', level: li + 1, levelName: this.levels?.[li]?.levelName || (this.levels?.length > 1 ? `Level ${li + 1}` : ''), playTime: Math.round(this.playTime || 0), ver: +st.saveVersion || 1, auto, pic: st.slotPictures === false ? '' : this.slotPicture() };
+    const data = { vars, level: li, entities, spawned, removed: [...ids].filter((id) => !alive.has(id)), time: s.time, saved: Date.now(), meta };
+    try { store.set(this.slotKey(slot), this.encodeSlot(data)); } catch { if (meta.pic) { meta.pic = ''; store.set(this.slotKey(slot), this.encodeSlot(data)); } } // a full phone: try without the picture
+    s.emit('slotSaved', slot);
     return true;
   }
   loadGame(slot = 1, { keepTitle = false } = {}) {
@@ -17693,17 +17849,45 @@ export class Engine {
     if (!keepTitle || s.state !== 'title') s.state = 'play';
     this.setScene(s, { skipRestore: true });
     Object.assign(s.vars, d.vars); s.restoreInv();
+    s.vars.loadedSaveVersion = d.meta?.ver || 1; // older saves can be fixed up in On Save Loaded
+    this.playTime = d.meta?.playTime || 0;
     const removed = new Set(d.removed || []);
     for (const e of s.entities) {
       if (removed.has(e.id)) { e.dead = true; continue; }
-      const st = d.entities?.[e.id];
-      if (!st) continue;
-      Object.assign(e, { x: st.x, y: st.y, z: st.z, rx: st.rx, ry: st.ry, rz: st.rz, visible: st.visible });
-      Object.assign(e.data, st.data || {});
-      if (e.body) e.body.vel = { x: 0, y: 0, z: 0 };
+      if (d.entities?.[e.id]) SaveFiles.apply(e, d.entities[e.id]);
     }
+    for (const o of d.spawned || []) { const q = s.spawn(o.tpl, { x: o.x, y: o.y, z: o.z }); if (q) SaveFiles.apply(q, o); }
     s.flush();
     return true;
+  }
+  /** What a slot card shows: { slot, exists, label, level, levelName, saved, ago, when, playTime, pic, auto }. */
+  slotInfo(slot) {
+    const d = this.readSave(slot), m = d?.meta || {}, t = d?.saved || 0, pt = Math.round(m.playTime || 0);
+    const ago = !t ? '' : ((sec) => sec < 60 ? 'just now' : sec < 3600 ? `${Math.floor(sec / 60)} min ago` : sec < 86400 ? `${Math.floor(sec / 3600)} h ago` : `${Math.floor(sec / 86400)} d ago`)((Date.now() - t) / 1000);
+    return { slot, exists: !!d, label: m.label || '', level: m.level || (d ? (d.level || 0) + 1 : 0), levelName: m.levelName || '', saved: t, ago, when: t ? new Date(t).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '',
+      playTime: pt >= 3600 ? `${Math.floor(pt / 3600)} h ${Math.floor(pt / 60) % 60} min` : pt >= 60 ? `${Math.floor(pt / 60)} min` : d ? `${pt} s` : '', pic: m.pic || '', auto: slot === 'auto' };
+  }
+  /** The slot saved most recently (numbered or auto), or 0. */
+  newestSlot() {
+    let best = 0, bt = 0;
+    for (const k of ['auto', ...Array.from({ length: this.slotCount() }, (_, i) => i + 1)]) { const t = this.readSave(k)?.saved || 0; if (t > bt) { bt = t; best = k; } }
+    return best;
+  }
+  /** Auto-save (Game Settings › Saving): into the "auto" slot on a timer, when the player leaves the app, and when a level starts. */
+  autoSlot(why) {
+    const s = this.scene, m = s?.settings.autoSave || 'off';
+    if (!s || this.editing || m === 'off' || s.state !== 'play' || s.fromApp) return;
+    if (why === 'timer' && m === 'only when leaving') return;
+    this.saveGame('auto', { auto: true });
+  }
+  /** A slot as one line of text, to move a save to another phone (Import Save Slot puts it back). */
+  exportSave(slot) { const raw = store.get(this.slotKey(slot), ''); return raw ? 'PSLOT1:' + SaveFiles.b64(new TextEncoder().encode(raw)) : ''; }
+  importSave(slot, text) {
+    try {
+      const t = String(text || '').trim(), raw = t.startsWith('PSLOT1:') ? new TextDecoder().decode(SaveFiles.unb64(t.slice(7))) : t;
+      if (!this.decodeSlot(raw)) return false;
+      store.set(this.slotKey(slot), raw); return true;
+    } catch { return false; }
   }
 
   /**
@@ -17878,6 +18062,9 @@ export class Engine {
       this.slowTime = this.fps < 42 ? (this.slowTime || 0) + dt : 0;
       if (this.slowTime > 2 && this.dpr > 1) { this.maxDpr = Math.max(1, this.dpr - 0.5); this.slowTime = 0; this.resize(); }
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
+      this.playTime = (this.playTime || 0) + dt; // time played, kept in save slots
+      const ae = { 'every 30 seconds': 30, 'every minute': 60, 'every 5 minutes': 300 }[this.scene.settings.autoSave];
+      if (ae && (this.autoTimer = (this.autoTimer || 0) + dt) > ae) { this.autoTimer = 0; this.autoSlot('timer'); }
     }
     if (this.scene) {
       try { // a bug in one frame shows in the Console instead of freezing the game

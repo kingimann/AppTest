@@ -3889,8 +3889,12 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Turn up Darkness for caves and night levels, then add Light objects or a Light component to the player (torch).'),
   ], { icon: 'bulb', key: 's-light' }));
   box.append(comp('Saving', [
-    h('p', { class: 'desc' }, 'Save games keep variables, the level, where things are and what was collected. Save with a Save Point, a Button (Do → save game) or the Save Game node; load with Load Game. Amount = slot number.'),
-    C('settings.loadOnStart', { label: 'Continue from save slot 1 on start', type: 'bool', def: false }),
+    h('p', { class: 'desc' }, 'Save games keep variables, the level, where things are (with their size and text), what was collected and objects made while playing. Save with a Save Point, a Button (Do → save game), the Save Game node or a Save Slots menu (Add → UI → Game Systems); load with Load Game. Amount = slot number.'),
+    C('settings.saveSlots', { label: 'Save slots', type: 'number', def: 3, step: 1, range: [1, 10], infoText: 'How many slots the Save Slots menu shows.' }),
+    C('settings.autoSave', { label: 'Auto-save', type: 'select', options: [['off', 'Off'], ['every 30 seconds', 'Every 30 seconds'], ['every minute', 'Every minute'], ['every 5 minutes', 'Every 5 minutes'], ['only when leaving', 'Only when leaving the game']], def: 'off', infoText: 'Into its own Auto-save slot: on the timer, when the player leaves the app and when a new level starts.' }),
+    C('settings.loadOnStart', { label: 'Continue from the newest save on start', type: 'bool', def: false }),
+    C('settings.slotPictures', { label: 'A picture of the game in each slot', type: 'bool', def: true }),
+    C('settings.saveVersion', { label: 'Save version', type: 'number', def: 1, step: 1, range: [1, 99], infoText: 'Raise it when an update changes what is saved. A loaded save puts its version in {loadedSaveVersion}, so On Save Loaded can fix up older saves.' }),
     C('settings.saveProgress', { label: 'Auto-save variables (clicker games)', type: 'bool', def: false }),
     fold('s-save:files', 'Save files (Easy Save)', [
       h('p', { class: 'desc' }, 'Named save files hold any value under a key: numbers, text, lists, dictionaries, whole objects. Use the Save Files nodes, or add Auto Save (remembers an object) and Save Manager (remembers game variables) components.'),

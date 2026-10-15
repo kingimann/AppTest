@@ -1439,7 +1439,12 @@ Meshes are saved as `{ geometry: 'mesh', verts: [[x,y,z]…], faces: [{ v: [i,j,
   - the Save Game node;
   - the **Pause Menu** UI widget (Resume / Save / Load / Restart).
 
-  To load, use *load game*, the Load Game node, or the **Continue Menu** widget. *Game Settings → Saving → Continue from save slot 1 on start* resumes automatically.
+  To load, use *load game*, the Load Game node, or the **Continue Menu** widget. *Game Settings → Saving → Continue from the newest save on start* resumes automatically.
+  - Saves also keep sizes, texts and objects made while playing. Each slot remembers its name, level, when it was saved, the time played and a picture of the game.
+  - **Save Slots** menus (*Add → UI → Game Systems*): load, save, or a Save / Load popup, with a card per slot, *Tap again to save over it* and delete buttons.
+  - **Auto-save** into its own slot (every 30 s, 1 min or 5 min, or only when leaving), plus when the player switches apps and at each new level.
+  - **Save version** with `{loadedSaveVersion}` to fix up older saves; **Encrypt save files** covers slots too.
+  - Nodes: Save Slot Info, Newest Save Slot, On Slot Saved, Export / Import Save Slot, Continue (newest save), Delete every save (Reset progress), and Cloud Save / Load Slot (PlayFab). See the [saving guide](docs/guide/saving-online.md).
 - **Lighting.** Add a **Light** object, or the Light component on anything (a torch on the player):
   - **2D:** *Game Settings → Lighting → Darkness* makes caves and night levels, and lights cut through it. The **Torch** prefab sets this up for you.
   - **3D:** up to 8 coloured point lights; sun colour, brightness, direction and height; ambient light; sky and ground tint; shadows on or off. The **Lamp** object is a lamp post with its own light.
@@ -1596,7 +1601,8 @@ registerBehavior('blink', {
 | `scene.camera` | 2D: `{x, y, zoom, shake}`. 3D: `{position, target, fov, shake}` |
 | `scene.on('collide' \| 'separate' \| 'var' \| 'over' \| 'win', fn)` | events (`separate` = stopped touching; behaviors get a `separate(e, other, scene)` hook) |
 | `scene.raycast(origin, dir, maxDist, { ignore, tag })`, `scene.canSee(a, b)` | ray tests against colliders (rotated 2D boxes, circles, 3D boxes and spheres) |
-| `scene.saveGame(slot)`, `scene.loadGame(slot)`, `scene.hasSave(slot)`, `scene.deleteSave(slot)` | save slots: variables, level, positions and what was collected |
+| `scene.saveGame(slot)`, `scene.loadGame(slot)`, `scene.hasSave(slot)`, `scene.deleteSave(slot)` | save slots: variables, level, positions, sizes, texts, what was collected and objects made while playing |
+| `engine.slotInfo(slot)`, `engine.newestSlot()`, `engine.exportSave(slot)`, `engine.importSave(slot, text)`, `engine.deleteAllSaves()` | slot cards (name, level, saved ago, time played, picture), Continue, moving a save, Reset progress |
 | `scene.setCamera('Camera 2')`, `scene.gravityX`, `scene.gravityZ`, `scene.light` | switch cameras, sideways gravity, lighting (`darkness` for 2D, sun / ambient / sky / ground for 3D) |
 
 | | |

@@ -192,6 +192,29 @@ Apps use the same Visual Scripts as games (and Triggers, State Machines and Java
 
 - *Scripts › New Visual Script* in an app puts the script on an **App Logic** object, which runs on every page. It starts with *On Page Opened → Show Toast*. (Pages hide when they aren't shown, so app-wide scripts don't go on a page.)
 - In the Node Editor, the **App** folder comes first. It has everything for apps in one place: page events and *Go To Page*, *Go Back*, the side menu and nav bars, toasts and alerts, data (*Add / Change / Delete / Open Record*, *Data Value*, record events), and games (*Play Game*, *Back to App*, *On Back From a Game*, *Opened From an App*).
+- **More App nodes:**
+  - **Pages:** *Current Page* (as text), *Pages To Go Back*, and *Go To Page With Value*. That last one puts a value in a variable and opens a page, e.g. tap a product and open “details” with its name.
+  - **Records:**
+    - *For Each Record* runs for every record that passes a filter, in a sort order.
+    - *Find Record* finds the first record whose field is, contains or starts with a value, opens it, and can go to a page.
+    - *On Data Changed* runs when a record is added, changed or deleted.
+    - *Record Field* and *Record Field (number)* read the record you're on: inside those three, or the opened record.
+    - *Set Record Field* and *Toggle Yes / No Field* change that record.
+    - *Change Records Where* and *Delete Records Where* change many at once (mark all done, clear completed).
+    - *Records To Array* copies one field of every record into an array.
+  - **Forms:** *Text Is Valid* checks for not empty, an email, a phone number, a number, a website, a date or a length. *Clear Form Fields* empties input variables after saving.
+  - **Dates and money:**
+    - Dates are numbers, and **0 means now**.
+    - *Now / Today* gives the date or its year, month, day, weekday, hour or minute; *Part Of Date* does the same for any date.
+    - *Date As Text* shows a date as 12 Mar 2026, 14:05, Thursday, *3 min ago*, or 2026-12-25.
+    - *Date Plus* adds minutes to years; *Time Between Dates* gives, e.g., days until a birthday.
+    - *Text To Date* turns typed 2026-12-25 into a date.
+    - *Money As Text* shows $12.50 or €12.50 (a currency code or your own symbol).
+  - **App:**
+    - *Set Dark Mode* turns it on, off, toggles it, or follows the phone; *Is Dark Mode* reads it.
+    - *Show / Hide Loading* dims the screen with a *Loading…* card; nothing under it can be tapped.
+    - *Call / Email / Text / Map* opens the phone's dialler, email, messages or maps, filled in.
+    - *App Info* gives the platform (iOS, Android, web), installed or not, language, phone or tablet, online.
 - Inside a game, **Opened From an App** is true when an app opened it, so a game can skip its own menus or show *Back to app* only then.
 
 The **Arcade** app type is a complete example: three mini games, a card with **Play** and the best score for each, and a *My Scores* tab.

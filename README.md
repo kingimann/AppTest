@@ -643,6 +643,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event (node: **On Back From a Game**, with won / lost / quit outputs).
   - **Variables shared with games** (*Game Settings › App*, e.g. `coins, name` or `*`): a game starts with the app's values and gives them back changed when it ends, so coins won in a game are in the app. Data collections are always shared.
   - **Visual scripts in apps:** the same Node Editor. New scripts go on an *App Logic* object, and an **App** folder (first in apps) gathers pages, menus, data and game nodes: *Play Game*, *Back to App*, *Opened From an App*.
+  - **27 more App nodes:** *For Each Record*, *Find Record*, *Record Field*, *Set Record Field*, *Toggle Yes / No Field*, *Change / Delete Records Where*, *Records To Array*, *On Data Changed*; *Current Page*, *Go To Page With Value*; *Text Is Valid*, *Clear Form Fields*; dates (*Now / Today*, *Date As Text* incl. "3 min ago", *Date Plus*, *Time Between Dates*, *Text To Date*) and *Money As Text*; *Set Dark Mode*, *Show / Hide Loading*, *Call / Email / Text / Map*, *App Info*.
   - *Record every game played* fills a collection (game, score, result, date) for score tables.
   - New **Arcade** app type: three games, best scores, and a score list.
 - Data Lists, Record Forms and Data Summaries work in games too.

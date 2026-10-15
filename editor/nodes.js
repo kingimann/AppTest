@@ -210,6 +210,34 @@ export const NODE_HELP = {
   objPos: 'Where another object is', deltaTime: 'Seconds since the last frame',
   and: 'Both are true', or: 'Either is true', not: 'Flip true/false', position: 'Where this object is', distance: 'How far to the nearest tagged object', time: 'Seconds since start',
 };
+Object.assign(NODE_HELP, { // App nodes
+  curPage: 'The page that is showing now (the page variable), as text', pageDepth: 'How many pages Back would go through (0 = at the start)',
+  goPageWith: 'Puts a value in a variable, then opens a page (Back returns). Great for detail pages: tap a product, open “details” with its name',
+  onDataChanged: 'When a record is added, changed or deleted in a collection (blank = any). Record Field reads that record; the event value is its id',
+  forEachRecord: 'Runs “each” for every record that passes the filter, in the sort order. Inside, Record Field reads that record and Set Record Field / Toggle change it',
+  recordField: 'A field of the record you are on (inside For Each Record, Find Record, On Data Changed) or the opened record, as people read it (yes / no, $12.50, 3 Mar 2026)',
+  recordNum: 'A field as a number (yes / no fields are 1 or 0): for sums, comparisons and charts',
+  findRecord: 'Finds the first record whose field is, contains or starts with the value (not case-sensitive), opens it and optionally goes to a page. “not found” otherwise',
+  setRecordField: 'Changes a field of the record you are on (or the opened one). {variables} work in the value',
+  toggleField: 'Flips a yes / no field (done, favourite, starred) of the record you are on (or the opened one)',
+  updateRecords: 'Sets a field on every record that passes the filter (mark all as done, archive old ones). The event value is how many changed',
+  deleteRecords: 'Deletes every record that passes the filter (clear completed, remove old ones). The event value is how many went',
+  recordsToArray: 'Puts one field of every matching record into an array: for lists, dropdowns, charts or totals',
+  textValid: 'Checks what someone typed: not empty, an email, a phone number, a number, a website, a date, or a length. Use it before saving a form',
+  clearVars: 'Empties the variables behind text inputs (or any variables), e.g. after saving a form',
+  moneyText: 'A number as money: USD → $12.50, EUR → €12.50 in the phone\'s style, or put your own symbol',
+  dateNow: 'Today and now: the date as a number (to store or compare), or the year, month, day, weekday, hour or minute',
+  dateText: 'A date number as text: 12 Mar 2026, 14:05, Thursday, 3 min ago, 2026-03-12… (0 = now)',
+  datePart: 'The year, month, day, weekday, hour or minute of a date number',
+  dateAdd: 'A date plus minutes, hours, days, weeks, months or years (use a minus amount to go back)',
+  dateDiff: 'How long from one date to another: days until a birthday, hours since a check-in (0 = now). Days count calendar days',
+  textToDate: 'Turns typed text like 2026-12-25 (or 25 Dec 2026) into a date number; 0 if it isn\'t a date',
+  setDarkMode: 'Turns the app\'s dark mode on, off, toggles it, or follows the phone again. Remembered on the device',
+  isDarkMode: 'True while the app is in dark mode',
+  showLoading: 'Dims the screen with a “Loading…” card and a busy bar while something slow happens (online data, sign in); Hide takes it away',
+  openPhoneApp: 'Opens the phone\'s dialler, email, messages or maps, filled in (contact pages, “email us”, directions)',
+  appInfo: 'Facts about where the app runs: its name, iOS / Android / web, installed or in a browser, the language, phone or tablet, online',
+});
 for (const [t, d] of Object.entries(NODE_TYPES)) if (d.fromLogic && !NODE_HELP[t]) NODE_HELP[t] = t.startsWith('le_') ? `The Triggers event “${d.label.replace(/^When: /, '')}”, as an event node` : t.startsWith('lc_') ? `The Triggers condition “${d.label}”: true or false` : `The Triggers instruction “${d.label}”; waits for it to finish, then “then”`;
 
 

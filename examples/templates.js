@@ -164,7 +164,7 @@ function blankApp() {
 function socialApp() {
   const A = '#1d9bf0', t = Date.now(), H = 3600e3;
   const feed = (id, look, top) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiFeed', collection: 'Posts', look, openPage: 'post', card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
+    behaviors: [{ type: 'uiFeed', collection: 'Posts', look, card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
   return {
     version: 1, name: 'Social', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Social', A),
     vars: { page: 'home', playerName: 'Alex Rivera', playerHandle: 'alex', followers: 1280, following: 0 },
@@ -178,7 +178,8 @@ function socialApp() {
       { author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, comments: 63, reposts: 12, following: true, reposted_by: 'Maya Chen', _at: t - 26 * H },
       { author: 'Amir Haddad', handle: 'amir', text: 'Practising a new song for Friday. Who is coming? 🎸', media: '🎸', color: '#10b981', likes: 141, comments: 19, reposts: 3, live: true, following: false, _at: t - 40 * H },
       { author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', likes: 5420, comments: 410, reposts: 1900, verified: true, following: true, link: 'https://example.com/comet', link_title: 'A new comet is coming', link_image: '☄️', _at: t - 72 * H },
-    ] }],
+    ] },
+    { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }], rows: [] }],
     entities: [
       app.bar('home = Home\nphotos = Photos\nfriends = Friends\nprofile = Profile\npost = Post', A),
       ...app.page('p-home', 'home', true, [

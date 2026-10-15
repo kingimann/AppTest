@@ -226,7 +226,9 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Posts come from a data collection called **Posts**. Fields: author, handle, text, media (an emoji or a picture link), color, likes, liked, comments, reposts, reposted, saved, verified.
   - Until you make that collection, it shows sample posts.
   - Likes, reposts and saves are stored in the record.
-  - Tapping a post opens it (`{record_text}`…) and can go to a page. Comment and share send messages.
+  - **Tapping a post** opens it full size with its comments. If *Tapping a post opens page* is set, it goes to that page instead (`{record_text}`… work there).
+  - **Comments:** the comment button opens a comments sheet with a box to write one. You can like comments, reply (which fills in @name) and delete your own. Comments are written as *Comments are written as* (default `{playerName}`). They're stored in a **Comments** collection (fields: post, author, handle, text, likes, liked) if there is one, otherwise on the device. Each comment adds to the post's comment count. *Writing a comment sends* sends a message.
+  - **Share:** opens a share menu: *Share via…* (the phone's share sheet), Copy text, Copy link, Repost and Save. Set *Share button sends* to send a message instead.
 - **Feed settings** (in the Inspector, grouped):
   - **Content:** collection, sort, filter, a search variable (matches name, handle and text), most posts shown, and *My field names* (e.g. `text = body, media = photo`) if your collection uses other names.
   - **Show:**

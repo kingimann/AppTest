@@ -9,12 +9,13 @@ Plain JavaScript ES modules. No dependencies and no build step.
 - `editor/`: the visual editor (make games without code)
 - `examples/`: Neon Dodge (written in code) and the starter templates
 - `play.html`: plays a template (`?game=jump-quest`) or any scene JSON (`?src=my-game.json`)
+- `supabase/schema.sql` and `editor/cloud-config.js`: optional accounts and cloud sync for the editor ([Accounts guide](docs/guide/accounts.md)): a profile on each device now, sign-in and syncing games between devices once a Supabase project is connected
 
 ## Documentation
 
 The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
 
-- **19 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, and troubleshooting.
+- **20 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, accounts and cloud sync, and troubleshooting.
 - **A reference generated from the engine itself**, so it always matches the running version:
   - every component with all its settings, types, defaults (2D and 3D) and choices;
   - every visual-script node with its wires and settings;

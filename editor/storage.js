@@ -88,9 +88,13 @@ function writeProject(id, rec) {
   } catch (e) { writeErr = 'error'; return Promise.resolve(false); }
 }
 
+let hooks = {};
+/** Someone else wants to know about saves and deletes (cloud sync). */
+export function onStorage(h) { hooks = h || {}; }
 /** Save a project. Also takes a restore point every few minutes. */
 export function saveProject(id, rec) {
   cache[id] = rec;
+  hooks.saved?.(id);
   const p = writeProject(id, rec);
   if (db && Date.now() - (lastSnap[id] || 0) > SNAP_EVERY) { lastSnap[id] = Date.now(); snapshot(id, rec, 'auto'); }
   return p;
@@ -103,6 +107,7 @@ export function rescueCopy(id, rec) {
 }
 export function deleteProject(id) {
   delete cache[id];
+  hooks.deleted?.(id);
   if (!db) return writeProject(id);
   const tx = db.transaction(['projects', 'snapshots'], 'readwrite');
   tx.objectStore('projects').delete(id);

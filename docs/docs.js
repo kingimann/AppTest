@@ -33,6 +33,7 @@ export const GUIDES = [
   ] },
   { sec: 'Ship it', items: [
     ['publishing', 'Publishing your game', 'Share a link, a web app, or the App Store and Google Play'],
+    ['accounts', 'Accounts and cloud sync', 'Your profile, signing in, syncing games between devices, connecting Supabase'],
     ['troubleshooting', 'Troubleshooting and FAQ', 'When something does not work the way you expect'],
   ] },
 ];

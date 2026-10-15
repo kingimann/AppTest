@@ -6,7 +6,8 @@ import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
-import { initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
+import * as cloud from './cloud.js';
+import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
 import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS } from './navstyles.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
@@ -5203,14 +5204,16 @@ function quickCreate(sec = 'games') {
   draw();
   return wrap;
 }
-function showHome() {
-  closeLayer();
-  $('.toast')?.remove();
+function showHome(o = {}) {
+  if (!o.keep) { closeLayer(); $('.toast')?.remove(); } // keep: refresh Home behind an open window (after a sync)
+  const keepScroll = o.keep ? $('#home').scrollTop : 0;
   const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
   const cur = root && all.find(([id]) => id === projectId), hr = new Date().getHours();
-  const greet = hr < 5 ? 'Up late? Let’s make something.' : hr < 12 ? 'Good morning! Let’s make something.' : hr < 18 ? 'Good afternoon! Let’s make something.' : 'Good evening! Let’s make something.';
+  const nm = cloud.profile().name.split(/\s+/)[0], hi = (w) => nm ? `${w}, ${nm}!` : `${w}!`;
+  const greet = hr < 5 ? `Up late${nm ? ', ' + nm : ''}? Let’s make something.` : `${hi(hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening')} Let’s make something.`;
   home.replaceChildren(...[
     h('div', { class: 'hd' }, h('img', { src: '../icon.svg', alt: '' }), h('div', { class: 'hd-t' }, h('h1', {}, 'Pocket Engine'), h('p', { class: 'sub' }, greet)),
+      avatarButton(),
       h('button', { class: 'hd-b', title: 'Documentation', onclick: () => openDocs('') }, icon('help')),
       h('button', { class: 'hd-b', title: 'Preferences', onclick: openPreferences }, icon('gear'))),
     cur && h('div', { class: 'hero' },
@@ -5229,7 +5232,7 @@ function showHome() {
     window.pocketUpdate && h('p', { class: 'sub ver' }, `Pocket Engine ${window.pocketUpdate.version}`),
   ].flat().filter(Boolean)); // DOM nodes only: nested arrays or false would render as text
   home.hidden = false;
-  home.scrollTop = 0;
+  home.scrollTop = keepScroll;
   document.body.classList.add('home-open'); engine.sleeping = true;
 }
 /** Home below Continue: a Games | Apps switch, then that section's create buttons, projects and templates. */
@@ -5251,6 +5254,98 @@ function homeSections(all) {
   };
   draw();
   return wrap;
+}
+// ---- accounts (cloud.js): a profile on the device; sign-in and sync once a Supabase server is set ----
+function avatarEl(size = 36) {
+  const P = cloud.profile(), ini = cloud.initials(P.name);
+  return h('span', { class: 'av', style: `--c:${P.color};width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px` }, ini || icon('player'));
+}
+function avatarButton() {
+  const st = cloud.syncStatus();
+  return h('button', { class: 'hd-b hd-acct' + (cloud.signedIn() ? ' on' : ''), title: cloud.signedIn() ? `Signed in as ${cloud.profile().email}` : 'Account', 'aria-label': 'Account', onclick: openAccount },
+    avatarEl(34), cloud.signedIn() && h('i', { class: 'av-dot' + (st.error ? ' err' : st.busy ? ' busy' : '') }));
+}
+function openAccount() {
+  const body = h('div', { class: 'acct' });
+  const draw = () => {
+    const P = cloud.profile(), st = cloud.syncStatus(), cfg = cloud.config();
+    const name = h('input', { type: 'text', value: P.name, placeholder: 'Your name', maxlength: 40, onchange: () => { cloud.setProfile({ name: name.value.trim() }); setTimeout(draw); } }); // (after the box has let go of focus)
+    const colors = h('div', { class: 'av-colors' }, cloud.AVATAR_COLORS.map((c) => h('button', { type: 'button', class: c === P.color ? 'on' : '', style: `--c:${c}`, 'aria-label': 'Colour', onclick: () => { cloud.setProfile({ color: c }); draw(); } })));
+    const prof = h('div', { class: 'acct-prof' }, avatarEl(64), h('div', { class: 'acct-pf' }, name, colors));
+    let main;
+    if (!cloud.configured()) main = [
+      h('div', { class: 'acct-card' }, h('b', {}, icon('phone'), 'Profile on this device'),
+        h('p', {}, 'Your name and colour are kept on this phone. Your games are saved here too (back them up with ☰ → Back Up All Games).'),
+        h('p', { class: 'muted' }, 'Sign-in and syncing your games between devices turn on when this Pocket Engine is connected to a Supabase server.')),
+      connectFold(),
+    ];
+    else if (!cloud.signedIn()) main = [signInForm(draw), cfg.local ? connectFold(true) : null];
+    else {
+      const ago = st.last ? 'last synced ' + agoText(st.last) : 'not synced yet';
+      main = [
+        h('div', { class: 'acct-card' }, h('b', {}, icon('check'), 'Signed in'), h('p', {}, P.email),
+          h('p', { class: 'muted' }, st.busy ? 'Syncing…' : st.error ? `Sync problem: ${st.error}` : `Your games sync to your account · ${ago}`),
+          h('div', { class: 'btns' },
+            h('button', { class: 'btn primary', disabled: st.busy, onclick: async () => { const n = await cloud.syncAll(); if (n) toast(syncSummary(n)); draw(); if (!$('#home').hidden) showHome({ keep: true }); } }, icon('rotate'), 'Sync now'),
+            h('button', { class: 'btn', onclick: async () => { await cloud.signOut(); toast('Signed out: your games stay on this device'); draw(); if (!$('#home').hidden) showHome({ keep: true }); } }, icon('left'), 'Sign out'))),
+        cfg.local ? connectFold(true) : null,
+      ];
+    }
+    body.replaceChildren(...[prof, ...main].filter(Boolean));
+  };
+  draw();
+  const off = cloud.onChange(() => { if (!body.isConnected) return off(); if (cloud.signedIn() && !body.contains(document.activeElement)) draw(); }); // sync progress
+  openDialog('Account', [body]);
+}
+const syncSummary = (n) => [n.down && `${n.down} from your account`, n.up && `${n.up} sent up`, n.copies && `${n.copies} kept as copies`, n.removed && `${n.removed} removed`].filter(Boolean).join(' · ') || 'Everything is up to date';
+function signInForm(redraw) {
+  let mode = 'in', providers = [];
+  const wrap = h('div', { class: 'acct-card' });
+  const email = h('input', { type: 'email', placeholder: 'Email', autocomplete: 'email', autocapitalize: 'off' });
+  const pw = h('input', { type: 'password', placeholder: 'Password', autocomplete: 'current-password' });
+  const nm = h('input', { type: 'text', placeholder: 'Your name', value: cloud.profile().name });
+  const msg = h('p', { class: 'acct-msg' });
+  const go = async (fn) => { msg.className = 'acct-msg'; msg.textContent = '…'; try { await fn(); } catch (e) { msg.className = 'acct-msg err'; msg.textContent = e.message; } };
+  const draw = () => wrap.replaceChildren(...[
+    h('div', { class: 'seg small' }, [['in', 'Sign in'], ['up', 'Create account']].map(([k, l]) => h('button', { class: mode === k ? 'on' : '', onclick: () => { mode = k; pw.autocomplete = k === 'up' ? 'new-password' : 'current-password'; draw(); } }, l))),
+    mode === 'up' ? nm : null, email, pw, msg,
+    h('button', { class: 'btn primary wide', onclick: () => go(async () => {
+      if (!email.value.trim() || !pw.value) throw new Error('Type your email and a password');
+      if (mode === 'up') { const r = await cloud.signUp(email.value.trim(), pw.value, nm.value.trim()); if (r === 'confirm') { msg.textContent = 'Check your email: tap the link in it to finish, then sign in.'; return; } }
+      else await cloud.signIn(email.value.trim(), pw.value);
+      toast('Signed in'); redraw(); afterSignIn();
+    }) }, icon(mode === 'up' ? 'plus' : 'check'), mode === 'up' ? 'Create account' : 'Sign in'),
+    mode === 'in' ? h('button', { class: 'btn link', onclick: () => go(async () => { if (!email.value.trim()) throw new Error('Type your email first'); await cloud.resetPassword(email.value.trim()); msg.textContent = 'We sent you an email to choose a new password.'; }) }, 'Forgot password?') : null,
+    providers.length ? h('div', { class: 'acct-or' }, h('span', {}, 'or')) : null,
+    ...providers.map((pv) => h('button', { class: 'btn wide', onclick: () => cloud.signInWith(pv) }, `Continue with ${pv === 'github' ? 'GitHub' : pv.charAt(0).toUpperCase() + pv.slice(1)}`)),
+    h('p', { class: 'muted' }, 'Your games sync to your account, so they are on every device you sign in on.')].filter(Boolean));
+  draw();
+  cloud.testServer().then((t) => { providers = t.providers.filter((x) => ['google', 'apple', 'github', 'discord', 'facebook', 'twitter', 'azure', 'gitlab'].includes(x)); draw(); }).catch(() => {});
+  return wrap;
+}
+/** For the person running this Pocket Engine: try a Supabase server on this device before putting it in cloud-config.js. */
+function connectFold(connected) {
+  const c = cloud.config();
+  const url = h('input', { type: 'url', placeholder: 'https://xxxx.supabase.co', value: c.local ? c.url : '', autocapitalize: 'off' });
+  const key = h('input', { type: 'text', placeholder: 'anon public key', value: c.local ? c.anonKey : '', autocapitalize: 'off', spellcheck: false });
+  const msg = h('p', { class: 'acct-msg' });
+  const d = h('details', { class: 'acct-fold' }, h('summary', {}, connected ? 'Server (connected on this device)' : 'Connect a server (for the owner)'),
+    h('p', { class: 'muted' }, 'Paste your Supabase project URL and anon key (Project Settings › API) to try accounts on this device. To turn them on for everyone, put the same two values in editor/cloud-config.js. The guide shows the one-time database setup.'),
+    url, key, msg,
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: async () => {
+        msg.className = 'acct-msg'; msg.textContent = 'Checking…';
+        try { const t = await cloud.testServer(url.value.trim(), key.value.trim()); cloud.connectServer(url.value.trim(), key.value.trim()); toast('Server connected'); closeLayer(); openAccount(); if (t.providers.length) toast(`Sign in with: email, ${t.providers.join(', ')}`); }
+        catch (e) { msg.className = 'acct-msg err'; msg.textContent = 'Could not connect: ' + e.message; }
+      } }, icon('globe'), connected ? 'Update' : 'Connect'),
+      connected && h('button', { class: 'btn', onclick: async () => { await cloud.signOut(); cloud.disconnectServer(); closeLayer(); openAccount(); } }, 'Disconnect'),
+      h('button', { class: 'btn', onclick: () => openDocs('guide/accounts') }, icon('help'), 'Guide')));
+  return d;
+}
+async function afterSignIn() {
+  const n = await cloud.syncAll();
+  if (n && (n.down || n.copies || n.removed)) toast(syncSummary(n));
+  if (!$('#home').hidden) showHome({ keep: true });
 }
 function hideHome() { $('#home').hidden = true; document.body.classList.remove('home-open'); engine.sleeping = false; requestAnimationFrame(() => engine.resize()); }
 function openProjectsDialog() {
@@ -5457,10 +5552,10 @@ async function backupAll() {
   const data = JSON.stringify(makeBackup()), d = new Date(), name = `pocket-backup-${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}.json`;
   const file = typeof File === 'function' ? new File([data], name, { type: 'application/json' }) : null;
   if (file && navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: 'Pocket Engine backup' }); markBackedUp(); toast('Backup saved'); if (!$('#home').hidden) showHome(); return; }
+    try { await navigator.share({ files: [file], title: 'Pocket Engine backup' }); markBackedUp(); toast('Backup saved'); if (!$('#home').hidden) showHome({ keep: true }); return; }
     catch (e) { if (e?.name === 'AbortError') return; } // cancelled: nothing saved
   }
-  download(name, data, 'application/json'); markBackedUp(); toast('Backup downloaded'); if (!$('#home').hidden) showHome();
+  download(name, data, 'application/json'); markBackedUp(); toast('Backup downloaded'); if (!$('#home').hidden) showHome({ keep: true });
 }
 const ago = (t) => { const s = (Date.now() - t) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
 /** Restore points: earlier versions of the open game, taken every few minutes while you work. */
@@ -7017,6 +7112,13 @@ $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to
 setTool('move');
 
 await initStorage();
+cloud.attach({ all: () => loadProjects(), save: (id, rec) => saveProject(id, rec), remove: (id) => { deleteProject(id); store.set(thumbKey(id), ''); },
+  thumb: (id) => store.get(thumbKey(id), '') || null, setThumb: (id, src) => store.set(thumbKey(id), src),
+  changedOpen: (id, rec) => { if (id === projectId && !playing) { openProject(rec.json, id); toast('Updated from your other device'); } } });
+onStorage({ saved: (id) => cloud.saved(id), deleted: (id) => cloud.removed(id) });
+cloud.onChange(() => { const b = $('#home .hd-acct'); if (b && !$('#home').hidden) b.replaceWith(avatarButton()); });
+cloud.takeRedirect().then((back) => { if (back) toast('Signed in'); if (cloud.signedIn()) afterSignIn(); });
+window.addEventListener('online', () => { if (cloud.signedIn()) cloud.syncAll(); });
 askPersist(); // ask the browser to keep our data (Android / Chrome say yes for installed or often-used apps)
 storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('Storage is almost full: back up your games'); });
 {

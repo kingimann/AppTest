@@ -4287,10 +4287,14 @@ function uiDrawOrder(s) {
     const later = []; out = [];
     for (let i = 0; i < L.length; i++) { const e = L[i]; if (i < last && e._dock) later.push(e); else out.push(e); if (i === last) out.push(...later); }
   }
-  // an open Side Menu (with what's inside it) goes over the page's UI, whatever order they were added in; a popup opened from it goes over the menu
-  const ov = s.engine?.editing ? [] : out.filter((e) => e._overlay && e.ui && !e.dead);
-  if (!ov.length) return out;
-  const top = [...ov, ...(s.modal && !ov.includes(s.modal) ? [s.modal] : [])];
+  // what's open over the page (a Side Menu, Side Bar, Bottom Sheet, popup, an open dropdown), with what's inside it, goes over the page's UI,
+  // whatever order they were added in: side menus first, then whatever dims the page, then the one that has the taps (a popup opened from a menu)
+  if (s.engine?.editing) return out;
+  const ok = (e) => e && e.ui && !e.dead && e.visible, top = [];
+  for (const e of out) if (ok(e) && (e._overlay || e._overlayOn)) top.push(e);
+  const dimE = s.uiDim?.a > 0.01 ? s.uiDim.e : null;
+  for (const e of [dimE, s.modal]) if (ok(e)) { const i = top.indexOf(e); if (i >= 0) top.splice(i, 1); top.push(e); }
+  if (!top.length) return out;
   const under = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) { const i = top.indexOf(q); if (i >= 0) return i; } return -1; };
   const groups = top.map(() => []), rest = [];
   for (const e of out) { const i = under(e); if (i >= 0) groups[i].push(e); else rest.push(e); }
@@ -6385,8 +6389,9 @@ function hitTest(s, e, sx, sy) {
   if (!e.visible || e.dead || e._parentHidden || e._clipHidden || e.data.uiDisabled) return false; // (hidden, or Enable / Disable UI node)
   if (e.ui && !eng.editing && uiHiding(e)) return false; // a page on its way out
   if (e.ui && !eng.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== (eng.paused ? 'paused' : s.state)) return false; } // not on this screen: can't be tapped
-  if (e.ui && !eng.editing && s.modal?._overlay && s.modal !== e) { // under an open Side Menu's panel: the menu gets the tap, not the page
-    const R = s.modal._overlay; let mine = false; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === s.modal) { mine = true; break; }
+  const M0 = s.modal?.ui ? s.modal : s.tapOwner?.ui && !s.tapOwner.dead ? s.tapOwner : null;
+  if (e.ui && !eng.editing && M0 && M0 !== e) { // under an open Side Menu, Side Bar, sheet or popup: it gets the tap, not the page
+    const M = M0, R = M._overlay || (M._modalRect ? { x: -1e5, y: -1e5, w: 2e5, h: 2e5 } /* (an open dropdown or picker has every tap) */ : null) || (() => { const b = uiBox(M, eng.width, eng.height, eng.safe); return { x: b.x - b.w / 2, y: b.y - b.h / 2, w: b.w, h: b.h }; })(); let mine = false; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === M) { mine = true; break; }
     if (!mine && sx >= R.x && sx <= R.x + R.w && sy >= R.y && sy <= R.y + R.h) return false;
   }
   if (e.ui) {
@@ -9567,8 +9572,8 @@ registerBehavior('drawer', {
         const away = { left: { x: home.x - (r.w / k + 40) }, right: { x: home.x + (r.w / k + 40) }, bottom: { y: home.y + (r.h / k + 40) }, top: { y: home.y - (r.h / k + 40) } }[p.side] || { x: home.x - (r.w / k + 40) };
         s.killTweens(e); s.killTweens(dim);
         dim.e = e; s.uiDim = dim;
-        if (want) { e.visible = true; s.modal = e; s.to(e, { x: home.x, y: home.y }, d, { ease: 'outCubic' }); s.to(dim, { a: +p.dim || 0 }, d, { ease: 'outQuad' }); }
-        else { if (s.modal === e) s.modal = null; s.to(e, { ...away }, d, { ease: 'inCubic', onComplete: () => { if (!open) e.visible = false; } }); s.to(dim, { a: 0 }, d, { ease: 'outQuad' }); }
+        if (want) { e.visible = true; e._overlayOn = true; s.modal = e; s.to(e, { x: home.x, y: home.y }, d, { ease: 'outCubic' }); s.to(dim, { a: +p.dim || 0 }, d, { ease: 'outQuad' }); }
+        else { if (s.modal === e) s.modal = null; s.to(e, { ...away }, d, { ease: 'inCubic', onComplete: () => { if (!open) { e.visible = false; e._overlayOn = false; } } }); s.to(dim, { a: 0 }, d, { ease: 'outQuad' }); }
       },
       start(e, s) {
         e._dismiss = () => inst.set(e, s, false);
@@ -9600,7 +9605,7 @@ registerBehavior('uiPopup', {
       get open() { return open; },
       set(e, s, want, instant = false) {
         if (want === open && !instant) { if (want) timer = 0; return; }
-        open = want; timer = 0;
+        open = want; timer = 0; e._overlayOn = want; // (over the page's UI while open)
         uiAnimate(s, e, want, instant ? 'none' : p.anim, 0.22);
         if (p.modal) { dim.e = e; s.uiDim = dim; s.killTweens(dim); s.to(dim, { a: want ? 0.55 : 0 }, instant ? 0.001 : 0.2); if (want) s.modal = e; else if (s.modal === e) s.modal = null; }
       },
@@ -9793,6 +9798,7 @@ registerBehavior('uiSheet', {
         }
         e.y = base + st.off * h;
         if (!open && st.off >= 1.07 && !drag) e.visible = false;
+        e._overlayOn = e.visible && st.off < 1.07; // over the page's UI while it shows
         if (p.dim) { dim.e = e; dim.a = 0.5 * clamp(1 - st.off, 0, 1); if (dim.a > 0.005) s.uiDim = dim; else if (s.uiDim === dim) s.uiDim = null; }
       },
       drawUI(ctx, e, s) {
@@ -18261,6 +18267,7 @@ export class Engine {
 
   modalTaps(s) {
     const m = s.modal;
+    s.tapOwner = m && !m.dead && m.visible ? m : null; // this frame's taps belong to it, even if it closes while handling them (a dropdown choice)
     if (!m || m.dead || !m.visible) { s.modal = null; return; }
     const inp = this.input, r = m._modalRect?.() || uiBox(m, this.width, this.height, this.safe); // a component can claim the whole screen while open
     const pass = m._modalPass?.() || []; // areas whose taps still reach the game (a side menu between nav bars)

@@ -171,13 +171,14 @@ function socialApp() {
     collections: [{ name: 'Posts', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' },
       { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Comments', type: 'number' }, { name: 'Reposts', type: 'number' }, { name: 'Reposted', type: 'yes/no' }, { name: 'Saved', type: 'yes/no' }, { name: 'Verified', type: 'yes/no' },
       { name: 'Location', type: 'text' }, { name: 'Poll', type: 'text' }, { name: 'Votes', type: 'text' }, { name: 'Voted', type: 'number' }, { name: 'Reaction', type: 'text' }, { name: 'Following', type: 'yes/no' },
-      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }],
+      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }, { name: 'Quote', type: 'text' }],
     rows: [
       { author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, comments: 48, reposts: 120, verified: true, following: true, views: 48200, location: 'Banff', top_comment: 'Leo Park: Unreal colours!', _at: t - 0.15 * H },
       { author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', likes: 312, liked: true, comments: 27, reposts: 41, following: true, poll: 'Dark mode | Faster sync | Fewer bugs', votes: '64, 21, 33', _at: t - 2.5 * H },
       { author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, comments: 63, reposts: 12, following: true, reposted_by: 'Maya Chen', _at: t - 26 * H },
       { author: 'Amir Haddad', handle: 'amir', text: 'Practising a new song for Friday. Who is coming? 🎸', media: '🎸', color: '#10b981', likes: 141, comments: 19, reposts: 3, live: true, following: false, _at: t - 40 * H },
       { author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', likes: 5420, comments: 410, reposts: 1900, verified: true, following: true, link: 'https://example.com/comet', link_title: 'A new comet is coming', link_image: '☄️', _at: t - 72 * H },
+      { author: 'Ava Brooks', handle: 'avab', text: 'Adding this to my list of places to see 😍', likes: 64, comments: 5, reposts: 2, following: false, quote: 's0', _at: t - 30 * H },
     ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }], rows: [] }],
     entities: [

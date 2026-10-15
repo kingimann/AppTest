@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { installPlugins, installedPlugins, Mods, supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -4375,7 +4375,35 @@ function renderSceneSettings(box) {
     catch (e) { toast('Supabase: ' + (e.message || 'could not connect')); }
   };
   const RS = (path, spec) => { const r = R(path, spec); r?.querySelector?.('input')?.addEventListener('change', () => renderInspector()); return r; }; // shows what depends on it once you finish typing
-  const copySQL = () => { const sql = onlineCols.map(supabaseSQL).join('\n'); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
+  // ---- custom accounts: the fields people fill in, a profiles table, and pages made from them ----
+  const st = root.settings, AF = () => (st.accountFields ||= []), ACC_TYPES = ['text', 'long text', 'number', 'date', 'yes/no', 'choice', 'picture'];
+  const accChanged = () => { changed({ inspector: true }); pushHistory?.(); };
+  const accountsUI = () => {
+    const F = AF();
+    const row = (f, i) => h('div', { class: 'acc-f' },
+      h('div', { class: 'acc-top' },
+        h('input', { type: 'text', value: f.name, placeholder: 'Field name', onchange: (e) => { const n = e.target.value.trim(); if (!n) return; if (ACCOUNT_RESERVED.includes(fieldKeyOf(n))) { toast(`“${n}” is built in: pick another name`); e.target.value = f.name; return; } if (F.some((q, j) => j !== i && fieldKeyOf(q.name) === fieldKeyOf(n))) { toast('Two fields can\'t share a name'); e.target.value = f.name; return; } f.name = n; accChanged(); } }),
+        h('select', { onchange: (e) => { f.type = e.target.value; if (f.type !== 'text') delete f.unique; accChanged(); } }, ACC_TYPES.map((ty) => h('option', { value: ty, selected: (f.type || 'text') === ty }, ty))),
+        h('button', { class: 'ib', title: 'Remove field', onclick: () => { F.splice(i, 1); accChanged(); } }, icon('trash'))),
+      h('div', { class: 'acc-opts' },
+        h('label', {}, h('input', { type: 'checkbox', checked: !!f.required, onchange: (e) => { if (e.target.checked) f.required = true; else delete f.required; accChanged(); } }), ' Required'),
+        (f.type || 'text') === 'text' && h('label', {}, h('input', { type: 'checkbox', checked: !!f.unique, onchange: (e) => { if (e.target.checked) f.unique = true; else delete f.unique; accChanged(); } }), ' Unique (like a username)'),
+        f.type === 'choice' && h('input', { type: 'text', class: 'wide', value: f.options || '', placeholder: 'Choices: Student, Teacher, Parent', onchange: (e) => { f.options = e.target.value; accChanged(); } })));
+    return [
+      h('h5', { class: 'sub-head' }, 'Accounts'),
+      h('p', { class: 'desc' }, 'Extra things people fill in when they create an account, like a username, a birthday or a bio. Each field is a variable on the sign-up form ({username}); after signing in, {user_username} shows the signed-in person\'s.'),
+      h('div', { class: 'acc-list' }, F.map(row)),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { let n = F.length ? 'Field' : 'Username', k = 2; while (F.some((q) => fieldKeyOf(q.name) === fieldKeyOf(n))) n = 'Field ' + k++; F.push(n === 'Username' ? { name: n, type: 'text', required: true, unique: true } : { name: n, type: 'text' }); accChanged(); } }, icon('plus'), 'Add account field')),
+      ((r) => { r?.querySelector?.('select')?.addEventListener('change', () => setTimeout(() => renderInspector())); return r; })(R('settings.profiles', { label: 'Profiles table (one row per person)', type: 'select', options: ['off', 'everyone can see them', 'only the person themselves'], def: 'off', infoText: 'Keeps each person\'s name and account fields in a table, so the app can show other people\'s profiles (and check that usernames are free).' })),
+      st.profiles && st.profiles !== 'off' && R('settings.profilesTable', { label: 'Table name', type: 'text', def: 'profiles' }),
+      st.profiles && st.profiles !== 'off' && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const sql = profilesSQL(st); navigator.clipboard?.writeText(sql).then(() => toast('Profiles SQL copied: paste it in Supabase › SQL Editor and Run (again after adding fields)'), () => openDialog('Profiles SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); } }, icon('copy'), 'Copy profiles SQL'),
+        h('button', { class: 'btn', onclick: () => addProfilesCollection() }, icon('list'), 'Profiles collection')),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => addAccountPage('signup') }, icon('plus'), 'Add sign-up page'),
+        h('button', { class: 'btn', onclick: () => addAccountPage('profile') }, icon('plus'), 'Add edit-profile page')),
+    ];
+  };
+  const copySQL = () => { const sql = onlineCols.map(supabaseSQL).join('\n') + (st.profiles && st.profiles !== 'off' ? '\n' + profilesSQL(st) : ''); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
   box.append(comp('Supabase (accounts & online data)', [
     h('p', { class: 'desc' }, 'Your app\'s own accounts and online data, with a free Supabase project. People sign up and sign in (email, Google, Apple…), and data collections can be stored online: private to each person (their notes on every phone), shared with everyone (a feed, a chat, a shop catalogue), or read from tables you already have.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => connectSupabase() }, icon('bolt'), sbOn ? 'Connect Supabase: check & tables' : 'Connect Supabase')),
@@ -4385,7 +4413,8 @@ function renderSceneSettings(box) {
     sbOn && RS('settings.signInPage', { label: 'Sign-in page (blank = signing in is optional)', type: 'text', def: '', placeholder: 'signin', infoText: 'While nobody is signed in the app shows this page (add a Sign-in Page from Add › UI & Menus › App). After signing in it goes on to its first page.' }),
     sbOn && root.settings.signInPage && R('settings.afterSignInPage', { label: 'Page after signing in (blank = the first page)', type: 'text', def: '' }),
     sbOn && h('p', { class: 'desc' }, `Online collections: ${onlineCols.length ? onlineCols.map((c) => c.name).join(', ') : 'none yet (Game Settings › Data › a collection › Store online)'}.`),
-    sbOn && onlineCols.length && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: copySQL }, icon('copy'), 'Copy setup SQL')),
+    sbOn && (onlineCols.length || (st.profiles && st.profiles !== 'off')) && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: copySQL }, icon('copy'), 'Copy setup SQL')),
+    sbOn && accountsUI(),
     h('p', { class: 'desc' }, 'Show {userName}, {userEmail} and {signedIn} in text; {authError} says why signing in failed. Buttons can sign in, create account, sign out and send password reset (they use the variables email, password and name). The Online nodes and Triggers do the same.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openDocs('guide/apps') }, icon('help'), 'Guide')),
   ], { icon: 'player', key: 's-supabase' }));
@@ -5142,6 +5171,40 @@ function addEntity(props, at) {
   changed({ structure: true }); pushHistory();
   closeLayer();
   return j;
+}
+const fieldKeyOf = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
+/** A sign-up page or an edit-profile page with a box for each account field (Game Settings › Supabase › Accounts). */
+function addAccountPage(kind) {
+  const st = root.settings, F = (st.accountFields || []).filter((f) => f?.name && !ACCOUNT_RESERVED.includes(fieldKeyOf(f.name))), signup = kind === 'signup', page = signup ? 'signup' : 'editprofile';
+  if (project.entities.some((e) => e.ui && e.behaviors?.some((b) => b.type === 'uiShowIf' && b.var === 'page' && b.value === page))) { toast(`There's already a page for page = ${page}`); return; }
+  let y = 108; const kids = [], step = (h0 = 60) => { const at = y; y += h0; return at; };
+  const box = (name, v, kind0, ph, max = 80) => ({ name, ui: true, anchor: 'top', x: 0, y: step(), stretch: 'width', margin: 24, shape: { type: 'rect', w: 352, h: 52, radius: 14, fill: '@field' }, behaviors: [{ type: 'uiInput', var: v, kind: kind0, placeholder: ph, maxLength: max }] });
+  const btn = (name, label, action, fill, color, value = '') => ({ name, ui: true, anchor: 'top', x: 0, y: step(), stretch: 'width', margin: 24, shape: { type: 'rect', w: 352, h: 52, radius: 14, fill }, text: { value: label, size: 17, color, weight: '800' }, behaviors: [{ type: 'button', action, value, amount: 1, sound: 'click', feel: 'spring', pressScale: 0.96 }] });
+  kids.push({ name: signup ? 'Sign-up Title' : 'Profile Title', ui: true, anchor: 'top', x: 0, y: 58, text: { value: signup ? 'Create your account' : 'Edit profile', size: 28, color: '@text', weight: '900' } });
+  if (signup) { kids.push(box('Email Box', 'email', 'email', 'Email')); kids.push(box('Password Box', 'password', 'password', 'Password (6+ characters)', 64)); }
+  kids.push(box('Name Box', 'name', 'text', 'Your name', 40));
+  for (const f of F) {
+    const k = fieldKeyOf(f.name), ph = f.name + (f.required ? '' : ' (optional)'), ty = f.type || 'text';
+    if (ty === 'choice') { const at = step(); kids.push({ name: f.name + ' Picker', ui: true, anchor: 'top', x: 0, y: at, stretch: 'width', margin: 24, shape: { type: 'rect', w: 352, h: 52, radius: 14, fill: '' }, behaviors: [{ type: 'uiDropdown', var: k, options: String(f.options || '').split(/[,\n]/).map((q) => q.trim()).filter(Boolean).map((q) => `${q} | ${q}`).join('\n'), placeholder: ph, start: 0 }] }); }
+    else if (ty === 'yes/no') { const at = step(52); kids.push({ name: f.name + ' Label', ui: true, anchor: 'top-left', x: 24, y: at, text: { value: f.name, size: 16, color: '@text', weight: '700', align: 'left' } }); kids.push({ name: f.name + ' Switch', ui: true, anchor: 'top-right', x: -60, y: at, shape: { type: 'rect', w: 64, h: 34, radius: 17, fill: '#9aa0ae' }, behaviors: [{ type: 'uiToggle', var: k, start: false, style: 'switch', onText: '', offText: '', onColor: '@accent', offColor: '#9aa0ae' }] }); }
+    else kids.push(box(f.name + ' Box', k, ty === 'number' ? 'number' : 'text', ty === 'date' ? ph + ' · YYYY-MM-DD' : ty === 'picture' ? ph + ' · picture link' : ph, ty === 'long text' ? 300 : +f.max || 80));
+  }
+  kids.push({ name: 'Account Error', ui: true, anchor: 'top', x: 0, y: step(30) + 6, text: { value: '{authError}', size: 13, color: '@danger', weight: '700' } });
+  if (signup) { kids.push(btn('Create Account Button', 'Create account', 'create account', '@accent', '@onAccent')); kids.push(btn('Have Account Button', 'I have an account: sign in', 'go to page', '@card', '@text', 'signin')); }
+  else { kids.push(btn('Save Profile Button', 'Save', 'save profile', '@accent', '@onAccent', 'Profile saved')); step(16); kids.push(box('New Password Box', 'newPassword', 'password', 'New password', 64)); kids.push(btn('Change Password Button', 'Change password', 'change password', '@card', '@text')); kids.push(btn('Back Button', 'Back', 'go back', '@card', '@text')); }
+  if (signup) for (const c of kids) c.layer = 6; // over the page, which sits over the app's bars
+  addPrefab({ props: { name: signup ? 'Sign-up Page' : 'Edit Profile Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: signup ? 5 : 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
+    behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: page, whenUnset: false, anim: signup ? 'fade' : 'slide (follows navigation)' }], children: kids } });
+  toast(signup ? 'Added the Sign-up Page (page = signup). Open it from the sign-in page with “go to page signup”.' : 'Added the Edit Profile Page (page = editprofile).');
+  if (y > 700) setTimeout(() => toast('Lots of fields: the page is taller than the screen. Move some boxes, or put them in a Scroll View.'), 2400);
+}
+/** A data collection for the profiles table, so Data Lists and feeds can show people. */
+function addProfilesCollection() {
+  const st = root.settings, cols = (root.collections ||= []), t = String(st.profilesTable || 'profiles').trim() || 'profiles';
+  if (cols.some((c) => c.online === 'my own table' && (c.table || '') === t)) { toast('There\'s already a collection for the profiles table'); return; }
+  const tyOf = { number: 'number', date: 'date', 'yes/no': 'yes/no', choice: 'choice', 'long text': 'long text' };
+  cols.push({ name: 'Profiles', online: 'my own table', table: t, idColumn: 'id', orderBy: 'updated_at desc', fields: [{ name: 'Name', type: 'text' }, ...(st.accountFields || []).filter((f) => f?.name && !ACCOUNT_RESERVED.includes(fieldKeyOf(f.name))).map((f) => ({ name: f.name, type: tyOf[f.type] || 'text', ...(f.type === 'choice' ? { options: f.options || '' } : {}) }))], rows: [] });
+  changed({ inspector: true }); toast('Added the collection “Profiles” (Game Settings › Data): show people with a Data List');
 }
 function addPrefab(def, at) {
   const selBefore = selectedId;

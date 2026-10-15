@@ -144,7 +144,27 @@ The anon key is safe in your app. Never use the *service_role* key.
 - **Nodes** (Online): *Sign In*, *Create Account* (outputs: signed in, check email, failed), *Sign Out*, *Send Password Reset*, *Continue With Google / Apple…*, *Change My Name*, *Is Signed In*, *Signed-in Person*, and the events *On Signed In* / *On Signed Out*.
 - **Triggers:** the events *Signed in*, *Signed out* and *Sign-in failed*; the condition *Signed in*; and the instructions to sign in, create an account, sign out, send a reset email and refresh online data.
 
-### Online data collections
+### Custom accounts
+
+*Game Settings › Supabase › Accounts* adds your own fields to accounts, like a **username**, a birthday, a bio, a role or a newsletter tick:
+
+- **Account fields:** each one has a name, a type and a couple of checks.
+  - **Types:** text, long text, number, date, yes / no, choice (with its choices) or picture (a link).
+  - **Required** fields must be filled in before an account can be made.
+  - **Unique** text fields (usernames) must be free. They take 2–32 letters, numbers, dots, dashes or underscores.
+  - *Email*, *Password* and *Name* are built in, so they can't be account fields.
+- **On the form**, each field is a variable named after it (`{username}`, `{birthday}`), which the boxes fill in. **Create account** sends them with the email, password and name. If something is missing or wrong (or the username is taken), `{authError}` says what.
+- **After signing in**, `{user_username}`, `{user_birthday}`… show the signed-in person's fields, and the form variables (`{username}`…) are filled in too, ready for an edit form.
+- **Add sign-up page** makes a page (`page = signup`) with Email, Password, Name and a box for each field: a picker for choices and a switch for yes / no. It also has *Create account* and *I have an account: sign in*. Point the Sign-in Page's *Create account* button at it (*go to page* `signup`).
+- **Add edit-profile page** makes a page (`page = editprofile`) to change the name and fields (**Save**), and the password.
+- **Buttons:** *save profile* (the name and fields from the form), *change password* (`{newPassword}`), *change email* (`{newEmail}`; Supabase emails both addresses to confirm) and *open profile* (fills `{profile_name}`, `{profile_username}`… for a username or id).
+- **Nodes** (Online): *Save My Profile*, *Change Password*, *Load Profile*, and *My Account Field* (a value). Triggers have *Save my profile* and *Load a profile*.
+
+**Profiles table.** Set *Profiles table* to **everyone can see them** (or **only the person themselves**). Then **Copy profiles SQL** and run it in Supabase › SQL Editor (run it again after adding fields).
+- Each person gets a row with their id, name and account fields. It's saved when they sign up or sign in and whenever they save their profile, and only they can change it.
+- With everyone able to see them, usernames are checked before signing up, and the database also refuses a taken one (unique fields get a unique index).
+- **Profiles collection** adds a *Profiles* data collection on that table, so a Data List can show a people directory.
+
 
 In *Game Settings › Data*, open a collection and set **Store online (Supabase)**:
 

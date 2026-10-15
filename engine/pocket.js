@@ -4934,7 +4934,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'open mods', 'sign in', 'create account', 'sign out', 'send password reset', 'continue with google', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'open mods', 'sign in', 'create account', 'sign out', 'send password reset', 'continue with google', 'save profile', 'change password', 'change email', 'open profile', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -14150,6 +14150,10 @@ function runAction(s, e, p, other) {
     case 'open mods': s.engine.openMods(); break;
     case 'sign in': s.engine.supa.signIn(String(s.vars.email ?? '').trim(), String(s.vars.password ?? '')).catch(() => {}); break;
     case 'create account': s.engine.supa.signUp(String(s.vars.email ?? '').trim(), String(s.vars.password ?? ''), String(s.vars.name ?? '').trim()).then((r) => { if (r === 'check email') s.message('Check your email to finish signing up', 2.5); }).catch(() => {}); break;
+    case 'save profile': s.engine.supa.saveProfile().then((ok) => { if (ok) s.message(v && v !== 'Hello!' ? v : 'Saved', 1.5); }); break;
+    case 'change password': s.engine.supa.changePassword(s.vars.newPassword ?? s.vars.password).then((ok) => { if (ok) s.message('Password changed', 1.8); }); break;
+    case 'change email': s.engine.supa.changeEmail(s.vars.newEmail ?? s.vars.email).then((ok) => { if (ok) s.message('Check both emails to confirm the change', 2.5); }); break;
+    case 'open profile': s.engine.supa.loadProfile(fillTemplate(String(v ?? ''), s.vars)).then((ok) => { if (!ok) s.message('No such person', 1.5); }); break;
     case 'sign out': s.engine.supa.signOut(); break;
     case 'send password reset': s.engine.supa.reset(String(s.vars.email ?? '').trim()).then(() => s.message('Check your email for a link', 2.5)).catch(() => {}); break;
     case 'continue with google': s.engine.supa.provider(v && v !== 'Hello!' ? v : 'google'); break;
@@ -14523,11 +14527,69 @@ export class Supa {
     return true;
   }
   fail(e) { const m = e?.message || String(e); this.engine.scene?.setVar('authError', m); this.engine.scene?.emit('authFailed', m); Log.add('warn', 'Sign-in: ' + m, 'Supabase'); return m; }
-  async signUp(email, password, name) {
+  async signUp(email, password, name, extra = this.formValues()) {
     this.engine.scene?.setVar('authError', '');
     if (!email || !password) throw new Error(this.fail({ message: 'Type an email and a password' }));
-    try { const j = await this.call('/auth/v1/signup', { method: 'POST', body: { email, password, data: { name: name || '' } }, auth: false }); return this.took(j) ? 'signed in' : 'check email'; }
+    const bad = this.checkFields(extra, true) || await this.taken(extra); if (bad) throw new Error(this.fail({ message: bad }));
+    try { const j = await this.call('/auth/v1/signup', { method: 'POST', body: { email, password, data: { ...extra, name: name || '' } }, auth: false }); return this.took(j) ? 'signed in' : 'check email'; }
     catch (e) { throw new Error(this.fail(e)); }
+  }
+  // ---- custom account fields (Game Settings › Supabase › Account fields) and profiles ----
+  /** [{ name, key, type, required, unique, options }] */
+  accountFields() { return (this.cfg().st.accountFields || []).filter((f) => f?.name).map((f) => ({ ...f, key: fieldKey(f.name), type: f.type || 'text' })).filter((f) => !ACCOUNT_RESERVED.includes(f.key)); }
+  profilesOn() { const m = this.cfg().st.profiles; return m === 'everyone can see them' || m === 'only the person themselves'; }
+  profilesTable() { return String(this.cfg().st.profilesTable || 'profiles').trim() || 'profiles'; }
+  /** What the form's variables hold for each account field ({username}, {bio}…), as the field's type. */
+  formValues(vars = this.engine.scene?.vars || {}) { const o = {}; for (const f of this.accountFields()) o[f.key] = ACCOUNT_VALUE(f, vars[f.key]); return o; }
+  /** A message when something is missing or wrong, else ''. */
+  checkFields(vals, creating) {
+    for (const f of this.accountFields()) {
+      const v = vals[f.key], empty = v == null || v === '' || (f.type === 'yes/no' && f.required && v !== true);
+      if (f.required && empty && (creating || f.key in vals)) return f.type === 'yes/no' ? `Tick “${f.name}”` : `Type your ${f.name.toLowerCase()}`;
+      if (empty) continue;
+      if (f.type === 'number' && !Number.isFinite(+v)) return `${f.name} must be a number`;
+      if (f.type === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(String(v))) return `${f.name}: use a date like 2001-04-30`;
+      if (f.type === 'choice') { const ok = String(f.options || '').split(/[,\n]/).map((q) => q.trim()).filter(Boolean); if (ok.length && !ok.includes(String(v))) return `Pick a ${f.name.toLowerCase()}`; }
+      if (f.unique && f.type === 'text' && !/^[\w.\-]{2,32}$/.test(String(v))) return `${f.name}: 2–32 letters, numbers, dots, dashes or underscores`;
+      if (+f.max > 0 && String(v).length > +f.max) return `${f.name}: at most ${f.max} characters`;
+    }
+    return '';
+  }
+  /** Is a unique field (a username) already someone else's? Needs a profiles table people can read. */
+  async taken(vals) {
+    if (!this.profilesOn() || this.cfg().st.profiles !== 'everyone can see them') return '';
+    const me = this.user()?.id;
+    for (const f of this.accountFields().filter((q) => q.unique && vals[q.key] != null && vals[q.key] !== '')) {
+      try { const rows = await this.call(`/rest/v1/${encodeURIComponent(this.profilesTable())}?select=id&${encodeURIComponent(f.key)}=ilike.${encodeURIComponent(String(vals[f.key]).replace(/[%_*]/g, ''))}&limit=2`, { auth: !!me }); if ((rows || []).some((r) => r.id !== me)) return `That ${f.name.toLowerCase()} is taken`; } catch { /* no table yet: the database rule still checks */ }
+    }
+    return '';
+  }
+  /** The profile row (one per person) gets the name and the account fields. */
+  async saveProfileRow(u = this.user()) {
+    if (!u || !this.profilesOn()) return;
+    const md = u.user_metadata || {}, row = { id: u.id, name: this.name(u), updated_at: new Date().toISOString() };
+    for (const f of this.accountFields()) if (f.key in md) row[f.key] = md[f.key] === '' && f.type !== 'text' && f.type !== 'long text' ? null : md[f.key];
+    await this.call(`/rest/v1/${encodeURIComponent(this.profilesTable())}`, { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: row });
+  }
+  /** Change the signed-in person's name and account fields (from the form's variables by default). */
+  async saveProfile(vals = this.formValues(), name = this.engine.scene?.vars?.name) {
+    const s = this.engine.scene; s?.setVar('authError', '');
+    if (!this.user()) { this.fail({ message: 'Sign in first' }); return false; }
+    const bad = this.checkFields(vals, false) || await this.taken(vals); if (bad) { this.fail({ message: bad }); return false; }
+    try {
+      const data = { ...vals }; if (name != null && String(name).trim()) data.name = String(name).trim();
+      const u = await this.call('/auth/v1/user', { method: 'PUT', body: { data } }); if (u?.id) this.keep({ ...this.session(), user: u });
+      await this.saveProfileRow(u?.id ? u : this.user()); this.vars(); s?.emit('profileSaved'); return true;
+    } catch (e) { this.fail(/duplicate key|unique/i.test(e.message) ? { message: 'That is already taken: try another' } : e); return false; }
+  }
+  async changePassword(pw) { this.engine.scene?.setVar('authError', ''); if (String(pw || '').length < 6) { this.fail({ message: 'Use at least 6 characters' }); return false; } try { await this.call('/auth/v1/user', { method: 'PUT', body: { password: String(pw) } }); return true; } catch (e) { this.fail(e); return false; } }
+  async changeEmail(email) { this.engine.scene?.setVar('authError', ''); if (!/@/.test(String(email || ''))) { this.fail({ message: 'Type the new email' }); return false; } try { const u = await this.call('/auth/v1/user', { method: 'PUT', body: { email: String(email).trim() } }); if (u?.id) this.keep({ ...this.session(), user: u }); return true; } catch (e) { this.fail(e); return false; } }
+  /** Someone's public profile by id or a unique field (username): fills {profile_name}, {profile_username}… */
+  async loadProfile(by) {
+    const s = this.engine.scene, T = encodeURIComponent(this.profilesTable()), q = String(by || '').trim(); if (!q) return false;
+    const uniq = this.accountFields().find((f) => f.unique), col = /^[0-9a-f-]{36}$/i.test(q) || !uniq ? 'id' : uniq.key;
+    try { const rows = await this.call(`/rest/v1/${T}?select=*&${encodeURIComponent(col)}=${col === 'id' ? 'eq' : 'ilike'}.${encodeURIComponent(q.replace(/^@/, ''))}&limit=1`, { auth: !!this.user() }); const r = rows?.[0]; if (!r) return false;
+      for (const [k, v] of Object.entries(r)) s?.setVar('profile_' + k, v ?? ''); return true; } catch (e) { s?.setVar('authError', e.message); return false; }
   }
   async signIn(email, password) {
     this.engine.scene?.setVar('authError', '');
@@ -14540,8 +14602,12 @@ export class Supa {
   async signOut() { try { await this.call('/auth/v1/logout', { method: 'POST' }); } catch { /* signed out here either way */ } this.keep(null); this.signedOut(); }
   async setName(name) { try { const u = await this.call('/auth/v1/user', { method: 'PUT', body: { data: { name } } }); if (u?.id) { this.keep({ ...this.session(), user: u }); this.vars(); } return true; } catch (e) { this.fail(e); return false; } }
   /** {signedIn} 1/0, {userName}, {userEmail}, {userId} */
-  vars(s = this.engine.scene) { if (!s) return; const u = this.user(); s.setVar('signedIn', u ? 1 : 0); s.setVar('userName', this.name(u)); s.setVar('userEmail', u?.email || ''); s.setVar('userId', u?.id || ''); }
-  signedIn() { const s = this.engine.scene; this.vars(s); s?.setVar('authError', ''); s?.emit('signedIn'); this.pullAll(); this.route(s, true); }
+  vars(s = this.engine.scene) {
+    if (!s) return; const u = this.user(), md = u?.user_metadata || {}; s.setVar('signedIn', u ? 1 : 0); s.setVar('userName', this.name(u)); s.setVar('userEmail', u?.email || ''); s.setVar('userId', u?.id || '');
+    for (const f of this.accountFields()) { const v = md[f.key] ?? (f.type === 'yes/no' ? false : ''); s.setVar('user_' + f.key, v); if (u) s.setVar(f.key, v); } // {user_username}, and the edit form's {username}
+    if (u && md.name) s.setVar('name', md.name);
+  }
+  signedIn() { const s = this.engine.scene; this.vars(s); s?.setVar('authError', ''); s?.emit('signedIn'); this.pullAll(); this.route(s, true); this.saveProfileRow().catch((e) => Log.add('warn', 'Profile: ' + e.message, 'Supabase')); } // (the profile row catches up after an email confirmation)
   signedOut() {
     const s = this.engine.scene, D = this.engine.data;
     for (const d of D.defs()) if (d.online === 'private to each person') { D.cache[fieldKey(d.name)] = []; D.save(d.name); D.syncVars(s || {}); s?.emit('data', fieldKey(d.name), 'refreshed', null); } // someone else's private records leave with them
@@ -14689,6 +14755,32 @@ export class Supa {
   }
 }
 const SUPA_MODES = ['private to each person', 'shared with everyone', 'my own table'];
+export const ACCOUNT_RESERVED = ['email', 'password', 'name', 'id', 'updated_at', 'newpassword', 'newemail'];
+/** A value typed in a form, as an account field's type. */
+const ACCOUNT_VALUE = (f, v) => (f.type === 'yes/no' ? truthy(v) : f.type === 'number' ? (v === '' || v == null ? '' : Number.isFinite(+v) ? +v : String(v)) : v == null ? '' : String(v).trim());
+const ACCOUNT_SQL_TYPE = { text: 'text', 'long text': 'text', number: 'numeric', date: 'date', 'yes/no': 'boolean', choice: 'text', picture: 'text' };
+/** The SQL for the profiles table: one row per person with their name and account fields. */
+export function profilesSQL(st = {}) {
+  const t = String(st.profilesTable || 'profiles').trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase() || 'profiles', pub = st.profiles !== 'only the person themselves';
+  const F = (st.accountFields || []).filter((f) => f?.name).map((f) => ({ ...f, key: fieldKey(f.name) })).filter((f) => !ACCOUNT_RESERVED.includes(f.key));
+  return `-- Profiles: one row per person (${pub ? 'everyone can see them' : 'only the person themselves'}); each person changes only their own
+create table if not exists public.${t} (
+  id uuid primary key references auth.users on delete cascade,
+  name text not null default '',
+  updated_at timestamptz not null default now()
+);
+alter table public.${t} add column if not exists name text not null default '';
+${F.map((f) => `alter table public.${t} add column if not exists ${f.key} ${ACCOUNT_SQL_TYPE[f.type || 'text'] || 'text'};`).join('\n')}
+${F.filter((f) => f.unique).map((f) => `create unique index if not exists ${t}_${f.key}_unique on public.${t} (lower(${f.key}::text));`).join('\n')}
+alter table public.${t} enable row level security;
+drop policy if exists "${t} read" on public.${t};
+drop policy if exists "${t} add" on public.${t};
+drop policy if exists "${t} change" on public.${t};
+create policy "${t} read" on public.${t} for select using (${pub ? 'true' : 'auth.uid() = id'});
+create policy "${t} add" on public.${t} for insert with check (auth.uid() = id);
+create policy "${t} change" on public.${t} for update using (auth.uid() = id) with check (auth.uid() = id);
+`;
+}
 /** Turns on live updates (Realtime) for a table. */
 const liveSQL = (t) => `do $$ begin alter publication supabase_realtime add table public.${t}; exception when duplicate_object then null; end $$;\n`;
 /** The SQL that makes a collection's table in Supabase, with the rules for private or shared records. */
@@ -17322,6 +17414,10 @@ Object.assign(NODE_TYPES, {
   supaSetName: { cat: 'Online', label: 'Change My Name (Supabase)', exec: true, outs: ['then', 'failed'], params: [txt('name', '{name}', 'name')] },
   supaRefreshN: { cat: 'Online', label: 'Refresh Online Data (Supabase)', exec: true, outs: ['then'], params: [{ ...txt('collection', '', 'collection (blank = all)'), suggest: 'collections' }] },
   supaSignedIn: { cat: 'Online', label: 'Is Signed In (Supabase)', value: 'bool' },
+  supaSaveProfile: { cat: 'Online', label: 'Save My Profile (Supabase)', exec: true, outs: ['then', 'saved', 'failed'] },
+  supaChangePw: { cat: 'Online', label: 'Change Password (Supabase)', exec: true, outs: ['then', 'changed', 'failed'], params: [txt('password', '{newPassword}', 'new password')] },
+  supaLoadProfile: { cat: 'Online', label: 'Load Profile (Supabase)', exec: true, outs: ['then', 'found', 'not found'], params: [txt('who', '{username}', 'username or id')] },
+  supaField: { cat: 'Online', label: 'My Account Field (Supabase)', value: 'text', params: [txt('field', 'username', 'field')] },
   supaRpc: { cat: 'Online', label: 'Call Database Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   supaEdge: { cat: 'Online', label: 'Call Edge Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   supaUser: { cat: 'Online', label: 'Signed-in Person (Supabase)', value: 'text', params: [opt('what', ['name', 'email', 'id'], 'name', 'show')] },
@@ -17595,6 +17691,8 @@ export const LOGIC_ACTIONS = {
   supaSignUp: { cat: 'Data', label: 'Create account (Supabase)', icon: 'user', noNode: true, params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password'), txt('name', '{name}', 'name')], run: (c, p) => { c.s.engine.supa.signUp(fillTemplate(p.email, c.s.vars).trim(), fillTemplate(p.password, c.s.vars), fillTemplate(p.name, c.s.vars).trim()).then((r) => { if (r === 'check email') c.s.message('Check your email to finish', 2.5); }).catch(() => {}); }, say: () => 'Create an account' },
   supaSignOut: { cat: 'Data', label: 'Sign out (Supabase)', icon: 'user', noNode: true, run: (c) => { c.s.engine.supa.signOut(); }, say: () => 'Sign out' },
   supaReset: { cat: 'Data', label: 'Send password reset (Supabase)', icon: 'mail', noNode: true, params: [txt('email', '{email}', 'email')], run: (c, p) => { c.s.engine.supa.reset(fillTemplate(p.email, c.s.vars).trim()).then(() => c.s.message('Check your email', 2)).catch(() => {}); }, say: () => 'Send a password reset email' },
+  supaSaveProfile: { cat: 'Data', label: 'Save my profile (Supabase)', icon: 'user', noNode: true, run: (c) => { let done = false; c.s.engine.supa.saveProfile().then(() => { done = true; }); return { until: () => done }; }, say: () => 'Save my profile' },
+  supaLoadProfile: { cat: 'Data', label: 'Load a profile (Supabase)', icon: 'user', noNode: true, params: [txt('who', '{username}', 'username or id')], run: (c, p) => { let done = false; c.s.engine.supa.loadProfile(fillTemplate(p.who, c.s.vars)).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Load the profile of ${p.who}` },
   supaRpc: { cat: 'Data', label: 'Call database function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.rpc(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call database function ${p.fn}` },
   supaEdge: { cat: 'Data', label: 'Call Edge Function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.edge(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call Edge Function ${p.fn}` },
   supaRefresh: { cat: 'Data', label: 'Refresh online data (Supabase)', icon: 'refresh', noNode: true, params: [sug(txt('collection', '', 'collection (empty = all)'), 'collections')], run: (c, p) => { c.s.engine.supa.pullAll(p.collection); }, say: (p) => `Refresh ${p.collection || 'online data'}` },
@@ -18292,6 +18390,7 @@ registerBehavior('graph', {
         case 'slotInfo': { const I = s.engine.slotInfo(P('slot') || 1), w = P('what'); return w === 'is saved' ? I.exists : !I.exists ? '' : w === 'date and time' ? I.when : w === 'play time' ? I.playTime : w === 'level' ? I.level : w === 'level name' ? I.levelName : w === 'name' ? I.label : I.ago; }
         case 'newestSlot': return String(s.engine.newestSlot() || '');
         case 'supaSignedIn': return !!s.engine.supa.user();
+        case 'supaField': { const u = s.engine.supa.user(); return u ? u.user_metadata?.[fieldKey(P('field'))] ?? '' : ''; }
         case 'supaUser': { const u = s.engine.supa.user(), w = P('what'); return !u ? '' : w === 'email' ? u.email || '' : w === 'id' ? u.id : s.engine.supa.name(u); }
         case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
         case 'questInfo': {
@@ -18577,6 +18676,9 @@ registerBehavior('graph', {
         }
         case 'supaSignOut': { const later = { ...ctx, steps: 0 }; s.engine.supa.signOut().then(() => follow(n, 'then', later)); return; }
         case 'supaProvider': s.engine.supa.provider(P('provider')); return;
+        case 'supaSaveProfile': case 'supaChangePw': case 'supaLoadProfile': { const later = { ...ctx, steps: 0 }, S = s.engine.supa, f = (k) => fillTemplate(P(k) || '', s.vars);
+          const pr = n.type === 'supaSaveProfile' ? S.saveProfile() : n.type === 'supaChangePw' ? S.changePassword(f('password')) : S.loadProfile(f('who'));
+          pr.then((ok) => { if (!e.dead) follow(n, ok ? { supaSaveProfile: 'saved', supaChangePw: 'changed', supaLoadProfile: 'found' }[n.type] : n.type === 'supaLoadProfile' ? 'not found' : 'failed', later); }); break; }
         case 'supaRpc': case 'supaEdge': { const later = { ...ctx, steps: 0 }, S = s.engine.supa, a = kvText(fillTemplate(P('args') || '', s.vars)); (n.type === 'supaRpc' ? S.rpc(P('fn'), a, P('into')) : S.edge(P('fn'), a, P('into'))).then((ok) => { if (!e.dead) follow(n, ok ? 'done' : 'failed', later); }); break; }
         case 'supaRefreshN': s.engine.supa.pullAll(P('collection')); break;
         case 'exportSlot': { const t = s.engine.exportSave(P('slot') || 1); if (t) { s.setVar(P('var') || 'saveCode', t); if (P('copy')) navigator.clipboard?.writeText(t).catch(() => {}); } return follow(n, t ? 'then' : 'empty slot', ctx); }

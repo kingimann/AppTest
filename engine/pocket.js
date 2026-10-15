@@ -3052,6 +3052,82 @@ export const SPRITE_ART = {
   'ui-gem': artIcon('M18 12h28l12 14-26 30L6 26zM6 26h52'),
   'ui-shop': artIcon('M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'),
   'ui-info': artIcon('M32 28v18M32 18v1', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  // more UI icons
+  'ui-bookmark': artIcon('M18 8h28v48L32 44 18 56z'),
+  'ui-flag': artIcon('M14 58V8M14 10h32l-6 10 6 10H14'),
+  'ui-gift': artIcon('M10 24h44v10H10zM14 34v22h36V34M32 24v32M32 24c-4-10-16-12-16-4 0 4 8 4 16 4c4-10 16-12 16-4 0 4-8 4-16 4'),
+  'ui-tag': artIcon('M8 8h22l26 26-22 22L8 30z', '<circle cx="20" cy="20" r="4" fill="#fff"/>'),
+  'ui-key': artIcon('M32 30h24M50 30v8M43 30v6', '<circle cx="20" cy="30" r="10" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-shield': artIcon('M32 6l22 8v16c0 14-10 22-22 28C20 52 10 44 10 30V14z'),
+  'ui-bolt': artIcon('M36 6L14 36h16l-4 22 22-30H32z'),
+  'ui-fire': artIcon('M32 58c-12 0-20-8-20-20 0-10 8-14 10-24 6 6 8 10 8 16 4-4 4-8 4-12 8 6 18 14 18 20 0 12-8 20-20 20z'),
+  'ui-globe': artIcon('M8 32h48M32 8c-8 8-8 40 0 48M32 8c8 8 8 40 0 48', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-link': artIcon('M28 36l8-8M24 28l-6 6a8 8 0 0 0 12 12l6-6M40 36l6-6a8 8 0 0 0-12-12l-6 6'),
+  'ui-eye': artIcon('M6 32s10-16 26-16 26 16 26 16-10 16-26 16S6 32 6 32z', '<circle cx="32" cy="32" r="7" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-eye-off': artIcon('M6 32s10-16 26-16 26 16 26 16-10 16-26 16S6 32 6 32zM10 10l44 44'),
+  'ui-unlock': artIcon('M18 30h28v24H18zM24 30v-8a8 8 0 0 1 15-4'),
+  'ui-sliders': artIcon('M10 16h44M10 32h44M10 48h44', '<circle cx="22" cy="16" r="5" fill="#fff"/><circle cx="42" cy="32" r="5" fill="#fff"/><circle cx="28" cy="48" r="5" fill="#fff"/>'),
+  'ui-cloud': artIcon('M18 46a10 10 0 0 1 0-20 14 14 0 0 1 27-4 11 11 0 0 1 1 24z'),
+  'ui-upload': artIcon('M32 42V10M20 22l12-12 12 12M12 54h40'),
+  'ui-wifi': artIcon('M8 26a34 34 0 0 1 48 0M16 34a22 22 0 0 1 32 0M24 42a10 10 0 0 1 16 0', '<circle cx="32" cy="51" r="4" fill="#fff"/>'),
+  'ui-battery': artIcon('M8 20h42v24H8zM50 28h6v8', '<rect x="14" y="26" width="20" height="12" fill="#fff"/>'),
+  'ui-compass': artIcon('M40 24l-6 14-14 6 6-14z', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-navigate': artIcon('M32 6l20 50-20-12-20 12z'),
+  'ui-send': artIcon('M8 30L56 8 40 56l-8-20zM32 36L56 8'),
+  'ui-attach': artIcon('M44 30L28 46a8 8 0 0 1-12-12l20-20a6 6 0 0 1 8 8L26 40a3 3 0 0 1-4-4l16-16'),
+  'ui-mic': artIcon('M24 12a8 8 0 0 1 16 0v18a8 8 0 0 1-16 0zM14 30a18 18 0 0 0 36 0M32 48v8'),
+  'ui-video': artIcon('M8 18h34v28H8zM42 28l14-8v24l-14-8'),
+  'ui-headphones': artIcon('M12 40v-8a20 20 0 0 1 40 0v8M12 38h8v16h-8zM44 38h8v16h-8z'),
+  'ui-gamepad': artIcon('M16 20h32a10 10 0 0 1 10 10l2 14a6 6 0 0 1-11 4l-5-6H20l-5 6a6 6 0 0 1-11-4l2-14a10 10 0 0 1 10-10zM18 31h10M23 26v10', '<circle cx="42" cy="28" r="3" fill="#fff"/><circle cx="48" cy="34" r="3" fill="#fff"/>'),
+  'ui-dice': artIcon('M12 12h40v40H12z', '<circle cx="22" cy="22" r="4" fill="#fff"/><circle cx="42" cy="42" r="4" fill="#fff"/><circle cx="32" cy="32" r="4" fill="#fff"/><circle cx="42" cy="22" r="4" fill="#fff"/><circle cx="22" cy="42" r="4" fill="#fff"/>'),
+  'ui-crown': artIcon('M10 48L6 18l14 12 12-18 12 18 14-12-4 30z'),
+  'ui-rocket': artIcon('M32 6c10 8 14 20 12 34H20C18 26 22 14 32 6zM20 40l-8 10h10M44 40l8 10H42M28 50h8v6h-8z', '<circle cx="32" cy="26" r="4" fill="#fff"/>'),
+  'ui-target': artIcon('M32 32h0', '<circle cx="32" cy="32" r="22" fill="none" stroke="#fff" stroke-width="5"/><circle cx="32" cy="32" r="12" fill="none" stroke="#fff" stroke-width="5"/><circle cx="32" cy="32" r="3" fill="#fff"/>'),
+  'ui-medal': artIcon('M22 6l10 18 10-18', '<circle cx="32" cy="40" r="15" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-thumbs-up': artIcon('M20 28v28H10V28zM20 30l10-22c6 0 8 4 7 10l-2 8h15c4 0 6 4 5 8l-4 16c-1 4-4 6-8 6H20'),
+  'ui-smile': artIcon('M22 38c4 6 16 6 20 0', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/><circle cx="24" cy="26" r="3.5" fill="#fff"/><circle cx="40" cy="26" r="3.5" fill="#fff"/>'),
+  'ui-users': artIcon('M6 54c0-8 6-14 14-14s14 6 14 14M36 44c2-2 6-4 9-4 8 0 13 6 13 14', '<circle cx="20" cy="24" r="9" fill="none" stroke="#fff" stroke-width="5"/><circle cx="45" cy="26" r="8" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-user-plus': artIcon('M8 54c0-10 8-16 18-16s18 6 18 16M50 14v16M42 22h16', '<circle cx="26" cy="22" r="10" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-logout': artIcon('M26 10H12v44h14M30 32h26M46 22l10 10-10 10'),
+  'ui-login': artIcon('M38 10h14v44H38M8 32h28M26 22l10 10-10 10'),
+  'ui-copy': artIcon('M22 22h30v32H22zM12 42V10h30'),
+  'ui-book': artIcon('M8 12h18a6 6 0 0 1 6 6v38a6 6 0 0 0-6-6H8zM56 12H38a6 6 0 0 0-6 6v38a6 6 0 0 1 6-6h18z'),
+  'ui-file': artIcon('M16 6h22l12 12v40H16zM38 6v12h12'),
+  'ui-folder': artIcon('M6 16h18l6 6h28v30H6z'),
+  'ui-inbox': artIcon('M8 36l8-24h32l8 24v18H8zM8 36h14l4 6h12l4-6h14'),
+  'ui-card': artIcon('M6 16h52v32H6zM6 26h52M14 40h12'),
+  'ui-wallet': artIcon('M8 18h44v32H8zM8 18l34-8v8M40 30h12v10H40z'),
+  'ui-bag': artIcon('M14 22h36l-3 34H17zM24 22v-4a8 8 0 0 1 16 0v4'),
+  'ui-percent': artIcon('M14 50L50 14', '<circle cx="18" cy="18" r="6" fill="none" stroke="#fff" stroke-width="5"/><circle cx="46" cy="46" r="6" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-truck': artIcon('M6 18h32v26H6zM38 28h12l8 8v8H38z', '<circle cx="18" cy="48" r="5" fill="#fff"/><circle cx="46" cy="48" r="5" fill="#fff"/>'),
+  'ui-undo': artIcon('M16 26a18 18 0 1 1-2 14M16 12v14h14'),
+  'ui-zoom-in': artIcon('M42 42l12 12M28 20v16M20 28h16', '<circle cx="28" cy="28" r="15" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-expand': artIcon('M8 24V8h16M40 8h16v16M56 40v16H40M24 56H8V40'),
+  'ui-minus': artIcon('M12 32h40'),
+  'ui-x-circle': artIcon('M24 24l16 16M40 24L24 40', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-check-circle': artIcon('M22 32l7 7 13-14', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-alert': artIcon('M32 8l26 46H6zM32 26v12M32 46v1'),
+  'ui-help': artIcon('M25 25a7 7 0 1 1 9 7c-2 1-2 3-2 5M32 45v1', '<circle cx="32" cy="32" r="24" fill="none" stroke="#fff" stroke-width="5"/>'),
+  'ui-sparkles': artIcon('M30 8l4 14 14 4-14 4-4 14-4-14-14-4 14-4zM50 40l2 6 6 2-6 2-2 6-2-6-6-2 6-2z'),
+  'ui-bulb': artIcon('M24 42c0-6-8-10-8-20a16 16 0 0 1 32 0c0 10-8 14-8 20zM24 50h16M28 56h8'),
+  'ui-palette': artIcon('M32 8a24 24 0 0 0 0 48c4 0 6-3 4-6s0-6 4-6h6c6 0 10-4 10-10C56 18 46 8 32 8z', '<circle cx="20" cy="30" r="3.5" fill="#fff"/><circle cx="28" cy="18" r="3.5" fill="#fff"/><circle cx="42" cy="20" r="3.5" fill="#fff"/>'),
+  'ui-code': artIcon('M22 18L8 32l14 14M42 18l14 14-14 14M36 12l-8 40'),
+  'ui-layers': artIcon('M32 8l24 12-24 12L8 20zM8 32l24 12 24-12M8 44l24 12 24-12'),
+  'ui-skip-next': artIcon('M14 12l24 20-24 20zM46 12v40'),
+  'ui-skip-back': artIcon('M50 12L26 32l24 20zM18 12v40'),
+  'ui-mute': artIcon('M10 24h10l14-12v40L20 40H10zM42 24l14 16M56 24L42 40'),
+  'ui-repeat': artIcon('M12 28v-6a8 8 0 0 1 8-8h32M44 6l8 8-8 8M52 36v6a8 8 0 0 1-8 8H12M20 58l-8-8 8-8'),
+  'ui-shuffle': artIcon('M8 18h10c12 0 16 28 28 28h10M8 46h10c4 0 7-4 9-8M38 26c2-4 5-8 8-8h10M50 12l6 6-6 6M50 40l6 6-6 6'),
+  'ui-hourglass': artIcon('M16 6h32M16 58h32M20 6c0 14 24 18 24 26S20 44 20 58M44 6c0 14-24 18-24 26s24 12 24 26'),
+  'ui-sword': artIcon('M48 6h10v10L26 48l-10-10zM14 40l10 10M10 54l8-8'),
+  'ui-potion': artIcon('M26 6h12M28 6v14L14 46a8 8 0 0 0 7 12h22a8 8 0 0 0 7-12L36 20V6'),
+  'ui-skull': artIcon('M32 8C18 8 10 18 10 30c0 8 4 12 8 14v10h28V44c4-2 8-6 8-14 0-12-8-22-22-22zM28 54v-6M36 54v-6', '<circle cx="23" cy="32" r="5" fill="#fff"/><circle cx="41" cy="32" r="5" fill="#fff"/>'),
+  'ui-podium': artIcon('M24 56V24h16v32M8 56V36h16M40 56V42h16M4 56h56'),
+  'ui-news': artIcon('M8 12h40v40H14a6 6 0 0 1-6-6zM48 24h8v22a6 6 0 0 1-6 6M16 22h24M16 32h24M16 42h14'),
+  'ui-paw': artIcon('M32 56c-10 0-16-6-16-12 0-8 8-12 16-12s16 4 16 12c0 6-6 12-16 12z', '<circle cx="16" cy="26" r="5" fill="#fff"/><circle cx="26" cy="14" r="5" fill="#fff"/><circle cx="38" cy="14" r="5" fill="#fff"/><circle cx="48" cy="26" r="5" fill="#fff"/>'),
+  'ui-leaf': artIcon('M10 54C10 28 28 10 54 10c0 26-18 44-44 44zM10 54l26-26'),
+  'ui-drop': artIcon('M32 6S14 28 14 40a18 18 0 0 0 36 0C50 28 32 6 32 6z'),
+  'ui-coffee': artIcon('M10 22h34v18a14 14 0 0 1-14 14h-6a14 14 0 0 1-14-14zM44 26h4a8 8 0 0 1 0 16h-4M20 6v8M28 6v8M36 6v8'),
 };
 /** Groups for the Project panel's sprite library. */
 export const SPRITE_GROUPS = {
@@ -3435,6 +3511,63 @@ function drawText2D(ctx, e, vars, time) {
   ctx.restore();
 }
 /** Draw an entity, with theme colour tokens in its shape and text resolved. */
+/** Your own shape: an SVG path ("d"), drawn into the shape's width and height. Its view box is "x y w h" (default 0 0 100 100). */
+const shapePathCache = new Map();
+function shapePath2D(s) {
+  if (typeof Path2D === 'undefined' || !s.path) return null;
+  const v = String(s.view || '0 0 100 100').trim().split(/[\s,]+/).map(Number), [vx, vy, vw, vh] = v.length === 4 && v[2] > 0 && v[3] > 0 ? v : [0, 0, 100, 100];
+  const key = s.path + '|' + v.join(',') + '|' + s.w + '|' + s.h;
+  let P = shapePathCache.get(key);
+  if (!P) {
+    try { const raw = new Path2D(s.path); P = new Path2D(); const kx = s.w / vw, ky = s.h / vh; P.addPath(raw, typeof DOMMatrix !== 'undefined' ? new DOMMatrix([kx, 0, 0, ky, -s.w / 2 - vx * kx, -s.h / 2 - vy * ky]) : undefined); } catch { return null; }
+    if (shapePathCache.size > 200) shapePathCache.clear(); shapePathCache.set(key, P);
+  }
+  return P;
+}
+/** More shapes for UI: speech bubbles, tickets, tags, ribbons, shields, badges… drawn to the shape's size (so their corners don't stretch). */
+function traceExtraShape(ctx, s) {
+  const w = s.w, h = s.h, hw = w / 2, hh = h / 2, r = Math.max(0, Math.min(+s.radius >= 0 && s.radius !== '' && s.radius != null ? +s.radius : 12, hw, hh));
+  const rr = (x0, y0, x1, y1, rad) => { ctx.moveTo(x0 + rad, y0); ctx.lineTo(x1 - rad, y0); ctx.arcTo(x1, y0, x1, y0 + rad, rad); ctx.lineTo(x1, y1 - rad); ctx.arcTo(x1, y1, x1 - rad, y1, rad); ctx.lineTo(x0 + rad, y1); ctx.arcTo(x0, y1, x0, y1 - rad, rad); ctx.lineTo(x0, y0 + rad); ctx.arcTo(x0, y0, x0 + rad, y0, rad); ctx.closePath(); };
+  const poly = (pts) => { pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * hw, y * hh) : ctx.moveTo(x * hw, y * hh))); ctx.closePath(); };
+  const radial = (n, f) => { for (let i = 0; i <= n; i++) { const a = -Math.PI / 2 + (i / n) * Math.PI * 2, k = f(a); const x = Math.cos(a) * hw * k, y = Math.sin(a) * hh * k; i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); } ctx.closePath(); };
+  switch (s.type) {
+    case 'bubble': { // a speech bubble with its tail at the bottom (left, middle or right)
+      const th = Math.min(h * 0.24, 16), y1 = hh - th, rad = Math.min(r, (h - th) / 2, hw), side = s.tail || 'left', tw = Math.min(14, w * 0.12);
+      const tx = side === 'right' ? hw - rad - tw * 1.6 : side === 'center' ? -tw / 2 : -hw + rad + tw * 0.6, tip = side === 'right' ? tx + tw * 1.4 : side === 'center' ? 0 : tx - tw * 0.4;
+      ctx.moveTo(-hw + rad, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, y1 - rad); ctx.arcTo(hw, y1, hw - rad, y1, rad);
+      ctx.lineTo(tx + tw, y1); ctx.lineTo(tip, hh); ctx.lineTo(tx, y1);
+      ctx.lineTo(-hw + rad, y1); ctx.arcTo(-hw, y1, -hw, y1 - rad, rad); ctx.lineTo(-hw, -hh + rad); ctx.arcTo(-hw, -hh, -hw + rad, -hh, rad); ctx.closePath(); break;
+    }
+    case 'ticket': { // round bites out of both sides
+      const n = Math.min(hh * 0.4, 12), rad = Math.min(r, 8, hh - n);
+      ctx.moveTo(-hw + rad, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, -n); ctx.arc(hw, 0, n, -Math.PI / 2, Math.PI / 2, true); ctx.lineTo(hw, hh - rad); ctx.arcTo(hw, hh, hw - rad, hh, rad);
+      ctx.lineTo(-hw + rad, hh); ctx.arcTo(-hw, hh, -hw, hh - rad, rad); ctx.lineTo(-hw, n); ctx.arc(-hw, 0, n, Math.PI / 2, -Math.PI / 2, true); ctx.lineTo(-hw, -hh + rad); ctx.arcTo(-hw, -hh, -hw + rad, -hh, rad); ctx.closePath(); break;
+    }
+    case 'tag': { const p = Math.min(hh, w * 0.3), rad = Math.min(r, hh); ctx.moveTo(-hw, 0); ctx.lineTo(-hw + p, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, hh - rad); ctx.arcTo(hw, hh, hw - rad, hh, rad); ctx.lineTo(-hw + p, hh); ctx.closePath(); break; } // a price tag pointing left
+    case 'ribbon': { const d = Math.min(hh * 0.9, w * 0.12); ctx.moveTo(-hw, -hh); ctx.lineTo(hw, -hh); ctx.lineTo(hw - d, 0); ctx.lineTo(hw, hh); ctx.lineTo(-hw, hh); ctx.lineTo(-hw + d, 0); ctx.closePath(); break; } // a banner with forked ends
+    case 'chevron': { const d = Math.min(hh, w * 0.18); ctx.moveTo(-hw, -hh); ctx.lineTo(hw - d, -hh); ctx.lineTo(hw, 0); ctx.lineTo(hw - d, hh); ctx.lineTo(-hw, hh); ctx.lineTo(-hw + d, 0); ctx.closePath(); break; } // a step in a progress row
+    case 'bookmark': { const d = Math.min(h * 0.25, w * 0.45), rad = Math.min(r, 8); ctx.moveTo(-hw + rad, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, hh); ctx.lineTo(0, hh - d); ctx.lineTo(-hw, hh); ctx.lineTo(-hw, -hh + rad); ctx.arcTo(-hw, -hh, -hw + rad, -hh, rad); ctx.closePath(); break; }
+    case 'shield': { const rad = Math.min(r, 10); ctx.moveTo(-hw + rad, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, hh * 0.05); ctx.quadraticCurveTo(hw, hh * 0.7, 0, hh); ctx.quadraticCurveTo(-hw, hh * 0.7, -hw, hh * 0.05); ctx.lineTo(-hw, -hh + rad); ctx.arcTo(-hw, -hh, -hw + rad, -hh, rad); ctx.closePath(); break; }
+    case 'squircle': radial(96, (a) => { const c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a)); return 1 / Math.pow(Math.pow(c, 4.5) + Math.pow(sn, 4.5), 1 / 4.5); }); break; // iOS-style smooth corners
+    case 'slanted': { const k = Math.min(h * 0.45, w * 0.2), rad = Math.min(r, 6); ctx.moveTo(-hw + k, -hh); ctx.lineTo(hw, -hh); ctx.lineTo(hw - k, hh); ctx.lineTo(-hw, hh); ctx.closePath(); break; }
+    case 'cut': { const c = Math.min(r || 10, hw, hh); ctx.moveTo(-hw + c, -hh); ctx.lineTo(hw - c, -hh); ctx.lineTo(hw, -hh + c); ctx.lineTo(hw, hh - c); ctx.lineTo(hw - c, hh); ctx.lineTo(-hw + c, hh); ctx.lineTo(-hw, hh - c); ctx.lineTo(-hw, -hh + c); ctx.closePath(); break; } // cut-off corners (sci-fi panels)
+    case 'burst': radial(40, (a) => (Math.round((a + Math.PI / 2) / (Math.PI * 2) * 40) % 2 ? 0.8 : 1)); break; // a starburst / sale seal
+    case 'scallop': radial(240, (a) => 0.92 + 0.08 * Math.cos(a * 14)); break; // a wavy-edged badge
+    case 'blob': { const sd = +s.seed || 1; radial(120, (a) => 0.9 + 0.07 * Math.sin(a * 3 + sd) + 0.04 * Math.sin(a * 5 + sd * 2.3)); break; }
+    case 'cross': { const t = 0.34; poly([[-t, -1], [t, -1], [t, -t], [1, -t], [1, t], [t, t], [t, 1], [-t, 1], [-t, t], [-1, t], [-1, -t], [-t, -t]]); break; }
+    case 'drop': ctx.moveTo(0, -hh); ctx.bezierCurveTo(hw * 0.55, -hh * 0.35, hw, hh * 0.05, hw, hh * 0.35); ctx.bezierCurveTo(hw, hh * 0.9, hw * 0.5, hh, 0, hh); ctx.bezierCurveTo(-hw * 0.5, hh, -hw, hh * 0.9, -hw, hh * 0.35); ctx.bezierCurveTo(-hw, hh * 0.05, -hw * 0.55, -hh * 0.35, 0, -hh); ctx.closePath(); break;
+    case 'leaf': ctx.moveTo(-hw, hh); ctx.quadraticCurveTo(-hw, -hh, hw, -hh); ctx.quadraticCurveTo(hw, hh, -hw, hh); ctx.closePath(); break;
+    case 'bolt': poly([[0.15, -1], [-0.7, 0.15], [-0.05, 0.15], [-0.25, 1], [0.7, -0.2], [0.05, -0.2], [0.35, -1]]); break;
+    case 'moon': { const R = Math.min(hw, hh); ctx.ellipse(0, 0, hw, hh, 0, Math.PI * 0.25, Math.PI * 1.75); ctx.ellipse(hw * 0.38, -hh * 0.12, hw * 0.78, hh * 0.78, 0, Math.PI * 1.65, Math.PI * 0.35, true); ctx.closePath(); break; }
+    case 'wave': { const a = Math.min(hh * 0.25, 10), n = Math.max(2, Math.round(w / 90)), rad = Math.min(r, 10); ctx.moveTo(-hw + rad, -hh); ctx.lineTo(hw - rad, -hh); ctx.arcTo(hw, -hh, hw, -hh + rad, rad); ctx.lineTo(hw, hh - a); for (let i = 0; i <= 48; i++) { const x = hw - (i / 48) * w; ctx.lineTo(x, hh - a + Math.sin((i / 48) * Math.PI * 2 * n) * a); } ctx.lineTo(-hw, -hh + rad); ctx.arcTo(-hw, -hh, -hw + rad, -hh, rad); ctx.closePath(); break; } // a wavy bottom edge
+    default: rr(-hw, -hh, hw, hh, r);
+  }
+}
+/** Draw just a shape (for pickers and previews): centred at x, y. */
+export function drawShapePreview(ctx, shape, x, y) {
+  const e = { x, y, rz: 0, sx: 1, sy: 1, alpha: 1, data: {}, shape };
+  drawEntity2DRaw(ctx, e, {}, 0);
+}
 function drawEntity2D(ctx, e, vars, time) {
   const sh = e.shape, tx = e.text, br = e.bar;
   if (br && (isTok(br.fill) || isTok(br.bg) || isTok(br.border) || isTok(br.labelColor) || isTok(br.trail) || isTok(br.fill2))) { // a bar with theme colours
@@ -3459,7 +3592,8 @@ function drawEntity2DRaw(ctx, e, vars, time) {
   if (s) {
     if (s.shadow) { ctx.shadowColor = s.shadow; ctx.shadowBlur = s.shadowBlur ?? 10; ctx.shadowOffsetX = s.shadowX || 0; ctx.shadowOffsetY = s.shadowY ?? 4; }
     else if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
-    const trace = () => { ctx.beginPath();
+    let P2 = null; // (a custom shape is a Path2D)
+    const trace = () => { ctx.beginPath(); P2 = null;
     switch (s.type) {
       case 'circle': ctx.arc(0, 0, s.r, 0, Math.PI * 2); break;
       case 'triangle': ctx.moveTo(0, -s.h / 2); ctx.lineTo(s.w / 2, s.h / 2); ctx.lineTo(-s.w / 2, s.h / 2); ctx.closePath(); break;
@@ -3489,6 +3623,9 @@ function drawEntity2DRaw(ctx, e, vars, time) {
       case 'cloud':
         for (const [cx, cy, cr] of [[-0.25, 0.1, 0.25], [0, -0.1, 0.32], [0.27, 0.08, 0.24], [0, 0.18, 0.22]]) { ctx.moveTo(cx * s.w + cr * s.w, cy * s.h); ctx.arc(cx * s.w, cy * s.h, cr * s.w, 0, Math.PI * 2); }
         break;
+      case 'path': { const P = shapePath2D(s); if (P) P2 = P; else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h); break; } // your own shape (an SVG path)
+      case 'bubble': case 'ticket': case 'tag': case 'ribbon': case 'bookmark': case 'shield': case 'squircle': case 'slanted': case 'cut': case 'chevron':
+      case 'burst': case 'scallop': case 'blob': case 'cross': case 'drop': case 'leaf': case 'bolt': case 'moon': case 'wave': traceExtraShape(ctx, s); break;
       case 'emoji': break;
       default: {
         const R = cornerRadii(s);
@@ -3505,10 +3642,10 @@ function drawEntity2DRaw(ctx, e, vars, time) {
     } else {
       const bw = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.w, bh = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.h;
       const rule = s.type === 'ring' ? 'evenodd' : 'nonzero';
-      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); ctx.fill(rule); }
+      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); (P2 ? ctx.fill(P2, rule) : ctx.fill(rule)); }
       if (s.shadow) { ctx.shadowColor = 'transparent'; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; } // shadow under the fill only
       if (s.pattern && s.pattern !== 'none') { // dots, stripes, a grid or checks over the fill
-        const g = Math.max(4, +s.patternSize || 12); ctx.save(); ctx.clip(rule); ctx.fillStyle = s.patternColor || 'rgba(255,255,255,0.14)'; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = Math.max(1, g / 8);
+        const g = Math.max(4, +s.patternSize || 12); ctx.save(); (P2 ? ctx.clip(P2, rule) : ctx.clip(rule)); ctx.fillStyle = s.patternColor || 'rgba(255,255,255,0.14)'; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = Math.max(1, g / 8);
         const x0 = -bw / 2, y0 = -bh / 2;
         if (s.pattern === 'dots') { for (let yy = y0 + g / 2; yy < y0 + bh + g; yy += g) for (let xx = x0 + g / 2; xx < x0 + bw + g; xx += g) { ctx.beginPath(); ctx.arc(xx, yy, g * 0.16, 0, Math.PI * 2); ctx.fill(); } }
         else if (s.pattern === 'stripes') { ctx.lineWidth = g / 3; ctx.beginPath(); for (let k = -bh; k < bw + bh; k += g) { ctx.moveTo(x0 + k, y0); ctx.lineTo(x0 + k - bh, y0 + bh); } ctx.stroke(); }
@@ -3517,15 +3654,15 @@ function drawEntity2DRaw(ctx, e, vars, time) {
         ctx.restore(); trace();
       }
       if (s.inner) { // an inner shadow: pressed in, or soft (neumorphic)
-        const ib = s.innerBlur ?? 12, far = 4000; ctx.save(); ctx.clip(rule);
+        const ib = s.innerBlur ?? 12, far = 4000; ctx.save(); (P2 ? ctx.clip(P2, rule) : ctx.clip(rule));
         const M = ctx.getTransform(), k = Math.hypot(M.a, M.b) || 1; // (shadow offsets are in screen pixels, not in the shape's units)
         ctx.shadowColor = s.inner; ctx.shadowBlur = ib * k; ctx.shadowOffsetX = far * M.a + (+s.innerX || 0) * k; ctx.shadowOffsetY = far * M.b + (s.innerY ?? 4) * k;
-        ctx.translate(-far, 0); trace(); ctx.lineWidth = ib * 2 + 8; ctx.strokeStyle = '#000'; ctx.stroke(); // (the line is drawn far away: only its shadow lands inside)
+        ctx.translate(-far, 0); trace(); ctx.lineWidth = ib * 2 + 8; ctx.strokeStyle = '#000'; (P2 ? ctx.stroke(P2) : ctx.stroke()); // (the line is drawn far away: only its shadow lands inside)
         ctx.restore(); trace();
       }
       if (s.stroke) {
         if (s.dash) ctx.setLineDash([s.dash, s.dash * 0.75]);
-        ctx.strokeStyle = s.stroke2 ? paintOf(ctx, s.stroke, s.stroke2, s.strokeDir || 'diagonal', bw, bh) : s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); // (a gradient border too)
+        ctx.strokeStyle = s.stroke2 ? paintOf(ctx, s.stroke, s.stroke2, s.strokeDir || 'diagonal', bw, bh) : s.stroke; ctx.lineWidth = s.lineWidth; P2 ? ctx.stroke(P2) : ctx.stroke(); // (a gradient border too)
         if (s.dash) ctx.setLineDash([]);
       }
     }
@@ -6910,9 +7047,22 @@ registerBehavior('navItem', {
 
 /** A white UI icon recoloured (cached per colour and size). Emoji and other text draw as text. */
 const tintCache = new Map();
+/** Your own icons (Game Settings customIcons: { name, data }) and font files (customFonts), used as my:Name and by name. */
+const CUSTOM_ICONS = new Map(), loadedFontFiles = new Set();
+export function useCustomAssets(settings) {
+  CUSTOM_ICONS.clear(); for (const c of settings?.customIcons || []) if (c?.name && c.data) CUSTOM_ICONS.set(c.name, c.data);
+  if (typeof FontFace === 'undefined' || typeof document === 'undefined') return;
+  for (const f of settings?.customFonts || []) {
+    if (!f?.name || !f.data) continue; const key = f.name + ':' + f.data.length; if (loadedFontFiles.has(key)) continue; loadedFontFiles.add(key);
+    try { new FontFace(f.name, `url(${f.data})`).load().then((ff) => document.fonts.add(ff)).catch(() => {}); } catch { /* not a font file */ }
+  }
+}
+/** Icon names that are also game sprites, where the line icon is meant (the older ones keep drawing the sprite, as they always did). */
+const UI_FIRST = new Set(['key', 'shield', 'fire', 'drop', 'flag', 'potion', 'sword', 'crown', 'rocket', 'cloud', 'leaf', 'skull']);
 function drawNavIcon(ctx, icon, x, y, size, color, alpha = 1) {
+  if (typeof icon === 'string' && icon.startsWith('my:')) icon = CUSTOM_ICONS.get(icon.slice(3)) || 'star'; // one of your own icons
   if (!icon) return;
-  const src = /^(art:|data:|https?:)/.test(icon) ? icon : /^ui-|^[a-z][a-zA-Z-]+$/.test(icon) ? 'art:' + (icon.startsWith('ui-') || SPRITE_ART[icon] ? icon : 'ui-' + icon) : null;
+  const src = /^(art:|data:|https?:|blob:)/.test(icon) ? icon : /^ui-|^[a-z][a-zA-Z-]+$/.test(icon) ? 'art:' + (icon.startsWith('ui-') || (SPRITE_ART[icon] && !UI_FIRST.has(icon)) ? icon : 'ui-' + icon) : null;
   ctx.globalAlpha *= alpha;
   if (!src) { ctx.font = `${Math.round(size)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = color; ctx.fillText(icon, x, y + size * 0.05); ctx.globalAlpha /= alpha; return; }
   const img = loadImage(src); if (!img.complete || !img.naturalWidth) { ctx.globalAlpha /= alpha; return; }
@@ -7709,7 +7859,7 @@ registerBehavior('uiSideBar', {
           ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 ${tsz0}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle && !centred ? 10 : 0), maxW);
           if (p.subtitle) { ctx.globalAlpha *= 0.75; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, centred ? ty + tsz0 / 2 + 12 : ty + 12, maxW); ctx.globalAlpha /= 0.75; }
           y = bleed ? hR + hh + hS + 10 + (full() ? 6 : 10) : cardH ? hy + hH + 12 : y + hh - (full() ? 0 : 6); // the list starts clear of the header
-        } else y += compact ? 8 : 4;
+        } else y += compact ? 8 : p.closeButton !== false && !tb && (full() || !rail()) ? 44 : 4; // (no header: leave room for the ✕)
         if (p.closeButton !== false && !compact && !tb && (full() || !rail())) { const bx = closeAt ? closeAt.x : full() ? x + w - 34 : x + w - 28, by = closeAt ? closeAt.y : R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
         // items
         const gapV = compact ? 0 : Math.max(0, +p.itemGap || 0) + (sty === 'cards' ? 8 : sty === 'pills' ? 6 : 0), boxedSty = sty === 'pills' || sty === 'cards';
@@ -18303,7 +18453,7 @@ export class Engine {
       if (saved?.vars) { Object.assign(scene.vars, saved.vars); scene.restoreInv(); }
     }
     this.useRenderer(scene.mode);
-    loadFonts(scene.settings.fonts);
+    loadFonts(scene.settings.fonts); useCustomAssets(scene.settings);
     scene.on('message', (m, d) => { // notifications: notify:type always; plain "notify" unless a Notifications component handles it
       if (typeof m !== 'string' || !m.startsWith('notify')) return;
       if (!m.startsWith('notify:') && scene.entities.some((q) => !q.dead && q.getBehavior?.('uiNotifications'))) return;

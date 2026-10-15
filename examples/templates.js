@@ -163,21 +163,23 @@ function blankApp() {
 /** A social app: a timeline with stories and a post box, a photo feed, a friends feed of cards, and a profile with a photo grid. */
 function socialApp() {
   const A = '#1d9bf0', t = Date.now(), H = 3600e3;
-  const feed = (id, look, top) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
-    behaviors: [{ type: 'uiFeed', collection: 'Posts', look, searchVar: 'q', card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
+  const feed = (id, look, top, o = {}) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
+    behaviors: [{ type: 'uiFeed', collection: 'Posts', look, ...o, card: '@card', text: INK, sub: MUTED, line: '@line', accent: '@accent' }] });
   return {
     version: 1, name: 'Social', mode: '2d', background: '@bg', view: { width: 400, height: 700 }, gravity: 0, settings: appSettings('Social', A),
     vars: { page: 'home', playerName: 'Alex Rivera', playerHandle: 'alex', followers: 1280, following: 0, chat: '', chatTitle: 'Chat', unread: 0, q: '' },
     collections: [{ name: 'Posts', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' },
       { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Comments', type: 'number' }, { name: 'Reposts', type: 'number' }, { name: 'Reposted', type: 'yes/no' }, { name: 'Saved', type: 'yes/no' }, { name: 'Verified', type: 'yes/no' },
       { name: 'Location', type: 'text' }, { name: 'Poll', type: 'text' }, { name: 'Votes', type: 'text' }, { name: 'Voted', type: 'number' }, { name: 'Reaction', type: 'text' }, { name: 'Following', type: 'yes/no' },
-      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }, { name: 'Quote', type: 'text' }],
+      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }, { name: 'Quote', type: 'text' }, { name: 'Reply To', type: 'text' }],
     rows: [
       { author: 'Maya Chen', handle: 'maya', text: 'Sunrise hike, worth the 5am alarm. #sunrise #hiking', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, comments: 48, reposts: 120, verified: true, following: true, views: 48200, location: 'Banff', top_comment: 'Leo Park: Unreal colours!', _at: t - 0.15 * H },
       { author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', likes: 312, liked: true, comments: 27, reposts: 41, following: true, poll: 'Dark mode | Faster sync | Fewer bugs', votes: '64, 21, 33', _at: t - 2.5 * H },
       { author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝 #pastanight', media: '🍝', color: '#ff7a45', likes: 958, comments: 63, reposts: 12, following: true, reposted_by: 'Maya Chen', _at: t - 26 * H },
       { author: 'Amir Haddad', handle: 'amir', text: 'Practising a new song for Friday. Who is coming? 🎸 #music', media: '🎸', color: '#10b981', likes: 141, comments: 19, reposts: 3, live: true, following: false, _at: t - 40 * H },
       { author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month. #comet #space', likes: 5420, comments: 410, reposts: 1900, verified: true, following: true, link: 'https://example.com/comet', link_title: 'A new comet is coming', link_image: '☄️', _at: t - 72 * H },
+      { author: 'Leo Park', handle: 'leop', text: 'Also: the app is now 30% smaller to download 📦', likes: 88, comments: 4, reposts: 6, following: true, reply_to: 's1', _at: t - 2.45 * H },
+      { author: 'Leo Park', handle: 'leop', text: 'Full list of changes on the blog 👇 #indiedev', likes: 51, comments: 2, reposts: 3, following: true, reply_to: 's5', link: 'https://example.com/changelog', link_title: 'What’s new in 2.0', link_image: '📝', _at: t - 2.4 * H },
       { author: 'Ava Brooks', handle: 'avab', text: 'Adding this to my list of places to see 😍 #hiking', likes: 64, comments: 5, reposts: 2, following: false, quote: 's0', _at: t - 30 * H },
     ] },
     { name: 'Messages', fields: [{ name: 'Chat', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Reaction', type: 'text' }],
@@ -191,16 +193,16 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }], rows: [] }],
     entities: [
-      app.bar('home = Home\nphotos = Photos\nexplore = Explore\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A),
+      app.bar('home = Home\nreels = Reels\nexplore = Explore\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
-        feed('feed-home', 'timeline', 156),
+        feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following = yes', tabStyle: 'underline' }),
       ]),
-      ...app.page('p-photos', 'photos', false, [feed('feed-photos', 'photos', 0)]),
+      ...app.page('p-reels', 'reels', false, [feed('feed-reels', 'reels', 0)]),
       ...app.page('p-explore', 'explore', false, [
-        { id: 'who-follow', name: 'Who To Follow', ui: true, anchor: 'top', x: 0, y: 125, stretch: 'width', margin: 12, shape: { type: 'rect', w: 376, h: 250, radius: 16, fill: '' }, behaviors: [{ type: 'uiWhoToFollow', collection: 'Posts', bg: '@card', text: INK, sub: MUTED }] },
-        { id: 'trending', name: 'Trending', ui: true, anchor: 'top', x: 0, y: 440, stretch: 'width', margin: 12, shape: { type: 'rect', w: 376, h: 360, radius: 16, fill: '' }, behaviors: [{ type: 'uiTrending', collection: 'Posts', days: 0, searchVar: 'q', openPage: 'home', bg: '@card', text: INK, sub: MUTED }] },
+        { id: 'explore-search', name: 'Search Bar', ui: true, anchor: 'top', x: 0, y: 26, stretch: 'width', margin: 12, shape: { type: 'rect', w: 376, h: 44, radius: 22, fill: '' }, behaviors: [{ type: 'uiSearchBar', var: 'q', placeholder: 'Search posts, #tags, @people', collection: 'Posts', text: INK, sub: MUTED }] },
+        feed('feed-explore', 'grid', 60, { searchVar: 'q', gridColumns: 3 }),
       ]),
       ...app.page('p-inbox', 'inbox', false, [{ id: 'inbox', name: 'Inbox', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiInbox', collection: 'Messages', openPage: 'chat', text: INK, sub: MUTED }] }]),
       ...app.page('p-chat', 'chat', false, [{ id: 'chat-view', name: 'Chat', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiChat', collection: 'Messages', room: 'general', text: INK, sub: MUTED }] }]),
@@ -215,7 +217,7 @@ function socialApp() {
         app.text('pp-meta', 'Post Counts', '❤️ {record_likes}   💬 {record_comments}   🔁 {record_reposts}', 200, { size: 15, color: MUTED, weight: '700' }),
       ]),
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
-        behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nPhotos | image | photos\nExplore | search | explore\nMessages | chat | inbox | unread\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
+        behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nReels | video | reels\nMessages | chat | inbox | unread\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],
   };
 }

@@ -276,6 +276,12 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **New Post composer:** a character ring, up to 4 photos, polls, a place and drafts.
 - **Quote posts** from the repost button, shown as cards in the feed and opened posts.
 - **Videos** in posts.
+- **More feed looks:** **Grid** (an explore grid), **Reels** (one post per screen, swipe, videos play) and **Magazine**.
+- **Media:** videos play muted in feeds and GIFs animate. Post photos, GIFs (files or links) and videos, uploaded to a **Supabase Storage** media bucket when you set one.
+- **Threads:** replies (`reply_to`) sit under their post with a connecting line. Write a thread in the composer (🧵), or add to one from your post's ⋯ menu.
+- **Search Bar** with recent searches, trending tags, people and filters. Feeds understand `#tag`, `@person`, `has:photo/video/gif/poll/link` and multi-word searches.
+- **Edit your comments** (marked *edited*), and edit posts from the opened post too.
+- The **Social** template has For you / Following tabs, an Explore page (search + grid) and a Reels tab.
 - **Messaging:**
   - **Chat** (bubbles, avatars, times, big emoji, photos, double-tap ❤️, Sent / Sending…);
   - **Inbox** (conversations, unread counts and a `{unread}` badge);

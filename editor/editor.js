@@ -7519,6 +7519,7 @@ function pageCard(j, b, i, threeD, C, menu) {
     C(`behaviors.${i}.whenUnset`, { label: 'The app opens on this page', type: 'bool', def: false }),
     bar ? h('div', { class: 'row' }, h('label', {}, 'Title in the App Bar'), h('input', { type: 'text', value: titleOf(), placeholder: val, oninput: (e) => setTitle(e.target.value) })) : null,
     navs.length && !inTab ? h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const nm = (j.name || val).replace(/ Page$/, ''); for (const n of navs) n.tabs = navTabsText([...navTabs(n), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } }, icon('plus'), 'Add to the bottom bar')) : null,
+    P('stack', { structure: true }), P('stackGap'), P('stackTop'),
     fold('page:content', 'What’s on this page', [pageContent(j)], true),
     fold('page:look', 'Look', [
       C('shape.fill', { label: 'Background', type: 'color' }),
@@ -7556,7 +7557,7 @@ function newPage(from, o = {}) {
   } else {
     const app = !!levelList()[0].settings?.app;
     top = { id: uid(), name: name + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: app ? '@bg' : 'rgba(16,18,28,0.96)' },
-      behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: val, whenUnset: false, anim: app ? 'push (iOS, follows navigation)' : 'slide (follows navigation)', stagger: 'rise one after another', scroll: true }] };
+      behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: val, whenUnset: false, anim: app ? 'push (iOS, follows navigation)' : 'slide (follows navigation)', stagger: 'rise one after another', scroll: true, stack: true, stackGap: 16 }] }; // (what you put on it lines up by itself)
     project.entities.push(top, { id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
   }
   for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
@@ -7801,6 +7802,7 @@ function renamePage(pg) {
 }
 // ---- Content on a page: blocks that stack under what's there (or under the selected one), rows you can reorder ----
 const PAGE_GAP = 16;
+const PAGE_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiDataList', 'uiPhotoGrid']); // long lists: on a page they fill the room under the rest
 const PAGE_SKIP = new Set(['uiShowIf', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiPopup', 'uiSheet', 'uiNotifications', 'uiScreenFX', 'uiTutorial', 'uiOffscreen', 'uiCrosshair']); // bars, pop-ups and screen effects aren't page content
 /** The page shown in the UI editor (or the one the selected object is on). */
 function shownPageEnt() {
@@ -7870,6 +7872,10 @@ function adoptIntoPage(j, before) {
   const k = (before && pageOf(before)) || (uiMode && curPage()), pg = k && k !== 'all' ? pageEnt(k) : null; if (!pg || pg.id === j.id) return; // the page you're working on: the selected thing's, or the one shown in the UI editor
   if ((j.behaviors || []).some((b) => PAGE_SKIP.has(b.type))) return;
   j.parent = pg.id;
+  if ((j.behaviors || []).some((b) => PAGE_FILLERS.has(b.type)) && j.stretch !== 'both') { // a feed, chat or list: it fills the page under what is already there
+    const rows = pageRows(pg, new Set([j.id])); j.anchor = 'center'; j.x = 0; j.y = 0; j.stretch = 'both'; j.margin = 0; j.marginBottom = 0; j.marginTop = rows.length ? Math.round(rows[rows.length - 1].bot + PAGE_GAP / 2) : 0;
+    toast(`Added ${j.name} to the “${showIfOf(pg).value}” page: it fills the room under what’s there`); return true;
+  }
   if (j.stretch === 'both' || /^bottom/.test(j.anchor || '')) { toast(`Added ${j.name} to the “${showIfOf(pg).value}” page`); return true; } // fills the page, or sits at its bottom (a + button)
   if (!/^top/.test(j.anchor || 'center')) { j.anchor = 'top'; j.x = 0; }
   placeOnPage(pg, [j], before);

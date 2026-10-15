@@ -2523,6 +2523,12 @@ function control(target, path, spec) {
         } }, NAV_STYLE_THUMBS[v] ? h('img', { src: NAV_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l + (v === 'raised center' && n % 2 === 0 ? ' (odd tabs)' : '')))));
         label.textContent = 'Style'; break;
       }
+      if (/\.position$/.test(path) && getPath(target(), path.replace(/\.position$/, '.type')) === 'uiBottomNav') { // Bottom Nav: at the bottom, or along the top (the object moves too)
+        el = h('div', { class: 'seg' }, opts.map(([v, l]) => h('button', { type: 'button', class: v === (val || 'bottom') ? 'on' : '', onclick: () => {
+          set(v); const j = target(); if (j && !ent(j.parent)?.ui) { const hh = j.shape?.h || 64; j.anchor = v === 'top' ? 'top' : 'bottom'; j.y = v === 'top' ? hh / 2 : -hh / 2; if (v === 'top' && (j.name || '').startsWith('Bottom Nav')) j.name = j.name.replace('Bottom Nav', 'Top Nav'); else if (v === 'bottom' && (j.name || '').startsWith('Top Nav')) j.name = j.name.replace('Top Nav', 'Bottom Nav'); }
+          buzz(4); changed({ structure: true }); renderInspector(); } }, l.charAt(0).toUpperCase() + l.slice(1))));
+        break;
+      }
       if (/\.style$/.test(path) && getPath(target(), path.replace(/\.style$/, '.type')) === 'uiSideBar') { // Side Menu: pick a style by its picture
         el = h('div', { class: 'nav-styles side-styles' }, opts.map(([v, l]) => h('button', { type: 'button', class: 'ns' + (v === val ? ' on' : ''), title: l, onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); buzz(4); renderInspector(); } },
           SIDE_STYLE_THUMBS[v] ? h('img', { src: SIDE_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l))));

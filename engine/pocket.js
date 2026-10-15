@@ -6953,7 +6953,9 @@ registerBehavior('uiBottomNav', {
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
     { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
+    { key: 'position', label: 'Position', type: 'select', options: ['bottom', 'top'], default: 'bottom', info: { bottom: 'Along the bottom of the screen (a tab bar).', top: 'Along the top of the screen (top tabs). Under an App Bar if there is one; pages start below it.' } },
     { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
+    { key: 'showIcons', label: 'Show icons', type: 'bool', default: true, info: 'Off: just the names, like the tabs at the top of many apps (Posts · Photos · Saved).' },
     { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
     { key: 'barOpacity', label: 'Background see-through (1 = solid, 0 = clear)', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Background', info: 'How much of the page shows through the bar. With a see-through bar the pages run underneath it.' },
     { key: 'barBlur', label: 'Blur what is behind (frosted glass)', type: 'number', default: 0, range: [0, 30], step: 1, group: 'Background', info: 'Blurs the page and the game behind the bar, like iOS. Works best with a see-through bar.' },
@@ -7030,7 +7032,13 @@ registerBehavior('uiBottomNav', {
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
     const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
-    const sizeBar = (e) => { const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
+    const isTop = () => p.position === 'top', noIc = () => p.showIcons === false;
+    const sizeBar = (e) => {
+      if (isTop() && !e.parentEnt?.ui) { e.anchor = 'top'; const hh = +p.height > 0 && e.shape ? (e.shape.h = +p.height) : e.extents().hy * 2; e.y = hh / 2; if (e.local) e.local.y = e.y; return; } // top tabs: hang down from the top edge
+      const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
+    /** Top tabs sit under an App Bar: how far down (screen pixels). */
+    const belowAppBar = (e, s) => { if (!isTop() || e.parentEnt?.ui) return 0; let d = 0; for (const q of s.entities) { if (q === e || !q.ui || q.dead || !q.visible || q._parentHidden) continue; for (const b of q.behaviors) if (b.type === 'uiAppBar' && b.dock) { const r = b.dock(q, s); if (r?.edge === 'top') d = Math.max(d, r.size); } } return d; };
+    const placeTop = (e, s) => { const d = belowAppBar(e, s); if (d > 0) e._push = { x: 0, y: d }; else if (e._push && isTop()) delete e._push; };
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
     const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || pagesHiding(s).some((v) => sameVal(s.vars[p.var], v)) || s.barsHidden > 0 || !!s.navBarsOff;
@@ -7043,7 +7051,7 @@ registerBehavior('uiBottomNav', {
     const floatingStyle = () => ['floating', 'glass', 'segmented', 'dock'].includes(p.style);
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
       const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
-      const cp = p.style === 'chips' ? 6 : 0, bw = w - m * 2 - cp * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? e.y + h / 2 - m - bh : e.y - h / 2;
+      const cp = p.style === 'chips' ? 6 : 0, bw = w - m * 2 - cp * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? (isTop() ? e.y - h / 2 + m : e.y + h / 2 - m - bh) : e.y - h / 2;
       const n = Math.max(1, T.length), tw = bw / n, ws = (p.style === 'bubble' || p.style === 'chips') && W8 && W8.length === n ? W8.map((f) => f * bw) : null; // bubble: the selected tab is wider (room for its name)
       const left = (i) => { if (!ws) return bx + tw * i; let x = bx; for (let j = 0; j < i; j++) x += ws[j]; return x; };
       return { w, h, bx, by, bw, bh, tw, n, cx: (i) => left(i) + (ws ? ws[i] : tw) / 2, tws: (i) => (ws ? ws[i] ?? tw : tw), at: (lx) => { if (!ws) return Math.floor((lx - bx) / tw); for (let j = 0; j < n; j++) if (lx < left(j + 1)) return lx < bx ? -1 : j; return n; }, cy: by + bh / 2 };
@@ -7054,6 +7062,7 @@ registerBehavior('uiBottomNav', {
       pageLabel(page, v) { if (v !== p.var) return null; const t = T.find((q) => q.page != null && sameVal(q.page, page)); return t ? t.label : null; },
       /** The bar holds the bottom (or top) of the screen: other UI is laid out above it. */
       dock(e, s) {
+        placeTop(e, s); // (under an App Bar first, so the space it holds is right this frame)
         if (p.reserve === false || hide > 0.99) return null;
         const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe), top = o.y + G.by * K, bot = o.y + (G.by + G.bh) * K;
         const U = under(s);
@@ -7061,14 +7070,14 @@ registerBehavior('uiBottomNav', {
         return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide), under: U };
       },
       start(e, s) {
-        T = tabs(); BH.start(s, e); sizeBar(e);
+        T = tabs(); BH.start(s, e); sizeBar(e); placeTop(e, s);
         const saved = p.remember && !s.engine.editing ? store.get(memKey(s), '') : '', si = saved ? T.findIndex((t) => t.page != null && String(t.page) === saved) : -1;
         const i = si >= 0 ? si : clamp(Math.round(+p.start || 1) - 1, 0, T.length - 1);
         if (T[i] && (si >= 0 || s.vars[p.var] == null || s.vars[p.var] === '' || s.vars[p.var] === 0)) s.setVar(p.var, T[i].page);
       },
       update(e, dt, s) {
         const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
-        sizeBar(e);
+        sizeBar(e); placeTop(e, s);
         hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
@@ -7119,16 +7128,22 @@ registerBehavior('uiBottomNav', {
       },
       drawUI(ctx, e, s) {
         if (!T.length) T = tabs();
-        if (s.engine.editing) sizeBar(e);
+        if (s.engine.editing) { sizeBar(e); placeTop(e, s); }
         const G = geo(e), a = activeIdx(s), st = p.style, act = p.activeColor || '#4fa3ff', idle = p.idleColor || '#8b90a5', indC = p.indicatorColor || (T[a]?.color ? tok(T[a].color) : act); // (a tab with its own colour lights up in it)
         if (a >= 0 && (ind == null || s.engine.editing)) ind = G.cx(a); // (in the editor nothing animates: the indicator sits on the selected tab)
         if (hide > 0.99) return;
-        BH.apply(ctx, hide, G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
-        const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = (s.engine.safe?.bottom || 0) / uiK(s.engine.safe);
+        const top = isTop(), safeT = top ? ((s.engine.safe?.top || 0) + (e._push?.y || 0)) / uiK(s.engine.safe) : 0; // (top tabs: the notch area, and an App Bar, above them)
+        BH.apply(ctx, hide, top ? -(G.bh + 40 + safeT) : G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
+        const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = top ? 0 : (s.engine.safe?.bottom || 0) / uiK(s.engine.safe), safeUp = top && !e._push?.y ? (s.engine.safe?.top || 0) / uiK(s.engine.safe) : 0;
+        const edgeY = top ? G.by + G.bh : G.by, inY = (d) => (top ? G.by + G.bh - d : G.by + d); // the edge facing the page; d in from the outer edge
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
         const notchR = (+p.iconSize || 24) * 0.95 + 8, nx = a >= 0 && ind != null ? (p.anim === 'slide' ? ind : G.cx(a)) : null;
         const barPath = (x, y, w, h, r) => { // the curved style's bar has a notch where the selected circle sits
           if (st !== 'curved' || nx == null) return rr(x, y, w, h, r);
+          if (top) { ctx.save(); ctx.translate(0, y * 2 + h); ctx.scale(1, -1); barPath0(x, y, w, h, r); ctx.restore(); return; } // (upside down: the notch faces the page)
+          barPath0(x, y, w, h, r);
+        };
+        const barPath0 = (x, y, w, h, r) => {
           const R = notchR, d = R * 0.92; r = Math.min(r, h / 2);
           ctx.beginPath(); ctx.moveTo(x + r, y);
           ctx.lineTo(Math.max(x + r, nx - R * 1.55), y);
@@ -7142,22 +7157,22 @@ registerBehavior('uiBottomNav', {
         if ((fl || st === 'minimal' || st === 'curved') && !e.parentEnt?.ui && !under(s)) {
           const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === p.var && sameVal(s.vars[p.var], b.params?.value)));
           const fill = pg ? tok(pg.shape.fill) : tok(s.background || '') || THEME.bg || '';
-          if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; ctx.fillRect(e.x - G.w / 2, G.by - (st === 'minimal' ? 0 : 8), G.w, G.h + safeB + 8); ctx.restore(); }
+          if (fill && !/^rgba\([^)]*,\s*0\)$/.test(fill)) { ctx.save(); ctx.fillStyle = fill; if (top) ctx.fillRect(e.x - G.w / 2, e.y - G.h / 2 - safeUp, G.w, G.h + safeUp + 8); else ctx.fillRect(e.x - G.w / 2, G.by - (st === 'minimal' ? 0 : 8), G.w, G.h + safeB + 8); ctx.restore(); }
         }
         // the bar
         if (st !== 'minimal') {
-          if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : -2; }
-          const hp = here(s), bc = hp?.color ? tok(hp.color) : p.barColor || '#12141f', bh2 = G.bh + (!fl && p.fillSafe !== false ? safeB : 0), op = opacity(s);
-          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.shadowColor = 'transparent'; barPath(G.bx, G.by, G.bw, bh2, rad); ctx.clip(); blurBehind(ctx, e, s, G.bx, G.by, G.bw, bh2, blurOf(s)); ctx.restore(); } // frosted glass
+          if (p.shadow !== false) { ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = fl ? 22 : 14; ctx.shadowOffsetY = fl ? 6 : top ? 2 : -2; }
+          const hp = here(s), bc = hp?.color ? tok(hp.color) : p.barColor || '#12141f', up = !fl && p.fillSafe !== false ? safeUp : 0, bh2 = G.bh + (!fl && p.fillSafe !== false ? safeB : 0) + up, by2 = G.by - up, op = opacity(s);
+          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.shadowColor = 'transparent'; barPath(G.bx, by2, G.bw, bh2, rad); ctx.clip(); blurBehind(ctx, e, s, G.bx, by2, G.bw, bh2, blurOf(s)); ctx.restore(); } // frosted glass
           let paint = st === 'glass' && /^#[0-9a-f]{3,8}$/i.test(bc) ? withAlpha(bc, 0.72) : bc; // glass: the bar's colour, see-through
           if (p.barColor2 && st !== 'glass') { const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, bc); g.addColorStop(1, tok(p.barColor2)); paint = g; }
           ctx.fillStyle = paint;
           const ba = ctx.globalAlpha; ctx.globalAlpha *= op; if (op < 0.6) ctx.shadowColor = 'transparent'; // (no shadow under a nearly clear bar)
-          barPath(G.bx, G.by, G.bw, bh2, rad); ctx.fill(); ctx.globalAlpha = ba;
+          barPath(G.bx, by2, G.bw, bh2, rad); ctx.fill(); ctx.globalAlpha = ba;
           ctx.shadowColor = 'transparent';
           if (st === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1.2; ctx.stroke(); ctx.save(); ctx.clip(); const g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, 'rgba(255,255,255,0.16)'); g.addColorStop(0.5, 'rgba(255,255,255,0)'); ctx.fillStyle = g; ctx.fillRect(G.bx, G.by, G.bw, G.bh); ctx.restore(); } // a glassy sheen
-          else if (st === 'neon') { ctx.strokeStyle = withAlpha(indC, 0.35); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
-          else if (p.border !== false && !fl && st !== 'curved') { ctx.strokeStyle = tok(p.lineColor) || 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, G.by + 0.5); ctx.lineTo(G.bx + G.bw - rad, G.by + 0.5); ctx.stroke(); }
+          else if (st === 'neon') { ctx.strokeStyle = withAlpha(indC, 0.35); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, edgeY + (top ? -0.5 : 0.5)); ctx.lineTo(G.bx + G.bw - rad, edgeY + (top ? -0.5 : 0.5)); ctx.stroke(); }
+          else if (p.border !== false && !fl && st !== 'curved') { ctx.strokeStyle = tok(p.lineColor) || 'rgba(255,255,255,0.08)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(G.bx + rad, edgeY + (top ? -0.5 : 0.5)); ctx.lineTo(G.bx + G.bw - rad, edgeY + (top ? -0.5 : 0.5)); ctx.stroke(); } // (the line is on the side facing the page)
         }
         const isz = +p.iconSize || 24, lsz = +p.labelSize || 11, raisedIdx = st === 'raised center' && G.n % 2 === 1 ? (G.n - 1) / 2 : -1;
         if (st === 'chips') T.forEach((t, i) => { if (i === a) return; const ch = Math.min(G.bh - 18, 40); ctx.save(); ctx.fillStyle = withAlpha(idle, 0.13); rr(G.cx(i) - G.tws(i) / 2 + 5, G.cy - ch / 2, G.tws(i) - 10, ch, ch / 2); ctx.fill(); ctx.restore(); });
@@ -7166,18 +7181,18 @@ registerBehavior('uiBottomNav', {
           const x = p.anim === 'slide' ? ind : G.cx(a);
           ctx.save(); if (p.anim === 'fade') ctx.globalAlpha *= fade;
           ctx.fillStyle = indC;
-          const labelOn = showLabel(a, true), iy = labelOn && st !== 'bubble' ? G.cy - lsz * 0.85 : G.cy;
+          const labelOn = showLabel(a, true), iy = labelOn && st !== 'bubble' && !noIc() ? G.cy - lsz * 0.85 : G.cy;
           if (st === 'pill' || st === 'floating' || st === 'glass') { const ph = labelOn ? isz * 1.28 : isz * 1.5; ctx.globalAlpha *= st === 'glass' ? 0.35 : 0.22; rr(x - isz * 1.35, iy - ph / 2, isz * 2.7, ph, isz); ctx.fill(); }
-          else if (st === 'underline') { rr(x - G.tws(a) * 0.25, G.by, G.tws(a) * 0.5, 3, 2); ctx.fill(); }
-          else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'underline') { const uw = top ? G.tws(a) * (noIc() ? 0.8 : 0.6) : G.tws(a) * 0.5; rr(x - uw / 2, top ? edgeY - 3 : G.by, uw, 3, 2); ctx.fill(); } // (top tabs: a wider line along the bottom, like most apps)
+          else if (st === 'dot') { ctx.beginPath(); ctx.arc(x, top ? G.by + G.bh - 6 : G.by + G.bh - 7, 3, 0, Math.PI * 2); ctx.fill(); }
           else if (st === 'bubble') { ctx.font = `700 ${lsz + 2}px ${THEME.font}`; const lw = showLabel(a, true) ? ctx.measureText(T[a].label).width + 8 : 0, bw = Math.min(G.tws(a) - 6, isz + lw + 28); ctx.globalAlpha *= 0.2; rr(x - bw / 2, G.cy - isz * 0.85, bw, isz * 1.7, isz); ctx.fill(); }
           else if (st === 'classic') { ctx.globalAlpha *= 0.12; rr(x - G.tws(a) / 2 + 4, G.by + 4, G.tws(a) - 8, G.bh - 8, 12); ctx.fill(); }
           else if (st === 'segmented') { const ih = G.bh - 12; ctx.shadowColor = withAlpha(indC, 0.45); ctx.shadowBlur = 10; ctx.shadowOffsetY = 2; rr(x - G.tws(a) / 2 + 6, G.by + 6, G.tws(a) - 12, ih, ih / 2); ctx.fill(); }
-          else if (st === 'curved') { ctx.shadowColor = withAlpha(indC, 0.5); ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.beginPath(); ctx.arc(x, G.by + 2, notchR - 6, 0, Math.PI * 2); ctx.fill(); }
-          else if (st === 'neon') { const w = G.tws(a) * 0.5; ctx.shadowColor = indC; ctx.shadowBlur = glowK; rr(x - w / 2, G.by, w, 3, 2); ctx.fill(); ctx.fill(); }
-          else if (st === 'spotlight') { const w = G.tws(a) * 0.42, W2 = G.tws(a) * 0.9, g = ctx.createLinearGradient(0, G.by, 0, G.by + G.bh); g.addColorStop(0, withAlpha(indC, 0.42)); g.addColorStop(1, withAlpha(indC, 0)); ctx.fillStyle = g;
-            ctx.beginPath(); ctx.moveTo(x - w / 2, G.by); ctx.lineTo(x + w / 2, G.by); ctx.lineTo(x + W2 / 2, G.by + G.bh); ctx.lineTo(x - W2 / 2, G.by + G.bh); ctx.closePath(); ctx.fill();
-            ctx.fillStyle = indC; ctx.shadowColor = indC; ctx.shadowBlur = glowK * 0.6; rr(x - w / 2, G.by, w, 3, 2); ctx.fill(); }
+          else if (st === 'curved') { ctx.shadowColor = withAlpha(indC, 0.5); ctx.shadowBlur = 14; ctx.shadowOffsetY = top ? -4 : 4; ctx.beginPath(); ctx.arc(x, top ? edgeY - 2 : G.by + 2, notchR - 6, 0, Math.PI * 2); ctx.fill(); }
+          else if (st === 'neon') { const w = G.tws(a) * 0.5; ctx.shadowColor = indC; ctx.shadowBlur = glowK; rr(x - w / 2, top ? edgeY - 3 : G.by, w, 3, 2); ctx.fill(); ctx.fill(); }
+          else if (st === 'spotlight') { const w = G.tws(a) * 0.42, W2 = G.tws(a) * 0.9, y0 = top ? edgeY : G.by, y1 = top ? G.by : G.by + G.bh, g = ctx.createLinearGradient(0, y0, 0, y1); g.addColorStop(0, withAlpha(indC, 0.42)); g.addColorStop(1, withAlpha(indC, 0)); ctx.fillStyle = g; // (top tabs: the light shines up from the bottom edge)
+            ctx.beginPath(); ctx.moveTo(x - w / 2, y0); ctx.lineTo(x + w / 2, y0); ctx.lineTo(x + W2 / 2, y1); ctx.lineTo(x - W2 / 2, y1); ctx.closePath(); ctx.fill();
+            ctx.fillStyle = indC; ctx.shadowColor = indC; ctx.shadowBlur = glowK * 0.6; rr(x - w / 2, top ? y0 - 3 : y0, w, 3, 2); ctx.fill(); }
           else if (st === 'outline') { const R = isz * (labelOn ? 0.7 : 0.95); ctx.globalAlpha *= 0.14; ctx.beginPath(); ctx.arc(x, iy, R, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha /= 0.14; ctx.strokeStyle = indC; ctx.lineWidth = 2; ctx.stroke(); }
           else if (st === 'dock') { ctx.beginPath(); ctx.arc(x, G.by + G.bh - (labelOn ? 4 : 6), labelOn ? 2 : 2.5, 0, Math.PI * 2); ctx.fill(); } // (under the name when there is one)
           else if (st === 'chips') { const ch = Math.min(G.bh - 18, 40); ctx.shadowColor = withAlpha(indC, 0.4); ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; rr(x - G.tws(a) / 2 + 5, G.cy - ch / 2, G.tws(a) - 10, ch, ch / 2); ctx.fill(); }
@@ -7202,16 +7217,21 @@ registerBehavior('uiBottomNav', {
           const navIcon = (ix, iy, sz, c, al) => { if (!rot && flip === 1) return drawNavIcon(ctx, icon, ix, iy, sz, c, al); ctx.save(); ctx.translate(ix, iy); ctx.rotate(rot); ctx.scale(flip, 1); drawNavIcon(ctx, icon, 0, 0, sz, c, al); ctx.restore(); };
           if (i === raisedIdx) { // the big round middle button
             const R = G.bh * 0.46;
-            ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, G.by + 4, R * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
-            drawNavIcon(ctx, icon, x, G.by + 4, isz * 1.15, '#ffffff');
-            if (showLabel(i, on)) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 0.9); }
+            ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; const ry = top ? G.cy : G.by + 4, Rr = top ? Math.min(R, G.bh * 0.4) : R; // (top tabs: the round button stays inside the bar)
+            ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, ry, Rr * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
+            drawNavIcon(ctx, icon, x, ry, isz * (top ? 1 : 1.15), '#ffffff');
+            if (showLabel(i, on) && !top) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, top ? G.by + lsz * 0.9 : G.by + G.bh - lsz * 0.9); }
             return;
           }
           const lab = showLabel(i, on) && t.label;
-          if (st === 'curved' && on) {
+          if (noIc() && st !== 'curved' && i !== raisedIdx) { // names only: bigger, in the middle (chips keep their pill)
+            ctx.font = `${lw} ${lsz + 4}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc); if ((st === 'glass' || st === 'neon') && on) { ctx.shadowColor = act; ctx.shadowBlur = st === 'neon' ? glowK : 12; }
+            ctx.fillStyle = col; ctx.fillText(t.label || '', 0, 1, G.tws(i) - 8); ctx.restore();
+          } else if (st === 'curved' && on) {
             const cx2 = p.anim === 'slide' && ind != null ? ind : x;
-            ctx.save(); ctx.translate(cx2, G.by + 2); ctx.scale(sc, sc); navIcon(0, 0, isz, onC, 1); ctx.restore();
-            if (lab) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, G.by + G.bh - lsz * 1.1); }
+            ctx.save(); ctx.translate(cx2, top ? edgeY - 2 : G.by + 2); ctx.scale(sc, sc); navIcon(0, 0, isz, onC, 1); ctx.restore();
+            if (lab) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, top ? G.by + lsz * 1.1 : G.by + G.bh - lsz * 1.1); }
           } else if (st === 'chips') { // icon and name side by side, inside the chip (just the icon if the name doesn't fit)
             ctx.font = `${lw} ${lsz + 1}px ${THEME.font}`; const lw2 = lab ? ctx.measureText(t.label).width : 0, fit = lab && isz * 0.85 + 6 + lw2 <= G.tws(i) - 24, total = fit ? isz * 0.85 + 6 + lw2 : isz * 0.85;
             ctx.save(); ctx.translate(x, y); ctx.scale(sc, sc);
@@ -7242,8 +7262,9 @@ registerBehavior('uiBottomNav', {
           if (bv != null && bv !== '' && bv !== false && (!zero || p.badgeZero) && !(on && p.badgeHideSelected)) {
             const n = +bv, num = Number.isFinite(n) && bv !== true && String(bv).trim() !== '', max = Math.max(1, +p.badgeMax || 99);
             const txt = p.badgeStyle === 'dot only' || t.badgeShow === 'dot' ? '' : num ? (n > max ? max + '+' : String(Math.round(n))) : p.badgeWords !== false && typeof bv === 'string' ? bv.trim().slice(0, 8) : '';
-            const bs = clamp(+p.badgeSize || 1, 0.4, 3), pos = p.badgePos || 'icon corner', named = lab && st !== 'bubble' && st !== 'chips', iconY = y - (named ? lsz * 0.85 : 0) - lift;
+            const bs = clamp(+p.badgeSize || 1, 0.4, 3), pos = p.badgePos || 'icon corner', named = lab && st !== 'bubble' && st !== 'chips' && !noIc(), iconY = y - (named ? lsz * 0.85 : 0) - lift;
             let bxp = x + isz * 0.55 - 6, byp = iconY - isz * 0.45, anchorLeft = true; // (the badge's left side, and its middle)
+            if (noIc()) { ctx.font = `${lw} ${lsz + 4}px ${THEME.font}`; bxp = x + Math.min(ctx.measureText(t.label || '').width, G.tws(i) - 8) / 2 + 3; byp = y - (lsz + 4) * 0.55; } // beside the name
             if (pos === 'top right of the tab') { bxp = x + G.tws(i) / 2 - 8; byp = G.by + 8; anchorLeft = false; }
             else if (pos === 'over the icon') { bxp = x; byp = iconY; anchorLeft = null; }
             else if (pos === 'beside the name' && named) { ctx.font = `${lw} ${lsz}px ${THEME.font}`; bxp = x + ctx.measureText(t.label).width / 2 + 4; byp = iconY + isz * 0.5 + lsz * 1.05; }

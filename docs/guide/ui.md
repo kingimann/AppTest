@@ -290,8 +290,34 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Follow button:** posts with `following = no` show a *Follow* pill. Tapping it follows that author on all their posts and sends *Following someone sends*.
   - **Reactions:** hold the like button for 👍 ❤️ 😂 😮 😢 😡. Slide to one and let go. It's stored in `reaction`, and cards show *Love*, *Haha*…
   - **⋯ menu:** Save post, Copy text, Not interested (hides the post), Mute @handle (hides all their posts) and Report post. Each has an **Undo** snackbar. Hidden posts and muted people are remembered on the device. Turn it off with *⋯ opens a menu*; *Reporting a post sends* and *Hiding or muting sends* send messages.
+- **More looks:**
+  - **grid:** pictures three across (2–5 columns; square, 4:5 or 9:16 tiles), like an explore page. Tiles show likes and badges for several pictures (⧉), video (▶) and LIVE. Text posts become coloured tiles. Tap one to open it.
+  - **reels:** one post per screen with the like, comment, repost, share and ⋯ buttons down the side, and the person and text at the bottom.
+    - Swipe up or down for the next post. Videos play.
+    - Text-only posts become big text on a colour.
+  - **magazine:** the newest post as a big card, then a compact list.
+- **Photos, GIFs and videos:**
+  - **Videos** play muted, looping, while they're on screen (*Videos play (muted) as they scroll by*). They pause when they scroll away and play with sound and controls in the opened post.
+  - **GIFs** animate in the feed with a *GIF* badge.
+  - A video in `media` is a link ending in .mp4, .webm, .mov or .m4v, or anything starting with `video:`.
+- **Threads:** a post with `reply_to` (another post's id) comes right under that post, joined to it by a line between the avatars, and a thread can go on and on. A reply whose post isn't shown says *↩ Replying to @someone*. Turn it off with *Threads*.
+- **Search:** a feed's search variable now understands:
+  - several words (all must match, in the name, handle, text or place);
+  - `#tag` (that exact tag);
+  - `@someone` or `from:someone` (their posts, or posts mentioning them);
+  - `has:photo`, `has:video`, `has:gif`, `has:poll` and `has:link`.
+
+  With no results it says *No results for "…"*.
 - **Your own posts** get their own ⋯ menu: **Edit post** (opens the composer with the text; saving marks it *Edited*), **Pin to top**, Save, Copy and **Delete post** (with Undo). Other people's posts get **Message @someone**, which opens a chat with them (*Messaging opens page*, default `chat`).
 - **Search chip:** while a feed's search variable has something in it (a tapped #tag, a search box), a pill at the top shows it; ✕ clears it.
+  - The menu also has **Add to thread**, which posts a reply to your own post that continues the thread. The opened post's ⋯ has Edit, Add to thread, Pin and Delete for your posts too.
+- **Editing comments:** your own comments have **Edit** next to Reply and Delete. Change the text in place and press Enter or Save. Edited comments say *· edited*.
+- **Search Bar:** a bar that opens a search screen:
+  - recent searches (with ✕ and *Clear all*);
+  - trending #tags, people, and filter chips (📷 Photos, 🎬 Videos, GIFs, 📊 Polls);
+  - suggestions for tags and people as you type.
+
+  Picking something puts it in its variable (`q`). Give a Social Feed the same *Search with variable* and it shows the results. *Searching goes to page* can open a results page.
 - **Chat:** a conversation in bubbles, like a messaging app.
   - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
   - Times appear between messages more than 15 minutes apart. Emoji-only messages show big, and photos show in the bubble.
@@ -320,6 +346,10 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - **Post** lights up when there's something to post.
   - Closing it keeps a **draft** that comes back next time.
   - The new post gets `media`, `poll` and `votes`, and `location`. Turn photos, polls and places on or off one by one.
+  - **Videos and GIFs:** pick videos and GIFs with the photos, or tap **GIF** to paste a GIF link (Giphy, Tenor…).
+    - With a **Supabase media bucket** (*Game Settings › Supabase › Media bucket*; **Copy media bucket SQL** makes it), photos, GIFs and videos are uploaded there and the post keeps their links, so everyone sees them. People need to be signed in to upload.
+    - Without a bucket: photos are made smaller and kept in the post, GIFs up to 3 MB and videos up to 6 MB are kept in the post, and bigger videos stay on that phone.
+  - **Threads:** 🧵 adds another post under the first, up to 10. Posting makes a thread: each post replies to the one before (`reply_to`).
 - **Colours:** these pieces use theme colours. In an app they follow light / dark mode; in a game they follow the game's background (dark background → light text). Lists scroll their last item clear of a bottom tab bar.
 - **Photo Grid:** a scrolling grid of square pictures from the collection's media field (or emojis). Tap one to open it.
 

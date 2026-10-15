@@ -2067,7 +2067,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
+const EDIT_PREVIEW = new Set(['uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -8801,14 +8801,35 @@ const isPic = (m) => /^(https?:|data:|blob:|art:)/.test(String(m || ''));
 function drawMedia(ctx, media, color, x, y, w, h, r, fit = 'cover') {
   ctx.save(); UK.rr(ctx, x, y, w, h, r); ctx.clip();
   const m = String(media || '');
-  if (isVid(m)) { ctx.fillStyle = '#111'; ctx.fillRect(x, y, w, h); const g = ctx.createLinearGradient(x, y, x, y + h); g.addColorStop(0, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0.3)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); const R = Math.min(30, Math.min(w, h) * 0.18); ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(x + w / 2 - R * 0.32, y + h / 2 - R * 0.45); ctx.lineTo(x + w / 2 + R * 0.5, y + h / 2); ctx.lineTo(x + w / 2 - R * 0.32, y + h / 2 + R * 0.45); ctx.closePath(); ctx.fill(); ctx.restore(); return; }
+  if (isVid(m)) {
+    ctx.fillStyle = '#111'; ctx.fillRect(x, y, w, h);
+    const v = feedVideo(m), live = v && v.readyState >= 2 && v.videoWidth;
+    if (live) { const k = (fit === 'contain' ? Math.min : Math.max)(w / v.videoWidth, h / v.videoHeight), iw = v.videoWidth * k, ih = v.videoHeight * k; try { ctx.drawImage(v, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); } catch { /* not ready */ } v._seen = performance.now(); if (FEED_AUTOPLAY.on && v.paused) v.play().catch(() => {}); }
+    const g = ctx.createLinearGradient(x, y, x, y + h); g.addColorStop(0, 'rgba(255,255,255,0.04)'); g.addColorStop(1, 'rgba(0,0,0,0.35)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+    if (!live || !FEED_AUTOPLAY.on) { const R = Math.min(30, Math.min(w, h) * 0.18); ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(x + w / 2 - R * 0.32, y + h / 2 - R * 0.45); ctx.lineTo(x + w / 2 + R * 0.5, y + h / 2); ctx.lineTo(x + w / 2 - R * 0.32, y + h / 2 + R * 0.45); ctx.closePath(); ctx.fill(); }
+    else { const R = 13; ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.beginPath(); ctx.arc(x + w - R - 8, y + h - R - 8, R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = `13px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('🔇', x + w - R - 8, y + h - R - 7); }
+    ctx.restore(); return;
+  }
+  if (isGif(m) && typeof document !== 'undefined') { const im = loadImage(m); if (!im._held) { im._held = true; gifHolder().append(im); } } // (kept in the page so it keeps animating)
   if (isPic(m)) { ctx.fillStyle = '#222'; ctx.fillRect(x, y, w, h); const im = loadImage(m); if (im.complete && im.naturalWidth) { const k = (fit === 'contain' ? Math.min : Math.max)(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); } }
   else {
     const c = color || '#5b6bff', g = ctx.createLinearGradient(x, y, x + w, y + h); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,0.3)'); ctx.fillStyle = c; ctx.fillRect(x, y, w, h); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); // solid, lighter towards a corner
     if (m) { ctx.font = `${Math.round(Math.min(w, h) * 0.42)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(m, x + w / 2, y + h / 2 + Math.min(w, h) * 0.03); }
   }
+  if (isGif(m) && w > 50) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; UK.rr(ctx, x + 8, y + h - 26, 34, 18, 5); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = `800 11px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('GIF', x + 25, y + h - 16.5); }
   ctx.restore();
 }
+/** Videos in feeds: one muted, looping <video> per link; it plays while it's drawn and pauses a moment after it scrolls away. */
+const FEED_VIDEOS = new Map(), FEED_AUTOPLAY = { on: true };
+function feedVideo(m) {
+  if (typeof document === 'undefined') return null;
+  let v = FEED_VIDEOS.get(m);
+  if (!v) { v = document.createElement('video'); v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.crossOrigin = 'anonymous'; v.src = String(m).replace(/^video:/, ''); FEED_VIDEOS.set(m, v);
+    if (!FEED_VIDEOS.timer) FEED_VIDEOS.timer = setInterval(() => { const now = performance.now(); for (const q of FEED_VIDEOS.values()) if (!q.paused && now - (q._seen || 0) > 600) q.pause(); }, 400); }
+  return v;
+}
+const isGif = (m) => /^data:image\/gif|\.gif(\?|#|$)/i.test(String(m || ''));
+const gifHolder = () => { let h = document.getElementById('pocket-gifs'); if (!h) { h = document.createElement('div'); h.id = 'pocket-gifs'; h.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0.01;pointer-events:none;'; document.body.append(h); } return h; };
 /** Little avatar for feeds: initials on a colour from the name (or an emoji / picture). */
 function miniAvatar(ctx, name, x, y, d, pic = '', ring = null) {
   if (ring) { const g = ctx.createLinearGradient(x - d / 2, y + d / 2, x + d / 2, y - d / 2); if (Array.isArray(ring)) { g.addColorStop(0, ring[0]); g.addColorStop(1, ring[1]); } ctx.strokeStyle = Array.isArray(ring) ? g : ring; ctx.lineWidth = Math.max(2, d * 0.07); ctx.beginPath(); ctx.arc(x, y, d / 2 + d * 0.09, 0, Math.PI * 2); ctx.stroke(); }
@@ -8874,6 +8895,12 @@ function postRecord(me, out, extra = {}) {
   if (out.place) r.location = out.place;
   return r;
 }
+/** The first post, then each extra one as a reply to the one before (a thread). */
+function postThread(D, name, me, out, extra = {}) {
+  const first = D.add(name, postRecord(me, out, extra)); let prev = first;
+  for (const tx of out.thread || []) { const r = D.add(name, postRecord(me, { text: tx }, { reply_to: prev?.id })); if (r && prev && r._at <= prev._at) r._at = prev._at + 1; prev = r; }
+  return first;
+}
 /** Write a post: text with a counter, up to 4 pictures, a poll, a place, and (for a quote) the post being quoted. */
 function postComposer(s, o) {
   const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
@@ -8882,7 +8909,7 @@ function postComposer(s, o) {
   const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
   const DKEY = 'pocket.draft.' + (s.engine.gameKey || 'game') + '.' + (o.draftKey || 'post');
   let draft = null; if (!o.quote && !o.noDraft) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
-  const st = { text: draft?.text || o.text || '', media: draft?.media || [], poll: draft?.poll || null, place: draft?.place || '' };
+  const st = { text: draft?.text || o.text || '', media: (draft?.media || []).filter((m) => !/^(video:)?blob:/.test(m)), poll: draft?.poll || null, place: draft?.place || '', more: draft?.more || [], busy: 0 };
   const wrap = el('div', `position:absolute;inset:0;z-index:55;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;`); wrap.dataset.pocketComposer = '1';
   const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;top:0;background:${c.bg};color:${c.text};display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);padding-bottom:env(safe-area-inset-bottom);`);
   wrap.append(sheet); root.append(wrap);
@@ -8913,14 +8940,17 @@ function postComposer(s, o) {
   col.append(ta); row.append(av, col); body.append(row);
   const mediaBox = el('div', 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0 54px;');
   const pollBox = el('div', 'margin:12px 0 0 54px;'), placeBox = el('div', 'margin:10px 0 0 54px;'), quoteBox = el('div', 'margin:12px 0 0 54px;');
-  body.append(mediaBox, pollBox, quoteBox, placeBox);
+  const gifBox = el('div', 'margin:10px 0 0 54px;'), threadBox = el('div', 'margin-top:6px;');
+  body.append(mediaBox, gifBox, pollBox, quoteBox, placeBox, threadBox);
   if (o.quote) { const Q = o.quote, qc = el('div', `border:1px solid ${c.line};border-radius:14px;padding:10px 12px;`); qc.dataset.quoteCard = '1';
     const h1 = el('div', 'font-size:14px;'); h1.append(el('b', '', Q.author || ''), el('span', `color:${c.sub};margin-left:6px;`, Q.handle ? '@' + Q.handle : '')); qc.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:84px;overflow:hidden;', Q.text || (Q.media ? '📷 Photo' : ''))); quoteBox.append(qc); }
   // bottom: picture, poll, place … counter
   const bar = el('div', `flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid ${c.line};`);
   const tool = (ic, label) => { const b = btn(`font-size:22px;width:42px;height:40px;border-radius:12px;color:${c.acc};`, ic); b.setAttribute('aria-label', label); b.title = label; bar.append(b); return b; };
-  const file = el('input'); file.type = 'file'; file.accept = o.videos ? 'image/*,video/*' : 'image/*'; file.multiple = true; file.style.display = 'none'; sheet.append(file);
+  const file = el('input'); file.type = 'file'; file.accept = o.videos !== false ? 'image/*,video/*' : 'image/*'; file.multiple = true; file.style.display = 'none'; sheet.append(file);
   const bPic = o.photos !== false ? tool('🖼️', 'Add photos') : null, bPoll = o.polls !== false && !o.quote ? tool('📊', 'Add a poll') : null, bPlace = o.places !== false ? tool('📍', 'Add a place') : null;
+  const bGif = o.photos !== false && o.gifs !== false ? tool('', 'Add a GIF') : null; if (bGif) { bGif.textContent = 'GIF'; bGif.style.cssText += `font:900 12px ${font};border:2px solid ${c.acc};border-radius:7px;width:36px;height:26px;margin:0 3px;`; }
+  const bThread = o.threads && !o.quote && !o.noDraft ? tool('🧵', 'Add another post to the thread') : null;
   bar.append(el('div', 'flex:1;'));
   const NS = 'http://www.w3.org/2000/svg', ring = document.createElementNS(NS, 'svg'); ring.setAttribute('width', '30'); ring.setAttribute('height', '30'); ring.setAttribute('viewBox', '0 0 30 30');
   const bg = document.createElementNS(NS, 'circle'), fg = document.createElementNS(NS, 'circle');
@@ -8930,7 +8960,7 @@ function postComposer(s, o) {
   sheet.append(top, body, bar);
   // keep everything up to date
   const pollOpts = () => (st.poll || []).map((q) => q.trim()).filter(Boolean);
-  const ready = () => (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.text.length <= max && (!o.noDraft || st.text !== (o.text || '') || o.allowSame) && (!st.poll || pollOpts().length >= 2);
+  const ready = () => !st.busy && (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.more.every((q) => q.length <= max) && st.text.length <= max && (!o.noDraft || st.text !== (o.text || '') || o.allowSame) && (!st.poll || pollOpts().length >= 2);
   const sync = () => {
     const n = st.text.length, k = Math.min(1, n / max), L = 2 * Math.PI * 12; fg.setAttribute('stroke-dashoffset', String(L * (1 - k)));
     fg.setAttribute('stroke', n > max ? '#f4212e' : n > max - 20 ? '#ffad1f' : c.acc); left.textContent = n > max - 20 ? String(max - n) : ''; left.style.color = n > max ? '#f4212e' : c.sub;
@@ -8940,7 +8970,7 @@ function postComposer(s, o) {
   const paintMedia = () => {
     mediaBox.textContent = ''; mediaBox.style.gridTemplateColumns = st.media.length === 1 ? '1fr' : '1fr 1fr';
     st.media.forEach((m, i) => { const cell = el('div', `position:relative;border-radius:14px;overflow:hidden;background:#222;aspect-ratio:${st.media.length === 1 ? '4/3' : '1'};`);
-      if (isVid(m)) { const v = el('video', 'width:100%;height:100%;object-fit:cover;display:block;'); v.src = m; v.muted = true; v.playsInline = true; cell.append(v); } else { const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.src = m; cell.append(im); }
+      if (isVid(m)) { const v = el('video', 'width:100%;height:100%;object-fit:cover;display:block;'); v.src = String(m).replace(/^video:/, ''); v.muted = true; v.playsInline = true; v.autoplay = true; v.loop = true; cell.append(v); cell.append(el('span', 'position:absolute;left:8px;bottom:8px;padding:2px 7px;border-radius:6px;background:rgba(0,0,0,.6);color:#fff;font:800 11px system-ui;', 'VIDEO')); } else { const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.src = m; cell.append(im); }
       const x = btn('position:absolute;right:6px;top:6px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:14px;', '✕'); x.setAttribute('aria-label', 'Remove picture'); x.onclick = () => { st.media.splice(i, 1); paintMedia(); sync(); };
       cell.append(x); mediaBox.append(cell); });
   };
@@ -8963,20 +8993,53 @@ function postComposer(s, o) {
   };
   ta.addEventListener('input', () => { st.text = ta.value; grow(); sync(); });
   bPic && (bPic.onclick = () => { if (st.media.length >= 4 || st.poll) return; file.click(); });
+  const asDataURL = (f) => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => no(fr.error); fr.readAsDataURL(f); });
+  const toBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
+  /** One picked file → a link to put in the post: uploaded to Supabase Storage when there's a media bucket, else kept in the post (small ones) or on this phone. */
+  const addFile = async (f) => {
+    const vid = /^video\//.test(f.type), gif = f.type === 'image/gif';
+    if (vid && o.videos === false) { s.snackbar?.('Videos are off for posts'); return; }
+    if (o.upload) { const body = vid || gif ? f : new File([await toBlob(await shrinkPicture(f, +o.pictureSize || 1080))], 'photo.jpg', { type: 'image/jpeg' }); const url = await o.upload(body); return vid && !isVid(url) ? 'video:' + url : url; }
+    if (gif) { if (f.size > 3e6) { s.snackbar?.('That GIF is too big (3 MB at most)'); return; } return asDataURL(f); }
+    if (vid) { if (f.size <= 6e6) return 'video:' + (await asDataURL(f)).replace(/^data:[^;]*;/, `data:${f.type || 'video/mp4'};`); s.snackbar?.('Big videos stay on this phone only. Add a Supabase media bucket to share them.', '', null, 4); return 'video:' + URL.createObjectURL(f); }
+    return shrinkPicture(f, +o.pictureSize || 1080);
+  };
   file.onchange = async () => {
     const fs = [...file.files].slice(0, 4 - st.media.length); file.value = '';
-    for (const f of fs) { try { st.media.push(/^video\//.test(f.type) ? URL.createObjectURL(f) : await shrinkPicture(f, +o.pictureSize || 1080)); } catch { s.snackbar?.('That file could not be added'); } }
-    paintMedia(); sync();
+    for (const f of fs) { st.busy++; sync(); post.textContent = 'Uploading…'; try { const m = await addFile(f); if (m) st.media.push(m); } catch (e) { s.snackbar?.('That file could not be added' + (e?.message ? ': ' + e.message : '')); } st.busy--; }
+    post.textContent = o.button || 'Post'; paintMedia(); sync();
   };
+  const paintGif = () => {
+    gifBox.textContent = ''; if (!gifBox.dataset.editing) return;
+    const row0 = el('div', `display:flex;gap:6px;align-items:center;`), inp = el('input', `flex:1;min-width:0;font:15px ${font};padding:9px 12px;border-radius:10px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`);
+    inp.placeholder = 'Paste a GIF link (Giphy, Tenor…)'; inp.type = 'url';
+    const add = btn(`flex:none;padding:8px 12px;border-radius:10px;background:${c.acc};color:#fff;font:700 14px ${font};`, 'Add'), x = btn(`color:${c.sub};font-size:15px;padding:4px;`, '✕');
+    const go = () => { const u = inp.value.trim(); if (!/^https?:\/\/\S+$/.test(u)) { s.snackbar?.('Paste a link that starts with https://'); return; } if (st.media.length >= 4) return; st.media.push(u); gifBox.dataset.editing = ''; paintGif(); paintMedia(); sync(); };
+    add.onclick = go; inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } }; x.onclick = () => { gifBox.dataset.editing = ''; paintGif(); };
+    row0.append(inp, add, x); gifBox.append(row0); setTimeout(() => inp.focus(), 30);
+  };
+  bGif && (bGif.onclick = () => { if (st.media.length >= 4 || st.poll) return; gifBox.dataset.editing = '1'; paintGif(); });
+  const paintThread = () => {
+    threadBox.textContent = '';
+    st.more.forEach((q, i) => {
+      const row0 = el('div', 'display:flex;gap:12px;padding:10px 16px 0;'), line0 = el('div', 'flex:none;width:42px;display:flex;flex-direction:column;align-items:center;');
+      line0.append(el('div', `width:2px;height:14px;background:${c.line};`), el('div', `width:30px;height:30px;border-radius:50%;background:${av.style.background};color:#fff;font:800 12px ${font};display:flex;align-items:center;justify-content:center;`, av.textContent));
+      const col0 = el('div', 'flex:1;min-width:0;padding-top:14px;'), tx = el('textarea', `display:block;width:100%;min-height:48px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:17px/1.4 ${font};padding:0;`);
+      tx.placeholder = 'Add another post'; tx.value = q; tx.dataset.threadPart = String(i); tx.oninput = () => { st.more[i] = tx.value; tx.style.height = 'auto'; tx.style.height = Math.max(48, tx.scrollHeight) + 'px'; sync(); };
+      const x = btn(`flex:none;color:${c.sub};font-size:15px;padding:14px 2px 0;`, '✕'); x.onclick = () => { st.more.splice(i, 1); paintThread(); sync(); };
+      col0.append(tx); row0.append(line0, col0, x); threadBox.append(row0);
+    });
+  };
+  bThread && (bThread.onclick = () => { if (st.more.length >= 9) return; st.more.push(''); paintThread(); sync(); threadBox.querySelector(`[data-thread-part="${st.more.length - 1}"]`)?.focus(); });
   bPoll && (bPoll.onclick = () => { if (st.media.length) return; st.poll = st.poll || ['', '']; paintPoll(); sync(); pollBox.querySelector('input')?.focus(); });
   bPlace && (bPlace.onclick = () => { placeBox.dataset.editing = '1'; paintPlace()?.focus(); });
   post.onclick = () => {
     if (!ready()) return;
-    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim() };
+    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim(), thread: st.more.map((q) => q.trim()).filter(Boolean) };
     if (o.onPost?.(out) === false) return; close(true);
   };
   if (st.place) placeBox.dataset.editing = '1';
-  paintMedia(); paintPoll(); paintPlace(); sync(); setTimeout(() => { grow(); ta.focus(); }, 320);
+  paintMedia(); paintPoll(); paintPlace(); paintThread(); sync(); setTimeout(() => { grow(); ta.focus(); }, 320);
   return { wrap, close, textarea: ta, state: st };
 }
 
@@ -9161,13 +9224,19 @@ function socialSheet(s, o) {
     line1.append(el('span', 'font-weight:800;', cm.author || 'Someone'));
     if (o.post && cm.author && cm.author === o.post.author) line1.append(el('span', `background:${c.acc};color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;`, 'Author'));
     if (cm.pinned) line1.append(el('span', `color:${c.sub};`, '📌 Pinned'));
-    line1.append(el('span', `color:${c.sub};`, cm.at ? shortAgo(cm.at) : ''));
+    line1.append(el('span', `color:${c.sub};`, (cm.at ? shortAgo(cm.at) : '') + (cm.edited ? ' · edited' : '')));
     const txt = el('div', 'font-size:15px;line-height:1.35;margin-top:2px;white-space:pre-wrap;word-wrap:break-word;');
     for (const part of String(cm.text).split(/(@[\w.]+)/)) txt.append(/^@[\w.]+$/.test(part) ? el('span', `color:${c.acc};font-weight:600;`, part) : document.createTextNode(part));
     mid.append(line1, txt);
     const acts = el('div', `display:flex;gap:16px;margin-top:5px;color:${c.sub};font-size:13px;font-weight:700;`);
     const reply = btn('', 'Reply'); reply.onclick = () => { replyTo = cm.parent || cm.id; chip(cm.handle || String(cm.author || '').split(/\s+/)[0]); inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
     acts.append(reply);
+    if (cm.mine && o.onEditComment) { const ed = btn('', 'Edit'); ed.onclick = () => { // edit it where it is
+      const box = el('div', 'display:flex;gap:6px;margin-top:4px;'), inp0 = el('input', `flex:1;min-width:0;font:15px ${font};padding:8px 12px;border-radius:16px;border:1px solid ${c.acc};background:${c.field};color:${c.text};outline:none;`); inp0.value = cm.text; inp0.maxLength = 500; inp0.dataset.editComment = '1';
+      const ok0 = btn(`flex:none;color:${c.acc};font:800 14px ${font};padding:0 6px;`, 'Save'), no0 = btn(`flex:none;color:${c.sub};font:700 14px ${font};padding:0 4px;`, 'Cancel');
+      const save = () => { const v = inp0.value.trim(); if (!v) return; if (v !== cm.text) o.onEditComment(cm, v); paint(); };
+      ok0.onclick = save; no0.onclick = () => paint(); inp0.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } else if (ev.key === 'Escape') paint(); };
+      box.append(inp0, ok0, no0); txt.replaceWith(box); acts.style.display = 'none'; setTimeout(() => { inp0.focus(); inp0.setSelectionRange(inp0.value.length, inp0.value.length); }, 20); }; acts.append(ed); }
     if (cm.mine && o.onDelete) { const del = btn('', 'Delete'); del.onclick = () => { o.onDelete(cm); paint(); }; acts.append(del); }
     mid.append(acts);
     const hb = btn(`flex:none;color:${cm.liked ? c.like : c.sub};font:700 12px ${font};display:flex;flex-direction:column;align-items:center;gap:1px;min-width:30px;`);
@@ -9218,7 +9287,7 @@ registerBehavior('uiFeed', {
   label: 'Social Feed', description: 'A scrolling feed of posts like social apps: a text timeline, a compact list, big photo posts, or cards. Like (or double-tap the picture), comment, repost, share and save; pull down to refresh. Posts come from a data collection (fields: author, handle, text, media, color, likes, liked, comments, reposts, verified, plus extras like poll, location, link, live and top comment; other names can be mapped). Polls, picture carousels, reactions, a ⋯ menu (hide, mute, report) and Follow buttons are built in, or sample posts.',
   params: [
     { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
-    { key: 'look', label: 'Look', type: 'select', options: ['timeline', 'compact', 'photos', 'cards'], default: 'timeline', info: { timeline: 'Text first, small avatar, actions under each post.', compact: 'Tighter rows with a small picture on the right.', photos: 'A header, a big picture, then likes and the caption.', cards: 'Each post on a card with buttons along the bottom.' } },
+    { key: 'look', label: 'Look', type: 'select', options: ['timeline', 'compact', 'photos', 'cards', 'grid', 'reels', 'magazine'], default: 'timeline', info: { grid: 'Pictures in a grid, like an explore page (3 across). Tap one to open it.', reels: 'One post per screen, swipe up for the next; videos play. Buttons down the side.', magazine: 'The newest post as a big card, then a compact list.', timeline: 'Text first, small avatar, actions under each post.', compact: 'Tighter rows with a small picture on the right.', photos: 'A header, a big picture, then likes and the caption.', cards: 'Each post on a card with buttons along the bottom.' } },
     { key: 'sort', label: 'Sort', type: 'text', default: 'newest first', info: 'newest first, oldest first, or a field: likes (high-low), author (a-z)…' },
     { key: 'filter', label: 'Only show (e.g. author = Maya Chen)', type: 'text', default: '' },
     { key: 'searchVar', label: 'Search with variable (matches name, handle and text)', type: 'text', default: '', suggest: 'vars' },
@@ -9280,6 +9349,12 @@ registerBehavior('uiFeed', {
     { key: 'messagePage', label: 'Messaging opens page (with a Chat)', type: 'text', default: 'chat', group: 'Behaviour', showIf: (b) => b.messages !== false },
     { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars', group: 'Behaviour', showIf: (b) => b.messages !== false },
     { key: 'deleteMessage', label: 'Deleting your post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'threads', label: 'Threads: replies (reply_to) come under their post, joined by a line', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'gridColumns', label: 'Grid: columns', type: 'number', default: 3, range: [2, 5], step: 1, group: 'Layout', showIf: (b) => b.look === 'grid' },
+    { key: 'gridShape', label: 'Grid: tile shape', type: 'select', options: ['square', 'tall (4:5)', 'portrait (9:16)'], default: 'square', group: 'Layout', showIf: (b) => b.look === 'grid' },
+    { key: 'gridText', label: 'Grid: posts without pictures too', type: 'bool', default: true, group: 'Layout', showIf: (b) => b.look === 'grid' },
+    { key: 'gridLikes', label: 'Grid: likes on tiles', type: 'bool', default: true, group: 'Layout', showIf: (b) => b.look === 'grid' },
+    { key: 'autoplay', label: 'Videos play (muted) as they scroll by', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'skeletons', label: 'Grey placeholder posts while loading (Supabase)', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'quotes', label: 'Repost button offers “Quote”', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'quoteMessage', label: 'Quoting a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.quotes !== false },
@@ -9317,7 +9392,7 @@ registerBehavior('uiFeed', {
     const patch = (s, r, o) => { const q = {}; for (const [k, v] of Object.entries(o)) q[K(k)] = v; if (has(s)) D(s).update(p.collection, r.id, q); else Object.assign(r, q); };
     const REACT = ['👍', '❤️', '😂', '😮', '😢', '😡'], REACT_WORD = { '👍': 'Like', '❤️': 'Love', '😂': 'Haha', '😮': 'Wow', '😢': 'Sad', '😡': 'Angry' };
     const domainOf = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./, ''); } catch { return String(u || '').replace(/^https?:\/\//, '').split('/')[0]; } };
-    let searchR = null, tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
+    let reelH = 0, reelIdx = 0, reelDrag = null, searchR = null, tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
     const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
@@ -9328,8 +9403,39 @@ registerBehavior('uiFeed', {
       const H = hid(s); if (H.posts.length || H.authors.length) P = P.filter((r) => !H.posts.includes(r.id) && !H.authors.includes(who(r)));
       if (p.pinnedFirst !== false && P.some((r) => truthy(F(r, 'pinned')))) P = [...P.filter((r) => truthy(F(r, 'pinned'))), ...P.filter((r) => !truthy(F(r, 'pinned')))];
       const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
-      if (q) P = P.filter((r) => ['author', 'handle', 'text'].some((k) => String(F(r, k) ?? '').toLowerCase().includes(q)));
+      if (q) { const test = searchTest(q); P = P.filter(test); }
+      if (p.threads !== false && !q) P = threadOrder(P);
+      else { tUp.clear(); tDown.clear(); }
       return +p.max > 0 ? P.slice(0, +p.max) : P;
+    };
+    // search: words (all must match), #tag, @person, from:person, has:photo / video / gif / poll / link
+    const searchTest = (q) => {
+      const toks = (q.match(/"[^"]+"|\S+/g) || []).map((x) => x.replace(/^"|"$/g, ''));
+      return (r) => toks.every((tk) => {
+        const text = String(F(r, 'text') ?? '').toLowerCase(), M = mediaList(r);
+        if (/^#[\p{L}\p{N}_]+$/u.test(tk)) return new RegExp('(^|[^\\p{L}\\p{N}_])' + tk.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\p{L}\\p{N}_])', 'iu').test(text);
+        if (/^(@|from:)/.test(tk)) { const h = tk.replace(/^(from:)?@?/, ''); return who(r).toLowerCase() === h || (tk[0] === '@' && text.includes('@' + h)); }
+        if (tk === 'has:photo' || tk === 'has:photos') return M.some((m) => !isVid(m) && !isGif(m));
+        if (tk === 'has:video' || tk === 'has:videos') return M.some(isVid) || truthy(F(r, 'video'));
+        if (tk === 'has:gif') return M.some(isGif);
+        if (tk === 'has:poll') return !!pollOf(r);
+        if (tk === 'has:link') return !!F(r, 'link');
+        return ['author', 'handle', 'text', 'location'].some((k) => String(F(r, k) ?? '').toLowerCase().includes(tk));
+      });
+    };
+    // threads: a post that replies to a post (reply_to = its id) comes right after it, joined by a line
+    const tUp = new Set(), tDown = new Set(), rid = (r) => { const v = F(r, 'replyTo'); return v == null || v === '' ? '' : String(v); };
+    const threadOrder = (P) => {
+      tUp.clear(); tDown.clear();
+      const ids = new Set(P.map((r) => String(r.id))), kids = new Map();
+      for (const r of P) { const pr = rid(r); if (pr && ids.has(pr)) (kids.get(pr) || kids.set(pr, []).get(pr)).push(r); }
+      if (!kids.size) return P;
+      const out = [], seen = new Set();
+      const walk = (r, depth) => { if (seen.has(r.id) || depth > 30) return; seen.add(r.id); out.push(r); for (const k of (kids.get(String(r.id)) || []).sort((a, b) => (a._at || 0) - (b._at || 0))) walk(k, depth + 1); };
+      for (const r of P) if (!(rid(r) && ids.has(rid(r)))) walk(r, 0);
+      for (const r of P) if (!seen.has(r.id)) out.push(r);
+      for (let i = 1; i < out.length; i++) if (rid(out[i]) === String(out[i - 1].id)) { tUp.add(out[i].id); tDown.add(out[i - 1].id); }
+      return out;
     };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
@@ -9342,6 +9448,14 @@ registerBehavior('uiFeed', {
       sheetUp = true;
       const ok = postComposer(s, { me: meOf(s), max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Edit post', button: 'Save', text: String(F(r, 'text') || ''), noDraft: true, photos: false, polls: false, places: false,
         onPost: (out) => { patch(s, r, { text: out.text, edited: true }); s.snackbar?.('Post updated'); }, onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+      if (!ok) sheetUp = false;
+    };
+    const threadIt = (s, r) => { // add a post under one of yours: the thread continues
+      sheetUp = true;
+      const me0 = meOf(s), ok = postComposer(s, { me: me0, max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Add to thread', placeholder: 'Add another post…', button: 'Post', noDraft: true, allowSame: true, photos: true, polls: false, places: false,
+        upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
+        onPost: (out) => { let last = r; for (;;) { const nx = (has(s) ? D(s).rows(p.collection) : sample || []).find((q) => rid(q) === String(last.id) && who(q) === who(r)); if (!nx) break; last = nx; } const rec = postRecord(me0, out, { reply_to: last.id }); if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_POSTS()).unshift({ id: 't' + Date.now().toString(36), ...rec, _at: Date.now() }); s.snackbar?.('Added to the thread'); },
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
       if (!ok) sheetUp = false;
     };
     const deleteIt = (s, r) => {
@@ -9375,7 +9489,7 @@ registerBehavior('uiFeed', {
       if (!has(s)) { let h = 0; for (const ch of String(r.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; const n = Math.min(3, +F(r, 'comments') || 0);
         for (let k = 0; k < n; k++) { const [author, handle, text] = SAMPLE_COMMENTS[(h + k * 2) % SAMPLE_COMMENTS.length]; if (author === F(r, 'author')) continue; out.push(mem(r.id + ':s' + k, { id: 's' + k, author, handle, text, at: (+F(r, 'time') || Date.now()) + (k + 2) * 240e3, likes: (h >> k) % 30, liked: false })); } }
       const cc = cColl(s);
-      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: +q.likes || 0, liked: truthy(q.liked), parent: q.parent || '', pinned: truthy(q.pinned), mine: q.author === me0.author }); }
+      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: +q.likes || 0, liked: truthy(q.liked), parent: q.parent || '', pinned: truthy(q.pinned), edited: truthy(q.edited), mine: q.author === me0.author }); }
       else for (const q of cDev(s)[r.id] || []) out.push({ ...q, mine: q.author === me0.author });
       return out;
     };
@@ -9408,7 +9522,11 @@ registerBehavior('uiFeed', {
         onLike: (only) => { if (only && truthy(F(r, 'liked'))) return; if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); },
         onRepost: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }, onSave: () => { flip(s, r, 'saved'); pops.set(r.id + 's', s.time); },
         onFollow: () => followIt(s, r), onLink: () => { if (!s.engine.editing && /^https?:/.test(String(lnk))) window.open(lnk, '_blank', 'noopener'); },
-        onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: [
+        onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: isMine(s, r) ? [
+          { icon: '✏️', label: 'Edit post', run: () => { sh?.close(); setTimeout(() => editIt(s, r), 280); } },
+          ...(p.threads !== false ? [{ icon: '🧵', label: 'Add to thread', run: () => { sh?.close(); setTimeout(() => threadIt(s, r), 280); } }] : []),
+          { icon: '📌', label: truthy(F(r, 'pinned')) ? 'Unpin' : 'Pin to top', run: () => flip(s, r, 'pinned') },
+          { icon: '🗑️', label: 'Delete post', danger: true, run: () => { sh?.close(); deleteIt(s, r); } }] : [
           { icon: '📋', label: 'Copy text', run: () => { navigator.clipboard?.writeText(String(F(r, 'text') || '')).catch(() => {}); s.snackbar?.('Copied to clipboard'); } },
           { icon: '🙈', label: 'Not interested', run: () => { sh?.close(); hideIt(s, r, 'hide'); } },
           { icon: '🔇', label: `Mute @${who(r)}`, run: () => { sh?.close(); hideIt(s, r, 'mute'); } },
@@ -9420,6 +9538,7 @@ registerBehavior('uiFeed', {
           if (cc) D(s).add(cc, { post: r.id, ...c0 }); else cSave(s, r, (L) => L.push({ id: 'c' + Date.now().toString(36), ...c0, at: Date.now() }));
           patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
         },
+        onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
         onLikeComment: (cm) => { const on = !cm.liked, n = Math.max(0, (+cm.likes || 0) + (on ? 1 : -1));
           if (cm.row) D(s).update(cc, cm.id, { liked: on, likes: n }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.liked = on; q.likes = n; } }); else { cm.liked = on; cm.likes = n; } },
@@ -9433,6 +9552,11 @@ registerBehavior('uiFeed', {
         const b = UK.box(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
+        if (look0() === 'reels' && reelH > 0) { // one post per screen: a swipe moves one at a time
+          if (S.drag) { if (reelDrag == null) reelDrag = Math.round(S.v / reelH); }
+          else { if (reelDrag != null) { const d = S.v - reelDrag * reelH; reelIdx = reelDrag + (d > reelH * 0.18 || S.flick > 600 ? 1 : d < -reelH * 0.18 || S.flick < -600 ? -1 : 0); reelDrag = null; }
+            reelIdx = clamp(reelIdx, 0, Math.max(0, Math.round(S.max / reelH))); S.flick = 0; if (S.v > -20 || s.time - S.refreshT > 0.9) S.v += (reelIdx * reelH - S.v) * Math.min(1, dt * 12); }
+        }
         if (Math.abs(S.v - lastV) > 0.5) scrollT = s.time; lastV = S.v;
         for (let i = bursts.length - 1; i >= 0; i--) if (s.time - bursts[i].t > 0.9) bursts.splice(i, 1);
         if (goTop) { S.flick = 0; S.v += (0 - S.v) * Math.min(1, dt * 10); if (S.v < 2) { S.v = 0; goTop = false; } }
@@ -9473,6 +9597,7 @@ registerBehavior('uiFeed', {
             else if (m.k === 'hide' || m.k === 'mute') hideIt(s, r, m.k);
             else if (m.k === 'report') reportIt(s, r);
             else if (m.k === 'edit') editIt(s, r);
+            else if (m.k === 'thread') threadIt(s, r);
             else if (m.k === 'pin') flip(s, r, 'pinned');
             else if (m.k === 'delete') deleteIt(s, r);
             else if (m.k === 'message') messageIt(s, r);
@@ -9488,6 +9613,7 @@ registerBehavior('uiFeed', {
           else if (k === 'repost') { UK.tap(s, p); if (p.quotes !== false && !s.engine.editing) { sheetUp = true; if (!socialSheet(s, { kind: 'repost', colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet], [data-pocket-composer]'); }, items: [
               { icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } },
               { icon: '✏️', label: 'Quote', run: () => openQuote(s, r) }] })) sheetUp = false; } else { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } }
+          else if (k === 'gridOpen') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) { if (p.openPage) { if (has(s)) openRecord(s, p.collection, q); s.navTo(p.openPage); } else openPost(s, q, 'post'); } }
           else if (k === 'quote') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) openPost(s, q, 'post'); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
           else if (k === 'comment') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.commentMessage) s.send(p.commentMessage, r.id); if (p.commentsSheet !== false && !s.engine.editing) openPost(s, r, 'comments', true); }
@@ -9536,7 +9662,7 @@ registerBehavior('uiFeed', {
           if (st === 'underline') { ctx.fillStyle = line; ctx.fillRect(b.x, b.y + inset - 1, b.w, 1); }
         }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + inset, b.w, b.h - inset); ctx.clip();
-        const P = posts(s); L = []; let y = 0;
+        const P = posts(s); L = []; let y = 0; FEED_AUTOPLAY.on = p.autoplay !== false;
         // new posts while scrolled down: a pill to jump up
         const ids = new Set(P.map((r) => r.id)); if (known) { let n = 0; for (const id of ids) if (!known.has(id)) n++; if (n && S.v > 30) fresh += n; } known = ids;
         const pop = (key) => { const t0 = pops.get(key); if (t0 == null) return 1; const a = (s.time - t0) / 0.35; return a >= 1 ? 1 : 1 + Math.sin(a * Math.PI) * 0.45; };
@@ -9681,9 +9807,64 @@ registerBehavior('uiFeed', {
             y0 += big ? 70 + Math.min(170, w1 * 0.56) + 22 : 82;
           }
           ctx.restore();
-        } else if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
+        } else if (!P.length) { const sq = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim() : ''; UK.text(ctx, sq ? `No results for “${sq}”` : p.empty || 'No posts yet', b.cx, b.y + inset + 70, { size: 15, weight: 600, color: sub, maxW: b.w - 40 }); if (sq) UK.text(ctx, 'Try other words, a #tag or @someone', b.cx, b.y + inset + 96, { size: 13, weight: 500, color: sub }); }
         let idx = 0;
+        const lookAll = look;
+        if (lookAll === 'grid') { // a grid of pictures, like an explore page
+          const cols = clamp(Math.round(+p.gridColumns || 3), 2, 5), g = 2, cw = (b.w - g * (cols - 1)) / cols, ch = cw * ({ 'tall (4:5)': 1.25, 'portrait (9:16)': 16 / 9 }[p.gridShape] || 1);
+          const items = p.gridText === false ? P.filter((r) => mediaList(r).length || F(r, 'color')) : P;
+          for (let i = 0; i < items.length; i += cols) {
+            const row = items.slice(i, i + cols), at0 = top + y, hits = [];
+            if (at0 < b.y + b.h && at0 + ch > b.y) row.forEach((r, j) => {
+              const x = b.x + j * (cw + g), M = mediaList(r);
+              if (M.length) dm(ctx, M[0], F(r, 'color'), x, at0, cw, ch, 0);
+              else { let hh = 0; for (const ch0 of String(r.id)) hh = (hh * 31 + ch0.charCodeAt(0)) >>> 0; dm(ctx, '', F(r, 'color') || AVATAR_COLORS[hh % AVATAR_COLORS.length], x, at0, cw, ch, 0); ctx.font = `700 ${Math.max(11, Math.round(cw / 9))}px ${THEME.font}`; wrapLines(ctx, String(F(r, 'text') || ''), cw - 16, Math.max(11, Math.round(cw / 9)), 4).forEach((l, k) => UK.text(ctx, l, x + 8, at0 + 18 + k * Math.round(cw / 7.5), { size: Math.max(11, Math.round(cw / 9)), weight: 700, color: '#fff', align: 'left' })); }
+              const badge = M.length > 1 ? '⧉' : M.some(isVid) || truthy(F(r, 'video')) ? '▶' : truthy(F(r, 'live')) ? 'LIVE' : '';
+              if (badge) { ctx.font = `800 12px ${THEME.font}`; const bw0 = Math.max(22, ctx.measureText(badge).width + 10); ctx.fillStyle = badge === 'LIVE' ? '#f4212e' : 'rgba(0,0,0,0.55)'; UK.rr(ctx, x + cw - bw0 - 6, at0 + 6, bw0, 20, 6); ctx.fill(); UK.text(ctx, badge, x + cw - bw0 / 2 - 6, at0 + 16, { size: 12, weight: 800, color: '#fff' }); }
+              if (p.gridLikes !== false && +F(r, 'likes') > 0) { const lb = '♥ ' + fmtN(F(r, 'likes'), true); ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4; UK.text(ctx, lb, x + 8, at0 + ch - 12, { size: 12, weight: 800, color: '#fff', align: 'left' }); ctx.restore(); }
+              hits.push({ k: 'gridOpen', id: r.id, x: x - b.x, y: 0, w: cw, h: ch });
+            });
+            L.push({ r: row[0], y, h: ch + g, hits }); y += ch + g;
+          }
+        } else if (lookAll === 'reels') { // one post per screen with the buttons down the side
+          const ph = Math.max(220, b.h - inset - coveredBottom(s, e, b)); reelH = ph;
+          for (const r of P) {
+            const at0 = top + y, hits = [], M = mediaList(r); curR = truthy(F(r, 'liked')) ? String(F(r, 'reaction') || '') : '';
+            if (at0 < b.y + b.h && at0 + ph > b.y) {
+              ctx.save(); ctx.beginPath(); ctx.rect(b.x, at0, b.w, ph); ctx.clip();
+              if (M.length && p.showMedia !== false) { const i0 = clamp(cIdx.get(r.id) || 0, 0, M.length - 1); dm(ctx, M[i0], F(r, 'color'), b.x, at0, b.w, ph, 0); }
+              else { let hh = 0; for (const ch0 of String(r.id)) hh = (hh * 31 + ch0.charCodeAt(0)) >>> 0; const c0 = F(r, 'color') || AVATAR_COLORS[hh % AVATAR_COLORS.length], gg = ctx.createLinearGradient(b.x, at0, b.x + b.w, at0 + ph); gg.addColorStop(0, c0); gg.addColorStop(1, '#111'); ctx.fillStyle = gg; ctx.fillRect(b.x, at0, b.w, ph);
+                ctx.font = `800 24px ${THEME.font}`; const ls = wrapLines(ctx, String(F(r, 'text') || ''), b.w - 110, 24, 8); ls.forEach((l, k) => UK.text(ctx, l, b.cx - 20, at0 + ph / 2 - (ls.length - 1) * 16 + k * 32, { size: 24, weight: 800, color: '#fff' })); }
+              hits.push({ k: 'media', x: 0, y: 0, w: b.w - 70, h: ph - 140, multi: M.length > 1 });
+              const gr = ctx.createLinearGradient(0, at0 + ph * 0.55, 0, at0 + ph); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,0.7)'); ctx.fillStyle = gr; ctx.fillRect(b.x, at0 + ph * 0.55, b.w, ph * 0.45);
+              // the side: avatar, like, comment, repost, share, more
+              let sy = at0 + ph - 330; const sx = b.x + b.w - 34;
+              av(r, sx, sy, 46); hits.push({ k: followable(r) ? 'follow' : 'none', x: sx - 23 - b.x, y: sy - 23 - at0, w: 46, h: 46 });
+              if (followable(r)) { ctx.fillStyle = '#f4212e'; ctx.beginPath(); ctx.arc(sx, sy + 23, 10, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '+', sx, sy + 23, { size: 15, weight: 900, color: '#fff' }); }
+              sy += 64;
+              const side = (k, draw, n) => { draw(sx, sy); if (n != null) UK.text(ctx, n, sx, sy + 24, { size: 12, weight: 800, color: '#fff' }); hits.push({ k, x: sx - 24 - b.x, y: sy - 22 - at0, w: 48, h: 56 }); sy += 62; };
+              const lk = truthy(F(r, 'liked')), pk = pop(r.id);
+              side('like', (x, y0) => { ctx.save(); ctx.translate(x, y0); ctx.scale(pk, pk); if (curR) UK.text(ctx, curR, 0, 0, { size: 26 }); else { heartPath(ctx, 0, 0, 30); ctx.fillStyle = lk ? likeC : '#fff'; ctx.fill(); } ctx.restore(); }, fmtN(F(r, 'likes'), true));
+              side('comment', (x, y0) => icon('ui-chat', x, y0, 28, '#fff'), fmtN(F(r, 'comments'), true));
+              side('repost', (x, y0) => icon('ui-repeat', x, y0, 28, truthy(F(r, 'reposted')) ? repC : '#fff'), fmtN(F(r, 'reposts'), true));
+              side('share', (x, y0) => icon('ui-share', x, y0, 26, '#fff'), null);
+              side('more', (x, y0) => icon('ui-more', x, y0, 24, '#fff'), null);
+              // the bottom: who, the text, the place
+              let by = at0 + ph - 96; const tw0 = b.w - 100;
+              ctx.font = `800 16px ${THEME.font}`; const nm = '@' + (who(r) || String(F(r, 'author') || '')); const nw = Math.min(ctx.measureText(nm).width, tw0);
+              UK.text(ctx, nm, b.x + 16, by, { size: 16, weight: 800, color: '#fff', align: 'left', maxW: tw0 }); if (truthy(F(r, 'verified'))) verifiedBadge(ctx, b.x + 16 + nw + 10, by, 15, tick(r));
+              UK.text(ctx, '· ' + when(r), b.x + 16 + nw + (truthy(F(r, 'verified')) ? 24 : 6), by, { size: 13, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
+              ctx.font = `500 15px ${THEME.font}`; wrapLines(ctx, String(F(r, 'text') || ''), tw0, 15, M.length ? 2 : 0).slice(0, M.length ? 2 : 0).forEach((l, k) => UK.text(ctx, l, b.x + 16, by + 24 + k * 20, { size: 15, weight: 500, color: '#fff', align: 'left' }));
+              if (F(r, 'location')) UK.text(ctx, '📍 ' + F(r, 'location'), b.x + 16, by + (M.length ? 70 : 26), { size: 13, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left', maxW: tw0 });
+              if (M.length > 1) { const i0 = clamp(cIdx.get(r.id) || 0, 0, M.length - 1); M.forEach((_, k) => { ctx.fillStyle = k === i0 ? '#fff' : 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.arc(b.cx + (k - (M.length - 1) / 2) * 12, at0 + 14, 3.5, 0, Math.PI * 2); ctx.fill(); }); }
+              burst(r, b.cx, at0 + ph * 0.45, 110);
+              ctx.restore();
+            }
+            L.push({ r, y, h: ph, hits }); y += ph;
+          }
+        } else
         for (const r of P) {
+          const look = lookAll === 'magazine' ? (idx === 0 ? 'cards' : 'compact') : lookAll;
           const media = p.showMedia === false ? '' : F(r, 'media'), color = p.showMedia === false ? '' : F(r, 'color'), hasM = !!(media || color);
           if (look === 'photos' && !hasM) continue; // a photo feed shows posts with a picture
           const hits = [], x0 = b.x, W = b.w, at0 = top + y, liked = truthy(F(r, 'liked')), name = String(F(r, 'author') || 'Someone');
@@ -9692,7 +9873,8 @@ registerBehavior('uiFeed', {
           if (!born.has(r.id)) born.set(r.id, s.time + Math.min(idx, 6) * 0.06); idx++;
           const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at1 = at0 + dy;
           let at = at1;
-          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : F(r, 'repostedBy') ? `🔁 ${F(r, 'repostedBy')} reposted` : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : '') : '';
+          const par = rid(r) && !tUp.has(r.id) ? findPost(s, rid(r)) : null;
+          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : F(r, 'repostedBy') ? `🔁 ${F(r, 'repostedBy')} reposted` : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : par ? `↩ Replying to @${who(par)}` : '') : '';
           curR = truthy(F(r, 'liked')) ? String(F(r, 'reaction') || '') : '';
           const hp = hPrev.get(r.id), bgC = look !== 'cards' ? (pressedId === r.id && s.time - pressedT > 0.06 ? p.pressed || 'rgba(128,128,128,0.10)' : p.postBg) : '';
           if (bgC && hp) { ctx.fillStyle = bgC; ctx.fillRect(x0, at, W, hp); }
@@ -9768,6 +9950,7 @@ registerBehavior('uiFeed', {
             h = pad - 2 + NS + 8 + textH(T) + (exT ? exT + 4 : 0) + (mh ? 10 + mh : 0) + actH + 4;
             if (compact && thumb) h = Math.max(h, pad + thumb + 10);
             if (at < b.y + b.h && at + h > b.y) {
+              if (showAv && (tUp.has(r.id) || tDown.has(r.id))) { ctx.fillStyle = line; const lx = x0 + pad + AV / 2 - 1; if (tUp.has(r.id)) ctx.fillRect(lx, at1 - gap, 2.5, at + pad - 2 - (at1 - gap) - 4); if (tDown.has(r.id)) ctx.fillRect(lx, at + pad - 2 + AV + 4, 2.5, at1 + h - (at + pad - 2 + AV + 4) + (lab ? 20 : 0)); }
               if (showAv) av(r, x0 + pad + AV / 2, at + pad - 2 + AV / 2, AV);
               const fwT = followable(r) && !thumb ? followPill(r, x0 + W - pad - (p.showMore !== false ? 26 : 0), at + pad + NS / 2, hits, x0, at) : 0;
               nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0) - fwT, true);
@@ -9777,7 +9960,7 @@ registerBehavior('uiFeed', {
               if (thumb) { gallery(r, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10), 'single', hits, x0, at); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
               if (mh) { const my = ey; gallery(r, tx, my, tw, mh, mr, 'grid', hits, x0, at); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); }
               if (A.length) actionRow(r, tx, compact ? Math.min(tw + thumb, 240) : tw, at + h - (compact ? 18 : 22), hits, x0, at, compact ? 16 : 18);
-              if (p.dividers !== false) { const dx = p.dividerInset ? tx : x0; ctx.fillStyle = line; ctx.fillRect(dx, at + h - 1, x0 + W - dx, 1); }
+              if (p.dividers !== false && !tDown.has(r.id)) { const dx = p.dividerInset ? tx : x0; ctx.fillStyle = line; ctx.fillRect(dx, at + h - 1, x0 + W - dx, 1); }
             }
           }
           ctx.restore();
@@ -9804,7 +9987,7 @@ registerBehavior('uiFeed', {
         menuR = [];
         if (menu) { // the ⋯ menu
           const r = menu.r, sv = truthy(F(r, 'saved')), mine = isMine(s, r), IT = mine
-            ? [['edit', 'Edit post', '✏️'], ['pin', truthy(F(r, 'pinned')) ? 'Unpin' : 'Pin to top', '📌'], ['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['delete', 'Delete post', '🗑️', true]]
+            ? [['edit', 'Edit post', '✏️'], ...(p.threads !== false ? [['thread', 'Add to thread', '🧵']] : []), ['pin', truthy(F(r, 'pinned')) ? 'Unpin' : 'Pin to top', '📌'], ['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['delete', 'Delete post', '🗑️', true]]
             : [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ...(p.messages !== false ? [['message', `Message @${who(r)}`, '💬']] : []), ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
           const w = 220, rh = 44, hh = IT.length * rh + 12, x = clamp(menu.sx - w, b.x + 8, b.x + b.w - w - 8), yy = menu.sy + hh > b.y + b.h - 8 ? Math.max(b.y + inset + 8, menu.sy - hh - 30) : menu.sy;
           ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8; ctx.fillStyle = card; UK.rr(ctx, x, yy, w, hh, 14); ctx.fill(); ctx.restore();
@@ -10125,6 +10308,103 @@ registerBehavior('uiWhoToFollow', {
   },
 });
 
+// ---------------------------------------------------------------------------
+// Search: a bar that opens a search screen (recent searches, trending tags, people, filters) and puts the search in a variable a Social Feed uses
+const recentKey = (s) => 'pocket.recentSearch.' + (s.engine.gameKey || 'game');
+const recentOf = (s) => { try { return JSON.parse(store.get(recentKey(s), '[]')) || []; } catch { return []; } };
+function searchScreen(s, o) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
+  const c = o.colors, font = o.font || THEME.font, el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
+  const wrap = el('div', `position:absolute;inset:0;z-index:52;background:${c.bg};color:${c.text};font-family:${font};display:flex;flex-direction:column;opacity:0;transform:translateY(12px);transition:opacity .2s,transform .2s;padding-bottom:env(safe-area-inset-bottom);`); wrap.dataset.pocketSearch = '1';
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
+  const top = el('div', `flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid ${c.line};`);
+  const field = el('div', `flex:1;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:22px;background:${c.field};`);
+  const inp = el('input', `flex:1;min-width:0;border:0;outline:none;background:transparent;color:${c.text};font:16px ${font};padding:11px 0;`); inp.type = 'search'; inp.placeholder = o.placeholder || 'Search'; inp.value = o.value || ''; inp.setAttribute('enterkeyhint', 'search');
+  const clr = btn(`color:${c.sub};font-size:15px;padding:4px;`, '✕'); clr.setAttribute('aria-label', 'Clear');
+  field.append(el('span', `color:${c.sub};font-size:16px;`, '🔍'), inp, clr);
+  const cancel = btn(`flex:none;font:600 16px ${font};color:${c.text};padding:6px 2px;`, 'Cancel');
+  top.append(field, cancel);
+  const body = el('div', 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;');
+  wrap.append(top, body); root.append(wrap);
+  requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.opacity = '1'; wrap.style.transform = 'none'; }));
+  let gone = false;
+  const close = () => { if (gone) return; gone = true; wrap.style.opacity = '0'; wrap.style.transform = 'translateY(12px)'; setTimeout(() => { wrap.remove(); o.onClose?.(); }, 200); };
+  const pick = (v) => { v = String(v || '').trim(); if (v) { const R = recentOf(s).filter((q) => q !== v); R.unshift(v); store.set(recentKey(s), JSON.stringify(R.slice(0, 10))); } o.onPick(v); close(); };
+  const head = (t0, right) => { const h = el('div', 'display:flex;align-items:center;justify-content:space-between;padding:16px 16px 6px;'); h.append(el('div', 'font-weight:900;font-size:18px;', t0)); if (right) h.append(right); return h; };
+  const row = (icon, main, sub0, onclick, extra) => { const r = btn(`display:flex;align-items:center;gap:12px;width:100%;padding:10px 16px;`); const ic = typeof icon === 'string' ? el('span', `flex:none;width:40px;height:40px;border-radius:50%;background:${c.field};display:flex;align-items:center;justify-content:center;font-size:17px;`, icon) : icon; const tx = el('div', 'flex:1;min-width:0;'); tx.append(el('div', 'font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', main)); if (sub0) tx.append(el('div', `color:${c.sub};font-size:13px;`, sub0)); r.append(ic, tx); if (extra) r.append(extra); r.onclick = onclick; return r; };
+  const face = (name) => { const a = el('span', `flex:none;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;`); let h0 = 0; for (const ch of String(name || '?')) h0 = (h0 * 31 + ch.charCodeAt(0)) >>> 0; a.style.background = AVATAR_COLORS[h0 % AVATAR_COLORS.length]; a.textContent = String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''); return a; };
+  const D0 = o.data();
+  const paint = () => {
+    body.textContent = ''; const q = inp.value.trim(), ql = q.toLowerCase(); clr.style.visibility = q ? 'visible' : 'hidden';
+    // filters
+    const chips = el('div', 'display:flex;gap:8px;padding:12px 16px 4px;overflow-x:auto;');
+    for (const [lab, add] of [['📷 Photos', 'has:photo'], ['🎬 Videos', 'has:video'], ['GIFs', 'has:gif'], ['📊 Polls', 'has:poll']]) { const ch = btn(`flex:none;padding:7px 12px;border-radius:16px;border:1px solid ${c.line};font:700 13px ${font};`, lab); ch.onclick = () => pick((q ? q + ' ' : '') + add); chips.append(ch); }
+    body.append(chips);
+    if (!q) {
+      const R = recentOf(s);
+      if (R.length) { const all = btn(`color:${c.acc};font:700 14px ${font};`, 'Clear all'); all.onclick = () => { store.set(recentKey(s), '[]'); paint(); }; body.append(head('Recent', all));
+        for (const v of R) { const x = btn(`flex:none;color:${c.sub};font-size:15px;padding:6px;`, '✕'); x.onclick = (ev) => { ev.stopPropagation(); store.set(recentKey(s), JSON.stringify(recentOf(s).filter((z) => z !== v))); paint(); }; const r = row('🕘', v, '', () => pick(v), x); r.dataset.recent = v; body.append(r); } }
+      if (D0.tags.length) { body.append(head('Trending')); for (const [tg, n] of D0.tags.slice(0, 6)) { const r = row('#', tg, `${shortNum(n)} post${n === 1 ? '' : 's'}`, () => pick(tg)); r.dataset.tag = tg; body.append(r); } }
+      if (D0.people.length) { body.append(head('People')); for (const pp of D0.people.slice(0, 6)) body.append(row(face(pp.name), pp.name + (pp.verified ? ' ✓' : ''), '@' + pp.h, () => pick('@' + pp.h))); }
+      return;
+    }
+    const go = row('🔍', `Search for “${q}”`, '', () => pick(q)); go.dataset.searchFor = q; body.append(go);
+    const tg = D0.tags.filter(([t0]) => t0.toLowerCase().includes(ql.replace(/^#/, '#')) || t0.toLowerCase().slice(1).startsWith(ql.replace(/^#/, ''))).slice(0, 5);
+    for (const [t0, n] of tg) body.append(row('#', t0, `${shortNum(n)} post${n === 1 ? '' : 's'}`, () => pick(t0)));
+    const pl = D0.people.filter((pp) => pp.name.toLowerCase().includes(ql.replace(/^@/, '')) || pp.h.toLowerCase().includes(ql.replace(/^@/, ''))).slice(0, 6);
+    if (pl.length) { body.append(head('People')); for (const pp of pl) { const r = row(face(pp.name), pp.name + (pp.verified ? ' ✓' : ''), '@' + pp.h, () => pick('@' + pp.h)); r.dataset.person = pp.h; body.append(r); } }
+  };
+  inp.addEventListener('input', paint); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); pick(inp.value); } else if (ev.key === 'Escape') close(); });
+  clr.onclick = () => { inp.value = ''; paint(); inp.focus(); }; cancel.onclick = close;
+  paint(); setTimeout(() => inp.focus(), 60);
+  return { wrap, input: inp, close };
+}
+
+registerBehavior('uiSearchBar', {
+  label: 'Search Bar', description: 'A search bar for social apps: tapping it opens a search screen with recent searches, trending #tags, people and filters (photos, videos, GIFs, polls), with suggestions as you type. The search goes in a variable: give a Social Feed the same “Search with variable” and it shows the results.',
+  params: [
+    { key: 'var', label: 'Search goes in variable', type: 'text', default: 'q', suggest: 'vars' },
+    { key: 'placeholder', label: 'Hint', type: 'text', default: 'Search' },
+    { key: 'collection', label: 'Posts collection (for tags and people)', type: 'text', default: 'Posts', suggest: 'collections' },
+    { key: 'openPage', label: 'Searching goes to page (blank = stay)', type: 'text', default: '' },
+    { key: 'message', label: 'Searching sends', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ field: ['Bar', '@field'], text: ['Text', '@text'], sub: ['Hint', '@sub'], accent: ['Accent', '@accent'], bg: ['Search screen', '@card'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let open = null, clearR = null;
+    const data = (s) => {
+      const D = s.engine.data, rows = D.def(p.collection) ? D.rows(p.collection) : SAMPLE_POSTS(), n = new Map(), shown = new Map(), people = new Map();
+      for (const r of rows) {
+        const T = new Set(); for (const m of String(r.text ?? '').matchAll(/#[\p{L}\p{N}_]{2,40}/gu)) { const k = m[0].toLowerCase(); if (T.has(k)) continue; T.add(k); n.set(k, (n.get(k) || 0) + 1); if (!shown.has(k)) shown.set(k, m[0]); }
+        const h = String(r.handle || '').replace(/^@/, ''); if (h && !people.has(h)) people.set(h, { h, name: r.author || h, verified: truthy(r.verified), likes: 0 }); if (h) people.get(h).likes += +r.likes || 0;
+      }
+      return { tags: [...n.entries()].sort((a, b) => b[1] - a[1]).map(([k, c]) => [shown.get(k), c]), people: [...people.values()].sort((a, b) => b.likes - a.likes) };
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        for (const t of UK.taps(s, e)) {
+          const b = UK.box(e); if (!UK.in(t, b)) continue;
+          if (clearR && UK.in(t, clearR, 6)) { UK.tap(s, p); s.setVar(p.var, ''); continue; }
+          if (open || s.engine.editing) continue; UK.tap(s, p);
+          open = searchScreen(s, { value: String(s.vars[p.var] ?? ''), placeholder: p.placeholder, data: () => data(s), colors: { bg: tok(p.bg || '@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' },
+            onPick: (v) => { s.setVar(p.var, v); if (p.openPage && v) s.navTo(p.openPage); if (p.message) s.send(p.message, v); }, onClose: () => { open = null; } });
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), v = String(s.vars[p.var] ?? ''), h = Math.min(b.h, 44), y = b.cy - h / 2;
+        ctx.fillStyle = tok(p.field || '@field') || 'rgba(128,128,128,0.15)'; UK.rr(ctx, b.x, y, b.w, h, h / 2); ctx.fill();
+        drawNavIcon(ctx, 'ui-search', b.x + 22, b.cy, 18, tok(p.sub || '@sub'));
+        UK.text(ctx, v || p.placeholder || 'Search', b.x + 42, b.cy + 1, { size: 15, weight: v ? 700 : 500, color: tok(v ? p.text || '@text' : p.sub || '@sub'), align: 'left', maxW: b.w - 80 });
+        clearR = null; if (v) { const cx = b.x + b.w - 22; ctx.fillStyle = tok(p.sub || '@sub'); ctx.globalAlpha *= 0.25; ctx.beginPath(); ctx.arc(cx, b.cy, 11, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha /= 0.25; UK.text(ctx, '✕', cx, b.cy + 1, { size: 11, weight: 800, color: tok(p.text || '@text') }); clearR = { x: cx - 14, y: b.cy - 14, w: 28, h: 28 }; }
+      },
+      destroy() { open?.close(); },
+    };
+  },
+});
+
 const STORY_SAMPLE = 'Maya | 🏔️ | #4f7cff | Sunrise hike\nLeo | 🚀 | #7b2ff7 | Launch day!\nSofia | 🍝 | #ff7a45 | Pasta night\nAmir | 🎸 | #10b981 | New song soon\nJun | 🐶 | #f59e0b | Meet Biscuit';
 registerBehavior('uiStories', {
   label: 'Stories', description: 'A row of round story bubbles with a coloured ring (grey once seen). Tap one to watch full screen: progress bars on top, tap right for next, left for back, hold to pause, it moves on by itself. One per line: Name | emoji or picture | colour | text.',
@@ -10338,7 +10618,9 @@ registerBehavior('uiComposer', {
     { key: 'message', label: 'After posting, send', type: 'text', default: 'posted', suggest: 'messages' },
     { key: 'style', label: 'Tapping it opens', type: 'select', options: ['full composer', 'simple text box'], default: 'full composer', info: { 'full composer': 'A full-screen editor with a character ring, photos, a poll and a place. Unfinished posts are kept as a draft.' } },
     { key: 'photos', label: 'Photos (up to 4)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
-    { key: 'videos', label: 'Videos too (on this device only)', type: 'bool', default: false, showIf: (b) => b.style !== 'simple text box' && b.photos !== false },
+    { key: 'videos', label: 'Videos', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' && b.photos !== false, info: 'Small videos (6 MB) are kept in the post; with a Supabase media bucket (Game Settings › Supabase) photos, GIFs and videos are uploaded there.' },
+    { key: 'gifs', label: 'GIFs (from the phone or a link)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' && b.photos !== false },
+    { key: 'threads', label: 'Threads (🧵 adds more posts)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'polls', label: 'Polls', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'places', label: 'Place (📍)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     ...colorParams({ field: ['Field', '@field'], text: ['Hint', '@sub'], accent: ['Button', '@accent'] }),
@@ -10354,8 +10636,9 @@ registerBehavior('uiComposer', {
         const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
         if (p.style !== 'simple text box' && !s.engine.editing) {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
-          const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: !!p.videos, draftKey: e.name || e.id,
-            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } s.engine.data.add(p.collection, postRecord(me, out)); if (p.message) s.send(p.message, out.text); s.snackbar?.('Posted'); },
+          const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
+            upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
+            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } postThread(s.engine.data, p.collection, me, out); if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
           if (ok) return;
         }
@@ -15245,6 +15528,16 @@ export class Supa {
       s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase');
     });
   }
+  /** Upload a photo, GIF or video to Supabase Storage (Game Settings › Supabase › Media bucket). Returns its public link. */
+  async upload(file, folder = 'posts') {
+    const c = this.cfg(), bucket = String(c.st.supabaseBucket || '').trim(); if (!c.url || !c.key || !bucket) throw new Error('no media bucket');
+    await this.fresh(); const se = this.session(), ext = (String(file.name || '').match(/\.(\w{2,5})$/) || [, (String(file.type).split('/')[1] || 'bin').replace('jpeg', 'jpg').replace('quicktime', 'mov')])[1].toLowerCase();
+    const path = `${folder}/${this.user()?.id || 'guest'}/${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}.${ext}`;
+    const r = await fetch(`${c.url}/storage/v1/object/${encodeURIComponent(bucket)}/${path}`, { method: 'POST', headers: { apikey: c.key, Authorization: 'Bearer ' + (se?.access_token || c.key), 'Content-Type': file.type || 'application/octet-stream', 'x-upsert': 'false' }, body: file });
+    if (!r.ok) { let m = 'upload failed (' + r.status + ')'; try { const j = await r.json(); m = j.message || j.error || m; } catch { /* not json */ } throw new Error(m); }
+    return `${c.url}/storage/v1/object/public/${encodeURIComponent(bucket)}/${path}`;
+  }
+  canUpload() { const c = this.cfg(); return this.on() && !!String(c.st.supabaseBucket || '').trim(); }
   /** A database function (Supabase › Database › Functions): POST /rest/v1/rpc/name. Its answer goes in variables. */
   async rpc(fn, args = {}, into = 'supaResult') { try { const j = await this.call('/rest/v1/rpc/' + encodeURIComponent(String(fn).trim()), { method: 'POST', body: args, auth: !!this.user() }); this.answer(j, into); return true; } catch (e) { this.answerFail('Database function', e); return false; } }
   /** An Edge Function (Supabase › Edge Functions): POST /functions/v1/name. */
@@ -15323,6 +15616,19 @@ create policy "${t} change" on public.${t} for update using (auth.uid() = id) wi
 }
 /** Turns on live updates (Realtime) for a table. */
 const liveSQL = (t) => `do $$ begin alter publication supabase_realtime add table public.${t}; exception when duplicate_object then null; end $$;\n`;
+/** The SQL for a public media bucket that signed-in people can upload photos, GIFs and videos to. */
+export function storageSQL(bucket = 'media') {
+  const b = String(bucket || 'media').trim().replace(/[^a-z0-9_-]/gi, '-').toLowerCase() || 'media';
+  return `-- Media: a public bucket for photos, GIFs and videos in posts and messages
+insert into storage.buckets (id, name, public, file_size_limit) values ('${b}', '${b}', true, 52428800) on conflict (id) do update set public = true;
+drop policy if exists "${b} read" on storage.objects;
+drop policy if exists "${b} upload" on storage.objects;
+drop policy if exists "${b} remove" on storage.objects;
+create policy "${b} read" on storage.objects for select using (bucket_id = '${b}');
+create policy "${b} upload" on storage.objects for insert to authenticated with check (bucket_id = '${b}' and (storage.foldername(name))[2] = auth.uid()::text);
+create policy "${b} remove" on storage.objects for delete to authenticated using (bucket_id = '${b}' and owner = auth.uid());
+`;
+}
 /** The SQL that makes a collection's table in Supabase, with the rules for private or shared records. */
 export function supabaseSQL(def) {
   if (def.online === 'my own table') { const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(); return def.live ? `-- ${def.name}: live updates for your table\n` + liveSQL(t) : `-- ${def.name} uses your own table “${t}”: nothing to set up. Its row level security rules decide who can read and write.\n`; }

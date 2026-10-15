@@ -193,6 +193,10 @@ In *Game Settings › Data*, open a collection and set **Store online (Supabase)
 - **Who can read and write** is up to your table's row level security rules. Signing in isn't required unless your rules need it. If a rule refuses a change, `{dataError}` says why.
 - Live updates work here too. The setup SQL for an own table only turns on Realtime; it doesn't change your table.
 
+### Media (photos, GIFs and videos)
+
+Set *Game Settings › Supabase › **Media bucket*** (e.g. `media`) and press **Copy media bucket SQL**, then run that SQL in Supabase. It makes a public Storage bucket that signed-in people can upload to, each into their own folder. After that, the post composer uploads photos (made smaller first), GIFs and videos there, and posts keep their public links.
+
 ### Database and Edge Functions
 
 - **Call Database Function (Supabase)** runs a Postgres function (Supabase › Database › Functions) with arguments like `player = {playerName}, amount = 10`.

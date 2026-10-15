@@ -7211,7 +7211,7 @@ registerBehavior('uiBottomNav', {
           }
           // badge
           let bv = t.badge ? s.vars[t.badge] : null; const now = s.time || 0;
-          if (s.engine.editing && t.badge && (bv == null || bv === '' || bv === 0 || bv === false)) bv = t.badgeShow === 'dot' ? true : 3; // the editor shows a sample, so you can see how badges look
+          if (s.engine.editing && t.badge && (bv == null || bv === '')) bv = t.badgeShow === 'dot' ? true : 3; // a variable that doesn't exist yet shows a sample in the editor; one you set (even to 0) shows as it will in Play
           const seen = badgeSeen.get(i); if (!seen || seen.v !== bv) badgeSeen.set(i, { v: bv, t: seen ? now : -9 }); // (a change starts its pop; the first look doesn't)
           const zero = bv === 0 || bv === '0';
           if (bv != null && bv !== '' && bv !== false && (!zero || p.badgeZero) && !(on && p.badgeHideSelected)) {
@@ -15021,6 +15021,7 @@ export const LOGIC_CONDITIONS = {
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
   dataCount: { label: 'Number of records', icon: 'list', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'only where (e.g. done = no)'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(c.s.engine.data.stat(p.collection, 'count', '', p.filter, c.s.vars), p.op, +p.value || 0), say: (p) => `${p.collection}${p.filter ? ` (${p.filter})` : ''} count ${p.op} ${p.value}` },
+  fromApp: { label: 'Opened from an app', icon: 'phone', test: (c) => !!c.s.fromApp, say: () => 'this game was opened from an app' },
   recordIsOpen: { label: 'A record is open', icon: 'eye', test: (c) => !!openedRecord(c.s), say: () => 'a record is open' },
   unitCount: { label: 'Number of units', icon: 'player', params: [opt('which', ['selected', 'yours', 'enemy', 'ready this turn'], 'selected', 'units'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(+c.s.vars[{ selected: 'selectedUnits', yours: 'unitsLeft', enemy: 'enemiesLeft', 'ready this turn': 'unitsReady' }[p.which] || 'selectedUnits'] || 0, p.op, +p.value || 0), say: (p) => `${p.which} units ${p.op} ${p.value}` },
   isPlayerTurn: { label: 'It is your turn', icon: 'clock', test: (c) => c.s.isPlayerTurn, say: () => 'it is your turn' },
@@ -15211,6 +15212,14 @@ for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden) NODE_TYPES['l
 for (const [k, d] of Object.entries(LOGIC_CONDITIONS)) if (!d.hidden) NODE_TYPES['lc_' + k] = { cat: 'Conditions', label: d.label, value: 'bool', params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
 const evLabel = (l) => 'When: ' + l.charAt(0).toLowerCase() + l.slice(1);
 for (const [k, d] of Object.entries(LOGIC_EVENTS)) if (!d.hidden && !d.fsm && !['always'].includes(k)) NODE_TYPES['le_' + k] = { cat: 'Events', label: evLabel(d.label), outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+NODE_TYPES.onGameDone = { cat: 'Events', label: 'On Back From a Game', outs: ['won', 'lost', 'quit'], params: [txt('game', '', 'game (level name; blank = any)')] };
+NODE_TYPES.playGameN = { cat: 'Actions', label: 'Play Game', exec: true, outs: ['then', 'no such game'], params: [txt('game', '2', 'game (level number or name)')] };
+NODE_TYPES.backToAppN = { cat: 'Actions', label: 'Back to App', exec: true, outs: ['then', 'not in an app'] };
+NODE_TYPES.inApp = { cat: 'Values', label: 'Opened From an App', value: 'bool' };
+// nodes for apps and pages also show in the App folder (they keep their own category, so events stay events)
+for (const k of ['onPage', 'onPageClosed', 'onBack', 'onGameDone', 'onAppHidden', 'onAppShown', 'onDarkMode', 'onMenu', 'le_gameFinished', 'le_recordAdded', 'le_recordChanged', 'le_recordDeleted', 'le_recordOpened', 'le_pageChanged',
+  'goToPage', 'goBack', 'canGoBack', 'pageIs', 'playGameN', 'backToAppN', 'inApp', 'menuOpen', 'menuIsOpen', 'navBars', 'toast', 'alert', 'confirm', 'askText', 'dataValue',
+  'la_snackbar', 'la_dataAdd', 'la_dataSet', 'la_dataDelete', 'la_dataOpen', 'la_dataClear', 'la_dataToVar', 'lc_dataCount', 'lc_recordIsOpen', 'lc_fromApp', 'deviceIs']) if (NODE_TYPES[k]) NODE_TYPES[k].also = 'App';
 const nodeParams = (d, p) => Object.fromEntries([...(d.params || []), ...(d.inputs || [])].map((q) => [q.key, p[q.key] ?? q.default]));
 /** A one-node visual script: Triggers run any action node through it (its outputs call back), read any value node, or listen for any event node. */
 function nodeGraph(type, params, tag = '') {
@@ -15703,6 +15712,7 @@ registerBehavior('graph', {
         case 'countTag': return s.findAll(P('tag')).filter((q) => !q.dead).length;
         case 'exists': { const k = P('object'); return !!(s.find(k) && !s.find(k).dead) || s.findAll(k).some((q) => !q.dead); }
         case 'health': return e.getBehavior('health')?.hp ?? e.data.hp ?? 0;
+        case 'inApp': return !!s.fromApp;
         case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
         case 'questInfo': {
           const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
@@ -16308,6 +16318,8 @@ registerBehavior('graph', {
           call().then((r) => { if (e.dead) return; if (n.type === 'pfGetData') follow(n, r === 'loaded' ? 'loaded' : r === 'none' ? 'nothing' : 'failed', later); else follow(n, r ? ok : 'failed', later); });
           if (n.type === 'pfLoginEmail' || n.type === 'pfGetData') return; break;
         }
+        case 'playGameN': return follow(n, s.engine.playGame(P('game')) ? 'then' : 'no such game', ctx);
+        case 'backToAppN': return follow(n, s.engine.backToApp() ? 'then' : 'not in an app', ctx);
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
         case 'whileLoop': case 'repeatUntil': {
@@ -16624,6 +16636,7 @@ registerBehavior('graph', {
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onSaveFile')) s.on('saved', (f) => { if (!e.dead) fire('onSaveFile', e, s, null, (n) => !param(n, 'file') || param(n, 'file') === f); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onGameDone')) s.on('gameFinished', (name, score, result) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onGameDone' && !n.off && (!param(n, 'game') || String(name).toLowerCase() === String(param(n, 'game')).trim().toLowerCase())) follow(n, result, { s, e, steps: 0, eventValue: score }); });
         if (has('onPermission')) s.on('permission', (k, ok) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onPermission' && (param(n, 'kind') === 'any' || param(n, 'kind') === k)) follow(n, ok ? 'allowed' : 'not allowed', { s, e, steps: 0 }); });
         if (has('onLocation')) s.on('location', () => { if (!e.dead) fire('onLocation', e, s); });
         if (has('onCamLive')) s.on('cameraLive', (name) => { if (!e.dead) fire('onCamLive', e, s, null, (n) => !param(n, 'camera') || param(n, 'camera') === name); });
@@ -17471,6 +17484,7 @@ export class Engine {
     const s = Scene.fromJSON(json);
     s.level = i + 1; s.levelCount = this.levels.length;
     if (this.carry) { Object.assign(s.vars, this.carry); s.restoreInv(); if (s.state === 'title') s.state = 'play'; }
+    if (this.shareIn) { Object.assign(s.vars, this.shareIn); this.shareIn = null; } // an app's shared variables, given to the game it opens
     if (s.settings.timeLimit) s.vars.time = +s.settings.timeLimit;
     s.vars.level = s.level;
     return s;
@@ -17483,10 +17497,18 @@ export class Engine {
     const n = +ref; if (String(ref).trim() !== '' && Number.isFinite(n)) return n >= 1 && n <= this.levels.length ? Math.round(n) - 1 : -1;
     const k = String(ref || '').trim().toLowerCase(); return this.levels.findIndex((lv, i) => String(lv.levelName || (i === 0 ? lv.name : '') || '').trim().toLowerCase() === k);
   }
-  /** Apps: open a game (another level of this project). It starts fresh (with its title screen), and Back or its end screen returns to the app. */
+  /** The variables an app shares with its games (Game Settings → App → Shared with games): a list, or * for all of them. */
+  sharedVars(list, vars) {
+    const raw = String(list || '').trim(); if (!raw) return [];
+    const skip = new Set(['level', 'levelCount', 'time', 'score', 'lives', 'page', 'lastGame', 'lastScore', 'lastResult', 'gamesPlayed']);
+    return raw === '*' ? Object.keys(vars).filter((k) => !skip.has(k) && !k.startsWith('__') && !k.startsWith('best_')) : raw.split(/[\s,]+/).map((k) => k.replace(/[{}]/g, '')).filter(Boolean);
+  }
+  /** Apps: open a game (another level of this project). It starts fresh (with its title screen), and Back or its end screen returns to the app. Shared variables go in with it and come back changed. */
   playGame(ref) {
     const i = this.levelIndexOf(ref), s = this.scene; if (i < 0 || !s) { Log.add('warn', `There is no level “${ref}” to play`, 'App'); return false; }
-    this.appReturn = { level: this.levelIndex, vars: { ...s.vars, __inv: s.packInv() }, nav: JSON.parse(JSON.stringify(s.navStacks || {})), navVar: s.navVar, record: s.settings.recordPlays || '' };
+    const shared = this.sharedVars(s.settings.shareVars, s.vars);
+    this.appReturn = { level: this.levelIndex, vars: { ...s.vars, __inv: s.packInv() }, nav: JSON.parse(JSON.stringify(s.navStacks || {})), navVar: s.navVar, record: s.settings.recordPlays || '', shared };
+    this.shareIn = Object.fromEntries(shared.filter((k) => k in s.vars).map((k) => [k, s.vars[k]]));
     this.carry = null; this.levelIndex = i; this.paused = false;
     const g = this.factory(); g.fromApp = true; this.setScene(g);
     this.audio.sfx('click'); return true;
@@ -17497,11 +17519,12 @@ export class Engine {
     const name = this.levels[this.levelIndex]?.levelName || `Level ${this.levelIndex + 1}`, score = Math.floor(+g.vars.score || 0), result = g.state === 'win' ? 'won' : g.state === 'over' ? 'lost' : 'quit';
     this.appReturn = null; this.paused = false;
     const bestKey = 'best_' + fieldKey(name), best = Math.max(+R.vars[bestKey] || 0, score);
-    this.carry = { ...R.vars, lastGame: name, lastScore: score, lastResult: result, [bestKey]: best, gamesPlayed: (+R.vars.gamesPlayed || 0) + 1 };
+    const back = Object.fromEntries((R.shared || []).filter((k) => k in g.vars).map((k) => [k, g.vars[k]])); // shared variables come back as the game left them
+    this.carry = { ...R.vars, ...back, lastGame: name, lastScore: score, lastResult: result, [bestKey]: best, gamesPlayed: (+R.vars.gamesPlayed || 0) + 1 };
     this.levelIndex = R.level;
     const a = this.factory(); a.navStacks = R.nav; a.navVar = R.navVar; this.setScene(a);
     if (R.record && this.data.def(R.record)) this.data.add(R.record, { game: name, score, result, date: isoDay() }); // every play goes into the app's data (Scores…)
-    a.emit('gameFinished', name, score, result);
+    a.after(0, () => a.emit('gameFinished', name, score, result)); // next frame, once the app's scripts and triggers are listening
     return true;
   }
   /** Jump to a level by number (1 = first), keeping variables like score. */
@@ -17525,7 +17548,7 @@ export class Engine {
   restart(skipTitle = true) {
     if (!this.factory) return;
     if (this.levels && this.scene?.state === 'win' && !this.scene.fromApp) { this.levelIndex = 0; this.carry = null; } // finished the last level
-    if (this.scene?.fromApp) this.carry = null; // a game inside an app starts fresh each time
+    if (this.scene?.fromApp) { this.carry = null; const sh = this.appReturn?.shared || []; this.shareIn = Object.fromEntries(sh.filter((k) => k in this.scene.vars).map((k) => [k, this.scene.vars[k]])); } // a game inside an app starts fresh each time, keeping what it shares with the app
     const s = this.factory();
     if (this.scene?.fromApp && this.appReturn) s.fromApp = true; // playing again: still a game inside the app
     if (skipTitle && s.state === 'title') s.state = 'play';

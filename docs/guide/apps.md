@@ -125,15 +125,33 @@ An app can hold games, and a game can use everything an app has. They live in th
    - The app's page gets a **▶ Play** button for it.
 2. A **Play Game Button** (*Add → UI & Menus → App*), the *play game* button action or the **Play a game** instruction opens a game by its level number or name (`2`, `Breakout`).
 3. The game plays as a normal game, with its own title screen, pause button and end screens:
-   - it starts fresh every time (score 0);
+   - it starts fresh every time (score 0), except for the **shared variables** (below);
    - **Tap to play again** replays it;
    - its pause and end screens have a **‹ Back to app** button, and the phone's back gesture leaves it too;
    - a *Back to App Button* widget or the **Back to the app** instruction does the same from your own UI.
 4. Back in the app, you're on the same page as before, with:
    - `{lastGame}`, `{lastScore}`, `{lastResult}` (won, lost or quit) and `{gamesPlayed}`;
    - the best score per game, as `{best_breakout}`;
-   - the **Back from a game** event, for Triggers and visual scripts.
+   - the **Back from a game** event for Triggers, and **On Back From a Game** for visual scripts (with *won*, *lost* and *quit* outputs; the event value is the score).
 5. *Game Settings › App › Record every game played in collection* (e.g. `Scores`) adds a record for each play, with **game**, **score**, **result** and **date**. A Data List can then show a high-score table, and a Data Summary can show the best score (`max` of `score` where `game = Breakout`).
+
+### Sharing variables between the app and its games
+
+*Game Settings › App › Variables shared with games* lists the variables the app and its games have in common, like `coins, gems, name` (or `*` for all of them).
+
+- A game opened from the app starts with the app's values: a game can show the player's name, or spend the coins they have in the app.
+- When the game ends, those variables go back to the app as the game left them: coins won in the game are in the app's wallet, and a shop page in the app can sell what the game earns.
+- **Play again** keeps what the game has earned so far.
+- Variables not in the list stay separate: the game has its own `score`, `lives` and the rest, and the app keeps its own.
+- Data collections are always shared: a game can add records the app lists, and read the app's records.
+
+### Visual scripts in apps
+
+Apps use the same Visual Scripts as games (and Triggers, State Machines and JavaScript too).
+
+- *Scripts › New Visual Script* in an app puts the script on an **App Logic** object, which runs on every page. It starts with *On Page Opened → Show Toast*. (Pages hide when they aren't shown, so app-wide scripts don't go on a page.)
+- In the Node Editor, the **App** folder comes first. It has everything for apps in one place: page events and *Go To Page*, *Go Back*, the side menu and nav bars, toasts and alerts, data (*Add / Change / Delete / Open Record*, *Data Value*, record events), and games (*Play Game*, *Back to App*, *On Back From a Game*, *Opened From an App*).
+- Inside a game, **Opened From an App** is true when an app opened it, so a game can skip its own menus or show *Back to app* only then.
 
 The **Arcade** app type is a complete example: three mini games, a card with **Play** and the best score for each, and a *My Scores* tab.
 

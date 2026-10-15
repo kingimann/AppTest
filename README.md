@@ -639,7 +639,9 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Games inside apps:** apps and games live in one project.
   - *Levels › Add a Game to This App* copies one of your games, or a game type, in as new levels, with a Play button.
   - **Play Game** opens a game. It keeps its own title, pause and end screens, with **‹ Back to app** (the back gesture works too).
-  - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event.
+  - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event (node: **On Back From a Game**, with won / lost / quit outputs).
+  - **Variables shared with games** (*Game Settings › App*, e.g. `coins, name` or `*`): a game starts with the app's values and gives them back changed when it ends, so coins won in a game are in the app. Data collections are always shared.
+  - **Visual scripts in apps:** the same Node Editor. New scripts go on an *App Logic* object, and an **App** folder (first in apps) gathers pages, menus, data and game nodes: *Play Game*, *Back to App*, *Opened From an App*.
   - *Record every game played* fills a collection (game, score, result, date) for score tables.
   - New **Arcade** app type: three games, best scores, and a score list.
 - Data Lists, Record Forms and Data Summaries work in games too.

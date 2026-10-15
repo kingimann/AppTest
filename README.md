@@ -637,7 +637,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - Stretched UI can have its own top and bottom margins.
 - **From code:** `engine.data.add / rows / query / update / remove / stat / reset`.
 - **Games inside apps:** apps and games live in one project.
-  - *Levels › Add a Game to This App* copies one of your games, or a game type, in as new levels, with a Play button.
+  - *Levels › Add a Game to This App* copies one of your games, or a game type, in as new levels, with a Play button. In an app the Levels menu is split into **App** (its pages) and **Games inside**, and the level button says *App* or the game's name.
   - **Play Game** opens a game. It keeps its own title, pause and end screens, with **‹ Back to app** (the back gesture works too).
   - Back in the app: `{lastGame}`, `{lastScore}`, `{lastResult}`, `{best_<game>}`, and the *Back from a game* event (node: **On Back From a Game**, with won / lost / quit outputs).
   - **Variables shared with games** (*Game Settings › App*, e.g. `coins, name` or `*`): a game starts with the app's values and gives them back changed when it ends, so coins won in a game are in the app. Data collections are always shared.
@@ -670,7 +670,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - Touch buttons dip and light up while held; pause, sound and D-pad buttons draw their own icons.
 - A text showing a variable (`{score}`) pops when the value changes (*Pop when the value changes* in the Text card).
 - **Apps:** search bars with a magnifier and a clear ✕, *No results* and empty-list states, and app bars that get a shadow once you scroll.
-- **Home screen:** the open game big at the top with a picture, *Play* and *Keep editing*; **New 2D game / New 3D game / New app** in one tap; your games as picture cards (the game as you last played it) with when you edited them and a ⋯ menu (open, play, rename, duplicate, delete); then templates with richer tiles. Side by side on wide screens.
+- **Home screen:** the open game big at the top with a picture, *Play* and *Keep editing*; a **Games | Apps** switch that splits the rest into two sections (remembered); **New 2D game / New 3D game**, or **New app / To-do list / App with games**, in one tap; your games or apps as picture cards (the game as you last played it) with when you edited them and a ⋯ menu (open, play, rename, duplicate, delete); then templates with richer tiles. Side by side on wide screens.
 - **Search bars:** suggestions while typing (from a word list, a list variable or a data collection, with the typed part in bold), recent searches kept on the phone, ✕ while typing, an iPhone-style **Cancel**, **voice search** 🎤, hints that take turns (`Search recipes | Try “pasta”`), a message once typing pauses, and `{searchResults}` from the Data List. New preset: *Search Bar (suggestions + voice)*.
 
 ### Page transitions and Build Settings

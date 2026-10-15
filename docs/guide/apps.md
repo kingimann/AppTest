@@ -120,6 +120,8 @@ Text           {left} to do
 
 An app can hold games, and a game can use everything an app has. They live in the **same project**: the app is level 1, and each game is one or more further levels (each one 2D or 3D).
 
+The Levels menu (the button showing *App* at the top of the editor) keeps them apart: **App** is the app's pages, and **Games inside** lists each game. *New Blank 2D Game* and *New Blank 3D Game* add an empty game to fill in yourself. The Open Project window lists your games and apps in separate groups too.
+
 1. *Levels › Add a Game to This App…* (or *Game Settings › App › Add a game…*). Pick one of your own games or a game type.
    - Its levels are copied in, with what it needs from the whole project: items, recipes, quests, dialogues, data, sounds and My Instructions.
    - The app's page gets a **▶ Play** button for it.

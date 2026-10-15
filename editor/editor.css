@@ -326,6 +326,14 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .quick .q-ic em svg.i { width: 13px; height: 13px; stroke-width: 3; }
 .quick .q b { font-size: 15px; line-height: 1.2; }
 .quick .q small { color: var(--muted); font-size: 12.5px; }
+.quick.two { grid-template-columns: repeat(2, 1fr); }
+.seg.home-sec { margin: 22px 0 0; border-radius: 20px; padding: 5px; }
+.seg.home-sec button { height: 56px; font-size: 16.5px; border-radius: 15px; }
+.seg.home-sec button svg.i { width: 22px; height: 22px; }
+.home-sec-wrap { animation: homeIn .3s ease-out both; }
+#home .home-none { margin: 4px 2px 0; }
+.proj-group { display: flex; align-items: center; gap: 8px; margin: 14px 2px 6px; font-size: 12.5px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); }
+.proj-group small { letter-spacing: 0; padding: 1px 7px; border-radius: 9px; background: var(--g2); font-weight: 700; }
 .q-or { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--muted); }
 .q-or span { margin-right: 4px; }
 .q-or button { height: 32px; padding: 0 12px; border-radius: 16px; border: 1px solid var(--g2); background: transparent; color: var(--muted); font-weight: 650; font-size: 13px; }

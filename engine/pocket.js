@@ -652,6 +652,7 @@ let PAL = APP_PALETTES.light, darkMQ = null;
 export function isDark(s) {
   const v = s?.vars?.darkMode;
   if (v !== undefined && v !== '' && v !== null) return v === true || v === 1 || v === '1' || v === 'on' || v === 'yes' || v === 'dark';
+  if (!s?.settings?.appTheme && !s?.settings?.app && typeof s?.background === 'string' && /^#[0-9a-f]{3,8}$/i.test(s.background)) { const [r, g, b] = hexToRgb(s.background); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5; } // a game without a theme: theme colours follow its background
   const t = s?.settings?.appTheme || 'light';
   if (t === 'dark') return true;
   if (t === 'follow the phone') { if (darkMQ === null) try { darkMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : false; } catch { darkMQ = false; } return !!darkMQ?.matches; }
@@ -8815,6 +8816,12 @@ function miniAvatar(ctx, name, x, y, d, pic = '', ring = null) {
   const ini = pic || String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join('');
   UK.text(ctx, ini, x, y + 1, { size: Math.round(d * (pic ? 0.55 : 0.38)), weight: 800, color: '#fff' });
 }
+/** How much of an element (in its own units) is hidden behind a bottom bar (a tab bar), so a scrolling list can scroll its end clear of it. */
+function coveredBottom(s, e, b) {
+  const E = s.engine, S = E.safe, bar = S?.bars?.bottom || 0; if (!bar) return 0;
+  const o = uiOrigin(e, E.width, E.height, S), K = uiK(S) || 1;
+  return Math.max(0, (o.y + (b.y + b.h) * K - (E.height - bar)) / K);
+}
 /** Drag-to-scroll with a flick and a rubber band; pull down past the top to refresh. */
 function makeScroller(axis = 'y') {
   const S = { v: 0, max: 0, drag: null, flick: 0, pulled: 0, refreshT: -9, moved: false };
@@ -8870,7 +8877,7 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e); S.max = Math.max(0, total - b.h + 12);
+        const b = UK.box(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         for (let i = bursts.length - 1; i >= 0; i--) if (s.time - bursts[i].t > 0.9) bursts.splice(i, 1);
         if (s.engine.editing) return;
@@ -9248,7 +9255,7 @@ registerBehavior('uiPhotoGrid', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const G = geo(e), n = items(s).length; S.max = Math.max(0, Math.ceil(n / G.c) * (G.w + G.g) - G.b.h); S.update(s, e, dt, G.b);
+        const G = geo(e), n = items(s).length; S.max = Math.max(0, Math.ceil(n / G.c) * (G.w + G.g) - G.b.h + coveredBottom(s, e, G.b)); S.update(s, e, dt, G.b);
         if (s.engine.editing) return;
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, G.b) || S.moved) continue;

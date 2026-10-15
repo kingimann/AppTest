@@ -1923,3 +1923,11 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .nt-badge { flex: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; border: 2px solid var(--panel); background: var(--bc, #ff3b5c); color: #fff; font: 800 11px/1 system-ui, sans-serif; display: grid; place-items: center; }
 .nt-badge.dot { min-width: 12px; width: 12px; height: 12px; padding: 0; }
 .btn.danger { color: #ff8a80; }
+.pb-chips { margin: 0 0 12px; flex-wrap: wrap; overflow: visible; }
+.pb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.pb-tile { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 12px; border-radius: 14px; border: 1px solid var(--g2); background: var(--g3); color: var(--text); text-align: left; min-height: 96px; }
+.pb-tile:active { transform: scale(.98); }
+.pb-tile .pb-ic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-text); margin-bottom: 4px; }
+.pb-tile .pb-ic svg.i { width: 19px; height: 19px; }
+.pb-tile b { font-size: 14px; }
+.pb-tile small { color: var(--muted); font-size: 12px; line-height: 1.3; }

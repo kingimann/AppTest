@@ -229,6 +229,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
   - Tick *This is my profile* for **Edit profile** instead.
 - **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once.
+- **Colours:** these pieces use theme colours. In an app they follow light / dark mode; in a game they follow the game's background (dark background → light text). Lists scroll their last item clear of a bottom tab bar.
 - **Photo Grid:** a scrolling grid of square pictures from the collection's media field (or emojis). Tap one to open it.
 
 ## Tooltips, menus and more UI pieces

@@ -6,26 +6,60 @@
 |---|---|---|
 | **Best score** (`settings.saveBest`) | `{best}` | Arcade games |
 | **Auto-save variables** (`settings.saveProgress`) | Variables, the level, the inventory | Clicker and idle games |
-| **Save slots** | Variables, the level, positions, what was collected or destroyed, the inventory | Adventures, RPGs |
+| **Save slots** | Variables, the level, positions and sizes, texts, what was collected or destroyed, objects made while playing, the inventory | Adventures, RPGs |
 | **Save files** (Easy Save style) | Any key you choose: numbers, text, lists, dictionaries, objects | Settings, unlocks, anything custom |
 | **Auto Save / Save Manager** components | One object's state / chosen variables | Persistent worlds |
-| **Cloud save** (PlayFab) | Variables in the player's online account | Playing on several devices |
+| **Cloud save** (PlayFab) | Variables, or a whole save slot, in the player's online account | Playing on several devices |
 
 Everything except cloud saves is stored on the player's device, per game.
 
 ### Save slots
 
-Save with a **Save Point** prefab, a Button set to *save game* (Amount = slot), the *Save game* instruction, the **Save Game** node, the Pause Menu widget, or `scene.saveGame(1)`. Load with *Load game*, the Continue Menu widget or `scene.loadGame(1)`. *Game Settings › Saving › Continue from save slot 1 on start* resumes automatically.
+Save with a **Save Point** prefab, a Button set to *save game* (Amount = slot), the *Save game* instruction, the **Save Game** node (it can also give the slot a name, like `{area}`), a **Save Slots** menu, the Pause Menu widget, or `scene.saveGame(1)`. Load with *Load game*, a Save Slots menu, the Continue Menu widget or `scene.loadGame(1)`.
 
 A save keeps:
 
 - the variables and the level;
-- each saved object's position, rotation, visibility and own variables;
+- each saved object's position, rotation, size, visibility, text and own variables (lists and dictionaries too);
 - which objects were removed (collected coins stay collected);
-- the inventory, the equipment and the recipes learned.
+- objects made while playing (spawned bullets, placed blocks, dropped items), which are made again on load;
+- the inventory, the equipment and the recipes learned;
+- for the slot card: its name, the level, when it was saved, the time played and a small picture of the game.
+
+**Game Settings › Saving:**
+
+- **Save slots:** how many slots there are (1–10, 3 by default).
+- **Auto-save:** off, every 30 seconds, every minute, every 5 minutes, or only when leaving the game. It saves into its own **Auto-save** slot, also when the player switches apps and when a new level starts.
+- **Continue from the newest save on start:** the game opens on its title screen with the most recent save (a numbered slot or the auto-save) already loaded.
+- **A picture of the game in each slot.**
+- **Save version:** raise it when an update changes what your game saves. A loaded save puts its version in `{loadedSaveVersion}`, so an *On Save Loaded* script can fix up older saves (give new variables a value, move renamed ones).
+- **Encrypt save files** covers slots too: players can't read or edit them, and a changed slot is refused.
+
+#### The Save Slots menu
+
+*Add → UI → Game Systems* has three ready menus: **Save Slots (load)**, **Save Slots (save)** and **Save / Load Menu (popup)** (it opens on the message `open saves` and closes after saving or loading). Each slot is a card with its picture, name, level, *2 h ago* and the time played.
+
+- **Tapping a slot** loads it, saves there, or shows a *Save* and a *Load* button.
+- It asks before saving over a slot (*Tap again to save over it*), and each saved slot has a delete button (tap twice).
+- The auto-save shows first, when auto-save is on. It can be loaded, not saved over.
+- **Name new saves from a variable** (e.g. the area or the player's name). Colours, the title and the slot name (`Slot {n}`) can be changed.
+
+#### Nodes and instructions
+
+- **Save Game** (with a slot name), **Load Game**, **Delete Save**, **Has Saved Game**.
+- **Continue (load the newest save)**, also a Button action (*continue from newest save*), and **Has any save** for a Continue button that only shows when there is one.
+- **Save Slot Info**: when it was saved (*saved ago* or the date and time), the time played, the level, its name, or whether it is saved. Slots are numbers, or `auto`.
+- **Newest Save Slot**, **On Slot Saved** (the event value is the slot).
+- **Export Save Slot As Text** / **Import Save Slot From Text**, to move a save to another phone.
+- **Delete every save of this game** (slots, the auto-save, saved progress and save files) for a *Reset progress* button.
+- **Cloud Save Slot** / **Cloud Load Slot** (PlayFab): the whole slot in the player's account.
 
 ```js
-scene.saveGame(2); scene.hasSave(2); scene.loadGame(2); scene.deleteSave(2);
+const E = scene.engine;
+E.saveGame(2, { label: 'Forest camp' }); E.loadGame(2); E.deleteSave(2);
+E.slotInfo(2);        // { exists, label, levelName, ago, when, playTime, pic, … }
+E.newestSlot();       // 2, 'auto' or 0
+E.exportSave(2); E.importSave(3, text); E.deleteAllSaves();
 ```
 
 ### Save files

@@ -2000,3 +2000,30 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .plug-h small { color: var(--muted); }
 .plug .desc { margin: 6px 0; }
 .plugin-code { width: 100%; font: 12.5px/1.45 ui-monospace, Menlo, monospace; min-height: 300px; }
+
+/* folding settings sections (Build Settings, Project Settings, Preferences) */
+.fsec { padding: 0; overflow: hidden; }
+.fsec-h { width: 100%; display: flex; align-items: center; gap: 10px; padding: 13px 12px; background: none; border: 0; color: var(--text); font: inherit; font-size: 15px; font-weight: 700; text-align: left; cursor: pointer; }
+.fsec-h > svg.i { width: 18px; height: 18px; opacity: .85; flex: none; }
+.fsec-t { flex: none; }
+.fsec-sum { flex: 1; min-width: 0; color: var(--muted); font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.fsec-chev { margin-left: auto; display: grid; place-items: center; transition: transform .18s; }
+.fsec-sum + .fsec-chev { margin-left: 4px; }
+.fsec-chev svg { width: 16px; height: 16px; opacity: .6; }
+.fsec:not(.closed) .fsec-chev { transform: rotate(180deg); }
+.fsec:not(.closed) .fsec-sum { visibility: hidden; }
+.fsec-b { padding: 0 12px 10px; }
+.fsec.closed .fsec-b { display: none; }
+.fsec.searching .fsec-b, .comp.searching .comp-b { display: block !important; }
+.fsec-tools { position: sticky; top: -1px; z-index: 3; display: flex; gap: 8px; align-items: center; padding: 8px 0; margin-bottom: 8px; background: var(--panel); }
+.fsec-search { flex: 1; min-width: 0; height: 40px; border-radius: 12px; padding: 0 12px; }
+.fsec-search.none { outline: 2px solid #e5484d; }
+.fsec-tools .btn { height: 40px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+@media (max-width: 480px) { .fsec-tools .btn { font-size: 0; gap: 0; width: 40px; justify-content: center; } .fsec-tools .btn svg { width: 18px; height: 18px; } }
+.ps-cats { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 8px; scrollbar-width: none; }
+.ps-cats::-webkit-scrollbar { display: none; }
+.ps-cats .chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; border: 1px solid var(--line, var(--g3)); background: transparent; color: inherit; border-radius: 99px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+.ps-cats .chip svg { width: 15px; height: 15px; }
+.ps-cats .chip.on { background: var(--accent-strong, #3a6ea5); color: #fff; }
+.ps-box .comp { margin-bottom: 10px; }
+.ps-open { margin-left: auto; height: 32px; padding: 0 10px; font-size: 12.5px; }

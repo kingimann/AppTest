@@ -1583,6 +1583,7 @@ function openSpaceMenu(sx, sy) {
       '-', { cap: 'Prefabs' }, ...prefabs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o, at) }))]) },
     { icon: 'frame', label: 'Reset View', fn: () => { resetCamera(); applyCamera(); } },
     { icon: 'gear', label: 'Game Settings', fn: () => { select(SCENE_ID); setDock('inspector'); } },
+    { icon: 'scene', label: 'Project Settings…', fn: openProjectSettings },
   ]);
 }
 
@@ -3307,6 +3308,7 @@ function inspectorEmpty() {
       key.map((e) => h('button', { onclick: () => select(e.id) }, icon(iconFor(e)), e.name, (e.tags || []).includes('player') ? h('small', { style: 'margin:0 0 0 auto;text-transform:none;letter-spacing:0' }, 'player') : null))) : null);
 }
 function renderInspector() {
+  if (projectSettingsRedraw) setTimeout(() => projectSettingsRedraw?.()); // (Project Settings shows the same settings)
   const box = $('#inspector');
   const scroll = box.scrollTop;
   box.replaceChildren();
@@ -3853,7 +3855,7 @@ function renderSceneSettings(box) {
   box.append(h('div', { class: 'insp-head' }, h('div', { class: 'big-ico' }, icon('scene')),
     h('span'), h('input', { type: 'text', value: game.name, placeholder: 'Game name', oninput: (e) => { game.name = e.target.value; changed(); renderHierarchy(); } }),
     h('div', { class: 'sub' }, `${threeD ? '3D' : '2D'} game · Pocket Engine ${VERSION}`)));
-  box.append(h('div', { class: 'comp-tools few' }, h('div', { class: 'cf' }, h('span', { class: 'cf-n' }, 'Game Settings')), foldAllBtn(box)));
+  box.append(h('div', { class: 'comp-tools few' }, h('div', { class: 'cf' }, h('span', { class: 'cf-n' }, 'Game Settings')), h('button', { class: 'btn ps-open', title: 'The same settings in a big window, by category', onclick: openProjectSettings }, icon('scene'), 'Project Settings'), foldAllBtn(box)));
   box.append(comp('Level', [
     C('levelName', { label: 'Level Name', type: 'text', def: levelName(project, levelIdx) }),
     h('p', { class: 'desc' }, `This is level ${levelIdx + 1} of ${levelList().length}. Reaching a Goal moves on to the next level; score and lives carry over.`),
@@ -5127,6 +5129,7 @@ function openFileMenu() {
     { icon: 'download', label: 'Export This Project (.json)', fn: () => download(slug(root.name) + '.json', JSON.stringify(root, null, 2), 'application/json') },
     '-',
     !matchMedia('(display-mode: standalone)').matches && { icon: 'download', label: 'Install App', k: 'works offline', fn: installApp },
+    { icon: 'scene', label: 'Project Settings…', k: 'this game', fn: openProjectSettings },
     { icon: 'gear', label: 'Preferences…', k: 'editor & app', fn: openPreferences },
     { icon: 'bulb', label: 'Quick Tour', fn: () => openTour(0) },
     { icon: 'help', label: 'Documentation', k: 'guides & reference', fn: () => openDocs('') },
@@ -5704,12 +5707,88 @@ function openNotifyEditor(name) {
   $('.dialog .db')?.addEventListener('change', () => { engine.notifyTypes = gameSettings().notifyTypes; });
 }
 /** ☰ → Preferences: how the editor looks and behaves on this device, plus the app itself (updates, install, storage). */
+// ---- folding sections for settings windows (Build Settings, Project Settings, Preferences) ----
+/** A section whose title bar opens and closes it (remembered per window), with a summary shown while it is closed. */
+function foldSec(ns, id, title, ic, kids, { open = true, summary = '' } = {}) {
+  const key = `pocket.fold.${ns}.${id}`; let isOpen = open;
+  try { const v = localStorage.getItem(key); if (v) isOpen = v === '1'; } catch { /* storage unavailable */ }
+  const head = h('button', { type: 'button', class: 'fsec-h', 'aria-expanded': String(isOpen) }, icon(ic), h('span', { class: 'fsec-t' }, title), summary ? h('small', { class: 'fsec-sum' }, summary) : null, h('span', { class: 'fsec-chev' }, icon('chevron')));
+  const el = h('div', { class: 'build-sec fsec' + (isOpen ? '' : ' closed'), id: 'bs-' + id, 'data-sec': id }, head, h('div', { class: 'fsec-b' }, kids));
+  el.foldTo = (want) => { const o = want ?? el.classList.contains('closed'); el.classList.toggle('closed', !o); head.setAttribute('aria-expanded', String(o)); try { localStorage.setItem(key, o ? '1' : '0'); } catch { /* storage unavailable */ } };
+  head.onclick = () => { el.foldTo(); buzz(3); };
+  return el;
+}
+/** Search and Expand all / Collapse all over a window's folding sections (search opens the sections that match). */
+function foldTools(root, placeholder = 'Search settings') {
+  const inp = h('input', { type: 'search', class: 'fsec-search', placeholder, autocapitalize: 'off' });
+  inp.oninput = () => {
+    const q = inp.value.trim().toLowerCase(), box = typeof root === 'function' ? root() : root; let hits = 0;
+    for (const sct of box.querySelectorAll('.fsec, .comp')) {
+      const on = !q || sct.textContent.toLowerCase().includes(q); sct.hidden = !on; sct.classList.toggle('searching', !!q && on); if (q && on) hits++;
+    }
+    inp.classList.toggle('none', !!q && !hits);
+  };
+  const all = (o) => { const box = typeof root === 'function' ? root() : root; for (const sct of box.querySelectorAll('.fsec')) sct.foldTo?.(o); for (const c of box.querySelectorAll('.comp')) { c.classList.toggle('closed', !o); const k = c.dataset.key; if (k) { if (o) closedComps.delete(k); else closedComps.add(k); } } };
+  return h('div', { class: 'fsec-tools' }, inp,
+    h('button', { type: 'button', class: 'btn', title: 'Open every section', onclick: () => all(true) }, icon('plus'), 'Expand all'),
+    h('button', { type: 'button', class: 'btn', title: 'Close every section', onclick: () => all(false) }, icon('minus'), 'Collapse all'));
+}
+/** Which Project Settings category each Game Settings section belongs to. */
+const PS_CATS = [['all', 'All', 'list'], ['project', 'Project', 'gear'], ['screen', 'Screen & start', 'phone'], ['gameplay', 'Gameplay', 'gamepad'], ['look', 'Look & lighting', 'brush'], ['input', 'Controls', 'hand'], ['data', 'Saving & data', 'save'], ['online', 'App & online', 'globe'], ['phone', 'Notifications & phone', 'bell'], ['ext', 'Plugins & mods', 'bolt']];
+function psCatOf(title) {
+  const t = String(title).toLowerCase();
+  if (/^project$/.test(t)) return 'project';
+  if (/level|orientation|screen|start screen|environment/.test(t)) return 'screen';
+  if (/physics|collision|inventory|items|recipes|quests|dialogues/.test(t)) return 'gameplay';
+  if (/light|post processing|theme|motion/.test(t)) return 'look';
+  if (/touch|control/.test(t)) return 'input';
+  if (/saving|data/.test(t)) return 'data';
+  if (/^app$|supabase|online/.test(t)) return 'online';
+  if (/notification|permission/.test(t)) return 'phone';
+  if (/plugin|mod/.test(t)) return 'ext';
+  return 'project';
+}
+let psCat = 'all';
+/** Project Settings: everything about this game in one window: its details, then every Game Settings section by category. */
+function openProjectSettings() {
+  saveNow();
+  const box = h('div', { class: 'ps-box' }), B = () => (root.build ||= {});
+  const draw = () => {
+    const sc = $('.dialog .db')?.scrollTop;
+    box.replaceChildren();
+    const o = buildOpts(), lv = levelList(), nObj = lv.reduce((n, l) => n + (l.entities || []).filter((e) => !e.template).length, 0);
+    box.append(comp('Project', [
+      control(() => root, 'name', { label: 'Name', type: 'text', def: root.name }),
+      control(B, 'version', { label: 'Version', type: 'text', def: BUILD_DEFAULTS.version }),
+      control(B, 'author', { label: 'Made by', type: 'text', def: '' }),
+      control(B, 'description', { label: 'Description', type: 'code', def: '' }),
+      control(B, 'category', { label: 'Category', type: 'select', options: [['', root.settings?.app ? 'App: Productivity' : 'Game: Casual'], ...STORE_CATEGORIES], def: '' }),
+      h('div', { class: 'br-row' }, h('span', {}, 'Kind'), h('b', {}, KIND_INFO[projKind(root)].label)),
+      h('div', { class: 'br-row' }, h('span', {}, 'Levels · objects'), h('b', {}, `${lv.length} · ${nObj}`)),
+      h('div', { class: 'br-row' }, h('span', {}, 'Saved'), h('b', {}, allProjects()[projectId] ? (manualSave() && dirty ? 'unsaved changes' : 'yes') : 'not yet')),
+      h('div', { class: 'btns' },
+        manualSave() && h('button', { class: 'btn primary', onclick: () => { commitSave(); draw(); } }, icon('save'), 'Save'),
+        h('button', { class: 'btn', onclick: () => { closeLayer(); openBuildSettings(); } }, icon('download'), 'Build Settings'),
+        h('button', { class: 'btn', onclick: () => { closeLayer(); openPreferences(); } }, icon('gear'), 'Preferences')),
+    ], { icon: 'gear', key: 'ps-project' }));
+    const tmp = h('div'); renderSceneSettings(tmp);
+    for (const c of tmp.querySelectorAll(':scope > .comp')) { c.dataset.ps = psCatOf(c.querySelector('.comp-h .t')?.firstChild?.textContent || ''); box.append(c); }
+    for (const c of box.querySelectorAll(':scope > .comp')) { if (!c.dataset.ps) c.dataset.ps = 'project'; c.hidden = psCat !== 'all' && c.dataset.ps !== psCat; }
+    if (sc != null && $('.dialog .db')) $('.dialog .db').scrollTop = sc;
+  };
+  const chips = h('div', { class: 'ps-cats' }, PS_CATS.map(([k, l, ic]) => h('button', { type: 'button', class: 'chip' + (psCat === k ? ' on' : ''), onclick: (e) => { psCat = k; for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); for (const c of box.querySelectorAll(':scope > .comp')) c.hidden = psCat !== 'all' && c.dataset.ps !== psCat; $('.dialog .db')?.scrollTo?.(0, 0); } }, icon(ic), l)));
+  draw();
+  projectSettingsRedraw = () => { if (box.isConnected) draw(); else projectSettingsRedraw = null; };
+  openDialog('Project Settings', [h('p', { class: 'desc' }, 'This game’s settings, saved with it. Build Settings has how it is packaged; Preferences are for you on this device.'), chips, foldTools(box, 'Search project settings'), box]);
+}
+let projectSettingsRedraw = null;
 function openPreferences() {
   const redo = () => setTimeout(() => { const sc = $('.dialog .db')?.scrollTop; openPreferences(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
   const sel = (k, label, options, info) => h('div', { class: 'row side' }, h('label', {}, label), h('select', { onchange: (e) => { const o = options.find(([v]) => String(v) === e.target.value); setEP(k, o ? o[0] : e.target.value); redo(); } }, options.map(([v, l]) => h('option', { value: String(v), selected: String(EP[k]) === String(v) }, l))), info && h('small', { class: 'pref-info' }, info));
   const tog = (k, label, info, after) => h('label', { class: 'row inline' }, h('span', {}, label, info && h('small', { class: 'pref-info' }, info)), h('input', { type: 'checkbox', checked: !!EP[k], onchange: (e) => { setEP(k, e.target.checked); after?.(e.target.checked); } }));
   const flag = (label, get, set) => h('label', { class: 'row inline' }, h('span', {}, label), h('input', { type: 'checkbox', checked: get(), onchange: (e) => set(e.target.checked) }));
-  const sec = (title, ic, kids) => h('div', { class: 'build-sec' }, h('h4', {}, icon(ic), title), kids);
+  const PREF_SUM = { Look: () => `${THEME_NAMES.find(([v]) => v === EP.theme)?.[1] || EP.theme} · ${EP.dense ? 'compact' : 'roomy'}`, Editing: () => `snap ${snap ? 'on' : 'off'} · ${EP.snap2D} px`, Saving: () => ({ manual: 'only when I tap Save', 0.5: 'straight away', 3: 'after a few seconds', 10: 'every 10 seconds', leave: 'on Save or leaving' })[EP.autosave] || '', App: () => (EP.startOn === 'last' ? 'opens my last game' : 'opens on Home') };
+  const sec = (title, ic, kids) => foldSec('prefs', title.toLowerCase().replace(/\W+/g, '-'), title, ic, kids, { open: ['Look', 'Saving'].includes(title), summary: PREF_SUM[title]?.() || '' });
   const storeInfo = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Checking storage…'));
   Promise.all([storageUse(), isPersisted()]).then(([u, kept]) => {
     const row = (l, v) => h('div', { class: 'br-row' }, h('span', {}, l), h('b', {}, v));
@@ -5718,7 +5797,8 @@ function openPreferences() {
   });
   const installedApp = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   openDialog('Preferences', [
-    h('p', { class: 'desc' }, 'These are for you on this device. Game settings live in Scene Settings and Build Settings.'),
+    h('p', { class: 'desc' }, 'These are for you on this device. This game’s settings are in Project Settings, and how it is packaged in Build Settings.'),
+    foldTools(() => $('.dialog .db') || document.body, 'Search preferences'),
     sec('Look', 'brush', [
       tog('dense', 'Compact panels', 'Shorter rows in the Hierarchy and smaller fields in the Inspector, so more fits on screen'),
       tog('compactTools', 'Fold the tool bar', 'Shows only the tool you are using over the Scene; tap it for the others'),
@@ -6371,7 +6451,16 @@ function openBuildSettings() {
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
   const SEC_ID = { Screenshots: 'shots', App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
-  const sec = (title, ic, kids) => h('div', { class: 'build-sec', id: 'bs-' + (SEC_ID[title] || title) }, h('h4', {}, icon(ic), title), kids);
+  const TARGET_SEC = { web: 'web', store: 'stores', expo: 'expo', itch: 'itch' };
+  const BSUM = { // what a folded section shows in its title bar
+    app: () => [o.title || root.name, 'v' + (o.version || '1.0'), o.author].filter(Boolean).join(' · '), icon: () => (o.icon ? 'picture' : `${o.iconEmoji || '🎮'} on colour`),
+    loading: () => ({ logo: 'picture and name', text: 'name and text', none: 'no splash' })[o.splash] || '', levels: () => `${lvls.length} level${lvls.length > 1 ? 's' : ''}${lvls.length > 1 ? ', start at ' + (o.startLevel || 1) : ''}`,
+    player: () => `${o.quality || 'balanced'} quality`, web: () => (o.installable !== false ? 'installs to the Home Screen' : 'browser only'),
+    stores: () => storeOpts().appId, expo: () => [o.appleId && 'Apple ID set', o.localVersions ? 'build ' + (o.buildNumber || 1) : 'auto build numbers'].filter(Boolean).join(' · '),
+    itch: () => o.itchUser ? o.itchUser + '/' + (o.itchGame || slug(o.title || root.name)) : '', listing: () => STORE_CATEGORIES.find(([k]) => k === o.category)?.[1] || '',
+    shots: () => `${(o.shots || []).length} of 8`, size: () => (o.compress ? 'compressed' : 'not compressed'), testing: () => (o.showFps || o.showErrors ? 'testing options on' : 'off'),
+  };
+  const sec = (title, ic, kids) => { const id = SEC_ID[title] || title; return foldSec('build', id, title, ic, kids, { open: ['app', 'icon', TARGET_SEC[target]].includes(id), summary: BSUM[id]?.() || '' }); };
   const Cr = (path, spec) => { const el = C(path, spec); el.addEventListener('change', redo); return el; }; // a field that shows or hides others
   const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
   const report = h('div', { class: 'build-report' }, h('div', { class: 'muted' }, 'Working out the size…'));
@@ -6398,6 +6487,7 @@ function openBuildSettings() {
   const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], listing: ['store', 'expo', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
   const jump = (key) => { // scroll to a field (or section) and highlight it
     const el = $(`.dialog [data-bkey="${key}"]`) || $(`.dialog #bs-${key}`); if (!el) return;
+    const fs = el.closest('.fsec'); if (fs?.classList.contains('closed')) fs.foldTo(true); // open its section first
     el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
     setTimeout(() => el.querySelector('input, select, textarea')?.focus({ preventScroll: true }), 350);
     return true; // (a Fix that only shows where to look: no need to redraw)
@@ -6427,6 +6517,7 @@ function openBuildSettings() {
     checkBox,
     h('div', { class: 'build-jump' }, sections.map(([k, l]) => h('button', { type: 'button', class: 'chip', onclick: () => jump(k) }, l)),
       h('label', { class: 'chk bj-all' }, h('input', { type: 'checkbox', checked: showAll, onchange: (e) => { try { localStorage.setItem('pocket.build.all', e.target.checked ? '1' : '0'); } catch { /* storage unavailable */ } redo(); } }), 'Every setting')),
+    foldTools(() => $('.dialog .db') || document.body, 'Search build settings'),
     sec('App', 'phone', [
       h('div', { class: 'build-app' }, preview, h('div', { class: 'build-app-t' }, h('b', {}, o.title || root.name), h('small', {}, [o.version && 'Version ' + o.version, o.author].filter(Boolean).join(' · ') || 'Pocket Engine game'))),
       tag(C('title', { label: 'Name', def: root.name }), 'title'),

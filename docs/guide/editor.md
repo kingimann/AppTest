@@ -107,7 +107,31 @@ The selected object's settings, as **components** (cards).
 
 ## Game Settings
 
-Tap the level row at the top of the Hierarchy. The sections are:
+Tap the level row at the top of the Hierarchy. The same settings open in a bigger window with **Project Settings** (the button at the top of Game Settings, or *☰ → Project Settings…*).
+
+### Project Settings
+
+**Project Settings** starts with a **Project** section:
+
+- name, version, *Made by*, description and category (the same ones Build Settings uses);
+- what kind of project it is, how many levels and objects it has, and whether it is saved;
+- buttons for **Save**, Build Settings and Preferences.
+
+Then come all the Game Settings sections, sorted by category chips:
+
+- Project;
+- Screen & start;
+- Gameplay;
+- Look & lighting;
+- Controls;
+- Saving & data;
+- App & online;
+- Notifications & phone;
+- Plugins & mods.
+
+**Search** shows only the sections that match. **Expand all** and **Collapse all** open or fold every section. Settings that show or hide others update straight away.
+
+The sections are:
 
 | Section | What's in it |
 |---|---|
@@ -193,4 +217,4 @@ Long-press an object → **Make Prefab**. It appears in *Project › Prefabs ›
 
 ## Preferences
 
-*☰ → Preferences…* holds settings for you on this device: theme and accent colour, panel text size, reduce motion, snapping steps, grid, showing all colliders, vibration, how often to save and keep restore points, opening on the Home screen or the last game, and **Check for updates**.
+*☰ → Preferences…* holds settings for you on this device. Its sections fold (Look and Saving start open; a folded section shows its current choice), and **Search** finds a preference. They cover: theme and accent colour, panel text size, reduce motion, snapping steps, grid, showing all colliders, vibration, how often to save and keep restore points, opening on the Home screen or the last game, and **Check for updates**.

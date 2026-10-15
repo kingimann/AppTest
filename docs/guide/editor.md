@@ -180,7 +180,11 @@ Long-press an object → **Make Prefab**. It appears in *Project › Prefabs ›
 
 ## Saving, history and backups
 
-- Projects save automatically to the browser's database (IndexedDB). A safety copy is taken whenever you switch apps or lock the phone.
+- **Projects are saved only when you save them.** Tap the **Save** button in the top bar (or ☰ → *Save*, or Ctrl/⌘ S). A dot after the game's name means there are unsaved changes.
+- **New games and templates aren't kept until you save them.** Before another project replaces the open one (opening a game, starting a new one, importing), it asks: **Save**, **Don't save** or **Cancel**. The browser also asks before the tab is closed with unsaved changes.
+- **If the app is closed with unsaved changes**, they are kept aside (not saved as the project), and next time it asks whether to bring them back.
+- To save as you go instead, pick *Straight away*, *After a few seconds* or *Every 10 seconds* in *☰ → Preferences… › Save my work*.
+- Saved projects live in the browser's database (IndexedDB).
 - *☰ → Restore Earlier Version…* keeps a restore point every few minutes (the last 12).
 - *☰ → Back Up All Games* makes one file with every game and your saved scripts; **Restore** brings it back on any device.
 - *☰ → Export / Import JSON* moves a single game.

@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
+import { installPlugins, installedPlugins, Mods, supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -34,8 +34,9 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: '0.5', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: 'manual', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
+try { if (!localStorage.getItem('pocket.editor.manualSave')) { localStorage.setItem('pocket.editor.manualSave', '1'); if (EP.autosave !== 'manual') { EP.autosave = 'manual'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // projects are saved only when you save them
 const THEMES = {
   dark: {},
   black: { '--toolbar': '#000', '--bg': '#0a0a0a', '--panel': '#151515', '--card': '#1a1a1a', '--tab': '#222', '--tab-off': '#101010', '--header': '#1c1c1c', '--field': '#0f0f0f', '--field-b': '#050505', '--line': '#000', '--hover': '#262626',
@@ -124,14 +125,38 @@ let viewMode = 'scene'; // scene | top (3D levels laid out from above, no perspe
 let uiScreen = 'all'; // which screen's UI the UI editor previews
 let playing = false;
 
-function saveNow() {
+// ---- saving: by default only when you tap Save (Preferences › Save my work); other modes save as you go ----
+const manualSave = () => EP.autosave === 'manual';
+const DRAFT_KEY = 'pocket.editor.draft';
+let dirty = false, edited = false, draftTimer = 0; // edited: changed since it was opened (only then is a draft worth keeping)
+/** Unsaved changes: a dot by the name and a lit Save button. */
+function setDirty(v) { dirty = !!v; $('#projectTitle')?.classList.toggle('unsaved', manualSave() && dirty); const b = $('#saveBtn'); if (b) { b.hidden = !manualSave(); b.classList.toggle('on', dirty); } }
+/** Writes the project to the device. In "only when I save" mode, only Save (force) does; everything else keeps a safety draft. */
+function saveNow({ force = false } = {}) {
   if (!project) return;
+  if (manualSave() && !force) { writeDraft(); return; }
   const rec = { name: root.name, updated: Date.now(), json: root };
   saveProject(projectId, rec).then((ok) => { if (!ok) storageFull(); });
   store.set(CURRENT_KEY, projectId);
+  setDirty(false); edited = false; clearDraft();
 }
-/** Leaving the app (switching apps, locking the phone, closing the tab): save, plus an instant safety copy. */
-function saveOnLeave() { if (!project) return; saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
+function commitSave() { if (!project) return; saveNow({ force: true }); toast(`Saved “${root.name}”`); buzz(8); if (!$('#home').hidden) showHome({ keep: true }); }
+/** Not a save: if the app is closed with unsaved changes, it offers them back next time. */
+function writeDraft() { if (!dirty || !edited || !project) return; try { const t = JSON.stringify({ id: projectId, at: Date.now(), rec: { name: root.name, updated: Date.now(), json: root } }); if (t.length < 2_500_000) localStorage.setItem(DRAFT_KEY, t); } catch { /* too big or storage full */ } }
+function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
+/** Before the open project is replaced: Save / Don't save / Cancel when it has unsaved changes. */
+function askSave(next) {
+  if (!manualSave() || !dirty || !project) return next();
+  openDialog('Save changes?', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
+    h('h4', {}, `Save “${root.name}”?`),
+    h('p', {}, allProjects()[projectId] ? 'It has changes that are not saved yet.' : 'It has not been saved yet. If you don’t save it, it is gone.'),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => { closeLayer(); commitSave(); next(); } }, icon('save'), 'Save'),
+      h('button', { class: 'btn', onclick: () => { closeLayer(); setDirty(false); edited = false; clearDraft(); next(); } }, 'Don’t save'),
+      h('button', { class: 'btn', onclick: closeLayer }, 'Cancel')))]);
+}
+/** Leaving the app (switching apps, locking the phone, closing the tab): save (or keep a draft), plus an instant safety copy. */
+function saveOnLeave() { if (!project) return; if (manualSave()) { writeDraft(); return; } saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
 let fullWarned = 0;
 function storageFull() {
   if (Date.now() - fullWarned < 60000) return; fullWarned = Date.now();
@@ -196,7 +221,10 @@ let hRevealed = null; // last selection the Hierarchy scrolled to
 let attachFor = null;
 let colliderEdit = null; // object whose 2D collider is being edited with handles
 let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
-const saveSoon = () => { clearTimeout(saveTimer); if (EP.autosave === 'leave') return; saveTimer = setTimeout(saveNow, (+EP.autosave || 0.5) * 1000); }; // Preferences › Saving
+const saveSoon = () => {
+  if (manualSave()) { setDirty(true); edited = true; clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 1500); return; } // only Save saves
+  clearTimeout(saveTimer); if (EP.autosave === 'leave') return; saveTimer = setTimeout(saveNow, (+EP.autosave || 0.5) * 1000);
+}; // Preferences › Saving
 
 const levelList = () => [root, ...(root.levels || [])];
 const levelName = (lv, i) => lv.levelName || `Level ${i + 1}`;
@@ -214,6 +242,9 @@ function openProject(json, id = uid('p')) {
   resetCamera();
   rebuild();
   refreshAll();
+  installPlugins(root.plugins); // its components and nodes show in the editor
+  if (manualSave()) { setDirty(!allProjects()[id]); edited = false; return; } // a new project isn't saved until you save it
+  installPlugins(root.plugins);
   saveNow();
 }
 
@@ -1994,7 +2025,7 @@ function stepSelection(d) {
 function refreshAll() {
   refreshPageBtn(); $('#uiScreens')?.classList.toggle('app', !!levelList()[0].settings?.app); // apps have pages, not title / pause / game-over screens
   $('#sceneTab').replaceChildren(icon(uiMode ? 'hud' : is3D() ? 'cube' : 'grid'), uiMode ? 'UI' : viewMode === 'top' ? 'Top' : is3D() ? '3D' : '2D', icon('chevron'));
-  $('#projectTitle').textContent = levelList()[0].name || 'Untitled';
+  $('#projectTitle').textContent = levelList()[0].name || 'Untitled'; setDirty(dirty);
   const n = levelList().length;
   const appP = !!levelList()[0].settings?.app;
   $('#levelBtn').replaceChildren(...[icon(appP ? (levelIdx ? 'gamepad' : 'phone') : 'layers'), h('span', {}, appP && !levelIdx ? 'App' : levelName(project, levelIdx)), n > 1 && h('small', {}, appP ? (levelIdx ? 'game' : `+${n - 1} game${n > 2 ? 's' : ''}`) : `${levelIdx + 1}/${n}`), icon('chevron')].filter(Boolean));
@@ -4066,6 +4097,7 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Show {userName}, {userEmail} and {signedIn} in text; {authError} says why signing in failed. Buttons can sign in, create account, sign out and send password reset (they use the variables email, password and name). The Online nodes and Triggers do the same.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openDocs('guide/apps') }, icon('help'), 'Guide')),
   ], { icon: 'player', key: 's-supabase' }));
+  box.append(comp('Plugins & Mods', pluginsAndMods(R), { icon: 'bolt', key: 's-plugins' }));
   box.append(comp('Online (PlayFab & Photon)', [
     h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),
     h('h5', { class: 'sub-head' }, 'PlayFab'),
@@ -4316,7 +4348,7 @@ function componentsFor(j) {
     if (def.hidden) continue; // engine-internal helpers
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
-    list.push({ cat: BEH_META[type]?.[0] || 'Other', key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
+    list.push({ cat: BEH_META[type]?.[0] || (def.plugin ? 'Plugins' : 'Other'), key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
       ok: (e) => (!e.ui || ['script', 'graph', 'rules', 'button', 'triggers', 'fsm', 'tween', 'tweenSequence', 'animator', 'flipbook', 'dialogue'].includes(type) || BEH_META[type]?.[0] === 'UI') && (e.ui || BEH_META[type]?.[0] !== 'UI' || ['button', 'dialogue'].includes(type)), add: (e) => { (e.behaviors ||= []).push(defaultBehavior(type, threeD)); if (type === 'move' || type === 'platformer') e.tags = [...new Set([...(e.tags || []), 'player'])]; } });
   }
   return list;
@@ -5075,9 +5107,9 @@ function openFileMenu() {
     { icon: 'undo', label: 'Undo', k: '2-finger tap', fn: () => undoRedo(-1) },
     { icon: 'redo', label: 'Redo', k: '3-finger tap', fn: () => undoRedo(1) },
     '-',
-    { icon: 'save', label: 'Save', k: 'auto', fn: () => { saveNow(); toast('Saved'); } },
+    { icon: 'save', label: manualSave() && dirty ? 'Save •' : 'Save', k: manualSave() ? 'Ctrl S' : 'auto', fn: commitSave },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
-    { icon: 'copy', label: 'Duplicate Project', fn: () => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast('Project duplicated'); } },
+    { icon: 'copy', label: 'Duplicate Project', fn: () => askSave(() => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast(manualSave() ? 'Copy made: tap Save to keep it' : 'Project duplicated'); }) },
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
     { icon: 'key', label: 'Tags & Layers…', fn: openTagsLayers },
     { icon: 'warn', label: 'Find Problems…', k: 'all levels', fn: openProblems },
@@ -5143,12 +5175,13 @@ function projectList(all, row) {
   return wrap;
 }
 const modeBadge = (json) => (json.settings?.app ? h('span', { class: 'mode-badge mapp' }, 'App') : h('span', { class: 'mode-badge ' + (json.mode === '3d' ? 'm3' : 'm2') }, json.mode === '3d' ? '3D' : '2D'));
-function startGame(t, orient) {
+function startGame(t, orient) { closeLayer(); askSave(() => startGameNow(t, orient)); }
+function startGameNow(t, orient) {
   closeLayer(); hideHome();
   if (store.get('pocket.editor.toured', '') !== '1') setTimeout(() => openTour(0), 400);
   newFromTemplate(t.key, t.key.startsWith('empty') ? 'New Game' : t.key === 'app-blank' ? 'My App' : undefined);
   if (orient) { setOrientation(orient); resetCamera(); applyCamera(); }
-  toast(`Created ${root.name}. Tap ▶ Play to try it!`);
+  toast(manualSave() ? `Created ${root.name}. Tap Save to keep it, ▶ Play to try it` : `Created ${root.name}. Tap ▶ Play to try it!`);
 }
 function openNewDialog() {
   openDialog('New Game or App', [h('p', { class: 'desc', style: 'color:var(--muted);margin:0 0 12px' }, 'Pick a game type, or an app. Each one already works, and you can change it any way you like.'), typeCards(startGame)]);
@@ -5250,6 +5283,121 @@ async function shrinkPictures({ resize = false } = {}) {
   if (!n) { toast('The pictures are already small'); return; }
   changed({ structure: true }); saveNow(); toast(`${n} picture${n > 1 ? 's' : ''} smaller: saved ${kb(Math.round((before - after) * 0.75))} (Undo puts them back)`);
 }
+// ---- plugins (code that adds to the engine, saved with the game) and mods (files players add to the finished game) ----
+const PLUGIN_TEMPLATE = `// A plugin adds to Pocket Engine for this game, in the editor and in builds.
+// api: registerBehavior, addInstruction, addCondition, addNode, on, text, number, choice, input, log. P: the Pocket toolbox.
+
+// An instruction for Triggers (it is a node too)
+api.addInstruction('confetti', {
+  label: 'Confetti burst', params: [api.text('color', '#ffd23f', 'colour'), api.number('count', 40, 'how many')],
+  run(c, p) { c.s.burst(c.e.x, c.e.y, 0, p.color, +p.count); },
+});
+
+// A condition
+api.addCondition('isWeekend', { label: 'It is the weekend', test: () => [0, 6].includes(new Date().getDay()) });
+
+// A value node and an action node (run returns the output to follow)
+api.addNode('randomColor', { label: 'Random Colour', cat: 'Values', type: 'text', value: () => '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0') });
+api.addNode('coinFlip', { label: 'Coin Flip', outs: ['heads', 'tails'], run: () => (Math.random() < 0.5 ? 'heads' : 'tails') });
+
+// A component (Add Component › Plugins)
+api.registerBehavior('spinForever', {
+  label: 'Spin Forever', description: 'Keeps turning.',
+  params: [{ key: 'speed', label: 'Speed (degrees per second)', type: 'number', default: 90 }],
+  create(p) { return { update(e, dt, s) { if (!s.engine.editing) e.rz = (e.rz || 0) + p.speed * dt; } }; },
+});
+
+// Hooks: 'sceneStart' (scene, engine) and 'update' (scene, dt, engine)
+api.on('sceneStart', () => api.log('Level started'));
+`;
+/** "// @name X  @version 1.2  @author Y  @description …" comments at the top of a plugin file. */
+function pluginMeta(code, fallback = 'Plugin') {
+  const tag = (k) => (String(code).match(new RegExp('@' + k + '\\s+([^\\n@]+)')) || [])[1]?.trim() || '';
+  return { name: tag('name') || fallback, version: tag('version'), author: tag('author'), description: tag('description') };
+}
+const pluginLib = () => { try { return JSON.parse(localStorage.getItem('pocket.pluginLibrary') || '[]'); } catch { return []; } };
+function addPlugin(pl, { trusted = false } = {}) {
+  if (!trusted && !confirm(`Add the plugin “${pl.name}”?\n\nPlugins run code in the editor and in your game. Only add plugins you trust.`)) return false;
+  (root.plugins ||= []).push({ id: uid('pl'), enabled: true, ...pl });
+  installPlugins([root.plugins.at(-1)]); changed({ structure: true }); renderInspector();
+  const r = installedPlugins.get(root.plugins.at(-1).id); toast(r?.error ? `Plugin error: ${r.error}` : `Added “${pl.name}”${r?.adds?.length ? ': ' + r.adds.map((a) => a[1]).join(', ') : ''}`);
+  return true;
+}
+function editPluginCode(pl) {
+  const ta = h('textarea', { class: 'code plugin-code', rows: 22, spellcheck: false, autocapitalize: 'off' }, pl.code || '');
+  const name = h('input', { type: 'text', value: pl.name || '' }), ver = h('input', { type: 'text', value: pl.version || '', placeholder: '1.0' });
+  openDialog(`Plugin: ${pl.name}`, [
+    h('div', { class: 'row' }, h('label', {}, 'Name'), name), h('div', { class: 'row' }, h('label', {}, 'Version'), ver), ta,
+    h('p', { class: 'desc' }, 'Saved with the game and run in the editor and in builds. Changes to components and nodes show at once; removing something a plugin added takes a reload of the editor.'),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => { pl.code = ta.value; pl.name = name.value.trim() || pl.name; pl.version = ver.value.trim(); installedPlugins.delete(pl.id); installPlugins([pl]); changed({ structure: true }); closeLayer(); renderInspector(); const r = installedPlugins.get(pl.id); toast(r?.error ? `Plugin error: ${r.error}` : 'Plugin updated'); } }, icon('check'), 'Save'),
+      h('button', { class: 'btn', onclick: closeLayer }, 'Cancel'))]);
+}
+function pluginsAndMods(R) {
+  const PL = root.plugins || [], ms = root.settings.mods || {};
+  const pickFile = (accept, fn) => { const i = h('input', { type: 'file', accept }); i.onchange = async () => { const f = i.files?.[0]; if (f) fn(await f.text(), f.name); }; i.click(); };
+  const fromText = (text, fname = '') => {
+    let j = null; try { j = JSON.parse(text); } catch { /* a .js file */ }
+    if (j?.pocketPlugin || (j?.code && j?.name)) return addPlugin({ name: j.name, version: j.version || '', author: j.author || '', description: j.description || '', code: j.code });
+    return addPlugin({ ...pluginMeta(text, fname.replace(/\.(js|txt)$/i, '') || 'Plugin'), code: text });
+  };
+  const card = (pl, i) => {
+    const info = installedPlugins.get(pl.id), adds = info?.adds || [];
+    return h('div', { class: 'plug' + (pl.enabled === false ? ' off' : '') },
+      h('div', { class: 'plug-h' }, h('b', {}, pl.name || 'Plugin'), pl.version && h('small', {}, 'v' + pl.version),
+        h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: pl.enabled !== false, onchange: (e) => { pl.enabled = e.target.checked; if (pl.enabled) installPlugins([pl]); changed({ structure: true }); renderInspector(); if (!pl.enabled) toast('Turned off: reload the editor to remove what it added'); } }), 'On')),
+      (pl.author || pl.description) && h('p', { class: 'desc' }, [pl.author && 'by ' + pl.author, pl.description].filter(Boolean).join(' · ')),
+      info?.error ? h('p', { class: 'desc warn' }, 'Error: ' + info.error) : adds.length ? h('p', { class: 'desc' }, 'Adds: ' + adds.map((a) => `${a[1]} (${a[0].toLowerCase()})`).join(', ')) : null,
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => editPluginCode(pl) }, icon('script'), 'Code'),
+        h('button', { class: 'btn', onclick: () => download(slug(pl.name || 'plugin') + '.js', `// @name ${pl.name}${pl.version ? '\n// @version ' + pl.version : ''}${pl.author ? '\n// @author ' + pl.author : ''}${pl.description ? '\n// @description ' + pl.description : ''}\n${pl.code}`, 'text/javascript') }, icon('download'), 'Export'),
+        h('button', { class: 'btn', onclick: () => { const L = pluginLib().filter((x) => x.name !== pl.name); L.push({ name: pl.name, version: pl.version, author: pl.author, description: pl.description, code: pl.code }); try { localStorage.setItem('pocket.pluginLibrary', JSON.stringify(L)); toast('Saved to My Plugins (for your other games)'); } catch { toast('Not enough space'); } } }, icon('save'), 'To My Plugins'),
+        h('button', { class: 'btn danger', onclick: () => { if (!confirm(`Remove the plugin “${pl.name}”?`)) return; PL.splice(i, 1); changed({ structure: true }); renderInspector(); toast('Removed: reload the editor to remove what it added'); } }, icon('trash'))));
+  };
+  const lib = pluginLib();
+  return [
+    h('p', { class: 'desc' }, 'Plugins add to the engine for this game: components, Triggers instructions and conditions, nodes and hooks, written in JavaScript. They are saved with the game and go into every build.'),
+    PL.length ? h('div', { class: 'plug-list' }, PL.map(card)) : h('p', { class: 'desc' }, 'No plugins yet.'),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => addPlugin({ name: 'My Plugin', version: '1.0', code: PLUGIN_TEMPLATE }, { trusted: true }) && editPluginCode(root.plugins.at(-1)) }, icon('plus'), 'New plugin'),
+      h('button', { class: 'btn', onclick: () => pickFile('.js,.json,.txt,text/javascript,application/json', fromText) }, icon('upload'), 'From a file'),
+      h('button', { class: 'btn', onclick: async () => { const u = prompt('Plugin address (a .js or .json file)', 'https://'); if (!u || u === 'https://') return; try { const r = await fetch(u); if (!r.ok) throw new Error('error ' + r.status); fromText(await r.text(), u.split('/').pop()); } catch (e) { toast('Could not load it: ' + e.message); } } }, icon('globe'), 'From a link'),
+      lib.length ? h('select', { class: 'btn', onchange: (e) => { const x = lib.find((q) => q.name === e.target.value); e.target.value = ''; if (x) addPlugin({ ...x }, { trusted: true }); } }, h('option', { value: '' }, 'From My Plugins…'), lib.map((x) => h('option', { value: x.name }, x.name))) : null),
+    h('h5', { class: 'sub-head' }, 'Mods (for players)'),
+    h('p', { class: 'desc' }, 'Let players add mods to the finished game: files that change variables and settings, change, add or remove objects, and add levels, items and quests. They are added on the player’s device from a Mods screen.'),
+    R('settings.mods.allow', { label: 'Players can add mods', type: 'bool', def: false, structure: true }),
+    ms.allow && [
+      R('settings.mods.menu', { label: 'Mods button in the pause menu and Settings', type: 'bool', def: true, infoText: 'Or open it yourself: a Button (Do → open mods) or the “Open the Mods screen” instruction.' }),
+      R('settings.mods.scripts', { label: 'Mods may contain code', type: 'bool', def: false, infoText: 'Off: mods can only change data (safe). On: a mod’s code runs like a plugin, so players should only add mods they trust.' }),
+    ],
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn', onclick: () => download(slug(root.name) + '-mod-template.json', JSON.stringify(modTemplate(), null, 2), 'application/json') }, icon('download'), 'Make a mod template'),
+      h('button', { class: 'btn', onclick: () => pickFile('.json,.pmod,.txt,application/json', (t) => { const { mod, error } = Mods.parse(t); if (error) return toast(error); engine.mods.testing = mod; toast(`Testing “${mod.name}”: press ▶ Play`); renderInspector(); }) }, icon('play'), engine.mods?.testing ? `Testing “${engine.mods.testing.name}”` : 'Test a mod in Play'),
+      engine.mods?.testing && h('button', { class: 'btn', onclick: () => { engine.mods.testing = null; renderInspector(); toast('Stopped testing the mod'); } }, 'Stop testing')),
+  ];
+}
+/** A starting point for modders: the format, with this game's objects, templates and variables to aim at. */
+function modTemplate() {
+  const lv = levelList(), tpl = lv.flatMap((l) => (l.entities || []).filter((e) => e.template).map((e) => e.name)), objs = [...new Set((lv[0].entities || []).filter((e) => !e.template && e.name).map((e) => e.name))].slice(0, 40);
+  return {
+    pocketMod: 1, name: 'My Mod', version: '1.0', author: '', description: 'What the mod changes', game: root.name,
+    patch: {
+      vars: Object.fromEntries(Object.entries(lv[0].vars || {}).slice(0, 3)),
+      change: objs[0] ? [{ name: objs[0], set: { 'shape.fill': '#ff5577' } }] : [],
+      add: [], remove: [], levels: [],
+    },
+    _readme: [
+      'Players add this file from the game’s Mods screen. Delete what you don’t need; keys starting with _ are ignored.',
+      'patch.vars: starting values of variables. patch.settings: Game Settings values (gravity, timeLimit…).',
+      'patch.change: [{ "name": "Coin", "level": 1, "set": { "shape.fill": "#ff0", "behaviors.0.points": 50 } }] (level: a number, a level name or "all"; or use "tag" instead of "name").',
+      'patch.add: objects in the game file format, with "level": 1 (add "template": true for templates others can spawn).',
+      'patch.remove: ["Enemy"] or [{ "name": "Enemy", "level": 2 }]. patch.levels: whole new levels (game file format), added at the end.',
+      'patch.items / recipes / quests / collections: replace one with the same name, or add it. patch.sounds: { "name": "data:audio/..." }.',
+      root.settings.mods?.scripts ? '"code": JavaScript that runs like a plugin (api.addInstruction, api.registerBehavior…), allowed by this game.' : 'This game only allows data mods: "code" is ignored.',
+    ],
+    _thisGame: { levels: lv.map((l, i) => levelName(l, i)), templates: tpl, objectsInLevel1: objs, variables: Object.keys(lv[0].vars || {}) },
+  };
+}
 /** A project's picture: the last game screen, or a coloured tile with its kind's icon. */
 function projArt(id, json, name, big) {
   const src = store.get(thumbKey(id), ''), K = KIND_INFO[projKind(json)];
@@ -5259,10 +5407,10 @@ function projArt(id, json, name, big) {
   return h('div', { class: 'pj-art gen' + (big ? ' big' : ''), style: `--a:hsl(${hue} 55% 42%);--b:hsl(${(hue + 40) % 360} 60% 24%)` }, icon(K.icon), h('span', {}, String(name || '?').trim().charAt(0).toUpperCase()));
 }
 function projMenu(anchor, id, pr) {
-  const open = () => { saveNow(); openProject(pr.json, id); hideHome(); };
+  const open = (then) => { if (id === projectId) { hideHome(); then?.(); return; } askSave(() => { saveNow(); openProject(pr.json, id); hideHome(); then?.(); }); };
   popMenu(anchor, [{ cap: pr.name },
     { icon: 'edit', label: 'Open', fn: open },
-    { icon: 'play', label: 'Play', fn: () => { open(); play(); } },
+    { icon: 'play', label: 'Play', fn: () => open(play) },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Name', pr.name)?.trim(); if (!n) return; if (id === projectId) { root.name = n; saveNow(); } else { pr.json.name = n; saveProject(id, { ...pr, name: n, json: pr.json }); } setTimeout(showHome, 50); } },
     { icon: 'copy', label: 'Duplicate', fn: () => { const c = clone(pr.json); c.name = pr.name + ' (copy)'; const nid = uid('p'); saveProject(nid, { name: c.name, updated: Date.now(), json: c }); const t = store.get(thumbKey(id), ''); if (t) store.set(thumbKey(nid), t); setTimeout(showHome, 50); toast(`Made “${c.name}”`); } },
     '-', id !== projectId && { icon: 'trash', label: 'Delete', danger: true, fn: () => { if (!confirm(`Delete "${pr.name}"? This cannot be undone.`)) return; deleteProject(id); store.set(thumbKey(id), ''); showHome(); } }].filter(Boolean));
@@ -5278,7 +5426,7 @@ function myProjects(all, kinds = ['2d', '3d', 'app']) {
         h('button', { class: f === k ? 'on' : '', onclick: () => { f = k; store.set('pocket.editor.projFilter', k); draw(); } }, l, h('small', {}, String(c))))) : null,
       shown.length ? h('div', { class: 'pj-grid' }, cut.map(([id, pr]) => { const K = KIND_INFO[projKind(pr.json)];
         return h('div', { class: 'pj' + (id === projectId ? ' cur' : '') },
-          h('button', { class: 'pj-open', onclick: () => { saveNow(); if (id !== projectId) openProject(pr.json, id); hideHome(); } }, projArt(id, pr.json, pr.name),
+          h('button', { class: 'pj-open', onclick: () => { if (id === projectId) return hideHome(); askSave(() => { saveNow(); openProject(pr.json, id); hideHome(); }); } }, projArt(id, pr.json, pr.name),
             h('span', { class: 'pj-t' }, h('b', {}, pr.name), h('small', {}, h('i', { style: `--c:${K.color}` }, K.label), ' · ', agoText(pr.updated)))),
           h('button', { class: 'pj-more', 'aria-label': 'More', onclick: (e) => projMenu(e.currentTarget, id, pr) }, icon('more'))); }))
         : h('div', { class: 'empty' }, f === 'app' || kinds[0] === 'app' ? 'No apps yet.' : f === 'all' ? 'No games yet.' : `No ${f.toUpperCase()} games yet.`),
@@ -5307,7 +5455,7 @@ function showHome(o = {}) {
   if (!o.keep) { closeLayer(); $('.toast')?.remove(); } // keep: refresh Home behind an open window (after a sync)
   const keepScroll = o.keep ? $('#home').scrollTop : 0;
   const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
-  const cur = root && all.find(([id]) => id === projectId), hr = new Date().getHours();
+  const cur = root && (all.find(([id]) => id === projectId) || [projectId, { name: root.name, updated: Date.now(), json: root, unsaved: true }]), hr = new Date().getHours();
   const nm = cloud.profile().name.split(/\s+/)[0], hi = (w) => nm ? `${w}, ${nm}!` : `${w}!`;
   const greet = hr < 5 ? `Up late${nm ? ', ' + nm : ''}? Let’s make something.` : `${hi(hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening')} Let’s make something.`;
   home.replaceChildren(...[
@@ -5318,8 +5466,9 @@ function showHome(o = {}) {
     cur && h('div', { class: 'hero' },
       h('button', { class: 'hero-art', onclick: hideHome, 'aria-label': 'Open' }, projArt(cur[0], root, root.name, true), h('span', { class: 'hero-tag' }, icon('clock'), 'Continue')),
       h('div', { class: 'hero-b' },
-        h('div', { class: 'hero-t' }, h('b', {}, root.name), h('small', {}, `${KIND_INFO[projKind(root)].label} · edited ${agoText(cur[1].updated)}${(root.levels || []).length ? root.settings?.app ? ` · ${root.levels.length} game${root.levels.length > 1 ? 's' : ''} inside` : ` · ${root.levels.length + 1} levels` : ''}`)),
+        h('div', { class: 'hero-t' }, h('b', {}, root.name), h('small', {}, `${KIND_INFO[projKind(root)].label} · ${cur[1].unsaved ? 'not saved yet' : manualSave() && dirty ? 'unsaved changes' : 'edited ' + agoText(cur[1].updated)}${(root.levels || []).length ? root.settings?.app ? ` · ${root.levels.length} game${root.levels.length > 1 ? 's' : ''} inside` : ` · ${root.levels.length + 1} levels` : ''}`)),
         h('div', { class: 'hero-btns' },
+          manualSave() && dirty && h('button', { class: 'btn', onclick: commitSave }, icon('save'), 'Save'),
           h('button', { class: 'btn', onclick: () => { hideHome(); play(); } }, icon('play'), 'Play'),
           h('button', { class: 'btn primary continue', onclick: hideHome }, icon('edit'), 'Keep editing')))),
     homeSections(all),
@@ -5451,7 +5600,7 @@ function openProjectsDialog() {
   const all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
   openDialog('Open Project', all.length ? projectList(all, ([id, p]) => h('div', { class: 'proj-row' },
     modeBadge(p.json),
-    h('span', { class: 'nm', onclick: () => { closeLayer(); saveNow(); openProject(p.json, id); } }, p.name, id === projectId ? ' (open)' : ''),
+    h('span', { class: 'nm', onclick: () => { closeLayer(); if (id !== projectId) askSave(() => { saveNow(); openProject(p.json, id); }); } }, p.name, id === projectId ? ' (open)' : ''),
     h('small', {}, new Date(p.updated).toLocaleDateString()),
     id !== projectId && h('button', { title: 'Delete', onclick: () => {
       if (!confirm(`Delete "${p.name}"? This cannot be undone.`)) return;
@@ -5588,7 +5737,7 @@ function openPreferences() {
       tog('haptics', 'Vibration on taps', 'Little buzzes when you pick, drop or press things'),
     ]),
     sec('Saving', 'save', [
-      sel('autosave', 'Save my work', [['0.5', 'Straight away'], ['3', 'After a few seconds'], ['10', 'Every 10 seconds'], ['leave', 'Only when I tap Save or leave']]),
+      sel('autosave', 'Save my work', [['manual', 'Only when I tap Save (asks before leaving)'], ['0.5', 'Straight away'], ['3', 'After a few seconds'], ['10', 'Every 10 seconds'], ['leave', 'Only when I tap Save or leave']]),
       sel('snapEvery', 'Restore point every', [[1, '1 minute'], [3, '3 minutes'], [5, '5 minutes'], [10, '10 minutes']]),
       sel('snapKeep', 'Restore points kept', [[6, '6'], [12, '12'], [24, '24'], [40, '40']], '☰ → Restore Earlier Version… goes back to one'),
       h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); backupAll(); } }, icon('save'), 'Back up all games'), h('button', { class: 'btn', onclick: () => { closeLayer(); importJSON(); } }, icon('upload'), 'Restore a backup')),
@@ -5668,7 +5817,7 @@ async function openRestorePoints() {
       h('span', { class: 'nm' }, h('b', {}, new Date(sn.time).toLocaleString()), h('small', {}, ` ${ago(sn.time)} · ${count(sn.json)} objects · ${(sn.json.levels?.length || 0) + 1} level${sn.json.levels?.length ? 's' : ''}${sn.reason !== 'auto' ? ' · ' + sn.reason : ''}`)),
       h('button', { class: 'btn', onclick: async () => {
         await snapshot(projectId, { name: root.name, updated: Date.now(), json: clone(root) }, 'before restore');
-        closeLayer(); openProject(clone(sn.json), projectId); saveNow(); toast('Earlier version restored');
+        closeLayer(); openProject(clone(sn.json), projectId); if (manualSave()) setDirty(true); saveNow(); toast(manualSave() ? 'Earlier version restored: tap Save to keep it' : 'Earlier version restored');
       } }, 'Restore')))) : h('div', { class: 'empty' }, 'No earlier versions yet: they appear after a few minutes of editing.'),
   ]);
 }
@@ -5703,7 +5852,7 @@ function importJSON() {
       }
       if (!Array.isArray(json.entities)) throw new Error('not a Pocket project or backup');
       for (const e of json.entities) e.id ||= uid();
-      openProject(json); hideHome(); toast(`Imported ${json.name || 'project'}`);
+      askSave(() => { openProject(json); hideHome(); toast(`Imported ${json.name || 'project'}${manualSave() ? ': tap Save to keep it' : ''}`); });
     } catch (err) { toast('Could not import: ' + err.message); }
   };
   fi.click();
@@ -7353,6 +7502,7 @@ $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to
 setTool('move');
 
 await initStorage();
+const bootDraft = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; } })(); // read before anything opens
 cloud.attach({ all: () => loadProjects(), save: (id, rec) => saveProject(id, rec), remove: (id) => { deleteProject(id); store.set(thumbKey(id), ''); },
   thumb: (id) => store.get(thumbKey(id), '') || null, setThumb: (id, src) => store.set(thumbKey(id), src),
   changedOpen: (id, rec) => { if (id === projectId && !playing) { openProject(rec.json, id); toast('Updated from your other device'); } } });
@@ -7377,4 +7527,15 @@ storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('S
     }
   }
 }
+{ // unsaved changes from last time (the app was closed before Save)
+  const d = bootDraft;
+  if (d?.rec?.json && manualSave()) setTimeout(() => openDialog('Unsaved changes', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
+    h('h4', {}, `“${d.rec.name || 'Untitled'}” has changes that were not saved`), h('p', {}, `From ${agoText(d.at)}. Bring them back?`),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn primary', onclick: () => { closeLayer(); askSave(() => { openProject(d.rec.json, d.id); setDirty(true); edited = true; writeDraft(); hideHome(); toast('Changes back: tap Save to keep them'); }); } }, icon('undo'), 'Bring them back'),
+      h('button', { class: 'btn', onclick: () => { closeLayer(); clearDraft(); } }, 'Throw them away')))]), 700);
+}
+addEventListener('beforeunload', (e) => { if (manualSave() && dirty) { writeDraft(); e.preventDefault(); e.returnValue = ''; } }); // "Leave site? Changes may not be saved"
+addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); commitSave(); } });
+$('#saveBtn')?.append(icon('save')); $('#saveBtn')?.addEventListener('click', commitSave); setDirty(dirty);
 window.pocketReady = true; // boot finished (index.html recovers from a half-updated cache otherwise)

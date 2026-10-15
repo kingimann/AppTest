@@ -30,6 +30,7 @@ export const GUIDES = [
     ['scripting', 'Scripting with JavaScript', 'Custom Script components and the Pocket helpers'],
     ['engine-api', 'Using the engine from code', 'Engine, Scene, Entity, input, audio, events, tweens'],
     ['custom-components', 'Writing your own components', 'registerBehavior: params, hooks, drawing UI'],
+    ['plugins-mods', 'Plugins and mods', 'Plugins that add components and nodes; mods players add to your game'],
   ] },
   { sec: 'Ship it', items: [
     ['publishing', 'Publishing your game', 'Share a link, a web app, or the App Store and Google Play'],

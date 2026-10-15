@@ -5,10 +5,10 @@ import { NODE_TYPES } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
-export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', 'Save Files': '#2e7d6b', Instructions: '#5c6bc0', Conditions: '#8d6e00', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b', App: '#1e88e5' };
+export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Variables: '#b8860b', 'Save Files': '#2e7d6b', Instructions: '#5c6bc0', Conditions: '#8d6e00', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b', App: '#1e88e5', Plugins: '#e65100' };
 const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: '#8bd347' };
-const CATS = ['App', 'Events', 'Flow', 'Actions', 'Instructions', 'Conditions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
-const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', 'Save Files': 'save', Instructions: 'list', Conditions: 'check', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud', App: 'phone' };
+const CATS = ['App', 'Plugins', 'Events', 'Flow', 'Actions', 'Instructions', 'Conditions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
+const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Variables: 'key', 'Save Files': 'save', Instructions: 'list', Conditions: 'check', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud', App: 'phone', Plugins: 'bolt' };
 /** "What usually comes next" for the Add Node picker. */
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
@@ -40,6 +40,7 @@ const recentNodes = () => { try { return JSON.parse(localStorage.getItem(RECENT_
 const rememberNode = (t) => { try { localStorage.setItem(RECENT_KEY, JSON.stringify([t, ...recentNodes().filter((q) => q !== t)].slice(0, 8))); } catch {} };
 const CAT_HELP = {
   App: 'Pages, menus, data and games inside apps.',
+  Plugins: 'Added by this game’s plugins.',
   Events: 'Start here: when something happens…',
   Actions: '…do something.',
   Move: 'Position, rotation and size.',
@@ -741,7 +742,7 @@ export function openNodeEditor(opts) {
         ...section(sd ? 'Suggested next' : 'Start with an event', suggestions(), true, sd ? `after “${sd.label}”` : 'green nodes start a script'),
         ...section('Recently used', recent, true),
         h('div', { class: 'ne-pcat' }, 'All nodes', h('small', {}, 'by category')),
-        h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).map((cat) => {
+        h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).filter((cat) => cat !== 'Plugins' || Object.values(NODE_TYPES).some((d) => d.also === 'Plugins')).map((cat) => {
           const n = Object.values(NODE_TYPES).filter((d) => !d.hidden && (d.cat === cat || d.also === cat)).length;
           return h('button', { class: 'ne-folder', 'data-cat': cat, style: `--c:${CAT_COLOR[cat]}`, onclick: () => { folder = cat; draw(); } },
             h('span', { class: 'ne-ficon' }, icon(CAT_ICON[cat] || 'folder')), h('b', {}, cat), h('small', {}, CAT_HELP[cat]), h('em', {}, String(n)));

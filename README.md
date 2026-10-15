@@ -675,6 +675,10 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - **Connect Supabase:** a step-by-step check of the project URL and key, a list of your tables with **Use in app**, ✓ / ✗ for each online collection's table, and the setup SQL.
   - **Your own tables:** collections can read and write tables you already have, column by column. They have a key column, sort, filters and *Make fields from the table*.
   - **Live updates** with Supabase Realtime: changes show up on every phone straight away.
+  - **Custom accounts:** your own account fields (username, birthday, role, newsletter…; text, number, date, yes / no, choice, picture), with required and unique checks.
+    - `{user_…}` variables, and generated **sign-up** and **edit-profile** pages.
+    - Save-profile, change-password, change-email and open-profile buttons and nodes.
+    - An optional **profiles table** (public or private) with its SQL and a Profiles collection for people lists.
   - **Database functions and Edge Functions** from nodes and Triggers, with the answer in variables.
 - See the [Making apps guide](docs/guide/apps.md).
 

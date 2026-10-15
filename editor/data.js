@@ -1,6 +1,6 @@
 // App Data (Game Settings): collections of records (Tasks, Notes, Expenses…), their fields and starting rows.
 // Data Lists, Record Forms, Data Summaries, Triggers and nodes use them; apps save what users add on the device.
-import { FIELD_TYPES, fieldKey, fieldsOf, supabaseSQL } from '../engine/pocket.js';
+import { FIELD_TYPES, fieldKey, fieldsOf, supabaseSQL, profilesSQL } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 function h(tag, attrs = {}, ...kids) {
@@ -181,10 +181,11 @@ export function connectSupabase() {
             used ? h('span', { class: 'sb-used' }, '✓ ' + used.name) : h('button', { class: 'btn', onclick: () => { const c = addTableCollection(tb, cl); X.toast(`Added the collection “${c.name}” (Game Settings › Data)`); draw(); } }, icon('plus'), 'Use in app')); }))
           : h('p', { class: 'desc' }, 'No tables the anon key can read yet. Make one in Supabase › Table Editor (and add a row level security rule that lets people read it).'))),
       url && key && step(3, 'Online collections',
-        !pocketCols.length && !ownCols.length && h('p', { class: 'desc' }, 'None yet. Use a table above, or open a collection in Game Settings › Data and pick “Store online”.'),
+        !pocketCols.length && !ownCols.length && !(st.profiles && st.profiles !== 'off') && h('p', { class: 'desc' }, 'None yet. Use a table above, or open a collection in Game Settings › Data and pick “Store online”.'),
+        st.profiles && st.profiles !== 'off' && h('div', { class: 'sb-col' }, h('b', {}, 'Profiles'), ` · ${st.profiles} · table “${st.profilesTable || 'profiles'}” `, !T ? '' : T[st.profilesTable || 'profiles'] ? h('span', { class: 'sb-ok' }, '✓ found') : h('span', { class: 'sb-bad' }, '✗ not made yet')),
         ...[...pocketCols, ...ownCols].map((c) => { const has = T ? !!T[tName(c)] : null; return h('div', { class: 'sb-col' }, h('b', {}, c.name), ` · ${c.online === 'my own table' ? 'your table' : c.online}${c.live ? ' · live' : ''} · table “${tName(c)}” `, has == null ? '' : has ? h('span', { class: 'sb-ok' }, '✓ found') : h('span', { class: 'sb-bad' }, '✗ not made yet')); }),
-        (pocketCols.length || ownCols.some((c) => c.live)) && h('p', { class: 'desc' }, 'Pocket\'s own online tables need setting up once: copy the SQL, paste it in Supabase › SQL Editor and press Run.'),
-        (pocketCols.length || ownCols.some((c) => c.live)) && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const sql = [...pocketCols, ...ownCols.filter((c) => c.live)].map(supabaseSQL).join('\n'); navigator.clipboard?.writeText(sql).then(() => X.toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => X.openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); } }, icon('copy'), 'Copy setup SQL'))),
+        (pocketCols.length || ownCols.some((c) => c.live) || (st.profiles && st.profiles !== 'off')) && h('p', { class: 'desc' }, 'Pocket\'s own online tables need setting up once: copy the SQL, paste it in Supabase › SQL Editor and press Run.'),
+        (pocketCols.length || ownCols.some((c) => c.live) || (st.profiles && st.profiles !== 'off')) && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const sql = [...pocketCols, ...ownCols.filter((c) => c.live)].map(supabaseSQL).join('\n') + (st.profiles && st.profiles !== 'off' ? '\n' + profilesSQL(st) : ''); navigator.clipboard?.writeText(sql).then(() => X.toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => X.openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); } }, icon('copy'), 'Copy setup SQL'))),
       url && key && step(4, 'Sign-in',
         h('p', { class: 'desc' }, pocketCols.length ? 'Private and shared collections need people to sign in. Add a Sign-in Page (Add › UI & Menus › App) and set Game Settings › Supabase › Sign-in page, or use the sign-in buttons and nodes.' : 'Optional: add a Sign-in Page (Add › UI & Menus › App) so people get their own accounts. Show {userName} and {signedIn} in text.')),
       h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => { X.closeLayer(); X.redraw?.(); X.refresh?.(); } }, icon('check'), 'Done')));

@@ -7350,11 +7350,18 @@ registerBehavior('uiSideBar', {
     { key: 'selectedText', label: 'Selected item text (blank = automatic)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'sectionColor', label: 'Section titles (blank = text colour)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'lineColor', label: 'Lines (blank = faint text colour)', type: 'color', default: '', optional: true, group: 'Colours' },
+    { key: 'foldSections', label: 'Sections fold (tap a section title)', type: 'bool', default: false, group: 'Items', info: 'Tap a section title to hide or show its items. In the text, "#- Title" starts folded and "#+ Title" can fold even with this off.' },
+    { key: 'rememberFolds', label: 'Remember folded sections', type: 'bool', default: true, group: 'Items', showIf: (b) => !!b.foldSections },
+    { key: 'filterVar', label: 'Search the items with variable', type: 'text', default: '', suggest: 'vars', group: 'Items', info: 'e.g. search: while it has text, the menu shows only the items (from every submenu too) whose name has it. Put a Search Bar inside the menu that types into the same variable.' },
+    { key: 'noResults', label: 'When nothing matches', type: 'text', default: 'No matches', group: 'Items', showIf: (b) => !!b.filterVar },
+    { key: 'lockedTap', label: 'Tapping a locked item sends', type: 'text', default: '', suggest: 'messages', group: 'Items', infoText: 'Items with a "?" show-if (e.g. ?level >= 5) show greyed with a lock until it is true. e.g. locked: show a popup.' },
+    { key: 'subVar', label: 'Set variable to the open submenu', type: 'text', default: '', suggest: 'vars', group: 'Behaviour', infoText: 'Blank = none. It holds the submenu\'s name while one is open, "" otherwise.' },
   ],
   create(p) {
     const actOf = (a, base) => { // what an item does: page, msg:, toggle:, url:, slider:, choice:, progress:, button:…
       if (a.startsWith('button:')) return { ...actOf(a.slice(7).trim() || base.label.toLowerCase(), base), button: true };
       if (a.startsWith('msg:')) return { ...base, kind: 'msg', msg: a.slice(4).trim() };
+      if (a.startsWith('menu:')) return { ...base, kind: 'sub', name: a.slice(5).trim() }; // opens a submenu ("## Name")
       if (a.startsWith('toggle:')) return { ...base, kind: 'toggle', v: a.slice(7).trim() };
       if (a.startsWith('url:')) return { ...base, kind: 'url', url: a.slice(4).trim() };
       if (a.startsWith('slider:')) { const [v, r = ''] = a.slice(7).split('='), [mn, mx] = r.split('..'); return { ...base, kind: 'slider', v: v.trim(), min: mn != null && mn.trim() !== '' && Number.isFinite(+mn) ? +mn : 0, max: mx != null && mx.trim() !== '' && Number.isFinite(+mx) ? +mx : 100 }; }
@@ -7364,12 +7371,13 @@ registerBehavior('uiSideBar', {
     };
     const parse = (txt) => String(txt || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
       if (/^-+$/.test(l)) return { kind: 'line' };
-      if (l.startsWith('#')) return { kind: 'section', label: l.replace(/^#+\s*/, '') };
+      if (l.startsWith('##')) return { kind: 'group', label: l.replace(/^##\s*/, '') }; // "## Account" starts a submenu, "##" ends it
+      if (l.startsWith('#')) { const m = l.match(/^#([+-]?)\s*(.*)$/); return { kind: 'section', label: m[2], fold: m[1] || (p.foldSections ? '+' : '') }; }
       if (l.startsWith('>')) return { kind: 'text', label: l.slice(1).trim() }; // a paragraph ({variables} work)
       if (/^(~|space)(\s+\d+)?$/i.test(l)) return { kind: 'space', n: +(l.match(/\d+/)?.[0] || 16) }; // empty room
       if (l.startsWith('=')) return { kind: 'stats', cells: l.slice(1).split('|').map((c) => { const i = c.indexOf(':'); return i >= 0 ? { l: c.slice(0, i).trim(), v: c.slice(i + 1).trim() } : { l: '', v: c.trim() }; }).filter((c) => c.v || c.l) }; // a row of numbers in little cards
-      const [label = '', icon = '', act = '', badge = '', sub = '', right = '', color = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
-      return actOf(a, { label, icon, badge, sub, right, color });
+      const [label = '', icon = '', act = '', badge = '', sub = '', right = '', color = '', cond = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
+      return actOf(a, { label, icon, badge, sub, right, color, cond });
     });
     let otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
@@ -7382,15 +7390,47 @@ registerBehavior('uiSideBar', {
       return { x: left ? R.x - (R.w + R.m + 24) * (1 - tt) : R.x + (R.w + R.m + 24) * (1 - tt), w: R.w };
     };
     let sl = null; // a slider being dragged
+    let G = {}, sub = null, subAge = 9; const folded = new Set(), foldSeen = new Set(); // submenus by name; the open one; folded section titles
+    const load = () => {
+      const all = parse(p.items); G = {}; I = []; let g = null;
+      for (const it of all) { if (it.kind === 'group') { g = it.label ? (G[it.label] ||= []) : null; continue; } (g || I).push(it); }
+      F = parse(p.footer).filter((it) => it.kind !== 'group');
+      for (const it of [...I, ...Object.values(G).flat()]) if (it.kind === 'section' && it.fold && !foldSeen.has(it.label)) { foldSeen.add(it.label); if (it.fold === '-' && !(p.rememberFolds !== false && memo?.open?.has(it.label))) folded.add(it.label); if (p.rememberFolds !== false && memo?.shut?.has(it.label)) folded.add(it.label); }
+    };
+    let memo = null; // folded sections remembered on this phone
+    const truthy = (v) => !(v == null || v === false || v === 0 || v === '' || v === '0' || v === 'false');
+    /** An item's show-if: "loggedIn", "!loggedIn", "level >= 5", "plan = pro"; a leading ? shows it locked instead of hiding it. */
+    const condOk = (s, it) => {
+      let c = String(it.cond || '').trim(); if (!c) return true;
+      const soft = c.startsWith('?'); if (soft) c = c.slice(1).trim();
+      const m = c.match(/^(!?)\s*([\w.]+)\s*(?:(==|=|!=|>=|<=|>|<)\s*(.*))?$/); if (!m) return true;
+      const v = s.vars[m[2]]; let ok;
+      if (!m[3]) ok = truthy(v);
+      else { const b = m[4].trim().replace(/^["']|["']$/g, ''), nv = +v, nb = +b, num = v !== '' && v != null && b !== '' && Number.isFinite(nv) && Number.isFinite(nb), op = m[3];
+        ok = op === '>' ? (num ? nv > nb : String(v) > b) : op === '<' ? (num ? nv < nb : String(v) < b) : op === '>=' ? (num ? nv >= nb : String(v) >= b) : op === '<=' ? (num ? nv <= nb : String(v) <= b) : op === '!=' ? (num ? nv !== nb : String(v ?? '') !== b) : (num ? nv === nb : String(v ?? '') === b); }
+      if (m[1]) ok = !ok;
+      return ok ? true : soft ? 'locked' : false;
+    };
+    const ITEMISH = (it) => !['line', 'section', 'space', 'text', 'stats', 'group', 'back'].includes(it.kind);
+    /** What the list shows now: a submenu, folded sections closed, show-ifs applied, or what matches the search. */
+    const visibleItems = (s, list, main) => {
+      const q = main && p.filterVar ? String(s.vars[p.filterVar] ?? '').trim().toLowerCase() : '';
+      if (q) { const hits = [...I, ...Object.values(G).flat()].filter((it) => ITEMISH(it) && condOk(s, it) !== false && it.label.toLowerCase().includes(q)); return hits.length ? hits : [{ kind: 'text', label: p.noResults || 'No matches' }]; }
+      const src = main && sub ? [{ kind: 'back', label: sub, icon: 'back' }, ...(G[sub] || [])] : list, out = []; let hide = false;
+      for (const it of src) { if (it.kind === 'section') { hide = !!it.fold && folded.has(it.label); out.push(it); continue; } if (it.kind === 'line') { hide = false; out.push(it); continue; } if (hide || condOk(s, it) === false) continue; out.push(it); }
+      return out;
+    };
+    const openSub = (s, name) => { sub = name || null; subAge = 0; age = 0; scroll = 0; if (p.subVar) s.setVar(p.subVar, sub || ''); };
+    const saveFolds = () => { if (p.rememberFolds === false) return; try { const k = 'pocket.menuFolds.' + (p.message || 'menu'); localStorage.setItem(k, JSON.stringify({ shut: [...folded], open: [...foldSeen].filter((l) => !folded.has(l)) })); } catch { /* storage unavailable */ } };
     const selInside = (s, e) => { let q = s.engine.editSelected && s.entities.find((z) => z.id === s.engine.editSelected); for (let n = 0; q && n < 50; q = q.parentEnt, n++) if (q === e) return true; return false; }; // the editor shows the menu open while it, or something in it, is selected
     const setSlider = (s, d, px) => { const it = d.it, f = clamp((px - d.x0) / Math.max(1, d.x1 - d.x0), 0, 1), span = it.max - it.min, v = it.min + f * span; s.setVar(it.v, span <= 2 ? Math.round(v * 100) / 100 : Math.round(v)); };
     const inst = {
       uiAlways: true, sideMenu: true,
       get open() { return want; }, get rows() { return rows; },
-      pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
+      pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F, ...Object.values(G).flat()].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
       set(e, s, v) {
         if (v === want) return; want = v;
-        if (v) { s.modal = e; if (t < 0.05) age = 0; } else if (s.modal === e) s.modal = null;
+        if (v) { s.modal = e; if (t < 0.05) { age = 0; if (sub) openSub(s, null); } } else if (s.modal === e) s.modal = null;
         (s.openMenus ||= new Set())[v ? 'add' : 'delete'](p.message); s.emit('menu', p.message, v);
         if (p.bars === 'hide them while open') s.barsHidden = Math.max(0, (s.barsHidden || 0) + (v ? 1 : -1));
         if (p.openVar) s.setVar(p.openVar, v);
@@ -7417,13 +7457,14 @@ registerBehavior('uiSideBar', {
         return { x, y, r: 24 * K };
       },
       start(e, s) {
-        I = parse(p.items); F = parse(p.footer);
+        try { const r = JSON.parse(localStorage.getItem('pocket.menuFolds.' + (p.message || 'menu')) || 'null'); if (r) memo = { shut: new Set(r.shut || []), open: new Set(r.open || []) }; } catch { /* storage unavailable */ }
+        load();
         e._dismiss = () => inst.set(e, s, false);
         e._modalStay = () => !!p.pageWorks; // taps outside reach the page and leave the menu open
         e._modalPass = () => { if (p.pageWorks) { const R = inst.rect(s), W = s.engine.width, H = s.engine.height; return [{ x: 0, y: 0, w: R.x, h: H }, { x: R.x + R.w, y: 0, w: W - R.x - R.w, h: H }, { x: R.x, y: 0, w: R.w, h: R.y }, { x: R.x, y: R.y + R.h, w: R.w, h: H - R.y - R.h }]; }
           if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
         if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
-        s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+        s.on('message', (m) => { if (e.dead) return; if (typeof m === 'string' && m.startsWith(p.message + ' sub:')) { inst.set(e, s, true); openSub(s, m.slice(p.message.length + 5).trim()); return; } if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
       destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {
@@ -7435,7 +7476,7 @@ registerBehavior('uiSideBar', {
         if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, t0: t, open: false }; break; } }
         // a slider in the menu: press and drag along it
         if (sl) { const q = inp.pointers.get(sl.id); if (q) setSlider(s, sl, q.x); else sl = null; }
-        else if (want && t > 0.9 && !drag) for (const d of inp.downs) { const r = rows.find((r) => r.track && d.x >= r.track.x0 - 14 && d.x <= r.track.x1 + 14 && d.y >= r.y && d.y <= r.y + r.h && (!r.clipped || (d.y >= r.clipped[0] && d.y <= r.clipped[1]))); if (r) { sl = { id: d.id, it: r.item, x0: r.track.x0, x1: r.track.x1 }; setSlider(s, sl, d.x); break; } }
+        else if (want && t > 0.9 && !drag) for (const d of inp.downs) { const r = rows.find((r) => r.track && condOk(s, r.item) === true && d.x >= r.track.x0 - 14 && d.x <= r.track.x1 + 14 && d.y >= r.y && d.y <= r.y + r.h && (!r.clipped || (d.y >= r.clipped[0] && d.y <= r.clipped[1]))); if (r) { sl = { id: d.id, it: r.item, x0: r.track.x0, x1: r.track.x1 }; setSlider(s, sl, d.x); break; } }
         if (!drag && !sl && want && ((p.dragClose !== false && !full()) || overflow > 0)) for (const d of inp.downs) { if (d.x >= R.x && d.x <= R.x + R.w && d.y >= R.y && d.y <= R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, s0: scroll, open: true, moved: false, mode: null }; break; } }
         if (drag) {
           const q = inp.pointers.get(drag.id), span = Math.max(1, R.w - (rail() ? railW : 0));
@@ -7451,7 +7492,7 @@ registerBehavior('uiSideBar', {
           t = want ? Math.min(1, t + step) : Math.max(0, t - step);
         }
         scroll = clamp(scroll, 0, overflow);
-        age += dt;
+        age += dt; subAge += dt;
         { const ow = rail() ? railW + (R.w - railW) * ease(t) : R.w; e._overlay = t > 0.001 || rail() ? { x: left ? R.x : R.x + R.w - ow, y: R.y, w: ow, h: R.h } : null; } // drawn over the page's UI while it shows (uiDrawOrder, hitTest)
         // "push the screen": the rest of the UI slides aside by as much as the menu is open
         if (p.openMode === 'push the screen' && !rail()) { const sh = (left ? 1 : -1) * (R.w + R.m) * ease(t); if (sh || s.uiShiftBy === e) { s.uiShift = sh; s.uiShiftBy = sh ? e : null; } }
@@ -7465,9 +7506,14 @@ registerBehavior('uiSideBar', {
           if (full() || st() !== 'rail' || t > 0.5) { const c = rows.find((r) => r.close && Math.hypot(tp.x - r.x, tp.y - r.y) < 26); if (c) { inst.set(e, s, false); continue; } }
           const hd = rows.find((r) => r.head && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h);
           if (hd && p.headerMessage) { if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); s.send(p.headerMessage); if (p.closeOnPick !== false && want) inst.set(e, s, false); continue; }
+          const sr = rows.find((r) => r.sect && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
+          if (sr) { const l = sr.sect.label; if (folded.has(l)) folded.delete(l); else folded.add(l); saveFolds(); if (p.haptics !== false) E.vibrate(6); continue; } // fold or unfold a section
           const r = rows.find((r) => r.item && tp.x >= r.x && tp.x <= r.x + r.w && tp.y >= r.y && tp.y <= r.y + r.h && (!r.clipped || (tp.y >= r.clipped[0] && tp.y <= r.clipped[1])));
           if (!r) continue;
           const it = r.item;
+          if (condOk(s, it) === 'locked') { if (p.haptics !== false) E.vibrate(20); if (p.lockedTap) s.send(p.lockedTap); continue; } // locked until its show-if is true
+          if (it.kind === 'back') { press.set(it, 1); if (p.sound) E.audio.sfx(p.sound); openSub(s, null); continue; }
+          if (it.kind === 'sub') { press.set(it, 1); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); openSub(s, it.name); continue; }
           if (it.kind === 'slider' || it.kind === 'progress') continue; // (sliders follow the finger; a bar only shows)
           if (it.kind === 'choice') { const g = r.segs?.find((q) => tp.x >= q.x && tp.x <= q.x + q.w); if (g) { if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); s.setVar(it.v, g.v !== '' && Number.isFinite(+g.v) ? +g.v : g.v); } continue; }
           press.set(it, 1);
@@ -7487,7 +7533,7 @@ registerBehavior('uiSideBar', {
       },
       drawUI(ctx, e, s) {
         const E = s.engine, editing = E.editing, W = E.width, H = E.height, k = uiK(E.safe) || 1, o = uiOrigin(e, W, H, E.safe);
-        if (!I.length && !F.length) { I = parse(p.items); F = parse(p.footer); }
+        if (!I.length && !F.length) load();
         ctx.scale(1 / k, 1 / k); ctx.translate(-o.x, -o.y); // draw in screen pixels
         const shown = editing ? (selInside(s, e) ? 1 : 0) : t, sty = st(), R = inst.rect(s), left = p.side !== 'right', railW = 72, tt = editing ? shown : ease(t), raw = shown; // the editor shows it open while it's selected
         rows = [];
@@ -7499,7 +7545,7 @@ registerBehavior('uiSideBar', {
         }
         if (tt <= 0.001 && !rail()) return;
         const dense = sty === 'compact', acc = p.accent || '#4fa3ff', txt = st() === 'gradient' ? '#ffffff' : p.text || '#e8eaf2', bg = p.bg || '#151826', isz = (+p.iconSize || 22) - (dense ? 4 : 0), tsz = (+p.textSize || 16) - (dense ? 2 : 0), ih = Math.round((+p.itemHeight || 50) * (dense ? 0.76 : 1)), icons = p.showIcons !== false && sty !== 'minimal';
-        const lineC = p.lineColor || null, wt = { regular: 500, bold: 650, heavy: 800 }[p.weight] ?? 650, centreItems = p.itemAlign === 'centre', DECO = (it) => ['line', 'section', 'space', 'text', 'stats'].includes(it.kind);
+        const lineC = p.lineColor || null, IL = visibleItems(s, I, true), FL = visibleItems(s, F, false), wt = { regular: 500, bold: 650, heavy: 800 }[p.weight] ?? 650, centreItems = p.itemAlign === 'centre', DECO = (it) => ['line', 'section', 'space', 'text', 'stats'].includes(it.kind);
         // the page behind: dimmed, blurred, hidden, or left alone
         const behind = p.behind || 'dims', dimC = p.dimColor || '#000000', ay = R.top || 0, ah = H - (R.top || 0) - (R.bot || 0);
         if (!editing && !full() && tt > 0 && behind !== 'stays as it is') {
@@ -7585,7 +7631,9 @@ registerBehavior('uiSideBar', {
           function drawItem(it, li) {
             const delay = p.stagger !== false && !editing && want ? idx * 0.035 : 0, ip = rail() || !want || drag ? (rail() ? 1 : tt) : clamp((age - delay) / Math.max(0.05, (+p.duration || 0.28) * 0.6), 0, 1), slide = (1 - ease(ip)) * 30 * (left ? -1 : 1);
             if (it.kind === 'line') { if (!compact && !grouped()) { ctx.fillStyle = lineC || withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; return; }
-            if (it.kind === 'section') { if (!compact) { const ss = p.sectionStyle || 'small capitals', big = ss === 'title', mid = full() || centreItems; ctx.save(); ctx.globalAlpha *= (ss === 'small capitals' && !p.sectionColor ? 0.55 : 0.95) * ease(ip); ctx.fillStyle = p.sectionColor || (ss === 'accent capitals' ? acc : txt); ctx.font = big ? `800 ${tsz + 1}px ${THEME.font}` : `800 11.5px ${THEME.font}`; ctx.textAlign = mid ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(big ? it.label : it.label.toUpperCase(), mid ? x + w / 2 : x + pad + 8 + slide, yy + (big ? 20 : 16)); ctx.restore(); } yy += hOf(it); return; }
+            if (it.kind === 'section') { if (!compact) { const ss = p.sectionStyle || 'small capitals', big = ss === 'title', mid = full() || centreItems; ctx.save(); ctx.globalAlpha *= (ss === 'small capitals' && !p.sectionColor ? 0.55 : 0.95) * ease(ip); ctx.fillStyle = p.sectionColor || (ss === 'accent capitals' ? acc : txt); ctx.font = big ? `800 ${tsz + 1}px ${THEME.font}` : `800 11.5px ${THEME.font}`; ctx.textAlign = mid ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(big ? it.label : it.label.toUpperCase(), mid ? x + w / 2 : x + pad + 8 + slide, yy + (big ? 20 : 16));
+                if (it.fold) { const sh = folded.has(it.label), ax = x + w - pad - 12, ay = yy + (big ? 20 : 16); ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = 2; ctx.beginPath(); if (sh) { ctx.moveTo(ax - 3, ay - 5); ctx.lineTo(ax + 2, ay); ctx.lineTo(ax - 3, ay + 5); } else { ctx.moveTo(ax - 5, ay - 2); ctx.lineTo(ax, ay + 3); ctx.lineTo(ax + 5, ay - 2); } ctx.stroke(); rows.push({ sect: it, x, y: yy, w, h: hOf(it) }); } // ▸ folded, ▾ open
+                ctx.restore(); } yy += hOf(it); return; }
             if (it.kind === 'space') { yy += hOf(it); return; }
             if (it.kind === 'text') { if (!compact) { const L = wrap(fillTemplate(it.label, s.vars)), mid = full() || centreItems; ctx.save(); ctx.globalAlpha *= 0.72 * ease(ip); ctx.fillStyle = txt; ctx.font = `600 ${tsz - 2}px ${THEME.font}`; ctx.textAlign = mid ? 'center' : 'left'; ctx.textBaseline = 'top'; L.forEach((ln, i) => ctx.fillText(ln, mid ? x + w / 2 : x + pad + 8 + slide, yy + 6 + i * (tsz + 3))); ctx.restore(); } yy += hOf(it); return; }
             if (it.kind === 'stats') { // numbers in little cards: "= Coins: {coins} | Gems: {gems}"
@@ -7597,7 +7645,8 @@ registerBehavior('uiSideBar', {
             const rx = boxed ? x + 12 : x + (sty === 'classic' || compact ? 0 : 8), rw = boxed ? w - 24 : w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
             const itemR = sty === 'pills' ? Math.min((hgt - 6) / 2, 22) : Math.max(0, +p.itemRadius >= 0 && p.itemRadius !== '' ? +p.itemRadius : 14);
             const ctl = !compact && ['slider', 'progress', 'choice'].includes(it.kind), btn = it.button && !compact;
-            ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
+            const lock = condOk(s, it) === 'locked', subIn = it.kind === 'back' || subAge < 1 ? clamp(subAge / 0.22, 0, 1) : 1; // a submenu slides in
+            ctx.save(); ctx.globalAlpha *= ease(ip) * (lock ? 0.45 : 1); ctx.translate(slide + (sub ? (1 - ease(subIn)) * 40 : 0), 0);
             if (boxedSty && !compact && !full() && !btn) { if (sty === 'cards') { ctx.fillStyle = withAlpha(txt, 0.07); rr(rx, yy + 2, rw, hgt - 4, Math.min(itemR, 16)); ctx.fill(); } else { ctx.strokeStyle = withAlpha(txt, 0.2); ctx.lineWidth = 1.2; rr(rx, yy + 3, rw, hgt - 6, itemR); ctx.stroke(); } } // pills and cards: every item has its own shape
             if (inCard && card && yy > card.y + 1) { ctx.fillStyle = withAlpha(txt, 0.08); ctx.fillRect(rx + (icons && it.icon ? 50 : 16), yy, rw - (icons && it.icon ? 50 : 16), 1); } // a hairline between rows in a card
             if (btn) { ctx.fillStyle = it.color || acc; rr(rx + 4, yy + 4, rw - 8, hgt - 8, sty === 'pills' || full() ? (hgt - 8) / 2 : Math.min(itemR, 14)); ctx.fill(); if (pr) { ctx.fillStyle = `rgba(255,255,255,${(0.2 * pr).toFixed(3)})`; ctx.fill(); } } // a button: filled
@@ -7607,11 +7656,12 @@ registerBehavior('uiSideBar', {
               else if (inCard && card) { const first = yy <= card.y + 0.5, last = yy + hgt + gapV >= card.y + card.h - 0.5, cr = 14; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(rx, yy, rw, hgt, [first ? cr : 0, first ? cr : 0, last ? cr : 0, last ? cr : 0]); else ctx.rect(rx, yy, rw, hgt); ctx.fill(); } // grouped: the whole row, rounded where the card is
               else { rr(rx + (compact ? 12 : 0), yy + 3, rw - (compact ? 24 : 0), hgt - 6, full() ? hgt / 2 : itemR); ctx.fill(); if (sty === 'neon' && on) { ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.shadowColor = acc; ctx.shadowBlur = 10; ctx.stroke(); ctx.restore(); } }
             }
-            const own = it.color || null, col = btn ? '#ffffff' : on ? (p.selectedText || (hl === 'filled' || (sty === 'pills' && hl !== 'text only') ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc)) : own || txt;
+            const own = it.color || (it.kind === 'back' ? acc : null), col = btn ? '#ffffff' : on ? (p.selectedText || (hl === 'filled' || (sty === 'pills' && hl !== 'text only') ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc)) : own || txt;
             const icCol = on || btn ? col : own || p.iconColor || txt;
             const cy = yy + (btn ? hgt / 2 : (hgt - ex) / 2 - (it.sub && !full() && !compact ? 6 : 0)), ccy = yy + hgt - ex / 2 - 4; // the name's line, and the control's
             if (sty === 'neon' && on) { ctx.shadowColor = acc; ctx.shadowBlur = 12; } // (the selected item glows)
-            const bv = it.badge ? s.vars[it.badge] : null, hasBadge = bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0';
+            const lit = /^(["']).+\1$/.test(it.badge || '') ? fillTemplate(it.badge.slice(1, -1), s.vars) : null; // "NEW": a word, not a variable
+            const bv = lit ?? (it.badge ? s.vars[it.badge] : null), hasBadge = !lock && bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0';
             let track = null, segs = null;
             if (compact) drawNavIcon(ctx, it.icon || it.label.slice(0, 1), x + w / 2, cy, isz, icCol);
             else {
@@ -7627,8 +7677,9 @@ registerBehavior('uiSideBar', {
               if (it.sub && !big) { ctx.save(); ctx.globalAlpha *= 0.62; ctx.font = `600 ${Math.max(10, tsz - 3)}px ${THEME.font}`; ctx.fillStyle = (on && hl === 'filled') || btn ? '#ffffff' : txt; ctx.textAlign = mid ? 'center' : 'left'; ctx.fillText(fillTemplate(it.sub, s.vars), mid ? x + w / 2 : lx, cy + tsz * 0.5 + 8); ctx.restore(); } // the line under it
               let rEdge = rx + rw - 12; const E0 = boxed ? rx + rw - 6 : x + w - pad; // what's on the right: a switch, an arrow, a badge, a value (inside the card in boxed styles)
               if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sw = 40, sh = 24, sx = big ? lx + lw + 16 : E0 - 46; ctx.fillStyle = v ? own || acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); rEdge = sx - 10; }
-              else if (!big && !btn && sty !== 'minimal' && (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page'))) { ctx.strokeStyle = withAlpha(on && hl === 'filled' ? '#ffffff' : txt, 0.35); ctx.lineWidth = 2; const ax = E0 - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); rEdge = ax - 12; }
-              if (hasBadge) rEdge = Math.min(rEdge, (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page') ? 30 : 16) - 20);
+              else if (lock && !big) { drawNavIcon(ctx, 'lock', E0 - 14, cy, 16, txt); rEdge = E0 - 30; } // locked
+              else if (!big && !btn && sty !== 'minimal' && (it.kind === 'msg' || it.kind === 'url' || it.kind === 'sub' || (p.chevrons && it.kind === 'page'))) { ctx.strokeStyle = withAlpha(on && hl === 'filled' ? '#ffffff' : txt, 0.35); ctx.lineWidth = 2; const ax = E0 - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); rEdge = ax - 12; }
+              if (hasBadge) rEdge = Math.min(rEdge, (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || it.kind === 'sub' || (p.chevrons && it.kind === 'page') ? 30 : 16) - 20);
               let rightTxt = it.right ? fillTemplate(it.right, s.vars) : '';
               const t0 = big ? x + w * 0.18 : mid ? rx + 16 : lx, t1 = big ? x + w * 0.82 : rx + rw - 14;
               if (it.kind === 'slider') { const span = it.max - it.min, v = clamp(+(s.vars[it.v] ?? it.min) || 0, Math.min(it.min, it.max), Math.max(it.min, it.max)), f = span ? (v - it.min) / span : 0, kx = t0 + (t1 - t0) * f; ctx.fillStyle = withAlpha(txt, 0.18); rr(t0, ccy - 3, t1 - t0, 6, 3); ctx.fill(); ctx.fillStyle = own || acc; rr(t0, ccy - 3, Math.max(6, kx - t0), 6, 3); ctx.fill(); ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 5; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(kx, ccy, 9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); track = { x0: t0 + slide, x1: t1 + slide }; if (!rightTxt) rightTxt = String(Math.round(v * 100) / 100); }
@@ -7637,8 +7688,8 @@ registerBehavior('uiSideBar', {
               if (rightTxt && !big && !btn) { ctx.save(); ctx.globalAlpha *= 0.6; ctx.font = `600 ${Math.max(10, tsz - 2)}px ${THEME.font}`; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = on && hl === 'filled' ? '#ffffff' : own || txt; ctx.fillText(rightTxt, rEdge, cy); ctx.restore(); } // a value on the right: {coins}, 60, 3 / 10
             }
             if (hasBadge) {
-              const n = +bv, tx = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
-              const bx = compact ? x + w / 2 + isz * 0.5 : (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page') ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
+              const n = +bv, tx = lit != null ? lit : Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
+              const bx = compact ? x + w / 2 + isz * 0.5 : (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || it.kind === 'sub' || (p.chevrons && it.kind === 'page') ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
               ctx.fillStyle = p.badgeColor || '#ff3b5c';
               if (!tx) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(tx).width + 10); rr(bx - bw / 2, by - 10, bw, 20, 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(tx, bx, by + 0.5); }
             }
@@ -7655,15 +7706,15 @@ registerBehavior('uiSideBar', {
         const kGap = p.kidGap !== '' && p.kidGap != null && +p.kidGap >= 0 ? +p.kidGap : 10, kidH = kidL.reduce((n, q) => n + uiBox(q, W, H, E.safe).h + kGap, 0);
         const placeKids = (y0) => { let yy = y0; for (const q of kidL) { const b = uiBox(q, W, H, E.safe), al = p.kidAlign || 'centre'; q._at = { x: al === 'left' ? x + pad + b.w / 2 : al === 'right' ? x + w - pad - b.w / 2 : x + w / 2, y: yy + b.h / 2 }; q._atBy = e; yy += b.h + kGap; } return yy; };
         if (kidsMode === 'under the header' && kidL.length) y = placeKids(y + 4);
-        if (full()) { const tot = I.reduce((n, it) => n + hOf(it), 0); y = Math.max(y, R.y + (R.h - tot) / 2); }
+        if (full()) { const tot = IL.reduce((n, it) => n + hOf(it), 0); y = Math.max(y, R.y + (R.h - tot) / 2); }
         // the list scrolls when it doesn't fit above the footer, so items never run under it
-        const small = p.footerText && !compact ? 26 : 0, fh = F.reduce((n, it) => n + hOf(it), 0), fy = R.y + R.h - safeB - fh - 10 - small;
-        let listEnd = F.length ? fy - 8 : R.y + R.h - safeB - 6;
+        const small = p.footerText && !compact ? 26 : 0, fh = FL.reduce((n, it) => n + hOf(it), 0), fy = R.y + R.h - safeB - fh - 10 - small;
+        let listEnd = FL.length ? fy - 8 : R.y + R.h - safeB - 6;
         if (kidsMode === 'above the footer' && kidL.length) { listEnd -= kidH; placeKids(listEnd + 2); }
-        const total = I.reduce((n, it) => n + hOf(it), 0) + (kidsMode === 'after the items' ? kidH + 4 : 0);
+        const total = IL.reduce((n, it) => n + hOf(it), 0) + (kidsMode === 'after the items' ? kidH + 4 : 0);
         overflow = editing ? 0 : Math.max(0, total - (listEnd - y));
         ctx.save(); ctx.beginPath(); ctx.rect(x - 40, y, w + 80, Math.max(0, listEnd - y)); ctx.clip();
-        const n0 = rows.length, endY = drawList(I, y - (overflow ? scroll : 0));
+        const n0 = rows.length, endY = drawList(IL, y - (overflow ? scroll : 0));
         for (let i = n0; i < rows.length; i++) rows[i].clipped = [y, listEnd];
         ctx.restore();
         if (kidsMode === 'after the items' && kidL.length) placeKids(endY + 4);
@@ -7671,7 +7722,7 @@ registerBehavior('uiSideBar', {
         e._clipChildren = !(editing && kidsMode === 'where I put them'); e._clipRadius = after ? 0 : rad / k; e._clipRect = after ? { x: x + w / 2, y: (y + listEnd) / 2, w, h: Math.max(0, listEnd - y) } : { x: x + w / 2, y: R.y + R.h / 2, w, h: R.h };
         e._kidAlpha = alpha;
         if (overflow > 0) { const vh = listEnd - y, bh = Math.max(24, vh * vh / (vh + overflow)), by = y + (vh - bh) * (scroll / overflow); ctx.fillStyle = withAlpha(txt, 0.25); rr(left ? x + w - 5 : x + 2, by, 3, bh, 2); ctx.fill(); }
-        if (F.length) { if (!compact && !grouped()) { ctx.fillStyle = lineC || withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(F, fy); }
+        if (FL.length) { if (!compact && !grouped()) { ctx.fillStyle = lineC || withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(FL, fy); }
         if (small) { ctx.save(); ctx.globalAlpha *= 0.5; ctx.fillStyle = txt; ctx.font = `600 12px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(fillTemplate(String(p.footerText), s.vars), full() ? x + w / 2 : x + pad + 8, R.y + R.h - safeB - 18); ctx.restore(); } // small print
         ctx.restore(); ctx.restore();
       },

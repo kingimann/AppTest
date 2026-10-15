@@ -7246,16 +7246,16 @@ registerBehavior('uiBottomNav', {
 });
 
 
-const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal', 'grouped', 'gradient'];
+const SIDE_STYLES = ['classic', 'rounded', 'floating', 'glass', 'rail', 'fullscreen', 'minimal', 'grouped', 'gradient', 'neon', 'compact', 'pills', 'cards'];
 registerBehavior('uiSideBar', {
-  label: 'Side Menu', description: 'A complete side menu: header, items with icons, badges and a line under them, sections, switches and a footer, in 9 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
+  label: 'Side Menu', description: 'A complete side menu: header, items with icons, badges and a line under them, sections, switches and a footer, in 13 styles. Opens on a message (from a ☰ button) or a swipe from the screen edge; drag it back or tap outside to close.',
   params: [
     { key: 'items', label: 'Items (Label | icon | page or msg:name or toggle:var | badge variable | line under it; "# Title" = section, "-" = line)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings' },
     { key: 'footer', label: 'Footer items (same format)', type: 'code', default: 'Help | info | msg:help' },
     { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'side', label: 'Side', type: 'select', options: ['left', 'right'], default: 'left' },
     { key: 'message', label: 'Open / close on message', type: 'text', default: 'menu', suggest: 'messages' },
-    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { grouped: 'Items in rounded cards, a section each, like iPhone Settings.', gradient: 'A colourful gradient panel with white text.', classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
+    { key: 'style', label: 'Style', type: 'select', options: SIDE_STYLES, default: 'rounded', info: { grouped: 'Items in rounded cards, a section each, like iPhone Settings.', gradient: 'A colourful gradient panel with white text.', neon: 'A dark panel with a glowing edge; the selected item glows.', compact: 'Smaller rows: more items fit.', pills: 'Every item is an outlined pill; the selected one is filled.', cards: 'Every item is its own card, with space between them.', classic: 'Full-height panel; the selected row is tinted with a bar on its edge.', rounded: 'Full-height panel with rounded highlights (Material style).', floating: 'A rounded card floating off the edges.', glass: 'See-through frosted card.', rail: 'A slim column of icons that is always there and opens to the full menu.', fullscreen: 'Covers the whole screen with big centred items.', minimal: 'Big words, no lines or icons.' } },
     { key: 'title', label: 'Title', type: 'text', default: 'My Game', group: 'Header' },
     { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '', group: 'Header' },
     { key: 'avatar', label: 'Picture (icon or emoji, blank = none)', type: 'text', default: '🙂', group: 'Header' },
@@ -7273,6 +7273,11 @@ registerBehavior('uiSideBar', {
     { key: 'blur', label: 'Frosted glass blur', type: 'number', default: 14, range: [0, 30], step: 1, group: 'Colours', showIf: { style: ['glass'] } },
     { key: 'corner', label: 'Corner roundness', type: 'number', default: 22, range: [0, 40], step: 1, group: 'Size', showIf: { style: ['floating', 'glass', 'grouped', 'gradient'] } },
     { key: 'shadow', label: 'Shadow', type: 'bool', default: true, group: 'Size' },
+    { key: 'edge', label: 'Line along its edge', type: 'bool', default: false, group: 'Size' },
+    { key: 'itemGap', label: 'Space between items', type: 'number', default: 0, range: [0, 24], step: 1, group: 'Size', infoText: 'Pills and cards add their own space too.' },
+    { key: 'itemRadius', label: 'Roundness of the highlight', type: 'number', default: 14, range: [0, 30], step: 1, group: 'Size' },
+    { key: 'iconBubbles', label: 'Icons in coloured circles', type: 'bool', default: false, group: 'Size' },
+    { key: 'dividers', label: 'Lines between items', type: 'bool', default: false, group: 'Size' },
     { key: 'width', label: 'Width', type: 'number', default: 290, range: [180, 420], step: 10, group: 'Size' },
     { key: 'itemHeight', label: 'Row height', type: 'number', default: 50, range: [36, 80], step: 2, group: 'Size' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 28], step: 1, group: 'Size' },
@@ -7282,7 +7287,10 @@ registerBehavior('uiSideBar', {
     { key: 'anim', label: 'Opens with', type: 'select', options: ['slide', 'fade', 'zoom'], default: 'slide', group: 'Animation' },
     { key: 'duration', label: 'Open time (sec)', type: 'number', default: 0.28, range: [0.05, 1], step: 0.01, group: 'Animation' },
     { key: 'stagger', label: 'Items flow in one by one', type: 'bool', default: true, group: 'Animation' },
-    { key: 'dim', label: 'Dim behind it', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05, group: 'Animation' },
+    { key: 'behind', label: 'The page behind it', type: 'select', options: ['dims', 'blurs', 'is hidden', 'stays as it is'], default: 'dims', group: 'Page behind', info: { dims: 'Darkens the page so the menu stands out.', blurs: 'Blurs and darkens the page (frosted).', 'is hidden': 'Covers the page completely while the menu is open.', 'stays as it is': 'Leaves the page as it is.' } },
+    { key: 'dim', label: 'How much', type: 'number', default: 0.5, range: [0, 0.9], step: 0.05, group: 'Page behind', showIf: (b) => !b.behind || b.behind === 'dims' || b.behind === 'blurs' },
+    { key: 'dimColor', label: 'Colour', type: 'color', default: '#000000', group: 'Page behind', showIf: (b) => b.behind !== 'stays as it is' },
+    { key: 'pageWorks', label: 'The page still works while it\'s open', type: 'bool', default: false, group: 'Page behind', info: 'Taps on the page work and the menu stays open: close it with its ✕, the ☰ button, a swipe or the message. Off: tapping the page closes the menu.' },
     { key: 'sound', label: 'Tap sound', type: 'text', default: 'click', suggest: 'sounds', group: 'Animation' },
     { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Animation' },
     { key: 'swipeOpen', label: 'Swipe from the edge to open', type: 'bool', default: true, group: 'Behaviour' },
@@ -7342,7 +7350,9 @@ registerBehavior('uiSideBar', {
       start(e, s) {
         I = parse(p.items); F = parse(p.footer);
         e._dismiss = () => inst.set(e, s, false);
-        e._modalPass = () => { if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
+        e._modalStay = () => !!p.pageWorks; // taps outside reach the page and leave the menu open
+        e._modalPass = () => { if (p.pageWorks) { const R = inst.rect(s), W = s.engine.width, H = s.engine.height; return [{ x: 0, y: 0, w: R.x, h: H }, { x: R.x + R.w, y: 0, w: W - R.x - R.w, h: H }, { x: R.x, y: 0, w: R.w, h: R.y }, { x: R.x, y: R.y + R.h, w: R.w, h: H - R.y - R.h }]; }
+          if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
         if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
         s.on('message', (m) => { if (e.dead) return; if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
@@ -7406,9 +7416,14 @@ registerBehavior('uiSideBar', {
           drawNavIcon(ctx, 'menu', Bt.x, Bt.y, Bt.r * 1.0, p.buttonColor || '#ffffff'); ctx.restore();
         }
         if (tt <= 0.001 && !rail()) return;
-        const acc = p.accent || '#4fa3ff', txt = st() === 'gradient' ? '#ffffff' : p.text || '#e8eaf2', bg = p.bg || '#151826', isz = +p.iconSize || 22, tsz = +p.textSize || 16, ih = +p.itemHeight || 50, icons = p.showIcons !== false && sty !== 'minimal';
-        // dim behind
-        if (!editing && +p.dim > 0 && !full() && tt > 0) { ctx.save(); ctx.globalAlpha *= (+p.dim || 0) * tt; ctx.fillStyle = '#000'; ctx.fillRect(0, R.top || 0, W, H - (R.top || 0) - (R.bot || 0)); ctx.restore(); }
+        const dense = sty === 'compact', acc = p.accent || '#4fa3ff', txt = st() === 'gradient' ? '#ffffff' : p.text || '#e8eaf2', bg = p.bg || '#151826', isz = (+p.iconSize || 22) - (dense ? 4 : 0), tsz = (+p.textSize || 16) - (dense ? 2 : 0), ih = Math.round((+p.itemHeight || 50) * (dense ? 0.76 : 1)), icons = p.showIcons !== false && sty !== 'minimal';
+        // the page behind: dimmed, blurred, hidden, or left alone
+        const behind = p.behind || 'dims', dimC = p.dimColor || '#000000', ay = R.top || 0, ah = H - (R.top || 0) - (R.bot || 0);
+        if (!editing && !full() && tt > 0 && behind !== 'stays as it is') {
+          if (behind === 'blurs') { ctx.save(); ctx.globalAlpha *= tt; blurBehind(ctx, e, s, 0, ay, W, ah, 12, true); ctx.restore(); }
+          const a = behind === 'is hidden' ? 1 : (+p.dim >= 0 ? +p.dim : 0.5) * (behind === 'blurs' ? 0.7 : 1);
+          if (a > 0) { ctx.save(); ctx.globalAlpha *= a * tt; ctx.fillStyle = dimC; ctx.fillRect(0, ay, W, ah); ctx.restore(); }
+        }
         // panel placement for this frame
         let w = R.w, x = R.x, alpha = 1, zoom = 1;
         if (rail()) { w = railW + (R.w - railW) * tt; x = left ? R.x : R.x + R.w - w; }
@@ -7427,6 +7442,8 @@ registerBehavior('uiSideBar', {
           if (g2 && sty !== 'glass') { const g = ctx.createLinearGradient(x, R.y, x + w * 0.35, R.y + R.h); g.addColorStop(0, sty === 'gradient' ? acc : bg); g.addColorStop(1, g2); paint = g; }
           ctx.fillStyle = paint; rr(x, R.y, w, R.h, rad); ctx.fill(); ctx.restore();
           if (sty === 'glass') { ctx.strokeStyle = 'rgba(255,255,255,0.22)'; ctx.lineWidth = 1; rr(x, R.y, w, R.h, rad); ctx.stroke(); }
+          if (p.edge || sty === 'neon') { ctx.save(); ctx.strokeStyle = sty === 'neon' ? acc : withAlpha(acc, 0.7); ctx.lineWidth = sty === 'neon' ? 2 : 1.5; if (sty === 'neon') { ctx.shadowColor = acc; ctx.shadowBlur = 14; } // the edge that faces the page
+            if (floaty()) { rr(x + 1, R.y + 1, w - 2, R.h - 2, rad); ctx.stroke(); } else { const ex = left ? x + w - 1 : x + 1; ctx.beginPath(); ctx.moveTo(ex, R.y); ctx.lineTo(ex, R.y + R.h); ctx.stroke(); } ctx.restore(); }
         }
         ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
         const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
@@ -7449,7 +7466,8 @@ registerBehavior('uiSideBar', {
         } else y += compact ? 8 : 4;
         if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = full() ? x + w - 34 : x + w - 28, by = R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = p.header === 'banner' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
         // items
-        const rowH = (it) => (full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih) + (it.sub && !full() && !compact ? 12 : 0);
+        const gapV = compact ? 0 : Math.max(0, +p.itemGap || 0) + (sty === 'cards' ? 8 : sty === 'pills' ? 6 : 0), boxedSty = sty === 'pills' || sty === 'cards';
+        const rowH = (it) => (full() ? ih * 1.25 : sty === 'minimal' ? ih * 1.1 : ih) + (it.sub && !full() && !compact ? 12 : 0) + (it.kind === 'line' || it.kind === 'section' ? 0 : gapV);
         const hl = sty === 'classic' ? 'edge bar' : p.highlight || 'soft';
         const drawList = (list, startY, dirUp) => {
           let yy = startY, idx = 0, card = null;
@@ -7466,23 +7484,27 @@ registerBehavior('uiSideBar', {
             if (it.kind === 'line') { if (!compact && !grouped()) { ctx.fillStyle = withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, yy + 8, w - pad * 2, 1); } yy += 17; return; }
             if (it.kind === 'section') { if (!compact) { ctx.save(); ctx.globalAlpha *= 0.55 * ease(ip); ctx.fillStyle = txt; ctx.font = `800 11.5px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(it.label.toUpperCase(), full() ? x + w / 2 : x + pad + 8 + slide, yy + 16); ctx.restore(); } yy += compact ? 6 : 32; return; }
             idx++;
-            const hgt = rowH(it), on = it.kind === 'page' && sameVal(s.vars[p.var], it.page), inCard = grouped() && !compact;
-            const rx = inCard ? x + 12 : x + (sty === 'classic' || compact ? 0 : 8), rw = inCard ? w - 24 : w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
+            const hgt = rowH(it) - gapV, on = it.kind === 'page' && sameVal(s.vars[p.var], it.page), inCard = grouped() && !compact, boxed = !compact && (inCard || boxedSty);
+            const rx = boxed ? x + 12 : x + (sty === 'classic' || compact ? 0 : 8), rw = boxed ? w - 24 : w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
+            const itemR = sty === 'pills' ? (hgt - 6) / 2 : Math.max(0, +p.itemRadius >= 0 && p.itemRadius !== '' ? +p.itemRadius : 14);
             ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
+            if (boxedSty && !compact && !full()) { if (sty === 'cards') { ctx.fillStyle = withAlpha(txt, 0.07); rr(rx, yy + 2, rw, hgt - 4, Math.min(itemR, 16)); ctx.fill(); } else { ctx.strokeStyle = withAlpha(txt, 0.2); ctx.lineWidth = 1.2; rr(rx, yy + 3, rw, hgt - 6, itemR); ctx.stroke(); } } // pills and cards: every item has its own shape
             if (inCard && card && yy > card.y + 1) { ctx.fillStyle = withAlpha(txt, 0.08); ctx.fillRect(rx + (icons && it.icon ? 50 : 16), yy, rw - (icons && it.icon ? 50 : 16), 1); } // a hairline between rows in a card
             if ((on && hl !== 'text only') || pr) {
               ctx.fillStyle = on && hl === 'filled' ? acc : withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr);
               if (sty === 'classic' || (on && hl === 'edge bar' && !compact && !full())) { if (sty === 'classic') ctx.fillRect(rx, yy, rw, hgt); else { rr(rx, yy + 3, rw, hgt - 6, 10); ctx.fill(); } if (on) { ctx.fillStyle = acc; if (sty === 'classic') ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); else { rr(left ? rx : rx + rw - 4, yy + 8, 4, hgt - 16, 2); ctx.fill(); } } }
-              else { const inset = inCard ? 4 : 0; rr(rx + (compact ? 12 : 0) + inset, yy + 3, rw - (compact ? 24 : 0) - inset * 2, hgt - 6, full() ? hgt / 2 : inCard ? 10 : 14); ctx.fill(); }
+              else { const inset = inCard ? 4 : 0; rr(rx + (compact ? 12 : 0) + inset, yy + 3, rw - (compact ? 24 : 0) - inset * 2, hgt - 6, full() ? hgt / 2 : inCard ? Math.min(itemR, 10) : itemR); ctx.fill(); if (sty === 'neon' && on) { ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.shadowColor = acc; ctx.shadowBlur = 10; ctx.stroke(); ctx.restore(); } }
             }
-            const col = on ? (hl === 'filled' ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc) : txt, cy = yy + hgt / 2 - (it.sub && !full() && !compact ? 6 : 0);
+            const col = on ? (hl === 'filled' || (sty === 'pills' && hl !== 'text only') ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc) : txt, cy = yy + hgt / 2 - (it.sub && !full() && !compact ? 6 : 0);
+            if (sty === 'neon' && on) { ctx.shadowColor = acc; ctx.shadowBlur = 12; } // (the selected item glows)
             if (compact) drawNavIcon(ctx, it.icon || it.label.slice(0, 1), x + w / 2, cy, isz, col);
             else if (full()) {
               ctx.font = `800 ${tsz + 8}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(it.label, x + w / 2, cy);
               if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sw = 40, sh = 24, sx = x + w / 2 + ctx.measureText(it.label).width / 2 + 16; ctx.fillStyle = v ? acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); } // its switch, beside the name
             }
             else {
-              const ix = x + pad + 14 + (sty === 'classic' ? 4 : 0);
+              const ix = x + pad + 14 + (sty === 'classic' ? 4 : 0) + (boxed && !inCard ? 4 : 0);
+              if (icons && it.icon && p.iconBubbles) { ctx.save(); ctx.shadowColor = 'transparent'; ctx.fillStyle = on && (hl === 'filled' || sty === 'pills') ? 'rgba(255,255,255,0.22)' : withAlpha(on ? acc : txt, on ? 0.2 : 0.1); ctx.beginPath(); ctx.arc(ix, cy, isz * 0.82, 0, Math.PI * 2); ctx.fill(); ctx.restore(); } // the icon in a soft circle
               if (icons && it.icon) drawNavIcon(ctx, it.icon, ix, cy, isz, col);
               ctx.font = `${on ? 800 : 650} ${sty === 'minimal' ? tsz + 6 : tsz}px ${THEME.font}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = col;
               ctx.fillText(it.label, icons && it.icon ? ix + isz / 2 + 14 : x + pad + 8, cy);
@@ -7498,8 +7520,9 @@ registerBehavior('uiSideBar', {
               if (!tx) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(tx).width + 10); rr(bx - bw / 2, by - 10, bw, 20, 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(tx, bx, by + 0.5); }
             }
             ctx.restore();
+            if (p.dividers && !compact && !boxed && list[li + 1] && list[li + 1].kind !== 'line' && list[li + 1].kind !== 'section') { ctx.fillStyle = withAlpha(txt, 0.09); ctx.fillRect(x + pad + (icons && it.icon ? 36 : 8), yy + hgt + gapV / 2, w - pad * 2 - (icons && it.icon ? 36 : 8), 1); } // a line between items
             rows.push({ item: it, x: rx, y: yy, w: rw, h: hgt });
-            yy += hgt;
+            yy += hgt + gapV;
           }
           return yy;
         };
@@ -17703,7 +17726,7 @@ export class Engine {
     const inside = (t) => Math.abs(t.x - r.x) <= r.w / 2 && Math.abs(t.y - r.y) <= r.h / 2, through = (t) => pass.some((q) => t.x >= q.x && t.x <= q.x + q.w && t.y >= q.y && t.y <= q.y + q.h);
     const out = inp.taps.some((t) => !inside(t));
     inp.taps = inp.taps.filter((t) => inside(t) || through(t)); inp.downs = inp.downs.filter((t) => inside(t) || through(t));
-    if (out) m._dismiss?.();
+    if (out && !m._modalStay?.()) m._dismiss?.();
   }
 
   /** True when the game wants portrait/landscape and a phone is held the other way (and it isn't letterboxed). */

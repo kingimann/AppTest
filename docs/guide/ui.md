@@ -105,9 +105,11 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - *Behaviour*: **Swipe left / right to change tab**, **Tapping the current tab again scrolls its page to the top**, **Open on the last tab used** (next time the app opens), and **Pressing and holding a tab sends** a message (the tab's page is in `heldTab`).
   - *Size & shape*: label weight (normal, bold, bold when selected) and UPPERCASE labels.
   - *Background*: **Background see-through** (1 = solid, 0 = clear), **Blur what is behind** (frosted glass, like iOS), a **gradient** to a second colour, and the **line colour** on its top edge. **Pages run under the bar** (auto, yes or no): on *auto*, a see-through, blurred, floating, glass or minimal bar lets the open page reach the bottom of the screen and show through it. What's on the page (buttons, lists, the last item of a scrolling page) still stops above the bar, and dragging on the bar never scrolls the page.
-- **Side Menu:** a drawer with a header, sections, switches, footer items and 9 styles.
+- **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
   - In the Inspector each item is a card: tap its icon to pick one, type its name, and choose what it does: a page (or *+ New page…*), **a switch** for a variable (music, sound, dark mode) or **a message** (help, log out). Its ⋯ menu adds a badge, a **line under it** (small text, `{variables}` work), shows its page, moves it or removes it. **+ Add** also adds section titles and lines. (*Text* edits them as lines: `Label | icon | page or msg:name or toggle:var | badge | line under it`.)
-  - **Style:** pick from pictures of the 9 styles: classic, rounded, floating, glass (real frosted glass over the page), rail, fullscreen, minimal, **grouped** (items in rounded cards per section, like iPhone Settings) and **gradient** (a colourful panel with white text).
+  - **Style:** pick from pictures of the 13 styles: classic, rounded, floating, glass (real frosted glass over the page), rail, fullscreen, minimal, **grouped** (items in rounded cards per section, like iPhone Settings), **gradient** (a colourful panel with white text), **neon** (a glowing edge and a glowing selected row), **compact** (smaller rows, to fit more), **pills** (each item a rounded outline) and **cards** (each item its own card).
+  - **Page behind:** while the menu is open the page behind it **dims**, **blurs**, **is hidden** (filled with a colour, so only the menu shows) or **stays as it is**. Set how dark it gets and the colour. **The page still works** lets people keep using the page while the menu is open: taps outside the menu reach the page and the menu stays open until they close it.
+  - **Items:** space between items, roundness of the highlight, **icons in coloured circles**, **lines between items** and a **line along its edge**.
   - **Selected row:** soft tint, filled with the accent, a bar on its edge, or text only. **Gradient to** fades the background into a second colour. Corner roundness, blur and shadow.
   - **Header:** a title, a subtitle with variables, and a picture: an icon, an emoji or a **photo** (an image address or data URL). **Tapping the header sends** a message (open a profile page). **Small print at the bottom** for a version or *Signed in as {name}*.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
@@ -130,7 +132,7 @@ Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Ca
 - Its name (**Rename**, which updates the buttons and tabs that open it), **Show** it in the UI editor, **The app opens on this page**, its **Title in the App Bar**, and **Add to the bottom bar**.
 - **Look:** background colour or gradient, a **background picture** (cover, fit, tile or stretch, with opacity and a tint over it so text stays readable), and space at the top and bottom.
 - **What's on this page:** everything on it, top to bottom. Tap one to select it; ↑ and ↓ move it (things side by side move together); its ⋯ menu has *Duplicate* (right under it), *Add under it…* and *Delete*.
-- **Add to page** (also **+ Add** in the UI editor while a page is shown) offers ready blocks in your app's theme colours:
+- **Add to page** (also **+ Add** in the UI editor while a page is shown) opens a picker of ready blocks in your app's theme colours, sorted into **Basics**, **Social**, **Game menu** and **Forms & settings**:
 
   | Block | What it is |
   |---|---|
@@ -140,6 +142,10 @@ Nodes: Go To Page, Go Back, On Page Opened, On Page Closed, On Back, Page Is, Ca
   | Two Numbers, Two Buttons | Side by side, sharing the width on every screen |
   | Switch Row, Text Box, Search Bar | A setting, typing into a variable, searching |
   | Picture, Divider, Data List | A photo from your device, a thin line, your data's records |
+  | Space, Small Print | Empty space; a small grey note |
+  | Profile Header, Post, Stories Row, Chat Bubbles, Comment Box, Person Row, Notification Row | **Social:** a profile with avatar and counts, a post with likes, a row of story circles, a chat, a box to write a comment, a person with a Follow button, an activity line |
+  | Game Title, Big Play Button, Menu Buttons, Level Grid, Coins & Gems, Leaderboard, Shop Item, Progress Bar | **Game menu:** a title screen, the main buttons, a grid of levels, currencies, a top-scores list, something to buy, a bar with a label |
+  | Slider Row, Segmented Tabs | **Forms & settings:** a labelled slider; a row of choices |
 
   Each block goes under the last thing on the page, or under the one selected (what's below moves down to make room). *Any UI…* opens the full list; whatever you add while a page is shown goes on that page. **Line up** spaces everything evenly from top to bottom, and a page turns on scrolling by itself when its content gets taller than the screen.
 - **Opening and closing**, **Scrolling**, **Bottom bar and access**, **Messages** (the settings below).

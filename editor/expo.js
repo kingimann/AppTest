@@ -52,7 +52,7 @@ export function easJson(o) {
 }
 
 /** The bridge inside the game: window.Capacitor, so the engine's native code paths (notifications, haptics) work unchanged. */
-const BRIDGE = String.raw`(function () {
+export const BRIDGE = String.raw`(function () {
   if (window.Capacitor) return;
   var seq = 0, waiting = {}, listeners = {};
   function call(plugin, method, args) {

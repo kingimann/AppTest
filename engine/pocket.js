@@ -14566,17 +14566,27 @@ export class Supa {
     if (!this.listening) { this.listening = true; addEventListener('online', () => { if (this.on()) this.flush().then(() => this.pullAll()); }); }
   }
   // ---- online collections ----
-  online(def) { return !!def && this.on() && ['private to each person', 'shared with everyone'].includes(def.online); }
+  online(def) { return !!def && this.on() && SUPA_MODES.includes(def.online); }
+  own(def) { return def?.online === 'my own table'; }
   table(def) { return String(def.table || fieldKey(def.name)).trim(); }
-  canRead(def) { return def.online === 'shared with everyone' || !!this.user(); }
-  toRec(def, row) { const me = this.user()?.id; return { ...this.engine.data.newRecord(def.name), ...this.engine.data.norm(def, row.data || {}), id: row.id, _at: +row.at || 0, _by: row.user_id || '', _mine: !!me && row.user_id === me, author: row.data?.author ?? row.author ?? '' }; }
+  idCol(def) { return String(def.idColumn || 'id').trim() || 'id'; }
+  canRead(def) { return def.online !== 'private to each person' || !!this.user(); }
+  /** My own table: its columns are the fields (a column “Due date” or “due_date” fills the field Due date). */
+  ownRec(def, row) {
+    const D = this.engine.data, F = fieldsOf(def), o = {}, idc = this.idCol(def);
+    for (const [col, v] of Object.entries(row || {})) { const f = F.find((q) => q.key === fieldKey(col) || (q.column && q.column === col)); if (f) o[f.key] = v; }
+    const at = row.created_at || row.inserted_at || row.at; return { ...D.newRecord(def.name), ...D.norm(def, o), id: String(row[idc] ?? ''), _at: typeof at === 'number' ? at : Date.parse(at) || 0, author: o.author ?? '' };
+  }
+  ownRow(def, rec) { const o = {}, idc = this.idCol(def); for (const f of fieldsOf(def)) { if (f.key === idc || f.readOnly) continue; if (rec && f.key in rec) o[f.column || f.key] = rec[f.key] === '' && ['number', 'money', 'rating', 'date'].includes(f.type) ? null : rec[f.key]; } return o; }
+  ownQuery(def) { const q = ['select=*']; const w = String(def.where || '').trim(); if (w) q.push(...w.split(/\s*[&\n]\s*/).filter(Boolean)); const ob = String(def.orderBy || '').trim(); if (ob) q.push('order=' + ob.replace(/\s+(asc|desc)$/i, '.$1').replace(/\s+/g, '')); q.push('limit=' + Math.max(1, Math.min(5000, +def.limit || 500))); return q.join('&'); }
+  toRec(def, row) { if (this.own(def)) return this.ownRec(def, row); const me = this.user()?.id; return { ...this.engine.data.newRecord(def.name), ...this.engine.data.norm(def, row.data || {}), id: row.id, _at: +row.at || 0, _by: row.user_id || '', _mine: !!me && row.user_id === me, author: row.data?.author ?? row.author ?? '' }; }
   fields(rec) { const o = {}; for (const [k, v] of Object.entries(rec || {})) if (k !== 'id' && !k.startsWith('_')) o[k] = v; return o; }
   async pull(def) {
     if (!this.online(def) || !this.canRead(def)) return false;
     const D = this.engine.data, s = this.engine.scene;
     try {
       await this.flush();
-      const rows = await this.call(`/rest/v1/${encodeURIComponent(this.table(def))}?select=*&order=at.desc&limit=${Math.max(1, Math.min(5000, +def.limit || 500))}`, { auth: !!this.user() });
+      const rows = await this.call(`/rest/v1/${encodeURIComponent(this.table(def))}?${this.own(def) ? this.ownQuery(def) : `select=*&order=at.desc&limit=${Math.max(1, Math.min(5000, +def.limit || 500))}`}`, { auth: !!this.user() });
       const fresh = (rows || []).map((r) => this.toRec(def, r)), waiting = this.pending().filter((op) => op.c === def.name && op.kind === 'added' && op.rec && !fresh.some((r) => r.id === op.rec.id)).map((op) => op.rec); // not sent yet: keep showing them
       D.cache[fieldKey(def.name)] = [...waiting, ...fresh]; D.save(def.name); D.syncVars(s || {}); s?.emit('data', fieldKey(def.name), 'refreshed', null);
       s?.setVar('dataError', ''); return true;
@@ -14586,18 +14596,27 @@ export class Supa {
   /** The same change in the table. */
   send(def, kind, rec) {
     const T = encodeURIComponent(this.table(def)), u = this.user(), id = encodeURIComponent(rec?.id || '');
+    if (this.own(def)) {
+      const idc = encodeURIComponent(this.idCol(def));
+      if (kind === 'added') return this.call(`/rest/v1/${T}`, { method: 'POST', headers: { Prefer: 'return=representation' }, body: this.ownRow(def, rec) }).then((j) => { const row = Array.isArray(j) ? j[0] : j; if (row && row[this.idCol(def)] != null) this.renamed(def, rec.id, String(row[this.idCol(def)])); }); // the table picks the id
+      if (kind === 'changed') return this.call(`/rest/v1/${T}?${idc}=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: this.ownRow(def, rec) });
+      if (kind === 'deleted') return this.call(`/rest/v1/${T}?${idc}=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      return Promise.resolve(); // clearing never empties someone's own table
+    }
     if (kind === 'added') return this.call(`/rest/v1/${T}`, { method: 'POST', headers: { Prefer: 'return=minimal' }, body: { id: rec.id, author: this.name(u), at: rec._at || Date.now(), data: this.fields(rec) } });
     if (kind === 'changed') return this.call(`/rest/v1/${T}?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: { data: this.fields(rec) } });
     if (kind === 'deleted') return this.call(`/rest/v1/${T}?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
     if (kind === 'cleared') return this.call(`/rest/v1/${T}?user_id=eq.${encodeURIComponent(u.id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); // (only your own records)
     return Promise.resolve();
   }
+  /** A record added here got its real id from the table. */
+  renamed(def, from, to) { if (!to || from === to) return; const D = this.engine.data, r = D.get(def.name, from); if (r) { r.id = to; D.save(def.name); } const L = this.pending(); let ch = false; for (const op of L) if (op.c === def.name && op.rec?.id === from) { op.rec.id = to; ch = true; } if (ch) this.setPending(L); }
   // changes made without a connection wait here and go when the phone is back online
   pkey() { return 'pocket.supa.pending.' + (this.engine.gameKey || 'game'); }
   pending() { try { return JSON.parse(store.get(this.pkey(), '[]')) || []; } catch { return []; } }
   setPending(L) { if (L.length) store.set(this.pkey(), JSON.stringify(L)); else try { localStorage.removeItem(this.pkey()); } catch { /* storage unavailable */ } }
   async flush() {
-    const L = this.pending(); if (!L.length || !this.user()) return;
+    const L = this.pending(); if (!L.length || (!this.user() && !L.every((op) => this.own(this.engine.data.def(op.c))))) return;
     const left = [];
     for (const op of L) {
       const def = this.engine.data.def(op.c); if (!def || !this.online(def)) continue;
@@ -14610,8 +14629,8 @@ export class Supa {
   wrote(def, kind, rec) {
     if (!this.online(def) || this.pulling) return;
     const s = this.engine.scene, u = this.user();
-    if (!u) { s?.setVar('dataError', 'Sign in to save this online'); Log.add('warn', `“${def.name}” is online: sign in to add or change records`, 'Supabase'); return; }
-    if (kind === 'added') { rec._by = u.id; rec._mine = true; }
+    if (!u && !this.own(def)) { s?.setVar('dataError', 'Sign in to save this online'); Log.add('warn', `“${def.name}” is online: sign in to add or change records`, 'Supabase'); return; }
+    if (kind === 'added' && u && !this.own(def)) { rec._by = u.id; rec._mine = true; }
     const op = { c: def.name, kind, rec: rec ? { ...rec } : null };
     if (this.pending().length) { this.setPending([...this.pending(), op]); this.flush(); return; } // still offline from before: queue behind the others
     return this.send(def, kind, rec).then(() => s?.setVar('dataError', '')).catch((e) => {
@@ -14619,14 +14638,61 @@ export class Supa {
       s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase');
     });
   }
+  /** A database function (Supabase › Database › Functions): POST /rest/v1/rpc/name. Its answer goes in variables. */
+  async rpc(fn, args = {}, into = 'supaResult') { try { const j = await this.call('/rest/v1/rpc/' + encodeURIComponent(String(fn).trim()), { method: 'POST', body: args, auth: !!this.user() }); this.answer(j, into); return true; } catch (e) { this.answerFail('Database function', e); return false; } }
+  /** An Edge Function (Supabase › Edge Functions): POST /functions/v1/name. */
+  async edge(fn, args = {}, into = 'supaResult') { try { const j = await this.call('/functions/v1/' + String(fn).trim().replace(/^\/+/, ''), { method: 'POST', body: args, auth: true }); this.answer(j, into); return true; } catch (e) { this.answerFail('Edge Function', e); return false; } }
+  answer(j, into) {
+    const s = this.engine.scene; if (!s) return; s.setVar('supaError', '');
+    const v = j && typeof j === 'object' && !Array.isArray(j) && Object.keys(j).length === 1 ? Object.values(j)[0] : j; // { total: 3 } → 3
+    s.setVar(into || 'supaResult', v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : v);
+    if (j && typeof j === 'object' && !Array.isArray(j)) for (const [k, x] of Object.entries(j)) if (x == null || typeof x !== 'object') s.setVar(k, x ?? ''); // and each plain value by its name
+  }
+  answerFail(what, e) { const m = e?.message || String(e); this.engine.scene?.setVar('supaError', m); Log.add('warn', `${what}: ${m}`, 'Supabase'); }
+  // ---- live updates (Supabase Realtime): a websocket that hears inserts, updates and deletes ----
+  liveDefs() { return this.engine.data.defs().filter((d) => d.live && this.online(d) && this.canRead(d)); }
+  liveStart() {
+    if (typeof WebSocket === 'undefined' || !this.on()) return; const defs = this.liveDefs(); if (!defs.length) return this.liveStop();
+    const want = defs.map((d) => this.table(d)).sort().join(','), tok = this.session()?.access_token || '';
+    if (this.ws && this.wsTables === want && this.wsTok === tok && this.ws.readyState <= 1) return;
+    if (!this.ws && Date.now() < (this.wsNext || 0)) return; // waiting before trying again
+    this.liveStop(); this.wsTables = want; this.wsTok = tok;
+    const c = this.cfg(); let ws; try { ws = new WebSocket(c.url.replace(/^http/, 'ws') + '/realtime/v1/websocket?apikey=' + encodeURIComponent(c.key) + '&vsn=1.0.0'); } catch { return; }
+    this.ws = ws; this.wsRef = 0; this.wsTopics = {};
+    const send = (topic, event, payload, join) => { if (ws.readyState !== 1) return; const ref = String(++this.wsRef); ws.send(JSON.stringify({ topic, event, payload, ref, ...(join ? { join_ref: ref } : {}) })); };
+    ws.onopen = () => {
+      this.engine.scene?.setVar('liveOnline', 1); this.wsBack = 0;
+      for (const d of defs) { const topic = 'realtime:pocket-' + this.table(d); this.wsTopics[topic] = d.name; send(topic, 'phx_join', { config: { broadcast: { ack: false, self: false }, presence: { key: '' }, postgres_changes: [{ event: '*', schema: 'public', table: this.table(d) }], private: false }, ...(tok ? { access_token: tok } : {}) }, true); }
+      clearInterval(this.wsBeat); this.wsBeat = setInterval(() => send('phoenix', 'heartbeat', {}), 25000);
+    };
+    ws.onmessage = (ev) => { let m; try { m = JSON.parse(ev.data); } catch { return; } if (m.event === 'postgres_changes') this.liveChange(this.wsTopics[m.topic], m.payload?.data); else if (m.event === 'phx_reply' && m.payload?.status === 'error') Log.add('warn', `Live updates: ${m.payload?.response?.reason || 'could not listen'} (${this.wsTopics[m.topic] || m.topic})`, 'Supabase'); };
+    ws.onclose = () => { clearInterval(this.wsBeat); this.engine.scene?.setVar('liveOnline', 0); if (this.ws !== ws) return; this.ws = null; const wait = Math.min(30, 1 + (this.wsBack = (this.wsBack || 0) + 1) * 2); this.wsNext = Date.now() + wait * 1000; clearTimeout(this.wsRetry); this.wsRetry = setTimeout(() => this.liveStart(), wait * 1000); };
+    ws.onerror = () => {};
+  }
+  liveStop() { clearInterval(this.wsBeat); clearTimeout(this.wsRetry); const ws = this.ws; this.ws = null; this.wsTables = ''; try { ws?.close(); } catch { /* already closed */ } }
+  /** One change from the table, put into the records on this phone. */
+  liveChange(name, d) {
+    const def = name && this.engine.data.def(name); if (!def || !d) return;
+    const D = this.engine.data, s = this.engine.scene, L = D.rows(def.name), type = String(d.type || d.eventType || '').toUpperCase();
+    const key = (row) => String(this.own(def) ? row?.[this.idCol(def)] ?? '' : row?.id ?? '');
+    let kind = '', rec = null;
+    if (type === 'DELETE') { const id = key(d.old_record), i = L.findIndex((r) => r.id === id); if (i < 0) return; [rec] = L.splice(i, 1); kind = 'deleted'; }
+    else if (d.record) { rec = this.toRec(def, d.record); const i = L.findIndex((r) => r.id === rec.id); if (i >= 0) { Object.assign(L[i], rec); rec = L[i]; kind = 'changed'; } else { L.unshift(rec); kind = 'added'; } }
+    if (!kind) return; D.save(def.name); D.syncVars(s || {}); s?.emit('data', fieldKey(def.name), kind, rec); s?.emit('liveChange', fieldKey(def.name), kind, rec);
+  }
   /** Collections with "Check for new records every … seconds" (chats, feeds). */
   tick(dt) {
     if (!this.on()) return;
+    if ((this.liveT = (this.liveT || 0) + dt) > 2) { this.liveT = 0; this.liveStart(); } // (re)connects when collections, the sign-in or the token change
     for (const d of this.engine.data.defs()) { const every = +d.refresh || 0; if (!every || !this.online(d)) continue; const k = fieldKey(d.name); if ((this.t[k] = (this.t[k] || 0) + dt) >= every) { this.t[k] = 0; this.pull(d); } }
   }
 }
+const SUPA_MODES = ['private to each person', 'shared with everyone', 'my own table'];
+/** Turns on live updates (Realtime) for a table. */
+const liveSQL = (t) => `do $$ begin alter publication supabase_realtime add table public.${t}; exception when duplicate_object then null; end $$;\n`;
 /** The SQL that makes a collection's table in Supabase, with the rules for private or shared records. */
 export function supabaseSQL(def) {
+  if (def.online === 'my own table') { const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(); return def.live ? `-- ${def.name}: live updates for your table\n` + liveSQL(t) : `-- ${def.name} uses your own table “${t}”: nothing to set up. Its row level security rules decide who can read and write.\n`; }
   const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(), shared = def.online === 'shared with everyone';
   return `-- ${def.name}: ${shared ? 'everyone can read; people add, change and delete their own records' : 'each person sees only their own records'}
 create table if not exists public.${t} (
@@ -14645,7 +14711,7 @@ create policy "${t} read" on public.${t} for select using (${shared ? 'true' : '
 create policy "${t} add" on public.${t} for insert with check (auth.uid() = user_id);
 create policy "${t} change" on public.${t} for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "${t} remove" on public.${t} for delete using (auth.uid() = user_id);
-`;
+${def.live ? liveSQL(t) : ''}`;
 }
 
 export class DataStore {
@@ -17255,6 +17321,8 @@ Object.assign(NODE_TYPES, {
   supaSetName: { cat: 'Online', label: 'Change My Name (Supabase)', exec: true, outs: ['then', 'failed'], params: [txt('name', '{name}', 'name')] },
   supaRefreshN: { cat: 'Online', label: 'Refresh Online Data (Supabase)', exec: true, outs: ['then'], params: [{ ...txt('collection', '', 'collection (blank = all)'), suggest: 'collections' }] },
   supaSignedIn: { cat: 'Online', label: 'Is Signed In (Supabase)', value: 'bool' },
+  supaRpc: { cat: 'Online', label: 'Call Database Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
+  supaEdge: { cat: 'Online', label: 'Call Edge Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   supaUser: { cat: 'Online', label: 'Signed-in Person (Supabase)', value: 'text', params: [opt('what', ['name', 'email', 'id'], 'name', 'show')] },
   onSlotSaved: { cat: 'Events', label: 'On Slot Saved', outs: ['then'], params: [txt('slot', '', 'slot (blank = any; auto = auto-save)')] },
   slotInfo: { cat: 'Save Files', label: 'Save Slot Info', value: 'text', params: [txt('slot', '1', 'slot (number or auto)'), opt('what', ['saved ago', 'date and time', 'play time', 'level', 'level name', 'name', 'is saved'], 'saved ago', 'show')] },
@@ -17526,6 +17594,8 @@ export const LOGIC_ACTIONS = {
   supaSignUp: { cat: 'Data', label: 'Create account (Supabase)', icon: 'user', noNode: true, params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password'), txt('name', '{name}', 'name')], run: (c, p) => { c.s.engine.supa.signUp(fillTemplate(p.email, c.s.vars).trim(), fillTemplate(p.password, c.s.vars), fillTemplate(p.name, c.s.vars).trim()).then((r) => { if (r === 'check email') c.s.message('Check your email to finish', 2.5); }).catch(() => {}); }, say: () => 'Create an account' },
   supaSignOut: { cat: 'Data', label: 'Sign out (Supabase)', icon: 'user', noNode: true, run: (c) => { c.s.engine.supa.signOut(); }, say: () => 'Sign out' },
   supaReset: { cat: 'Data', label: 'Send password reset (Supabase)', icon: 'mail', noNode: true, params: [txt('email', '{email}', 'email')], run: (c, p) => { c.s.engine.supa.reset(fillTemplate(p.email, c.s.vars).trim()).then(() => c.s.message('Check your email', 2)).catch(() => {}); }, say: () => 'Send a password reset email' },
+  supaRpc: { cat: 'Data', label: 'Call database function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.rpc(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call database function ${p.fn}` },
+  supaEdge: { cat: 'Data', label: 'Call Edge Function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.edge(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call Edge Function ${p.fn}` },
   supaRefresh: { cat: 'Data', label: 'Refresh online data (Supabase)', icon: 'refresh', noNode: true, params: [sug(txt('collection', '', 'collection (empty = all)'), 'collections')], run: (c, p) => { c.s.engine.supa.pullAll(p.collection); }, say: (p) => `Refresh ${p.collection || 'online data'}` },
   dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
   dataSet: { cat: 'Data', label: 'Change the opened record', icon: 'edit', params: [txt('field', 'done', 'field'), txt('value', 'yes', 'to ({variables} work)')], run: (c, p) => { const r = c.s.openRecord; if (!r) return; const rec = c.s.engine.data.update(r.col, r.id, { [p.field]: fillTemplate(String(p.value ?? ''), c.s.vars) }); if (rec) openRecord(c.s, r.col, rec); }, say: (p) => `Set ${p.field} of the opened record to ${p.value}` },
@@ -18506,6 +18576,7 @@ registerBehavior('graph', {
         }
         case 'supaSignOut': { const later = { ...ctx, steps: 0 }; s.engine.supa.signOut().then(() => follow(n, 'then', later)); return; }
         case 'supaProvider': s.engine.supa.provider(P('provider')); return;
+        case 'supaRpc': case 'supaEdge': { const later = { ...ctx, steps: 0 }, S = s.engine.supa, a = kvText(fillTemplate(P('args') || '', s.vars)); (n.type === 'supaRpc' ? S.rpc(P('fn'), a, P('into')) : S.edge(P('fn'), a, P('into'))).then((ok) => { if (!e.dead) follow(n, ok ? 'done' : 'failed', later); }); break; }
         case 'supaRefreshN': s.engine.supa.pullAll(P('collection')); break;
         case 'exportSlot': { const t = s.engine.exportSave(P('slot') || 1); if (t) { s.setVar(P('var') || 'saveCode', t); if (P('copy')) navigator.clipboard?.writeText(t).catch(() => {}); } return follow(n, t ? 'then' : 'empty slot', ctx); }
         case 'importSlot': return follow(n, s.engine.importSave(P('slot') || 1, s.vars[P('var') || 'saveCode']) ? 'imported' : 'not a save', ctx);

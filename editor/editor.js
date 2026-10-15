@@ -18,7 +18,7 @@ import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
 import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
-import { initData, dataEditor, ensureCollection } from './data.js';
+import { initData, dataEditor, ensureCollection, connectSupabase } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
@@ -4352,7 +4352,7 @@ function renderSceneSettings(box) {
     toast(O.state === 'lobby' ? `Photon works ✓ connected to region ${ph.region || 'eu'}` : `Photon: ${engine.scene.vars.onlineError || 'could not connect'}`); O.disconnect();
   };
   // ---- Supabase: the app's own accounts and online data ----
-  const sbOn = !!(root.settings.supabaseUrl && root.settings.supabaseKey), onlineCols = (root.collections || []).filter((c) => ['private to each person', 'shared with everyone'].includes(c.online));
+  const sbOn = !!(root.settings.supabaseUrl && root.settings.supabaseKey), onlineCols = (root.collections || []).filter((c) => ['private to each person', 'shared with everyone'].includes(c.online) || (c.online === 'my own table' && c.live));
   const testSupabase = async () => {
     const url = String(root.settings.supabaseUrl || '').trim().replace(/\/+$/, '');
     try { const r = await fetch(url + '/auth/v1/settings', { headers: { apikey: String(root.settings.supabaseKey || '').trim() } }); if (!r.ok) throw new Error(r.status === 401 ? 'the key was not accepted' : 'error ' + r.status); const j = await r.json(); const pv = Object.entries(j.external || {}).filter(([k, on]) => on && !['email', 'phone', 'anonymous_users'].includes(k)).map(([k]) => k); toast(`Supabase works ✓ sign in with email${pv.length ? ', ' + pv.join(', ') : ''}`); }
@@ -4361,7 +4361,8 @@ function renderSceneSettings(box) {
   const RS = (path, spec) => { const r = R(path, spec); r?.querySelector?.('input')?.addEventListener('change', () => renderInspector()); return r; }; // shows what depends on it once you finish typing
   const copySQL = () => { const sql = onlineCols.map(supabaseSQL).join('\n'); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
   box.append(comp('Supabase (accounts & online data)', [
-    h('p', { class: 'desc' }, 'Your app\'s own accounts and online data, with a free Supabase project. People sign up and sign in (email, Google, Apple…), and data collections can be stored online: private to each person (their notes on every phone) or shared with everyone (a feed, a chat, a shop catalogue).'),
+    h('p', { class: 'desc' }, 'Your app\'s own accounts and online data, with a free Supabase project. People sign up and sign in (email, Google, Apple…), and data collections can be stored online: private to each person (their notes on every phone), shared with everyone (a feed, a chat, a shop catalogue), or read from tables you already have.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => connectSupabase() }, icon('bolt'), sbOn ? 'Connect Supabase: check & tables' : 'Connect Supabase')),
     RS('settings.supabaseUrl', { label: 'Project URL', type: 'text', def: '', placeholder: 'https://xxxx.supabase.co', infoText: 'Supabase › Project Settings › API.' }),
     RS('settings.supabaseKey', { label: 'Anon public key', type: 'text', def: '', infoText: 'The anon (public) key from the same page. It is safe in the app; never use the service_role key.' }),
     sbOn && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: testSupabase }, icon('check'), 'Test Supabase')),
@@ -6455,7 +6456,7 @@ function appFacts() {
   return {
     playfab: !!st.playfab?.titleId, playfabEmail: !!st.playfab?.titleId && has(/pfAddEmail|pfLoginEmail/), photon: !!st.photon?.appId,
     supabase: !!(st.supabaseUrl && st.supabaseKey), supabaseAccounts: !!(st.supabaseUrl && st.supabaseKey) && (!!st.signInPage || has(/supaSign|"sign in"|"create account"/)),
-    onlineData: !!(st.supabaseUrl && st.supabaseKey) && (root.collections || []).some((c) => ['private to each person', 'shared with everyone'].includes(c.online)),
+    onlineData: !!(st.supabaseUrl && st.supabaseKey) && (root.collections || []).some((c) => ['private to each person', 'my own table', 'shared with everyone'].includes(c.online)),
     chat: has(/netChat/) || (root.collections || []).some((c) => c.online === 'shared with everyone'),
     notifications: has(/phone notification|phoneNotify|scheduleNotif|notifySchedule/) || !!st.reminders?.length, camera: perms.includes('camera'), microphone: perms.includes('microphone'), location: perms.includes('location'),
   };

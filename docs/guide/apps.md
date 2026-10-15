@@ -124,7 +124,12 @@ Apps can have their own accounts and keep data online with a free [Supabase](htt
 ### Connect your project
 
 1. Create a project at supabase.com.
-2. *Game Settings › Supabase (accounts & online data)*: paste the **Project URL** and the **anon public key** (Supabase › Project Settings › API). **Test Supabase** checks them and lists the sign-in methods that are on.
+2. *Game Settings › Supabase › **Connect Supabase***: paste the **Project URL** and the **anon public key** (Supabase › Project Settings › API) and press **Check connection**. It shows the sign-in methods that are on and then walks you through the rest:
+   - **Your tables:** the tables your project already has, each with **Use in app** (see *Your own tables* below).
+   - **Online collections:** each online collection's table, ✓ found or ✗ not made yet, and **Copy setup SQL** for the missing ones.
+   - **Sign-in:** what to add so people can sign in.
+
+   It warns you if you paste the *service_role* key by mistake. (You can also type the URL and key straight into *Game Settings › Supabase*; **Test Supabase** checks them.)
 3. In Supabase, *Authentication › URL Configuration*: put your app's address (where it is published) in **Site URL** and **Redirect URLs**, so email links and Google sign-in come back to it. *Sign In / Providers* turns on Google, Apple and others; turn **Confirm email** off while testing if you like.
 
 The anon key is safe in your app. Never use the *service_role* key.
@@ -147,6 +152,7 @@ In *Game Settings › Data*, open a collection and set **Store online (Supabase)
 |---|---|---|
 | **Private to each person** | Each signed-in person sees only their own records, on every phone they sign in on. Signing out hides them. | Notes, to-dos, journals, a wallet |
 | **Shared with everyone** | Everyone sees every record (even before signing in). Signed-in people add records and change or delete only their own. | Feeds, chats, reviews, a catalogue, leaderboards |
+| **From a table I already have** | Whatever your table's row level security rules allow. | A database you already use, tables shared with a website or another app |
 
 - **Copy setup SQL** (on the collection, or in Game Settings › Supabase for all of them) copies the SQL that makes the table and its security rules. Paste it in Supabase › **SQL Editor** and press **Run**. Each table keeps the record's fields in one `data` column, so adding fields later needs no change in Supabase.
 - **Table name** defaults to the collection's name (`posts` for Posts).
@@ -155,6 +161,24 @@ In *Game Settings › Data*, open a collection and set **Store online (Supabase)
 - Data Lists, Record Forms, Data Summaries, the Data nodes and Triggers work as before: adding, changing and deleting records goes to Supabase too. A copy is kept on the phone, so the app opens instantly and works offline. Changes made without a connection wait on the phone and are sent, in order, when it is back online.
 - `{dataError}` says why something could not be saved online (for example "Sign in to save this online").
 - *Refresh Online Data* (node or instruction) loads the latest records.
+- **Update live when the table changes (Supabase Realtime):** new, changed and deleted records show up straight away on every phone, with no refresh. Run the setup SQL once; it turns on Realtime for the table. `{liveOnline}` is 1 while connected. It reconnects by itself and works alongside *Check for new records every … seconds*.
+
+### Your own tables
+
+*Store online → **From a table I already have*** (or **Use in app** in Connect Supabase) reads and writes a table you made yourself, column by column:
+
+- **Fields come from the columns.** A column `due_date` fills the field *Due date*. **Make fields from the table** adds a field for each column, with its type (true/false → yes / no, numbers → number, date → date). The key column and `created_at`, `updated_at` and `user_id` are left out. A field can name its column exactly (`column`) for columns like `ShipDate`.
+- **Key column** (default `id`) identifies each row. New rows get their id from the table, so give it a default (an identity column, or `gen_random_uuid()`).
+- **Sort by** (`created_at desc`) and **Only rows where**, in Supabase's filter style (`status=eq.open`, `price=lt.10`; several with `&`).
+- **Who can read and write** is up to your table's row level security rules. Signing in isn't required unless your rules need it. If a rule refuses a change, `{dataError}` says why.
+- Live updates work here too. The setup SQL for an own table only turns on Realtime; it doesn't change your table.
+
+### Database and Edge Functions
+
+- **Call Database Function (Supabase)** runs a Postgres function (Supabase › Database › Functions) with arguments like `player = {playerName}, amount = 10`.
+- **Call Edge Function (Supabase)** runs an Edge Function, sending the same kind of arguments as its JSON body, with the signed-in person's token.
+
+Both are nodes (Online; outputs *then*, *done*, *failed*) and Triggers instructions. The answer goes in a variable (default `{supaResult}`; objects and lists as JSON). If the answer is an object, each plain value also gets its own variable: `{ "coins": 20 }` sets `{coins}`. `{supaError}` says why a call failed.
 
 ## Games inside apps
 

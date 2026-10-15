@@ -492,6 +492,39 @@ export const UI_WIDGETS_MORE = [
   { icon: 'stats', label: 'Total / Count Text', group: 'App', data: true, note: 'Counts or totals a collection into a variable (Data Summary) and shows it.',
     props: { name: 'Total Text', ui: true, anchor: 'top-left', x: 20, y: 64, text: { value: '{total} records', size: 15, color: '#6b7280', weight: '700', align: 'left' },
       behaviors: [{ type: 'dataStat', collection: 'Tasks', how: 'count', field: '', filter: '', var: 'total', format: 'number' }] } },
+  // Supabase accounts (Game Settings › Supabase)
+  (() => {
+    const inp = (name, y, v, kind, ph, max = 80) => ({ name, ui: true, anchor: 'top', x: 0, y, stretch: 'width', margin: 24, shape: { type: 'rect', w: 352, h: 52, radius: 14, fill: '@field' }, behaviors: [{ type: 'uiInput', var: v, kind, placeholder: ph, maxLength: max }] });
+    const btn = (name, y, label, action, fill, color, value = '') => ({ name, ui: true, anchor: 'top', x: 0, y, stretch: 'width', margin: 24, shape: { type: 'rect', w: 352, h: 52, radius: 14, fill }, text: { value: label, size: 17, color, weight: '800' }, behaviors: [{ type: 'button', action, value, amount: 1, sound: 'click', feel: 'spring', pressScale: 0.96 }] });
+    return { icon: 'player', label: 'Sign-in Page', group: 'App', settings: { signInPage: 'signin' }, note: 'A page (page = signin) to sign in or create an account with Supabase. Set your project in Game Settings › Supabase; while nobody is signed in, the app shows this page.',
+      props: { name: 'Sign-in Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
+        behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: 'signin', whenUnset: false, anim: 'fade' }],
+        children: [
+          { name: 'Sign-in Title', ui: true, anchor: 'top', x: 0, y: 96, text: { value: 'Welcome', size: 32, color: '@text', weight: '900' } },
+          { name: 'Sign-in Subtitle', ui: true, anchor: 'top', x: 0, y: 136, text: { value: 'Sign in, or create an account', size: 15, color: '@sub', weight: '600' } },
+          inp('Email Box', 196, 'email', 'email', 'Email'),
+          inp('Password Box', 260, 'password', 'password', 'Password', 64),
+          inp('Name Box', 324, 'name', 'text', 'Your name (for a new account)', 40),
+          { name: 'Sign-in Error', ui: true, anchor: 'top', x: 0, y: 378, text: { value: '{authError}', size: 13, color: '@danger', weight: '700' } },
+          btn('Sign In Button', 404, 'Sign in', 'sign in', '@accent', '@onAccent'),
+          btn('Create Account Button', 468, 'Create account', 'create account', '@card', '@text'),
+          { name: 'Forgot Password', ui: true, anchor: 'top', x: 0, y: 536, shape: { type: 'rect', w: 200, h: 36, radius: 10, fill: '' }, text: { value: 'Forgot password?', size: 14, color: '@accent', weight: '700' }, behaviors: [{ type: 'button', action: 'send password reset', value: '', amount: 1, sound: 'click' }] },
+          btn('Google Button', 584, 'Continue with Google', 'continue with google', '@card', '@text', 'google'),
+        ] } };
+  })(),
+  { icon: 'player', label: 'Account Page', group: 'App', note: 'A page (page = account) showing who is signed in, with Sign out. Open it from a tab or a button (go to page account).',
+    props: { name: 'Account Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
+      behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: 'account', whenUnset: false, anim: 'slide (follows navigation)' }],
+      children: [
+        { name: 'Account Title', ui: true, anchor: 'top-left', x: 20, y: 40, text: { value: 'Account', size: 28, color: '@text', weight: '900', align: 'left' } },
+        { name: 'Account Card', ui: true, anchor: 'top', x: 0, y: 150, stretch: 'width', margin: 16, shape: { type: 'rect', w: 368, h: 110, radius: 18, fill: '@card', shadow: '@shadow', shadowBlur: 14, shadowY: 4 },
+          children: [
+            { name: 'Account Picture', ui: true, anchor: 'left', x: 52, y: 0, shape: { type: 'circle', r: 32, fill: '@accent' }, text: { value: '👤', size: 28 } },
+            { name: 'Account Name', ui: true, anchor: 'left', x: 100, y: -14, text: { value: '{userName}', size: 20, color: '@text', weight: '800', align: 'left' } },
+            { name: 'Account Email', ui: true, anchor: 'left', x: 100, y: 14, text: { value: '{userEmail}', size: 14, color: '@sub', weight: '600', align: 'left' } },
+          ] },
+        { name: 'Sign Out Button', ui: true, anchor: 'top', x: 0, y: 300, stretch: 'width', margin: 16, shape: { type: 'rect', w: 368, h: 52, radius: 14, fill: '@card' }, text: { value: 'Sign out', size: 17, color: '@danger', weight: '800' }, behaviors: [{ type: 'button', action: 'sign out', value: '', amount: 1, sound: 'click', feel: 'spring', pressScale: 0.96 }] },
+      ] } },
   { icon: 'square', label: 'App Page', group: 'App', note: 'A full page shown when the variable page is “newpage”. Rename the value, then open it with Go To Page buttons or a Data List.',
     props: { name: 'New Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '#f4f6fb' },
       behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: 'newpage', whenUnset: false, anim: 'slide (follows navigation)' }],

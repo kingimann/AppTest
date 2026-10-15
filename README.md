@@ -646,6 +646,10 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - *Record every game played* fills a collection (game, score, result, date) for score tables.
   - New **Arcade** app type: three games, best scores, and a score list.
 - Data Lists, Record Forms and Data Summaries work in games too.
+- **Supabase for apps** (*Game Settings › Supabase*): your app's own accounts and online data.
+  - Sign up, sign in, password reset and Google / Apple sign-in, with a ready **Sign-in Page** and **Account Page**, an optional "must sign in" page, `{userName}`, `{userEmail}`, `{signedIn}` and `{authError}`.
+  - Data collections can be **stored online**: private to each person, or shared with everyone (feeds, chats, reviews). **Copy setup SQL** makes the table and its security rules; Data Lists and Forms work unchanged, with auto-refresh for chats and an author field filled in.
+  - Buttons (*sign in*, *create account*, *sign out*…), Online nodes and Triggers.
 - See the [Making apps guide](docs/guide/apps.md).
 
 ### UI motion, light and dark mode

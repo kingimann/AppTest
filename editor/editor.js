@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
+import { supabaseSQL, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -4044,6 +4044,27 @@ function renderSceneSettings(box) {
     const t0 = Date.now(); while (Date.now() - t0 < 8000 && !['lobby', 'offline'].includes(O.state)) await new Promise((r) => setTimeout(r, 200));
     toast(O.state === 'lobby' ? `Photon works ✓ connected to region ${ph.region || 'eu'}` : `Photon: ${engine.scene.vars.onlineError || 'could not connect'}`); O.disconnect();
   };
+  // ---- Supabase: the app's own accounts and online data ----
+  const sbOn = !!(root.settings.supabaseUrl && root.settings.supabaseKey), onlineCols = (root.collections || []).filter((c) => ['private to each person', 'shared with everyone'].includes(c.online));
+  const testSupabase = async () => {
+    const url = String(root.settings.supabaseUrl || '').trim().replace(/\/+$/, '');
+    try { const r = await fetch(url + '/auth/v1/settings', { headers: { apikey: String(root.settings.supabaseKey || '').trim() } }); if (!r.ok) throw new Error(r.status === 401 ? 'the key was not accepted' : 'error ' + r.status); const j = await r.json(); const pv = Object.entries(j.external || {}).filter(([k, on]) => on && !['email', 'phone', 'anonymous_users'].includes(k)).map(([k]) => k); toast(`Supabase works ✓ sign in with email${pv.length ? ', ' + pv.join(', ') : ''}`); }
+    catch (e) { toast('Supabase: ' + (e.message || 'could not connect')); }
+  };
+  const RS = (path, spec) => { const r = R(path, spec); r?.querySelector?.('input')?.addEventListener('change', () => renderInspector()); return r; }; // shows what depends on it once you finish typing
+  const copySQL = () => { const sql = onlineCols.map(supabaseSQL).join('\n'); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
+  box.append(comp('Supabase (accounts & online data)', [
+    h('p', { class: 'desc' }, 'Your app\'s own accounts and online data, with a free Supabase project. People sign up and sign in (email, Google, Apple…), and data collections can be stored online: private to each person (their notes on every phone) or shared with everyone (a feed, a chat, a shop catalogue).'),
+    RS('settings.supabaseUrl', { label: 'Project URL', type: 'text', def: '', placeholder: 'https://xxxx.supabase.co', infoText: 'Supabase › Project Settings › API.' }),
+    RS('settings.supabaseKey', { label: 'Anon public key', type: 'text', def: '', infoText: 'The anon (public) key from the same page. It is safe in the app; never use the service_role key.' }),
+    sbOn && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: testSupabase }, icon('check'), 'Test Supabase')),
+    sbOn && RS('settings.signInPage', { label: 'Sign-in page (blank = signing in is optional)', type: 'text', def: '', placeholder: 'signin', infoText: 'While nobody is signed in the app shows this page (add a Sign-in Page from Add › UI & Menus › App). After signing in it goes on to its first page.' }),
+    sbOn && root.settings.signInPage && R('settings.afterSignInPage', { label: 'Page after signing in (blank = the first page)', type: 'text', def: '' }),
+    sbOn && h('p', { class: 'desc' }, `Online collections: ${onlineCols.length ? onlineCols.map((c) => c.name).join(', ') : 'none yet (Game Settings › Data › a collection › Store online)'}.`),
+    sbOn && onlineCols.length && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: copySQL }, icon('copy'), 'Copy setup SQL')),
+    h('p', { class: 'desc' }, 'Show {userName}, {userEmail} and {signedIn} in text; {authError} says why signing in failed. Buttons can sign in, create account, sign out and send password reset (they use the variables email, password and name). The Online nodes and Triggers do the same.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openDocs('guide/apps') }, icon('help'), 'Guide')),
+  ], { icon: 'player', key: 's-supabase' }));
   box.append(comp('Online (PlayFab & Photon)', [
     h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),
     h('h5', { class: 'sub-head' }, 'PlayFab'),

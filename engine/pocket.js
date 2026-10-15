@@ -4749,7 +4749,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'sign in', 'create account', 'sign out', 'send password reset', 'continue with google', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -12176,6 +12176,11 @@ function runAction(s, e, p, other) {
     case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
     case 'save game': if (s.saveGame(p.amount || 1)) s.message(v && v !== 'Hello!' ? v : 'Game saved', 1.5); break;
     case 'load game': if (!s.loadGame(p.amount || 1)) s.message('No saved game yet', 1.5); return;
+    case 'sign in': s.engine.supa.signIn(String(s.vars.email ?? '').trim(), String(s.vars.password ?? '')).catch(() => {}); break;
+    case 'create account': s.engine.supa.signUp(String(s.vars.email ?? '').trim(), String(s.vars.password ?? ''), String(s.vars.name ?? '').trim()).then((r) => { if (r === 'check email') s.message('Check your email to finish signing up', 2.5); }).catch(() => {}); break;
+    case 'sign out': s.engine.supa.signOut(); break;
+    case 'send password reset': s.engine.supa.reset(String(s.vars.email ?? '').trim()).then(() => s.message('Check your email for a link', 2.5)).catch(() => {}); break;
+    case 'continue with google': s.engine.supa.provider(v && v !== 'Hello!' ? v : 'google'); break;
     case 'continue from newest save': { const k = s.engine.newestSlot(); if (!k || !s.engine.loadGame(k)) s.message('No saved game yet', 1.5); return; }
     case 'delete save': s.deleteSave(p.amount || 1); s.message('Save deleted', 1.5); break;
     case 'switch camera': s.setCamera(v); break;
@@ -12412,6 +12417,169 @@ export function fieldText(f, v, def) {
 const fieldDefault = (f) => (f.default !== undefined && f.default !== '' ? (f.type === 'yes/no' ? truthy(f.default) : ['number', 'money', 'rating'].includes(f.type) ? +f.default || 0 : f.default === 'today' && f.type === 'date' ? isoDay() : f.default)
   : f.type === 'yes/no' ? false : f.type === 'date' ? isoDay() : f.type === 'choice' ? f.options[0] || '' : ['number', 'money', 'rating'].includes(f.type) ? 0 : '');
 /** Stores every collection (seed rows from Game Settings, then whatever the app adds) and saves it on the device. */
+/**
+ * Supabase for apps and games (Game Settings › Supabase): the app's own accounts (sign up, sign in, Google…)
+ * and online data collections kept in Supabase tables, private to each person or shared with everyone.
+ * Talks to Supabase's REST APIs (Auth, PostgREST) directly: no library.
+ */
+export class Supa {
+  constructor(engine) { this.engine = engine; this.t = {}; this.pulling = false; }
+  cfg() { const st = this.engine.levels?.[0]?.settings || this.engine.scene?.settings || {}; return { url: String(st.supabaseUrl || '').trim().replace(/\/+$/, ''), key: String(st.supabaseKey || '').trim(), st }; }
+  on() { const c = this.cfg(); return !!(c.url && c.key) && !this.engine.editing; }
+  skey() { return 'pocket.supa.' + (this.engine.gameKey || 'game'); }
+  session() { try { return JSON.parse(store.get(this.skey(), 'null')); } catch { return null; } }
+  keep(sess) { if (sess) store.set(this.skey(), JSON.stringify(sess)); else try { localStorage.removeItem(this.skey()); } catch { /* storage unavailable */ } }
+  user() { return this.on() ? this.session()?.user || null : null; }
+  name(u = this.user()) { return u ? u.user_metadata?.name || String(u.email || '').split('@')[0] : ''; }
+  async call(path, { method = 'GET', body, auth = true, headers = {} } = {}) {
+    const c = this.cfg(); if (!c.url || !c.key) throw new Error('Supabase is not set up (Game Settings › Supabase)');
+    if (auth) await this.fresh();
+    const se = this.session(), h = { apikey: c.key, 'Content-Type': 'application/json', ...headers };
+    h.Authorization = 'Bearer ' + (auth && se?.access_token ? se.access_token : c.key);
+    const r = await fetch(c.url + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
+    const txt = await r.text(); let j = null; try { j = txt ? JSON.parse(txt) : null; } catch { j = txt; }
+    if (!r.ok) throw new Error(j?.msg || j?.error_description || j?.message || j?.error || `Error ${r.status}`);
+    return j;
+  }
+  async fresh() {
+    const se = this.session(); if (!se?.refresh_token || (se.expires_at || 0) - Date.now() / 1000 > 60) return;
+    try { const c = this.cfg(), r = await fetch(c.url + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', headers: { apikey: c.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: se.refresh_token }) }); if (!r.ok) throw 0; this.took(await r.json(), false); }
+    catch { this.keep(null); this.signedOut(); }
+  }
+  took(j, announce = true) {
+    if (!j?.access_token) return false;
+    const was = !!this.user();
+    this.keep({ access_token: j.access_token, refresh_token: j.refresh_token, expires_at: j.expires_at || Math.round(Date.now() / 1000) + (j.expires_in || 3600), user: j.user });
+    if (announce || !was) this.signedIn();
+    return true;
+  }
+  fail(e) { const m = e?.message || String(e); this.engine.scene?.setVar('authError', m); this.engine.scene?.emit('authFailed', m); Log.add('warn', 'Sign-in: ' + m, 'Supabase'); return m; }
+  async signUp(email, password, name) {
+    this.engine.scene?.setVar('authError', '');
+    if (!email || !password) throw new Error(this.fail({ message: 'Type an email and a password' }));
+    try { const j = await this.call('/auth/v1/signup', { method: 'POST', body: { email, password, data: { name: name || '' } }, auth: false }); return this.took(j) ? 'signed in' : 'check email'; }
+    catch (e) { throw new Error(this.fail(e)); }
+  }
+  async signIn(email, password) {
+    this.engine.scene?.setVar('authError', '');
+    if (!email || !password) throw new Error(this.fail({ message: 'Type your email and password' }));
+    try { return this.took(await this.call('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password }, auth: false })); }
+    catch (e) { throw new Error(this.fail(e)); }
+  }
+  async reset(email) { this.engine.scene?.setVar('authError', ''); if (!email) throw new Error(this.fail({ message: 'Type your email first' })); try { await this.call('/auth/v1/recover', { method: 'POST', body: { email }, auth: false }); } catch (e) { throw new Error(this.fail(e)); } }
+  provider(p) { const c = this.cfg(); if (!c.url) return; location.href = `${c.url}/auth/v1/authorize?provider=${encodeURIComponent(p || 'google')}&redirect_to=${encodeURIComponent(location.href.split('#')[0])}`; }
+  async signOut() { try { await this.call('/auth/v1/logout', { method: 'POST' }); } catch { /* signed out here either way */ } this.keep(null); this.signedOut(); }
+  async setName(name) { try { const u = await this.call('/auth/v1/user', { method: 'PUT', body: { data: { name } } }); if (u?.id) { this.keep({ ...this.session(), user: u }); this.vars(); } return true; } catch (e) { this.fail(e); return false; } }
+  /** {signedIn} 1/0, {userName}, {userEmail}, {userId} */
+  vars(s = this.engine.scene) { if (!s) return; const u = this.user(); s.setVar('signedIn', u ? 1 : 0); s.setVar('userName', this.name(u)); s.setVar('userEmail', u?.email || ''); s.setVar('userId', u?.id || ''); }
+  signedIn() { const s = this.engine.scene; this.vars(s); s?.setVar('authError', ''); s?.emit('signedIn'); this.pullAll(); this.route(s, true); }
+  signedOut() {
+    const s = this.engine.scene, D = this.engine.data;
+    for (const d of D.defs()) if (d.online === 'private to each person') { D.cache[fieldKey(d.name)] = []; D.save(d.name); D.syncVars(s || {}); s?.emit('data', fieldKey(d.name), 'refreshed', null); } // someone else's private records leave with them
+    this.vars(s); s?.emit('signedOut'); this.route(s, false);
+  }
+  /** Game Settings › Supabase › Sign-in page: shown while nobody is signed in; after signing in the app goes on to its first page. */
+  route(s, inNow) {
+    const st = this.cfg().st, pg = String(st.signInPage || '').trim(); if (!s || !pg || !s.settings.app) return;
+    const v = 'page', start = String(st.afterSignInPage || this.engine.levels?.[0]?.vars?.page || 'home').trim();
+    if (!inNow && s.vars[v] !== pg) s.navTo?.(pg, v, { clear: true }); else if (!inNow && s.vars[v] === pg) { /* already there */ }
+    else if (inNow && sameVal(s.vars[v], pg)) s.navTo?.(start, v, { clear: true });
+  }
+  /** Once the app opens: back from Google / an email link, the variables, the sign-in page, then the online records. */
+  async start(s) {
+    if (!this.on()) return;
+    if (/access_token=/.test(location.hash)) {
+      const q = new URLSearchParams(location.hash.slice(1)); try { history.replaceState(null, '', location.pathname + location.search); } catch { /* sandboxed */ }
+      this.keep({ access_token: q.get('access_token'), refresh_token: q.get('refresh_token'), expires_at: +q.get('expires_at') || Math.round(Date.now() / 1000) + (+q.get('expires_in') || 3600), user: null });
+      try { const u = await this.call('/auth/v1/user'); this.keep({ ...this.session(), user: u }); this.signedIn(); return; } catch (e) { this.keep(null); this.fail(e); }
+    }
+    this.vars(s); if (!this.user()) this.route(s, false);
+    this.pullAll();
+    if (!this.listening) { this.listening = true; addEventListener('online', () => { if (this.on()) this.flush().then(() => this.pullAll()); }); }
+  }
+  // ---- online collections ----
+  online(def) { return !!def && this.on() && ['private to each person', 'shared with everyone'].includes(def.online); }
+  table(def) { return String(def.table || fieldKey(def.name)).trim(); }
+  canRead(def) { return def.online === 'shared with everyone' || !!this.user(); }
+  toRec(def, row) { const me = this.user()?.id; return { ...this.engine.data.newRecord(def.name), ...this.engine.data.norm(def, row.data || {}), id: row.id, _at: +row.at || 0, _by: row.user_id || '', _mine: !!me && row.user_id === me, author: row.data?.author ?? row.author ?? '' }; }
+  fields(rec) { const o = {}; for (const [k, v] of Object.entries(rec || {})) if (k !== 'id' && !k.startsWith('_')) o[k] = v; return o; }
+  async pull(def) {
+    if (!this.online(def) || !this.canRead(def)) return false;
+    const D = this.engine.data, s = this.engine.scene;
+    try {
+      await this.flush();
+      const rows = await this.call(`/rest/v1/${encodeURIComponent(this.table(def))}?select=*&order=at.desc&limit=${Math.max(1, Math.min(5000, +def.limit || 500))}`, { auth: !!this.user() });
+      const fresh = (rows || []).map((r) => this.toRec(def, r)), waiting = this.pending().filter((op) => op.c === def.name && op.kind === 'added' && op.rec && !fresh.some((r) => r.id === op.rec.id)).map((op) => op.rec); // not sent yet: keep showing them
+      D.cache[fieldKey(def.name)] = [...waiting, ...fresh]; D.save(def.name); D.syncVars(s || {}); s?.emit('data', fieldKey(def.name), 'refreshed', null);
+      s?.setVar('dataError', ''); return true;
+    } catch (e) { s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase'); return false; }
+  }
+  pullAll(name) { for (const d of this.engine.data.defs()) if (this.online(d) && (!name || fieldKey(d.name) === fieldKey(name))) this.pull(d); }
+  /** The same change in the table. */
+  send(def, kind, rec) {
+    const T = encodeURIComponent(this.table(def)), u = this.user(), id = encodeURIComponent(rec?.id || '');
+    if (kind === 'added') return this.call(`/rest/v1/${T}`, { method: 'POST', headers: { Prefer: 'return=minimal' }, body: { id: rec.id, author: this.name(u), at: rec._at || Date.now(), data: this.fields(rec) } });
+    if (kind === 'changed') return this.call(`/rest/v1/${T}?id=eq.${id}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: { data: this.fields(rec) } });
+    if (kind === 'deleted') return this.call(`/rest/v1/${T}?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+    if (kind === 'cleared') return this.call(`/rest/v1/${T}?user_id=eq.${encodeURIComponent(u.id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }); // (only your own records)
+    return Promise.resolve();
+  }
+  // changes made without a connection wait here and go when the phone is back online
+  pkey() { return 'pocket.supa.pending.' + (this.engine.gameKey || 'game'); }
+  pending() { try { return JSON.parse(store.get(this.pkey(), '[]')) || []; } catch { return []; } }
+  setPending(L) { if (L.length) store.set(this.pkey(), JSON.stringify(L)); else try { localStorage.removeItem(this.pkey()); } catch { /* storage unavailable */ } }
+  async flush() {
+    const L = this.pending(); if (!L.length || !this.user()) return;
+    const left = [];
+    for (const op of L) {
+      const def = this.engine.data.def(op.c); if (!def || !this.online(def)) continue;
+      if (left.length) { left.push(op); continue; } // keep the order
+      try { await this.send(def, op.kind, op.rec); } catch (e) { if (e instanceof TypeError) left.push(op); else Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase'); }
+    }
+    this.setPending(left);
+  }
+  /** A record was added, changed or deleted on this phone: the same change goes to the table. */
+  wrote(def, kind, rec) {
+    if (!this.online(def) || this.pulling) return;
+    const s = this.engine.scene, u = this.user();
+    if (!u) { s?.setVar('dataError', 'Sign in to save this online'); Log.add('warn', `“${def.name}” is online: sign in to add or change records`, 'Supabase'); return; }
+    if (kind === 'added') { rec._by = u.id; rec._mine = true; }
+    const op = { c: def.name, kind, rec: rec ? { ...rec } : null };
+    if (this.pending().length) { this.setPending([...this.pending(), op]); this.flush(); return; } // still offline from before: queue behind the others
+    return this.send(def, kind, rec).then(() => s?.setVar('dataError', '')).catch((e) => {
+      if (e instanceof TypeError) { this.setPending([...this.pending(), op]); s?.setVar('dataError', 'Offline: it will be saved online when you are back'); return; } // no connection
+      s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase');
+    });
+  }
+  /** Collections with "Check for new records every … seconds" (chats, feeds). */
+  tick(dt) {
+    if (!this.on()) return;
+    for (const d of this.engine.data.defs()) { const every = +d.refresh || 0; if (!every || !this.online(d)) continue; const k = fieldKey(d.name); if ((this.t[k] = (this.t[k] || 0) + dt) >= every) { this.t[k] = 0; this.pull(d); } }
+  }
+}
+/** The SQL that makes a collection's table in Supabase, with the rules for private or shared records. */
+export function supabaseSQL(def) {
+  const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(), shared = def.online === 'shared with everyone';
+  return `-- ${def.name}: ${shared ? 'everyone can read; people add, change and delete their own records' : 'each person sees only their own records'}
+create table if not exists public.${t} (
+  id text primary key,
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  author text not null default '',
+  at bigint not null default 0,
+  data jsonb not null default '{}'::jsonb
+);
+alter table public.${t} enable row level security;
+drop policy if exists "${t} read" on public.${t};
+drop policy if exists "${t} add" on public.${t};
+drop policy if exists "${t} change" on public.${t};
+drop policy if exists "${t} remove" on public.${t};
+create policy "${t} read" on public.${t} for select using (${shared ? 'true' : 'auth.uid() = user_id'});
+create policy "${t} add" on public.${t} for insert with check (auth.uid() = user_id);
+create policy "${t} change" on public.${t} for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "${t} remove" on public.${t} for delete using (auth.uid() = user_id);
+`;
+}
+
 export class DataStore {
   constructor(engine) { this.engine = engine; this.cache = {}; this.n = 0; }
   defs() { return this.engine.collections || []; }
@@ -12426,7 +12594,7 @@ export class DataStore {
     return (this.cache[k] = rows);
   }
   save(name) { const def = this.def(name); if (def && def.keep !== false) store.set(this.key(def), JSON.stringify(this.rows(name))); }
-  changed(name, kind, rec) { this.save(name); const s = this.engine.scene; if (!s) return; this.syncVars(s); s.emit('data', fieldKey(name), kind, rec); }
+  changed(name, kind, rec) { this.save(name); this.engine.supa?.wrote(this.def(name), kind, rec); const s = this.engine.scene; if (!s) return; this.syncVars(s); s.emit('data', fieldKey(name), kind, rec); }
   /** {tasks_count} for every collection. */
   syncVars(s) { for (const d of this.defs()) { const k = fieldKey(d.name) + '_count', n = this.rows(d.name).length; if (s.vars[k] !== n) s.setVar(k, n); } }
   newRecord(name) { const o = {}; for (const f of fieldsOf(this.def(name))) o[f.key] = fieldDefault(f); return o; }
@@ -12434,11 +12602,14 @@ export class DataStore {
   add(name, rec = {}) {
     const def = this.def(name); if (!def) { Log.add('warn', `There is no data collection called “${name}”`, 'Data'); return null; }
     const r = { ...this.newRecord(name), ...this.norm(def, rec), id: 'r' + Date.now().toString(36) + (this.n++).toString(36), _at: Date.now() };
+    if (this.engine.supa?.online(def) && fieldsOf(def).some((f) => f.key === 'author') && !r.author) r.author = this.engine.supa.name(); // who wrote it (feeds, chats)
     this.rows(name).push(r); this.changed(name, 'added', r); return r;
   }
   get(name, id) { return this.rows(name).find((r) => r.id === id) || null; }
-  update(name, id, patch) { const def = this.def(name), r = this.get(name, id); if (!r) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r; }
-  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
+  /** Shared online records belong to whoever wrote them. */
+  notMine(def, r) { if (this.engine.supa?.online(def) && r._by && !r._mine) { this.engine.scene?.message('Only the person who wrote it can change it', 1.8); return true; } return false; }
+  update(name, id, patch) { const def = this.def(name), r = this.get(name, id); if (!r || this.notMine(def, r)) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r; }
+  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0 || this.notMine(this.def(name), L[i])) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
   clear(name) { const L = this.rows(name); L.length = 0; this.changed(name, 'cleared', null); }
   /** Back to the starting rows from Game Settings (forgets what was saved on this device). */
   reset(name) { const def = this.def(name); if (!def) return; try { localStorage.removeItem(this.key(def)); } catch { /* storage unavailable */ } delete this.cache[fieldKey(def.name)]; this.changed(name, 'reset', null); }
@@ -14916,6 +15087,17 @@ Object.assign(NODE_TYPES, {
   onScrolled: { cat: 'Events', label: 'On Scrolled', outs: ['up', 'down'] },
   onPageClosed: { cat: 'Events', label: 'On Page Closed', outs: ['then'], params: [txt('page', '', 'page (blank = any)')] },
   onSaveLoaded: { cat: 'Events', label: 'On Save Loaded', outs: ['then'] },
+  onSignedIn: { cat: 'Events', label: 'On Signed In (Supabase)', outs: ['then'] },
+  onSignedOut: { cat: 'Events', label: 'On Signed Out (Supabase)', outs: ['then'] },
+  supaSignIn: { cat: 'Online', label: 'Sign In (Supabase)', exec: true, outs: ['signed in', 'failed'], params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password')] },
+  supaSignUp: { cat: 'Online', label: 'Create Account (Supabase)', exec: true, outs: ['signed in', 'check email', 'failed'], params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password'), txt('name', '{name}', 'name')] },
+  supaSignOut: { cat: 'Online', label: 'Sign Out (Supabase)', exec: true, outs: ['then'] },
+  supaReset: { cat: 'Online', label: 'Send Password Reset (Supabase)', exec: true, outs: ['sent', 'failed'], params: [txt('email', '{email}', 'email')] },
+  supaProvider: { cat: 'Online', label: 'Continue With Google / Apple… (Supabase)', exec: true, outs: [], params: [opt('provider', ['google', 'apple', 'github', 'discord', 'facebook', 'twitter', 'azure'], 'google', 'with')] },
+  supaSetName: { cat: 'Online', label: 'Change My Name (Supabase)', exec: true, outs: ['then', 'failed'], params: [txt('name', '{name}', 'name')] },
+  supaRefreshN: { cat: 'Online', label: 'Refresh Online Data (Supabase)', exec: true, outs: ['then'], params: [{ ...txt('collection', '', 'collection (blank = all)'), suggest: 'collections' }] },
+  supaSignedIn: { cat: 'Online', label: 'Is Signed In (Supabase)', value: 'bool' },
+  supaUser: { cat: 'Online', label: 'Signed-in Person (Supabase)', value: 'text', params: [opt('what', ['name', 'email', 'id'], 'name', 'show')] },
   onSlotSaved: { cat: 'Events', label: 'On Slot Saved', outs: ['then'], params: [txt('slot', '', 'slot (blank = any; auto = auto-save)')] },
   slotInfo: { cat: 'Save Files', label: 'Save Slot Info', value: 'text', params: [txt('slot', '1', 'slot (number or auto)'), opt('what', ['saved ago', 'date and time', 'play time', 'level', 'level name', 'name', 'is saved'], 'saved ago', 'show')] },
   newestSlot: { cat: 'Save Files', label: 'Newest Save Slot', value: 'text' },
@@ -15073,6 +15255,9 @@ export const LOGIC_EVENTS = {
   dialogueEnded: { label: 'Dialogue ends', icon: 'sign', params: [sug(txt('dialogue', '', 'dialogue or NPC (empty = any)'), 'dialogues')], say: (p) => (p.dialogue ? `Done talking to ${p.dialogue}` : 'A conversation ends') },
   dialogueChoice: { label: 'Dialogue choice picked', icon: 'sign', params: [txt('choice', '', 'choice text (empty = any)')], say: (p) => (p.choice ? `Picks “${p.choice}”` : 'Picks a choice') },
   gameFinished: { label: 'Back from a game', icon: 'gamepad', params: [txt('game', '', 'game (level name; empty = any)'), opt('result', ['any', 'won', 'lost', 'quit'], 'any', 'result')], say: (p) => `Back from ${p.game || 'a game'}${p.result !== 'any' ? ` (${p.result})` : ''}` },
+  signedIn: { label: 'Signed in (Supabase)', icon: 'user', say: () => 'Someone signs in' },
+  signedOut: { label: 'Signed out (Supabase)', icon: 'user', say: () => 'Someone signs out' },
+  authFailed: { label: 'Sign-in failed (Supabase)', icon: 'warn', say: () => 'Signing in fails ({authError} says why)' },
   recordAdded: { label: 'Record added', icon: 'plus', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is added${p.collection ? ' to ' + p.collection : ''}` },
   recordChanged: { label: 'Record changed', icon: 'edit', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record changes${p.collection ? ' in ' + p.collection : ''}` },
   recordDeleted: { label: 'Record deleted', icon: 'trash', params: [sug(txt('collection', '', 'collection (empty = any)'), 'collections')], say: (p) => `A record is deleted${p.collection ? ' from ' + p.collection : ''}` },
@@ -15112,6 +15297,7 @@ export const LOGIC_CONDITIONS = {
   anySave: { label: 'Has any save', icon: 'save', test: (c) => !!c.s.engine.newestSlot(), say: () => 'there is a save' },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
+  signedIn: { label: 'Signed in (Supabase)', icon: 'user', test: (c) => !!c.s.engine.supa.user(), say: () => 'someone is signed in' },
   dataCount: { label: 'Number of records', icon: 'list', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('filter', '', 'only where (e.g. done = no)'), opt('op', OPS6, '≥', 'is'), num('value', 1, 'value')], test: (c, p) => cmp(c.s.engine.data.stat(p.collection, 'count', '', p.filter, c.s.vars), p.op, +p.value || 0), say: (p) => `${p.collection}${p.filter ? ` (${p.filter})` : ''} count ${p.op} ${p.value}` },
   fromApp: { label: 'Opened from an app', icon: 'phone', test: (c) => !!c.s.fromApp, say: () => 'this game was opened from an app' },
   recordIsOpen: { label: 'A record is open', icon: 'eye', test: (c) => !!openedRecord(c.s), say: () => 'a record is open' },
@@ -15177,6 +15363,11 @@ export const LOGIC_ACTIONS = {
   snackbar: { cat: 'UI', label: 'Show snackbar', icon: 'info', params: [txt('text', 'Saved', 'text ({variables} work)'), txt('action', '', 'button (optional, e.g. Undo)'), txt('message', '', 'the button sends message'), num('seconds', 4, 'for (sec)')], run: (c, p) => c.s.snackbar(fillTemplate(p.text, c.s.vars), p.action, p.message ? () => c.s.send(p.message) : null, +p.seconds || 4), say: (p) => `Snackbar “${p.text}”${p.action ? ` [${p.action}]` : ''}` },
   playGame: { cat: 'Game', label: 'Play a game (from an app)', icon: 'gamepad', params: [txt('level', '2', 'level (number or name)')], run: (c, p) => { c.s.engine.playGame(p.level); }, say: (p) => `Play the game in level ${p.level}` },
   backToApp: { cat: 'Game', label: 'Back to the app', icon: 'home', run: (c) => { c.s.engine.backToApp(); }, say: () => 'Back to the app' },
+  supaSignIn: { cat: 'Data', label: 'Sign in (Supabase)', icon: 'user', noNode: true, params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password')], run: (c, p) => { c.s.engine.supa.signIn(fillTemplate(p.email, c.s.vars).trim(), fillTemplate(p.password, c.s.vars)).catch(() => {}); }, say: () => 'Sign in with {email} and {password}' },
+  supaSignUp: { cat: 'Data', label: 'Create account (Supabase)', icon: 'user', noNode: true, params: [txt('email', '{email}', 'email'), txt('password', '{password}', 'password'), txt('name', '{name}', 'name')], run: (c, p) => { c.s.engine.supa.signUp(fillTemplate(p.email, c.s.vars).trim(), fillTemplate(p.password, c.s.vars), fillTemplate(p.name, c.s.vars).trim()).then((r) => { if (r === 'check email') c.s.message('Check your email to finish', 2.5); }).catch(() => {}); }, say: () => 'Create an account' },
+  supaSignOut: { cat: 'Data', label: 'Sign out (Supabase)', icon: 'user', noNode: true, run: (c) => { c.s.engine.supa.signOut(); }, say: () => 'Sign out' },
+  supaReset: { cat: 'Data', label: 'Send password reset (Supabase)', icon: 'mail', noNode: true, params: [txt('email', '{email}', 'email')], run: (c, p) => { c.s.engine.supa.reset(fillTemplate(p.email, c.s.vars).trim()).then(() => c.s.message('Check your email', 2)).catch(() => {}); }, say: () => 'Send a password reset email' },
+  supaRefresh: { cat: 'Data', label: 'Refresh online data (Supabase)', icon: 'refresh', noNode: true, params: [sug(txt('collection', '', 'collection (empty = all)'), 'collections')], run: (c, p) => { c.s.engine.supa.pullAll(p.collection); }, say: (p) => `Refresh ${p.collection || 'online data'}` },
   dataAdd: { cat: 'Data', label: 'Add record', icon: 'plus', params: [sug(txt('collection', 'Tasks', 'collection'), 'collections'), txt('values', 'title = New task, done = no', 'values (field = value, comma separated; {variables} work)'), bool('open', false, 'open it')], run: (c, p) => { const o = {}; for (const part of fillTemplate(String(p.values || ''), c.s.vars).split(',')) { const m = part.match(/^\s*(.+?)\s*=\s*(.*?)\s*$/); if (m) o[m[1]] = m[2]; } const r = c.s.engine.data.add(p.collection, o); if (r && p.open) openRecord(c.s, p.collection, r); }, say: (p) => `Add to ${p.collection}: ${p.values}` },
   dataSet: { cat: 'Data', label: 'Change the opened record', icon: 'edit', params: [txt('field', 'done', 'field'), txt('value', 'yes', 'to ({variables} work)')], run: (c, p) => { const r = c.s.openRecord; if (!r) return; const rec = c.s.engine.data.update(r.col, r.id, { [p.field]: fillTemplate(String(p.value ?? ''), c.s.vars) }); if (rec) openRecord(c.s, r.col, rec); }, say: (p) => `Set ${p.field} of the opened record to ${p.value}` },
   dataDelete: { cat: 'Data', label: 'Delete the opened record', icon: 'trash', run: (c) => { const r = c.s.openRecord; if (r) { c.s.engine.data.remove(r.col, r.id); openRecord(c.s, r.col, null); } }, say: () => 'Delete the opened record' },
@@ -15302,7 +15493,7 @@ export const LOGIC_ACTIONS = {
 };
 // ---- nodes ⇄ triggers: every trigger event / condition / instruction is a node, and every node can be used in triggers ----
 NODE_TYPES._signal = { cat: '(internal)', label: 'Signal', exec: true, outs: [], hidden: true, params: [txt('port', 'then'), txt('tag', '')] };
-for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden) NODE_TYPES['la_' + k] = { cat: 'Instructions', label: d.label, exec: true, outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden && !d.noNode) NODE_TYPES['la_' + k] = { cat: 'Instructions', label: d.label, exec: true, outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
 for (const [k, d] of Object.entries(LOGIC_CONDITIONS)) if (!d.hidden) NODE_TYPES['lc_' + k] = { cat: 'Conditions', label: d.label, value: 'bool', params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
 const evLabel = (l) => 'When: ' + l.charAt(0).toLowerCase() + l.slice(1);
 for (const [k, d] of Object.entries(LOGIC_EVENTS)) if (!d.hidden && !d.fsm && !['always'].includes(k)) NODE_TYPES['le_' + k] = { cat: 'Events', label: evLabel(d.label), outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
@@ -15430,6 +15621,7 @@ class LogicWatcher {
     s.on('turn', () => this.queue.push({ type: 'turnStarted' }));
     s.on('data', (col, kind) => { const type = { added: 'recordAdded', changed: 'recordChanged', deleted: 'recordDeleted' }[kind]; if (type) this.queue.push({ type, item: col }); });
     s.on('recordOpened', (col) => this.queue.push({ type: 'recordOpened', item: col }));
+    s.on('signedIn', () => this.queue.push({ type: 'signedIn' })); s.on('signedOut', () => this.queue.push({ type: 'signedOut' })); s.on('authFailed', (m) => this.queue.push({ type: 'authFailed', item: m }));
     s.on('gameFinished', (game, score, result) => this.queue.push({ type: 'gameFinished', item: game, value: score, result }));
     s.on('unitsSelected', (L) => this.queue.push({ type: 'unitsSelected', value: L.length }));
     s.on('unitArrived', (u) => this.queue.push({ type: 'unitArrived', other: u }));
@@ -15809,6 +16001,8 @@ registerBehavior('graph', {
         case 'inApp': return !!s.fromApp;
         case 'slotInfo': { const I = s.engine.slotInfo(P('slot') || 1), w = P('what'); return w === 'is saved' ? I.exists : !I.exists ? '' : w === 'date and time' ? I.when : w === 'play time' ? I.playTime : w === 'level' ? I.level : w === 'level name' ? I.levelName : w === 'name' ? I.label : I.ago; }
         case 'newestSlot': return String(s.engine.newestSlot() || '');
+        case 'supaSignedIn': return !!s.engine.supa.user();
+        case 'supaUser': { const u = s.engine.supa.user(), w = P('what'); return !u ? '' : w === 'email' ? u.email || '' : w === 'id' ? u.id : s.engine.supa.name(u); }
         case 'dataValue': return s.engine.data.stat(P('collection'), P('how'), P('field'), P('filter'), s.vars);
         case 'questInfo': {
           const w = P('what'), st = s.questState(P('quest')), O = s.questObjectives(P('quest')), dn = O.filter((o) => o.done).length;
@@ -16080,6 +16274,14 @@ registerBehavior('graph', {
         case 'nextLevel': if (s.engine.hasNextLevel()) s.win(); return;
         case 'restart': s.engine.restart(); return;
         case 'saveGame': if (s.engine.saveGame(+P('slot') || 1, { label: P('name') ? fillTemplate(P('name'), s.vars) : '' }) && P('text')) s.message(P('text'), 1.5); break;
+        case 'supaSignIn': case 'supaSignUp': case 'supaReset': case 'supaSetName': {
+          const S = s.engine.supa, later = { ...ctx, steps: 0 }, f = (k) => fillTemplate(P(k) || '', s.vars);
+          const pr = n.type === 'supaSignIn' ? S.signIn(f('email').trim(), f('password')).then(() => 'signed in') : n.type === 'supaSignUp' ? S.signUp(f('email').trim(), f('password'), f('name').trim()) : n.type === 'supaReset' ? S.reset(f('email').trim()).then(() => 'sent') : S.setName(f('name').trim()).then((ok) => (ok ? 'then' : 'failed'));
+          pr.then((port) => follow(n, port, later)).catch(() => follow(n, 'failed', later)); return;
+        }
+        case 'supaSignOut': { const later = { ...ctx, steps: 0 }; s.engine.supa.signOut().then(() => follow(n, 'then', later)); return; }
+        case 'supaProvider': s.engine.supa.provider(P('provider')); return;
+        case 'supaRefreshN': s.engine.supa.pullAll(P('collection')); break;
         case 'exportSlot': { const t = s.engine.exportSave(P('slot') || 1); if (t) { s.setVar(P('var') || 'saveCode', t); if (P('copy')) navigator.clipboard?.writeText(t).catch(() => {}); } return follow(n, t ? 'then' : 'empty slot', ctx); }
         case 'importSlot': return follow(n, s.engine.importSave(P('slot') || 1, s.vars[P('var') || 'saveCode']) ? 'imported' : 'not a save', ctx);
         case 'cloudSaveSlot': { const later = { ...ctx, steps: 0 }; s.engine.online.pfSaveSlot(P('slot') || 1).then((ok) => { if (!e.dead) follow(n, ok ? 'saved' : 'failed', later); }); return; }
@@ -16736,6 +16938,8 @@ registerBehavior('graph', {
         if (has('onPage')) s.on('var', (k, v) => { if (!e.dead) fire('onPage', e, s, null, (n) => (param(n, 'var') || 'page') === k && (!param(n, 'page') || sameVal(v, param(n, 'page')))); });
         if (has('onSaveFile')) s.on('saved', (f) => { if (!e.dead) fire('onSaveFile', e, s, null, (n) => !param(n, 'file') || param(n, 'file') === f); });
         if (has('onBack')) s.on('back', () => { if (!e.dead) fire('onBack', e, s); });
+        if (has('onSignedIn')) s.on('signedIn', () => { if (!e.dead) fire('onSignedIn', e, s); });
+        if (has('onSignedOut')) s.on('signedOut', () => { if (!e.dead) fire('onSignedOut', e, s); });
         if (has('onSlotSaved')) s.on('slotSaved', (k) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onSlotSaved' && !n.off && (!param(n, 'slot') || String(param(n, 'slot')).trim() === String(k))) follow(n, 'then', { s, e, steps: 0, eventValue: k }); });
         if (has('onGameDone')) s.on('gameFinished', (name, score, result) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onGameDone' && !n.off && (!param(n, 'game') || String(name).toLowerCase() === String(param(n, 'game')).trim().toLowerCase())) follow(n, result, { s, e, steps: 0, eventValue: score }); });
         if (has('onPermission')) s.on('permission', (k, ok) => { if (!e.dead) for (const n of g.nodes) if (n.type === 'onPermission' && (param(n, 'kind') === 'any' || param(n, 'kind') === k)) follow(n, ok ? 'allowed' : 'not allowed', { s, e, steps: 0 }); });
@@ -17516,6 +17720,7 @@ export class Engine {
 
     this.input = new Input(this, this.uiCanvas);
     this.online = new Online(this);
+    this.supa = new Supa(this); // the app's own accounts and online data (Game Settings › Supabase)
     this.audio = new Audio();
     this.physics = new Physics();
     this.scene = null;
@@ -17591,7 +17796,7 @@ export class Engine {
     if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
     this.loadPrefs();
     this.setScene(this.factory());
-    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); }
+    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); this.supa.start(this.scene); }
     return this.scene;
   }
 
@@ -18063,6 +18268,7 @@ export class Engine {
       if (this.slowTime > 2 && this.dpr > 1) { this.maxDpr = Math.max(1, this.dpr - 0.5); this.slowTime = 0; this.resize(); }
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
       this.playTime = (this.playTime || 0) + dt; // time played, kept in save slots
+      this.supa.tick(dt);
       const ae = { 'every 30 seconds': 30, 'every minute': 60, 'every 5 minutes': 300 }[this.scene.settings.autoSave];
       if (ae && (this.autoTimer = (this.autoTimer || 0) + dt) > ae) { this.autoTimer = 0; this.autoSlot('timer'); }
     }

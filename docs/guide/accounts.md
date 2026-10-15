@@ -7,7 +7,7 @@ The accounts work in two steps:
 1. **Now:** everyone has a **profile on this device**: a name and a colour, shown on the Home screen. Games are saved on the device, like before.
 2. **Once a Supabase server is connected:** people can **sign in** (email and password, or Google, Apple, GitHub… if you turn them on), and their games **sync to their account**.
 
-> These are accounts for Pocket Engine itself. For accounts *inside your games* (players signing in, cloud saves, leaderboards), use PlayFab: see [Saving, online and the phone](#/guide/saving-online).
+> These are accounts for Pocket Engine itself. For accounts *inside the apps you make* (your app's users signing in, data stored online), see [Making apps › Accounts and online data](#/guide/apps). For games (cloud saves, leaderboards, multiplayer), use PlayFab and Photon: see [Saving, online and the phone](#/guide/saving-online).
 
 ## Your profile
 

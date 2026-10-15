@@ -103,7 +103,18 @@ Lists inside components are typed one item per line with `|` between the parts, 
 Apps and menus are built from **pages**. A page is a panel with **Show If** (or *Show when*) on the `page` variable. Navigation changes `page`, and pages fade or slide between each other.
 
 - **Bottom Nav:** a complete tab bar (16 styles, badges, animations). In the Inspector each tab is a card: tap its icon to pick from the icon grid (or an emoji), type its label, and choose the page it opens from a list. **+ Add Tab** offers your pages that aren't tabs yet, **a new page** (made for you, with a fitting icon), or a ☰ tab for the Side Menu. A tab's ⋯ menu adds a badge, moves it left or right, shows its page or removes it. (*Text* edits them as lines: `Label | icon | page | badge variable`.)
-  - **Top tabs (Top Nav):** set **Position** to **Top** (or add a *Top Nav* from the UI library) and the same bar runs along the top of the screen, with every style, badge and setting. Under an App Bar it sits just below it, and pages start below both. Turn off **Show icons** for name-only tabs (*Posts · Photos · Saved*); the underline then runs along the bottom of the bar. Swipe left or right on the page to change tab. It slides up and away when it hides, and fills the notch area above it.
+  - **Top tabs (Top Nav):** set **Position** to **Top** (or add a *Top Nav* from the UI library) and the bar runs along the top of the screen. Under an App Bar it sits just below it, and pages start below both.
+    - It has its own **Top style**, picked from pictures:
+      - **tabs** (a line under the whole tab, like Android);
+      - **short line** (a short rounded line under bold names, like X);
+      - **text** (just names, the selected one bigger, like TikTok's *Following | For You*);
+      - **pills**, **chips** (every tab a chip, good for many tabs), **segmented** (a grey track and a sliding white thumb, like iOS), **folder** (the selected tab joins the page), **gradient**, **neon** and **boxed**.
+    - Or pick *like the bottom bar* to use one of the 16 bottom styles.
+    - The indicator slides and stretches from tab to tab.
+    - **Tab widths:** fill the width, fit the names, or centred. *Auto* fills the bar when the names fit; otherwise each tab is as wide as its name and the row scrolls sideways (drag it, and it follows the selected tab).
+    - **Icons** beside or above the names, **Name size**, a **Thumb / card colour** (segmented, folder) and a **Gradient** colour.
+    - Badges show as a count or a dot beside the name.
+    - Swipe left or right on the page to change tab. It slides up and away when it hides, and fills the notch area above it.
   - **New Page…** asks whether to add the page to the bottom bar too, and the page button's *Add “page” to the bottom bar* adds a page that's already there.
   - **Style:** pick from pictures of the 16 styles: classic, pill, underline, dot, bubble, floating, raised center, glass, minimal, **segmented** (a solid highlight slides along a floating capsule), **curved** (the selected icon rides in a circle inside a notch that slides), **neon** (a glowing line and icon), **dock** (big icons that magnify around the selected one), **spotlight** (a beam of light on the selected tab), **outline** (a ring) and **chips** (every tab a chip, the selected one filled). Floating, glass and minimal bars sit over the open page's colour; *raised center* needs an odd number of tabs; in *bubble* the selected tab widens to fit its name.
   - *Animation*: **The newly selected icon** bounces, pops, spins, wiggles or flips. *Colours*: **Glow** (neon, spotlight) and **Icon and text on the highlight** (segmented, curved, chips). Ready presets: Segmented, Curved, Neon, Dock, Spotlight, Ring and Chips.
@@ -268,7 +279,12 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - Messages for tapping a post, liking, comment, share and ⋯.
   - **Colours:** background, cards, text, grey text, lines, accent, liked, reposted, verified tick, card border and the avatar ring.
   - There's also a fourth look, **compact**: tighter rows with a small picture on the right.
-  - **Tabs** on top (*Tabs* setting, one per line: `Label | only where…`, e.g. `For you |` and `Saved | saved = yes`). Pick underline, pills or segmented tabs; the picked tab can go in a variable.
+  - **Tabs** on top (*Tabs* setting, one per line: `Label | only where…`, e.g. `For you |` and `Saved | saved = yes`).
+    - *Tab look* has the same 10 styles as the Top Nav, with a sliding indicator. The picked tab can go in a variable.
+    - Swipe the posts sideways to change tab, and tap the current tab to go back to the top.
+    - Each tab remembers where it was scrolled to, and a dot shows on tabs with posts newer than the last time you looked.
+    - *Tab widths*, *Tab name size*, *Tab row height* and *Tab row colour* change how they look.
+  - **What is above it scrolls away:** scrolling the feed down first moves up whatever is above it on the page (stories, the post box), so the posts get the whole screen while the tabs stay under the App Bar. It all comes back when you scroll to the top. Turn this off with *What is above it scrolls away*.
   - **Pinned posts** (`pinned = yes`) come first with 📌 Pinned. A **label** field puts a small line above a post, like *Sponsored* or *Suggested for you*.
   - **#hashtags, @mentions and links** are coloured. Tapping a tag fills the search variable and sends a message; tapping a link opens it.
   - **Font** for the whole feed, colours for names, @handles, links, the post background and a pressed post.
@@ -335,7 +351,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Likes, comments, replies, reposts, quotes, @mentions, follows, friend requests, accepted requests and direct messages each send a notification to that person.
   - A new notification pops up a banner and buzzes. Turn this off with the setting `socialBanners: false`.
   - Variables: `{notifications_unread}`, `{friend_requests}`, `{followers_count}`, `{following_count}` and `{friends_count}`. Use them as badges, for example the App Bar action `bell | page:notifications | notifications_unread`.
-- **Notifications (social):** All / Mentions / Requests tabs.
+- **Notifications (social):** All / Mentions / Requests tabs (any Top Nav *Tab look*).
   - Likes, reposts and follows on the same post are grouped ("Maya and 2 others liked your post"). New ones are highlighted and marked read once seen.
   - Friend requests have **Accept / Decline**, and follows have **Follow back**.
   - Tapping a notification opens the post (on the page *Open posts on page*, using the variable `openPost`), the chat, or the person's profile.

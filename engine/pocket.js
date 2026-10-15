@@ -4474,7 +4474,7 @@ export function uiOrigin(e, W, H, safe) {
     const r = uiBox(p, W, H, safe), f = AFRAC(e.anchor), Un = underOf(p, safe);
     let x = r.x - r.w / 2 + f.x * r.w, y = r.y - r.h / 2 + f.y * r.h;
     if (Un) { x += Un.left * (1 - f.x) - Un.right * f.x; y += Un.top * (1 - f.y) - Un.bottom * f.y; } // inside the part of the page that isn't under a bar
-    return { x: x + (P ? P.x : 0), y: y + (P ? P.y : 0) - (p._scrollY || 0) * uiK(safe) }; // (a page scrolled by its Show If moves what is inside it)
+    return { x: x + (P ? P.x : 0), y: y + (P ? P.y : 0) - ((p._scrollY || 0) + (p._collapseY || 0)) * uiK(safe) }; // (and a feed scrolling away what is above it) // (a page scrolled by its Show If moves what is inside it)
   } // (a page scrolled by its Show If moves what is inside it)
   const pt = anchorPoint(e.anchor, W, H, e.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0, k: safe?.k } : safe), B = barsFor(e, safe);
   if (B && !e._dock && !e.ignoreSafe && !e.ignoreBars) { // nav bars hold their edge of the screen: everything else is laid out in what's left
@@ -4589,7 +4589,8 @@ function applyStretch(e, W, H, safe) {
   const place = (k, v) => { if (!moving) { e[k] = v; return; } const B = e._animBase; if (B && Math.abs(v - B[k]) > 0.01) { e[k] += v - B[k]; B[k] = v; } }; // while it animates, the bars changing moves where it comes to rest
   if (ri >= 0) { const g = +e.parentEnt.row || 0, cw = Math.max(4, (box.w / K - ml - mr - g * (RK.length - 1)) / RK.length); set('w', cw); place('x', (box.l - ao.x) / K + ml + cw / 2 + ri * (cw + g)); } // a cell of a row
   else if (e.stretch === 'width' || e.stretch === 'both') { set('w', Math.max(4, box.w / K - ml - mr)); place('x', (box.l + box.w / 2 - ao.x) / K + (ml - mr) / 2); }
-  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb)); place('y', (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2); }
+  const cc = p && e.parentEnt._collapseBy === e ? e.parentEnt._collapseY || 0 : 0; // a feed scrolling away what is above it: it reaches up into the room
+  if (e.stretch === 'height' || e.stretch === 'both') { set('h', Math.max(4, box.h / K - mt - mb) + cc); place('y', (box.t + box.h / 2 - ao.y) / K + (mt - mb) / 2 - cc / 2); }
 }
 /** Minimap: a small overview of the level around the player (or the whole view in 2D). */
 function drawMinimap(ctx, e, s) {
@@ -7123,16 +7124,138 @@ function blurBehind(ctx, e, s, lx, ly, lw, lh, blur, screen = false) { // (scree
   try { t.drawImage(E.canvas, sx * gd, sy * gd, sw * gd, sh * gd, 0, 0, blurTmp.width, blurTmp.height); t.drawImage(E.uiCanvas, sx * d, sy * d, sw * d, sh * d, 0, 0, blurTmp.width, blurTmp.height); } catch { return; }
   ctx.filter = `blur(${blur}px)`; ctx.drawImage(blurTmp, (sx - r.x) / K + e.x, (sy - r.y) / K + e.y, sw / K, sh / K); ctx.filter = 'none';
 }
+/** Looks for tabs along the top of a screen or a list (Top Nav, feed tabs, Notifications, Friends). */
+export const TOP_STYLES = ['tabs', 'short line', 'text', 'pills', 'chips', 'segmented', 'folder', 'gradient', 'neon', 'boxed'];
+const TOP_STYLE_INFO = { tabs: 'A line under the whole selected tab (Android, Material).', 'short line': 'A short rounded line under the selected name, bold names (X, Threads).', text: 'Just the names: the selected one bigger and brighter with a small bar under it (TikTok "Following | For You").', pills: 'The selected name in a filled capsule.', chips: 'Every tab is a chip; the selected one is filled. Good for many tabs (it scrolls).', segmented: 'A grey track with a white thumb that slides (iOS).', folder: 'The selected tab is a card joined to the page, like folder or browser tabs.', gradient: 'A gradient capsule slides to the selected tab.', neon: 'A glowing line and glowing names.', boxed: 'Tabs in an outlined box, the selected one filled (Android segmented buttons).' };
+/** A row of tabs drawn in one of TOP_STYLES. The indicator slides and stretches to the selected tab; too many tabs scroll sideways. Keeps its own animation state. */
+export class TabStrip {
+  constructor() { this.ix = null; this.iw = 0; this.off = 0; this.goal = null; this.drag = null; this.items = []; this.box = null; this.cur = -1; this.t = null; this.pulse = new Map(); }
+  /** Where each tab goes: [{ x, w, cw (content width) }] in strip space (before scrolling). */
+  layout(ctx, b, tabs, o) {
+    const st = o.style, size = o.size || 15, ic = o.icons || 'none', track = st === 'segmented' || st === 'boxed', pad = { tabs: 16, 'short line': 14, text: 11, pills: 14, chips: 15, segmented: 12, folder: 18, gradient: 16, neon: 14, boxed: 12 }[st] || 14;
+    const gap = st === 'chips' ? 8 : 0, inset = track ? 8 : st === 'chips' || st === 'pills' || st === 'gradient' ? 10 : 0, avail = b.w - inset * 2;
+    const cws = tabs.map((t) => { ctx.font = `800 ${st === 'text' ? size + 2 : size}px ${THEME.font}`; let w = ctx.measureText(o.upper ? String(t.label).toUpperCase() : t.label).width; if (t.icon && ic === 'beside the name') w += size * 1.25 + 6; if (t.icon && ic === 'above the name') w = Math.max(w, size * 1.5); if (t.badgeText) { ctx.font = `800 10px ${THEME.font}`; w += Math.max(16, ctx.measureText(t.badgeText).width + 8) + 5; } else if (t.badgeDot) w += 11; return w; });
+    const nat = cws.map((w) => w + pad * 2), sum = nat.reduce((a, c) => a + c, 0) + gap * Math.max(0, tabs.length - 1);
+    const mode = o.layout && o.layout !== 'auto' ? o.layout : sum <= avail ? (st === 'chips' ? 'fit the names (scrolls)' : 'fill the width') : 'fit the names (scrolls)';
+    let x = b.x + inset; const items = [];
+    if (mode === 'fill the width' && sum <= avail * 1.02) { const extra = (avail - sum) / Math.max(1, tabs.length); tabs.forEach((t, i) => { const w = nat[i] + extra; items.push({ x, w, cw: cws[i] }); x += w + gap; }); }
+    else { if (mode === 'centred' && sum < avail) x += (avail - sum) / 2; tabs.forEach((t, i) => { items.push({ x, w: nat[i], cw: cws[i] }); x += nat[i] + gap; }); }
+    this.total = x - gap - (b.x + inset); this.avail = avail; this.inset = inset; this.maxOff = Math.max(0, this.total - avail);
+    return items;
+  }
+  /** The indicator's rectangle for a tab (strip space). */
+  indRect(it, b, o) {
+    const st = o.style, size = o.size || 15, cy = b.y + b.h / 2, ph = Math.min(b.h - 12, size * 2.2 + 2);
+    if (st === 'tabs') return { x: it.x, w: it.w, y: b.y + b.h - 3, h: 3, r: 1.5 };
+    if (st === 'short line' || st === 'neon') { const w = Math.max(24, it.cw + 4); return { x: it.x + (it.w - w) / 2, w, y: b.y + b.h - 4, h: 4, r: 2 }; }
+    if (st === 'text') { const w = Math.min(28, it.cw); return { x: it.x + (it.w - w) / 2, w, y: cy + size * 0.95 + 3, h: 3, r: 1.5 }; }
+    if (st === 'pills' || st === 'gradient') { const w = Math.min(it.w - 4, it.cw + 30); return { x: it.x + (it.w - w) / 2, w, y: cy - ph / 2, h: ph, r: ph / 2 }; }
+    if (st === 'chips') { const h = Math.min(b.h - 14, 34); return { x: it.x, w: it.w, y: cy - h / 2, h, r: h / 2 }; }
+    if (st === 'segmented') { const h = b.h - 12 - 6; return { x: it.x + 3, w: it.w - 6, y: b.y + 9, h, r: Math.min(10, h / 2) }; }
+    if (st === 'boxed') { const h = b.h - 14; return { x: it.x, w: it.w, y: b.y + 7, h, r: 0 }; }
+    if (st === 'folder') return { x: it.x + 2, w: it.w - 4, y: b.y + 7, h: b.h - 7, r: 12 };
+    return { x: it.x, w: it.w, y: b.y + b.h - 3, h: 3, r: 1.5 };
+  }
+  /** Which tab is at a point (same space as the box), or -1. */
+  hit(x, y) { const b = this.box; if (!b || y < b.y || y > b.y + b.h || x < b.x || x > b.x + b.w) return -1; const lx = x + this.off; return this.items.findIndex((it) => lx >= it.x - 4 && lx <= it.x + it.w + 4); }
+  /** Sideways drags scroll the tabs when they don't all fit. toLocal turns a screen point into the box's space. Returns true while dragging. */
+  input(inp, toLocal = (q) => q) {
+    if (!this.box || this.maxOff <= 0) { this.drag = null; return false; }
+    for (const d of inp.downs) { const q = toLocal(d); if (this.hit(q.x, q.y) >= 0 || (q.y >= this.box.y && q.y <= this.box.y + this.box.h && q.x >= this.box.x && q.x <= this.box.x + this.box.w)) this.drag = { id: d.id, x: q.x, off: this.off, moved: false }; }
+    if (this.drag) { const ptr = inp.pointers.get(this.drag.id); if (!ptr) { this.drag = null; return false; } const q = toLocal(ptr), dx = q.x - this.drag.x; if (Math.abs(dx) > 6) this.drag.moved = true; if (this.drag.moved) { this.off = clamp(this.drag.off - dx, 0, this.maxOff); this.goal = null; } return this.drag.moved; }
+    return false;
+  }
+  tap(i) { this.pulse.set(i, this.t ?? 0); }
+  /**
+   * Draw the tabs. tabs: [{ label, icon, badgeText, badgeDot }]. o: { style, act, idle, text, on, bar, line, size, icons, layout, upper, glow, thumb, grad2, badgeColor, now, snap, border, divider }.
+   * Returns the tabs' rectangles (after scrolling) for taps.
+   */
+  draw(ctx, b, tabs, cur, o) {
+    const st = TOP_STYLES.includes(o.style) ? o.style : 'tabs', O = { ...o, style: st }, now = o.now ?? 0, dt = this.t == null ? 1 : clamp(now - this.t, 0, 0.1); this.t = now;
+    this.box = b; const items = this.layout(ctx, b, tabs, O); this.items = items;
+    const size = O.size || 15, act = O.act || '#1d9bf0', idle = O.idle || '#71767b', txt = O.text || '#0f1419', ind = O.indicator || act, cy = b.y + b.h / 2, k = O.snap ? 1 : 1 - Math.exp(-dt * 16);
+    // scroll so the selected tab shows
+    if (cur !== this.cur) { this.cur = cur; const it = items[cur]; if (it && this.maxOff > 0) { const l = it.x - b.x - this.inset, r = l + it.w; if (l - 24 < this.off) this.goal = Math.max(0, l - 24); else if (r + 24 > this.off + this.avail) this.goal = Math.min(this.maxOff, r + 24 - this.avail); } }
+    if (this.goal != null && !this.drag?.moved) { this.off += (this.goal - this.off) * (O.snap ? 1 : 1 - Math.exp(-dt * 12)); if (Math.abs(this.goal - this.off) < 0.5) { this.off = this.goal; this.goal = null; } }
+    this.off = clamp(this.off, 0, this.maxOff);
+    // the bar
+    if (O.bar) { ctx.fillStyle = O.bar; ctx.fillRect(b.x, b.y - (O.above || 0), b.w, b.h + (O.above || 0)); }
+    const lineC = O.line || withAlpha(idle.startsWith('#') ? idle : '#888888', 0.25);
+    if (['tabs', 'short line', 'neon', 'folder', 'text'].includes(st) && O.border !== false && st !== 'text') { ctx.fillStyle = st === 'neon' ? withAlpha(ind.startsWith('#') ? ind : '#4fa3ff', 0.3) : lineC; ctx.fillRect(b.x, b.y + b.h - 1, b.w, 1); }
+    ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y - 2, b.w, b.h + 4); ctx.clip(); ctx.translate(-this.off, 0);
+    const trackR = st === 'segmented' ? { x: b.x + 8, y: b.y + 6, w: Math.min(b.w - 16, this.total + 0.5), h: b.h - 12 } : st === 'boxed' ? { x: b.x + 8, y: b.y + 7, w: Math.min(b.w - 16, this.total), h: b.h - 14 } : null;
+    if (st === 'segmented') { ctx.fillStyle = O.track || withAlpha(idle.startsWith('#') ? idle : '#888888', 0.16); UK.rr(ctx, trackR.x, trackR.y, this.total, trackR.h, Math.min(12, trackR.h / 2)); ctx.fill(); }
+    if (st === 'chips') items.forEach((it, i) => { if (i === cur) return; const r = this.indRect(it, b, O); ctx.fillStyle = O.chip || withAlpha(idle.startsWith('#') ? idle : '#888888', 0.13); UK.rr(ctx, r.x, r.y, r.w, r.h, r.r); ctx.fill(); });
+    // the indicator: slides and stretches (the front edge leads, the back edge follows)
+    const it = items[cur];
+    if (it) {
+      const R = this.indRect(it, b, O);
+      if (this.ix == null || O.snap) { this.ix = R.x; this.iw = R.w; }
+      else { const L = this.ix, Rt = this.ix + this.iw, gl = R.x, gr = R.x + R.w, fast = 1 - Math.exp(-dt * 22), slow = 1 - Math.exp(-dt * 11), right = gr > Rt; const nl = L + (gl - L) * (right ? slow : fast), nr = Rt + (gr - Rt) * (right ? fast : slow); this.ix = nl; this.iw = Math.max(2, nr - nl); }
+      const x = this.ix, w = this.iw;
+      ctx.save();
+      if (st === 'segmented') { ctx.shadowColor = 'rgba(0,0,0,0.16)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 1; ctx.fillStyle = O.thumb || '#ffffff'; UK.rr(ctx, x, R.y, w, R.h, R.r); ctx.fill(); }
+      else if (st === 'gradient') { const g = ctx.createLinearGradient(x, 0, x + w, 0); g.addColorStop(0, act); g.addColorStop(1, O.grad2 || '#a855f7'); ctx.fillStyle = g; ctx.shadowColor = withAlpha(act.startsWith('#') ? act : '#4fa3ff', 0.4); ctx.shadowBlur = 10; ctx.shadowOffsetY = 3; UK.rr(ctx, x, R.y, w, R.h, R.r); ctx.fill(); }
+      else if (st === 'folder') { ctx.fillStyle = O.thumb || O.page || '#ffffff'; ctx.shadowColor = 'rgba(0,0,0,0.12)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = -1; ctx.beginPath(); const r = R.r, y0 = R.y, y1 = b.y + b.h + 1; ctx.moveTo(x - 6, y1); ctx.quadraticCurveTo(x, y1, x, y1 - 6); ctx.lineTo(x, y0 + r); ctx.quadraticCurveTo(x, y0, x + r, y0); ctx.lineTo(x + w - r, y0); ctx.quadraticCurveTo(x + w, y0, x + w, y0 + r); ctx.lineTo(x + w, y1 - 6); ctx.quadraticCurveTo(x + w, y1, x + w + 6, y1); ctx.closePath(); ctx.fill(); }
+      else if (st === 'boxed') { ctx.beginPath(); UK.rr(ctx, trackR.x, trackR.y, this.total, trackR.h, Math.min(10, trackR.h / 2)); ctx.clip(); ctx.fillStyle = withAlpha(act.startsWith('#') ? act : '#4fa3ff', 0.16); ctx.fillRect(x, R.y, w, R.h); }
+      else { if (st === 'neon') { ctx.shadowColor = ind; ctx.shadowBlur = O.glow ?? 14; } ctx.fillStyle = ind; UK.rr(ctx, x, R.y, w, R.h, R.r); ctx.fill(); if (st === 'neon') ctx.fill(); }
+      ctx.restore();
+    }
+    if (st === 'boxed') { ctx.strokeStyle = O.line || withAlpha(idle.startsWith('#') ? idle : '#888888', 0.45); ctx.lineWidth = 1; UK.rr(ctx, trackR.x + 0.5, trackR.y + 0.5, this.total - 1, trackR.h - 1, Math.min(10, trackR.h / 2)); ctx.stroke(); items.forEach((q, i) => { if (i) { ctx.beginPath(); ctx.moveTo(q.x + 0.5, trackR.y); ctx.lineTo(q.x + 0.5, trackR.y + trackR.h); ctx.stroke(); } }); }
+    // the names (and icons, badges)
+    const filled = st === 'pills' || st === 'gradient' || st === 'chips', onTxt = O.on || (filled ? '#ffffff' : st === 'tabs' || st === 'neon' || st === 'boxed' ? act : txt);
+    const rects = [];
+    items.forEach((q, i) => {
+      const t = tabs[i], on = i === cur, sel = it && on ? 1 : 0, pz = this.pulse.has(i) ? clamp((now - this.pulse.get(i)) / 0.3, 0, 1) : 1, sc = 1 + Math.sin(pz * Math.PI) * (pz < 1 ? 0.08 : 0);
+      if (pz >= 1) this.pulse.delete(i);
+      const sz = st === 'text' ? (on ? size + 2 : size) : size, col = on ? onTxt : idle, label = O.upper ? String(t.label).toUpperCase() : t.label;
+      ctx.save(); ctx.translate(q.x + q.w / 2, cy); ctx.scale(sc, sc);
+      if (st === 'neon' && on) { ctx.shadowColor = ind; ctx.shadowBlur = (O.glow ?? 14) * 0.7; }
+      ctx.font = `${on ? 800 : st === 'text' ? 700 : 600} ${sz}px ${THEME.font}`; const lw = ctx.measureText(label).width;
+      const ic = t.icon && O.icons && O.icons !== 'none' ? O.icons : null, isz = size * 1.25;
+      let bw = 0; if (t.badgeText) { ctx.font = `800 10px ${THEME.font}`; bw = Math.max(16, ctx.measureText(t.badgeText).width + 8) + 5; ctx.font = `${on ? 800 : 600} ${sz}px ${THEME.font}`; } else if (t.badgeDot) bw = 11;
+      if (ic === 'above the name') {
+        drawNavIcon(ctx, t.icon, 0, -sz * 0.62, isz, col); ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `${on ? 800 : 600} ${sz - 3}px ${THEME.font}`; ctx.fillText(label, 0, sz * 0.72, q.w - 6);
+        if (bw) badge(ctx, isz * 0.42, -sz * 0.62 - isz * 0.42, t, O);
+      } else {
+        const cw = lw + (ic ? isz + 6 : 0) + bw; let x0 = -cw / 2;
+        if (ic) { drawNavIcon(ctx, t.icon, x0 + isz / 2, 0, isz, col); x0 += isz + 6; }
+        ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(label, x0, 1); x0 += lw;
+        if (bw) badge(ctx, x0 + 5, t.badgeText ? 0 : -sz * 0.45, t, O, true);
+      }
+      ctx.restore();
+      rects.push({ x: q.x - this.off, y: b.y, w: q.w, h: b.h });
+    });
+    ctx.restore();
+    // edge fades when it scrolls
+    const fadeC = O.fade || O.bar; if (this.maxOff > 0 && fadeC && /^#[0-9a-f]{6}$/i.test(fadeC)) for (const [side, show] of [[0, this.off > 2], [1, this.off < this.maxOff - 2]]) { if (!show) continue; const x0 = side ? b.x + b.w - 28 : b.x, g = ctx.createLinearGradient(x0, 0, x0 + 28, 0); g.addColorStop(side ? 0 : 1, withAlpha(fadeC, 0)); g.addColorStop(side ? 1 : 0, withAlpha(fadeC, 1)); ctx.fillStyle = g; ctx.fillRect(x0, b.y, 28, b.h - 1); }
+    return rects;
+  }
+}
+/** A count or a dot beside a tab's name. */
+function badge(ctx, x, y, t, o, left = false) {
+  ctx.save(); ctx.shadowColor = 'transparent'; ctx.fillStyle = o.badgeColor || '#ff3b5c';
+  if (t.badgeText) { ctx.font = `800 10px ${THEME.font}`; const w = Math.max(16, ctx.measureText(t.badgeText).width + 8), cx = left ? x + w / 2 : x; UK.rr(ctx, cx - w / 2, y - 8, w, 16, 8); ctx.fill(); ctx.fillStyle = o.badgeTextColor || '#ffffff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t.badgeText, cx, y + 0.5); }
+  else { ctx.beginPath(); ctx.arc(left ? x + 3.5 : x, y, 3.5, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
+}
+
 const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal', 'segmented', 'curved', 'neon', 'dock', 'spotlight', 'outline', 'chips'];
 registerBehavior('uiBottomNav', {
-  label: 'Bottom Nav', description: 'A complete bottom navigation bar: tabs with icons, labels and badges, 16 styles, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
+  label: 'Bottom Nav', description: 'A complete navigation bar along the bottom (16 styles) or the top (10 top styles: tabs, short line, text, pills, chips, segmented, folder, gradient, neon, boxed): tabs with icons, labels and badges, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
   params: [
     { key: 'tabs', label: 'Tabs (one per line: Label | icon | page or msg:name | badge variable | icon when selected | colour when selected | badge colour | badge shows: count or dot)', type: 'code', default: 'Home | home | home\nShop | shop | shop | shopNew\nAwards | trophy | awards\nProfile | user | profile', infoText: 'msg:menu makes a tab that opens the Side Menu (it lights up while the menu is open).' },
     { key: 'var', label: 'Variable', type: 'text', default: 'page', suggest: 'vars' },
     { key: 'start', label: 'Start on tab (1 = first)', type: 'number', default: 1, step: 1 },
-    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
+    { key: 'style', label: 'Style', type: 'select', options: NAV_STYLES, default: 'pill', showIf: (b) => b.position !== 'top' || b.topStyle === 'like the bottom bar', info: { segmented: 'A floating capsule; a solid highlight slides to the selected tab.', curved: 'The selected icon sits in a circle above the bar, in a notch that slides with it.', neon: 'A glowing line and a glowing icon on a dark bar.', dock: 'A floating dock of big icons: the selected one lifts up, its neighbours grow a little.', spotlight: 'A beam of light shines down on the selected tab.', outline: 'A ring around the selected icon.', chips: 'Every tab is a chip; the selected one is filled.', classic: 'Icons and labels; the selected one lights up.', pill: 'A soft pill behind the selected icon (Material style).', underline: 'A line slides along the top to the selected tab.', dot: 'A small dot under the selected tab.', bubble: 'The selected tab grows into a bubble with its name.', floating: 'A rounded bar floating above the bottom edge.', 'raised center': 'The middle tab is a big round button that sticks up.', glass: 'See-through frosted bar, floating.', minimal: 'Just icons, no bar.' } },
     { key: 'position', label: 'Position', type: 'select', options: ['bottom', 'top'], default: 'bottom', info: { bottom: 'Along the bottom of the screen (a tab bar).', top: 'Along the top of the screen (top tabs). Under an App Bar if there is one; pages start below it.' } },
-    { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto' },
+    { key: 'topStyle', label: 'Top style', type: 'select', options: [...TOP_STYLES, 'like the bottom bar'], default: 'tabs', showIf: { position: ['top'] }, info: { ...TOP_STYLE_INFO, 'like the bottom bar': 'Use one of the bottom bar looks (Style, below) at the top.' } },
+    { key: 'topLayout', label: 'Tab widths', type: 'select', options: ['auto', 'fill the width', 'fit the names (scrolls)', 'centred'], default: 'auto', showIf: (b) => b.position === 'top' && b.topStyle !== 'like the bottom bar', info: { auto: 'Fill the width when the names fit, else each tab as wide as its name and the row scrolls sideways.', 'fill the width': 'Equal tabs across the bar.', 'fit the names (scrolls)': 'Each tab as wide as its name, from the left; drag sideways when there are more than fit.', centred: 'As wide as their names, in the middle.' } },
+    { key: 'topIcons', label: 'Icons', type: 'select', options: ['none', 'beside the name', 'above the name'], default: 'none', showIf: (b) => b.position === 'top' && b.topStyle !== 'like the bottom bar' },
+    { key: 'topTextSize', label: 'Name size', type: 'number', default: 15, range: [10, 26], step: 1, showIf: (b) => b.position === 'top' && b.topStyle !== 'like the bottom bar' },
+    { key: 'thumbColor', label: 'Thumb / selected card colour (blank = white, or the page\'s colour)', type: 'color', default: '', optional: true, group: 'Colours', showIf: (b) => b.position === 'top' && ['segmented', 'folder'].includes(b.topStyle) },
+    { key: 'gradientTo', label: 'Gradient to', type: 'color', default: '#a855f7', group: 'Colours', showIf: (b) => b.position === 'top' && b.topStyle === 'gradient' },
+    { key: 'labels', label: 'Labels', type: 'select', options: ['auto', 'always', 'selected only', 'never'], default: 'auto', showIf: (b) => b.position !== 'top' || b.topStyle === 'like the bottom bar' },
     { key: 'showIcons', label: 'Show icons', type: 'bool', default: true, info: 'Off: just the names, like the tabs at the top of many apps (Posts · Photos · Saved).' },
     { key: 'barColor', label: 'Bar colour', type: 'color', default: '#12141f', group: 'Colours' },
     { key: 'barOpacity', label: 'Background see-through (1 = solid, 0 = clear)', type: 'number', default: 1, range: [0, 1], step: 0.05, group: 'Background', info: 'How much of the page shows through the bar. With a see-through bar the pages run underneath it.' },
@@ -7206,11 +7329,12 @@ registerBehavior('uiBottomNav', {
     const LOOK = { solid: 1, 'half see-through': 0.6, 'see-through': 0.3, clear: 0 };
     const opacity = (s) => { const h = here(s); return h && LOOK[h.look] != null ? LOOK[h.look] : clamp(p.barOpacity ?? 1, 0, 1); };
     const blurOf = (s) => { const h = here(s); return h && LOOK[h.look] === 1 ? 0 : +p.barBlur || 0; }; // a page that wants a solid bar gets no frosted glass
-    const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || (floatingStyle() || p.style === 'minimal')));
+    const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || (floatingStyle() || (p.style === 'minimal' && !topOn()))));
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
     const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
     const isTop = () => p.position === 'top', noIc = () => p.showIcons === false;
+    const topOn = () => isTop() && (p.topStyle || 'tabs') !== 'like the bottom bar', strip = new TabStrip(); // top tabs in a style made for the top
     const sizeBar = (e) => {
       if (isTop() && !e.parentEnt?.ui) { e.anchor = 'top'; const hh = +p.height > 0 && e.shape ? (e.shape.h = +p.height) : e.extents().hy * 2; e.y = hh / 2; if (e.local) e.local.y = e.y; return; } // top tabs: hang down from the top edge
       const hgt = +p.height; if (!(hgt > 0) || !e.shape) return; e.shape.h = hgt; if ((e.anchor || '').startsWith('bottom') && !e.parentEnt?.ui) { e.y = -hgt / 2; if (e.local) e.local.y = e.y; } }; // Bar height: grows up from the bottom edge
@@ -7226,7 +7350,7 @@ registerBehavior('uiBottomNav', {
       const h = here(s); if (h?.tab) { const j = T.findIndex((t) => t.page != null && sameVal(t.page, h.tab)); if (j >= 0) return j; } // a sub-page (Detail) keeps its tab (Home) lit
       return (p.otherPage || 'keep the last tab lit') === 'keep the last tab lit' && lastTab >= 0 && lastTab < T.length ? lastTab : -1;
     };
-    const floatingStyle = () => ['floating', 'glass', 'segmented', 'dock'].includes(p.style);
+    const floatingStyle = () => !topOn() && ['floating', 'glass', 'segmented', 'dock'].includes(p.style);
     const geo = (e) => { // local layout: bar rect and each tab's centre and width
       const ex = e.extents(), mw = +p.maxWidth > 0 ? +p.maxWidth : Infinity, w = Math.min(ex.hx * 2, mw), h = ex.hy * 2, fl = floatingStyle(), m = fl ? +p.margin || 0 : 0;
       const cp = p.style === 'chips' ? 6 : 0, bw = w - m * 2 - cp * 2, bh = fl ? Math.min(h - m, 64) : h, bx = e.x - bw / 2, by = fl ? (isTop() ? e.y - h / 2 + m : e.y + h / 2 - m - bh) : e.y - h / 2;
@@ -7263,7 +7387,7 @@ registerBehavior('uiBottomNav', {
         if (p.badgeClear && !s.engine.editing && ti >= 0 && T[ti].badge) { const v = s.vars[T[ti].badge]; if (v != null && v !== 0 && v !== '' && v !== false && v !== '0') s.setVar(T[ti].badge, typeof v === 'number' || /^\d+$/.test(String(v)) ? 0 : ''); } // seeing the page marks it read
         const a = activeIdx(s);
         const c0 = s.engine.uiCtx, chipsFit = p.style === 'chips' && c0 && (() => { const ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity) - 12, isz = +p.iconSize || 24, lsz = +p.labelSize || 11; c0.font = `800 ${lsz + 1}px ${THEME.font}`; return T.every((t) => !showLabel(0, true) || !t.label || isz * 0.85 + 6 + c0.measureText(t.label).width + 24 <= bw / T.length - 10); })();
-        if ((p.style === 'bubble' || (p.style === 'chips' && !chipsFit)) && T.length > 1) { // the selected tab grows to fit its name, the others share the rest (chips: when the names don't all fit)
+        if (!topOn() && (p.style === 'bubble' || (p.style === 'chips' && !chipsFit)) && T.length > 1) { // the selected tab grows to fit its name, the others share the rest (chips: when the names don't all fit)
           const n = T.length, ex = e.extents(), bw = Math.min(ex.hx * 2, +p.maxWidth > 0 ? +p.maxWidth : Infinity) - (p.style === 'chips' ? 12 : 0), c = s.engine.uiCtx, isz = +p.iconSize || 24, lsz = +p.labelSize || 11;
           let fa = 1 / n; if (a >= 0 && c && showLabel(a, true)) { c.font = `${p.style === 'chips' ? 800 : 700} ${lsz + (p.style === 'chips' ? 1 : 2)}px ${THEME.font}`; fa = clamp((isz + c.measureText(T[a].label).width + (p.style === 'chips' ? 48 : 44)) / bw, 1 / n, 0.55); }
           const want = T.map((_, i) => (a < 0 ? 1 / n : i === a ? fa : (1 - fa) / (n - 1)));
@@ -7289,10 +7413,12 @@ registerBehavior('uiBottomNav', {
           let j = cur + (dx < 0 ? 1 : -1); while (T[j] && T[j].page == null) j += dx < 0 ? 1 : -1;
           if (T[j]) { if (p.haptics !== false) s.engine.vibrate(6); goTab(s, j, cur); }
         }
+        const TOP = topOn(); if (TOP) strip.input(inp, (q) => ({ x: (q.x - r.x) / K + e.x, y: (q.y - r.y) / K + e.y })); // (too many tabs: drag them sideways)
         for (const t of s.engine.input.taps) {
-          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = (p.style === 'raised center' && T.length % 2 === 1) || p.style === 'curved'; // (their circles stick up above the bar)
-          let i = G.at(lx);
-          const inBar = ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
+          const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = !TOP && ((p.style === 'raised center' && T.length % 2 === 1) || p.style === 'curved'); // (their circles stick up above the bar)
+          let i = TOP ? strip.hit(lx, ly) : G.at(lx);
+          const inBar = TOP ? i >= 0 : ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;
+          if (TOP && i >= 0) strip.tap(i);
           if (!inBar) continue;
           const tab = T[i];
           pulse.set(i, 1); if (p.tapEffect === 'ripple') ripples.push({ i, t: 0 });
@@ -7312,6 +7438,16 @@ registerBehavior('uiBottomNav', {
         if (hide > 0.99) return;
         const top = isTop(), safeT = top ? ((s.engine.safe?.top || 0) + (e._push?.y || 0)) / uiK(s.engine.safe) : 0; // (top tabs: the notch area, and an App Bar, above them)
         BH.apply(ctx, hide, top ? -(G.bh + 40 + safeT) : G.bh + 40 + (s.engine.safe?.bottom || 0) / uiK(s.engine.safe));
+        if (topOn()) { // tabs made for the top
+          const safeUp0 = !e._push?.y && p.fillSafe !== false ? (s.engine.safe?.top || 0) / uiK(s.engine.safe) : 0, b = { x: G.bx, y: G.by, w: G.bw, h: G.bh }, hp = here(s), bc = hp?.color ? tok(hp.color) : tok(p.barColor) || p.barColor || '#12141f', op = opacity(s), tst = p.topStyle || 'tabs';
+          if (blurOf(s) > 0 && !s.engine.editing) { ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y - safeUp0, b.w, b.h + safeUp0); ctx.clip(); blurBehind(ctx, e, s, b.x, b.y - safeUp0, b.w, b.h + safeUp0, blurOf(s)); ctx.restore(); }
+          if (op > 0) { ctx.save(); ctx.globalAlpha *= op; if (p.shadow !== false && op > 0.6 && !['tabs', 'short line', 'folder', 'neon'].includes(tst)) { ctx.shadowColor = 'rgba(0,0,0,0.14)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 2; } let paint = bc; if (p.barColor2) { paint = ctx.createLinearGradient(b.x, 0, b.x + b.w, 0); paint.addColorStop(0, bc); paint.addColorStop(1, tok(p.barColor2)); } ctx.fillStyle = paint; ctx.fillRect(b.x, b.y - safeUp0, b.w, b.h + safeUp0); ctx.restore(); }
+          const pg = s.entities.find((q) => q.ui && q.visible && !q._parentHidden && q.shape?.fill && q.stretch === 'both' && q.behaviors.some((bb) => bb.type === 'uiShowIf' && (bb.params?.var || p.var) === p.var && sameVal(s.vars[p.var], bb.params?.value))), pageC = pg ? tok(pg.shape.fill) : tok(s.background || '') || '#ffffff';
+          const filled = ['pills', 'gradient', 'chips'].includes(tst), now = s.time || 0;
+          const items = T.map((t, i) => { let bv = t.badge ? s.vars[t.badge] : null; if (s.engine.editing && t.badge && (bv == null || bv === '')) bv = t.badgeShow === 'dot' ? true : 3; const zero = bv === 0 || bv === '0', on = bv != null && bv !== '' && bv !== false && (!zero || p.badgeZero) && !(i === a && p.badgeHideSelected); const n = +bv, num = on && Number.isFinite(n) && bv !== true && String(bv).trim() !== '', max = Math.max(1, +p.badgeMax || 99); const dot = on && (p.badgeStyle === 'dot only' || t.badgeShow === 'dot' || (!num && (p.badgeWords === false || typeof bv !== 'string'))); return { label: t.label, icon: t.icon, badgeDot: dot, badgeText: on && !dot ? (num ? (n > max ? max + '+' : String(Math.round(n))) : String(bv).trim().slice(0, 8)) : '' }; });
+          strip.draw(ctx, b, items, a, { style: tst, act: tok(p.activeColor) || '#4fa3ff', idle: tok(p.idleColor) || '#8b90a5', text: tok(p.activeColor) || '#4fa3ff', on: filled ? tok(p.onColor) || '#ffffff' : '', indicator: tok(p.indicatorColor) || '', line: p.border === false ? 'transparent' : tok(p.lineColor) || '', border: p.border !== false, size: +p.topTextSize || 15, icons: p.topIcons || 'none', layout: p.topLayout || 'auto', glow: +p.glow >= 0 ? +p.glow : 14, thumb: tok(p.thumbColor) || (tst === 'folder' ? pageC : ''), grad2: tok(p.gradientTo) || '#a855f7', badgeColor: tok(p.badgeColor) || '#ff3b5c', badgeTextColor: tok(p.badgeTextColor) || '#ffffff', now, snap: s.engine.editing, fade: op >= 0.99 ? bc : '' });
+          return;
+        }
         const fl = floatingStyle(), rad = fl ? Math.max(+p.radius || 0, Math.min(G.bh / 2, 26)) : +p.radius || 0, safeB = top ? 0 : (s.engine.safe?.bottom || 0) / uiK(s.engine.safe), safeUp = top && !e._push?.y ? (s.engine.safe?.top || 0) / uiK(s.engine.safe) : 0;
         const edgeY = top ? G.by + G.bh : G.by, inY = (d) => (top ? G.by + G.bh - d : G.by + d); // the edge facing the page; d in from the outer edge
         const rr = (x, y, w, h, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.min(r, h / 2, w / 2)); else ctx.rect(x, y, w, h); };
@@ -9297,7 +9433,13 @@ registerBehavior('uiFeed', {
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |” and “Saved | saved = yes”. Blank = no tabs.' },
     { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
-    { key: 'tabStyle', label: 'Tab look', type: 'select', options: ['underline', 'pills', 'segmented'], default: 'underline', showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', showIf: (b) => !!String(b.tabs || '').trim(), info: TOP_STYLE_INFO },
+    { key: 'tabLayout', label: 'Tab widths', type: 'select', options: ['auto', 'fill the width', 'fit the names (scrolls)', 'centred'], default: 'auto', showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabSize', label: 'Tab name size', type: 'number', default: 15, range: [10, 24], step: 1, showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabHeight', label: 'Tab row height', type: 'number', default: 46, range: [32, 80], step: 1, showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabBg', label: 'Tab row colour (blank = none)', type: 'color', default: '', optional: true, showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabSwipe', label: 'Swipe sideways to change tab', type: 'bool', default: true, showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabDots', label: 'A dot on tabs with new posts', type: 'bool', default: true, showIf: (b) => !!String(b.tabs || '').trim(), info: 'Each tab remembers the newest post you saw in it and where you were scrolled to.' },
     { key: 'pinnedFirst', label: 'Pinned posts first (pinned = yes)', type: 'bool', default: true },
     // what shows
     { key: 'actions', label: 'Buttons, in order (blank = the look’s own)', type: 'text', default: '', group: 'Show', info: 'Any of: comment, repost, like, share, save, views. E.g. “like, comment, share”.' },
@@ -9335,6 +9477,7 @@ registerBehavior('uiFeed', {
     { key: 'cardShadow', label: 'Card shadow', type: 'bool', default: false, group: 'Layout' },
     // behaviour
     { key: 'doubleTapLike', label: 'Double-tap a picture to like', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'collapseAbove', label: 'What is above it scrolls away (stories, post box)', type: 'bool', default: true, group: 'Behaviour', info: 'Scrolling the feed down first moves up whatever is above it on the page, so the posts get the whole screen; it comes back when you scroll to the top. The tabs stay.' },
     { key: 'pullRefresh', label: 'Pull down to refresh', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'refreshMessage', label: 'Refresh sends', type: 'text', default: 'refresh', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.pullRefresh !== false },
     { key: 'entrance', label: 'Posts appear', type: 'select', options: ['slide up', 'fade in', 'pop', 'at once'], default: 'slide up', group: 'Behaviour' },
@@ -9396,15 +9539,38 @@ registerBehavior('uiFeed', {
     const patch = (s, r, o) => { const q = {}; for (const [k, v] of Object.entries(o)) q[K(k)] = v; if (has(s)) D(s).update(p.collection, r.id, q); else Object.assign(r, q); };
     const REACT = ['👍', '❤️', '😂', '😮', '😢', '😡'], REACT_WORD = { '👍': 'Like', '❤️': 'Love', '😂': 'Haha', '😮': 'Wow', '😢': 'Sad', '😡': 'Angry' };
     const domainOf = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./, ''); } catch { return String(u || '').replace(/^https?:\/\//, '').split('/')[0]; } };
-    let reelH = 0, reelIdx = 0, reelDrag = null, searchR = null, tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
+    let reelH = 0, reelIdx = 0, reelDrag = null, searchR = null, tab = 0, tabsR = [], inset = 0, tabShown = 0, tabNewT = -9, tabNew = [];
+    const TSt = new TabStrip(), tabScroll = new Map(), tabSeen = new Map(); // the tabs: their look, where each was scrolled to, the newest post seen in each
+    let known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
     const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
     const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
-    const posts = (s) => {
-      const T = TABS(), tw0 = T.length ? T[clamp(tab, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
+    /** The posts a tab holds (before hiding, search and threads). */
+    const tabPosts = (s, ti) => {
+      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
+      return P;
+    };
+    /** The page this feed is on (things above it scroll away), and how far up they have gone. */
+    const hostOf = (e) => (p.collapseAbove !== false && e.parentEnt?.ui && !e.parentEnt.dead ? e.parentEnt : null);
+    const boxOf = (e) => { const b = UK.box(e), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return b; }; // (the feed grows down into the room they leave)
+    /** Scrolling down first moves what is above the feed (stories, the post box) up out of the way, then the posts; scrolling back up brings it back once the posts are at the top. */
+    const collapse = (s, e, dt) => {
+      const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
+      const E = s.engine, k = uiK(E.safe) || 1, pr = uiBox(h, E.width, E.height, E.safe), fr = uiBox(e, E.width, E.height, E.safe);
+      let c = h._collapseBy === e ? h._collapseY || 0 : 0; const A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c);
+      if (A < 12) { h._collapseY = 0; return; }
+      if (goTop) c += (0 - c) * Math.min(1, dt * 10);
+      else if (S.v > 0 && c < A && S.max > 0) { const t = Math.min(S.v, A - c); c += t; S.v -= t; if (S.drag) S.drag.v0 -= t; }
+      else if (S.v < 0 && c > 0) { const t = Math.min(-S.v, c); c -= t; S.v += t; if (S.drag) S.drag.v0 += t; }
+      c = clamp(c, 0, A); if (c < 0.3) c = 0; h._collapseY = c; h._collapseBy = e; if (c > 0) h._clipChildren = true;
+    };
+    /** Switch tab: each tab keeps where it was scrolled to. */
+    const setTab = (s, i) => { const T = TABS(); if (!T[i] || i === tab) return; tabScroll.set(tab, S.v); tab = i; S.v = tabScroll.get(i) || 0; S.flick = 0; born.clear(); fresh = 0; known = null; tabNew[i] = false; if (p.tabVar) s.setVar(p.tabVar, T[i].label); };
+    const posts = (s) => {
+      let P = tabPosts(s, tab);
       const H = hid(s); if (H.posts.length || H.authors.length) P = P.filter((r) => !H.posts.includes(r.id) && !H.authors.includes(who(r)));
       if (p.pinnedFirst !== false && P.some((r) => truthy(F(r, 'pinned')))) P = [...P.filter((r) => truthy(F(r, 'pinned'))), ...P.filter((r) => !truthy(F(r, 'pinned')))];
       const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
@@ -9557,8 +9723,9 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.box(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
+        const b = boxOf(e); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
+        collapse(s, e, dt);
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
         if (p.openVar && s.vars[p.openVar] && !s.engine.editing && !sheetUp) { const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); const q = shown && findPost(s, s.vars[p.openVar]); if (q) { s.setVar(p.openVar, ''); openPost(s, q, 'post'); } } // a notification (or anything) asked for a post
         if (look0() === 'reels' && reelH > 0) { // one post per screen: a swipe moves one at a time
@@ -9568,11 +9735,21 @@ registerBehavior('uiFeed', {
         }
         if (Math.abs(S.v - lastV) > 0.5) scrollT = s.time; lastV = S.v;
         for (let i = bursts.length - 1; i >= 0; i--) if (s.time - bursts[i].t > 0.9) bursts.splice(i, 1);
-        if (goTop) { S.flick = 0; S.v += (0 - S.v) * Math.min(1, dt * 10); if (S.v < 2) { S.v = 0; goTop = false; } }
+        if (goTop) { S.flick = 0; S.v += (0 - S.v) * Math.min(1, dt * 10); const h0 = hostOf(e); if (S.v < 2 && !(h0 && h0._collapseBy === e && h0._collapseY > 1)) { S.v = 0; goTop = false; } }
         if (S.v < 30) fresh = 0;
         if (p.loadMoreMessage && S.max > 0 && S.v > S.max - 240 && askedAt !== total) { askedAt = total; s.send(p.loadMoreMessage); }
         me = e;
         if (s.engine.editing) return;
+        const TBs = TABS();
+        if (TBs.length > 1) {
+          TSt.input(s.engine.input, (q) => UK.local(s, e, q)); // (more tabs than fit: drag them sideways)
+          if (p.tabSwipe !== false && look0() !== 'reels') for (const u0 of s.engine.input.ups) { // a quick sideways swipe on the posts: the next or previous tab
+            const u = UK.local(s, e, u0), st0 = UK.local(s, e, { x: u0.sx, y: u0.sy }), dx = u.x - st0.x, dy = u.y - st0.y; if (u0.time > 0.6 || Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx) * 0.6 || u0.sx < 24 || st0.y < b.y + inset || !UK.in(st0, b) || sheetUp) continue;
+            const j = tab + (dx < 0 ? 1 : -1); if (TBs[j]) { s.engine.vibrate?.(6); setTab(s, j); }
+          }
+          if (p.tabDots !== false && s.time - tabNewT > 1.5) { tabNewT = s.time; const me0 = meOf(s).handle; // a dot on tabs with posts newer than the last time you looked at them
+            tabNew = TBs.map((_, i) => { const newest = tabPosts(s, i).reduce((m, r) => (who(r) === me0 || r._mine ? m : Math.max(m, +r._at || 0)), 0); if (i === tab || !tabSeen.has(i)) { tabSeen.set(i, Math.max(newest, tabSeen.get(i) || 0)); return false; } return newest > tabSeen.get(i); }); }
+        }
         const at = (y) => L.find((q) => y >= b.y + inset + q.y - S.v && y < b.y + inset + q.y - S.v + q.h);
         const hitAt = (pt) => { const it = at(pt.y); if (!it) return null; const lx = pt.x - b.x, ly = pt.y - (b.y + inset + it.y - S.v); return { it, hit: it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), lx, ly }; };
         if (menu && S.moved) menu = null;
@@ -9615,7 +9792,7 @@ registerBehavior('uiFeed', {
           if (!UK.in(t, b) || S.moved) continue;
           if (searchR && UK.in(t, searchR, 4)) { UK.tap(s, p); s.setVar(p.searchVar, ''); S.v = 0; continue; }
           if (pillR && UK.in(t, pillR, 4)) { UK.tap(s, p); goTop = true; fresh = 0; continue; }
-          if (t.y < b.y + inset) { const i = tabsR.findIndex((r) => UK.in(t, r)); if (i >= 0 && i !== tab) { UK.tap(s, p); tab = i; if (p.tabVar) s.setVar(p.tabVar, TABS()[i].label); S.v = 0; born.clear(); } continue; }
+          if (t.y < b.y + inset) { const i = TSt.hit(t.x, t.y); if (i >= 0) { UK.tap(s, p); TSt.tap(i); if (i === tab) goTop = true; else setTab(s, i); } continue; } // (the current tab again: back to the top)
           const it = at(t.y); if (!it) continue;
           const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
           if (k === 'like') { UK.tap(s, p); if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); }
@@ -9642,7 +9819,7 @@ registerBehavior('uiFeed', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
+        const b = boxOf(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
         const keepTheme = THEME; if (p.font) THEME = { ...THEME, font: /[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}", ${keepTheme.font}` : `${p.font}, ${keepTheme.font}` };
         try { this.paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC); } finally { THEME = keepTheme; }
       },
@@ -9657,19 +9834,10 @@ registerBehavior('uiFeed', {
         const mRad = (auto) => (+p.mediaRadius >= 0 ? +p.mediaRadius : auto);
         if (p.bg) { ctx.fillStyle = p.bg; ctx.fillRect(b.x, b.y, b.w, b.h); }
         // tabs along the top (they stay put while the posts scroll)
-        const TB = TABS(); inset = TB.length ? 46 : 0; tabsR = [];
+        const TB = TABS(); inset = TB.length ? Math.max(32, +p.tabHeight || 46) : 0; tabsR = [];
         if (TB.length) {
-          const tw = b.w / TB.length, st = p.tabStyle || 'underline', tc = p.tabText || txt;
-          if (st === 'segmented') { ctx.fillStyle = withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.1); UK.rr(ctx, b.x + 8, b.y + 6, b.w - 16, 34, 17); ctx.fill(); }
-          TB.forEach((t, i) => {
-            const x = b.x + tw * i, on = i === tab, r = { x, y: b.y, w: tw, h: inset }; tabsR.push(r);
-            ctx.font = `800 15px ${THEME.font}`; const lw = ctx.measureText(t.label).width;
-            if (on && st === 'underline') { ctx.fillStyle = acc; UK.rr(ctx, x + tw / 2 - lw / 2 - 4, b.y + inset - 4, lw + 8, 4, 2); ctx.fill(); }
-            if (on && st === 'pills') { ctx.fillStyle = acc; UK.rr(ctx, x + tw / 2 - lw / 2 - 14, b.y + 7, lw + 28, 32, 16); ctx.fill(); }
-            if (on && st === 'segmented') { ctx.fillStyle = card; UK.rr(ctx, x + (i === 0 ? 10 : 2), b.y + 8, tw - (i === 0 || i === TB.length - 1 ? 12 : 4), 30, 15); ctx.fill(); }
-            UK.text(ctx, t.label, x + tw / 2, b.y + inset / 2 + 1, { size: 15, weight: on ? 800 : 600, color: on && st === 'pills' ? '#fff' : on ? tc : withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.55) });
-          });
-          if (st === 'underline') { ctx.fillStyle = line; ctx.fillRect(b.x, b.y + inset - 1, b.w, 1); }
+          const st0 = p.tabStyle || 'short line', st = { underline: 'short line' }[st0] || st0, tc = p.tabText || txt, fil = ['pills', 'gradient', 'chips'].includes(st);
+          tabsR = TSt.draw(ctx, { x: b.x, y: b.y, w: b.w, h: inset }, TB.map((t, i) => ({ label: t.label, badgeDot: !!tabNew[i] })), clamp(tab, 0, TB.length - 1), { style: st, act: acc, idle: withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.55), text: tc, on: fil ? '#ffffff' : ['tabs', 'neon', 'boxed'].includes(st) ? acc : tc, line, size: +p.tabSize || 15, layout: p.tabLayout || 'auto', thumb: st === 'segmented' ? card : st === 'folder' ? tok(p.bg) || card : '', bar: tok(p.tabBg) || '', fade: tok(p.tabBg) || tok(p.bg) || '', now: s.time, snap: s.engine.editing, badgeColor: acc });
         }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + inset, b.w, b.h - inset); ctx.clip();
         const P = posts(s); L = []; let y = 0; FEED_AUTOPLAY.on = p.autoplay !== false;
@@ -10422,13 +10590,15 @@ registerBehavior('uiSearchBar', {
 // ---------------------------------------------------------------------------
 // Notifications (likes, comments, replies, reposts, quotes, mentions, follows, friend requests) and Friends, from the social graph
 const peopleFromPosts = (s, coll = 'Posts') => { const D = s.engine.data, rows = D.def(coll) ? D.rows(coll) : SAMPLE_POSTS(), m = new Map(); for (const r of rows) { const h = String(r.handle || '').replace(/^@/, '').toLowerCase(); if (h && !m.has(h)) m.set(h, { handle: h, name: r.author || h, verified: truthy(r.verified), likes: 0 }); if (h) m.get(h).likes += +r.likes || 0; } return m; };
-const tabsRow = (ctx, b, labels, cur, txt, sub, acc, line) => { const R = []; const w = b.w / labels.length; labels.forEach((l, i) => { const x = b.x + i * w; UK.text(ctx, l, x + w / 2, b.y + 22, { size: 14, weight: i === cur ? 800 : 600, color: i === cur ? txt : sub, maxW: w - 8 }); if (i === cur) { ctx.fillStyle = acc; ctx.font = `800 14px ${THEME.font}`; const lw = Math.min(w - 16, ctx.measureText(l).width + 10); UK.rr(ctx, x + w / 2 - lw / 2, b.y + 41, lw, 3, 1.5); ctx.fill(); } R.push({ x, y: b.y, w, h: 44 }); }); ctx.fillStyle = line; ctx.fillRect(b.x, b.y + 44, b.w, 1); return R; };
+/** The tab row along the top of Notifications and Friends, in a Top Nav style (sliding indicator). */
+const tabsRow = (ctx, b, labels, cur, txt, sub, acc, line, strip, style = 'short line', sc = null) => { const now = sc?.time || 0, snap = !!sc?.engine.editing; const st = TOP_STYLES.includes(style) ? style : 'short line'; return strip.draw(ctx, { x: b.x, y: b.y, w: b.w, h: 45 }, labels.map((l) => ({ label: l })), cur, { style: st, act: acc, idle: sub, text: txt, on: ['pills', 'gradient', 'chips'].includes(st) ? '#ffffff' : ['tabs', 'neon', 'boxed'].includes(st) ? acc : txt, line, size: 14, now, snap, thumb: st === 'segmented' || st === 'folder' ? (isDark(sc) ? '#2a2d36' : '#ffffff') : '' }); };
 const pillBtn = (ctx, x, y, w, label, filled, acc, txt, line) => { if (filled) { ctx.fillStyle = acc; UK.rr(ctx, x, y, w, 30, 15); ctx.fill(); } else { ctx.strokeStyle = line; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, 29, 15); ctx.stroke(); } UK.text(ctx, label, x + w / 2, y + 15, { size: 13, weight: 800, color: filled ? '#fff' : txt }); return { x, y, w, h: 30 }; };
 
 registerBehavior('uiActivity', {
   label: 'Notifications (social)', description: 'Your notifications, newest first: likes, comments, replies, reposts, quotes, @mentions, new followers and friend requests (Accept / Decline right there; Follow back for new followers). Likes on the same post are grouped. Tapping one opens the post or the person. Unread ones are marked; {notifications_unread} counts them for a badge.',
   params: [
     { key: 'tabs', label: 'Tabs: All, Mentions, Requests', type: 'bool', default: true },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
     { key: 'openPage', label: 'Tapping a post notification goes to page (with a Social Feed)', type: 'text', default: 'home' },
     { key: 'openVar', label: '…and puts the post id in variable (the feed opens it)', type: 'text', default: 'openPost', suggest: 'vars' },
     { key: 'profilePage', label: 'Tapping a person goes to page (sets {profile})', type: 'text', default: '' },
@@ -10439,7 +10609,7 @@ registerBehavior('uiActivity', {
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let tab = 0, tabsR = [], rows = [], btns = [], shownT = 0, fresh = null, total = 0;
+    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, tabsR = [], rows = [], btns = [], shownT = 0, fresh = null, total = 0;
     const items = (s) => {
       const G = s.engine.social, all = G.mine(), out = [], by = new Map();
       for (const n of all) {
@@ -10476,7 +10646,7 @@ registerBehavior('uiActivity', {
         const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), dark = isDark(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         const reqN = G.requests().length, top = p.tabs !== false ? 46 : 0;
-        tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', 'Mentions', reqN ? `Requests (${reqN})` : 'Requests'], tab, txt, sub, acc, line) : [];
+        tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', 'Mentions', reqN ? `Requests (${reqN})` : 'Requests'], tab, txt, sub, acc, line, TSt, p.tabStyle, s) : [];
         const L = items(s); rows = []; btns = [];
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + top, b.w, b.h - top); ctx.clip();
         if (!L.length) { UK.text(ctx, '🔔', b.cx, b.y + top + 70, { size: 40 }); UK.text(ctx, tab === 2 ? 'No friend requests' : p.empty || 'No notifications yet', b.cx, b.y + top + 120, { size: 15, weight: 700, color: sub }); }
@@ -10513,13 +10683,14 @@ registerBehavior('uiFriends', {
   params: [
     { key: 'postsCollection', label: 'People come from posts in', type: 'text', default: 'Posts', suggest: 'collections' },
     { key: 'profilePage', label: 'Tapping a person goes to page (sets {profile})', type: 'text', default: '' },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', info: TOP_STYLE_INFO },
     { key: 'chatPage', label: 'Message opens page (a Chat)', type: 'text', default: 'chat' },
     { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars' },
     ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let tab = 0, tabsR = [], rows = [], btns = [], total = 0;
+    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, tabsR = [], rows = [], btns = [], total = 0;
     const lists = (s) => {
       const G = s.engine.social, me = G.me().handle.toLowerCase(), people = peopleFromPosts(s, p.postsCollection), friends = G.friends(), req = G.requests(), sent = G.sentRequests();
       for (const q of [...friends, ...req, ...sent, ...G.followers(), ...G.following()]) if (!people.has(q.handle)) people.set(q.handle, { handle: q.handle, name: q.name || q.handle, likes: 0 });
@@ -10551,7 +10722,7 @@ registerBehavior('uiFriends', {
       drawUI(ctx, e, s) {
         const b = UK.box(e), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), Ls = lists(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
-        tabsR = tabsRow(ctx, b, [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line);
+        tabsR = tabsRow(ctx, b, [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line, TSt, p.tabStyle, s);
         rows = []; btns = [];
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + 46, b.w, b.h - 46); ctx.clip();
         let y = b.y + 46 - S.v; const H = 68;
@@ -12311,7 +12482,7 @@ registerBehavior('uiShowIf', {
     const scrollTick = (e, dt, s) => {
       const E = s.engine, inp = E.input, k = uiK(E.safe) || 1, b = uiBox(e, E.width, E.height, E.safe);
       maxS = overflow(s, e);
-      e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0;
+      e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0 || (e._collapseY || 0) > 0;
       const canScroll = maxS > 0.5, canPull = !!p.refreshMessage;
       if (canScroll || canPull) for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d) && !s.entities.some((q) => q._dock && q.visible && !q._parentHidden && hitTest(s, q, d.x, d.y))) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; } // (nothing below the screen and no pull-to-refresh: the page stays put)
       let y = e._scrollY || 0;

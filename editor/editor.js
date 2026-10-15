@@ -9,7 +9,7 @@ import { templates, templateInfo } from '../examples/templates.js';
 import * as cloud from './cloud.js';
 import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
-import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS } from './navstyles.js';
+import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS, TOP_STYLE_THUMBS } from './navstyles.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openSprite2D, newDrawing } from './sprite2d.js';
@@ -2540,6 +2540,11 @@ function control(target, path, spec) {
           if (v === 'raised center' && n % 2 === 0) toast(`Raised center needs an odd number of tabs (now ${n}): add or remove one`);
         } }, NAV_STYLE_THUMBS[v] ? h('img', { src: NAV_STYLE_THUMBS[v], alt: '' }) : null, h('span', {}, l + (v === 'raised center' && n % 2 === 0 ? ' (odd tabs)' : '')))));
         label.textContent = 'Style'; break;
+      }
+      if (/\.topStyle$/.test(path) && getPath(target(), path.replace(/\.topStyle$/, '.type')) === 'uiBottomNav') { // Top Nav: pick a top style by its picture
+        el = h('div', { class: 'nav-styles' }, opts.map(([v, l]) => h('button', { type: 'button', class: 'ns' + (v === (val || 'tabs') ? ' on' : ''), title: l, onclick: (e) => { set(v); for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); buzz(4); renderInspector(); } },
+          TOP_STYLE_THUMBS[v] ? h('img', { src: TOP_STYLE_THUMBS[v], alt: '' }) : h('span', { class: 'ns-more' }, '⋯'), h('span', {}, l))));
+        label.textContent = 'Top style'; break;
       }
       if (/\.position$/.test(path) && getPath(target(), path.replace(/\.position$/, '.type')) === 'uiBottomNav') { // Bottom Nav: at the bottom, or along the top (the object moves too)
         el = h('div', { class: 'seg' }, opts.map(([v, l]) => h('button', { type: 'button', class: v === (val || 'bottom') ? 'on' : '', onclick: () => {

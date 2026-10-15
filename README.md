@@ -282,6 +282,13 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **Search Bar** with recent searches, trending tags, people and filters. Feeds understand `#tag`, `@person`, `has:photo/video/gif/poll/link` and multi-word searches.
 - **Edit your comments** (marked *edited*), and edit posts from the opened post too.
 - The **Social** template has For you / Following tabs, an Explore page (search + grid) and a Reels tab.
+- **Feed tabs:**
+  - the 10 Top Nav styles;
+  - swipe sideways to change tab;
+  - each tab keeps its scroll position;
+  - new-post dots;
+  - tapping the current tab scrolls back to the top.
+- **Stories and the post box scroll away** as you scroll the feed, so the posts get the whole screen.
 - **Messaging:**
   - **Chat** (bubbles, avatars, times, big emoji, photos, double-tap ❤️, Sent / Sending…);
   - **Inbox** (conversations, unread counts and a `{unread}` badge);
@@ -1347,7 +1354,10 @@ The editor, home page and player check for a new release when they open, when yo
   - Notifications, messages and the touch controls (joystick, buttons, pause and mute) stay clear of the bars too. While a side menu or popup is open, the touch controls hide.
 - **Shapes, icons and fonts:** a shape gallery with 19 new shapes (speech bubble, ticket, price tag, ribbon, step arrow, bookmark, shield, wavy edge, squircle, cut corners, slanted, starburst, badge, blob, drop, leaf, lightning, moon, plus); **draw your own shape** or **paste an SVG**; **Save to My UI** to reuse your own UI pieces; 120+ searchable icons and **upload your own**; ~100 Google Fonts in groups with search and a live preview, and **upload your own font files**.
 - **Looks and styles for any UI:** **Looks…** (18 one-tap looks with previews: glass, neumorphic, pressed, neon, gradient border, retro, patterns…), **My Styles** (named styles that stay linked: update one and every element using it changes, on every level), and new shape effects: inner shadow, gradient border, sideways shadow, patterns (dots, stripes, grid, checks) and frosted glass that blurs what's behind.
-- **Top tabs:** the Bottom Nav can also run along the top (**Position: Top**, or a *Top Nav* preset), with all 16 styles, badges and settings, name-only tabs, and it stacks under an App Bar so pages start below both.
+- **Top tabs:** the Bottom Nav can also run along the top (**Position: Top**, or a *Top Nav* preset). It stacks under an App Bar so pages start below both.
+  - It has 10 **top styles** made for the top: tabs, short line, text, pills, chips, segmented, folder, gradient, neon and boxed. Or use any of the 16 bottom styles.
+  - The indicator slides and stretches between tabs. Too many tabs scroll sideways.
+  - It can show icons beside or above the names, and badges beside them.
 - **Side Menu, fully customizable:** put any UI inside it (a search bar, profile card, buttons, pictures, Coins & Gems…: **UI inside** under its items, or drag objects onto it). They stack under the header, after the items or above the footer, and show, slide, fade and get cut off with the menu. Items can also be **sliders**, **choices** (Light / Dark / Auto), **progress bars**, **buttons**, **website links**, **text**, **rows of numbers** and **space**, with a value on the right and their own colour. More looks: a card header, a centred header, picture shape and size, title size, header and background pictures, centred items, text weight, arrows, section title styles, colours for icons, selected text, sections and lines, and width as a % of the screen. While open, it (and any Side Bar, Bottom Sheet, Popup or Dropdown) shows over the page's UI and keeps its taps. Also: a **top bar** (✕ or ‹, a title, icon buttons with badges), **submenus** that slide in with a Back row, **folding sections** (remembered), items that **show only if** a variable says so or show **locked** until then, word badges like **"NEW"**, and **search** across every item.
   - When a bar slides away (Hide on pages, the Show / Hide Nav Bars node), its space is given back.
   - **Go under the nav bars** (UI Element card) lets a background fill the whole screen anyway; the bar's own **Keep other UI clear** setting turns it off for that bar.

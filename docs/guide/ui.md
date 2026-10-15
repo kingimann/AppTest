@@ -255,6 +255,17 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Messages:** holding a post, tapping a tag, and *load more* when you scroll near the end.
   - **"↑ New posts"** button when posts arrive while you're scrolled down (tap to jump up).
   - **End text** like "You're all caught up ✨".
+- **Feed features** (each turns on when a post has the field):
+  - **Polls:** `poll = Dark mode | Faster sync | Fewer bugs`, with `votes = 64, 21, 33`. Tap an option to vote. The bars fill in with percentages and your pick gets a ✓. The vote is stored in `voted` (1, 2…) and *Voting in a poll sends* a message.
+  - **Several pictures:** put them in `media` separated by `|` (or commas). Photos and cards become a swipeable carousel with dots and a *2/3* badge. Timeline shows a 2, 3 or 4 picture grid, and compact shows a ⧉ badge.
+  - **Live and video:** `live = yes` shows a red LIVE badge. `video = yes` adds a play button, and `duration` (e.g. 0:42) adds a time badge.
+  - **Link cards:** `link`, `link_title` and `link_image` show a preview card with the site name. Tapping it opens the link.
+  - **Reposted by:** `reposted_by = Maya Chen` puts "🔁 Maya Chen reposted" above the post.
+  - **Location and edited:** `location` shows 📍 next to the time, and `edited = yes` adds "· Edited".
+  - **Top comment:** `top_comment = Leo Park: Unreal colours!` shows one comment under photos and cards.
+  - **Follow button:** posts with `following = no` show a *Follow* pill. Tapping it follows that author on all their posts and sends *Following someone sends*.
+  - **Reactions:** hold the like button for 👍 ❤️ 😂 😮 😢 😡. Slide to one and let go. It's stored in `reaction`, and cards show *Love*, *Haha*…
+  - **⋯ menu:** Save post, Copy text, Not interested (hides the post), Mute @handle (hides all their posts) and Report post. Each has an **Undo** snackbar. Hidden posts and muted people are remembered on the device. Turn it off with *⋯ opens a menu*; *Reporting a post sends* and *Hiding or muting sends* send messages.
 - **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.

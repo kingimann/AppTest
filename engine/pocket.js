@@ -8845,14 +8845,15 @@ function makeScroller(axis = 'y') {
 }
 const SOCIAL_COLORS = { bg: ['Background', ''], card: ['Cards', '@card'], text: ['Text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'], like: ['Liked', '#f91880'] };
 const SAMPLE_POSTS = () => { const t = Date.now(); return [
-  { id: 'p1', author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️', color: '#4f7cff', likes: 1284, liked: false, comments: 48, reposts: 120, verified: true, _at: t - 7 * 60e3 },
-  { id: 'p2', author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', media: '', color: '', likes: 312, liked: true, comments: 27, reposts: 41, verified: false, _at: t - 2.5 * 3600e3 },
-  { id: 'p3', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, liked: false, comments: 63, reposts: 12, verified: false, _at: t - 26 * 3600e3 },
-  { id: 'p4', author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', media: '☄️', color: '#2b2d6e', likes: 5420, liked: false, comments: 410, reposts: 1900, verified: true, _at: t - 3 * 86400e3 },
+  { id: 'p1', author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, liked: false, comments: 48, reposts: 120, verified: true, location: 'Banff', top_comment: 'Leo Park: Unreal colours!', _at: t - 7 * 60e3 },
+  { id: 'p2', author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', media: '', color: '', likes: 312, liked: true, comments: 27, reposts: 41, verified: false, poll: 'Dark mode | Faster sync | Fewer bugs', votes: '64, 21, 33', voted: 0, _at: t - 2.5 * 3600e3 },
+  { id: 'p5', author: 'Ava Brooks', handle: 'avab', text: 'Going live with a sketching session — come say hi!', media: '🎨', color: '#c2185b', likes: 77, liked: false, comments: 9, reposts: 3, verified: false, live: true, following: false, _at: t - 40 * 60e3 },
+  { id: 'p3', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, liked: false, comments: 63, reposts: 12, verified: false, reposted_by: 'Maya Chen', edited: true, _at: t - 26 * 3600e3 },
+  { id: 'p4', author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', media: '', likes: 5420, liked: false, comments: 410, reposts: 1900, verified: true, link: 'https://example.com/comet', link_title: 'A new comet is coming', link_image: '☄️', _at: t - 3 * 86400e3 },
 ]; };
 
 registerBehavior('uiFeed', {
-  label: 'Social Feed', description: 'A scrolling feed of posts like social apps: a text timeline, a compact list, big photo posts, or cards. Like (or double-tap the picture), comment, repost, share and save; pull down to refresh. Posts come from a data collection (fields: author, handle, text, media, color, likes, liked, comments, reposts, verified; other names can be mapped), or sample posts.',
+  label: 'Social Feed', description: 'A scrolling feed of posts like social apps: a text timeline, a compact list, big photo posts, or cards. Like (or double-tap the picture), comment, repost, share and save; pull down to refresh. Posts come from a data collection (fields: author, handle, text, media, color, likes, liked, comments, reposts, verified, plus extras like poll, location, link, live and top comment; other names can be mapped). Polls, picture carousels, reactions, a ⋯ menu (hide, mute, report) and Follow buttons are built in, or sample posts.',
   params: [
     { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
     { key: 'look', label: 'Look', type: 'select', options: ['timeline', 'compact', 'photos', 'cards'], default: 'timeline', info: { timeline: 'Text first, small avatar, actions under each post.', compact: 'Tighter rows with a small picture on the right.', photos: 'A header, a big picture, then likes and the caption.', cards: 'Each post on a card with buttons along the bottom.' } },
@@ -8860,7 +8861,7 @@ registerBehavior('uiFeed', {
     { key: 'filter', label: 'Only show (e.g. author = Maya Chen)', type: 'text', default: '' },
     { key: 'searchVar', label: 'Search with variable (matches name, handle and text)', type: 'text', default: '', suggest: 'vars' },
     { key: 'max', label: 'Most posts shown (0 = all)', type: 'number', default: 0, step: 1 },
-    { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time.' },
+    { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |” and “Saved | saved = yes”. Blank = no tabs.' },
     { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
@@ -8916,27 +8917,45 @@ registerBehavior('uiFeed', {
     { key: 'tagMessage', label: 'Tapping a #tag or @name sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'loadMoreMessage', label: 'Near the end, send (load more)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'newPill', label: '“↑ New posts” button when posts arrive', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'moreMenu', label: '⋯ opens a menu (Save, Copy, Not interested, Mute, Report)', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'reactions', label: 'Hold like to pick a reaction (👍 ❤️ 😂 😮 😢 😡)', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'followButtons', label: '“Follow” next to people you don’t follow (following = no)', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'pollMessage', label: 'Voting in a poll sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'followMessage', label: 'Following someone sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'reportMessage', label: 'Reporting a post sends', type: 'text', default: 'report', suggest: 'messages', group: 'Behaviour' },
+    { key: 'hideMessage', label: 'Hiding or muting sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     ...colorParams({ ...SOCIAL_COLORS, repost: ['Reposted', '#00ba7c'], verified: ['Verified tick (blank = accent)', ''], cardBorder: ['Card border', ''], ring1: ['Avatar ring (start)', '#feda75'], ring2: ['Avatar ring (end)', '#d62976'], nameColor: ['Names (blank = text)', ''], handleColor: ['@handles and times (blank = grey)', ''], link: ['#tags and links (blank = accent)', ''], postBg: ['Post background (timeline, compact, photos)', ''], pressed: ['Pressed post', ''], tabText: ['Tabs', ''] }),
     ...UI_COMMON,
   ],
   create(p) {
     const S = makeScroller('y'), pops = new Map(), bursts = [], born = new Map(), open = new Set(); let L = [], total = 0, lastTap = null, sample = null, scrollT = -9, lastV = 0;
     const hPrev = new Map(); let pressedId = null, pressedT = 0, pressedPtr = null;
+    const cIdx = new Map(), cAnim = new Map(); let swipe = null, react = null, rpress = null, menu = null, menuR = [], hidden = null, me = null, skipTo = 0;
+    const HKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.' + (me?.name || 'feed');
+    const hid = (s) => hidden || (hidden = (() => { try { const o = JSON.parse(store.get(HKEY(s), '{}')); return { posts: o.posts || [], authors: o.authors || [] }; } catch { return { posts: [], authors: [] }; } })());
+    const saveHid = (s) => store.set(HKEY(s), JSON.stringify(hid(s)));
+    const who = (r) => String(F(r, 'handle') || F(r, 'author') || '').replace(/^@/, '');
+    const mediaList = (r) => { const m = String(F(r, 'media') ?? '').trim(); if (!m) return []; const parts = m.includes('|') ? m.split('|') : /^(https?:|data:|blob:|art:)/.test(m) ? m.split(/\s+/) : m.split(/\s*,\s*/); return parts.map((q) => q.trim()).filter(Boolean); };
+    const pollOf = (r) => { const o = String(F(r, 'poll') ?? '').split(/\s*\|\s*|\n/).map((q) => q.trim()).filter(Boolean); if (o.length < 2) return null; const v = String(F(r, 'votes') ?? '').split(/\s*[,|]\s*/).map((n) => +n || 0); while (v.length < o.length) v.push(0); return { o, v: v.slice(0, o.length), voted: +F(r, 'voted') || 0 }; };
+    const patch = (s, r, o) => { const q = {}; for (const [k, v] of Object.entries(o)) q[K(k)] = v; if (has(s)) D(s).update(p.collection, r.id, q); else Object.assign(r, q); };
+    const REACT = ['👍', '❤️', '😂', '😮', '😢', '😡'], REACT_WORD = { '👍': 'Like', '❤️': 'Love', '😂': 'Haha', '😮': 'Wow', '😢': 'Sad', '😡': 'Angry' };
+    const domainOf = (u) => { try { return new URL(String(u)).hostname.replace(/^www\./, ''); } catch { return String(u || '').replace(/^https?:\/\//, '').split('/')[0]; } };
     let tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
     const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
-    const K = (k) => MAP[k] || (k === 'time' ? '_at' : k), F = (r, k) => r[K(k)];
+    const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
     const posts = (s) => {
       const T = TABS(), tw = T.length ? T[clamp(tab, 0, T.length - 1)].where : '', filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      const H = hid(s); if (H.posts.length || H.authors.length) P = P.filter((r) => !H.posts.includes(r.id) && !H.authors.includes(who(r)));
       if (p.pinnedFirst !== false && P.some((r) => truthy(F(r, 'pinned')))) P = [...P.filter((r) => truthy(F(r, 'pinned'))), ...P.filter((r) => !truthy(F(r, 'pinned')))];
       const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
       if (q) P = P.filter((r) => ['author', 'handle', 'text'].some((k) => String(F(r, k) ?? '').toLowerCase().includes(q)));
       return +p.max > 0 ? P.slice(0, +p.max) : P;
     };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
-    const C = (k, d) => p[k] || d;
+    const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
     const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, like, share', photos: 'like, comment, share, save', cards: 'like, comment, share' };
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
@@ -8952,8 +8971,24 @@ registerBehavior('uiFeed', {
         if (goTop) { S.flick = 0; S.v += (0 - S.v) * Math.min(1, dt * 10); if (S.v < 2) { S.v = 0; goTop = false; } }
         if (S.v < 30) fresh = 0;
         if (p.loadMoreMessage && S.max > 0 && S.v > S.max - 240 && askedAt !== total) { askedAt = total; s.send(p.loadMoreMessage); }
+        me = e;
         if (s.engine.editing) return;
         const at = (y) => L.find((q) => y >= b.y + inset + q.y - S.v && y < b.y + inset + q.y - S.v + q.h);
+        const hitAt = (pt) => { const it = at(pt.y); if (!it) return null; const lx = pt.x - b.x, ly = pt.y - (b.y + inset + it.y - S.v); return { it, hit: it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), lx, ly }; };
+        if (menu && S.moved) menu = null;
+        // a finger down on a like (hold for reactions) or on a picture with several (swipe through them)
+        for (const d of UK.downs(s, e)) {
+          if (!UK.in(d, b) || d.y < b.y + inset || menu) continue; const H0 = hitAt(d); if (!H0?.hit) continue;
+          if (H0.hit.k === 'like' && p.reactions !== false) rpress = { ptr: d.id, t: s.time, id: H0.it.r.id, r: H0.it.r, sx: b.x + H0.hit.x + H0.hit.w / 2 - (look0() === 'cards' ? 0 : 0), sy: b.y + inset + H0.it.y - S.v + H0.hit.y };
+          if (H0.hit.k === 'media' && H0.hit.multi) swipe = { ptr: d.id, id: H0.it.r.id, x0: d.x, y0: d.y, dx: 0, w: H0.hit.w, n: H0.hit.multi, on: false };
+        }
+        if (swipe) { const q = UK.ptr(s, e, swipe.ptr); if (q) { const dx = q.x - swipe.x0; if (!swipe.on && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(q.y - swipe.y0)) swipe.on = true; if (swipe.on) { const i = cIdx.get(swipe.id) || 0; swipe.dx = (i === 0 && dx > 0) || (i === swipe.n - 1 && dx < 0) ? dx * 0.3 : dx; } } else { if (swipe.on) { const i = cIdx.get(swipe.id) || 0, ni = clamp(i + (swipe.dx < -swipe.w * 0.18 ? 1 : swipe.dx > swipe.w * 0.18 ? -1 : 0), 0, swipe.n - 1); cAnim.set(swipe.id, i - swipe.dx / swipe.w); cIdx.set(swipe.id, ni); skipTo = s.time + 0.15; } swipe = null; } }
+        if (rpress) { const q = UK.ptr(s, e, rpress.ptr); if (!q || S.moved) rpress = null; else if (s.time - rpress.t > 0.38) { react = { ...rpress, pick: -1 }; rpress = null; s.engine.vibrate?.(15); } }
+        if (react) {
+          const q = UK.ptr(s, e, react.ptr), step = 42, w = step * 6 + 12, x0 = clamp(react.sx - w / 2, b.x + 6, b.x + b.w - w - 6);
+          if (q) { const i = Math.floor((q.x - x0 - 6) / step); react.pick = q.y < react.sy + 30 && q.y > react.sy - 110 && i >= 0 && i < 6 ? i : -1; react.x0 = x0; }
+          else { if (react.pick >= 0) { const r = react.r, was = truthy(F(r, 'liked')); patch(s, r, { liked: true, reaction: REACT[react.pick], ...(was ? {} : { likes: (+F(r, 'likes') || 0) + 1 }) }); pops.set(r.id, s.time); if (p.likeMessage) s.send(p.likeMessage, r.id); UK.tap(s, p); } react = null; skipTo = s.time + 0.3; }
+        }
         { const d = UK.downs(s, e).find((q) => UK.in(q, b) && q.y > b.y + inset); if (d) { pressedPtr = d.id; pressedId = at(d.y)?.r.id ?? null; pressedT = s.time; } if (pressedPtr != null && (!UK.ptr(s, e, pressedPtr) || S.moved)) { pressedPtr = null; pressedId = null; } }
         // hold a post
         if (p.holdMessage) {
@@ -8962,21 +8997,34 @@ registerBehavior('uiFeed', {
         }
         for (const t of UK.taps(s, e)) {
           if (held) { held = false; continue; }
+          if (s.time < skipTo || react) continue;
+          if (menu) { // the ⋯ menu has every tap while it's open
+            const m = menuR.find((q) => UK.in(t, q)), r = menu.r; menu = null; if (!m) continue; UK.tap(s, p);
+            if (m.k === 'save') flip(s, r, 'saved');
+            else if (m.k === 'copy') { const tx = String(F(r, 'text') || ''); navigator.clipboard?.writeText(tx).catch(() => {}); s.snackbar?.('Copied to clipboard'); }
+            else if (m.k === 'hide' || m.k === 'mute') { const H = hid(s), list = m.k === 'hide' ? H.posts : H.authors, v = m.k === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(m.k === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); }
+            else if (m.k === 'report') { if (p.reportMessage) s.send(p.reportMessage, r.id); s.snackbar?.('Thanks, we’ll take a look'); }
+            continue;
+          }
           if (!UK.in(t, b) || S.moved) continue;
           if (pillR && UK.in(t, pillR, 4)) { UK.tap(s, p); goTop = true; fresh = 0; continue; }
           if (t.y < b.y + inset) { const i = tabsR.findIndex((r) => UK.in(t, r)); if (i >= 0 && i !== tab) { UK.tap(s, p); tab = i; if (p.tabVar) s.setVar(p.tabVar, TABS()[i].label); S.v = 0; born.clear(); } continue; }
           const it = at(t.y); if (!it) continue;
           const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
-          if (k === 'like') { UK.tap(s, p); like(s, r); }
+          if (k === 'like') { UK.tap(s, p); if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); }
           else if (k === 'repost') { UK.tap(s, p); flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
           else if (k === 'comment') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.commentMessage) s.send(p.commentMessage, r.id); }
           else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (navigator.share) navigator.share({ text: `${F(r, 'author') || ''}: ${F(r, 'text') || ''}` }).catch(() => {}); }
-          else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); }
+          else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); if (p.moreMenu !== false) menu = { r, sx: b.x + hit.x + hit.w, sy: b.y + inset + it.y - S.v + hit.y + hit.h }; }
+          else if (k === 'vote') { const P0 = pollOf(r); if (P0 && !P0.voted) { UK.tap(s, p); P0.v[hit.i]++; patch(s, r, { votes: P0.v.join(', '), voted: hit.i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[hit.i]); } }
+          else if (k === 'follow') { UK.tap(s, p); const hd = who(r); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); }
+          else if (k === 'link') { UK.tap(s, p); if (!s.engine.editing && /^https?:/.test(hit.url)) window.open(hit.url, '_blank', 'noopener'); }
           else if (k === 'expand') { UK.tap(s, p); open.add(r.id); }
           else if (k === 'tag') { UK.tap(s, p); const tg = hit.tag; if (/^https?:/.test(tg)) { if (!s.engine.editing) window.open(tg, '_blank', 'noopener'); } else { if (p.searchVar) s.setVar(p.searchVar, tg); if (p.tagMessage) s.send(p.tagMessage, tg); } }
           else if (k === 'media' && p.doubleTapLike !== false && lastTap && lastTap.id === r.id && s.time - lastTap.t < 0.32) { lastTap = null; if (!truthy(F(r, 'liked'))) like(s, r); else pops.set(r.id, s.time); bursts.push({ id: r.id, t: s.time }); s.engine.vibrate?.(18); }
           else if (k === 'media' && p.doubleTapLike !== false) lastTap = { id: r.id, t: s.time };
+          else if (k === 'media' && hit.multi) { /* swipe through the pictures */ }
           else if (k !== 'none') { if (has(s)) openRecord(s, p.collection, r); if (p.openPage) s.navTo(p.openPage); if (p.postMessage) s.send(p.postMessage, r.id); }
         }
       },
@@ -9019,6 +9067,7 @@ registerBehavior('uiFeed', {
         const likeMark = (x, yy, sz, on, key) => {
           const z = pop(key); ctx.save(); ctx.translate(x, yy); ctx.scale(z, z);
           const li = p.likeIcon || 'heart';
+          if (on && curR && !(curR === '❤️' && li === 'heart') && !(curR === '👍' && li === 'thumbs up')) { UK.text(ctx, curR, 0, 1, { size: sz * 1.05 }); ctx.restore(); return; }
           if (li === 'heart') { heartPath(ctx, 0, 0, sz); if (on) { ctx.fillStyle = likeC; ctx.fill(); } else { ctx.strokeStyle = look === 'photos' ? txt : sub; ctx.lineWidth = 1.8; ctx.stroke(); } }
           else if (li === 'star') UK.text(ctx, on ? '★' : '☆', 0, 1, { size: sz * 1.15, weight: 900, color: on ? '#ffc400' : sub });
           else { ctx.globalAlpha *= on ? 1 : 0.55; UK.text(ctx, li === 'fire' ? '🔥' : '👍', 0, 1, { size: sz * 0.95 }); }
@@ -9033,7 +9082,7 @@ registerBehavior('uiFeed', {
           if (!isPic(pic)) { ctx.save(); UK.rr(ctx, x - d / 2, yy - d / 2, d, d, avR(d)); ctx.clip(); let hsh = 0; for (const ch of name) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0; ctx.fillStyle = AVATAR_COLORS[hsh % AVATAR_COLORS.length]; ctx.fillRect(x - d / 2, yy - d / 2, d, d); ctx.restore(); UK.text(ctx, pic || name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''), x, yy + 1, { size: Math.round(d * 0.38), weight: 800, color: '#fff' }); }
         };
         const nameRow = (r, x, yy, maxW, withTime) => { // name, tick, @handle · time
-          const name = String(F(r, 'author') || 'Someone'), handle = String(F(r, 'handle') || '').replace(/^@/, ''), tm = withTime ? when(r) : '';
+          const name = String(F(r, 'author') || 'Someone'), handle = String(F(r, 'handle') || '').replace(/^@/, ''), tm = withTime ? [when(r), truthy(F(r, 'edited')) ? 'edited' : '', F(r, 'location') ? '📍 ' + F(r, 'location') : ''].filter(Boolean).join(' · ') : '';
           ctx.font = `800 ${NS}px ${THEME.font}`; const nw = Math.min(ctx.measureText(name).width, maxW * 0.6);
           UK.text(ctx, name, x, yy, { size: NS, weight: 800, color: nameC, align: 'left', maxW: maxW * 0.6 });
           const vv = F(r, 'verified'), isV = truthy(vv) || ['gold', 'grey', 'gray', 'green', 'blue'].includes(String(vv ?? '').toLowerCase());
@@ -9067,6 +9116,64 @@ registerBehavior('uiFeed', {
           });
         };
         const burst = (r, cx, cy, size, kind) => { for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9, z = Math.min(1, a * 5) * (a < 0.25 ? 1 + Math.sin(a / 0.25 * Math.PI) * 0.15 : 1); ctx.save(); ctx.globalAlpha *= a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(cx, cy); ctx.scale(z, z); if (kind === 'thumb' || p.likeIcon === 'thumbs up') UK.text(ctx, '👍', 0, 0, { size }); else if (p.likeIcon === 'fire') UK.text(ctx, '🔥', 0, 0, { size }); else if (p.likeIcon === 'star') UK.text(ctx, '★', 0, 0, { size, color: '#ffc400' }); else { heartPath(ctx, 0, 0, size); ctx.fillStyle = kind === 'white' ? '#fff' : likeC; ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.fill(); } ctx.restore(); } };
+        let curR = '';
+        // several pictures: a grid (timeline) or a carousel you swipe (photos, cards); video and LIVE badges
+        const gallery = (r, x, yy, w, hh, rad, mode, hits, ox, oy) => {
+          const M = mediaList(r), Cs = String(F(r, 'color') ?? '').split(/\s*[|,]\s*/).filter(Boolean), col = (i) => Cs[i % Math.max(1, Cs.length)] || '';
+          if (M.length <= 1 || mode === 'single') { dm(ctx, M[0] || '', col(0), x, yy, w, hh, rad); if (M.length > 1) { ctx.fillStyle = 'rgba(0,0,0,0.55)'; UK.rr(ctx, x + w - 24, yy + 4, 20, 16, 4); ctx.fill(); UK.text(ctx, '⧉', x + w - 14, yy + 12, { size: 11, color: '#fff' }); } }
+          else if (mode === 'grid') {
+            const n = Math.min(4, M.length), g = 2, C4 = n === 2 ? [[0, 0, 0.5, 1], [0.5, 0, 0.5, 1]] : n === 3 ? [[0, 0, 0.5, 1], [0.5, 0, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]] : [[0, 0, 0.5, 0.5], [0.5, 0, 0.5, 0.5], [0, 0.5, 0.5, 0.5], [0.5, 0.5, 0.5, 0.5]];
+            ctx.save(); UK.rr(ctx, x, yy, w, hh, rad); ctx.clip();
+            C4.forEach(([cx, cy, cw, ch], i) => { const X = x + cx * w + (cx ? g / 2 : 0), Y = yy + cy * hh + (cy ? g / 2 : 0), Wd = cw * w - (cw < 1 ? g / 2 : 0), Hd = ch * hh - (ch < 1 ? g / 2 : 0); dm(ctx, M[i], col(i), X, Y, Wd, Hd, 0); if (i === 3 && M.length > 4) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(X, Y, Wd, Hd); UK.text(ctx, '+' + (M.length - 4), X + Wd / 2, Y + Hd / 2, { size: 22, weight: 800, color: '#fff' }); } });
+            ctx.restore();
+          } else {
+            const i = cIdx.get(r.id) || 0, a0 = cAnim.get(r.id) ?? i, a = Math.abs(i - a0) < 0.002 ? i : a0 + (i - a0) * 0.22, drag = swipe && swipe.id === r.id && swipe.on ? swipe.dx : 0; cAnim.set(r.id, a);
+            ctx.save(); UK.rr(ctx, x, yy, w, hh, rad); ctx.clip();
+            for (let j = Math.max(0, Math.floor(a) - 1); j <= Math.min(M.length - 1, Math.ceil(a) + 1); j++) dm(ctx, M[j], col(j), x + (j - a) * w + drag, yy, w, hh, 0);
+            ctx.restore();
+            const lab = `${i + 1}/${M.length}`; ctx.font = `700 12px ${THEME.font}`; const lw = ctx.measureText(lab).width + 14; ctx.fillStyle = 'rgba(0,0,0,0.55)'; UK.rr(ctx, x + w - lw - 10, yy + 10, lw, 22, 11); ctx.fill(); UK.text(ctx, lab, x + w - lw / 2 - 10, yy + 21, { size: 12, weight: 700, color: '#fff' });
+            for (let j = 0; j < M.length; j++) { ctx.fillStyle = j === i ? '#ffffff' : 'rgba(255,255,255,0.5)'; ctx.beginPath(); ctx.arc(x + w / 2 + (j - (M.length - 1) / 2) * 12, yy + hh - 12, j === i ? 3.5 : 3, 0, Math.PI * 2); ctx.fill(); }
+          }
+          if (truthy(F(r, 'live'))) { ctx.fillStyle = '#ef4444'; UK.rr(ctx, x + 10, yy + 10, 44, 20, 4); ctx.fill(); UK.text(ctx, 'LIVE', x + 32, yy + 20.5, { size: 11, weight: 900, color: '#fff' }); }
+          if (truthy(F(r, 'video')) || truthy(F(r, 'live'))) { const R0 = Math.min(28, hh * 0.18); ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(x + w / 2, yy + hh / 2, R0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(x + w / 2 - R0 * 0.32, yy + hh / 2 - R0 * 0.45); ctx.lineTo(x + w / 2 + R0 * 0.5, yy + hh / 2); ctx.lineTo(x + w / 2 - R0 * 0.32, yy + hh / 2 + R0 * 0.45); ctx.closePath(); ctx.fill(); }
+          if (F(r, 'duration')) { const d = String(F(r, 'duration')); ctx.font = `700 11px ${THEME.font}`; const dw = ctx.measureText(d).width + 12; ctx.fillStyle = 'rgba(0,0,0,0.6)'; UK.rr(ctx, x + w - dw - 8, yy + hh - 26, dw, 18, 4); ctx.fill(); UK.text(ctx, d, x + w - dw / 2 - 8, yy + hh - 16.5, { size: 11, weight: 700, color: '#fff' }); }
+          if (hits) hits.push({ k: 'media', x: x - ox, y: yy - oy, w, h: hh, multi: mode === 'carousel' && M.length > 1 ? M.length : 0 });
+        };
+        // a poll: buttons to vote, then bars with percentages
+        const pollH = (r) => { const P0 = pollOf(r); return P0 ? P0.o.length * 42 + 22 : 0; };
+        const drawPoll = (r, x, yy, w, hits, ox, oy) => {
+          const P0 = pollOf(r); if (!P0) return; const tot = P0.v.reduce((a, b2) => a + b2, 0), grow = clamp((s.time - (pops.get(r.id + 'p') ?? -9)) / 0.5, 0, 1), k = P0.voted ? UK.ease(grow === 0 ? 1 : grow) : 0;
+          P0.o.forEach((o, i) => {
+            const by = yy + i * 42, mine = P0.voted === i + 1, pct = tot ? P0.v[i] / tot : 0;
+            if (P0.voted) {
+              ctx.fillStyle = withAlpha(String(acc).startsWith('#') ? acc : '#1d9bf0', mine ? 0.35 : 0.15); UK.rr(ctx, x, by, Math.max(8, w * pct * k), 36, 8); ctx.fill();
+              UK.text(ctx, o + (mine ? '  ✓' : ''), x + 12, by + 18.5, { size: TS - 1, weight: mine ? 800 : 600, color: txt, align: 'left', maxW: w - 70 });
+              UK.text(ctx, Math.round(pct * 100) + '%', x + w - 10, by + 18.5, { size: TS - 1, weight: mine ? 800 : 600, color: txt, align: 'right' });
+            } else {
+              ctx.strokeStyle = acc; ctx.lineWidth = 1.5; UK.rr(ctx, x + 0.75, by + 0.75, w - 1.5, 34.5, 18); ctx.stroke();
+              UK.text(ctx, o, x + w / 2, by + 18.5, { size: TS - 1, weight: 700, color: acc, maxW: w - 24 });
+              if (hits) hits.push({ k: 'vote', i, x: x - ox, y: by - oy, w, h: 36 });
+            }
+          });
+          UK.text(ctx, `${fmtN(tot)} vote${tot === 1 ? '' : 's'}${P0.voted ? '' : ' · tap to vote'}`, x, yy + P0.o.length * 42 + 8, { size: 13, weight: 500, color: sub, align: 'left' });
+        };
+        // a link preview card
+        const linkH = (r) => (F(r, 'link') ? 72 : 0);
+        const drawLink = (r, x, yy, w, hits, ox, oy) => {
+          const u = String(F(r, 'link') || ''); if (!u) return; const img = String(F(r, 'linkImage') || '🔗'), title = String(F(r, 'linkTitle') || domainOf(u));
+          ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, x + 0.5, yy + 0.5, w - 1, 71, 12); ctx.stroke();
+          ctx.save(); UK.rr(ctx, x + 0.5, yy + 0.5, 72, 71, 12); ctx.clip(); dm(ctx, isPic(img) ? img : '', isPic(img) ? '' : 'rgba(128,128,128,0.18)', x, yy, 72, 72, 0); if (!isPic(img)) UK.text(ctx, img, x + 36, yy + 37, { size: 28 }); ctx.restore();
+          UK.text(ctx, domainOf(u), x + 84, yy + 20, { size: 12, weight: 500, color: sub, align: 'left', maxW: w - 96 });
+          ctx.font = `700 ${TS - 1}px ${THEME.font}`; wrapLines(ctx, title, w - 96, TS - 1, 2).forEach((l, i) => UK.text(ctx, l, x + 84, yy + 40 + i * 18, { size: TS - 1, weight: 700, color: txt, align: 'left' }));
+          if (hits) hits.push({ k: 'link', url: u, x: x - ox, y: yy - oy, w, h: 72 });
+        };
+        const extrasH = (r) => (pollH(r) ? pollH(r) + 8 : 0) + (linkH(r) ? linkH(r) + 8 : 0);
+        const drawExtras = (r, x, yy, w, hits, ox, oy) => { if (pollH(r)) { drawPoll(r, x, yy, w, hits, ox, oy); yy += pollH(r) + 8; } if (linkH(r)) { drawLink(r, x, yy, w, hits, ox, oy); yy += linkH(r) + 8; } return yy; };
+        // the top comment under a post
+        const topC = (r) => { const t = String(F(r, 'topComment') || ''); if (!t) return null; const i = t.indexOf(':'); return i > 0 ? { name: t.slice(0, i).trim(), text: t.slice(i + 1).trim() } : { name: '', text: t }; };
+        // “Follow” next to someone you don’t follow yet
+        const followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following'));
+        const followPill = (r, right, cy, hits, ox, oy) => { ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText('Follow').width + 22; ctx.fillStyle = acc; UK.rr(ctx, right - w, cy - 14, w, 28, 14); ctx.fill(); UK.text(ctx, 'Follow', right - w / 2, cy + 1, { size: 13, weight: 800, color: '#fff' }); if (hits) hits.push({ k: 'follow', x: right - w - ox, y: cy - 16 - oy, w, h: 32 }); return w + 8; };
         const top = b.y + inset - S.v;
         if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
         if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
@@ -9080,7 +9187,8 @@ registerBehavior('uiFeed', {
           if (!born.has(r.id)) born.set(r.id, s.time + Math.min(idx, 6) * 0.06); idx++;
           const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at1 = at0 + dy;
           let at = at1;
-          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : '') : '';
+          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : F(r, 'repostedBy') ? `🔁 ${F(r, 'repostedBy')} reposted` : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : '') : '';
+          curR = truthy(F(r, 'liked')) ? String(F(r, 'reaction') || '') : '';
           const hp = hPrev.get(r.id), bgC = look !== 'cards' ? (pressedId === r.id && s.time - pressedT > 0.06 ? p.pressed || 'rgba(128,128,128,0.10)' : p.postBg) : '';
           if (bgC && hp) { ctx.fillStyle = bgC; ctx.fillRect(x0, at, W, hp); }
           ctx.save(); ctx.globalAlpha *= ek;
@@ -9089,12 +9197,15 @@ registerBehavior('uiFeed', {
             const AV = +p.avatarSize || 32, head = Math.max(44, AV + 22), mh = mediaH(W, 1), mr = mRad(0); ctx.font = `600 ${TS}px ${THEME.font}`;
             const T = textLines({ ...r, [K('text')]: `${name}  ${F(r, 'text') || ''}` }, W - pad * 2, 3);
             const actY = head + mh + 22;
-            h = actY + 22 + 22 + textH(T) + 22 + (p.time === 'hidden' ? 0 : 20) + 14;
+            const exP = extrasH(r), tcP = topC(r);
+            h = actY + 22 + 22 + textH(T) + (exP ? exP + 4 : 0) + (tcP ? 20 : 0) + 22 + (p.time === 'hidden' ? 0 : 20) + 14;
             if (at < b.y + b.h && at + h > b.y) {
               if (showAv) av(r, x0 + pad + AV / 2, at + head / 2, AV, avShape === 'circle' ? [p.ring1 || '#feda75', p.ring2 || '#d62976'] : null);
-              const nx = x0 + pad + (showAv ? AV + 10 : 0); nameRow(r, nx, at + head / 2, W - (nx - x0) - 40, false);
+              const nx = x0 + pad + (showAv ? AV + 10 : 0), loc = F(r, 'location'), fw = followable(r) ? followPill(r, x0 + W - (p.showMore !== false ? 40 : pad), at + head / 2, hits, x0, at) : 0;
+              nameRow(r, nx, at + head / 2 - (loc ? 8 : 0), W - (nx - x0) - 40 - fw, false);
+              if (loc) UK.text(ctx, String(loc), nx, at + head / 2 + 10, { size: 12, weight: 500, color: handleC, align: 'left', maxW: W - (nx - x0) - 40 - fw });
               if (p.showMore !== false) { icon('ui-more', x0 + W - 22, at + head / 2, 20, txt); hits.push({ k: 'more', x: W - 36, y: head / 2 - 14, w: 28, h: 28 }); }
-              dm(ctx, media, color, x0, at + head, W, mh, mr);
+              gallery(r, x0, at + head, W, mh, mr, 'carousel', hits, x0, at);
               burst(r, x0 + W / 2, at + head + mh / 2, 96, 'white');
               const ay = at + actY; let ix = x0 + pad + 10;
               for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && truthy(F(r, 'reposted')) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
@@ -9103,25 +9214,29 @@ registerBehavior('uiFeed', {
               if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${fmtN(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
               T.lines.forEach((l, i) => { if (i === 0 && l.startsWith(name)) { UK.text(ctx, name, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); ctx.font = `800 ${TS - 1}px ${THEME.font}`; UK.text(ctx, l.slice(name.length), x0 + pad + ctx.measureText(name).width, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); } else UK.text(ctx, l, x0 + pad, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); yy += LH; });
               if (T.more) { UK.text(ctx, 'more', x0 + pad, yy, { size: TS - 1, weight: 600, color: sub, align: 'left' }); hits.push({ k: 'expand', x: pad, y: yy - at - LH / 2, w: 80, h: LH }); yy += LH; }
+              if (exP) yy = drawExtras(r, x0 + pad, yy - LH / 2 + 4, W - pad * 2, hits, x0, at) + LH / 2 - 4;
+              if (tcP) { let cx2 = x0 + pad; if (tcP.name) { UK.text(ctx, tcP.name, cx2, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); ctx.font = `800 ${TS - 1}px ${THEME.font}`; cx2 += ctx.measureText(tcP.name + ' ').width; } UK.text(ctx, tcP.text, cx2, yy, { size: TS - 1, weight: 500, color: txt, align: 'left', maxW: x0 + W - pad - cx2 }); yy += 20; }
               yy += 3; if (A.includes('comment')) { UK.text(ctx, +F(r, 'comments') ? `View all ${fmtN(F(r, 'comments'))} comments` : 'Add a comment…', x0 + pad, yy, { size: TS - 1, weight: 500, color: sub, align: 'left' }); hits.push({ k: 'comment', x: pad, y: yy - at - 11, w: W - pad * 2, h: 22 }); } yy += 20;
               if (p.time !== 'hidden') UK.text(ctx, p.time === 'short (3h)' || !p.time ? when(r).replace(/^(\d+)([mhd])$/, (_, n, u) => `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[u]}${n === '1' ? '' : 's'} ago`) : when(r), x0 + pad, yy, { size: 11, weight: 500, color: sub, align: 'left' });
             }
-            hits.push({ k: 'media', x: 0, y: head, w: W, h: mh });
           } else if (look === 'cards') {
             const cw = W - 16, AV = +p.avatarSize || 40, head = Math.max(58, AV + 18), T = textLines(r, cw - pad * 2, 14), mh = hasM ? mediaH(cw, 0.62) : 0, mr = mRad(0), tH = textH(T) + (T.lines.length ? 8 : 0);
             const showCnt = p.showCounts !== false, btnH = A.length ? 44 : 0;
-            h = 8 + head + tH + mh + (showCnt ? 36 : 6) + (btnH ? 1 + btnH : 0) + 8;
+            const exC = extrasH(r), tcC = topC(r);
+            h = 8 + head + tH + exC + mh + (showCnt ? 36 : 6) + (btnH ? 1 + btnH : 0) + (tcC ? 52 : 0) + 8;
             if (at < b.y + b.h && at + h > b.y) {
               const cx = x0 + 8, cy = at + 8, ch = h - 16;
               if (p.cardShadow) { ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, +p.cardRadius || 0); ctx.fill(); ctx.restore(); }
               ctx.fillStyle = card; UK.rr(ctx, cx, cy, cw, ch, +p.cardRadius >= 0 ? +p.cardRadius : 12); ctx.fill();
               if (p.cardBorder) { ctx.strokeStyle = p.cardBorder; ctx.lineWidth = 1; UK.rr(ctx, cx + 0.5, cy + 0.5, cw - 1, ch - 1, +p.cardRadius || 0); ctx.stroke(); }
               if (showAv) av(r, cx + pad + AV / 2, cy + head / 2, AV);
-              const nx = cx + pad + (showAv ? AV + 10 : 0); nameRow(r, nx, cy + head / 2 - (p.time === 'hidden' ? 0 : 9), cw - (nx - cx) - 40, false);
-              if (p.time !== 'hidden') UK.text(ctx, `${when(r)} · 🌐`, nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left' });
+              const nx = cx + pad + (showAv ? AV + 10 : 0), fwC = followable(r) ? followPill(r, cx + cw - (p.showMore !== false ? 44 : pad), cy + head / 2, hits, x0, at) : 0;
+              nameRow(r, nx, cy + head / 2 - (p.time === 'hidden' ? 0 : 9), cw - (nx - cx) - 40 - fwC, false);
+              if (p.time !== 'hidden') UK.text(ctx, [when(r), truthy(F(r, 'edited')) ? 'edited' : '', F(r, 'location') ? '📍 ' + F(r, 'location') : '', '🌐'].filter(Boolean).join(' · '), nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left', maxW: cw - (nx - cx) - 40 - fwC });
               if (p.showMore !== false) { icon('ui-more', cx + cw - 24, cy + head / 2, 20, sub); hits.push({ k: 'more', x: cw - 30, y: 8 + head / 2 - 14, w: 28, h: 28 }); }
               let yy = cy + head + LH / 2; yy = drawText(T, cx + pad, yy, hits, x0, at);
-              const my = cy + head + tH; if (hasM) { dm(ctx, media, color, cx, my, cw, mh, mr); burst(r, cx + cw / 2, my + mh / 2, 80, 'thumb'); hits.push({ k: 'media', x: 8, y: my - at, w: cw, h: mh }); }
+              if (exC) drawExtras(r, cx + pad, cy + head + tH, cw - pad * 2, hits, x0, at);
+              const my = cy + head + tH + exC; if (hasM) { gallery(r, cx, my, cw, mh, mr, 'carousel', hits, x0, at); burst(r, cx + cw / 2, my + mh / 2, 80, 'thumb'); }
               let ry = my + mh + 18;
               if (showCnt) {
                 ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(cx + pad + 9, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '👍', cx + pad + 9, ry + 1, { size: 10 }); ctx.fillStyle = likeC; ctx.beginPath(); ctx.arc(cx + pad + 25, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '❤', cx + pad + 25, ry + 1, { size: 10, color: '#fff' });
@@ -9132,26 +9247,30 @@ registerBehavior('uiFeed', {
                 if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1); }
                 const by = ry + 18 + 22, part = cw / A.length;
                 A.forEach((k, i) => {
-                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? 'Liked' : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
+                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? (curR ? REACT_WORD[curR] || 'Liked' : 'Liked') : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
                   const mx = cx + part * i + part / 2; ctx.font = `700 14px ${THEME.font}`; const tw = A.length > 3 ? 0 : ctx.measureText(l).width, x1 = mx - (tw + (tw ? 26 : 18)) / 2;
                   ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
                   if (tw) UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
                   hits.push({ k: k === 'views' ? 'none' : k, x: 8 + part * i, y: by - at - 22, w: part, h: 44 });
                 });
               }
+              if (tcC) { const ty = cy + ch - 52 + 4; av({ author: tcC.name || 'Someone', [K('author')]: tcC.name || 'Someone' }, cx + pad + 14, ty + 22, 28); ctx.font = `500 13px ${THEME.font}`; const bw = Math.min(cw - pad * 2 - 40, Math.max(ctx.measureText(tcC.text).width, (ctx.font = `800 13px ${THEME.font}`, ctx.measureText(tcC.name).width)) + 24); ctx.fillStyle = withAlpha(String(txt).startsWith('#') ? txt : '#888888', 0.08); UK.rr(ctx, cx + pad + 34, ty + 2, bw, 40, 14); ctx.fill(); UK.text(ctx, tcC.name, cx + pad + 46, ty + 14, { size: 13, weight: 800, color: txt, align: 'left', maxW: bw - 20 }); UK.text(ctx, tcC.text, cx + pad + 46, ty + 31, { size: 13, weight: 500, color: txt, align: 'left', maxW: bw - 20 }); hits.push({ k: 'comment', x: cx + pad + 34 - x0, y: ty + 2 - at, w: bw, h: 40 }); }
             }
           } else { // timeline and compact
             const compact = look === 'compact', AV = +p.avatarSize || (compact ? 36 : 44), tx = x0 + pad + (showAv ? AV + 12 : 0), thumb = compact && hasM ? 64 : 0, tw = W - (tx - x0) - pad - (thumb ? thumb + 10 : 0);
             const T = textLines(r, tw, compact ? 2 : 14), mh = hasM && !compact ? mediaH(tw, 0.56) : 0, mr = mRad(16), actH = A.length ? (compact ? 30 : 38) : 8;
-            h = pad - 2 + NS + 8 + textH(T) + (mh ? 10 + mh : 0) + actH + 4;
+            const exT = extrasH(r);
+            h = pad - 2 + NS + 8 + textH(T) + (exT ? exT + 4 : 0) + (mh ? 10 + mh : 0) + actH + 4;
             if (compact && thumb) h = Math.max(h, pad + thumb + 10);
             if (at < b.y + b.h && at + h > b.y) {
               if (showAv) av(r, x0 + pad + AV / 2, at + pad - 2 + AV / 2, AV);
-              nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0), true);
+              const fwT = followable(r) && !thumb ? followPill(r, x0 + W - pad - (p.showMore !== false ? 26 : 0), at + pad + NS / 2, hits, x0, at) : 0;
+              nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0) - fwT, true);
               if (p.showMore !== false && !thumb) { icon('ui-more', x0 + W - pad - 8, at + pad + NS / 2, 18, sub); hits.push({ k: 'more', x: W - pad - 22, y: pad + NS / 2 - 14, w: 28, h: 28 }); }
               let yy = at + pad + NS + 8 + LH / 2 - 2; yy = drawText(T, tx, yy, hits, x0, at);
-              if (thumb) { dm(ctx, media, color, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10)); hits.push({ k: 'media', x: W - pad - thumb, y: pad, w: thumb, h: thumb }); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
-              if (mh) { const my = yy - LH / 2 + 6; dm(ctx, media, color, tx, my, tw, mh, mr); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); hits.push({ k: 'media', x: tx - x0, y: my - at, w: tw, h: mh }); }
+              let ey = yy - LH / 2 + 6; if (exT) ey = drawExtras(r, tx, ey, tw, hits, x0, at);
+              if (thumb) { gallery(r, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10), 'single', hits, x0, at); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
+              if (mh) { const my = ey; gallery(r, tx, my, tw, mh, mr, 'grid', hits, x0, at); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); }
               if (A.length) actionRow(r, tx, compact ? Math.min(tw + thumb, 240) : tw, at + h - (compact ? 18 : 22), hits, x0, at, compact ? 16 : 18);
               if (p.dividers !== false) { const dx = p.dividerInset ? tx : x0; ctx.fillStyle = line; ctx.fillRect(dx, at + h - 1, x0 + W - dx, 1); }
             }
@@ -9165,6 +9284,18 @@ registerBehavior('uiFeed', {
         total = y;
         pillR = null;
         if (fresh > 0 && p.newPill !== false && S.v > 30) { const label = `↑  ${fresh} new post${fresh === 1 ? '' : 's'}`; ctx.font = `800 14px ${THEME.font}`; const w = ctx.measureText(label).width + 32, x = b.cx - w / 2, yy = b.y + inset + 12; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3; ctx.fillStyle = acc; UK.rr(ctx, x, yy, w, 36, 18); ctx.fill(); ctx.restore(); UK.text(ctx, label, b.cx, yy + 19, { size: 14, weight: 800, color: '#fff' }); pillR = { x, y: yy, w, h: 36 }; }
+        if (react) { // the reaction bar over the like button
+          const step = 42, w = step * 6 + 12, x = react.x0 ?? clamp(react.sx - w / 2, b.x + 6, b.x + b.w - w - 6), yy = react.sy - 64;
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 4; ctx.fillStyle = card === 'transparent' ? '#ffffff' : card; UK.rr(ctx, x, yy, w, 52, 26); ctx.fill(); ctx.restore();
+          REACT.forEach((q, i) => { const big = i === react.pick; UK.text(ctx, q, x + 6 + step * i + step / 2, yy + 26 - (big ? 14 : 0), { size: big ? 40 : 28 }); if (big) UK.text(ctx, REACT_WORD[q], x + 6 + step * i + step / 2, yy - 26, { size: 12, weight: 800, color: txt }); });
+        }
+        menuR = [];
+        if (menu) { // the ⋯ menu
+          const r = menu.r, sv = truthy(F(r, 'saved')), IT = [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
+          const w = 220, rh = 44, hh = IT.length * rh + 12, x = clamp(menu.sx - w, b.x + 8, b.x + b.w - w - 8), yy = menu.sy + hh > b.y + b.h - 8 ? Math.max(b.y + inset + 8, menu.sy - hh - 30) : menu.sy;
+          ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8; ctx.fillStyle = card; UK.rr(ctx, x, yy, w, hh, 14); ctx.fill(); ctx.restore();
+          IT.forEach(([k, l, ic, danger], i) => { const ry = yy + 6 + i * rh; UK.text(ctx, ic, x + 24, ry + rh / 2, { size: 17 }); UK.text(ctx, l, x + 46, ry + rh / 2 + 1, { size: 15, weight: 600, color: danger ? '#f4212e' : txt, align: 'left', maxW: w - 56 }); menuR.push({ k, x, y: ry, w, h: rh }); });
+        }
         if (p.scrollbar && S.max > 0 && s.time - scrollT < 1) { const f = clamp(S.v / S.max, 0, 1), bh = Math.max(30, b.h * b.h / (total + 12)), a = clamp(1 - (s.time - scrollT - 0.6) / 0.4, 0, 1); ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 5, b.y + 2 + f * (b.h - bh - 4), 3, bh, 1.5); ctx.fill(); }
         ctx.restore();
       },

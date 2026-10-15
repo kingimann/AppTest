@@ -22,6 +22,7 @@ import { initData, dataEditor, ensureCollection } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
+import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -5643,6 +5644,12 @@ const BUILD_DEFAULTS = {
   // app stores (Codemagic)
   appId: '', storeIOS: true, storeAndroid: true, iosPublish: 'testflight', iosDevices: 'iphone', androidTrack: 'internal', playDraft: true,
   ascIntegration: 'codemagic', keystoreRef: 'keystore_reference', playGroup: 'google_play', buildOffset: 0, notifyEmail: '', storeFullscreen: true,
+  // store listing (App Store Connect, Google Play Console, itch.io page)
+  subtitle: '', shortDesc: '', keywords: '', category: '', privacyUrl: '', supportUrl: '', marketingUrl: '',
+  // Expo / EAS
+  localVersions: false, buildNumber: 1, appleId: '', ascAppId: '', appleTeamId: '', playKeyFile: false,
+  // itch.io
+  itchUser: '', itchGame: '',
 };
 const QUALITY = { battery: 1, balanced: 2, sharp: 3 };
 const clampN = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -5807,7 +5814,78 @@ function storeOpts() {
     iosPublish: o.iosPublish, iosDevices: o.iosDevices, androidTrack: o.androidTrack, playDraft: !!o.playDraft, ascIntegration: o.ascIntegration, keystoreRef: o.keystoreRef,
     playGroup: o.playGroup, buildOffset: +o.buildOffset || 0, notifyEmail: o.notifyEmail, fullscreen: o.storeFullscreen !== false,
     orientation: o.orientation && o.orientation !== 'any' ? o.orientation : orientationOf() === 'any' ? '' : orientationOf(),
-    iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')) };
+    iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')),
+    author: o.author, description: o.description, subtitle: o.subtitle, shortDesc: o.shortDesc, keywords: o.keywords, category: o.category || (root.settings?.app ? 'app-productivity' : 'game-casual'),
+    privacyUrl: o.privacyUrl, supportUrl: o.supportUrl, marketingUrl: o.marketingUrl, localVersions: !!o.localVersions, buildNumber: +o.buildNumber || 1,
+    appleId: o.appleId, ascAppId: o.ascAppId, appleTeamId: o.appleTeamId, playKeyFile: !!o.playKeyFile, itchUser: o.itchUser, itchGame: o.itchGame };
+}
+/** What the game uses that the stores' privacy questions ask about (for LISTING.md and the starter privacy policy). */
+function appFacts() {
+  const st = levelList()[0]?.settings || {}, txt = JSON.stringify(levelList().map((l) => l.entities || [])), perms = usedPermissions();
+  const has = (re) => re.test(txt);
+  return {
+    playfab: !!st.playfab?.titleId, playfabEmail: !!st.playfab?.titleId && has(/pfAddEmail|pfLoginEmail/), photon: !!st.photon?.appId,
+    supabase: !!(st.supabaseUrl && st.supabaseKey), supabaseAccounts: !!(st.supabaseUrl && st.supabaseKey) && (!!st.signInPage || has(/supaSign|"sign in"|"create account"/)),
+    onlineData: !!(st.supabaseUrl && st.supabaseKey) && (root.collections || []).some((c) => ['private to each person', 'shared with everyone'].includes(c.online)),
+    chat: has(/netChat/) || (root.collections || []).some((c) => c.online === 'shared with everyone'),
+    notifications: has(/phone notification|phoneNotify|scheduleNotif|notifySchedule/) || !!st.reminders?.length, camera: perms.includes('camera'), microphone: perms.includes('microphone'), location: perms.includes('location'),
+  };
+}
+const darken = (hex, k) => { const n = parseInt(hexOr(hex, '#3a8dff').slice(1).padEnd(6, '0').slice(0, 6), 16); return '#' + [16, 8, 0].map((sh) => Math.round(((n >> sh) & 255) * (1 - k)).toString(16).padStart(2, '0')).join(''); };
+const imgOf = (url) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+/** The pictures the stores ask for: App Store icon (no transparency), Google Play icon and feature graphic, itch.io cover. */
+async function storeArt(o, { itch = false } = {}) {
+  const so = storeOpts(), bg = hexOr(o.iconBg, '#3a8dff'), icon = await imgOf(await makeIcon(o, 1024)), font = themeOf(root.settings).font || 'system-ui, sans-serif';
+  const cv = (w, hh) => { const c = document.createElement('canvas'); c.width = w; c.height = hh; return [c, c.getContext('2d')]; };
+  const [a, ax] = cv(1024, 1024); ax.drawImage(icon, 0, 0, 1024, 1024);
+  const [p, px] = cv(512, 512); px.drawImage(icon, 0, 0, 512, 512);
+  const banner = (W, H) => { // icon on the left, the name and a line on the right, over the icon colour
+    const [c, x] = cv(W, H), g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, bg); g.addColorStop(1, darken(bg, 0.45)); x.fillStyle = g; x.fillRect(0, 0, W, H);
+    if (W / H < 1.6) { // a cover: icon in the middle, the name under it
+      const s = Math.round(H * 0.44), ix = Math.round((W - s) / 2), iy = Math.round(H * 0.12);
+      x.save(); x.shadowColor = 'rgba(0,0,0,0.35)'; x.shadowBlur = H * 0.06; x.shadowOffsetY = H * 0.02; x.beginPath(); x.roundRect(ix, iy, s, s, s * 0.22); x.fillStyle = bg; x.fill(); x.restore();
+      x.save(); x.beginPath(); x.roundRect(ix, iy, s, s, s * 0.22); x.clip(); x.drawImage(icon, ix, iy, s, s); x.restore();
+      let fs = Math.round(H * 0.12); x.fillStyle = '#ffffff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+      do { x.font = `900 ${fs}px ${font}`; fs -= 2; } while (x.measureText(so.name).width > W * 0.88 && fs > 12);
+      x.fillText(so.name, W / 2, H * 0.72, W * 0.9);
+      const sub = so.subtitle || so.shortDesc || (so.author ? 'by ' + so.author : ''); if (sub) { x.font = `600 ${Math.round(H * 0.05)}px ${font}`; x.fillStyle = 'rgba(255,255,255,0.85)'; x.fillText(sub, W / 2, H * 0.84, W * 0.9); }
+      return c;
+    }
+    const s = Math.round(H * 0.56), ix = Math.round(H * 0.18), iy = Math.round((H - s) / 2);
+    x.save(); x.shadowColor = 'rgba(0,0,0,0.35)'; x.shadowBlur = H * 0.06; x.shadowOffsetY = H * 0.02; x.beginPath(); x.roundRect(ix, iy, s, s, s * 0.22); x.fillStyle = bg; x.fill(); x.restore();
+    x.save(); x.beginPath(); x.roundRect(ix, iy, s, s, s * 0.22); x.clip(); x.drawImage(icon, ix, iy, s, s); x.restore();
+    const tx = ix + s + H * 0.12, tw = W - tx - H * 0.12; let fs = Math.round(H * 0.17);
+    x.fillStyle = '#ffffff'; x.textBaseline = 'middle';
+    do { x.font = `900 ${fs}px ${font}`; fs -= 2; } while (x.measureText(so.name).width > tw && fs > 12);
+    x.fillText(so.name, tx, H * 0.44, tw);
+    const sub = so.subtitle || so.shortDesc || (so.author ? 'by ' + so.author : ''); if (sub) { x.font = `600 ${Math.round(H * 0.075)}px ${font}`; x.fillStyle = 'rgba(255,255,255,0.85)'; x.fillText(sub, tx, H * 0.62, tw); }
+    return c;
+  };
+  const toPNG = (c) => dataBytes(c.toDataURL('image/png'));
+  if (itch) return { cover: await toPNG(banner(630, 500)) };
+  return { appStoreIcon: await opaquePNG(a, bg), playIcon: await toPNG(p), feature: await toPNG(banner(1024, 500)) };
+}
+/** store-listing/: the pictures, LISTING.md and privacy-policy.md, for the App Store and Google Play. */
+async function storeKitFiles(o, dir = 'store-listing/') {
+  const so = storeOpts(), f = appFacts(), art = await storeArt(o);
+  return [{ name: dir + 'LISTING.md', data: listingSheet(so, f) }, { name: dir + 'privacy-policy.md', data: privacyPolicy(so, f) },
+    { name: dir + 'app-store-icon-1024.png', data: art.appStoreIcon }, { name: dir + 'play-icon-512.png', data: art.playIcon }, { name: dir + 'play-feature-graphic-1024x500.png', data: art.feature }];
+}
+function downloadZip(files, name) { const zip = makeZip(files), a = h('a', { href: URL.createObjectURL(zip), download: name }); document.body.append(a); a.click(); a.remove(); return zip; }
+async function exportStoreKit() {
+  try { toast('Making the store kit…'); const o = buildOpts(), zip = downloadZip(await storeKitFiles(o, ''), slug(storeOpts().name) + '-store-listing.zip'); toast(`Store kit ready (${kb(zip.size)}): pictures, LISTING.md and a privacy policy`); }
+  catch (err) { toast('Could not make the store kit: ' + err.message); }
+}
+/** itch.io: the game as an HTML5 upload (index.html at the root), a cover image and the page settings. */
+async function exportItch() {
+  try {
+    toast('Making the itch.io upload…');
+    const o = buildOpts(), so = storeOpts(), b = await buildHTML({ native: true }), v = root.view || { width: 400, height: 700 }, port = (so.orientation || (v.height >= v.width ? 'portrait' : 'landscape')) === 'portrait';
+    const vp = port ? { w: Math.round(720 * v.width / v.height), h: 720 } : { w: 960, h: Math.round(960 * v.height / v.width) };
+    const inner = makeZip([{ name: 'index.html', data: b.html }]), art = await storeArt(o, { itch: true });
+    const zip = downloadZip([{ name: 'upload-this-to-itch.zip', data: new Uint8Array(await inner.arrayBuffer()) }, { name: 'cover-630x500.png', data: art.cover }, { name: 'ITCH-PAGE.md', data: itchPage({ ...so, orientation: port ? 'portrait' : 'landscape' }, vp) }], slug(so.name) + '-itch.zip');
+    noteBuild('itch', zip.size); toast(`itch.io kit ready (${kb(zip.size)}): upload upload-this-to-itch.zip as an HTML game. ITCH-PAGE.md has the page settings (${vp.w} × ${vp.h}).`);
+  } catch (err) { toast('Could not make the itch.io upload: ' + err.message); }
 }
 /** Which permissions the game asks for (Game Settings › Permissions, nodes and triggers): for the app's iOS / Android declarations. */
 function usedPermissions() {
@@ -5832,7 +5910,7 @@ async function exportStoreProject() {
     toast('Making the app project…');
     const o = buildOpts(), b = await buildHTML({ native: true });
     const [icon, fg, splash, bg] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o), makeSplash({ ...o, splashBg: o.iconBg }, 1024, 0, false)].map((p) => p.then(dataBytes)));
-    const zip = makeZip(storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }));
+    const zip = makeZip([...storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }), ...await storeKitFiles(o)]);
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-app.zip' }); document.body.append(a); a.click(); a.remove();
     noteBuild('store', zip.size); toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
   } catch (err) { toast('Could not make the app project: ' + err.message); }
@@ -5852,7 +5930,8 @@ async function exportExpoProject() {
     toast('Making the Expo project…');
     const o = buildOpts(), b = await buildHTML({ native: true });
     const [icon, fg, splash] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o)].map((p) => p.then(dataBytes)));
-    const zip = makeZip(expoFiles(so, { html: b.html, icon, fg, splash, notif: await notifIconPNG() }));
+    const kit = await storeKitFiles(o), opaqueIcon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data; // iOS rejects icons with transparency
+    const zip = makeZip([...expoFiles(so, { html: b.html, icon: opaqueIcon || icon, fg, splash, notif: await notifIconPNG() }), ...kit]);
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-expo.zip' }); document.body.append(a); a.click(); a.remove();
     noteBuild('expo', zip.size); toast(`Expo project ready (${kb(zip.size)}): npm install, then npx expo start to try it, or eas build. README.md has the steps.`);
   } catch (err) { toast('Could not make the Expo project: ' + err.message); }
@@ -6015,6 +6094,7 @@ const BUILD_TARGETS = [
   ['web', 'globe', 'Website', 'A folder for itch.io, GitHub Pages or Netlify. Installs to the Home Screen.', 'Download website (.zip)'],
   ['store', 'phone', 'App Store & Google Play', 'An app project that Codemagic builds and uploads for you.', 'Download app project (.zip)'],
   ['expo', 'bolt', 'Expo app', 'An Expo project to build and publish with EAS.', 'Download Expo project (.zip)'],
+  ['itch', 'gamepad', 'itch.io', 'An HTML5 upload for itch.io, with a cover image and the page settings.', 'Download for itch.io (.zip)'],
 ];
 const ICON_EMOJI = ['🎮', '🚀', '⭐', '👾', '🐱', '🐶', '🦄', '🐉', '🧩', '🏎️', '⚔️', '🏰', '💎', '🍀', '🎵', '📝', '✅', '💰', '📚', '❤️'];
 const ICON_BG = ['#3a8dff', '#6c5ce7', '#e84393', '#ff4757', '#ff7a1a', '#f5b700', '#22b573', '#00b8d9', '#111827', '#ffffff'];
@@ -6048,7 +6128,11 @@ function buildChecks(o, target, jump) {
     else add('ok', `App ID: ${so.appId}${o.appId ? '' : ' (suggested)'}`, !o.appId ? ['Keep it', () => { B().appId = so.appId; }] : null);
     if (target === 'store' && !so.ios && !so.android) add('bad', 'Pick iOS, Android or both', ['Both', () => { B().storeIOS = true; B().storeAndroid = true; }]);
     if (!o.author) add('warn', 'No “Made by” name (shown in the stores)', ['Add it', () => jump('author')]);
+    if (!String(o.privacyUrl || '').trim()) add('warn', 'No privacy policy link: both stores ask for one (the store kit has one to put online)', ['Add it', () => jump('privacyUrl')]);
+    for (const [k, l, n] of [['subtitle', 'Subtitle', LIMITS.subtitle], ['shortDesc', 'Short description', LIMITS.shortDesc], ['keywords', 'Keywords', LIMITS.keywords]]) if (String(o[k] || '').length > n) add('warn', `${l} is ${String(o[k]).length} letters: the store allows ${n}`, ['Shorten', () => jump(k)]);
+    if (name.length > LIMITS.name) add('warn', `The name is ${name.length} letters: store names can be ${LIMITS.name}`, ['Change', () => jump('title')]);
   }
+  if (target === 'itch' && !String(o.shortDesc || '').trim()) add('warn', 'No short description for the itch.io page', ['Write one', () => jump('shortDesc')]);
   return out;
 }
 function openBuildSettings() {
@@ -6056,7 +6140,7 @@ function openBuildSettings() {
   const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
-  const SEC_ID = { App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'File size': 'size', Testing: 'testing' };
+  const SEC_ID = { App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
   const sec = (title, ic, kids) => h('div', { class: 'build-sec', id: 'bs-' + (SEC_ID[title] || title) }, h('h4', {}, icon(ic), title), kids);
   const Cr = (path, spec) => { const el = C(path, spec); el.addEventListener('change', redo); return el; }; // a field that shows or hides others
   const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
@@ -6081,7 +6165,7 @@ function openBuildSettings() {
 
   const target = BUILD_TARGETS.some((t) => t[0] === o.target) ? o.target : 'html', T = BUILD_TARGETS.find((t) => t[0] === target);
   let showAll = false; try { showAll = localStorage.getItem('pocket.build.all') === '1'; } catch { /* storage unavailable */ }
-  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'] }[k] || []).includes(target); // sections that only matter for some kinds of build
+  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], listing: ['store', 'expo', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
   const jump = (key) => { // scroll to a field (or section) and highlight it
     const el = $(`.dialog [data-bkey="${key}"]`) || $(`.dialog #bs-${key}`); if (!el) return;
     el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
@@ -6099,10 +6183,10 @@ function openBuildSettings() {
         c.fix && h('button', { type: 'button', class: 'btn', onclick: () => { const r = c.fix[1](); if (r === undefined) { changed(); redo(); } } }, c.fix[0]))));
   };
   const last = o.last;
-  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject }[target];
+  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, itch: exportItch }[target];
   const homeMock = h('div', { class: 'home-mock' }, ['light', 'dark'].map((m) => h('div', { class: 'hm ' + m }, h('img', { class: 'hm-ic', alt: '' }), h('small', {}, (o.shortName || o.title || root.name || 'Game').slice(0, 12)))));
   makeIcon(o, 120).then((u) => homeMock.querySelectorAll('.hm-ic').forEach((i) => { i.src = u; }));
-  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', target === 'expo' ? 'Expo' : 'Stores'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
+  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
 
   openDialog('Build Settings', [
     h('h4', { class: 'bt-q' }, 'What are you making?'),
@@ -6195,6 +6279,37 @@ function openBuildSettings() {
         h('h4', { class: 'sub-h' }, 'Or with Expo'),
         h('p', { class: 'desc' }, 'Prefer Expo (expo.dev)? Download an Expo project instead: the game in a full-screen WebView, with phone notifications, haptics, permissions and the Android Back button through Expo’s modules (SDK 57). Try it in the Expo Go app with npx expo start, then build and publish with EAS (eas build, eas submit). Uses the same App ID, version, orientation, icon and splash as above.'),
         h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk, onclick: exportExpoProject }, icon('download'), 'Download Expo project (.zip)')),
+      ];
+    })()),
+    want('expo') && sec('Expo & EAS', 'bolt', [
+      h('p', { class: 'desc' }, 'Filled into eas.json, so “eas submit” knows where to upload. All optional.'),
+      C('appleId', { label: 'Apple ID (email)', def: '', placeholder: 'you@example.com' }),
+      C('ascAppId', { label: 'App Store Connect app ID', def: '', placeholder: '1234567890', infoText: 'App Store Connect › your app › App Information › Apple ID (a number).' }),
+      C('appleTeamId', { label: 'Apple Team ID', def: '', placeholder: 'AB12CD34EF' }),
+      C('playKeyFile', { label: 'Upload to Google Play with a key file', type: 'bool', infoText: 'Save the Google service account key as google-play-key.json in the project folder (it is kept out of git). Otherwise EAS uses the key stored in your expo.dev account.' }),
+      Cr('localVersions', { label: 'Set build numbers myself', type: 'bool', infoText: 'Off: EAS counts builds up by itself (recommended). On: the build number below goes into app.json.' }),
+      o.localVersions && C('buildNumber', { label: 'Build number (iOS buildNumber / Android versionCode)', type: 'number', step: 1, infoText: 'Raise it for every upload, even with the same version.' }),
+      h('p', { class: 'desc' }, 'Included: Apple’s privacy manifest, an App Store icon without transparency, the adaptive Android icon, and store-listing/ with the listing text and pictures.'),
+    ]),
+    want('itch') && sec('itch.io page', 'gamepad', [
+      h('p', { class: 'desc' }, 'The download has upload-this-to-itch.zip (the game, index.html at its root), a 630×500 cover and ITCH-PAGE.md with the page settings: viewport size, Mobile friendly, orientation and the fullscreen button.'),
+      C('itchUser', { label: 'itch.io username (for butler)', def: '', placeholder: 'your-name' }),
+      C('itchGame', { label: 'Project address on itch.io', def: '', placeholder: slug(o.title || root.name || 'game') }),
+    ]),
+    want('listing') && sec('Store listing', 'star', (() => {
+      const n = (k) => String(o[k] || '').length;
+      return [
+        h('p', { class: 'desc' }, target === 'itch' ? 'Text for the itch.io page.' : 'What App Store Connect and the Google Play Console ask for. It goes into store-listing/LISTING.md with the store pictures and the privacy answers for what your game uses.'),
+        target !== 'itch' && tag(C('subtitle', { label: `Subtitle (App Store, ${n('subtitle')}/${LIMITS.subtitle})`, def: '', placeholder: 'Dodge, collect, survive' }), 'subtitle'),
+        tag(C('shortDesc', { label: `Short description (Google Play, ${n('shortDesc')}/${LIMITS.shortDesc})`, def: '', placeholder: 'A one-line pitch' }), 'shortDesc'),
+        tag(C('keywords', { label: `Keywords / tags (${n('keywords')}/${LIMITS.keywords})`, def: '', placeholder: 'arcade, space, retro' }), 'keywords'),
+        C('category', { label: 'Category', type: 'select', options: [['', root.settings?.app ? 'App: Productivity' : 'Game: Casual'], ...STORE_CATEGORIES] }),
+        target !== 'itch' && [
+          tag(C('privacyUrl', { label: 'Privacy policy URL (both stores need one)', def: '', placeholder: 'https://…/privacy.html', infoText: 'The kit includes privacy-policy.md, written for what your game uses: put it online (GitHub Pages, your site) and paste its address here.' }), 'privacyUrl'),
+          C('supportUrl', { label: 'Support URL or email', def: '', placeholder: 'https://… or mailto:you@example.com' }),
+          C('marketingUrl', { label: 'Website (optional)', def: '' }),
+          h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: exportStoreKit }, icon('download'), 'Download store kit (.zip)')),
+        ],
       ];
     })()),
     sec('File size', 'download', [

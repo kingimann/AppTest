@@ -25,8 +25,12 @@ export function appJson(o) {
       name: o.name, slug: slugOf(o.name), version: semver(o.version), orientation: o.orientation === 'landscape' ? 'landscape' : o.orientation === 'portrait' ? 'portrait' : 'default',
       icon: './assets/icon.png', userInterfaceStyle: 'dark', backgroundColor: o.splashBg,
       splash: { image: './assets/splash.png', resizeMode: 'contain', backgroundColor: o.splashBg },
-      ios: { bundleIdentifier: o.appId, supportsTablet: o.iosDevices !== 'iphone', requireFullScreen: true, infoPlist },
-      android: { package: o.appId, adaptiveIcon: { foregroundImage: './assets/adaptive-icon.png', backgroundColor: o.iconBg }, permissions: androidPerms },
+      ios: { bundleIdentifier: o.appId, supportsTablet: o.iosDevices !== 'iphone', requireFullScreen: true, infoPlist,
+        ...(o.localVersions ? { buildNumber: String(Math.max(1, +o.buildNumber || 1)) } : {}),
+        // Apple's privacy manifest: no tracking; storage on the device is used for the game's own saves (reason CA92.1)
+        privacyManifests: { NSPrivacyTracking: false, NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] }] } },
+      android: { package: o.appId, adaptiveIcon: { foregroundImage: './assets/adaptive-icon.png', backgroundColor: o.iconBg }, permissions: androidPerms,
+        ...(o.localVersions ? { versionCode: Math.max(1, +o.buildNumber || 1) } : {}) },
       plugins: [['expo-notifications', { icon: './assets/notification-icon.png', color: o.notifyColor || '#4fa3ff' }], ['expo-splash-screen', { image: './assets/splash.png', backgroundColor: o.splashBg, imageWidth: 200 }], 'expo-screen-orientation'],
       extra: { madeWith: 'Pocket Engine' },
     },
@@ -36,12 +40,14 @@ export function appJson(o) {
 /** eas.json: build profiles (a test build you can install, and store builds) and store uploads. */
 export function easJson(o) {
   return {
-    cli: { version: '>= 16.0.0', appVersionSource: 'remote' },
+    cli: { version: '>= 16.0.0', appVersionSource: o.localVersions ? 'local' : 'remote' },
     build: {
       preview: { distribution: 'internal', android: { buildType: 'apk' }, ios: { simulator: false } },
-      production: { autoIncrement: true },
+      production: o.localVersions ? {} : { autoIncrement: true },
     },
-    submit: { production: { ios: {}, android: { track: o.androidTrack && o.androidTrack !== 'none' ? o.androidTrack : 'internal', ...(o.playDraft ? { releaseStatus: 'draft' } : {}) } } },
+    submit: { production: {
+      ios: { ...(o.appleId ? { appleId: o.appleId } : {}), ...(o.ascAppId ? { ascAppId: String(o.ascAppId) } : {}), ...(o.appleTeamId ? { appleTeamId: o.appleTeamId } : {}) },
+      android: { track: o.androidTrack && o.androidTrack !== 'none' ? o.androidTrack : 'internal', ...(o.playDraft ? { releaseStatus: 'draft' } : {}), ...(o.playKeyFile ? { serviceAccountKeyPath: './google-play-key.json' } : {}) } } },
   };
 }
 
@@ -195,11 +201,15 @@ small bridge in \`App.js\` gives it phone notifications, haptics and the Android
 1. Make a free account at [expo.dev](https://expo.dev), then \`npm install -g eas-cli\` and \`eas login\`.
 2. \`eas init\` links the project to your account.
 3. A test build you can install: \`eas build --profile preview --platform android\` (an .apk) or \`--platform ios\` (needs an Apple Developer account; EAS sets up certificates for you).
-4. Store builds: \`eas build --profile production --platform all\`. Build numbers go up by themselves.
+4. Store builds: \`eas build --profile production --platform all\`. ${o.localVersions ? `The build number is ${Math.max(1, +o.buildNumber || 1)} (set in Build Settings): raise it for every upload.` : 'Build numbers go up by themselves.'}
 
 ## Publish
 - \`eas submit --platform ios\` uploads the latest build to App Store Connect (TestFlight).
-- \`eas submit --platform android\` uploads to Google Play (the first upload must be done by hand in the Play Console; then it uses a Google service account, see expo.dev/accounts → credentials).
+- \`eas submit --platform android\` uploads to Google Play (the first upload must be done by hand in the Play Console; then it uses a Google service account${o.playKeyFile ? ': save its JSON key as **google-play-key.json** in this folder (it is in .gitignore)' : ', see expo.dev/accounts → credentials'}).
+${o.appleId || o.ascAppId ? `- iOS uploads go to ${o.ascAppId ? 'App Store Connect app ' + o.ascAppId : 'your App Store Connect account'}${o.appleId ? ' as ' + o.appleId : ''} (eas.json › submit).` : ''}
+
+## Store listing
+The **store-listing/** folder has the App Store icon (1024, no transparency), the Google Play icon and feature graphic, **LISTING.md** (text to paste, with each store's limits, plus the App Privacy and Data safety answers for what your game uses) and a starter **privacy-policy.md** to put online.
 
 ## Updating the game
 Make your changes in Pocket Engine and download the Expo project again; replace \`game/game-html.js\` (or the whole folder).
@@ -228,7 +238,7 @@ export function expoFiles(o, { html, icon, fg, splash, notif }) {
     { name: 'index.js', data: "import { registerRootComponent } from 'expo';\nimport App from './App';\n\nregisterRootComponent(App);\n" },
     { name: 'App.js', data: appJs(o) },
     { name: 'game/game-html.js', data: '// The whole game (Pocket Engine build). Replace this file to update the game.\nexport default ' + JSON.stringify(html) + ';\n' },
-    { name: '.gitignore', data: 'node_modules/\n.expo/\ndist/\nios/\nandroid/\n*.jks\n*.p8\n*.p12\n*.key\n*.mobileprovision\n' },
+    { name: '.gitignore', data: 'node_modules/\n.expo/\ndist/\nios/\nandroid/\n*.jks\n*.p8\n*.p12\n*.key\n*.mobileprovision\ngoogle-play-key.json\n' },
     { name: 'assets/icon.png', data: icon },
     { name: 'assets/adaptive-icon.png', data: fg || icon },
     { name: 'assets/splash.png', data: splash },

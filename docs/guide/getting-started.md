@@ -16,6 +16,7 @@ Your games are saved automatically on the device, in the browser's storage.
 
 The **Home** screen (*☰ → Home*) has, from the top:
 
+- **Your picture** (top right): your name and colour, and signing in to sync your games between devices ([Accounts](#/guide/accounts)).
 - **Continue:** the game or app you have open, with a picture of it, *Play* and *Keep editing*.
 - **Games | Apps:** a switch that splits everything below into two sections. It remembers your choice, and the first time it opens on the kind you have open.
 - **New game** (*New 2D game*, *New 3D game*; *New games start* picks portrait or landscape) or **New app** (*New app*, *To-do list*, *App with games*): one tap each.

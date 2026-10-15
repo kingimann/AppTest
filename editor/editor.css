@@ -1939,3 +1939,33 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .pb-tile .pb-ic svg.i { width: 19px; height: 19px; }
 .pb-tile b { font-size: 14px; }
 .pb-tile small { color: var(--muted); font-size: 12px; line-height: 1.3; }
+
+/* accounts */
+.av { display: inline-grid; place-items: center; border-radius: 50%; background: var(--c); color: #fff; font-weight: 800; letter-spacing: .02em; flex: none; }
+.av svg.i { width: 55%; height: 55%; }
+#home .hd-acct { position: relative; padding: 0; overflow: visible; }
+.av-dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; background: #2bb673; border: 2px solid var(--bg); }
+.av-dot.busy { background: #f0b429; } .av-dot.err { background: #e5484d; }
+.acct { display: flex; flex-direction: column; gap: 14px; }
+.acct-prof { display: flex; align-items: center; gap: 14px; }
+.acct-pf { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.acct-pf input { width: 100%; }
+.av-colors { display: flex; gap: 8px; flex-wrap: wrap; }
+.av-colors button { width: 28px; height: 28px; border-radius: 50%; background: var(--c); border: 2px solid transparent; box-shadow: 0 0 0 2px var(--panel) inset; }
+.av-colors button.on { border-color: var(--text); }
+.acct-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 16px; background: var(--g1); border: 1px solid var(--g0); }
+.acct-card > b { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+.acct-card p { margin: 0; line-height: 1.45; }
+.acct-card input { width: 100%; }
+.acct .muted, .acct-fold .muted { color: var(--muted); font-size: 13px; }
+.acct .btn.wide { width: 100%; justify-content: center; }
+.acct .btn.link { background: none; border: 0; color: var(--accent); align-self: center; padding: 4px; }
+.acct-msg { min-height: 0; font-size: 13px; color: var(--muted); }
+.acct-msg:empty { display: none; }
+.acct-msg.err { color: #ff6b6b; }
+.acct-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+.acct-or::before, .acct-or::after { content: ''; flex: 1; height: 1px; background: var(--g2); }
+.acct-fold { border-radius: 14px; border: 1px dashed var(--g2); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.acct-fold summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--muted); }
+.acct-fold[open] { display: flex; }
+.acct-fold input { width: 100%; margin-top: 8px; }

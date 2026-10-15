@@ -3441,8 +3441,8 @@ function drawEntity2D(ctx, e, vars, time) {
     e.bar = { ...br, fill: tok(br.fill), fill2: tok(br.fill2), bg: tok(br.bg), border: tok(br.border), labelColor: tok(br.labelColor), trail: tok(br.trail) };
     try { return drawEntity2D(ctx, e, vars, time); } finally { e.bar = br; }
   }
-  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.shadow))) || (tx && (isTok(tx.color) || isTok(tx.color2) || isTok(tx.outline) || isTok(tx.glow) || isTok(tx.shadowColor) || isTok(tx.bg) || isTok(tx.bgBorder))))) return drawEntity2DRaw(ctx, e, vars, time);
-  if (sh) e.shape = { ...sh, fill: tok(sh.fill), fill2: tok(sh.fill2), stroke: tok(sh.stroke), shadow: tok(sh.shadow) };
+  if (!((sh && (isTok(sh.fill) || isTok(sh.fill2) || isTok(sh.stroke) || isTok(sh.stroke2) || isTok(sh.shadow) || isTok(sh.inner) || isTok(sh.patternColor))) || (tx && (isTok(tx.color) || isTok(tx.color2) || isTok(tx.outline) || isTok(tx.glow) || isTok(tx.shadowColor) || isTok(tx.bg) || isTok(tx.bgBorder))))) return drawEntity2DRaw(ctx, e, vars, time);
+  if (sh) e.shape = { ...sh, fill: tok(sh.fill), fill2: tok(sh.fill2), stroke: tok(sh.stroke), stroke2: tok(sh.stroke2), shadow: tok(sh.shadow), inner: tok(sh.inner), patternColor: tok(sh.patternColor) };
   if (tx) e.text = { ...tx, color: tok(tx.color), color2: tok(tx.color2), outline: tok(tx.outline), glow: tok(tx.glow), shadowColor: tok(tx.shadowColor), bg: tok(tx.bg), bgBorder: tok(tx.bgBorder) };
   try { return drawEntity2DRaw(ctx, e, vars, time); } finally { if (sh) e.shape = sh; if (tx) e.text = tx; }
 }
@@ -3459,7 +3459,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
   if (s) {
     if (s.shadow) { ctx.shadowColor = s.shadow; ctx.shadowBlur = s.shadowBlur ?? 10; ctx.shadowOffsetX = s.shadowX || 0; ctx.shadowOffsetY = s.shadowY ?? 4; }
     else if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
-    ctx.beginPath();
+    const trace = () => { ctx.beginPath();
     switch (s.type) {
       case 'circle': ctx.arc(0, 0, s.r, 0, Math.PI * 2); break;
       case 'triangle': ctx.moveTo(0, -s.h / 2); ctx.lineTo(s.w / 2, s.h / 2); ctx.lineTo(-s.w / 2, s.h / 2); ctx.closePath(); break;
@@ -3496,6 +3496,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
         else ctx.rect(-s.w / 2, -s.h / 2, s.w, s.h);
       }
     }
+    }; trace();
     if (s.type === 'emoji') { // emoji sprites: thousands of ready-made characters, items and props
       ctx.font = `${Math.round(s.h * 0.92)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -3503,11 +3504,28 @@ function drawEntity2DRaw(ctx, e, vars, time) {
       ctx.fillText(s.emoji || '⭐', 0, s.h * 0.06);
     } else {
       const bw = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.w, bh = s.type === 'circle' || s.type === 'ring' ? s.r * 2 : s.h;
-      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); ctx.fill(s.type === 'ring' ? 'evenodd' : 'nonzero'); }
+      const rule = s.type === 'ring' ? 'evenodd' : 'nonzero';
+      if (s.fill) { ctx.fillStyle = paintOf(ctx, s.fill, s.fill2, s.gradDir, bw, bh); ctx.fill(rule); }
       if (s.shadow) { ctx.shadowColor = 'transparent'; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0; } // shadow under the fill only
+      if (s.pattern && s.pattern !== 'none') { // dots, stripes, a grid or checks over the fill
+        const g = Math.max(4, +s.patternSize || 12); ctx.save(); ctx.clip(rule); ctx.fillStyle = s.patternColor || 'rgba(255,255,255,0.14)'; ctx.strokeStyle = ctx.fillStyle; ctx.lineWidth = Math.max(1, g / 8);
+        const x0 = -bw / 2, y0 = -bh / 2;
+        if (s.pattern === 'dots') { for (let yy = y0 + g / 2; yy < y0 + bh + g; yy += g) for (let xx = x0 + g / 2; xx < x0 + bw + g; xx += g) { ctx.beginPath(); ctx.arc(xx, yy, g * 0.16, 0, Math.PI * 2); ctx.fill(); } }
+        else if (s.pattern === 'stripes') { ctx.lineWidth = g / 3; ctx.beginPath(); for (let k = -bh; k < bw + bh; k += g) { ctx.moveTo(x0 + k, y0); ctx.lineTo(x0 + k - bh, y0 + bh); } ctx.stroke(); }
+        else if (s.pattern === 'grid') { ctx.beginPath(); for (let xx = x0; xx <= x0 + bw; xx += g) { ctx.moveTo(xx, y0); ctx.lineTo(xx, y0 + bh); } for (let yy = y0; yy <= y0 + bh; yy += g) { ctx.moveTo(x0, yy); ctx.lineTo(x0 + bw, yy); } ctx.stroke(); }
+        else if (s.pattern === 'checks') { for (let yy = y0, r = 0; yy < y0 + bh; yy += g, r++) for (let xx = x0 + (r % 2) * g; xx < x0 + bw; xx += g * 2) ctx.fillRect(xx, yy, g, g); }
+        ctx.restore(); trace();
+      }
+      if (s.inner) { // an inner shadow: pressed in, or soft (neumorphic)
+        const ib = s.innerBlur ?? 12, far = 4000; ctx.save(); ctx.clip(rule);
+        const M = ctx.getTransform(), k = Math.hypot(M.a, M.b) || 1; // (shadow offsets are in screen pixels, not in the shape's units)
+        ctx.shadowColor = s.inner; ctx.shadowBlur = ib * k; ctx.shadowOffsetX = far * M.a + (+s.innerX || 0) * k; ctx.shadowOffsetY = far * M.b + (s.innerY ?? 4) * k;
+        ctx.translate(-far, 0); trace(); ctx.lineWidth = ib * 2 + 8; ctx.strokeStyle = '#000'; ctx.stroke(); // (the line is drawn far away: only its shadow lands inside)
+        ctx.restore(); trace();
+      }
       if (s.stroke) {
         if (s.dash) ctx.setLineDash([s.dash, s.dash * 0.75]);
-        ctx.strokeStyle = s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke();
+        ctx.strokeStyle = s.stroke2 ? paintOf(ctx, s.stroke, s.stroke2, s.strokeDir || 'diagonal', bw, bh) : s.stroke; ctx.lineWidth = s.lineWidth; ctx.stroke(); // (a gradient border too)
         if (s.dash) ctx.setLineDash([]);
       }
     }
@@ -4517,6 +4535,11 @@ function renderUI(engine, scene) {
       for (let q = e.parentEnt, n = 0, mine = e.id === engine.editSelected; q && n < 30; q = q.parentEnt, n++) if (q._clipChildren || (engine.editing && !mine && q.behaviors.some((b) => b.clipsKids))) { const r = q._clipRect || uiBox(q, W, H, engine.safe), R = q._clipRadius ?? (engine.editing ? q.shape?.radius || 0 : 0), sh = q._clipRect ? 0 : scene.uiShift || 0; ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(r.x - r.w / 2 + sh, r.y - r.h / 2, r.w, r.h, R * K); else ctx.rect(r.x - r.w / 2 + sh, r.y - r.h / 2, r.w, r.h); ctx.clip(); } // inside a Scroll View: cut off at its edges
       ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); ctx.globalAlpha = pa;
       for (const b of e.behaviors) if (b.drawUnder) { ctx.save(); b.drawUnder(ctx, e, scene); ctx.restore(); } // under the element (a panel's frosted glass)
+      if (+e.shape?.blur > 0 && !engine.editing && e.shape.type !== 'emoji') { // frosted glass: what's behind the shape, blurred
+        const sh = e.shape, round = sh.type === 'circle' || sh.type === 'ring', w = round ? sh.r * 2 : sh.w, hh = round ? sh.r * 2 : sh.h;
+        ctx.save(); ctx.beginPath(); if (round) ctx.arc(e.x, e.y, sh.r, 0, Math.PI * 2); else if (ctx.roundRect && sh.type !== 'ellipse') ctx.roundRect(e.x - w / 2, e.y - hh / 2, w, hh, sh.type === 'capsule' ? Math.min(w, hh) / 2 : cornerRadii(sh) || 0); else ctx.ellipse(e.x, e.y, w / 2, hh / 2, 0, 0, Math.PI * 2);
+        ctx.clip(); blurBehind(ctx, e, scene, e.x - w / 2, e.y - hh / 2, w, hh, Math.min(40, +sh.blur)); ctx.restore();
+      }
       const own = e.alpha; if (pa < 1) e.alpha = (own ?? 1) * pa; drawEntity2D(ctx, e, scene.vars, scene.time); e.alpha = own;
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)

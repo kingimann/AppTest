@@ -3393,6 +3393,13 @@ function renderInspector() {
       (root.settings?.uiOverlap === 'push apart') && C('overlap', { label: 'Allowed to overlap other UI', type: 'bool', def: false, structure: true, infoText: 'Game Settings › Screen keeps UI apart; this element may sit on top of others (badges, labels on pictures).' }),
       C('showWhen', { label: 'Show when', type: 'select', options: [['always', 'Always'], ['play', 'While playing'], ['title', 'Title screen'], ['paused', 'Paused'], ['over', 'Game over'], ['win', 'Win / level complete']], def: 'always' }),
       h('p', { class: 'desc' }, 'Make your own menus: turn on "Custom Screens" in Game Settings, then add Buttons that start, pause or restart the game.'),
+      (j.shape || j.text) && h('div', { class: 'btns' },
+        h('button', { class: 'btn primary', onclick: () => looksDialog(j) }, icon('brush'), 'Looks…'),
+        h('button', { class: 'btn', onclick: () => stylesDialog(j) }, icon('star'), j.styleName ? `Style: ${j.styleName}` : 'My Styles…')),
+      j.styleName && projStyles()[j.styleName] && h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => { const n = j.styleName, S = projStyles(); S[n] = styleOf(j); let c = 0; for (const e of styleUsers(n)) { if (e !== j) applyNamedStyle(e, S[n]); c++; } changed({ structure: true }); pushHistory(); toast(`Updated “${n}” · ${c} element${c === 1 ? '' : 's'}`); } }, icon('upload'), `Update “${j.styleName}” everywhere`),
+        h('button', { class: 'btn', onclick: () => { applyNamedStyle(j, projStyles()[j.styleName]); changed({ inspector: true }); pushHistory(); } }, icon('undo'), 'Reset to it'),
+        h('button', { class: 'btn', onclick: () => { delete j.styleName; changed({ inspector: true }); pushHistory(); } }, icon('unlink'), 'Unlink')),
       h('div', { class: 'btns' },
         h('button', { class: 'btn', onclick: () => { styleClipboard = styleOf(j); toast('Style copied'); } }, icon('copy'), 'Copy Style'),
         h('button', { class: 'btn', onclick: () => { if (!styleClipboard) return toast('Copy a style first'); pasteStyle(j, styleClipboard); changed({ inspector: true }); pushHistory(); toast('Style pasted'); } }, icon('paste'), 'Paste Style'),
@@ -3422,9 +3429,16 @@ function renderInspector() {
       t !== 'emoji' && j.shape.fill && C('shape.fill2', { label: 'Gradient to', type: 'color', optional: true, structure: true }),
       t !== 'emoji' && j.shape.fill2 && C('shape.gradDir', { label: 'Gradient direction', type: 'select', options: [['down', 'Top to bottom'], ['right', 'Left to right'], ['diagonal', 'Diagonal'], ['radial', 'From the centre']], def: 'down' }),
       C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
-      j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 })],
+      j.shape.shadow && [C('shape.shadowBlur', { label: 'Shadow softness', type: 'number', def: 10, range: [0, 60], step: 1 }), C('shape.shadowY', { label: 'Shadow distance', type: 'number', def: 4, range: [-30, 30], step: 1 }), C('shape.shadowX', { label: 'Shadow sideways', type: 'number', def: 0, range: [-30, 30], step: 1 })],
       !j.shape.shadow && C('shape.glow', { label: 'Glow', type: 'number', def: 0 }),
-      ], !!(j.shape.fill2 || j.shape.shadow || +j.shape.glow || +j.shape.dash)),
+      t !== 'emoji' && j.shape.stroke && C('shape.stroke2', { label: 'Outline gradient to', type: 'color', optional: true, structure: true }),
+      t !== 'emoji' && j.shape.stroke2 && C('shape.strokeDir', { label: 'Outline gradient direction', type: 'select', options: [['diagonal', 'Diagonal'], ['right', 'Left to right'], ['down', 'Top to bottom']], def: 'diagonal' }),
+      t !== 'emoji' && C('shape.inner', { label: 'Inner shadow', type: 'color', optional: true, structure: true, infoText: 'A shadow inside the edge: dark for a pressed-in look, light for a soft raised (neumorphic) one.' }),
+      t !== 'emoji' && j.shape.inner && [C('shape.innerBlur', { label: 'Inner shadow softness', type: 'number', def: 12, range: [0, 40], step: 1 }), C('shape.innerY', { label: 'Inner shadow distance', type: 'number', def: 4, range: [-20, 20], step: 1 })],
+      t !== 'emoji' && C('shape.pattern', { label: 'Pattern', type: 'select', options: [['', 'None'], ['dots', 'Dots'], ['stripes', 'Stripes'], ['grid', 'Grid'], ['checks', 'Checks']], def: '', structure: true }),
+      t !== 'emoji' && j.shape.pattern && [C('shape.patternColor', { label: 'Pattern colour', type: 'color', def: 'rgba(255,255,255,0.14)' }), C('shape.patternSize', { label: 'Pattern size', type: 'number', def: 12, range: [4, 60], step: 1 })],
+      j.ui && t !== 'emoji' && C('shape.blur', { label: 'Frosted glass (blur what is behind)', type: 'number', def: 0, range: [0, 40], step: 1, infoText: 'Use a see-through fill (e.g. white at 12%) to see it. Shows in Play.' }),
+      ], !!(j.shape.fill2 || j.shape.shadow || +j.shape.glow || +j.shape.dash || j.shape.inner || j.shape.pattern || +j.shape.blur || j.shape.stroke2)),
     ], { icon: iconFor(j), key: 'shape', summary: `${t === 'rect' ? 'Rectangle' : t} · ${t === 'circle' || t === 'ring' ? 'r ' + (j.shape.r ?? 20) : `${j.shape.w ?? 40}×${j.shape.h ?? 40}`}`, menu: removeMenu(() => { delete j.shape; changed({ structure: true }); }, 'shape') }));
   }
   if (j.sprite) {
@@ -3804,7 +3818,94 @@ function openFontPicker(onPick) {
     h('div', { class: 'font-list' }, FONTS.map(([v, n]) => row(v, n, false)), GOOGLE_FONTS.map((n) => row(googleFont(n), n, true))),
   ]);
 }
-const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'lineWidth', 'dash', 'radius', 'glow', 'shadow', 'shadowBlur', 'shadowY'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
+const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'stroke2', 'strokeDir', 'lineWidth', 'dash', 'radius', 'corners', 'glow', 'shadow', 'shadowBlur', 'shadowX', 'shadowY', 'inner', 'innerBlur', 'innerY', 'pattern', 'patternColor', 'patternSize', 'blur'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
+/** Shape keys that make up a look's effects: cleared when a look or a saved style is applied, so it comes out the same everywhere. */
+const LOOK_FX = ['fill2', 'gradDir', 'stroke', 'stroke2', 'strokeDir', 'lineWidth', 'dash', 'glow', 'shadow', 'shadowBlur', 'shadowX', 'shadowY', 'inner', 'innerBlur', 'innerY', 'pattern', 'patternColor', 'patternSize', 'blur'];
+/** One-tap looks for any UI element (Inspector › UI Element › Looks). */
+function uiLooks() {
+  const T = themeOf(root.settings || {}), a = T.accent || '#3a7bfd', pn = T.panel || '#1b1e2e';
+  return [
+    ['Flat', { fill: a, radius: 12 }],
+    ['Soft card', { fill: pn, radius: 16, shadow: 'rgba(0,0,0,0.28)', shadowBlur: 18, shadowY: 6 }],
+    ['Outline', { fill: '', stroke: a, lineWidth: 2, radius: 12 }, { color: a }],
+    ['Pill', { fill: a, radius: 999 }],
+    ['Glass', { fill: 'rgba(255,255,255,0.12)', stroke: 'rgba(255,255,255,0.3)', lineWidth: 1, radius: 18, blur: 14 }, { color: '#ffffff' }],
+    ['Soft (neumorphic)', { fill: '#23263a', radius: 18, shadow: 'rgba(0,0,0,0.55)', shadowBlur: 16, shadowY: 6, inner: 'rgba(255,255,255,0.10)', innerBlur: 6, innerY: 2 }, { color: '#e8eaf2' }],
+    ['Pressed in', { fill: '#1d2030', radius: 14, inner: 'rgba(0,0,0,0.65)', innerBlur: 10, innerY: 4 }, { color: '#c9cde0' }],
+    ['Neon', { fill: '#0b0d16', stroke: '#29e3ff', lineWidth: 2, radius: 14, glow: 16 }, { color: '#29e3ff' }],
+    ['Gradient', { fill: a, fill2: mixHex(a, '#e84393', 0.7), gradDir: 'diagonal', radius: 14, shadow: 'rgba(0,0,0,0.3)', shadowBlur: 14, shadowY: 4 }],
+    ['Sunset', { fill: '#ff7a1a', fill2: '#e84393', gradDir: 'diagonal', radius: 16 }, { color: '#ffffff' }],
+    ['Ocean', { fill: '#00b8d9', fill2: '#3a3dff', gradDir: 'down', radius: 16 }, { color: '#ffffff' }],
+    ['Gradient border', { fill: pn, stroke: '#4fa3ff', stroke2: '#e84393', strokeDir: 'diagonal', lineWidth: 2.5, radius: 16 }, { color: '#ffffff' }],
+    ['Retro', { fill: '#ffd23d', stroke: '#111111', lineWidth: 3, radius: 6, shadow: '#111111', shadowBlur: 0, shadowX: 5, shadowY: 5 }, { color: '#111111' }],
+    ['Dots', { fill: a, radius: 14, pattern: 'dots', patternColor: 'rgba(255,255,255,0.22)', patternSize: 12 }],
+    ['Stripes', { fill: '#ff4757', radius: 12, pattern: 'stripes', patternColor: 'rgba(255,255,255,0.16)', patternSize: 14 }, { color: '#ffffff' }],
+    ['Grid', { fill: '#101624', stroke: 'rgba(79,163,255,0.5)', lineWidth: 1, radius: 10, pattern: 'grid', patternColor: 'rgba(79,163,255,0.18)', patternSize: 14 }, { color: '#cfe3ff' }],
+    ['Paper', { fill: '#fdfaf3', stroke: '#e5dccb', lineWidth: 1, radius: 10, shadow: 'rgba(0,0,0,0.18)', shadowBlur: 10, shadowY: 3 }, { color: '#3a3226' }],
+    ['Clear', { fill: '', radius: 0 }],
+  ];
+}
+/** A small CSS picture of a look (or a saved style's shape). */
+function lookCSS(sh = {}) {
+  const st = [], bg = sh.fill2 ? `linear-gradient(${sh.gradDir === 'right' ? '90deg' : sh.gradDir === 'down' || !sh.gradDir ? '180deg' : '135deg'}, ${sh.fill}, ${sh.fill2})` : sh.fill || 'transparent';
+  const pat = sh.pattern === 'dots' ? `radial-gradient(${sh.patternColor || 'rgba(255,255,255,.2)'} 18%, transparent 20%) 0 0 / 10px 10px` : sh.pattern === 'stripes' ? `repeating-linear-gradient(45deg, ${sh.patternColor || 'rgba(255,255,255,.2)'} 0 4px, transparent 4px 10px)` : sh.pattern === 'grid' ? `linear-gradient(${sh.patternColor} 1px, transparent 1px) 0 0 / 10px 10px, linear-gradient(90deg, ${sh.patternColor} 1px, transparent 1px) 0 0 / 10px 10px` : sh.pattern === 'checks' ? `repeating-conic-gradient(${sh.patternColor || 'rgba(255,255,255,.2)'} 0 25%, transparent 0 50%) 0 0 / 14px 14px` : '';
+  st.push(`background:${pat ? pat + ', ' : ''}${bg}`);
+  st.push(`border-radius:${Math.min(+sh.radius || 0, 22)}px`);
+  if (sh.stroke) st.push(sh.stroke2 ? `border:${Math.max(1, +sh.lineWidth || 2)}px solid transparent;background:${pat ? pat + ', ' : ''}linear-gradient(${sh.fill || '#1b1e2e'},${sh.fill || '#1b1e2e'}) padding-box, linear-gradient(135deg, ${sh.stroke}, ${sh.stroke2}) border-box` : `border:${Math.max(1, +sh.lineWidth || 2)}px ${sh.dash ? 'dashed' : 'solid'} ${sh.stroke}`);
+  const sd = [];
+  if (sh.shadow) sd.push(`${sh.shadowX || 0}px ${sh.shadowY ?? 4}px ${sh.shadowBlur ?? 10}px ${sh.shadow}`);
+  else if (+sh.glow) sd.push(`0 0 ${sh.glow}px ${sh.stroke || sh.fill}`);
+  if (sh.inner) sd.push(`inset ${sh.innerX || 0}px ${sh.innerY ?? 4}px ${sh.innerBlur ?? 12}px ${sh.inner}`);
+  if (sd.length) st.push(`box-shadow:${sd.join(',')}`);
+  if (+sh.blur) st.push('backdrop-filter:blur(6px)');
+  return st.join(';');
+}
+/** Put a look (or a style's shape and text) on an element. */
+function applyLook(j, sh, tx) {
+  if (j.shape && j.shape.type !== 'emoji') {
+    for (const k of LOOK_FX) delete j.shape[k];
+    const { radius, ...rest } = sh;
+    Object.assign(j.shape, clone(rest));
+    if (radius != null && (j.shape.type === 'rect' || !j.shape.type)) j.shape.radius = radius >= 999 ? Math.round((j.shape.h || 40) / 2) : radius;
+  }
+  if (j.text) {
+    if (tx?.color) j.text.color = tx.color;
+    else if (/^#[0-9a-f]{6}$/i.test(sh.fill || '')) j.text.color = isLight(sh.fill) ? '#1b1b1b' : '#ffffff';
+    delete j.text.color2;
+  }
+}
+function looksDialog(j) {
+  const grid = h('div', { class: 'look-grid' }, uiLooks().map(([name, sh, tx]) => h('button', { type: 'button', class: 'look-tile', title: name, onclick: () => { applyLook(j, sh, tx); delete j.styleName; changed({ inspector: true }); pushHistory(); toast(`${name} look`); } },
+    h('span', { class: 'look-pv', style: lookCSS(sh) }, h('i', { style: `color:${tx?.color || (/^#[0-9a-f]{6}$/i.test(sh.fill || '') && isLight(sh.fill) ? '#1b1b1b' : '#fff')}` }, 'Aa')), h('small', {}, name))));
+  openDialog('Looks', [h('p', { class: 'desc' }, `Tap one to restyle “${j.name}”: colours, corners, border, shadow and effects. Fine-tune it after in Shape Renderer › More looks.`), grid]);
+}
+/** My Styles: named looks saved with the game. Elements using one stay linked: update the style and they all change. */
+const projStyles = () => (root.styles ||= {});
+function styleUsers(name) { const out = []; for (const lv of levelList()) for (const e of lv.entities || []) if (e.styleName === name) out.push(e); return out; }
+function applyNamedStyle(e, st) { if (e.shape && st.shape) applyLook(e, st.shape, null); if (e.shape && st.shape) Object.assign(e.shape, clone(st.shape)); for (const k of ['text', 'sprite']) if (e[k] && st[k]) Object.assign(e[k], clone(st[k])); }
+function stylesDialog(j) {
+  const S = projStyles(), list = h('div', { class: 'style-list' });
+  const draw = () => {
+    const names = Object.keys(S);
+    list.replaceChildren(...(names.length ? names.map((n) => {
+      const st = S[n], users = styleUsers(n).length;
+      return h('div', { class: 'style-row' + (j?.styleName === n ? ' on' : '') },
+        h('span', { class: 'look-pv sm', style: lookCSS(st.shape || {}) }, h('i', { style: `color:${st.text?.color || '#fff'}` }, 'Aa')),
+        h('div', { class: 'style-nm' }, h('b', {}, n), h('small', {}, users ? `${users} use${users === 1 ? 's' : ''} it` : 'not used yet')),
+        j && h('button', { type: 'button', class: 'btn', onclick: () => { applyNamedStyle(j, st); j.styleName = n; changed({ inspector: true }); pushHistory(); toast(`“${n}” style`); draw(); } }, 'Use'),
+        h('button', { type: 'button', class: 'tl-m', title: 'More', onclick: (ev) => popMenu(ev.currentTarget, [
+          j && { icon: 'upload', label: `Update from “${j.name}”`, k: 'changes everything using it', fn: () => { S[n] = styleOf(j); j.styleName = n; let c = 0; for (const e of styleUsers(n)) { if (e !== j) applyNamedStyle(e, S[n]); c++; } changed({ structure: true }); pushHistory(); toast(`Updated “${n}” · ${c} element${c === 1 ? '' : 's'}`); draw(); } },
+          { icon: 'select', label: 'Select one using it', fn: () => { const u = styleUsers(n).find((e) => project.entities.includes(e)); if (u) { closeLayer(); select(u.id); } else toast('Nothing on this level uses it'); } },
+          { icon: 'edit', label: 'Rename…', fn: () => { const nn = prompt('New name', n)?.trim(); if (!nn || nn === n || S[nn]) return; S[nn] = S[n]; delete S[n]; for (const e of styleUsers(n)) e.styleName = nn; changed({ inspector: true }); pushHistory(); draw(); } },
+          { icon: 'trash', label: 'Delete', danger: true, k: 'elements keep their look', fn: () => { for (const e of styleUsers(n)) delete e.styleName; delete S[n]; changed({ inspector: true }); pushHistory(); draw(); } }].filter(Boolean)) }, icon('more')));
+    }) : [h('p', { class: 'desc' }, 'No styles yet. Style an element the way you like, then save it here to use on others.')]));
+  };
+  draw();
+  openDialog('My Styles', [
+    h('p', { class: 'desc' }, 'Saved looks for your UI (colours, corners, border, shadow, effects, font and text colour). Elements using a style stay linked: update the style and every one of them changes, on every level.'),
+    j && h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn primary', onclick: () => { const n = prompt('Name for this style (e.g. Primary Button, Card, Title)', j.name || '')?.trim(); if (!n) return; if (S[n] && !confirm(`Replace the “${n}” style?`)) return; S[n] = styleOf(j); j.styleName = n; changed({ inspector: true }); pushHistory(); toast(`Saved “${n}”`); draw(); } }, icon('plus'), `Save “${j.name}” as a style…`)),
+    list]);
+}
 let styleClipboard = null;
 function styleOf(j) { const out = {}; for (const [k, keys] of Object.entries(STYLE_KEYS)) if (j[k]) out[k] = Object.fromEntries(keys.filter((q) => j[k][q] !== undefined).map((q) => [q, j[k][q]])); return clone(out); }
 function pasteStyle(j, st) { for (const [k, v] of Object.entries(st)) if (j[k]) Object.assign(j[k], clone(v)); }

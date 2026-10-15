@@ -2066,7 +2066,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf']);
+const EDIT_PREVIEW = new Set(['uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -4648,6 +4648,7 @@ function renderUI(engine, scene) {
   if (!engine.editing || engine.showUI) {
     const screen = engine.paused ? 'paused' : scene.state, V = engine.editing && engine.uiView;
     if (V) { ctx.save(); ctx.translate(W / 2 + V.x, H / 2 + V.y); ctx.scale(V.z, V.z); ctx.translate(-W / 2, -H / 2); } // the editor's UI zoom
+    let tops = null;
     for (const e of uiDrawOrder(scene)) {
       if (!e.ui || !e.visible || e.dead || e._parentHidden || e._clipHidden) continue;
       if (scene.uiDim && scene.uiDim.e === e && scene.uiDim.a > 0.01 && !engine.editing) { ctx.save(); ctx.globalAlpha = scene.uiDim.a; ctx.fillStyle = '#000'; if (V) ctx.fillRect(-W, -H, W * 3, H * 3); else ctx.fillRect(0, 0, W, H); ctx.restore(); } // dim what's behind a side bar / popup
@@ -4681,7 +4682,9 @@ function renderUI(engine, scene) {
       if (e.minimap) { ctx.translate(e.x, e.y); drawMinimap(ctx, e, scene); }
       for (const b of e.behaviors) if (b.drawUI) { ctx.save(); b.drawUI(ctx, e, scene); ctx.restore(); } // components that draw themselves (Bottom Nav)
       ctx.restore();
+      if (e.behaviors.some((b) => b.drawTop)) (tops ||= []).push({ e, o, K });
     }
+    for (const { e, o, K } of tops || []) for (const b of e.behaviors) if (b.drawTop) { ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); b.drawTop(ctx, e, scene, { o, K, W, H }); ctx.restore(); } // tooltips and popover menus sit above every other UI
     if (V) ctx.restore();
   }
   drawSnackbar(ctx, scene, engine, W, H);
@@ -8346,6 +8349,429 @@ const UI_COMMON = [
   { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
 ];
 const colorParams = (o) => Object.entries(o).map(([key, [label, def]]) => ({ key, label, type: 'color', default: def, group: 'Colours' }));
+
+// ---- more UI: tooltip, popover menu, spinner, skeleton, chips, avatar, banner, steps, divider ----
+const TIP_STYLES = { dark: ['#1f2430', '#ffffff'], light: ['#ffffff', '#1c1f26'], accent: ['#3a7bfd', '#ffffff'], warning: ['#ffb020', '#1c1f26'] };
+/** A speech-bubble card beside a box (local coordinates): above / below / left / right, kept on screen, with a little arrow. */
+function drawBubble(ctx, b, lines, { place = 'auto', bg = '#1f2430', fg = '#ffffff', title = '', size = 14, arrow = true, k = 1, view, pad = 10 } = {}) {
+  const lh = Math.round(size * 1.35), tw = Math.max(...lines.map((l) => { ctx.font = `600 ${size}px ${THEME.font}`; return ctx.measureText(l).width; }), title ? (ctx.font = `800 ${size}px ${THEME.font}`, ctx.measureText(title).width) : 0);
+  const w = Math.ceil(tw + pad * 2.4), h = Math.ceil((lines.length + (title ? 1 : 0)) * lh + pad * 1.6), gap = 10;
+  const V = view || { x0: -1e4, y0: -1e4, x1: 1e4, y1: 1e4 };
+  let side = place === 'auto' ? (b.y - h - gap > V.y0 + 4 ? 'above' : 'below') : place;
+  if (side === 'left' && b.x - w - gap < V.x0) side = 'right'; else if (side === 'right' && b.x + b.w + w + gap > V.x1) side = 'left';
+  let x = side === 'left' ? b.x - w - gap : side === 'right' ? b.x + b.w + gap : b.cx - w / 2;
+  let y = side === 'above' ? b.y - h - gap : side === 'below' ? b.y + b.h + gap : b.cy - h / 2;
+  x = clamp(x, V.x0 + 6, Math.max(V.x0 + 6, V.x1 - w - 6)); y = clamp(y, V.y0 + 6, Math.max(V.y0 + 6, V.y1 - h - 6));
+  ctx.save(); ctx.globalAlpha *= clamp(k, 0, 1);
+  const ox = side === 'above' || side === 'below' ? b.cx : side === 'left' ? x + w : x, oy = side === 'above' ? y + h : side === 'below' ? y : b.cy; // where it grows from
+  const z = 0.85 + 0.15 * UK.ease(k); ctx.translate(ox, oy); ctx.scale(z, z); ctx.translate(-ox, -oy);
+  ctx.shadowColor = 'rgba(0,0,0,0.28)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = bg;
+  UK.rr(ctx, x, y, w, h, 10); ctx.fill(); ctx.shadowColor = 'transparent';
+  if (arrow) {
+    const a = 7; ctx.beginPath();
+    if (side === 'above') { const ax = clamp(b.cx, x + 14, x + w - 14); ctx.moveTo(ax - a, y + h - 1); ctx.lineTo(ax, y + h + a); ctx.lineTo(ax + a, y + h - 1); }
+    else if (side === 'below') { const ax = clamp(b.cx, x + 14, x + w - 14); ctx.moveTo(ax - a, y + 1); ctx.lineTo(ax, y - a); ctx.lineTo(ax + a, y + 1); }
+    else if (side === 'left') { const ay = clamp(b.cy, y + 12, y + h - 12); ctx.moveTo(x + w - 1, ay - a); ctx.lineTo(x + w + a, ay); ctx.lineTo(x + w - 1, ay + a); }
+    else { const ay = clamp(b.cy, y + 12, y + h - 12); ctx.moveTo(x + 1, ay - a); ctx.lineTo(x - a, ay); ctx.lineTo(x + 1, ay + a); }
+    ctx.closePath(); ctx.fill();
+  }
+  let ty = y + pad * 0.8 + lh / 2;
+  if (title) { UK.text(ctx, title, x + pad * 1.2, ty, { size, weight: 800, color: fg, align: 'left' }); ty += lh; }
+  for (const l of lines) { UK.text(ctx, l, x + pad * 1.2, ty, { size, weight: 600, color: fg, align: 'left' }); ty += lh; }
+  ctx.restore();
+  return { x, y, w, h };
+}
+/** The visible screen in an element's drawing space. */
+const viewOf = (v) => (v ? { x0: -v.o.x / v.K, y0: -v.o.y / v.K, x1: (v.W - v.o.x) / v.K, y1: (v.H - v.o.y) / v.K } : null);
+
+registerBehavior('uiTooltip', {
+  label: 'Tooltip', description: 'A small bubble of help beside this element: on tap, on long-press, always, once (the first time), or on a message. It stays on screen, points at the element and hides by itself.',
+  params: [
+    { key: 'text', label: 'Text ({variables} work)', type: 'text', default: 'Tap to jump' },
+    { key: 'title', label: 'Bold title (optional)', type: 'text', default: '' },
+    { key: 'showOn', label: 'Shows', type: 'select', options: ['tap', 'long-press', 'always', 'first time only', 'on a message'], default: 'long-press', info: { tap: 'Tapping the element shows it (and still does what the element does).', 'first time only': 'Once ever on this device, a moment after the page opens. Good for “new!” hints.' } },
+    { key: 'message', label: 'Message', type: 'text', default: 'tip', suggest: 'messages', showIf: { showOn: ['on a message'] } },
+    { key: 'place', label: 'Where', type: 'select', options: ['auto', 'above', 'below', 'left', 'right'], default: 'auto' },
+    { key: 'seconds', label: 'Hide after (sec, 0 = when tapped)', type: 'number', default: 3, step: 0.5 },
+    { key: 'width', label: 'Widest', type: 'number', default: 220, step: 10 },
+    { key: 'size', label: 'Text size', type: 'number', default: 14, step: 1 },
+    { key: 'style', label: 'Look', type: 'select', options: ['dark', 'light', 'accent', 'warning', 'custom'], default: 'dark' },
+    { key: 'arrow', label: 'Arrow', type: 'bool', default: true },
+    ...colorParams({ bg: ['Bubble', '#1f2430'], fg: ['Text', '#ffffff'] }).map((q) => ({ ...q, showIf: { style: ['custom'] } })),
+  ],
+  create(p) {
+    let on = false, k = 0, age = 0, held = null, ht = 0, wait = -1;
+    const show = (v) => { if (v && !on) age = 0; on = v; };
+    const colors = () => (p.style === 'custom' ? [p.bg || '#1f2430', p.fg || '#fff'] : TIP_STYLES[p.style] || TIP_STYLES.dark);
+    return {
+      uiAlways: true,
+      start(e, s) {
+        if (p.showOn === 'always') on = true;
+        if (p.showOn === 'on a message') s.on('message', (m) => { if (!e.dead && m === (p.message || 'tip')) show(true); });
+        if (p.showOn === 'first time only' && !s.engine.editing) { const key = 'pocket.tip.' + (s.engine.gameKey || 'game') + '.' + (e.name || e.id); if (!store.get(key, '')) { store.set(key, '1'); wait = 0.6; } }
+      },
+      update(e, dt, s) {
+        k = clamp(k + (on ? dt : -dt) / 0.15, 0, 1);
+        if (wait >= 0 && (wait -= dt) < 0 && UK.live(s, e)) show(true);
+        if (!UK.live(s, e)) { if (p.showOn !== 'always') on = false; return; }
+        const inp = s.engine.input, hit = (q) => hitTest(s, e, q.x, q.y);
+        if (p.showOn === 'long-press') {
+          if (!held) { const d = inp.downs.find(hit); if (d) { held = d.id; ht = 0; } }
+          else { const q = inp.pointers.get(held); if (!q || !hit(q)) { held = null; if (on && +p.seconds > 0) age = Math.max(age, (+p.seconds || 3) - 0.8); } else if ((ht += dt) > 0.45 && !on) { show(true); s.engine.vibrate(12); } }
+        }
+        const tapped = inp.taps.find(hit);
+        if (p.showOn === 'tap' && tapped) show(!on);
+        else if (on && p.showOn !== 'always' && inp.taps.length && !tapped) on = false; // a tap anywhere else hides it
+        if (on && p.showOn !== 'always' && +p.seconds > 0 && !held && (age += dt) > +p.seconds) on = false;
+      },
+      drawTop(ctx, e, s, v) {
+        const ed = s.engine.editing, pv = ed && s.engine.editSelected === e.id; // the editor shows it while selected
+        const kk = pv ? 1 : k; if (kk <= 0.01) return;
+        const text = fillTemplate(String(p.text || ''), s.vars), size = +p.size || 14, [bg, fg] = colors();
+        const lines = String(text).split('\n').flatMap((l) => wrapLines(ctx, l, Math.max(60, +p.width || 220), size, 8));
+        if (!lines.length && !p.title) return;
+        drawBubble(ctx, UK.box(e), lines, { place: p.place, bg, fg, title: p.title, size, arrow: p.arrow !== false, k: kk, view: viewOf(v) });
+      },
+    };
+  },
+});
+
+registerBehavior('uiPopover', {
+  label: 'Popover Menu', description: 'Tap this element (a ⋯ button, an avatar, a row) to open a small menu beside it. Each line is an item: Label | message | icon. Start a label with ! to make it red (Delete). Tapping outside closes it.',
+  params: [
+    { key: 'items', label: 'Items (one per line: Label | message | icon)', type: 'code', default: 'Edit | edit | ✏️\nShare | share | 📤\n!Delete | delete | 🗑️' },
+    { key: 'opensOn', label: 'Opens on', type: 'select', options: ['tap', 'long-press', 'a message'], default: 'tap' },
+    { key: 'message', label: 'Open on message', type: 'text', default: 'more', suggest: 'messages', showIf: { opensOn: ['a message'] } },
+    { key: 'place', label: 'Where', type: 'select', options: ['auto', 'below', 'above', 'left', 'right'], default: 'auto' },
+    { key: 'width', label: 'Width', type: 'number', default: 200, step: 10 },
+    { key: 'pickVar', label: 'Picked label goes in variable (optional)', type: 'text', default: '', suggest: 'vars' },
+    ...colorParams({ bg: ['Menu', '#232838'], fg: ['Text', '#ffffff'], danger: ['Red items', '#ff5c6c'], hover: ['Pressed', 'rgba(255,255,255,0.08)'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let open = false, k = 0, rows = [], rect = null, held = null, ht = 0, pressed = -1;
+    const items = () => UK.lines(p.items).map(([label = '', msg = '', icon = '']) => ({ label: label.replace(/^!/, ''), danger: label.startsWith('!'), msg, icon }));
+    const set = (e, s, v) => { open = v; UK.modal(s, e, v, () => set(e, s, false)); if (v) pressed = -1; };
+    return {
+      uiAlways: true,
+      start(e, s) { if (p.opensOn === 'a message') s.on('message', (m) => { if (!e.dead && m === (p.message || 'more')) set(e, s, true); }); },
+      update(e, dt, s) {
+        k = clamp(k + (open ? dt : -dt) / 0.14, 0, 1);
+        if (!UK.live(s, e)) { if (open) set(e, s, false); return; }
+        const inp = s.engine.input, hit = (q) => hitTest(s, e, q.x, q.y);
+        if (open) {
+          for (const t of UK.taps(s, e)) {
+            const i = rows.findIndex((r) => UK.in(t, r)); set(e, s, false);
+            if (i >= 0) { const it = items()[i]; UK.tap(s, p); if (p.pickVar) s.setVar(p.pickVar, it.label); if (it.msg) s.send(it.msg); }
+            return;
+          }
+          const d = UK.downs(s, e)[0]; if (d) pressed = rows.findIndex((r) => UK.in(d, r));
+          return;
+        }
+        if (p.opensOn === 'tap' && inp.taps.some(hit)) { UK.tap(s, p); set(e, s, true); }
+        if (p.opensOn === 'long-press') {
+          if (!held) { const d = inp.downs.find(hit); if (d) { held = d.id; ht = 0; } }
+          else { const q = inp.pointers.get(held); if (!q || !hit(q)) held = null; else if ((ht += dt) > 0.45) { held = null; s.engine.vibrate(15); set(e, s, true); inp.taps.length = 0; } }
+        }
+      },
+      drawTop(ctx, e, s, v) {
+        const pv = s.engine.editing && s.engine.editSelected === e.id, kk = pv ? 1 : k; if (kk <= 0.01) { rows = []; return; }
+        const L = items(), rh = 44, w = Math.max(120, +p.width || 200), h = L.length * rh + 12, b = UK.box(e), V = viewOf(v) || { x0: -1e4, y0: -1e4, x1: 1e4, y1: 1e4 };
+        let side = p.place === 'auto' ? (b.y + b.h + h + 8 < V.y1 ? 'below' : 'above') : p.place;
+        let x = side === 'left' ? b.x - w - 8 : side === 'right' ? b.x + b.w + 8 : b.x + b.w - w, y = side === 'below' ? b.y + b.h + 8 : side === 'above' ? b.y - h - 8 : b.cy - h / 2;
+        x = clamp(x, V.x0 + 8, Math.max(V.x0 + 8, V.x1 - w - 8)); y = clamp(y, V.y0 + 8, Math.max(V.y0 + 8, V.y1 - h - 8));
+        rect = { x, y, w, h };
+        ctx.save(); ctx.globalAlpha *= kk; const z = 0.9 + 0.1 * UK.ease(kk), ox = x + w / 2, oy = side === 'above' ? y + h : y; ctx.translate(ox, oy); ctx.scale(z, z); ctx.translate(-ox, -oy);
+        ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8; ctx.fillStyle = p.bg || '#232838'; UK.rr(ctx, x, y, w, h, 14); ctx.fill(); ctx.shadowColor = 'transparent';
+        rows = L.map((it, i) => {
+          const r = { x: x + 6, y: y + 6 + i * rh, w: w - 12, h: rh - 2 };
+          if (i === pressed) { ctx.fillStyle = p.hover || 'rgba(255,255,255,0.08)'; UK.rr(ctx, r.x, r.y, r.w, r.h, 9); ctx.fill(); }
+          const col = it.danger ? p.danger || '#ff5c6c' : p.fg || '#fff'; let tx = r.x + 12;
+          if (it.icon) { UK.text(ctx, it.icon, tx + 9, r.y + r.h / 2, { size: 17, color: col }); tx += 30; }
+          UK.text(ctx, it.label, tx, r.y + r.h / 2 + 1, { size: 15, weight: 600, color: col, align: 'left', maxW: r.x + r.w - tx - 8 });
+          return r;
+        });
+        ctx.restore();
+      },
+      destroy(e, s) { if (s.modal === e) s.modal = null; },
+    };
+  },
+});
+
+registerBehavior('uiSpinner', {
+  label: 'Spinner', description: 'A loading spinner: ring, dots, bars, pulse, orbit or bouncing dots. Optionally shows only while a variable is on (loading = 1).',
+  params: [
+    { key: 'look', label: 'Look', type: 'select', options: ['ring', 'dots', 'bars', 'pulse', 'orbit', 'bounce'], default: 'ring' },
+    { key: 'speed', label: 'Speed', type: 'number', default: 1, step: 0.1 },
+    { key: 'whileVar', label: 'Only while variable is on (blank = always)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'label', label: 'Text under it ({variables} work)', type: 'text', default: '' },
+    ...colorParams({ color: ['Colour', '#4fa3ff'], track: ['Track', 'rgba(255,255,255,0.14)'], text: ['Text', '#ffffff'] }),
+  ],
+  create(p) {
+    let k = 1;
+    return {
+      update(e, dt, s) { const want = !p.whileVar || truthy(s.vars[p.whileVar]) || !!+s.vars[p.whileVar]; k = clamp(k + (want ? dt : -dt) / 0.2, 0, 1); },
+      drawUI(ctx, e, s) {
+        if (k <= 0.01 && !s.engine.editing) return;
+        const b = UK.box(e), t = (s.engine.editing ? performance.now() / 1000 : s.time) * (+p.speed || 1), col = p.color || '#4fa3ff', lab = p.label ? fillTemplate(String(p.label), s.vars) : '';
+        const R = Math.max(6, Math.min(b.w, b.h - (lab ? 26 : 0)) / 2 - 3), cx = b.cx, cy = b.cy - (lab ? 12 : 0);
+        ctx.globalAlpha *= s.engine.editing ? 1 : k; ctx.lineCap = 'round';
+        switch (p.look) {
+          case 'dots': for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2, f = ((t * 1.2 - i / 8) % 1 + 1) % 1; ctx.globalAlpha = 0.25 + 0.75 * (1 - f); ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * R * 0.8, cy + Math.sin(a) * R * 0.8, R * 0.14, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; break;
+          case 'bars': { const n = 5, bw = R * 2 / (n * 1.6); for (let i = 0; i < n; i++) { const f = 0.35 + 0.65 * Math.abs(Math.sin(t * 4 - i * 0.6)); ctx.fillStyle = col; UK.rr(ctx, cx - R + i * bw * 1.6 + bw * 0.3, cy - R * f, bw, R * 2 * f, bw / 2); ctx.fill(); } break; }
+          case 'pulse': for (let i = 0; i < 2; i++) { const f = ((t * 0.8 + i * 0.5) % 1); ctx.globalAlpha = 1 - f; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx, cy, R * f, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; break;
+          case 'orbit': ctx.strokeStyle = p.track || 'rgba(255,255,255,0.14)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx, cy, R * 0.8, 0, Math.PI * 2); ctx.stroke(); for (let i = 0; i < 3; i++) { const a = t * (3 - i * 0.6) + i * 2; ctx.fillStyle = col; ctx.globalAlpha = 1 - i * 0.25; ctx.beginPath(); ctx.arc(cx + Math.cos(a) * R * 0.8, cy + Math.sin(a) * R * 0.8, R * (0.16 - i * 0.03), 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; break;
+          case 'bounce': for (let i = 0; i < 3; i++) { const yy = -Math.abs(Math.sin(t * 5 - i * 0.7)) * R * 0.6; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(cx + (i - 1) * R * 0.7, cy + yy + R * 0.25, R * 0.2, 0, Math.PI * 2); ctx.fill(); } break;
+          default: { const lw = Math.max(3, R * 0.18); ctx.lineWidth = lw; ctx.strokeStyle = p.track || 'rgba(255,255,255,0.14)'; ctx.beginPath(); ctx.arc(cx, cy, R - lw / 2, 0, Math.PI * 2); ctx.stroke(); const a = t * 5, len = 1.2 + Math.sin(t * 2.5) * 0.9; ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(cx, cy, R - lw / 2, a, a + len + 0.4); ctx.stroke(); }
+        }
+        if (lab) UK.text(ctx, lab, b.cx, b.y + b.h - 10, { size: 14, weight: 600, color: p.text || '#fff' });
+      },
+    };
+  },
+});
+
+registerBehavior('uiSkeleton', {
+  label: 'Skeleton Loader', description: 'Grey placeholder shapes that shimmer while content loads: text lines, an avatar with lines, a card, list rows or a picture. Fades away when a variable turns on (loaded = 1).',
+  params: [
+    { key: 'layout', label: 'Shape', type: 'select', options: ['text lines', 'avatar + lines', 'card', 'list rows', 'picture'], default: 'avatar + lines' },
+    { key: 'lines', label: 'Lines / rows', type: 'number', default: 3, step: 1, range: [1, 12] },
+    { key: 'doneVar', label: 'Hide when variable is on (blank = never)', type: 'text', default: '', suggest: 'vars' },
+    { key: 'radius', label: 'Roundness', type: 'number', default: 8, step: 1 },
+    ...colorParams({ base: ['Placeholder', 'rgba(255,255,255,0.09)'], shine: ['Shimmer', 'rgba(255,255,255,0.16)'] }),
+  ],
+  create(p) {
+    let k = 1;
+    return {
+      update(e, dt, s) { const done = p.doneVar && (truthy(s.vars[p.doneVar]) || !!+s.vars[p.doneVar]); k = clamp(k + (done ? -dt : dt) / 0.3, 0, 1); },
+      drawUI(ctx, e, s) {
+        if (k <= 0.01 && !s.engine.editing) return;
+        const b = UK.box(e), r = +p.radius || 0, n = Math.max(1, Math.round(+p.lines || 3)), blocks = [];
+        const lines = (x, y, w, h, count, lh) => { for (let i = 0; i < count; i++) blocks.push([x, y + i * lh, i === count - 1 && count > 1 ? w * 0.6 : w, h]); };
+        if (p.layout === 'text lines') lines(b.x, b.y, b.w, Math.min(14, b.h / n * 0.55), n, b.h / n);
+        else if (p.layout === 'card') { const ih = b.h * 0.55; blocks.push([b.x, b.y, b.w, ih]); lines(b.x + 12, b.y + ih + 14, b.w - 24, 12, Math.min(n, 3), 22); }
+        else if (p.layout === 'picture') blocks.push([b.x, b.y, b.w, b.h]);
+        else if (p.layout === 'list rows') { const rh = b.h / n; for (let i = 0; i < n; i++) { const y = b.y + i * rh, a = Math.min(rh * 0.7, 44); blocks.push([b.x, y + (rh - a) / 2, a, a, a / 2]); blocks.push([b.x + a + 12, y + rh / 2 - 12, (b.w - a - 12) * 0.8, 10]); blocks.push([b.x + a + 12, y + rh / 2 + 4, (b.w - a - 12) * 0.5, 10]); } }
+        else { const a = Math.min(b.h, 56); blocks.push([b.x, b.y, a, a, a / 2]); lines(b.x + a + 14, b.y + 4, b.w - a - 14, 12, n, Math.max(18, (b.h - 8) / n)); }
+        const t = (s.engine.editing ? performance.now() / 1000 : s.time), sx = b.x - b.w + ((t * 0.8) % 1.6) * b.w * 1.6;
+        ctx.globalAlpha *= s.engine.editing ? 1 : k;
+        const g = ctx.createLinearGradient(sx, 0, sx + b.w * 0.6, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.5, p.shine || 'rgba(255,255,255,0.16)'); g.addColorStop(1, 'rgba(0,0,0,0)');
+        for (const [x, y, w, h, rr] of blocks) { UK.rr(ctx, x, y, w, h, rr ?? r); ctx.fillStyle = p.base || 'rgba(255,255,255,0.09)'; ctx.fill(); ctx.fillStyle = g; ctx.fill(); }
+      },
+    };
+  },
+});
+
+registerBehavior('uiChips', {
+  label: 'Chips', description: 'A row of tappable chips (filters, tags, categories) that wraps onto more lines. Pick one, or several, into a variable. Each line or comma: Label | value.',
+  params: [
+    { key: 'options', label: 'Chips (comma separated, or one per line: Label | value)', type: 'code', default: 'All, Food, Travel, Bills, Fun' },
+    { key: 'var', label: 'Variable', type: 'text', default: 'filter', suggest: 'vars' },
+    { key: 'multi', label: 'Pick several (the variable gets “a, b, c”)', type: 'bool', default: false },
+    { key: 'start', label: 'Start on chip # (0 = none)', type: 'number', default: 1, step: 1 },
+    { key: 'look', label: 'Look', type: 'select', options: ['filled', 'outlined', 'soft'], default: 'filled' },
+    { key: 'align', label: 'Line up', type: 'select', options: ['left', 'center'], default: 'left' },
+    { key: 'height', label: 'Chip height', type: 'number', default: 34, step: 2 },
+    { key: 'message', label: 'Message when it changes', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ chip: ['Chip', 'rgba(255,255,255,0.10)'], picked: ['Picked', '#3a7bfd'], text: ['Text', '#ffffff'], pickedText: ['Picked text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let rects = [];
+    const opts = () => { const raw = String(p.options || ''); return (raw.includes('\n') || raw.includes('|') ? UK.lines(raw) : raw.split(',').map((q) => [q.trim()]).filter((q) => q[0])).map(([l, v]) => ({ label: l, value: v ?? l })); };
+    const picked = (s) => { const v = s.vars[p.var]; return p.multi ? String(v ?? '').split(',').map((q) => q.trim()).filter(Boolean) : [String(v ?? '')]; };
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var] == null || (p.multi && s.vars[p.var] === 0)) { const o = opts()[(+p.start || 0) - 1]; s.setVar(p.var, o ? listVal(o.value) : ''); } },
+      update(e, dt, s) {
+        for (const t of UK.taps(s, e)) {
+          const i = rects.findIndex((r) => UK.in(t, r, 2)); if (i < 0) continue;
+          const o = opts()[i]; if (!o) continue; UK.tap(s, p);
+          if (p.multi) { const cur = picked(s), has = cur.includes(String(o.value)); s.setVar(p.var, (has ? cur.filter((q) => q !== String(o.value)) : [...cur, String(o.value)]).join(', ')); }
+          else s.setVar(p.var, listVal(o.value));
+          if (p.message) s.send(p.message, o.value);
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), H = +p.height || 34, gap = 8, size = Math.round(H * 0.42), cur = picked(s), O = opts();
+        ctx.font = `700 ${size}px ${THEME.font}`;
+        const rowsOf = []; let row = [], w0 = 0;
+        for (const o of O) { const on = cur.includes(String(o.value)), w = ctx.measureText(o.label).width + H * 0.8 + (p.multi && on ? size : 0); if (row.length && w0 + w > b.w) { rowsOf.push([row, w0 - gap]); row = []; w0 = 0; } row.push({ o, on, w }); w0 += w + gap; }
+        if (row.length) rowsOf.push([row, w0 - gap]);
+        rects = [];
+        rowsOf.forEach(([r, rw], j) => {
+          let x = p.align === 'center' ? b.cx - rw / 2 : b.x; const y = b.y + j * (H + gap);
+          for (const { o, on, w } of r) {
+            const look = p.look || 'filled';
+            if (on) { ctx.fillStyle = look === 'soft' ? withAlpha(p.picked || '#3a7bfd', 0.25) : p.picked || '#3a7bfd'; UK.rr(ctx, x, y, w, H, H / 2); ctx.fill(); }
+            else if (look === 'outlined') { ctx.strokeStyle = p.chip && p.chip !== 'rgba(255,255,255,0.10)' ? p.chip : 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5; UK.rr(ctx, x + 0.75, y + 0.75, w - 1.5, H - 1.5, H / 2); ctx.stroke(); }
+            else { ctx.fillStyle = p.chip || 'rgba(255,255,255,0.10)'; UK.rr(ctx, x, y, w, H, H / 2); ctx.fill(); }
+            const col = on ? (look === 'soft' ? p.picked || '#3a7bfd' : p.pickedText || '#fff') : p.text || '#fff';
+            UK.text(ctx, (p.multi && on ? '✓ ' : '') + o.label, x + w / 2, y + H / 2 + 1, { size, weight: 700, color: col });
+            rects.push({ x, y, w, h: H }); x += w + gap;
+          }
+        });
+      },
+    };
+  },
+});
+
+const AVATAR_COLORS = ['#ef5350', '#ec407a', '#ab47bc', '#7e57c2', '#5c6bc0', '#42a5f5', '#26a69a', '#66bb6a', '#ffa726', '#8d6e63'];
+registerBehavior('uiAvatar', {
+  label: 'Avatar', description: 'A round picture for a person: their initials (or an emoji) on a colour picked from their name, with an optional online / away / busy dot and a ring. Give the element a sprite to show a photo instead.',
+  params: [
+    { key: 'name', label: 'Name ({variables} work)', type: 'text', default: '{playerName}' },
+    { key: 'emoji', label: 'Emoji instead of initials (optional)', type: 'text', default: '' },
+    { key: 'shape', label: 'Shape', type: 'select', options: ['circle', 'rounded square'], default: 'circle' },
+    { key: 'status', label: 'Status dot', type: 'select', options: ['none', 'online', 'away', 'busy', 'offline', 'from a variable'], default: 'none' },
+    { key: 'statusVar', label: 'Status variable (online / away / busy / offline)', type: 'text', default: 'status', suggest: 'vars', showIf: { status: ['from a variable'] } },
+    { key: 'ring', label: 'Ring', type: 'bool', default: false },
+    ...colorParams({ color: ['Background (blank = from the name)', ''], text: ['Letters', '#ffffff'], ringColor: ['Ring', '#3a7bfd'] }),
+  ],
+  create(p) {
+    const DOT = { online: '#22c55e', away: '#f59e0b', busy: '#ef4444', offline: '#9ca3af' };
+    return {
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), d = Math.min(b.w, b.h), x = b.cx - d / 2, y = b.cy - d / 2, sq = p.shape === 'rounded square';
+        const name = fillTemplate(String(p.name ?? ''), s.vars).trim(), path = () => { if (sq) UK.rr(ctx, x, y, d, d, d * 0.22); else { ctx.beginPath(); ctx.arc(b.cx, b.cy, d / 2, 0, Math.PI * 2); } };
+        if (!e.sprite) {
+          let hsh = 0; for (const ch of name) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+          ctx.fillStyle = p.color || AVATAR_COLORS[hsh % AVATAR_COLORS.length]; path(); ctx.fill();
+          const ini = p.emoji || name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join('') || '?';
+          UK.text(ctx, ini, b.cx, b.cy + 1, { size: Math.round(d * (p.emoji ? 0.55 : 0.4)), weight: 800, color: p.text || '#fff' });
+        }
+        if (p.ring) { ctx.strokeStyle = p.ringColor || '#3a7bfd'; ctx.lineWidth = Math.max(2, d * 0.05); if (sq) UK.rr(ctx, x - 3, y - 3, d + 6, d + 6, d * 0.26); else { ctx.beginPath(); ctx.arc(b.cx, b.cy, d / 2 + 3, 0, Math.PI * 2); } ctx.stroke(); }
+        const st = p.status === 'from a variable' ? String(s.vars[p.statusVar || 'status'] ?? '').toLowerCase() : p.status;
+        if (DOT[st]) { const r = Math.max(4, d * 0.13), dx = b.cx + d / 2 * (sq ? 0.92 : 0.72), dy = b.cy + d / 2 * (sq ? 0.92 : 0.72); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(dx, dy, r + 2, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = DOT[st]; ctx.beginPath(); ctx.arc(dx, dy, r, 0, Math.PI * 2); ctx.fill(); }
+      },
+    };
+  },
+});
+
+const BANNER_KINDS = { info: ['#3a7bfd', 'ℹ️'], success: ['#22c55e', '✅'], warning: ['#f59e0b', '⚠️'], error: ['#ef4444', '⛔'], tip: ['#a855f7', '💡'] };
+registerBehavior('uiBanner', {
+  label: 'Banner', description: 'A message strip in the page: info, success, warning, error or tip, with an icon, a title, text, an optional button and ✕ to close. Show and hide it with messages; it can remember being closed.',
+  params: [
+    { key: 'kind', label: 'Kind', type: 'select', options: Object.keys(BANNER_KINDS), default: 'info' },
+    { key: 'title', label: 'Title', type: 'text', default: 'New update' },
+    { key: 'text', label: 'Text ({variables} work)', type: 'text', default: 'Pull down to see what changed.' },
+    { key: 'icon', label: 'Icon (blank = for the kind)', type: 'text', default: '' },
+    { key: 'button', label: 'Button (optional)', type: 'text', default: '' },
+    { key: 'buttonMessage', label: 'Button sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'close', label: '✕ to close', type: 'bool', default: true },
+    { key: 'startShown', label: 'Shown at first', type: 'bool', default: true },
+    { key: 'showOn', label: 'Show on message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'hideOn', label: 'Hide on message', type: 'text', default: '', suggest: 'messages' },
+    { key: 'remember', label: 'Stay closed once closed (this device)', type: 'bool', default: false },
+    { key: 'look', label: 'Look', type: 'select', options: ['soft', 'solid', 'outlined'], default: 'soft' },
+    ...colorParams({ textColor: ['Text', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let on = true, k = 1, xr = null, br = null;
+    const key = (s, e) => 'pocket.banner.' + (s.engine.gameKey || 'game') + '.' + (e.name || e.id);
+    return {
+      uiAlways: true,
+      start(e, s) {
+        on = p.startShown !== false && !(p.remember && store.get(key(s, e), '')); k = on ? 1 : 0;
+        s.on('message', (m) => { if (e.dead) return; if (p.showOn && m === p.showOn) on = true; if (p.hideOn && m === p.hideOn) on = false; });
+      },
+      update(e, dt, s) {
+        k = clamp(k + (on ? dt : -dt) / 0.2, 0, 1); if (!on) return;
+        for (const t of UK.taps(s, e)) {
+          if (xr && UK.in(t, xr, 6)) { UK.tap(s, p); on = false; if (p.remember) store.set(key(s, e), '1'); }
+          else if (br && UK.in(t, br, 4)) { UK.tap(s, p); if (p.buttonMessage) s.send(p.buttonMessage); }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const kk = s.engine.editing ? 1 : k; if (kk <= 0.01) { xr = br = null; return; }
+        const b = UK.box(e), [col, ic] = BANNER_KINDS[p.kind] || BANNER_KINDS.info, look = p.look || 'soft', fg = look === 'solid' ? '#ffffff' : p.textColor || '#fff';
+        ctx.globalAlpha *= kk; ctx.translate(0, (1 - UK.ease(kk)) * -12);
+        ctx.fillStyle = look === 'solid' ? col : withAlpha(col, look === 'outlined' ? 0.06 : 0.18); UK.rr(ctx, b.x, b.y, b.w, b.h, 12); ctx.fill();
+        if (look === 'outlined') { ctx.strokeStyle = col; ctx.lineWidth = 1.5; UK.rr(ctx, b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5, 12); ctx.stroke(); }
+        else if (look === 'soft') { ctx.fillStyle = col; UK.rr(ctx, b.x, b.y, 4, b.h, 2); ctx.fill(); }
+        let x = b.x + 14; const icon = p.icon || ic;
+        if (icon) { UK.text(ctx, icon, x + 10, b.cy, { size: 20, color: fg }); x += 32; }
+        let right = b.x + b.w - 10;
+        if (p.close !== false) { xr = { x: right - 26, y: b.cy - 13, w: 26, h: 26 }; UK.text(ctx, '✕', right - 13, b.cy, { size: 15, weight: 800, color: withAlpha(fg, 0.7) }); right -= 32; } else xr = null;
+        if (p.button) { ctx.font = `800 14px ${THEME.font}`; const bw = ctx.measureText(p.button).width + 22; br = { x: right - bw, y: b.cy - 16, w: bw, h: 32 }; ctx.fillStyle = look === 'solid' ? 'rgba(255,255,255,0.22)' : col; UK.rr(ctx, br.x, br.y, br.w, br.h, 16); ctx.fill(); UK.text(ctx, p.button, br.x + bw / 2, b.cy + 1, { size: 14, weight: 800, color: '#fff' }); right -= bw + 10; } else br = null;
+        const tw = right - x, text = fillTemplate(String(p.text || ''), s.vars), L = wrapLines(ctx, text, tw, 14, Math.max(1, Math.floor((b.h - (p.title ? 30 : 12)) / 18)));
+        const total = (p.title ? 20 : 0) + L.length * 18; let y = b.cy - total / 2 + 9;
+        if (p.title) { UK.text(ctx, p.title, x, y, { size: 15, weight: 800, color: fg, align: 'left', maxW: tw }); y += 20; }
+        for (const l of L) { UK.text(ctx, l, x, y, { size: 14, weight: 500, color: withAlpha(fg, 0.85), align: 'left', maxW: tw }); y += 18; }
+      },
+    };
+  },
+});
+
+registerBehavior('uiSteps', {
+  label: 'Steps', description: 'Shows where someone is in a few steps (Cart › Address › Pay, or a sign-up): done steps get a tick, the current one is lit. The step number lives in a variable; tap a done step to go back to it.',
+  params: [
+    { key: 'steps', label: 'Steps (comma separated)', type: 'text', default: 'Cart, Address, Payment, Done' },
+    { key: 'var', label: 'Current step variable (1 = first)', type: 'text', default: 'step', suggest: 'vars' },
+    { key: 'look', label: 'Look', type: 'select', options: ['circles & lines', 'numbers only', 'bar'], default: 'circles & lines' },
+    { key: 'labels', label: 'Labels under it', type: 'bool', default: true },
+    { key: 'tapBack', label: 'Tap a done step to go back', type: 'bool', default: true },
+    { key: 'message', label: 'Message when it changes', type: 'text', default: '', suggest: 'messages' },
+    ...colorParams({ active: ['Current & done', '#3a7bfd'], todo: ['Still to do', 'rgba(255,255,255,0.18)'], text: ['Labels', '#ffffff'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    let hits = [], shown = null;
+    const names = () => String(p.steps || '').split(',').map((q) => q.trim()).filter(Boolean);
+    return {
+      uiAlways: true,
+      start(e, s) { if (s.vars[p.var] == null) s.setVar(p.var, 1); },
+      update(e, dt, s) {
+        const cur = Math.round(+s.vars[p.var] || 1);
+        if (shown !== null && shown !== cur && p.message) s.send(p.message, cur); shown = cur;
+        if (p.tapBack === false) return;
+        for (const t of UK.taps(s, e)) { const i = hits.findIndex((r) => UK.in(t, r, 6)); if (i >= 0 && i + 1 < cur) { UK.tap(s, p); s.setVar(p.var, i + 1); } }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), N = names(), n = Math.max(1, N.length), cur = clamp(Math.round(+s.vars[p.var] || 1), 1, n + 1), act = p.active || '#3a7bfd', todo = p.todo || 'rgba(255,255,255,0.18)';
+        const lab = p.labels !== false && p.look !== 'bar', cy = lab ? b.y + Math.min(b.h * 0.35, 18) : b.cy; hits = [];
+        if (p.look === 'bar') { const gap = 6, w = (b.w - gap * (n - 1)) / n, h = Math.min(8, b.h); for (let i = 0; i < n; i++) { const x = b.x + i * (w + gap); ctx.fillStyle = i + 1 <= cur ? act : todo; UK.rr(ctx, x, b.cy - h / 2, w, h, h / 2); ctx.fill(); hits.push({ x, y: b.y, w, h: b.h }); } return; }
+        const r = Math.min(16, b.h * 0.3), step = n > 1 ? (b.w - r * 2) / (n - 1) : 0;
+        for (let i = 0; i < n - 1; i++) { const x0 = b.x + r + i * step + r + 4, x1 = b.x + r + (i + 1) * step - r - 4; ctx.strokeStyle = i + 2 <= cur ? act : todo; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(x0, cy); ctx.lineTo(x1, cy); ctx.stroke(); }
+        for (let i = 0; i < n; i++) {
+          const x = n > 1 ? b.x + r + i * step : b.cx, done = i + 1 < cur, now = i + 1 === cur;
+          if (p.look === 'numbers only') UK.text(ctx, String(i + 1), x, cy, { size: 18, weight: 900, color: done || now ? act : withAlpha(p.text || '#fff', 0.4) });
+          else {
+            ctx.beginPath(); ctx.arc(x, cy, r, 0, Math.PI * 2);
+            if (done || now) { ctx.fillStyle = act; ctx.fill(); } else { ctx.strokeStyle = todo; ctx.lineWidth = 2.5; ctx.stroke(); }
+            if (now) { ctx.strokeStyle = withAlpha(act, 0.35); ctx.lineWidth = 5; ctx.beginPath(); ctx.arc(x, cy, r + 4, 0, Math.PI * 2); ctx.stroke(); }
+            UK.text(ctx, done ? '✓' : String(i + 1), x, cy + 1, { size: Math.round(r * 0.95), weight: 800, color: done || now ? '#fff' : withAlpha(p.text || '#fff', 0.6) });
+          }
+          if (lab) UK.text(ctx, N[i], x, cy + r + 14, { size: 12, weight: now ? 800 : 600, color: withAlpha(p.text || '#fff', now || done ? 1 : 0.55), maxW: Math.max(40, step - 4) });
+          hits.push({ x: x - r - 4, y: cy - r - 4, w: r * 2 + 8, h: r * 2 + (lab ? 26 : 8) });
+        }
+      },
+    };
+  },
+});
+
+registerBehavior('uiDivider', {
+  label: 'Divider', description: 'A thin line across, optionally with a word in the middle (“or”, “Today”, “New”).',
+  params: [
+    { key: 'label', label: 'Word in the middle (optional)', type: 'text', default: 'or' },
+    { key: 'look', label: 'Line', type: 'select', options: ['solid', 'dashed', 'dotted', 'fade at the ends'], default: 'solid' },
+    { key: 'thickness', label: 'Thickness', type: 'number', default: 1, step: 0.5 },
+    ...colorParams({ color: ['Line', 'rgba(255,255,255,0.18)'], text: ['Word', 'rgba(255,255,255,0.6)'] }),
+  ],
+  create(p) {
+    return {
+      drawUI(ctx, e, s) {
+        const b = UK.box(e), lab = fillTemplate(String(p.label || ''), s.vars), col = p.color || 'rgba(255,255,255,0.18)';
+        ctx.font = `700 13px ${THEME.font}`; const tw = lab ? ctx.measureText(lab).width + 24 : 0;
+        ctx.lineWidth = +p.thickness || 1; ctx.strokeStyle = col; ctx.lineCap = 'round';
+        if (p.look === 'dashed') ctx.setLineDash([8, 6]); else if (p.look === 'dotted') ctx.setLineDash([1, 6]);
+        if (p.look === 'fade at the ends') { const g = ctx.createLinearGradient(b.x, 0, b.x + b.w, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(0.5, col); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.strokeStyle = g; }
+        ctx.beginPath(); ctx.moveTo(b.x, b.cy); ctx.lineTo(b.cx - tw / 2, b.cy); ctx.moveTo(b.cx + tw / 2, b.cy); ctx.lineTo(b.x + b.w, b.cy); ctx.stroke(); ctx.setLineDash([]);
+        if (lab) UK.text(ctx, lab, b.cx, b.cy + 1, { size: 13, weight: 700, color: p.text || 'rgba(255,255,255,0.6)' });
+      },
+    };
+  },
+});
 
 registerBehavior('uiDropdown', {
   label: 'Dropdown', description: 'A drop-down menu: tap it to see the choices, pick one and it goes into a variable (difficulty, language, character…).',

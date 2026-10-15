@@ -964,16 +964,32 @@ function uiShown(e) {
   if (!engine.uiFilter(e)) return false;
   return ['always', 'play'].includes(e.showWhen) || engine.screenFilter(e);
 }
+/** A Side Menu's part that's drawn in the editor right now: the open panel while it's selected, else its rail or ☰ button (or nothing). */
+function sideMenuArea(e) {
+  const A = e.behaviors?.find((b) => b.sideMenu)?.edArea; if (!A) return undefined;
+  const r = A.open ? A.panel : A.rail || A.btn; if (!r) return null;
+  const k = A.cv?.clientWidth ? A.cv.width / A.cv.clientWidth : devicePixelRatio || 1, cr = A.cv?.getBoundingClientRect?.(), vr = surface?.getBoundingClientRect?.() || cr;
+  const P = (x, y) => { const q = A.M.transformPoint(new DOMPoint(x, y)); return { x: q.x / k + ((cr?.left ?? 0) - (vr?.left ?? 0)), y: q.y / k + ((cr?.top ?? 0) - (vr?.top ?? 0)) }; };
+  const a = P(r.x, r.y), b = P(r.x + r.w, r.y + r.h), c = A.open && A.close?.(), cx = c && P(c.x, c.y);
+  return { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y), close: cx || null };
+}
+const inArea = (A, x, y) => !!A && x >= A.x0 && x <= A.x1 && y >= A.y0 && y <= A.y1;
 function pick(sx, sy) {
   const s = engine.scene, list = s.entities.slice().reverse().filter((e) => !ent(e.id)?.locked && (!uiMode || e.ui) && (uiMode || !e.ui || !EP.hideUI)); // hidden UI can't be tapped
   let bestUI = null, bestA = Infinity; // UI: the smallest thing under the finger (a button over a card over a page), with a little room around small ones
+  // Side Menus: a closed one can only be tapped where it's drawn (its rail or ☰); an open one covers what's under it
+  const menus = list.filter((e) => e.ui && uiShown(e) && e.behaviors?.some((b) => b.sideMenu)), within = (e, m) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === m) return true; return false; };
+  let cover = null;
+  for (const m of menus) { const A = sideMenuArea(m); if (A === undefined) continue; if (inArea(A, sx, sy)) { if (!m.behaviors.find((b) => b.sideMenu).edArea.open) return m; if (A.close && Math.hypot(sx - A.close.x, sy - A.close.y) < 20) return null; cover = m; break; } } // (its ✕ closes it: nothing selected)
   for (const e of list) {
     if (!e.ui) continue;
     if (!uiShown(e)) continue; // on another page or screen: not drawn, so not tappable
+    if (cover ? !within(e, cover) : menus.includes(e) && sideMenuArea(e) !== undefined) continue; // under the open menu, or a menu tapped outside what it draws
     const b = uiBounds(e), pad = Math.max(6, 22 - Math.min(b.hx, b.hy)); // thin text and small icons get a bigger target
     if (Math.abs(sx - b.x) <= b.hx + pad && Math.abs(sy - b.y) <= b.hy + pad) { const a = (b.hx + 4) * (b.hy + 4) + (Math.abs(sx - b.x) > b.hx || Math.abs(sy - b.y) > b.hy ? 1e6 : 0); if (a < bestA) { bestA = a; bestUI = e; } } // (a hit right on it beats one only near it)
   }
   if (bestUI) return bestUI;
+  if (cover) return cover; // anywhere on the open menu's panel
   for (const e of list) {
     if (e.ui || hasVisual(e)) continue;
     const p = toScreen(e);

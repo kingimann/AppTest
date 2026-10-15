@@ -264,6 +264,11 @@ Add them from *Create → Logic*, *Add Component → Logic*, or **Quick add** in
 
 Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, Wave Spawner, Patrol Guard (FSM).
 
+### More UI pieces
+
+- **Tooltip** (tap, long-press, always, once, or on a message) and **Popover Menu** (⋯ / avatar menus) draw above every other UI.
+- **Spinner**, **Skeleton Loader**, **Chips** (single or multi-select), **Avatar** (initials and status dot), **Banner** (info / success / warning / error / tip), **Steps** and **Divider**, each with ready-made versions in *Project › UI*.
+
 ### Hierarchy and Inspector
 
 - **Home** and **New Game** split game types into **2D games** and **3D games** (with Blank first), and **My games** has All / 2D / 3D tabs with a 2D/3D badge on each.

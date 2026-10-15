@@ -208,6 +208,30 @@ Add **Panel (window)** to make it a window (or add *UI › Window* / *Glass Pane
 - Nodes: **Show Toast**, **Show Alert** (*closed*), **Ask Yes / No** (*yes* / *no*), **Ask For Text**.
 - **Notifications** are built in: send `notify:reward Daily gift|+50 coins|🎁`, or use the **Notify** node. Notification types (achievement, reward, level up, info, warning, error, chat…) are styled in *Game Settings › Notifications*.
 
+## Tooltips, menus and more UI pieces
+
+Each is a component (*Add Component › UI*) and has ready-made versions in *Project › UI*.
+
+- **Tooltip:** a help bubble beside any element.
+  - It can show on tap, on long-press, always, once ever (the first time, for "New!" hints), or on a message.
+  - It points at the element, stays on screen, and hides after a few seconds or when you tap elsewhere.
+  - Pick dark, light, accent, warning or your own colours. Text can use `{variables}`, with an optional bold title.
+  - In the editor, selecting the element shows its tooltip.
+  - Ready-made: *Info Icon with Tooltip*, *Button with Tooltip (hold)*, *New Feature Hint (once)*.
+- **Popover Menu:** tap (or long-press) an element, such as a ⋯ button or an avatar, to open a small menu beside it.
+  - One item per line: `Label | message | icon`. Start a label with `!` to make it red.
+  - Tapping outside closes it, and the picked label can go into a variable.
+  - Ready-made: *Popover Menu (⋯)*, *Profile Menu (avatar)*.
+- **Spinner:** ring, dots, bars, pulse, orbit or bouncing dots, with optional text. It can show only while a variable (like `loading`) is on.
+- **Skeleton Loader:** shimmering grey placeholders while content loads (text lines, avatar + lines, a card, list rows or a picture). It fades away when a variable (like `loaded`) turns on.
+- **Chips:** tappable filter or tag chips that wrap onto more lines. Pick one, or several (the variable gets `Music, Sport`). Looks: filled, outlined or soft.
+- **Avatar:** initials (or an emoji) on a colour picked from the name. Optional ring and online / away / busy / offline dot, which can come from a variable. Give the element an image to show a photo.
+- **Banner:** an info, success, warning, error or tip strip with an icon, title, text, an optional button and ✕.
+  - Show and hide it with messages.
+  - It can stay closed once closed.
+- **Steps:** where someone is in a flow (Cart › Address › Pay), from a step variable. Done steps get a tick, and tapping one goes back to it. Looks: circles and lines, numbers, or a bar.
+- **Divider:** a line across, optionally with a word in the middle ("or"). Solid, dashed, dotted or faded.
+
 ## UI Theme and styling
 
 *Game Settings › UI Theme* picks a look (Default, Neon, Candy, Retro, Fantasy, Ocean, Light) or your own: font, text, accent, panel, dimming, touch controls, win and lose colours, corner roundness. The built-in screens, touch controls, messages and dialogs follow it, as does any text using **Theme font**. **Apply to my UI** restyles what you already made.

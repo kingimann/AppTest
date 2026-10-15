@@ -125,6 +125,12 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - *Size & shape*: label weight (normal, bold, bold when selected) and UPPERCASE labels.
   - *Background*: **Background see-through** (1 = solid, 0 = clear), **Blur what is behind** (frosted glass, like iOS), a **gradient** to a second colour, and the **line colour** on its top edge. **Pages run under the bar** (auto, yes or no): on *auto*, a see-through, blurred, floating, glass or minimal bar lets the open page reach the bottom of the screen and show through it. What's on the page (buttons, lists, the last item of a scrolling page) still stops above the bar, and dragging on the bar never scrolls the page.
 - **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
+  - **Keep in step with** the Bottom Nav tabs, all pages, or the tabs then the other pages. The menu then lists those pages (names, icons and badges) by itself and changes when they change. Your own items come after them.
+  - The Bottom Nav has **Keep in step with** too (the Side Menu's pages, or all pages, with *Most tabs* and where your own tabs go). A new page added in the editor also asks to join the side menu.
+  - **For social apps:** turn on *Show the signed-in person*. The header then shows who is signed in: their initials or picture, name and @handle, with **Following / Followers / Friends** counts from the social graph.
+    - Tapping the person opens *Tapping the person goes to page* (their profile), and tapping the numbers opens *Tapping the numbers goes to page*.
+    - Give it items with badges (`Notifications | bell | notifications | notifications_unread`) and a big **Post** button (`Post | edit | button:msg:compose`). The New Post Box opens on the message `compose`, from any page.
+  - Taps on a menu, sheet or popup never reach the page under it, even when it closes on that tap. A pull down that starts near the screen edge (a feed's pull to refresh) doesn't open the menu; only a sideways swipe does.
   - **In the editor** a Side Menu shows open while it's selected. Select it in the *Hierarchy*, or tap its ☰ button or Icon Rail in the scene. A closed menu doesn't catch taps meant for the page. While it's open, taps beside it select what's there, and its ✕ closes it.
   - While it's open it always shows **over the page's own UI** (search bars, headings, buttons), whatever order you added them in, and taps on the menu never reach what's under it. A popup opened from the menu shows over the menu. The same goes for the **Side Bar (drawer)**, **Bottom Sheet**, **Popup** and an open **Dropdown**: they cover the page, and their own buttons are the only ones that react.
   - In the Inspector each item is a card: tap its icon to pick one, type its name, and choose what it does: a page (or *+ New page…*), **a switch** for a variable (music, sound, dark mode) or **a message** (help, log out). Its ⋯ menu adds a badge, a **line under it** (small text, `{variables}` work), shows its page, moves it or removes it. **+ Add** also adds section titles and lines. (*Text* edits them as lines: `Label | icon | page or msg:name or toggle:var | badge | line under it`.)
@@ -335,16 +341,30 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - suggestions for tags and people as you type.
 
   Picking something puts it in its variable (`q`). Give a Social Feed the same *Search with variable* and it shows the results. *Searching goes to page* can open a results page.
-- **Chat:** a conversation in bubbles, like a messaging app.
+- **Chat:** a conversation in bubbles, like a messaging app. It works for direct messages and group chats.
   - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
   - Times appear between messages more than 15 minutes apart. Emoji-only messages show big, and photos show in the bubble.
-  - Double-tap a message for ❤️. *Sent* shows under your last one (*Sending…* while offline).
   - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.
-  - Messages are kept in a **Messages** collection (chat, author, handle, text, media, reaction). The conversation comes from the variable `chat` (blank = the room in *Room*). With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once.
-- **Inbox:** your conversations, newest first.
-  - Each row shows the other person, the last message (*You:* for yours), when it was sent, and an unread count. The total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`).
-  - Tapping one sets `chat` and `chatTitle` and goes to the page `chat`.
-  - Direct messages use ids like `dm-alex-maya`, the same from both sides. Other ids are group rooms (`# general`).
+  - **Press and hold a message:**
+    - react with ❤️ 😂 😮 😢 😡 👍 (*Reactions*);
+    - **Reply** (the reply quotes it; tap the quote to jump to the original);
+    - **Copy**;
+    - for your own messages, **Edit** (marked *Edited*) and **Unsend** (with Undo).
+  - Double-tap a message for ❤️.
+  - Under your last message: *Sending…*, *Sent*, then **Seen** (in a group, *Seen by Maya, Leo* or *Seen by everyone*).
+  - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reply_to, reply_text, reply_author, edited, deleted, system, members, title.
+    - The conversation comes from the variable `chat` (blank = the room in *Room*).
+    - With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once, and the people in the conversation get a notification.
+  - **Read receipts:** add a **Reads** collection (chat, handle, at) and "Seen" works across phones. Without one, each phone only knows what it has read.
+- **Inbox:** your conversations, newest first: direct messages, group chats and rooms.
+  - Each row shows the person (or two faces for a group), the last message (*You:* for yours, the name in groups), when it was sent, and an unread count. Your last message shows ✓ when sent and ✓✓ once they have read it.
+  - **Search** by name or words. **All / Unread / Groups** tabs, in any Top Nav *Tab look*.
+  - **✏️ starts a conversation:**
+    - **New message:** pick a person (friends, people you follow, your followers and everyone who has posted, with search).
+    - **New group:** tick two or more people and give it a name.
+  - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
+  - The unread total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`). Tapping a conversation sets `chat` and `chatTitle` and goes to the page `chat`.
+  - Direct messages use ids like `dm-alex-maya`, the same from both sides. Groups use `g-…` with their members and name on their first message. Other ids are rooms (`# general`).
 - **Trending:** the most used #hashtags in recent posts (*From the last … days*), with post counts. Tapping one puts it in a search variable (`q`) and can go to a page, so a feed with that search variable shows those posts.
 - **Who To Follow:** people you don't follow yet, most liked first, each with a **Follow** button.
 - **The social graph** connects all the social pieces. It keeps who follows whom, friends and notifications in the collections **Follows** (follower, followee), **Friends** (from, to, status) and **Notifications** (to, from, from_name, type, post, text, read). Add these collections to make them online with Supabase; without them, they are kept on the device.

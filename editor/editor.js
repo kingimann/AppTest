@@ -7560,8 +7560,12 @@ function newPage(from, o = {}) {
     project.entities.push(top, { id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
   }
   for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
-  const navs = navBars(v), inTab = navs.some((b) => navTabs(b).some((r) => r[2] === val));
+  const navs = navBars(v).filter((b) => !b.sync || b.sync === 'nothing'), inTab = navs.some((b) => navTabs(b).some((r) => r[2] === val)); // (a bar that keeps in step with the pages gets it by itself)
   if (navs.length && !inTab && (o.tab ?? confirm(`Add “${name}” to the bottom bar too?`))) for (const b of navs) b.tabs = navTabsText([...navTabs(b), [name, guessIcon(name), val]]);
+  const sides = project.entities.flatMap((j) => (j.behaviors || []).filter((b) => b.type === 'uiSideBar' && (b.var || 'page') === v && (!b.sync || b.sync === 'nothing')));
+  const inSide = sides.some((b) => String(b.items || '').split('\n').some((l) => (l.split('|')[2] || '').trim() === val));
+  if (sides.length && !inSide && (o.side ?? confirm(`Add “${name}” to the side menu too?`))) for (const b of sides) { // with the other pages: before the first line or section
+    const L = String(b.items || '').split('\n'), at = L.findIndex((l) => /^\s*(-+|#.*)\s*$/.test(l)); L.splice(at >= 0 ? at : L.length, 0, `${name} | ${guessIcon(name)} | ${val}`); b.items = L.filter((l, i) => l.trim() || i < L.length - 1).join('\n'); }
   if (!o.stay) { setUIPage(`${v}=${val}`); selectedId = top.id; }
   changed({ structure: true }); pushHistory();
   toast(navs.length && (o.tab ?? true) ? `Page “${val}” added${navs.length ? ' with a tab' : ''}` : `Page “${val}” added. Open it with a button set to Go To Page → ${val}`);

@@ -672,6 +672,10 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - Sign up, sign in, password reset and Google / Apple sign-in, with a ready **Sign-in Page** and **Account Page**, an optional "must sign in" page, `{userName}`, `{userEmail}`, `{signedIn}` and `{authError}`.
   - Data collections can be **stored online**: private to each person, or shared with everyone (feeds, chats, reviews). **Copy setup SQL** makes the table and its security rules; Data Lists and Forms work unchanged, with auto-refresh for chats and an author field filled in.
   - Buttons (*sign in*, *create account*, *sign out*…), Online nodes and Triggers.
+  - **Connect Supabase:** a step-by-step check of the project URL and key, a list of your tables with **Use in app**, ✓ / ✗ for each online collection's table, and the setup SQL.
+  - **Your own tables:** collections can read and write tables you already have, column by column. They have a key column, sort, filters and *Make fields from the table*.
+  - **Live updates** with Supabase Realtime: changes show up on every phone straight away.
+  - **Database functions and Edge Functions** from nodes and Triggers, with the answer in variables.
 - See the [Making apps guide](docs/guide/apps.md).
 
 ### UI motion, light and dark mode

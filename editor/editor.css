@@ -555,6 +555,15 @@ input[type=range].slider::-moz-range-thumb { width: 22px; height: 22px; border-r
 .obox.info { background: rgba(76,139,214,.12); border-color: rgba(76,139,214,.35); color: #b9d4f5; }
 .obox.warn { background: rgba(247,160,44,.12); border-color: rgba(247,160,44,.4); color: #ffd28a; }
 .obox.error { background: rgba(229,57,53,.14); border-color: rgba(229,57,53,.45); color: #ffab9f; }
+.obox.ok { background: rgba(62,207,142,.13); border-color: rgba(62,207,142,.45); color: #9be8c4; }
+.sb-wiz .sb-step { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--g2); }
+.sb-wiz .sb-step:first-of-type { border-top: 0; }
+.sb-n { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent, #3ecf8e); color: #111; font-size: 12px; font-weight: 800; margin-right: 8px; }
+.sb-table { cursor: default; }
+.sb-table .btn { flex: none; }
+.sb-used, .sb-ok { color: #3ecf8e; font-weight: 700; font-size: 13px; flex: none; }
+.sb-bad { color: #ff8a7a; font-weight: 700; font-size: 13px; }
+.sb-col { padding: 6px 0; font-size: 14px; }
 .og { margin-top: 14px; border: 1px solid var(--g2); border-radius: 12px; background: rgba(0,0,0,.12); }
 .og-h { width: 100%; height: 48px; border: 0; background: transparent; display: flex; align-items: center; gap: 8px; padding: 0 12px; color: var(--text); font-weight: 600; font-size: 15px; }
 .og-h svg.i { transform: rotate(-90deg); transition: transform .15s; width: 18px; height: 18px; }

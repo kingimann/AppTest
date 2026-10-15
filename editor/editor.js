@@ -35,7 +35,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, rotSnap: 15, haptics: true, autosave: 'manual', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, uiSnap: true, uiSnapGap: 8, uiSnapDist: 8, rotSnap: 15, haptics: true, autosave: 'manual', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 try { if (!localStorage.getItem('pocket.editor.manualSave')) { localStorage.setItem('pocket.editor.manualSave', '1'); if (EP.autosave !== 'manual') { EP.autosave = 'manual'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // projects are saved only when you save them
 const THEMES = {
@@ -1175,7 +1175,7 @@ surface.addEventListener('pointermove', (ev) => {
     const j = ent(g.id), live = s.byId(g.id);
     if (!j) return;
     if (g.type === 'free') {
-      if (g.ui) { const z = UIS().v.z, st = j.stretch || 'none'; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); if (uiMode) snapUI(j); if (st === 'width' || st === 'both') j.x = g.orig.x; if (st === 'height' || st === 'both') j.y = g.orig.y; } // a stretched side follows the screen
+      if (g.ui) { const z = UIS().v.z, st = j.stretch || 'none'; j.x = Math.round(g.orig.x + dx / z); j.y = Math.round(g.orig.y + dy / z); snapUI(j); if (st === 'width' || st === 'both') j.x = g.orig.x; if (st === 'height' || st === 'both') j.y = g.orig.y; } // a stretched side follows the screen
       else if (childOf(g)) { // a child: move it in the world, store the result relative to its parent
         let W;
         if (!is3D()) { const z = engine.renderer.zoomFor(s); W = [snapV(g.origW.x + dx / z, 10), snapV(g.origW.y + dy / z, 10), 0]; }
@@ -1213,6 +1213,7 @@ surface.addEventListener('pointermove', (ev) => {
       if (g.square) { const m = hx && hy ? Math.max(w, hgt) : hx ? w : hgt; w = hgt = m; }
       if (snap) { const st = g.ui ? 4 : 5; w = Math.round(w / st) * st; hgt = Math.round(hgt / st) * st; }
       w = Math.max(4, w); hgt = Math.max(4, hgt);
+      if (g.ui && !g.square) [w, hgt] = snapUISize(j, g, w, hgt, scX, scY);
       setSize(j, w, hgt);
       if (!(j.text && !j.shape && !j.sprite && !j.bar && !j.minimap)) { // the opposite edge stays put
         j.x = round(g.orig.x + (g.square && !hx ? 0 : hx) * (w - w0) * scX / 2, 2);
@@ -6129,6 +6130,9 @@ function openPreferences() {
       flag('Snap when moving', () => snap, (v) => { snap = v; store.set('pocket.editor.snap', v ? '1' : '0'); $('#snapBtn')?.classList.toggle('on', v); }),
       sel('snap2D', 'Snap step (2D)', [[1, '1 px'], [5, '5 px'], [10, '10 px'], [16, '16 px (tiles)'], [20, '20 px'], [32, '32 px'], [50, '50 px']]),
       sel('snap3D', 'Snap step (3D)', [[0.1, '0.1'], [0.25, '0.25'], [0.5, '0.5'], [1, '1']]),
+      tog('uiSnap', 'UI snaps to other UI', 'While you move or resize a UI element, its edges and centre line up with other elements, their parent and the screen, with pink guides'),
+      sel('uiSnapGap', 'UI snap gap', [[0, 'none (touching only)'], [4, '4 px'], [8, '8 px'], [12, '12 px'], [16, '16 px'], [24, '24 px']]),
+      sel('uiSnapDist', 'UI snap strength', [[4, 'Light'], [8, 'Normal'], [14, 'Strong']]),
       sel('rotSnap', 'Rotation snap', [[5, '5°'], [15, '15°'], [30, '30°'], [45, '45°'], [90, '90°']]),
       flag('Show the grid', () => showGrid, (v) => { showGrid = v; store.set('pocket.editor.grid', v ? '1' : '0'); $('#gridBtn')?.classList.toggle('on', v); engine.render(); }),
       flag('Show all colliders', () => showColliders, (v) => toggleColliders(v)),
@@ -7987,30 +7991,104 @@ engine.onBeforeUI = (ctx) => {
   ctx.beginPath(); ctx.moveTo(W / 2, 0); ctx.lineTo(W / 2, H); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(120,170,255,0.6)';
   for (const a of ['top-left', 'top', 'top-right', 'left', 'center', 'right', 'bottom-left', 'bottom', 'bottom-right']) { const p = anchorPoint(a, W, H, sf); ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); }
-  if (uiGuide) { ctx.strokeStyle = '#ff5ad1'; ctx.lineWidth = 1.5 / V.z; ctx.beginPath(); if (uiGuide.x != null) { ctx.moveTo(uiGuide.x, 0); ctx.lineTo(uiGuide.x, H); } if (uiGuide.y != null) { ctx.moveTo(0, uiGuide.y); ctx.lineTo(W, uiGuide.y); } ctx.stroke(); }
+
   ctx.restore();
 };
-let uiGuide = null;
-/** UI drags snap to the screen centre and to the element's anchor point. */
-function snapUI(j) {
-  const S = UIS(), live = engine.scene.byId(j.id), W = S.w, H = S.h, a = live ? uiOrigin(live, W, H, S.safe) : anchorPoint(j.anchor || 'top-left', W, H, S.safe), T = 10 / S.v.z;
-  uiGuide = {};
-  const sx = a.x + j.x, sy = a.y + j.y;
-  if (Math.abs(sx - W / 2) < T) { j.x = Math.round(W / 2 - a.x); uiGuide.x = W / 2; } else if (Math.abs(j.x) < T) { j.x = 0; uiGuide.x = a.x; } else if (snap) j.x = Math.round(j.x / 4) * 4;
-  if (Math.abs(sy - H / 2) < T) { j.y = Math.round(H / 2 - a.y); uiGuide.y = H / 2; } else if (Math.abs(j.y) < T) { j.y = 0; uiGuide.y = a.y; } else if (snap) j.y = Math.round(j.y / 4) * 4;
-  if (!live) return;
-  // line up with the other elements in the same parent (centres and edges)
-  const W2 = S.w, H2 = S.h, flat = (q) => { const o = uiOrigin(q, W2, H2, S.safe), b = boundsOf(q); return { x: o.x + b.x, y: o.y + b.y, hx: b.hx, hy: b.hy }; }; // (the same space as the centre snapping above)
-  const me = boundsOf(live), cx = a.x + j.x + (me.x - (live.x || 0)), cy = a.y + j.y + (me.y - (live.y || 0)), K = 1;
-  let bx = null, by = null;
-  for (const q of engine.scene.entities) {
-    if (q === live || !q.ui || q.dead || !q.visible || q._parentHidden || q.parentEnt !== live.parentEnt) continue;
-    const r = flat(q);
-    if (uiGuide.x == null) for (const [mine, theirs] of [[0, 0], [-me.hx, -r.hx], [me.hx, r.hx], [-me.hx, r.hx], [me.hx, -r.hx]]) { const d = (r.x + theirs) - (cx + mine); if (Math.abs(d) < T && (!bx || Math.abs(d) < Math.abs(bx.d))) bx = { d, at: r.x + theirs }; }
-    if (uiGuide.y == null) for (const [mine, theirs] of [[0, 0], [-me.hy, -r.hy], [me.hy, r.hy], [-me.hy, r.hy], [me.hy, -r.hy]]) { const d = (r.y + theirs) - (cy + mine); if (Math.abs(d) < T && (!by || Math.abs(d) < Math.abs(by.d))) by = { d, at: r.y + theirs }; }
+/** Snap guides sit above the UI (in the UI editor and the Scene view). */
+engine.onAfterUI = (ctx) => {
+  if (playing || !uiGuide) return;
+  const W = engine.width, H = engine.height, V = (uiMode && (engine.uiView || uiView)) || { z: 1 };
+  { // lines along what lined up, and measured gaps
+    ctx.save(); ctx.strokeStyle = '#ff5ad1'; ctx.fillStyle = '#ff5ad1'; ctx.lineWidth = 1.5 / V.z;
+    for (const l of uiGuide.lines || []) { ctx.beginPath(); if (l.x != null) { ctx.moveTo(l.x, Math.max(0, l.y0 - 10)); ctx.lineTo(l.x, Math.min(H, l.y1 + 10)); } else { ctx.moveTo(Math.max(0, l.x0 - 10), l.y); ctx.lineTo(Math.min(W, l.x1 + 10), l.y); } ctx.stroke(); }
+    for (const q of uiGuide.gaps || []) {
+      const vert = q.x0 == null, a0 = vert ? q.y0 : q.x0, a1 = vert ? q.y1 : q.x1, c = vert ? q.x : q.y, t = 4 / V.z;
+      ctx.beginPath(); if (vert) { ctx.moveTo(c, a0); ctx.lineTo(c, a1); ctx.moveTo(c - t, a0); ctx.lineTo(c + t, a0); ctx.moveTo(c - t, a1); ctx.lineTo(c + t, a1); } else { ctx.moveTo(a0, c); ctx.lineTo(a1, c); ctx.moveTo(a0, c - t); ctx.lineTo(a0, c + t); ctx.moveTo(a1, c - t); ctx.lineTo(a1, c + t); } ctx.stroke();
+      const lab = String(Math.round(Math.abs(a1 - a0))), fs = 11 / V.z; ctx.font = `700 ${fs}px system-ui, sans-serif`; const tw = ctx.measureText(lab).width + 8 / V.z, mx = vert ? c + 6 / V.z : (a0 + a1) / 2 - tw / 2, my = vert ? (a0 + a1) / 2 - fs * 0.7 : c - fs * 1.9;
+      ctx.fillStyle = '#ff5ad1'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(mx, my, tw, fs * 1.4, 3 / V.z); else ctx.rect(mx, my, tw, fs * 1.4); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, mx + tw / 2, my + fs * 0.72); ctx.fillStyle = '#ff5ad1';
+    }
+    ctx.restore();
   }
-  if (bx) { j.x = Math.round(j.x + bx.d / K); uiGuide.x = bx.at; }
-  if (by) { j.y = Math.round(j.y + by.d / K); uiGuide.y = by.at; }
+};
+let uiGuide = null;
+/**
+ * UI snapping: a dragged or resized UI element's edges and centre line up with other elements on the page (edges, centres,
+ * or a gap away, so elements sit snugly next to each other), its parent's edges and centre, and the screen's centre and
+ * safe edges. Pink guides show what it lined up with; a gap shows its size.
+ */
+let uiSnapKey = '';
+function uiSnapTargets(live) {
+  const S = UIS(), W = S.w, H = S.h, sf = S.safe || {}, G = Math.max(0, +EP.uiSnapGap || 0), xs = [], ys = [];
+  const add = (arr, v, r, kind, gap = 0) => arr.push({ v, r, kind, gap });
+  const scr = { x0: 0, y0: 0, x1: W, y1: H, screen: true };
+  add(xs, W / 2, scr, 'center'); add(ys, H / 2, scr, 'center');
+  const L = sf.left || 0, Rt = W - (sf.right || 0), T = sf.top || 0, B = H - (sf.bottom || 0);
+  for (const v of [L, Rt]) add(xs, v, scr, 'screen'); for (const v of [T, B]) add(ys, v, scr, 'screen');
+  if (G) { add(xs, L + G, scr, 'screen'); add(xs, Rt - G, scr, 'screen'); add(ys, T + G, scr, 'screen'); add(ys, B - G, scr, 'screen'); }
+  const rectOf = (q) => { const o = uiOrigin(q, W, H, S.safe), b = boundsOf(q); return { x0: o.x + b.x - b.hx, x1: o.x + b.x + b.hx, y0: o.y + b.y - b.hy, y1: o.y + b.y + b.hy }; };
+  const inside = (q) => { for (let a = q, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === live) return true; return false; };
+  const par = live.parentEnt?.ui ? live.parentEnt : null;
+  if (par) { const r = rectOf(par); r.parent = true; for (const v of [r.x0, (r.x0 + r.x1) / 2, r.x1]) add(xs, v, r, 'parent'); for (const v of [r.y0, (r.y0 + r.y1) / 2, r.y1]) add(ys, v, r, 'parent'); if (G) { add(xs, r.x0 + G, r, 'parent'); add(xs, r.x1 - G, r, 'parent'); add(ys, r.y0 + G, r, 'parent'); add(ys, r.y1 - G, r, 'parent'); } }
+  for (const q of engine.scene.entities) {
+    if (!q.ui || q.dead || !q.visible || q._parentHidden || inside(q) || q === par || q._dock) continue;
+    if (engine.uiFilter && !engine.uiFilter(q)) continue; // (other pages)
+    if (engine.screenFilter && !engine.screenFilter(q)) continue;
+    const r = rectOf(q); if (!(r.x1 > r.x0 && r.y1 > r.y0) || (r.x1 - r.x0 > W * 0.96 && r.y1 - r.y0 > H * 0.8)) continue; // whole pages and backgrounds
+    add(xs, r.x0, r, 'edge'); add(xs, r.x1, r, 'edge'); add(xs, (r.x0 + r.x1) / 2, r, 'center');
+    add(ys, r.y0, r, 'edge'); add(ys, r.y1, r, 'edge'); add(ys, (r.y0 + r.y1) / 2, r, 'center');
+    if (G) { add(xs, r.x0 - G, r, 'gap', -1); add(xs, r.x1 + G, r, 'gap', 1); add(ys, r.y0 - G, r, 'gap', -1); add(ys, r.y1 + G, r, 'gap', 1); }
+  }
+  return { xs, ys, G };
+}
+/** The nearest target to any of my edges: { d (how far to move), t (target), e (my edge) }. A gap target only pairs with the facing edge. */
+function uiSnapBest(list, edges, T) {
+  let best = null;
+  for (const t of list) for (const e of edges) {
+    if (t.gap && t.gap !== -e.side) continue;
+    const d = t.v - e.v;
+    if (Math.abs(d) <= T && (!best || Math.abs(d) < Math.abs(best.d) - 0.01 || (Math.abs(Math.abs(d) - Math.abs(best.d)) < 0.01 && t.kind === 'edge' && best.t.kind !== 'edge'))) best = { d, t, e };
+  }
+  return best;
+}
+/** Guides for what snapped: a line along the shared edge (spanning both elements), and a measured gap. */
+function uiSnapGuides(bx, by, me) {
+  const out = { lines: [], gaps: [] };
+  const span = (r, a0, a1) => (r.screen ? [0, Infinity] : [Math.min(a0, r.y0 ?? a0), Math.max(a1, r.y1 ?? a1)]);
+  if (bx) { const r = bx.t.r, v = bx.t.v, [y0, y1] = r.screen ? [0, UIS().h] : [Math.min(me.y0, r.y0), Math.max(me.y1, r.y1)]; out.lines.push({ x: v, y0, y1 }); if (bx.t.kind === 'gap') { const yy = (Math.max(me.y0, r.y0) + Math.min(me.y1, r.y1)) / 2; out.gaps.push({ x0: bx.t.gap < 0 ? v : r.x1, x1: bx.t.gap < 0 ? r.x0 : v, y: Number.isFinite(yy) ? yy : me.y0 }); } }
+  if (by) { const r = by.t.r, v = by.t.v, [x0, x1] = r.screen ? [0, UIS().w] : [Math.min(me.x0, r.x0), Math.max(me.x1, r.x1)]; out.lines.push({ y: v, x0, x1 }); if (by.t.kind === 'gap') { const xx = (Math.max(me.x0, r.x0) + Math.min(me.x1, r.x1)) / 2; out.gaps.push({ y0: by.t.gap < 0 ? v : r.y1, y1: by.t.gap < 0 ? r.y0 : v, x: Number.isFinite(xx) ? xx : me.x0 }); } }
+  void span; return out;
+}
+const uiSnapFeel = (bx, by) => { const k = (bx ? bx.t.v.toFixed(1) : '') + '|' + (by ? by.t.v.toFixed(1) : ''); if (k !== '|' && k !== uiSnapKey) buzz(4); uiSnapKey = k; };
+/** Moving: line up my left / centre / right and top / middle / bottom. */
+function snapUI(j) {
+  const S = UIS(), live = engine.scene.byId(j.id), W = S.w, H = S.h, a = live ? uiOrigin(live, W, H, S.safe) : anchorPoint(j.anchor || 'top-left', W, H, S.safe);
+  uiGuide = null;
+  if (!live || EP.uiSnap === false) { if (snap) { j.x = Math.round(j.x / 4) * 4; j.y = Math.round(j.y / 4) * 4; } return; }
+  const T = (+EP.uiSnapDist || 8) / S.v.z, me = boundsOf(live), off = { x: me.x - (live.x || 0), y: me.y - (live.y || 0) };
+  const cx = a.x + j.x + off.x, cy = a.y + j.y + off.y, { xs, ys, G } = uiSnapTargets(live);
+  // the element's anchor point is a target too (x / y = 0)
+  xs.push({ v: a.x + off.x, r: { x0: a.x, x1: a.x, y0: a.y, y1: a.y }, kind: 'anchor', gap: 0 }); ys.push({ v: a.y + off.y, r: { x0: a.x, x1: a.x, y0: a.y, y1: a.y }, kind: 'anchor', gap: 0 });
+  const bx = uiSnapBest(xs, [{ v: cx - me.hx, side: -1 }, { v: cx, side: 0 }, { v: cx + me.hx, side: 1 }], T);
+  const by = uiSnapBest(ys, [{ v: cy - me.hy, side: -1 }, { v: cy, side: 0 }, { v: cy + me.hy, side: 1 }], T);
+  if (bx) j.x = Math.round((j.x + bx.d) * 2) / 2; else if (snap) j.x = Math.round(j.x / 4) * 4;
+  if (by) j.y = Math.round((j.y + by.d) * 2) / 2; else if (snap) j.y = Math.round(j.y / 4) * 4;
+  const nx = a.x + j.x + off.x, ny = a.y + j.y + off.y;
+  uiGuide = uiSnapGuides(bx, by, { x0: nx - me.hx, x1: nx + me.hx, y0: ny - me.hy, y1: ny + me.hy }); uiGuide.G = G;
+  uiSnapFeel(bx, by);
+}
+/** Resizing: the edge being pulled lines up with the same targets. Returns the snapped width and height. */
+function snapUISize(j, g, w, hgt, scX, scY) {
+  uiGuide = null;
+  const S = UIS(), live = engine.scene.byId(j.id); if (!live || EP.uiSnap === false || (j.text && !j.shape && !j.sprite && !j.bar)) return [w, hgt];
+  const a = uiOrigin(live, S.w, S.h, S.safe), [hx, hy] = g.dir, [w0, h0] = g.size0, T = (+EP.uiSnapDist || 8) / S.v.z, { xs, ys, G } = uiSnapTargets(live);
+  const fx = a.x + g.orig.x - hx * w0 * scX / 2, fy = a.y + g.orig.y - hy * h0 * scY / 2; // the edges that stay put
+  let bx = null, by = null;
+  if (hx) { const m = fx + hx * w * scX; bx = uiSnapBest(xs, [{ v: m, side: hx }], T); if (bx) w = Math.max(4, Math.round((m + bx.d - fx) * hx / scX)); }
+  if (hy) { const m = fy + hy * hgt * scY; by = uiSnapBest(ys, [{ v: m, side: hy }], T); if (by) hgt = Math.max(4, Math.round((m + by.d - fy) * hy / scY)); }
+  const x0 = hx ? Math.min(fx, fx + hx * w * scX) : a.x + g.orig.x - w * scX / 2, y0 = hy ? Math.min(fy, fy + hy * hgt * scY) : a.y + g.orig.y - hgt * scY / 2;
+  uiGuide = uiSnapGuides(bx, by, { x0, x1: x0 + w * scX, y0, y1: y0 + hgt * scY }); uiGuide.G = G;
+  uiSnapFeel(bx, by);
+  return [w, hgt];
 }
 $('#addFab').addEventListener('click', () => openCreate());
 $('#panelsFab').addEventListener('click', () => setSheet('half'));

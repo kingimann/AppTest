@@ -4685,6 +4685,7 @@ function renderUI(engine, scene) {
       ctx.restore();
       if (e.behaviors.some((b) => b.drawTop)) (tops ||= []).push({ e, o, K });
     }
+    engine.onAfterUI?.(ctx, scene); // (the editor's snap guides)
     for (const { e, o, K } of tops || []) for (const b of e.behaviors) if (b.drawTop) { ctx.save(); ctx.translate(o.x, o.y); if (K !== 1) ctx.scale(K, K); b.drawTop(ctx, e, scene, { o, K, W, H }); ctx.restore(); } // tooltips and popover menus sit above every other UI
     if (V) ctx.restore();
   }

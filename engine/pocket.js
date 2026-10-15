@@ -7532,11 +7532,11 @@ registerBehavior('uiSideBar', {
         let y = R.y + safeT + 10;
         // header
         const look = p.header || 'simple', hasHead = look !== 'none' && !compact && (p.title || p.avatar || p.headerImage);
-        let headLight = false;
+        let headLight = false, closeAt = null;
         if (hasHead) {
           const banner = look === 'banner', cardH = look === 'card', av = Math.max(20, +p.avatarSize || 52), centred = full() || p.headerAlign === 'centred';
           const tsz0 = full() && (+p.titleSize || 19) === 19 ? 26 : +p.titleSize || 19, subH = p.subtitle ? 22 : 0;
-          const autoH = centred ? av + tsz0 + subH + 40 : Math.max(banner ? 132 : 96, av + 44 + (cardH ? 12 : 0));
+          const autoH = centred ? av + tsz0 + subH + 40 : Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0));
           const hh = +p.headerHeight > 0 ? +p.headerHeight : autoH;
           const hx = cardH ? x + 12 : x, hw = cardH ? w - 24 : w, hy = cardH ? y - 2 : R.y, hH = cardH ? hh - 8 : hh + safeT + 10; // the header's own box
           const hImg = p.headerImage ? loadImage(artURL(p.headerImage)) : null, hasImg = !!(hImg && hImg.complete && hImg.naturalWidth);
@@ -7550,8 +7550,10 @@ registerBehavior('uiSideBar', {
             }
             ctx.restore();
           }
+          if (cardH) closeAt = { x: hx + hw - 26, y: hy + 26 }; // the ✕ sits inside the card
           const light = headLight = banner || hasImg || sty === 'gradient' || (cardH && !!p.headerColor);
-          const inX = cardH ? 14 : 0, cx = centred ? x + w / 2 : x + pad + inX + av / 2, cy = centred ? y + av / 2 + 6 : y + (banner ? 14 : 4) + av / 2 + (cardH ? 8 : 0);
+          const bleed = banner || hasImg, blockH = centred ? av + 8 + tsz0 + subH : av, midY = bleed ? R.y + safeT + (hh + 10) / 2 : cardH ? hy + hH / 2 : 0; // a coloured header: its picture and name sit in the middle of it
+          const inX = cardH ? 14 : 0, cx = centred ? x + w / 2 : x + pad + inX + av / 2, cy = midY ? (centred ? midY - blockH / 2 + av / 2 : midY) : centred ? y + av / 2 + 6 : y + 4 + av / 2;
           const avPath = () => { ctx.beginPath(); const sh = p.avatarShape || 'circle'; if (sh === 'circle' || !ctx.roundRect) ctx.arc(cx, cy, av / 2, 0, Math.PI * 2); else ctx.roundRect(cx - av / 2, cy - av / 2, av, av, sh === 'rounded' ? av * 0.26 : 6); };
           if (p.avatar && /^(data:|https?:|art:|blob:)/.test(p.avatar)) { const im = loadImage(artURL(p.avatar)); ctx.save(); avPath(); ctx.fillStyle = withAlpha(acc, 0.22); ctx.fill(); ctx.clip(); if (im.complete && im.naturalWidth) { const k2 = av / Math.min(im.naturalWidth, im.naturalHeight); ctx.drawImage(im, cx - im.naturalWidth * k2 / 2, cy - im.naturalHeight * k2 / 2, im.naturalWidth * k2, im.naturalHeight * k2); } ctx.restore(); ctx.strokeStyle = light ? 'rgba(255,255,255,0.6)' : withAlpha(acc, 0.5); ctx.lineWidth = 2; avPath(); ctx.stroke(); } // a photo
           else if (p.avatar) { ctx.fillStyle = light ? 'rgba(255,255,255,0.22)' : withAlpha(acc, 0.22); avPath(); ctx.fill(); drawNavIcon(ctx, p.avatar, cx, cy, av * 0.54, light ? '#ffffff' : acc); }
@@ -7560,9 +7562,9 @@ registerBehavior('uiSideBar', {
           const tx = centred ? x + w / 2 : p.avatar ? cx + av / 2 + 12 : x + pad + inX, ty = centred ? cy + av / 2 + 8 + tsz0 / 2 : cy, maxW = Math.max(40, centred ? w - pad * 2 : x + w - tx - pad - 36);
           ctx.fillStyle = light ? '#ffffff' : txt; ctx.font = `800 ${tsz0}px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.title || ''), s.vars), tx, ty - (p.subtitle && !centred ? 10 : 0), maxW);
           if (p.subtitle) { ctx.globalAlpha *= 0.75; ctx.font = `600 13px ${THEME.font}`; ctx.fillText(fillTemplate(String(p.subtitle), s.vars), tx, centred ? ty + tsz0 / 2 + 12 : ty + 12, maxW); ctx.globalAlpha /= 0.75; }
-          y += hh - (full() ? 0 : 6);
+          y = bleed ? R.y + hh + safeT + 10 + (full() ? 6 : 10) : cardH ? hy + hH + 12 : y + hh - (full() ? 0 : 6); // the list starts clear of the header
         } else y += compact ? 8 : 4;
-        if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = full() ? x + w - 34 : x + w - 28, by = R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
+        if (p.closeButton !== false && !compact && (full() || !rail())) { const bx = closeAt ? closeAt.x : full() ? x + w - 34 : x + w - 28, by = closeAt ? closeAt.y : R.y + safeT + 28; ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.beginPath(); ctx.arc(bx, by, 16, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = headLight && p.header !== 'card' ? '#fff' : txt; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(bx - 5, by - 5); ctx.lineTo(bx + 5, by + 5); ctx.moveTo(bx + 5, by - 5); ctx.lineTo(bx - 5, by + 5); ctx.stroke(); rows.push({ close: true, x: bx, y: by }); }
         // items
         const gapV = compact ? 0 : Math.max(0, +p.itemGap || 0) + (sty === 'cards' ? 8 : sty === 'pills' ? 6 : 0), boxedSty = sty === 'pills' || sty === 'cards';
         const ctlX = (it) => (compact ? 0 : it.kind === 'slider' ? 22 : it.kind === 'progress' ? 16 : it.kind === 'choice' ? 40 : it.button ? 6 : 0); // room for a control under the name
@@ -7593,7 +7595,7 @@ registerBehavior('uiSideBar', {
             idx++;
             const ex = ctlX(it), hgt = rowH(it) - gapV, on = it.kind === 'page' && !it.button && sameVal(s.vars[p.var], it.page), inCard = grouped() && !compact, boxed = !compact && (inCard || boxedSty);
             const rx = boxed ? x + 12 : x + (sty === 'classic' || compact ? 0 : 8), rw = boxed ? w - 24 : w - (sty === 'classic' || compact ? 0 : 16), pr = press.get(it) || 0;
-            const itemR = sty === 'pills' ? (hgt - 6) / 2 : Math.max(0, +p.itemRadius >= 0 && p.itemRadius !== '' ? +p.itemRadius : 14);
+            const itemR = sty === 'pills' ? Math.min((hgt - 6) / 2, 22) : Math.max(0, +p.itemRadius >= 0 && p.itemRadius !== '' ? +p.itemRadius : 14);
             const ctl = !compact && ['slider', 'progress', 'choice'].includes(it.kind), btn = it.button && !compact;
             ctx.save(); ctx.globalAlpha *= ease(ip); ctx.translate(slide, 0);
             if (boxedSty && !compact && !full() && !btn) { if (sty === 'cards') { ctx.fillStyle = withAlpha(txt, 0.07); rr(rx, yy + 2, rw, hgt - 4, Math.min(itemR, 16)); ctx.fill(); } else { ctx.strokeStyle = withAlpha(txt, 0.2); ctx.lineWidth = 1.2; rr(rx, yy + 3, rw, hgt - 6, itemR); ctx.stroke(); } } // pills and cards: every item has its own shape
@@ -7602,7 +7604,8 @@ registerBehavior('uiSideBar', {
             else if (((on && hl !== 'text only') || pr) && !ctl) {
               ctx.fillStyle = on && hl === 'filled' ? acc : withAlpha(acc, on ? (sty === 'glass' ? 0.3 : 0.18) : 0.1 * pr);
               if (sty === 'classic' || (on && hl === 'edge bar' && !compact && !full())) { if (sty === 'classic') ctx.fillRect(rx, yy, rw, hgt); else { rr(rx, yy + 3, rw, hgt - 6, 10); ctx.fill(); } if (on) { ctx.fillStyle = acc; if (sty === 'classic') ctx.fillRect(left ? rx : rx + rw - 4, yy, 4, hgt); else { rr(left ? rx : rx + rw - 4, yy + 8, 4, hgt - 16, 2); ctx.fill(); } } }
-              else { const inset = inCard ? 4 : 0; rr(rx + (compact ? 12 : 0) + inset, yy + 3, rw - (compact ? 24 : 0) - inset * 2, hgt - 6, full() ? hgt / 2 : inCard ? Math.min(itemR, 10) : itemR); ctx.fill(); if (sty === 'neon' && on) { ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.shadowColor = acc; ctx.shadowBlur = 10; ctx.stroke(); ctx.restore(); } }
+              else if (inCard && card) { const first = yy <= card.y + 0.5, last = yy + hgt + gapV >= card.y + card.h - 0.5, cr = 14; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(rx, yy, rw, hgt, [first ? cr : 0, first ? cr : 0, last ? cr : 0, last ? cr : 0]); else ctx.rect(rx, yy, rw, hgt); ctx.fill(); } // grouped: the whole row, rounded where the card is
+              else { rr(rx + (compact ? 12 : 0), yy + 3, rw - (compact ? 24 : 0), hgt - 6, full() ? hgt / 2 : itemR); ctx.fill(); if (sty === 'neon' && on) { ctx.save(); ctx.strokeStyle = acc; ctx.lineWidth = 1.5; ctx.shadowColor = acc; ctx.shadowBlur = 10; ctx.stroke(); ctx.restore(); } }
             }
             const own = it.color || null, col = btn ? '#ffffff' : on ? (p.selectedText || (hl === 'filled' || (sty === 'pills' && hl !== 'text only') ? '#ffffff' : sty === 'gradient' ? '#ffffff' : acc)) : own || txt;
             const icCol = on || btn ? col : own || p.iconColor || txt;
@@ -7622,10 +7625,10 @@ registerBehavior('uiSideBar', {
               if (showIc) drawNavIcon(ctx, it.icon, ix, cy, isz, icCol);
               ctx.textAlign = 'left'; ctx.fillStyle = col; ctx.fillText(it.label, lx, cy);
               if (it.sub && !big) { ctx.save(); ctx.globalAlpha *= 0.62; ctx.font = `600 ${Math.max(10, tsz - 3)}px ${THEME.font}`; ctx.fillStyle = (on && hl === 'filled') || btn ? '#ffffff' : txt; ctx.textAlign = mid ? 'center' : 'left'; ctx.fillText(fillTemplate(it.sub, s.vars), mid ? x + w / 2 : lx, cy + tsz * 0.5 + 8); ctx.restore(); } // the line under it
-              let rEdge = rx + rw - 12; // what's on the right: a switch, an arrow, a badge, a value
-              if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sw = 40, sh = 24, sx = big ? lx + lw + 16 : x + w - pad - 46; ctx.fillStyle = v ? own || acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); rEdge = sx - 10; }
-              else if (!big && !btn && sty !== 'minimal' && (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page'))) { ctx.strokeStyle = withAlpha(on && hl === 'filled' ? '#ffffff' : txt, 0.35); ctx.lineWidth = 2; const ax = x + w - pad - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); rEdge = ax - 12; }
-              if (hasBadge) rEdge = Math.min(rEdge, x + w - pad - (it.kind === 'msg' ? 30 : 16) - 20);
+              let rEdge = rx + rw - 12; const E0 = boxed ? rx + rw - 6 : x + w - pad; // what's on the right: a switch, an arrow, a badge, a value (inside the card in boxed styles)
+              if (it.kind === 'toggle') { const v = !!(s.vars[it.v] ?? true), sw = 40, sh = 24, sx = big ? lx + lw + 16 : E0 - 46; ctx.fillStyle = v ? own || acc : withAlpha(txt, 0.25); rr(sx, cy - sh / 2, sw, sh, sh / 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(v ? sx + sw - sh / 2 : sx + sh / 2, cy, sh / 2 - 3, 0, Math.PI * 2); ctx.fill(); rEdge = sx - 10; }
+              else if (!big && !btn && sty !== 'minimal' && (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page'))) { ctx.strokeStyle = withAlpha(on && hl === 'filled' ? '#ffffff' : txt, 0.35); ctx.lineWidth = 2; const ax = E0 - 14; ctx.beginPath(); ctx.moveTo(ax - 3, cy - 5); ctx.lineTo(ax + 2, cy); ctx.lineTo(ax - 3, cy + 5); ctx.stroke(); rEdge = ax - 12; }
+              if (hasBadge) rEdge = Math.min(rEdge, (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page') ? 30 : 16) - 20);
               let rightTxt = it.right ? fillTemplate(it.right, s.vars) : '';
               const t0 = big ? x + w * 0.18 : mid ? rx + 16 : lx, t1 = big ? x + w * 0.82 : rx + rw - 14;
               if (it.kind === 'slider') { const span = it.max - it.min, v = clamp(+(s.vars[it.v] ?? it.min) || 0, Math.min(it.min, it.max), Math.max(it.min, it.max)), f = span ? (v - it.min) / span : 0, kx = t0 + (t1 - t0) * f; ctx.fillStyle = withAlpha(txt, 0.18); rr(t0, ccy - 3, t1 - t0, 6, 3); ctx.fill(); ctx.fillStyle = own || acc; rr(t0, ccy - 3, Math.max(6, kx - t0), 6, 3); ctx.fill(); ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 5; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(kx, ccy, 9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); track = { x0: t0 + slide, x1: t1 + slide }; if (!rightTxt) rightTxt = String(Math.round(v * 100) / 100); }
@@ -7635,7 +7638,7 @@ registerBehavior('uiSideBar', {
             }
             if (hasBadge) {
               const n = +bv, tx = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '';
-              const bx = compact ? x + w / 2 + isz * 0.5 : x + w - pad - (it.kind === 'msg' ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
+              const bx = compact ? x + w / 2 + isz * 0.5 : (boxed ? rx + rw - 6 : x + w - pad) - (it.kind === 'msg' || it.kind === 'url' || (p.chevrons && it.kind === 'page') ? 30 : 16), by = compact ? cy - isz * 0.5 : cy;
               ctx.fillStyle = p.badgeColor || '#ff3b5c';
               if (!tx) { ctx.beginPath(); ctx.arc(bx, by, 4.5, 0, Math.PI * 2); ctx.fill(); } else { ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(tx).width + 10); rr(bx - bw / 2, by - 10, bw, 20, 10); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.fillText(tx, bx, by + 0.5); }
             }

@@ -4289,7 +4289,12 @@ function uiDrawOrder(s) {
   }
   // what's open over the page (a Side Menu, Side Bar, Bottom Sheet, popup, an open dropdown), with what's inside it, goes over the page's UI,
   // whatever order they were added in: side menus first, then whatever dims the page, then the one that has the taps (a popup opened from a menu)
-  if (s.engine?.editing) return out;
+  if (s.engine?.editing) { // the editor shows a selected Side Menu open: over the page's UI there too
+    const sel = s.engine.editSelected, m = sel && out.find((e) => e.id === sel && e.ui && e.behaviors?.some((b) => b.sideMenu));
+    if (!m) return out;
+    const inM = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === m) return true; return false; };
+    return [...out.filter((e) => !inM(e)), ...out.filter(inM)];
+  }
   const ok = (e) => e && e.ui && !e.dead && e.visible, top = [];
   for (const e of out) if (ok(e) && (e._overlay || e._overlayOn)) top.push(e);
   const dimE = s.uiDim?.a > 0.01 ? s.uiDim.e : null;
@@ -7335,7 +7340,7 @@ registerBehavior('uiSideBar', {
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     const inst = {
-      uiAlways: true,
+      uiAlways: true, sideMenu: true,
       get open() { return want; }, get rows() { return rows; },
       pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
       set(e, s, v) {

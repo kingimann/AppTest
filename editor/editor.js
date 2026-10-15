@@ -4804,7 +4804,7 @@ function addEntity(props, at) {
   let n = 1; const base = j.name;
   while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`;
   project.entities.push(j);
-  selectedId = j.id;
+  selectedId = j.id; engine.editSelected = j.id; // (a new Side Menu previews open)
   changed({ structure: true }); pushHistory();
   closeLayer();
   return j;
@@ -7252,16 +7252,29 @@ function navTabEditor(get, set, path, b) {
 function sideItemEditor(get, set, path, b) {
   const box = h('div', { class: 'navtabs side-items' });
   const v = b?.var || 'page';
-  const parse = () => String(get() ?? '').split('\n').filter((l) => l.trim()).map((l) => { const t = l.trim(); if (/^-+$/.test(t)) return { kind: 'line' }; if (t.startsWith('#')) return { kind: 'section', label: t.replace(/^#+\s*/, '') }; return { kind: 'item', c: t.split('|').map((x) => x.trim()) }; });
-  const text = (rows) => rows.map((r) => (r.kind === 'line' ? '-' : r.kind === 'section' ? '# ' + r.label : (() => { const c = [...r.c].map((x) => x ?? ''); while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); })())).join('\n');
+  const parse = () => String(get() ?? '').split('\n').filter((l) => l.trim()).map((l) => { const t = l.trim(); if (/^-+$/.test(t)) return { kind: 'line' }; if (t.startsWith('#')) return { kind: 'section', label: t.replace(/^#+\s*/, '') };
+    if (t.startsWith('>')) return { kind: 'text', label: t.slice(1).trim() }; if (/^(~|space)(\s+\d+)?$/i.test(t)) return { kind: 'space', n: +(t.match(/\d+/)?.[0] || 16) }; if (t.startsWith('=')) return { kind: 'stats', label: t.slice(1).trim() };
+    return { kind: 'item', c: t.split('|').map((x) => x.trim()) }; });
+  const text = (rows) => rows.map((r) => (r.kind === 'line' ? '-' : r.kind === 'section' ? '# ' + r.label : r.kind === 'text' ? '> ' + r.label : r.kind === 'space' ? '~ ' + (r.n || 16) : r.kind === 'stats' ? '= ' + r.label : (() => { const c = [...r.c].map((x) => x ?? ''); while (c.length > 3 && !c[c.length - 1]) c.pop(); return c.join(' | '); })())).join('\n');
   const draw = () => {
     const rows = parse(), save = (r) => { set(text(r)); if (box.isConnected) draw(); else renderInspector(); };
     const pages = [...(uiPages().get(v) || [])];
-    const actLabel = (a) => (!a ? '(its name)' : a.startsWith('msg:') ? `sends “${a.slice(4)}”` : a.startsWith('toggle:') ? `switch: ${a.slice(7)}` : '→ ' + a + (pages.includes(a) ? '' : ' (no page yet)'));
+    const actLabel = (a) => (!a ? '(its name)' : a.startsWith('button:') ? '▣ ' + actLabel(a.slice(7)) : a.startsWith('msg:') ? `sends “${a.slice(4)}”` : a.startsWith('toggle:') ? `switch: ${a.slice(7)}` : a.startsWith('slider:') ? `slider: ${a.slice(7).replace('=', ' ')}` : a.startsWith('choice:') ? `choice: ${a.slice(7).split('=')[0]}` : a.startsWith('progress:') ? `bar: ${a.slice(9)}` : a.startsWith('url:') ? `opens ${a.slice(4).replace(/^https?:\/\//, '')}` : '→ ' + a + (pages.includes(a) ? '' : ' (no page yet)'));
+    const varName = (t) => String(t || '').trim().replace(/\s+(\w)/g, (_, ch) => ch.toUpperCase()).replace(/[^\w]/g, '');
     const askAct = (r, kind) => {
       if (kind === 'toggle') { const n = prompt('Variable the switch turns on and off (e.g. music, sound, darkMode)', (r.c[2] || '').startsWith('toggle:') ? r.c[2].slice(7) : '')?.trim(); if (n) { r.c[2] = 'toggle:' + n; save(rows); } else draw(); }
       else if (kind === 'msg') { const n = prompt('Message it sends (e.g. help, logout, open shop)', (r.c[2] || '').startsWith('msg:') ? r.c[2].slice(4) : '')?.trim(); if (n) { r.c[2] = 'msg:' + n; save(rows); } else draw(); }
       else if (kind === 'new') { const nv = newPage(null, { name: prompt('Name of the new page', r.c[0] || '') || '', tab: false, stay: true }); if (nv) { r.c[2] = nv; save(rows); } else draw(); }
+      else { const a = askKind(kind, r.c[0]); if (a) { r.c[2] = a; save(rows); } else draw(); }
+    };
+    /** Ask what a slider, choice, bar or link needs; returns its action text (or null). */
+    const askKind = (kind, label) => {
+      const lv = varName(label).replace(/^./, (ch) => ch.toLowerCase());
+      if (kind === 'slider') { const v = varName(prompt('Variable the slider sets (e.g. volume, brightness)', lv)); if (!v) return null; const r = (prompt('Lowest .. highest', '0..100') || '0..100').replace(/\s/g, ''); project.vars[v] ??= 50; return `slider:${v}=${/^-?[\d.]+\.\.-?[\d.]+$/.test(r) ? r : '0..100'}`; }
+      if (kind === 'choice') { const v = varName(prompt('Variable the choice sets (e.g. theme, difficulty)', lv)); if (!v) return null; const o = prompt('Choices, separated by commas', 'light, dark, auto'); if (!o?.trim()) return null; const first = o.split(',')[0].trim(); project.vars[v] ??= first; return `choice:${v}=${o.split(',').map((x) => x.trim()).filter(Boolean).join(',')}`; }
+      if (kind === 'progress') { const v = varName(prompt('Variable the bar shows (e.g. xp, health)', lv)); if (!v) return null; const m = (prompt('Full at (a number, or a variable like maxXp)', '100') || '100').trim(); project.vars[v] ??= 0; return `progress:${v}/${m}`; }
+      if (kind === 'url') { const u = prompt('Web address it opens', 'https://')?.trim(); return u && /^https?:\/\/./.test(u) ? 'url:' + u : null; }
+      return null;
     };
     const more = (i, extra) => [...extra,
       i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(rows); } },
@@ -7271,6 +7284,8 @@ function sideItemEditor(get, set, path, b) {
       ...rows.map((r, i) => {
         if (r.kind === 'line') return h('div', { class: 'nt-row si-line' }, h('span', { class: 'si-rule' }), h('small', {}, 'line'), h('button', { type: 'button', class: 'tl-m', title: 'Line', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
         if (r.kind === 'section') return h('div', { class: 'nt-row si-sec' }, h('span', { class: 'si-hash' }, '#'), h('input', { type: 'text', value: r.label, placeholder: 'Section title', 'aria-label': 'Section title', oninput: (e) => { r.label = e.target.value; set(text(rows)); } }), h('button', { type: 'button', class: 'tl-m', title: 'Section', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
+        if (r.kind === 'text' || r.kind === 'stats') return h('div', { class: 'nt-row si-sec' }, h('span', { class: 'si-hash', title: r.kind === 'text' ? 'Text' : 'Numbers' }, r.kind === 'text' ? '¶' : '#'), h('input', { type: 'text', value: r.label, placeholder: r.kind === 'text' ? 'Text ({variables} work)' : 'Coins: {coins} | Gems: {gems}', 'aria-label': r.kind === 'text' ? 'Text' : 'Numbers row', oninput: (e) => { r.label = e.target.value; set(text(rows)); } }), h('button', { type: 'button', class: 'tl-m', title: r.kind === 'text' ? 'Text' : 'Numbers', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
+        if (r.kind === 'space') return h('div', { class: 'nt-row si-line' }, h('span', { class: 'si-rule', style: 'opacity:0' }), h('small', {}, 'space'), h('input', { type: 'number', min: 2, max: 120, value: r.n || 16, style: 'width:64px', 'aria-label': 'Space height', onchange: (e) => { r.n = Math.max(2, Math.min(120, +e.target.value || 16)); save(rows); } }), h('button', { type: 'button', class: 'tl-m', title: 'Space', onclick: (e) => popMenu(e.currentTarget, more(i, [])) }, icon('more')));
         const c = r.c, a = c[2] || '';
         return h('div', { class: 'nt-row' },
           h('button', { type: 'button', class: 'nt-icbtn', title: 'Pick an icon', onclick: () => pickNavIcon(c[1], (ic) => { c[1] = ic; save(rows); }) }, navIconImg(c[1] || '')),
@@ -7279,12 +7294,16 @@ function sideItemEditor(get, set, path, b) {
             h('select', { 'aria-label': 'What it does', onchange: (e) => { const x = e.target.value; if (x.startsWith('\u0000')) { askAct(r, x.slice(1)); return; } c[2] = x; save(rows); } },
               [...new Set([...pages, a].filter(Boolean))].map((pg) => h('option', { value: pg, selected: pg === a }, actLabel(pg))),
               !a ? h('option', { value: '', selected: true }, '(choose)') : null,
-              h('option', { value: '\u0000toggle' }, '⇄ A switch for a variable…'), h('option', { value: '\u0000msg' }, '✉ Send a message…'), h('option', { value: '\u0000new' }, '+ New page…')),
+              h('option', { value: '\u0000toggle' }, '⇄ A switch for a variable…'), h('option', { value: '\u0000msg' }, '✉ Send a message…'), h('option', { value: '\u0000new' }, '+ New page…'),
+              h('option', { value: '\u0000slider' }, '━ A slider for a variable…'), h('option', { value: '\u0000choice' }, '◫ A choice (light / dark…)…'), h('option', { value: '\u0000progress' }, '▬ A progress bar…'), h('option', { value: '\u0000url' }, '🔗 Open a website…')),
             c[4] ? h('small', { class: 'si-sub' }, c[4]) : null),
           h('button', { type: 'button', class: 'tl-m', title: 'Item', onclick: (e) => popMenu(e.currentTarget, more(i, [
             a && !a.includes(':') && pages.includes(a) && { icon: 'eye', label: `Show the “${a}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${a}`); } },
             { icon: 'bell', label: c[3] ? `Badge: {${c[3]}}…` : 'Badge from a variable…', k: 'a count beside it', fn: () => { const n = prompt('Variable for the badge count (blank = none)', c[3] || ''); if (n !== null) { while (c.length < 3) c.push(''); c[3] = n.trim(); save(rows); } } },
             { icon: 'text', label: c[4] ? `Line under it: ${c[4]}…` : 'Line under it…', k: 'small text, {variables} work', fn: () => { const n = prompt('Small text under the name (blank = none)', c[4] || ''); if (n !== null) { while (c.length < 4) c.push(''); c[4] = n.trim(); save(rows); } } },
+            { icon: 'coin', label: c[5] ? `On the right: ${c[5]}…` : 'Value on the right…', k: 'e.g. {coins} or 3 new', fn: () => { const n = prompt('Text on the right of the item, e.g. {coins} (blank = none)', c[5] || ''); if (n !== null) { while (c.length < 5) c.push(''); c[5] = n.trim(); save(rows); } } },
+            { icon: 'brush', label: c[6] ? `Colour: ${c[6]}…` : 'Its own colour…', k: 'name, icon and control', fn: () => { const n = prompt('Colour for this item, e.g. #ff4757 (blank = the menu\'s colours)', c[6] || ''); if (n !== null) { while (c.length < 6) c.push(''); c[6] = n.trim(); save(rows); } } },
+            !/^(toggle|slider|choice|progress):/.test(a) && { icon: 'square', label: a.startsWith('button:') ? 'Show as a normal item' : 'Show as a button', k: a.startsWith('button:') ? '' : 'filled, like Log out', fn: () => { c[2] = a.startsWith('button:') ? a.slice(7) : 'button:' + (a || (c[0] || '').toLowerCase()); save(rows); } },
           ].filter(Boolean))) }, icon('more')));
       }),
       h('div', { class: 'tl-foot' },
@@ -7293,9 +7312,19 @@ function sideItemEditor(get, set, path, b) {
           { icon: 'plus', label: 'A new page…', k: 'makes the page too', fn: () => { const name = prompt('Name of the new page (e.g. Settings, Shop)')?.trim(); if (!name) return; const nv = newPage(null, { name, tab: false, stay: true }); if (nv) save([...rows, { kind: 'item', c: [name, guessIcon(name), nv] }]); } },
           { icon: 'check', label: 'A switch…', k: 'music, sound, dark mode', fn: () => { const n = prompt('Name of the switch (e.g. Music)')?.trim(); if (!n) return; save([...rows, { kind: 'item', c: [n, guessIcon(n) === 'star' ? 'check' : guessIcon(n), 'toggle:' + n.toLowerCase().replace(/\s+(\w)/g, (_, ch) => ch.toUpperCase()).replace(/[^\w]/g, '')] }]); } },
           { icon: 'bolt', label: 'A message…', k: 'help, log out, share', fn: () => { const n = prompt('Name of the item (e.g. Help)')?.trim(); if (!n) return; save([...rows, { kind: 'item', c: [n, guessIcon(n), 'msg:' + n.toLowerCase()] }]); } },
+          { icon: 'minus', label: 'A slider…', k: 'volume, brightness', fn: () => { const n = prompt('Name of the slider (e.g. Volume)')?.trim(); if (!n) return; const a = askKind('slider', n); if (a) save([...rows, { kind: 'item', c: [n, guessIcon(n), a] }]); } },
+          { icon: 'list', label: 'A choice…', k: 'light / dark / auto', fn: () => { const n = prompt('Name of the choice (e.g. Theme)')?.trim(); if (!n) return; const a = askKind('choice', n); if (a) save([...rows, { kind: 'item', c: [n, guessIcon(n), a] }]); } },
+          { icon: 'stats', label: 'A progress bar…', k: 'XP, health, a goal', fn: () => { const n = prompt('Name of the bar (e.g. XP)')?.trim(); if (!n) return; const a = askKind('progress', n); if (a) save([...rows, { kind: 'item', c: [n, 'star', a] }]); } },
+          { icon: 'square', label: 'A button…', k: 'filled: Log out, Upgrade', fn: () => { const n = prompt('Text on the button (e.g. Log out)')?.trim(); if (!n) return; save([...rows, { kind: 'item', c: [n, guessIcon(n), 'button:msg:' + n.toLowerCase()] }]); } },
+          { icon: 'globe', label: 'A website link…', fn: () => { const n = prompt('Name of the link (e.g. Our website)')?.trim(); if (!n) return; const a = askKind('url', n); if (a) save([...rows, { kind: 'item', c: [n, 'globe', a] }]); } },
           '-', { icon: 'text', label: 'A section title', fn: () => save([...rows, { kind: 'section', label: 'Section' }]) },
-          { icon: 'minus', label: 'A line', fn: () => save([...rows, { kind: 'line' }]) }]) }, icon('plus'), 'Add'),
+          { icon: 'text', label: 'Some text', k: '{variables} work', fn: () => save([...rows, { kind: 'text', label: 'Hello {name}!' }]) },
+          { icon: 'coin', label: 'A row of numbers', k: 'coins, gems, level', fn: () => { for (const [k, v] of [['coins', 250], ['gems', 12]]) project.vars[k] ??= v; save([...rows, { kind: 'stats', label: 'Coins: {coins} | Gems: {gems} | Level: {level}' }]); } },
+          { icon: 'square', label: 'Some space', fn: () => save([...rows, { kind: 'space', n: 16 }]) },
+          { icon: 'minus', label: 'A line', fn: () => save([...rows, { kind: 'line' }]) },
+          /\.items$/.test(path) && ent(selectedId) && '-', /\.items$/.test(path) && ent(selectedId) && { icon: 'hud', label: 'UI inside the menu…', k: 'search bar, card, buttons, picture…', fn: () => menuAddMenu(ent(selectedId)) }].filter(Boolean)) }, icon('plus'), 'Add'),
         h('span', { class: 'tl-n' }, `${rows.filter((r) => r.kind === 'item').length} item${rows.filter((r) => r.kind === 'item').length === 1 ? '' : 's'}`),
+        /\.items$/.test(path) && ent(selectedId) ? h('button', { type: 'button', class: 'btn', title: 'Put a search bar, card, buttons, a picture… inside the menu', onclick: () => menuAddMenu(ent(selectedId)) }, icon('hud'), 'UI inside') : null,
         h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')));
   };
   draw();
@@ -7500,6 +7529,28 @@ function pageBlocks() {
     { key: 'spacer', group: 'Basics', label: 'Space', icon: 'square', desc: 'Empty room between things', make: () => [{ ...wide, name: 'Space', shape: { type: 'rect', w: 368, h: 24, radius: 0, fill: '' } }] },
     { key: 'smallprint', group: 'Basics', label: 'Small Print', icon: 'text', desc: 'A quiet centred line', make: () => [{ ...ui, name: 'Small Print', text: tx('Made with Pocket Engine', { size: 12, color: T.sub, weight: '500' }) }] },
   ].filter(Boolean);
+}
+/** Side Menu › Add › UI inside the menu: the page blocks, put inside the menu (it stacks them where its "Objects inside" setting says). */
+function menuAddMenu(mj) {
+  if (!mj) return;
+  const blocks = pageBlocks(), groups = [...new Set(blocks.map((b) => b.group || 'Basics'))];
+  let g = store.get('pocket.editor.menuBlockGroup', 'Forms & settings'); if (!groups.includes(g)) g = groups[0];
+  const grid = h('div', { class: 'pb-grid' }), chips = h('div', { class: 'chips pb-chips' });
+  const pick = (blk) => {
+    closeLayer();
+    const made = [], add = (q, parent) => { const { children, ...rest } = q; const j = { id: uid(), ui: true, ...clone(rest), parent }; let n = 1; const base = j.name; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; const L = project.entities, at = L.indexOf(mj) + subtree(mj.id).length; L.splice(at, 0, j); made.push(j); for (const c of children || []) add(c, j.id); return j; };
+    const roots = blk.make('').map((q) => add(q, mj.id));
+    for (const b of mj.behaviors || []) if (b.type === 'uiSideBar' && !b.kids) b.kids = 'under the header';
+    closedKids.delete(mj.id); selectedId = roots[0].id; engine.editSelected = selectedId; changed({ structure: true }); pushHistory();
+    if (blk.image) pickImage((url) => { const e = ent(roots[0].id); if (e?.sprite) { e.sprite.src = url; changed({ inspector: true }); } }, 1024);
+    toast(`Added ${blk.label} inside the menu`);
+  };
+  const draw = () => {
+    chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.menuBlockGroup', x); draw(); } }, x, h('small', {}, String(blocks.filter((b) => (b.group || 'Basics') === x).length)))));
+    grid.replaceChildren(...blocks.filter((b) => (b.group || 'Basics') === g).map((blk) => h('button', { type: 'button', class: 'pb-tile', onclick: () => pick(blk) }, h('span', { class: 'pb-ic' }, icon(blk.icon)), h('b', {}, blk.label), h('small', {}, blk.desc))));
+  };
+  draw();
+  openDialog(`Add inside “${mj.name}”`, [h('p', { class: 'desc' }, 'It goes inside the menu and shows while the menu is open. Where it sits: Side Menu › Objects inside.'), chips, grid]);
 }
 /** Add a block to a page. */
 function addPageBlock(pg, blk, pgv) {

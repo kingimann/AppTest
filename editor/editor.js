@@ -22,6 +22,7 @@ import { initData, dataEditor, ensureCollection } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import { expoFiles } from './expo.js';
+import { xcodeFiles, androidFiles } from './native.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -6243,6 +6244,31 @@ async function exportExpoProject() {
     noteBuild('expo', zip.size); toast(`Expo project ready (${kb(zip.size)}): npm install, then npx expo start to try it, or eas build. README.md has the steps.`);
   } catch (err) { toast('Could not make the Expo project: ' + err.message); }
 }
+/** Build Settings → Xcode / Android Studio: a plain native project (no Capacitor, Expo or npm) to open, run and upload yourself. */
+function nativeOpts() { return { ...storeOpts(), perms: usedPermissions().map((k) => ({ kind: k, why: levelList()[0]?.settings?.permissions?.[k]?.why || PERMISSIONS[k].why })) }; }
+async function exportXcode() {
+  const so = nativeOpts();
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  try {
+    toast('Making the Xcode project…');
+    const o = buildOpts(), b = await buildHTML({ native: true }), kit = await storeKitFiles(o);
+    const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data; // iOS rejects icons with transparency
+    const zip = downloadZip([...xcodeFiles(so, { html: b.html, icon }), ...kit], slug(so.name) + '-xcode.zip');
+    noteBuild('xcode', zip.size); toast(`Xcode project ready (${kb(zip.size)}): unzip it on a Mac and open the .xcodeproj. README.md has the steps.`);
+  } catch (err) { toast('Could not make the Xcode project: ' + err.message); }
+}
+async function exportAndroid() {
+  const so = nativeOpts();
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  try {
+    toast('Making the Android Studio project…');
+    const o = buildOpts(), b = await buildHTML({ native: true }), sizes = [48, 72, 96, 144, 192];
+    const pngs = await Promise.all([...sizes.map((px) => makeIcon(o, px)), makeSplash(o, 432, 0.62, true)].map((p) => p.then(dataBytes)));
+    const icons = { legacy: Object.fromEntries(sizes.map((px, i) => [px, pngs[i]])), fg: pngs[sizes.length], notif: await notifIconPNG(96) };
+    const zip = downloadZip([...androidFiles(so, { html: b.html, icons }), ...await storeKitFiles(o, 'store-listing/', 'store')], slug(so.name) + '-android.zip');
+    noteBuild('android', zip.size); toast(`Android Studio project ready (${kb(zip.size)}): unzip it and choose File › Open in Android Studio. README.md has the steps.`);
+  } catch (err) { toast('Could not make the Android Studio project: ' + err.message); }
+}
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
 async function exportHTML() {
   try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); noteBuild('html', b.html.length); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
@@ -6394,7 +6420,7 @@ function noteBuild(target, size) {
   const B = (root.build ||= {}), v = B.version || BUILD_DEFAULTS.version;
   B.last = { target, at: Date.now(), size, version: v };
   B.history = [{ target, at: B.last.at, size, version: v }, ...(B.history || [])].slice(0, 12); // Build Settings › Recent builds
-  if (target === 'store' || target === 'expo') B.lastStoreVersion = v;
+  if (['store', 'expo', 'xcode', 'android'].includes(target)) B.lastStoreVersion = v;
   changed(); if ($('.dialog .build-sec')) setTimeout(() => { const db = $('.dialog .db'), sc = db?.scrollTop; openBuildSettings(); if ($('.dialog .db')) $('.dialog .db').scrollTop = sc; }, 50);
 }
 const BUILD_TARGETS = [
@@ -6402,6 +6428,8 @@ const BUILD_TARGETS = [
   ['web', 'globe', 'Website', 'A folder for itch.io, GitHub Pages or Netlify. Installs to the Home Screen.', 'Download website (.zip)'],
   ['store', 'phone', 'App Store & Google Play', 'An app project that Codemagic builds and uploads for you.', 'Download app project (.zip)'],
   ['expo', 'bolt', 'Expo app', 'An Expo project to build and publish with EAS.', 'Download Expo project (.zip)'],
+  ['xcode', 'phone', 'Xcode project', 'An iOS app to open in Xcode on a Mac: run it on your iPhone and upload to the App Store.', 'Download Xcode project (.zip)'],
+  ['android', 'phone', 'Android Studio project', 'An Android app to open in Android Studio: run it on your phone and upload to Google Play.', 'Download Android Studio project (.zip)'],
   ['itch', 'gamepad', 'itch.io', 'An HTML5 upload for itch.io, with a cover image and the page settings.', 'Download for itch.io (.zip)'],
 ];
 const ICON_EMOJI = ['🎮', '🚀', '⭐', '👾', '🐱', '🐶', '🦄', '🐉', '🧩', '🏎️', '⚔️', '🏰', '💎', '🍀', '🎵', '📝', '✅', '💰', '📚', '❤️'];
@@ -6416,7 +6444,7 @@ function bumpVersion(v, big) {
 /** What to look at before building: each check is ok / warn / bad (bad stops a store build), with a Fix where one helps. */
 function buildChecks(o, target, jump) {
   const B = () => (root.build ||= {}), out = [], add = (lvl, text, fix) => out.push({ lvl, text, fix });
-  const name = (o.title || root.name || '').trim(), store = target === 'store' || target === 'expo';
+  const name = (o.title || root.name || '').trim(), store = ['store', 'expo', 'xcode', 'android'].includes(target);
   if (!name || /^(untitled|my game|new game|my app|new app)( \d+)?$/i.test(name)) add('warn', `The name is still “${name || 'empty'}”`, ['Change', () => jump('title')]);
   else add('ok', `Name: ${name}`);
   if (!o.icon && (o.iconEmoji || '🎮') === '🎮' && hexOr(o.iconBg, '#3a8dff') === '#3a8dff') add('warn', 'Still the default icon', ['Pick one', () => jump('icon')]);
@@ -6450,13 +6478,14 @@ function openBuildSettings() {
   const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
-  const SEC_ID = { Screenshots: 'shots', App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
-  const TARGET_SEC = { web: 'web', store: 'stores', expo: 'expo', itch: 'itch' };
+  const SEC_ID = { Screenshots: 'shots', App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'Xcode & Android Studio': 'native', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
+  const TARGET_SEC = { web: 'web', store: 'stores', expo: 'expo', xcode: 'native', android: 'native', itch: 'itch' };
   const BSUM = { // what a folded section shows in its title bar
     app: () => [o.title || root.name, 'v' + (o.version || '1.0'), o.author].filter(Boolean).join(' · '), icon: () => (o.icon ? 'picture' : `${o.iconEmoji || '🎮'} on colour`),
     loading: () => ({ logo: 'picture and name', text: 'name and text', none: 'no splash' })[o.splash] || '', levels: () => `${lvls.length} level${lvls.length > 1 ? 's' : ''}${lvls.length > 1 ? ', start at ' + (o.startLevel || 1) : ''}`,
     player: () => `${o.quality || 'balanced'} quality`, web: () => (o.installable !== false ? 'installs to the Home Screen' : 'browser only'),
     stores: () => storeOpts().appId, expo: () => [o.appleId && 'Apple ID set', o.localVersions ? 'build ' + (o.buildNumber || 1) : 'auto build numbers'].filter(Boolean).join(' · '),
+    native: () => [storeOpts().appId, 'build ' + (o.buildNumber || 1)].join(' · '),
     itch: () => o.itchUser ? o.itchUser + '/' + (o.itchGame || slug(o.title || root.name)) : '', listing: () => STORE_CATEGORIES.find(([k]) => k === o.category)?.[1] || '',
     shots: () => `${(o.shots || []).length} of 8`, size: () => (o.compress ? 'compressed' : 'not compressed'), testing: () => (o.showFps || o.showErrors ? 'testing options on' : 'off'),
   };
@@ -6484,7 +6513,7 @@ function openBuildSettings() {
 
   const target = BUILD_TARGETS.some((t) => t[0] === o.target) ? o.target : 'html', T = BUILD_TARGETS.find((t) => t[0] === target);
   let showAll = false; try { showAll = localStorage.getItem('pocket.build.all') === '1'; } catch { /* storage unavailable */ }
-  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], listing: ['store', 'expo', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
+  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], native: ['xcode', 'android'], listing: ['store', 'expo', 'xcode', 'android', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
   const jump = (key) => { // scroll to a field (or section) and highlight it
     const el = $(`.dialog [data-bkey="${key}"]`) || $(`.dialog #bs-${key}`); if (!el) return;
     const fs = el.closest('.fsec'); if (fs?.classList.contains('closed')) fs.foldTo(true); // open its section first
@@ -6503,10 +6532,10 @@ function openBuildSettings() {
         c.fix && h('button', { type: 'button', class: 'btn', onclick: () => { const r = c.fix[1](); if (r === undefined) { changed(); redo(); } } }, c.fix[0]))));
   };
   const last = o.last;
-  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, itch: exportItch }[target];
+  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, xcode: exportXcode, android: exportAndroid, itch: exportItch }[target];
   const homeMock = h('div', { class: 'home-mock' }, ['light', 'dark'].map((m) => h('div', { class: 'hm ' + m }, h('img', { class: 'hm-ic', alt: '' }), h('small', {}, (o.shortName || o.title || root.name || 'Game').slice(0, 12)))));
   makeIcon(o, 120).then((u) => homeMock.querySelectorAll('.hm-ic').forEach((i) => { i.src = u; }));
-  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], want('listing') && ['shots', 'Shots'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
+  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('native') && ['native', 'Native'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], want('listing') && ['shots', 'Shots'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
 
   openDialog('Build Settings', [
     h('h4', { class: 'bt-q' }, 'What are you making?'),
@@ -6615,6 +6644,23 @@ function openBuildSettings() {
       o.localVersions && C('buildNumber', { label: 'Build number (iOS buildNumber / Android versionCode)', type: 'number', step: 1, infoText: 'Raise it for every upload, even with the same version.' }),
       h('p', { class: 'desc' }, 'Included: Apple’s privacy manifest, an App Store icon without transparency, the adaptive Android icon, and store-listing/ with the listing text and pictures.'),
     ]),
+    want('native') && sec('Xcode & Android Studio', 'phone', (() => {
+      const so = storeOpts(), idOk = validAppId(so.appId), ios = target === 'xcode';
+      return [
+        h('p', { class: 'desc' }, ios
+          ? 'A plain Xcode project (Swift, no CocoaPods or npm): the game in a full-screen WebView, with phone notifications, haptics and permissions built in. Unzip it on a Mac with Xcode 16 or newer, open the .xcodeproj, pick your iPhone and press Run. Product › Archive uploads it to App Store Connect.'
+          : 'A plain Android Studio project (Java, no extra libraries): the game in a full-screen WebView, with phone notifications, haptics, permissions and the Back button built in. Unzip it, choose File › Open in Android Studio, then press Run. Build › Generate Signed App Bundle makes the .aab for Google Play.'),
+        Cr('appId', { label: ios ? 'Bundle ID' : 'Package name (applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.game. It can never change after the first store release.' }),
+        !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.game (each part starts with a letter).'),
+        C('buildNumber', { label: ios ? 'Build number (CFBundleVersion)' : 'Version code', type: 'number', step: 1, infoText: 'Raise it for every upload, even with the same version.' }),
+        ios && C('appleTeamId', { label: 'Apple Team ID (for signing)', def: '', placeholder: 'AB12CD34EF', infoText: 'developer.apple.com › Membership. Leave it empty and pick your team in Xcode › Signing & Capabilities.' }),
+        ios && C('iosDevices', { label: 'Devices', type: 'select', options: [['iphone', 'iPhone only'], ['universal', 'iPhone and iPad']] }),
+        C('storeFullscreen', { label: 'Full screen (hide the status bar)', type: 'bool' }),
+        h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · ${ios ? 'iOS 15 or newer' : 'Android 8 or newer'} · icon from Icon above. store-listing/ has the listing text and pictures.`),
+        h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk, onclick: ios ? exportXcode : exportAndroid }, icon('download'), ios ? 'Download Xcode project (.zip)' : 'Download Android Studio project (.zip)')),
+        h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk, onclick: ios ? exportAndroid : exportXcode }, icon('download'), ios ? 'Also: Android Studio project' : 'Also: Xcode project')),
+      ];
+    })()),
     want('itch') && sec('itch.io page', 'gamepad', [
       h('p', { class: 'desc' }, 'The download has upload-this-to-itch.zip (the game, index.html at its root), a 630×500 cover and ITCH-PAGE.md with the page settings: viewport size, Mobile friendly, orientation and the fullscreen button.'),
       C('itchUser', { label: 'itch.io username (for butler)', def: '', placeholder: 'your-name' }),

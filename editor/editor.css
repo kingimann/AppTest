@@ -1735,7 +1735,8 @@ body.playing.pb-float #playBar #pbDock, body.playing.pb-mini #playBar #pbHandle 
 .home-mock small { font-size: 11px; font-weight: 600; }
 .bc-head .btn { padding: 5px 12px; min-height: 0; font-size: 12.5px; white-space: nowrap; }
 .bc-head .btn svg { width: 15px; height: 15px; }
-.build-btns .btn { white-space: nowrap; }
+.build-btns .btn { white-space: nowrap; flex: 0 0 auto; }
+.build-btns .btn.primary { white-space: normal; line-height: 1.15; flex: 1 1 auto; text-align: left; }
 
 /* ---------- Light theme: the few places that need more than the colour variables ---------- */
 :root[data-ed-theme=light] { color-scheme: light; --hi: #1c2029; }

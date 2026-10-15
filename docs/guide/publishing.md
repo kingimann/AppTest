@@ -9,6 +9,8 @@ There are five ways to get a game to players, from quickest to most involved:
 | **App stores via Codemagic** | Real iOS and Android apps | Apple / Google developer accounts, a free Codemagic account |
 | **itch.io** | A page on itch.io that plays in the browser, on phones too | A free itch.io account |
 | **App stores via Expo** | Real iOS and Android apps (React Native WebView) | An Expo account (EAS) |
+| **Xcode project** | A real iOS app you build and upload yourself | A Mac with Xcode 16 or newer, an Apple developer account |
+| **Android Studio project** | A real Android app you build and upload yourself | Android Studio (Windows, Mac or Linux), a Google Play developer account |
 
 All of them start from **☰ → Build Settings…**.
 
@@ -25,7 +27,7 @@ Every section of Build Settings **folds**:
 
 The top of Build Settings helps you get it right:
 
-- **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play** or **Expo app**. Build Settings then shows only the settings that kind of build needs (tick *Every setting* to see them all), and the big button at the bottom makes it.
+- **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play**, **Expo app**, **Xcode project**, **Android Studio project** or **itch.io**. Build Settings then shows only the settings that kind of build needs (tick *Every setting* to see them all), and the big button at the bottom makes it.
 - **The ready check** lists what to look at before you build, each with a button that fixes it or takes you there:
   - a name that's still "Untitled", the default 🎮 icon, or a version that isn't a number;
   - no description (for link previews and store listings) and no *Made by* name (for the stores);
@@ -106,6 +108,38 @@ The **Expo & EAS** section of Build Settings adds:
   - the adaptive Android icon;
   - the `store-listing/` folder (below).
 
+## Xcode and Android Studio
+
+Want to build the app yourself, with no cloud service, npm or plugins? Pick **Xcode project** or **Android Studio project** in Build Settings. Both are plain native projects: the game runs in a full-screen web view, and a small bridge gives it the same native features as the other app builds:
+
+- phone notifications, scheduled at a time, every day at a time, or repeating, even while the game is closed, and tapping one tells the game which;
+- haptics;
+- the permission texts your game needs (camera, microphone, location);
+- on Android, the Back button too.
+
+The **Xcode & Android Studio** section of Build Settings has the **Bundle ID** / **package name** (the App ID), the **build number** (raise it for every upload), full screen and, for Xcode, your **Apple Team ID** and iPhone-only or iPhone and iPad. Both buttons are there, so you can download either project from either target.
+
+### Xcode (iOS)
+
+The download has a `YourGame/` folder and the `store-listing/` folder.
+
+1. Unzip it on a Mac and double-click `YourGame.xcodeproj` (Xcode 16 or newer).
+2. Under **Signing & Capabilities**, pick your team (or type your Team ID in Build Settings first).
+3. Plug in your iPhone, pick it at the top and press **Run** (▶).
+4. To publish: **Product › Archive**, then **Distribute App › App Store Connect**. Then send it to TestFlight or App Store review in App Store Connect.
+
+Inside are a SwiftUI app (`App/GameApp.swift`), the game (`App/index.html`), Apple's privacy manifest, an app icon without transparency and the launch colour. It runs on iOS 15 and newer. To update the game later, replace `App/index.html` with a new download's.
+
+### Android Studio
+
+The download has a `YourGame-android/` folder and the `store-listing/` folder.
+
+1. Unzip it, open Android Studio and choose **File › Open**, then pick the `YourGame-android` folder. Let it sync (the first time downloads Gradle).
+2. Turn on USB debugging on your phone, plug it in and press **Run** (▶).
+3. To publish: **Build › Generate Signed App Bundle or APK › Android App Bundle**. Make an upload key there (keep it safe: every update needs the same key), then upload the `.aab` in the Google Play Console.
+
+Inside are a small Java app (`MainActivity.java` and `NotifyReceiver.java` for notifications), the game (`app/src/main/assets/index.html`), the adaptive icon and the older icon sizes, and the notification icon. It runs on Android 8 and newer and targets Android 16 (API 36), as Google Play asks. To update the game later, replace `index.html`.
+
 ## itch.io
 
 Pick **itch.io** in Build Settings. The download has:
@@ -122,7 +156,7 @@ Pick **itch.io** in Build Settings. The download has:
 
 ## Store listing kit
 
-The stores ask for more than the app. **Store listing** in Build Settings (for the App Store & Google Play and Expo targets) takes:
+The stores ask for more than the app. **Store listing** in Build Settings (for the App Store & Google Play, Expo, Xcode and Android Studio targets) takes:
 
 - the subtitle (App Store, 30 letters);
 - the short description (Google Play, 80);

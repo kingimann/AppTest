@@ -248,10 +248,11 @@ Every UI element with a shape (buttons, cards, panels, fields…) can be restyle
 
 The UI shapes keep their corners when you stretch them, and every look and effect (gradients, borders, shadows, inner shadow, patterns, glass) works on all of them.
 
-**Your own shapes:**
+**Your own shapes:** tap **Draw or paste…** (next to Shapes…) for:
 
 - **Draw a shape…**: tap to place corners, drag one to move it, tick **Smooth** for curves, then **Use this shape**.
 - **Paste SVG…**: paste an SVG from Figma, Canva or an icon site (or just its path). It fills the element and stretches with it. The path and view box can be edited in the Inspector too.
+- **Draw your own (2D Sprite Editor)** and **Use a sprite picture instead** are in the same menu.
 
 **Your own UI pieces:** build something once (a card, a shop row, a score panel, with whatever is inside it), then tap **Save to My UI** in UI Element. It shows up under **My UI** when you add to a page, and in My Prefabs. Edit one and *Apply to Prefab* to update every copy.
 

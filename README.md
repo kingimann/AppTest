@@ -1364,7 +1364,8 @@ Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are rel
 
 ### A tidier Inspector
 
-- **One slim top row:** back to the Hierarchy, search (with "2/21"), Advanced, previous / next object.
+- **One slim top row:** back to the Hierarchy, Search settings, Advanced, Only changed.
+- **Path and stepping:** Level › parent › object (tap to go up), with **‹ 2 / 21 ›** to step through objects.
 - **Compact object header:**
   - The name, then tag chips.
   - Two rows of small pickers: Layer · Draw + order · Parent · Child (New Child / Add Existing).

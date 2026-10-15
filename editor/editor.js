@@ -1643,6 +1643,7 @@ function setDock(name, { fromTab = false } = {}) {
   if (name === 'scripts') renderScripts();
   markTabs();
   for (const p of $$('.dock')) p.classList.toggle('active', p.dataset.dock === name);
+  if (name === 'project') { const pb = $('#project'); if (projectScroll[projectTab] && !projectQuery && !pb.scrollTop) pb.scrollTop = projectScroll[projectTab]; pb.onscroll?.(); }
 }
 const isDesktop = () => false; // phones and tablets only
 
@@ -3194,6 +3195,7 @@ function newModel() {
 }
 
 const closedComps = new Set();
+const inspMemory = new Map(); // object id → { closed sections, scroll } so stepping back finds it as you left it
 let showAdvanced = store.get('pocket.editor.advanced', '0') === '1', lastInspected = null, selectedPart = -1;
 const voxelBrush = { mode: 'add', block: 1 };
 const tileBrush = { mode: 'paint', tile: 1 };
@@ -3312,40 +3314,74 @@ function inspectorEmpty() {
       h('button', { class: 'btn', onclick: () => setDock('hierarchy') }, icon('list'), 'Hierarchy'),
       h('button', { class: 'btn', onclick: () => setDock('scripts') }, icon('nodes'), 'Scripts')),
     key.length ? h('div', { class: 'ie-recent' }, h('small', {}, `In this level · ${(project.entities || []).length} objects${uiCount ? `, ${uiCount} UI` : ''}`),
-      key.map((e) => h('button', { onclick: () => select(e.id) }, icon(iconFor(e)), e.name, (e.tags || []).includes('player') ? h('small', { style: 'margin:0 0 0 auto;text-transform:none;letter-spacing:0' }, 'player') : null))) : null);
+      findObjects(),
+      h('div', { class: 'ie-key' }, key.map((e) => h('button', { onclick: () => select(e.id) }, icon(iconFor(e)), e.name, (e.tags || []).includes('player') ? h('small', { style: 'margin:0 0 0 auto;text-transform:none;letter-spacing:0' }, 'player') : null)))) : null);
+}
+/** Type to find any object in the level by name, tag or component, and tap one to inspect it. */
+function findObjects() {
+  const out = h('div', { class: 'ie-found' });
+  const show = (q) => {
+    q = q.trim().toLowerCase(); out.replaceChildren(); out.parentNode?.querySelector('.ie-key')?.toggleAttribute('hidden', !!q);
+    if (!q) return;
+    const hits = (project.entities || []).filter((e) => [e.name, ...(e.tags || []), ...(e.behaviors || []).map((b) => b.type)].some((t) => String(t || '').toLowerCase().includes(q)));
+    out.append(...hits.slice(0, 12).map((e) => h('button', { onclick: () => select(e.id) }, icon(iconFor(e)), e.name || 'Object', h('small', { style: 'margin:0 0 0 auto;text-transform:none;letter-spacing:0' }, e.ui ? 'UI' : `${Math.round(e.x || 0)}, ${Math.round((is3D() ? e.z : e.y) || 0)}`))), // same-named objects told apart by where they are
+      hits.length > 12 ? h('small', {}, `${hits.length - 12} more: keep typing`) : null, hits.length ? null : h('small', {}, 'Nothing matches'));
+  };
+  return h('div', { class: 'ie-find' }, h('input', { type: 'search', placeholder: 'Find an object…', autocapitalize: 'off', oninput: (e) => show(e.target.value) }), out);
+}
+/** Where the object lives (Level › parent › object, each tappable) and previous / next stepping through the level's objects. */
+function inspCrumbs(j, idx) {
+  const path = []; for (let p = j.parent && ent(j.parent), n = 0; p && n < 8; p = p.parent && ent(p.parent), n++) path.unshift(p);
+  const crumb = (label, onclick, cur) => h('button', { type: 'button', class: 'cr' + (cur ? ' cur' : ''), onclick }, label);
+  const sep = () => h('span', { class: 'cr-sep' }, '›');
+  const parts = [crumb(j.ui ? 'UI' : levelList()[0].name || 'Level', () => select(null))];
+  for (const p of path) parts.push(sep(), crumb(p.name || 'Object', () => select(p.id)));
+  parts.push(sep(), crumb(j.name || 'Object', () => { $('#inspector').scrollTo({ top: 0, behavior: EP.reduceMotion ? 'auto' : 'smooth' }); }, true));
+  const trail = h('div', { class: 'cr-trail' }, parts);
+  setTimeout(() => { trail.scrollLeft = trail.scrollWidth; });
+  return h('div', { class: 'insp-crumbs' }, trail,
+    h('div', { class: 'cr-step' },
+      h('button', { type: 'button', class: 'prev', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('chevron')),
+      h('span', { title: 'This object\'s place in the level' }, `${idx + 1} / ${project.entities.length}`),
+      h('button', { type: 'button', class: 'next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
 }
 function renderInspector() {
   if (projectSettingsRedraw) setTimeout(() => projectSettingsRedraw?.()); // (Project Settings shows the same settings)
   const box = $('#inspector');
   const scroll = box.scrollTop;
+  if (lastInspected && lastInspected !== SCENE_ID && lastInspected !== selectedId && ent(lastInspected)) inspMemory.set(lastInspected, { closed: new Set(closedComps), scroll });
   box.replaceChildren();
   if (selectedId === SCENE_ID) {
     const fresh = lastInspected !== SCENE_ID; lastInspected = SCENE_ID;
     renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); compJump(box); box.scrollTop = scroll; return;
   }
   const j = ent(selectedId);
-  if (!j) { box.append(inspectorEmpty()); return; }
+  if (!j) { lastInspected = null; box.append(inspectorEmpty()); return; }
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
   const idx = project.entities.indexOf(j);
-  let freshSel = false;
+  let freshSel = false, scrollTo = scroll;
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
     lastInspected = j.id; selectedPart = -1; freshSel = true;
     closedComps.clear();
-    const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
-    if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
+    const mem = inspMemory.get(j.id); // coming back to an object: its sections open and closed as you left them
+    if (mem) { mem.closed.forEach((k) => closedComps.add(k)); scrollTo = mem.scroll; } else {
+      scrollTo = 0;
+      const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
+      if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
+    }
+    if (mem) freshSel = false;
   }
 
   box.append(h('div', { class: 'insp-bar' }, // one slim row: back · search · advanced · previous / next
     h('button', { class: 'ib', title: 'Back to the Hierarchy', onclick: () => setDock('hierarchy') }, icon('left')),
-    h('input', { type: 'search', placeholder: `Search (${idx + 1}/${project.entities.length})`, value: inspQuery, autocapitalize: 'off', oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
+    h('input', { type: 'search', placeholder: 'Search settings', 'aria-label': 'Search this object\'s settings', value: inspQuery, autocapitalize: 'off', oninput: (e) => { inspQuery = e.target.value; applyInspSearch(box); } }),
     h('button', { class: 'ib adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
       onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear')),
     h('button', { class: 'ib mod-btn' + (onlyChanged ? ' on' : ''), title: 'Show only settings changed from their defaults', 'aria-pressed': String(onlyChanged),
-      onclick: () => { onlyChanged = !onlyChanged; renderInspector(); toast(onlyChanged ? 'Showing only changed settings' : 'Showing all settings'); } }, icon('edit')),
-    h('button', { class: 'ib', title: 'Previous object', onclick: () => stepSelection(-1) }, icon('chevron')),
-    h('button', { class: 'ib next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
+      onclick: () => { onlyChanged = !onlyChanged; renderInspector(); toast(onlyChanged ? 'Showing only changed settings' : 'Showing all settings'); } }, icon('edit'))));
+  box.append(inspCrumbs(j, idx));
 
   // header: active toggle + name, tag, flags
   box.append(h('div', { class: 'insp-head' },
@@ -3416,12 +3452,15 @@ function renderInspector() {
     const t = j.shape.type;
     box.append(comp('Shape Renderer', [
       C('shape.type', { label: 'Shape', type: 'select', options: SHAPE_OPTIONS(), structure: true }),
-      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => shapeGallery(j) }, icon('square'), 'Shapes…'), h('button', { class: 'btn', onclick: () => drawShapeTool(j) }, icon('brush'), 'Draw a shape…'), h('button', { class: 'btn', onclick: () => pasteSvgShape(j) }, icon('paste'), 'Paste SVG…')),
+      h('div', { class: 'btns shape-btns' }, h('button', { class: 'btn primary', onclick: () => shapeGallery(j) }, icon('square'), 'Shapes…'),
+        h('button', { class: 'btn', title: 'Draw, paste or swap for a picture', onclick: (e) => popMenu(e.currentTarget, [
+          { icon: 'brush', label: 'Draw a shape…', fn: () => drawShapeTool(j) },
+          { icon: 'paste', label: 'Paste SVG…', fn: () => pasteSvgShape(j) }, '-',
+          { icon: 'brush', label: 'Draw your own (2D Sprite Editor)', fn: () => editSprite2D(j) },
+          { icon: 'image', label: 'Use a sprite picture instead', fn: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }]) }, icon('brush'), 'Draw or paste…', icon('chevron'))),
       t === 'path' && [C('shape.path', { label: 'Path (SVG "d")', type: 'code', def: '' }), C('shape.view', { label: 'View box (x y width height)', def: '0 0 100 100' })],
       t === 'bubble' && C('shape.tail', { label: 'Tail', type: 'select', options: [['left', 'Left'], ['center', 'Middle'], ['right', 'Right']], def: 'left' }),
       t === 'blob' && C('shape.seed', { label: 'Blob shape (try numbers)', type: 'number', def: 1, step: 1 }),
-      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => editSprite2D(j) }, icon('brush'), 'Draw your own (2D Sprite Editor)')),
-      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => pickSprite((url) => { j.sprite = { src: url, w: j.shape.w || (j.shape.r || 20) * 2 || 56, h: j.shape.h || (j.shape.r || 20) * 2 || 56 }; delete j.shape; changed({ structure: true }); pushHistory(); toast('Now a sprite: change it in the Image component'); }) }, icon('image'), 'Use a sprite picture instead')),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       (t === 'rect' || ['bubble', 'ticket', 'tag', 'bookmark', 'shield', 'cut', 'wave'].includes(t)) && C('shape.radius', { label: t === 'cut' ? 'Corner cut' : 'Corner Radius', type: 'number', def: t === 'rect' ? 0 : 12, structure: true }),
@@ -3751,12 +3790,13 @@ function renderInspector() {
   if (freshSel && foldAllPref) foldAll(box, true);
   syncFoldBtn(box);
   compJump(box);
-  box.scrollTop = scroll;
+  box.scrollTop = scrollTo;
 }
 /** A row of chips, one per component (or Game Settings section), that stays at the top of the Inspector: tap one to jump there. */
 function compJump(box) {
   const comps = [...box.querySelectorAll(':scope > .comp')].filter((c) => c.style.display !== 'none');
-  if (comps.length < 4) return;
+  if (comps.length < 3) return;
+  const top = h('button', { type: 'button', class: 'cj cj-top', title: 'Back to the top', 'aria-label': 'Back to the top', onclick: () => box.scrollTo({ top: 0, behavior: EP.reduceMotion ? 'auto' : 'smooth' }) }, icon('chevron'));
   const chips = comps.map((c) => {
     const t = c.querySelector('.comp-h .t')?.firstChild?.textContent?.trim() || c.dataset.key, ic = c.querySelector('.comp-h svg.ci')?.cloneNode(true);
     const b = h('button', { type: 'button', class: 'cj', onclick: () => {
@@ -3766,12 +3806,13 @@ function compJump(box) {
     } }, ic, h('span', {}, t));
     b._comp = c; return b;
   });
-  const bar = h('div', { class: 'comp-jump' }, chips);
+  const bar = h('div', { class: 'comp-jump' }, top, chips);
   (box.querySelector('.comp-tools') || comps[0]).after(bar);
   const mark = () => { // the chip of the component at the top lights up
     const y = box.scrollTop + bar.offsetHeight + 12; let cur = chips[0];
     for (const b of chips) if (b._comp.offsetTop <= y) cur = b;
     for (const b of chips) b.classList.toggle('on', b === cur);
+    top.classList.toggle('show', box.scrollTop > 240);
     if (cur && !cur.classList.contains('seen')) { chips.forEach((b) => b.classList.remove('seen')); cur.classList.add('seen'); const l = cur.offsetLeft - bar.clientWidth / 2 + cur.offsetWidth / 2; bar.scrollTo({ left: Math.max(0, l), behavior: 'auto' }); }
   };
   box.onscroll = mark; mark();
@@ -4899,48 +4940,93 @@ const OBJECTS_3D = [
 ];
 for (const o of OBJECTS_3D) { const m = o.props.mesh; if (m && !o.props.body) o.props.collider = { shape: m.geometry === 'sphere' ? 'sphere' : 'box' }; } // Unity's 3D primitives come with colliders
 
-let projectTab = 'prefabs';
+let projectTab = store.get('pocket.editor.ptab', 'prefabs'), projectQuery = '', projectView = store.get('pocket.editor.pview', 'grid');
+const projectScroll = {}; // tab → scroll position, so switching tabs returns where you were
+const PROJECT_TABS = () => [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
+/** The tiles a Project tab shows. */
+function projectItems(tab) {
+  if (tab === 'components') return componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
+  if (tab === 'sounds') return [];
+  const src = tab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
+    : tab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
+      : tab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
+        : tab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
+  return src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
+}
 function renderProject() {
   const box = $('#project');
   box.replaceChildren();
-  const tabs = [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
+  const search = h('input', { type: 'search', class: 'p-search', placeholder: 'Search all assets', value: projectQuery, autocapitalize: 'off', 'aria-label': 'Search all assets',
+    oninput: (e) => { projectQuery = e.target.value; fillProject(); } });
+  box.append(h('div', { class: 'p-top' }, h('div', { class: 'p-tabs' }),
+    h('div', { class: 'p-find' }, search,
+      h('button', { class: 'ib p-view', title: projectView === 'list' ? 'Show as tiles' : 'Show as a list', onclick: () => { projectView = projectView === 'list' ? 'grid' : 'list'; store.set('pocket.editor.pview', projectView); renderProject(); } }, icon(projectView === 'list' ? 'grid' : 'list')),
+      h('button', { class: 'btn primary p-create', title: 'Open the Create screen', onclick: () => openCreate({ prefabs: 'gameplay', objects: 'objects', sprites: 'sprites', ui: 'ui', models: 'models' }[projectTab]) }, icon('plus'), 'Create')),
+    h('div', { class: 'p-jump' })));
+  fillProject();
+}
+/** Everything under the Project panel's search box: tab buttons (with match counts), jump chips and the tiles. */
+function fillProject() {
+  const box = $('#project'), top = box.querySelector('.p-top'), jump = top.querySelector('.p-jump');
+  for (const el of [...box.children]) if (el !== top) el.remove();
+  const tabs = PROJECT_TABS();
   if (!tabs.some((t) => t[0] === projectTab)) projectTab = 'prefabs';
-  box.append(h('div', { class: 'p-tabs' }, tabs.map(([k, l, ic]) => h('button', { class: projectTab === k ? 'active' : '', onclick: () => { projectTab = k; renderProject(); } }, icon(ic), l))));
-  box.append(h('div', { class: 'p-path' }, `Assets › ${tabs.find((t) => t[0] === projectTab)[1]}`));
-  if (projectTab === 'sounds') { box.append(...soundsTab()); return; }
-  let items;
-  if (projectTab === 'components') {
-    items = componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
-  } else {
-    const src = projectTab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
-      : projectTab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
-        : projectTab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
-          : projectTab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
-    items = src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
-  }
-  const mine = projectTab === 'prefabs' ? userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode) : [];
-  if (projectTab !== 'components') box.append(h('button', { class: 'btn primary p-create', onclick: () => openCreate({ prefabs: 'gameplay', objects: 'objects', sprites: 'sprites', ui: 'ui', models: 'models' }[projectTab]) }, icon('plus'), 'Open the Create screen'));
-  if (projectTab === 'prefabs' && mine.length) {
-    box.append(h('div', { class: 'p-sec' }, 'My Prefabs'));
-    box.append(h('div', { class: 'tiles' }, mine.map((pf) => {
-      const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
-        h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
-      draggable(t, { kind: 'prefab', def: { userPrefab: pf.id, label: pf.name }, label: pf.name, icon: iconFor(pf.entities[0]) });
-      return t;
-    })));
-    box.append(h('div', { class: 'p-sec' }, 'Built-in'));
-  }
-  const tileOf = (it) => {
-    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.art ? h('div', { class: 'th art' + (it.art.startsWith('art:ui-') ? ' uiic' : '') }, h('img', { src: artURL(it.art), alt: '' })) : it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label));
-    draggable(t, it.payload);
+  const q = projectQuery.trim().toLowerCase(), match = (it) => !q || `${it.label} ${it.group || ''}`.toLowerCase().includes(q);
+  const mineAll = userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode);
+  const hitsIn = (k) => q ? projectItems(k).filter(match).length + (k === 'prefabs' ? mineAll.filter((p) => p.name.toLowerCase().includes(q)).length : 0) : 0;
+  const tile = (it) => { const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.art ? h('div', { class: 'th art' + (it.art.startsWith('art:ui-') ? ' uiic' : '') }, h('img', { src: artURL(it.art), alt: '' })) : it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label)); draggable(t, it.payload); return t; };
+  const mineTile = (pf) => {
+    const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
+      h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
+    draggable(t, { kind: 'prefab', def: { userPrefab: pf.id, label: pf.name }, label: pf.name, icon: iconFor(pf.entities[0]) });
     return t;
   };
+  const grid = (list) => h('div', { class: 'tiles' + (projectView === 'list' ? ' list' : '') }, list);
+  const sec = (label, n) => h('div', { class: 'p-sec', 'data-sec': label }, label, n != null ? h('span', { class: 'p-n' }, n) : null);
+
+  top.querySelector('.p-tabs').replaceChildren(...tabs.map(([k, l, ic]) => { const n = hitsIn(k); return h('button', { class: (projectTab === k && !q ? 'active' : '') + (q && !n ? ' none' : ''), onclick: () => { if (!q) projectScroll[projectTab] = box.scrollTop; projectTab = k; projectQuery = ''; store.set('pocket.editor.ptab', k); renderProject(); } }, icon(ic), l, q && n ? h('span', { class: 'p-n' }, n) : null); }));
+  jump.replaceChildren(); box.onscroll = null;
+
+  if (q) { // search every tab at once
+    let any = false;
+    for (const [k, l] of tabs) {
+      const mine = k === 'prefabs' ? mineAll.filter((p) => p.name.toLowerCase().includes(q)) : [];
+      const list = projectItems(k).filter(match);
+      if (!list.length && !mine.length) continue;
+      any = true;
+      box.append(sec(l, list.length + mine.length), grid([...mine.map(mineTile), ...list.slice(0, 60).map(tile)]));
+    }
+    if (!any) box.append(h('p', { class: 'p-note' }, `Nothing called “${projectQuery.trim()}”. Try a shorter word, or open the Create screen.`));
+    top.querySelector('.p-create').hidden = false; box.scrollTop = 0;
+    return;
+  }
+  if (projectTab === 'sounds') { box.append(...soundsTab()); box.scrollTop = projectScroll.sounds || 0; return; }
+  if (projectTab === 'components') top.querySelector('.p-create').hidden = true;
+  const items = projectItems(projectTab);
+  const mine = projectTab === 'prefabs' ? mineAll : [];
   const groups = [...new Set(items.map((it) => it.group).filter(Boolean))].sort((a, b) => (UI_GROUPS.indexOf(a) + 99) % 99 - (UI_GROUPS.indexOf(b) + 99) % 99);
-  if (groups.length > 1) for (const g of groups) box.append(h('div', { class: 'p-sec' }, g), h('div', { class: 'tiles' }, items.filter((it) => it.group === g).map(tileOf)));
-  else box.append(h('div', { class: 'tiles' }, items.map(tileOf)));
+  const secs = [...(mine.length ? ['My Prefabs'] : []), ...(groups.length > 1 ? groups : [])];
+  if (secs.length > 2) { // jump chips: one per section, the current one lit as you scroll
+    jump.replaceChildren(...secs.map((g) => h('button', { type: 'button', onclick: () => {
+      const el = box.querySelector(`.p-sec[data-sec="${CSS.escape(g)}"]`); if (el) box.scrollTo({ top: el.offsetTop - top.offsetHeight - 4, behavior: EP.reduceMotion ? 'auto' : 'smooth' });
+      box._pinned = g; [...jump.children].forEach((b) => b.classList.toggle('on', b.textContent === g));
+    } }, g)));
+    box._pinned = null; box.onpointerdown = box.onwheel = () => { box._pinned = null; }; // the chip you tapped stays lit even when its section is too near the end to reach the top
+    box.onscroll = () => {
+      if (box._pinned || !box.clientHeight) return; // (not laid out while the panel is hidden)
+      const y = box.scrollTop + top.offsetHeight + 12; let cur = 0;
+      [...box.querySelectorAll('.p-sec[data-sec]')].forEach((el, i) => { if (el.offsetTop <= y) cur = i; });
+      [...jump.children].forEach((b, i) => b.classList.toggle('on', i === cur));
+    };
+  }
+  if (mine.length) box.append(sec('My Prefabs', mine.length), grid(mine.map(mineTile)), sec('Built-in'));
+  if (groups.length > 1) for (const g of groups) { const list = items.filter((it) => it.group === g); box.append(sec(g, list.length), grid(list.map(tile))); }
+  else box.append(grid(items.map(tile)));
   box.append(h('p', { class: 'p-note' }, projectTab === 'components'
     ? 'Drag a component onto an object in the Scene or Hierarchy, or tap to add it to the selected object.'
     : 'Drag into the Scene to place, or tap to add at the center of the view.' + (projectTab === 'prefabs' && !mine.length ? ' Make your own prefabs: long-press an object (or its ⋯ menu) and pick Make Prefab.' : '')));
+  box.scrollTop = projectScroll[projectTab] || 0;
+  jump.firstChild?.classList.add('on'); box.onscroll?.();
 }
 
 // ---- drag & drop ----

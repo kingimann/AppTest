@@ -4638,6 +4638,36 @@ function ownScreen(scene, screen) {
   return scene.entities.some((e) => e.ui && !e.dead && e.visible && e.showWhen === screen);
 }
 
+
+const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
+/**
+ * A page set to "Line everything up": what is in it stacks top to bottom, in the order it was put there, with an even gap, so
+ * nothing overlaps on any screen (a text that wraps to more lines, or an element that hides, moves what is under it). Elements
+ * whose tops overlap stay side by side as a row. A feed or list that fills the page starts under them; middle and bottom
+ * anchored elements float.
+ */
+function layoutStack(pg, scene) {
+  const b = pg.behaviors.find((x) => x.type === 'uiShowIf' && x.params?.stack); if (!b) return;
+  const gap = Math.max(0, +(b.params.stackGap ?? 16)), items = [], fill = [];
+  for (const q of scene.entities) {
+    if (q.parentEnt !== pg || !q.ui || q.dead) continue;
+    if (q.stretch === 'both') { if (q.behaviors.some((x) => STACK_FILLERS.has(x.type))) fill.push(q); continue; }
+    if (!/^top/.test(q.anchor || 'center')) continue;
+    const B = q._animBase, cur = B ? B.y : q.y;
+    if (q._y0 == null || (q._ys != null && Math.abs(cur - q._ys) > 0.01)) q._y0 = cur; // where it was put (or moved to, dragging it in the editor): its place in the order
+    if (q.visible === false && q.behaviors.some((x) => x.type === 'uiShowIf')) continue; // hidden by its own Show If: no gap (one waiting to arrive keeps its place)
+    const ex = q.extents(), hy = ex.sphere ? ex.r : ex.hy, oy = ex.oy || 0; if (!(hy > 0)) continue;
+    const E = scene.engine, r = uiBox(q, E.width, E.height, E.safe);
+    items.push({ q, top: q._y0 + oy - hy, bot: q._y0 + oy + hy, x0: r.x - r.w / 2, x1: r.x + r.w / 2 });
+  }
+  items.sort((a, c) => a.top - c.top);
+  const rows = [];
+  for (const it of items) { const r = rows[rows.length - 1]; if (r && it.top < r.bot - 2 && r.items.every((o) => Math.min(it.x1, o.x1) - Math.max(it.x0, o.x0) <= Math.min(it.x1 - it.x0, o.x1 - o.x0) * 0.25)) { r.items.push(it); r.top = Math.min(r.top, it.top); r.bot = Math.max(r.bot, it.bot); } else rows.push({ top: it.top, bot: it.bot, items: [it] }); } // side by side (not on top of each other): one row
+  const st = +(b.params.stackTop ?? -1);
+  let at = st >= 0 ? st : rows.length ? Math.max(gap, rows[0].top) : gap;
+  for (const r of rows) { const d = at - r.top; for (const it of r.items) { const q = it.q, y = q._y0 + d, B = q._animBase; if (B) { q.y += y - B.y; B.y = y; } else q.y = y; q._ys = y; } at += r.bot - r.top + gap; } // (arriving with an animation: it lands in its place)
+  for (const q of fill) q.marginTop = rows.length ? at : q.marginTop; // the feed fills what is left under them
+}
 function renderUI(engine, scene) {
   const ctx = engine.uiCtx, W = engine.width, H = engine.height, inp = engine.input;
   ctx.setTransform(engine.uiDpr, 0, 0, engine.uiDpr, 0, 0);
@@ -4658,6 +4688,7 @@ function renderUI(engine, scene) {
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
       if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
+      if (e.behaviors.length && e.behaviors.some((x) => x.type === 'uiShowIf' && x.params?.stack)) layoutStack(e, scene); // a page that lines up what is in it
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
       if (scene.uiShift && !engine.editing) { let mine = false; for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === scene.uiShiftBy) { mine = true; break; } if (!mine) o.x += scene.uiShift; } // a side menu that pushes the screen aside
       let pa = 1; for (let q = e.parentEnt, n = 0; q && n < 50; q = q.parentEnt, n++) pa *= (q.alpha ?? 1) * (q._kidAlpha ?? 1); // a page fading in or out fades everything inside it
@@ -12728,6 +12759,9 @@ registerBehavior('uiShowIf', {
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
     { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
+    { key: 'stack', label: 'Line everything up, top to bottom (no overlaps)', type: 'bool', default: false, group: 'Page', info: 'What is on the page stacks top to bottom in its order, with an even gap, on every screen size: a taller text or a hidden element moves what is under it. Things side by side stay a row. A feed or list that fills the page starts under them. Elements anchored to the middle or the bottom (a + button) float where they are.' },
+    { key: 'stackGap', label: 'Gap between them', type: 'number', default: 16, range: [0, 48], step: 2, group: 'Page', showIf: (b) => !!b.stack },
+    { key: 'stackTop', label: 'Space above the first one', type: 'number', default: -1, range: [-1, 120], step: 2, group: 'Page', showIf: (b) => !!b.stack, infoText: '-1 = where the first one is.' },
     { key: 'scroll', label: 'Scroll when it is taller than the screen', type: 'bool', default: false, group: 'Page', info: 'Drag up and down to see what is below the screen (with a flick, a rubber band at the ends and a thin scroll bar). Lists and scroll views inside it still scroll on their own.' },
     { key: 'keepScroll', label: 'Remember where it was scrolled to', type: 'bool', default: true, group: 'Page', showIf: (b) => !!b.scroll },
     { key: 'showMessage', label: 'Message when it opens', type: 'text', default: '', suggest: 'messages', group: 'Page' },

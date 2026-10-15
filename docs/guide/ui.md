@@ -124,6 +124,11 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - *Behaviour*: **Swipe left / right to change tab**, **Tapping the current tab again scrolls its page to the top**, **Open on the last tab used** (next time the app opens), and **Pressing and holding a tab sends** a message (the tab's page is in `heldTab`).
   - *Size & shape*: label weight (normal, bold, bold when selected) and UPPERCASE labels.
   - *Background*: **Background see-through** (1 = solid, 0 = clear), **Blur what is behind** (frosted glass, like iOS), a **gradient** to a second colour, and the **line colour** on its top edge. **Pages run under the bar** (auto, yes or no): on *auto*, a see-through, blurred, floating, glass or minimal bar lets the open page reach the bottom of the screen and show through it. What's on the page (buttons, lists, the last item of a scrolling page) still stops above the bar, and dragging on the bar never scrolls the page.
+- **Pages that line themselves up:** turn on the page's **Line everything up (no overlaps)**; new pages made in the editor have it on.
+  - What is on the page stacks top to bottom, in its order, with an even *Gap*, on every screen size. A text that wraps to more lines, or an element hidden by its own Show If, moves what is under it.
+  - Things placed side by side stay a row. Drag one above or below another to change the order.
+  - A feed, chat, inbox, list or photo grid that fills the page starts under them. Elements anchored to the middle or bottom (a + button) float where they are.
+  - Adding a feed, chat, inbox, notifications, friends, Data List or photo grid to any page makes it fill the room under what is already there.
 - **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
   - **Keep in step with** the Bottom Nav tabs, all pages, or the tabs then the other pages. The menu then lists those pages (names, icons and badges) by itself and changes when they change. Your own items come after them.
   - The Bottom Nav has **Keep in step with** too (the Side Menu's pages, or all pages, with *Most tabs* and where your own tabs go). A new page added in the editor also asks to join the side menu.

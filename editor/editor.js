@@ -5173,6 +5173,83 @@ function captureThumb() {
     store.set(thumbKey(projectId), c.toDataURL('image/jpeg', 0.7));
   } catch { /* a picture is nice to have */ }
 }
+/** The Play bar's camera: the game screen as it is now, kept for the store listing (Build Settings › Screenshots). */
+function captureShot() {
+  if (!playing) return;
+  try {
+    const host = engine.root || $('#viewport'), R = host.getBoundingClientRect();
+    engine.render?.();
+    const cvs = [...host.querySelectorAll('canvas')].filter((cv) => cv.getBoundingClientRect().width && getComputedStyle(cv).display !== 'none'); if (!cvs.length) return;
+    const rs = cvs.map((cv) => cv.getBoundingClientRect()), L = Math.max(R.left, Math.min(...rs.map((r) => r.left))), T = Math.max(R.top, Math.min(...rs.map((r) => r.top)));
+    const bw = Math.min(R.right, Math.max(...rs.map((r) => r.right))) - L, bh = Math.min(R.bottom, Math.max(...rs.map((r) => r.bottom))) - T;
+    const k = Math.min(cvs[0].width / rs[0].width, 1800 / Math.max(bw, bh)), W = Math.round(bw * k), H = Math.round(bh * k); // the screen's own sharpness, at most 1800 px
+    const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+    g.fillStyle = hexOr(root.background, '#000000'); g.fillRect(0, 0, W, H);
+    cvs.forEach((cv, i) => { const r = rs[i]; g.drawImage(cv, (r.left - L) * k, (r.top - T) * k, r.width * k, r.height * k); });
+    const B = (root.build ||= {}), shots = (B.shots ||= []);
+    if (shots.length >= 8) { toast('You have 8 screenshots: remove some in Build Settings › Screenshots'); return; }
+    shots.push({ id: uid('s'), img: c.toDataURL('image/jpeg', 0.88), caption: '', w: W, h: H }); changed(); saveNow();
+    const fl = h('div', { class: 'shot-flash' }); document.body.append(fl); setTimeout(() => fl.remove(), 450); buzz(10);
+    toast(`Screenshot ${shots.length} saved for the store listing (Build Settings › Screenshots)`);
+  } catch { toast('Could not take a screenshot'); }
+}
+/** Store sizes for screenshots: [file name, width, height] for portrait (landscape swaps them). */
+function shotSizes(target, so) {
+  if (target === 'itch') return [['itch-screenshot', 0, 0]];
+  return [['app-store-iphone-6.9', 1320, 2868], ...(so.iosDevices === 'universal' ? [['app-store-ipad-13', 2064, 2752]] : []), ['google-play-phone', 1080, 1920]];
+}
+/** One screenshot made to a store size: plain (fills the picture) or with its caption above it. */
+async function frameShot(shot, W, H, o) {
+  const img = await imgOf(shot.img), c = document.createElement('canvas'); c.width = W || img.naturalWidth; c.height = H || img.naturalHeight; W = c.width; H = c.height;
+  const x = c.getContext('2d'), bg = hexOr(o.shotBg, hexOr(o.iconBg, '#3a8dff')), font = themeOf(root.settings).font || 'system-ui, sans-serif';
+  const cover = (dx, dy, dw, dh) => { const k = Math.max(dw / img.naturalWidth, dh / img.naturalHeight), sw = dw / k, sh = dh / k; x.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, dx, dy, dw, dh); };
+  if (o.shotStyle !== 'caption' || !shot.caption) { x.fillStyle = bg; x.fillRect(0, 0, W, H); cover(0, 0, W, H); return c.toDataURL('image/jpeg', 0.9); }
+  const g = x.createLinearGradient(0, 0, 0, H); g.addColorStop(0, bg); g.addColorStop(1, darken(bg, 0.4)); x.fillStyle = g; x.fillRect(0, 0, W, H);
+  const port = H >= W, top = H * (port ? 0.2 : 0.24), fs = Math.round(Math.min(W, H) * (port ? 0.075 : 0.07));
+  x.fillStyle = hexOr(o.shotText, '#ffffff'); x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = `900 ${fs}px ${font}`;
+  const words = String(shot.caption).split(/\s+/), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (x.measureText(t).width > W * 0.86 && cur) { lines.push(cur); cur = w; } else cur = t; } if (cur) lines.push(cur);
+  lines.slice(0, 3).forEach((l, i, a) => x.fillText(l, W / 2, top / 2 + (i - (a.length - 1) / 2) * fs * 1.15 + H * 0.015));
+  const aw = W * 0.84, ah = H - top - H * 0.05, k = Math.min(aw / img.naturalWidth, ah / img.naturalHeight), dw = img.naturalWidth * k, dh = img.naturalHeight * k, dx = (W - dw) / 2, dy = top + (ah - dh) / 2, r = Math.min(W, H) * 0.045;
+  x.save(); x.shadowColor = 'rgba(0,0,0,0.4)'; x.shadowBlur = W * 0.03; x.shadowOffsetY = W * 0.01; x.beginPath(); x.roundRect(dx, dy, dw, dh, r); x.fillStyle = '#000'; x.fill(); x.restore();
+  x.save(); x.beginPath(); x.roundRect(dx, dy, dw, dh, r); x.clip(); x.drawImage(img, dx, dy, dw, dh); x.restore();
+  return c.toDataURL('image/jpeg', 0.9);
+}
+/** screenshots/: every saved screenshot at every size the target's stores want. */
+async function shotFiles(o, target, dir) {
+  const so = storeOpts(), out = [], shots = o.shots || [];
+  for (const [i, sh] of shots.entries()) for (const [nm, w, hh] of shotSizes(target, so)) {
+    const land = (sh.w || 1) > (sh.h || 1), W = land ? hh : w, H = land ? w : hh;
+    out.push({ name: `${dir}screenshots/${nm}-${i + 1}.jpg`, data: await dataBytes(await frameShot(sh, W, H, o)) });
+  }
+  return out;
+}
+/**
+ * Build Settings › File size › Make pictures smaller: pictures saved in the game are saved again as WebP (or JPEG when
+ * they have no see-through parts), at the same size unless asked to shrink very big ones. Undo puts them back.
+ */
+async function shrinkPictures({ resize = false } = {}) {
+  const found = [], seen = new Set();
+  const walk = (o) => { if (!o || typeof o !== 'object') return; for (const [k, v] of Object.entries(o)) { if (typeof v === 'string' && /^data:image\/(png|jpeg|jpg|webp|bmp)/.test(v) && v.length > 120000) found.push([o, k]); else if (v && typeof v === 'object' && !seen.has(v)) { seen.add(v); walk(v); } } };
+  const { build, ...game } = root; walk(game); // (not Build Settings' own screenshots)
+  if (!found.length) { toast('No big pictures to shrink'); return; }
+  pushHistory(); let before = 0, after = 0, n = 0;
+  for (const [o, k] of found) {
+    try {
+      const src = o[k], img = await imgOf(src), big = Math.max(img.naturalWidth, img.naturalHeight), sc = resize && big > 2048 ? 2048 / big : 1;
+      const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * sc); c.height = Math.round(img.naturalHeight * sc);
+      const x = c.getContext('2d'); x.drawImage(img, 0, 0, c.width, c.height);
+      let out = c.toDataURL('image/webp', 0.86);
+      if (!out.startsWith('data:image/webp')) { // (no WebP encoder, e.g. Safari): JPEG, unless it has see-through parts
+        const px = x.getImageData(0, 0, c.width, c.height).data; let alpha = false; for (let i = 3; i < px.length; i += 16) if (px[i] < 250) { alpha = true; break; }
+        out = alpha ? '' : c.toDataURL('image/jpeg', 0.86);
+      }
+      if (out && out.length < src.length * 0.9) { before += src.length; after += out.length; o[k] = out; n++; }
+    } catch { /* leave that one as it is */ }
+  }
+  if (!n) { toast('The pictures are already small'); return; }
+  changed({ structure: true }); saveNow(); toast(`${n} picture${n > 1 ? 's' : ''} smaller: saved ${kb(Math.round((before - after) * 0.75))} (Undo puts them back)`);
+}
 /** A project's picture: the last game screen, or a coloured tile with its kind's icon. */
 function projArt(id, json, name, big) {
   const src = store.get(thumbKey(id), ''), K = KIND_INFO[projKind(json)];
@@ -5645,7 +5722,8 @@ const BUILD_DEFAULTS = {
   appId: '', storeIOS: true, storeAndroid: true, iosPublish: 'testflight', iosDevices: 'iphone', androidTrack: 'internal', playDraft: true,
   ascIntegration: 'codemagic', keystoreRef: 'keystore_reference', playGroup: 'google_play', buildOffset: 0, notifyEmail: '', storeFullscreen: true,
   // store listing (App Store Connect, Google Play Console, itch.io page)
-  subtitle: '', shortDesc: '', keywords: '', category: '', privacyUrl: '', supportUrl: '', marketingUrl: '',
+  subtitle: '', shortDesc: '', keywords: '', category: '', privacyUrl: '', supportUrl: '', marketingUrl: '', whatsNew: '',
+  shotStyle: 'caption', shotBg: '', shotText: '#ffffff',
   // Expo / EAS
   localVersions: false, buildNumber: 1, appleId: '', ascAppId: '', appleTeamId: '', playKeyFile: false,
   // itch.io
@@ -5817,7 +5895,7 @@ function storeOpts() {
     iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')),
     author: o.author, description: o.description, subtitle: o.subtitle, shortDesc: o.shortDesc, keywords: o.keywords, category: o.category || (root.settings?.app ? 'app-productivity' : 'game-casual'),
     privacyUrl: o.privacyUrl, supportUrl: o.supportUrl, marketingUrl: o.marketingUrl, localVersions: !!o.localVersions, buildNumber: +o.buildNumber || 1,
-    appleId: o.appleId, ascAppId: o.ascAppId, appleTeamId: o.appleTeamId, playKeyFile: !!o.playKeyFile, itchUser: o.itchUser, itchGame: o.itchGame };
+    appleId: o.appleId, ascAppId: o.ascAppId, appleTeamId: o.appleTeamId, playKeyFile: !!o.playKeyFile, itchUser: o.itchUser, itchGame: o.itchGame, whatsNew: o.whatsNew, shots: (o.shots || []).length };
 }
 /** What the game uses that the stores' privacy questions ask about (for LISTING.md and the starter privacy policy). */
 function appFacts() {
@@ -5866,9 +5944,9 @@ async function storeArt(o, { itch = false } = {}) {
   return { appStoreIcon: await opaquePNG(a, bg), playIcon: await toPNG(p), feature: await toPNG(banner(1024, 500)) };
 }
 /** store-listing/: the pictures, LISTING.md and privacy-policy.md, for the App Store and Google Play. */
-async function storeKitFiles(o, dir = 'store-listing/') {
+async function storeKitFiles(o, dir = 'store-listing/', target = 'store') {
   const so = storeOpts(), f = appFacts(), art = await storeArt(o);
-  return [{ name: dir + 'LISTING.md', data: listingSheet(so, f) }, { name: dir + 'privacy-policy.md', data: privacyPolicy(so, f) },
+  return [...await shotFiles(o, target, dir),{ name: dir + 'LISTING.md', data: listingSheet(so, f) }, { name: dir + 'privacy-policy.md', data: privacyPolicy(so, f) },
     { name: dir + 'app-store-icon-1024.png', data: art.appStoreIcon }, { name: dir + 'play-icon-512.png', data: art.playIcon }, { name: dir + 'play-feature-graphic-1024x500.png', data: art.feature }];
 }
 function downloadZip(files, name) { const zip = makeZip(files), a = h('a', { href: URL.createObjectURL(zip), download: name }); document.body.append(a); a.click(); a.remove(); return zip; }
@@ -5882,8 +5960,8 @@ async function exportItch() {
     toast('Making the itch.io upload…');
     const o = buildOpts(), so = storeOpts(), b = await buildHTML({ native: true }), v = root.view || { width: 400, height: 700 }, port = (so.orientation || (v.height >= v.width ? 'portrait' : 'landscape')) === 'portrait';
     const vp = port ? { w: Math.round(720 * v.width / v.height), h: 720 } : { w: 960, h: Math.round(960 * v.height / v.width) };
-    const inner = makeZip([{ name: 'index.html', data: b.html }]), art = await storeArt(o, { itch: true });
-    const zip = downloadZip([{ name: 'upload-this-to-itch.zip', data: new Uint8Array(await inner.arrayBuffer()) }, { name: 'cover-630x500.png', data: art.cover }, { name: 'ITCH-PAGE.md', data: itchPage({ ...so, orientation: port ? 'portrait' : 'landscape' }, vp) }], slug(so.name) + '-itch.zip');
+    const inner = makeZip([{ name: 'index.html', data: b.html }]), art = await storeArt(o, { itch: true }), shots = await shotFiles(o, 'itch', '');
+    const zip = downloadZip([...shots, { name: 'upload-this-to-itch.zip', data: new Uint8Array(await inner.arrayBuffer()) }, { name: 'cover-630x500.png', data: art.cover }, { name: 'ITCH-PAGE.md', data: itchPage({ ...so, orientation: port ? 'portrait' : 'landscape' }, vp) }], slug(so.name) + '-itch.zip');
     noteBuild('itch', zip.size); toast(`itch.io kit ready (${kb(zip.size)}): upload upload-this-to-itch.zip as an HTML game. ITCH-PAGE.md has the page settings (${vp.w} × ${vp.h}).`);
   } catch (err) { toast('Could not make the itch.io upload: ' + err.message); }
 }
@@ -6086,6 +6164,7 @@ function loadingDesigner(B, C, o, redo) {
 function noteBuild(target, size) {
   const B = (root.build ||= {}), v = B.version || BUILD_DEFAULTS.version;
   B.last = { target, at: Date.now(), size, version: v };
+  B.history = [{ target, at: B.last.at, size, version: v }, ...(B.history || [])].slice(0, 12); // Build Settings › Recent builds
   if (target === 'store' || target === 'expo') B.lastStoreVersion = v;
   changed(); if ($('.dialog .build-sec')) setTimeout(() => { const db = $('.dialog .db'), sc = db?.scrollTop; openBuildSettings(); if ($('.dialog .db')) $('.dialog .db').scrollTop = sc; }, 50);
 }
@@ -6132,6 +6211,8 @@ function buildChecks(o, target, jump) {
     for (const [k, l, n] of [['subtitle', 'Subtitle', LIMITS.subtitle], ['shortDesc', 'Short description', LIMITS.shortDesc], ['keywords', 'Keywords', LIMITS.keywords]]) if (String(o[k] || '').length > n) add('warn', `${l} is ${String(o[k]).length} letters: the store allows ${n}`, ['Shorten', () => jump(k)]);
     if (name.length > LIMITS.name) add('warn', `The name is ${name.length} letters: store names can be ${LIMITS.name}`, ['Change', () => jump('title')]);
   }
+  if ((store || target === 'itch') && !(o.shots || []).length) add('warn', target === 'itch' ? 'No screenshots for the itch.io page yet' : 'No screenshots yet: both stores need them', ['How', () => jump('shots')]);
+  else if (store || target === 'itch') add('ok', `${o.shots.length} screenshot${o.shots.length > 1 ? 's' : ''}`);
   if (target === 'itch' && !String(o.shortDesc || '').trim()) add('warn', 'No short description for the itch.io page', ['Write one', () => jump('shortDesc')]);
   return out;
 }
@@ -6140,7 +6221,7 @@ function openBuildSettings() {
   const B = () => { root.build ||= {}; return root.build; }, o = buildOpts();
   const C = (path, spec) => control(B, path, { def: BUILD_DEFAULTS[path], ...spec, structure: false });
   const redo = () => setTimeout(() => { if (!$('.dialog .build-sec')) return; document.activeElement?.blur?.(); const sc = $('.dialog .db')?.scrollTop; openBuildSettings(); const db = $('.dialog .db'); if (db) db.scrollTop = sc; });
-  const SEC_ID = { App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
+  const SEC_ID = { Screenshots: 'shots', App: 'app', Icon: 'icon', 'Loading screen': 'loading', Levels: 'levels', Player: 'player', 'Web app': 'web', 'App stores (iOS & Android)': 'stores', 'Store listing': 'listing', 'Expo & EAS': 'expo', 'itch.io page': 'itch', 'File size': 'size', Testing: 'testing' };
   const sec = (title, ic, kids) => h('div', { class: 'build-sec', id: 'bs-' + (SEC_ID[title] || title) }, h('h4', {}, icon(ic), title), kids);
   const Cr = (path, spec) => { const el = C(path, spec); el.addEventListener('change', redo); return el; }; // a field that shows or hides others
   const preview = h('img', { class: 'build-icon', alt: '' }); makeIcon(o, 180).then((u) => { preview.src = u; });
@@ -6186,12 +6267,14 @@ function openBuildSettings() {
   const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, itch: exportItch }[target];
   const homeMock = h('div', { class: 'home-mock' }, ['light', 'dark'].map((m) => h('div', { class: 'hm ' + m }, h('img', { class: 'hm-ic', alt: '' }), h('small', {}, (o.shortName || o.title || root.name || 'Game').slice(0, 12)))));
   makeIcon(o, 120).then((u) => homeMock.querySelectorAll('.hm-ic').forEach((i) => { i.src = u; }));
-  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
+  const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], want('listing') && ['shots', 'Shots'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
 
   openDialog('Build Settings', [
     h('h4', { class: 'bt-q' }, 'What are you making?'),
     h('div', { class: 'build-targets' }, BUILD_TARGETS.map(([k, ic, label, desc]) => h('button', { type: 'button', class: 'bt' + (k === target ? ' on' : ''), onclick: () => { B().target = k; changed(); redo(); } }, icon(ic), h('b', {}, label), h('small', {}, desc)))),
     last && h('p', { class: 'desc build-last' }, `Last built ${ago(last.at)}: ${BUILD_TARGETS.find((t) => t[0] === last.target)?.[2] || last.target}, version ${last.version}, ${kb(last.size || 0)}`),
+    (o.history || []).length > 1 && h('details', { class: 'build-hist' }, h('summary', {}, `Recent builds (${o.history.length})`),
+      h('div', {}, o.history.map((b) => h('div', { class: 'bh-row' }, h('b', {}, BUILD_TARGETS.find((t) => t[0] === b.target)?.[2] || b.target), h('span', {}, `v${b.version}`), h('span', {}, kb(b.size || 0)), h('small', {}, ago(b.at)))))),
     checkBox,
     h('div', { class: 'build-jump' }, sections.map(([k, l]) => h('button', { type: 'button', class: 'chip', onclick: () => jump(k) }, l)),
       h('label', { class: 'chk bj-all' }, h('input', { type: 'checkbox', checked: showAll, onchange: (e) => { try { localStorage.setItem('pocket.build.all', e.target.checked ? '1' : '0'); } catch { /* storage unavailable */ } redo(); } }), 'Every setting')),
@@ -6204,6 +6287,7 @@ function openBuildSettings() {
         h('button', { type: 'button', class: 'btn', onclick: () => { B().version = bumpVersion(o.version, true); changed(); redo(); } }, `Big → ${bumpVersion(o.version, true)}`))),
       tag(C('author', { label: 'Made by' }), 'author'),
       tag(C('description', { label: 'Description' }), 'description'),
+      target !== 'html' && target !== 'web' && tag(C('whatsNew', { label: 'What’s new in this version', type: 'code', def: '', placeholder: 'New levels, faster loading, bug fixes…', infoText: 'The release notes: App Store “What’s New”, Google Play “Release notes”, and the itch.io page.' }), 'whatsNew'),
       C('file', { label: 'File name', def: slug(o.title || root.name) }),
     ]),
     sec('Icon', 'image', [
@@ -6312,8 +6396,28 @@ function openBuildSettings() {
         ],
       ];
     })()),
+    want('listing') && sec('Screenshots', 'camera', (() => {
+      const shots = o.shots || [], save = () => { changed(); redo(); };
+      const styled = h('img', { class: 'shot-preview', alt: '' }); if (shots[0]) { const so = storeOpts(), land = (shots[0].w || 1) > (shots[0].h || 1); frameShot(shots[0], land ? 600 : 276, land ? 276 : 600, o).then((u) => { styled.src = u; }); }
+      return [
+        h('p', { class: 'desc' }, shots.length ? `${shots.length} of 8. They go into the download at every size the ${target === 'itch' ? 'itch.io page' : 'stores'} need${target === 'itch' ? '' : ': App Store iPhone 6.9"' + (o.iosDevices === 'universal' ? ', iPad 13"' : '') + ' and Google Play phone'}.`
+          : 'Press ▶ Play, then the camera on the Play bar at the best moments (up to 8). They are kept with the game, and the download makes them the sizes each store wants.'),
+        shots.length && h('div', { class: 'shot-grid' }, shots.map((sh, i) => h('div', { class: 'shot' },
+          h('img', { src: sh.img, alt: '' }),
+          h('input', { type: 'text', placeholder: 'Caption (optional)', value: sh.caption || '', maxlength: 60, onchange: (e) => { sh.caption = e.target.value.trim(); save(); } }),
+          h('div', { class: 'shot-btns' },
+            i > 0 && h('button', { type: 'button', class: 'ib', title: 'Move earlier', onclick: () => { shots.splice(i - 1, 0, shots.splice(i, 1)[0]); save(); } }, '↑'),
+            h('button', { type: 'button', class: 'ib', title: 'Remove', onclick: () => { shots.splice(i, 1); save(); } }, icon('trash')))))),
+        shots.length && target !== 'itch' && [
+          Cr('shotStyle', { label: 'Look', type: 'select', options: [['caption', 'Caption above the screenshot (when it has one)'], ['plain', 'Just the screenshot, filling the picture']] }),
+          o.shotStyle !== 'plain' && [C('shotBg', { label: 'Background', type: 'color', optional: true, infoText: 'Empty = the icon colour.' }), C('shotText', { label: 'Caption colour', type: 'color' })],
+          h('div', { class: 'shot-pv' }, styled, h('small', {}, 'The first one, as it will look')),
+        ],
+      ];
+    })()),
     sec('File size', 'download', [
       C('compress', { label: 'Compress (much smaller file)', type: 'bool' }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: async () => { const resize = confirm('Make pictures smaller.\n\nPictures in the game are saved again in a smaller format, at the same size. Undo puts them back.\n\nOK: also shrink pictures wider or taller than 2048 px (not for sprite sheets cut into frames by pixel size).\nCancel: keep their size.'); await shrinkPictures({ resize }); redo(); } }, icon('image'), 'Make pictures smaller')),
       h('p', { class: 'desc' }, 'Needs a browser from 2023 or later (iOS 16.4+). Turn it off for very old phones.'),
       report,
     ]),
@@ -6489,6 +6593,7 @@ $('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#p
 $('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) return; engine.stepFrames = 1; buzz(4); setTimeout(() => { if (inspectId) renderInspectCard(); }, 60); });
 $('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
 $('#pbStats').addEventListener('click', toggleStats);
+$('#pbShot').append(icon('camera')); $('#pbShot').addEventListener('click', captureShot);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 // ---- where the play bar goes: above the game (default) or below it, so it never covers the game's own UI; or floating / a small button you drag ----
 const PB_DOCKS = [['top', 'Above the game', 'The game starts under the bar: nothing of it is covered.'], ['bottom', 'Below the game', 'The game ends above the bar.'], ['float', 'Floating over the game', 'Drag the bar by its ⋮ button.'], ['mini', 'Small button', 'One round button you can drag anywhere; tap it for the tools.']];

@@ -329,7 +329,20 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Tapping one sets `chat` and `chatTitle` and goes to the page `chat`.
   - Direct messages use ids like `dm-alex-maya`, the same from both sides. Other ids are group rooms (`# general`).
 - **Trending:** the most used #hashtags in recent posts (*From the last … days*), with post counts. Tapping one puts it in a search variable (`q`) and can go to a page, so a feed with that search variable shows those posts.
-- **Who To Follow:** people whose posts have `following = no`, most liked first, each with a **Follow** button that follows them on all their posts.
+- **Who To Follow:** people you don't follow yet, most liked first, each with a **Follow** button.
+- **The social graph** connects all the social pieces. It keeps who follows whom, friends and notifications in the collections **Follows** (follower, followee), **Friends** (from, to, status) and **Notifications** (to, from, from_name, type, post, text, read). Add these collections to make them online with Supabase; without them, they are kept on the device.
+  - Following someone anywhere (a feed's Follow pill, Who To Follow, a Profile Header, Friends, *Follow back*) follows them everywhere. A feed tab with filter `following` shows posts from people you follow, plus your own.
+  - Likes, comments, replies, reposts, quotes, @mentions, follows, friend requests, accepted requests and direct messages each send a notification to that person.
+  - A new notification pops up a banner and buzzes. Turn this off with the setting `socialBanners: false`.
+  - Variables: `{notifications_unread}`, `{friend_requests}`, `{followers_count}`, `{following_count}` and `{friends_count}`. Use them as badges, for example the App Bar action `bell | page:notifications | notifications_unread`.
+- **Notifications (social):** All / Mentions / Requests tabs.
+  - Likes, reposts and follows on the same post are grouped ("Maya and 2 others liked your post"). New ones are highlighted and marked read once seen.
+  - Friend requests have **Accept / Decline**, and follows have **Follow back**.
+  - Tapping a notification opens the post (on the page *Open posts on page*, using the variable `openPost`), the chat, or the person's profile.
+- **Friends:** the tabs **Friends** (with Message), **Requests** (Accept / Decline, plus the ones you sent, with Cancel) and **Find people** (Follow and + Friend). Tapping a person opens their profile.
+- **Profiles:** tapping a name or avatar in a feed sets `profile`, `profile_name` and `profile_verified`, then goes to *Profile page* (or *My profile page* for you).
+  - A Profile Header with *Follow, friends and counts from the social graph* shows Follow, **Add friend / Requested / Accept / Friends ✓** and ✉ (opens a direct message).
+  - Its counts are real: posts, followers, following and friends. Tapping the counts goes to *Lists page*.
 - **Stories:** a row of round bubbles with a coloured ring that turns grey once seen (remembered on the device).
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.

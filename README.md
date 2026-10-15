@@ -288,7 +288,12 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Message @someone** from any post. Live with Supabase.
 - **Your own posts:** edit, pin and delete with Undo.
 - **Discovery:** **Trending** hashtags, **Who To Follow** suggestions, and a search chip on feeds.
-- The **Social** template has Explore (Who to follow + Trending), Messages and Chat pages.
+- **Friends, follows and notifications, all connected:**
+  - a social graph (Follows / Friends / Notifications collections, online with Supabase);
+  - **Add friend** (requests, Accept / Decline) and **Follow** from feeds, profiles, Who To Follow and the **Friends** page;
+  - a **Notifications** page (grouped likes, comments, mentions, follows, friend requests and messages) with unread badges and live banners;
+  - profile pages for everyone, opened by tapping their name.
+- The **Social** template has Explore, Messages, Chat, Notifications, Friends and profile pages.
 - **Shimmering placeholders** while online feeds load.
 - Opened posts (as a sheet or full screen) show the whole post: swipeable pictures with a full-screen viewer and double-tap to like, polls, link cards, the full time and views, counts, Comment / Repost / Like / Save / Share buttons and a ⋯ menu. Comments have threaded replies, Top / Newest sorting, Author tags, pinned comments and quick emoji.
 - **Stories** row with a full-screen viewer (progress bars, tap / hold, seen rings), **Like Button** (pop, count, hold for reactions), **Profile Header** (cover, avatar, verified tick, counts, Follow / Following), **New Post Box** and **Photo Grid**.

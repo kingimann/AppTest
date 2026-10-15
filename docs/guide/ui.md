@@ -244,6 +244,12 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - @mentions are coloured, and you can double-tap a comment to like it.
     - A row of quick emoji (❤️ 🙌 🔥 👏 😢 😍 😮 😂) sits above the comment box.
     - In a Comments collection, replies use a **parent** field (the comment they answer).
+  - **Quote posts:** the repost button offers **Repost** or **Quote**, in the feed and in an opened post.
+    - **Quote** opens the composer with the post as a card under your text. The new post's `quote` field holds the quoted post's id.
+    - The feed and the opened post show the quoted post as a small card (name, @handle, two lines and a thumbnail); tap it to open that post. A deleted one shows "This post is unavailable".
+    - Turn it off with *Repost button offers "Quote"*; *Quoting a post sends* sends a message.
+  - **Videos:** a `media` link ending in .mp4, .webm, .mov or .m4v shows a play button in the feed. Tapping it opens the post, where the video plays with controls; it also plays in the full-screen viewer.
+  - **Loading placeholders:** while a feed's Supabase collection loads, grey placeholder posts shimmer instead of "No posts yet" (*Grey placeholder posts while loading*).
   - **Share:** opens a share menu: *Share via…* (the phone's share sheet), Copy text, Copy link, Repost and Save. Set *Share button sends* to send a message instead.
 - **Feed settings** (in the Inspector, grouped):
   - **Content:** collection, sort, filter, a search variable (matches name, handle and text), most posts shown, and *My field names* (e.g. `text = body, media = photo`) if your collection uses other names.
@@ -293,6 +299,13 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
   - Tick *This is my profile* for **Edit profile** instead.
 - **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once.
+  - Tapping it opens a **full composer** (or, with *Tapping it opens: simple text box*, the old one-line box):
+    - a big text area with a **character ring** that turns orange near the limit and red over it (with the count left);
+    - **up to 4 photos** from the phone, made smaller to fit in a record. Videos too if you turn that on; they stay on that device only;
+    - a **poll** with 2–4 choices, and a **📍 place**;
+    - **Post** lights up when there's something to post.
+  - Closing it keeps a **draft** that comes back next time.
+  - The new post gets `media`, `poll` and `votes`, and `location`. Turn photos, polls and places on or off one by one.
 - **Colours:** these pieces use theme colours. In an app they follow light / dark mode; in a game they follow the game's background (dark background → light text). Lists scroll their last item clear of a bottom tab bar.
 - **Photo Grid:** a scrolling grid of square pictures from the collection's media field (or emojis). Tap one to open it.
 

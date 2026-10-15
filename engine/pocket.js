@@ -8801,6 +8801,7 @@ const isPic = (m) => /^(https?:|data:|blob:|art:)/.test(String(m || ''));
 function drawMedia(ctx, media, color, x, y, w, h, r, fit = 'cover') {
   ctx.save(); UK.rr(ctx, x, y, w, h, r); ctx.clip();
   const m = String(media || '');
+  if (isVid(m)) { ctx.fillStyle = '#111'; ctx.fillRect(x, y, w, h); const g = ctx.createLinearGradient(x, y, x, y + h); g.addColorStop(0, 'rgba(255,255,255,0.08)'); g.addColorStop(1, 'rgba(0,0,0,0.3)'); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); const R = Math.min(30, Math.min(w, h) * 0.18); ctx.fillStyle = 'rgba(255,255,255,0.92)'; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, R, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#111'; ctx.beginPath(); ctx.moveTo(x + w / 2 - R * 0.32, y + h / 2 - R * 0.45); ctx.lineTo(x + w / 2 + R * 0.5, y + h / 2); ctx.lineTo(x + w / 2 - R * 0.32, y + h / 2 + R * 0.45); ctx.closePath(); ctx.fill(); ctx.restore(); return; }
   if (isPic(m)) { ctx.fillStyle = '#222'; ctx.fillRect(x, y, w, h); const im = loadImage(m); if (im.complete && im.naturalWidth) { const k = (fit === 'contain' ? Math.min : Math.max)(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); } }
   else {
     const c = color || '#5b6bff', g = ctx.createLinearGradient(x, y, x + w, y + h); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,0.3)'); ctx.fillStyle = c; ctx.fillRect(x, y, w, h); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); // solid, lighter towards a corner
@@ -8848,10 +8849,136 @@ const SOCIAL_COLORS = { bg: ['Background', ''], card: ['Cards', '@card'], text: 
 const SAMPLE_POSTS = () => { const t = Date.now(); return [
   { id: 'p1', author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, liked: false, comments: 48, reposts: 120, verified: true, location: 'Banff', top_comment: 'Leo Park: Unreal colours!', _at: t - 7 * 60e3 },
   { id: 'p2', author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', media: '', color: '', likes: 312, liked: true, comments: 27, reposts: 41, verified: false, poll: 'Dark mode | Faster sync | Fewer bugs', votes: '64, 21, 33', voted: 0, _at: t - 2.5 * 3600e3 },
+  { id: 'p6', author: 'Jon Doe', handle: 'jondoe', text: 'This is the kind of morning I need 🙌', media: '', color: '', likes: 41, liked: false, comments: 3, reposts: 1, verified: false, quote: 'p1', _at: t - 3 * 60e3 },
   { id: 'p5', author: 'Ava Brooks', handle: 'avab', text: 'Going live with a sketching session — come say hi!', media: '🎨', color: '#c2185b', likes: 77, liked: false, comments: 9, reposts: 3, verified: false, live: true, following: false, _at: t - 40 * 60e3 },
   { id: 'p3', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, liked: false, comments: 63, reposts: 12, verified: false, reposted_by: 'Maya Chen', edited: true, _at: t - 26 * 3600e3 },
   { id: 'p4', author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', media: '', likes: 5420, liked: false, comments: 410, reposts: 1900, verified: true, link: 'https://example.com/comet', link_title: 'A new comet is coming', link_image: '☄️', _at: t - 3 * 86400e3 },
 ]; };
+
+const isVid = (m) => /^(https?:|blob:|data:video)[^?#]*\.(mp4|webm|mov|m4v)(\?|#|$)|^data:video\//i.test(String(m || '')) || /^video:/.test(String(m || ''));
+/** Pictures picked on the phone, made smaller (the longest side at most `max` pixels) so they fit in a record. */
+function shrinkPicture(file, max = 1080, q = 0.82) {
+  return new Promise((ok, no) => {
+    const fr = new FileReader(); fr.onerror = () => no(fr.error);
+    fr.onload = () => { const im = new Image(); im.onerror = () => no(new Error('not a picture')); im.onload = () => {
+      const k = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement('canvas'); c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); ok(c.toDataURL('image/jpeg', q)); }; im.src = fr.result; };
+    fr.readAsDataURL(file);
+  });
+}
+/** What the composer made, as a Posts record (author, handle, text, media, poll, votes, location, quote). */
+function postRecord(me, out, extra = {}) {
+  const r = { author: me.author, handle: me.handle, text: out.text, likes: 0, liked: false, comments: 0, reposts: 0, following: true, ...extra };
+  if (out.media?.length) r.media = out.media.join(' | ');
+  if (out.poll?.length >= 2) { r.poll = out.poll.join(' | '); r.votes = out.poll.map(() => 0).join(', '); r.voted = 0; }
+  if (out.place) r.location = out.place;
+  return r;
+}
+/** Write a post: text with a counter, up to 4 pictures, a poll, a place, and (for a quote) the post being quoted. */
+function postComposer(s, o) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
+  const c = o.colors, font = o.font || 'system-ui,-apple-system,sans-serif', max = Math.max(1, +o.max || 280);
+  const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
+  const DKEY = 'pocket.draft.' + (s.engine.gameKey || 'game') + '.' + (o.draftKey || 'post');
+  let draft = null; if (!o.quote) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
+  const st = { text: draft?.text || o.text || '', media: draft?.media || [], poll: draft?.poll || null, place: draft?.place || '' };
+  const wrap = el('div', `position:absolute;inset:0;z-index:55;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;`); wrap.dataset.pocketComposer = '1';
+  const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;top:0;background:${c.bg};color:${c.text};display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);padding-bottom:env(safe-area-inset-bottom);`);
+  wrap.append(sheet); root.append(wrap);
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
+  requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.45)'; sheet.style.transform = 'none'; }));
+  let done = false;
+  const close = (posted) => {
+    if (done) return; done = true;
+    if (!o.quote) try { if (!posted && (st.text.trim() || st.media.length || st.poll)) localStorage.setItem(DKEY, JSON.stringify(st)); else localStorage.removeItem(DKEY); } catch { /* full, or storage unavailable */ }
+    if (!posted && draftSaved()) s.snackbar?.('Draft saved');
+    sheet.style.transform = 'translateY(100%)'; wrap.style.background = 'rgba(0,0,0,0)'; setTimeout(() => { wrap.remove(); o.onClose?.(); }, 300);
+  };
+  const draftSaved = () => !o.quote && !!(st.text.trim() || st.media.length || st.poll);
+  // top: Cancel … Post
+  const top = el('div', `flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid ${c.line};`);
+  const cancel = btn(`font:600 16px ${font};color:${c.text};padding:6px 4px;`, 'Cancel'); cancel.onclick = () => close(false);
+  const post = btn(`font:800 15px ${font};background:${c.acc};color:#fff;padding:9px 18px;border-radius:20px;transition:opacity .2s;`, o.button || 'Post'); post.dataset.post = '1';
+  top.append(cancel, el('div', 'font-weight:800;font-size:16px;', o.quote ? 'Quote' : o.title || 'New post'), post);
+  // the writing area
+  const body = el('div', 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px;');
+  const row = el('div', 'display:flex;gap:12px;'), av = el('div', `flex:none;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;`);
+  { const n = o.me?.author || 'Me'; let h0 = 0; for (const ch of n) h0 = (h0 * 31 + ch.charCodeAt(0)) >>> 0; av.style.background = AVATAR_COLORS[h0 % AVATAR_COLORS.length]; av.textContent = n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''); }
+  const col = el('div', 'flex:1;min-width:0;');
+  col.append(el('div', 'font-weight:800;font-size:15px;margin:2px 0 4px;', o.me?.author || 'Me'));
+  const ta = el('textarea', `display:block;width:100%;min-height:90px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:18px/1.4 ${font};padding:0;`);
+  ta.placeholder = o.quote ? 'Add a comment…' : o.placeholder || 'What’s happening?'; ta.value = st.text;
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.max(90, ta.scrollHeight) + 'px'; };
+  col.append(ta); row.append(av, col); body.append(row);
+  const mediaBox = el('div', 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0 54px;');
+  const pollBox = el('div', 'margin:12px 0 0 54px;'), placeBox = el('div', 'margin:10px 0 0 54px;'), quoteBox = el('div', 'margin:12px 0 0 54px;');
+  body.append(mediaBox, pollBox, quoteBox, placeBox);
+  if (o.quote) { const Q = o.quote, qc = el('div', `border:1px solid ${c.line};border-radius:14px;padding:10px 12px;`); qc.dataset.quoteCard = '1';
+    const h1 = el('div', 'font-size:14px;'); h1.append(el('b', '', Q.author || ''), el('span', `color:${c.sub};margin-left:6px;`, Q.handle ? '@' + Q.handle : '')); qc.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:84px;overflow:hidden;', Q.text || (Q.media ? '📷 Photo' : ''))); quoteBox.append(qc); }
+  // bottom: picture, poll, place … counter
+  const bar = el('div', `flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid ${c.line};`);
+  const tool = (ic, label) => { const b = btn(`font-size:22px;width:42px;height:40px;border-radius:12px;color:${c.acc};`, ic); b.setAttribute('aria-label', label); b.title = label; bar.append(b); return b; };
+  const file = el('input'); file.type = 'file'; file.accept = o.videos ? 'image/*,video/*' : 'image/*'; file.multiple = true; file.style.display = 'none'; sheet.append(file);
+  const bPic = o.photos !== false ? tool('🖼️', 'Add photos') : null, bPoll = o.polls !== false && !o.quote ? tool('📊', 'Add a poll') : null, bPlace = o.places !== false ? tool('📍', 'Add a place') : null;
+  bar.append(el('div', 'flex:1;'));
+  const NS = 'http://www.w3.org/2000/svg', ring = document.createElementNS(NS, 'svg'); ring.setAttribute('width', '30'); ring.setAttribute('height', '30'); ring.setAttribute('viewBox', '0 0 30 30');
+  const bg = document.createElementNS(NS, 'circle'), fg = document.createElementNS(NS, 'circle');
+  for (const [k0, v] of Object.entries({ cx: 15, cy: 15, r: 12, fill: 'none', 'stroke-width': 3 })) { bg.setAttribute(k0, v); fg.setAttribute(k0, v); }
+  bg.setAttribute('stroke', c.line); fg.setAttribute('stroke', c.acc); fg.setAttribute('stroke-linecap', 'round'); fg.setAttribute('transform', 'rotate(-90 15 15)'); fg.setAttribute('stroke-dasharray', String(2 * Math.PI * 12));
+  ring.append(bg, fg); const left = el('div', `font:700 13px ${font};min-width:28px;text-align:right;`); bar.append(left, ring);
+  sheet.append(top, body, bar);
+  // keep everything up to date
+  const pollOpts = () => (st.poll || []).map((q) => q.trim()).filter(Boolean);
+  const ready = () => (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.text.length <= max && (!st.poll || pollOpts().length >= 2);
+  const sync = () => {
+    const n = st.text.length, k = Math.min(1, n / max), L = 2 * Math.PI * 12; fg.setAttribute('stroke-dashoffset', String(L * (1 - k)));
+    fg.setAttribute('stroke', n > max ? '#f4212e' : n > max - 20 ? '#ffad1f' : c.acc); left.textContent = n > max - 20 ? String(max - n) : ''; left.style.color = n > max ? '#f4212e' : c.sub;
+    const ok = ready(); post.disabled = !ok; post.style.opacity = ok ? '1' : '.45';
+    if (bPic) bPic.style.opacity = st.media.length >= 4 || st.poll ? '.35' : '1'; if (bPoll) bPoll.style.opacity = st.media.length ? '.35' : '1';
+  };
+  const paintMedia = () => {
+    mediaBox.textContent = ''; mediaBox.style.gridTemplateColumns = st.media.length === 1 ? '1fr' : '1fr 1fr';
+    st.media.forEach((m, i) => { const cell = el('div', `position:relative;border-radius:14px;overflow:hidden;background:#222;aspect-ratio:${st.media.length === 1 ? '4/3' : '1'};`);
+      if (isVid(m)) { const v = el('video', 'width:100%;height:100%;object-fit:cover;display:block;'); v.src = m; v.muted = true; v.playsInline = true; cell.append(v); } else { const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.src = m; cell.append(im); }
+      const x = btn('position:absolute;right:6px;top:6px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;font-size:14px;', '✕'); x.setAttribute('aria-label', 'Remove picture'); x.onclick = () => { st.media.splice(i, 1); paintMedia(); sync(); };
+      cell.append(x); mediaBox.append(cell); });
+  };
+  const paintPoll = () => {
+    pollBox.textContent = ''; if (!st.poll) return;
+    const card = el('div', `border:1px solid ${c.line};border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px;`); card.dataset.pollEditor = '1';
+    st.poll.forEach((q, i) => { const inp = el('input', `font:16px ${font};padding:10px 12px;border-radius:10px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); inp.placeholder = `Choice ${i + 1}${i >= 2 ? ' (optional)' : ''}`; inp.maxLength = 25; inp.value = q; inp.oninput = () => { st.poll[i] = inp.value; sync(); }; card.append(inp); });
+    const acts = el('div', 'display:flex;justify-content:space-between;');
+    if (st.poll.length < 4) { const add = btn(`color:${c.acc};font:700 14px ${font};`, '+ Add a choice'); add.onclick = () => { st.poll.push(''); paintPoll(); sync(); card.lastElementChild; }; acts.append(add); } else acts.append(el('span'));
+    const rm = btn(`color:#f4212e;font:700 14px ${font};`, 'Remove poll'); rm.onclick = () => { st.poll = null; paintPoll(); sync(); }; acts.append(rm);
+    card.append(acts); pollBox.append(card);
+  };
+  const paintPlace = () => {
+    placeBox.textContent = ''; if (st.place == null || st.place === false) return;
+    if (st.place === '' && !placeBox.dataset.editing) return;
+    const chip = el('div', `display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:16px;background:${c.field};color:${c.acc};font:700 14px ${font};`);
+    const inp = el('input', `border:0;outline:none;background:transparent;color:${c.text};font:600 14px ${font};width:160px;`); inp.placeholder = 'Where are you?'; inp.value = st.place; inp.maxLength = 40; inp.oninput = () => { st.place = inp.value; };
+    const x = btn(`color:${c.sub};font-size:13px;`, '✕'); x.onclick = () => { st.place = ''; placeBox.dataset.editing = ''; paintPlace(); };
+    chip.append(el('span', '', '📍'), inp, x); placeBox.append(chip); return inp;
+  };
+  ta.addEventListener('input', () => { st.text = ta.value; grow(); sync(); });
+  bPic && (bPic.onclick = () => { if (st.media.length >= 4 || st.poll) return; file.click(); });
+  file.onchange = async () => {
+    const fs = [...file.files].slice(0, 4 - st.media.length); file.value = '';
+    for (const f of fs) { try { st.media.push(/^video\//.test(f.type) ? URL.createObjectURL(f) : await shrinkPicture(f, +o.pictureSize || 1080)); } catch { s.snackbar?.('That file could not be added'); } }
+    paintMedia(); sync();
+  };
+  bPoll && (bPoll.onclick = () => { if (st.media.length) return; st.poll = st.poll || ['', '']; paintPoll(); sync(); pollBox.querySelector('input')?.focus(); });
+  bPlace && (bPlace.onclick = () => { placeBox.dataset.editing = '1'; paintPlace()?.focus(); });
+  post.onclick = () => {
+    if (!ready()) return;
+    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim() };
+    if (o.onPost?.(out) === false) return; close(true);
+  };
+  if (st.place) placeBox.dataset.editing = '1';
+  paintMedia(); paintPoll(); paintPlace(); sync(); setTimeout(() => { grow(); ta.focus(); }, 320);
+  return { wrap, close, textarea: ta, state: st };
+}
 
 // A bottom sheet over the game for social pieces: a post with its comments (with a box to write one), or a list of actions (share).
 const SAMPLE_COMMENTS = [['Leo Park', 'leop', 'This is so good 🔥'], ['Sofia Ruiz', 'sofiaruiz', 'Wow, love it!'], ['Amir Haddad', 'amir', 'Need to try this 🙌'], ['Ava Brooks', 'avab', 'Saving this one'], ['Maya Chen', 'maya', 'Haha yes 😂'], ['Jon Doe', 'jondoe', 'Where is this?']];
@@ -8910,8 +9037,9 @@ function socialSheet(s, o) {
     const strip = el('div', `display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;${big ? 'height:100%;' : ''}`); strip.className = 'pocket-strip';
     media.forEach((m) => {
       const cell = el('div', `flex:none;width:100%;scroll-snap-align:center;position:relative;display:flex;align-items:center;justify-content:center;${big ? 'height:100%;' : `aspect-ratio:${isPic(m) ? 'auto' : '4/3'};background:${P.color || 'rgba(128,128,128,.18)'};`}`);
-      if (isPic(m)) { const im = el('img', `display:block;width:100%;${big ? 'height:100%;object-fit:contain;' : 'max-height:70vh;object-fit:cover;'}`); im.src = artURL(m); im.draggable = false; cell.append(im); } else cell.append(el('span', `font-size:${big ? 160 : 110}px;line-height:1;`, m));
-      if (P.video && !big) cell.append(el('span', 'position:absolute;width:62px;height:62px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;padding-left:4px;box-sizing:border-box;', '▶'));
+      if (isVid(m)) { const v = el('video', `display:block;width:100%;${big ? 'height:100%;object-fit:contain;' : 'max-height:70vh;background:#000;'}`); v.src = String(m).replace(/^video:/, ''); v.controls = true; v.playsInline = true; v.preload = 'metadata'; v.addEventListener('click', (ev) => ev.stopPropagation()); cell.append(v); cell.dataset.video = '1'; }
+      else if (isPic(m)) { const im = el('img', `display:block;width:100%;${big ? 'height:100%;object-fit:contain;' : 'max-height:70vh;object-fit:cover;'}`); im.src = artURL(m); im.draggable = false; cell.append(im); } else cell.append(el('span', `font-size:${big ? 160 : 110}px;line-height:1;`, m));
+      if (P.video && !big && !isVid(m)) cell.append(el('span', 'position:absolute;width:62px;height:62px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;display:flex;align-items:center;justify-content:center;font-size:26px;padding-left:4px;box-sizing:border-box;', '▶'));
       strip.append(cell);
     });
     box.append(strip);
@@ -8983,6 +9111,16 @@ function socialSheet(s, o) {
       tx.append(el('div', `color:${c.sub};font-size:12px;`, P.domain || ''), el('div', 'font-weight:700;font-size:15px;line-height:1.3;', P.linkTitle || P.link));
       lk.append(im, tx); lk.onclick = () => o.onLink?.(); box.append(lk);
     }
+    // a quoted post
+    if (P.quote) {
+      const Q = P.quote, qc = btn(`display:block;width:100%;margin-top:12px;border:1px solid ${c.line};border-radius:14px;padding:10px 12px;text-align:left;`); qc.dataset.quoteCard = '1';
+      if (Q.gone) qc.append(el('div', `color:${c.sub};font-size:14px;`, 'This post is unavailable'));
+      else { const row0 = el('div', 'display:flex;gap:10px;'), tx = el('div', 'flex:1;min-width:0;'), h1 = el('div', 'font-size:14px;display:flex;align-items:center;gap:6px;'); h1.append(avatar(Q.author, '', 20), el('b', '', Q.author || ''), el('span', `color:${c.sub};`, Q.handle ? '@' + Q.handle : ''));
+        tx.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:62px;overflow:hidden;', Q.text || (Q.media ? '📷 Photo' : ''))); row0.append(tx);
+        if (Q.media) { const th = el('div', `flex:none;width:58px;height:58px;border-radius:8px;overflow:hidden;background:rgba(128,128,128,.2);display:flex;align-items:center;justify-content:center;font-size:30px;`); if (isPic(Q.media) && !isVid(Q.media)) th.style.background = `#333 center/cover url("${artURL(Q.media)}")`; else th.textContent = isVid(Q.media) ? '▶' : Q.media; row0.append(th); }
+        qc.append(row0); qc.onclick = () => o.onOpenQuote?.(); }
+      box.append(qc);
+    }
     // when, views
     const when = [P.when, P.edited ? 'Edited' : '', P.views ? `${shortNum(P.views)} views` : ''].filter(Boolean).join(' · ');
     if (when) box.append(el('div', `color:${c.sub};font-size:14px;margin-top:14px;`, when));
@@ -9004,7 +9142,7 @@ function socialSheet(s, o) {
       bS.textContent = st.saved ? '🔖' : '🏷'; bS.style.filter = st.saved ? 'none' : 'grayscale(1)'; bS.style.opacity = st.saved ? '1' : '.7';
       bSh.textContent = '↗'; bSh.style.fontSize = '24px';
     };
-    bC.onclick = () => { inp.focus(); }; bR.onclick = () => { o.onRepost?.(); paintActs(); pop(bR); }; bL.onclick = () => { o.onLike?.(); paintActs(); pop(bL); };
+    bC.onclick = () => { inp.focus(); }; bR.onclick = () => { if (o.onQuote) { socialSheet(s, { kind: 'repost', colors: c, font, items: [{ icon: '🔁', label: o.stats().reposted ? 'Undo repost' : 'Repost', run: () => { o.onRepost?.(); paintActs(); pop(bR); } }, { icon: '✏️', label: 'Quote', run: () => o.onQuote() }] }); return; } o.onRepost?.(); paintActs(); pop(bR); }; bL.onclick = () => { o.onLike?.(); paintActs(); pop(bL); };
     bS.onclick = () => { o.onSave?.(); paintActs(); pop(bS); }; bSh.onclick = () => o.onShare?.();
     api.paintActs = paintActs; paintActs();
     box.append(stats, acts); body.append(box, el('div', `height:1px;background:${c.line};`));
@@ -9137,6 +9275,9 @@ registerBehavior('uiFeed', {
     { key: 'tapPost', label: 'Tapping a post', type: 'select', options: ['opens the post', 'nothing'], default: 'opens the post', group: 'Behaviour', info: 'Opens it full size with its comments (unless “Tapping a post opens page” is set).' },
     { key: 'postView', label: 'Opened posts show as', type: 'select', options: ['a sheet', 'full screen'], default: 'a sheet', group: 'Behaviour', showIf: (b) => b.tapPost !== 'nothing' },
     { key: 'commentsSheet', label: 'Comment button opens the comments', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'skeletons', label: 'Grey placeholder posts while loading (Supabase)', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'quotes', label: 'Repost button offers “Quote”', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'quoteMessage', label: 'Quoting a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.quotes !== false },
     { key: 'commentSort', label: 'Comments sorted by', type: 'select', options: ['top', 'newest'], default: 'top', group: 'Behaviour' },
     { key: 'commentAs', label: 'Comments are written as', type: 'text', default: '{playerName}', group: 'Behaviour', info: 'The name on comments you write. {variables} work; blank = “You”.' },
     { key: 'commentsCollection', label: 'Comments collection (fields: post, author, text)', type: 'text', default: 'Comments', suggest: 'collections', group: 'Behaviour', info: 'If there is no such collection, comments are kept on the device.' },
@@ -9191,6 +9332,16 @@ registerBehavior('uiFeed', {
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
+    const findPost = (s, id) => { if (id == null || id === '') return null; return has(s) ? D(s).get(p.collection, String(id)) : (sample || []).find((q) => String(q.id) === String(id)) || null; };
+    const openQuote = (s, r) => {
+      const me0 = meOf(s), c = colorsOf();
+      sheetUp = true;
+      const ok = postComposer(s, { me: me0, max: +p.maxQuote || 280, colors: c, font: fontOf(), button: 'Post', photos: true, polls: false, places: false,
+        quote: { author: F(r, 'author'), handle: who(r), text: F(r, 'text'), media: mediaList(r)[0] },
+        onPost: (out) => { const rec = postRecord(me0, out, { quote: r.id }); if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_POSTS()).unshift({ id: 'q' + Date.now().toString(36), ...rec, _at: Date.now() }); patch(s, r, { reposts: (+F(r, 'reposts') || 0) + 1 }); goTop = true; if (p.quoteMessage) s.send(p.quoteMessage, r.id); s.snackbar?.('Posted'); },
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+      if (!ok) sheetUp = false;
+    };
     const hideIt = (s, r, kind) => { const H = hid(s), list = kind === 'hide' ? H.posts : H.authors, v = kind === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(kind === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); };
     const reportIt = (s, r) => { if (p.reportMessage) s.send(p.reportMessage, r.id); s.snackbar?.('Thanks, we’ll take a look'); };
     const followIt = (s, r) => { const hd = who(r); if (has(s)) { for (const q of D(s).rows(p.collection)) if (who(q) === hd && !truthy(F(q, 'following'))) D(s).update(p.collection, q.id, { [K('following')]: true }); } else for (const q of sample || []) if (who(q) === hd) q[K('following')] = true; if (p.followMessage) s.send(p.followMessage, hd); s.snackbar?.(`Following @${hd}`); };
@@ -9228,9 +9379,10 @@ registerBehavior('uiFeed', {
       sheetUp = true;
       const isPost = kind === 'post', fol = F(r, 'following'), lnk = F(r, 'link');
       const sh = socialSheet(s, { kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
-        post: isPost ? { author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
+        onOpenQuote: () => { const q = findPost(s, F(r, 'quote')); if (q) { sh?.close(); setTimeout(() => openPost(s, q, 'post'), 280); } }, onQuote: p.quotes !== false ? () => openQuote(s, r) : null,
+        post: isPost ? { quote: (() => { const q = findPost(s, F(r, 'quote')); return q ? { author: F(q, 'author'), handle: who(q), text: F(q, 'text'), media: mediaList(q)[0] } : F(r, 'quote') ? { gone: true } : null; })(), author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
           repostedBy: F(r, 'repostedBy'), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
-          following: p.followButtons !== false && fol != null && fol !== '' ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
+          following: p.followButtons !== false && fol != null && fol !== '' && who(r) !== me0.handle && !r._mine ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
         stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: truthy(F(r, 'reposted')), saved: truthy(F(r, 'saved')), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
         count: () => +F(r, 'comments') || 0,
         poll: isPost && pollOf(r) ? () => pollOf(r) : null,
@@ -9310,7 +9462,10 @@ registerBehavior('uiFeed', {
           const it = at(t.y); if (!it) continue;
           const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
           if (k === 'like') { UK.tap(s, p); if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); }
-          else if (k === 'repost') { UK.tap(s, p); flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }
+          else if (k === 'repost') { UK.tap(s, p); if (p.quotes !== false && !s.engine.editing) { sheetUp = true; if (!socialSheet(s, { kind: 'repost', colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet], [data-pocket-composer]'); }, items: [
+              { icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } },
+              { icon: '✏️', label: 'Quote', run: () => openQuote(s, r) }] })) sheetUp = false; } else { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } }
+          else if (k === 'quote') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) openPost(s, q, 'post'); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
           else if (k === 'comment') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.commentMessage) s.send(p.commentMessage, r.id); if (p.commentsSheet !== false && !s.engine.editing) openPost(s, r, 'comments', true); }
           else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (!s.engine.editing) shareMenu(s, r); }
@@ -9320,6 +9475,7 @@ registerBehavior('uiFeed', {
           else if (k === 'link') { UK.tap(s, p); if (!s.engine.editing && /^https?:/.test(hit.url)) window.open(hit.url, '_blank', 'noopener'); }
           else if (k === 'expand') { UK.tap(s, p); open.add(r.id); }
           else if (k === 'tag') { UK.tap(s, p); const tg = hit.tag; if (/^https?:/.test(tg)) { if (!s.engine.editing) window.open(tg, '_blank', 'noopener'); } else { if (p.searchVar) s.setVar(p.searchVar, tg); if (p.tagMessage) s.send(p.tagMessage, tg); } }
+          else if (k === 'media' && mediaList(r).some(isVid) && p.tapPost !== 'nothing' && !s.engine.editing && !p.openPage) { UK.tap(s, p); openPost(s, r, 'post'); } // a video plays in the opened post
           else if (k === 'media' && p.doubleTapLike !== false && lastTap && lastTap.id === r.id && s.time - lastTap.t < 0.32) { lastTap = null; if (!truthy(F(r, 'liked'))) like(s, r); else pops.set(r.id, s.time); bursts.push({ id: r.id, t: s.time }); s.engine.vibrate?.(18); }
           else if (k === 'media' && p.doubleTapLike !== false) lastTap = { id: r.id, t: s.time };
           else if (k === 'media' && hit.multi) { /* swipe through the pictures */ }
@@ -9465,16 +9621,44 @@ registerBehavior('uiFeed', {
           ctx.font = `700 ${TS - 1}px ${THEME.font}`; wrapLines(ctx, title, w - 96, TS - 1, 2).forEach((l, i) => UK.text(ctx, l, x + 84, yy + 40 + i * 18, { size: TS - 1, weight: 700, color: txt, align: 'left' }));
           if (hits) hits.push({ k: 'link', url: u, x: x - ox, y: yy - oy, w, h: 72 });
         };
-        const extrasH = (r) => (pollH(r) ? pollH(r) + 8 : 0) + (linkH(r) ? linkH(r) + 8 : 0);
-        const drawExtras = (r, x, yy, w, hits, ox, oy) => { if (pollH(r)) { drawPoll(r, x, yy, w, hits, ox, oy); yy += pollH(r) + 8; } if (linkH(r)) { drawLink(r, x, yy, w, hits, ox, oy); yy += linkH(r) + 8; } return yy; };
+        // a quoted post (quote = the other post's id)
+        const quoteH = (r) => { const id = F(r, 'quote'); if (id == null || id === '') return 0; return findPost(s, id) ? 78 : 44; };
+        const drawQuote = (r, x, yy, w, hits, ox, oy) => {
+          const id = F(r, 'quote'), q = findPost(s, id), H = q ? 78 : 44;
+          ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, x + 0.5, yy + 0.5, w - 1, H - 1, 12); ctx.stroke();
+          if (!q) { UK.text(ctx, 'This post is unavailable', x + 14, yy + H / 2, { size: TS - 2, weight: 500, color: sub, align: 'left' }); return; }
+          const m = mediaList(q)[0], th = m && p.showMedia !== false ? 54 : 0, tw = w - 26 - (th ? th + 10 : 0);
+          miniAvatar(ctx, F(q, 'author'), x + 21, yy + 20, 18, F(q, 'avatar'));
+          ctx.font = `800 ${TS - 2}px ${THEME.font}`; const an = String(F(q, 'author') || ''), aw = Math.min(ctx.measureText(an).width, tw - 20);
+          UK.text(ctx, an, x + 36, yy + 20, { size: TS - 2, weight: 800, color: nameC, align: 'left', maxW: tw - 20 });
+          if (who(q)) UK.text(ctx, '@' + who(q), x + 42 + aw, yy + 20, { size: TS - 2, weight: 500, color: handleC, align: 'left', maxW: Math.max(0, tw - aw - 30) });
+          ctx.font = `500 ${TS - 1}px ${THEME.font}`; const tx0 = String(F(q, 'text') || (m ? '📷 Photo' : ''));
+          wrapLines(ctx, tx0, tw, TS - 1, 2).forEach((l, i) => UK.text(ctx, l, x + 12, yy + 44 + i * 18, { size: TS - 1, weight: 500, color: txt, align: 'left' }));
+          if (th) dm(ctx, m, F(q, 'color'), x + w - th - 12, yy + 12, th, th, 8);
+          if (hits) hits.push({ k: 'quote', id: q.id, x: x - ox, y: yy - oy, w, h: H });
+        };
+        const extrasH = (r) => (pollH(r) ? pollH(r) + 8 : 0) + (linkH(r) ? linkH(r) + 8 : 0) + (quoteH(r) ? quoteH(r) + 8 : 0);
+        const drawExtras = (r, x, yy, w, hits, ox, oy) => { if (pollH(r)) { drawPoll(r, x, yy, w, hits, ox, oy); yy += pollH(r) + 8; } if (linkH(r)) { drawLink(r, x, yy, w, hits, ox, oy); yy += linkH(r) + 8; } if (quoteH(r)) { drawQuote(r, x, yy, w, hits, ox, oy); yy += quoteH(r) + 8; } return yy; };
         // the top comment under a post
         const topC = (r) => { const t = String(F(r, 'topComment') || ''); if (!t) return null; const i = t.indexOf(':'); return i > 0 ? { name: t.slice(0, i).trim(), text: t.slice(i + 1).trim() } : { name: '', text: t }; };
         // “Follow” next to someone you don’t follow yet
-        const followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following'));
+        const myHandle = meOf(s).handle, followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following')) && who(r) !== myHandle && !r._mine; // (never on your own posts)
         const followPill = (r, right, cy, hits, ox, oy) => { ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText('Follow').width + 22; ctx.fillStyle = acc; UK.rr(ctx, right - w, cy - 14, w, 28, 14); ctx.fill(); UK.text(ctx, 'Follow', right - w / 2, cy + 1, { size: 13, weight: 800, color: '#fff' }); if (hits) hits.push({ k: 'follow', x: right - w - ox, y: cy - 16 - oy, w, h: 32 }); return w + 8; };
         const top = b.y + inset - S.v;
         if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
-        if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
+        if (!P.length && p.skeletons !== false && (has(s) && s.engine.supa?.isLoading?.(p.collection))) { // loading from Supabase: grey placeholder posts that shimmer
+          const sh = (s.time * 0.9) % 1.6 - 0.3, g = ctx.createLinearGradient(b.x + sh * b.w - 120, 0, b.x + sh * b.w + 120, 0), base = isDark(s) ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)', hi = isDark(s) ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.03)';
+          g.addColorStop(0, base); g.addColorStop(0.5, hi); g.addColorStop(1, base);
+          ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + inset, b.w, b.h - inset); ctx.clip(); ctx.fillStyle = g;
+          for (let i = 0, y0 = b.y + inset + 14; i < 4 && y0 < b.y + b.h; i++) {
+            const av = 40, x1 = b.x + pad + av + 12, w1 = b.w - (x1 - b.x) - pad, big = i % 2 === 0;
+            ctx.beginPath(); ctx.arc(b.x + pad + av / 2, y0 + av / 2, av / 2, 0, Math.PI * 2); ctx.fill();
+            UK.rr(ctx, x1, y0 + 4, w1 * 0.45, 12, 6); ctx.fill(); UK.rr(ctx, x1, y0 + 26, w1, 11, 5); ctx.fill(); UK.rr(ctx, x1, y0 + 44, w1 * 0.7, 11, 5); ctx.fill();
+            if (big) { UK.rr(ctx, x1, y0 + 66, w1, Math.min(170, w1 * 0.56), 14); ctx.fill(); }
+            y0 += big ? 70 + Math.min(170, w1 * 0.56) + 22 : 82;
+          }
+          ctx.restore();
+        } else if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
         let idx = 0;
         for (const r of P) {
           const media = p.showMedia === false ? '' : F(r, 'media'), color = p.showMedia === false ? '' : F(r, 'color'), hasM = !!(media || color);
@@ -9812,6 +9996,11 @@ registerBehavior('uiComposer', {
     { key: 'max', label: 'Longest post', type: 'number', default: 280, step: 10 },
     { key: 'button', label: 'Button', type: 'text', default: 'Post' },
     { key: 'message', label: 'After posting, send', type: 'text', default: 'posted', suggest: 'messages' },
+    { key: 'style', label: 'Tapping it opens', type: 'select', options: ['full composer', 'simple text box'], default: 'full composer', info: { 'full composer': 'A full-screen editor with a character ring, photos, a poll and a place. Unfinished posts are kept as a draft.' } },
+    { key: 'photos', label: 'Photos (up to 4)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
+    { key: 'videos', label: 'Videos too (on this device only)', type: 'bool', default: false, showIf: (b) => b.style !== 'simple text box' && b.photos !== false },
+    { key: 'polls', label: 'Polls', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
+    { key: 'places', label: 'Place (📍)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     ...colorParams({ field: ['Field', '@field'], text: ['Hint', '@sub'], accent: ['Button', '@accent'] }),
     ...UI_COMMON,
   ],
@@ -9822,6 +10011,14 @@ registerBehavior('uiComposer', {
       update(e, dt, s) {
         if (busy || !UK.taps(s, e).some((t) => UK.in(t, UK.box(e)))) return;
         UK.tap(s, p); busy = true;
+        const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
+        if (p.style !== 'simple text box' && !s.engine.editing) {
+          const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
+          const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: !!p.videos, draftKey: e.name || e.id,
+            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } s.engine.data.add(p.collection, postRecord(me, out)); if (p.message) s.send(p.message, out.text); s.snackbar?.('Posted'); },
+            onClose: () => { busy = false; } });
+          if (ok) return;
+        }
         askTextBox(s, { question: 'New post', max: +p.max || 280, placeholder: p.placeholder }, (v) => {
           busy = false; if (!v) return;
           const author = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', handle = fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author.toLowerCase().replace(/\s+/g, '');
@@ -14650,7 +14847,7 @@ export class Supa {
   fields(rec) { const o = {}; for (const [k, v] of Object.entries(rec || {})) if (k !== 'id' && !k.startsWith('_')) o[k] = v; return o; }
   async pull(def) {
     if (!this.online(def) || !this.canRead(def)) return false;
-    const D = this.engine.data, s = this.engine.scene;
+    const D = this.engine.data, s = this.engine.scene, lk = fieldKey(def.name); (this.loading ||= new Set()).add(lk);
     try {
       await this.flush();
       const rows = await this.call(`/rest/v1/${encodeURIComponent(this.table(def))}?${this.own(def) ? this.ownQuery(def) : `select=*&order=at.desc&limit=${Math.max(1, Math.min(5000, +def.limit || 500))}`}`, { auth: !!this.user() });
@@ -14658,7 +14855,10 @@ export class Supa {
       D.cache[fieldKey(def.name)] = [...waiting, ...fresh]; D.save(def.name); D.syncVars(s || {}); s?.emit('data', fieldKey(def.name), 'refreshed', null);
       s?.setVar('dataError', ''); return true;
     } catch (e) { s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase'); return false; }
+    finally { this.loading.delete(lk); }
   }
+  /** Is this collection being loaded from Supabase right now? (lists show placeholders meanwhile) */
+  isLoading(name) { return !!this.loading?.has(fieldKey(name)); }
   pullAll(name) { for (const d of this.engine.data.defs()) if (this.online(d) && (!name || fieldKey(d.name) === fieldKey(name))) this.pull(d); }
   /** The same change in the table. */
   send(def, kind, rec) {

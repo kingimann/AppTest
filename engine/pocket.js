@@ -9793,14 +9793,19 @@ registerBehavior('uiFeed', {
     const cmtsOf = (s, r) => {
       const out = [], me0 = meOf(s), tc = String(F(r, 'topComment') ?? '').trim();
       const mem = (id, o) => { if (!cMem.has(id)) cMem.set(id, o); return cMem.get(id); };
-      if (tc) { const m = tc.match(/^([^:]{1,40}):\s*(.+)$/s); out.push(mem(r.id + ':top', { id: 'top', author: m ? m[1].trim() : 'Someone', text: m ? m[2] : tc, at: (+F(r, 'time') || Date.now()) + 60e3, likes: 12, liked: false })); }
+      const myL = myCLikes(s); if (tc) { const m = tc.match(/^([^:]{1,40}):\s*(.+)$/s), on = myL.has(r.id + ':top'); out.push(mem(r.id + ':top', { id: 'top', author: m ? m[1].trim() : 'Someone', text: m ? m[2] : tc, at: (+F(r, 'time') || Date.now()) + 60e3, likes: 12 + (on ? 1 : 0), liked: on })); }
       if (!has(s)) { let h = 0; for (const ch of String(r.id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0; const n = Math.min(3, +F(r, 'comments') || 0);
-        for (let k = 0; k < n; k++) { const [author, handle, text] = SAMPLE_COMMENTS[(h + k * 2) % SAMPLE_COMMENTS.length]; if (author === F(r, 'author')) continue; out.push(mem(r.id + ':s' + k, { id: 's' + k, author, handle, text, at: (+F(r, 'time') || Date.now()) + (k + 2) * 240e3, likes: (h >> k) % 30, liked: false })); } }
+        for (let k = 0; k < n; k++) { const [author, handle, text] = SAMPLE_COMMENTS[(h + k * 2) % SAMPLE_COMMENTS.length]; if (author === F(r, 'author')) continue; const on = myL.has(r.id + ':s' + k); out.push(mem(r.id + ':s' + k, { id: 's' + k, author, handle, text, at: (+F(r, 'time') || Date.now()) + (k + 2) * 240e3, likes: (h >> k) % 30 + (on ? 1 : 0), liked: on })); } }
       const cc = cColl(s);
-      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: +q.likes || 0, liked: truthy(q.liked), parent: q.parent || '', pinned: truthy(q.pinned), edited: truthy(q.edited), mine: q.author === me0.author }); }
+      const mine0 = myCLikes(s), mh = String(me0.handle).toLowerCase();
+      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; const by = likedBy(q), local = mine0.has(r.id + ':' + q.id), liked = local || by.includes(mh); out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: Math.max(0, +q.likes || 0) + (local && !by.includes(mh) ? 1 : 0), liked, parent: q.parent || '', pinned: truthy(q.pinned), edited: truthy(q.edited), mine: q.author === me0.author }); } // (liked by me: who liked it is kept on the comment; this phone remembers too)
       else for (const q of cDev(s)[r.id] || []) out.push({ ...q, mine: q.author === me0.author });
       return out;
     };
+    const CLKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.commentLikes';
+    /** The comments this phone has liked ("post:comment"), so a like stays even where the comment can't be changed (someone else's, online). */
+    const myCLikes = (s) => { try { return new Set(JSON.parse(store.get(CLKEY(s), '[]')) || []); } catch { return new Set(); } };
+    const likedBy = (q) => String(q.liked_by ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
     const cSave = (s, r, fn) => { const all = cDev(s), L = all[r.id] || (all[r.id] = []); fn(L); if (!L.length) delete all[r.id]; store.set(CKEY(s), JSON.stringify(all)); };
     const colorsOf = () => { const bg0 = tok(p.card || '@card'); return { bg: bg0 && !/^(transparent|rgba\([^)]*,\s*0\))$/.test(bg0) ? bg0 : tok('@bg') || '#fff', text: tok(C('text', '#e7e9ea')), sub: tok(C('sub', '#71767b')), line: tok(C('line', 'rgba(128,128,128,0.25)')), acc: tok(C('accent', '#1d9bf0')), like: tok(C('like', '#f91880')), repost: tok(C('repost', '#00ba7c')), field: 'rgba(128,128,128,0.12)' }; };
     const fontOf = () => (p.font ? `${/[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}"` : p.font}, ${THEME.font}` : THEME.font);
@@ -9849,8 +9854,15 @@ registerBehavior('uiFeed', {
         },
         onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
-        onLikeComment: (cm) => { const on = !cm.liked, n = Math.max(0, (+cm.likes || 0) + (on ? 1 : -1));
-          if (cm.row) D(s).update(cc, cm.id, { liked: on, likes: n }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.liked = on; q.likes = n; } }); else { cm.liked = on; cm.likes = n; } },
+        onLikeComment: (cm) => { // per person: who liked it is kept on the comment, and this phone remembers its own likes
+          const on = !cm.liked, key = r.id + ':' + cm.id, me1 = meOf(s), mh = String(me1.handle).toLowerCase(), L0 = myCLikes(s);
+          if (on) L0.add(key); else L0.delete(key); store.set(CLKEY(s), JSON.stringify([...L0].slice(-2000)));
+          if (cm.row) { const q = D(s).rows(cc).find((x) => String(x.id) === String(cm.id)); if (q) { const by = likedBy(q), had = by.includes(mh), next = on ? (had ? by : [...by, mh]) : by.filter((x) => x !== mh); if (on !== had) D(s).update(cc, cm.id, { liked_by: next.join(','), likes: Math.max(0, (+q.likes || 0) + (on ? 1 : -1)), liked: next.length > 0 }); } }
+          else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.liked = on; q.likes = Math.max(0, (+q.likes || 0) + (on ? 1 : -1)); } });
+          else { cm.liked = on; cm.likes = Math.max(0, (+cm.likes || 0) + (on ? 1 : -1)); }
+          if (on && cm.handle && String(cm.handle).replace(/^@/, '').toLowerCase() !== mh) s.engine.social?.notify(cm.handle, 'comment_like', { post: r.id, text: cm.text }); // they hear about it
+          if (on) s.engine.vibrate?.(8);
+        },
         onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
       if (!sh) sheetUp = false;
     };
@@ -16082,7 +16094,7 @@ export class SocialGraph {
   /** Tell someone something happened: like, comment, reply, repost, quote, mention, follow, friend_request, friend_accept, message. */
   notify(to, type, o = {}) {
     const me = this.me(), b = this.h(to); if (!b || b === this.h(me.handle)) return null;
-    if (['like', 'repost', 'follow'].includes(type) && this.rows('notes').some((n) => this.h(n.to) === b && this.h(n.from) === this.h(me.handle) && n.type === type && String(n.post ?? '') === String(o.post ?? '') && Date.now() - (n._at || 0) < 864e5)) return null; // (once, not every tap)
+    if (['like', 'repost', 'follow', 'comment_like'].includes(type) && this.rows('notes').some((n) => this.h(n.to) === b && this.h(n.from) === this.h(me.handle) && n.type === type && String(n.post ?? '') === String(o.post ?? '') && (type !== 'comment_like' || n.text === String(o.text || '').slice(0, 140)) && Date.now() - (n._at || 0) < 864e5)) return null; // (once, not every tap)
     return this.add('notes', { to: b, from: me.handle, from_name: me.author, type, post: o.post != null ? String(o.post) : '', text: String(o.text || '').slice(0, 140), read: false });
   }
   /** The @someones in a text. */
@@ -16107,9 +16119,9 @@ export class SocialGraph {
     else if (newest) this.seenN = newest.id;
   }
 }
-const NOTE_ICON = { like: '❤️', comment: '💬', reply: '↩️', repost: '🔁', quote: '✏️', mention: '@', follow: '👤', friend_request: '🤝', friend_accept: '🤝', message: '✉️' };
+const NOTE_ICON = { comment_like: '❤️', like: '❤️', comment: '💬', reply: '↩️', repost: '🔁', quote: '✏️', mention: '@', follow: '👤', friend_request: '🤝', friend_accept: '🤝', message: '✉️' };
 /** "Maya liked your post" (with the name) or "liked your post". */
-const NOTE_TEXT = (n, withName = true) => { const who = withName ? (n.from_name || '@' + n.from) + ' ' : ''; return who + ({ like: 'liked your post', comment: 'commented: ', reply: 'replied to your post', repost: 'reposted your post', quote: 'quoted your post', mention: 'mentioned you', follow: 'started following you', friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message' }[n.type] || n.type) + (n.type === 'comment' && n.text ? '“' + n.text + '”' : ''); };
+const NOTE_TEXT = (n, withName = true) => { const who = withName ? (n.from_name || '@' + n.from) + ' ' : ''; return who + ({ like: 'liked your post', comment_like: 'liked your comment', comment: 'commented: ', reply: 'replied to your post', repost: 'reposted your post', quote: 'quoted your post', mention: 'mentioned you', follow: 'started following you', friend_request: 'sent you a friend request', friend_accept: 'accepted your friend request', message: 'sent you a message' }[n.type] || n.type) + (n.type === 'comment' && n.text ? '“' + n.text + '”' : n.type === 'comment_like' && n.text ? ': “' + String(n.text).slice(0, 60) + '”' : ''); };
 
 /**
  * Supabase for apps and games (Game Settings › Supabase): the app's own accounts (sign up, sign in, Google…)

@@ -377,6 +377,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Likes, comments, replies, reposts, quotes, @mentions, follows, friend requests, accepted requests and direct messages each send a notification to that person.
   - A new notification pops up a banner and buzzes. Turn this off with the setting `socialBanners: false`.
   - Variables: `{notifications_unread}`, `{friend_requests}`, `{followers_count}`, `{following_count}` and `{friends_count}`. Use them as badges, for example the App Bar action `bell | page:notifications | notifications_unread`.
+- **Liking comments** is per person: who liked a comment is kept on it (a *liked_by* field in the Comments collection), so someone else's like counts but doesn't show as yours. Your phone also remembers your own likes, so they stay even where you can't change someone else's comment online. The comment's author gets a notification (*liked your comment*).
 - **Notifications (social):** All / Mentions / Requests tabs (any Top Nav *Tab look*).
   - Likes, reposts and follows on the same post are grouped ("Maya and 2 others liked your post"). New ones are highlighted and marked read once seen.
   - Friend requests have **Accept / Decline**, and follows have **Follow back**.

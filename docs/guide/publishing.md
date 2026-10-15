@@ -135,6 +135,34 @@ The checklist warns when something is too long, or when the privacy policy link 
 
 A game that keeps everything on the phone gets "Data not collected", the simplest answer in both stores.
 
+### Screenshots
+
+Press **▶ Play**, then the **camera** on the Play bar at the best moments (up to 8). A flash shows it was taken. The screenshots are kept with the game.
+
+**Build Settings › Screenshots** lists them:
+
+- give each one a caption (optional), reorder them or remove them;
+- **Look**: a caption above the screenshot on a coloured background (the usual store style), or just the screenshot filling the picture;
+- background and caption colours.
+
+The store kit (and every app project, in `store-listing/screenshots/`) has each screenshot at the exact sizes the stores accept:
+
+- App Store iPhone 6.9" (1320×2868);
+- App Store iPad 13" (2064×2752), when the app supports iPad;
+- Google Play phone (1080×1920).
+
+Landscape screenshots come out sideways sizes. The itch.io download has them at their own size. The checklist reminds you when there are none.
+
+### Release notes
+
+**What's new in this version** (Build Settings › App) goes into LISTING.md, for the App Store's "What's New" and Google Play's "Release notes", and into ITCH-PAGE.md as a devlog post.
+
+## Smaller builds
+
+**File size › Make pictures smaller** saves the game's big pictures again in a smaller format (WebP, or JPEG where there are no see-through parts). They keep their size. You can also choose to shrink pictures bigger than 2048 px, but not sprite sheets that are cut into frames by pixel size. **Undo** puts them back.
+
+**Recent builds**, under the build targets, lists the last builds: what, which version, how big and when.
+
 ## Playing a game from a URL
 
 The engine's own `play.html` plays any game JSON or template:

@@ -15,7 +15,7 @@ Plain JavaScript ES modules. No dependencies and no build step.
 
 The engine has its own documentation site in `docs/`: open **docs/** in the app (or *☰ → Documentation* in the editor, or **Docs** on any component's ⋯ menu). It works offline and has:
 
-- **20 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, accounts and cloud sync, and troubleshooting.
+- **21 guides:** getting started, the editor, core concepts, the game file, physics, Triggers and state machines, visual scripting, UI, gameplay systems, quests and dialogue, making apps, cameras and lighting, animation and audio, saving and online, scripting with JavaScript, using the engine from code, writing your own components, publishing, accounts and cloud sync, plugins and mods, and troubleshooting.
 - **A reference generated from the engine itself**, so it always matches the running version:
   - every component with all its settings, types, defaults (2D and 3D) and choices;
   - every visual-script node with its wires and settings;
@@ -156,7 +156,7 @@ Settings for you on this device (games keep their own settings):
 |---|---|
 | Look | theme (Dark, Black, Slate, Midnight, Warm, Light), accent colour (it colours the Play and Add buttons, selections and highlights too), panel text size, reduce motion |
 | Editing | snap on / off, snap step for 2D (1–50 px) and 3D (0.1–1), rotation snap (5°–90°), grid, all colliders, vibration on taps |
-| Saving | save straight away, after a few seconds, every 10 seconds, or only on Save / leaving; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
+| Saving | only when I tap Save (the default; asks before leaving), straight away, after a few seconds, or every 10 seconds; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
 | App | open on the Home screen or straight into the last game, keep the screen on while editing, version and **Check for updates**, **Install app**, storage used and **Protect my games** (asks the browser not to clear them) |
 
 **Reset preferences** puts them back.
@@ -647,6 +647,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - New **Arcade** app type: three games, best scores, and a score list.
 - Data Lists, Record Forms and Data Summaries work in games too.
 - **Publishing:** Build Settings makes a play file, a website, an **itch.io** upload (index.html at the root, a cover image and the page settings: viewport, Mobile friendly, fullscreen, butler command), an App Store & Google Play project (Codemagic) or an **Expo** project (EAS submit settings, Apple privacy manifest, an icon without transparency, optional manual build numbers). Store builds include a **store listing kit**, with screenshots taken from the Play bar's camera, captioned and sized for the App Store (iPhone 6.9", iPad 13") and Google Play, and release notes: App Store and Play icons, the Play feature graphic, LISTING.md with the stores' limits and the App Privacy / Data safety answers for what the game uses, and a starter privacy policy. See the [publishing guide](docs/guide/publishing.md).
+- **Plugins and mods** (*Game Settings › Plugins & Mods*): plugins are JavaScript saved with the game that add components, Triggers instructions and conditions, nodes (in a Plugins folder) and hooks, in the editor and in builds (new, from a file or link, My Plugins, export). Players can add **mods** from a Mods screen when you allow it: data patches (variables, settings, change / add / remove objects, new levels, items, quests), and code mods only if you allow code. Make a mod template, test a mod in Play. See the [plugins and mods guide](docs/guide/plugins-mods.md).
 - **Supabase for apps** (*Game Settings › Supabase*): your app's own accounts and online data.
   - Sign up, sign in, password reset and Google / Apple sign-in, with a ready **Sign-in Page** and **Account Page**, an optional "must sign in" page, `{userName}`, `{userEmail}`, `{signedIn}` and `{authError}`.
   - Data collections can be **stored online**: private to each person, or shared with everyone (feeds, chats, reviews). **Copy setup SQL** makes the table and its security rules; Data Lists and Forms work unchanged, with auto-refresh for chats and an author field filled in.
@@ -1272,7 +1273,8 @@ Games can keep anything between plays in **named save files** of keys, like Unit
 
 ### Saving, restore points and backups
 
-- **Autosave** to the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.
+- **Saved only when you save** (top-bar Save, ☰ → Save, Ctrl/⌘ S): a dot marks unsaved changes; switching or starting a project asks Save / Don't save / Cancel; closing the tab warns; unsaved changes from a closed app are offered back next time. Preferences › *Save my work* can switch back to saving as you go.
+- Projects live in the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.
 - **Safety copy:** when you switch apps, lock the phone or close the tab, the open game is also copied instantly, so a phone freezing the page mid-save can't lose the last edits.
 - **Earlier versions** (☰ → *Restore Earlier Version…*): a restore point every few minutes while you work (the last 12 per game). Restoring keeps your current version as a restore point too.
 - **Back Up All Games** (☰ or the Home card) puts every game and your saved scripts in one file and opens the share sheet (Files, iCloud Drive, Google Drive, email…). **Restore** brings them back on any phone or browser: missing games are added, older copies updated, and newer ones on the phone kept.

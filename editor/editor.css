@@ -1985,3 +1985,18 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .build-hist summary { cursor: pointer; }
 .bh-row { display: grid; grid-template-columns: 1.4fr .7fr .8fr 1fr; gap: 8px; padding: 4px 2px; border-bottom: 1px solid var(--g0); }
 .bh-row b { color: var(--text); font-weight: 700; }
+
+/* unsaved changes (Preferences › Save my work: only when I tap Save) */
+#projectTitle.unsaved::after { content: ' •'; color: var(--accent, #4c8bd6); }
+#saveBtn.on { color: var(--accent, #4c8bd6); }
+#saveBtn.on svg { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--accent, #4c8bd6) 60%, transparent)); }
+
+/* plugins */
+.plug-list { display: flex; flex-direction: column; gap: 10px; margin: 8px 0; }
+.plug { border: 1px solid var(--g2); background: var(--g1); border-radius: 14px; padding: 10px 12px; }
+.plug.off { opacity: .6; }
+.plug-h { display: flex; align-items: center; gap: 8px; }
+.plug-h b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.plug-h small { color: var(--muted); }
+.plug .desc { margin: 6px 0; }
+.plugin-code { width: 100%; font: 12.5px/1.45 ui-monospace, Menlo, monospace; min-height: 300px; }

@@ -4698,6 +4698,7 @@ function drawGameScreens(ctx, engine, scene, W, H, TH) {
   if (key === 'paused') {
     const rows = [['resume', 'Resume', 'play', true], ['restart', 'Restart', 'again'], ['sound', engine.audio.muted ? 'Sound off' : 'Sound on', engine.audio.muted ? 'mute' : 'sound']];
     if (scene.fromApp) rows.push(['app', 'Back to app', 'back']);
+    if (scene.settings.mods?.allow && scene.settings.mods.menu !== false) rows.push(['mods', 'Mods', 'list']);
     const ch = 84 + rows.length * (bh + gap) + 14, cy = Math.max(engine.safe.top + 20, (H - ch) / 2 - 24), off = card(cy, cw, ch);
     text('Paused', W / 2, cy + off + 46, 28, TH.text, 900, P(0.08, 0.3));
     rows.forEach(([id, lab, ic, pri], i) => { button(id, lab, ic, W / 2, cy + off + 84 + i * (bh + gap), bw, bh, !!pri, 0.1 + i * 0.05); if (id === 'app') { const r = engine.screenBtns.at(-1); if (r?.id === 'app') engine.appRect = r; } });
@@ -4749,7 +4750,7 @@ export const Behaviors = {};
 /** Actions shared by Trigger, Timer, Condition, Button, Rules and Tween ("when finished"). */
 export const ACTIONS = ['message', 'add score', 'add to variable', 'set variable', 'spawn template', 'destroy object', 'destroy other', 'show object', 'hide object', 'toggle object',
   'play sound', 'vibrate', 'camera shake', 'jump', 'move by', 'win', 'game over', 'next level', 'start game', 'restart game', 'pause game', 'resume game', 'open settings', 'show notification', 'phone notification', 'ask permission',
-  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'sign in', 'create account', 'sign out', 'send password reset', 'continue with google', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
+  'save game', 'load game', 'continue from newest save', 'delete save', 'switch camera', 'push', 'set gravity', 'toggle light', 'send message', 'play animation', 'go to page', 'go back', 'new record', 'edit opened record', 'delete opened record', 'play game', 'back to app', 'open mods', 'sign in', 'create account', 'sign out', 'send password reset', 'continue with google', 'join online room', 'leave online room', 'send network message', 'submit score online', 'cloud save', 'cloud load'];
 /** Default value of a behavior param for a 2D or 3D entity. */
 export const paramDefault = (p, threeD) => (threeD && p.default3d !== undefined ? p.default3d : p.default);
 export function registerBehavior(type, def) { Behaviors[type] = def; }
@@ -12176,6 +12177,7 @@ function runAction(s, e, p, other) {
     case 'vibrate': s.engine.vibrate([40, 30, 40]); break;
     case 'save game': if (s.saveGame(p.amount || 1)) s.message(v && v !== 'Hello!' ? v : 'Game saved', 1.5); break;
     case 'load game': if (!s.loadGame(p.amount || 1)) s.message('No saved game yet', 1.5); return;
+    case 'open mods': s.engine.openMods(); break;
     case 'sign in': s.engine.supa.signIn(String(s.vars.email ?? '').trim(), String(s.vars.password ?? '')).catch(() => {}); break;
     case 'create account': s.engine.supa.signUp(String(s.vars.email ?? '').trim(), String(s.vars.password ?? ''), String(s.vars.name ?? '').trim()).then((r) => { if (r === 'check email') s.message('Check your email to finish signing up', 2.5); }).catch(() => {}); break;
     case 'sign out': s.engine.supa.signOut(); break;
@@ -12417,6 +12419,103 @@ export function fieldText(f, v, def) {
 const fieldDefault = (f) => (f.default !== undefined && f.default !== '' ? (f.type === 'yes/no' ? truthy(f.default) : ['number', 'money', 'rating'].includes(f.type) ? +f.default || 0 : f.default === 'today' && f.type === 'date' ? isoDay() : f.default)
   : f.type === 'yes/no' ? false : f.type === 'date' ? isoDay() : f.type === 'choice' ? f.options[0] || '' : ['number', 'money', 'rating'].includes(f.type) ? 0 : '');
 /** Stores every collection (seed rows from Game Settings, then whatever the app adds) and saves it on the device. */
+// ---- plugins (Game Settings › Plugins & Mods): project code that adds components, instructions, conditions, nodes and hooks ----
+export const pluginHooks = { sceneStart: [], update: [] };
+/** What each plugin added (the editor lists it). id → { name, version, code, adds, error } */
+export const installedPlugins = new Map();
+/**
+ * Runs plugins: each one's code gets api (registerBehavior, addInstruction, addCondition, addNode, on, param helpers, log)
+ * and P (the Pocket toolbox). A plugin already running with the same code is not run again.
+ */
+export function installPlugins(list) {
+  for (const pl of list || []) {
+    if (!pl || pl.enabled === false || !String(pl.code || '').trim()) continue;
+    const id = pl.id || pl.name || 'plugin'; if (installedPlugins.get(id)?.code === pl.code) continue;
+    const adds = [], name = pl.name || id;
+    const api = {
+      P: Pocket, plugin: { name, version: pl.version || '' },
+      input: (key, def = 0, type = 'number') => ({ key, type, default: def }),
+      text: (key, def = '', label = key) => txt(key, def, label), number: (key, def = 0, label = key) => num(key, def, label), choice: (key, options, def, label = key) => opt(key, options, def ?? options[0], label),
+      registerBehavior: (type, def) => { registerBehavior(type, { ...def, plugin: name }); adds.push(['Component', def.label || type]); },
+      addInstruction: (k, def) => {
+        LOGIC_ACTIONS[k] = { cat: 'Plugins', icon: 'bolt', say: () => def.label || k, ...def, plugin: name, run: (c, p) => def.run?.(c, p, Pocket) };
+        NODE_TYPES['la_' + k] = { cat: 'Instructions', also: 'Plugins', label: def.label || k, exec: true, outs: ['then'], params: (def.params || []).map((q) => ({ ...q })), fromLogic: true, plugin: name };
+        adds.push(['Instruction', def.label || k]);
+      },
+      addCondition: (k, def) => {
+        LOGIC_CONDITIONS[k] = { icon: 'check', say: () => def.label || k, ...def, plugin: name, test: (c, p) => !!def.test?.(c, p, Pocket) };
+        NODE_TYPES['lc_' + k] = { cat: 'Conditions', also: 'Plugins', label: def.label || k, value: 'bool', params: (def.params || []).map((q) => ({ ...q })), fromLogic: true, plugin: name };
+        adds.push(['Condition', def.label || k]);
+      },
+      addNode: (k, def) => {
+        NODE_TYPES[k] = { cat: def.cat || 'Actions', also: 'Plugins', label: def.label || k, params: def.params || [], inputs: def.inputs || [], help: def.help, plugin: name,
+          ...(def.value ? { value: def.type || 'number', pluginValue: def.value } : { exec: true, outs: def.outs || ['then'], pluginRun: def.run }) };
+        adds.push(['Node', def.label || k]);
+      },
+      on: (ev, fn) => { if (pluginHooks[ev] && typeof fn === 'function') { pluginHooks[ev].push(fn); adds.push(['Hook', ev]); } },
+      log: (...a) => Log.add('log', a.join(' '), name), warn: (...a) => Log.add('warn', a.join(' '), name),
+    };
+    try { new Function('api', 'P', 'plugin', String(pl.code))(api, Pocket, api.plugin); installedPlugins.set(id, { name, version: pl.version || '', code: pl.code, adds }); }
+    catch (err) { Log.add('error', `Plugin “${name}”: ${err.message}`, 'Plugin'); installedPlugins.set(id, { name, version: pl.version || '', code: pl.code, adds, error: err.message }); }
+  }
+}
+const runHooks = (ev, ...a) => { for (const f of pluginHooks[ev]) { try { f(...a); } catch (err) { Log.add('error', `Plugin hook ${ev}: ${err.message}`, 'Plugin'); } } };
+
+// ---- mods (Game Settings › Plugins & Mods › Players can add mods): files players add to a finished game ----
+const setPathIn = (o, path, v) => { const ks = String(path).split('.'); let t = o; for (const k of ks.slice(0, -1)) { if (t[k] == null || typeof t[k] !== 'object') t[k] = /^\d+$/.test(k) ? [] : {}; t = t[k]; } t[ks.at(-1)] = v; };
+const MOD_LOCKED = ['mods', 'supabaseUrl', 'supabaseKey', 'playfab', 'photon', 'app']; // settings a mod can't change
+/**
+ * A mod: { pocketMod: 1, name, version, author, description, game, patch, code }.
+ * patch: vars {}, settings {}, add [objects (level: n)], change [{ name, level?, set: { 'shape.fill': '#f00' } }],
+ * remove [names], levels [level JSON], items / recipes / quests / collections [replace by name or add], sounds {}.
+ */
+export function applyModPatch(g, patch = {}) {
+  const levels = [g, ...(g.levels ||= [])], lvOf = (ref) => (ref == null || ref === 'all' ? levels : [levels[(+ref || 1) - 1] || levels.find((l) => l.levelName === ref)].filter(Boolean));
+  if (patch.vars) Object.assign(g.vars ||= {}, patch.vars);
+  if (patch.settings) for (const [k, v] of Object.entries(patch.settings)) if (!MOD_LOCKED.includes(k)) (g.settings ||= {})[k] = v;
+  for (const o of patch.add || []) { const { level, ...ent } = o; const lv = lvOf(level ?? 1)[0]; if (lv) (lv.entities ||= []).push({ id: 'm' + Math.random().toString(36).slice(2, 9), ...ent }); }
+  for (const c of patch.change || []) for (const lv of lvOf(c.level)) for (const e of lv.entities || []) if ((c.name && e.name === c.name) || (c.tag && (e.tags || []).includes(c.tag))) for (const [k, v] of Object.entries(c.set || {})) setPathIn(e, k, v);
+  for (const r of patch.remove || []) { const n = typeof r === 'string' ? r : r.name; for (const lv of lvOf(typeof r === 'string' ? 'all' : r.level)) lv.entities = (lv.entities || []).filter((e) => e.name !== n); }
+  if (Array.isArray(patch.levels)) g.levels.push(...patch.levels.map((l) => ({ entities: [], vars: {}, settings: {}, ...l })));
+  for (const k of ['items', 'recipes', 'quests', 'collections']) if (Array.isArray(patch[k])) { const L = (g[k] ||= []); for (const x of patch[k]) { const i = L.findIndex((y) => y?.name === x?.name); if (i >= 0) L[i] = x; else L.push(x); } }
+  if (patch.sounds) Object.assign(g.sounds ||= {}, patch.sounds);
+  return g;
+}
+export class Mods {
+  constructor(engine) { this.engine = engine; this.testing = null; }
+  key() { return 'pocket.mods.' + (this.engine.gameKey || 'game'); }
+  list() { try { return JSON.parse(store.get(this.key(), '[]')) || []; } catch { return []; } }
+  saveList(L) { try { localStorage.setItem(this.key(), JSON.stringify(L)); return true; } catch { return false; } }
+  /** A mod file's text → the mod, or { error }. */
+  static parse(text) {
+    let m; try { m = JSON.parse(String(text || '').replace(/^﻿/, '')); } catch { return { error: 'That file is not a mod (it is not JSON)' }; }
+    if (!m || typeof m !== 'object' || !m.pocketMod) return { error: 'That file is not a mod for this game (no “pocketMod”)' };
+    if (!m.name) return { error: 'The mod has no name' };
+    return { mod: m };
+  }
+  add(text) {
+    const { mod, error } = Mods.parse(text); if (error) return { error };
+    const L = this.list().filter((x) => x.name !== mod.name), want = this.engine.levels?.[0]?.name || this.engine.gameKey;
+    L.push({ id: 'mod' + Date.now().toString(36), name: mod.name, version: mod.version || '', author: mod.author || '', description: mod.description || '', enabled: true, data: mod });
+    if (!this.saveList(L)) return { error: 'Not enough space on this device for that mod' };
+    return { mod, warn: mod.game && want && String(mod.game).toLowerCase() !== String(want).toLowerCase() ? `Made for “${mod.game}”` : '' };
+  }
+  remove(id) { this.saveList(this.list().filter((m) => m.id !== id)); }
+  toggle(id, on) { this.saveList(this.list().map((m) => (m.id === id ? { ...m, enabled: on } : m))); }
+  active(settings) { const ms = settings?.mods || {}; return [...(ms.allow ? this.list().filter((m) => m.enabled !== false).map((m) => m.data) : []), ...(this.testing ? [this.testing] : [])]; }
+  /** The game with every turned-on mod applied (data first, then mods with code, when the game allows those). */
+  apply(json) {
+    const st = json.settings || {}, act = this.active(st); this.applied = act.map((m) => m.name);
+    if (!act.length) return json;
+    const g = JSON.parse(JSON.stringify(json));
+    for (const m of act) { try { applyModPatch(g, m.patch || {}); } catch (err) { Log.add('error', `Mod “${m.name}”: ${err.message}`, 'Mods'); } }
+    const code = act.filter((m) => m.code && (st.mods?.scripts || m === this.testing));
+    for (const m of act) if (m.code && !code.includes(m)) Log.add('warn', `Mod “${m.name}” has code, and this game only allows data mods: its code was skipped`, 'Mods');
+    if (code.length) installPlugins(code.map((m) => ({ id: 'mod:' + m.name, name: m.name, version: m.version, code: m.code })));
+    return g;
+  }
+}
+
 /**
  * Supabase for apps and games (Game Settings › Supabase): the app's own accounts (sign up, sign in, Google…)
  * and online data collections kept in Supabase tables, private to each person or shared with everyone.
@@ -15294,6 +15393,7 @@ export const LOGIC_CONDITIONS = {
   exists: { label: 'Object exists', icon: 'cube', params: [sug(txt('object', '', 'object'), 'objects')], test: (c, p) => !!c.s.find(p.object), say: (p) => `${p.object} exists` },
   visible: { label: 'Is visible', icon: 'eye', params: [sug(txt('object', '', 'object (empty = this)'), 'objects')], test: (c, p) => !!(p.object ? c.s.find(p.object) : c.e)?.visible, say: (p) => `${p.object || 'this'} is visible` },
   state: { label: 'State is', icon: 'nodes', params: [txt('state', 'Idle', 'state')], test: (c, p) => c.e.data.state === p.state, say: (p) => `state is ${p.state}` },
+  modActive: { label: 'Mod is on', icon: 'list', params: [txt('mod', '', 'mod name (blank = any)')], test: (c, p) => { const a = c.s.engine.mods?.applied || []; return p.mod ? a.some((n) => String(n).toLowerCase() === String(p.mod).trim().toLowerCase()) : a.length > 0; }, say: (p) => p.mod ? `the mod “${p.mod}” is on` : 'a mod is on' },
   anySave: { label: 'Has any save', icon: 'save', test: (c) => !!c.s.engine.newestSlot(), say: () => 'there is a save' },
   hasSave: { label: 'Has saved game', icon: 'save', params: [num('slot', 1, 'slot')], test: (c, p) => c.s.hasSave(+p.slot || 1), say: () => 'has a save' },
   hasItem: { label: 'Has item', icon: 'key', params: [txt('item', 'Key', 'item'), num('count', 1, 'at least')], test: (c, p) => c.s.itemCount(p.item) >= (+p.count || 1), say: (p) => `has ${p.count} ${p.item}` },
@@ -15434,6 +15534,7 @@ export const LOGIC_ACTIONS = {
   shake: { cat: 'Game', label: 'Camera shake', icon: 'camera', params: [num('strength', 12, 'strength')], run: (c, p) => c.s.impulse(+p.strength || 10, c.e), say: (p) => `Shake camera (${p.strength})` },
   switchCamera: { cat: 'Game', label: 'Switch camera', icon: 'camera', params: [sug(txt('camera', 'Camera', 'camera object'), 'objects')], run: (c, p) => c.s.setCamera(p.camera), say: (p) => `Camera → ${p.camera}` },
   save: { cat: 'Game', label: 'Save game', icon: 'save', params: [num('slot', 1, 'slot')], run: (c, p) => { if (c.s.saveGame(+p.slot || 1)) c.s.message('Game saved', 1.2); }, say: () => 'Save game' },
+  openMods: { cat: 'Game', label: 'Open the Mods screen', icon: 'list', run: (c) => { c.s.engine.openMods(); }, say: () => 'Open the Mods screen' },
   loadNewest: { cat: 'Game', label: 'Continue (load the newest save)', icon: 'folder', run: (c) => { const k = c.s.engine.newestSlot(); if (k) c.s.engine.loadGame(k); }, say: () => 'Continue from the newest save' },
   deleteAllSaves: { cat: 'Game', label: 'Delete every save of this game', icon: 'trash', run: (c) => { c.s.engine.deleteAllSaves(); }, say: () => 'Delete every save' },
   load: { cat: 'Game', label: 'Load game', icon: 'folder', params: [num('slot', 1, 'slot')], run: (c, p) => { c.s.loadGame(+p.slot || 1); }, say: () => 'Load game' },
@@ -15971,6 +16072,8 @@ registerBehavior('graph', {
     };
     const valueOf = (n, ctx, depth) => {
       if (!n) return 0;
+      const PV = NODE_TYPES[n.type]?.pluginValue; // a plugin's value node
+      if (PV) { try { return PV({ s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue, param: (k) => param(n, k), input: (k) => input(n, k, ctx, depth) }, Pocket); } catch (err) { Log.add('error', `${NODE_TYPES[n.type].label}: ${err.message}`, 'Plugin'); return 0; } }
       if (n.type.startsWith('lc_')) { const k = n.type.slice(3), d = LOGIC_CONDITIONS[k]; if (!d) return false; const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key); return conditionsPass([it], { s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue }); } // a Triggers condition as a node
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx, depth), P = (k) => param(n, k);
       switch (n.type) {
@@ -16211,6 +16314,12 @@ registerBehavior('graph', {
       const st = ctx.s.engine.graphStats;
       if (st) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
       if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
+      const PR = NODE_TYPES[n.type]?.pluginRun; // a plugin's node: its run() returns the output to follow (or a promise of it)
+      if (PR) {
+        let port; try { port = PR({ s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue, param: (k) => param(n, k), input: (k) => input(n, k, ctx, 0) }, Pocket); } catch (err) { Log.add('error', `${NODE_TYPES[n.type].label}: ${err.message}`, 'Plugin'); }
+        if (port && typeof port.then === 'function') { const later = { ...ctx, steps: 0 }; port.then((pp) => { if (!ctx.e.dead) follow(n, typeof pp === 'string' ? pp : 'then', later); }); return; }
+        return follow(n, typeof port === 'string' ? port : 'then', ctx);
+      }
       if (n.type.startsWith('la_')) { // a Triggers instruction as a node
         const k = n.type.slice(3), d = LOGIC_ACTIONS[k], later = { ...ctx, steps: 0 }; if (!d) return;
         const it = { type: k }; for (const q of d.params || []) it[q.key] = param(n, q.key);
@@ -17721,6 +17830,7 @@ export class Engine {
     this.input = new Input(this, this.uiCanvas);
     this.online = new Online(this);
     this.supa = new Supa(this); // the app's own accounts and online data (Game Settings › Supabase)
+    this.mods = new Mods(this); // mods players add (Game Settings › Plugins & Mods)
     this.audio = new Audio();
     this.physics = new Physics();
     this.scene = null;
@@ -17782,6 +17892,11 @@ export class Engine {
    */
   start(source, opts = {}) {
     this.levels = null; this.carry = null;
+    if (source && typeof source === 'object' && !(source instanceof Scene)) {
+      this.source = source; this.gameKey = source.name || this.gameKey || 'game';
+      installPlugins(source.plugins); // (each plugin runs once per page)
+      if (!this.editing) source = this.mods.apply(source); // turned-on mods
+    }
     if (!this.editing && this.recordGraphs) this.graphStats = new Map(); // the node editor's live debug: what ran in this play
     if (source && typeof source === 'object' && !(source instanceof Scene)) this.audio.clips = { ...(source.sounds || {}) }; // imported sounds
     if (typeof source === 'function') this.factory = source;
@@ -17796,7 +17911,7 @@ export class Engine {
     if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
     this.loadPrefs();
     this.setScene(this.factory());
-    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); this.supa.start(this.scene); }
+    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); this.supa.start(this.scene); this.scene.vars.modsActive = (this.mods.applied || []).length; }
     return this.scene;
   }
 
@@ -17887,7 +18002,7 @@ export class Engine {
   setScene(scene, { skipRestore = false } = {}) {
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
-    this.scene = scene; if (!this.editing) this.fitScreen(); this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
+    this.scene = scene; if (!this.editing) { this.fitScreen(); if (pluginHooks.sceneStart.length) runHooks('sceneStart', scene, this); } this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
     if (scene.settings.loadOnStart && !this.editing && !skipRestore && !this.loadedOnce && this.newestSlot()) { // continue from the newest save
       this.loadedOnce = true;
       return this.loadGame(this.newestSlot(), { keepTitle: true });
@@ -18218,18 +18333,52 @@ export class Engine {
     if (use.tilt) move.push(row('Tilt sensitivity', slider('tiltSens', 0.5, 2.5, 0.05), 'Higher = less tilt for full speed'), row('Invert tilt forward / back', toggle('tiltInvert')), `<button class="pk-btn" data-act="calibrate">Set level to how I'm holding it</button>`);
     if (use.look) move.push(row('Look sensitivity', slider('lookSens', 0.3, 3, 0.05)), row('Invert look up / down', toggle('invertLook')));
     const other = [row('Sound effects', slider('sfx', 0, 1, 0.05)), row('Music', slider('music', 0, 1, 0.05)), row('Vibration', toggle('vibration'))];
-    wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="Settings"><div class="pk-head"><b>Settings</b><button class="pk-x" data-act="close" aria-label="Close">✕</button></div><div class="pk-body">${sec('Controls', ctl)}${sec('Movement', move)}${sec('Sound & feel', other)}</div><div class="pk-foot"><button class="pk-btn ghost" data-act="reset">Reset</button><button class="pk-btn primary" data-act="close">Done</button></div></div>`;
+    wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="Settings"><div class="pk-head"><b>Settings</b><button class="pk-x" data-act="close" aria-label="Close">✕</button></div><div class="pk-body">${sec('Controls', ctl)}${sec('Movement', move)}${sec('Sound & feel', other)}</div><div class="pk-foot">${this.scene?.settings.mods?.allow ? '<button class="pk-btn ghost" data-act="mods">Mods</button>' : ''}<button class="pk-btn ghost" data-act="reset">Reset</button><button class="pk-btn primary" data-act="close">Done</button></div></div>`;
     for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click']) wrap.addEventListener(ev, (e) => e.stopPropagation());
     wrap.addEventListener('input', (e) => { const el = e.target, k = el.dataset?.k; if (!k) return; const v = el.type === 'checkbox' ? el.checked : +el.value; this.setPref(k, v); const o = el.nextElementSibling; if (o?.tagName === 'OUTPUT') o.textContent = fmtPref(k, v); if (k === 'vibration' && v) this.vibrate(20); });
     wrap.addEventListener('click', (e) => {
       const act = e.target.closest?.('[data-act]')?.dataset.act; if (!act && e.target === wrap) return this.closeSettings();
       if (act === 'close') this.closeSettings();
       else if (act === 'calibrate') { this.input.calibrateTilt(); this.scene?.message?.('Tilt level set', 1.2); }
+      else if (act === 'mods') { this.closeSettings(true); this.openMods(); }
       else if (act === 'reset') { const resume = this.settingsResume; this.prefs = { ...PLAYER_PREFS }; this.savePrefs(); this.closeSettings(true); this.openSettings(); this.settingsResume = resume; }
     });
     this.root.appendChild(wrap); this.settingsPanel = wrap;
     this.scene?.emit?.('settingsOpen');
   }
+  /** The Mods screen: the mods added on this device, on or off, add a mod file, restart to use them. */
+  openMods() {
+    if (this.modsPanel || this.editing) return;
+    if (!this.paused && this.scene?.state === 'play') { this.paused = true; this.modsResume = true; } else this.modsResume = false;
+    injectPrefsCss();
+    const wrap = document.createElement('div'); wrap.className = 'pk-ps'; this.modsPanel = wrap;
+    const esc = (t) => String(t ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+    let note = '', changedMods = false;
+    const draw = () => {
+      const L = this.mods.list(), codeOK = !!this.scene?.settings.mods?.scripts;
+      wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="Mods"><div class="pk-head"><b>Mods</b><button class="pk-x" data-act="close" aria-label="Close">✕</button></div><div class="pk-body">
+        ${L.length ? L.map((m) => `<label class="pk-row"><span>${esc(m.name)}${m.version ? ' ' + esc(m.version) : ''}<small>${esc([m.author && 'by ' + m.author, m.description, m.data?.code && !codeOK ? 'has code: this game only uses data mods, so its code is skipped' : ''].filter(Boolean).join(' · '))}</small></span><div style="display:flex;flex-direction:row;align-items:center;gap:12px;flex:none"><input type="checkbox" data-mod="${m.id}" ${m.enabled !== false ? 'checked' : ''}><button class="pk-x" data-del="${m.id}" aria-label="Remove" style="font-size:15px">🗑</button></div></label>`).join('') : '<p class="pk-row"><span>No mods yet<small>Mods change or add to the game: new levels, characters, rules. Add a mod file you trust.</small></span></p>'}
+        ${note ? `<p class="pk-row"><span><small>${esc(note)}</small></span></p>` : ''}</div>
+        <div class="pk-foot"><button class="pk-btn ghost" data-act="add">Add a mod file…</button><button class="pk-btn primary" data-act="${changedMods ? 'restart' : 'close'}">${changedMods ? 'Restart with mods' : 'Done'}</button></div></div>`;
+    };
+    draw();
+    for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend', 'click']) wrap.addEventListener(ev, (e) => e.stopPropagation());
+    wrap.addEventListener('change', (e) => { const id = e.target.dataset?.mod; if (id) { this.mods.toggle(id, e.target.checked); changedMods = true; draw(); } });
+    wrap.addEventListener('click', (e) => {
+      const t = e.target.closest?.('[data-act],[data-del]'); if (!t && e.target === wrap) return this.closeMods();
+      if (t?.dataset.del) { this.mods.remove(t.dataset.del); changedMods = true; note = 'Mod removed.'; draw(); return; }
+      const act = t?.dataset.act;
+      if (act === 'close') this.closeMods();
+      else if (act === 'restart') { this.closeMods(true); this.paused = false; this.start(this.source || this.levels?.[0]); }
+      else if (act === 'add') {
+        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,.pmod,.txt,application/json';
+        inp.onchange = async () => { const f = inp.files?.[0]; if (!f) return; const r = this.mods.add(await f.text()); note = r.error || `Added “${r.mod.name}”.${r.warn ? ' ' + r.warn + '.' : ''} Restart to play with it.`; if (!r.error) changedMods = true; draw(); };
+        inp.click();
+      }
+    });
+    this.root.appendChild(wrap);
+  }
+  closeMods(keepPaused = false) { this.modsPanel?.remove(); this.modsPanel = null; if (this.modsResume && !keepPaused) this.paused = false; }
   closeSettings(keepPaused = false) {
     this.settingsPanel?.remove(); this.settingsPanel = null;
     if (this.settingsResume && !keepPaused) this.paused = false;
@@ -18269,6 +18418,7 @@ export class Engine {
       if ((this.saveTimer = (this.saveTimer || 0) + dt) > 3) { this.saveTimer = 0; this.saveProgress(); }
       this.playTime = (this.playTime || 0) + dt; // time played, kept in save slots
       this.supa.tick(dt);
+      if (pluginHooks.update.length) runHooks('update', this.scene, dt, this);
       const ae = { 'every 30 seconds': 30, 'every minute': 60, 'every 5 minutes': 300 }[this.scene.settings.autoSave];
       if (ae && (this.autoTimer = (this.autoTimer || 0) + dt) > ae) { this.autoTimer = 0; this.autoSlot('timer'); }
     }
@@ -18312,6 +18462,7 @@ export class Engine {
       const hit = inp.taps.length && !ownScreen(s, 'paused') ? this.screenHit(inp.taps[0]) : null;
       if (hit === 'app' && s.fromApp) { this.backToApp(); return; }
       if (hit === 'restart') { this.audio.sfx('click'); this.vibrate(8); this.paused = false; this.restart(); return; }
+      if (hit === 'mods') { this.audio.sfx('click'); this.openMods(); return; }
       if (hit === 'sound') { this.audio.setMuted(!this.audio.muted); if (!this.audio.muted) this.audio.sfx('click'); this.vibrate(8); return; }
       if (hit === 'resume') this.vibrate(8);
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;

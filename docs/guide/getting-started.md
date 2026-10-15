@@ -10,7 +10,7 @@ This page walks you through making a small game from scratch, then shows where t
 - **On a computer:** the same link works. A mouse and keyboard work too, but everything is designed for touch first.
 - **Your own copy:** the whole engine is plain JavaScript files. Serve the folder over HTTP (`python3 -m http.server 8000`) and open `http://localhost:8000/editor/`. Opening the files directly with `file://` doesn't work, because ES modules need a web server.
 
-Your games are saved automatically on the device, in the browser's storage.
+Your games are saved on the device when you tap **Save** (the button in the top bar). A dot after the name means there are unsaved changes, and it asks before anything replaces a game you haven't saved.
 
 ## Start from a template, or from nothing
 

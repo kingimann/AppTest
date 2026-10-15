@@ -8796,10 +8796,10 @@ function shortAgo(t) {
 const shortNum = (n) => { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? (n / 1e3).toFixed(n >= 1e5 ? 0 : 1).replace(/\.0$/, '') + 'K' : n.toLocaleString?.(localeOf()) ?? String(n); };
 const isPic = (m) => /^(https?:|data:|blob:|art:)/.test(String(m || ''));
 /** A post's picture: an image (cover-fitted), or an emoji on a colour. */
-function drawMedia(ctx, media, color, x, y, w, h, r) {
+function drawMedia(ctx, media, color, x, y, w, h, r, fit = 'cover') {
   ctx.save(); UK.rr(ctx, x, y, w, h, r); ctx.clip();
   const m = String(media || '');
-  if (isPic(m)) { ctx.fillStyle = '#222'; ctx.fillRect(x, y, w, h); const im = loadImage(m); if (im.complete && im.naturalWidth) { const k = Math.max(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); } }
+  if (isPic(m)) { ctx.fillStyle = '#222'; ctx.fillRect(x, y, w, h); const im = loadImage(m); if (im.complete && im.naturalWidth) { const k = (fit === 'contain' ? Math.min : Math.max)(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); } }
   else {
     const c = color || '#5b6bff', g = ctx.createLinearGradient(x, y, x + w, y + h); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, 'rgba(255,255,255,0.3)'); ctx.fillStyle = c; ctx.fillRect(x, y, w, h); ctx.fillStyle = g; ctx.fillRect(x, y, w, h); // solid, lighter towards a corner
     if (m) { ctx.font = `${Math.round(Math.min(w, h) * 0.42)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(m, x + w / 2, y + h / 2 + Math.min(w, h) * 0.03); }
@@ -8861,6 +8861,10 @@ registerBehavior('uiFeed', {
     { key: 'max', label: 'Most posts shown (0 = all)', type: 'number', default: 0, step: 1 },
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
+    { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |” and “Saved | saved = yes”. Blank = no tabs.' },
+    { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: ['underline', 'pills', 'segmented'], default: 'underline', showIf: (b) => !!String(b.tabs || '').trim() },
+    { key: 'pinnedFirst', label: 'Pinned posts first (pinned = yes)', type: 'bool', default: true },
     // what shows
     { key: 'actions', label: 'Buttons, in order (blank = the look’s own)', type: 'text', default: '', group: 'Show', info: 'Any of: comment, repost, like, share, save, views. E.g. “like, comment, share”.' },
     { key: 'likeIcon', label: 'Like icon', type: 'select', options: ['heart', 'thumbs up', 'star', 'fire'], default: 'heart', group: 'Show' },
@@ -8872,7 +8876,16 @@ registerBehavior('uiFeed', {
     { key: 'showMedia', label: 'Pictures', type: 'bool', default: true, group: 'Show' },
     { key: 'showMore', label: '⋯ button on each post', type: 'bool', default: true, group: 'Show' },
     { key: 'maxLines', label: 'Lines of text before “Show more” (0 = all)', type: 'number', default: 0, step: 1, group: 'Show' },
+    { key: 'highlight', label: 'Colour #hashtags, @mentions and links (tap to search)', type: 'bool', default: true, group: 'Show' },
+    { key: 'labels', label: 'Little label above a post (label field, e.g. Sponsored)', type: 'bool', default: true, group: 'Show' },
+    { key: 'numbers', label: 'Numbers', type: 'select', options: ['auto', 'short (1.2K)', 'full (1,234)'], default: 'auto', group: 'Show' },
+    { key: 'actionStyle', label: 'Buttons look', type: 'select', options: ['icons', 'icons + words'], default: 'icons', group: 'Show' },
+    { key: 'actionSize', label: 'Button icon size (0 = auto)', type: 'number', default: 0, step: 1, group: 'Show' },
+    { key: 'avatarRing', label: 'Ring around avatars', type: 'select', options: ['auto', 'none', 'gradient', 'accent'], default: 'auto', group: 'Show' },
+    { key: 'verifiedStyle', label: 'Verified tick colour', type: 'select', options: ['accent', 'blue', 'gold', 'grey', 'green', 'from the verified field'], default: 'accent', group: 'Show', info: { 'from the verified field': 'A verified value of gold, grey or green picks that colour; yes is blue.' } },
+    { key: 'endText', label: 'At the end of the feed', type: 'text', default: '', group: 'Show', info: 'E.g. “You’re all caught up ✨”. Blank = nothing.' },
     // layout
+    { key: 'font', label: 'Font (blank = the game’s)', type: 'text', default: '', group: 'Layout', info: 'A font name, like Georgia, Inter or one from More fonts.' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 15, step: 1, group: 'Layout' },
     { key: 'nameSize', label: 'Name size', type: 'number', default: 15, step: 1, group: 'Layout' },
     { key: 'avatarSize', label: 'Avatar size (0 = the look’s own)', type: 'number', default: 0, step: 2, group: 'Layout' },
@@ -8882,6 +8895,8 @@ registerBehavior('uiFeed', {
     { key: 'mediaShape', label: 'Picture shape', type: 'select', options: ['auto', 'wide (16:9)', 'short (2:1)', 'square', 'tall (4:5)'], default: 'auto', group: 'Layout' },
     { key: 'mediaRadius', label: 'Picture roundness (-1 = auto)', type: 'number', default: -1, step: 1, group: 'Layout' },
     { key: 'dividers', label: 'Lines between posts', type: 'bool', default: true, group: 'Layout' },
+    { key: 'dividerInset', label: 'Lines start at the text (not the edge)', type: 'bool', default: false, group: 'Layout', showIf: (b) => b.dividers !== false },
+    { key: 'mediaFit', label: 'Pictures', type: 'select', options: ['fill (crop)', 'fit (whole picture)'], default: 'fill (crop)', group: 'Layout' },
     { key: 'cardRadius', label: 'Card roundness', type: 'number', default: 12, step: 1, group: 'Layout' },
     { key: 'cardShadow', label: 'Card shadow', type: 'bool', default: false, group: 'Layout' },
     // behaviour
@@ -8896,16 +8911,25 @@ registerBehavior('uiFeed', {
     { key: 'commentMessage', label: 'Comment button sends', type: 'text', default: 'comment', suggest: 'messages', group: 'Behaviour' },
     { key: 'shareMessage', label: 'Share button sends (blank = the phone’s share sheet)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'moreMessage', label: '⋯ button sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
-    ...colorParams({ ...SOCIAL_COLORS, repost: ['Reposted', '#00ba7c'], verified: ['Verified tick (blank = accent)', ''], cardBorder: ['Card border', ''], ring1: ['Avatar ring (start, photos)', '#feda75'], ring2: ['Avatar ring (end, photos)', '#d62976'] }),
+    { key: 'holdMessage', label: 'Holding a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'tagMessage', label: 'Tapping a #tag or @name sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'loadMoreMessage', label: 'Near the end, send (load more)', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
+    { key: 'newPill', label: '“↑ New posts” button when posts arrive', type: 'bool', default: true, group: 'Behaviour' },
+    ...colorParams({ ...SOCIAL_COLORS, repost: ['Reposted', '#00ba7c'], verified: ['Verified tick (blank = accent)', ''], cardBorder: ['Card border', ''], ring1: ['Avatar ring (start)', '#feda75'], ring2: ['Avatar ring (end)', '#d62976'], nameColor: ['Names (blank = text)', ''], handleColor: ['@handles and times (blank = grey)', ''], link: ['#tags and links (blank = accent)', ''], postBg: ['Post background (timeline, compact, photos)', ''], pressed: ['Pressed post', ''], tabText: ['Tabs', ''] }),
     ...UI_COMMON,
   ],
   create(p) {
     const S = makeScroller('y'), pops = new Map(), bursts = [], born = new Map(), open = new Set(); let L = [], total = 0, lastTap = null, sample = null, scrollT = -9, lastV = 0;
+    const hPrev = new Map(); let pressedId = null, pressedT = 0, pressedPtr = null;
+    let tab = 0, tabsR = [], inset = 0, known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
+    const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
     const K = (k) => MAP[k] || (k === 'time' ? '_at' : k), F = (r, k) => r[K(k)];
     const posts = (s) => {
-      let P = has(s) ? D(s).query(p.collection, { filter: p.filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      const T = TABS(), tw = T.length ? T[clamp(tab, 0, T.length - 1)].where : '', filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
+      let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      if (p.pinnedFirst !== false && P.some((r) => truthy(F(r, 'pinned')))) P = [...P.filter((r) => truthy(F(r, 'pinned'))), ...P.filter((r) => !truthy(F(r, 'pinned')))];
       const q = p.searchVar ? String(s.vars[p.searchVar] ?? '').trim().toLowerCase() : '';
       if (q) P = P.filter((r) => ['author', 'handle', 'text'].some((k) => String(F(r, k) ?? '').toLowerCase().includes(q)));
       return +p.max > 0 ? P.slice(0, +p.max) : P;
@@ -8924,11 +8948,24 @@ registerBehavior('uiFeed', {
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
         if (Math.abs(S.v - lastV) > 0.5) scrollT = s.time; lastV = S.v;
         for (let i = bursts.length - 1; i >= 0; i--) if (s.time - bursts[i].t > 0.9) bursts.splice(i, 1);
+        if (goTop) { S.flick = 0; S.v += (0 - S.v) * Math.min(1, dt * 10); if (S.v < 2) { S.v = 0; goTop = false; } }
+        if (S.v < 30) fresh = 0;
+        if (p.loadMoreMessage && S.max > 0 && S.v > S.max - 240 && askedAt !== total) { askedAt = total; s.send(p.loadMoreMessage); }
         if (s.engine.editing) return;
+        const at = (y) => L.find((q) => y >= b.y + inset + q.y - S.v && y < b.y + inset + q.y - S.v + q.h);
+        { const d = UK.downs(s, e).find((q) => UK.in(q, b) && q.y > b.y + inset); if (d) { pressedPtr = d.id; pressedId = at(d.y)?.r.id ?? null; pressedT = s.time; } if (pressedPtr != null && (!UK.ptr(s, e, pressedPtr) || S.moved)) { pressedPtr = null; pressedId = null; } }
+        // hold a post
+        if (p.holdMessage) {
+          const d = UK.downs(s, e).find((q) => UK.in(q, b) && q.y > b.y + inset); if (d) press = { id: d.id, t: s.time, it: at(d.y) };
+          if (press) { const q = UK.ptr(s, e, press.id); if (!q || S.moved) press = null; else if (s.time - press.t > 0.5 && press.it) { s.send(p.holdMessage, press.it.r.id); if (has(s)) openRecord(s, p.collection, press.it.r); s.engine.vibrate?.(20); held = true; press = null; } }
+        }
         for (const t of UK.taps(s, e)) {
+          if (held) { held = false; continue; }
           if (!UK.in(t, b) || S.moved) continue;
-          const it = L.find((q) => t.y >= b.y + q.y - S.v && t.y < b.y + q.y - S.v + q.h); if (!it) continue;
-          const lx = t.x - b.x, ly = t.y - (b.y + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
+          if (pillR && UK.in(t, pillR, 4)) { UK.tap(s, p); goTop = true; fresh = 0; continue; }
+          if (t.y < b.y + inset) { const i = tabsR.findIndex((r) => UK.in(t, r)); if (i >= 0 && i !== tab) { UK.tap(s, p); tab = i; if (p.tabVar) s.setVar(p.tabVar, TABS()[i].label); S.v = 0; born.clear(); } continue; }
+          const it = at(t.y); if (!it) continue;
+          const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
           if (k === 'like') { UK.tap(s, p); like(s, r); }
           else if (k === 'repost') { UK.tap(s, p); flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); }
           else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
@@ -8936,6 +8973,7 @@ registerBehavior('uiFeed', {
           else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (navigator.share) navigator.share({ text: `${F(r, 'author') || ''}: ${F(r, 'text') || ''}` }).catch(() => {}); }
           else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); }
           else if (k === 'expand') { UK.tap(s, p); open.add(r.id); }
+          else if (k === 'tag') { UK.tap(s, p); const tg = hit.tag; if (/^https?:/.test(tg)) { if (!s.engine.editing) window.open(tg, '_blank', 'noopener'); } else { if (p.searchVar) s.setVar(p.searchVar, tg); if (p.tagMessage) s.send(p.tagMessage, tg); } }
           else if (k === 'media' && p.doubleTapLike !== false && lastTap && lastTap.id === r.id && s.time - lastTap.t < 0.32) { lastTap = null; if (!truthy(F(r, 'liked'))) like(s, r); else pops.set(r.id, s.time); bursts.push({ id: r.id, t: s.time }); s.engine.vibrate?.(18); }
           else if (k === 'media' && p.doubleTapLike !== false) lastTap = { id: r.id, t: s.time };
           else if (k !== 'none') { if (has(s)) openRecord(s, p.collection, r); if (p.openPage) s.navTo(p.openPage); if (p.postMessage) s.send(p.postMessage, r.id); }
@@ -8943,13 +8981,38 @@ registerBehavior('uiFeed', {
       },
       drawUI(ctx, e, s) {
         const b = UK.box(e), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
+        const keepTheme = THEME; if (p.font) THEME = { ...THEME, font: /[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}", ${keepTheme.font}` : `${p.font}, ${keepTheme.font}` };
+        try { this.paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC); } finally { THEME = keepTheme; }
+      },
+      paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC) {
+        const nameC = p.nameColor || txt, handleC = p.handleColor || sub, linkC = p.link || acc;
+        const VC = { blue: '#1d9bf0', gold: '#e2b719', grey: '#829aab', green: '#00ba7c' }, tick = (r) => { const v = String(F(r, 'verified') ?? '').toLowerCase(); return p.verifiedStyle === 'from the verified field' ? VC[v] || VC.blue : VC[p.verifiedStyle] || verC; };
+        const fmtN = (n, tight) => { n = +n || 0; if (p.numbers === 'full (1,234)') return n.toLocaleString?.(localeOf()) ?? String(n); if (p.numbers === 'short (1.2K)' || (tight && n >= 1000)) return n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1000 ? (n / 1000).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K' : String(n); return shortNum(n); };
         const TS = Math.max(9, +p.textSize || 15), NS = Math.max(9, +p.nameSize || 15), LH = Math.round(TS * 1.34), pad = Number.isFinite(+p.padding) ? Math.max(0, +p.padding) : 14, gap = Math.max(0, +p.gap || 0), A = acts(), showAv = p.showAvatar !== false;
         const avShape = p.avatarShape || 'circle', avR = (d) => (avShape === 'circle' ? d / 2 : avShape === 'square' ? 0 : d * 0.22);
         const mediaH = (w, auto) => { const m = p.mediaShape || 'auto'; return Math.round(w * (m === 'square' ? 1 : m === 'tall (4:5)' ? 1.25 : m === 'short (2:1)' ? 0.5 : m === 'wide (16:9)' ? 0.5625 : auto)); };
+        const dm = (...a) => drawMedia(...a, p.mediaFit === 'fit (whole picture)' ? 'contain' : 'cover');
         const mRad = (auto) => (+p.mediaRadius >= 0 ? +p.mediaRadius : auto);
         if (p.bg) { ctx.fillStyle = p.bg; ctx.fillRect(b.x, b.y, b.w, b.h); }
-        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+        // tabs along the top (they stay put while the posts scroll)
+        const TB = TABS(); inset = TB.length ? 46 : 0; tabsR = [];
+        if (TB.length) {
+          const tw = b.w / TB.length, st = p.tabStyle || 'underline', tc = p.tabText || txt;
+          if (st === 'segmented') { ctx.fillStyle = withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.1); UK.rr(ctx, b.x + 8, b.y + 6, b.w - 16, 34, 17); ctx.fill(); }
+          TB.forEach((t, i) => {
+            const x = b.x + tw * i, on = i === tab, r = { x, y: b.y, w: tw, h: inset }; tabsR.push(r);
+            ctx.font = `800 15px ${THEME.font}`; const lw = ctx.measureText(t.label).width;
+            if (on && st === 'underline') { ctx.fillStyle = acc; UK.rr(ctx, x + tw / 2 - lw / 2 - 4, b.y + inset - 4, lw + 8, 4, 2); ctx.fill(); }
+            if (on && st === 'pills') { ctx.fillStyle = acc; UK.rr(ctx, x + tw / 2 - lw / 2 - 14, b.y + 7, lw + 28, 32, 16); ctx.fill(); }
+            if (on && st === 'segmented') { ctx.fillStyle = card; UK.rr(ctx, x + (i === 0 ? 10 : 2), b.y + 8, tw - (i === 0 || i === TB.length - 1 ? 12 : 4), 30, 15); ctx.fill(); }
+            UK.text(ctx, t.label, x + tw / 2, b.y + inset / 2 + 1, { size: 15, weight: on ? 800 : 600, color: on && st === 'pills' ? '#fff' : on ? tc : withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.55) });
+          });
+          if (st === 'underline') { ctx.fillStyle = line; ctx.fillRect(b.x, b.y + inset - 1, b.w, 1); }
+        }
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + inset, b.w, b.h - inset); ctx.clip();
         const P = posts(s); L = []; let y = 0;
+        // new posts while scrolled down: a pill to jump up
+        const ids = new Set(P.map((r) => r.id)); if (known) { let n = 0; for (const id of ids) if (!known.has(id)) n++; if (n && S.v > 30) fresh += n; } known = ids;
         const pop = (key) => { const t0 = pops.get(key); if (t0 == null) return 1; const a = (s.time - t0) / 0.35; return a >= 1 ? 1 : 1 + Math.sin(a * Math.PI) * 0.45; };
         const icon = (name, x, yy, sz, col) => drawNavIcon(ctx, name, x, yy, sz, col);
         const likeMark = (x, yy, sz, on, key) => {
@@ -8960,8 +9023,10 @@ registerBehavior('uiFeed', {
           else { ctx.globalAlpha *= on ? 1 : 0.55; UK.text(ctx, li === 'fire' ? '🔥' : '👍', 0, 1, { size: sz * 0.95 }); }
           ctx.restore();
         };
-        const av = (r, x, yy, d, ring) => {
-          const name = String(F(r, 'author') || 'Someone'), pic = String(F(r, 'avatar') || '');
+        const RING = p.avatarRing || 'auto', ringOf = (auto) => (RING === 'none' ? null : RING === 'gradient' ? [p.ring1 || '#feda75', p.ring2 || '#d62976'] : RING === 'accent' ? acc : auto);
+        const av = (r, x, yy, d, ring0) => {
+          const ring = ringOf(ring0), name = String(F(r, 'author') || 'Someone'), pic = String(F(r, 'avatar') || '');
+          if (ring && avShape !== 'circle') { ctx.save(); const g = ctx.createLinearGradient(x - d / 2, yy + d / 2, x + d / 2, yy - d / 2); if (Array.isArray(ring)) { g.addColorStop(0, ring[0]); g.addColorStop(1, ring[1]); } ctx.strokeStyle = Array.isArray(ring) ? g : ring; ctx.lineWidth = Math.max(2, d * 0.07); UK.rr(ctx, x - d / 2 - d * 0.09, yy - d / 2 - d * 0.09, d * 1.18, d * 1.18, avR(d) * 1.18); ctx.stroke(); ctx.restore(); }
           if (avShape === 'circle') return miniAvatar(ctx, name, x, yy, d, isPic(pic) || /\p{Extended_Pictographic}/u.test(pic) ? pic : '', ring);
           ctx.save(); UK.rr(ctx, x - d / 2, yy - d / 2, d, d, avR(d)); ctx.clip(); miniAvatar(ctx, name, x, yy, d * 1.5, isPic(pic) ? pic : ''); ctx.restore();
           if (!isPic(pic)) { ctx.save(); UK.rr(ctx, x - d / 2, yy - d / 2, d, d, avR(d)); ctx.clip(); let hsh = 0; for (const ch of name) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0; ctx.fillStyle = AVATAR_COLORS[hsh % AVATAR_COLORS.length]; ctx.fillRect(x - d / 2, yy - d / 2, d, d); ctx.restore(); UK.text(ctx, pic || name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''), x, yy + 1, { size: Math.round(d * 0.38), weight: 800, color: '#fff' }); }
@@ -8969,27 +9034,39 @@ registerBehavior('uiFeed', {
         const nameRow = (r, x, yy, maxW, withTime) => { // name, tick, @handle · time
           const name = String(F(r, 'author') || 'Someone'), handle = String(F(r, 'handle') || '').replace(/^@/, ''), tm = withTime ? when(r) : '';
           ctx.font = `800 ${NS}px ${THEME.font}`; const nw = Math.min(ctx.measureText(name).width, maxW * 0.6);
-          UK.text(ctx, name, x, yy, { size: NS, weight: 800, color: txt, align: 'left', maxW: maxW * 0.6 });
-          let hx = x + nw + 4; if (p.showVerified !== false && truthy(F(r, 'verified'))) { verifiedBadge(ctx, hx + NS * 0.5, yy, NS * 0.5, verC); hx += NS * 1.25; }
+          UK.text(ctx, name, x, yy, { size: NS, weight: 800, color: nameC, align: 'left', maxW: maxW * 0.6 });
+          const vv = F(r, 'verified'), isV = truthy(vv) || ['gold', 'grey', 'gray', 'green', 'blue'].includes(String(vv ?? '').toLowerCase());
+          let hx = x + nw + 4; if (p.showVerified !== false && isV) { verifiedBadge(ctx, hx + NS * 0.5, yy, NS * 0.5, tick(r)); hx += NS * 1.25; }
           const rest = [p.showHandle !== false && handle ? '@' + handle : '', tm].filter(Boolean).join(' · ');
-          if (rest) UK.text(ctx, rest, hx + 2, yy, { size: NS, weight: 500, color: sub, align: 'left', maxW: Math.max(10, x + maxW - hx - 4) });
+          if (rest) UK.text(ctx, rest, hx + 2, yy, { size: NS, weight: 500, color: handleC, align: 'left', maxW: Math.max(10, x + maxW - hx - 4) });
         };
         const textLines = (r, w, max) => { const text = String(F(r, 'text') || ''); ctx.font = `500 ${TS}px ${THEME.font}`; const all = text ? text.split('\n').flatMap((l) => wrapLines(ctx, l, w, TS, 40)) : []; const lim = +p.maxLines > 0 && !open.has(r.id) ? +p.maxLines : max; return { lines: all.slice(0, lim), more: all.length > lim }; };
-        const drawText = (T, x, yy, hits, ox, oy) => { for (const l of T.lines) { UK.text(ctx, l, x, yy, { size: TS, weight: 500, color: txt, align: 'left' }); yy += LH; } if (T.more) { UK.text(ctx, 'Show more', x, yy, { size: TS, weight: 700, color: acc, align: 'left' }); hits.push({ k: 'expand', x: x - ox, y: yy - oy - LH / 2, w: 110, h: LH }); yy += LH; } return yy; };
+        const rich = (l, x, yy, hits, ox, oy) => { // #tags, @names and links in the link colour (tappable)
+          if (p.highlight === false || !/[#@]\w|https?:\/\//.test(l)) { UK.text(ctx, l, x, yy, { size: TS, weight: 500, color: txt, align: 'left' }); return; }
+          let cx = x; ctx.font = `500 ${TS}px ${THEME.font}`;
+          for (const part of l.split(/(#[\p{L}\p{N}_]+|@[\p{L}\p{N}_]+|https?:\/\/\S+)/u)) {
+            if (!part) continue; const tagged = /^[#@]|^https?:/.test(part), w = (ctx.font = `500 ${TS}px ${THEME.font}`, ctx.measureText(part).width);
+            UK.text(ctx, part, cx, yy, { size: TS, weight: 500, color: tagged ? linkC : txt, align: 'left' });
+            if (tagged && hits) hits.push({ k: 'tag', tag: part, x: cx - ox, y: yy - oy - LH / 2, w, h: LH });
+            cx += w;
+          }
+        };
+        const drawText = (T, x, yy, hits, ox, oy) => { for (const l of T.lines) { rich(l, x, yy, hits, ox, oy); yy += LH; } if (T.more) { UK.text(ctx, 'Show more', x, yy, { size: TS, weight: 700, color: acc, align: 'left' }); hits.push({ k: 'expand', x: x - ox, y: yy - oy - LH / 2, w: 110, h: LH }); yy += LH; } return yy; };
         const textH = (T) => (T.lines.length + (T.more ? 1 : 0)) * LH;
         const countOf = (r, k) => (k === 'comment' ? F(r, 'comments') : k === 'repost' ? F(r, 'reposts') : k === 'like' ? F(r, 'likes') : k === 'views' ? F(r, 'views') : 0);
-        const actionRow = (r, x, w, yy, hits, ox, oy, sz) => { // spread evenly; save sits at the end
+        const actionRow = (r, x, w, yy, hits, ox, oy, sz0) => { const sz = +p.actionSize > 0 ? +p.actionSize : sz0; // spread evenly; save sits at the end
           const list = A.filter((k) => k !== 'save' || look !== 'photos'), step = w / Math.max(1, list.length), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
           list.forEach((k, i) => {
             const ix = x + step * i + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? truthy(F(r, 'saved')) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
             if (k === 'like') likeMark(ix, yy, sz, on, r.id);
             else { ctx.save(); const z = k === 'repost' ? pop(r.id + 'r') : k === 'save' ? pop(r.id + 's') : 1; ctx.translate(ix, yy); ctx.scale(z, z); icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, sz, col); if (k === 'save' && on) { ctx.fillStyle = col; ctx.fillRect(-sz * 0.25, -sz * 0.38, sz * 0.5, sz * 0.6); } ctx.restore(); }
-            if (p.showCounts !== false && +n) UK.text(ctx, step < 90 && +n >= 1000 ? (+n / 1000).toFixed(+n >= 1e4 ? 0 : 1).replace(/\.0$/, '') + 'K' : shortNum(n), ix + sz * 0.85, yy, { size: Math.round(TS * 0.87), weight: 500, color: col, align: 'left' });
+            const num = p.showCounts !== false && +n ? fmtN(n, step < 90) : '', word = p.actionStyle === 'icons + words' ? (num ? { comment: +n === 1 ? 'reply' : 'replies', repost: +n === 1 ? 'repost' : 'reposts', like: +n === 1 ? 'like' : 'likes', views: 'views' }[k] || '' : { comment: 'Reply', repost: 'Repost', like: 'Like', share: 'Share', save: 'Save', views: 'Views' }[k]) : '';
+            if (num || word) UK.text(ctx, [num, word].filter(Boolean).join(' '), ix + sz * 0.85, yy, { size: Math.round(TS * 0.87), weight: 500, color: col, align: 'left' });
             hits.push({ k: k === 'views' ? 'none' : k, x: ix - sz / 2 - ox, y: yy - oy - 16, w: Math.min(step, 70), h: 32 });
           });
         };
         const burst = (r, cx, cy, size, kind) => { for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9, z = Math.min(1, a * 5) * (a < 0.25 ? 1 + Math.sin(a / 0.25 * Math.PI) * 0.15 : 1); ctx.save(); ctx.globalAlpha *= a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(cx, cy); ctx.scale(z, z); if (kind === 'thumb' || p.likeIcon === 'thumbs up') UK.text(ctx, '👍', 0, 0, { size }); else if (p.likeIcon === 'fire') UK.text(ctx, '🔥', 0, 0, { size }); else if (p.likeIcon === 'star') UK.text(ctx, '★', 0, 0, { size, color: '#ffc400' }); else { heartPath(ctx, 0, 0, size); ctx.fillStyle = kind === 'white' ? '#fff' : likeC; ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.fill(); } ctx.restore(); } };
-        const top = b.y - S.v;
+        const top = b.y + inset - S.v;
         if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
         if (!P.length) UK.text(ctx, p.empty || 'No posts yet', b.cx, b.y + 60, { size: 15, weight: 600, color: sub });
         let idx = 0;
@@ -9000,8 +9077,13 @@ registerBehavior('uiFeed', {
           let h = 0;
           // entrance: each post arrives once, one after another
           if (!born.has(r.id)) born.set(r.id, s.time + Math.min(idx, 6) * 0.06); idx++;
-          const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at = at0 + dy;
-          ctx.save(); ctx.globalAlpha *= ek; if (p.entrance === 'pop' && ek < 1) { const z = 0.94 + 0.06 * ek; ctx.translate(b.cx, at + 40); ctx.scale(z, z); ctx.translate(-b.cx, -(at + 40)); }
+          const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at1 = at0 + dy;
+          let at = at1;
+          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : '') : '';
+          const hp = hPrev.get(r.id), bgC = look !== 'cards' ? (pressedId === r.id && s.time - pressedT > 0.06 ? p.pressed || 'rgba(128,128,128,0.10)' : p.postBg) : '';
+          if (bgC && hp) { ctx.fillStyle = bgC; ctx.fillRect(x0, at, W, hp); }
+          ctx.save(); ctx.globalAlpha *= ek;
+          if (lab) { const lx = look === 'cards' ? x0 + 8 + pad : x0 + pad + (showAv ? (+p.avatarSize || (look === 'compact' ? 36 : 44)) + 12 : 0); UK.text(ctx, lab, lx, at + (look === 'cards' ? 16 : pad + 4), { size: 13, weight: 700, color: handleC, align: 'left' }); at += look === 'cards' ? 22 : 20; } if (p.entrance === 'pop' && ek < 1) { const z = 0.94 + 0.06 * ek; ctx.translate(b.cx, at + 40); ctx.scale(z, z); ctx.translate(-b.cx, -(at + 40)); }
           if (look === 'photos') {
             const AV = +p.avatarSize || 32, head = Math.max(44, AV + 22), mh = mediaH(W, 1), mr = mRad(0); ctx.font = `600 ${TS}px ${THEME.font}`;
             const T = textLines({ ...r, [K('text')]: `${name}  ${F(r, 'text') || ''}` }, W - pad * 2, 3);
@@ -9011,16 +9093,16 @@ registerBehavior('uiFeed', {
               if (showAv) av(r, x0 + pad + AV / 2, at + head / 2, AV, avShape === 'circle' ? [p.ring1 || '#feda75', p.ring2 || '#d62976'] : null);
               const nx = x0 + pad + (showAv ? AV + 10 : 0); nameRow(r, nx, at + head / 2, W - (nx - x0) - 40, false);
               if (p.showMore !== false) { icon('ui-more', x0 + W - 22, at + head / 2, 20, txt); hits.push({ k: 'more', x: W - 36, y: head / 2 - 14, w: 28, h: 28 }); }
-              drawMedia(ctx, media, color, x0, at + head, W, mh, mr);
+              dm(ctx, media, color, x0, at + head, W, mh, mr);
               burst(r, x0 + W / 2, at + head + mh / 2, 96, 'white');
               const ay = at + actY; let ix = x0 + pad + 10;
               for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && truthy(F(r, 'reposted')) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
               if (A.includes('save')) { const sv = truthy(F(r, 'saved')); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - pad - 10, ay); ctx.scale(sz, sz); icon('ui-bookmark', 0, 0, 24, txt); if (sv) { ctx.fillStyle = txt; ctx.fillRect(-6, -9, 12, 14); } ctx.restore(); hits.push({ k: 'save', x: W - pad - 26, y: actY - 16, w: 32, h: 32 }); }
               let yy = ay + 34;
-              if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${shortNum(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
+              if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${fmtN(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
               T.lines.forEach((l, i) => { if (i === 0 && l.startsWith(name)) { UK.text(ctx, name, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); ctx.font = `800 ${TS - 1}px ${THEME.font}`; UK.text(ctx, l.slice(name.length), x0 + pad + ctx.measureText(name).width, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); } else UK.text(ctx, l, x0 + pad, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); yy += LH; });
               if (T.more) { UK.text(ctx, 'more', x0 + pad, yy, { size: TS - 1, weight: 600, color: sub, align: 'left' }); hits.push({ k: 'expand', x: pad, y: yy - at - LH / 2, w: 80, h: LH }); yy += LH; }
-              yy += 3; if (A.includes('comment')) { UK.text(ctx, +F(r, 'comments') ? `View all ${shortNum(F(r, 'comments'))} comments` : 'Add a comment…', x0 + pad, yy, { size: TS - 1, weight: 500, color: sub, align: 'left' }); hits.push({ k: 'comment', x: pad, y: yy - at - 11, w: W - pad * 2, h: 22 }); } yy += 20;
+              yy += 3; if (A.includes('comment')) { UK.text(ctx, +F(r, 'comments') ? `View all ${fmtN(F(r, 'comments'))} comments` : 'Add a comment…', x0 + pad, yy, { size: TS - 1, weight: 500, color: sub, align: 'left' }); hits.push({ k: 'comment', x: pad, y: yy - at - 11, w: W - pad * 2, h: 22 }); } yy += 20;
               if (p.time !== 'hidden') UK.text(ctx, p.time === 'short (3h)' || !p.time ? when(r).replace(/^(\d+)([mhd])$/, (_, n, u) => `${n} ${{ m: 'minute', h: 'hour', d: 'day' }[u]}${n === '1' ? '' : 's'} ago`) : when(r), x0 + pad, yy, { size: 11, weight: 500, color: sub, align: 'left' });
             }
             hits.push({ k: 'media', x: 0, y: head, w: W, h: mh });
@@ -9038,18 +9120,18 @@ registerBehavior('uiFeed', {
               if (p.time !== 'hidden') UK.text(ctx, `${when(r)} · 🌐`, nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left' });
               if (p.showMore !== false) { icon('ui-more', cx + cw - 24, cy + head / 2, 20, sub); hits.push({ k: 'more', x: cw - 30, y: 8 + head / 2 - 14, w: 28, h: 28 }); }
               let yy = cy + head + LH / 2; yy = drawText(T, cx + pad, yy, hits, x0, at);
-              const my = cy + head + tH; if (hasM) { drawMedia(ctx, media, color, cx, my, cw, mh, mr); burst(r, cx + cw / 2, my + mh / 2, 80, 'thumb'); hits.push({ k: 'media', x: 8, y: my - at, w: cw, h: mh }); }
+              const my = cy + head + tH; if (hasM) { dm(ctx, media, color, cx, my, cw, mh, mr); burst(r, cx + cw / 2, my + mh / 2, 80, 'thumb'); hits.push({ k: 'media', x: 8, y: my - at, w: cw, h: mh }); }
               let ry = my + mh + 18;
               if (showCnt) {
                 ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(cx + pad + 9, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '👍', cx + pad + 9, ry + 1, { size: 10 }); ctx.fillStyle = likeC; ctx.beginPath(); ctx.arc(cx + pad + 25, ry, 9, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '❤', cx + pad + 25, ry + 1, { size: 10, color: '#fff' });
-                UK.text(ctx, shortNum(F(r, 'likes')), cx + pad + 40, ry, { size: 13, weight: 500, color: sub, align: 'left' });
-                UK.text(ctx, `${shortNum(F(r, 'comments'))} comments${+F(r, 'reposts') ? ` · ${shortNum(F(r, 'reposts'))} shares` : ''}`, cx + cw - pad, ry, { size: 13, weight: 500, color: sub, align: 'right' });
+                UK.text(ctx, fmtN(F(r, 'likes')), cx + pad + 40, ry, { size: 13, weight: 500, color: sub, align: 'left' });
+                UK.text(ctx, `${fmtN(F(r, 'comments'))} comments${+F(r, 'reposts') ? ` · ${fmtN(F(r, 'reposts'))} shares` : ''}`, cx + cw - pad, ry, { size: 13, weight: 500, color: sub, align: 'right' });
               } else ry -= 12;
               if (btnH) {
                 if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1); }
                 const by = ry + 18 + 22, part = cw / A.length;
                 A.forEach((k, i) => {
-                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? 'Liked' : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: shortNum(F(r, 'views')) }[k], col = on ? acc : sub;
+                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? 'Liked' : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
                   const mx = cx + part * i + part / 2; ctx.font = `700 14px ${THEME.font}`; const tw = A.length > 3 ? 0 : ctx.measureText(l).width, x1 = mx - (tw + (tw ? 26 : 18)) / 2;
                   ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
                   if (tw) UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
@@ -9067,16 +9149,21 @@ registerBehavior('uiFeed', {
               nameRow(r, tx, at + pad + NS / 2, tw - (p.showMore !== false && !thumb ? 24 : 0), true);
               if (p.showMore !== false && !thumb) { icon('ui-more', x0 + W - pad - 8, at + pad + NS / 2, 18, sub); hits.push({ k: 'more', x: W - pad - 22, y: pad + NS / 2 - 14, w: 28, h: 28 }); }
               let yy = at + pad + NS + 8 + LH / 2 - 2; yy = drawText(T, tx, yy, hits, x0, at);
-              if (thumb) { drawMedia(ctx, media, color, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10)); hits.push({ k: 'media', x: W - pad - thumb, y: pad, w: thumb, h: thumb }); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
-              if (mh) { const my = yy - LH / 2 + 6; drawMedia(ctx, media, color, tx, my, tw, mh, mr); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); hits.push({ k: 'media', x: tx - x0, y: my - at, w: tw, h: mh }); }
+              if (thumb) { dm(ctx, media, color, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10)); hits.push({ k: 'media', x: W - pad - thumb, y: pad, w: thumb, h: thumb }); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
+              if (mh) { const my = yy - LH / 2 + 6; dm(ctx, media, color, tx, my, tw, mh, mr); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); hits.push({ k: 'media', x: tx - x0, y: my - at, w: tw, h: mh }); }
               if (A.length) actionRow(r, tx, compact ? Math.min(tw + thumb, 240) : tw, at + h - (compact ? 18 : 22), hits, x0, at, compact ? 16 : 18);
-              if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(x0, at + h - 1, W, 1); }
+              if (p.dividers !== false) { const dx = p.dividerInset ? tx : x0; ctx.fillStyle = line; ctx.fillRect(dx, at + h - 1, x0 + W - dx, 1); }
             }
           }
           ctx.restore();
+          if (lab) { const sh = look === 'cards' ? 22 : 20; h += sh; for (const q of hits) q.y += sh; }
+          hPrev.set(r.id, h);
           L.push({ r, y, h: h + gap, hits }); y += h + gap;
         }
+        if (p.endText && P.length) { UK.text(ctx, fillTemplate(String(p.endText), s.vars), b.cx, top + y + 34, { size: 14, weight: 600, color: sub }); y += 70; }
         total = y;
+        pillR = null;
+        if (fresh > 0 && p.newPill !== false && S.v > 30) { const label = `↑  ${fresh} new post${fresh === 1 ? '' : 's'}`; ctx.font = `800 14px ${THEME.font}`; const w = ctx.measureText(label).width + 32, x = b.cx - w / 2, yy = b.y + inset + 12; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 3; ctx.fillStyle = acc; UK.rr(ctx, x, yy, w, 36, 18); ctx.fill(); ctx.restore(); UK.text(ctx, label, b.cx, yy + 19, { size: 14, weight: 800, color: '#fff' }); pillR = { x, y: yy, w, h: 36 }; }
         if (p.scrollbar && S.max > 0 && s.time - scrollT < 1) { const f = clamp(S.v / S.max, 0, 1), bh = Math.max(30, b.h * b.h / (total + 12)), a = clamp(1 - (s.time - scrollT - 0.6) / 0.4, 0, 1); ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 5, b.y + 2 + f * (b.h - bh - 4), 3, bh, 1.5); ctx.fill(); }
         ctx.restore();
       },

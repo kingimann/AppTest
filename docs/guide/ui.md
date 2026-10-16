@@ -130,7 +130,7 @@ Lists inside components are typed one item per line with `|` between the parts, 
 Apps and menus are built from **pages**. A page is a panel with **Show If** (or *Show when*) on the `page` variable. Navigation changes `page`, and pages fade or slide between each other.
 
 - **Bottom Nav:** a complete tab bar (16 styles, badges, animations). In the Inspector each tab is a card: tap its icon to pick from the icon grid (or an emoji), type its label, and choose the page it opens from a list. **+ Add Tab** offers your pages that aren't tabs yet, **a new page** (made for you, with a fitting icon), or a ☰ tab for the Side Menu. A tab's ⋯ menu adds a badge, moves it left or right, shows its page or removes it. (*Text* edits them as lines: `Label | icon | page | badge variable`.)
-  - **Two bars in the same place:** only the one on top takes taps (a hidden one underneath can't fire its tabs, like a *More* tab that opens the Side Menu). The Inspector warns about the duplicate and **Keep only this Bottom Nav** deletes the others.
+  - **Two bars in the same place:** only the one on top takes taps (a hidden one underneath can't fire its tabs, like a *More* tab that opens the Side Menu). The editor points out the duplicate (see *Duplicates* in the Editor guide).
   - **Top tabs (Top Nav):** set **Position** to **Top** (or add a *Top Nav* from the UI library) and the bar runs along the top of the screen. Under an App Bar it sits just below it, and pages start below both.
     - It has its own **Top style**, picked from pictures:
       - **tabs** (a line under the whole tab, like Android);

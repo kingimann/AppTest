@@ -2193,6 +2193,24 @@ function hMatch(e) {
   if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
   return hKind === 'all' || kindOf(e) === hKind;
 }
+/** Things there should be one of but are there twice (two Bottom Navs on one edge, two App Bars, two Side Menus on one message), and copies stacked exactly on top of each other. Each group: { label, why, ids } (the one drawn on top last). */
+function findDuplicates(ents = project.entities) {
+  const out = [], beh = (e, t) => (e.behaviors || []).find((b) => b.type === t), order = (e) => (e.layer || 0) * 1e6 + ents.indexOf(e);
+  const group = (label, why, key) => { const m = new Map(); for (const e of ents) { if (!e.ui) continue; const k = key(e); if (k == null) continue; if (!m.has(k)) m.set(k, []); m.get(k).push(e); } for (const [k, L] of m) if (L.length > 1) out.push({ label: label(k, L), why, ids: L.sort((a, c) => order(a) - order(c)).map((e) => e.id) }); };
+  group((k, L) => `${L.length} ${k.startsWith('top') ? 'top tab bars' : 'Bottom Navs'} in the same place`, 'Only the one on top can be seen and tapped. The hidden one still runs, and its tabs (like a More tab that opens the menu) fire too.', (e) => { const b = beh(e, 'uiBottomNav'); return b ? `${b.position || 'bottom'}|${e.parent || ''}` : null; });
+  group((k, L) => `${L.length} App Bars`, 'Only the one on top shows. The one underneath still answers taps on its buttons.', (e) => (beh(e, 'uiAppBar') ? e.parent || '' : null));
+  group((k, L) => `${L.length} Side Menus opening on “${k.split('|')[0]}”`, 'One ☰ opens both, one on top of the other.', (e) => { const b = beh(e, 'uiSideBar'); return b ? `${b.message || 'menu'}|${b.side || 'left'}` : null; });
+  group((k, L) => `${L.length} copies of “${String(L[0].name || 'Object').replace(/\s*\(\d+\)$/, '')}” stacked on top of each other`, 'They sit in exactly the same place, so you only see one, but both work.', (e) => { if (showIfOf(e) || ['uiBottomNav', 'uiAppBar', 'uiSideBar'].some((t) => beh(e, t))) return null; const sz = sizeOf(e); return [e.parent || '', String(e.name || '').replace(/\s*\(\d+\)$/, ''), e.anchor || '', Math.round(e.x || 0), Math.round(e.y || 0), sz ? `${Math.round(sz[0])}x${Math.round(sz[1])}` : '', (e.behaviors || []).map((b) => b.type).join(','), e.text?.value ?? ''].join('|'); });
+  return out;
+}
+/** Keep the one on top (or the one picked), delete the rest. */
+function keepOnlyOne(g, keepId) {
+  const keep = keepId || g.ids[g.ids.length - 1], others = g.ids.filter((id) => id !== keep && ent(id));
+  if (!others.length || !confirm(`Delete ${others.map((id) => '“' + (ent(id)?.name || 'Object') + '”').join(', ')} and keep “${ent(keep)?.name || 'Object'}”?`)) return;
+  for (const id of others) deleteEntity(id);
+  toast(`Deleted ${others.length} duplicate${others.length > 1 ? 's' : ''}. Undo to restore.`);
+}
+let dupSig = null;
 function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
@@ -2210,6 +2228,14 @@ function renderHierarchy() {
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
   box.append(h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn));
   if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
+  const dups = findDuplicates(), dupIds = new Set(dups.flatMap((g) => g.ids)), sig = dups.map((g) => g.ids.join(',')).join(';');
+  if (dups.length) box.append(h('div', { class: 'h-dups' }, dups.map((g) => h('div', { class: 'h-dup' }, icon('warn'),
+    h('div', { class: 'h-dup-t' }, h('b', {}, g.label), h('small', {}, g.why)),
+    h('div', { class: 'h-dup-b' },
+      h('button', { class: 'btn', title: 'Select them', onclick: () => { multi = new Set(g.ids); select(g.ids[g.ids.length - 1]); renderHierarchy(); } }, icon('check'), 'Show'),
+      h('button', { class: 'btn primary', title: 'Keep the one on top, delete the others', onclick: () => keepOnlyOne(g) }, icon('trash'), 'Keep one'))))));
+  if (sig && sig !== dupSig && (dupSig === null || dups.some((g) => !dupSig.includes(g.ids.join(','))))) { const g = dups.find((q) => !(dupSig || '').includes(q.ids.join(','))); toast(`Heads up: ${g.label}. The Hierarchy shows them.`); } // a duplicate just appeared (or was there when the project opened)
+  dupSig = sig;
   const rows = h('div');
   box.append(rows);
   const gs = gettingStarted(); // after the list, so your objects come first
@@ -2218,7 +2244,7 @@ function renderHierarchy() {
     const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
-      class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
+      class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : '') + (dupIds.has(e.id) ? ' dup' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
       onclick: (ev) => {
         if (ev.currentTarget._held) { ev.currentTarget._held = false; return; }
@@ -2242,7 +2268,7 @@ function renderHierarchy() {
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
     h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
     h('span', { class: 'h-txt' },
-      h('span', { class: 'nm' }, e.name || 'Object', e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
+      h('span', { class: 'nm' }, e.name || 'Object', dupIds.has(e.id) && h('span', { class: 'tagchip dupchip', title: 'Duplicate: see the note at the top' }, 'duplicate'), e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
       (badges.length || kids || parentName) ? h('span', { class: 'h-sub' }, [parentName && `in ${parentName}`, kids && `${kids} child${kids > 1 ? 'ren' : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
@@ -2922,7 +2948,6 @@ function validate(b, j) {
   const out = [], all = project.entities, has = (n) => all.some((e) => e.name === n), tagged = (t) => all.some((e) => e.name === t || (e.tags || []).includes(t));
   if ((b.type === 'spawner' || b.type === 'shooter') && b.template && !all.some((e) => e.template && e.name === b.template)) out.push(['error', `No template named “${b.template}”. Tick “Template” on the object to spawn.`]);
   if ((b.type === 'spawner' || b.type === 'shooter') && !b.template) out.push(['warn', 'Pick a template to spawn.']);
-  if (b.type === 'uiBottomNav') { const twins = all.filter((e) => e !== j && e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))); if (twins.length) out.push(['warn', `There is another Bottom Nav in the same place (“${twins.map((e) => e.name).join('”, “')}”). Only the one on top takes taps; the one underneath can't be seen but its tabs (like “More”, which opens the menu) were firing too. Delete the one you don't use.`]); }
   if (b.type === 'teleport' && b.target && !has(b.target)) out.push(['error', `No object named “${b.target}”.`]);
   if (b.type === 'camera' && b.mode !== 'fixed' && b.target && !tagged(b.target)) out.push(['warn', `Nothing is tagged “${b.target}” yet: the camera will stay put.`]);
   if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
@@ -2968,6 +2993,7 @@ function projectProblems() {
           for (const p of def.params) if (p.required && (b[p.key] ?? '') === '') add('error', def.label, `${p.label || p.key} is required.`);
         }
       }
+      for (const g of findDuplicates(lv.entities || [])) { const e = (lv.entities || []).find((q) => q.id === g.ids[g.ids.length - 1]); out.push({ lvl: 'warn', li, id: e?.id, name: g.label, comp: 'Duplicate', msg: g.why }); }
     } finally { project = keep; }
   });
   for (const sc of userScripts()) if (!(sc.graph?.nodes || []).some((n) => NODE_TYPES[n.type]?.cat === 'Events')) out.push({ lvl: 'warn', li: -1, name: sc.name || 'Script', comp: 'Script', msg: 'This reusable script has no Event node.' });
@@ -3646,6 +3672,9 @@ function renderInspector() {
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'))));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
   const pfb = prefabBanner(j); if (pfb) box.append(pfb);
+  { const g = findDuplicates().find((q) => q.ids.includes(j.id)); if (g) box.append(h('div', { class: 'obox warn dup-banner' }, h('b', {}, g.label), h('div', {}, g.why), h('div', { class: 'btns' },
+    h('button', { class: 'btn primary', onclick: () => keepOnlyOne(g, j.id) }, icon('trash'), 'Keep this one'),
+    h('button', { class: 'btn', onclick: () => { const o = g.ids.find((id) => id !== j.id); if (o) select(o); } }, icon('eye'), 'Go to the other')))); }
 
   // quick add + component filters (Odin-style tidy inspector)
   const quick = ['b:triggers', 'body', 'b:tween', 'b:health', 'b:animator', 'b:fsm'].map((k) => componentsFor(j).find((c) => c.key === k)).filter((c) => c && c.ok(j) && !(c.key.startsWith('b:') && (j.behaviors || []).some((b) => 'b:' + b.type === c.key)));
@@ -4737,8 +4766,6 @@ function renderSceneSettings(box) {
 // ============================================================================
 /** Odin-style [Button]s shown at the top of a component. */
 const BEH_BUTTONS = {
-  uiBottomNav: [{ label: 'Keep only this Bottom Nav', icon: 'trash', when: (b) => project.entities.filter((e) => e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))).length > 1,
-    fn: (j, i, b) => { const others = project.entities.filter((e) => e !== j && e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))); if (!confirm(`Delete ${others.map((e) => '“' + e.name + '”').join(', ')}? This one stays.`)) return; for (const e of others) deleteEntity(e.id); toast(`Deleted ${others.length} other Bottom Nav${others.length > 1 ? 's' : ''}`); } }],
   tween: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b) }],
   tweenSequence: [{ label: 'Preview', icon: 'play', primary: true, fn: (j, i, b) => previewBehavior(j, b, Math.min(8, seqLength(b))) }],
   flipbook: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 3) }],

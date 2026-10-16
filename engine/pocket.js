@@ -8581,6 +8581,14 @@ const UK = {
     return low;
   },
   /** A tall list kept inside the room the nav bars leave: on a shorter screen (or the editor's phone frame) a feed taller than that space would run under the App Bar and the Bottom Nav. */
+  /** A short bar at the top sharing its row with a floating ☰ button (the Side Menu's): it starts after the button instead of under it. */
+  clearCorner(s, e, b) {
+    if (e._dock || e.parentEnt?._dock || b.h > 90) return b; const E = s.engine, k = uiK(E.safe) || 1, o = uiOrigin(e, E.width, E.height, E.safe);
+    const sx0 = o.x + b.x * k, sx1 = o.x + (b.x + b.w) * k, sy0 = o.y + b.y * k, sy1 = o.y + (b.y + b.h) * k; let l = -1e9, r = 1e9;
+    for (const q of s.entities) { if (!q.ui || q.dead || !q.visible) continue; const sb = q.behaviors.find((x) => x.sideMenu), bt = sb?.btn?.(s); if (!bt || bt.y + bt.r < sy0 || bt.y - bt.r > sy1 || bt.x + bt.r < sx0 || bt.x - bt.r > sx1) continue; if (bt.x < (sx0 + sx1) / 2) l = Math.max(l, bt.x + bt.r + 8 * k); else r = Math.min(r, bt.x - bt.r - 8 * k); }
+    if (l === -1e9 && r === 1e9) return b; const n0 = Math.max(sx0, l), n1 = Math.min(sx1, r); if (n1 - n0 < 80 * k) return b;
+    const x = (n0 - o.x) / k, w = (n1 - n0) / k; return { ...b, x, w, cx: x + w / 2 };
+  },
   fit(s, e, b) {
     if (e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe) return b; // (on a page too: a feed taller than the room left would scroll its last posts under the bar, out of reach)
     const A = uiArea(E.width, E.height, E.safe, e), o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1;
@@ -11115,7 +11123,7 @@ registerBehavior('uiSearchBar', {
       uiAlways: true,
       update(e, dt, s) {
         for (const t of UK.taps(s, e)) {
-          const b = UK.box(e); if (!UK.in(t, b)) continue;
+          const b = UK.clearCorner(s, e, UK.box(e)); if (!UK.in(t, b)) continue;
           if (clearR && UK.in(t, clearR, 6)) { UK.tap(s, p); s.setVar(p.var, ''); continue; }
           if (open || s.engine.editing) continue; UK.tap(s, p);
           open = searchScreen(s, { value: String(s.vars[p.var] ?? ''), placeholder: p.placeholder, data: () => data(s), colors: { bg: tok(p.bg || '@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' },
@@ -11123,7 +11131,7 @@ registerBehavior('uiSearchBar', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), v = String(s.vars[p.var] ?? ''), h = Math.min(b.h, 44), y = b.cy - h / 2;
+        const b = UK.clearCorner(s, e, UK.box(e)), v = String(s.vars[p.var] ?? ''), h = Math.min(b.h, 44), y = b.cy - h / 2;
         ctx.fillStyle = tok(p.field || '@field') || 'rgba(128,128,128,0.15)'; UK.rr(ctx, b.x, y, b.w, h, h / 2); ctx.fill();
         drawNavIcon(ctx, 'ui-search', b.x + 22, b.cy, 18, tok(p.sub || '@sub'));
         UK.text(ctx, v || p.placeholder || 'Search', b.x + 42, b.cy + 1, { size: 15, weight: v ? 700 : 500, color: tok(v ? p.text || '@text' : p.sub || '@sub'), align: 'left', maxW: b.w - 80 });

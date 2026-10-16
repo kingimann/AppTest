@@ -133,6 +133,23 @@ export async function snapshot(id, rec, reason = 'auto') {
     }
   } catch { /* a restore point is a nice-to-have; never block saving */ }
 }
+/** Restore points of work that isn't saved yet ("only when I tap Save"): one every few minutes while you edit. */
+export function snapshotUnsaved(id, rec) { if (db && rec?.json && Date.now() - (lastSnap[id] || 0) > SNAP_EVERY) { lastSnap[id] = Date.now(); snapshot(id, rec, 'not saved'); } }
+
+// ---- drafts: unsaved changes kept on the device (IndexedDB, so a big game with pictures fits too) ----
+const DRAFT_ID = '__draft__';
+let draftAt = 0, draftPend = null;
+/** Keep the open project's unsaved changes (at most every few seconds; the last one is always written). */
+export function saveDraft(id, rec, now = false) {
+  if (!db || !id || !rec?.json) return;
+  draftPend = { id, at: Date.now(), rec };
+  const write = () => { const d = draftPend; draftPend = null; if (!d) return; draftAt = Date.now(); try { const tx = db.transaction('snapshots', 'readwrite'), st = tx.objectStore('snapshots'); const idx = st.index('project'); idx.openCursor(IDBKeyRange.only(DRAFT_ID)).onsuccess = (ev) => { const c = ev.target.result; if (c) { c.delete(); c.continue(); } else st.add({ project: DRAFT_ID, of: d.id, time: d.at, reason: 'draft', name: d.rec.name, json: d.rec.json }); }; } catch { /* nice-to-have */ } };
+  if (now || Date.now() - draftAt > 4000) write(); else setTimeout(() => { if (draftPend) write(); }, 4000 - (Date.now() - draftAt));
+}
+/** The kept draft: { id, at, rec } or null. */
+export async function readDraft() { const l = await listSnapshots(DRAFT_ID); const d = l[0]; return d ? { id: d.of, at: d.time, rec: { name: d.name, updated: d.time, json: d.json } } : null; }
+export function dropDraft() { draftPend = null; if (!db) return; try { const tx = db.transaction('snapshots', 'readwrite'); tx.objectStore('snapshots').index('project').openCursor(IDBKeyRange.only(DRAFT_ID)).onsuccess = (ev) => { const c = ev.target.result; if (c) { c.delete(); c.continue(); } }; } catch { /* ignore */ } }
+
 /** Restore points for a project, newest first: [{ key, time, reason, name, json }] */
 export async function listSnapshots(id) {
   if (!db) return [];

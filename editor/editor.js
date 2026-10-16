@@ -8,7 +8,7 @@ const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'L
 import { templates, templateInfo } from '../examples/templates.js';
 import { qrCanvas } from './qr.js';
 import * as cloud from './cloud.js';
-import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
+import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, snapshotUnsaved, saveDraft, readDraft, dropDraft, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
 import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS, TOP_STYLE_THUMBS } from './navstyles.js';
 import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
@@ -132,7 +132,8 @@ const manualSave = () => EP.autosave === 'manual';
 const DRAFT_KEY = 'pocket.editor.draft';
 let dirty = false, edited = false, draftTimer = 0; // edited: changed since it was opened (only then is a draft worth keeping)
 /** Unsaved changes: a dot by the name and a lit Save button. */
-function setDirty(v) { dirty = !!v; $('#projectTitle')?.classList.toggle('unsaved', manualSave() && dirty); const b = $('#saveBtn'); if (b) { b.hidden = !manualSave(); b.classList.toggle('on', dirty); } }
+let savedAt = 0;
+function setDirty(v) { dirty = !!v; $('#projectTitle')?.classList.toggle('unsaved', manualSave() && dirty); const b = $('#saveBtn'); if (b) { b.hidden = !manualSave(); b.classList.toggle('on', dirty); b.title = dirty ? 'Save (Ctrl+S): you have unsaved changes' : savedAt ? `All changes saved (${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})` : 'Save (Ctrl+S)'; } }
 /** Writes the project to the device. In "only when I save" mode, only Save (force) does; everything else keeps a safety draft. */
 function saveNow({ force = false } = {}) {
   if (!project) return;
@@ -142,10 +143,15 @@ function saveNow({ force = false } = {}) {
   store.set(CURRENT_KEY, projectId);
   setDirty(false); edited = false; clearDraft();
 }
-function commitSave() { if (!project) return; saveNow({ force: true }); toast(`Saved “${root.name}”`); buzz(8); if (!$('#home').hidden) showHome({ keep: true }); }
+function commitSave() { if (!project) return; savedAt = Date.now(); saveNow({ force: true }); const sb = $('#saveBtn'); if (sb) { sb.classList.remove('saved'); void sb.offsetWidth; sb.classList.add('saved'); } toast(`Saved “${root.name}”`); buzz(8); if (!$('#home').hidden) showHome({ keep: true }); }
 /** Not a save: if the app is closed with unsaved changes, it offers them back next time. */
-function writeDraft() { if (!dirty || !edited || !project) return; try { const t = JSON.stringify({ id: projectId, at: Date.now(), rec: { name: root.name, updated: Date.now(), json: root } }); if (t.length < 2_500_000) localStorage.setItem(DRAFT_KEY, t); } catch { /* too big or storage full */ } }
-function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
+function writeDraft(now = false) {
+  if (!dirty || !edited || !project) return;
+  const rec = { name: root.name, updated: Date.now(), json: root };
+  saveDraft(projectId, rec, now); snapshotUnsaved(projectId, rec); // on the device (no size limit), plus a restore point every few minutes
+  try { const t = JSON.stringify({ id: projectId, at: Date.now(), rec }); if (t.length < 2_500_000) localStorage.setItem(DRAFT_KEY, t); else localStorage.removeItem(DRAFT_KEY); } catch { /* too big or storage full: the device copy has it */ }
+}
+function clearDraft() { dropDraft(); try { localStorage.removeItem(DRAFT_KEY); } catch { /* storage unavailable */ } }
 /** Before the open project is replaced: Save / Don't save / Cancel when it has unsaved changes. */
 function askSave(next) {
   if (!manualSave() || !dirty || !project) return next();
@@ -158,7 +164,7 @@ function askSave(next) {
       h('button', { class: 'btn', onclick: closeLayer }, 'Cancel')))]);
 }
 /** Leaving the app (switching apps, locking the phone, closing the tab): save (or keep a draft), plus an instant safety copy. */
-function saveOnLeave() { if (!project) return; if (manualSave()) { writeDraft(); return; } saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
+function saveOnLeave() { if (!project) return; if (manualSave()) { writeDraft(true); return; } saveNow(); rescueCopy(projectId, { name: root.name, updated: Date.now(), json: root }); }
 let fullWarned = 0;
 function storageFull() {
   if (Date.now() - fullWarned < 60000) return; fullWarned = Date.now();
@@ -169,7 +175,9 @@ function storageFull() {
 }
 let saveTimer;
 /** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
+let multiKey = '';
 function renderMultiBar() {
+  { const k = multi && multi.size > 1 ? [...multi].sort().join(',') : ''; if (k !== multiKey) { multiKey = k; setTimeout(renderInspector); } } // the Inspector follows what's ticked
   const box = $('#hierarchy');
   box.querySelector('.multi-bar')?.remove();
   if (!multi) return;
@@ -1566,7 +1574,8 @@ const endPointer = (ev) => {
 surface.addEventListener('pointerup', endPointer);
 surface.addEventListener('pointercancel', endPointer);
 
-let objClipboard = null;
+let rowTap = {}; // the last Hierarchy row tapped (for double-tap to rename)
+let objClipboard = null, fieldClip = null; // an object, or one setting's value (Inspector › hold a label › Copy value)
 /** Turn a Scene-view point into an "at" position for addEntity. */
 function worldAt(sx, sy) {
   const s = engine.scene;
@@ -1581,6 +1590,7 @@ function openObjectMenu(id, sx, sy, anchor) {
   popMenu(anchor || pointRect(sx, sy), [
     { cap: j.name || 'Object' },
     { icon: 'info', label: 'Inspect', fn: () => ctxAction('inspect') },
+    { icon: 'edit', label: 'Rename', fn: () => { if (!document.querySelector(`#hierarchy .h-row[data-id="${id}"]`)) setDock('hierarchy'); setTimeout(() => inlineRename(id), 60); } },
     { icon: 'copy', label: 'Duplicate', fn: () => duplicateEntity(id) },
     { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
@@ -2114,18 +2124,46 @@ function startRowDrag(ev, id) {
   let over = null;
   const at = (e) => { ghost.style.left = e.clientX + 'px'; ghost.style.top = e.clientY + 'px'; };
   const target = (e) => { const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.h-row, .h-folder'); return el && el.dataset.id !== id ? el : null; };
+  // on a row: its top quarter puts it above, its bottom quarter below (same parent), the middle inside it
+  const zone = (t, e) => { if (!t?.dataset.id || t.classList.contains('scene')) return 'in'; const r = t.getBoundingClientRect(), f = (e.clientY - r.top) / r.height; return f < 0.28 ? 'before' : f > 0.72 ? 'after' : 'in'; };
+  let where = 'in';
+  const mark = () => { for (const c of ['drop', 'drop-before', 'drop-after']) over?.classList.remove(c); };
   at(ev); buzz(8);
-  const move = (e) => { at(e); const t = target(e); if (t !== over) { over?.classList.remove('drop'); over = t; over?.classList.add('drop'); } };
+  const move = (e) => { at(e); const t = target(e), z = zone(t, e); if (t !== over || z !== where) { mark(); over = t; where = z; over?.classList.add(z === 'in' ? 'drop' : 'drop-' + z); ghost.dataset.where = z; } };
   const up = (e) => {
     grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up);
-    ghost.remove(); over?.classList.remove('drop');
+    ghost.remove(); mark();
     const t = e.type === 'pointerup' ? target(e) : null;
     if (!t) return;
     if (t.classList.contains('scene')) { if (j.parent) setParent(id, null); return; }
     if (t.dataset.folder) { if (j.parent) setParent(id, null); j.folder = t.dataset.folder; changed({ structure: true }); pushHistory(); return; }
+    if (t.dataset.id && where !== 'in') return moveBeside(id, t.dataset.id, where);
     if (t.dataset.id) setParent(id, t.dataset.id);
   };
   grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+}
+/** Put an object (and what's inside it) just above or below another one, with the same parent and folder: the order in the Hierarchy is the drawing order. */
+function moveBeside(id, tid, where) {
+  const j = ent(id), t = ent(tid); if (!j || !t || isInside(tid, id)) return;
+  if ((j.parent || null) !== (t.parent || null)) { setParent(id, t.parent || null); if (!ent(id) || (ent(id).parent || null) !== (t.parent || null)) return; } // (refused: UI into a game object…)
+  if (t.folder) j.folder = t.folder; else delete j.folder;
+  const L = project.entities, ids = new Set(subtree(id)), moving = L.filter((e) => ids.has(e.id));
+  for (const m of moving) L.splice(L.indexOf(m), 1);
+  let at = L.indexOf(t);
+  if (where === 'after') { const tids = new Set(subtree(tid)); while (at + 1 < L.length && tids.has(L[at + 1].id)) at++; at++; } // after the target's own children
+  L.splice(at, 0, ...moving);
+  changed({ structure: true }); pushHistory(); buzz(6);
+}
+/** Rename right in the Hierarchy row (double-tap the name, or F2). */
+function inlineRename(id) {
+  const row = document.querySelector(`#hierarchy .h-row[data-id="${id}"]`), nm = row?.querySelector('.nm'), j = ent(id);
+  if (!j) return; if (!nm) { const n = prompt('Rename', j.name || ''); if (n != null && n.trim()) { j.name = n.trim(); changed({ structure: true }); pushHistory(); } return; }
+  const inp = h('input', { type: 'text', class: 'h-rename', value: j.name || '', autocapitalize: 'off' });
+  let done = false;
+  const finish = (ok) => { if (done) return; done = true; const v = inp.value.trim(); if (ok && v && v !== j.name) { j.name = v; changed({ structure: true }); pushHistory(); } else renderHierarchy(); };
+  inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); });
+  inp.addEventListener('blur', () => finish(true)); inp.addEventListener('click', (e) => e.stopPropagation()); inp.addEventListener('pointerdown', (e) => e.stopPropagation());
+  nm.replaceWith(inp); inp.focus(); inp.select();
 }
 function hMatch(e) {
   if (uiMode && !e.ui) return false;
@@ -2163,7 +2201,22 @@ function renderHierarchy() {
     return h('div', {
       class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
-      onclick: () => { if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); } else if (attachFor) endAttach(e.id); else if (selectedId === e.id && !isDesktop()) setDock('inspector'); else select(e.id); },
+      onclick: (ev) => {
+        if (ev.currentTarget._held) { ev.currentTarget._held = false; return; }
+        if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); return; }
+        if (attachFor) return endAttach(e.id);
+        const now = Date.now(); if (rowTap.id === e.id && now - rowTap.t < 380) { clearTimeout(rowTap.timer); rowTap = {}; return inlineRename(e.id); } // a double-tap renames it
+        rowTap = { id: e.id, t: now };
+        if (ev.shiftKey && selectedId && selectedId !== e.id && selectedId !== SCENE_ID) { multi = new Set([selectedId, e.id]); renderHierarchy(); }
+        else if (selectedId === e.id && !isDesktop()) rowTap.timer = setTimeout(() => setDock('inspector'), 380); // (tapping it again opens its Inspector, unless that was a double-tap)
+        else select(e.id);
+      },
+      oncontextmenu: (ev) => { if (multi) return; ev.preventDefault(); openObjectMenu(e.id, 0, 0, ev.currentTarget.querySelector('.nm') || ev.currentTarget); },
+      onpointerdown: (ev) => { if (multi || ev.pointerType === 'mouse' || ev.button > 0 || ev.target.closest('button')) return; const row = ev.currentTarget, x0 = ev.clientX, y0 = ev.clientY; clearTimeout(row._hold); row._held = false; // hold for the object menu
+        const stop = () => { clearTimeout(row._hold); row.removeEventListener('pointerup', stop); row.removeEventListener('pointercancel', stop); row.removeEventListener('pointermove', mv); };
+        const mv = (m) => { if (Math.hypot(m.clientX - x0, m.clientY - y0) > 8) stop(); };
+        row.addEventListener('pointerup', stop); row.addEventListener('pointercancel', stop); row.addEventListener('pointermove', mv);
+        row._hold = setTimeout(() => { stop(); row._held = true; buzz(10); openObjectMenu(e.id, 0, 0, row.querySelector('.nm') || row); }, 520); },
     },
     multi ? h('span', { class: 'h-check' + (multi.has(e.id) ? ' on' : '') }, multi.has(e.id) ? icon('check') : null) : '',
     depth ? h('span', { class: 'h-branch' }) : '',
@@ -2175,7 +2228,7 @@ function renderHierarchy() {
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
     e.id === selectedId && h('button', { class: 'eye', title: 'More actions', onclick: (ev) => { ev.stopPropagation(); openObjectMenu(e.id, 0, 0, ev.currentTarget); } }, icon('more')),
-    h('button', { class: 'eye h-grip', title: 'Drag onto another object to make it a child', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
+    h('button', { class: 'eye h-grip', title: 'Drag: drop on an object to put it inside, or on its top or bottom edge to move it above or below', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
   };
   const tree = (list) => { // parents with their children folded underneath; 3+ top-level copies of one name fold into a group
     const inList = new Set(list.map((e) => e.id)), out = [];
@@ -2518,6 +2571,14 @@ function control(target, path, spec) {
   const um = !unit && spec.type === 'number' && text.match(/\s*\((s|sec|seconds|px|°|%|deg|degrees|ms|m|m\/s)\)$/); // Odin-style [SuffixLabel]: "Speed (px)" → a px chip in the field
   if (um) { unit = { sec: 's', seconds: 's', deg: '°', degrees: '°' }[um[1]] || um[1]; text = text.slice(0, um.index); }
   const label = h('label', { title: text }, text);
+  { // right-click or hold a label: copy this value, paste one, or reset it
+    const menu = (anchor) => popMenu(anchor, [{ cap: text || path },
+      { icon: 'copy', label: 'Copy value', fn: () => { fieldClip = { type: spec.type || 'text', v: clone(get()) }; navigator.clipboard?.writeText(typeof fieldClip.v === 'object' ? JSON.stringify(fieldClip.v) : String(fieldClip.v ?? '')).catch(() => {}); toast('Value copied'); } },
+      fieldClip && (fieldClip.type === (spec.type || 'text') || (spec.type || 'text') === 'text') && { icon: 'paste', label: `Paste ${typeof fieldClip.v === 'object' ? 'value' : `“${String(fieldClip.v).slice(0, 24)}”`}`, fn: () => { set(clone(fieldClip.v)); pushHistory(); changed({ inspector: true }); } },
+      spec.def !== undefined && { icon: 'rotate', label: 'Reset to default', fn: () => { set(spec.def === '' ? undefined : clone(spec.def)); pushHistory(); changed({ inspector: true }); } }]);
+    label.addEventListener('contextmenu', (e) => { e.preventDefault(); menu(label); });
+    label.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const x0 = e.clientX, y0 = e.clientY; let moved = false; const mv = (m) => { if (Math.hypot(m.clientX - x0, m.clientY - y0) > 8) moved = true; }; label.addEventListener('pointermove', mv); const t = setTimeout(() => { if (!moved) { buzz(10); menu(label); } }, 560); const end = () => { clearTimeout(t); label.removeEventListener('pointermove', mv); }; label.addEventListener('pointerup', end, { once: true }); label.addEventListener('pointercancel', end, { once: true }); });
+  }
   let el;
   switch (spec.type) {
     case 'number': {
@@ -3427,6 +3488,60 @@ function inspCrumbs(j, idx) {
       h('span', { title: 'This object\'s place in the level' }, `${idx + 1} / ${project.entities.length}`),
       h('button', { type: 'button', class: 'next', title: 'Next object', onclick: () => stepSelection(1) }, icon('chevron'))));
 }
+/** A stand-in for several objects: reading gives the first one's value, writing sets it on all of them (nested parts too: shape.fill, text.size…). */
+function multiTarget(list, path = []) {
+  const at = (o) => path.reduce((a, k) => (a == null ? a : a[k]), o);
+  return new Proxy({}, {
+    get(_, k) { const v = at(list[0])?.[k]; return v && typeof v === 'object' && !Array.isArray(v) ? multiTarget(list, [...path, k]) : v; },
+    set(_, k, v) { for (const o of list) { let a = o; for (const p of path) { if (a[p] == null || typeof a[p] !== 'object') a[p] = {}; a = a[p]; } a[k] = v && typeof v === 'object' ? clone(v) : v; } return true; },
+    deleteProperty(_, k) { for (const o of list) { const a = at(o); if (a) delete a[k]; } return true; },
+    has(_, k) { const a = at(list[0]); return !!a && k in a; },
+  });
+}
+/** The Inspector for several objects (Select mode): the settings they all have, changed on all of them at once. */
+function renderMultiInspector(box, list) {
+  const TP = () => multiTarget(list), n = list.length, all = (f) => list.every(f), threeD = is3D() && !list[0].ui;
+  const differs = (path) => { const v0 = JSON.stringify(getPath(list[0], path) ?? null); return list.some((o) => JSON.stringify(getPath(o, path) ?? null) !== v0); };
+  const C = (path, spec) => { const row = control(TP, path, spec); if (row && differs(path)) { row.classList.add('mixed'); row.title = 'They differ: shows the first one’s. Changing it sets all of them.'; } return row; };
+  const kinds = [...new Set(list.map((o) => (o.ui ? 'UI' : 'object')))];
+  box.append(h('div', { class: 'multi-head' }, h('b', {}, `${n} objects`), h('span', {}, list.slice(0, 4).map((o) => o.name || 'Object').join(', ') + (n > 4 ? ` +${n - 4}` : '')),
+    h('p', { class: 'desc' }, 'Changes here apply to all of them. A field marked “mixed” shows the first one’s value.')));
+  box.append(comp('Shared', [
+    C('visible', { label: 'Visible', type: 'bool', def: true, structure: true }),
+    C('locked', { label: 'Locked (can’t be picked in the Scene)', type: 'bool', def: false, structure: true }),
+    C('layer', { label: 'Draw order', type: 'number', def: 0, step: 1 }),
+    kinds.length === 1 && (threeD ? [vecRow(TP, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(TP, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)] : [vecRow(TP, 'Rotation', ['rz'], [0], 1), vecRow(TP, 'Scale', ['sx', 'sy'], [1, 1], 0.05)]),
+    h('div', { class: 'btns' },
+      h('button', { class: 'btn', onclick: () => nudgeMany(list) }, icon('move'), 'Move all by…'),
+      all((o) => o.ui) && h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Line up' }, { icon: 'alignl', label: 'Left edges', fn: () => alignUI(list, 'left') }, { icon: 'alignc', label: 'Centres (across)', fn: () => alignUI(list, 'hcenter') }, { icon: 'alignr', label: 'Right edges', fn: () => alignUI(list, 'right') }, { icon: 'alignt', label: 'Top edges', fn: () => alignUI(list, 'top') }, { icon: 'alignm', label: 'Middles (down)', fn: () => alignUI(list, 'vcenter') }, { icon: 'alignb', label: 'Bottom edges', fn: () => alignUI(list, 'bottom') }]) }, icon('alignc'), 'Line up…')),
+  ], { icon: 'layers', key: 'multi-shared' }));
+  if (all((o) => o.shape && o.shape.type !== 'emoji')) box.append(comp('Shape', [
+    C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
+    C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
+    all((o) => o.shape.type === 'rect') && C('shape.radius', { label: 'Corner Radius', type: 'number', def: 0, step: 1 }),
+    C('shape.shadow', { label: 'Drop shadow', type: 'color', optional: true, structure: true }),
+  ], { icon: 'square', key: 'multi-shape' }));
+  if (all((o) => o.text)) box.append(comp('Text', [
+    C('text.size', { label: 'Font Size', type: 'number', def: 24 }),
+    C('text.color', { label: 'Color', type: 'color' }),
+    C('text.align', { label: 'Alignment', type: 'select', options: ['left', 'center', 'right'], def: 'center' }),
+    C('text.font', { label: 'Font', type: 'select', options: fontOptions(list[0].text.font), def: 'theme' }),
+    C('text.weight', { label: 'Weight', type: 'select', options: [['400', 'Normal'], ['600', 'Semi-bold'], ['800', 'Bold'], ['900', 'Black']], def: '800' }),
+  ], { icon: 'text', key: 'multi-text' }));
+  const types = [...new Set(list.flatMap((o) => (o.behaviors || []).map((b) => b.type)))].filter((t) => all((o) => (o.behaviors || []).some((b) => b.type === t)));
+  if (types.length) box.append(comp('Components they all have', [
+    h('p', { class: 'desc' }, 'Turn one off or on for all of them. Select one object to change its settings.'),
+    ...types.map((t) => { const on = all((o) => o.behaviors.find((b) => b.type === t).enabled !== false); return h('div', { class: 'row' }, h('label', {}, Behaviors[t]?.label || t),
+      h('button', { class: 'btn', onclick: () => { for (const o of list) { const b = o.behaviors.find((x) => x.type === t); if (on) b.enabled = false; else delete b.enabled; } changed({ structure: true }); pushHistory(); } }, on ? 'Turn off' : 'Turn on')); }),
+  ], { icon: 'bolt', key: 'multi-comps' }));
+}
+/** Move several objects by the same amount. */
+function nudgeMany(list) {
+  const t = prompt('Move all of them by (x, y' + (is3D() ? ', z' : '') + ')', '10, 0'); if (t == null) return;
+  const [dx = 0, dy = 0, dz = 0] = t.split(/[ ,]+/).map(Number); if (![dx, dy, dz].every(Number.isFinite)) return;
+  for (const o of topPicks(list)) { o.x = round((o.x || 0) + dx, 3); o.y = round((o.y || 0) + dy, 3); if (is3D() && !o.ui) o.z = round((o.z || 0) + dz, 3); }
+  changed({ structure: true }); pushHistory();
+}
 function renderInspector() {
   if (projectSettingsRedraw) setTimeout(() => projectSettingsRedraw?.()); // (Project Settings shows the same settings)
   const box = $('#inspector');
@@ -3437,6 +3552,7 @@ function renderInspector() {
     const fresh = lastInspected !== SCENE_ID; lastInspected = SCENE_ID;
     renderSceneSettings(box); if (fresh && foldAllPref) foldAll(box, true); syncFoldBtn(box); compJump(box); box.scrollTop = scroll; return;
   }
+  if (multi && multi.size > 1) { const list = [...multi].map(ent).filter(Boolean); if (list.length > 1) { lastInspected = null; renderMultiInspector(box, list); box.scrollTop = scroll; return; } } // several objects: edit what they share
   const j = ent(selectedId);
   if (!j) { lastInspected = null; box.append(inspectorEmpty()); return; }
   const T = () => ent(selectedId) || {};
@@ -6437,9 +6553,9 @@ async function openRestorePoints() {
   const list = await listSnapshots(projectId);
   const count = (j) => [j, ...(j.levels || [])].reduce((n, lv) => n + (lv.entities?.length || 0), 0);
   openDialog('Earlier Versions', [
-    h('p', { class: 'desc' }, usingIndexedDB() ? `A version of “${root.name}” is kept every few minutes while you work (the last 12). Restoring one keeps your current version here too, so you can always go back.` : 'Earlier versions need more storage than this browser allows (private browsing?).'),
+    h('p', { class: 'desc' }, usingIndexedDB() ? `A version of “${root.name}” is kept every few minutes while you work (the last 12), saved or not. Restoring one keeps your current version here too, so you can always go back.` : 'Earlier versions need more storage than this browser allows (private browsing?).'),
     list.length ? h('div', { class: 'snap-list' }, list.map((sn) => h('div', { class: 'proj-row' },
-      h('span', { class: 'nm' }, h('b', {}, new Date(sn.time).toLocaleString()), h('small', {}, ` ${ago(sn.time)} · ${count(sn.json)} objects · ${(sn.json.levels?.length || 0) + 1} level${sn.json.levels?.length ? 's' : ''}${sn.reason !== 'auto' ? ' · ' + sn.reason : ''}`)),
+      h('span', { class: 'nm' }, h('b', {}, new Date(sn.time).toLocaleString()), h('small', {}, ` ${ago(sn.time)} · ${count(sn.json)} objects · ${(sn.json.levels?.length || 0) + 1} level${sn.json.levels?.length ? 's' : ''}${sn.reason !== 'auto' ? ' · ' + (sn.reason === 'not saved' ? 'not saved yet' : sn.reason) : ''}`)),
       h('button', { class: 'btn', onclick: async () => {
         await snapshot(projectId, { name: root.name, updated: Date.now(), json: clone(root) }, 'before restore');
         closeLayer(); openProject(clone(sn.json), projectId); if (manualSave()) setDirty(true); saveNow(); toast(manualSave() ? 'Earlier version restored: tap Save to keep it' : 'Earlier version restored');
@@ -8556,7 +8672,7 @@ $('#app').dataset.sheet = 'peek'; // big Scene first; tap a tab (or swipe up) to
 setTool('move');
 
 await initStorage();
-const bootDraft = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; } })(); // read before anything opens
+const bootDraft = await (async () => { const a = (() => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch { return null; } })(), b = await readDraft().catch(() => null); return !a ? b : !b ? a : (b.at > a.at ? b : a); })(); // read before anything opens (the device copy holds big games too)
 cloud.attach({ all: () => loadProjects(), save: (id, rec) => saveProject(id, rec), remove: (id) => { deleteProject(id); store.set(thumbKey(id), ''); },
   thumb: (id) => store.get(thumbKey(id), '') || null, setThumb: (id, src) => store.set(thumbKey(id), src),
   changedOpen: (id, rec) => { if (id === projectId && !playing) { openProject(rec.json, id); toast('Updated from your other device'); } } });
@@ -8586,10 +8702,31 @@ storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('S
   if (d?.rec?.json && manualSave()) setTimeout(() => openDialog('Unsaved changes', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
     h('h4', {}, `“${d.rec.name || 'Untitled'}” has changes that were not saved`), h('p', {}, `From ${agoText(d.at)}. Bring them back?`),
     h('div', { class: 'btns' },
-      h('button', { class: 'btn primary', onclick: () => { closeLayer(); askSave(() => { openProject(d.rec.json, d.id); setDirty(true); edited = true; writeDraft(); hideHome(); toast('Changes back: tap Save to keep them'); }); } }, icon('undo'), 'Bring them back'),
+      h('button', { class: 'btn primary', onclick: () => { closeLayer(); const back = () => { openProject(d.rec.json, d.id); setDirty(true); edited = true; writeDraft(true); hideHome(); toast('Changes back: tap Save to keep them'); }; if (d.id === projectId || !allProjects()[projectId]) back(); else askSave(back); } }, icon('undo'), 'Bring them back'),
       h('button', { class: 'btn', onclick: () => { closeLayer(); clearDraft(); } }, 'Throw them away')))]), 700);
 }
-addEventListener('beforeunload', (e) => { if (manualSave() && dirty) { writeDraft(); e.preventDefault(); e.returnValue = ''; } }); // "Leave site? Changes may not be saved"
+addEventListener('beforeunload', (e) => { if (manualSave() && dirty) { writeDraft(true); e.preventDefault(); e.returnValue = ''; } }); // "Leave site? Changes may not be saved"
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); commitSave(); } });
+/** Keyboard shortcuts (a keyboard on a tablet or computer): undo, delete, duplicate, copy / paste, rename, move through the Hierarchy. Not while typing. */
+addEventListener('keydown', (e) => {
+  const tEl = e.target, typing = tEl && (tEl.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tEl.tagName));
+  if (typing || playing || !project || !layer.hidden) return; // (not under a menu or a window)
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase(), j = selectedId && selectedId !== SCENE_ID ? ent(selectedId) : null;
+  const go = (fn) => { e.preventDefault(); fn(); };
+  if (mod && k === 'z') return go(() => undoRedo(e.shiftKey ? 1 : -1));
+  if (mod && k === 'y') return go(() => undoRedo(1));
+  if (multi && multi.size && (k === 'delete' || k === 'backspace')) return go(() => multiDelete([...multi].map(ent).filter(Boolean)));
+  if (multi && multi.size && mod && k === 'd') return go(() => multiDuplicate([...multi].map(ent).filter(Boolean)));
+  if (mod && k === 'v' && objClipboard) return go(() => { const c = clone(objClipboard); delete c.id; delete c.parent; addEntity(c); toast(`Pasted ${c.name || 'object'}`); });
+  if (k === 'escape') { if (multi) return go(() => { multi = null; renderHierarchy(); }); if (selectedId) return go(() => select(null)); return; }
+  if (!j) return;
+  if (k === 'delete' || k === 'backspace') return go(() => deleteEntity(j.id));
+  if (mod && k === 'd') return go(() => duplicateEntity(j.id));
+  if (mod && k === 'c') return go(() => { objClipboard = clone(j); toast(`Copied ${j.name || 'object'}: Ctrl+V pastes`); });
+  if (k === 'f2') return go(() => inlineRename(j.id));
+  if (k === 'f' && !mod) return go(frameSelected);
+  if (k === 'arrowup' || k === 'arrowdown') { const rows = [...document.querySelectorAll('#hierarchy .h-row[data-id]')], i = rows.findIndex((r) => r.dataset.id === j.id), n = rows[i + (k === 'arrowup' ? -1 : 1)]; if (i >= 0 && n) return go(() => { select(n.dataset.id); document.querySelector(`#hierarchy .h-row[data-id="${n.dataset.id}"]`)?.scrollIntoView({ block: 'nearest' }); }); }
+  if ((k === 'arrowleft' || k === 'arrowright') && kidsOf(j.id).length && document.querySelector(`#hierarchy .h-row[data-id="${j.id}"]`)) return go(() => { if (k === 'arrowleft') closedKids.add(j.id); else closedKids.delete(j.id); renderHierarchy(); }); // fold / unfold its children
+});
 $('#saveBtn')?.append(icon('save')); $('#saveBtn')?.addEventListener('click', commitSave); setDirty(dirty);
 window.pocketReady = true; // boot finished (index.html recovers from a half-updated cache otherwise)

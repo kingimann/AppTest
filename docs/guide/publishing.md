@@ -27,8 +27,8 @@ Every section of Build Settings **folds**:
 
 The top of Build Settings helps you get it right:
 
-- **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play**, **Expo app**, **Xcode project**, **Android Studio project** or **itch.io**. Build Settings then shows only the settings that kind of build needs (tick *Every setting* to see them all), and the big button at the bottom makes it.
-- **The ready check** lists what to look at before you build, each with a button that fixes it or takes you there:
+- **What are you making?** Pick **Play file**, **Website**, **App Store & Google Play**, **Expo app**, **Xcode project**, **Android Studio project** or **itch.io**. Each is a compact tile; the picked one's description shows under them. Build Settings then shows only the settings that kind of build needs (tap **Show all kinds** to see them all), and the big button at the bottom makes it (it stays on top while you scroll).
+- **The ready check** lists what to look at before you build, each with a button that fixes it or takes you there, and **Use the recommended settings** at the bottom:
   - a name that's still "Untitled", the default 🎮 icon, or a version that isn't a number;
   - no description (for link previews and store listings) and no *Made by* name (for the stores);
   - starting at a later level, levels left out, testing options still on, compression off;

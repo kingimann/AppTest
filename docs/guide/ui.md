@@ -361,7 +361,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - The conversation comes from the variable `chat` (blank = the room in *Room*).
     - With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once, and the people in the conversation get a notification.
   - **Read receipts:** add a **Reads** collection (chat, handle, at) and "Seen" works across phones. Without one, each phone only knows what it has read.
-- **Inbox:** your conversations, newest first: direct messages, group chats and rooms.
+- **Inbox:** your conversations, newest first: your direct messages and the group chats you are in (public rooms only if you turn them on).
   - Each row shows the person (or two faces for a group), the last message (*You:* for yours, the name in groups), when it was sent, and an unread count. Your last message shows ✓ when sent and ✓✓ once they have read it.
   - **Search** by name or words. **All / Unread / Groups** tabs, in any Top Nav *Tab look*.
   - **✏️ starts a conversation:**
@@ -369,7 +369,8 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - **New group:** tick two or more people and give it a name.
   - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
   - The unread total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`). Tapping a conversation sets `chat` and `chatTitle` and goes to the page `chat`.
-  - Direct messages use ids like `dm-alex-maya`, the same from both sides. Groups use `g-…` with their members and name on their first message. Other ids are rooms (`# general`).
+  - Direct messages use ids like `dm-alex-maya`, the same from both sides. Groups use `g-…` with their members and name on their first message.
+  - **Private by default:** a Chat only shows a direct message to its two people and a group to its members. Anyone else (or no conversation picked) sees “You’re not in this conversation” and no message bar. Set *Who can see and write* to *anyone (a public room)* for an open room (other ids, like `general`); the Inbox lists rooms only with *Also list public rooms*.
 - **Trending:** the most used #hashtags in recent posts (*From the last … days*), with post counts. Tapping one puts it in a search variable (`q`) and can go to a page, so a feed with that search variable shows those posts.
 - **Who To Follow:** people you don't follow yet, most liked first, each with a **Follow** button.
 - **The social graph** connects all the social pieces. It keeps who follows whom, friends and notifications in the collections **Follows** (follower, followee), **Friends** (from, to, status) and **Notifications** (to, from, from_name, type, post, text, read). Add these collections to make them online with Supabase; without them, they are kept on the device.
@@ -379,6 +380,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Variables: `{notifications_unread}`, `{friend_requests}`, `{followers_count}`, `{following_count}` and `{friends_count}`. Use them as badges, for example the App Bar action `bell | page:notifications | notifications_unread`.
 - **Liking comments** is per person: who liked a comment is kept on it (a *liked_by* field in the Comments collection), so someone else's like counts but doesn't show as yours. Your phone also remembers your own likes, so they stay even where you can't change someone else's comment online. The comment's author gets a notification (*liked your comment*).
 - **Notifications (social):** All / Mentions / Requests tabs (any Top Nav *Tab look*).
+- **Views, like X:** every post counts one view from each person once it has been at least half on their screen for a moment, or they open it (your own posts don't count your views). The count shows with the bar-chart icon when the feed's *Buttons* include `views` (the timeline and compact looks have it by default; with many buttons they space out like X, with save and share together at the end) and in the open post (“30.1K views”). Turn off *Count views* to only show the number already on the post.
 - **Bookmarks:** the bookmark on a post (in the feed when *Buttons* include `save`, in the open post, or ⋯ › Save post) and **Save** under any comment keep them for you only. **Saved** lists them, newest first, with All / Posts / Comments tabs: tap one to open the post (a saved comment is scrolled to and highlighted), tap its bookmark to remove it (Undo in the snackbar). A feed tab `Saved | saved` shows your saved posts, and the feed's *Saved page* adds a **View** button to the “Saved” snackbar. With a **Bookmarks** collection (handle, kind, ref, post, author, author_handle, text, media) they follow you to every phone; without one they stay on this phone. The Social template has a Saved page in the side menu.
   - Likes, reposts and follows on the same post are grouped ("Maya and 2 others liked your post"). New ones are highlighted and marked read once seen.
   - Friend requests have **Accept / Decline**, and follows have **Follow back**.

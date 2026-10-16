@@ -10045,6 +10045,7 @@ registerBehavior('uiFeed', {
       const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0) || SRC() === 'people I follow', onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0) || SRC() === 'my saved posts', kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : FILT(s), tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
       { const ow = ownerOf(s), pf = HANDLE_RE.test(FILT(s)); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: qVars(s) }) : (sample ||= SAMPLE_POSTS());
+      if (!has(s)) { const ow0 = ownerOf(s); if (ow0) P = P.filter((r) => who(r) === ow0); } // the sample posts (no Posts collection yet, or in the editor) follow a profile too
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
       if (kw === 'posts') P = P.filter((r) => !F(r, 'reply_to')); else if (kw === 'replies') P = P.filter((r) => !!F(r, 'reply_to')); else if (kw === 'media') P = P.filter((r) => String(F(r, 'media') || '').trim()); else if (kw === 'likes') P = P.filter((r) => truthy(F(r, 'liked')));
@@ -10163,12 +10164,13 @@ registerBehavior('uiFeed', {
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
     /** Who a post is for (the composer's audience) and who may reply to it. */
     /** On a page with a Profile Header and no filter of its own: that person's posts (mine on my profile). */
-    let selfE = null, pageWho = { t: -1, h: '' }, saidWho = '';
+    let selfE = null, headE = null, pageWho = { t: -1, h: '' }, saidWho = '';
     const profileOwner = (s) => {
       if (pageWho.t === s.time) return pageWho.h; pageWho = { t: s.time, h: '' }; if (!selfE) return '';
       const shown = (q) => { for (let a = q, n = 0; a && n < 40; a = a.parentEnt, n++) if (a.visible === false || a.dead || a._parentHidden) return false; return true; };
       const heads = s.entities.filter((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiProfile'));
       const hd = heads.find((q) => q.parentEnt && q.parentEnt === selfE.parentEnt) || (shown(selfE) ? heads.find((q) => shown(q) && !q.behaviors.some((x) => x.sideMenu)) : null); // on its page, or the one on screen with it
+      headE = hd || null;
       if (hd) { const P = hd.behaviors.find((x) => x.type === 'uiProfile').params || {}; pageWho.h = P.own ? handleOf(meOfVars(s, P.name, P.handle).handle) : handleOf(fillTemplate(String(P.handle || ''), qVars(s))) || '\u0000'; }
       return pageWho.h;
     };
@@ -10322,6 +10324,7 @@ registerBehavior('uiFeed', {
         const b = boxOf(e, s); S.max = Math.max(0, total - b.h + (inset || 0) + 12 + coveredBottom(s, e, b)); // (under the tabs, which stay at the top)
         S.update(s, e, dt, room > 0 ? { ...b, y: b.y - room, h: b.h + room, cy: b.cy - room / 2 } : b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         collapse(s, e, dt);
+        profileOwner(s); if (headE) { headE._pull = S.v < 0 && !s.engine.editing ? -S.v : 0; headE._pullBusy = s.time - S.refreshT < 0.9; } // under a profile, pulling down keeps the page together: the Profile Header shows the spinner
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
         if (p.openVar && s.vars[p.openVar] && !s.engine.editing && !sheetUp) { const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); const q = shown && findPost(s, s.vars[p.openVar]); if (q) { s.setVar(p.openVar, ''); openPost(s, q, 'post'); } } // a notification (or anything) asked for a post
         if (look0() === 'reels' && reelH > 0) { // one post per screen: a swipe moves one at a time
@@ -10575,8 +10578,8 @@ registerBehavior('uiFeed', {
         // “Follow” next to someone you don’t follow yet
         const myHandle = meOf(s).handle, followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following')) && who(r) !== myHandle && !r._mine && !s.engine.social?.isFollowing(who(r)); // (never on your own posts)
         const followPill = (r, right, cy, hits, ox, oy) => { ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText('Follow').width + 22; ctx.fillStyle = acc; UK.rr(ctx, right - w, cy - 14, w, 28, 14); ctx.fill(); UK.text(ctx, 'Follow', right - w / 2, cy + 1, { size: 13, weight: 800, color: '#fff' }); if (hits) hits.push({ k: 'follow', x: right - w - ox, y: cy - 16 - oy, w, h: 32 }); return w + 8; };
-        const top = b.y + inset - S.v;
-        if (S.v < -8 && p.pullRefresh !== false) { // the pull-to-refresh spinner, in the gap that opens under the tabs (not behind them): fills as you pull, spins while it refreshes
+        const top = b.y + inset - (headE && S.v < 0 ? 0 : S.v);
+        if (!headE && S.v < -8 && p.pullRefresh !== false) { // the pull-to-refresh spinner, in the gap that opens under the tabs (not behind them): fills as you pull, spins while it refreshes
           const busy = s.time - S.refreshT < 0.9, a = busy ? 1 : clamp(-S.v / 58, 0, 1), cy = b.y + inset + Math.min(-S.v, 70) / 2, R = 16;
           ctx.save(); ctx.globalAlpha *= Math.min(1, (-S.v - 8) / 20);
           ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; ctx.fillStyle = tok('@card') || (isDark(s) ? '#1f2330' : '#ffffff'); ctx.beginPath(); ctx.arc(b.cx, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.shadowColor = 'transparent';
@@ -12787,9 +12790,13 @@ registerBehavior('uiProfile', {
           y = details(y, 'center'); y = linkChips(y + 2, 'center'); y = lockLine(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
           y = highlightsRow(y); y = completionCard(y);
         }
+        // pull to refresh on the feed under it: a spinner over the cover (the page itself doesn't move)
+        if ((e._pull || 0) > 8) { const pl = e._pull, busy = !!e._pullBusy, a = busy ? 1 : clamp(pl / 58, 0, 1), cy = b.y + 22 + Math.min(pl, 70) / 2, R = 16;
+          ctx.save(); ctx.globalAlpha *= Math.min(1, (pl - 8) / 20); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; ctx.fillStyle = tok('@card') || '#ffffff'; ctx.beginPath(); ctx.arc(b.cx, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.shadowColor = 'transparent';
+          ctx.strokeStyle = acc; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath(); const st = busy ? s.time * 7 : -Math.PI / 2 + a * 1.5; ctx.arc(b.cx, cy, R - 7, st, st + (busy ? Math.PI * 1.5 : Math.PI * 1.7 * a)); ctx.stroke(); ctx.restore(); }
         // grow to fit what it shows: a page that lines things up moves what is under it; otherwise the top stays put
         const need = Math.ceil(y - b.y);
-        if (!s.engine.editing && p.autoHeight !== false && e.shape && Math.abs((e.shape.h || 0) - need) > 1) {
+        if (p.autoHeight !== false && e.shape && Math.abs((e.shape.h || 0) - need) > 1) { // (in the editor too, so what is under it isn't drawn over it)
           const stacked = e.parentEnt?.behaviors?.some((x) => x.type === 'uiShowIf' && x.params?.stack);
           if (!stacked && /^top/.test(e.anchor || '')) e.y += (need - (e.shape.h || 0)) / 2;
           e.shape.h = need;

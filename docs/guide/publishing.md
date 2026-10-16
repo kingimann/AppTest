@@ -104,6 +104,16 @@ Players can add it to their Home Screen. It opens full screen, plays offline and
    Its `README.md` has the one-time setup for accounts, keys and certificates.
 5. Put the folder on GitHub, add it in Codemagic and start the workflow. Build numbers go up by themselves; raise **Version** for a store update.
 
+### Build on Codemagic from the editor
+
+Under the download button, **Build on Codemagic from here** does steps 4 and 5 for you, with your own accounts:
+
+1. **Sign in with GitHub.** With the editor's accounts server (Supabase with GitHub sign-in turned on), tap **Sign in with GitHub** and approve; otherwise paste a GitHub token with the `repo` permission. The app project goes into a **private repository in your GitHub** (`your-game-app`).
+2. **Connect Codemagic.** Paste your Codemagic API token once (codemagic.io › Teams › Personal Account › Integrations › Codemagic API). Builds use **your** Codemagic account, signing keys and build minutes.
+3. **Send & build.** Makes the project from the game as it is now, sends it to GitHub as one commit, adds the repository to your Codemagic (with a read-only deploy key it makes for you) the first time, and starts the iOS and / or Android workflows. The status shows right there (waiting, building, sending to the store, done or failed), with links to download the `.ipa` / `.aab`, open the build on Codemagic, or cancel it. **Recent builds** shows the last few.
+
+Tokens stay on this device and are only sent to GitHub and Codemagic. You still do Codemagic's one-time signing setup (App Store Connect key, Android keystore, Google Play key) on codemagic.io; README.md in the repository has the steps.
+
 App builds get real haptics, scheduled notifications that arrive while the game is closed, and the permission texts your game needs.
 
 ## iOS and Android with Expo

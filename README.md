@@ -123,6 +123,7 @@ The quick-action bar over the Scene (Inspect, Duplicate, Focus, Delete) appears 
   - **Sharing:** a **link preview** (title and description for messages and social posts) and the **language code**.
   - **Extra code in `<head>`** (advanced): analytics, fonts or meta tags, pasted into every build as-is.
 - **App stores (iOS & Android):** publish with **Codemagic** ([codemagic.io](https://codemagic.io)), a cloud build service. You don't need a Mac or Android Studio.
+  - **Build on Codemagic from here:** sign in with GitHub (or a token) and connect your Codemagic API token once; **Send & build** pushes the app project to a private repo in your GitHub, adds it to your Codemagic with a read-only deploy key, starts the iOS / Android workflows and shows their status, downloads and Recent builds in the editor (no server: both APIs allow the browser).
   - Set the **App ID** (like `com.yourname.game`; it's checked as you type) and tick iOS, Android or both.
   - **iOS:** send to TestFlight, to TestFlight and then App Store review, or just build the .ipa; iPhone only or iPhone + iPad; the name of your App Store Connect key in Codemagic.
   - **Android:** publish to internal / closed / open testing or production, or just build the .aab; *First release* (Google only accepts drafts until the first review); the keystore and Google Play key names in Codemagic.

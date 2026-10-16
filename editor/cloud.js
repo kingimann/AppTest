@@ -81,12 +81,13 @@ export async function signUp(email, password, name) {
 export async function signIn(email, password) { return took(await call('/auth/v1/token?grant_type=password', { method: 'POST', body: { email, password }, auth: false })); }
 export async function resetPassword(email) { await call('/auth/v1/recover', { method: 'POST', body: { email }, auth: false }); }
 /** Google, GitHub, Apple…: goes to the provider and comes back signed in (see takeRedirect). */
-export function signInWith(provider) { const c = config(); location.href = `${c.url}/auth/v1/authorize?provider=${encodeURIComponent(provider)}&redirect_to=${encodeURIComponent(location.origin + location.pathname)}`; }
+export function signInWith(provider, scopes = '') { const c = config(); location.href = `${c.url}/auth/v1/authorize?provider=${encodeURIComponent(provider)}${scopes ? '&scopes=' + encodeURIComponent(scopes) : ''}&redirect_to=${encodeURIComponent(location.origin + location.pathname)}`; } // (scopes: e.g. GitHub's "repo", to build on Codemagic from the editor)
 /** Coming back from a provider or an email link: the tokens are in the address (#access_token=…). */
 export async function takeRedirect() {
   if (!configured() || !/access_token=/.test(location.hash)) return false;
   const q = new URLSearchParams(location.hash.slice(1));
   history.replaceState(null, '', location.pathname + location.search);
+  if (q.get('provider_token')) try { localStorage.setItem('pocket.github.token', q.get('provider_token')); localStorage.removeItem('pocket.github.user'); } catch { /* storage unavailable */ } // signed in with GitHub: its token lets the editor send the app project to GitHub
   saveSession({ access_token: q.get('access_token'), refresh_token: q.get('refresh_token'), expires_at: +q.get('expires_at') || Math.round(Date.now() / 1000) + (+q.get('expires_in') || 3600), user: null });
   try { const u = await call('/auth/v1/user'); saveSession({ ...session(), user: u }); return true; } catch { saveSession(null); return false; }
 }

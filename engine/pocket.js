@@ -7935,7 +7935,8 @@ registerBehavior('uiSideBar', {
       /** The built-in ☰ button (screen pixels), or null. */
       btn(s) {
         if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
-        const now = s.engine.editing ? performance.now() / 1000 : s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) // (the editor's clock stands still: look again every half second anyway) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && (q._allBehaviors || q.behaviors.map((b) => ({ type: b.type, ...b.params }))).some((b) => b.type === 'button' && b.action === 'send message' && String(b.value ?? '').trim() === p.message)) };
+        // (the editor's clock stands still: look again every half second anyway)
+        const now = s.engine.editing ? performance.now() / 1000 : s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && (q._allBehaviors || q.behaviors.map((b) => ({ type: b.type, ...b.params }))).some((b) => b.type === 'button' && b.action === 'send message' && String(b.value ?? '').trim() === p.message)) };
         if (otherBtn.on) return null; // a ☰ button of your own already opens this menu: don't draw a second one on top of it
         const E = s.engine, S = E.safe, B = S.bars || { top: 0, bottom: 0, left: 0, right: 0 }, left = p.side !== 'right', K = uiK(S);
         const x = left ? S.left + B.left + 34 * K : E.width - S.right - B.right - 34 * K, y = p.button === 'bottom corner' ? E.height - S.bottom - B.bottom - 34 * K : S.top + B.top + 34 * K;

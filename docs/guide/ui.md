@@ -14,6 +14,12 @@ UI is everything drawn on the screen rather than in the world: scores, health ba
   - the screen's centre and safe-area edges, and its own anchor point.
   - Pink guides show what it lined up with, and a small label shows the gap. A little buzz tells you it caught.
   - *Preferences › Editing* has **UI snaps to other UI** (on/off), **UI snap gap** (none, 4–24 px) and **UI snap strength**.
+- **Place (UI Element card):** one tap puts the element at the **left, centre or right** and the **top, middle or bottom** of its page (or the screen, if it has no parent), 16 px in from the edge. The last button makes it **full width** with a 16 px margin.
+- **Align several at once:** in the Hierarchy tap **Select**, tick two or more UI elements, then **Align**:
+  - **Line up:** left edges, centres across, right edges, top edges, middles down or bottom edges.
+  - **Spread out:** even gaps across or down (three or more; the first and last stay put).
+  - **Size:** the same width or height as the first one ticked.
+- **Staying on screen:** in play, a button, field or card a little wider than the page (less 16 px each side) narrows to fit. Text set to wrap at a width wraps before the edge, so nothing runs off a narrow phone or touches the sides. Things much wider than the screen, like backgrounds, are left alone.
 
 ### Anchors
 

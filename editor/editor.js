@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -186,6 +186,7 @@ function renderMultiBar() {
       act('child', 'Group', () => multiGroup(list)),
       act(visible ? 'eyeoff' : 'eye', visible ? 'Hide' : 'Show', () => { for (const e of list) e.visible = !visible; changed({ structure: true }); pushHistory(); }),
       act('folder', 'Folder', () => moveToFolder(list)),
+      list.filter((e) => e.ui).length >= 2 ? h('button', { onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Line up' }, { icon: 'alignl', label: 'Left edges', fn: () => alignUI(list, 'left') }, { icon: 'alignc', label: 'Centres (across)', fn: () => alignUI(list, 'hcenter') }, { icon: 'alignr', label: 'Right edges', fn: () => alignUI(list, 'right') }, { icon: 'alignt', label: 'Top edges', fn: () => alignUI(list, 'top') }, { icon: 'alignm', label: 'Middles (down)', fn: () => alignUI(list, 'vcenter') }, { icon: 'alignb', label: 'Bottom edges', fn: () => alignUI(list, 'bottom') }, { cap: 'Spread out' }, { icon: 'spreadh', label: 'Even gaps across', fn: () => alignUI(list, 'hspace') }, { icon: 'spreadv', label: 'Even gaps down', fn: () => alignUI(list, 'vspace') }, { cap: 'Size' }, { icon: 'scale', label: 'Same width as the first', fn: () => alignUI(list, 'samew') }, { icon: 'scale', label: 'Same height as the first', fn: () => alignUI(list, 'sameh') }]) }, icon('alignl'), 'Align') : null,
       act('trash', 'Delete', () => multiDelete(list), 'danger'))));
 }
 /** Top-most picks only: a ticked child is already covered by its ticked parent. */
@@ -3255,6 +3256,57 @@ function anchorPresets(j, inParent) {
   return h('div', { class: 'row' }, h('label', {}, inParent ? 'Anchor (in parent)' : 'Anchor'), h('div', { class: 'ap-wrap' }, h('div', { class: 'ap-grid' }, cells),
     h('div', { class: 'ap-help' }, h('b', {}, `${['Top', 'Middle', 'Bottom', 'Stretch'][rowOf]} · ${['Left', 'Centre', 'Right', 'Stretch'][colOf]}`), h('span', {}, 'Last row / column stretches across. It keeps its place when you change the anchor.'))));
 }
+/** Where a UI element's room is (its parent, or the screen less the bars), in screen pixels. */
+function uiRoomOf(live) {
+  const S = UIS(), p = live.parentEnt?.ui ? live.parentEnt : null, A = uiArea(S.w, S.h, S.safe, live);
+  if (!p) return A;
+  const r = uiBox(p, S.w, S.h, S.safe), l = Math.max(r.x - r.w / 2, A.l), t = Math.max(r.y - r.h / 2, A.t), rr = Math.min(r.x + r.w / 2, A.l + A.w), b = Math.min(r.y + r.h / 2, A.t + A.h);
+  return rr - l > 20 && b - t > 20 ? { l, t, w: rr - l, h: b - t } : { l: r.x - r.w / 2, t: r.y - r.h / 2, w: r.w, h: r.h }; // (the part of the parent on screen)
+}
+/** Move a UI element so its box's centre lands at screen (x, y) (either may be null to keep it). */
+function placeUIAt(j, x, y, b0) {
+  const live = engine.scene.byId(j.id); if (!live && !b0) return;
+  const S = UIS(), b = b0 || uiBox(live, S.w, S.h, S.safe), k = S.safe?.k || 1;
+  if (x != null) j.x = Math.round(((j.x || 0) + (x - b.x) / k) * 2) / 2;
+  if (y != null) j.y = Math.round(((j.y || 0) + (y - b.y) / k) * 2) / 2;
+  if (!b0) rebuild(); // (several at once: each from the box it had, one rebuild at the end)
+}
+const PLACE_GUTTER = 16;
+/** One tap to put a UI element at the left / centre / right or top / middle / bottom of its page (or the screen), a gutter in from the edge. */
+function placeRow(j) {
+  const go = (hx, vy) => {
+    const live = engine.scene.byId(j.id); if (!live) return; const S = UIS(), b = uiBox(live, S.w, S.h, S.safe), R = uiRoomOf(live), g = PLACE_GUTTER * (S.safe?.k || 1);
+    const x = hx == null ? null : hx === 0 ? R.l + g + b.w / 2 : hx === 1 ? R.l + R.w / 2 : R.l + R.w - g - b.w / 2;
+    const y = vy == null ? null : vy === 0 ? R.t + g + b.h / 2 : vy === 1 ? R.t + R.h / 2 : R.t + R.h - g - b.h / 2;
+    placeUIAt(j, x, y); changed({ inspector: true }); pushHistory();
+  };
+  const fullW = () => { j.stretch = j.stretch === 'height' ? 'both' : 'width'; j.margin = PLACE_GUTTER; changed({ structure: true }); pushHistory(); };
+  const b = (ic, title, fn) => h('button', { class: 'place-btn', title, 'aria-label': title, onclick: fn }, icon({ l: 'alignl', c: 'alignc', r: 'alignr', t: 'alignt', m: 'alignm', b: 'alignb', w: 'fullw' }[ic]));
+  return h('div', { class: 'row' }, h('label', {}, 'Place'), h('div', { class: 'place-row' },
+    b('l', 'Left (16 in)', () => go(0, null)), b('c', 'Centre', () => go(1, null)), b('r', 'Right (16 in)', () => go(2, null)), h('i', { class: 'place-sep' }),
+    b('t', 'Top (16 in)', () => go(null, 0)), b('m', 'Middle', () => go(null, 1)), b('b', 'Bottom (16 in)', () => go(null, 2)), h('i', { class: 'place-sep' }),
+    j.stretch === 'width' || j.stretch === 'both' ? null : b('w', 'Full width (16 in)', fullW)));
+}
+/** Several UI elements at once: line up their edges or centres, spread them out evenly, or give them the same size. */
+function alignUI(list, how) {
+  const S = UIS(), live = list.map((j) => ({ j, q: engine.scene.byId(j.id) })).filter((o) => o.q && o.j.ui);
+  if (live.length < 2) { toast('Select two or more UI elements'); return; }
+  const B = live.map((o) => ({ ...o, b: uiBox(o.q, S.w, S.h, S.safe) }));
+  const L = Math.min(...B.map((o) => o.b.x - o.b.w / 2)), R = Math.max(...B.map((o) => o.b.x + o.b.w / 2)), T = Math.min(...B.map((o) => o.b.y - o.b.h / 2)), Bt = Math.max(...B.map((o) => o.b.y + o.b.h / 2));
+  if (how === 'left') for (const o of B) placeUIAt(o.j, L + o.b.w / 2, null, o.b);
+  else if (how === 'hcenter') for (const o of B) placeUIAt(o.j, (L + R) / 2, null, o.b);
+  else if (how === 'right') for (const o of B) placeUIAt(o.j, R - o.b.w / 2, null, o.b);
+  else if (how === 'top') for (const o of B) placeUIAt(o.j, null, T + o.b.h / 2, o.b);
+  else if (how === 'vcenter') for (const o of B) placeUIAt(o.j, null, (T + Bt) / 2, o.b);
+  else if (how === 'bottom') for (const o of B) placeUIAt(o.j, null, Bt - o.b.h / 2, o.b);
+  else if (how === 'hspace' || how === 'vspace') { // the same gap between each, ends stay put
+    if (B.length < 3) { toast('Select three or more to spread out'); return; }
+    const hz = how === 'hspace', sz = (o) => (hz ? o.b.w : o.b.h), pos = (o) => (hz ? o.b.x : o.b.y), S0 = [...B].sort((a, c) => pos(a) - pos(c));
+    const span = (hz ? R - L : Bt - T), gap = (span - S0.reduce((a, o) => a + sz(o), 0)) / (S0.length - 1); let at = hz ? L : T;
+    for (const o of S0) { const c = at + sz(o) / 2; if (hz) placeUIAt(o.j, c, null, o.b); else placeUIAt(o.j, null, c, o.b); at += sz(o) + gap; }
+  } else if (how === 'samew' || how === 'sameh') { const ref = sizeOf(B[0].j); if (!ref) return; for (const o of B.slice(1)) { const z = sizeOf(o.j); if (z) setSize(o.j, how === 'samew' ? ref[0] : z[0], how === 'sameh' ? ref[1] : z[1]); } rebuild(); }
+  rebuild(); changed({ inspector: true }); pushHistory(); toast('Lined up');
+}
 /** Width / height of a UI element (what the Rect tool changes). */
 function sizeRow(j) {
   const sz = sizeOf(j); if (!sz) return null;
@@ -3440,6 +3492,7 @@ function renderInspector() {
     box.append(comp('UI Element', [
       h('p', { class: 'desc' }, inParent ? `Anchored inside its parent “${ent(j.parent).name}”: it moves and stretches with it.` : 'UI stays fixed on the screen. Anchor it to a corner, edge or the centre so it fits every phone, or stretch it across.'),
       anchorPresets(j, inParent),
+      placeRow(j),
       sizeRow(j),
       C('stretch', { label: inParent ? 'Stretch inside parent' : 'Stretch to screen', type: 'select', options: [['none', 'No'], ['width', 'Full width'], ['height', 'Full height'], ['both', 'Fill']], def: 'none', structure: true }),
       j.stretch && j.stretch !== 'none' && C('margin', { label: 'Margin', type: 'number', def: 16, range: [0, 120], step: 2 }),

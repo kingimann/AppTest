@@ -267,6 +267,9 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 ### UI snapping
 
 - Moving or resizing UI snaps its edges and centre to other elements (edges, centres, side by side touching or with a gap), its parent and the screen, with pink guides and a gap label. The gap, strength and an on/off switch are in *Preferences › Editing*.
+- **Place** buttons on the UI Element card put an element at the left / centre / right or top / middle / bottom of its page, 16 px in from the edge, or make it full width.
+- **Align** (Hierarchy › Select, two or more UI elements) lines up edges or centres, spreads them out with even gaps, or makes them the same width or height.
+- In play, fixed-width buttons, fields and text stay inside the screen with a 16 px gutter on narrow or tall phones instead of touching or running off the edges.
 
 ### Social app UI
 

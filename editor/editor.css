@@ -2213,3 +2213,18 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .size-lock{flex:none;width:30px;height:30px;border-radius:8px;border:1px solid var(--dim);background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
 .size-lock svg{width:16px;height:16px}
 .size-lock.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent)}
+/* Inspector: name details in one line, group chips, one at a time */
+.insp-head .hd { grid-column: 1 / -1; }
+.insp-head .hd-h { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 4px 2px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13.5px; cursor: pointer; text-align: left; }
+.insp-head .hd-h svg { width: 15px; height: 15px; flex: none; transform: rotate(-90deg); transition: transform .15s; }
+.insp-head .hd.open .hd-h svg { transform: none; }
+.insp-head .hd-h span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-head .hd-h small { flex: none; font-size: 12px; color: var(--dim); }
+.insp-head .hd:not(.open) .hd-b { display: none; }
+.insp-head .hd-b { display: flex; flex-direction: column; gap: 8px; padding-top: 4px; }
+.insp-head .hd-b .meta { grid-column: auto; }
+.og-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 4px 0 8px; }
+.og-chip { border: 1px solid var(--dim); background: transparent; color: var(--muted); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.og-chip.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); color: var(--text); }
+.comp-tools .one-btn.on { color: var(--accent-text, var(--accent)); border-color: var(--accent); }
+.comp-tools .one-btn { white-space: nowrap; }

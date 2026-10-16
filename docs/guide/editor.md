@@ -89,12 +89,15 @@ Every object in the current level, in drawing order.
 
 The selected object's settings, as **components** (cards).
 
-- **Header:** name, **tags** (chips; + adds one), **Layer** (collision layer), **Draw** layer and order, **Parent**.
+- **Header:** the name, with one line under it ("No tags · Layer Default · in Home Page"). Tap it for the **Details**: **tags** (chips; + adds one), **Layer** (collision layer), **Draw** layer and order and **Parent**. It stays open or closed as you leave it.
+- **What it is comes first:** on a UI element with a component of its own (a Bottom Nav, a Feed, a Side Menu, a Button…), that component's card is at the top and open. *Rect Transform* and *UI Element* (where it sits) come after it, folded, the first time you select it.
 - **Components:** each card can be folded. Closed cards show a summary ("run speed 240 · jump power 680").
 - **Add Component:** suggestions for this object, recently used, and folders (Physics, Colliders, Controllers, Combat, Survival, Crafting, AI, Logic, UI…). Search covers everything.
 - **Quick add** chips sit next to Add Component.
 - **⋯ on a card:** Copy, **Paste Values** (from another component of the same type), Copy as Text, move up / down, turn off, remove, and **Docs** (opens this component's reference page).
 - **Collapse all / Expand all** folds every card. The choice is remembered for the next object you select.
+- **One open:** turn it on and opening a card closes the others, so you only ever scroll through one.
+- **Group chips:** a big component (a Feed, a Side Menu…) shows a row of chips for its groups (Look, Behaviour, Colours, More settings…). Tap one to open that group, close the others and jump to it.
 - **Top row:** back to the Hierarchy, **Search settings** (finds a setting in this object's cards), **Advanced** and **Only changed**.
 - **Where it lives:** under the top row, the path to the object (Level › parent › object). Tap a parent to select it, or the level name to go back to nothing selected. On the right, **‹ 2 / 21 ›** steps to the previous or next object in the level.
 - **Jump chips:** with three or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. Once you've scrolled down, an **↑** chip at the start takes you back to the top. A card's header also sticks to the top while you scroll through it.

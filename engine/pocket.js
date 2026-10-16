@@ -7514,7 +7514,9 @@ registerBehavior('uiBottomNav', {
           if (T[j]) { if (p.haptics !== false) s.engine.vibrate(6); goTab(s, j, cur); }
         }
         const TOP = topOn(); if (TOP) strip.input(inp, (q) => ({ x: (q.x - r.x) / K + e.x, y: (q.y - r.y) / K + e.y })); // (too many tabs: drag them sideways)
+        const above = s.entities.filter((q) => q !== e && q.ui && q.visible && !q.dead && !q._parentHidden && q.behaviors.some((b) => b.type === 'uiBottomNav' && !b.off) && ((q.layer || 0) > (e.layer || 0) || ((q.layer || 0) === (e.layer || 0) && s.entities.indexOf(q) > s.entities.indexOf(e)))); // another bar drawn over this one (a duplicate in the same place)
         for (const t of s.engine.input.taps) {
+          if (above.length && above.some((q) => { const R = uiRect(s, q); return Math.abs(t.x - R.x) <= R.w / 2 && Math.abs(t.y - R.y) <= R.h / 2; })) continue; // a tap on the bar on top is that bar's, not this hidden one's
           const lx = (t.x - r.x) / K + e.x, ly = (t.y - r.y) / K + e.y, raised = !TOP && ((p.style === 'raised center' && T.length % 2 === 1) || p.style === 'curved'); // (their circles stick up above the bar)
           let i = TOP ? strip.hit(lx, ly) : G.at(lx);
           const inBar = TOP ? i >= 0 : ly >= G.by - (raised ? G.bh * 0.5 : 0) && ly <= G.by + G.bh + (p.fillSafe ? 40 : 0) && i >= 0 && i < G.n;

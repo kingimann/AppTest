@@ -210,6 +210,16 @@ function socialApp() {
         { author: 'Pocket News', handle: 'pocketnews', media: '☄️', color: '#111827', text: 'Comet watch: look north-east after sunset', _at: t - 1 * H },
       ] },
     { name: 'StoryViews', fields: [{ name: 'Story', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Name', type: 'text' }], rows: [] },
+    { name: 'Listings', fields: [{ name: 'Title', type: 'text' }, { name: 'Price', type: 'number' }, { name: 'Category', type: 'text' }, { name: 'Condition', type: 'text' }, { name: 'Location', type: 'text' }, { name: 'Description', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' }, { name: 'Seller', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Sold', type: 'yes/no' }],
+      rows: [
+        { title: 'Road bike, 54 cm', price: 320, category: 'Sports', condition: 'Used – good', location: 'Lisbon', description: 'Aluminium frame, Shimano gears, new tyres last month. Great for commuting.', media: '🚲', color: '#10b981', seller: 'Maya Chen', handle: 'maya', _at: t - 3 * H },
+        { title: 'iPhone 13, 128 GB', price: 410, category: 'Electronics', condition: 'Used – like new', location: 'Porto', description: 'Always in a case, battery 91%. Comes with the box and cable.', media: '📱', color: '#4f7cff', seller: 'Leo Park', handle: 'leop', _at: t - 7 * H },
+        { title: 'Mid-century armchair', price: 140, category: 'Home & Garden', condition: 'Used – good', location: 'Lisbon', description: 'Solid wood, original fabric. Pick up only.', media: '🛋️', color: '#f59e0b', seller: 'Sofia Ruiz', handle: 'sofiaruiz', _at: t - 20 * H },
+        { title: 'Acoustic guitar + case', price: 95, category: 'Hobbies', condition: 'Used – fair', location: 'Braga', description: 'Plays well, a few scratches. Strings changed in May.', media: '🎸', color: '#ef4444', seller: 'Amir Haddad', handle: 'amir', _at: t - 30 * H },
+        { title: 'Board games bundle', price: 0, category: 'Free', condition: 'Used – good', location: 'Lisbon', description: 'Catan, Ticket to Ride and Codenames. Free to a good home!', media: '🎲', color: '#7c3aed', seller: 'Ava Brooks', handle: 'avab', _at: t - 2 * H },
+        { title: 'Denim jacket (M)', price: 25, category: 'Clothing', condition: 'Used – like new', location: 'Coimbra', description: 'Worn twice. Smoke-free home.', media: '🧥', color: '#0ea5e9', seller: 'Jon Doe', handle: 'jondoe', _at: t - 50 * H },
+      ] },
+    { name: 'Points', fields: [{ name: 'Handle', type: 'text' }, { name: 'Name', type: 'text' }, { name: 'Points', type: 'number' }, { name: 'Streak', type: 'number' }, { name: 'Achievements', type: 'text' }], rows: [] },
     { name: 'Bookmarks', fields: [{ name: 'Handle', type: 'text' }, { name: 'Kind', type: 'text' }, { name: 'Ref', type: 'text' }, { name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Author Handle', type: 'text' }, { name: 'Text', type: 'text' }, { name: 'Media', type: 'text' }, { name: 'Post Author', type: 'text' }], rows: [] },
     { name: 'Reads', fields: [{ name: 'Chat', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'At', type: 'number' }],
       rows: [{ chat: 'dm-alex-maya', handle: 'maya', at: t - 0.76 * H }, { chat: 'dm-alex-leop', handle: 'leop', at: t - 25 * H }] },
@@ -227,7 +237,7 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }, { name: 'Liked By', type: 'text' }, { name: 'Media', type: 'text' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post\nsaved = Saved', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
+      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
@@ -239,6 +249,8 @@ function socialApp() {
         feed('feed-explore', 'grid', 60, { searchVar: 'q', gridColumns: 3 }),
       ]),
       ...app.page('p-notifications', 'notifications', false, [{ id: 'activity', name: 'Notifications', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiActivity', openPage: 'home', profilePage: 'user', text: INK, sub: MUTED }] }]),
+      ...app.page('p-marketplace', 'marketplace', false, [{ id: 'market', name: 'Marketplace', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiMarketplace', collection: 'Listings', chatPage: 'chat', text: INK, sub: MUTED }] }]),
+      ...app.page('p-achievements', 'achievements', false, [{ id: 'trophies', name: 'Achievements', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiAchievements', text: INK, sub: MUTED }] }]),
       ...app.page('p-saved', 'saved', false, [{ id: 'saved-list', name: 'Saved', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiBookmarks', openPage: 'home', text: INK, sub: MUTED }] }]),
       ...app.page('p-friends', 'friends', false, [{ id: 'friends-list', name: 'Friends', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiFriends', profilePage: 'user', text: INK, sub: MUTED }] }]),
       ...app.page('p-user', 'user', false, [
@@ -250,7 +262,7 @@ function socialApp() {
       ...app.page('p-chat', 'chat', false, [{ id: 'chat-view', name: 'Chat', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiChat', collection: 'Messages', text: INK, sub: MUTED }] }]),
       ...app.page('p-profile', 'profile', false, [
         { id: 'profile-head', name: 'Profile Header', ui: true, anchor: 'top', x: 0, y: 140, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 290, radius: 0, fill: '' },
-          behaviors: [{ type: 'uiProfile', social: true, listPage: 'friends', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nFollowing | 312', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
+          behaviors: [{ type: 'uiProfile', social: true, listPage: 'friends', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nScore | {points}', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
         { id: 'profile-grid', name: 'Photo Grid', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: 258, marginBottom: 0, shape: { type: 'rect', w: 400, h: 300, radius: 0, fill: '' }, behaviors: [{ type: 'uiPhotoGrid', collection: 'Posts', openPage: 'post' }] },
       ]),
       ...app.page('p-post', 'post', false, [
@@ -260,7 +272,7 @@ function socialApp() {
       ]),
       { id: 'side', name: 'Side Menu', ui: true, anchor: 'center', x: 0, y: 0, layer: 6, shape: { type: 'rect', w: 10, h: 10, radius: 0, fill: '' },
         behaviors: [{ type: 'uiSideBar', social: true, profilePage: 'profile', countsPage: 'friends', counts: 'following, followers and friends', sync: 'the Bottom Nav tabs', header: 'simple', title: '', avatar: '', style: 'rounded', bg: '@card', text: INK, accent: '@accent', iconColor: '', badgeColor: '#f91880',
-          items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\nSaved | bookmark | saved\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },
+          items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\nSaved | bookmark | saved\nMarketplace | shop | marketplace\nAchievements | trophy | achievements\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
         behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nReels | video | reels\nMessages | chat | inbox | unread\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],

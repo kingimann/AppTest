@@ -58,6 +58,13 @@ The sections:
 - **Testing:** an FPS counter and on-screen errors for trying a build on another phone.
 - The main button builds what you picked at the top. For a play file, **Share** sends it with the phone's share sheet. **Test** opens it in a new tab.
 
+## Test in Safari
+
+Before you upload anything, try the web app exactly as people will get it:
+
+- **Test in Safari** (top of Build Settings, or *☰ → Test in Safari*) builds the web app and opens it in a new tab. On an iPhone or iPad that is Safari itself, so you see real touch, safe areas, the keyboard and the status bar colour. Close the tab to come back to the editor.
+- **Copy test link** packs the project into a link to `play.html` (no upload needed). On a computer it is copied; on a phone the share sheet opens, so you can AirDrop or message it to your iPhone and open it in Safari. Very large projects (lots of pictures and sounds) are too big for a link: use Test in Safari or *A web app* instead.
+
 ## One HTML file
 
 **☰ → Build HTML** packs the engine, your game, its pictures and sounds into one `.html` file. Send it, upload it anywhere, or open it from Files. It works offline once opened.

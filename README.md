@@ -342,7 +342,13 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Select** (the tick button next to search): tick several objects (tapping a ×N group ticks all its copies), then **Duplicate**, **Group** (puts them in a new parent so they move together), **Hide / Show**, **Folder** or **Delete** them at once. **All** ticks everything shown.
   - **Getting started** is a one-line strip with the next step (tap to see all steps).
   - Bring to front / send to back; a lock button on locked objects.
+  - **Drag to reorder:** drop a row's grip on another row's top or bottom edge to move it above / below (same parent); on the middle to make it a child.
+  - **Double-tap a row (or F2) to rename it** in place; **hold or right-click any row** for its menu; **Shift-click** a second row to tick both.
+  - **Keyboard:** Ctrl/⌘ Z / Shift Z / Y, Delete, Ctrl/⌘ D, Ctrl/⌘ C / V, F2, F (focus), ↑ ↓ (move through the list), ← → (fold children), Esc.
+- **Saving:** unsaved changes are kept in IndexedDB (big games too) and offered back after a crash or a closed tab; restore points are taken of unsaved work too.
 - **Inspector**:
+  - **Several objects ticked:** edits what they share (visible, locked, draw order, rotation, scale, shape fill / outline / corners / shadow, text size / colour / align / font / weight), with *mixed* marks, **Move all by…**, **Line up…** and turning shared components off / on.
+  - **Hold or right-click a field's name:** Copy value, Paste value, Reset to default.
   - Short fields (numbers, dropdowns, colours, text) sit beside their label; component headers stay pinned while you scroll.
   - Only fields for the game's mode (2D or 3D) are shown. **Advanced** next to search shows the rarely used ones.
   - Category filters: Visual, Physics, Logic, Animation, Gameplay.

@@ -76,10 +76,14 @@ Every object in the current level, in drawing order.
 - Rows show a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing the object's components.
 - Three or more objects with the same name fold into one row (**Gem ×8**).
 - **Children** sit indented under their parent with a fold arrow and a tree line. Drag a row's grip onto another object to make it a child.
+- **Reorder by dragging:** drop the grip on the **top or bottom edge** of a row (a blue line shows) to move the object just above or below it, with the same parent. The order is the drawing order.
+- **Rename:** double-tap a row (or press F2) and type right in the list. Enter keeps it, Esc cancels.
+- **Hold any row** (or right-click it) for its menu: Rename, Duplicate, Copy, Make Child Of, Folder, Lock, Delete and more.
 - The eye and the drag grip are faint until a row is selected; the selected row has an accent edge.
 - **Folders:** long-press → *Put in Folder…*.
 - **Filter:** player, logic, physics, UI, templates, a tag or a layer. Search matches names, tags and components.
-- **Select** (tick button): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder or Delete them together.
+- **Select** (tick button, or Shift-click a second row): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder or Delete them together. The Inspector then edits all of them (below).
+- **Keyboard** (a tablet or computer keyboard): Ctrl/⌘ Z undo, Ctrl/⌘ Shift Z or Y redo, Delete removes, Ctrl/⌘ D duplicates, Ctrl/⌘ C / V copy and paste, F2 renames, F focuses the Scene on it, ↑ ↓ move through the Hierarchy, ← → fold and unfold children, Esc deselects. Not while you're typing in a field.
 
 ## Inspector
 
@@ -95,6 +99,8 @@ The selected object's settings, as **components** (cards).
 - **Where it lives:** under the top row, the path to the object (Level › parent › object). Tap a parent to select it, or the level name to go back to nothing selected. On the right, **‹ 2 / 21 ›** steps to the previous or next object in the level.
 - **Jump chips:** with three or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. Once you've scrolled down, an **↑** chip at the start takes you back to the top. A card's header also sticks to the top while you scroll through it.
 - **Remembers where you were:** come back to an object (with ‹ ›, the Hierarchy or the Scene) and its cards are open or closed as you left them, scrolled to the same place.
+- **Several objects ticked** (Hierarchy › Select): the Inspector shows **N objects** and the settings they share: Visible, Locked, Draw order, Rotation and Scale, the Shape's fill, outline, corners and shadow, and the Text's size, colour, alignment, font and weight. A change sets all of them; a field marked *mixed* shows the first one's value. **Move all by…** nudges them together, **Line up…** aligns UI, and the components they all have can be turned off or on together.
+- **Copy one setting:** hold a field's name (or right-click it) for **Copy value**, **Paste value** and **Reset to default**. Copy a colour from one object and paste it onto another.
 - **Nothing selected:** **Find an object…** searches the level by name, tag or component; tap a result to inspect it. Below it are the main objects (the player first).
 
 *Preferences › Compact panels* (on by default) makes Hierarchy rows shorter and Inspector fields smaller, so more fits on a phone screen.
@@ -216,10 +222,10 @@ Long-press an object → **Make Prefab**. It appears in *Project › Prefabs ›
 
 - **Projects are saved only when you save them.** Tap the **Save** button in the top bar (or ☰ → *Save*, or Ctrl/⌘ S). A dot after the game's name means there are unsaved changes.
 - **New games and templates aren't kept until you save them.** Before another project replaces the open one (opening a game, starting a new one, importing), it asks: **Save**, **Don't save** or **Cancel**. The browser also asks before the tab is closed with unsaved changes.
-- **If the app is closed with unsaved changes**, they are kept aside (not saved as the project), and next time it asks whether to bring them back.
+- **If the app is closed with unsaved changes**, they are kept aside (not saved as the project), and next time it asks whether to bring them back. They're kept in the device's database, so big games with pictures and sounds are kept too. The Save button's tooltip says when you last saved, and it gives a little check when you do.
 - To save as you go instead, pick *Straight away*, *After a few seconds* or *Every 10 seconds* in *☰ → Preferences… › Save my work*.
 - Saved projects live in the browser's database (IndexedDB).
-- *☰ → Restore Earlier Version…* keeps a restore point every few minutes (the last 12).
+- *☰ → Restore Earlier Version…* keeps a restore point every few minutes (the last 12), of unsaved work too (marked *not saved yet*), so an hour of changes is never one tap away from being lost.
 - *☰ → Back Up All Games* makes one file with every game and your saved scripts; **Restore** brings it back on any device.
 - *☰ → Export / Import JSON* moves a single game.
 

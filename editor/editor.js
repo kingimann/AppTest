@@ -3851,10 +3851,10 @@ function renderInspector() {
       def && { icon: 'help', label: 'Docs', fn: () => openDocs('ref/component/' + b.type) },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
-    const floatBtns = b.type === 'uiSideBar' && b.style !== 'rail' && b.side !== 'right' ? floatingMenuButtons(b.message || 'menu') : [];
+    const floatBtns = b.type === 'uiSideBar' && b.style !== 'rail' ? floatingMenuButtons(b.message || 'menu', b.side === 'right') : [], gearIc = b.side === 'right' ? '⚙' : '☰';
     if (floatBtns.length) box.append(h('div', { class: 'insp-fix', style: 'margin:8px;padding:12px;border-radius:12px;background:color-mix(in srgb, var(--accent) 14%, transparent);display:flex;flex-direction:column;gap:8px' },
-      h('div', {}, h('b', {}, 'The ☰ floats over your pages. '), 'Templates and rows at the top can run into it. Put it in a top bar and everything lays out under the bar, like in an app.'),
-      h('button', { class: 'btn', onclick: () => menuToTopBar(b.message || 'menu') }, icon('menu'), 'Put the ☰ in a top bar')));
+      h('div', {}, h('b', {}, `The ${gearIc} floats over your pages. `), 'Templates and rows at the top can run into it. Put it in the top bar and everything lays out under the bar, like in an app.'),
+      h('button', { class: 'btn', onclick: () => menuToTopBar(b.message || 'menu', b.side === 'right') }, icon(b.side === 'right' ? 'gear' : 'menu'), `Put the ${gearIc} in the top bar`)));
     if (b.type === 'uiShowIf' && j.ui && j.stretch === 'both' && (b.op || '=') === '=') { box.append(pageCard(j, b, i, threeD, C, menu)); return; } // a page: its own card
     const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
       .map((p) => { const v = b[p.key] ?? paramDefault(p, threeD); const t = String(v ?? ''); return t === '' ? null : `${String(p.label || p.key).replace(/\s*\(.*\)$/, '').split(' ').slice(0, 2).join(' ').toLowerCase()} ${t.length > 14 ? t.slice(0, 13) + '…' : t}`; }).filter(Boolean).join(' · ');
@@ -5329,7 +5329,8 @@ function addPrefab(def, at) {
     return null;
   };
   const layout = !!(def.before || def.after); // a preset of several parts: reuse the bars you already have
-  for (const b of def.before || []) { const b0 = (b.behaviors || [])[0], m = sends(b0); if (haveBtn(m) || (b0?.type === 'uiAppBar' && haveBar()) || (layout && twinBar(b)) || ((b.behaviors || []).some((bh) => bh.type === 'uiShowIf' && havePage(bh)))) continue; addTree(b, null, at); } // (a ☰ or a bar you already have, or a second page for a value that has one: skipped)
+  const mergeActions = (b0) => { const bar = project.entities.flatMap((q) => (q.behaviors || []).filter((x) => x.type === 'uiAppBar'))[0]; if (bar && b0?.actions) addBarActions(bar, b0.actions); };
+  for (const b of def.before || []) { const b0 = (b.behaviors || [])[0], m = sends(b0); if (b0?.type === 'uiAppBar' && haveBar()) mergeActions(b0); if (haveBtn(m) || (b0?.type === 'uiAppBar' && haveBar()) || (layout && twinBar(b)) || ((b.behaviors || []).some((bh) => bh.type === 'uiShowIf' && havePage(bh)))) continue; addTree(b, null, at); } // (a ☰ or a bar you already have, or a second page for a value that has one: skipped)
   const kids = def.children || def.props.children; // children can sit on the widget or inside its props
   const reuse = layout && twinBar(def.props);
   const j = reuse || (kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at));
@@ -5462,17 +5463,25 @@ function duplicateEntity(id) {
   changed({ structure: true }); pushHistory();
 }
 /** Buttons of your own (not inside a bar or a page) that open this Side Menu and float in a top corner. */
-function floatingMenuButtons(msg) {
-  if (project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiAppBar'))) return [];
+function floatingMenuButtons(msg, right = false) {
+  if (!right && project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiAppBar'))) return []; // (a ☰ is already on the bar; a ⚙ for a right-hand menu still moves onto it)
   return project.entities.filter((q) => q.ui && !q.parent && /^top/.test(q.anchor || '') && (q.behaviors || []).some((bh) => bh.type === 'button' && bh.action === 'send message' && String(bh.value ?? '').trim() === msg));
 }
 /** Swap floating ☰ buttons for a top bar whose ☰ opens the menu. */
-function menuToTopBar(msg) {
-  const ids = new Set(floatingMenuButtons(msg).flatMap((q) => subtree(q.id)));
+function menuToTopBar(msg, right = false) {
+  const btns = floatingMenuButtons(msg, right), icon0 = right ? (btns.map((q) => (project.entities.find((c) => c.parent === q.id && c.sprite)?.sprite?.src || '').replace(/^art:ui-/, '')).find(Boolean) || 'gear') : '';
+  const ids = new Set(btns.flatMap((q) => subtree(q.id)));
   project.entities = project.entities.filter((e) => !ids.has(e.id));
-  const bar = { id: uid(), ...clone(topBar(msg)) }; let n = 1; while (project.entities.some((e) => e.name === bar.name)) bar.name = `App Bar (${n++})`;
-  project.entities.push(bar); selectedId = bar.id;
-  changed({ structure: true }); pushHistory(); updateCtxBar(); toast('The ☰ is in a top bar now. Undo to go back.');
+  const have = project.entities.find((q) => (q.behaviors || []).some((x) => x.type === 'uiAppBar'));
+  if (have) { const ab = have.behaviors.find((x) => x.type === 'uiAppBar'); if (right) addBarActions(ab, `${icon0} | ${msg}`); else if (ab.left === 'back' || ab.left === 'none') ab.left = 'back, else menu'; selectedId = have.id; }
+  else { const bar = { id: uid(), ...clone(right ? topBar('menu', `${icon0} | ${msg}`) : topBar(msg)) }; project.entities.push(bar); selectedId = bar.id; }
+  changed({ structure: true }); pushHistory(); updateCtxBar(); toast(`The ${right ? '⚙' : '☰'} is in the top bar now. Undo to go back.`);
+}
+/** Add action buttons (lines “icon | message…”) to an App Bar, skipping ones it already has. */
+function addBarActions(ab, lines) {
+  const have = String(ab.actions || '').split('\n').map((l) => l.trim()).filter(Boolean), msgs = new Set(have.map((l) => (l.split('|')[1] || '').trim()));
+  for (const l of String(lines).split('\n').map((x) => x.trim()).filter(Boolean)) if (!msgs.has((l.split('|')[1] || '').trim())) have.push(l);
+  ab.actions = have.join('\n');
 }
 function deleteEntity(id) {
   const j = ent(id); if (!j) return;
@@ -8057,7 +8066,8 @@ function duplicateOnPage(pg, id) {
 /** A UI widget added while a page is shown goes on that page, under what's already there. */
 function adoptIntoPage(j, before) {
   if (!j?.ui || j.parent) return;
-  const k = (before && pageOf(before)) || (uiMode && curPage()), pg = k && k !== 'all' ? pageEnt(k) : null; if (!pg || pg.id === j.id) return; // the page you're working on: the selected thing's, or the one shown in the UI editor
+  const content = !!levelList()[0].settings?.app || (j.behaviors || []).some((b) => PAGE_FILLERS.has(b.type) || ['uiStories', 'uiComposer', 'uiProfile', 'uiForm', 'uiSearchBar'].includes(b.type)); // (in an app, or app content in a game: it goes on the page the app opens on, not over every page)
+  const k = (before && pageOf(before)) || ((uiMode || content) && curPage()), pg = k && k !== 'all' ? pageEnt(k) : null; if (!pg || pg.id === j.id) return; // the page you're working on: the selected thing's, or the one shown in the UI editor
   if ((j.behaviors || []).some((b) => PAGE_SKIP.has(b.type))) return;
   j.parent = pg.id;
   if ((j.behaviors || []).some((b) => PAGE_FILLERS.has(b.type)) && j.stretch !== 'both') { // a feed, chat or list: it fills the page under what is already there

@@ -96,6 +96,8 @@ Long text that doesn't fit its space ends in "…" instead of being squeezed. Ta
 | Touch Button | Your own on-screen control: left, right, up, down, jump, fire or a message while held |
 | List View / Scroll View | Scrolling lists and grids, with flick, snapping, pull to refresh and "load more" |
 
+**How scrolling feels:** every scrolling list, feed, page and Scroll View works like an iPhone. A flick keeps gliding at the speed your finger was moving as it let go, then slows down gently. If your finger stops before it lifts, the list stays put. A glide that reaches the end stops quickly and springs back, and a drag starts from where your finger is, with no jump.
+
 Lists inside components are typed one item per line with `|` between the parts, like `Coin Pack | 🪙 | 5 | item:Coin Pack`. The Inspector shows them as tables.
 
 ## Pages and navigation

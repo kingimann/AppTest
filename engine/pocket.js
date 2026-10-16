@@ -9330,6 +9330,7 @@ function postComposer(s, o) {
   };
   if (st.place) placeBox.dataset.editing = '1';
   paintMedia(); paintPoll(); paintPlace(); paintThread(); sync(); setTimeout(() => { grow(); ta.focus(); }, 320);
+  if (o.startWith) setTimeout(() => ({ photo: bPic, gif: bGif, poll: bPoll, place: bPlace })[o.startWith]?.click(), 340); // (opened from a Photo / GIF / Poll button on the box)
   return { wrap, close, textarea: ta, state: st };
 }
 
@@ -12182,8 +12183,10 @@ registerBehavior('uiProfile', {
 });
 
 registerBehavior('uiComposer', {
-  label: 'New Post Box', description: 'A “What’s happening?” bar with your avatar: tap it to write a post, which is added to a Posts collection (author, handle, text) and shows in a Social Feed.',
+  label: 'New Post Box', description: 'A “What’s happening?” box with your avatar, in one of several looks (a pill with a Post button, a card with Photo / GIF / Poll buttons, Facebook, Threads, a big button or a round + button). Tap it to write a post, which is added to a Posts collection (author, handle, text) and shows in a Social Feed.',
   params: [
+    { key: 'look', label: 'Look', type: 'select', options: ['pill', 'card', 'facebook', 'threads', 'minimal', 'button', 'round button'], default: 'pill', info: { pill: 'Avatar, a rounded “What’s happening?” field and a Post button (X).', card: 'A card: avatar and hint on top, Photo, GIF, Poll and Place buttons below that open the composer with that tool.', facebook: 'Avatar, an outlined “What’s on your mind?” field and a photo button.', threads: 'Your name with “Start a thread…” under it and small Photo / GIF / Poll icons (Threads).', minimal: 'Just the hint and a pencil, on a line.', button: 'One big accent button: ✎ New post.', 'round button': 'A round accent + button (put it in a corner).' } },
+    { key: 'avatar', label: 'Avatar picture ({variables} work, blank = initials)', type: 'text', default: '' },
     { key: 'placeholder', label: 'Hint', type: 'text', default: 'What’s happening?' },
     { key: 'collection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
     { key: 'author', label: 'Author ({variables} work)', type: 'text', default: '{playerName}' },
@@ -12199,21 +12202,22 @@ registerBehavior('uiComposer', {
     { key: 'threads', label: 'Threads (🧵 adds more posts)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'polls', label: 'Polls', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'places', label: 'Place (📍)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
-    ...colorParams({ field: ['Field', '@field'], text: ['Hint', '@sub'], accent: ['Button', '@accent'] }),
+    ...colorParams({ field: ['Field', '@field'], text: ['Hint', '@sub'], accent: ['Button', '@accent'], card: ['Card (card look)', '@card'], name: ['Name (threads look)', '@text'], line: ['Lines', '@line'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    let busy = false, asked = false;
+    let busy = false, asked = false, tool = '', tools = [], pressT = -9;
     return {
       uiAlways: true,
       start(e, s) { if (p.openOn) s.on('message', (m) => { if (m !== p.openOn || e.dead || busy || s.engine.editing || s._composeAt === s.time) return; s._composeAt = s.time; asked = true; }); }, // (one composer answers, even from another page)
       update(e, dt, s) {
-        if (busy || !(asked || UK.taps(s, e).some((t) => UK.in(t, UK.box(e))))) return; asked = false;
+        if (!busy && !asked) for (const t of UK.taps(s, e)) { if (!UK.in(t, UK.box(e))) continue; const hit = tools.find((q) => UK.in(t, q, 4)); tool = hit ? hit.k : ''; asked = true; pressT = s.time; break; }
+        if (busy || !asked) return; asked = false; const startWith = tool; tool = '';
         UK.tap(s, p); busy = true;
         const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
         if (p.style !== 'simple text box' && !s.engine.editing) {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
-          const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
+          const ok = postComposer(s, { startWith, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
             onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
@@ -12228,13 +12232,33 @@ registerBehavior('uiComposer', {
         });
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), av = Math.min(40, b.h - 12), name = fillTemplate(String(p.author || ''), s.vars) || 'Me';
-        miniAvatar(ctx, name, b.x + 10 + av / 2, b.cy, av);
-        ctx.font = `800 14px ${THEME.font}`; const bw = p.button ? ctx.measureText(p.button).width + 28 : 0;
-        const fx = b.x + 20 + av, fw = b.w - (fx - b.x) - (bw ? bw + 18 : 10);
-        ctx.fillStyle = p.field || 'rgba(128,128,128,0.15)'; UK.rr(ctx, fx, b.cy - 19, fw, 38, 19); ctx.fill();
-        UK.text(ctx, p.placeholder || '', fx + 16, b.cy + 1, { size: 15, weight: 500, color: p.text || '#8b8f97', align: 'left', maxW: fw - 24 });
-        if (bw) { ctx.fillStyle = p.accent || '#1d9bf0'; UK.rr(ctx, b.x + b.w - 10 - bw, b.cy - 17, bw, 34, 17); ctx.fill(); UK.text(ctx, p.button, b.x + b.w - 10 - bw / 2, b.cy + 1, { size: 14, weight: 800, color: '#fff' }); }
+        const b = UK.box(e), look = p.look || 'pill', name = fillTemplate(String(p.author || ''), s.vars) || 'Me', pic = fillTemplate(String(p.avatar || ''), s.vars).trim(), dark = isDark(s);
+        const field = tok(p.field || '@field') || (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'), hint = tok(p.text || '@sub') || '#8b8f97', acc = tok(p.accent || '@accent') || '#1d9bf0', line = tok(p.line || '@line') || 'rgba(128,128,128,0.25)', txt = tok(p.name || '@text') || '#111';
+        const press = Math.max(0, 1 - (s.time - pressT) / 0.25), avatar = (x, y, d) => miniAvatar(ctx, name, x, y, d, isPic(pic) ? pic : '');
+        const toolRow = (x, y, w, list, big) => { tools = []; const n = list.length, step = w / n; list.forEach(([k, ic, label, col], i) => { const cx = x + step * i + step / 2; if (big) { ctx.font = `700 14px ${THEME.font}`; const tw = ctx.measureText(label).width, gx = cx - (tw + 26) / 2; drawIco(ctx, ic, gx + 10, y, 20, col, { stroke: 2.1 }); UK.text(ctx, label, gx + 26, y + 1, { size: 14, weight: 700, color: hint, align: 'left' }); tools.push({ k, x: x + step * i, y: y - 18, w: step, h: 36 }); } else { drawIco(ctx, ic, cx, y, 20, col, { stroke: 2 }); tools.push({ k, x: cx - 18, y: y - 18, w: 36, h: 36 }); } }); };
+        const TOOLS = [['photo', 'image', 'Photo', '#22b573'], ['gif', 'gif', 'GIF', acc], ['poll', 'poll', 'Poll', '#f59e0b'], ['place', 'place', 'Place', '#f4212e']].filter(([k]) => (k === 'photo' || k === 'gif' ? p.photos !== false && (k !== 'gif' || p.gifs !== false) : k === 'poll' ? p.polls !== false : p.places !== false) && p.style !== 'simple text box');
+        ctx.save(); if (press) { const z = 1 - press * 0.02; ctx.translate(b.cx, b.cy); ctx.scale(z, z); ctx.translate(-b.cx, -b.cy); }
+        tools = [];
+        if (look === 'round button') { const r = Math.min(b.w, b.h) / 2 - 2; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.25)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(b.cx, b.cy, r, 0, Math.PI * 2); ctx.fill(); ctx.restore(); drawIco(ctx, 'plus', b.cx, b.cy, r * 0.9, '#fff', { stroke: 2.6 }); }
+        else if (look === 'button') { const h = Math.min(50, b.h - 8); ctx.fillStyle = acc; UK.rr(ctx, b.x + 8, b.cy - h / 2, b.w - 16, h, h / 2); ctx.fill(); ctx.font = `800 16px ${THEME.font}`; const l = p.button && p.button !== 'Post' ? p.button : 'New post', tw = ctx.measureText(l).width; drawIco(ctx, 'edit', b.cx - tw / 2 - 6, b.cy, 18, '#fff', { stroke: 2.2 }); UK.text(ctx, l, b.cx - tw / 2 + 12, b.cy + 1, { size: 16, weight: 800, color: '#fff', align: 'left' }); }
+        else if (look === 'minimal') { drawIco(ctx, 'edit', b.x + 22, b.cy, 20, acc, { stroke: 2.1 }); UK.text(ctx, p.placeholder || '', b.x + 44, b.cy + 1, { size: 16, weight: 500, color: hint, align: 'left', maxW: b.w - 60 }); ctx.fillStyle = line; ctx.fillRect(b.x + 12, b.y + b.h - 1, b.w - 24, 1); }
+        else if (look === 'threads') { const av = Math.min(40, b.h * 0.5); avatar(b.x + 12 + av / 2, b.y + 10 + av / 2, av); const tx = b.x + 24 + av; UK.text(ctx, name, tx, b.y + 18, { size: 15, weight: 800, color: txt, align: 'left' }); UK.text(ctx, p.placeholder && p.placeholder !== 'What’s happening?' ? p.placeholder : 'Start a thread…', tx, b.y + 38, { size: 15, weight: 500, color: hint, align: 'left', maxW: b.w - (tx - b.x) - 12 });
+          if (b.h >= 76 && TOOLS.length) { tools = []; TOOLS.forEach(([k, ic], i) => { const cx = tx + 10 + i * 34, y = b.y + 64; drawIco(ctx, ic, cx, y, 19, hint, { stroke: 2 }); tools.push({ k, x: cx - 16, y: y - 16, w: 32, h: 32 }); }); }
+          ctx.fillStyle = line; ctx.fillRect(b.x, b.y + b.h - 0.5, b.w, 0.5); }
+        else if (look === 'card') { ctx.save(); ctx.shadowColor = dark ? 'rgba(0,0,0,0.4)' : 'rgba(15,23,42,0.08)'; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; ctx.fillStyle = tok(p.card || '@card') || (dark ? '#1b1e25' : '#fff'); UK.rr(ctx, b.x + 4, b.y + 2, b.w - 8, b.h - 4, 16); ctx.fill(); ctx.restore();
+          const av = 38, topH = b.h >= 96 ? 56 : b.h - 4; avatar(b.x + 18 + av / 2, b.y + 2 + topH / 2, av); const fx = b.x + 28 + av; ctx.fillStyle = field; UK.rr(ctx, fx, b.y + 2 + topH / 2 - 18, b.w - (fx - b.x) - 16, 36, 18); ctx.fill(); UK.text(ctx, p.placeholder || '', fx + 14, b.y + 3 + topH / 2, { size: 15, weight: 500, color: hint, align: 'left', maxW: b.w - (fx - b.x) - 40 });
+          if (b.h >= 96 && TOOLS.length) { ctx.fillStyle = line; ctx.fillRect(b.x + 16, b.y + 2 + topH, b.w - 32, 0.5); toolRow(b.x + 8, b.y + 2 + topH + (b.h - 6 - topH) / 2, b.w - 16, TOOLS, true); } }
+        else if (look === 'facebook') { const av = Math.min(40, b.h - 12); avatar(b.x + 12 + av / 2, b.cy, av); const fx = b.x + 24 + av, fw = b.w - (fx - b.x) - 56; ctx.strokeStyle = line; ctx.lineWidth = 1.2; UK.rr(ctx, fx + 0.5, b.cy - 19.5, fw - 1, 39, 19.5); ctx.stroke();
+          UK.text(ctx, p.placeholder && p.placeholder !== 'What’s happening?' ? p.placeholder : 'What’s on your mind?', fx + 16, b.cy + 1, { size: 15, weight: 500, color: hint, align: 'left', maxW: fw - 24 });
+          if (TOOLS.some(([k]) => k === 'photo')) { const cx = b.x + b.w - 28; drawIco(ctx, 'image', cx, b.cy, 24, '#22b573', { stroke: 2 }); tools = [{ k: 'photo', x: cx - 20, y: b.cy - 20, w: 40, h: 40 }]; } }
+        else { // pill (X)
+          const av = Math.min(40, b.h - 12); avatar(b.x + 10 + av / 2, b.cy, av);
+          ctx.font = `800 14px ${THEME.font}`; const bw = p.button ? ctx.measureText(p.button).width + 28 : 0, fx = b.x + 20 + av, fw = b.w - (fx - b.x) - (bw ? bw + 18 : 10);
+          ctx.fillStyle = field; UK.rr(ctx, fx, b.cy - 19, fw, 38, 19); ctx.fill();
+          UK.text(ctx, p.placeholder || '', fx + 16, b.cy + 1, { size: 15, weight: 500, color: hint, align: 'left', maxW: fw - 24 });
+          if (bw) { ctx.fillStyle = acc; UK.rr(ctx, b.x + b.w - 10 - bw, b.cy - 17, bw, 34, 17); ctx.fill(); UK.text(ctx, p.button, b.x + b.w - 10 - bw / 2, b.cy + 1, { size: 14, weight: 800, color: '#fff' }); }
+        }
+        ctx.restore();
       },
     };
   },

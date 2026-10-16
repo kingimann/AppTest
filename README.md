@@ -298,6 +298,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - **Friends, follows and notifications, all connected:**
   - a social graph (Follows / Friends / Notifications collections, online with Supabase);
   - **Add friend** (requests, Accept / Decline) and **Follow** from feeds, profiles, Who To Follow and the **Friends** page;
+  - **bookmarks** for posts and comments (each person's own) and a **Saved** page with All / Posts / Comments tabs;
   - a **Notifications** page (grouped likes, comments, mentions, follows, friend requests and messages) with unread badges and live banners;
   - profile pages for everyone, opened by tapping their name.
 - The **Social** template has Explore, Messages, Chat, Notifications, Friends and profile pages.

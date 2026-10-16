@@ -7375,9 +7375,10 @@ function openBuildSettings() {
     const list = buildChecks(buildOpts(), target, jump), bad = list.filter((c) => c.lvl === 'bad').length, warn = list.filter((c) => c.lvl === 'warn').length;
     checkBox.replaceChildren(
       h('div', { class: 'bc-head ' + (bad ? 'bad' : warn ? 'warn' : 'ok') }, icon(bad ? 'warn' : warn ? 'info' : 'check'), h('b', {}, bad ? `${bad} thing${bad > 1 ? 's' : ''} to fix first` : warn ? `Ready, with ${warn} thing${warn > 1 ? 's' : ''} to look at` : 'Ready to build'),
-        h('button', { type: 'button', class: 'btn', onclick: () => { Object.assign(B(), { compress: true, showFps: false, showErrors: false, startLevel: '1', keepAwake: true, pauseHidden: true, backGesture: true, noMenu: true }); changed(); redo(); toast('Recommended settings on'); } }, icon('star'), 'Recommended')),
+      ),
       ...list.map((c) => h('div', { class: 'bc-row ' + c.lvl }, h('span', { class: 'bc-dot' }, c.lvl === 'ok' ? '✓' : c.lvl === 'bad' ? '✕' : '!'), h('span', { class: 'bc-t' }, c.text),
-        c.fix && h('button', { type: 'button', class: 'btn', onclick: () => { const r = c.fix[1](); if (r === undefined) { changed(); redo(); } } }, c.fix[0]))));
+        c.fix && h('button', { type: 'button', class: 'btn', onclick: () => { const r = c.fix[1](); if (r === undefined) { changed(); redo(); } } }, c.fix[0]))),
+      h('button', { type: 'button', class: 'bc-reco', onclick: () => { Object.assign(B(), { compress: true, showFps: false, showErrors: false, startLevel: '1', keepAwake: true, pauseHidden: true, backGesture: true, noMenu: true }); changed(); redo(); toast('Recommended settings on'); } }, icon('star'), 'Use the recommended settings'));
   };
   const last = o.last;
   const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, xcode: exportXcode, android: exportAndroid, itch: exportItch }[target];
@@ -7387,7 +7388,8 @@ function openBuildSettings() {
 
   openDialog('Build Settings', [
     h('h4', { class: 'bt-q' }, 'What are you making?'),
-    h('div', { class: 'build-targets' }, BUILD_TARGETS.map(([k, ic, label, desc]) => h('button', { type: 'button', class: 'bt' + (k === target ? ' on' : ''), onclick: () => { B().target = k; changed(); redo(); } }, icon(ic), h('b', {}, label), h('small', {}, desc)))),
+    h('div', { class: 'build-targets compact' }, BUILD_TARGETS.map(([k, ic, label, desc]) => h('button', { type: 'button', class: 'bt' + (k === target ? ' on' : ''), title: desc, onclick: () => { B().target = k; changed(); redo(); } }, icon(ic), h('b', {}, label)))),
+    h('p', { class: 'desc bt-desc' }, T[3]),
     h('div', { class: 'build-test' }, h('div', {}, h('b', {}, 'Try it in Safari first'), h('small', {}, 'Builds the web app and opens it in a new tab, exactly as people will get it. Or copy a test link and open it on your iPhone.')),
       h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn primary', onclick: testInSafari }, icon('globe'), 'Test in Safari'), h('button', { type: 'button', class: 'btn', onclick: copyTestLink }, icon('link'), 'Copy test link'))),
     last && h('p', { class: 'desc build-last' }, `Last built ${ago(last.at)}: ${BUILD_TARGETS.find((t) => t[0] === last.target)?.[2] || last.target}, version ${last.version}, ${kb(last.size || 0)}`),
@@ -7395,7 +7397,7 @@ function openBuildSettings() {
       h('div', {}, o.history.map((b) => h('div', { class: 'bh-row' }, h('b', {}, BUILD_TARGETS.find((t) => t[0] === b.target)?.[2] || b.target), h('span', {}, `v${b.version}`), h('span', {}, kb(b.size || 0)), h('small', {}, ago(b.at)))))),
     checkBox,
     h('div', { class: 'build-jump' }, sections.map(([k, l]) => h('button', { type: 'button', class: 'chip', onclick: () => jump(k) }, l)),
-      h('label', { class: 'chk bj-all' }, h('input', { type: 'checkbox', checked: showAll, onchange: (e) => { try { localStorage.setItem('pocket.build.all', e.target.checked ? '1' : '0'); } catch { /* storage unavailable */ } redo(); } }), 'Every setting')),
+      h('button', { type: 'button', class: 'chip bj-all' + (showAll ? ' on' : ''), title: 'Show the settings for every kind of build, not just this one', onclick: () => { try { localStorage.setItem('pocket.build.all', showAll ? '0' : '1'); } catch { /* storage unavailable */ } redo(); } }, icon(showAll ? 'check' : 'plus'), showAll ? 'All kinds shown' : 'Show all kinds')),
     foldTools(() => $('.dialog .db') || document.body, 'Search build settings'),
     sec('App', 'phone', [
       h('div', { class: 'build-app' }, preview, h('div', { class: 'build-app-t' }, h('b', {}, o.title || root.name), h('small', {}, [o.version && 'Version ' + o.version, o.author].filter(Boolean).join(' · ') || 'Pocket Engine game'))),

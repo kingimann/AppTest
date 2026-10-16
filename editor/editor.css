@@ -2193,3 +2193,19 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ps-crumb .btn svg { transform: rotate(90deg); }
 .ps-crumb-t { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
 .ps-crumb-t svg { width: 20px; height: 20px; color: var(--accent, #4c8bd6); }
+/* Build Settings: tidier top, and the bottom buttons always on top */
+.build-btns { z-index: 6; box-shadow: 0 -10px 16px -8px rgba(0,0,0,.45); }
+.build-targets.compact { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.build-targets.compact .bt { display: flex; flex-direction: row; align-items: center; gap: 10px; min-height: 52px; padding: 10px 12px; text-align: left; }
+.build-targets.compact .bt svg { flex: none; width: 22px; height: 22px; margin: 0; }
+.build-targets.compact .bt b { font-size: 14px; line-height: 1.2; }
+.bt-desc { margin: 8px 2px 4px; }
+.bc-head b { flex: 1; min-width: 0; }
+.bc-reco { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 8px; padding: 10px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--accent, #4c8bd6) 55%, transparent); background: none; color: var(--accent, #4c8bd6); font: inherit; font-weight: 700; font-size: 13px; cursor: pointer; }
+.bc-reco svg { width: 16px; height: 16px; }
+.build-jump .chip.bj-all { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.build-jump .chip.bj-all.on { background: color-mix(in srgb, var(--accent, #4c8bd6) 22%, transparent); color: var(--accent, #4c8bd6); }
+.build-jump .chip.bj-all svg { width: 14px; height: 14px; }
+.build-test .btns { flex-wrap: nowrap; }
+.build-test .btns .btn { flex: 1 1 0; min-width: 0; white-space: nowrap; padding: 0 10px; font-size: 14px; gap: 6px; }
+.build-test .btns .btn svg { flex: none; width: 18px; height: 18px; }

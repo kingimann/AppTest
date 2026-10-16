@@ -8670,16 +8670,16 @@ const UK = {
   /** A short bar at the top sharing its row with a floating ☰ button (the Side Menu's): it starts after the button instead of under it. */
   clearCorner(s, e, b, maxH = 90, band = 0) { // band: only the top strip this tall holds the row's contents (a taller box still clears the corner)
     if (e._dock || e.parentEnt?._dock || (!band && b.h > maxH)) return b; const E = s.engine, k = uiK(E.safe) || 1, o = uiOrigin(e, E.width, E.height, E.safe);
-    const sx0 = o.x + b.x * k, sx1 = o.x + (b.x + b.w) * k, sy0 = o.y + b.y * k, sy1 = o.y + (b.y + Math.min(b.h, band || b.h)) * k, zone = (sx1 - sx0) * 0.25; let l = -1e9, r = 1e9;
+    const sx0 = o.x + b.x * k, sx1 = o.x + (b.x + b.w) * k, sy0 = o.y + b.y * k, sy1 = o.y + (b.y + Math.min(b.h, band || b.h)) * k, zone = (sx1 - sx0) * 0.25; let l = -1e9, r = 1e9, bot = -1e9;
     const rel = (q) => { for (let a = e; a; a = a.parentEnt) if (a === q) return true; for (let a = q; a; a = a.parentEnt) if (a === e) return true; return false; };
-    const block = (x0, x1, y0, y1) => { if (y1 < sy0 + 4 || y0 > sy1 - 4 || x1 < sx0 || x0 > sx1) return; if ((x0 + x1) / 2 < (sx0 + sx1) / 2) l = Math.max(l, x1 + 8 * k); else r = Math.min(r, x0 - 8 * k); };
+    const block = (x0, x1, y0, y1) => { if (y1 < sy0 + 4 || y0 > sy1 - 4 || x1 < sx0 || x0 > sx1) return; bot = Math.max(bot, y1); if ((x0 + x1) / 2 < (sx0 + sx1) / 2) l = Math.max(l, x1 + 8 * k); else r = Math.min(r, x0 - 8 * k); };
     for (const q of s.entities) { // a ☰ (the Side Menu's, or a button of your own) or another small control in the same row: start after it / stop before it
       if (!q.ui || q.dead || !q.visible || q._parentHidden || q === e) continue; const sb = q.behaviors.find((x) => x.sideMenu), bt = sb?.btn?.(s);
       if (bt) { block(bt.x - bt.r, bt.x + bt.r, bt.y - bt.r, bt.y + bt.r); continue; }
       if (sb || rel(q) || q._dock || q.stretch === 'both' || q.stretch === 'width' || q.behaviors.some((x) => x.type === 'uiShowIf' || x.uiAlways && x.open !== undefined)) continue;
       const u = uiBox(q, E.width, E.height, E.safe); if (u.w > E.width * 0.3 || u.h > 120 * k || u.w < 8 || (u.x > sx0 + zone && u.x < sx1 - zone)) continue; block(u.x - u.w / 2, u.x + u.w / 2, u.y - u.h / 2, u.y + u.h / 2); }
     if (l === -1e9 && r === 1e9) return b; const n0 = Math.max(sx0, l), n1 = Math.min(sx1, r); if (n1 - n0 < 80 * k) return b;
-    const x = (n0 - o.x) / k, w = (n1 - n0) / k; return { ...b, x, w, cx: x + w / 2 };
+    const x = (n0 - o.x) / k, w = (n1 - n0) / k; return { ...b, x, w, cx: x + w / 2, below: (bot + 6 * k - o.y) / k }; // (below: where the row could start under the button instead)
   },
   fit(s, e, b) {
     if (e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe) return b; // (on a page too: a feed taller than the room left would scroll its last posts under the bar, out of reach)
@@ -12011,6 +12011,11 @@ function storyComposer(s, o) {
   return { close, wrap };
 }
 
+/** Where a Stories Row draws: a floating ☰ (or other small control) in its top corner pushes it down below the button, keeping its left edge, or (corner: starts after it) makes it start beside the button. */
+function storyBox(s, e) {
+  const p = e.behaviors.find((x) => x.type === 'uiStories') || {}, b0 = UK.box(e), c = UK.clearCorner(s, e, b0, 160, (+p.size || 64) + 34);
+  if (c === b0 || p.corner === 'starts after it' || !(c.below > b0.y)) return c; const y = c.below; return { ...b0, y, cy: b0.cy + (y - b0.y) };
+}
 registerBehavior('uiStories', {
   label: 'Stories', description: 'Story bubbles with a coloured ring (grey once you have seen them all). Tap to watch full screen: a story per person with several slides, progress bars, tap to go on, hold to pause, swipe sideways for the next person and down to close. Reply by message or with a quick emoji, like a story, and see who viewed yours. “Your story” makes one: a photo, video, GIF or words on a colour. Stories come from a Stories collection (and disappear after a day), else the list below.',
   params: [
@@ -12027,6 +12032,7 @@ registerBehavior('uiStories', {
     { key: 'views', label: '“Seen by” on your own stories', type: 'bool', default: true, info: 'Add a StoryViews collection (story, handle, name) to know who viewed them from other phones.' },
     { key: 'size', label: 'Bubble size', type: 'number', default: 64, step: 2 },
     { key: 'labels', label: 'Names under them', type: 'bool', default: true },
+    { key: 'corner', label: 'A floating ☰ in the corner', type: 'select', options: ['goes below it', 'starts after it'], default: 'goes below it', info: 'goes below it: the row moves down below the button and keeps its left edge. starts after it: the row stays where it is and begins beside the button.' },
     ...colorParams({ ring1: ['Ring (start)', '#feda75'], ring2: ['Ring (end)', '#d62976'], seenRing: ['Seen ring', 'rgba(128,128,128,0.45)'], text: ['Names', '@text'] }),
     ...UI_COMMON,
   ],
@@ -12118,7 +12124,7 @@ registerBehavior('uiStories', {
       update(e, dt, s) {
         if (wantOpen && gi < 0 && UK.live(s, e)) { const G0 = groups(s), all = [G0.mine, ...G0.others].filter(Boolean), h = wantOpen; wantOpen = ''; if (all.some((g) => g.handle === h)) openAt(e, s, h, all); }
         k = clamp(k + (gi >= 0 ? dt : -dt) / 0.2, 0, 1); tr += (0 - tr) * Math.min(1, dt * 12); if (Math.abs(tr) < 0.002) tr = 0;
-        const b = UK.clearCorner(s, e, UK.box(e), 160, (+p.size || 64) + 34), Dz = +p.size || 64, gap = 14, G = groups(s), n = G.others.length + (p.yours !== false ? 1 : 0); // (a row of stories starts after a floating ☰, not under it)
+        const b = storyBox(s, e), Dz = +p.size || 64, gap = 14, G = groups(s), n = G.others.length + (p.yours !== false ? 1 : 0); // (a row of stories starts after a floating ☰, not under it)
         if (gi >= 0) {
           if (!UK.live(s, e)) return close(e, s);
           const inp = s.engine.input, E = s.engine, W = E.width, H = E.height, sT = E.safe?.top || 0, sB = E.safe?.bottom || 0, c = cur(s); if (!c) return close(e, s);
@@ -12156,7 +12162,7 @@ registerBehavior('uiStories', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.clearCorner(s, e, UK.box(e), 160, (+p.size || 64) + 34), Dz = +p.size || 64, gap = 14, G = groups(s), lab = p.labels !== false, ring = [p.ring1 || '#feda75', p.ring2 || '#d62976'], seenC = p.seenRing || 'rgba(128,128,128,0.45)'; let x = b.x + 8 - S.v;
+        const b = storyBox(s, e), Dz = +p.size || 64, gap = 14, G = groups(s), lab = p.labels !== false, ring = [p.ring1 || '#feda75', p.ring2 || '#d62976'], seenC = p.seenRing || 'rgba(128,128,128,0.45)'; let x = b.x + 8 - S.v;
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y - 6, b.w, b.h + 12); ctx.clip();
         const cy = b.y + Dz / 2 + 6, txt = tok(p.text || '@text') || '#fff';
         const bubble = (name, sl, rng, d) => {

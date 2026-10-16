@@ -39,6 +39,14 @@ An app is a set of **pages**. A page is a full-screen panel with **Show If** on 
 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
 - **App Bar** shows the page title (*Page titles*: `home = My Tasks`, one per line) and a ‹ Back button. The phone's back gesture, the browser's Back button and Esc go back too.
+- **Page templates:** the page button › **New Page…** opens a gallery of ready-made pages. Pick one, name it, and it's built for you. Everything on it lines up by itself and uses your theme colours; change any of it afterwards.
+  - **Start:** Blank, Welcome, Coming Soon, Dashboard.
+  - **Account:** Sign In and Create Account (Supabase accounts), Settings (switches, a volume slider, rows, Sign out), My Profile (an editable profile with Posts / Replies / Media / Likes), Account.
+  - **Social:** Feed (stories, a post box, For you / Following), Explore, Messages, Chat, Notifications, Friends.
+  - **Shop:** Marketplace, Product (picture, price, sizes, Add to cart), Game Shop (coins & gems and items), Pricing (Free / Pro / Team plans).
+  - **Info:** About, FAQ, Contact (a form with Send), List (search and your records).
+  - **Game:** Main Menu, Levels, Leaderboard, Achievements.
+  - Pages that are usually tabs ask whether to add them to the bottom bar and side menu. Sign-in, chat, product and other one-off pages don't. An app's first page shows when it starts.
 - *Add → UI & Menus → App → App Page* adds a new page. Change its value from `newpage` to your page's name.
 - **In the editor** you see one page at a time, starting with the home page. Switch pages with the page button above the UI editor's screen, or select something on another page in the Hierarchy and the editor shows that page.
 

@@ -7622,11 +7622,11 @@ engine.uiFilter = (e) => {
 };
 function pageMenu(anchor) {
   const pages = uiPages();
-  if (!pages.size) { toast('No pages yet: add Project › UI › Navigation › Page or a Bottom Nav Bar'); return; }
+  if (!pages.size) { openPageTemplates(); return; } // no pages yet: make the first one
   const cur = curPage(), pg = cur !== 'all' && pageEnt(cur);
   popMenu(anchor, [{ cap: 'Show page' }, ...[...pages].flatMap(([v, vals]) => [...vals].map((val) => ({ icon: cur === `${v}=${val}` ? 'check' : 'square', label: `${val}`, k: v, fn: () => setUIPage(`${v}=${val}`) }))),
     '-', { icon: cur === 'all' ? 'check' : 'layers', label: 'All pages at once', k: 'stacked', fn: () => setUIPage('all') },
-    '-', { icon: 'plus', label: 'New Page…', fn: () => newPage() },
+    '-', { icon: 'plus', label: 'New Page…', k: 'ready-made or blank', fn: () => openPageTemplates() },
     pg && navBars(cur.split('=')[0]).length && !navBars(cur.split('=')[0]).some((b) => navTabs(b).some((r) => r[2] === cur.split('=')[1])) && { icon: 'plus', label: `Add “${cur.split('=')[1]}” to the bottom bar`, fn: () => { const [v, val] = cur.split('='), nm = (pg.name || val).replace(/ Page$/, ''); for (const b of navBars(v)) b.tabs = navTabsText([...navTabs(b), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } },
     pg && { icon: 'copy', label: `Duplicate “${cur.split('=')[1]}”…`, fn: () => newPage(pg) },
     pg && { icon: 'edit', label: `Rename “${cur.split('=')[1]}”…`, k: 'updates buttons and tabs', fn: () => renamePage(pg) },
@@ -7688,13 +7688,17 @@ function newPage(from, o = {}) {
     const app = !!levelList()[0].settings?.app;
     top = { id: uid(), name: name + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: app ? '@bg' : 'rgba(16,18,28,0.96)' },
       behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: val, whenUnset: false, anim: app ? 'push (iOS, follows navigation)' : 'slide (follows navigation)', stagger: 'rise one after another', scroll: true, stack: true, stackGap: 16 }] }; // (what you put on it lines up by itself)
-    project.entities.push(top, { id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
+    if (!uiPages().get('page')?.size) showIfOf(top).whenUnset = true; // the first page shows when the app starts
+    project.entities.push(top); if (!o.template?.noTitle) project.entities.push({ id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
+    if (o.template) fillPageTemplate(top, o.template, val);
   }
   for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
   const navs = navBars(v).filter((b) => !b.sync || b.sync === 'nothing'), inTab = navs.some((b) => navTabs(b).some((r) => r[2] === val)); // (a bar that keeps in step with the pages gets it by itself)
+  if (o.template?.tab === false) o.tab = false; // a sign-in, chat or product page isn't a tab
   if (navs.length && !inTab && (o.tab ?? confirm(`Add “${name}” to the bottom bar too?`))) for (const b of navs) b.tabs = navTabsText([...navTabs(b), [name, guessIcon(name), val]]);
   const sides = project.entities.flatMap((j) => (j.behaviors || []).filter((b) => b.type === 'uiSideBar' && (b.var || 'page') === v && (!b.sync || b.sync === 'nothing')));
   const inSide = sides.some((b) => String(b.items || '').split('\n').some((l) => (l.split('|')[2] || '').trim() === val));
+  if (o.template?.tab === false) o.side ??= false;
   if (sides.length && !inSide && (o.side ?? confirm(`Add “${name}” to the side menu too?`))) for (const b of sides) { // with the other pages: before the first line or section
     const L = String(b.items || '').split('\n'), at = L.findIndex((l) => /^\s*(-+|#.*)\s*$/.test(l)); L.splice(at >= 0 ? at : L.length, 0, `${name} | ${guessIcon(name)} | ${val}`); b.items = L.filter((l, i) => l.trim() || i < L.length - 1).join('\n'); }
   if (!o.stay) { setUIPage(`${v}=${val}`); selectedId = top.id; }
@@ -8134,6 +8138,99 @@ function menuAddMenu(mj) {
   draw();
   openDialog(`Add inside “${mj.name}”`, [h('p', { class: 'desc' }, 'It goes inside the menu and shows while the menu is open. Where it sits: Side Menu › Objects inside.'), chips, grid]);
 }
+/**
+ * Page templates: ready-made pages (sign in, settings, a feed, a shop, a main menu…). Each lists what goes on the page,
+ * top to bottom; the page lines it all up by itself, and a feed, chat or list fills the room under it.
+ */
+function pageTemplates() {
+  const app = !!levelList()[0].settings?.app, B = Object.fromEntries(pageBlocks().map((b) => [b.key, b])), blk = (k, pgv = '') => (B[k] ? B[k].make(pgv) : []);
+  const T = app ? { text: '@text', sub: '@sub', card: '@card', accent: '@accent', on: '@onAccent', line: '@line', field: '@field', danger: '@danger', shadow: '@shadow' }
+    : { text: '#ffffff', sub: 'rgba(255,255,255,0.7)', card: 'rgba(255,255,255,0.1)', accent: '#3a7bfd', on: '#ffffff', line: 'rgba(255,255,255,0.18)', field: 'rgba(255,255,255,0.1)', danger: '#ff5a6a', shadow: 'rgba(0,0,0,0.35)' };
+  const ui = { ui: true, anchor: 'top', x: 0 }, wide = { ...ui, stretch: 'width', margin: 16 };
+  const at = (o) => (o.center ? { anchor: 'top', x: 0 } : { anchor: 'top-left', x: 20 });
+  const H = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Heading', text: { value: v, size: o.size || 28, color: T.text, weight: '900', align: o.center ? 'center' : 'left', wrap: 360 } });
+  const P = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Text', text: { value: v, size: o.size || 15, color: o.color || T.sub, weight: o.weight || '500', align: o.center ? 'center' : 'left', wrap: 340 } });
+  const press = (action, value) => [{ type: 'button', action, value: value ?? '', amount: 1, sound: 'click', feel: 'spring', ripple: true }];
+  const btn = (label, action, value, o = {}) => ({ ...wide, name: o.name || `${label} Button`, shape: { type: 'rect', w: 368, h: o.h || 52, radius: 16, fill: o.outline ? '' : o.fill || T.accent, ...(o.outline ? { stroke: T.accent, lineWidth: 2 } : {}) }, text: { value: label, size: 17, color: o.outline ? T.accent : o.color || T.on, weight: '800' }, behaviors: press(action, value) });
+  const link = (label, action, value) => ({ ...ui, name: `${label} Link`, shape: { type: 'rect', w: 260, h: 36, radius: 10, fill: '' }, text: { value: label, size: 14, color: T.accent, weight: '700' }, behaviors: press(action, value) });
+  const input = (name, v, kind, ph, o = {}) => ({ ...wide, name, shape: { type: 'rect', w: 368, h: o.h || 52, radius: 14, fill: T.field, stroke: T.line, lineWidth: 1 }, text: { value: '', size: 16, color: T.text, weight: '500', align: 'left', inset: 16 }, behaviors: [{ type: 'uiInput', var: v, kind, placeholder: ph, maxLength: o.max || 80, placeholderColor: T.sub, focusColor: T.accent, ...(o.multi ? { multiline: true } : {}) }] });
+  const badge = (emoji, o = {}) => ({ ...ui, name: o.name || 'Picture', shape: { type: 'circle', r: o.r || 46, fill: o.fill || T.card }, text: { value: emoji, size: Math.round((o.r || 46) * 0.95) } });
+  const card = (name, h, kids) => ({ ...wide, name, shape: { type: 'rect', w: 368, h, radius: 18, fill: T.card, ...(app ? { shadow: T.shadow, shadowBlur: 12, shadowY: 3 } : {}) }, children: kids });
+  const qa = (q, a) => card(q.slice(0, 28) + ' (FAQ)', 104, [
+    { name: 'Question', anchor: 'top-left', x: 18, y: 28, text: { value: q, size: 16, color: T.text, weight: '800', align: 'left', wrap: 330 } },
+    { name: 'Answer', anchor: 'top-left', x: 18, y: 60, text: { value: a, size: 14, color: T.sub, weight: '500', align: 'left', wrap: 330 } }]);
+  const plan = (name, price, what, hot) => ({ ...card(`${name} Plan`, 176, [
+    { name: 'Plan Name', anchor: 'top-left', x: 18, y: 30, text: { value: name, size: 16, color: hot ? T.accent : T.sub, weight: '800', align: 'left' } },
+    { name: 'Plan Price', anchor: 'top-left', x: 18, y: 66, text: { value: price, size: 30, color: T.text, weight: '900', align: 'left' } },
+    { name: 'Plan Features', anchor: 'top-left', x: 18, y: 102, text: { value: what, size: 14, color: T.sub, weight: '500', align: 'left', wrap: 330 } },
+    { name: 'Plan Button', anchor: 'bottom', x: 0, y: -28, stretch: 'width', margin: 16, shape: { type: 'rect', w: 336, h: 40, radius: 12, fill: hot ? T.accent : '', ...(hot ? {} : { stroke: T.accent, lineWidth: 2 }) }, text: { value: hot ? 'Start free trial' : 'Choose', size: 15, color: hot ? T.on : T.accent, weight: '800' }, behaviors: press('send message', `plan ${name.toLowerCase()}`) }]), ...(hot ? { } : {}) });
+  const switchRow = (label, v, start = true) => { const r = blk('toggle')[0]; r.name = `${label} Switch`; r.children[0].text.value = label; r.children[0].name = `${label} Label`; r.children[1].behaviors[0].var = v; r.children[1].behaviors[0].start = start; return r; };
+  const row = (label, pgv, ico) => { const r = blk('row', pgv)[0]; r.name = `${label} Row`; r.children[0].text.value = (ico ? ico + '  ' : '') + label; return r; };
+  const section = (t) => ({ ...ui, anchor: 'top-left', x: 22, name: `${t} Section`, text: { value: t.toUpperCase(), size: 12, color: T.sub, weight: '800', align: 'left', spacing: 0.6 } });
+  const fill = (name, type, params = {}) => ({ ui: true, name, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginBottom: 0, shape: { type: 'rect', w: 400, h: 520, radius: 0, fill: '' }, behaviors: [{ type, ...params }] });
+  const soc = { text: '@text', sub: '@sub', accent: '@accent' };
+  const seg = (opts, v) => { const r = blk('tabs3')[0]; r.name = `${v} Tabs`; Object.assign(r.behaviors[0], { options: opts, var: v }); return r; };
+  const item = (emoji, name, what, price) => { const r = blk('shopitem')[0]; r.name = name; r.children[0].text.value = emoji; r.children[1].text.value = name; r.children[2].text.value = what; const pr = r.children.find((c) => /price|buy/i.test(c.name || '')); if (pr?.text) pr.text.value = `🪙 ${price}`; if (pr?.behaviors?.[0]) pr.behaviors[0].value = 'buy ' + name.toLowerCase(); return r; };
+  return [
+    // ---- Start ----
+    { key: 'blank', group: 'Start', label: 'Blank', icon: 'square', desc: 'Just a title', kids: () => [] },
+    { key: 'welcome', tab: false, group: 'Start', label: 'Welcome', icon: 'star', desc: 'A first screen: picture, words, Get started', noTitle: true, kids: () => [{ ...ui, name: 'Top Space', shape: { type: 'rect', w: 10, h: 40, radius: 0, fill: '' } }, badge('👋', { r: 56 }), H('Welcome!', { center: true, size: 32 }), P('Everything you need, in your pocket. Let’s get you set up — it only takes a minute.', { center: true }), btn('Get started', 'go to page', 'home'), btn('I already have an account', 'go to page', 'signin', { outline: true })] },
+    { key: 'empty', tab: false, group: 'Start', label: 'Coming Soon', icon: 'clock', desc: 'An empty state with a button back', noTitle: true, kids: () => [{ ...ui, name: 'Top Space', shape: { type: 'rect', w: 10, h: 80, radius: 0, fill: '' } }, badge('🚧'), H('Coming soon', { center: true, size: 26 }), P('We’re still building this part. Check back soon!', { center: true }), btn('Go back', 'back', '', { outline: true })] },
+    { key: 'dashboard', group: 'Start', label: 'Dashboard', icon: 'stats', desc: 'Numbers, progress and shortcuts', kids: () => [P('Here’s how things are going today.'), ...blk('stats'), ...blk('progress'), section('Shortcuts'), row('Profile', 'profile', '👤'), row('Settings', 'settings', '⚙️'), row('Help', 'help', '💬')] },
+    // ---- Account ----
+    { key: 'signin', tab: false, group: 'Account', label: 'Sign In', icon: 'player', desc: 'Email and password (Supabase accounts)', noTitle: true, setup: () => { (root.settings ||= {}).signInPage ??= 'signin'; }, kids: () => [{ ...ui, name: 'Top Space', shape: { type: 'rect', w: 10, h: 40, radius: 0, fill: '' } }, H('Welcome back', { center: true, size: 30 }), P('Sign in to continue', { center: true }), input('Email Box', 'email', 'email', 'Email'), input('Password Box', 'password', 'password', 'Password', { max: 64 }), P('{authError}', { center: true, color: T.danger, weight: '700', size: 13, name: 'Sign-in Error' }), btn('Sign in', 'sign in'), btn('Continue with Google', 'continue with google', 'google', { fill: T.card, color: T.text }), link('Forgot password?', 'send password reset'), link('New here? Create an account', 'go to page', 'signup')] },
+    { key: 'signup', tab: false, group: 'Account', label: 'Create Account', icon: 'player', desc: 'Name, email, password', noTitle: true, kids: () => [{ ...ui, name: 'Top Space', shape: { type: 'rect', w: 10, h: 40, radius: 0, fill: '' } }, H('Create your account', { center: true, size: 28 }), P('It’s free and takes a minute', { center: true }), input('Name Box', 'name', 'text', 'Your name', { max: 40 }), input('Email Box', 'email', 'email', 'Email'), input('Password Box', 'password', 'password', 'Password (8 or more letters)', { max: 64 }), P('{authError}', { center: true, color: T.danger, weight: '700', size: 13, name: 'Sign-up Error' }), btn('Create account', 'create account'), P('By signing up you agree to the Terms and Privacy Policy.', { center: true, size: 12 }), link('Already have an account? Sign in', 'go to page', 'signin')] },
+    { key: 'settings', group: 'Account', label: 'Settings', icon: 'gear', desc: 'Switches, a slider, rows and Sign out', kids: () => [section('Preferences'), switchRow('Notifications', 'notifications'), switchRow('Dark mode', 'darkMode', false), ...blk('volume'), section('Account'), row('Profile', 'profile', '👤'), row('Privacy', 'privacy', '🔒'), row('Help & support', 'help', '💬'), btn('Sign out', 'sign out', '', { fill: T.card, color: T.danger }), ...blk('smallprint')] },
+    { key: 'profile', group: 'Account', label: 'My Profile', icon: 'user', desc: 'Profile header (editable) with your posts', noTitle: true, kids: () => [{ ...wide, margin: 0, name: 'Profile Header', shape: { type: 'rect', w: 400, h: 300, radius: 0, fill: '' }, behaviors: [{ type: 'uiProfile', social: true, own: true, look: 'x', name: '{playerName}', handle: '{playerHandle}', bio: 'Hi! This is my profile.', verified: false, message: 'edit profile', listPage: 'friends', cover: app ? '#1d9bf0' : '#3a7bfd', bg: app ? '@bg' : '#10121c', ...soc }] },
+      fill('My Posts', 'uiFeed', { collection: 'Posts', look: 'timeline', filter: 'handle = {playerHandle}', tabs: 'Posts | posts\nReplies | replies\nMedia | media | grid\nLikes | likes', tabStyle: 'underline', tabHeight: 42, empty: 'Nothing here yet', ...soc })] },
+    { key: 'account', tab: false, group: 'Account', label: 'Account', icon: 'player', desc: 'Who is signed in, and Sign out', kids: () => [card('Account Card', 110, [
+      { name: 'Account Picture', anchor: 'left', x: 52, y: 0, shape: { type: 'circle', r: 32, fill: T.accent }, text: { value: '👤', size: 28 } },
+      { name: 'Account Name', anchor: 'left', x: 100, y: -14, text: { value: '{userName}', size: 20, color: T.text, weight: '800', align: 'left' } },
+      { name: 'Account Email', anchor: 'left', x: 100, y: 14, text: { value: '{userEmail}', size: 14, color: T.sub, weight: '600', align: 'left' } }]), row('Edit profile', 'editprofile', '✏️'), row('Change password', 'password', '🔑'), btn('Sign out', 'sign out', '', { fill: T.card, color: T.danger })] },
+    // ---- Social ----
+    { key: 'feed', group: 'Social', label: 'Feed', icon: 'list', desc: 'Stories, a post box and a timeline', noTitle: true, kids: () => [{ ...wide, margin: 0, name: 'Stories', shape: { type: 'rect', w: 400, h: 96, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: soc.text }] }, { ...wide, margin: 6, name: 'New Post Box', shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', ...(app ? {} : { field: 'rgba(255,255,255,0.1)' }) }] }, fill('Feed', 'uiFeed', { collection: 'Posts', look: 'timeline', tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', ...soc })] },
+    { key: 'explore', group: 'Social', label: 'Explore', icon: 'search', desc: 'Search and a grid of posts', kids: () => [{ ...wide, margin: 12, name: 'Search Bar', shape: { type: 'rect', w: 376, h: 44, radius: 22, fill: '' }, behaviors: [{ type: 'uiSearchBar', var: 'q', placeholder: 'Search posts, #tags, @people', collection: 'Posts', ...soc }] }, fill('Explore Grid', 'uiFeed', { collection: 'Posts', look: 'grid', searchVar: 'q', gridColumns: 3, ...soc })] },
+    { key: 'inbox', group: 'Social', label: 'Messages', icon: 'chat', desc: 'Direct and group chats', kids: () => [fill('Inbox', 'uiInbox', { collection: 'Messages', openPage: 'chat', ...soc })] },
+    { key: 'chat', tab: false, group: 'Social', label: 'Chat', icon: 'chat', desc: 'One conversation with a message box', noTitle: true, kids: () => [fill('Chat', 'uiChat', { collection: 'Messages', ...soc })] },
+    { key: 'activity', group: 'Social', label: 'Notifications', icon: 'bell', desc: 'Likes, comments, follows and requests', kids: () => [fill('Notifications', 'uiActivity', { openPage: 'home', profilePage: 'user', ...soc })] },
+    { key: 'friends', group: 'Social', label: 'Friends', icon: 'users', desc: 'Friends, requests and people to find', kids: () => [fill('Friends', 'uiFriends', { profilePage: 'user', ...soc })] },
+    // ---- Shop ----
+    { key: 'market', group: 'Shop', label: 'Marketplace', icon: 'shop', desc: 'Listings, categories and a sell form', kids: () => [fill('Marketplace', 'uiMarketplace', { collection: 'Listings', chatPage: 'chat', ...soc })] },
+    { key: 'product', tab: false, group: 'Shop', label: 'Product', icon: 'gem', desc: 'Picture, price, description, Add to cart', noTitle: true, kids: () => [{ ...wide, name: 'Product Picture', shape: { type: 'rect', w: 368, h: 260, radius: 20, fill: T.card }, text: { value: '👟', size: 120 } }, H('Running Shoes', { size: 26 }), { ...ui, anchor: 'top-left', x: 20, name: 'Price', text: { value: '$89.00', size: 22, color: T.accent, weight: '900', align: 'left' } }, P('Light, comfy and made for long runs. Breathable mesh, a soft sole and laces that stay tied.'), seg('S, M, L, XL', 'size'), btn('Add to cart', 'send message', 'add to cart'), btn('Buy now', 'send message', 'buy now', { outline: true })] },
+    { key: 'gameshop', group: 'Shop', label: 'Game Shop', icon: 'coin', desc: 'Coins & gems and items to buy', kids: () => [...blk('currency'), item('🗡️', 'Fire Sword', '+10 attack', 100), item('🛡️', 'Ice Shield', 'Blocks one hit', 150), item('👟', 'Speed Boots', '+20% speed', 80), item('🧪', 'Health Potion', 'Heals 50', 25)] },
+    { key: 'pricing', tab: false, group: 'Shop', label: 'Pricing', icon: 'star', desc: 'Free, Pro and Team plans', kids: () => [P('Pick the plan that fits you. Change any time.'), plan('Free', '$0', 'The basics, for trying it out.'), plan('Pro', '$4.99 / month', 'Everything unlocked, no ads, cloud sync.', true), plan('Team', '$12 / month', 'Up to 10 people, shared spaces.')] },
+    // ---- Info ----
+    { key: 'about', tab: false, group: 'Info', label: 'About', icon: 'info', desc: 'Your app, what it does, links', kids: () => [badge('✨', { r: 40 }), P('We make simple, friendly apps that help you get things done. Thanks for being here!'), row('Website', 'website', '🌐'), row('Contact us', 'contact', '✉️'), row('Privacy policy', 'privacy', '🔒'), ...blk('smallprint')] },
+    { key: 'faq', tab: false, group: 'Info', label: 'FAQ', icon: 'help', desc: 'Questions and answers', kids: () => [P('Answers to what people ask most.'), qa('How do I make an account?', 'Tap Create account on the sign-in page and fill in your name, email and a password.'), qa('Is it free?', 'Yes. Pro adds extras like cloud sync, but the basics are free forever.'), qa('How do I change my password?', 'Go to Account › Change password, or use Forgot password when signing in.'), qa('Can I use it offline?', 'Yes. Your changes are kept on the phone and sync when you are back online.'), btn('Still need help? Contact us', 'go to page', 'contact', { outline: true })] },
+    { key: 'contact', tab: false, group: 'Info', label: 'Contact', icon: 'mail', desc: 'A form: name, email, message, Send', kids: () => [P('We usually reply within a day.'), input('Your Name Box', 'contactName', 'text', 'Your name', { max: 40 }), input('Your Email Box', 'contactEmail', 'email', 'Email'), input('Message Box', 'contactMessage', 'text', 'How can we help?', { h: 120, max: 500, multi: true }), btn('Send', 'send message', 'contact sent')] },
+    { key: 'list', group: 'Info', label: 'List', icon: 'list', desc: 'Search and a list of records', kids: () => [...(app ? [...blk('search'), { ...blk('list')[0], anchor: 'center', y: 0, stretch: 'both', margin: 0, marginBottom: 0 }] : [P('Lists of records need an app: turn on Game Settings › App.')])] },
+    // ---- Game ----
+    { key: 'mainmenu', group: 'Game', label: 'Main Menu', icon: 'gamepad', desc: 'Title, Play and menu buttons', noTitle: true, kids: () => [{ ...ui, name: 'Top Space', shape: { type: 'rect', w: 10, h: 60, radius: 0, fill: '' } }, ...blk('gametitle'), ...blk('play'), ...blk('menustack')] },
+    { key: 'levels', group: 'Game', label: 'Levels', icon: 'grid', desc: 'A grid of levels with stars and locks', kids: () => [...blk('currency'), ...blk('levels')] },
+    { key: 'leaders', group: 'Game', label: 'Leaderboard', icon: 'trophy', desc: 'Top players and your rank', kids: () => [seg('Today, This week, All time', 'board'), ...blk('leader'), P('You are #12 with 4,210 points', { center: true, weight: '700' })] },
+    { key: 'trophies', group: 'Game', label: 'Achievements', icon: 'trophy', desc: 'Score, streak and trophies', kids: () => [fill('Achievements', 'uiAchievements', soc)] },
+  ];
+}
+/** Build a template's content on a page (top to bottom; the page lines it up). */
+function fillPageTemplate(pg, tpl, pgv) {
+  const tall = (p) => { const sh = p.shape, t = p.text; if (sh) return +sh.h || (+sh.r || 0) * 2 || 40; if (t) { const sz = +t.size || 16, lines = Math.max(1, Math.ceil(String(t.value || '').length * sz * 0.5 / (+t.wrap || 360))); return sz * 1.35 * lines; } return 40; };
+  const add = (p, parent, y) => { const { children, ...rest } = p; const j = { id: uid(), ui: true, ...clone(rest), parent }; if (y != null && /^top/.test(j.anchor || '') && j.stretch !== 'both') j.y = Math.round(y + tall(p) / 2); let n = 1; const base = j.name || 'Object'; j.name = base; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; project.entities.push(j); for (const c of children || []) add(c, j.id); return j; };
+  let y = tpl.noTitle ? 24 : 96; tpl.setup?.();
+  for (const p of tpl.kids(pgv)) { add(p, pg.id, y); if (p.stretch !== 'both') y += tall(p) + 16; } // in order, top to bottom (the page lines them up from there)
+}
+/** New Page: pick a ready-made page (or a blank one), then name it. */
+function openPageTemplates() {
+  const L = pageTemplates(), groups = [...new Set(L.map((t) => t.group))];
+  let g = store.get('pocket.editor.pageTplGroup', groups[0]); if (!groups.includes(g)) g = groups[0];
+  const grid = h('div', { class: 'pb-grid' }), chips = h('div', { class: 'chips pb-chips' });
+  const pick = (t) => { closeLayer(); const name = prompt('Name of the new page', t.key === 'blank' ? '' : t.label)?.trim(); if (!name) return; newPage(null, { name, template: t }); };
+  const draw = () => {
+    chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.pageTplGroup', x); draw(); } }, x, h('small', {}, String(L.filter((t) => t.group === x).length)))));
+    grid.replaceChildren(...L.filter((t) => t.group === g).map((t) => h('button', { type: 'button', class: 'pb-tile', 'data-tpl': t.key, onclick: () => pick(t) }, h('span', { class: 'pb-ic' }, icon(t.icon)), h('b', {}, t.label), h('small', {}, t.desc))));
+  };
+  draw();
+  openDialog('New page', [h('p', { class: 'desc' }, 'Start from a ready-made page. Everything on it lines up by itself and follows your theme; change any of it afterwards.'), chips, grid]);
+}
 /** Add a block to a page. */
 function addPageBlock(pg, blk, pgv) {
   const made = [], add = (p, parent) => { const { children, ...rest } = p; const j = { id: uid(), ui: true, ...clone(rest), parent }; let n = 1; const base = j.name; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; project.entities.push(j); made.push(j); for (const c of children || []) add(c, j.id); return j; };
@@ -8185,7 +8282,7 @@ function pageContent(pg) {
       rows.length > 1 ? h('button', { type: 'button', class: 'btn', title: 'Even gaps, top to bottom', onclick: () => stackPage(pg) }, icon('layers'), 'Line up') : null));
   return box;
 }
-function refreshPageBtn() { const b = $('.page-btn span'), k = curPage(); $('.page-btn')?.toggleAttribute('hidden', !uiPages().size); /* no pages: no button */ if (b) b.textContent = k === 'all' ? 'All pages' : k.split('=')[1]; }
+function refreshPageBtn() { const b = $('.page-btn span'), k = curPage(); $('.page-btn')?.toggleAttribute('hidden', !uiPages().size && !levelList()[0]?.settings?.app); /* no pages: no button */ if (b) b.textContent = k === 'all' ? 'All pages' : k.split('=')[1]; }
 const SCREENS = [['all', 'All'], ['play', 'Playing'], ['title', 'Title'], ['paused', 'Paused'], ['over', 'Game Over'], ['win', 'Win']];
 {
   const phoneBtn = h('button', { class: 'phone-btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Preview on' }, ...Object.entries(PHONES).map(([k, ph]) => ({ icon: k === phone ? 'check' : 'phone', label: ph.label, fn: () => setPhone(k) }))]) }, icon('phone'), h('span', {}, PHONES[phone]?.short || 'Phone'));

@@ -2209,3 +2209,7 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .build-test .btns { flex-wrap: nowrap; }
 .build-test .btns .btn { flex: 1 1 0; min-width: 0; white-space: nowrap; padding: 0 10px; font-size: 14px; gap: 6px; }
 .build-test .btns .btn svg { flex: none; width: 18px; height: 18px; }
+/* Size row: keep proportions */
+.size-lock{flex:none;width:30px;height:30px;border-radius:8px;border:1px solid var(--dim);background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;padding:0;cursor:pointer}
+.size-lock svg{width:16px;height:16px}
+.size-lock.on{background:color-mix(in srgb,var(--accent) 18%,transparent);border-color:var(--accent);color:var(--accent)}

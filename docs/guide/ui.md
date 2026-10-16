@@ -11,15 +11,21 @@ UI is everything drawn on the screen rather than in the world: scores, health ba
   - other elements' edges and centres on the same page;
   - next to another element, touching or a gap away (8 px by default);
   - its parent's edges and centre (and a gap inside them);
-  - the screen's centre and safe-area edges, and its own anchor point.
+  - the screen's centre and safe-area edges, and its own anchor point;
+  - **equal spacing:** halfway between the elements on either side of it, or the same gap the others in that row or column already have (both gaps are labelled).
+  - While **resizing**, the edge you pull also catches the **same width or height** as another element ("= width of Pill Button" shows next to the size).
   - Pink guides show what it lined up with, and a small label shows the gap. A little buzz tells you it caught.
   - The camera and light markers stay hidden where UI covers them (select one to see it).
   - *Preferences › Editing* has **UI snaps to other UI** (on/off), **UI snap gap** (none, 4–24 px) and **UI snap strength**.
+- **Keep proportions:** the 🔒 between W and H in *Size* keeps width and height in step, both when you type a size and when you drag a handle. Hold **Shift** while dragging for the same thing once. Grid snapping only rounds the side you pull.
+- **Nudge with the keyboard:** after tapping something in the Scene, the arrow keys move it 1 px (**Shift**: 10 px), or everything selected. A run of taps is one undo step. Tap the Hierarchy and the arrows go back to moving through the list.
 - **Place (UI Element card):** one tap puts the element at the **left, centre or right** and the **top, middle or bottom** of its page (or the screen, if it has no parent), 16 px in from the edge. The last button makes it **full width** with a 16 px margin.
 - **Align several at once:** in the Hierarchy tap **Select**, tick two or more UI elements, then **Align**:
   - **Line up:** left edges, centres across, right edges, top edges, middles down or bottom edges.
   - **Spread out:** even gaps across or down (three or more; the first and last stay put).
-  - **Size:** the same width or height as the first one ticked.
+  - **Align to:** the selection's outer edges, **the first one ticked** (it stays put and the rest line up to it), or **the page** (or the screen).
+  - **Stack down, gap… / Row across, gap…:** one after another with the exact gap you type, in the order they are now (the first stays put).
+  - **Size:** the same width, height, or both as the first one ticked.
 - **Staying on screen:** in play, a button, field or card a little wider than the page (less 16 px each side) narrows to fit. Text set to wrap at a width wraps before the edge, so nothing runs off a narrow phone or touches the sides. Things much wider than the screen, like backgrounds, are left alone.
 
 ### Anchors

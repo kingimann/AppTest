@@ -497,7 +497,7 @@ export const UI_WIDGETS_MORE = [
     ['My Profile Header', 'Social', 'player', 'uiProfile', 390, 290, { name: '{playerName}', handle: '{playerHandle}', own: true, verified: false, bio: 'Hi! This is my profile.', message: 'edit profile' }, { anchor: 'top', y: 200, vars: { playerName: 'Alex Rivera', playerHandle: 'alex', followers: 120 } }],
     ['New Post Box', 'Social', 'edit', 'uiComposer', 380, 56, {}, { anchor: 'top', y: 190 }],
     ['Photo Grid', 'Social', 'grid', 'uiPhotoGrid', 380, 380, {}],
-    ['Chat', 'Social', 'list', 'uiChat', 400, 600, {}, { note: 'Messages are kept in a Messages collection (chat, author, handle, text, media). The conversation comes from the variable chat (an Inbox or “Message @someone” sets it).' }],
+    ['Chat', 'Social', 'list', 'uiChat', 400, 600, {}, { note: 'Messages are kept in a Messages collection (chat, author, handle, text, media). The conversation comes from the variable chat (an Inbox or “Message @someone” sets it). Private: only the people in a direct message or group can see and write in it (Who can see and write › anyone makes it a public room).' }],
     ['Inbox', 'Social', 'list', 'uiInbox', 400, 600, {}, { note: 'Search, All / Unread / Groups tabs, ✏️ for a new message or group, and press and hold to pin, mute, mark unread or delete. Tapping a conversation sets chat and chatTitle and goes to the page chat (put a Chat there). The unread count is in {unread}, for a Bottom Nav badge. Add a Reads collection (chat, handle, at) for “Seen” across phones.' }],
     ['Trending', 'Social', 'stats', 'uiTrending', 376, 360, { bg: '@card' }],
     ['Who To Follow', 'Social', 'player', 'uiWhoToFollow', 376, 250, { bg: '@card' }],

@@ -9564,6 +9564,7 @@ registerBehavior('uiFeed', {
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |”, “Following | following” and “Saved | saved” (the posts you bookmarked). Blank = no tabs.' },
+    { key: 'countViews', label: 'Count views (each person once, like X)', type: 'bool', default: true, info: 'A post gets a view when it has been on someone’s screen for a moment, or they open it. Show the count with “views” in Buttons.' },
     { key: 'savedPage', label: 'Saved page (“View” after saving, blank = none)', type: 'text', default: '', info: 'A page with a Saved list (bookmarked posts and comments).' },
     { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
     { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', showIf: (b) => !!String(b.tabs || '').trim(), info: TOP_STYLE_INFO },
@@ -9753,13 +9754,17 @@ registerBehavior('uiFeed', {
       return out;
     };
     const isSaved = (s, r) => bmHas(s, 'post', r.id);
+    /** Views, like X: a post counts one view from each person, once it has been on their screen for a moment (or opened). */
+    const VKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.viewed'; let viewedS = null; const viewT = new Map();
+    const myViews = (s) => { if (viewedS) return viewedS; try { viewedS = new Set(JSON.parse(store.get(VKEY(s), '[]')) || []); } catch { viewedS = new Set(); } return viewedS; };
+    const countView = (s, r) => { if (p.countViews === false || s.engine.editing || r._mine || who(r) === meOf(s).handle) return; const V = myViews(s), id = String(r.id); if (V.has(id)) return; V.add(id); store.set(VKEY(s), JSON.stringify([...V].slice(-5000))); patch(s, r, { views: (+F(r, 'views') || 0) + 1 }); };
     /** Bookmark a post (yours only: a Bookmarks collection or this phone); a Saves count on the post goes up / down. */
     const saveIt = (s, r) => { const m = mediaList(r)[0], on = bmToggle(s, { kind: 'post', ref: String(r.id), post: String(r.id), author: F(r, 'author') || '', author_handle: who(r), text: String(F(r, 'text') || '').slice(0, 280), media: isPic(m) && !isVid(m) && String(m).length < 4000 ? m : '' });
       if (F(r, 'saves') != null && F(r, 'saves') !== '') patch(s, r, { saves: Math.max(0, (+F(r, 'saves') || 0) + (on ? 1 : -1)) });
       s.snackbar?.(on ? 'Saved' : 'Removed from saved', p.savedPage ? (on ? 'View' : '') : '', on && p.savedPage ? () => s.navTo(p.savedPage) : null); return on; };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
-    const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, repost, like, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
+    const ACTS = { timeline: 'comment, repost, like, views, share', compact: 'comment, repost, like, views, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
     const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
@@ -9834,7 +9839,7 @@ registerBehavior('uiFeed', {
       sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } })) sheetUp = false;
     };
     const openPost = (s, r, kind, focus) => {
-      const cc = cColl(s), me0 = meOf(s);
+      const cc = cColl(s), me0 = meOf(s); countView(s, r);
       sheetUp = true;
       const isPost = kind === 'post', fol = F(r, 'following'), lnk = F(r, 'link');
       const sh = socialSheet(s, { kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
@@ -10049,14 +10054,21 @@ registerBehavior('uiFeed', {
         const textH = (T) => (T.lines.length + (T.more ? 1 : 0)) * LH;
         const countOf = (r, k) => (k === 'comment' ? F(r, 'comments') : k === 'repost' ? F(r, 'reposts') : k === 'like' ? F(r, 'likes') : k === 'views' ? F(r, 'views') : 0);
         const actionRow = (r, x, w, yy, hits, ox, oy, sz0) => { const sz = +p.actionSize > 0 ? +p.actionSize : sz0; // spread evenly; save sits at the end
-          const list = A.filter((k) => k !== 'save' || look !== 'photos'), step = w / Math.max(1, list.length), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
-          list.forEach((k, i) => {
-            const ix = x + step * i + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? isSaved(s, r) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
+          const list = A.filter((k) => k !== 'save' || look !== 'photos'), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
+          const step0 = w / Math.max(1, list.length), fs = Math.round(TS * 0.87), tail = list.length > 4 ? list.filter((k) => k === 'save' || k === 'share') : [];
+          let pos = null; if (tail.length) { // many buttons, like X: each takes its own width (icon + count), the space between is even, save and share sit together at the end
+            ctx.font = `500 ${fs}px ${THEME.font}`; const ws = list.map((k) => { const n = countOf(r, k), t = p.showCounts !== false && +n ? fmtN(n, true) : ''; return sz + (t ? sz * 0.35 + ctx.measureText(t).width : 0); });
+            const mainN = list.length - tail.length, tailGap = sz * 0.9, used = ws.reduce((a2, b2) => a2 + b2, 0) + tailGap * (tail.length - 1), gp = Math.max(4, (w - used) / Math.max(1, mainN)); pos = []; let xx = x;
+            list.forEach((k, i) => { pos.push(xx + sz / 2); xx += ws[i] + (tail.includes(k) ? tailGap : gp); });
+          }
+          const step = pos ? 64 : step0;
+          list.forEach((k, li) => {
+            const ti = tail.indexOf(k), ix = pos ? pos[li] : x + step0 * li + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? isSaved(s, r) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
             if (k === 'like') likeMark(ix, yy, sz, on, r.id);
             else { ctx.save(); const z = k === 'repost' ? pop(r.id + 'r') : k === 'save' ? pop(r.id + 's') : 1; ctx.translate(ix, yy); ctx.scale(z, z); if (k === 'save') bookmarkMark(ctx, 0, 0, sz, on ? acc : col, on); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', views: 'ui-chart' }[k], 0, 0, sz, col); ctx.restore(); }
-            const num = p.showCounts !== false && +n ? fmtN(n, step < 90) : '', word = p.actionStyle === 'icons + words' ? (num ? { comment: +n === 1 ? 'reply' : 'replies', repost: +n === 1 ? 'repost' : 'reposts', like: +n === 1 ? 'like' : 'likes', views: 'views' }[k] || '' : { comment: 'Reply', repost: 'Repost', like: 'Like', share: 'Share', save: 'Save', views: 'Views' }[k]) : '';
+            const num = p.showCounts !== false && +n ? fmtN(n, step < 90 || !!pos) : '', word = p.actionStyle === 'icons + words' ? (num ? { comment: +n === 1 ? 'reply' : 'replies', repost: +n === 1 ? 'repost' : 'reposts', like: +n === 1 ? 'like' : 'likes', views: 'views' }[k] || '' : { comment: 'Reply', repost: 'Repost', like: 'Like', share: 'Share', save: 'Save', views: 'Views' }[k]) : '';
             if (num || word) UK.text(ctx, [num, word].filter(Boolean).join(' '), ix + sz * 0.85, yy, { size: Math.round(TS * 0.87), weight: 500, color: col, align: 'left' });
-            hits.push({ k: k === 'views' ? 'none' : k, x: ix - sz / 2 - ox, y: yy - oy - 16, w: Math.min(step, 70), h: 32 });
+            hits.push({ k: k === 'views' ? 'none' : k, x: ix - sz / 2 - ox - (ti >= 0 ? 6 : 0), y: yy - oy - 16, w: ti >= 0 ? sz + 12 : Math.min(step, 70), h: 32 });
           });
         };
         const burst = (r, cx, cy, size, kind) => { for (const q of bursts) if (q.id === r.id) { const a = (s.time - q.t) / 0.9, z = Math.min(1, a * 5) * (a < 0.25 ? 1 + Math.sin(a / 0.25 * Math.PI) * 0.15 : 1); ctx.save(); ctx.globalAlpha *= a > 0.6 ? (1 - a) / 0.4 : 1; ctx.translate(cx, cy); ctx.scale(z, z); if (kind === 'thumb' || p.likeIcon === 'thumbs up') UK.text(ctx, '👍', 0, 0, { size }); else if (p.likeIcon === 'fire') UK.text(ctx, '🔥', 0, 0, { size }); else if (p.likeIcon === 'star') UK.text(ctx, '★', 0, 0, { size, color: '#ffc400' }); else { heartPath(ctx, 0, 0, size); ctx.fillStyle = kind === 'white' ? '#fff' : likeC; ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 16; ctx.fill(); } ctx.restore(); } };
@@ -10312,6 +10324,10 @@ registerBehavior('uiFeed', {
           hPrev.set(r.id, h);
           L.push({ r, y, h: h + gap, hits }); y += h + gap;
         }
+        if (p.countViews !== false && !s.engine.editing && !sheetUp) for (const it of L) { // on screen (at least half of it) for 0.8 s: a view
+          const y0 = Math.max(b.y, top + it.y), y1 = Math.min(b.y + b.h, top + it.y + it.h), on = y1 - y0 >= Math.min(it.h, b.h) * 0.5, id = it.r.id;
+          if (!on) viewT.delete(id); else if (!viewT.has(id)) viewT.set(id, s.time); else if (s.time - viewT.get(id) > 0.8) countView(s, it.r);
+        }
         if (p.endText && P.length) { UK.text(ctx, fillTemplate(String(p.endText), s.vars), b.cx, top + y + 34, { size: 14, weight: 600, color: sub }); y += 70; }
         total = y;
         pillR = null;
@@ -10354,7 +10370,7 @@ const SAMPLE_CHATS = () => { const t = Date.now(), M = 60e3; return [
   { id: 'm4', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Bring snacks 😄', _at: t - 46.6 * M, reaction: '❤️' },
   { id: 'm5', chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: '👍', _at: t - 3 * M, _me: true },
   { id: 'm6', chat: 'dm-alex-leop', author: 'Leo Park', handle: 'leop', text: 'Did you try the new update?', _at: t - 26 * 60 * M },
-  { id: 'm7', chat: 'general', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome everyone! 🎉', _at: t - 3 * 24 * 60 * M },
+  { id: 'm7', chat: 'dm-alex-sofiaruiz', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome to the app! 🎉', _at: t - 3 * 24 * 60 * M },
 ]; };
 const ONLY_EMOJI = (s) => { const t = String(s || '').trim(); return !!t && [...t].length <= 6 && !/[\p{L}\p{N}]/u.test(t) && /\p{Extended_Pictographic}/u.test(t); };
 const chatSeenKey = (s) => 'pocket.chatSeen.' + (s.engine.gameKey || 'game');
@@ -10476,7 +10492,8 @@ registerBehavior('uiChat', {
   params: [
     { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
     { key: 'chatVar', label: 'Conversation id comes from variable', type: 'text', default: 'chat', suggest: 'vars', info: 'The Inbox and “Message @someone” set it. Blank, or the variable empty = the room below.' },
-    { key: 'room', label: 'Room when no conversation is picked', type: 'text', default: 'general' },
+    { key: 'access', label: 'Who can see and write', type: 'select', options: ['only people in the conversation', 'anyone (a public room)'], default: 'only people in the conversation', info: 'Only people in the conversation: direct messages are between the two people, a group only its members; anything else shows nothing. A public room is open to everyone who opens it.' },
+    { key: 'room', label: 'Room when no conversation is picked', type: 'text', default: 'general', showIf: (b) => b.access === 'anyone (a public room)' },
     { key: 'author', label: 'My name ({variables} work)', type: 'text', default: '{playerName}' },
     { key: 'handle', label: 'My handle', type: 'text', default: '{playerHandle}' },
     { key: 'placeholder', label: 'Hint in the bar', type: 'text', default: 'Message…' },
@@ -10499,10 +10516,13 @@ registerBehavior('uiChat', {
   create(p) {
     const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
-    const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? p.room || 'general' : v); };
+    const pub = () => p.access === 'anyone (a public room)';
+    const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? (pub() ? p.room || 'general' : '') : v); };
     const me = (s) => meOfVars(s, p.author, p.handle);
     const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
-    const rows = (s) => { const c = chatOf(s); return all(s).filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
+    /** Private: only the two people of a direct message, or a group's members, can see and write in it. */
+    const allowed = (s) => { if (pub()) return true; const c = chatOf(s); if (!c || !(/^dm-/.test(c) || isGroupChat(c))) return false; return chatMembers(all(s), c).includes(handleOf(me(s).handle)); };
+    const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; return all(s).filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
     const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? '📷 Photo' : '');
@@ -10541,7 +10561,7 @@ registerBehavior('uiChat', {
         }
         for (const t of UK.taps(s, e)) {
           if (S.moved) continue;
-          if (UK.in(t, barRect)) { UK.tap(s, p); openBar(s); continue; }
+          if (UK.in(t, barRect)) { if (!allowed(s)) continue; UK.tap(s, p); openBar(s); continue; }
           if (!UK.in(t, list)) continue;
           const it = itemAt(t); if (!it) continue;
           if (it.quote && t.y + S.v - b.y <= it.y + it.quote) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
@@ -10583,7 +10603,7 @@ registerBehavior('uiChat', {
         y += 10; total = y;
         // draw
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, listH); ctx.clip(); ctx.translate(0, b.y - S.v);
-        if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
+        const ok = allowed(s); if (!ok) { UK.text(ctx, '🔒', b.cx, listH / 2 - 30 + S.v, { size: 34 }); UK.text(ctx, chatOf(s) ? 'You’re not in this conversation' : 'Pick a conversation from your messages', b.cx, listH / 2 + 14 + S.v, { size: 15, weight: 700, color: sub, maxW: b.w - 40 }); } else if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
         const vis0 = S.v - 60, vis1 = S.v + listH + 60;
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
@@ -10622,6 +10642,7 @@ registerBehavior('uiChat', {
           UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: label.startsWith('Seen') ? mineC : sub, align: 'right' });
         }
         ctx.restore();
+        if (!ok) return; // (no bar where you can't write)
         // the bar
         const brr = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
         ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, brr.y - 8, b.w, barH);
@@ -10650,6 +10671,7 @@ registerBehavior('uiInbox', {
     { key: 'search', label: 'Search box', type: 'bool', default: true },
     { key: 'newChat', label: '✏️ New message button', type: 'bool', default: true },
     { key: 'groups', label: 'Group chats (New group)', type: 'bool', default: true },
+    { key: 'rooms', label: 'Also list public rooms (anyone can write in them)', type: 'bool', default: false, info: 'Off: only your direct messages and the groups you are in.' },
     { key: 'tabs', label: 'Tabs: All, Unread, Groups', type: 'bool', default: true },
     { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'pills', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
     { key: 'hold', label: 'Press and hold: pin, mute, mark unread, delete', type: 'bool', default: true },
@@ -10669,6 +10691,7 @@ registerBehavior('uiInbox', {
         const mem = chatMembers(L, c), mine = L.some((q) => isMineMsg(q, M));
         if (has(s) && /^dm-/.test(c) && !mem.includes(mh) && !mine) continue; // other people's direct messages
         if (has(s) && isGroupChat(c) && !mem.includes(mh) && !mine) continue; // groups you are not in
+        if (!/^dm-/.test(c) && !isGroupChat(c) && !p.rooms) continue; // a public room (only when asked for)
         L.sort((a, b) => (a._at || 0) - (b._at || 0)); const last = L[L.length - 1]; if ((meta.hide[c] || 0) >= (last._at || 0)) continue; // deleted (until something new arrives)
         const other = [...L].reverse().find((q) => !isMineMsg(q, M) && !q.system), group = isGroupChat(c);
         const title = /^dm-/.test(c) ? other?.author || nameOfHandle(s, mem.find((h) => h !== mh) || '') || 'Chat' : group ? L.find((q) => q.title)?.title || mem.filter((h) => h !== mh).map((h) => nameOfHandle(s, h).split(' ')[0]).join(', ') || 'Group' : '# ' + c;

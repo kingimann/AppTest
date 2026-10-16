@@ -4707,6 +4707,7 @@ const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiB
  * whose tops overlap stay side by side as a row. A feed or list that fills the page starts under them; middle and bottom
  * anchored elements float.
  */
+const FLUSH_TOP = new Set(['uiProfile']);
 function layoutStack(pg, scene) {
   const b = pg.behaviors.find((x) => x.type === 'uiShowIf' && x.params?.stack); if (!b) return;
   const gap = Math.max(0, +(b.params.stackGap ?? 16)), items = [], fill = [];
@@ -4725,7 +4726,8 @@ function layoutStack(pg, scene) {
   const rows = [];
   for (const it of items) { const r = rows[rows.length - 1]; if (r && it.top < r.bot - 2 && r.items.every((o) => Math.min(it.x1, o.x1) - Math.max(it.x0, o.x0) <= Math.min(it.x1 - it.x0, o.x1 - o.x0) * 0.25)) { r.items.push(it); r.top = Math.min(r.top, it.top); r.bot = Math.max(r.bot, it.bot); } else rows.push({ top: it.top, bot: it.bot, items: [it] }); } // side by side (not on top of each other): one row
   const st = +(b.params.stackTop ?? -1);
-  let at = st >= 0 ? st : rows.length ? Math.max(gap, rows[0].top) : gap;
+  const W0 = scene.engine.width, flush = rows.length && rows[0].items.length === 1 && rows[0].top < gap * 2 + 12 && rows[0].items[0].x0 <= 1 && rows[0].items[0].x1 >= W0 - 1 && rows[0].items[0].q.behaviors.some((x) => FLUSH_TOP.has(x.type)); // a profile's cover: edge to edge, right under the bar
+  let at = st >= 0 ? st : flush ? 0 : rows.length ? Math.max(gap, rows[0].top) : gap;
   for (const r of rows) { const d = at - r.top; for (const it of r.items) { const q = it.q, y = q._y0 + d, B = q._animBase; if (B) { q.y += y - B.y; B.y = y; } else q.y = y; q._ys = y; } at += r.bot - r.top + gap; } // (arriving with an animation: it lands in its place)
   for (const q of fill) q.marginTop = rows.length ? at : q.marginTop; // the feed fills what is left under them
 }
@@ -7935,6 +7937,7 @@ registerBehavior('uiSideBar', {
       /** The built-in ☰ button (screen pixels), or null. */
       btn(s) {
         if (!p.button || p.button === 'none' || rail() || s.appBarMenu?.has(p.message)) return null;
+        if (s.entities.some((q) => q.ui && q.visible && !q.dead && q.behaviors.some((b) => b.type === 'uiAppBar' && /menu/.test(String(b.params?.left ?? 'back, else menu')) && (b.params?.menuMessage || 'menu') === p.message))) return null; // (an App Bar showing ← here still owns the ☰: no hidden button under the page)
         // (the editor's clock stands still: look again every half second anyway)
         const now = s.engine.editing ? performance.now() / 1000 : s.time || 0; if (!(now - (otherBtn.t ?? -9) < 0.5 && now >= otherBtn.t)) otherBtn = { t: now, on: s.entities.some((q) => q.ui && q.visible && !q.dead && !q._parentHidden && (q._allBehaviors || q.behaviors.map((b) => ({ type: b.type, ...b.params }))).some((b) => b.type === 'button' && b.action === 'send message' && String(b.value ?? '').trim() === p.message)) };
         if (otherBtn.on) return null; // a ☰ button of your own already opens this menu: don't draw a second one on top of it
@@ -12627,7 +12630,7 @@ registerBehavior('uiProfile', {
           y = ay + av / 2 + 22; nameLine(b.x + 16, y, 20);
           y += 23; ctx.font = `500 14px ${F}`; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) chip('Follows you', b.x + 16 + Math.min(ctx.measureText(hl).width, b.w - 120) + 8, y); y += 27; }
           if (blocked) y = para(`You blocked @${I.handle}. You won’t see their posts.`, y, 15, sub) + 4; else if (I.bio) y = para(I.bio, y, 15, txt) + 3;
-          y = details(y); y = lockLine(y); y = counts(y + 6, 'inline'); y = mutuals(y + 12); y += 6;
+          y = details(y); y = lockLine(y); y = counts(y + 6, 'inline'); { const ym = mutuals(y + 12); y = ym === y + 12 ? y : ym; } y += 4;
         } else if (look === 'instagram') {
           const av = 86, ay = b.y + 14 + av / 2, ax = b.x + 16 + av / 2; avatar(ax, ay, av);
           const S0 = statsOf(s, I).filter(([l]) => l !== 'Friends' || !G); // three columns fit beside the picture

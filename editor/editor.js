@@ -7252,6 +7252,7 @@ function stop() {
   engine.input.enabled = false;
   engine.input.reset(true);
   engine.closeSettings?.(true); // a player Settings panel left open
+  engine.clearOverlays?.(); // a composer, sheet or chat bar the game left open
   engine.timeScale = 1;
   engine.factory = null;
   updatePauseButtons();

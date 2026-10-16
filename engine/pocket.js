@@ -20104,7 +20104,7 @@ function nodeDialog(s, o, onPick) {
 /** Ask For Text: a real text box over the game (the phone's keyboard opens), OK / Cancel. */
 function askTextBox(s, o, done) {
   const root = s.engine.root, TH = themeOf(s.settings);
-  const wrap = document.createElement('div');
+  const wrap = document.createElement('div'); wrap.dataset.pocketAsk = '1';
   wrap.style.cssText = 'position:absolute;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-family:system-ui,-apple-system,sans-serif;touch-action:auto;';
   const box = document.createElement('div');
   box.style.cssText = `width:min(320px,86%);padding:18px;border-radius:${TH.radius || 14}px;background:${TH.panel};color:${TH.text};box-shadow:0 10px 40px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px;`;
@@ -22862,6 +22862,7 @@ export class Engine {
    * Scene JSON may carry more levels in `levels: [sceneJson, ...]`; opts.level picks the starting one.
    */
   start(source, opts = {}) {
+    this.clearOverlays(); // (nothing left over from the last run)
     this.levels = null; this.carry = null;
     if (source && typeof source === 'object' && !(source instanceof Scene)) {
       this.source = source; this.gameKey = source.name || this.gameKey || 'game';
@@ -23212,6 +23213,13 @@ export class Engine {
     let st = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]'); if (!st) { st = document.createElement('meta'); st.name = 'apple-mobile-web-app-status-bar-style'; document.head.append(st); } st.content = 'default';
     if (this.parent === document.body) { document.documentElement.style.background = bg; document.body.style.background = bg; }
     document.documentElement.style.colorScheme = isDark(s) ? 'dark' : 'light';
+  }
+
+  /** Take away what a game opened over the screen (a composer, sheets, the chat bar, search…): when play stops or another scene starts. */
+  clearOverlays() {
+    if (!this.root) return;
+    for (const n of this.root.querySelectorAll('[data-pocket-sheet],[data-pocket-composer],[data-pocket-chatbar],[data-pocket-story-composer],[data-pocket-search],[data-pocket-viewer],[data-pocket-ask]')) n.remove();
+    document.getElementById('pocket-gifs')?.replaceChildren();
   }
 
   navTick(s) {

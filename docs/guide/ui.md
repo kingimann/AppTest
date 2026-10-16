@@ -438,7 +438,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
   - Tapping the **Followers / Following / Friends** counts opens *Lists page* (the Friends page) on that person's lists, with a Follow button on each.
 - **Profile tabs on a feed:** a feed's tabs can use `posts` (no replies), `replies`, `media` (posts with pictures or videos) and `likes` (posts you liked). A third column gives a tab its own look, e.g. `Media | media | grid`. The Social template's profiles use `Posts | posts`, `Replies | replies`, `Media | media | grid` and, on your own, `Likes | likes`.
-- **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once.
+- **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once. If the app has no Posts collection yet, the first post makes one (with the sample posts the feed was showing), so **Post** always works; open **Data** to change its fields.
   - Tapping it opens a **full composer** (or, with *Tapping it opens: simple text box*, the old one-line box):
     - a big text area with a **character ring** that turns orange near the limit and red over it (with the count left);
     - **up to 4 photos** from the phone, made smaller to fit in a record. Videos too if you turn that on; they stay on that device only;

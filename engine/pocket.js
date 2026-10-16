@@ -9298,6 +9298,13 @@ function editProfileSheet(s, o) {
       body.append(form);
     } });
 }
+const POST_FIELDS = [['Author', 'text'], ['Handle', 'text'], ['Text', 'long text'], ['Media', 'text'], ['Color', 'text'], ['Likes', 'number'], ['Liked', 'yes/no'], ['Comments', 'number'], ['Reposts', 'number'], ['Reposted', 'yes/no'], ['Saved', 'yes/no'], ['Verified', 'yes/no'], ['Location', 'text'], ['Poll', 'text'], ['Votes', 'text'], ['Voted', 'number'], ['Audience', 'text'], ['Reply Setting', 'text'], ['Background', 'text'], ['Link', 'text'], ['Link Title', 'text'], ['Quote', 'text'], ['Reply To', 'text']];
+/** The collection posts go in: made (with the sample posts the feed was showing) when the app doesn't have it yet, so Post always works. */
+function ensurePosts(engine, name) {
+  const D = engine.data; name = String(name || 'Posts').trim() || 'Posts'; if (D.def(name)) return name;
+  (engine.collections ||= []).push({ name, fields: POST_FIELDS.map(([n, type]) => ({ name: n, type })), rows: SAMPLE_POSTS().map(({ _at, ...r }) => ({ ...r, _at })) });
+  D.cache = {}; Log.add('info', `Made a “${name}” collection for the New Post Box (add it in Data to change its fields)`, 'Data'); return name;
+}
 /** What the composer made, as a Posts record (author, handle, text, media, poll, votes, location, quote). */
 function postRecord(me, out, extra = {}) {
   const r = { author: me.author, handle: me.handle, text: out.text, likes: 0, liked: false, comments: 0, reposts: 0, following: true, ...extra };
@@ -12607,15 +12614,14 @@ registerBehavior('uiComposer', {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
           const ok = postComposer(s, { startWith, look: p.composerLook, title: p.composerTitle, buttonStyle: p.buttonStyle, audience: !!p.audience, audienceDefault: p.audienceDefault, replyControl: !!p.replyControl, backgrounds: !!p.backgrounds, emoji: p.emoji !== false, counter: p.counter, drafts: p.drafts !== false, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
-            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); s.emit('posted', first?.id); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
+            onPost: (out) => { const coll = ensurePosts(s.engine, p.collection); awardPoints(s, 'post'); const first = postThread(s.engine.data, coll, me, out); s.emit('posted', first?.id); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
           if (ok) return;
         }
         askTextBox(s, { question: 'New post', max: +p.max || 280, placeholder: p.placeholder }, (v) => {
           busy = false; if (!v) return;
           const author = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', handle = fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author.toLowerCase().replace(/\s+/g, '');
-          if (s.engine.data.def(p.collection)) s.engine.data.add(p.collection, { author, handle, text: v, likes: 0, liked: false, comments: 0, reposts: 0 });
-          else Log.add('warn', `New Post Box: there is no data collection called “${p.collection}”`, 'Data');
+          const coll = ensurePosts(s.engine, p.collection); s.engine.data.add(coll, { author, handle, text: v, likes: 0, liked: false, comments: 0, reposts: 0 }); s.emit('posted'); s.snackbar?.('Posted');
           if (p.message) s.send(p.message, v);
         });
       },

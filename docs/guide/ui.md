@@ -157,6 +157,7 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - Things placed side by side stay a row. Drag one above or below another to change the order.
   - A feed, chat, inbox, list or photo grid that fills the page starts under them. Elements anchored to the middle or bottom (a + button) float where they are.
   - Adding a feed, chat, inbox, notifications, friends, Data List or photo grid to any page makes it fill the room under what is already there.
+- **Top and bottom bars take their own taps:** a tap or drag on the App Bar or Bottom Nav never reaches what is behind it (a feed, a page, a profile), even where the page goes under the bar.
 - **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
   - **With a Bottom Nav:** the menu stays between the bars (the default), except when the Bottom Nav has a raised middle button (*raised center* or *curved*): then the menu goes over the bottom bar, so nothing pokes into it. Set *With a Bottom Nav / App Bar* to *cover them* for a drawer over everything.
   - **What opened it:** each time it opens in play, the **Console** says why: “Side Menu opened by the “menu” message from App Bar”, “…by a swipe from the screen edge” or “…by its own ☰ button”. Handy when it opens when you don't expect it.
@@ -448,6 +449,8 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - Tap one to watch full screen. Progress bars run along the top; tap right for the next story, left to go back, hold to pause, and ✕ closes.
   - One per line: `Name | emoji or picture | colour | text`.
   - "Your story" (first) sends a message.
+  - **Fold or hide it:** a small ⌃ at the row's top-right folds it into a slim bar with the pictures of people who have new stories (“5 new stories”); tap the bar to open the row again. Hold the row for **Fold stories** / **Hide stories**. Hidden stories come back from **Settings and privacy → Stories** (*Show stories*, *Keep them folded*) or the message `show stories`. The messages `fold stories`, `unfold stories`, `toggle stories` and `hide stories` work too. What each person chooses stays on their phone. What is under the row moves up and down with it, also on a page that doesn't line things up.
+  - Settings (*Fold and hide*): *Can be folded*, *Starts folded*, *Show the ⌃ fold button*, *People can hide stories*.
 - **Like Button:** a heart (or 👍, or ★) that pops with little sparks, turns a variable on or off and counts. Tick *Hold to pick a reaction* for 👍 ❤️ 😂 😮 😢 😡.
 - **Feeds and profiles are connected:**
   - Each post shows its author's **current name, picture and verified tick** from their profile, so changing your picture in *Edit profile* updates all your posts. *Names and pictures come from profiles* turns this off.

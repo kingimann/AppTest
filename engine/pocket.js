@@ -8704,7 +8704,17 @@ const UK = {
     if (y1 - y0 < 40 || (y0 <= b.y + 0.5 && y1 >= b.y + b.h - 0.5)) return b; return { ...b, y: y0, h: y1 - y0, cy: (y0 + y1) / 2 };
   },
   /** Is this tap for e? While a menu, sheet or popup holds this frame's taps (it may be closing on them), only it and what is inside it get them, plus taps in the areas it lets through. */
-  mine(s, e, t) { const o = s.tapOwner; if (!o || o === e || o.dead) return true; for (let q = e.parentEnt, n = 0; q && n < 40; q = q.parentEnt, n++) if (q === o) return true; return (s.tapPass || []).some((r) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h); },
+  mine(s, e, t) { const own = ((s, e, t) => { const o = s.tapOwner; if (!o || o === e || o.dead) return true; for (let q = e.parentEnt, n = 0; q && n < 40; q = q.parentEnt, n++) if (q === o) return true; return (s.tapPass || []).some((r) => t.x >= r.x && t.x <= r.x + r.w && t.y >= r.y && t.y <= r.y + r.h); })(s, e, t); if (!own) return false; const o = s.tapOwner; if (o && !o.dead) return true; return !UK.onBar(s, e, t); },
+  /** A tap or drag on a top or bottom bar (App Bar, Bottom Nav) is for the bar, not what is behind it. */
+  onBar(s, e, t) {
+    for (let q = e; q; q = q.parentEnt) if (q._dock) return false; // (the bar itself, and what is inside it)
+    const E = s.engine; if (s._barT !== s.time) { s._barT = s.time; s._bars = [];
+      for (const q of s.entities) { if (!q.ui || !q._dock || q.dead || !q.visible || q._parentHidden || uiHiding(q)) continue; const bh = q.behaviors.find((b) => b.type === 'uiAppBar' || b.type === 'uiBottomNav'); if (!bh) continue;
+        const r = uiBox(q, E.width, E.height, E.safe), k = uiK(E.safe) || 1, up = r.y < E.height / 2; let y0 = r.y - r.h / 2, y1 = r.y + r.h / 2;
+        if (up) y0 = Math.min(y0, 0); else { y1 = Math.max(y1, E.height); if (bh.params?.style === 'raised center' || bh.params?.style === 'curved') y0 -= 30 * k; }
+        s._bars.push({ x0: r.x - r.w / 2, x1: r.x + r.w / 2, y0, y1 }); } }
+    return s._bars.some((r) => t.x >= r.x0 && t.x <= r.x1 && t.y >= r.y0 && t.y <= r.y1);
+  },
   taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
   downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
@@ -9345,6 +9355,10 @@ function settingsSheet(s, o = {}) {
         const t = toggle(!off.has(k), (v) => { if (v) off.delete(k); else off.add(k); save({ notes_off: [...off].join(', ') }); }); row(box, icon, label, t, () => t.flip(), 'note-' + k); } }
     // appearance
     { const box = section('Appearance'); const dv = s.vars.darkMode, cur = dv === '' || dv == null ? 'Automatic' : truthy(dv) ? 'Dark' : 'Light'; chips(box, ['Light', 'Dark', 'Automatic'], cur, (v) => s.setVar('darkMode', v === 'Automatic' ? '' : v === 'Dark' ? 1 : 0), 'theme'); }
+    if (s.entities.some((q) => !q.dead && q.behaviors.some((b) => b.type === 'uiStories'))) { // the stories row: shown, folded or hidden (as on the row itself, held down)
+      const box = section('Stories', 'Hold the stories row to fold or hide it.'), k0 = 'pocket.stories.' + (s.engine.gameKey || 'game'), hidden = store.get(k0 + '.hidden', '') === '1';
+      const t = toggle(!hidden, (v) => s.send(v ? 'show stories' : 'hide stories')); row(box, 'image', 'Show stories', t, () => t.flip(), 'stories-show');
+      const folded = store.get(k0 + '.folded', '') === '1'; const t2 = toggle(folded, (v) => s.send(v ? 'fold stories' : 'unfold stories')); row(box, 'menu', 'Keep them folded (a slim bar)', t2, () => t2.flip(), 'stories-fold'); }
     // muted and blocked
     for (const [kind, title, verb] of [['muted', 'Muted accounts', 'Unmute'], ['blocked', 'Blocked accounts', 'Unblock']]) {
       const box = section(title), paint = () => { box.replaceChildren(); const L = G.listOf(kind); if (!L.length) { box.append(el('div', `padding:14px;color:${c.sub};font-size:14.5px;`, kind === 'muted' ? 'No one muted. Mute people from the ⋯ menu on their posts or profile.' : 'No one blocked.')); return; }
@@ -10881,6 +10895,8 @@ const UI_SVG = {
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/>',
   'chevron-right': '<path d="M9 6l6 6-6 6"/>',
+  'chevron-down': '<path d="M6 9l6 6 6-6"/>',
+  'chevron-up': '<path d="M6 15l6-6 6 6"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
@@ -12247,6 +12263,10 @@ registerBehavior('uiStories', {
     { key: 'views', label: '“Seen by” on your own stories', type: 'bool', default: true, info: 'Add a StoryViews collection (story, handle, name) to know who viewed them from other phones.' },
     { key: 'size', label: 'Bubble size', type: 'number', default: 64, step: 2 },
     { key: 'labels', label: 'Names under them', type: 'bool', default: true },
+    { key: 'foldable', label: 'Can be folded (a small ⌃ button, or hold the row)', type: 'bool', default: true, group: 'Fold and hide', info: 'Folded, the row becomes a slim bar with the pictures of people who have new stories; tap it to open the row again. What people choose is kept on their phone.' },
+    { key: 'startFolded', label: 'Starts folded', type: 'bool', default: false, group: 'Fold and hide', showIf: (b) => b.foldable !== false },
+    { key: 'foldButton', label: 'Show the ⌃ fold button', type: 'bool', default: true, group: 'Fold and hide', showIf: (b) => b.foldable !== false },
+    { key: 'hideable', label: 'People can hide stories (hold the row → Hide stories)', type: 'bool', default: true, group: 'Fold and hide', infoText: 'They come back from Settings and privacy → Stories, or the message “show stories”.' },
     { key: 'corner', label: 'A floating ☰ in the corner', type: 'select', options: ['goes below it', 'starts after it'], default: 'goes below it', info: 'goes below it: the row moves down below the button and keeps its left edge. starts after it: the row stays where it is and begins beside the button.' },
     ...colorParams({ ring1: ['Ring (start)', '#feda75'], ring2: ['Ring (end)', '#d62976'], seenRing: ['Seen ring', 'rgba(128,128,128,0.45)'], text: ['Names', '@text'] }),
     ...UI_COMMON,
@@ -12262,6 +12282,18 @@ registerBehavior('uiStories', {
     const seenSet = (s) => setOf(s, '', seenR), likedSet = (s) => setOf(s, 'liked', likedR), viewedSet = (s) => setOf(s, 'viewed', viewedR);
     const saveSet = (s, k2, set) => store.set(key(s, k2), [...set].slice(-3000).join('|'));
     const localKey = (s) => key(s, 'mine');
+    // folded (a slim bar) or hidden, as this phone's person chose
+    let foldV = null, hidV = null, hNow = null, h0 = null, press = null, menuUp = false;
+    const isFolded = (s) => { if (p.foldable === false) return false; if (foldV == null) { const v = store.get(key(s, 'folded'), ''); foldV = v === '' ? !!p.startFolded : v === '1'; } return foldV; };
+    const isHidden = (s) => { if (p.hideable === false) return false; if (hidV == null) hidV = store.get(key(s, 'hidden'), '') === '1'; return hidV; };
+    const setFolded = (s, v) => { foldV = !!v; store.set(key(s, 'folded'), v ? '1' : '0'); };
+    const setHidden = (s, v) => { hidV = !!v; store.set(key(s, 'hidden'), v ? '1' : '0'); s.snackbar?.(v ? 'Stories hidden' : 'Stories are back', v ? 'Undo' : undefined, v ? () => setHidden(s, false) : undefined); };
+    const FOLD_H = 48;
+    const foldMenu = (s) => { if (menuUp) return; menuUp = true; const items = [];
+      if (p.foldable !== false) items.push(isFolded(s) ? { icon: '⬇️', label: 'Show the stories row', run: () => setFolded(s, false) } : { icon: '⬆️', label: 'Fold stories', run: () => setFolded(s, true) });
+      if (p.hideable !== false) items.push({ icon: '🙈', label: 'Hide stories', run: () => setHidden(s, true) });
+      if (!items.length) { menuUp = false; return; }
+      socialSheet(s, { kind: 'stories-menu', colors: colors(), items, onClose: () => { menuUp = false; } }); };
     const localStories = (s) => { try { return JSON.parse(store.get(localKey(s), '[]')) || []; } catch { return []; } };
     const fresh = (at) => !(+p.hours > 0) || !at || Date.now() - at < +p.hours * 3600e3;
     /** Everyone's stories: [{ handle, name, mine, slides: [{ id, pic, color, text, at, row }] }], mine first, then unseen ones, newest first. */
@@ -12364,8 +12396,34 @@ registerBehavior('uiStories', {
           }
           inp.taps.length = 0; inp.ups.length = 0; // (nothing underneath gets them) return;
         }
+        // fold / hide: the row grows or shrinks (on a page that lines things up, what is under it follows)
+        if (h0 == null) h0 = e.shape?.h || Dz + 42;
+        const target = s.engine.editing ? h0 : isHidden(s) ? 0 : isFolded(s) ? FOLD_H : h0;
+        hNow = hNow == null ? target : hNow + (target - hNow) * Math.min(1, dt * 14); if (Math.abs(target - hNow) < 0.5) hNow = target;
+        if (e.shape && Math.abs((e.shape.h || 0) - hNow) > 0.01) {
+          const pg = e.parentEnt, stacked = pg?.behaviors?.some((x) => x.type === 'uiShowIf' && x.params?.stack), d = hNow - (e.shape.h || 0);
+          if (!stacked && /^top/.test(e.anchor || '')) {
+            const bot = e.y + (e.shape.h || 0) / 2; e.y += d / 2; // (the top stays put)
+            if (pg) for (const q of s.entities) { if (q.parentEnt !== pg || q === e || q.dead || !q.ui) continue; // what is under it on the page follows (a page that doesn't line things up)
+              if (q.stretch === 'both') { if (q.behaviors.some((x) => STACK_FILLERS.has(x.type))) { q.marginTop = Math.max(0, (+q.marginTop || 0) + d); if (q._mt0 != null) q._mt0 = Math.max(0, q._mt0 + d); } }
+              else if (/^top/.test(q.anchor || '') && q.y - (q.extents?.().hy || 0) >= bot - 4) q.y += d; }
+          }
+          e.shape.h = hNow;
+        }
+        if (!s.engine.editing && (isHidden(s) || hNow < h0 - 1)) { // folded (or on the way): a slim bar; tap it to open, hold it for the menu
+          for (const d of UK.downs(s, e)) if (UK.in(d, b)) press = { id: d.id, t: s.time, x: d.x, y: d.y };
+          if (press) { const q = UK.ptr(s, e, press.id); if (!q || Math.hypot(q.x - press.x, q.y - press.y) > 10) press = null; else if (s.time - press.t > 0.5) { press = null; foldMenu(s); s.engine.vibrate?.(10); s.engine.input.taps.length = 0; } }
+          if (!isHidden(s)) for (const t of UK.taps(s, e)) if (UK.in(t, b)) { UK.tap(s, p); setFolded(s, false); }
+          return;
+        }
         S.max = Math.max(0, total - b.w); S.update(s, e, dt, b);
         if (s.engine.editing) return;
+        // hold the row: Fold / Hide
+        if (p.foldable !== false || p.hideable !== false) {
+          for (const d of UK.downs(s, e)) if (UK.in(d, b)) press = { id: d.id, t: s.time, x: d.x, y: d.y };
+          if (press) { const q = UK.ptr(s, e, press.id); if (!q || S.moved || Math.hypot(q.x - press.x, q.y - press.y) > 10) press = null; else if (s.time - press.t > 0.5) { press = null; foldMenu(s); s.engine.vibrate?.(10); s.engine.input.taps.length = 0; } }
+        }
+        if (p.foldable !== false && p.foldButton !== false) for (const t of UK.taps(s, e)) { const fx = b.x + b.w - 16, fy = b.y + 4; if (Math.hypot(t.x - fx, t.y - fy) < 18) { UK.tap(s, p); setFolded(s, true); s.engine.input.taps.length = 0; return; } }
         for (const t of UK.taps(s, e)) {
           if (!UK.in(t, b) || S.moved) continue;
           const i = Math.floor((t.x - b.x + S.v - 8) / (Dz + gap)); if (i < 0 || i >= n) continue;
@@ -12378,6 +12436,18 @@ registerBehavior('uiStories', {
       },
       drawUI(ctx, e, s) {
         const b = storyBox(s, e), Dz = +p.size || 64, gap = 14, G = groups(s), lab = p.labels !== false, ring = [p.ring1 || '#feda75', p.ring2 || '#d62976'], seenC = p.seenRing || 'rgba(128,128,128,0.45)'; let x = b.x + 8 - S.v;
+        if (b.h < 2) return; // hidden
+        const txt0 = tok(p.text || '@text') || '#fff', sub0 = withAlpha(txt0.startsWith('#') ? txt0 : '#888888', 0.6);
+        if (!s.engine.editing && h0 != null && hNow < h0 - 1) { // folded: a slim bar with the pictures of people who have new stories
+          const f = clamp((h0 - hNow) / Math.max(1, h0 - FOLD_H), 0, 1); ctx.save(); ctx.globalAlpha *= f; ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+          const fresh0 = G.others.filter((g) => !g.seen), show = (fresh0.length ? fresh0 : G.others).slice(0, 4), cy0 = b.y + b.h / 2; let ax = b.x + 16 + 14;
+          for (const g of show) { const last = g.slides[g.slides.length - 1], pic = last && isPic(last.pic) && !isVid(last.pic) ? last.pic : ''; miniAvatar(ctx, g.name, ax, cy0, 26, pic, g.seen ? seenC : ring); ax += 18; }
+          const label = fresh0.length ? `${fresh0.length} new ${fresh0.length === 1 ? 'story' : 'stories'}` : G.others.length ? 'Stories' : 'No stories yet';
+          UK.text(ctx, label, ax + 16, cy0, { size: 14, weight: 700, color: txt0, align: 'left', maxW: b.w - (ax - b.x) - 60 });
+          drawIco(ctx, 'chevron-down', b.x + b.w - 26, cy0, 20, sub0, { stroke: 2.2 }) || UK.text(ctx, '⌄', b.x + b.w - 26, cy0, { size: 18, weight: 900, color: sub0 });
+          ctx.restore(); if (f > 0.98) return;
+          ctx.globalAlpha *= 1 - f;
+        }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y - 6, b.w, b.h + 12); ctx.clip();
         const cy = b.y + Dz / 2 + 6, txt = tok(p.text || '@text') || '#fff';
         const bubble = (name, sl, rng, d) => {
@@ -12399,6 +12469,10 @@ registerBehavior('uiStories', {
           x += Dz + gap;
         }
         total = x + S.v - b.x; ctx.restore();
+        if (p.foldable !== false && p.foldButton !== false && !(h0 != null && hNow < h0 - 1)) { // the small ⌃ that folds the row
+          const fx = b.x + b.w - 16, fy = b.y + 4; ctx.save(); ctx.fillStyle = tok('@card') || (isDark(s) ? '#20232d' : '#ffffff'); ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(fx, fy, 11, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          drawIco(ctx, 'chevron-up', fx, fy, 14, sub0, { stroke: 2.4 }) || UK.text(ctx, '⌃', fx, fy + 2, { size: 13, weight: 900, color: sub0 });
+        }
       },
       drawTop(ctx, e, s, v) {
         if (k <= 0.01 && gi < 0) return; const c = cur(s); if (!c) return;
@@ -12436,6 +12510,7 @@ registerBehavior('uiStories', {
         if ((drag && held > 0.18 && !dx && !dy) || replying) UK.text(ctx, 'Ⅱ', W / 2, sT + 76, { size: 18, weight: 900, color: 'rgba(255,255,255,0.75)' });
         ctx.restore(); ctx.restore();
       },
+      start(e, s) { s.on('message', (m) => { if (e.dead) return; const k2 = String(m).toLowerCase(); if (k2 === 'fold stories') setFolded(s, true); else if (k2 === 'unfold stories') setFolded(s, false); else if (k2 === 'toggle stories') setFolded(s, !isFolded(s)); else if (k2 === 'hide stories') { hidV = true; store.set(key(s, 'hidden'), '1'); } else if (k2 === 'show stories') { hidV = false; store.set(key(s, 'hidden'), '0'); setFolded(s, false); } }); },
       destroy(e, s) { if (s.modal === e) s.modal = null; replying?.close?.(); sharing?.close?.(); },
     };
   },

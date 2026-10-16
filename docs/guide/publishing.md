@@ -58,6 +58,16 @@ The sections:
 - **Testing:** an FPS counter and on-screen errors for trying a build on another phone.
 - The main button builds what you picked at the top. For a play file, **Share** sends it with the phone's share sheet. **Test** opens it in a new tab.
 
+## Previews while you build
+
+The **phone** button next to Play (also in the play tools while a game runs) has:
+
+- **Play in the editor**: the usual way, with the play tools around it.
+- **Standalone preview**: the project on its own in a new tab, with no editor controls, exactly the size of the window. Preview again after a change and that tab reloads with it.
+- **Phone-size window** (on a computer): the same in a narrow window shaped like a phone.
+- **Device preview**: a **QR code** to scan with a phone's camera, and the link to send (Share on a phone: AirDrop, Messages…). The project travels inside the link as its changes to the template it started from, so it stays short; nothing is uploaded. A project too big for a QR code still works through the link. A phone can only open it when the editor runs on its https address (not on your computer's localhost).
+- **Test the built web app**: see below.
+
 ## Test in Safari
 
 Before you upload anything, try the web app exactly as people will get it:

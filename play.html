@@ -13,11 +13,21 @@
 <body>
 <script type="module">
   // play.html?game=<template key>  or  play.html?src=<url to scene JSON>
-  import { Engine } from './engine/pocket.js';
+  import { Engine, jsonPatch } from './engine/pocket.js';
   import { templates } from './examples/templates.js';
   const q = new URLSearchParams(location.search);
   let json = templates[q.get('game') || 'sky-dodge'];
   if (q.get('src')) json = await (await fetch(q.get('src'))).json();
+  const unpack = async (b64) => { const b = b64.replace(/-/g, '+').replace(/_/g, '/'), bin = atob(b + '==='.slice((b.length + 3) % 4)), u = Uint8Array.from(bin, (c) => c.charCodeAt(0)); return JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text()); };
+  if (q.get('preview')) { // Standalone Preview from the editor (same browser): the project waits in storage, and a newer one reloads this tab
+    try { const pv = JSON.parse(localStorage.getItem('pocket.preview') || 'null'); if (pv?.game) { json = pv.game; window.__previewAt = pv.at; } } catch { /* storage unavailable */ }
+    addEventListener('storage', (ev) => { if (ev.key === 'pocket.preview') location.reload(); });
+  }
+  const H = new URLSearchParams(location.hash.slice(1));
+  if (H.get('t') && H.has('d')) { // Device Preview: a template plus the changes made to it
+    try { const base = templates[H.get('t')]; if (!base) throw new Error('unknown template'); json = jsonPatch(JSON.parse(JSON.stringify(base)), await unpack(H.get('d'))); }
+    catch (err) { document.body.innerHTML = '<p style="color:#fff;font:16px system-ui;padding:24px">This preview link could not be opened. Make a new one in the editor.</p>'; throw err; }
+  }
   if (location.hash.startsWith('#p=')) { // a test link from the editor: the game is packed (gzip, base64url) into the link
     try { const b = location.hash.slice(3).replace(/-/g, '+').replace(/_/g, '/'), bin = atob(b + '==='.slice((b.length + 3) % 4)), u = Uint8Array.from(bin, (c) => c.charCodeAt(0));
       json = JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text()); }

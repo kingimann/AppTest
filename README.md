@@ -301,6 +301,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **threaded comments** (replies to replies) with **photos and GIFs**, a GIF picker (upload, paste, or search with a GIPHY / Tenor key), and **per-person reposts** shown on profiles;
   - line **icons** everywhere instead of emoji, and native touches (status bar colour, press feedback, swipe back);
   - **app pages and game pages** in one project (no pause menu on app pages), and **Standalone / Device previews** with a QR code;
+  - **X / Facebook / Instagram / Threads top bars**, and a post composer with audience, who-can-reply, text-on-colour posts and an inline emoji keyboard;
   - a **Marketplace** (listings, categories, search, message the seller, sell form) and **points, streaks and achievements** like a Snap Score;
   - an inline **emoji and GIF tray** for comments and chats;
   - **views** on every post, counted once per person like X;

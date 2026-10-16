@@ -2922,6 +2922,7 @@ function validate(b, j) {
   const out = [], all = project.entities, has = (n) => all.some((e) => e.name === n), tagged = (t) => all.some((e) => e.name === t || (e.tags || []).includes(t));
   if ((b.type === 'spawner' || b.type === 'shooter') && b.template && !all.some((e) => e.template && e.name === b.template)) out.push(['error', `No template named “${b.template}”. Tick “Template” on the object to spawn.`]);
   if ((b.type === 'spawner' || b.type === 'shooter') && !b.template) out.push(['warn', 'Pick a template to spawn.']);
+  if (b.type === 'uiBottomNav') { const twins = all.filter((e) => e !== j && e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))); if (twins.length) out.push(['warn', `There is another Bottom Nav in the same place (“${twins.map((e) => e.name).join('”, “')}”). Only the one on top takes taps; the one underneath can't be seen but its tabs (like “More”, which opens the menu) were firing too. Delete the one you don't use.`]); }
   if (b.type === 'teleport' && b.target && !has(b.target)) out.push(['error', `No object named “${b.target}”.`]);
   if (b.type === 'camera' && b.mode !== 'fixed' && b.target && !tagged(b.target)) out.push(['warn', `Nothing is tagged “${b.target}” yet: the camera will stay put.`]);
   if (b.type === 'animator' && b.autoplay && !(b.clips || []).some((c) => c.name === b.autoplay)) out.push(['error', `There is no clip called “${b.autoplay}”.`]);
@@ -4736,6 +4737,8 @@ function renderSceneSettings(box) {
 // ============================================================================
 /** Odin-style [Button]s shown at the top of a component. */
 const BEH_BUTTONS = {
+  uiBottomNav: [{ label: 'Keep only this Bottom Nav', icon: 'trash', when: (b) => project.entities.filter((e) => e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))).length > 1,
+    fn: (j, i, b) => { const others = project.entities.filter((e) => e !== j && e.ui && (e.behaviors || []).some((x) => x.type === 'uiBottomNav' && (x.position || 'bottom') === (b.position || 'bottom'))); if (!confirm(`Delete ${others.map((e) => '“' + e.name + '”').join(', ')}? This one stays.`)) return; for (const e of others) deleteEntity(e.id); toast(`Deleted ${others.length} other Bottom Nav${others.length > 1 ? 's' : ''}`); } }],
   tween: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b) }],
   tweenSequence: [{ label: 'Preview', icon: 'play', primary: true, fn: (j, i, b) => previewBehavior(j, b, Math.min(8, seqLength(b))) }],
   flipbook: [{ label: 'Preview', icon: 'play', fn: (j, i, b) => previewBehavior(j, b, 3) }],

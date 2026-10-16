@@ -448,6 +448,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - **Muted accounts** and **Blocked accounts**, each with *Unmute* / *Unblock*.
     - **Log out**, when people sign in with Supabase.
     - The choices are saved with your profile (fields `private`, `dm`, `notes_off`).
+  - At the top of a page that lines things up, a full-width Profile Header sits right under the App Bar: no gap above its cover.
   - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
   - Tapping the **Followers / Following / Friends** counts opens *Lists page* (the Friends page) on that person's lists, with a Follow button on each.
 - **Profile tabs on a feed:** a feed's tabs can use `posts` (no replies), `replies`, `media` (posts with pictures or videos) and `likes` (posts you liked). A third column gives a tab its own look, e.g. `Media | media | grid`. The Social template's profiles use `Posts | posts`, `Replies | replies`, `Media | media | grid` and, on your own, `Likes | likes`.

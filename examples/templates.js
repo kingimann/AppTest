@@ -210,6 +210,7 @@ function socialApp() {
         { author: 'Pocket News', handle: 'pocketnews', media: '☄️', color: '#111827', text: 'Comet watch: look north-east after sunset', _at: t - 1 * H },
       ] },
     { name: 'StoryViews', fields: [{ name: 'Story', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Name', type: 'text' }], rows: [] },
+    { name: 'Bookmarks', fields: [{ name: 'Handle', type: 'text' }, { name: 'Kind', type: 'text' }, { name: 'Ref', type: 'text' }, { name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Author Handle', type: 'text' }, { name: 'Text', type: 'text' }, { name: 'Media', type: 'text' }, { name: 'Post Author', type: 'text' }], rows: [] },
     { name: 'Reads', fields: [{ name: 'Chat', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'At', type: 'number' }],
       rows: [{ chat: 'dm-alex-maya', handle: 'maya', at: t - 0.76 * H }, { chat: 'dm-alex-leop', handle: 'leop', at: t - 25 * H }] },
     { name: 'Follows', fields: [{ name: 'Follower', type: 'text' }, { name: 'Followee', type: 'text' }, { name: 'Follower Name', type: 'text' }, { name: 'Followee Name', type: 'text' }],
@@ -226,11 +227,11 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }, { name: 'Liked By', type: 'text' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
+      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post\nsaved = Saved', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
-        feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', myProfilePage: 'profile' }),
+        feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', myProfilePage: 'profile', savedPage: 'saved', actions: 'comment, repost, like, save, share' }),
       ]),
       ...app.page('p-reels', 'reels', false, [feed('feed-reels', 'reels', 0, { profilePage: 'user', myProfilePage: 'profile' })]),
       ...app.page('p-explore', 'explore', false, [
@@ -238,6 +239,7 @@ function socialApp() {
         feed('feed-explore', 'grid', 60, { searchVar: 'q', gridColumns: 3 }),
       ]),
       ...app.page('p-notifications', 'notifications', false, [{ id: 'activity', name: 'Notifications', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiActivity', openPage: 'home', profilePage: 'user', text: INK, sub: MUTED }] }]),
+      ...app.page('p-saved', 'saved', false, [{ id: 'saved-list', name: 'Saved', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiBookmarks', openPage: 'home', text: INK, sub: MUTED }] }]),
       ...app.page('p-friends', 'friends', false, [{ id: 'friends-list', name: 'Friends', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: 'uiFriends', profilePage: 'user', text: INK, sub: MUTED }] }]),
       ...app.page('p-user', 'user', false, [
         { id: 'user-head', name: 'Person Header', ui: true, anchor: 'top', x: 0, y: 140, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 290, radius: 0, fill: '' },
@@ -258,7 +260,7 @@ function socialApp() {
       ]),
       { id: 'side', name: 'Side Menu', ui: true, anchor: 'center', x: 0, y: 0, layer: 6, shape: { type: 'rect', w: 10, h: 10, radius: 0, fill: '' },
         behaviors: [{ type: 'uiSideBar', social: true, profilePage: 'profile', countsPage: 'friends', counts: 'following, followers and friends', sync: 'the Bottom Nav tabs', header: 'simple', title: '', avatar: '', style: 'rounded', bg: '@card', text: INK, accent: '@accent', iconColor: '', badgeColor: '#f91880',
-          items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },
+          items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\nSaved | bookmark | saved\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },
       { id: 'nav', name: 'Bottom Nav', ui: true, anchor: 'bottom', x: 0, y: -38, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 76, radius: 0, fill: '' },
         behaviors: [{ type: 'uiBottomNav', tabs: 'Home | home | home\nExplore | search | explore\nReels | video | reels\nMessages | chat | inbox | unread\nProfile | user | profile', var: 'page', start: 1, style: 'minimal', barColor: '@bar', activeColor: '@text', idleColor: '@sub', otherPage: 'keep the last tab lit' }] },
     ],

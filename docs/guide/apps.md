@@ -19,7 +19,7 @@ On the home screen, tap **New app** for a blank app, or pick the **Apps** tab un
 | **Notes** | Notes with a mood, search, and editing |
 | **Expense Tracker** | Amounts with categories and dates, grouped by day, with a running total |
 | **Arcade** | An app with three games inside, best scores and a list of every play |
-| **Social** | Home (stories you can post, reply to and like, then For you / Following), Explore, Reels, Messages (direct and group chats) and a profile, a social Side Menu, plus Notifications, Friends and profile pages for everyone, all connected by follows, friends and notifications (see [Social app UI](#/guide/ui)) |
+| **Social** | Home (stories you can post, reply to and like, then For you / Following), Explore, Reels, Messages (direct and group chats), Saved (bookmarked posts and comments) and a profile, a social Side Menu, plus Notifications, Friends and profile pages for everyone, all connected by follows, friends and notifications (see [Social app UI](#/guide/ui)) |
 
 Each one works as soon as you press **▶ Play**. Change the colours, rename the fields, and add pages.
 

@@ -501,6 +501,7 @@ export const UI_WIDGETS_MORE = [
     ['Inbox', 'Social', 'list', 'uiInbox', 400, 600, {}, { note: 'Search, All / Unread / Groups tabs, ✏️ for a new message or group, and press and hold to pin, mute, mark unread or delete. Tapping a conversation sets chat and chatTitle and goes to the page chat (put a Chat there). The unread count is in {unread}, for a Bottom Nav badge. Add a Reads collection (chat, handle, at) for “Seen” across phones.' }],
     ['Trending', 'Social', 'stats', 'uiTrending', 376, 360, { bg: '@card' }],
     ['Who To Follow', 'Social', 'player', 'uiWhoToFollow', 376, 250, { bg: '@card' }],
+    ['Saved (bookmarks)', 'Social', 'bookmark', 'uiBookmarks', 400, 640, {}, { note: 'The posts and comments the signed-in person bookmarked, with All / Posts / Comments tabs. Tapping one opens the post on the feed page. Add a Bookmarks collection (handle, kind, ref, post, author, author_handle, text, media) to keep them on every phone.' }],
     ['Notifications (social)', 'Social', 'bell', 'uiActivity', 400, 640, {}, { note: 'Likes, comments, replies, reposts, mentions, follows, friend requests and messages for the signed-in person. The unread count is in {notifications_unread} (an App Bar icon badge: bell | page:notifications | notifications_unread).' }],
     ['Friends', 'Social', 'player', 'uiFriends', 400, 640, {}, { note: 'Friends, requests (Accept / Decline) and Find people (Follow, Add friend). Requests waiting are in {friend_requests}.' }],
     // more UI: loading, chips, avatars, banners, steps, dividers

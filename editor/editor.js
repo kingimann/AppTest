@@ -7802,7 +7802,7 @@ function renamePage(pg) {
 }
 // ---- Content on a page: blocks that stack under what's there (or under the selected one), rows you can reorder ----
 const PAGE_GAP = 16;
-const PAGE_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiDataList', 'uiPhotoGrid']); // long lists: on a page they fill the room under the rest
+const PAGE_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiDataList', 'uiPhotoGrid']); // long lists: on a page they fill the room under the rest
 const PAGE_SKIP = new Set(['uiShowIf', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiPopup', 'uiSheet', 'uiNotifications', 'uiScreenFX', 'uiTutorial', 'uiOffscreen', 'uiCrosshair']); // bars, pop-ups and screen effects aren't page content
 /** The page shown in the UI editor (or the one the selected object is on). */
 function shownPageEnt() {

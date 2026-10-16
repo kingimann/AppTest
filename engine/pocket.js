@@ -2067,7 +2067,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiActivity', 'uiFriends', 'uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
+const EDIT_PREVIEW = new Set(['uiActivity', 'uiBookmarks', 'uiFriends', 'uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -4639,7 +4639,7 @@ function ownScreen(scene, screen) {
 }
 
 
-const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
+const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
 /**
  * A page set to "Line everything up": what is in it stacks top to bottom, in the order it was put there, with an even gap, so
  * nothing overlaps on any screen (a text that wraps to more lines, or an element that hides, moves what is under it). Elements
@@ -9483,7 +9483,7 @@ function socialSheet(s, o) {
   const openThreads = new Set(); let replyTo = null;
   const fmt = (n) => (+n ? shortNum(+n) : '');
   const row = (cm, isReply) => {
-    const r = el('div', `display:flex;gap:10px;padding:8px 16px 8px ${isReply ? 58 : 16}px;`); r.dataset.comment = cm.text;
+    const r = el('div', `display:flex;gap:10px;padding:8px 16px 8px ${isReply ? 58 : 16}px;transition:background .6s;`); r.dataset.comment = cm.text; r.dataset.cid = cm.id;
     const mid = el('div', 'flex:1;min-width:0;'), line1 = el('div', 'font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;');
     line1.append(el('span', 'font-weight:800;', cm.author || 'Someone'));
     if (o.post && cm.author && cm.author === o.post.author) line1.append(el('span', `background:${c.acc};color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;`, 'Author'));
@@ -9495,6 +9495,7 @@ function socialSheet(s, o) {
     const acts = el('div', `display:flex;gap:16px;margin-top:5px;color:${c.sub};font-size:13px;font-weight:700;`);
     const reply = btn('', 'Reply'); reply.onclick = () => { replyTo = cm.parent || cm.id; chip(cm.handle || String(cm.author || '').split(/\s+/)[0]); inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
     acts.append(reply);
+    if (o.onSaveComment) { const sv = !!o.isCommentSaved?.(cm), sb = btn(`display:flex;align-items:center;gap:4px;color:${sv ? c.acc : c.sub};`); sb.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="${sv ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true">${POST_ICONS.bookmark}</svg>`; sb.append(document.createTextNode(sv ? 'Saved' : 'Save')); sb.dataset.saveComment = sv ? '1' : ''; sb.setAttribute('aria-label', sv ? 'Remove comment from saved' : 'Save comment'); sb.onclick = () => { o.onSaveComment(cm); paint(); }; acts.append(sb); }
     if (cm.mine && o.onEditComment) { const ed = btn('', 'Edit'); ed.onclick = () => { // edit it where it is
       const box = el('div', 'display:flex;gap:6px;margin-top:4px;'), inp0 = el('input', `flex:1;min-width:0;font:15px ${font};padding:8px 12px;border-radius:16px;border:1px solid ${c.acc};background:${c.field};color:${c.text};outline:none;`); inp0.value = cm.text; inp0.maxLength = 500; inp0.dataset.editComment = '1';
       const ok0 = btn(`flex:none;color:${c.acc};font:800 14px ${font};padding:0 6px;`, 'Save'), no0 = btn(`flex:none;color:${c.sub};font:700 14px ${font};padding:0 4px;`, 'Cancel');
@@ -9544,7 +9545,10 @@ function socialSheet(s, o) {
   };
   inp.addEventListener('input', sync); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } }); send.onclick = submit;
   inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send); foot.append(chipRow, emo, inRow); sheet.append(foot);
+  const fc = o.focusComment ?? s.engine._focusComment; s.engine._focusComment = null; // opened from a saved comment: show it
+  if (fc != null) { const cm = o.comments().find((q) => String(q.id) === String(fc)); if (cm?.parent) openThreads.add(String(cm.parent)); }
   sync(); paint(); if (o.focus) setTimeout(() => inp.focus(), 300);
+  if (fc != null) setTimeout(() => { const q = list.querySelector(`[data-cid="${CSS.escape(String(fc))}"]`); if (!q) return; q.scrollIntoView?.({ block: 'center', behavior: 'smooth' }); q.style.background = withAlpha(c.acc, 0.16); setTimeout(() => { q.style.background = ''; }, 1600); }, 350);
   api.input = inp; api.paint = paint; return api;
 }
 
@@ -9559,7 +9563,8 @@ registerBehavior('uiFeed', {
     { key: 'max', label: 'Most posts shown (0 = all)', type: 'number', default: 0, step: 1 },
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
-    { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |” and “Saved | saved = yes”. Blank = no tabs.' },
+    { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |”, “Following | following” and “Saved | saved” (the posts you bookmarked). Blank = no tabs.' },
+    { key: 'savedPage', label: 'Saved page (“View” after saving, blank = none)', type: 'text', default: '', info: 'A page with a Saved list (bookmarked posts and comments).' },
     { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
     { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', showIf: (b) => !!String(b.tabs || '').trim(), info: TOP_STYLE_INFO },
     { key: 'tabLayout', label: 'Tab widths', type: 'select', options: ['auto', 'fill the width', 'fit the names (scrolls)', 'centred'], default: 'auto', showIf: (b) => !!String(b.tabs || '').trim() },
@@ -9676,9 +9681,10 @@ registerBehavior('uiFeed', {
     const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
-      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
+      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing || onlySaved ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
+      if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
       return P;
     };
     /** The page this feed is on (things above it scroll away), and how far up they have gone. */
@@ -9746,6 +9752,11 @@ registerBehavior('uiFeed', {
       for (let i = 1; i < out.length; i++) if (rid(out[i]) === String(out[i - 1].id)) { tUp.add(out[i].id); tDown.add(out[i - 1].id); }
       return out;
     };
+    const isSaved = (s, r) => bmHas(s, 'post', r.id);
+    /** Bookmark a post (yours only: a Bookmarks collection or this phone); a Saves count on the post goes up / down. */
+    const saveIt = (s, r) => { const m = mediaList(r)[0], on = bmToggle(s, { kind: 'post', ref: String(r.id), post: String(r.id), author: F(r, 'author') || '', author_handle: who(r), text: String(F(r, 'text') || '').slice(0, 280), media: isPic(m) && !isVid(m) && String(m).length < 4000 ? m : '' });
+      if (F(r, 'saves') != null && F(r, 'saves') !== '') patch(s, r, { saves: Math.max(0, (+F(r, 'saves') || 0) + (on ? 1 : -1)) });
+      s.snackbar?.(on ? 'Saved' : 'Removed from saved', p.savedPage ? (on ? 'View' : '') : '', on && p.savedPage ? () => s.navTo(p.savedPage) : null); return on; };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
     const ACTS = { timeline: 'comment, repost, like, share', compact: 'comment, repost, like, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
@@ -9819,7 +9830,7 @@ registerBehavior('uiFeed', {
       items.push({ icon: '📋', label: 'Copy text', run: () => copy(tx, 'Copied to clipboard') });
       if (url) items.push({ icon: '🔗', label: 'Copy link', run: () => copy(String(url), 'Link copied') });
       items.push({ icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } });
-      items.push({ icon: '🔖', label: truthy(F(r, 'saved')) ? 'Remove from saved' : 'Save post', run: () => flip(s, r, 'saved') });
+      items.push({ icon: '🔖', label: isSaved(s, r) ? 'Remove from saved' : 'Save post', run: () => saveIt(s, r) });
       sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } })) sheetUp = false;
     };
     const openPost = (s, r, kind, focus) => {
@@ -9831,12 +9842,12 @@ registerBehavior('uiFeed', {
         post: isPost ? { quote: (() => { const q = findPost(s, F(r, 'quote')); return q ? { author: F(q, 'author'), handle: who(q), text: F(q, 'text'), media: mediaList(q)[0] } : F(r, 'quote') ? { gone: true } : null; })(), author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
           repostedBy: F(r, 'repostedBy'), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
           following: p.followButtons !== false && fol != null && fol !== '' && who(r) !== me0.handle && !r._mine ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
-        stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: truthy(F(r, 'reposted')), saved: truthy(F(r, 'saved')), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
+        stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: truthy(F(r, 'reposted')), saved: isSaved(s, r), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
         count: () => +F(r, 'comments') || 0,
         poll: isPost && pollOf(r) ? () => pollOf(r) : null,
         onVote: (i) => { const P0 = pollOf(r); if (!P0 || P0.voted) return; P0.v[i]++; patch(s, r, { votes: P0.v.join(', '), voted: i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[i]); },
         onLike: (only) => { if (only && truthy(F(r, 'liked'))) return; if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); },
-        onRepost: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); }, onSave: () => { flip(s, r, 'saved'); pops.set(r.id + 's', s.time); },
+        onRepost: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); }, onSave: () => { saveIt(s, r); pops.set(r.id + 's', s.time); },
         onFollow: () => followIt(s, r), onLink: () => { if (!s.engine.editing && /^https?:/.test(String(lnk))) window.open(lnk, '_blank', 'noopener'); },
         onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: isMine(s, r) ? [
           { icon: '✏️', label: 'Edit post', run: () => { sh?.close(); setTimeout(() => editIt(s, r), 280); } },
@@ -9857,6 +9868,8 @@ registerBehavior('uiFeed', {
         },
         onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
+        isCommentSaved: (cm) => bmHas(s, 'comment', r.id + ':' + cm.id),
+        onSaveComment: (cm) => { const on = bmToggle(s, { kind: 'comment', ref: r.id + ':' + cm.id, post: String(r.id), author: cm.author || '', author_handle: handleOf(cm.handle || ''), text: String(cm.text || '').slice(0, 280), post_author: F(r, 'author') || '' }); s.snackbar?.(on ? 'Comment saved' : 'Removed from saved'); return on; },
         onLikeComment: (cm) => { // per person: who liked it is kept on the comment, and this phone remembers its own likes
           const on = !cm.liked, key = r.id + ':' + cm.id, me1 = meOf(s), mh = String(me1.handle).toLowerCase(), L0 = myCLikes(s);
           if (on) L0.add(key); else L0.delete(key); store.set(CLKEY(s), JSON.stringify([...L0].slice(-2000)));
@@ -9928,7 +9941,7 @@ registerBehavior('uiFeed', {
           if (s.time < skipTo || react) continue;
           if (menu) { // the ⋯ menu has every tap while it's open
             const m = menuR.find((q) => UK.in(t, q)), r = menu.r; menu = null; if (!m) continue; UK.tap(s, p);
-            if (m.k === 'save') flip(s, r, 'saved');
+            if (m.k === 'save') saveIt(s, r);
             else if (m.k === 'copy') { const tx = String(F(r, 'text') || ''); navigator.clipboard?.writeText(tx).catch(() => {}); s.snackbar?.('Copied to clipboard'); }
             else if (m.k === 'hide' || m.k === 'mute') hideIt(s, r, m.k);
             else if (m.k === 'report') reportIt(s, r);
@@ -9952,7 +9965,7 @@ registerBehavior('uiFeed', {
           else if (k === 'profile') { UK.tap(s, p); openProfile(s, r); }
           else if (k === 'gridOpen') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) { if (p.openPage) { if (has(s)) openRecord(s, p.collection, q); s.navTo(p.openPage); } else openPost(s, q, 'post'); } }
           else if (k === 'quote') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) openPost(s, q, 'post'); }
-          else if (k === 'save') { UK.tap(s, p); flip(s, r, 'saved'); pops.set(r.id + 's', s.time); }
+          else if (k === 'save') { UK.tap(s, p); saveIt(s, r); pops.set(r.id + 's', s.time); }
           else if (k === 'comment') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.commentMessage) s.send(p.commentMessage, r.id); if (p.commentsSheet !== false && !s.engine.editing) openPost(s, r, 'comments', true); }
           else if (k === 'share') { UK.tap(s, p); if (p.shareMessage) s.send(p.shareMessage, r.id); else if (!s.engine.editing) shareMenu(s, r); }
           else if (k === 'more') { UK.tap(s, p); if (has(s)) openRecord(s, p.collection, r); if (p.moreMessage) s.send(p.moreMessage, r.id); if (p.moreMenu !== false) menu = { r, sx: b.x + hit.x + hit.w, sy: b.y + inset + it.y - S.v + hit.y + hit.h }; }
@@ -10038,9 +10051,9 @@ registerBehavior('uiFeed', {
         const actionRow = (r, x, w, yy, hits, ox, oy, sz0) => { const sz = +p.actionSize > 0 ? +p.actionSize : sz0; // spread evenly; save sits at the end
           const list = A.filter((k) => k !== 'save' || look !== 'photos'), step = w / Math.max(1, list.length), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
           list.forEach((k, i) => {
-            const ix = x + step * i + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? truthy(F(r, 'saved')) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
+            const ix = x + step * i + sz / 2, n = countOf(r, k), on = k === 'like' ? liked : k === 'repost' ? rep : k === 'save' ? isSaved(s, r) : false, col = k === 'like' && on ? likeC : k === 'repost' && on ? repC : sub;
             if (k === 'like') likeMark(ix, yy, sz, on, r.id);
-            else { ctx.save(); const z = k === 'repost' ? pop(r.id + 'r') : k === 'save' ? pop(r.id + 's') : 1; ctx.translate(ix, yy); ctx.scale(z, z); icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, sz, col); if (k === 'save' && on) { ctx.fillStyle = col; ctx.fillRect(-sz * 0.25, -sz * 0.38, sz * 0.5, sz * 0.6); } ctx.restore(); }
+            else { ctx.save(); const z = k === 'repost' ? pop(r.id + 'r') : k === 'save' ? pop(r.id + 's') : 1; ctx.translate(ix, yy); ctx.scale(z, z); if (k === 'save') bookmarkMark(ctx, 0, 0, sz, on ? acc : col, on); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', views: 'ui-chart' }[k], 0, 0, sz, col); ctx.restore(); }
             const num = p.showCounts !== false && +n ? fmtN(n, step < 90) : '', word = p.actionStyle === 'icons + words' ? (num ? { comment: +n === 1 ? 'reply' : 'replies', repost: +n === 1 ? 'repost' : 'reposts', like: +n === 1 ? 'like' : 'likes', views: 'views' }[k] || '' : { comment: 'Reply', repost: 'Repost', like: 'Like', share: 'Share', save: 'Save', views: 'Views' }[k]) : '';
             if (num || word) UK.text(ctx, [num, word].filter(Boolean).join(' '), ix + sz * 0.85, yy, { size: Math.round(TS * 0.87), weight: 500, color: col, align: 'left' });
             hits.push({ k: k === 'views' ? 'none' : k, x: ix - sz / 2 - ox, y: yy - oy - 16, w: Math.min(step, 70), h: 32 });
@@ -10225,7 +10238,7 @@ registerBehavior('uiFeed', {
               burst(r, x0 + W / 2, at + head + mh / 2, 96, 'white');
               const ay = at + actY; let ix = x0 + pad + 10;
               for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && truthy(F(r, 'reposted')) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
-              if (A.includes('save')) { const sv = truthy(F(r, 'saved')); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - pad - 10, ay); ctx.scale(sz, sz); icon('ui-bookmark', 0, 0, 24, txt); if (sv) { ctx.fillStyle = txt; ctx.fillRect(-6, -9, 12, 14); } ctx.restore(); hits.push({ k: 'save', x: W - pad - 26, y: actY - 16, w: 32, h: 32 }); }
+              if (A.includes('save')) { const sv = isSaved(s, r); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - pad - 10, ay); ctx.scale(sz, sz); bookmarkMark(ctx, 0, 0, 24, txt, sv); ctx.restore(); hits.push({ k: 'save', x: W - pad - 26, y: actY - 16, w: 32, h: 32 }); }
               let yy = ay + 34;
               if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${fmtN(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
               T.lines.forEach((l, i) => { if (i === 0 && l.startsWith(name)) { UK.text(ctx, name, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); ctx.font = `800 ${TS - 1}px ${THEME.font}`; UK.text(ctx, l.slice(name.length), x0 + pad + ctx.measureText(name).width, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); } else UK.text(ctx, l, x0 + pad, yy, { size: TS - 1, weight: 500, color: txt, align: 'left' }); yy += LH; });
@@ -10264,9 +10277,9 @@ registerBehavior('uiFeed', {
                 if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1); }
                 const by = ry + 18 + 22, part = cw / A.length;
                 A.forEach((k, i) => {
-                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? truthy(F(r, 'saved')) : false, l = { like: on ? (curR ? REACT_WORD[curR] || 'Liked' : 'Liked') : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
+                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? isSaved(s, r) : false, l = { like: on ? (curR ? REACT_WORD[curR] || 'Liked' : 'Liked') : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
                   const mx = cx + part * i + part / 2; ctx.font = `700 14px ${THEME.font}`; const tw = A.length > 3 ? 0 : ctx.measureText(l).width, x1 = mx - (tw + (tw ? 26 : 18)) / 2;
-                  ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', save: 'ui-bookmark', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
+                  ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else if (k === 'save') bookmarkMark(ctx, 0, 0, 18, col, on); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
                   if (tw) UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
                   hits.push({ k: k === 'views' ? 'none' : k, x: 8 + part * i, y: by - at - 22, w: part, h: 44 });
                 });
@@ -10317,7 +10330,7 @@ registerBehavior('uiFeed', {
         }
         menuR = [];
         if (menu) { // the ⋯ menu
-          const r = menu.r, sv = truthy(F(r, 'saved')), mine = isMine(s, r), IT = mine
+          const r = menu.r, sv = isSaved(s, r), mine = isMine(s, r), IT = mine
             ? [['edit', 'Edit post', '✏️'], ...(p.threads !== false ? [['thread', 'Add to thread', '🧵']] : []), ['pin', truthy(F(r, 'pinned')) ? 'Unpin' : 'Pin to top', '📌'], ['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ['delete', 'Delete post', '🗑️', true]]
             : [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ...(p.messages !== false ? [['message', `Message @${who(r)}`, '💬']] : []), ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
           const w = 220, rh = 44, hh = IT.length * rh + 12, x = clamp(menu.sx - w, b.x + 8, b.x + b.w - w - 8), yy = menu.sy + hh > b.y + b.h - 8 ? Math.max(b.y + inset + 8, menu.sy - hh - 30) : menu.sy;
@@ -11030,6 +11043,115 @@ registerBehavior('uiActivity', {
             ctx.fillStyle = line; ctx.fillRect(b.x, y + h - 0.5, b.w, 0.5);
           }
           rows.push({ x: b.x, y, w: b.w, h, g }); y += h;
+        }
+        total = y + S.v - (b.y + top);
+        ctx.restore();
+      },
+    };
+  },
+});
+
+// ---- bookmarks: the posts and comments each person saved ----
+const bmKey = (s) => 'pocket.bookmarks.' + (s.engine.gameKey || 'game');
+let bmCache = null;
+/** My bookmarks, newest last: [{ kind: 'post' | 'comment', ref, post, author, handle, text, media, post_author, at }]. A Bookmarks collection (handle = whose bookmark, kind, ref, post, author, author_handle, text, media) keeps them on every phone; else this phone remembers them. */
+function bookmarks(s) {
+  const D = s.engine.data, me = handleOf(meOfVars(s).handle), coll = !!D.def('Bookmarks');
+  if (bmCache && bmCache.t === s.time && bmCache.me === me && bmCache.coll === coll && bmCache.v === bmCache.ver()) return bmCache.list;
+  let list;
+  if (coll) list = D.rows('Bookmarks').filter((r) => handleOf(r.handle) === me).map((r) => ({ ...r, kind: r.kind || 'post', ref: String(r.ref ?? r.post ?? ''), at: +r._at || 0 }));
+  else { try { list = JSON.parse(store.get(bmKey(s), '[]')) || []; } catch { list = []; } }
+  const ver = () => (coll ? D.rows('Bookmarks').length : store.get(bmKey(s), '').length);
+  bmCache = { t: s.time, me, coll, list, set: new Set(list.map((b) => b.kind + '|' + b.ref)), ver, v: ver() };
+  return list;
+}
+const bmHas = (s, kind, ref) => { bookmarks(s); return bmCache.set.has(kind + '|' + String(ref)); };
+/** Save or unsave a post / comment for me. Returns true when it is now saved. */
+function bmToggle(s, item) {
+  const D = s.engine.data, me = handleOf(meOfVars(s).handle), ref = String(item.ref), on = !bmHas(s, item.kind, ref);
+  if (D.def('Bookmarks')) {
+    if (on) D.add('Bookmarks', { ...item, ref, handle: me });
+    else for (const r of D.rows('Bookmarks').filter((q) => handleOf(q.handle) === me && (q.kind || 'post') === item.kind && String(q.ref ?? q.post) === ref)) D.remove('Bookmarks', r.id);
+  } else {
+    const L = bookmarks(s).filter((b) => !(b.kind === item.kind && String(b.ref) === ref)); if (on) L.push({ ...item, ref, at: Date.now() });
+    store.set(bmKey(s), JSON.stringify(L.slice(-500)));
+  }
+  bmCache = null; s.engine.vibrate?.(on ? 10 : 0); s.emit?.('bookmark', { ...item, on }); return on;
+}
+let bmPath = null;
+/** A bookmark icon (outline, filled when saved), centred on x, y. */
+function bookmarkMark(ctx, x, y, sz, col, on) {
+  bmPath ||= typeof Path2D !== 'undefined' ? new Path2D('M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z') : null; if (!bmPath) return;
+  ctx.save(); ctx.translate(x, y); ctx.scale(sz / 24, sz / 24); ctx.translate(-12, -12); ctx.lineJoin = 'round'; ctx.lineWidth = 2; ctx.strokeStyle = col; if (on) { ctx.fillStyle = col; ctx.fill(bmPath); } ctx.stroke(bmPath); ctx.restore();
+}
+
+registerBehavior('uiBookmarks', {
+  label: 'Saved', description: 'The posts and comments you bookmarked, newest first, with tabs for All, Posts and Comments. Tap one to open the post (a saved comment is shown and highlighted); tap the bookmark to remove it (Undo in the snackbar). Each person has their own: a Bookmarks collection keeps them on every phone, else they stay on this one.',
+  params: [
+    { key: 'tabs', label: 'Tabs: All, Posts, Comments', type: 'bool', default: true },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'short line', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
+    { key: 'postsCollection', label: 'Posts collection', type: 'text', default: 'Posts', suggest: 'collections' },
+    { key: 'openPage', label: 'Tapping one goes to page (with a Social Feed)', type: 'text', default: 'home' },
+    { key: 'openVar', label: '…and puts the post id in variable (the feed opens it)', type: 'text', default: 'openPost', suggest: 'vars' },
+    { key: 'empty', label: 'When there are none', type: 'text', default: 'Nothing saved yet' },
+    { key: 'emptyHint', label: 'Hint under it', type: 'text', default: 'Tap the bookmark on a post, or Save under a comment, to keep it here.' },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, tabsR = [], rows = [], marks = [], total = 0;
+    const items = (s) => {
+      const D = s.engine.data, PC = p.postsCollection || 'Posts', posts = D.def(PC) ? D.rows(PC) : [];
+      return [...bookmarks(s)].reverse().filter((b) => (tab === 1 ? b.kind === 'post' : tab === 2 ? b.kind === 'comment' : true)).map((b) => {
+        const r = posts.find((q) => String(q.id) === String(b.post));
+        if (b.kind === 'post') return { b, author: r?.author ?? b.author, handle: r?.handle ?? b.author_handle, text: r ? r.text : b.text, media: r ? String(r.media || '').split('|')[0].trim() : b.media, color: r?.color, gone: !r && !b.text, at: r?._at };
+        return { b, author: b.author, handle: b.author_handle, text: b.text, label: `Comment on ${r?.author || b.post_author || 'a post'}’s post`, at: 0 };
+      });
+    };
+    const open = (s, it) => { if (it.gone) { s.snackbar?.('This post is no longer available'); return; } if (it.b.kind === 'comment') s.engine._focusComment = String(it.b.ref).split(':').slice(1).join(':'); if (p.openVar) s.setVar(p.openVar, String(it.b.post)); if (p.openPage) s.navTo(p.openPage); };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.fit(s, e, UK.box(e)), top = p.tabs !== false ? 46 : 0, list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
+        S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
+        if (s.engine.editing) return;
+        for (const t of UK.taps(s, e)) {
+          if (S.moved) continue;
+          const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { UK.tap(s, p); tab = ti; S.v = 0; continue; }
+          if (!UK.in(t, list)) continue;
+          const m = marks.find((q) => UK.in(t, q, 6));
+          if (m) { UK.tap(s, p); const it = m.it.b; bmToggle(s, it); s.snackbar?.('Removed from saved', 'Undo', () => { if (!bmHas(s, it.kind, it.ref)) bmToggle(s, it); }); continue; }
+          const r = rows.find((q) => UK.in(t, q)); if (r) { UK.tap(s, p); open(s, r.it); }
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.fit(s, e, UK.box(e)), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), top = p.tabs !== false ? 46 : 0;
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        const all = bookmarks(s), nP = all.filter((q) => q.kind === 'post').length, nC = all.length - nP;
+        tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', nP ? `Posts (${nP})` : 'Posts', nC ? `Comments (${nC})` : 'Comments'], tab, txt, sub, acc, line, TSt, p.tabStyle, s) : [];
+        const L = items(s); rows = []; marks = [];
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + top, b.w, b.h - top); ctx.clip();
+        if (!L.length) { bookmarkMark(ctx, b.cx, b.y + top + 72, 40, sub, false); UK.text(ctx, tab === 2 ? 'No saved comments' : tab === 1 ? 'No saved posts' : p.empty || 'Nothing saved yet', b.cx, b.y + top + 124, { size: 16, weight: 800, color: txt });
+          if (p.emptyHint) { ctx.font = `500 14px ${THEME.font}`; wrapLines(ctx, p.emptyHint, Math.min(300, b.w - 40), 14, 3).forEach((l, i) => UK.text(ctx, l, b.cx, b.y + top + 150 + i * 20, { size: 14, weight: 500, color: sub })); } }
+        let y = b.y + top - S.v;
+        for (const it of L) {
+          const pic = it.media && (isPic(it.media) || isVid(it.media)), emo = it.media && !pic, thumb = it.media ? 58 : 0;
+          const tx = b.x + 16 + 40 + 12, tw = b.w - (tx - b.x) - 16 - 34 - (thumb ? thumb + 10 : 0);
+          ctx.font = `500 15px ${THEME.font}`; const lines = it.gone ? ['This post is no longer available'] : wrapLines(ctx, fillTemplate(String(it.text || (pic ? '📷 Photo' : '')), s.vars), tw, 15, 3);
+          const h = Math.max(thumb + 24, (it.label ? 20 : 0) + 34 + lines.length * 20 + 12);
+          if (y + h > b.y && y < b.y + b.h) {
+            let yy = y + 14;
+            if (it.label) { UK.text(ctx, '💬 ' + it.label, tx, yy + 6, { size: 12, weight: 700, color: sub, align: 'left', maxW: tw + thumb }); yy += 20; }
+            miniAvatar(ctx, it.author || '?', b.x + 16 + 20, yy + 20, 40);
+            ctx.font = `800 15px ${THEME.font}`; const nm = String(it.author || 'Someone'), nw = Math.min(tw * 0.62, ctx.measureText(nm).width);
+            UK.text(ctx, nm, tx, yy + 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw * 0.62 });
+            if (it.handle) UK.text(ctx, '@' + handleOf(it.handle), tx + nw + 6, yy + 9, { size: 14, weight: 500, color: sub, align: 'left', maxW: tw - nw - 6 });
+            lines.forEach((l, i) => UK.text(ctx, l, tx, yy + 32 + i * 20, { size: 15, weight: 500, color: it.gone ? sub : txt, align: 'left' }));
+            if (thumb) { const X = b.x + b.w - 16 - 34 - thumb, Y = y + (h - thumb) / 2; if (pic) drawMedia(ctx, it.media, '#333', X, Y, thumb, thumb, 10, 'cover'); else { ctx.fillStyle = it.color || 'rgba(128,128,128,0.2)'; UK.rr(ctx, X, Y, thumb, thumb, 10); ctx.fill(); if (emo) UK.text(ctx, it.media, X + thumb / 2, Y + thumb / 2 + 2, { size: 28 }); } }
+            const mx = b.x + b.w - 16 - 12, my = y + 26; bookmarkMark(ctx, mx, my, 22, acc, true); marks.push({ x: mx - 16, y: my - 16, w: 32, h: 32, it });
+            ctx.fillStyle = line; ctx.fillRect(b.x, y + h - 0.5, b.w, 0.5);
+          }
+          rows.push({ x: b.x, y, w: b.w, h, it }); y += h;
         }
         total = y + S.v - (b.y + top);
         ctx.restore();
@@ -13007,7 +13129,7 @@ registerBehavior('uiShowIf', {
   create(p) {
     let shown = null, drag = null, vel = 0, maxS = 0, barT = -9, goal = null, pulled = false, refreshT = -9, firstDone = false;
     const D = (d) => d / clamp(+p.animSpeed || 1, 0.25, 3); // Transition speed
-    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick', 'uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiFriends', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']; // (a feed scrolls itself: the page doesn't move with it)
+    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick', 'uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']; // (a feed scrolls itself: the page doesn't move with it)
     const ownsDrag = (s, e, d) => s.entities.some((q) => q !== e && q.visible && q.ui && !q._parentHidden && q.behaviors.some((b) => SCROLLERS.includes(b.type)) && isInside(q, e) && hitTest(s, q, d.x, d.y));
     const isInside = (q, e) => { for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === e) return true; return false; };
     /** How far what is inside reaches below the page's bottom (UI units). */

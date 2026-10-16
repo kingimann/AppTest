@@ -718,11 +718,13 @@ engine.onRenderUI = (ctx, s) => {
   }
   // invisible logic objects
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  let uiRects = null; // where UI is drawn: a camera or light marker under it stays out of the way (unless selected)
+  const underUI = (p) => { if (!uiRects) { const S = UIS(); uiRects = s.entities.filter((q) => q.ui && !q.dead && q.visible !== false && !q._parentHidden).map((q) => { const r = uiBox(q, S.w, S.h, S.safe), a = uiv(r.x - r.w / 2, r.y - r.h / 2), c = uiv(r.x + r.w / 2, r.y + r.h / 2); return { x0: Math.min(a.x, c.x), y0: Math.min(a.y, c.y), x1: Math.max(a.x, c.x), y1: Math.max(a.y, c.y) }; }); } return uiRects.some((r) => p.x >= r.x0 && p.x <= r.x1 && p.y >= r.y0 && p.y <= r.y1); };
   for (const e of s.entities) {
     if (e.ui || hasVisual(e)) continue;
     const isSel = e.id === selectedId;
     if (uiMode || (project.settings?.app && !isSel)) continue; // the UI editor shows only the screen; apps don't need their camera and light in the way
-    const p = toScreen(e); if (!p) continue;
+    const p = toScreen(e); if (!p || (!isSel && underUI(p))) continue;
     ctx.fillStyle = isSel ? 'rgba(247,160,44,0.25)' : 'rgba(30,30,30,0.6)';
     ctx.strokeStyle = isSel ? ORANGE : 'rgba(200,200,200,0.6)'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.rect(p.x - 12, p.y - 12, 24, 24); ctx.fill(); ctx.stroke();

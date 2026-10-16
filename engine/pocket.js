@@ -12801,6 +12801,12 @@ registerBehavior('uiProfile', {
           if (!stacked && /^top/.test(e.anchor || '')) e.y += (need - (e.shape.h || 0)) / 2;
           e.shape.h = need;
         }
+        // on a page that doesn't line things up, a feed filling the page under it starts below it (it grew)
+        const pg = e.parentEnt; if (pg?.ui && p.autoHeight !== false && !pg.behaviors?.some((x) => x.type === 'uiShowIf' && x.params?.stack)) {
+          const E = s.engine, k = uiK(E.safe) || 1, pr = uiBox(pg, E.width, E.height, E.safe), hr = uiBox(e, E.width, E.height, E.safe), bot = Math.round((hr.y + hr.h / 2 - (pr.y - pr.h / 2)) / k + (pg._collapseY || 0));
+          for (const q of s.entities) { if (q.parentEnt !== pg || q === e || q.dead || q.stretch !== 'both' || !q.behaviors.some((x) => STACK_FILLERS.has(x.type))) continue;
+            if (q._mt0 == null) q._mt0 = +q.marginTop || 0; const want = Math.max(q._mt0, bot); if (Math.abs((+q.marginTop || 0) - want) > 0.5) q.marginTop = want; }
+        }
       },
     };
   },

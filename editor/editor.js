@@ -7690,7 +7690,7 @@ function newPage(from, o = {}) {
     top = { id: uid(), name: name + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: app ? '@bg' : 'rgba(16,18,28,0.96)' },
       behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value: val, whenUnset: false, anim: app ? 'push (iOS, follows navigation)' : 'slide (follows navigation)', stagger: 'rise one after another', scroll: true, stack: true, stackGap: 16 }] }; // (what you put on it lines up by itself)
     if (!uiPages().get('page')?.size) showIfOf(top).whenUnset = true; // the first page shows when the app starts
-    project.entities.push(top); if (!o.template?.noTitle) project.entities.push({ id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
+    project.entities.push(top); if (!o.template?.noTitle) project.entities.push({ id: uid(), name: name + ' Title', ui: true, parent: top.id, anchor: 'top-left', x: o.template ? 16 : 20, y: 40, text: { value: name, size: 28, color: app ? '@text' : '#ffffff', weight: '900', align: 'left' } });
     if (o.template) fillPageTemplate(top, o.template, val);
   }
   for (const j of project.entities) for (const b of j.behaviors || []) if (b.type === 'uiAppBar' && (b.var || 'page') === v && b.titles != null && !new RegExp(`^\\s*${val}\\s*=`, 'm').test(b.titles)) b.titles = (b.titles ? b.titles + '\n' : '') + `${val} = ${name}`; // the App Bar shows its title
@@ -8148,9 +8148,9 @@ function pageTemplates() {
   const T = app ? { text: '@text', sub: '@sub', card: '@card', accent: '@accent', on: '@onAccent', line: '@line', field: '@field', danger: '@danger', shadow: '@shadow' }
     : { text: '#ffffff', sub: 'rgba(255,255,255,0.7)', card: 'rgba(255,255,255,0.1)', accent: '#3a7bfd', on: '#ffffff', line: 'rgba(255,255,255,0.18)', field: 'rgba(255,255,255,0.1)', danger: '#ff5a6a', shadow: 'rgba(0,0,0,0.35)' };
   const ui = { ui: true, anchor: 'top', x: 0 }, wide = { ...ui, stretch: 'width', margin: 16 };
-  const at = (o) => (o.center ? { anchor: 'top', x: 0 } : { anchor: 'top-left', x: 20 });
-  const H = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Heading', text: { value: v, size: o.size || 28, color: T.text, weight: '900', align: o.center ? 'center' : 'left', wrap: 360 } });
-  const P = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Text', text: { value: v, size: o.size || 15, color: o.color || T.sub, weight: o.weight || '500', align: o.center ? 'center' : 'left', wrap: 340 } });
+  const at = (o) => (o.center ? { anchor: 'top', x: 0 } : { anchor: 'top-left', x: 16 }); // the same left edge as the cards and buttons (16 in)
+  const H = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Heading', text: { value: v, size: o.size || 28, color: T.text, weight: '900', align: o.center ? 'center' : 'left', wrap: 328 } });
+  const P = (v, o = {}) => ({ ...ui, ...at(o), name: o.name || 'Text', text: { value: v, size: o.size || 15, color: o.color || T.sub, weight: o.weight || '500', align: o.center ? 'center' : 'left', wrap: 328 } }); // (fits a phone with 16 in on each side)
   const press = (action, value) => [{ type: 'button', action, value: value ?? '', amount: 1, sound: 'click', feel: 'spring', ripple: true }];
   const btn = (label, action, value, o = {}) => ({ ...wide, name: o.name || `${label} Button`, shape: { type: 'rect', w: 368, h: o.h || 52, radius: 16, fill: o.outline ? '' : o.fill || T.accent, ...(o.outline ? { stroke: T.accent, lineWidth: 2 } : {}) }, text: { value: label, size: 17, color: o.outline ? T.accent : o.color || T.on, weight: '800' }, behaviors: press(action, value) });
   const link = (label, action, value) => ({ ...ui, name: `${label} Link`, shape: { type: 'rect', w: 260, h: 36, radius: 10, fill: '' }, text: { value: label, size: 14, color: T.accent, weight: '700' }, behaviors: press(action, value) });
@@ -8167,7 +8167,7 @@ function pageTemplates() {
     { name: 'Plan Button', anchor: 'bottom', x: 0, y: -28, stretch: 'width', margin: 16, shape: { type: 'rect', w: 336, h: 40, radius: 12, fill: hot ? T.accent : '', ...(hot ? {} : { stroke: T.accent, lineWidth: 2 }) }, text: { value: hot ? 'Start free trial' : 'Choose', size: 15, color: hot ? T.on : T.accent, weight: '800' }, behaviors: press('send message', `plan ${name.toLowerCase()}`) }]), ...(hot ? { } : {}) });
   const switchRow = (label, v, start = true) => { const r = blk('toggle')[0]; r.name = `${label} Switch`; r.children[0].text.value = label; r.children[0].name = `${label} Label`; r.children[1].behaviors[0].var = v; r.children[1].behaviors[0].start = start; return r; };
   const row = (label, pgv, ico) => { const r = blk('row', pgv)[0]; r.name = `${label} Row`; r.children[0].text.value = (ico ? ico + '  ' : '') + label; return r; };
-  const section = (t) => ({ ...ui, anchor: 'top-left', x: 22, name: `${t} Section`, text: { value: t.toUpperCase(), size: 12, color: T.sub, weight: '800', align: 'left', spacing: 0.6 } });
+  const section = (t) => ({ ...ui, anchor: 'top-left', x: 16, name: `${t} Section`, text: { value: t.toUpperCase(), size: 12, color: T.sub, weight: '800', align: 'left', spacing: 0.6 } });
   const fill = (name, type, params = {}) => ({ ui: true, name, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginBottom: 0, shape: { type: 'rect', w: 400, h: 520, radius: 0, fill: '' }, behaviors: [{ type, ...params }] });
   const soc = { text: '@text', sub: '@sub', accent: '@accent' };
   const seg = (opts, v) => { const r = blk('tabs3')[0]; r.name = `${v} Tabs`; Object.assign(r.behaviors[0], { options: opts, var: v }); return r; };
@@ -8197,7 +8197,7 @@ function pageTemplates() {
     { key: 'friends', group: 'Social', label: 'Friends', icon: 'users', desc: 'Friends, requests and people to find', kids: () => [fill('Friends', 'uiFriends', { profilePage: 'user', ...soc })] },
     // ---- Shop ----
     { key: 'market', group: 'Shop', label: 'Marketplace', icon: 'shop', desc: 'Listings, categories and a sell form', kids: () => [fill('Marketplace', 'uiMarketplace', { collection: 'Listings', chatPage: 'chat', ...soc })] },
-    { key: 'product', tab: false, group: 'Shop', label: 'Product', icon: 'gem', desc: 'Picture, price, description, Add to cart', noTitle: true, kids: () => [{ ...wide, name: 'Product Picture', shape: { type: 'rect', w: 368, h: 260, radius: 20, fill: T.card }, text: { value: '👟', size: 120 } }, H('Running Shoes', { size: 26 }), { ...ui, anchor: 'top-left', x: 20, name: 'Price', text: { value: '$89.00', size: 22, color: T.accent, weight: '900', align: 'left' } }, P('Light, comfy and made for long runs. Breathable mesh, a soft sole and laces that stay tied.'), seg('S, M, L, XL', 'size'), btn('Add to cart', 'send message', 'add to cart'), btn('Buy now', 'send message', 'buy now', { outline: true })] },
+    { key: 'product', tab: false, group: 'Shop', label: 'Product', icon: 'gem', desc: 'Picture, price, description, Add to cart', noTitle: true, kids: () => [{ ...wide, name: 'Product Picture', shape: { type: 'rect', w: 368, h: 260, radius: 20, fill: T.card }, text: { value: '👟', size: 120 } }, H('Running Shoes', { size: 26 }), { ...ui, anchor: 'top-left', x: 16, name: 'Price', text: { value: '$89.00', size: 22, color: T.accent, weight: '900', align: 'left' } }, P('Light, comfy and made for long runs. Breathable mesh, a soft sole and laces that stay tied.'), seg('S, M, L, XL', 'size'), btn('Add to cart', 'send message', 'add to cart'), btn('Buy now', 'send message', 'buy now', { outline: true })] },
     { key: 'gameshop', group: 'Shop', label: 'Game Shop', icon: 'coin', desc: 'Coins & gems and items to buy', kids: () => [...blk('currency'), item('🗡️', 'Fire Sword', '+10 attack', 100), item('🛡️', 'Ice Shield', 'Blocks one hit', 150), item('👟', 'Speed Boots', '+20% speed', 80), item('🧪', 'Health Potion', 'Heals 50', 25)] },
     { key: 'pricing', tab: false, group: 'Shop', label: 'Pricing', icon: 'star', desc: 'Free, Pro and Team plans', kids: () => [P('Pick the plan that fits you. Change any time.'), plan('Free', '$0', 'The basics, for trying it out.'), plan('Pro', '$4.99 / month', 'Everything unlocked, no ads, cloud sync.', true), plan('Team', '$12 / month', 'Up to 10 people, shared spaces.')] },
     // ---- Info ----
@@ -8212,18 +8212,30 @@ function pageTemplates() {
     { key: 'trophies', group: 'Game', label: 'Achievements', icon: 'trophy', desc: 'Score, streak and trophies', kids: () => [fill('Achievements', 'uiAchievements', soc)] },
   ];
 }
+/** How tall a text is once it wraps (measured with the font, the way the engine lays it out: lines × size × line height). */
+let measureCtx = null;
+function textBlockHeight(t) {
+  const size = +t.size || 24, lh = size * (+t.lineHeight || 1.2), wrap = +t.wrap || 0, words = String(t.value ?? '').split(/\s+/).filter(Boolean);
+  if (!wrap || !words.length) return lh;
+  measureCtx ||= document.createElement('canvas').getContext('2d');
+  const fam = getComputedStyle(document.body).fontFamily || 'system-ui, sans-serif'; measureCtx.font = `${t.weight || '700'} ${size}px ${fam}`;
+  let lines = 1, cur = '';
+  for (const w of words) { const next = cur ? cur + ' ' + w : w; if (cur && measureCtx.measureText(next).width > wrap) { lines++; cur = w; } else cur = next; }
+  return lines * lh;
+}
 /** Build a template's content on a page (top to bottom; the page lines it up). */
 function fillPageTemplate(pg, tpl, pgv, startY) {
-  const tall = (p) => { const sh = p.shape, t = p.text; if (sh) return +sh.h || (+sh.r || 0) * 2 || 40; if (t) { const sz = +t.size || 16, lines = Math.max(1, Math.ceil(String(t.value || '').length * sz * 0.5 / (+t.wrap || 360))); return sz * 1.35 * lines; } return 40; };
+  const tall = (p) => { const sh = p.shape, t = p.text; if (sh) return +sh.h || (+sh.r || 0) * 2 || 40; if (t) return textBlockHeight(t); return 40; };
   const add = (p, parent, y) => { const { children, ...rest } = p; const j = { id: uid(), ui: true, ...clone(rest), parent }; if (y != null && /^top/.test(j.anchor || '') && j.stretch !== 'both') j.y = Math.round(y + tall(p) / 2); let n = 1; const base = j.name || 'Object'; j.name = base; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; project.entities.push(j); for (const c of children || []) add(c, j.id); return j; };
-  let y = startY ?? (tpl.noTitle ? 24 : 96); tpl.setup?.();
-  for (const p of tpl.kids(pgv)) { add(p, pg.id, y); if (p.stretch !== 'both') y += tall(p) + 16; } // in order, top to bottom (the page lines them up from there)
+  let y = startY ?? (tpl.noTitle ? 24 : 76); tpl.setup?.(); // (under the page's title)
+  for (const p of tpl.kids(pgv)) { const j = add(p, pg.id, y); if (p.stretch === 'both') { j.marginTop = Math.round(y - 8); continue; } y += tall(p) + PAGE_GAP; } // a feed or list fills the room under the rest (a page that lines itself up sets this too) // in order, top to bottom (the page lines them up from there)
 }
 /** Put a template's content on a page that already exists, under what is there. */
 function addTemplateToPage(pg, tpl) {
   const rows = pageRows(pg), before = new Set(project.entities.map((j) => j.id));
   fillPageTemplate(pg, tpl, String(showIfOf(pg)?.value ?? ''), rows.length ? Math.round(rows[rows.length - 1].bot + PAGE_GAP) : 24);
   const first = project.entities.find((j) => !before.has(j.id) && j.parent === pg.id); if (first) selectedId = first.id;
+  rebuild(); fitPageScroll(pg); // more than fits: the page scrolls
   changed({ structure: true }); pushHistory(); toast(`Added the ${tpl.label} template to the “${showIfOf(pg).value}” page`);
 }
 /** Name a page and build it from a template. */

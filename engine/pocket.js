@@ -3410,7 +3410,7 @@ function drawText2D(ctx, e, vars, time) {
   const fontFor = (st, size) => `${t.italic || st.italic ? 'italic ' : ''}${st.bold ? boldW : baseW} ${st.size ? (st.size.rel ? size * st.size.rel : st.size) : size}px ${fontOf(t.font)}`;
   const sizeOf = (st, size) => (st.size ? (st.size.rel ? size * st.size.rel : st.size) : size);
   // the width to wrap at: a number, or the box it sits on ("wrap to the box")
-  const wrapW = t.wrap === 'box' || t.wrapBox ? (box ? Math.max(10, box.w - 2 * Math.max(padX, 8)) : 0) : +t.wrap || 0;
+  const wrapW = t.wrap === 'box' || t.wrapBox ? (box ? Math.max(10, box.w - 2 * Math.max(padX, 8)) : 0) : e._wrapMax ? Math.min(+t.wrap || 0, e._wrapMax) : +t.wrap || 0; // (narrowed to stay on screen)
   const maxLines = Math.max(0, Math.round(+t.maxLines || 0));
   /** Lay the runs out into lines of pieces { text, st, w } at a font size. */
   const layout = (size) => {
@@ -4616,6 +4616,28 @@ export function anchorPoint(anchor, W, H, safe) {
 }
 
 /** UI stretch (like Unity's stretch anchors): fill the screen width and/or height minus a margin. */
+/**
+ * In play, fixed-width UI on a page (or the screen) stays inside it: a button, field or card a little wider than the room
+ * (less a 16-unit gutter each side) narrows to fit, and text wraps before the edge instead of running off a narrow phone.
+ * Things much wider than the screen (backgrounds that bleed off it) are left alone.
+ */
+function fitToArea(e, W, H, safe) {
+  if (!e.ui || e.stretch === 'width' || e.stretch === 'both' || e._at || e.fit === false || e._dock) return;
+  const p = e.parentEnt; if (p && !(p.ui && (p.stretch === 'both' || p.behaviors.some((b) => b.type === 'uiShowIf')))) return; // on a page or the screen, not inside a card or menu
+  const K = uiK(safe) || 1, room = (p ? uiBox(p, W, H, safe).w : uiArea(W, H, safe, e).w) / K, G = 16, f = AFRAC(e.anchor), mid = Math.abs(f.x - 0.5) < 0.01 && Math.abs(+e.x || 0) < 2;
+  const sh = e.shape;
+  if (sh && (sh.type === 'rect' || sh.type === 'roundrect') && +sh.w > 0) {
+    if (e._w0 == null) e._w0 = +sh.w;
+    const w0 = e._w0, max = room - 2 * G, want = mid && w0 > max && w0 <= room * 1.25 ? Math.max(40, max) : w0;
+    if (sh.w !== want) sh.w = want;
+  }
+  const t = e.text;
+  if (t && +t.wrap > 0 && !(sh && +sh.w > 0)) { // text on its own (on a shape it wraps to that)
+    const x = +e.x || 0, al = t.align || 'center';
+    const max = f.x === 0 && al === 'left' ? room - x - Math.max(12, Math.min(x, 24)) : f.x === 1 && al === 'right' ? room + x - Math.max(12, Math.min(-x, 24)) : mid ? room - 2 * G : 0;
+    e._wrapMax = max > 0 && max < +t.wrap ? Math.max(40, max) : 0;
+  }
+}
 function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
   const Un = p ? underOf(e.parentEnt, safe) : null;
@@ -4726,7 +4748,7 @@ function renderUI(engine, scene) {
       if (!engine.editing) { const w = uiScreenOf(e); if (w !== 'always' && w !== screen) continue; }
       if (engine.editing && engine.screenFilter && !['always', 'play'].includes(e.showWhen) && !engine.screenFilter(e)) continue;
       if (engine.editing && engine.uiFilter && !engine.uiFilter(e)) continue; // the UI editor's page preview // menus for other screens stay out of the way
-      if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe);
+      if (e.stretch && e.stretch !== 'none') applyStretch(e, W, H, engine.safe); else if (!engine.editing) fitToArea(e, W, H, engine.safe);
       if (e.behaviors.length && e.behaviors.some((x) => x.type === 'uiShowIf' && x.params?.stack)) layoutStack(e, scene); // a page that lines up what is in it
       const o = uiOrigin(e, W, H, engine.safe), K = uiK(engine.safe);
       if (scene.uiShift && !engine.editing) { let mine = false; for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q === scene.uiShiftBy) { mine = true; break; } if (!mine) o.x += scene.uiShift; } // a side menu that pushes the screen aside
@@ -9869,7 +9891,7 @@ registerBehavior('uiFeed', {
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
       const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : p.filter, tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
-      { const ow = ownerOf(s); if (ow && s.engine.social?.isBlocked(ow)) { repostCtx = ''; return []; } } // the page of someone you blocked
+      { const ow = ownerOf(s), pf = /^\s*handle\s*=/i.test(String(p.filter || '')); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
@@ -10427,8 +10449,8 @@ registerBehavior('uiFeed', {
               // the bottom: who, the text, the place
               let by = at0 + ph - 96; const tw0 = b.w - 100;
               ctx.font = `800 16px ${THEME.font}`; const nm = '@' + (who(r) || String(F(r, 'author') || '')); const nw = Math.min(ctx.measureText(nm).width, tw0);
-              UK.text(ctx, nm, b.x + 16, by, { size: 16, weight: 800, color: '#fff', align: 'left', maxW: tw0 }); if (truthy(F(r, 'verified'))) verifiedBadge(ctx, b.x + 16 + nw + 10, by, 15, tick(r));
-              UK.text(ctx, '· ' + when(r), b.x + 16 + nw + (truthy(F(r, 'verified')) ? 24 : 6), by, { size: 13, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
+              UK.text(ctx, nm, b.x + 16, by, { size: 16, weight: 800, color: '#fff', align: 'left', maxW: tw0 }); if (truthy(F(r, 'verified'))) verifiedBadge(ctx, b.x + 16 + nw + 12, by, 8, tick(r));
+              UK.text(ctx, '· ' + when(r), b.x + 16 + nw + (truthy(F(r, 'verified')) ? 26 : 6), by, { size: 13, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
               ctx.font = `500 15px ${THEME.font}`; wrapLines(ctx, String(F(r, 'text') || ''), tw0, 15, M.length ? 2 : 0).slice(0, M.length ? 2 : 0).forEach((l, k) => UK.text(ctx, l, b.x + 16, by + 24 + k * 20, { size: 15, weight: 500, color: '#fff', align: 'left' }));
               if (F(r, 'location')) { drawIco(ctx, 'place', b.x + 23, by + (M.length ? 70 : 26), 14, 'rgba(255,255,255,0.85)'); UK.text(ctx, String(F(r, 'location')), b.x + 34, by + (M.length ? 70 : 26), { size: 13, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left', maxW: tw0 - 18 }); }
               if (M.length > 1) { const i0 = clamp(cIdx.get(r.id) || 0, 0, M.length - 1); M.forEach((_, k) => { ctx.fillStyle = k === i0 ? '#fff' : 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.arc(b.cx + (k - (M.length - 1) / 2) * 12, at0 + 14, 3.5, 0, Math.PI * 2); ctx.fill(); }); }
@@ -11912,7 +11934,7 @@ registerBehavior('uiFriends', {
             for (const [k, label, filled, w] of [...buttons].reverse()) { bx -= w; bb.push({ ...pillBtn(ctx, bx, y + H / 2 - 15, w, label, filled, acc, txt, line), k, who: q.handle, name: q.name }); bx -= 8; }
             btns.push(...bb);
             const tx = b.x + 16 + 46 + 12, tw = bx - tx - 4;
-            UK.text(ctx, q.name + (q.verified ? ' ✓' : ''), tx, y + H / 2 - 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw });
+            UK.text(ctx, q.name, tx, y + H / 2 - 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw - (q.verified ? 22 : 0) }); if (q.verified) { ctx.font = `800 15px ${THEME.font}`; verifiedBadge(ctx, tx + Math.min(ctx.measureText(q.name).width, tw - 22) + 11, y + H / 2 - 9, 7.5, acc); }
             UK.text(ctx, '@' + q.handle + (G.isFollowing(q.handle) ? ' · following' : '') + (G.isFollowing(G.me().handle, q.handle) ? ' · follows you' : ''), tx, y + H / 2 + 11, { size: 13, weight: 500, color: sub, align: 'left', maxW: tw });
             ctx.fillStyle = line; ctx.fillRect(tx, y + H - 0.5, b.x + b.w - tx, 0.5);
           }

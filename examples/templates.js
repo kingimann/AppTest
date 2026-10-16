@@ -248,7 +248,7 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }, { name: 'Liked By', type: 'text' }, { name: 'Media', type: 'text' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
+      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', audience: true, replyControl: true, backgrounds: true, field: '@field', text: MUTED, accent: '@accent' }] },
@@ -276,11 +276,6 @@ function socialApp() {
           behaviors: [{ type: 'uiProfile', social: true, look: 'x', listPage: 'friends', name: '{playerName}', handle: '{playerHandle}', bio: 'Making things with Pocket Engine ✨', verified: false, own: true, message: 'edit profile', stats: 'Posts | {posts_count}\nFollowers | {followers}\nScore | {points}', cover: A, text: INK, sub: MUTED, accent: '@accent', bg: '@bg' }] },
         feed('feed-me', 'timeline', 300, { filter: 'handle = {playerHandle}', profilePage: 'user', myProfilePage: '', empty: 'Nothing here yet', tabs: 'Posts | posts\nReplies | replies\nMedia | media | grid\nLikes | likes', tabStyle: 'underline', tabHeight: 42 }),
       ], { stack: true }),
-      ...app.page('p-post', 'post', false, [
-        app.text('pp-author', 'Post Author', '{record_author}  @{record_handle}', 40, { size: 17, weight: '800' }),
-        app.text('pp-text', 'Post Text', '{record_text}', 76, { size: 18, weight: '500' }),
-        app.text('pp-meta', 'Post Counts', '❤️ {record_likes}   💬 {record_comments}   🔁 {record_reposts}', 200, { size: 15, color: MUTED, weight: '700' }),
-      ]),
       { id: 'side', name: 'Side Menu', ui: true, anchor: 'center', x: 0, y: 0, layer: 6, shape: { type: 'rect', w: 10, h: 10, radius: 0, fill: '' },
         behaviors: [{ type: 'uiSideBar', social: true, profilePage: 'profile', countsPage: 'friends', counts: 'following, followers and friends', sync: 'the Bottom Nav tabs', header: 'simple', title: '', avatar: '', style: 'rounded', bg: '@card', text: INK, accent: '@accent', iconColor: '', badgeColor: '#f91880',
           items: 'Notifications | bell | notifications | notifications_unread\nFriends | users | friends | friend_requests\nSaved | bookmark | saved\nMarketplace | shop | marketplace\nAchievements | trophy | achievements\n-\nPost | edit | button:msg:compose\n-\n# Settings\nDark mode | moon | toggle:darkMode', footer: 'Help | info | msg:help' }] },

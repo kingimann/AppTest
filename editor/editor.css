@@ -2137,3 +2137,9 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .dp-qr .qr-code { width: min(280px, 70vw); height: auto; image-rendering: pixelated; border-radius: 12px; background: #fff; padding: 6px; }
 .dp-link { width: 100%; font: 13px ui-monospace, monospace; padding: 10px; border-radius: 10px; border: 1px solid var(--line, #444); background: var(--field, rgba(128,128,128,.12)); color: inherit; }
 .dp-warn { color: var(--orange); }
+/* Place row (UI Element): one tap to line an element up on its page */
+.place-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.place-btn { width: 34px; height: 32px; border-radius: 8px; border: 1px solid var(--line, rgba(128,128,128,.25)); background: var(--panel2, transparent); color: inherit; display: inline-flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; }
+.place-btn:active { transform: scale(.94); }
+.place-btn svg { width: 18px; height: 18px; }
+.place-sep { width: 1px; height: 20px; background: var(--line, rgba(128,128,128,.25)); margin: 0 4px; }

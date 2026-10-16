@@ -7430,7 +7430,7 @@ registerBehavior('uiBottomNav', {
     const blurOf = (s) => { const h = here(s); return h && LOOK[h.look] === 1 ? 0 : +p.barBlur || 0; }; // a page that wants a solid bar gets no frosted glass
     const under = (s) => p.underPages === 'yes' || (p.underPages !== 'no' && (opacity(s) < 0.97 || blurOf(s) > 0 || (floatingStyle() || (p.style === 'minimal' && !topOn()))));
     const memKey = (s) => 'pocket.tab.' + (s.json?.name || 'game') + '.' + p.var;
-    const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
+    const goTab = (s, i, cur) => { const tab = T[i]; if (!tab || tab.page == null) return; s._tabPickedAt = s.time; s.navTo(tab.page, p.var, { history: p.mode === 'open page (Back returns)', dir: cur < 0 || i >= cur ? 1 : -1 }); if (p.message) s.send(p.message); if (p.remember) store.set(memKey(s), String(tab.page)); };
     const pulse = new Map(), ripples = [], BH = new BarHider(p);
     const isTop = () => p.position === 'top', noIc = () => p.showIcons === false;
     const topOn = () => isTop() && (p.topStyle || 'tabs') !== 'like the bottom bar', strip = new TabStrip(); // top tabs in a style made for the top
@@ -7526,6 +7526,7 @@ registerBehavior('uiBottomNav', {
           if (p.sound) s.engine.audio.sfx(p.sound);
           if (raised && p.style === 'raised center' && i === (G.n - 1) / 2 && p.centerMessage) { s.send(p.centerMessage); continue; }
           if (tab.msg) { s.send(tab.msg); continue; }
+          s._tabPickedAt = s.time; // (a page tab, even the one already shown: no Side Menu opens off this tap)
           if (sameVal(s.vars[p.var], tab.page)) { if (p.reselect) { s.send(p.reselect); s.send(p.reselect, tab.page); } if (p.reselectTop !== false) s.emit('pageScrollTop', String(tab.page), p.var); continue; }
           goTab(s, i, activeIdx(s));
         }
@@ -7916,7 +7917,11 @@ registerBehavior('uiSideBar', {
       get open() { return want; }, get rows() { return rows; },
       pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F, ...Object.values(G).flat()].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
       set(e, s, v) {
-        if (v === want) return; want = v;
+        if (v === want) return;
+        if (v && !s.engine.editing && s._tabPickedAt != null && s.time - s._tabPickedAt < 0.5 && openWhy !== 'its own ☰ button' && !/\((App Bar|Button)\)$/.test(openWhy)) { // a page tab was just picked: whatever this is, it isn't someone asking for the menu
+          Log.add('warn', `${e.name || 'Side Menu'} didn't open: ${openWhy || 'a node or action'} came right after a Bottom Nav tab was picked`, 'UI'); openWhy = ''; return;
+        }
+        want = v;
         if (v && !s.engine.editing) Log.add('info', `${e.name || 'Side Menu'} opened by ${openWhy || 'a node or action'}`, 'UI'); openWhy = ''; // (the Console says what opened it)
         if (v) { s.modal = e; if (t < 0.05) { age = 0; if (sub) openSub(s, null); } } else if (s.modal === e) s.modal = null;
         (s.openMenus ||= new Set())[v ? 'add' : 'delete'](p.message); s.emit('menu', p.message, v);

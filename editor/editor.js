@@ -4236,7 +4236,7 @@ function renderSceneSettings(box) {
   ], { icon: 'save', key: 's-save' }));
   box.append(comp('App', [
     C('settings.app', { label: 'This is an app, not a game', type: 'bool', def: false, structure: true }),
-    !game.settings?.app && C('settings.pagesAre', { label: 'Pages without a setting of their own are', type: 'select', options: [['games', 'Game pages (pause button, pauses when you leave)'], ['apps', 'App pages (no pause, nothing pops up)']], def: 'games', infoText: 'Each page can choose for itself: select the page › This page is (an app page / a game page).' }),
+    !game.settings?.app && C('settings.pagesAre', { label: 'Pages without a setting of their own are', type: 'select', options: [['auto', 'Automatic: pages with a feed, chat, list or form are app pages'], ['games', 'Game pages (pause button, pauses when you leave)'], ['apps', 'App pages (no pause, nothing pops up)']], def: 'auto', infoText: 'Each page can choose for itself: select the page › This page is (an app page / a game page).' }),
     h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
     h('p', { class: 'desc' }, 'Apps can hold games: add one as new levels, and a Play Game button opens it. The game keeps its own title, pause and end screens, with a “Back to app” button.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),

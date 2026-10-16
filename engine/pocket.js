@@ -8611,7 +8611,13 @@ const UK = {
   clearCorner(s, e, b) {
     if (e._dock || e.parentEnt?._dock || b.h > 90) return b; const E = s.engine, k = uiK(E.safe) || 1, o = uiOrigin(e, E.width, E.height, E.safe);
     const sx0 = o.x + b.x * k, sx1 = o.x + (b.x + b.w) * k, sy0 = o.y + b.y * k, sy1 = o.y + (b.y + b.h) * k; let l = -1e9, r = 1e9;
-    for (const q of s.entities) { if (!q.ui || q.dead || !q.visible) continue; const sb = q.behaviors.find((x) => x.sideMenu), bt = sb?.btn?.(s); if (!bt || bt.y + bt.r < sy0 || bt.y - bt.r > sy1 || bt.x + bt.r < sx0 || bt.x - bt.r > sx1) continue; if (bt.x < (sx0 + sx1) / 2) l = Math.max(l, bt.x + bt.r + 8 * k); else r = Math.min(r, bt.x - bt.r - 8 * k); }
+    const rel = (q) => { for (let a = e; a; a = a.parentEnt) if (a === q) return true; for (let a = q; a; a = a.parentEnt) if (a === e) return true; return false; };
+    const block = (x0, x1, y0, y1) => { if (y1 < sy0 + 4 || y0 > sy1 - 4 || x1 < sx0 || x0 > sx1) return; if ((x0 + x1) / 2 < (sx0 + sx1) / 2) l = Math.max(l, x1 + 8 * k); else r = Math.min(r, x0 - 8 * k); };
+    for (const q of s.entities) { // a ☰ (the Side Menu's, or a button of your own) or another small control in the same row: start after it / stop before it
+      if (!q.ui || q.dead || !q.visible || q._parentHidden || q === e) continue; const sb = q.behaviors.find((x) => x.sideMenu), bt = sb?.btn?.(s);
+      if (bt) { block(bt.x - bt.r, bt.x + bt.r, bt.y - bt.r, bt.y + bt.r); continue; }
+      if (sb || rel(q) || q._dock || q.stretch === 'both' || q.stretch === 'width' || q.behaviors.some((x) => x.type === 'uiShowIf' || x.uiAlways && x.open !== undefined)) continue;
+      const u = uiBox(q, E.width, E.height, E.safe); if (u.w > E.width * 0.3 || u.h > 120 * k || u.w < 8) continue; block(u.x - u.w / 2, u.x + u.w / 2, u.y - u.h / 2, u.y + u.h / 2); }
     if (l === -1e9 && r === 1e9) return b; const n0 = Math.max(sx0, l), n1 = Math.min(sx1, r); if (n1 - n0 < 80 * k) return b;
     const x = (n0 - o.x) / k, w = (n1 - n0) / k; return { ...b, x, w, cx: x + w / 2 };
   },
@@ -11485,8 +11491,12 @@ function appPageNow(s) {
     const b = e.behaviors.find((q) => q.type === 'uiShowIf'), k = b?.params?.kind; if (!k || k === 'follow the game') continue;
     kind = k === 'an app page' ? 'app' : 'game'; if (kind === 'game') break; // (a game page showing wins)
   }
-  return kind ? kind === 'app' : !!(s.settings.app || s.settings.pagesAre === 'apps');
+  if (kind) return kind === 'app';
+  if (s.settings.app || s.settings.pagesAre === 'apps') return true; if (s.settings.pagesAre === 'games') return false;
+  if (s._appAutoT === s.time) return s._appAuto; s._appAutoT = s.time; // automatic: a page showing a feed, chat, list, form… is an app page
+  return (s._appAuto = s.entities.some((e) => e.ui && !e.dead && e.visible && !e._parentHidden && e.behaviors.some((b) => APP_PAGE_KINDS.has(b.type)) && (() => { for (let q = e.parentEnt, n = 0; q && n < 40; q = q.parentEnt, n++) if (!q.visible || q.dead) return false; return true; })()));
 }
+const APP_PAGE_KINDS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiMarketplace', 'uiBookmarks', 'uiFriends', 'uiProfile', 'uiComposer', 'uiDataList', 'uiForm', 'uiAchievements', 'uiStories', 'uiPhotoGrid']);
 /** Show my score in {points} and {streak} (and count today towards the streak). */
 function pointsSync(s) { if (s.vars.points === undefined && !s.engine.editing) { const st = pointsState(s); s.vars.points = st.points; s.vars.streak = st.lastDay === dayOf() || st.lastDay === dayOf(Date.now() - 864e5) ? st.streak : 0; } }
 
@@ -13674,7 +13684,7 @@ registerBehavior('uiShowIf', {
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
     { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
-    { key: 'kind', label: 'This page is', type: 'select', options: ['follow the game', 'an app page', 'a game page'], default: 'follow the game', group: 'Page', info: { 'follow the game': 'An app project’s pages are app pages, a game’s are game pages.', 'an app page': 'No pause button and no PAUSED screen while it shows (even when you leave and come back): it behaves like an app.', 'a game page': 'The pause button shows and the game pauses when you leave, like a game.' } },
+    { key: 'kind', label: 'This page is', type: 'select', options: ['follow the game', 'an app page', 'a game page'], default: 'follow the game', group: 'Page', info: { 'follow the game': 'An app project’s pages are app pages. In a game it follows Game Settings › App (automatic: a page with a feed, chat, list or form is an app page).', 'an app page': 'No pause button and no PAUSED screen while it shows (even when you leave and come back): it behaves like an app.', 'a game page': 'The pause button shows and the game pauses when you leave, like a game.' } },
     { key: 'stack', label: 'Line everything up, top to bottom (no overlaps)', type: 'bool', default: false, group: 'Page', info: 'What is on the page stacks top to bottom in its order, with an even gap, on every screen size: a taller text or a hidden element moves what is under it. Things side by side stay a row. A feed or list that fills the page starts under them. Elements anchored to the middle or the bottom (a + button) float where they are.' },
     { key: 'stackGap', label: 'Gap between them', type: 'number', default: 16, range: [0, 48], step: 2, group: 'Page', showIf: (b) => !!b.stack },
     { key: 'stackTop', label: 'Space above the first one', type: 'number', default: -1, range: [-1, 120], step: 2, group: 'Page', showIf: (b) => !!b.stack, infoText: '-1 = where the first one is.' },

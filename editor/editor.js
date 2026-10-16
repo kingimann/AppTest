@@ -1833,6 +1833,11 @@ function refreshConsoles(keepSearch) {
   if (dockTab === 'console') { consoleSeen = Log.entries.length; renderConsole(keepSearch); } else updateConsoleBadge();
   if (!$('#playConsole').hidden) renderPlayConsole(keepSearch);
 }
+let menuNoteN = 0;
+Log.listeners.add(() => { // while playing, say what opened a Side Menu (or what was stopped from opening it) right on screen
+  const L = Log.entries, last = L[L.length - 1]; if (!playing || !last || L.length === menuNoteN) return; menuNoteN = L.length;
+  if (/ (opened by|didn't open:) /.test(last.text) && last.source === 'UI' && !/\((App Bar|Button)\)$|its own ☰/.test(last.text)) toast(last.text);
+});
 Log.listeners.add(() => { // batch redraws to once a frame
   const last = Log.entries[Log.entries.length - 1];
   if (last?.level === 'error' && playing && consoleOpts().pauseOnError && !engine.paused && last.count === 1) { engine.paused = true; updatePauseButtons(); toast('Paused on an error (see Console)'); }

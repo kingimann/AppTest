@@ -9305,6 +9305,7 @@ function postRecord(me, out, extra = {}) {
   if (out.poll?.length >= 2) { r.poll = out.poll.join(' | '); r.votes = out.poll.map(() => 0).join(', '); r.voted = 0; }
   if (out.place) r.location = out.place;
   if (out.audience) r.audience = out.audience; if (out.reply_setting) r.reply_setting = out.reply_setting; if (out.background) r.background = out.background;
+  if (out.link) { r.link = out.link; if (out.link_title) r.link_title = out.link_title; }
   return r;
 }
 /** The first post, then each extra one as a reply to the one before (a thread). */
@@ -9358,11 +9359,52 @@ function postComposer(s, o) {
   const ta = el('textarea', `display:block;width:100%;min-height:90px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:18px/1.4 ${font};padding:0;`);
   ta.placeholder = o.quote ? 'Add a comment…' : o.placeholder || 'What’s happening?'; ta.value = st.text;
   const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.max(90, ta.scrollHeight) + 'px'; };
-  col.append(ta); row.append(av, col); body.append(row);
+  // what you type, drawn behind the (see-through) text box: #tags, @names and links in the accent colour, and what goes past the limit in red
+  const hl = el('div', `position:absolute;left:0;top:0;right:0;font:18px/1.4 ${font};white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;color:${c.text};pointer-events:none;padding:0;`), taWrap = el('div', 'position:relative;');
+  ta.dataset.pcTa = '1'; { const css = el('style'); css.textContent = `[data-pc-ta]::placeholder{color:${c.sub};opacity:1}`; wrap.append(css); }
+  const esc = (t) => t.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[ch]);
+  const paintHl = () => {
+    const on = !st.background; hl.style.display = on ? 'block' : 'none';
+    if (on) { ta.style.color = 'transparent'; ta.style.caretColor = c.text; ta.style.position = 'relative'; ta.style.background = 'transparent'; } else { ta.style.caretColor = ''; return; }
+    const t = st.text, cut = t.length > max ? max : t.length, mark = (x) => esc(x).replace(/(https?:\/\/[^\s<]+)|(^|[\s(])([@#][\p{L}\p{N}_]+)/gu, (m0, url, pre, tg) => url ? `<span style="color:${c.acc}">${url}</span>` : `${pre}<span style="color:${c.acc}">${tg}</span>`);
+    hl.innerHTML = mark(t.slice(0, cut)) + (t.length > max ? `<span style="background:rgba(244,33,46,.22);color:#f4212e">${esc(t.slice(max))}</span>` : '') + '\u200b';
+  };
+  taWrap.append(hl, ta); col.append(taWrap);
+  // @names and #tags you might mean, as you type them
+  const sugBox = el('div', `display:none;margin:6px 0 0;border:1px solid ${c.line};border-radius:14px;overflow:hidden;background:${c.bg};box-shadow:0 8px 24px rgba(0,0,0,.12);`); sugBox.dataset.suggest = '1'; col.append(sugBox);
+  let sug = [], sugTok = null;
+  const people = () => { const m = peopleFromPosts(s, o.collection || 'Posts'), G = s.engine.social; const meH = String(o.me?.handle || '').toLowerCase(); for (const q of G ? [...G.following(o.me?.handle || ''), ...G.friends(o.me?.handle || '')] : []) { const h0 = String(q.handle || q || '').replace(/^@/, '').toLowerCase(); if (h0 && !m.has(h0)) m.set(h0, { handle: h0, name: G.profile(h0).name || q.name || h0, likes: 0 }); } m.delete(meH); return [...m.values()].map((q) => ({ ...q, name: G?.profile(q.handle).name || q.name })); };
+  const tags = () => { const D = s.engine.data, coll = o.collection || 'Posts', rows = D.def(coll) ? D.rows(coll) : SAMPLE_POSTS(), n = new Map(); for (const r of rows) for (const m of String(r.text || '').matchAll(/#([\p{L}\p{N}_]+)/gu)) { const k = m[1].toLowerCase(); n.set(k, (n.get(k) || 0) + 1); } return [...n].sort((a, b2) => b2[1] - a[1]).map(([t, k]) => ({ tag: t, count: k })); };
+  const pick = (i) => { const it = sug[i]; if (!it || !sugTok) return; const ins = (sugTok.kind === '@' ? '@' + it.handle : '#' + it.tag) + ' ', a0 = sugTok.start, b0 = ta.selectionStart ?? ta.value.length; ta.value = ta.value.slice(0, a0) + ins + ta.value.slice(b0); st.text = ta.value; try { ta.setSelectionRange(a0 + ins.length, a0 + ins.length); } catch { /* ignore */ } sugBox.style.display = 'none'; sug = []; sugTok = null; grow(); sync(); ta.focus(); };
+  const suggest = () => {
+    const pos = ta.selectionStart ?? ta.value.length, before = ta.value.slice(0, pos), m = before.match(/(^|[\s(])([@#])([\p{L}\p{N}_]{0,30})$/u);
+    if (!m || st.background) { sugBox.style.display = 'none'; sug = []; sugTok = null; return; }
+    const kind = m[2], q = m[3].toLowerCase(); sugTok = { kind, start: pos - m[3].length - 1 };
+    sug = kind === '@' ? people().filter((p0) => !q || p0.handle.startsWith(q) || String(p0.name || '').toLowerCase().split(/\s+/).some((w) => w.startsWith(q))).sort((a, b2) => (b2.likes || 0) - (a.likes || 0)).slice(0, 5)
+      : tags().filter((t0) => t0.tag.startsWith(q) && t0.tag !== q).slice(0, 5);
+    sugBox.textContent = ''; if (!sug.length) { sugBox.style.display = 'none'; return; }
+    sug.forEach((it, i) => { const r0 = btn(`display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 12px;${i ? `border-top:${HAIR} solid ${c.line};` : ''}`, ''); r0.dataset.suggestItem = String(i);
+      if (kind === '@') { const a1 = el('div', `flex:none;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font:800 12px ${font};`); let h1 = 0; for (const ch of it.name || it.handle) h1 = (h1 * 31 + ch.charCodeAt(0)) >>> 0; a1.style.background = AVATAR_COLORS[h1 % AVATAR_COLORS.length]; a1.textContent = String(it.name || it.handle).split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join('');
+        const t1 = el('div', 'min-width:0;'); t1.append(el('div', `font:700 15px ${font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, (it.name || it.handle) + (it.verified ? ' ✓' : '')), el('div', `font:14px ${font};color:${c.sub};`, '@' + it.handle)); r0.append(a1, t1); }
+      else { const ic = el('div', `flex:none;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${c.field};color:${c.acc};font:800 16px ${font};`, '#'); const t1 = el('div'); t1.append(el('div', `font:700 15px ${font};`, '#' + it.tag), el('div', `font:13px ${font};color:${c.sub};`, `${it.count} post${it.count === 1 ? '' : 's'}`)); r0.append(ic, t1); }
+      r0.addEventListener('pointerdown', (ev) => ev.preventDefault()); r0.onclick = () => pick(i); sugBox.append(r0); });
+    sugBox.style.display = 'block';
+  };
+  ta.addEventListener('keydown', (ev) => { if (sug.length && (ev.key === 'Enter' || ev.key === 'Tab')) { ev.preventDefault(); pick(0); } else if (ev.key === 'Escape' && sug.length) { sugBox.style.display = 'none'; sug = []; } });
+  ta.addEventListener('click', suggest); ta.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== ta) { sugBox.style.display = 'none'; sug = []; } }, 150));
+  // the first link gets a preview card (✕ posts it as plain text)
+  const linkBox = el('div', 'margin:10px 0 0;'); linkBox.dataset.linkPreview = '1'; col.append(linkBox); let linkOff = '';
+  const firstLink = () => (st.text.match(/https?:\/\/[^\s]+/) || [])[0]?.replace(/[).,!?]+$/, '') || '';
+  const paintLink = () => { const u = !st.media.length && !st.poll && !st.background ? firstLink() : ''; linkBox.textContent = ''; if (!u || u === linkOff) return; let host = u; try { host = new URL(u).hostname.replace(/^www\./, ''); } catch { /* not a link */ }
+    const card = el('div', `position:relative;display:flex;align-items:center;gap:10px;border:1px solid ${c.line};border-radius:14px;padding:10px 12px;`), ic = el('div', `flex:none;width:44px;height:44px;border-radius:10px;background:${c.field};color:${c.acc};display:flex;align-items:center;justify-content:center;`);
+    ic.innerHTML = svgIcon('link', 22) || '🔗'; const t1 = el('div', 'min-width:0;flex:1;'); t1.append(el('div', `font:700 15px ${font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, host), el('div', `font:13px ${font};color:${c.sub};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, u));
+    const x = btn(`flex:none;width:26px;height:26px;border-radius:50%;background:${withAlpha(c.text, 0.12)};color:${c.text};font-size:12px;`, '✕'); x.setAttribute('aria-label', 'Remove the link preview'); x.onclick = () => { linkOff = u; paintLink(); };
+    card.append(ic, t1, x); linkBox.append(card); };
+  row.append(av, col); body.append(row);
   // text on a colour (Facebook): short posts without pictures can sit on a coloured background
   const BGS = ['', '#1877f2', '#f02849', '#45bd62', '#f7b928', '#9360f7', 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', 'linear-gradient(135deg,#00c6ff,#0072ff)', '#111827'];
-  const bgRow = el('div', 'display:none;gap:8px;padding:10px 0 0 54px;overflow-x:auto;scrollbar-width:none;'); bgRow.dataset.bgRow = '1';
-  const paintBg = () => { const can = o.backgrounds && !o.quote && !st.media.length && !st.poll && st.text.length <= 130; bgRow.style.display = o.backgrounds && !o.quote ? 'flex' : 'none'; bgRow.style.opacity = can ? '1' : '.35'; if (!can && st.background) st.background = '';
+  const bgRow = el('div', 'display:none;gap:8px;padding:12px 4px 6px 58px;overflow-x:auto;scrollbar-width:none;'); bgRow.dataset.bgRow = '1';
+  const paintBg = () => { const can = o.backgrounds && !o.quote && !st.media.length && !st.poll && st.text.length <= 130; bgRow.style.display = o.backgrounds && !o.quote && (can || st.background) ? 'flex' : 'none'; bgRow.style.opacity = '1'; if (!can && st.background) st.background = '';
     const on = !!st.background; ta.style.cssText = on ? `display:block;width:100%;min-height:200px;border:0;outline:none;resize:none;color:#fff;font:800 26px/1.3 ${font};padding:28px 18px;text-align:center;border-radius:14px;background:${st.background};` : `display:block;width:100%;min-height:90px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:18px/1.4 ${font};padding:0;`;
     for (const sw of bgRow.children) sw.style.outline = sw.dataset.bg === st.background ? `3px solid ${c.acc}` : 'none'; };
   for (const bgc of BGS) { const sw = btn(`flex:none;width:32px;height:32px;border-radius:9px;outline-offset:2px;background:${bgc || c.field};${bgc ? '' : `border:1px solid ${c.line};`}`, ''); sw.dataset.bg = bgc; sw.setAttribute('aria-label', bgc ? 'Background colour' : 'No background'); if (!bgc) sw.innerHTML = svgIcon('ban', 18); sw.style.color = c.sub; sw.style.display = 'flex'; sw.style.alignItems = 'center'; sw.style.justifyContent = 'center';
@@ -9402,7 +9444,7 @@ function postComposer(s, o) {
   const sync = () => {
     const n = st.text.length, k = Math.min(1, n / max), L = 2 * Math.PI * 12; fg.setAttribute('stroke-dashoffset', String(L * (1 - k)));
     fg.setAttribute('stroke', n > max ? '#f4212e' : n > max - 20 ? '#ffad1f' : c.acc); left.textContent = n > max - 20 ? String(max - n) : ''; left.style.color = n > max ? '#f4212e' : c.sub;
-    const ok = ready(); post.disabled = !ok; post.style.opacity = ok ? '1' : '.45'; paintBg?.();
+    const ok = ready(); post.disabled = !ok; post.style.opacity = ok ? '1' : '.45'; paintBg?.(); paintHl(); paintLink();
     if (bPic) bPic.style.opacity = st.media.length >= 4 || st.poll ? '.35' : '1'; if (bPoll) bPoll.style.opacity = st.media.length ? '.35' : '1';
   };
   const paintMedia = () => {
@@ -9429,7 +9471,7 @@ function postComposer(s, o) {
     const x = btn(`color:${c.sub};font-size:13px;`, '✕'); x.onclick = () => { st.place = ''; placeBox.dataset.editing = ''; paintPlace(); };
     chip.append(iconSpan('place', 16), inp, x); placeBox.append(chip); return inp;
   };
-  ta.addEventListener('input', () => { st.text = ta.value; grow(); sync(); });
+  ta.addEventListener('input', () => { st.text = ta.value; grow(); sync(); suggest(); });
   bPic && (bPic.onclick = () => { if (st.media.length >= 4 || st.poll) return; file.click(); });
   const asDataURL = (f) => new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.onerror = () => no(fr.error); fr.readAsDataURL(f); });
   const toBlob = async (dataUrl) => (await fetch(dataUrl)).blob();
@@ -9473,7 +9515,8 @@ function postComposer(s, o) {
   bPlace && (bPlace.onclick = () => { placeBox.dataset.editing = '1'; paintPlace()?.focus(); });
   post.onclick = () => {
     if (!ready()) return;
-    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim(), thread: st.more.map((q) => q.trim()).filter(Boolean), ...(o.audience && st.audience !== 'Everyone' ? { audience: st.audience } : {}), ...(o.replyControl && st.replies !== 'Everyone' ? { reply_setting: st.replies } : {}), ...(st.background && !st.media.length ? { background: st.background } : {}) };
+    const lk = !st.media.length && !st.poll && !st.background ? firstLink() : '', lkOn = lk && lk !== linkOff; let lkHost = ''; if (lkOn) try { lkHost = new URL(lk).hostname.replace(/^www\./, ''); } catch { /* ignore */ }
+    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim(), thread: st.more.map((q) => q.trim()).filter(Boolean), ...(lkOn ? { link: lk, link_title: lkHost } : {}), ...(o.audience && st.audience !== 'Everyone' ? { audience: st.audience } : {}), ...(o.replyControl && st.replies !== 'Everyone' ? { reply_setting: st.replies } : {}), ...(st.background && !st.media.length ? { background: st.background } : {}) };
     if (o.onPost?.(out) === false) return; close(true);
   };
   if (st.place) placeBox.dataset.editing = '1';

@@ -22,6 +22,7 @@ import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './
 import { initData, dataEditor, ensureCollection, connectSupabase } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
+import * as CM from './codemagic.js';
 import { expoFiles } from './expo.js';
 import { xcodeFiles, androidFiles } from './native.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
@@ -6870,18 +6871,107 @@ function usedPermissions() {
   return [...out].filter((k) => PERMISSIONS[k] && k !== 'notifications' && k !== 'storage');
 }
 /** Build Settings → App stores: a Capacitor project with a codemagic.yaml, as a .zip. */
-async function exportStoreProject() {
+/** The app project's files (Capacitor + codemagic.yaml), or null with a message when something is missing. */
+async function makeStoreFiles() {
   const so = { ...storeOpts(), perms: usedPermissions().map((k) => ({ kind: k, why: levelList()[0]?.settings?.permissions?.[k]?.why || PERMISSIONS[k].why })) };
-  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
-  if (!so.ios && !so.android) return toast('Tick iOS, Android or both');
+  if (!validAppId(so.appId)) { toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)'); return null; }
+  if (!so.ios && !so.android) { toast('Tick iOS, Android or both'); return null; }
+  const o = buildOpts(), b = await buildHTML({ native: true });
+  const [icon, fg, splash, bg] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o), makeSplash({ ...o, splashBg: o.iconBg }, 1024, 0, false)].map((p) => p.then(dataBytes)));
+  return { so, files: [...storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }), ...await storeKitFiles(o)] };
+}
+async function exportStoreProject() {
   try {
     toast('Making the app project…');
-    const o = buildOpts(), b = await buildHTML({ native: true });
-    const [icon, fg, splash, bg] = await Promise.all([makeIcon(o, 1024), makeSplash(o, 1024, 0.62, true), makeSplash(o), makeSplash({ ...o, splashBg: o.iconBg }, 1024, 0, false)].map((p) => p.then(dataBytes)));
-    const zip = makeZip([...storeFiles(so, { html: b.html, icon, fg, splash: { png: splash, bg } }), ...await storeKitFiles(o)]);
+    const made = await makeStoreFiles(); if (!made) return; const so = made.so;
+    const zip = makeZip(made.files);
     const a = h('a', { href: URL.createObjectURL(zip), download: slug(so.name) + '-app.zip' }); document.body.append(a); a.click(); a.remove();
     noteBuild('store', zip.size); toast(`App project ready (${kb(zip.size)}): put it on GitHub and open it in Codemagic. README.md has the steps.`);
   } catch (err) { toast('Could not make the app project: ' + err.message); }
+}
+// ---- Build on Codemagic from the editor (each person's own GitHub and Codemagic) ----
+let cmProviders = null, cmWatch = null, cmForm = null; // sign-in methods of the editor's server; the build being watched
+/** Build Settings › App stores: connect GitHub and Codemagic, then send the app project and build it, with the status here. */
+function codemagicPanel(redo) {
+  const B = () => (root.build ||= {}), box = h('div', { class: 'cm-panel' });
+  const paint = () => {
+    const ghT = CM.githubToken(), cmT = CM.codemagicToken(), so = storeOpts(), ready = validAppId(so.appId) && (so.ios || so.android);
+    if (cloud.configured() && !cmProviders) cloud.testServer().then((r) => { cmProviders = r.providers || []; paint(); }).catch(() => { cmProviders = []; });
+    const step = (n, done, title, ...kids) => h('div', { class: 'cm-step' + (done ? ' done' : '') }, h('div', { class: 'cm-num' }, done ? icon('check') : String(n)), h('div', { class: 'cm-body' }, h('b', {}, title), ...kids));
+    const ghStep = step(1, !!ghT, ghT ? `GitHub${CM.githubLogin() ? ': @' + CM.githubLogin() : ''}` : 'Sign in with GitHub',
+      h('p', { class: 'desc' }, ghT ? `Your app project goes into a private repository in your GitHub (${B().cmRepo || slug(so.name || root.name) + '-app'}).` : 'Your app project goes into a private repository in your own GitHub, where Codemagic builds it.'),
+      h('div', { class: 'btns' },
+        !ghT && cloud.configured() && (cmProviders || []).includes('github') && h('button', { class: 'btn primary', onclick: () => cloud.signInWith('github', 'repo') }, icon('user'), 'Sign in with GitHub'),
+        !ghT && cmForm !== 'github' && h('button', { class: 'btn', onclick: () => { cmForm = 'github'; paint(); } }, icon('key'), cloud.configured() && (cmProviders || []).includes('github') ? 'Use a token instead' : 'Connect with a GitHub token'),
+        ghT && h('button', { class: 'btn', onclick: () => { CM.setGithubToken(''); paint(); } }, 'Disconnect')),
+      cmForm === 'github' && !ghT && cmTokenForm('github', paint));
+    if (ghT && !CM.githubLogin()) CM.githubMe().then(paint).catch((e) => { toast(e.message); });
+    const cmStep = step(2, !!cmT, cmT ? 'Codemagic connected' : 'Connect your Codemagic',
+      h('p', { class: 'desc' }, cmT ? 'Builds run in your own Codemagic account, with your signing keys and build minutes.' : 'Builds run in your own Codemagic account. Copy your API token from Codemagic once; it stays on this device.'),
+      h('div', { class: 'btns' }, !cmT ? cmForm !== 'codemagic' && h('button', { class: 'btn primary', onclick: () => { cmForm = 'codemagic'; paint(); } }, icon('key'), 'Connect Codemagic') : h('button', { class: 'btn', onclick: () => { CM.setCodemagicToken(''); paint(); } }, 'Disconnect')),
+      cmForm === 'codemagic' && !cmT && cmTokenForm('codemagic', paint));
+    const wf = [so.ios && ['ios-release', 'iOS'], so.android && ['android-release', 'Android']].filter(Boolean);
+    const buildStep = step(3, false, 'Build',
+      h('p', { class: 'desc' }, !ready ? 'Fill in the App ID and pick iOS, Android or both above.' : (() => { const to = [so.ios && so.iosPublish !== 'none' && 'TestFlight', so.android && so.androidTrack !== 'none' && 'Google Play'].filter(Boolean); return `Sends the game as it is now, then builds ${wf.map((w) => w[1]).join(' and ')} on Codemagic${to.length ? ' and sends it to ' + to.join(' and ') : ''}.`; })()),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !ghT || !cmT || !ready || !!cmWatch?.busy, onclick: () => cmSendAndBuild(wf.map((w) => w[0]), paint) }, icon('play'), cmWatch?.busy ? 'Working…' : 'Send & build'),
+        B().cmApp && h('button', { class: 'btn', disabled: !cmT, onclick: () => cmRecent(paint) }, icon('clock'), 'Recent builds')),
+      cmWatch && cmWatchCard(paint));
+    box.replaceChildren(h('h4', { class: 'sub-h' }, 'Build on Codemagic from here'), ghStep, cmStep, buildStep);
+  };
+  paint(); return box;
+}
+/** The box for pasting a token, right in the panel (Build Settings stays open). */
+function cmTokenForm(kind, after) {
+  const gh = kind === 'github', inp = h('input', { type: 'password', placeholder: gh ? 'ghp_… or github_pat_…' : 'Codemagic API token', autocomplete: 'off', style: 'width:100%;margin:6px 0' }), msg = h('p', { class: 'desc' });
+  const go = async () => { const t = inp.value.trim(); if (!t) return; msg.textContent = 'Checking…';
+    try { if (gh) { CM.setGithubToken(t); await CM.githubMe(); } else { CM.setCodemagicToken(t); await CM.codemagicCheck(); } cmForm = null; toast(gh ? `Connected to GitHub as @${CM.githubLogin()}` : 'Codemagic connected'); after(); }
+    catch (e) { if (gh) CM.setGithubToken(''); else CM.setCodemagicToken(''); msg.textContent = e.message; } };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); }); setTimeout(() => inp.focus(), 60);
+  return h('div', { class: 'cm-form' },
+    h('p', { class: 'desc' }, gh ? 'Make a token on GitHub with the “repo” permission (Settings › Developer settings › Personal access tokens) and paste it here.' : 'On codemagic.io open Teams › Personal Account › Integrations › Codemagic API, tap Show, copy the token and paste it here.'),
+    h('a', { class: 'btn', href: gh ? 'https://github.com/settings/tokens/new?scopes=repo&description=Pocket%20Engine' : 'https://codemagic.io/teams', target: '_blank', rel: 'noopener' }, icon('upload'), gh ? 'Open GitHub' : 'Open Codemagic'),
+    inp, msg, h('p', { class: 'desc' }, `Kept on this device only, and sent only to ${gh ? 'GitHub' : 'Codemagic'}.`),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: go }, icon('check'), 'Connect'), h('button', { class: 'btn', onclick: () => { cmForm = null; after(); } }, 'Cancel')));
+}
+/** Make the project, send it to GitHub, make sure Codemagic has it, start the builds, and watch them. */
+async function cmSendAndBuild(workflows, paint) {
+  const B = () => (root.build ||= {});
+  cmWatch = { busy: true, step: 'Making the app project…', builds: [] }; paint();
+  const say = (t) => { cmWatch.step = t; paint(); };
+  try {
+    const made = await makeStoreFiles(); if (!made) throw new Error('The app settings above need fixing first');
+    const name = (B().cmRepo || slug(made.so.name || root.name) + '-app').replace(/^.*\//, '');
+    say('Getting your GitHub repository ready…'); const repo = await CM.ensureRepo(name, `${made.so.name} (made with Pocket Engine)`);
+    B().cmRepo = repo.name;
+    const pushed = await CM.pushFiles(repo, made.files, `Pocket Engine: ${made.so.name} ${made.so.version || ''}`.trim(), say);
+    say('Adding it to your Codemagic…'); const app = await CM.ensureApp(repo, () => CM.addDeployKey(repo));
+    B().cmApp = app; changed(); if (manualSave()) setDirty(true);
+    for (const w of workflows) { say(`Starting the ${w.startsWith('ios') ? 'iOS' : 'Android'} build…`); const id = await CM.startBuild(app.id, w, pushed.branch); cmWatch.builds.push({ id, workflow: w, status: 'queued' }); }
+    cmWatch.busy = false; cmWatch.step = ''; cmWatch.app = app; paint(); cmPoll(paint);
+  } catch (e) { cmWatch = { busy: false, error: e.message, builds: [] }; paint(); }
+}
+function cmPoll(paint) {
+  clearTimeout(cmWatch?.timer); if (!cmWatch?.builds?.length) return;
+  cmWatch.timer = setTimeout(async () => {
+    for (const b of cmWatch.builds) if (!CM.isOver(b.status)) try { const r = await CM.getBuild(b.id); b.status = r.status; b.artefacts = r.artefacts || []; b.message = r.message || r.buildActions?.find((a) => a.status === 'failed')?.name || ''; } catch (e) { b.message = e.message; }
+    paint(); if (cmWatch.builds.some((b) => !CM.isOver(b.status))) cmPoll(paint); else toast(cmWatch.builds.every((b) => ['finished', 'warning'].includes(b.status)) ? 'Codemagic build done' : 'A Codemagic build didn’t finish');
+  }, 10000);
+}
+function cmWatchCard(paint) {
+  const w = cmWatch;
+  if (w.error) return h('div', { class: 'cm-card bad' }, h('b', {}, 'Couldn’t build'), h('p', { class: 'desc' }, w.error));
+  if (w.busy) return h('div', { class: 'cm-card' }, h('span', { class: 'cm-spin' }), w.step);
+  return h('div', { class: 'cm-card' }, w.builds.map((b) => h('div', { class: 'cm-build' },
+    h('b', {}, b.workflow.startsWith('ios') ? 'iOS' : 'Android'), h('span', { class: 'cm-st ' + (['finished', 'warning'].includes(b.status) ? 'ok' : CM.isOver(b.status) ? 'bad' : 'run') }, CM.statusText(b.status)),
+    b.message && CM.isOver(b.status) && b.status !== 'finished' && h('small', {}, b.message),
+    (b.artefacts || []).filter((a) => /\.(ipa|aab|apk)$/i.test(a.name)).map((a) => h('button', { class: 'btn', onclick: async () => { try { open(await CM.publicLink(a), '_blank'); } catch (e) { toast(e.message); } } }, icon('download'), a.name)),
+    h('a', { class: 'btn', href: `https://codemagic.io/app/${w.app?.id || ''}/build/${b.id}`, target: '_blank', rel: 'noopener' }, 'Open on Codemagic'),
+    !CM.isOver(b.status) && h('button', { class: 'btn', onclick: async () => { try { await CM.cancelBuild(b.id); b.status = 'canceled'; paint(); } catch (e) { toast(e.message); } } }, 'Cancel'))));
+}
+async function cmRecent(paint) {
+  const app = (root.build || {}).cmApp; if (!app) return;
+  try { const list = await CM.recentBuilds(app.id); cmWatch = { app, builds: list.map((b) => ({ id: b._id, workflow: b.workflowId || b.workflow?.id || '', status: b.status, artefacts: b.artefacts || [], message: b.message || '' })) }; paint(); cmPoll(paint); }
+  catch (e) { toast(e.message); }
 }
 /** Android's notification icon: a white bell on transparent (PNG). */
 async function notifIconPNG(size = 96) {
@@ -7353,6 +7443,7 @@ function openBuildSettings() {
         C('notifyEmail', { label: 'Email me when a build finishes', def: '', placeholder: 'you@example.com' }),
         h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · icon and splash from Icon and Loading screen above.`),
         h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || (!so.ios && !so.android), onclick: exportStoreProject }, icon('download'), 'Download app project (.zip)')),
+        codemagicPanel(redo),
         h('h4', { class: 'sub-h' }, 'Or with Expo'),
         h('p', { class: 'desc' }, 'Prefer Expo (expo.dev)? Download an Expo project instead: the game in a full-screen WebView, with phone notifications, haptics, permissions and the Android Back button through Expo’s modules (SDK 57). Try it in the Expo Go app with npx expo start, then build and publish with EAS (eas build, eas submit). Uses the same App ID, version, orientation, icon and splash as above.'),
         h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk, onclick: exportExpoProject }, icon('download'), 'Download Expo project (.zip)')),

@@ -140,6 +140,9 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - Adding a feed, chat, inbox, notifications, friends, Data List or photo grid to any page makes it fill the room under what is already there.
 - **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
   - **Its ☰ sits in a top bar.** Adding a Side Menu (in a game or an app) also adds an App Bar whose ☰ opens it, unless you already have one, so pages and page templates lay out under the bar instead of running into a floating button. A project made before this, with a ☰ floating in the corner, shows **Put the ☰ in a top bar** at the top of the Side Menu's Inspector: one tap swaps the button for the bar (Undo brings it back).
+  - **An App Bar you already have gets the ☰:** an App Bar set to *‹ Back only* still shows ☰ (when there's nothing to go back to) once there's a Side Menu to open. Presets of several parts (like App Layout) reuse the App Bar, Bottom Nav and pages you already have instead of adding second ones.
+  - **Two pages for the same value** (two Home pages) both show at once and overlap: the Page card warns about it, with **Move its contents here and remove it**.
+  - Side Menu presets use the theme colours (*@card*, *@text*, *@accent*), so the menu is light in a light app and dark in a dark one.
   - The first page you add also shows when the menu points at a page that doesn't exist yet (a menu starting on *home* with no Home page), so a game never opens on an empty screen.
   - **Keep in step with** the Bottom Nav tabs, all pages, or the tabs then the other pages. The menu then lists those pages (names, icons and badges) by itself and changes when they change. Your own items come after them.
   - The Bottom Nav has **Keep in step with** too (the Side Menu's pages, or all pages, with *Most tabs* and where your own tabs go). A new page added in the editor also asks to join the side menu.

@@ -5315,10 +5315,22 @@ function addPrefab(def, at) {
   const sends = (bh) => { const P = bh?.params || bh; return bh?.type === 'button' && P?.action === 'send message' && String(P.value ?? '').trim(); };
   const haveBtn = (m) => m && project.entities.some((q) => q.ui && q.visible !== false && (q.behaviors || []).some((bh) => sends(bh) === m));
   const haveBar = () => project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiAppBar'));
-  for (const b of def.before || []) { const b0 = (b.behaviors || [])[0], m = sends(b0); if (haveBtn(m) || (b0?.type === 'uiAppBar' && haveBar())) continue; addTree(b, null, at); } // you already have a button that opens it (a ☰ from another menu): don't stack a second one on it
+  const havePage = (sif) => sif && project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiShowIf' && (bh.var || 'page') === (sif.var || 'page') && (bh.op || '=') === '=' && String(bh.value) === String(sif.value)));
+  const posOf = (bh) => (bh.params || bh).position || 'bottom';
+  const twinBar = (props) => { // the bar this one would double (one App Bar, one Bottom Nav per edge)
+    for (const bh of props.behaviors || []) {
+      if (bh.type === 'uiAppBar') { const q = project.entities.find((q) => (q.behaviors || []).some((x) => x.type === 'uiAppBar')); if (q) return q; }
+      if (bh.type === 'uiBottomNav') { const q = project.entities.find((q) => (q.behaviors || []).some((x) => x.type === 'uiBottomNav' && posOf(x) === posOf(bh))); if (q) return q; }
+    }
+    return null;
+  };
+  const layout = !!(def.before || def.after); // a preset of several parts: reuse the bars you already have
+  for (const b of def.before || []) { const b0 = (b.behaviors || [])[0], m = sends(b0); if (haveBtn(m) || (b0?.type === 'uiAppBar' && haveBar()) || (layout && twinBar(b)) || ((b.behaviors || []).some((bh) => bh.type === 'uiShowIf' && havePage(bh)))) continue; addTree(b, null, at); } // (a ☰ or a bar you already have, or a second page for a value that has one: skipped)
   const kids = def.children || def.props.children; // children can sit on the widget or inside its props
-  const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
-  for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
+  const reuse = layout && twinBar(def.props);
+  const j = reuse || (kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at));
+  if (reuse) for (const bh of reuse.behaviors || []) if (bh.type === 'uiAppBar' && (bh.left === 'back' || bh.left === 'none')) bh.left = 'back, else menu'; // its ☰ opens the new Side Menu
+  for (const a of def.after || []) if (!twinBar(a)) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
   if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
   const adopted = j.ui && !def.before && !def.after && adoptIntoPage(j, selBefore); // added while a page is shown: it goes on that page
   if (adopted) { selectedId = j.id; changed({ structure: true }); pushHistory(); }
@@ -7655,6 +7667,19 @@ function pageMenu(anchor) {
 }
 function setUIPage(k) { uiPage = k; refreshPageBtn(); engine.render(); }
 /** A page's settings in one place: its name and title, how it looks, how it opens, scrolling, the bottom bar, messages. */
+/** Two pages for the same value: keep this one, move what is on the others into it (not their placeholder title and hint), remove them. */
+function mergePages(j, twins) {
+  const gone = new Set(), moved = [];
+  for (const t of twins) {
+    for (const q of project.entities.filter((q) => q.parent === t.id)) {
+      const ph = q.text && (q.text.value === 'Add UI inside this page' || q.name === t.name + ' Title' || q.name === t.name + ' Hint'); // what a new page starts with
+      if (ph) subtree(q.id).forEach((id) => gone.add(id)); else { q.parent = j.id; moved.push(q); }
+    }
+    gone.add(t.id);
+  }
+  project.entities = project.entities.filter((e) => !gone.has(e.id));
+  changed({ structure: true }); pushHistory(); toast(moved.length ? `Moved ${moved.length} item${moved.length > 1 ? 's' : ''} onto ${j.name}. Undo to go back.` : `Removed the extra page. Undo to go back.`);
+}
 function pageCard(j, b, i, threeD, C, menu) {
   const def = Behaviors.uiShowIf, spec = (k, o = {}) => { const q = def.params.find((x) => x.key === k); return { ...q, def: paramDefault(q, threeD), ...o }; };
   const P = (k, o = {}) => (shown(spec(k), b, threeD) ? C(`behaviors.${i}.${k}`, spec(k, o)) : null);
@@ -7663,7 +7688,11 @@ function pageCard(j, b, i, threeD, C, menu) {
   const lineRe = new RegExp(`^\\s*${val.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`);
   const titleOf = () => (String(bar?.titles || '').split('\n').find((l) => lineRe.test(l)) || '').split('=').slice(1).join('=').trim();
   const setTitle = (t) => { const L = String(bar.titles || '').split('\n').filter((l) => l.trim()), k = L.findIndex((l) => lineRe.test(l)); if (t.trim()) { if (k >= 0) L[k] = `${val} = ${t.trim()}`; else L.push(`${val} = ${t.trim()}`); } else if (k >= 0) L.splice(k, 1); bar.titles = L.join('\n'); changed(); };
+  const twins = (b.op || '=') === '=' ? project.entities.filter((q) => q !== j && (q.behaviors || []).some((x) => x.type === 'uiShowIf' && (x.var || 'page') === v && (x.op || '=') === '=' && String(x.value ?? '') === val)) : [];
   const kids = [
+    twins.length ? h('div', { class: 'insp-fix', style: 'padding:12px;border-radius:12px;background:color-mix(in srgb, #ff9f0a 16%, transparent);display:flex;flex-direction:column;gap:8px' },
+      h('div', {}, h('b', {}, `${twins.map((q) => q.name).join(', ')} also show${twins.length > 1 ? '' : 's'} for ${v} = ${val}. `), 'Both pages show at once and their contents overlap.'),
+      h('button', { class: 'btn', onclick: () => mergePages(j, twins) }, icon('layers'), `Move ${twins.length > 1 ? 'their' : 'its'} contents here and remove ${twins.length > 1 ? 'them' : 'it'}`)) : null,
     h('div', { class: 'page-head' }, h('span', { class: 'page-chip' }, icon('layers'), val || '(no name)'),
       h('button', { class: 'btn', onclick: () => renamePage(j) }, icon('edit'), 'Rename'),
       h('button', { class: 'btn', onclick: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${val}`); } }, icon('eye'), 'Show')),

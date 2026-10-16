@@ -4498,6 +4498,12 @@ function uiDrawOrder(s) {
   const under = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) { const i = top.indexOf(q); if (i >= 0) return i; } return -1; };
   const groups = top.map(() => []), rest = [];
   for (const e of out) { const i = under(e); if (i >= 0) groups[i].push(e); else rest.push(e); }
+  // a Side Menu that stays between the bars: the bars (a Bottom Nav's raised middle button too) go over it, not cut off by its edge
+  const si = top.findIndex((e) => e.behaviors?.some((b) => b.sideMenu && (b.params?.bars ?? 'stay between them') === 'stay between them'));
+  if (si >= 0) {
+    const isBar = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q._dock && q.behaviors?.some((b) => b.type === 'uiBottomNav' || b.type === 'uiAppBar')) return true; return false; };
+    const bars = rest.filter(isBar); if (bars.length) { const r2 = rest.filter((e) => !isBar(e)); return r2.concat(...groups.slice(0, si + 1), bars, ...groups.slice(si + 1)); }
+  }
   return rest.concat(...groups);
 }
 function barsFor(e, safe) {
@@ -8095,7 +8101,7 @@ registerBehavior('uiSideBar', {
             if (floaty()) { rr(x + 1, R.y + 1, w - 2, R.h - 2, rad); ctx.stroke(); } else { const ex = left ? x + w - 1 : x + 1; ctx.beginPath(); ctx.moveTo(ex, R.y); ctx.lineTo(ex, R.y + R.h); ctx.stroke(); } ctx.restore(); }
         }
         ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
-        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
+        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = (floaty() ? 0 : E.safe.bottom) + ((p.bars ?? 'stay between them') === 'stay between them' && s.entities.some((q) => q.visible && !q._parentHidden && !q.dead && q.behaviors.some((x) => x.type === 'uiBottomNav' && x.params?.style === 'raised center')) ? 34 * uiK(E.safe) : 0); // (room for a Bottom Nav's raised middle button, which sits over the menu)
         let y = R.y + safeT + 10;
         // the top bar: ✕ (or ‹ in a submenu), a title, and icon buttons
         const tb = !!p.topBar && !compact, TH = Math.max(36, +p.topHeight || 52);

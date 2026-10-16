@@ -7861,7 +7861,7 @@ registerBehavior('uiSideBar', {
       const [label = '', icon = '', act = '', badge = '', sub = '', right = '', color = '', cond = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
       return actOf(a, { label, icon, badge, sub, right, color, cond });
     });
-    let toggledAt = null, otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
+    let openWhy = '', toggledAt = null, otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     /** Where the panel is when it is tt open (0..1): it slides in, or an Icon Rail widens. */
@@ -7917,6 +7917,7 @@ registerBehavior('uiSideBar', {
       pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F, ...Object.values(G).flat()].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
       set(e, s, v) {
         if (v === want) return; want = v;
+        if (v && !s.engine.editing) Log.add('info', `${e.name || 'Side Menu'} opened by ${openWhy || 'a node or action'}`, 'UI'); openWhy = ''; // (the Console says what opened it)
         if (v) { s.modal = e; if (t < 0.05) { age = 0; if (sub) openSub(s, null); } } else if (s.modal === e) s.modal = null;
         (s.openMenus ||= new Set())[v ? 'add' : 'delete'](p.message); s.emit('menu', p.message, v);
         if (p.bars === 'hide them while open') s.barsHidden = Math.max(0, (s.barsHidden || 0) + (v ? 1 : -1));
@@ -7954,7 +7955,7 @@ registerBehavior('uiSideBar', {
         e._modalPass = () => { if (p.pageWorks) { const R = inst.rect(s), W = s.engine.width, H = s.engine.height; return [{ x: 0, y: 0, w: R.x, h: H }, { x: R.x + R.w, y: 0, w: W - R.x - R.w, h: H }, { x: R.x, y: 0, w: R.w, h: R.y }, { x: R.x, y: R.y + R.h, w: R.w, h: H - R.y - R.h }]; }
           if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
         if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
-        s.on('message', (m) => { if (e.dead) return; if (typeof m === 'string' && m.startsWith(p.message + ' sub:')) { inst.set(e, s, true); openSub(s, m.slice(p.message.length + 5).trim()); return; } if (m === p.message) { const f = performance.now(); if (toggledAt != null && f - toggledAt < 120) return; toggledAt = f; inst.set(e, s, !want); } else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+        s.on('message', (m) => { if (e.dead) return; if (typeof m === 'string' && m.startsWith(p.message + ' sub:')) { inst.set(e, s, true); openSub(s, m.slice(p.message.length + 5).trim()); return; } if (m === p.message) { const f = performance.now(); if (toggledAt != null && f - toggledAt < 120) return; toggledAt = f; openWhy = `the “${m}” message` + (s._upd && s._upd !== e ? ` from ${s._upd.name || 'an object'} (${Behaviors[s._updB]?.label || s._updB})` : ''); inst.set(e, s, !want); } else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
       destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {
@@ -7962,7 +7963,7 @@ registerBehavior('uiSideBar', {
         const inp = s.engine.input, R = inst.rect(s), E = s.engine, left = p.side !== 'right', railW = 72, edge = +p.edgeWidth || 22;
         // the built-in ☰ button
         const B = inst.btn(s);
-        if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
+        if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { openWhy = 'its own ☰ button'; inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
         // swipe from the edge / drag to close
         if (!drag && p.swipeOpen !== false && !want && !full() && !(s.settings.edgeSwipeBack !== false && left && s.canGoBack())) for (const d of inp.downs) { /* (where you can go back, the edge swipe goes back, like iOS) */ if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, open: false, side: true }; break; } }
         // a slider in the menu: press and drag along it
@@ -7981,7 +7982,7 @@ registerBehavior('uiSideBar', {
               if (drag.mode === 'scroll') scroll = clamp(drag.s0 - dy, 0, overflow);
               else if (drag.mode === 'close' || drag.mode === 'open') t = clamp(drag.t0 + dx / span, 0, 1);
             }
-          } else { if (drag.mode === 'close' || !drag.open) inst.set(e, s, t > 0.4); drag = null; }
+          } else { if (drag.mode === 'close' || !drag.open) { if (!drag.open) openWhy = 'a swipe from the screen edge'; inst.set(e, s, t > 0.4); } drag = null; }
         } else {
           const step = dt / Math.max(0.05, +p.duration || 0.28);
           t = want ? Math.min(1, t + step) : Math.max(0, t - step);
@@ -15290,110 +15291,157 @@ registerBehavior('uiInput', {
 const previewText = (ctx, str, x, y, size, color, weight = 600, align = 'center', maxW) => { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle'; ctx.fillText(maxW ? fitText(ctx, String(str), maxW) : String(str), x, y); };
 /** List View: rows made from text, a list variable or numbers; scroll by dragging, tap a row to pick it. */
 registerBehavior('uiList', {
-  label: 'List View', description: 'A scrolling list of rows from text, a list variable or numbers 1 to N. Drag to scroll; tap a row to pick it: its position and text go into variables and a message is sent. Rows can show {item}, {i} and any {variable}. The editor shows a preview of the rows.',
+  label: 'List View', description: 'A scrolling list: plain rows, or rows with an icon, a line under the title and a value on the right, in sections. Rows come from text (one per line), a list variable or numbers 1 to N. Search it, tick several, swipe left to delete; tap a row to pick it: its position and text go into variables and a message is sent.',
   params: [
     { key: 'source', label: 'Rows from', type: 'select', options: ['these items', 'a list variable', 'numbers 1 to N'], default: 'these items' },
-    { key: 'items', label: 'Items (comma separated)', type: 'text', default: 'Sword, Shield, Potion, Map, Key, Bow, Lantern', showIf: { source: ['these items'] } },
+    { key: 'items', label: 'Items (one per line: Title | line under it | icon | on the right; "# Title" = a section)', type: 'code', default: 'Sword, Shield, Potion, Map, Key, Bow, Lantern', showIf: { source: ['these items'] }, info: 'Commas work too for plain rows. Icons: an emoji or an icon name (heart, star, bell…).' },
     { key: 'listVar', label: 'List variable', type: 'text', default: 'list', suggest: 'vars', showIf: { source: ['a list variable'] } },
     { key: 'count', label: 'How many', type: 'number', default: 10, showIf: { source: ['numbers 1 to N'] } },
-    { key: 'row', label: 'Row text', type: 'text', default: '{item}', info: '{item} = the row\'s item, {i} = its position (1, 2, 3…), plus any {variable}.' },
+    { key: 'row', label: 'Row text', type: 'text', default: '{item}', info: '{item} = the row\'s title, {sub} = its line under it, {i} = its position (1, 2, 3…), plus any {variable}.' },
+    { key: 'style', label: 'Look', type: 'select', options: ['cards', 'plain lines', 'inset grouped'], default: 'cards', info: { cards: 'A rounded card per row, with a gap between.', 'plain lines': 'Rows on the background with a thin line between (like Mail).', 'inset grouped': 'Each section in a rounded box with lines between its rows (like Settings).' } },
+    { key: 'search', label: 'Search with variable', type: 'text', default: '', suggest: 'vars', infoText: 'A Text Field or Search Bar writes into it; rows whose text contains it stay.' },
+    { key: 'empty', label: 'When there is nothing', type: 'text', default: 'Nothing here yet' },
+    { key: 'pickMany', label: 'Tapping ticks rows (pick several)', type: 'bool', default: false, info: 'The ticked titles go in the list variable below.' },
+    { key: 'pickedList', label: 'Ticked rows go in', type: 'text', default: 'ticked', suggest: 'vars', showIf: (b) => !!b.pickMany },
+    { key: 'swipeDelete', label: 'Swipe left to delete', type: 'bool', default: false, info: 'Rows from a list variable are taken out of it (with Undo); others go until the game restarts.' },
+    { key: 'deleteMessage', label: 'Deleting sends', type: 'text', default: '', suggest: 'messages', showIf: (b) => !!b.swipeDelete },
     { key: 'selectVar', label: 'Picked position goes in', type: 'text', default: 'picked', suggest: 'vars' },
     { key: 'selectText', label: 'Picked text goes in', type: 'text', default: 'pickedItem', suggest: 'vars' },
     { key: 'message', label: 'Message when picked', type: 'text', default: 'picked', suggest: 'messages' },
     { key: 'rowHeight', label: 'Row height', type: 'number', default: 52, group: 'Look' },
-    { key: 'spacing', label: 'Gap between rows', type: 'number', default: 6, group: 'Look' },
+    { key: 'spacing', label: 'Gap between rows (cards)', type: 'number', default: 6, group: 'Look' },
     { key: 'padding', label: 'Padding', type: 'number', default: 8, group: 'Look' },
     { key: 'rowColor', label: 'Row colour', type: 'color', default: '#2a3046', group: 'Look' },
     { key: 'altColor', label: 'Every other row', type: 'color', default: '', optional: true, group: 'Look' },
-    { key: 'pickColor', label: 'Picked row colour', type: 'color', default: '#3a8dff', group: 'Look' },
+    { key: 'pickColor', label: 'Picked row / accent colour', type: 'color', default: '#3a8dff', group: 'Look' },
     { key: 'textColor', label: 'Text colour', type: 'color', default: '#ffffff', group: 'Look' },
+    { key: 'subColor', label: 'Line under it / headings', type: 'color', default: '', optional: true, group: 'Look' },
+    { key: 'lineColor', label: 'Lines between rows', type: 'color', default: '', optional: true, group: 'Look' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 17, group: 'Look' },
     { key: 'align', label: 'Text', type: 'select', options: ['left', 'center'], default: 'left', group: 'Look' },
     { key: 'radius', label: 'Row roundness', type: 'number', default: 10, group: 'Look' },
     { key: 'numbered', label: 'Number the rows (1. 2. 3.)', type: 'bool', default: false, group: 'Look' },
     { key: 'arrow', label: 'Arrow on the right ›', type: 'bool', default: false, group: 'Look' },
+    { key: 'sticky', label: 'Section titles stay at the top while scrolling', type: 'bool', default: true, group: 'Look' },
     { key: 'appear', label: 'Rows appear', type: 'select', options: ['one after another', 'all at once'], default: 'one after another', group: 'Look' },
     ...SCROLL_PARAMS,
   ],
   create(p) {
-    let rows = [], sig = null, picked = 0;
-    const S = new Scroller(p, ['y']);
-    const itemsOf = (s) => p.source === 'a list variable' ? (Array.isArray(s.vars[p.listVar]) ? s.vars[p.listVar] : String(s.vars[p.listVar] ?? '').split(',').map((x) => x.trim()).filter(Boolean))
-      : p.source === 'numbers 1 to N' ? Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => i + 1) : String(p.items || '').split(',').map((x) => x.trim()).filter(Boolean);
-    const geo = (e) => { const ex = e.extents(); return { W: (ex.hx || 150) * 2, H: (ex.hy || 150) * 2, rh: Math.max(16, +p.rowHeight || 52), gap: +p.spacing || 0, pad: +p.padding || 0 }; };
-    const fillOf = (i) => (i + 1 === picked ? RAW(p, 'pickColor') : RAW(p, 'altColor') && i % 2 ? RAW(p, 'altColor') : RAW(p, 'rowColor'));
-    const build = (e, s, items) => {
-      for (const r of rows) { r.label?.destroy(); r.chev?.destroy(); r.destroy(); }
-      rows = [];
-      const { W, rh, gap, pad } = geo(e), L = (e.layer || 0) + 1;
-      items.forEach((it, i) => {
-        const vars = Object.assign(Object.create(s.vars), { item: it, i: i + 1 });
-        const txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars);
-        const row = s.add({ name: `${e.name} row ${i + 1}`, ui: true, parent: e.id, anchor: 'top', x: 0, y: pad + rh / 2 + i * (rh + gap), layer: L, shape: { type: 'rect', w: W - pad * 2, h: rh, radius: +p.radius || 0, fill: fillOf(i) } });
-        const left = p.align === 'left';
-        row.label = s.add({ name: `${e.name} row ${i + 1} text`, ui: true, parent: row.id, anchor: left ? 'left' : 'center', x: left ? 16 : 0, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: txt, size: +p.textSize || 17, color: RAW(p, 'textColor'), weight: '600', align: left ? 'left' : 'center', fit: W - pad * 2 - 44 } });
-        if (p.arrow) row.chev = s.add({ name: `${e.name} row ${i + 1} arrow`, ui: true, parent: row.id, anchor: 'right', x: -18, y: 0, layer: L + 1, text: { ...TEXT_DEFAULTS, value: '›', size: (+p.textSize || 17) + 8, color: RAW(p, 'textColor'), weight: '500' } });
-        row.baseY = row.y; row.item = it;
-        if (p.appear !== 'all at once' && i < 14) { row.alpha = 0; row.y += 16; s.to(row, { alpha: 1, y: row.baseY }, 0.28, { delay: i * 0.04, ease: 'outCubic' }); }
-        rows.push(row);
+    let picked = 0, firstT = 0, seen = false, drag = null, L = null, sig = '', total = 0;
+    const S = new Scroller(p, ['y']), ticked = new Set(), gone = new Set(), swX = {}, out2 = new Map(), pop = new Map(); // swipes, rows leaving, taps popping
+    const now = () => performance.now() / 1000;
+    const COL = (k, d) => tok(RAW(p, k)) || d; // (@tokens follow dark mode)
+    /** The rows: { title, sub, icon, right } and { head } for a section title. */
+    const itemsOf = (s) => {
+      const line = (t) => { const [title = '', sub = '', icon = '', right = ''] = String(t).split('|').map((x) => x.trim()); return { title, sub, icon, right }; };
+      if (p.source === 'numbers 1 to N') return Array.from({ length: clamp(Math.round(+p.count || 0), 0, 500) }, (_, i) => ({ title: String(i + 1), sub: '', icon: '', right: '' }));
+      if (p.source === 'a list variable') {
+        const v = s.vars[p.listVar], arr = Array.isArray(v) ? v : String(v ?? '').split(/\n|,/).map((x) => x.trim()).filter(Boolean);
+        return arr.map((x) => (x && typeof x === 'object' ? { title: String(x.title ?? x.name ?? x.label ?? ''), sub: String(x.subtitle ?? x.sub ?? ''), icon: String(x.icon ?? ''), right: String(x.right ?? x.value ?? ''), raw: x } : String(x).startsWith('# ') ? { head: String(x).slice(2).trim() } : { ...line(x), raw: x }));
+      }
+      const txt = String(p.items || '');
+      if (!/\n|\|/.test(txt)) return txt.split(',').map((x) => x.trim()).filter(Boolean).map((t) => ({ title: t, sub: '', icon: '', right: '' }));
+      return txt.split('\n').map((x) => x.trim()).filter((x) => x && x !== '-').map((x) => (x.startsWith('#') ? { head: x.replace(/^#+\s*/, '') } : line(x)));
+    };
+    const geo = (e) => { const b = UK.box(e), style = p.style || 'cards'; return { b, style, rh: Math.max(24, +p.rowHeight || 52), gap: style === 'cards' ? +p.spacing || 0 : 0, pad: +p.padding || 0, side: style === 'inset grouped' ? Math.max(12, +p.padding || 0) : style === 'plain lines' ? 0 : +p.padding || 0 }; };
+    /** Rows and section titles with their y from the top, after search and deletions. */
+    const layout = (e, s) => {
+      const G = geo(e), q = p.search ? String(s.vars[p.search] ?? '').trim().toLowerCase() : '', raw = itemsOf(s), list = []; let n = 0;
+      raw.forEach((it, idx) => { if (it.head) { list.push(it); return; } it.key = idx + ':' + it.title; if (gone.has(it.key)) return; n++;
+        const vars = Object.assign(Object.create(s.vars), { item: it.title, sub: it.sub, i: n });
+        it.text = (p.numbered ? `${n}. ` : '') + fillTemplate(String(p.row || '{item}'), vars); it.n = n;
+        if (q && !(it.text + ' ' + it.sub + ' ' + it.right).toLowerCase().includes(q)) { n--; return; } list.push(it); });
+      const rows = []; let y = G.pad, sec = 0;
+      list.forEach((it, i) => {
+        if (it.head) { if (!list.slice(i + 1).some((x) => !x.head) || (list[i + 1] && list[i + 1].head)) return; const hh = G.style === 'inset grouped' ? 38 : 32; if (rows.length) y += G.style === 'inset grouped' ? 10 : 4; rows.push({ head: it.head, y, h: hh }); y += hh; sec++; return; }
+        const last = !list[i + 1] || list[i + 1].head, first = !rows.length || rows[rows.length - 1].head;
+        rows.push({ ...it, y, h: G.rh, first, last, sec }); y += G.rh + (last ? 0 : G.gap);
       });
+      return { rows, total: y + G.pad };
+    };
+    const rowFill = (it) => (it.n === picked && !p.pickMany ? COL('pickColor', '#3a8dff') : COL('altColor', '') && it.n % 2 === 0 ? COL('altColor', '') : COL('rowColor', '#2a3046'));
+    const remove = (s, it) => {
+      if (p.source === 'a list variable') { const v = s.vars[p.listVar]; if (Array.isArray(v)) { const i = v.indexOf(it.raw); if (i >= 0) { const before = v.slice(); s.setVar(p.listVar, v.filter((_, j) => j !== i)); s.snackbar?.(`Deleted “${it.title.slice(0, 24)}”`, 'Undo', () => s.setVar(p.listVar, before)); } } else { const arr = String(v ?? '').split(/\n|,/).map((x) => x.trim()).filter(Boolean), i = arr.indexOf(String(it.raw)); if (i >= 0) { const before = v; arr.splice(i, 1); s.setVar(p.listVar, arr.join(', ')); s.snackbar?.(`Deleted “${it.title.slice(0, 24)}”`, 'Undo', () => s.setVar(p.listVar, before)); } } }
+      else { gone.add(it.key); s.snackbar?.(`Deleted “${it.title.slice(0, 24)}”`, 'Undo', () => gone.delete(it.key)); }
+      if (p.deleteMessage) s.send(p.deleteMessage, it.title);
     };
     return {
       uiAlways: true,
-      clipsKids: p.clip !== false, // (the editor cuts its contents off at its edges too)
+      clipsKids: p.clip !== false,
       start(e, s) {
-        picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; rows.forEach((r, j) => { r.shape.fill = fillOf(j); }); };
+        picked = Math.round(+s.vars[p.selectVar] || 0); e._listPick = (i) => { picked = i; };
+        if (p.pickMany && Array.isArray(s.vars[p.pickedList])) for (const t of s.vars[p.pickedList]) ticked.add(String(t));
         e._clipChildren = p.clip !== false; e._clipRadius = e.shape?.radius || 0;
         e._scrollTo = (f) => { const [mn, mx] = S.range.y; S.to('y', mx + (mn - mx) * clamp(+f || 0, 0, 1)); };
-        S.listen(s, e, (name) => { const i = rows.findIndex((q) => String(q.item) === name); if (i < 0) return null; const { rh, gap } = geo(e); return -i * (rh + gap); });
+        S.listen(s, e, (name) => { const r = L?.rows.find((q) => !q.head && q.title === name); return r ? -r.y : null; });
         S.overlay(s, e, () => uiRect(s, e));
       },
       update(e, dt, s) {
-        const refs = [...String(p.row || '').matchAll(/\{(\w+)\}/g)].map((m) => m[1]).filter((k) => k !== 'item' && k !== 'i'); // variables the rows show: rebuild when they change
-        const items = itemsOf(s), key = JSON.stringify(items) + '|' + p.row + '|' + JSON.stringify(refs.map((k) => s.vars[k]));
-        if (key !== sig) { sig = key; build(e, s, items); }
-        if (!e.visible || e._parentHidden) return;
-        const inp = s.engine.input, r = uiRect(s, e), k = uiK(s.engine.safe) || 1, { H, rh, gap, pad } = geo(e);
-        const content = pad * 2 + rows.length * rh + Math.max(0, rows.length - 1) * gap, mn = Math.min(0, H - content);
-        S.update(s, e, dt, r, k, { x: [0, 0], y: [mn, 0] }, { y: rows.map((_, i) => Math.max(mn, -i * (rh + gap))) }, { x: 1, y: H - pad * 2 });
-        const off = S.off.y;
-        // tap a row (not a drag) to pick it
-        if (S.moved < 8) for (const t of inp.taps) {
-          if (Math.abs(t.x - r.x) > r.w / 2 || Math.abs(t.y - r.y) > r.h / 2) continue;
-          const i = rows.findIndex((q) => !q._clipHidden && hitTest(s, q, t.x, t.y));
-          if (i < 0) continue;
-          picked = i + 1; rows.forEach((q, j) => { q.shape.fill = fillOf(j); });
-          s.setVar(p.selectVar || 'picked', picked); s.setVar(p.selectText || 'pickedItem', rows[i].item);
-          s.punch(rows[i], { sx: -0.04, sy: -0.08 }, 0.25, { add: true }); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
-          if (p.message) s.send(p.message);
+        const live = UK.live(s, e) || s.engine.editing; if (live && !seen) firstT = now(); seen = live;
+        L = layout(e, s); total = L.total; const G = geo(e);
+        const key = L.rows.map((r) => r.key || r.head).join('|'); if (key !== sig) { sig = key; }
+        if (!e.visible || e._parentHidden || s.engine.editing) return;
+        const r = uiRect(s, e), k = uiK(s.engine.safe) || 1, mn = Math.min(0, G.b.h - total);
+        S.update(s, e, dt, r, k, { x: [0, 0], y: [mn, 0] }, { y: L.rows.filter((q) => !q.head).map((q) => Math.max(mn, -q.y + G.pad)) }, { x: 1, y: G.b.h - G.pad * 2 });
+        const off = S.off.y, rowAt = (t) => L.rows.find((q) => !q.head && t.y >= G.b.y + q.y + off && t.y < G.b.y + q.y + off + q.h) || null;
+        // swipe left to delete (sideways); up and down is the scroller's
+        if (p.swipeDelete) {
+          for (const d of UK.downs(s, e)) if (UK.in(d, G.b)) drag = { id: d.id, x0: d.x, y0: d.y, row: rowAt(d), axis: '' };
+          if (drag) { const q = UK.ptr(s, e, drag.id);
+            if (q) { const dx = q.x - drag.x0, dy = q.y - drag.y0; if (!drag.axis && Math.hypot(dx, dy) > 10) drag.axis = drag.row && Math.abs(dx) > Math.abs(dy) * 1.4 && dx < 0 ? 'x' : 'y'; if (drag.axis === 'x') swX[drag.row.key] = Math.min(0, dx); }
+            else { if (drag.axis === 'x') { const id = drag.row.key; if ((swX[id] || 0) < -G.b.w * 0.33) { out2.set(id, { t: 0, it: drag.row }); UK.tap(s, p); } else swX[id] = swX[id] || 0; } drag = null; } }
+          for (const id of Object.keys(swX)) if (!drag || drag.row?.key !== id) { if (out2.has(id)) continue; swX[id] *= Math.pow(0.0005, dt); if (Math.abs(swX[id]) < 0.5) delete swX[id]; }
+          for (const [id, o] of out2) { o.t += dt * 5; swX[id] = (swX[id] || 0) - G.b.w * dt * 6; if (o.t >= 1) { out2.delete(id); delete swX[id]; remove(s, o.it); } }
         }
-        for (const q of rows) {
-          if (s.tweensOf(q).length) { q.baseY ??= q.y; } else q.y = q.baseY + off;
-          if (q.local) q.local.y = q.y;
-          const top = q.y - rh / 2, bot = q.y + rh / 2;
-          q._clipHidden = p.clip !== false ? bot < 0 || top > H : bot < rh * 0.5 || top > H - rh * 0.5; // cut at the edge (or hidden once more than half is outside)
+        // tap a row (not a drag) to pick or tick it
+        if (S.moved < 8 && !(drag && drag.axis === 'x')) for (const t of UK.taps(s, e)) {
+          if (!UK.in(t, G.b)) continue; const it = rowAt(t); if (!it || swX[it.key]) continue;
+          pop.set(it.key, now()); s.engine.audio.sfx('click'); s.engine.vibrate?.(6);
+          if (p.pickMany) { if (ticked.has(it.title)) ticked.delete(it.title); else ticked.add(it.title); s.setVar(p.pickedList || 'ticked', [...ticked]); s.setVar(p.selectText || 'pickedItem', it.title); }
+          else { picked = it.n; s.setVar(p.selectVar || 'picked', picked); s.setVar(p.selectText || 'pickedItem', it.title); }
+          if (p.message) s.send(p.message, it.title);
         }
       },
-      destroy(e, s) { for (const q of rows) { q.label?.destroy(); q.chev?.destroy(); q.destroy(); } rows = []; },
+      destroy() { L = null; },
       drawUI(ctx, e, s) {
-        if (!s.engine.editing || rows.length) return;
-        const { W, H, rh, gap, pad } = geo(e), x0 = e.x - W / 2, y0 = e.y - H / 2, items = itemsOf(s), rw = W - pad * 2, R = Math.min(+p.radius || 0, rh / 2), ts = +p.textSize || 17;
-        ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, W, H); ctx.clip();
-        if (!items.length) previewText(ctx, p.source === 'a list variable' ? `Rows from the list “${p.listVar}”` : 'No rows', e.x, e.y, 14, withAlpha(p.textColor || '#ffffff', 0.6));
-        items.forEach((it, i) => {
-          const cy = y0 + pad + rh / 2 + i * (rh + gap); if (cy - rh / 2 > y0 + H) return;
-          ctx.fillStyle = fillOf(i); UK.rr(ctx, e.x - rw / 2, cy - rh / 2, rw, rh, R); ctx.fill();
-          const vars = Object.assign(Object.create(s.vars), { item: it, i: i + 1 }), txt = (p.numbered ? `${i + 1}. ` : '') + fillTemplate(String(p.row || '{item}'), vars), left = p.align === 'left';
-          previewText(ctx, txt, left ? e.x - rw / 2 + 16 : e.x, cy, ts, p.textColor || '#ffffff', 600, left ? 'left' : 'center', rw - 40);
-          if (p.arrow) previewText(ctx, '›', e.x + rw / 2 - 18, cy, ts + 8, p.textColor || '#ffffff', 500);
-        });
+        const G = geo(e), D = L || layout(e, s), off = s.engine.editing ? 0 : S.off.y, t = now(), txt = COL('textColor', '#ffffff'), acc = COL('pickColor', '#3a8dff');
+        const sub = COL('subColor', '') || withAlpha(txt.startsWith('#') ? txt : '#888888', 0.6), lineC = COL('lineColor', '') || withAlpha(txt.startsWith('#') ? txt : '#888888', 0.14), ts = +p.textSize || 17, F = THEME.font;
+        const x0 = G.b.x + G.side, w = G.b.w - G.side * 2, R = G.style === 'plain lines' ? 0 : Math.min(+p.radius || 0, G.rh / 2), left = p.align !== 'center';
+        ctx.save(); ctx.beginPath(); ctx.rect(G.b.x, G.b.y, G.b.w, G.b.h); ctx.clip();
+        if (!D.rows.some((q) => !q.head)) { const q = p.search ? String(s.vars[p.search] ?? '').trim() : ''; UK.text(ctx, q ? `Nothing matches “${q}”` : p.source === 'a list variable' && s.engine.editing ? `Rows from the list “${p.listVar}”` : p.empty || '', G.b.cx, G.b.y + Math.min(80, G.b.h / 2), { size: 15, weight: 600, color: sub, maxW: G.b.w - 32 }); }
+        // inset grouped: each section's rows sit in one rounded box
+        if (G.style === 'inset grouped') { let a = null; for (const q of D.rows) { if (q.head) continue; if (q.first) a = q.y; if (q.last && a != null) { ctx.fillStyle = COL('rowColor', '#2a3046'); UK.rr(ctx, x0, G.b.y + a + off, w, q.y + q.h - a, Math.max(10, +p.radius || 12)); ctx.fill(); a = null; } } }
+        let i = 0, stickyHead = null;
+        for (const q of D.rows) {
+          const y = G.b.y + q.y + off; if (q.head && y < G.b.y + 2) stickyHead = q;
+          if (y > G.b.y + G.b.h || y + q.h < G.b.y) { if (!q.head) i++; continue; }
+          if (q.head) { UK.text(ctx, G.style === 'cards' ? q.head : q.head.toUpperCase(), x0 + (G.style === 'inset grouped' ? 16 : G.style === 'plain lines' ? 16 : 4), y + q.h - 10, { size: G.style === 'cards' ? 15 : 12.5, weight: 800, color: G.style === 'cards' ? txt : sub, align: 'left' }); continue; }
+          const ap = p.appear === 'all at once' || s.engine.editing ? 1 : clamp((t - firstT - i * 0.04) / 0.28, 0, 1), ea = 1 - Math.pow(1 - ap, 3); i++;
+          const sx = swX[q.key] || 0, pk = pop.get(q.key), z = pk ? 1 - Math.sin(clamp((t - pk) / 0.25, 0, 1) * Math.PI) * 0.03 : 1;
+          ctx.save(); ctx.globalAlpha *= ea; ctx.translate(0, (1 - ea) * 16);
+          if (sx < 0) { ctx.fillStyle = '#ef4444'; UK.rr(ctx, x0, y, w, q.h, R); ctx.fill(); UK.text(ctx, 'Delete', x0 + w - Math.min(44, -sx / 2), y + q.h / 2 + 1, { size: 14, weight: 800, color: '#fff' }); }
+          ctx.translate(sx, 0); if (z !== 1) { ctx.translate(x0 + w / 2, y + q.h / 2); ctx.scale(z, z); ctx.translate(-(x0 + w / 2), -(y + q.h / 2)); }
+          const pickedRow = !p.pickMany && q.n === picked;
+          if (G.style === 'cards') { ctx.fillStyle = rowFill(q); UK.rr(ctx, x0, y, w, q.h, R); ctx.fill(); }
+          else if (pickedRow || sx < 0) { ctx.fillStyle = sx < 0 ? (G.style === 'inset grouped' ? COL('rowColor', '#2a3046') : tok('@bg') || '#fff') : withAlpha(acc.startsWith('#') ? acc : '#3a8dff', 0.16); UK.rr(ctx, x0, y, w, q.h, G.style === 'inset grouped' && (q.first || q.last) ? Math.max(10, +p.radius || 12) : 0); ctx.fill(); }
+          let tx = x0 + 16; const cy = y + q.h / 2, ic = q.icon;
+          if (ic) { const sz = Math.min(30, q.h - 16); const named = /^[a-z][a-zA-Z-]+$/.test(ic) || ic.startsWith('my:'); if (named) { const ico = G.style === 'inset grouped' ? '#fff' : acc; ctx.fillStyle = withAlpha(acc.startsWith('#') ? acc : '#3a8dff', G.style === 'inset grouped' ? 1 : 0.16); UK.rr(ctx, tx, cy - sz / 2, sz, sz, sz * 0.28); ctx.fill(); if (iconName(ic)) drawIco(ctx, ic, tx + sz / 2, cy, sz * 0.62, ico, { stroke: 2.1 }); else drawNavIcon(ctx, ic, tx + sz / 2, cy, sz * 0.62, ico); } else drawNavIcon(ctx, ic, tx + sz / 2, cy, sz * 0.8, txt); tx += sz + 12; }
+          let rx = x0 + w - 16;
+          if (p.pickMany) { const on = ticked.has(q.title); ctx.beginPath(); ctx.arc(rx - 11, cy, 11, 0, Math.PI * 2); if (on) { ctx.fillStyle = acc; ctx.fill(); drawIco(ctx, 'check', rx - 11, cy, 14, '#fff', { stroke: 2.6 }); } else { ctx.strokeStyle = sub; ctx.lineWidth = 1.6; ctx.stroke(); } rx -= 30; }
+          if (p.arrow) { drawIco(ctx, 'chevron-right', rx - 6, cy, 16, sub, { stroke: 2.2 }); rx -= 22; }
+          if (q.right) { ctx.font = `500 ${ts - 2}px ${F}`; const rw = Math.min(ctx.measureText(q.right).width, w * 0.4); UK.text(ctx, q.right, rx, cy + 1, { size: ts - 2, weight: 500, color: sub, align: 'right', maxW: w * 0.4 }); rx -= rw + 10; }
+          const tc = pickedRow && G.style === 'cards' ? '#fff' : txt, mw = Math.max(20, rx - tx);
+          if (q.sub) { UK.text(ctx, q.text, left ? tx : x0 + w / 2, cy - ts * 0.48, { size: ts, weight: 650, color: tc, align: left ? 'left' : 'center', maxW: mw }); UK.text(ctx, q.sub, left ? tx : x0 + w / 2, cy + ts * 0.62, { size: ts - 3, weight: 500, color: pickedRow && G.style === 'cards' ? 'rgba(255,255,255,0.8)' : sub, align: left ? 'left' : 'center', maxW: mw }); }
+          else UK.text(ctx, q.text, left ? tx : x0 + w / 2, cy + 1, { size: ts, weight: 600, color: tc, align: left ? 'left' : 'center', maxW: mw });
+          if (G.style !== 'cards' && !q.last) { ctx.fillStyle = lineC; ctx.fillRect(left ? tx : x0 + 16, y + q.h - 0.5, x0 + w - (left ? tx : x0 + 16), 0.6); }
+          ctx.restore();
+        }
+        if (stickyHead && p.sticky !== false && G.style !== 'cards') { const hh = stickyHead.h; ctx.fillStyle = tok('@bg') || '#000'; ctx.fillRect(G.b.x, G.b.y, G.b.w, hh); const nx = D.rows.find((q) => q.head && q.y > stickyHead.y), push = nx ? Math.min(0, G.b.y + nx.y + off - (G.b.y + hh)) : 0; UK.text(ctx, stickyHead.head.toUpperCase(), x0 + 16, G.b.y + hh - 10 + push, { size: 12.5, weight: 800, color: sub, align: 'left' }); }
         ctx.restore();
       },
     };
   },
 });
-
-/** Segmented control: a row of options with a sliding highlight (Easy | Normal | Hard). */
 registerBehavior('uiSegmented', {
   label: 'Segmented Control', description: 'A row of options with a highlight that slides to the one you tap (Easy | Normal | Hard, Day | Week | Month). The choice goes into a variable. The editor shows a preview.',
   params: [
@@ -18080,6 +18128,8 @@ registerBehavior('uiDataList', {
     { key: 'groupBy', label: 'Group under headings by field', type: 'text', default: '' },
     { key: 'openPage', label: 'Tapping a row opens page', type: 'text', default: '', info: 'The record’s fields are in {record_title}… there. Blank = just open it (and send the message).' },
     { key: 'message', label: 'Tapping a row sends', type: 'text', default: '', suggest: 'messages' },
+    { key: 'swipeCheck', label: 'Swipe right to tick', type: 'bool', default: true, showIf: (b) => !!b.check },
+    { key: 'stickyHeads', label: 'Headings stay at the top while scrolling', type: 'bool', default: true, showIf: (b) => !!b.groupBy },
     { key: 'swipeDelete', label: 'Swipe left to delete', type: 'bool', default: true },
     { key: 'empty', label: 'When there is nothing', type: 'text', default: 'Nothing here yet' },
     { key: 'rowH', label: 'Row height', type: 'number', default: 64, range: [36, 140], step: 2, group: 'Look' },
@@ -18142,11 +18192,11 @@ registerBehavior('uiDataList', {
           const q = UK.ptr(s, e, drag.id);
           if (q) {
             const dx = q.x - drag.x0, dy = q.y - drag.y0;
-            if (!drag.axis && Math.hypot(dx, dy) > 10) { drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && p.swipeDelete !== false && drag.row ? 'x' : 'y'; pressId = null; }
+            if (!drag.axis && Math.hypot(dx, dy) > 10) { drag.axis = Math.abs(dx) > Math.abs(dy) * 1.3 && drag.row && ((dx < 0 && p.swipeDelete !== false) || (dx > 0 && checkKey() && p.swipeCheck !== false)) ? 'x' : 'y'; pressId = null; }
             if (drag.axis === 'y') { const ns = clamp(drag.s0 - dy, -60, maxS + 60), over = ns < 0 ? -ns : ns > maxS ? ns - maxS : 0; const ns2 = over ? (ns < 0 ? -over * 0.5 : maxS + over * 0.5) : ns; flick = (ns2 - scroll) / Math.max(dt, 1 / 120); scroll = ns2; scrollT = now(); } // rubber band past the ends
-            if (drag.axis === 'x') swX[drag.row.r.id] = Math.min(0, dx);
+            if (drag.axis === 'x') swX[drag.row.r.id] = dx < 0 ? (p.swipeDelete !== false ? dx : 0) : checkKey() && p.swipeCheck !== false ? Math.min(dx, G.b.w * 0.5) : 0;
           } else {
-            if (drag.axis === 'x') { const id = drag.row.r.id; if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else swX[id] = 0; }
+            if (drag.axis === 'x') { const id = drag.row.r.id, ck = checkKey(); if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else if (ck && (swX[id] || 0) > G.b.w * 0.25) { checkAt[id] = now(); s.engine.data.update(p.collection, id, { [ck]: !truthy(drag.row.r[ck]) }); UK.tap(s, p); s.engine.vibrate?.(10); } }
             if (drag.axis === 'y') { const u = UK.lifted(s, e, drag.id); if (u) flick = scroll < 0 || scroll > maxS ? 0 : -u.vy; }
             drag = null; pressId = null;
           }
@@ -18187,6 +18237,7 @@ registerBehavior('uiDataList', {
           const y = G.b.y + (an ? an.y : it.y) - scroll; if (y > G.b.y + G.b.h || y + it.h < G.b.y) continue;
           if (it.head) { UK.text(ctx, it.head.toUpperCase(), G.b.x + 20, y + 18, { size: 12, weight: 800, color: sub, align: 'left' }); continue; }
           const id = it.r.id, sw = swX[id] || 0, k = gone.has(id) ? gone.get(id) : 0, x = G.b.x + 4 + sw - k * G.b.w, w = G.b.w - 8, h = G.rh, done = ck && truthy(it.r[ck]);
+          if (sw > 4) { ctx.globalAlpha = Math.min(1, sw / 60); ctx.fillStyle = done ? '#64748b' : '#22c55e'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, done ? '↺  Not done' : '✓  Done', G.b.x + 20, y + h / 2, { size: 13, weight: 800, color: '#fff', align: 'left' }); ctx.globalAlpha = 1; }
           if (sw < -4 || k) { ctx.globalAlpha = Math.min(1, -sw / 60 + k); ctx.fillStyle = p.danger || '#ef4444'; UK.rr(ctx, G.b.x + 4, y, w, h, +p.radius || 0); ctx.fill(); UK.text(ctx, '🗑  Delete', G.b.x + w - 50, y + h / 2, { size: 13, weight: 800, color: '#fff' }); ctx.globalAlpha = 1; }
           ctx.save();
           const pr = pressId === id ? 0.985 : 1, gs = 0.94 + 0.06 * an.g;
@@ -18219,6 +18270,10 @@ registerBehavior('uiDataList', {
           }
           if (st) UK.text(ctx, st, tx, y + h / 2 + 11, { size: 13, weight: 600, color: sub, align: 'left', maxW: x + w - tx - rw - 8 });
           ctx.restore();
+        }
+        if (p.groupBy && p.stickyHeads !== false && scroll > 0) { // the heading of the group at the top stays there (the next one pushes it up)
+          const heads = out.filter((q) => q.head), cur = [...heads].reverse().find((q) => q.y - scroll <= 0);
+          if (cur) { const nx = heads.find((q) => q.y > cur.y), push = nx ? Math.min(0, nx.y - scroll - cur.h) : 0; ctx.fillStyle = p.bg || tok('@bg') || '#f4f5f9'; ctx.fillRect(G.b.x, G.b.y, G.b.w, cur.h + push); UK.text(ctx, cur.head.toUpperCase(), G.b.x + 20, G.b.y + 18 + push, { size: 12, weight: 800, color: sub, align: 'left' }); }
         }
         // a thin scroll bar while scrolling
         const sa = Math.max(0, 1 - (t - scrollT - 0.6) / 0.4);
@@ -23577,7 +23632,7 @@ export class Engine {
     for (const e of s.entities) {
       if (!e.ui || e.dead) continue;
       if (!e.started) { e.started = true; for (const b of e.behaviors) b.start?.(e, s); }
-      for (const b of e.behaviors) if (b.uiAlways && !b.off) b.update?.(e, dt, s);
+      for (const b of e.behaviors) if (b.uiAlways && !b.off) { s._upd = e; s._updB = b.type; b.update?.(e, dt, s); } s._upd = null;
     }
     s.flush();
   }
@@ -24022,7 +24077,7 @@ export class Engine {
     for (const e of s.entities) {
       if (e.dead) continue;
       if (e.data.invuln > 0) e.data.invuln -= dt;
-      for (const b of e.behaviors) { if (e.dead) break; if (!b.off) b.update?.(e, dt, s); }
+      for (const b of e.behaviors) { if (e.dead) break; if (!b.off) { s._upd = e; s._updB = b.type; b.update?.(e, dt, s); } } s._upd = null; // (who is running: a Side Menu says what opened it)
     }
     s.update(dt, this);
     if (this.quests?.length) s.questTick();

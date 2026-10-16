@@ -270,6 +270,8 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
 - Moving or resizing UI snaps its edges and centre to other elements (edges, centres, side by side touching or with a gap), its parent and the screen, with pink guides and a gap label. The gap, strength and an on/off switch are in *Preferences › Editing*.
 - **Place** buttons on the UI Element card put an element at the left / centre / right or top / middle / bottom of its page, 16 px in from the edge, or make it full width.
 - **Align** (Hierarchy › Select, two or more UI elements) lines up edges or centres against the selection, the first one ticked or the page, spreads them out with even gaps or an exact gap (stack down / row across), or makes them the same width, height or size.
+- **Inspector:** the component that makes an object what it is comes first (its layout folds away), the name card's details fold into one line, big components have group chips, and *One open* keeps a single card open.
+- **List View:** rows with icons, a line under the title and a value on the right; sections with sticky titles; cards, plain lines or inset grouped looks; search, pick several, swipe left to delete. **Data List:** swipe right to tick, sticky group headings.
 - **Resizing and nudging:** keep proportions (🔒 in Size, or Shift while dragging), snap to other elements' widths and heights and to equal spacing, and nudge with the arrow keys (Shift: 10 px).
 - In play, fixed-width buttons, fields and text stay inside the screen with a 16 px gutter on narrow or tall phones instead of touching or running off the edges.
 

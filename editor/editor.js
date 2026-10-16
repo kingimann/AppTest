@@ -1332,6 +1332,15 @@ function tagMenu(anchor, j) {
     { icon: 'gear', label: 'Manage Tags & Layers…', fn: openTagsLayers }]);
 }
 /** Inspector header, compact: tag chips, then one row of small pickers (Layer, Draw + order, Parent, + Child). */
+/** Tags, layer, draw order and parent: one line that opens (they are set once and rarely changed). */
+function headDetails(j) {
+  const open = store.get('pocket.editor.headDetails', '0') === '1', names = layerNames(), par = j.parent && ent(j.parent);
+  const sum = [(j.tags || []).length ? '#' + j.tags.join(' #') : 'No tags', 'Layer ' + (names[layerOf(j)] || 'Default'), par ? 'in ' + (par.name || 'parent') : null].filter(Boolean).join(' · ');
+  const w = h('div', { class: 'hd' + (open ? ' open' : '') }, h('button', { type: 'button', class: 'hd-h', 'aria-expanded': String(open), onclick: () => { const o = !w.classList.contains('open'); w.classList.toggle('open', o); w.firstChild.setAttribute('aria-expanded', String(o)); store.set('pocket.editor.headDetails', o ? '1' : '0'); } }, icon('chevron'), h('span', {}, sum), h('small', {}, 'Details')), h('div', { class: 'hd-b' }, ...tagLayerRows(j)));
+  return w;
+}
+/** The components that make an object what it is (not just where it sits or how it's drawn). */
+const mainComps = (j) => (j.behaviors || []).filter((b) => !['uiShowIf', 'uiTooltip', 'uiAnim'].includes(b.type));
 function tagLayerRows(j) {
   const threeD = is3D(), names = layerNames(), so = sortOf(j), kids = kidsOf(j.id);
   const chips = h('div', { class: 'tag-chips' }, (j.tags || []).map((t) => h('span', { class: 'tag-chip' }, t,
@@ -2820,7 +2829,7 @@ function behaviorBody(def, b, i, j, threeD, C) {
   const out = validate(b, j).map(([lvl, txt]) => h('div', { class: 'obox ' + lvl }, txt));
   const btns = (BEH_BUTTONS[b.type] || []).filter((x) => !x.when || x.when(b, threeD));
   if (btns.length) out.push(h('div', { class: 'btns' }, btns.map((x) => h('button', { class: 'btn' + (x.primary ? ' primary' : ''), onclick: () => x.fn(j, i, b) }, icon(x.icon || 'play'), x.label))));
-  const groups = new Map();
+  const groups = new Map(), gEls = new Map();
   const visible = params.filter((p) => !((!showAdvanced && p.advanced) || !shown(p, b, threeD)));
   const loose = visible.filter((p) => !p.group), MAIN = 5; // the first few loose settings stay out; the rest fold into "More settings"
   const extra = !showAdvanced && loose.length > MAIN + 1 ? new Set(loose.slice(MAIN).map((p) => p.key)) : new Set();
@@ -2835,9 +2844,18 @@ function behaviorBody(def, b, i, j, threeD, C) {
       const key = b.type + ':' + p.group, body = h('div', { class: 'og-b' });
       const g = h('div', { class: 'og' + (openGroups.has(key) ? ' open' : '') },
         h('button', { class: 'og-h', onclick: () => { g.classList.toggle('open'); if (g.classList.contains('open')) openGroups.add(key); else openGroups.delete(key); } }, icon('chevron'), p.group), body);
-      groups.set(p.group, body); out.push(g);
+      groups.set(p.group, body); gEls.set(p.group, g); out.push(g);
     }
     groups.get(p.group).append(el);
+  }
+  if (gEls.size >= 3) { // many groups: chips to jump straight to one (it opens, the others close)
+    const first = out.indexOf([...gEls.values()][0]);
+    const chips = h('div', { class: 'og-chips' }, [...gEls].sort((a, c) => (a[0] === 'More settings') - (c[0] === 'More settings')).map(([name, g]) => h('button', { type: 'button', class: 'og-chip' + (g.classList.contains('open') ? ' on' : ''), onclick: (ev) => {
+      for (const [n2, g2] of gEls) { const on = n2 === name; g2.classList.toggle('open', on); const k2 = b.type + ':' + n2; if (on) openGroups.add(k2); else openGroups.delete(k2); }
+      for (const c of ev.currentTarget.parentElement.children) c.classList.toggle('on', c === ev.currentTarget);
+      const box = g.closest('#inspector'), bar = box?.querySelector('.comp-jump'); if (box) box.scrollTo({ top: g.offsetTop - (bar?.offsetHeight || 0) - 60, behavior: EP.reduceMotion ? 'auto' : 'smooth' });
+    } }, name)));
+    out.splice(first, 0, chips);
   }
   return out;
 }
@@ -3432,6 +3450,7 @@ function comp(title, kids, opts = {}) {
     if (e.target.closest('input,button')) return;
     el.classList.toggle('closed');
     if (el.classList.contains('closed')) closedComps.add(key); else closedComps.delete(key);
+    if (EP.inspOne && !el.classList.contains('closed')) for (const o of el.parentElement?.querySelectorAll(':scope > .comp:not(.closed)') || []) if (o !== el) { o.classList.add('closed'); closedComps.add(o.dataset.key); } // one at a time
     const ib = el.closest('#inspector'); if (ib) syncFoldBtn(ib);
   } },
   h('span', { class: 'fold' }, icon('chevron')),
@@ -3594,7 +3613,8 @@ function renderInspector() {
     if (mem) { mem.closed.forEach((k) => closedComps.add(k)); scrollTo = mem.scroll; } else {
       scrollTo = 0;
       const n = (j.behaviors || []).length + ['shape', 'mesh', 'text', 'sprite', 'body', 'bar', 'model', 'voxels', 'tiles'].filter((k) => j[k]).length;
-      if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
+      if (j.ui && mainComps(j).length) { closedComps.add('transform'); closedComps.add('uiel'); if (n > 3) closedComps.add('shape'); } // (a Bottom Nav, a Feed…: what it is comes first, open; where it sits folds away)
+      else if (n > 3) { (j.behaviors || []).forEach((b, i) => closedComps.add('b' + i + b.type)); if (j.body) closedComps.add('body'); }
     }
     if (mem) freshSel = false;
   }
@@ -3613,7 +3633,7 @@ function renderInspector() {
     h('div', { class: 'big-ico' }, icon(iconFor(j))),
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
     h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
-    ...tagLayerRows(j),
+    headDetails(j),
     kidsOf(j.id).length ? kidsCard(j) : null,
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
@@ -3628,6 +3648,7 @@ function renderInspector() {
   if (nComps < 5 && inspCat !== 'all') inspCat = 'all';
   box.append(h('div', { class: 'comp-tools' + (nComps < 5 ? ' few' : '') },
     h('div', { class: 'cf' }, nComps < 5 ? h('span', { class: 'cf-n' }, `${nComps} component${nComps === 1 ? '' : 's'}`) : INSP_CATS.map(([k, l]) => h('button', { class: inspCat === k ? 'on' : '', onclick: () => { inspCat = k; renderInspector(); } }, l))),
+    h('button', { class: 'ct one-btn' + (EP.inspOne ? ' on' : ''), title: 'Opening a component closes the others', 'aria-pressed': String(!!EP.inspOne), onclick: () => { setEP('inspOne', !EP.inspOne); renderInspector(); toast(EP.inspOne ? 'One component open at a time' : 'Components open on their own'); } }, icon('layers'), h('span', {}, 'One open')),
     foldAllBtn(box)));
 
   // Transform
@@ -4021,6 +4042,10 @@ function renderInspector() {
   if (inspCat !== 'all') for (const el of box.querySelectorAll('.comp')) if (el.dataset.cat !== inspCat && el.dataset.key !== 'transform') el.style.display = 'none';
   if (inspQuery) applyInspSearch(box);
   if (onlyChanged) applyOnlyChanged(box);
+  if (j.ui && EP.inspMainFirst !== false) { // the Bottom Nav / Feed / Button settings first, then Rect Transform, UI Element and how it's drawn
+    const comps = [...box.querySelectorAll(':scope > .comp')], lay = comps.find((c) => ['transform', 'uiel', 'shape', 'text', 'sprite', 'bar'].includes(c.dataset.key));
+    if (lay) for (const c of comps) if (/^b\d/.test(c.dataset.key || '') && comps.indexOf(c) > comps.indexOf(lay)) lay.before(c);
+  }
   if (freshSel && foldAllPref) foldAll(box, true);
   syncFoldBtn(box);
   compJump(box);

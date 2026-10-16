@@ -109,6 +109,18 @@ Long text that doesn't fit its space ends in "…" instead of being squeezed. Ta
 | Touch Button | Your own on-screen control: left, right, up, down, jump, fire or a message while held |
 | List View / Scroll View | Scrolling lists and grids, with flick, snapping, pull to refresh and "load more" |
 
+**List View** rows can be plain or rich:
+
+- **Items:** one row per line, `Title | line under it | icon | on the right` (`Profile | Name, photo, bio | user`, `Language | | globe | English`). A line starting with `#` is a **section** title. Plain comma-separated items still work. A list variable can hold the same lines (or objects with `title`, `subtitle`, `icon`, `right`).
+- **Icons:** an icon name (`heart`, `bell`, `lock`…) sits in a tinted tile; an emoji or a picture is shown as it is.
+- **Look:** **cards** (a rounded card per row), **plain lines** (rows on the background with thin lines between, like Mail) or **inset grouped** (each section in a rounded box, like iPhone Settings). Section titles stay at the top while you scroll.
+- **Search with variable:** a Search Bar or Text Field writing into it filters the rows; *When there is nothing* shows when no row is left.
+- **Tapping ticks rows (pick several):** a round tick on each row; the ticked titles go into a list variable (`ticked`).
+- **Swipe left to delete:** a red Delete slides out; rows from a list variable are taken out of it, with **Undo**. *Deleting sends* a message with the row's title.
+- Presets under **Lists**: *Settings List (grouped)*, *Contacts List (sections)*, *Checklist (tick several)* and *Inbox List (swipe to delete)*.
+
+**Data List** extras: with a checkbox field, **swipe right** ticks a row (or un-ticks it); with *Group under headings*, the heading of the group at the top stays there while you scroll.
+
 **How scrolling feels:** every scrolling list, feed, page and Scroll View works like an iPhone. A flick keeps gliding at the speed your finger was moving as it let go, then slows down gently. If your finger stops before it lifts, the list stays put. A glide that reaches the end stops quickly and springs back, and a drag starts from where your finger is, with no jump.
 
 Lists inside components are typed one item per line with `|` between the parts, like `Coin Pack | 🪙 | 5 | item:Coin Pack`. The Inspector shows them as tables.
@@ -145,6 +157,7 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - A feed, chat, inbox, list or photo grid that fills the page starts under them. Elements anchored to the middle or bottom (a + button) float where they are.
   - Adding a feed, chat, inbox, notifications, friends, Data List or photo grid to any page makes it fill the room under what is already there.
 - **Side Menu:** a drawer with a header, sections, switches, footer items and 13 styles.
+  - **What opened it:** each time it opens in play, the **Console** says why: “Side Menu opened by the “menu” message from App Bar”, “…by a swipe from the screen edge” or “…by its own ☰ button”. Handy when it opens when you don't expect it.
   - **Its ☰ sits in a top bar.** Adding a Side Menu (in a game or an app) also adds an App Bar whose ☰ opens it, unless you already have one, so pages and page templates lay out under the bar instead of running into a floating button. A project made before this, with a ☰ floating in the corner, shows **Put the ☰ in a top bar** at the top of the Side Menu's Inspector: one tap swaps the button for the bar (Undo brings it back).
   - **An App Bar you already have gets the ☰:** an App Bar set to *‹ Back only* still shows ☰ (when there's nothing to go back to) once there's a Side Menu to open. Presets of several parts (like App Layout) reuse the App Bar, Bottom Nav and pages you already have instead of adding second ones.
   - **Two pages for the same value** (two Home pages) both show at once and overlap: the Page card warns about it, with **Move its contents here and remove it**.

@@ -85,6 +85,15 @@ Every object in the current level, in drawing order.
 - **Select** (tick button, or Shift-click a second row): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder or Delete them together. The Inspector then edits all of them (below).
 - **Keyboard** (a tablet or computer keyboard): Ctrl/⌘ Z undo, Ctrl/⌘ Shift Z or Y redo, Delete removes, Ctrl/⌘ D duplicates, Ctrl/⌘ C / V copy and paste, F2 renames, F focuses the Scene on it, ↑ ↓ move through the Hierarchy, ← → fold and unfold children, Esc deselects. Not while you're typing in a field.
 
+## Duplicates
+
+Things there should be one of, found twice: two **Bottom Navs** (or top tab bars) in the same place, two **App Bars**, two **Side Menus** opening on the same message, and **copies stacked** exactly on top of each other (same place, size and components, names like *Button* and *Button (1)*).
+
+- A duplicate is easy to miss (you only see the one on top), but both work: a hidden Bottom Nav's tabs still fire, so a *More* tab under your *Profile* tab opens the Side Menu.
+- The **Hierarchy** shows a yellow note at the top for each duplicate, with **Show** (selects them) and **Keep one** (keeps the one on top, deletes the others; Undo brings them back). Their rows carry a *duplicate* mark.
+- The **Inspector** of either one says so too, with **Keep this one** and **Go to the other**.
+- When a duplicate appears (or a project opens with one), a short message says so. **Find Problems** lists them.
+
 ## Inspector
 
 The selected object's settings, as **components** (cards).

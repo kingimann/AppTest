@@ -9333,6 +9333,10 @@ function settingsSheet(s, o = {}) {
     // privacy
     { const box = section('Privacy', 'With a private account, only people who follow you see your posts.'); const t = toggle(st.private, (v) => save({ private: v })); row(box, 'lock', 'Private account', t, () => t.flip(), 'private'); }
     { const box = section('Who can message you'); chips(box, ['Everyone', 'People I follow', 'Friends', 'No one'], st.dm, (v) => save({ dm: v }), 'dm'); }
+    // what my profile shows
+    { const box = section('Your profile', 'Choose what people see on your profile.'), on = (k, dflt) => (pr[k] == null || pr[k] === '' ? dflt : truthy(pr[k]));
+      for (const [k, icon, label, dflt] of [['show_reposts', 'repost', 'Show posts I reposted', false], ['show_replies', 'comment', 'Replies tab', true], ['show_media', 'image', 'Media tab', true], ['show_likes', 'heart', 'Likes tab (posts I liked)', true], ['show_counts', 'users', 'Follower and following counts', true], ['show_location', 'place', 'Where I am', true], ['show_website', 'link', 'Website and links', true], ['show_joined', 'calendar', 'When I joined', true], ['show_status', 'info', 'My status', true], ['show_highlights', 'star', 'Highlights', true]]) {
+        const t = toggle(on(k, dflt), (v) => save({ [k]: v ? 'yes' : 'no' })); row(box, icon, label, t, () => t.flip(), k); } }
     // notifications
     { const box = section('Notifications', 'Turn off what you don’t want to hear about.'); const off = new Set(st.notes_off);
       for (const [k, icon, label] of [['likes', 'heart', 'Likes'], ['comments', 'comment', 'Comments and replies'], ['reposts', 'repost', 'Reposts and quotes'], ['mentions', 'at', 'Mentions'], ['follows', 'user-plus', 'New followers and friends'], ['messages', 'mail', 'Messages']]) {
@@ -9908,7 +9912,8 @@ registerBehavior('uiFeed', {
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |”, “Following | following” and “Saved | saved” (the posts you bookmarked). Blank = no tabs.' },
-    { key: 'onProfile', label: 'On a page with a Profile Header (and no “Only show”)', type: 'select', options: ['their posts only', 'everyone’s posts'], default: 'their posts only', info: { 'their posts only': 'The feed shows the posts of the person the Profile Header is about (you, on your own profile).' } },
+    { key: 'source', label: 'Show posts from', type: 'select', options: ['auto', 'everyone', 'me', 'the person in a variable', 'people I follow', 'my saved posts'], default: 'auto', info: { auto: 'On a page with a Profile Header: only that person’s posts (yours on your profile). Anywhere else: everyone’s.', everyone: 'Everyone’s posts, even on a profile page.', me: 'Only posts you wrote.', 'the person in a variable': 'Only posts by the handle in a variable (e.g. {profile}).', 'people I follow': 'People you follow, and you.', 'my saved posts': 'Posts you saved.' }, infoText: '“Only show” still applies on top.' },
+    { key: 'sourceVar', label: 'Person’s handle is in variable', type: 'text', default: 'profile', suggest: 'vars', showIf: (b) => b.source === 'the person in a variable' },
     { key: 'showReposts', label: 'A person’s posts (a profile) also show what they reposted', type: 'bool', default: false, info: 'Off: a profile shows only posts that person wrote. On: also the ones they reposted, with “reposted” on top (like X).' },
     { key: 'commentPhotos', label: 'Photos and GIFs in comments', type: 'bool', default: true },
     { key: 'countViews', label: 'Count views (each person once, like X)', type: 'bool', default: true, info: 'A post gets a view when it has been on someone’s screen for a moment, or they open it. Show the count with “views” in Buttons.' },
@@ -10026,7 +10031,8 @@ registerBehavior('uiFeed', {
     let reelH = 0, reelIdx = 0, reelDrag = null, searchR = null, tab = 0, tabsR = [], inset = 0, tabShown = 0, tabNewT = -9, tabNew = [];
     const TSt = new TabStrip(), tabScroll = new Map(), tabSeen = new Map(); // the tabs: their look, where each was scrolled to, the newest post seen in each
     let known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
-    const TABS = () => UK.lines(p.tabs).map(([label = '', where = '', look = '']) => ({ label, where, look: look.trim().toLowerCase() })); // (a tab can have its own look: Media | media | grid)
+    let ownerPrefs = null; const yesPref = (r, k) => !!r && r[k] != null && r[k] !== '' && truthy(r[k]), noPref = (r, k) => !!r && r[k] != null && r[k] !== '' && !truthy(r[k]);
+    const TABS = () => UK.lines(p.tabs).map(([label = '', where = '', look = '']) => ({ label, where, look: look.trim().toLowerCase() })).filter((t) => { const w = t.where.trim().toLowerCase(); return !(['likes', 'replies', 'media'].includes(w) && noPref(ownerPrefs, 'show_' + w)); }); // (the person can hide their Likes, Replies or Media tab) // (a tab can have its own look: Media | media | grid)
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
     const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); };
@@ -10036,15 +10042,15 @@ registerBehavior('uiFeed', {
     const F = (r, k) => { if (SGr && PK[k] && r) { const pr = profOf(r), v = pr?.[PK[k]]; if (v != null && v !== '') return v; } return r?.[K(k)]; };
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
-      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : FILT(s), tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
-      { const ow = ownerOf(s), pf = /^\s*handle\s*=/i.test(FILT(s)); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
+      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0) || SRC() === 'people I follow', onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0) || SRC() === 'my saved posts', kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : FILT(s), tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
+      { const ow = ownerOf(s), pf = HANDLE_RE.test(FILT(s)); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: qVars(s) }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
       if (kw === 'posts') P = P.filter((r) => !F(r, 'reply_to')); else if (kw === 'replies') P = P.filter((r) => !!F(r, 'reply_to')); else if (kw === 'media') P = P.filter((r) => String(F(r, 'media') || '').trim()); else if (kw === 'likes') P = P.filter((r) => truthy(F(r, 'liked')));
       P = P.filter((r) => canSee(s, r)); // (posts for followers, friends or only their author)
       repostCtx = '';
-      const hm = p.showReposts === true && has(s) && (!kw || kw === 'posts') && FILT(s).match(/^\s*handle\s*=\s*(.+?)\s*$/i);
+      const hm = (p.showReposts === true || yesPref(ownerPrefs, 'show_reposts')) && has(s) && (!kw || kw === 'posts') && FILT(s).match(HANDLE_RE);
       if (hm) { const h = handleOf(fillTemplate(hm[1], qVars(s))); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
       return P;
     };
@@ -10157,14 +10163,25 @@ registerBehavior('uiFeed', {
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
     /** Who a post is for (the composer's audience) and who may reply to it. */
     /** On a page with a Profile Header and no filter of its own: that person's posts (mine on my profile). */
-    let selfE = null, pageWho = { t: -1, h: '' };
+    let selfE = null, pageWho = { t: -1, h: '' }, saidWho = '';
     const profileOwner = (s) => {
-      if (pageWho.t === s.time) return pageWho.h; pageWho = { t: s.time, h: '' }; const pg = selfE?.parentEnt; if (!pg || p.onProfile === 'everyone’s posts') return '';
-      for (const q of s.entities) { if (q.parentEnt !== pg || q.dead) continue; const b = q.behaviors.find((x) => x.type === 'uiProfile'); if (!b) continue; const P = b.params || {}; pageWho.h = P.own ? handleOf(meOfVars(s, P.name, P.handle).handle) : handleOf(fillTemplate(String(P.handle || ''), qVars(s))) || '\u0000'; break; }
+      if (pageWho.t === s.time) return pageWho.h; pageWho = { t: s.time, h: '' }; if (!selfE) return '';
+      const shown = (q) => { for (let a = q, n = 0; a && n < 40; a = a.parentEnt, n++) if (a.visible === false || a.dead || a._parentHidden) return false; return true; };
+      const heads = s.entities.filter((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiProfile'));
+      const hd = heads.find((q) => q.parentEnt && q.parentEnt === selfE.parentEnt) || (shown(selfE) ? heads.find((q) => shown(q) && !q.behaviors.some((x) => x.sideMenu)) : null); // on its page, or the one on screen with it
+      if (hd) { const P = hd.behaviors.find((x) => x.type === 'uiProfile').params || {}; pageWho.h = P.own ? handleOf(meOfVars(s, P.name, P.handle).handle) : handleOf(fillTemplate(String(P.handle || ''), qVars(s))) || '\u0000'; }
       return pageWho.h;
     };
-    const FILT = (s) => { const f = String(p.filter || '').trim(); if (f) return f; const o = profileOwner(s); return o ? 'handle = ' + o : ''; };
-    const ownerOf = (s) => { const m = FILT(s).match(/^\s*handle\s*=\s*(.+?)\s*$/i); const h = m ? handleOf(fillTemplate(m[1], qVars(s))) : ''; return h === '\u0000' ? '' : h; }; // a person's page
+    const SRC = () => (p.onProfile === 'everyone’s posts' && (!p.source || p.source === 'auto') ? 'everyone' : p.source || 'auto');
+    const FILT = (s) => {
+      const f = String(p.filter || '').trim(), src = SRC(); let h = '';
+      if (src === 'me') h = handleOf(meOfVars(s).handle);
+      else if (src === 'the person in a variable') h = handleOf(fillTemplate('{' + String(p.sourceVar || 'profile').replace(/[{}\s]/g, '') + '}', qVars(s))) || '\u0000';
+      else if (src === 'auto' && !HANDLE_RE.test(f)) h = profileOwner(s);
+      return [f, h ? 'handle = ' + h : ''].filter(Boolean).join(' and ');
+    };
+    const HANDLE_RE = /(?:^|\s)handle\s*=\s*(\S+)/i;
+    const ownerOf = (s) => { const m = FILT(s).match(HANDLE_RE); const h = m ? handleOf(fillTemplate(m[1], qVars(s))) : ''; return h === '\u0000' ? '' : h; }; // a person's page
     const canSee = (s, r) => { const SG = s.engine.social, h = who(r); if (SG && !isMine(s, r) && SG.hides(h) && !(ownerOf(s) === h && !SG.isBlocked(h))) return false; // muted / blocked (a muted person's own page still shows their posts)
       if (SG && !isMine(s, r) && SG.isPrivate(h) && !SG.isFollowing(h)) return false; // a private account: only the people who follow them
       const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
@@ -10297,6 +10314,8 @@ registerBehavior('uiFeed', {
       uiAlways: true,
       update(e, dt, s) {
         selfE = e; SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
+        { const ow = ownerOf(s); ownerPrefs = ow && SGr ? SGr.profile(ow) : null;
+          const why = !s.engine.editing && ow ? `@${ow}` : ''; if (why && why !== saidWho) Log.add('info', `“${e.name || 'Social Feed'}” shows only posts by ${why} (Show posts from: ${SRC()}${String(p.filter || '').trim() ? ', Only show: ' + String(p.filter).trim() : ''})`, 'Social Feed'); saidWho = why; }
         if (has(s) && !s.engine.editing && fixedMine !== D(s).rows(p.collection).length + '|' + meOfVars(s).handle) { fixedMine = D(s).rows(p.collection).length + '|' + meOfVars(s).handle; // posts I wrote before the post box and my profile agreed on who I am (“Me @me”, or signed in under another handle) move to me
           const m = meOfVars(s), mh = handleOf(m.handle), hk = K('handle'), ak = K('author');
           for (const r of D(s).rows(p.collection)) { const h = handleOf(r[hk]); if (h === mh) continue; if (r._mine || (h === 'me' && r[ak] === 'Me' && mh !== 'me')) D(s).update(p.collection, r.id, { [hk]: m.handle, [ak]: m.author }); } }
@@ -12549,11 +12568,16 @@ registerBehavior('uiProfile', {
       const posts = G && D.def(pc) ? D.rows(pc).filter((q) => handleOf(q.handle) === W.handle) : [];
       const pick = (k, dflt) => (r[k] != null && (r[k] !== '' || k === 'bio') && Object.prototype.hasOwnProperty.call(r, k) ? String(r[k]) : dflt);
       const hasStory = !!(G && p.storyRing !== false && D.def('Stories') && D.rows('Stories').some((q) => handleOf(q.handle) === W.handle && (!q._at || Date.now() - q._at < 24 * 3600e3)));
-      return { handle: W.handle, name: (p.own ? W.name : r.name || W.name) || W.handle || 'Someone', bio: pick('bio', fill(p.bio, s)), avatar: r.avatar || fill(p.avatar, s), cover: r.cover || p.cover || '', location: r.location || fill(p.location, s), website: r.website || fill(p.website, s), pronouns: r.pronouns || '',
+      const out = { handle: W.handle, name: (p.own ? W.name : r.name || W.name) || W.handle || 'Someone', bio: pick('bio', fill(p.bio, s)), avatar: r.avatar || fill(p.avatar, s), cover: r.cover || p.cover || '', location: r.location || fill(p.location, s), website: r.website || fill(p.website, s), pronouns: r.pronouns || '',
         joined: +r.joined || (posts.length ? Math.min(...posts.map((q) => +q._at || Date.now())) : 0), verified: r.verified != null && r.verified !== '' ? truthy(r.verified) : !!p.verified || posts.some((q) => truthy(q.verified)), posts, hasStory, r,
         category: r.category || fill(p.category, s), status: r.status || fill(p.status, s),
         links: UK.lines(r.links || fill(p.links, s)).map(([label = '', url = '', icon = '']) => ({ label: label || url.replace(/^https?:\/\//i, ''), url: url || label, icon })).filter((q) => q.url),
         highlights: UK.lines(r.highlights || p.highlights || '').map(([name = '', pic = '', msg = '']) => ({ name, pic, msg })).filter((q) => q.name || q.pic) };
+      // what they chose not to show (Settings and privacy → Your profile)
+      const no = (k) => r[k] != null && r[k] !== '' && !truthy(r[k]);
+      if (no('show_location')) out.location = ''; if (no('show_joined')) out.joined = 0; if (no('show_website')) { out.website = ''; out.links = []; } if (no('show_highlights')) out.highlights = [];
+      out.hideCounts = no('show_counts') && !p.own; out.hideMutuals = no('show_mutuals'); out.hideStatus = no('show_status'); if (out.hideStatus) out.status = '';
+      return out;
     };
     const statsOf = (s, I) => { const G = SG(s); if (!G) return UK.lines(p.stats).map(([label = '', val = '']) => [label, fill(val, s)]); const V = { posts: ['Posts', () => I.posts.length], followers: ['Followers', () => G.followers(I.handle).length + (+fill(p.baseFollowers, s) || 0)], following: ['Following', () => G.following(I.handle).length], friends: ['Friends', () => G.friends(I.handle).length], likes: ['Likes', () => I.posts.reduce((a, q) => a + (+q.likes || 0), 0)], points: ['Points', () => (p.own ? pointsState(s).points : 0)] };
       return String(p.countsShow || 'posts, followers, following, friends').split(/[\s,]+/).map((k) => k.toLowerCase()).filter((k) => V[k]).map((k) => [V[k][0], String(V[k][1]())]); };
@@ -12688,7 +12712,7 @@ registerBehavior('uiProfile', {
         };
         /** "Followed by Maya Chen and 2 others you follow", with their pictures. */
         const mutuals = (y, align = 'left') => {
-          if (!G || p.own || p.mutuals === false) return y; const M = G.mutuals(I.handle); if (!M.length) return y;
+          if (!G || p.own || p.mutuals === false || I.hideMutuals) return y; const M = G.mutuals(I.handle); if (!M.length) return y;
           const names = M.slice(0, 2).map((q) => G.profile(q.handle).name || q.name || '@' + q.handle), rest = M.length - names.length;
           const text = `Followed by ${names.join(rest ? ', ' : ' and ')}${rest ? ` and ${rest} other${rest > 1 ? 's' : ''} you follow` : ''}`;
           const n = Math.min(3, M.length), aw = 14 + (n - 1) * 13 + 8; ctx.font = `500 13px ${F}`; const lines = wrapLines(ctx, text, b.w - 32 - aw, 13, 2), tw = Math.max(...lines.map((l) => (ctx.font = `600 13px ${F}`, ctx.measureText(l).width)));
@@ -12715,7 +12739,7 @@ registerBehavior('uiProfile', {
           return y + h;
         };
         let y;
-        const AVS = (d) => (+p.avatarSize > 0 ? +p.avatarSize : d), CVH = (d) => (+p.coverHeight > 0 ? +p.coverHeight : d), BTN = p.showButtons !== false, BIO = p.showBio !== false, HND = p.showHandle !== false, CNT = p.showCounts !== false;
+        const AVS = (d) => (+p.avatarSize > 0 ? +p.avatarSize : d), CVH = (d) => (+p.coverHeight > 0 ? +p.coverHeight : d), BTN = p.showButtons !== false, BIO = p.showBio !== false, HND = p.showHandle !== false, CNT = p.showCounts !== false && !I.hideCounts;
         if (look === 'x') {
           const coverH = I.cover ? CVH(118) : 0, av = AVS(84);
           if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }

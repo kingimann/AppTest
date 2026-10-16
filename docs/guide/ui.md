@@ -458,8 +458,16 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - A gradient **ring** goes around the picture when they have a story. Tapping it goes to the page with the Stories (*Stories are on page*) and plays theirs. Without a story, tapping a picture (or a cover photo) opens it full screen.
   - **⋯** opens Share profile, Copy username, **Mute**, **Block** and **Report**. Muting hides their posts and stories everywhere except their own page. Blocking also hides that page's posts, unfollows them, removes them as a friend and as your follower; the header then shows **Blocked** (tap to unblock).
   - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
-  - Tick *This is my profile* for **Edit profile** instead. With the social graph it opens an **editor**: change the cover (a photo or one of the colours), your picture, name, bio, pronouns, place and website, then **Save**. A new name also goes on your posts, comments and stories and in `{playerName}`.
-  - Everything shown comes from a **Profiles** collection (handle, name, bio, avatar, cover, location, website, pronouns, joined, verified) when there is one, otherwise from the settings; your own edits stay on the phone without one.
+  - Tick *This is my profile* for **Edit profile** instead. With the social graph it opens an **editor**: change the cover (a photo or one of the colours), your picture, name, bio, pronouns, **category**, **status**, place, website and **links**, then **Save**. A new name also goes on your posts, comments and stories and in `{playerName}`.
+  - **More to show** (the *Show* group):
+    - **Category** under the name (e.g. *Photographer*) and a **status** pill (e.g. *🎧 Listening to lo-fi*).
+    - **Links**: one per line, `Label | address | icon`. They show as chips under the bio and open the address (web, `mailto:` or `tel:`; a bare email works too).
+    - **Highlights**: round covers under the bio, like Instagram story highlights. One per line, `Name | emoji or picture | message`. Tapping one sends its message, with the name in `{highlight}`, or opens its picture full screen. On your own profile, *a “New” highlight sends* adds a **+ New** circle that sends that message.
+    - **Finish your profile**: on your own profile, a card with a progress bar (picture, cover, bio, place, a link, a first post) and the next step. Tapping it opens Edit profile. It goes away at 100%.
+    - **Counts to show, in order**: any of `posts`, `followers`, `following`, `friends`, `likes` (likes on their posts) and `points` (yours).
+    - Switches for the @handle line, the bio, the counts and the buttons.
+  - **Look settings:** picture shape (**circle**, **rounded** or **square**), picture size, cover height, name size and button shape (**pill**, **rounded** or **square**). 0 keeps what the look uses.
+  - Everything shown comes from a **Profiles** collection (handle, name, bio, avatar, cover, location, website, pronouns, category, status, links, joined, verified) when there is one, otherwise from the settings; your own edits stay on the phone without one.
   - **Settings and privacy** (the ⚙ next to *Edit profile*, the ⋯ menu, or the message `settings` from anywhere, e.g. a Side Menu item `Settings and privacy | settings | msg:settings`) opens a full-screen page:
     - **Your account**: your picture and name (tap to edit your profile), *Copy your username*.
     - **Private account**: only people who follow you see your posts. Other people's feeds hide them, and your Profile Header says the account is private until they follow you.
@@ -471,6 +479,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - The choices are saved with your profile (fields `private`, `dm`, `notes_off`).
   - At the top of a page that lines things up, a full-width Profile Header sits right under the App Bar: no gap above its cover.
   - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
+  - With a feed under it, the **whole page scrolls**: dragging on the header (not just the posts) moves it up out of the way, then the posts scroll. A feed with tabs now scrolls far enough to show its last post in full.
   - Tapping the **Followers / Following / Friends** counts opens *Lists page* (the Friends page) on that person's lists, with a Follow button on each.
 - **Profile tabs on a feed:** a feed's tabs can use `posts` (no replies), `replies`, `media` (posts with pictures or videos) and `likes` (posts you liked). A third column gives a tab its own look, e.g. `Media | media | grid`. The Social template's profiles use `Posts | posts`, `Replies | replies`, `Media | media | grid` and, on your own, `Likes | likes`.
 - **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once. If the app has no Posts collection yet, the first post makes one (with the sample posts the feed was showing), so **Post** always works; open **Data** to change its fields.

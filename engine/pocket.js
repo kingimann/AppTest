@@ -9326,7 +9326,7 @@ function settingsSheet(s, o = {}) {
     const chips = (box, opts, cur, set, key) => { const w = el('div', `display:flex;gap:6px;flex-wrap:wrap;padding:4px 14px 12px;`); w.dataset.set = key; const paint = () => w.replaceChildren(...opts.map((v) => { const b = btn(`padding:7px 13px;border-radius:16px;font-size:14px;font-weight:700;${v === cur ? `background:${c.acc};color:#fff;` : `border:1px solid ${c.line};color:${c.text};`}`, v); b.onclick = () => { cur = v; set(v); paint(); }; return b; })); paint(); box.append(w); };
     const me = G.me(), pr = G.profile(me.handle), st = G.settings();
     // you
-    const onEdit = o.onEdit || (() => editProfileSheet(s, { colors: c, upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null, data: { handle: me.handle, name: pr.name || me.author, bio: pr.bio || '', avatar: isPic(pr.avatar) ? pr.avatar : '', cover: pr.cover || '', location: pr.location || '', website: pr.website || '', pronouns: pr.pronouns || '' }, onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } }));
+    const onEdit = o.onEdit || (() => editProfileSheet(s, { colors: c, upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null, data: { handle: me.handle, name: pr.name || me.author, bio: pr.bio || '', avatar: isPic(pr.avatar) ? pr.avatar : '', cover: pr.cover || '', location: pr.location || '', website: pr.website || '', pronouns: pr.pronouns || '', category: pr.category || '', status: pr.status || '', links: pr.links || '' }, fields: ['name', 'bio', 'pronouns', 'category', 'status', 'location', 'website', 'links'], onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } }));
     { const box = section('Your account'); const r = btn(`display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;text-align:left;color:${c.text};`); r.dataset.set = 'edit'; r.append(api.avatar(pr.name || me.author, isPic(pr.avatar) ? pr.avatar : '', 48)); const t = el('span', 'flex:1;min-width:0;'); t.append(el('div', 'font-weight:800;font-size:16px;', pr.name || me.author), el('div', `color:${c.sub};font-size:14px;`, '@' + me.handle)); r.append(t); const ar = el('span', `color:${c.sub};display:inline-flex;`); ar.innerHTML = svgIcon('chevron-right', 18, { stroke: 2.2 }); r.append(ar);
       r.onclick = () => { api.close(); setTimeout(onEdit, 280); }; box.append(r);
       row(box, 'link', 'Copy your username', null, () => { navigator.clipboard?.writeText('@' + me.handle).catch(() => {}); s.snackbar?.('Copied @' + me.handle); }); }
@@ -9351,7 +9351,7 @@ function settingsSheet(s, o = {}) {
 function editProfileSheet(s, o) {
   const c = o.colors, d = { ...o.data }, want = new Set(o.fields || ['name', 'bio', 'pronouns', 'location', 'website']);
   return socialSheet(s, { kind: 'profile-edit', full: true, title: 'Edit profile', colors: c, font: o.font,
-    action: { label: 'Save', run: (api) => { const patch = {}; for (const k of ['name', 'bio', 'pronouns', 'location', 'website', 'avatar', 'cover']) if (d[k] !== o.data[k]) patch[k] = typeof d[k] === 'string' ? d[k].trim() : d[k]; if (patch.name === '') delete patch.name; if (patch.website && !/^https?:\/\//i.test(patch.website)) patch.website = 'https://' + patch.website; api.close(); if (Object.keys(patch).length) o.onSave(patch); } },
+    action: { label: 'Save', run: (api) => { const patch = {}; for (const k of ['name', 'bio', 'pronouns', 'location', 'website', 'category', 'status', 'links', 'avatar', 'cover']) if (d[k] !== o.data[k]) patch[k] = typeof d[k] === 'string' ? d[k].trim() : d[k]; if (patch.name === '') delete patch.name; if (patch.website && !/^https?:\/\//i.test(patch.website)) patch.website = 'https://' + patch.website; api.close(); if (Object.keys(patch).length) o.onSave(patch); } },
     build: (api) => {
       const { el, body } = api; body.style.borderTop = '0';
       const pick = (max, cb) => { const f = el('input'); f.type = 'file'; f.accept = 'image/*'; f.style.display = 'none'; body.append(f); f.onchange = async () => { const file = f.files?.[0]; f.remove(); if (!file) return; try { cb(o.upload ? await o.upload(file) : await shrinkPicture(file, max, 0.85)); } catch { s.snackbar?.('Could not use that picture'); } }; f.click(); };
@@ -9379,6 +9379,7 @@ function editProfileSheet(s, o) {
         box.append(top, inp); form.append(box); sync();
       };
       field('name', 'Name', 50, false, 'Your name'); field('bio', 'Bio', 160, true, 'A few words about you'); field('pronouns', 'Pronouns', 30, false, 'e.g. she/her'); field('location', 'Location', 40, false, 'City, country'); field('website', 'Website', 100, false, 'example.com');
+      field('category', 'Category', 40, false, 'e.g. Artist, Coffee shop'); field('status', 'Status', 60, false, 'What are you up to?'); field('links', 'Links (one per line: Label | address)', 400, true, 'Shop | myshop.com');
       if (o.data.handle) form.append(el('div', `color:${c.sub};font-size:13px;padding:0 2px;`, `Your username is @${o.data.handle}`));
       body.append(form);
     } });
@@ -10050,8 +10051,9 @@ registerBehavior('uiFeed', {
     const hostOf = (e) => (p.collapseAbove !== false && e.parentEnt?.ui && !e.parentEnt.dead ? e.parentEnt : null);
     const boxOf = (e, s) => { const b = UK.box(e), h = hostOf(e), c = h && h._collapseBy === e && e.stretch !== 'height' && e.stretch !== 'both' ? h._collapseY || 0 : 0; if (c) { b.h += c; b.cy += c / 2; } return UK.fit(s, e, b); }; // (the feed grows down into the room they leave)
     /** Scrolling down first moves what is above the feed (stories, the post box) up out of the way, then the posts; scrolling back up brings it back once the posts are at the top. */
+    let room = 0; // how far what is above can still go up (a drag that starts on it scrolls too: a tall profile header)
     const collapse = (s, e, dt) => {
-      const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
+      room = 0; const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
       const E = s.engine, k = uiK(E.safe) || 1, pr = uiBox(h, E.width, E.height, E.safe), fr = uiBox(e, E.width, E.height, E.safe);
       let c = h._collapseBy === e ? h._collapseY || 0 : 0; let A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c), lowest = -1e9;
       { // not up under a button that floats over the page (a ☰ in the corner): the feed stops below it
@@ -10068,7 +10070,7 @@ registerBehavior('uiFeed', {
       if (goTop) c += (0 - c) * Math.min(1, dt * 10);
       else if (S.v > 0 && c < A && S.max > 0) { const t = Math.min(S.v, A - c); c += t; S.v -= t; if (S.drag) S.drag.v0 -= t; }
       else if (S.v < 0 && c > 0) { const t = Math.min(-S.v, c); c -= t; S.v += t; if (S.drag) S.drag.v0 += t; }
-      c = clamp(c, 0, A); if (c < 0.3) c = 0; h._collapseY = c; h._collapseBy = e; if (c > 0) h._clipChildren = true;
+      c = clamp(c, 0, A); if (c < 0.3) c = 0; room = A - c; h._collapseY = c; h._collapseBy = e; if (c > 0) h._clipChildren = true;
       // what scrolls away above the feed (a search bar, the post box, tabs) goes out of sight just under a floating ☰, not behind it
       const pb = pr.y + pr.h / 2; if (c > 0 && lowest > pr.y - pr.h / 2) { const t0 = lowest + 2; h._clipRect = { x: pr.x, y: (t0 + pb) / 2, w: pr.w, h: Math.max(0, pb - t0) }; h._clipBy = e; } else if (h._clipBy === e) { h._clipRect = null; h._clipBy = null; }
     };
@@ -10283,8 +10285,8 @@ registerBehavior('uiFeed', {
       uiAlways: true,
       update(e, dt, s) {
         SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
-        const b = boxOf(e, s); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
-        S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
+        const b = boxOf(e, s); S.max = Math.max(0, total - b.h + (inset || 0) + 12 + coveredBottom(s, e, b)); // (under the tabs, which stay at the top)
+        S.update(s, e, dt, room > 0 ? { ...b, y: b.y - room, h: b.h + room, cy: b.cy - room / 2 } : b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         collapse(s, e, dt);
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
         if (p.openVar && s.vars[p.openVar] && !s.engine.editing && !sheetUp) { const shown = (() => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; })(); const q = shown && findPost(s, s.vars[p.openVar]); if (q) { s.setVar(p.openVar, ''); openPost(s, q, 'post'); } } // a notification (or anything) asked for a post
@@ -12494,6 +12496,22 @@ registerBehavior('uiProfile', {
     { key: 'listPage', label: 'Tapping the counts opens page (Friends)', type: 'text', default: '', showIf: (b) => !!b.social, infoText: 'The person goes in {people_of}, the count tapped (followers, following, friends) in {people_tab}.' },
     { key: 'message', label: 'Message / Edit button sends', type: 'text', default: 'message', suggest: 'messages' },
     { key: 'autoHeight', label: 'Grows to fit (what is under it moves down)', type: 'bool', default: true },
+    { key: 'category', label: 'Category under the name (e.g. Photographer)', type: 'text', default: '', group: 'Show', infoText: 'A Profiles field “category” overrides it (people set it in Edit profile).' },
+    { key: 'status', label: 'Status (e.g. 🎧 Listening to lo-fi)', type: 'text', default: '', group: 'Show', infoText: 'A Profiles field “status” overrides it.' },
+    { key: 'links', label: 'Links (one per line: Label | address | icon)', type: 'code', default: '', group: 'Show', infoText: 'Chips under the bio that open the address. A Profiles field “links” (same lines) overrides it.' },
+    { key: 'highlights', label: 'Highlights (one per line: Name | emoji or picture | message)', type: 'code', default: '', group: 'Show', info: 'Round covers under the bio, like Instagram story highlights. Tapping one sends its message (with the name), or opens its picture.' },
+    { key: 'newHighlight', label: 'On my profile: a “New” highlight sends', type: 'text', default: '', suggest: 'messages', group: 'Show', showIf: (b) => !!b.own },
+    { key: 'completion', label: 'On my profile: “Finish your profile” card', type: 'bool', default: true, group: 'Show', showIf: (b) => !!b.own && !!b.social, info: 'How complete the profile is (picture, cover, bio, place, a link, a first post) and the next step; tapping it opens Edit profile. It goes away at 100%.' },
+    { key: 'countsShow', label: 'Counts to show, in order', type: 'text', default: 'posts, followers, following, friends', group: 'Show', showIf: (b) => !!b.social, infoText: 'Any of: posts, followers, following, friends, likes (on their posts), points (yours).' },
+    { key: 'showHandle', label: '@handle and pronouns', type: 'bool', default: true, group: 'Show' },
+    { key: 'showBio', label: 'Bio', type: 'bool', default: true, group: 'Show' },
+    { key: 'showCounts', label: 'Counts', type: 'bool', default: true, group: 'Show' },
+    { key: 'showButtons', label: 'Buttons (Follow, Message, Edit profile…)', type: 'bool', default: true, group: 'Show' },
+    { key: 'avatarShape', label: 'Picture shape', type: 'select', options: ['circle', 'rounded', 'square'], default: 'circle', group: 'Look' },
+    { key: 'avatarSize', label: 'Picture size (0 = for the look)', type: 'number', default: 0, range: [0, 160], step: 2, group: 'Look' },
+    { key: 'coverHeight', label: 'Cover height (0 = for the look)', type: 'number', default: 0, range: [0, 260], step: 2, group: 'Look' },
+    { key: 'nameSize', label: 'Name size (0 = for the look)', type: 'number', default: 0, range: [0, 40], step: 1, group: 'Look' },
+    { key: 'buttonShape', label: 'Button shape', type: 'select', options: ['for the look', 'pill', 'rounded', 'square'], default: 'for the look', group: 'Look' },
     { key: 'cover', label: 'Cover colour (blank = none)', type: 'color', default: '#4f7cff', group: 'Colours' },
     ...colorParams({ text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Follow button', '@accent'], bg: ['Behind the avatar', '@bg'] }),
     ...UI_COMMON,
@@ -12511,16 +12529,20 @@ registerBehavior('uiProfile', {
       const pick = (k, dflt) => (r[k] != null && (r[k] !== '' || k === 'bio') && Object.prototype.hasOwnProperty.call(r, k) ? String(r[k]) : dflt);
       const hasStory = !!(G && p.storyRing !== false && D.def('Stories') && D.rows('Stories').some((q) => handleOf(q.handle) === W.handle && (!q._at || Date.now() - q._at < 24 * 3600e3)));
       return { handle: W.handle, name: (p.own ? W.name : r.name || W.name) || W.handle || 'Someone', bio: pick('bio', fill(p.bio, s)), avatar: r.avatar || fill(p.avatar, s), cover: r.cover || p.cover || '', location: r.location || fill(p.location, s), website: r.website || fill(p.website, s), pronouns: r.pronouns || '',
-        joined: +r.joined || (posts.length ? Math.min(...posts.map((q) => +q._at || Date.now())) : 0), verified: r.verified != null && r.verified !== '' ? truthy(r.verified) : !!p.verified || posts.some((q) => truthy(q.verified)), posts, hasStory, r };
+        joined: +r.joined || (posts.length ? Math.min(...posts.map((q) => +q._at || Date.now())) : 0), verified: r.verified != null && r.verified !== '' ? truthy(r.verified) : !!p.verified || posts.some((q) => truthy(q.verified)), posts, hasStory, r,
+        category: r.category || fill(p.category, s), status: r.status || fill(p.status, s),
+        links: UK.lines(r.links || fill(p.links, s)).map(([label = '', url = '', icon = '']) => ({ label: label || url.replace(/^https?:\/\//i, ''), url: url || label, icon })).filter((q) => q.url),
+        highlights: UK.lines(r.highlights || p.highlights || '').map(([name = '', pic = '', msg = '']) => ({ name, pic, msg })).filter((q) => q.name || q.pic) };
     };
-    const statsOf = (s, I) => { const G = SG(s); if (!G) return UK.lines(p.stats).map(([label = '', val = '']) => [label, fill(val, s)]); return [['Posts', String(I.posts.length)], ['Followers', String(G.followers(I.handle).length + (+fill(p.baseFollowers, s) || 0))], ['Following', String(G.following(I.handle).length)], ['Friends', String(G.friends(I.handle).length)]]; };
+    const statsOf = (s, I) => { const G = SG(s); if (!G) return UK.lines(p.stats).map(([label = '', val = '']) => [label, fill(val, s)]); const V = { posts: ['Posts', () => I.posts.length], followers: ['Followers', () => G.followers(I.handle).length + (+fill(p.baseFollowers, s) || 0)], following: ['Following', () => G.following(I.handle).length], friends: ['Friends', () => G.friends(I.handle).length], likes: ['Likes', () => I.posts.reduce((a, q) => a + (+q.likes || 0), 0)], points: ['Points', () => (p.own ? pointsState(s).points : 0)] };
+      return String(p.countsShow || 'posts, followers, following, friends').split(/[\s,]+/).map((k) => k.toLowerCase()).filter((k) => V[k]).map((k) => [V[k][0], String(V[k][1]())]); };
     const colorsOf = () => ({ bg: tok('@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0' });
     const share = (s, I) => { const t = `${I.name} (@${I.handle})`, url = typeof location !== 'undefined' ? location.href.split('#')[0] : ''; if (navigator.share) navigator.share({ title: t, text: t, ...(url ? { url } : {}) }).catch(() => {}); else { navigator.clipboard?.writeText(url ? t + ' ' + url : t).catch(() => {}); s.snackbar?.('Profile link copied'); } };
     const people = (s, I, tab) => { if (!p.listPage) return; s.setVar('people_of', I.handle); s.setVar('people_tab', tab); s.navTo(p.listPage); };
     const edit = (s, I) => {
       const G = SG(s); if (p.message) s.send(p.message); if (!G || p.editSheet === false || s.engine.editing || sheetUp) return;
       sheetUp = true; editProfileSheet(s, { colors: colorsOf(), coverColor: p.cover || '#1d9bf0', upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null,
-        data: { handle: I.handle, name: I.name, bio: I.bio, avatar: isPic(I.avatar) ? I.avatar : '', cover: I.r.cover || '', location: I.location, website: I.website, pronouns: I.pronouns },
+        data: { handle: I.handle, name: I.name, bio: I.bio, avatar: isPic(I.avatar) ? I.avatar : '', cover: I.r.cover || '', location: I.location, website: I.website, pronouns: I.pronouns, category: I.r.category || '', status: I.r.status || '', links: I.r.links || '' }, fields: ['name', 'bio', 'pronouns', 'category', 'status', 'location', 'website', 'links'],
         onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } });
       setTimeout(() => { sheetUp = false; }, 400);
     };
@@ -12559,6 +12581,10 @@ registerBehavior('uiProfile', {
           else if (k === 'link') { const u = /^https?:/i.test(I.website) ? I.website : 'https://' + I.website; if (!s.engine.editing) try { window.open(u, '_blank', 'noopener'); } catch { /* blocked */ } }
           else if (k.startsWith('stat:')) { const l = k.slice(5).toLowerCase(); if (G && l !== 'posts') people(s, I, l); }
           else if (k === 'mutuals') people(s, I, 'followers');
+          else if (k.startsWith('link:')) { const L = I.links[+k.slice(5)]; if (L && !s.engine.editing) { const u = /^(https?:|mailto:|tel:)/i.test(L.url) ? L.url : /@/.test(L.url) && !/\//.test(L.url) ? 'mailto:' + L.url : 'https://' + L.url; try { window.open(u, '_blank', 'noopener'); } catch { /* blocked */ } } }
+          else if (k === 'hl:new') { if (p.newHighlight) s.send(p.newHighlight); }
+          else if (k.startsWith('hl:')) { const q = I.highlights[+k.slice(3)]; if (q) { if (q.msg) { s.setVar('highlight', q.name); s.send(q.msg, q.name); } else if (isPic(q.pic)) photoViewer(s, q.pic); } }
+          else if (k === 'complete') edit(s, I);
         }
       },
       drawUI(ctx, e, s) {
@@ -12566,16 +12592,64 @@ registerBehavior('uiProfile', {
         const blocked = !!(G && !p.own && G.isBlocked(I.handle)), on = following(s), F = THEME.font; hits = [];
         const pop = (k) => { const a = (s.time - popT) / 0.3; return popK === k && a >= 0 && a < 1 ? 1 - Math.sin(a * Math.PI) * 0.07 : 1; };
         /** A button: fill (accent), outline or soft (grey). */
-        const button = (k, label, x, y, w, h, style, color) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = look === 'x' ? h / 2 : 9;
+        const BR = (h) => ({ pill: h / 2, rounded: 9, square: 4 })[p.buttonShape] ?? (look === 'x' ? h / 2 : 9); // (button corners)
+        const button = (k, label, x, y, w, h, style, color) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = BR(h);
           if (style === 'fill') { ctx.fillStyle = color || acc; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else if (style === 'soft') { ctx.fillStyle = soft; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else { ctx.strokeStyle = color ? withAlpha(color, 0.6) : edge; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke(); }
           UK.text(ctx, label, x + w / 2, y + h / 2 + 1, { size: h >= 36 ? 14 : 13.5, weight: 800, color: style === 'fill' ? '#fff' : color || txt, maxW: w - 12 }); ctx.restore(); hits.push({ k, x, y, w, h }); };
-        const iconButton = (k, icon, x, y, w, h, style) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = look === 'x' ? h / 2 : 9;
+        const iconButton = (k, icon, x, y, w, h, style) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = BR(h);
           if (style === 'dark') { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, h / 2, 0, Math.PI * 2); ctx.fill(); } else if (style === 'soft') { ctx.fillStyle = soft; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else if (style !== 'bare') { ctx.strokeStyle = edge; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke(); }
           drawIco(ctx, icon, x + w / 2, y + h / 2, Math.min(20, h * 0.52), style === 'dark' ? '#fff' : txt, { stroke: icon === 'more' ? 2.6 : 2 }); ctx.restore(); hits.push({ k, x, y, w, h }); };
-        const avatar = (cx, cy, d) => { if (I.hasStory) { const g = ctx.createLinearGradient(cx - d / 2, cy + d / 2, cx + d / 2, cy - d / 2); g.addColorStop(0, '#f9ce34'); g.addColorStop(0.5, '#ee2a7b'); g.addColorStop(1, '#6228d7'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 7, 0, Math.PI * 2); ctx.fill(); }
+        const avatar = (cx, cy, d) => { if (p.avatarShape && p.avatarShape !== 'circle') return squareAvatar(cx, cy, d); if (I.hasStory) { const g = ctx.createLinearGradient(cx - d / 2, cy + d / 2, cx + d / 2, cy - d / 2); g.addColorStop(0, '#f9ce34'); g.addColorStop(0.5, '#ee2a7b'); g.addColorStop(1, '#6228d7'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 7, 0, Math.PI * 2); ctx.fill(); }
           ctx.fillStyle = bgc; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 4, 0, Math.PI * 2); ctx.fill(); miniAvatar(ctx, I.name, cx, cy, d, I.avatar || ''); hits.push({ k: 'avatar', x: cx - d / 2, y: cy - d / 2, w: d, h: d }); };
-        const nameLine = (x, y, size, align = 'left', maxW = b.w - 60) => { ctx.font = `900 ${size}px ${F}`; const w = Math.min(ctx.measureText(I.name).width, maxW), x0 = align === 'center' ? x - w / 2 - (I.verified ? size * 0.6 : 0) : x;
+        const nameLine = (x, y, size0, align = 'left', maxW = b.w - 60) => { const size = +p.nameSize > 0 ? +p.nameSize : size0; ctx.font = `900 ${size}px ${F}`; const w = Math.min(ctx.measureText(I.name).width, maxW), x0 = align === 'center' ? x - w / 2 - (I.verified ? size * 0.6 : 0) : x;
           UK.text(ctx, I.name, x0, y, { size, weight: 900, color: txt, align: 'left', maxW }); if (I.verified) verifiedBadge(ctx, x0 + w + size * 0.62, y, size * 0.45, acc); };
+        /** A rounded or square picture (with the same story ring and border as the round one). */
+        const squareAvatar = (cx, cy, d) => { const R = p.avatarShape === 'square' ? d * 0.1 : d * 0.26;
+          if (I.hasStory) { const g = ctx.createLinearGradient(cx - d / 2, cy + d / 2, cx + d / 2, cy - d / 2); g.addColorStop(0, '#f9ce34'); g.addColorStop(0.5, '#ee2a7b'); g.addColorStop(1, '#6228d7'); ctx.fillStyle = g; UK.rr(ctx, cx - d / 2 - 7, cy - d / 2 - 7, d + 14, d + 14, R + 7); ctx.fill(); }
+          ctx.fillStyle = bgc; UK.rr(ctx, cx - d / 2 - 4, cy - d / 2 - 4, d + 8, d + 8, R + 4); ctx.fill();
+          ctx.save(); UK.rr(ctx, cx - d / 2, cy - d / 2, d, d, R); ctx.clip(); const pic = I.avatar || '';
+          if (isPic(pic)) { const im = loadImage(pic); ctx.fillStyle = '#444'; ctx.fillRect(cx - d / 2, cy - d / 2, d, d); if (im.complete && im.naturalWidth) { const k = Math.max(d / im.naturalWidth, d / im.naturalHeight), w = im.naturalWidth * k, h = im.naturalHeight * k; ctx.drawImage(im, cx - w / 2, cy - h / 2, w, h); } }
+          else { let hs = 0; for (const ch of String(I.name || '?')) hs = (hs * 31 + ch.charCodeAt(0)) >>> 0; ctx.fillStyle = AVATAR_COLORS[hs % AVATAR_COLORS.length]; ctx.fillRect(cx - d / 2, cy - d / 2, d, d); UK.text(ctx, pic || String(I.name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''), cx, cy + 1, { size: Math.round(d * (pic ? 0.55 : 0.38)), weight: 800, color: '#fff' }); }
+          ctx.restore(); hits.push({ k: 'avatar', x: cx - d / 2, y: cy - d / 2, w: d, h: d }); };
+        /** Category ("Photographer") and status ("🎧 Listening…") lines. */
+        const extraLines = (y, align = 'left') => {
+          const X = align === 'center' ? b.cx : b.x + 16;
+          if (I.category) { UK.text(ctx, I.category, X, y, { size: 14, weight: 600, color: sub, align, maxW: b.w - 32 }); y += 21; }
+          if (I.status) { ctx.font = `600 13px ${F}`; const w = Math.min(ctx.measureText(I.status).width + 22, b.w - 32), x0 = align === 'center' ? b.cx - w / 2 : X; ctx.fillStyle = soft; UK.rr(ctx, x0, y - 12, w, 24, 12); ctx.fill(); UK.text(ctx, I.status, x0 + 11, y + 0.5, { size: 13, weight: 600, color: txt, align: 'left', maxW: w - 22 }); y += 32; }
+          return y;
+        };
+        /** Link chips (wrapping). */
+        const linkChips = (y, align = 'left') => {
+          if (!I.links.length) return y; ctx.font = `700 13px ${F}`; const rows = [[]], W0 = b.w - 32; let w = 0;
+          I.links.forEach((L, i) => { const cw = Math.min(ctx.measureText(L.label).width + 40, W0); if (w + cw > W0 && rows[rows.length - 1].length) { rows.push([]); w = 0; } rows[rows.length - 1].push({ L, i, cw }); w += cw + 8; });
+          for (const row of rows) { const tw = row.reduce((a, q) => a + q.cw + 8, -8); let x = align === 'center' ? b.cx - tw / 2 : b.x + 16;
+            for (const { L, i, cw } of row) { const z = pop('link:' + i); ctx.save(); ctx.translate(x + cw / 2, y); ctx.scale(z, z); ctx.translate(-(x + cw / 2), -y); ctx.strokeStyle = edge; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y - 14.5, cw - 1, 29, 14.5); ctx.stroke(); drawIco(ctx, L.icon && iconName(L.icon) ? L.icon : 'link', x + 15, y, 14, acc, { stroke: 2.2 }); UK.text(ctx, L.label, x + 27, y + 0.5, { size: 13, weight: 700, color: txt, align: 'left', maxW: cw - 36 }); ctx.restore(); hits.push({ k: 'link:' + i, x, y: y - 15, w: cw, h: 30 }); x += cw + 8; }
+            y += 36; }
+          return y + 2;
+        };
+        /** Highlights: round covers with a name under each (and "New" first on your own profile). */
+        const highlightsRow = (y) => {
+          const L = I.highlights.map((q, i) => ({ ...q, k: 'hl:' + i })); if (p.own && p.newHighlight) L.unshift({ name: 'New', pic: '', k: 'hl:new', plus: true });
+          if (!L.length) return y; const d = 60, step = 78, n = Math.max(1, Math.floor((b.w - 16) / step)), cy = y + d / 2 + 4;
+          L.slice(0, n).forEach((q, i) => { const cx = b.x + 16 + d / 2 + i * step, z = pop(q.k); ctx.save(); ctx.translate(cx, cy); ctx.scale(z, z); ctx.translate(-cx, -cy);
+            ctx.strokeStyle = edge; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 3, 0, Math.PI * 2); ctx.stroke();
+            if (q.plus) { ctx.fillStyle = soft; ctx.beginPath(); ctx.arc(cx, cy, d / 2, 0, Math.PI * 2); ctx.fill(); drawIco(ctx, 'plus', cx, cy, 24, txt, { stroke: 2.4 }); }
+            else miniAvatar(ctx, q.name, cx, cy, d, q.pic || '');
+            UK.text(ctx, q.name, cx, cy + d / 2 + 16, { size: 12, weight: 600, color: txt, maxW: step - 6 }); ctx.restore(); hits.push({ k: q.k, x: cx - d / 2 - 4, y: cy - d / 2 - 4, w: d + 8, h: d + 30 }); });
+          return y + d + 34;
+        };
+        /** Your profile: how complete it is and the next step. */
+        const completionCard = (y) => {
+          if (!p.own || !G || p.completion === false) return y;
+          const steps = [['avatar', 'Add a profile picture', isPic(I.avatar)], ['cover', 'Add a cover photo', !!I.r.cover], ['bio', 'Write a bio', !!String(I.r.bio ?? '').trim()], ['location', 'Add where you are', !!I.location], ['website', 'Add a link', !!(I.website || I.links.length)], ['post', 'Share your first post', I.posts.length > 0]];
+          const done = steps.filter((q) => q[2]).length; if (done === steps.length) return y; const next = steps.find((q) => !q[2]);
+          const x = b.x + 16, w = b.w - 32, h = 70, z = pop('complete'); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2));
+          ctx.fillStyle = soft; UK.rr(ctx, x, y, w, h, 14); ctx.fill();
+          UK.text(ctx, 'Finish your profile', x + 14, y + 20, { size: 15, weight: 800, color: txt, align: 'left' }); UK.text(ctx, `${done} of ${steps.length}`, x + w - 14, y + 20, { size: 13, weight: 700, color: sub, align: 'right' });
+          ctx.fillStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.12); UK.rr(ctx, x + 14, y + 34, w - 28, 6, 3); ctx.fill(); ctx.fillStyle = acc; UK.rr(ctx, x + 14, y + 34, (w - 28) * done / steps.length, 6, 3); ctx.fill();
+          UK.text(ctx, `Next: ${next[1]} ›`, x + 14, y + 55, { size: 13, weight: 700, color: acc, align: 'left', maxW: w - 28 }); ctx.restore();
+          hits.push({ k: 'complete', x, y, w, h }); return y + h + 12;
+        };
         const chip = (label, x, y, align = 'left') => { ctx.font = `600 12px ${F}`; const w = ctx.measureText(label).width + 12, x0 = align === 'center' ? x - w / 2 : x; ctx.fillStyle = soft; UK.rr(ctx, x0, y - 9, w, 18, 5); ctx.fill(); UK.text(ctx, label, x0 + 6, y + 0.5, { size: 12, weight: 600, color: sub, align: 'left' }); return w; };
         /** Lines of text (wrapped), left or in the middle. Returns the y under them. */
         const para = (text, y, size, color, align = 'left', max = 4, lh = size + 5) => { const W0 = b.w - 32; for (const l of wrapLines(ctx, text, W0, size, max)) { UK.text(ctx, l, align === 'center' ? b.cx : b.x + 16, y, { size, weight: 500, color, align }); y += lh; } return y; };
@@ -12620,14 +12694,16 @@ registerBehavior('uiProfile', {
           return y + h;
         };
         let y;
+        const AVS = (d) => (+p.avatarSize > 0 ? +p.avatarSize : d), CVH = (d) => (+p.coverHeight > 0 ? +p.coverHeight : d), BTN = p.showButtons !== false, BIO = p.showBio !== false, HND = p.showHandle !== false, CNT = p.showCounts !== false;
         if (look === 'x') {
-          const coverH = I.cover ? 118 : 0, av = 84;
+          const coverH = I.cover ? CVH(118) : 0, av = AVS(84);
           if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }
           const ay = b.y + (coverH ? coverH : av / 2 + 8), ax = b.x + 16 + av / 2; avatar(ax, ay, av);
           if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 50, b.y + 10, 34, 34, coverH ? 'dark' : 'bare');
           // buttons on the right, under the cover
           const by = ay + 12; ctx.font = `800 14px ${F}`;
-          if (p.own) { const fw = ctx.measureText('Edit profile').width + 32; button('edit', 'Edit profile', b.x + b.w - 16 - fw, by - 18, fw, 36, 'outline'); if (G && p.settingsButton !== false) iconButton('settings', 'settings', b.x + b.w - 16 - fw - 46, by - 18, 36, 36, 'outline'); }
+          if (!BTN) { /* no buttons */ }
+          else if (p.own) { const fw = ctx.measureText('Edit profile').width + 32; button('edit', 'Edit profile', b.x + b.w - 16 - fw, by - 18, fw, 36, 'outline'); if (G && p.settingsButton !== false) iconButton('settings', 'settings', b.x + b.w - 16 - fw - 46, by - 18, 36, 36, 'outline'); }
           else if (blocked) { const fw = ctx.measureText('Blocked').width + 32; button('unblock', 'Blocked', b.x + b.w - 16 - fw, by - 18, fw, 36, 'fill', '#f4212e'); }
           else {
             const fl = on ? 'Following' : 'Follow', fw = ctx.measureText(fl).width + 32, fx = b.x + b.w - 16 - fw; button('follow', fl, fx, by - 18, fw, 36, on ? 'outline' : 'fill');
@@ -12636,29 +12712,35 @@ registerBehavior('uiProfile', {
               button('friend', l2, mx - 10 - w2, by - 16, w2, 32, st === 'received' ? 'fill' : 'outline', st === 'friends' ? acc : ''); }
           }
           y = ay + av / 2 + 22; nameLine(b.x + 16, y, 20);
-          y += 23; ctx.font = `500 14px ${F}`; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) chip('Follows you', b.x + 16 + Math.min(ctx.measureText(hl).width, b.w - 120) + 8, y); y += 27; }
-          if (blocked) y = para(`You blocked @${I.handle}. You won’t see their posts.`, y, 15, sub) + 4; else if (I.bio) y = para(I.bio, y, 15, txt) + 3;
-          y = details(y); y = lockLine(y); y = counts(y + 6, 'inline'); { const ym = mutuals(y + 12); y = ym === y + 12 ? y : ym; } y += 4;
+          y += 23; ctx.font = `500 14px ${F}`; const hl = HND ? (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : '') : ''; if (hl) { UK.text(ctx, hl, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) chip('Follows you', b.x + 16 + Math.min(ctx.measureText(hl).width, b.w - 120) + 8, y); y += 27; } else y += 4;
+          y = extraLines(y);
+          if (blocked) y = para(`You blocked @${I.handle}. You won’t see their posts.`, y, 15, sub) + 4; else if (I.bio && BIO) y = para(I.bio, y, 15, txt) + 3;
+          y = details(y); y = linkChips(y + 4); y = lockLine(y); if (CNT) y = counts(y + 6, 'inline'); { const ym = mutuals(y + 12); y = ym === y + 12 ? y : ym; } y += 4;
+          y = highlightsRow(y + 6); y = completionCard(y + 4);
         } else if (look === 'instagram') {
-          const av = 86, ay = b.y + 14 + av / 2, ax = b.x + 16 + av / 2; avatar(ax, ay, av);
-          const S0 = statsOf(s, I).filter(([l]) => l !== 'Friends' || !G); // three columns fit beside the picture
-          { const x0 = ax + av / 2 + 18, x1 = b.x + b.w - 16, cw = (x1 - x0) / S0.length, fmt = (v) => (Number.isFinite(+v) && v !== '' ? shortNum(v) : v); S0.forEach(([label, val], i) => { const cx = x0 + cw * i + cw / 2; UK.text(ctx, fmt(val), cx, ay - 9, { size: 18, weight: 800, color: txt }); UK.text(ctx, label, cx, ay + 12, { size: 13, weight: 500, color: txt, maxW: cw - 2 }); hits.push({ k: 'stat:' + label, x: cx - cw / 2, y: ay - 26, w: cw, h: 52 }); }); }
+          const av = AVS(86), ay = b.y + 14 + av / 2, ax = b.x + 16 + av / 2; avatar(ax, ay, av);
+          const S0 = CNT ? statsOf(s, I).filter(([l]) => l !== 'Friends' || !G).slice(0, 4) : []; // (three or four columns fit beside the picture)
+          if (S0.length) { const x0 = ax + av / 2 + 18, x1 = b.x + b.w - 16, cw = (x1 - x0) / S0.length, fmt = (v) => (Number.isFinite(+v) && v !== '' ? shortNum(v) : v); S0.forEach(([label, val], i) => { const cx = x0 + cw * i + cw / 2; UK.text(ctx, fmt(val), cx, ay - 9, { size: 18, weight: 800, color: txt }); UK.text(ctx, label, cx, ay + 12, { size: 13, weight: 500, color: txt, maxW: cw - 2 }); hits.push({ k: 'stat:' + label, x: cx - cw / 2, y: ay - 26, w: cw, h: 52 }); }); }
           if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 40, b.y + 2, 32, 24, 'bare');
           y = ay + av / 2 + 20; nameLine(b.x + 16, y, 15, 'left', b.w - 140);
-          if (I.pronouns) { ctx.font = `900 15px ${F}`; const nw = Math.min(ctx.measureText(I.name).width, b.w - 140) + (I.verified ? 22 : 0); UK.text(ctx, I.pronouns, b.x + 16 + nw + 8, y, { size: 14, weight: 500, color: sub, align: 'left' }); }
+          if (I.pronouns && HND) { ctx.font = `900 15px ${F}`; const nw = Math.min(ctx.measureText(I.name).width, b.w - 140) + (I.verified ? 22 : 0); UK.text(ctx, I.pronouns, b.x + 16 + nw + 8, y, { size: 14, weight: 500, color: sub, align: 'left' }); }
           y += 20; if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.x + 16, y); y += 22; }
-          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub) + 2; else if (I.bio) y = para(I.bio, y, 14, txt, 'left', 4, 19) + 2;
-          y = details(y); y = lockLine(y); y = mutuals(y + 2); y = wideButtons(y + 4, b.x + 16, b.x + b.w - 16, 34) + 14;
+          y = extraLines(y);
+          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub) + 2; else if (I.bio && BIO) y = para(I.bio, y, 14, txt, 'left', 4, 19) + 2;
+          y = details(y); y = linkChips(y + 2); y = lockLine(y); y = mutuals(y + 2); if (BTN) y = wideButtons(y + 4, b.x + 16, b.x + b.w - 16, 34) + 14; else y += 8;
+          y = highlightsRow(y); y = completionCard(y + 2);
         } else {
-          const coverH = I.cover ? 104 : 0, av = 96, ay = b.y + (coverH ? coverH : 10 + av / 2);
+          const coverH = I.cover ? CVH(104) : 0, av = AVS(96), ay = b.y + (coverH ? coverH : 10 + av / 2);
           if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }
           avatar(b.cx, ay, av); if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 50, b.y + 10, 34, 34, coverH ? 'dark' : 'bare');
           y = ay + av / 2 + 24; nameLine(b.cx, y, 20, 'center');
-          y += 22; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.cx, y, { size: 14, weight: 500, color: sub, maxW: b.w - 40 }); y += 22; }
+          y += 22; const hl = HND ? (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : '') : ''; if (hl) { UK.text(ctx, hl, b.cx, y, { size: 14, weight: 500, color: sub, maxW: b.w - 40 }); y += 22; }
           if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.cx, y, 'center'); y += 24; }
-          y = counts(y + 8, 'centered'); const bw = Math.min(b.w - 32, 320); y = wideButtons(y + 2, b.cx - bw / 2, b.cx + bw / 2, 40) + 16;
-          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub, 'center') + 2; else if (I.bio) y = para(I.bio, y, 15, txt, 'center', 4, 20) + 2;
-          y = details(y, 'center'); y = lockLine(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
+          y = extraLines(y, 'center');
+          if (CNT) y = counts(y + 8, 'centered'); const bw = Math.min(b.w - 32, 320); if (BTN) y = wideButtons(y + 2, b.cx - bw / 2, b.cx + bw / 2, 40) + 16; else y += 8;
+          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub, 'center') + 2; else if (I.bio && BIO) y = para(I.bio, y, 15, txt, 'center', 4, 20) + 2;
+          y = details(y, 'center'); y = linkChips(y + 2, 'center'); y = lockLine(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
+          y = highlightsRow(y); y = completionCard(y);
         }
         // grow to fit what it shows: a page that lines things up moves what is under it; otherwise the top stays put
         const need = Math.ceil(y - b.y);

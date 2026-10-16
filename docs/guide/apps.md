@@ -292,7 +292,7 @@ App colours can be **theme colours** instead of fixed ones. In any colour box, t
 | `@accent`, `@onAccent` | your accent colour, and text on it | | Buttons, the + button, ticks |
 | `@danger`, `@good`, `@shadow`, `@dim` | | | Delete, success, shadows, dimming |
 
-*Game Settings › Theme & Dark Mode* chooses **light**, **dark** or **follow the phone**, and the accent colour, with a preview of both.
+*Game Settings › Theme & Dark Mode* chooses **light**, **dark** or **follow the phone**, and the accent colour, with a preview of both. Until you pick one (for example a game you just turned into an app), theme colours follow the background: a dark background gets light text and dark fields, so nothing turns dark-on-dark.
 
 - Every app template uses theme colours, and its app bar has a 🌙 button.
 - Send the message `dark mode toggle`, `dark mode on` or `dark mode off` (from a Button or a Trigger), or put a **Toggle** on the variable `darkMode` (the Blank App's profile page has one).

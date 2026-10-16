@@ -13,6 +13,7 @@ UI is everything drawn on the screen rather than in the world: scores, health ba
   - its parent's edges and centre (and a gap inside them);
   - the screen's centre and safe-area edges, and its own anchor point.
   - Pink guides show what it lined up with, and a small label shows the gap. A little buzz tells you it caught.
+  - The camera and light markers stay hidden where UI covers them (select one to see it).
   - *Preferences › Editing* has **UI snaps to other UI** (on/off), **UI snap gap** (none, 4–24 px) and **UI snap strength**.
 - **Place (UI Element card):** one tap puts the element at the **left, centre or right** and the **top, middle or bottom** of its page (or the screen, if it has no parent), 16 px in from the edge. The last button makes it **full width** with a 16 px margin.
 - **Align several at once:** in the Hierarchy tap **Select**, tick two or more UI elements, then **Align**:

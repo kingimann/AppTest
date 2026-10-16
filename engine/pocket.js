@@ -652,7 +652,7 @@ let PAL = APP_PALETTES.light, darkMQ = null;
 export function isDark(s) {
   const v = s?.vars?.darkMode;
   if (v !== undefined && v !== '' && v !== null) return v === true || v === 1 || v === '1' || v === 'on' || v === 'yes' || v === 'dark';
-  if (!s?.settings?.appTheme && !s?.settings?.app && typeof s?.background === 'string' && /^#[0-9a-f]{3,8}$/i.test(s.background)) { const [r, g, b] = hexToRgb(s.background); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5; } // a game without a theme: theme colours follow its background
+  if (!s?.settings?.appTheme && typeof s?.background === 'string' && /^#[0-9a-f]{3,8}$/i.test(s.background)) { const [r, g, b] = hexToRgb(s.background); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5; } // no theme picked (a game, or a game just turned into an app): theme colours follow its background
   const t = s?.settings?.appTheme || 'light';
   if (t === 'dark') return true;
   if (t === 'follow the phone') { if (darkMQ === null) try { darkMQ = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : false; } catch { darkMQ = false; } return !!darkMQ?.matches; }

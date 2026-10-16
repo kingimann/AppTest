@@ -411,8 +411,16 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - "Your story" (first) sends a message.
 - **Like Button:** a heart (or 👍, or ★) that pops with little sparks, turns a variable on or off and counts. Tick *Hold to pick a reaction* for 👍 ❤️ 😂 😮 😢 😡.
 - **Profile Header:** a cover, a big avatar, name with a verified tick, @handle, bio, and counts (`Label | value` lines; `{variables}` work).
+  - **Look:** **x** (a wide cover with the picture over its edge and buttons on the right), **instagram** (the picture with the counts beside it, the bio under it and wide Follow / Message buttons) or **centered** (everything in the middle, like TikTok or Facebook).
+  - It shows pronouns after the @handle, a **Follows you** chip, and a row with the **place**, a tappable **website** and **Joined** month. **Followed by …** lists people you follow who follow them, with their pictures.
+  - A gradient **ring** goes around the picture when they have a story. Tapping it goes to the page with the Stories (*Stories are on page*) and plays theirs. Without a story, tapping a picture (or a cover photo) opens it full screen.
+  - **⋯** opens Share profile, Copy username, **Mute**, **Block** and **Report**. Muting hides their posts and stories everywhere except their own page. Blocking also hides that page's posts, unfollows them, removes them as a friend and as your follower; the header then shows **Blocked** (tap to unblock).
   - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
-  - Tick *This is my profile* for **Edit profile** instead.
+  - Tick *This is my profile* for **Edit profile** instead. With the social graph it opens an **editor**: change the cover (a photo or one of the colours), your picture, name, bio, pronouns, place and website, then **Save**. A new name also goes on your posts, comments and stories and in `{playerName}`.
+  - Everything shown comes from a **Profiles** collection (handle, name, bio, avatar, cover, location, website, pronouns, joined, verified) when there is one, otherwise from the settings; your own edits stay on the phone without one.
+  - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
+  - Tapping the **Followers / Following / Friends** counts opens *Lists page* (the Friends page) on that person's lists, with a Follow button on each.
+- **Profile tabs on a feed:** a feed's tabs can use `posts` (no replies), `replies`, `media` (posts with pictures or videos) and `likes` (posts you liked). A third column gives a tab its own look, e.g. `Media | media | grid`. The Social template's profiles use `Posts | posts`, `Replies | replies`, `Media | media | grid` and, on your own, `Likes | likes`.
 - **New Post Box:** "What's happening?" with your avatar. Tap to write a post; it's added to the Posts collection (author `{playerName}`, handle `{playerHandle}`) and shows in the feed at once.
   - Tapping it opens a **full composer** (or, with *Tapping it opens: simple text box*, the old one-line box):
     - a big text area with a **character ring** that turns orange near the limit and red over it (with the count left);

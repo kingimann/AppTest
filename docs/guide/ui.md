@@ -260,7 +260,7 @@ Add **Panel (window)** to make it a window (or add *UI › Window* / *Glass Pane
 
 Pieces for feeds, stories and profiles, like the big social apps. They're in *Project › UI › Social* and *Add Component › UI*. The **Social** app template (*New › App*) puts them together: a home timeline with stories and a post box, a photo feed, a friends feed, and a profile with a photo grid.
 
-- **Social Feed:** a scrolling list of posts with pull to refresh. Pick a look:
+- **Social Feed:** a scrolling list of posts with pull to refresh (a round spinner opens in the gap under its tabs, fills as you pull and spins while it refreshes). Pick a look:
   - **timeline:** text first, small avatar, name, verified tick, @handle and how long ago. Under each post: comment, repost, like and share, with counts.
   - **photos:** a header with a ringed avatar, a big square picture, then heart / comment / send / save, the likes, the caption and "View all comments". Double-tap the picture to like it (a heart pops). Posts without a picture are skipped.
   - **cards:** each post on a card with reaction counts and Like / Comment / Share buttons.

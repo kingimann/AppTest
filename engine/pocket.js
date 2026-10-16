@@ -9221,7 +9221,7 @@ function makeScroller(axis = 'y') {
         const dd = q[k] - S.drag.p0, other = q[k === 'y' ? 'x' : 'y'] - S.drag.o0;
         if (!S.drag.on && Math.abs(dd) > 8 && Math.abs(dd) > Math.abs(other)) { S.drag.on = true; S.drag.p0 = q[k]; } // (starts from here: no jump)
         if (S.drag.on) { const ep = s.engine.input.pointers.get(S.drag.id); if (ep && k === 'y') ep.claimed = true; S.moved = true; let nv = S.drag.v0 - (q[k] - S.drag.p0); if (nv < 0) nv = -Math.pow(-nv, 0.82); else if (nv > S.max) nv = S.max + Math.pow(nv - S.max, 0.82); S.flick = (nv - S.v) / Math.max(dt, 1 / 120); S.v = nv; }
-      } else { const u = S.drag.on && UK.lifted(s, e, S.drag.id); if (u) S.flick = S.v < 0 || S.v > S.max ? 0 : -u['v' + k]; if (S.v < -70 && onRefresh) { S.refreshT = s.time; onRefresh(); } S.drag = null; } // the flick: how fast the finger was going as it let go
+      } else { const u = S.drag.on && UK.lifted(s, e, S.drag.id); if (u) S.flick = S.v < 0 || S.v > S.max ? 0 : -u['v' + k]; if (S.v < -58 && onRefresh) { S.refreshT = s.time; onRefresh(); } S.drag = null; } // the flick: how fast the finger was going as it let go
     } else {
       S.v += S.flick * dt; S.flick *= Math.pow(SCROLL_DECAY, dt); if (Math.abs(S.flick) < 6) S.flick = 0;
       if (S.v < 0 && S.flick < 0 || S.v > S.max && S.flick > 0) S.flick *= Math.pow(1e-6, dt); // gliding past an end: a quick stop, then it springs back
@@ -10393,7 +10393,12 @@ registerBehavior('uiFeed', {
         const myHandle = meOf(s).handle, followable = (r) => p.followButtons !== false && r[K('following')] !== undefined && r[K('following')] !== '' && !truthy(F(r, 'following')) && who(r) !== myHandle && !r._mine && !s.engine.social?.isFollowing(who(r)); // (never on your own posts)
         const followPill = (r, right, cy, hits, ox, oy) => { ctx.font = `800 13px ${THEME.font}`; const w = ctx.measureText('Follow').width + 22; ctx.fillStyle = acc; UK.rr(ctx, right - w, cy - 14, w, 28, 14); ctx.fill(); UK.text(ctx, 'Follow', right - w / 2, cy + 1, { size: 13, weight: 800, color: '#fff' }); if (hits) hits.push({ k: 'follow', x: right - w - ox, y: cy - 16 - oy, w, h: 32 }); return w + 8; };
         const top = b.y + inset - S.v;
-        if (S.v < -8 && p.pullRefresh !== false) { const a = clamp(-S.v / 70, 0, 1), cy = b.y + Math.min(-S.v, 70) / 2; ctx.strokeStyle = acc; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath(); const st = s.time * 6; ctx.arc(b.cx, cy, 11, st, st + Math.PI * 1.5 * a); ctx.stroke(); }
+        if (S.v < -8 && p.pullRefresh !== false) { // the pull-to-refresh spinner, in the gap that opens under the tabs (not behind them): fills as you pull, spins while it refreshes
+          const busy = s.time - S.refreshT < 0.9, a = busy ? 1 : clamp(-S.v / 58, 0, 1), cy = b.y + inset + Math.min(-S.v, 70) / 2, R = 16;
+          ctx.save(); ctx.globalAlpha *= Math.min(1, (-S.v - 8) / 20);
+          ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; ctx.fillStyle = tok('@card') || (isDark(s) ? '#1f2330' : '#ffffff'); ctx.beginPath(); ctx.arc(b.cx, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.shadowColor = 'transparent';
+          ctx.strokeStyle = acc; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath(); const st = busy ? s.time * 7 : -Math.PI / 2 + a * 1.5; ctx.arc(b.cx, cy, R - 7, st, st + (busy ? Math.PI * 1.5 : Math.PI * 1.7 * a)); ctx.stroke(); ctx.restore();
+        }
         if (!P.length && p.skeletons !== false && (has(s) && s.engine.supa?.isLoading?.(p.collection))) { // loading from Supabase: grey placeholder posts that shimmer
           const sh = (s.time * 0.9) % 1.6 - 0.3, g = ctx.createLinearGradient(b.x + sh * b.w - 120, 0, b.x + sh * b.w + 120, 0), base = isDark(s) ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)', hi = isDark(s) ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.03)';
           g.addColorStop(0, base); g.addColorStop(0.5, hi); g.addColorStop(1, base);

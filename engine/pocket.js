@@ -9908,7 +9908,8 @@ registerBehavior('uiFeed', {
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |”, “Following | following” and “Saved | saved” (the posts you bookmarked). Blank = no tabs.' },
-    { key: 'withReposts', label: 'A person’s feed (handle = …) also shows what they reposted', type: 'bool', default: true },
+    { key: 'onProfile', label: 'On a page with a Profile Header (and no “Only show”)', type: 'select', options: ['their posts only', 'everyone’s posts'], default: 'their posts only', info: { 'their posts only': 'The feed shows the posts of the person the Profile Header is about (you, on your own profile).' } },
+    { key: 'showReposts', label: 'A person’s posts (a profile) also show what they reposted', type: 'bool', default: false, info: 'Off: a profile shows only posts that person wrote. On: also the ones they reposted, with “reposted” on top (like X).' },
     { key: 'commentPhotos', label: 'Photos and GIFs in comments', type: 'bool', default: true },
     { key: 'countViews', label: 'Count views (each person once, like X)', type: 'bool', default: true, info: 'A post gets a view when it has been on someone’s screen for a moment, or they open it. Show the count with “views” in Buttons.' },
     { key: 'savedPage', label: 'Saved page (“View” after saving, blank = none)', type: 'text', default: '', info: 'A page with a Saved list (bookmarked posts and comments).' },
@@ -10035,15 +10036,15 @@ registerBehavior('uiFeed', {
     const F = (r, k) => { if (SGr && PK[k] && r) { const pr = profOf(r), v = pr?.[PK[k]]; if (v != null && v !== '') return v; } return r?.[K(k)]; };
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
-      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : p.filter, tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
-      { const ow = ownerOf(s), pf = /^\s*handle\s*=/i.test(String(p.filter || '')); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
+      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : FILT(s), tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
+      { const ow = ownerOf(s), pf = /^\s*handle\s*=/i.test(FILT(s)); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: qVars(s) }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
       if (kw === 'posts') P = P.filter((r) => !F(r, 'reply_to')); else if (kw === 'replies') P = P.filter((r) => !!F(r, 'reply_to')); else if (kw === 'media') P = P.filter((r) => String(F(r, 'media') || '').trim()); else if (kw === 'likes') P = P.filter((r) => truthy(F(r, 'liked')));
       P = P.filter((r) => canSee(s, r)); // (posts for followers, friends or only their author)
       repostCtx = '';
-      const hm = p.withReposts !== false && has(s) && (!kw || kw === 'posts') && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
+      const hm = p.showReposts === true && has(s) && (!kw || kw === 'posts') && FILT(s).match(/^\s*handle\s*=\s*(.+?)\s*$/i);
       if (hm) { const h = handleOf(fillTemplate(hm[1], qVars(s))); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
       return P;
     };
@@ -10155,7 +10156,15 @@ registerBehavior('uiFeed', {
     let sheetUp = false; const cMem = new Map();
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
     /** Who a post is for (the composer's audience) and who may reply to it. */
-    const ownerOf = (s) => { const m = String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i); return m ? handleOf(fillTemplate(m[1], qVars(s))) : ''; }; // a person's page
+    /** On a page with a Profile Header and no filter of its own: that person's posts (mine on my profile). */
+    let selfE = null, pageWho = { t: -1, h: '' };
+    const profileOwner = (s) => {
+      if (pageWho.t === s.time) return pageWho.h; pageWho = { t: s.time, h: '' }; const pg = selfE?.parentEnt; if (!pg || p.onProfile === 'everyone’s posts') return '';
+      for (const q of s.entities) { if (q.parentEnt !== pg || q.dead) continue; const b = q.behaviors.find((x) => x.type === 'uiProfile'); if (!b) continue; const P = b.params || {}; pageWho.h = P.own ? handleOf(meOfVars(s, P.name, P.handle).handle) : handleOf(fillTemplate(String(P.handle || ''), qVars(s))) || '\u0000'; break; }
+      return pageWho.h;
+    };
+    const FILT = (s) => { const f = String(p.filter || '').trim(); if (f) return f; const o = profileOwner(s); return o ? 'handle = ' + o : ''; };
+    const ownerOf = (s) => { const m = FILT(s).match(/^\s*handle\s*=\s*(.+?)\s*$/i); const h = m ? handleOf(fillTemplate(m[1], qVars(s))) : ''; return h === '\u0000' ? '' : h; }; // a person's page
     const canSee = (s, r) => { const SG = s.engine.social, h = who(r); if (SG && !isMine(s, r) && SG.hides(h) && !(ownerOf(s) === h && !SG.isBlocked(h))) return false; // muted / blocked (a muted person's own page still shows their posts)
       if (SG && !isMine(s, r) && SG.isPrivate(h) && !SG.isFollowing(h)) return false; // a private account: only the people who follow them
       const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
@@ -10287,7 +10296,7 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
+        selfE = e; SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
         if (has(s) && !s.engine.editing && fixedMine !== D(s).rows(p.collection).length + '|' + meOfVars(s).handle) { fixedMine = D(s).rows(p.collection).length + '|' + meOfVars(s).handle; // posts I wrote before the post box and my profile agreed on who I am (“Me @me”, or signed in under another handle) move to me
           const m = meOfVars(s), mh = handleOf(m.handle), hk = K('handle'), ak = K('author');
           for (const r of D(s).rows(p.collection)) { const h = handleOf(r[hk]); if (h === mh) continue; if (r._mine || (h === 'me' && r[ak] === 'Me' && mh !== 'me')) D(s).update(p.collection, r.id, { [hk]: m.handle, [ak]: m.author }); } }
@@ -10409,7 +10418,7 @@ registerBehavior('uiFeed', {
           tabsR = TSt.draw(ctx, { x: b.x, y: b.y, w: b.w, h: inset }, TB.map((t, i) => ({ label: t.label, badgeDot: !!tabNew[i] })), clamp(tab, 0, TB.length - 1), { style: st, act: acc, idle: withAlpha(String(tc).startsWith('#') ? tc : '#888888', 0.55), text: tc, on: fil ? '#ffffff' : ['tabs', 'neon', 'boxed'].includes(st) ? acc : tc, line, size: +p.tabSize || 15, layout: p.tabLayout || 'auto', thumb: st === 'segmented' ? card : st === 'folder' ? tok(p.bg) || card : '', bar: tok(p.tabBg) || '', fade: tok(p.tabBg) || tok(p.bg) || '', now: s.time, snap: s.engine.editing, badgeColor: acc });
         }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + inset, b.w, b.h - inset); ctx.clip();
-        const P = posts(s); L = []; let y = 0; FEED_AUTOPLAY.on = p.autoplay !== false;
+        const P = posts(s); e._shown = P; L = []; let y = 0; FEED_AUTOPLAY.on = p.autoplay !== false;
         // new posts while scrolled down: a pill to jump up
         const ids = new Set(P.map((r) => r.id)); if (known) { let n = 0; for (const id of ids) if (!known.has(id)) n++; if (n && S.v > 30) fresh += n; } known = ids;
         const pop = (key) => { const t0 = pops.get(key); if (t0 == null) return 1; const a = (s.time - t0) / 0.35; return a >= 1 ? 1 : 1 + Math.sin(a * Math.PI) * 0.45; };

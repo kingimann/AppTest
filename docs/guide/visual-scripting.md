@@ -130,6 +130,30 @@ One Visual Script component can hold several scripts. Each runs side by side wit
 
 💾 (or *Save as Reusable Script* on the component) names and saves a script. Add it to other objects from *Add Component → My Scripts*. Copies stay **linked**: edit one and every copy updates. *Unlink* makes a copy independent. Saved scripts are kept on your device, so other games can use them too.
 
+## Social nodes
+
+The **Social** category works with the social app pieces (feeds, profiles, friends, messages, points). They use the same social graph as the Social Feed, Profile Header and Friends page, so a change made by a node shows everywhere at once.
+- **Actions:**
+  - **Follow Someone** (follow / unfollow / toggle) and **Friend Request** (send or accept / decline / cancel / unfriend);
+  - **Mute / Block Someone** (on / off / toggle);
+  - **Open Profile**, which sets `{profile}` and goes to their page, or to yours for your own handle;
+  - **Change My Profile** (name, bio, place, website, pronouns, picture or cover);
+  - **Open Edit Profile**: the editor; its *saved* output fires after Save;
+  - **Create Post** (text and a picture, mentions notify people) and **Open Post Composer**;
+  - **Send Direct Message** (optionally opens the chat);
+  - **Save Post** (save / unsave / toggle);
+  - **Send Notification** and **Mark Notifications Read**;
+  - **Award Points** (for a post, story, like… with streaks and trophies);
+  - **Watch Their Story**, with a *no story* output.
+- **Values:**
+  - **Social Check**: I follow them, they follow me, we are friends, a friend request either way, muted, blocked, has a story, is me;
+  - **Social Count**: followers, following, friends, posts, mutuals, friend requests, unread notifications;
+  - **Profile Field**: name, handle, bio, place, website, pronouns, picture, cover, joined, friend status. Leave *who* blank for yourself;
+  - **My Points** (points, streak, trophies), **Has Achievement** and **Post Is Saved**.
+- **Events:**
+  - **On Follow** (followed / unfollowed), **On New Friend**, **On New Notification** (any kind, or one), **On Posted**, **On Profile Saved** and **On Achievement Unlocked**;
+  - **Who (Social Event)** gives the @handle of the person the event is about. *Event Value (text)* gives the notification text, the post id or the achievement's name.
+
 ## Debugging
 
 - **Live debug:** after you Play, each node shows how often it ran (**×12**), and value nodes show their last value (**= 3.5**). Nodes that never ran are faded.

@@ -9462,10 +9462,12 @@ function socialSheet(s, o) {
       if (st.reaction) stats.append(el('span', '', st.reaction + ' You reacted'));
       stat(o.count?.() || 0, 'Comment'); stat(st.reposts, 'Repost'); stat(st.likes, 'Like'); stat(st.saves, 'Save');
       stats.style.display = stats.childElementCount ? 'flex' : 'none';
-      bC.textContent = '💬'; bR.textContent = '🔁'; bR.style.color = st.reposted ? c.repost : c.sub; bR.style.filter = st.reposted ? 'none' : 'grayscale(1)';
-      bL.textContent = st.liked ? st.reaction || '♥' : '♡'; bL.style.color = st.liked ? c.like : c.sub; bL.style.fontSize = '24px';
-      bS.textContent = st.saved ? '🔖' : '🏷'; bS.style.filter = st.saved ? 'none' : 'grayscale(1)'; bS.style.opacity = st.saved ? '1' : '.7';
-      bSh.textContent = '↗'; bSh.style.fontSize = '24px';
+      const ico = (b, d, on, col, fill) => { b.innerHTML = `<svg width="23" height="23" viewBox="0 0 24 24" fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${fill ? 1.6 : 1.9}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`; b.style.color = on ? col : c.sub; b.dataset.on = on ? '1' : ''; };
+      ico(bC, POST_ICONS.comment, false);
+      ico(bR, POST_ICONS.repost, st.reposted, c.repost);
+      if (st.liked && st.reaction && st.reaction !== '❤️') { bL.textContent = st.reaction; bL.style.color = c.like; bL.dataset.on = '1'; } else ico(bL, POST_ICONS.heart, st.liked, c.like, st.liked);
+      ico(bS, POST_ICONS.bookmark, st.saved, c.acc || c.text, st.saved);
+      ico(bSh, POST_ICONS.share, false);
     };
     bC.onclick = () => { inp.focus(); }; bR.onclick = () => { if (o.onQuote) { socialSheet(s, { kind: 'repost', colors: c, font, items: [{ icon: '🔁', label: o.stats().reposted ? 'Undo repost' : 'Repost', run: () => { o.onRepost?.(); paintActs(); pop(bR); } }, { icon: '✏️', label: 'Quote', run: () => o.onQuote() }] }); return; } o.onRepost?.(); paintActs(); pop(bR); }; bL.onclick = () => { o.onLike?.(); paintActs(); pop(bL); };
     bS.onclick = () => { o.onSave?.(); paintActs(); pop(bS); }; bSh.onclick = () => o.onShare?.();
@@ -9502,7 +9504,8 @@ function socialSheet(s, o) {
     if (cm.mine && o.onDelete) { const del = btn('', 'Delete'); del.onclick = () => { o.onDelete(cm); paint(); }; acts.append(del); }
     mid.append(acts);
     const hb = btn(`flex:none;color:${cm.liked ? c.like : c.sub};font:700 12px ${font};display:flex;flex-direction:column;align-items:center;gap:1px;min-width:30px;`);
-    hb.append(el('span', 'font-size:17px;', cm.liked ? '♥' : '♡'), el('span', '', fmt(cm.likes))); hb.setAttribute('aria-label', 'Like comment');
+    const hi = el('span', 'display:flex;height:18px;'); hi.innerHTML = `<svg width="17" height="17" viewBox="0 0 24 24" fill="${cm.liked ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${POST_ICONS.heart}</svg>`;
+    hb.append(hi, el('span', '', fmt(cm.likes))); hb.setAttribute('aria-label', 'Like comment'); hb.dataset.liked = cm.liked ? '1' : '';
     hb.onclick = () => { o.onLikeComment?.(cm); paint(); };
     let lastTap = 0; txt.addEventListener('click', () => { const t = performance.now(); if (t - lastTap < 300 && !cm.liked) { o.onLikeComment?.(cm); paint(); } lastTap = t; });
     r.append(avatar(cm.author, cm.avatar, isReply ? 26 : 34), mid, hb); return r;
@@ -10382,6 +10385,14 @@ function chatInputBar(s, o) {
   sync(); setTimeout(() => inp.focus(), 60);
   return { bar, input: inp, close, setReply };
 }
+/** Line icons for a post's buttons (the open post sheet). */
+const POST_ICONS = {
+  comment: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.4-4.3A8.4 8.4 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5z"/>',
+  repost: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21.2l8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  share: '<path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/>',
+};
 const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
 
 // ---- messaging: conversations, groups, replies, reactions, read receipts ----

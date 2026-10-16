@@ -2408,6 +2408,7 @@ function openCreate(startCat) {
     { key: 'objects', title: three ? 'Shapes' : 'Shapes & Objects', icon: 'square', color: '#2e7d5b', desc: three ? 'Cube, sphere, plane, text…' : 'Boxes, circles, text, images…', items: objs.filter((o) => !CAMLIGHT.includes(o.label)).map((o) => fromDef(o, 'entity')) },
     three && { key: 'models', title: '3D Models', icon: 'cube', color: '#2e7d5b', desc: 'Trees, houses, cars… or build your own', items: [{ label: 'New Model (Modeler)', icon: 'edit', desc: 'Model it like in Blender', fn: newModel }, ...MODELS_3D.map((m) => ({ label: m.label, icon: m.icon, fn: () => addEntity({ name: m.label, y: 0, model: { parts: clone(m.parts) } }) }))] },
     { key: 'ui', title: 'UI & Menus', icon: 'hud', color: '#c2185b', desc: 'Buttons, nav bars, side bars, popups…', items: UI_WIDGETS.map((o) => fromDef(o)) },
+    { key: 'pages', title: 'Page Templates', icon: 'layers', color: '#5b5bd6', desc: 'Ready-made pages: sign in, settings, feed, shop, menus…', items: pageTemplates().map((t) => ({ label: t.label, icon: t.icon, desc: t.desc, group: t.group, fn: () => newPageFrom(t) })) },
     { key: 'logic', title: 'Logic & Scripts', icon: 'bolt', color: '#e67e22', desc: 'Make things happen: nodes or triggers', items: logicItems },
     { key: 'camera', title: 'Camera & Lights', icon: 'camera', color: '#00897b', desc: 'What the player sees, and how it is lit', items: objs.filter((o) => CAMLIGHT.includes(o.label)).map((o) => fromDef({ ...o, label: o.label === 'Light' ? 'Point Light' : o.label }, 'entity')) },
     userPrefabs().length && { key: 'mine', title: 'My Prefabs', icon: 'cube', color: '#5d4037', desc: 'Things you saved to reuse', items: userPrefabs().map((pf) => ({ label: pf.name, icon: iconFor(pf.entities[0]), fn: () => instantiatePrefab(pf.id) })) },
@@ -2459,7 +2460,7 @@ function openCreate(startCat) {
   draw();
 }
 function openCreateMenu(anchor) {
-  if (uiMode) { popMenu(anchor, UI_GROUPS.flatMap((g) => [{ cap: g }, ...UI_WIDGETS.filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])); return; }
+  if (uiMode) { popMenu(anchor, [{ cap: 'Pages' }, { icon: 'layers', label: 'New page from a template…', k: 'sign in, settings, feed…', fn: openPageTemplates }, ...UI_GROUPS.flatMap((g) => [{ cap: g }, ...UI_WIDGETS.filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])]); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
   const sceneObj = (label) => objs.find((o) => o.label === label);
   popMenu(anchor, [
@@ -8212,18 +8213,27 @@ function pageTemplates() {
   ];
 }
 /** Build a template's content on a page (top to bottom; the page lines it up). */
-function fillPageTemplate(pg, tpl, pgv) {
+function fillPageTemplate(pg, tpl, pgv, startY) {
   const tall = (p) => { const sh = p.shape, t = p.text; if (sh) return +sh.h || (+sh.r || 0) * 2 || 40; if (t) { const sz = +t.size || 16, lines = Math.max(1, Math.ceil(String(t.value || '').length * sz * 0.5 / (+t.wrap || 360))); return sz * 1.35 * lines; } return 40; };
   const add = (p, parent, y) => { const { children, ...rest } = p; const j = { id: uid(), ui: true, ...clone(rest), parent }; if (y != null && /^top/.test(j.anchor || '') && j.stretch !== 'both') j.y = Math.round(y + tall(p) / 2); let n = 1; const base = j.name || 'Object'; j.name = base; while (project.entities.some((e) => e.name === j.name)) j.name = `${base} (${n++})`; project.entities.push(j); for (const c of children || []) add(c, j.id); return j; };
-  let y = tpl.noTitle ? 24 : 96; tpl.setup?.();
+  let y = startY ?? (tpl.noTitle ? 24 : 96); tpl.setup?.();
   for (const p of tpl.kids(pgv)) { add(p, pg.id, y); if (p.stretch !== 'both') y += tall(p) + 16; } // in order, top to bottom (the page lines them up from there)
 }
+/** Put a template's content on a page that already exists, under what is there. */
+function addTemplateToPage(pg, tpl) {
+  const rows = pageRows(pg), before = new Set(project.entities.map((j) => j.id));
+  fillPageTemplate(pg, tpl, String(showIfOf(pg)?.value ?? ''), rows.length ? Math.round(rows[rows.length - 1].bot + PAGE_GAP) : 24);
+  const first = project.entities.find((j) => !before.has(j.id) && j.parent === pg.id); if (first) selectedId = first.id;
+  changed({ structure: true }); pushHistory(); toast(`Added the ${tpl.label} template to the “${showIfOf(pg).value}” page`);
+}
+/** Name a page and build it from a template. */
+const newPageFrom = (t) => { const name = prompt('Name of the new page', t.key === 'blank' ? '' : t.label)?.trim(); if (name) newPage(null, { name, template: t }); };
 /** New Page: pick a ready-made page (or a blank one), then name it. */
 function openPageTemplates() {
   const L = pageTemplates(), groups = [...new Set(L.map((t) => t.group))];
   let g = store.get('pocket.editor.pageTplGroup', groups[0]); if (!groups.includes(g)) g = groups[0];
   const grid = h('div', { class: 'pb-grid' }), chips = h('div', { class: 'chips pb-chips' });
-  const pick = (t) => { closeLayer(); const name = prompt('Name of the new page', t.key === 'blank' ? '' : t.label)?.trim(); if (!name) return; newPage(null, { name, template: t }); };
+  const pick = (t) => { closeLayer(); newPageFrom(t); };
   const draw = () => {
     chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.pageTplGroup', x); draw(); } }, x, h('small', {}, String(L.filter((t) => t.group === x).length)))));
     grid.replaceChildren(...L.filter((t) => t.group === g).map((t) => h('button', { type: 'button', class: 'pb-tile', 'data-tpl': t.key, onclick: () => pick(t) }, h('span', { class: 'pb-ic' }, icon(t.icon)), h('b', {}, t.label), h('small', {}, t.desc))));
@@ -8249,10 +8259,11 @@ function pageAddMenu(anchor, pg = shownPageEnt()) {
     { icon: 'square', label: 'Choose later', fn: () => addPageBlock(pg, blk, '') }]);
   const sel = ent(selectedId), under = sel && sel.parent === pg.id ? ` under “${sel.name}”` : '';
   const mine = userPrefabs().filter((pf) => pf.entities?.[0]?.ui).map((pf) => ({ key: 'my-' + pf.id, group: 'My UI', label: pf.name, icon: 'cube', desc: 'saved by you', mine: pf.id }));
-  const blocks = [...mine, ...pageBlocks()], groups = [...new Set(blocks.map((b) => b.group || 'Basics'))];
+  const tpls = pageTemplates().filter((t) => t.key !== 'blank').map((t) => ({ key: 'tpl-' + t.key, group: 'Templates', label: t.label, icon: t.icon, desc: t.desc, tpl: t }));
+  const blocks = [...tpls, ...mine, ...pageBlocks()], groups = [...new Set(blocks.map((b) => b.group || 'Basics'))];
   let g = store.get('pocket.editor.blockGroup', groups[0]); if (!groups.includes(g)) g = groups[0];
   const grid = h('div', { class: 'pb-grid' }), chips = h('div', { class: 'chips pb-chips' });
-  const pickBlock = (blk) => { closeLayer(); if (blk.mine) { const j = instantiatePrefab(blk.mine); if (j) { j.parent = pg.id; placeOnPage(pg, [j]); changed({ structure: true }); } return; } if (blk.page && others.length) setTimeout(() => pickPage(blk)); else addPageBlock(pg, blk, ''); };
+  const pickBlock = (blk) => { closeLayer(); if (blk.tpl) { addTemplateToPage(pg, blk.tpl); return; } if (blk.mine) { const j = instantiatePrefab(blk.mine); if (j) { j.parent = pg.id; placeOnPage(pg, [j]); changed({ structure: true }); } return; } if (blk.page && others.length) setTimeout(() => pickPage(blk)); else addPageBlock(pg, blk, ''); };
   const draw = () => {
     chips.replaceChildren(...groups.map((x) => h('button', { type: 'button', class: x === g ? 'on' : '', onclick: () => { g = x; store.set('pocket.editor.blockGroup', x); draw(); } }, x, h('small', {}, String(blocks.filter((b) => (b.group || 'Basics') === x).length)))));
     grid.replaceChildren(...blocks.filter((b) => (b.group || 'Basics') === g).map((blk) => h('button', { type: 'button', class: 'pb-tile', onclick: () => pickBlock(blk) }, h('span', { class: 'pb-ic' }, icon(blk.icon)), h('b', {}, blk.label), h('small', {}, blk.desc))));

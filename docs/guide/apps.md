@@ -39,7 +39,11 @@ An app is a set of **pages**. A page is a full-screen panel with **Show If** on 
 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
 - **App Bar** shows the page title (*Page titles*: `home = My Tasks`, one per line) and a ‹ Back button. The phone's back gesture, the browser's Back button and Esc go back too.
-- **Page templates:** the page button › **New Page…** opens a gallery of ready-made pages. Pick one, name it, and it's built for you. Everything on it lines up by itself and uses your theme colours; change any of it afterwards.
+- **Page templates:** ready-made pages you can find in three places:
+  - **+ Add › Page Templates** (or search, e.g. “settings”) makes a new page from one;
+  - **Add to page › Templates** (the Page card, or **+ Add** in the UI editor while a page shows) puts a template's content on the page you're on, under what's already there;
+  - the page button › **New Page…** opens the same gallery.
+  Pick one, name it, and it's built for you. Everything on it lines up by itself and uses your theme colours; change any of it afterwards.
   - **Start:** Blank, Welcome, Coming Soon, Dashboard.
   - **Account:** Sign In and Create Account (Supabase accounts), Settings (switches, a volume slider, rows, Sign out), My Profile (an editable profile with Posts / Replies / Media / Likes), Account.
   - **Social:** Feed (stories, a post box, For you / Following), Explore, Messages, Chat, Notifications, Friends.

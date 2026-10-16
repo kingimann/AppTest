@@ -8123,7 +8123,7 @@ registerBehavior('uiSideBar', {
         if (hasHead) {
           const banner = look === 'banner', cardH = look === 'card', av = Math.max(20, +p.avatarSize || 52), centred = full() || p.headerAlign === 'centred';
           const tsz0 = full() && (+p.titleSize || 19) === 19 ? 26 : +p.titleSize || 19, subH = hSub ? 22 : 0;
-          const autoH = centred ? av + tsz0 + subH + 40 + cntH : banner || p.headerImage || cardH ? Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0)) + cntH : cntH ? av + 18 + cntH : Math.max(96, av + 44); // (plain header with numbers: they sit just under the picture, the list right after)
+          const autoH = (centred ? av + tsz0 + subH + 40 : Math.max(banner || p.headerImage ? 104 : 96, av + 44 + (cardH ? 12 : 0))) + cntH;
           const hh = +p.headerHeight > 0 ? +p.headerHeight : autoH;
           const hx = cardH ? x + 12 : x, hw = cardH ? w - 24 : w, hy = cardH ? y - 2 : hR, hH = cardH ? hh - 8 : hh + hS + 10; // the header's own box
           const hImg = p.headerImage ? loadImage(artURL(p.headerImage)) : null, hasImg = !!(hImg && hImg.complete && hImg.naturalWidth);
@@ -8272,7 +8272,6 @@ registerBehavior('uiSideBar', {
         const after = kidsMode === 'after the items'; // what's inside is cut off at the menu's edges (or the list's, when it scrolls with it)
         e._clipChildren = !(editing && kidsMode === 'where I put them'); e._clipRadius = after ? 0 : rad / k; e._clipRect = after ? { x: x + w / 2, y: (y + listEnd) / 2, w, h: Math.max(0, listEnd - y) } : { x: x + w / 2, y: R.y + R.h / 2, w, h: R.h };
         e._kidAlpha = alpha;
-        if (overflow > 0 && scroll < overflow - 1 && !/^url|gradient/.test(sty)) { const fc = tok(bg) || '#151826', g = ctx.createLinearGradient(0, listEnd - 30, 0, listEnd); g.addColorStop(0, withAlpha(fc, 0)); g.addColorStop(1, withAlpha(fc, sty === 'glass' ? 0.62 : 1)); ctx.fillStyle = g; ctx.fillRect(x, listEnd - 30, w, 30); } // more below: the last row fades out instead of being cut off
         if (overflow > 0) { const vh = listEnd - y, bh = Math.max(24, vh * vh / (vh + overflow)), by = y + (vh - bh) * (scroll / overflow); ctx.fillStyle = withAlpha(txt, 0.25); rr(left ? x + w - 5 : x + 2, by, 3, bh, 2); ctx.fill(); }
         if (FL.length) { if (!compact && !grouped()) { ctx.fillStyle = lineC || withAlpha(txt, sty === 'minimal' ? 0 : 0.1); ctx.fillRect(x + pad, fy - 6, w - pad * 2, 1); } drawList(FL, fy); }
         if (small) { ctx.save(); ctx.globalAlpha *= 0.5; ctx.fillStyle = txt; ctx.font = `600 12px ${THEME.font}`; ctx.textAlign = full() ? 'center' : 'left'; ctx.textBaseline = 'middle'; ctx.fillText(fillTemplate(String(p.footerText), s.vars), full() ? x + w / 2 : x + pad + 8, R.y + R.h - safeB - 18); ctx.restore(); } // small print

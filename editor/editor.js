@@ -3851,6 +3851,10 @@ function renderInspector() {
       def && { icon: 'help', label: 'Docs', fn: () => openDocs('ref/component/' + b.type) },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    const strays = b.type === 'uiSideBar' && (!b.sync || b.sync === 'nothing') ? sideMenuStrays(b) : [];
+    if (strays.length) box.append(h('div', { class: 'insp-fix', style: 'margin:8px;padding:12px;border-radius:12px;background:color-mix(in srgb, var(--accent) 14%, transparent);display:flex;flex-direction:column;gap:8px' },
+      h('div', {}, h('b', {}, `${strays.join(', ')} ${strays.length > 1 ? "aren't pages" : "isn't a page"} in your app. `), project.entities.some((q) => (q.behaviors || []).some((x) => x.type === 'uiBottomNav')) ? 'Match the Bottom Nav: the menu lists the same pages (then any others), and changes when they change. Your switches and sections stay.' : 'List your pages instead: the menu shows every page and changes when you add one. Your switches and sections stay.'),
+      h('button', { class: 'btn', onclick: () => { syncSideMenu(b); changed({ structure: true }); pushHistory(); toast('The menu now lists your pages'); } }, icon('layers'), project.entities.some((q) => (q.behaviors || []).some((x) => x.type === 'uiBottomNav')) ? 'Match the Bottom Nav' : 'List my pages')));
     const floatBtns = b.type === 'uiSideBar' && b.style !== 'rail' ? floatingMenuButtons(b.message || 'menu', b.side === 'right') : [], gearIc = b.side === 'right' ? '⚙' : '☰';
     if (floatBtns.length) box.append(h('div', { class: 'insp-fix', style: 'margin:8px;padding:12px;border-radius:12px;background:color-mix(in srgb, var(--accent) 14%, transparent);display:flex;flex-direction:column;gap:8px' },
       h('div', {}, h('b', {}, `The ${gearIc} floats over your pages. `), 'Templates and rows at the top can run into it. Put it in the top bar and everything lays out under the bar, like in an app.'),
@@ -5334,6 +5338,7 @@ function addPrefab(def, at) {
   const kids = def.children || def.props.children; // children can sit on the widget or inside its props
   const reuse = layout && twinBar(def.props);
   const j = reuse || (kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at));
+  if (!reuse) for (const bh of j.behaviors || []) if (bh.type === 'uiSideBar' && (!bh.sync || bh.sync === 'nothing') && (project.entities.some((q) => q.id !== j.id && (q.behaviors || []).some((x) => x.type === 'uiBottomNav')) || project.entities.some((q) => showIfOf(q) && q.ui))) syncSideMenu(bh); // a menu added to an app with tabs or pages lists those pages, not sample ones
   if (reuse) for (const bh of reuse.behaviors || []) if (bh.type === 'uiAppBar' && (bh.left === 'back' || bh.left === 'none')) bh.left = 'back, else menu'; // its ☰ opens the new Side Menu
   for (const a of def.after || []) if (!twinBar(a)) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
   if (kids || def.before || def.after) { selectedId = j.id; changed({ structure: true }); }
@@ -5461,6 +5466,27 @@ function duplicateEntity(id) {
   project.entities.splice(project.entities.indexOf(j) + ids.length, 0, ...copies);
   selectedId = c.id;
   changed({ structure: true }); pushHistory();
+}
+/** A Side Menu item line that opens a page (not a switch, a message, a section or a line): its page value, else ''. */
+function sideItemPage(l) {
+  const t = l.trim(); if (!t || /^(#|-|=|~|space)/.test(t)) return '';
+  const [label = '', , act = ''] = t.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
+  if (a.includes(':')) return /^page:/.test(a) ? a.slice(5).trim() : ''; // toggle:, msg:, button:, menu:… aren't pages
+  return /\s/.test(a) ? '' : a;
+}
+/** Items of this menu that go to pages the app doesn't have (names), when it has a Bottom Nav or pages to list instead. */
+function sideMenuStrays(b) {
+  const v = b.var || 'page', pages = new Set(project.entities.filter((q) => q.ui && showIfOf(q) && (showIfOf(q).var || 'page') === v).map((q) => String(showIfOf(q).value ?? '')));
+  if (!pages.size) return [];
+  return String(b.items || '').split('\n').filter((l) => { const pg = sideItemPage(l); return pg && !pages.has(pg); }).map((l) => l.split('|')[0].trim()).filter(Boolean);
+}
+/** The menu lists the Bottom Nav's pages (then the rest), or all pages: drop its own page items, keep switches, messages and sections. */
+function syncSideMenu(b) {
+  const hasNav = project.entities.some((q) => (q.behaviors || []).some((x) => x.type === 'uiBottomNav'));
+  b.sync = hasNav ? 'the Bottom Nav tabs, then the other pages' : 'all pages';
+  const L = String(b.items || '').split('\n').filter((l) => !sideItemPage(l));
+  while (L.length && /^\s*(-|)\s*$/.test(L[0])) L.shift(); // (no line or gap left at the top)
+  b.items = L.join('\n');
 }
 /** Buttons of your own (not inside a bar or a page) that open this Side Menu and float in a top corner. */
 function floatingMenuButtons(msg, right = false) {

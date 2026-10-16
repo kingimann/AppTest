@@ -148,6 +148,7 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
   - Side Menu presets use the theme colours (*@card*, *@text*, *@accent*), so the menu is light in a light app and dark in a dark one.
   - The first page you add also shows when the menu points at a page that doesn't exist yet (a menu starting on *home* with no Home page), so a game never opens on an empty screen.
   - **Keep in step with** the Bottom Nav tabs, all pages, or the tabs then the other pages. The menu then lists those pages (names, icons and badges) by itself and changes when they change. Your own items come after them.
+  - **A Side Menu added to an app with a Bottom Nav or pages keeps in step with them by itself** (the tabs first, then the other pages), keeping only its switches and sections, so the menu and the bar always list the same pages. A menu that still lists pages your app doesn't have (Shop, Map…) shows **Match the Bottom Nav** (or **List my pages**) at the top of its Inspector.
   - The Bottom Nav has **Keep in step with** too (the Side Menu's pages, or all pages, with *Most tabs* and where your own tabs go). A new page added in the editor also asks to join the side menu.
   - **For social apps:** turn on *Show the signed-in person*. The header then shows who is signed in: their initials or picture, name and @handle, with **Following / Followers / Friends** counts from the social graph.
     - Tapping the person opens *Tapping the person goes to page* (their profile), and tapping the numbers opens *Tapping the numbers goes to page*.

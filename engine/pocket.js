@@ -2643,7 +2643,7 @@ export class Input {
     this.engine.onFirstGesture?.();
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
-    const btn = this.engine.scene?.modal ? null : this.buttons.find((b) => (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
+    const btn = this.engine.scene?.modal ? null : this.buttons.find((b) => !b.off && (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
     const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
     const st = this.engine.scene?.settings || {};
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
@@ -3166,6 +3166,32 @@ export function loadImage(src) {
 // 2D renderer (Canvas 2D)
 // ============================================================================
 /** 1234 → "1234", 12345 → "12.3K", 4500000 → "4.5M" */
+const isPlainObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+/**
+ * What changed from a to b, as a small patch (undefined = nothing): objects key by key, lists item by item (matched by id,
+ * else by position), anything else replaced. "_at" times are left alone. Used to pack a project as its changes to the template
+ * it started from, so a Device Preview link stays short.
+ */
+export function jsonDiff(a, b, key) {
+  if (a === b) return undefined;
+  if (key === '_at' && typeof a === 'number' && typeof b === 'number') return undefined;
+  if (isPlainObj(a) && isPlainObj(b)) { const o = {}; let n = 0; for (const k of Object.keys(b)) { const d = jsonDiff(a[k], b[k], k); if (d !== undefined) { o[k] = d; n++; } } for (const k of Object.keys(a)) if (!(k in b)) { o[k] = { $x: 1 }; n++; } return n ? { $o: o } : undefined; }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    const byId = new Map(a.filter((q) => isPlainObj(q) && q.id != null).map((q) => [q.id, q])); let same = a.length === b.length;
+    const items = b.map((q, i) => { let m, ref; if (isPlainObj(q) && q.id != null && byId.has(q.id)) { m = byId.get(q.id); ref = { $r: q.id }; } else if (isPlainObj(q) && isPlainObj(a[i]) && a[i].id == null) { m = a[i]; ref = { $n: i }; } else { if (JSON.stringify(q) !== JSON.stringify(a[i])) same = false; return { $v: q }; }
+      if (m !== a[i]) same = false; const d = jsonDiff(m, q); if (d !== undefined) { same = false; ref.$d = d; } return ref; });
+    return same ? undefined : { $a: items };
+  }
+  return JSON.stringify(a) === JSON.stringify(b) ? undefined : { $v: b };
+}
+/** Apply a jsonDiff patch to a (gives b back). */
+export function jsonPatch(a, d) {
+  if (d === undefined) return a;
+  if ('$v' in d) return d.$v;
+  if (d.$o) { const o = isPlainObj(a) ? { ...a } : {}; for (const [k, x] of Object.entries(d.$o)) { if (x && x.$x) delete o[k]; else o[k] = jsonPatch(o[k], x); } return o; }
+  if (d.$a) { const A = Array.isArray(a) ? a : [], M = new Map(A.filter((q) => isPlainObj(q) && q.id != null).map((q) => [q.id, q])); return d.$a.map((it) => ('$v' in it ? it.$v : jsonPatch('$r' in it ? M.get(it.$r) : A[it.$n], it.$d))); }
+  return a;
+}
 export function formatNumber(v) {
   const a = Math.abs(v);
   if (a < 10000) return String(Math.floor(v));
@@ -4754,7 +4780,7 @@ function renderUI(engine, scene) {
     const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
     if (useStick) drawJoystick(ctx, engine, scene, inp, tint, pulse);
     for (const b of inp.buttons) {
-      if (b.hidden) continue; // UI Touch Buttons draw themselves
+      if (b.hidden || b.off) continue; // UI Touch Buttons draw themselves (a pause button is off on app pages)
       if (b.hotbar) { // square inventory slot: block colour, white frame when picked, count in the corner
         const x = b.x - b.w / 2, y = b.y - b.h / 2;
         ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, b.w, b.h);
@@ -11448,6 +11474,16 @@ function awardPoints(s, action, times = 1) {
   const D = s.engine.data, M = meOfVars(s); if (D.def('Points')) { const h = handleOf(M.handle), r = D.rows('Points').find((q) => handleOf(q.handle) === h), rec = { handle: h, name: M.author, points: st.points, streak: st.streak, achievements: Object.keys(st.unlocked).join(',') }; if (r) D.update('Points', r.id, rec); else D.add('Points', rec); }
   fresh.forEach((a, i) => setTimeout(() => { s.engine.notify?.({ type: 'achievement', title: a.title, text: a.text, icon: '', duration: 3 }); s.engine.vibrate?.(30); s.emit?.('achievement', a.id); }, 300 + i * 900));
 }
+/** Is an app page showing (a page set to “an app page”, or any page of an app project)? Then there is no pause button and nothing pauses by itself. */
+function appPageNow(s) {
+  if (!s) return false; let kind = '';
+  for (const e of s.entities) {
+    if (!e.ui || e.dead || !e.visible || e._parentHidden) continue;
+    const b = e.behaviors.find((q) => q.type === 'uiShowIf'), k = b?.params?.kind; if (!k || k === 'follow the game') continue;
+    kind = k === 'an app page' ? 'app' : 'game'; if (kind === 'game') break; // (a game page showing wins)
+  }
+  return kind ? kind === 'app' : !!(s.settings.app || s.settings.pagesAre === 'apps');
+}
 /** Show my score in {points} and {streak} (and count today towards the streak). */
 function pointsSync(s) { if (s.vars.points === undefined && !s.engine.editing) { const st = pointsState(s); s.vars.points = st.points; s.vars.streak = st.lastDay === dayOf() || st.lastDay === dayOf(Date.now() - 864e5) ? st.streak : 0; } }
 
@@ -13612,6 +13648,7 @@ registerBehavior('uiShowIf', {
     { key: 'whenUnset', label: 'Show while the variable is empty', type: 'bool', default: false },
     { key: 'anim', label: 'Animation', type: 'select', options: SHOW_ANIMS, default: 'fade', info: { 'zoom (follows navigation)': 'The new page grows in while the old one grows past you and fades; Back shrinks them the other way.', 'card stack (follows navigation)': 'The new page rises from the bottom over the old one, which sinks back and dims, like an iPhone sheet; Back drops it away.', 'reveal from tap (follows navigation)': 'The new page opens as a circle growing from where you tapped; Back closes it the same way.', 'wipe (follows navigation)': 'The new page is uncovered from the right edge; Back wipes it away.', 'push (iOS, follows navigation)': 'Opening a page pushes it in from the right over the old one, which slides a little left and dims; Back reverses it.', 'shared axis (follows navigation)': 'Pages slide a little and cross-fade, in the direction you navigate.', 'fade through': 'The old page fades out quickly, then the new one fades and grows in.', 'sheet (from bottom)': 'Slides up from the bottom with a spring.' } },
     { key: 'stagger', label: 'What is inside arrives', type: 'select', options: STAGGERS, default: 'none' },
+    { key: 'kind', label: 'This page is', type: 'select', options: ['follow the game', 'an app page', 'a game page'], default: 'follow the game', group: 'Page', info: { 'follow the game': 'An app project’s pages are app pages, a game’s are game pages.', 'an app page': 'No pause button and no PAUSED screen while it shows (even when you leave and come back): it behaves like an app.', 'a game page': 'The pause button shows and the game pauses when you leave, like a game.' } },
     { key: 'stack', label: 'Line everything up, top to bottom (no overlaps)', type: 'bool', default: false, group: 'Page', info: 'What is on the page stacks top to bottom in its order, with an even gap, on every screen size: a taller text or a hidden element moves what is under it. Things side by side stay a row. A feed or list that fills the page starts under them. Elements anchored to the middle or the bottom (a + button) float where they are.' },
     { key: 'stackGap', label: 'Gap between them', type: 'number', default: 16, range: [0, 48], step: 2, group: 'Page', showIf: (b) => !!b.stack },
     { key: 'stackTop', label: 'Space above the first one', type: 'number', default: -1, range: [-1, 120], step: 2, group: 'Page', showIf: (b) => !!b.stack, infoText: '-1 = where the first one is.' },
@@ -22672,7 +22709,7 @@ export class Engine {
       if (!this.editing) this.scene?.emit('appVisible', !document.hidden);
       if (document.hidden) { this.saveProgress(); this.autoSlot('leave'); if (!this.editing) this.phone.planReminders(this.levels?.[0]?.settings); } // "come back" reminders count from when the player left
       else if (this.audio.ctx?.state !== 'running') this.audio.ctx?.resume?.().catch(() => {}); // iOS suspends audio after calls/app switches
-      if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing) this.paused = true;
+      if (document.hidden && this.pauseOnHide && this.scene?.state === 'play' && !this.editing && !appPageNow(this.scene)) this.paused = true;
       if (!document.hidden && this.scene && !this.editing && this.scene.state === 'play') this.keepAwake();
     };
     document.addEventListener('visibilitychange', this.onVis);
@@ -23070,6 +23107,7 @@ export class Engine {
 
   navTick(s) {
     const inp = this.input; this.nativeChrome(s); if (s.settings.app) pointsSync(s);
+    { const ap = appPageNow(s); for (const b of inp.buttons) if (b.action === 'pause' || b.action === 'mute') b.off = ap; } // app pages: no pause / mute buttons
     if (s.settings.edgeSwipeBack !== false && s.canGoBack()) {
       for (const u of inp.ups) if (u.sx < 28 && u.x - u.sx > 70 && Math.abs(u.y - u.sy) < 90 && u.time < 0.7) { s.navBack(); inp.taps.length = 0; break; }
     }
@@ -23306,7 +23344,8 @@ export class Engine {
       if (!this.inspecting && ((inp.pressed('tap') && !ownScreen(s, 'paused')) || inp.pressed('btn:pause'))) this.paused = false;
       return;
     }
-    if (inp.pressed('btn:pause') && s.state === 'play') { this.paused = true; return; }
+    if (inp.pressed('btn:pause') && s.state === 'play' && !appPageNow(s)) { this.paused = true; return; }
+    if (s.state === 'title' && appPageNow(s)) s.state = 'play'; // (an app page opens straight away: no “tap to start”)
     if (s.state === 'title') {
       this.runUIOnly(s, dt);
       if (inp.pressed('tap') && !ownScreen(s, 'title') && !s.loading) { s.state = 'play'; this.audio.sfx('click'); if (this.screenHit(inp.taps[0])) this.vibrate(8); }

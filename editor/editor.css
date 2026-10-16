@@ -2132,3 +2132,8 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .acc-opts input[type=checkbox] { width: 18px; height: 18px; flex: none; margin: 0; }
 .build-test { display: flex; flex-direction: column; gap: 10px; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
 .build-test small { display: block; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+.dp { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.dp-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.dp-qr .qr-code { width: min(280px, 70vw); height: auto; image-rendering: pixelated; border-radius: 12px; background: #fff; padding: 6px; }
+.dp-link { width: 100%; font: 13px ui-monospace, monospace; padding: 10px; border-radius: 10px; border: 1px solid var(--line, #444); background: var(--field, rgba(128,128,128,.12)); color: inherit; }
+.dp-warn { color: var(--orange); }

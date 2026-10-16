@@ -1,11 +1,12 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
+import { qrCanvas } from './qr.js';
 import * as cloud from './cloud.js';
 import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
@@ -4235,6 +4236,7 @@ function renderSceneSettings(box) {
   ], { icon: 'save', key: 's-save' }));
   box.append(comp('App', [
     C('settings.app', { label: 'This is an app, not a game', type: 'bool', def: false, structure: true }),
+    !game.settings?.app && C('settings.pagesAre', { label: 'Pages without a setting of their own are', type: 'select', options: [['games', 'Game pages (pause button, pauses when you leave)'], ['apps', 'App pages (no pause, nothing pops up)']], def: 'games', infoText: 'Each page can choose for itself: select the page › This page is (an app page / a game page).' }),
     h('p', { class: 'desc' }, 'Apps open straight on their first page: no title screen, pause, sound or share buttons. Build them from pages, an App Bar or Bottom Nav, Data Lists and Record Forms (Add → UI & Menus → App).'),
     h('p', { class: 'desc' }, 'Apps can hold games: add one as new levels, and a Play Game button opens it. The game keeps its own title, pause and end screens, with a “Back to app” button.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: openAddGameDialog }, icon('gamepad'), 'Add a game…')),
@@ -6685,6 +6687,48 @@ async function exportAndroid() {
   } catch (err) { toast('Could not make the Android Studio project: ' + err.message); }
 }
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
+// ---- previews: the project on its own (no editor), and on a real phone ----
+/** Standalone Preview: the project in its own tab (or a phone-size window) with no editor around it. Playing again updates it. */
+function standalonePreview(win) {
+  saveNow(); const { game } = buildGameJSON();
+  try { localStorage.setItem('pocket.preview', JSON.stringify({ at: Date.now(), game })); }
+  catch { toast('The project is too big to hand over: opening the built web app instead'); return testInSafari(); }
+  const url = new URL('../play.html?preview=1', location.href).href;
+  const w = win ? window.open(url, 'pocketPreview', 'popup=yes,width=420,height=860') : window.open(url, 'pocketPreviewTab');
+  if (!w) { location.assign(url); return; }
+  toast(win ? 'Opened in a phone-size window' : 'Opened in a new tab: it updates when you preview again');
+}
+/** A link that opens this project on any phone: the template it started from plus what changed (short), else the whole project. */
+async function previewLink() {
+  const { game } = buildGameJSON(); let best = { key: '', d: null, n: JSON.stringify(game).length };
+  for (const [k, t] of Object.entries(templates)) { if ((t.mode || '2d') !== (game.mode || '2d') || !!t.settings?.app !== !!game.settings?.app) continue; const d = jsonDiff(t, game) || { $o: {} }, n = JSON.stringify(d).length; if (n < best.n) best = { key: k, d, n }; }
+  const z = (await gzip64(JSON.stringify(best.key ? best.d : game))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return new URL('../play.html', location.href).href + (best.key ? `#t=${encodeURIComponent(best.key)}&d=${z}` : `#p=${z}`);
+}
+/** Device Preview: a QR code to scan with a phone's camera, and the link to send. */
+async function devicePreview() {
+  saveNow(); let url = '';
+  try { url = await previewLink(); } catch (err) { toast('Could not make the preview link: ' + err.message); return; }
+  const live = /^https:/.test(location.href) && !/localhost|127\.0\.0\.1/.test(location.host), qr = url.length <= 2300 ? qrCanvas(url, 640) : null;
+  if (qr) { qr.className = 'qr-code'; qr.setAttribute('aria-label', 'QR code'); }
+  const share = async () => { if (navigator.share) { try { await navigator.share({ title: (root.name || 'My project') + ' (preview)', url }); return; } catch { /* closed */ } } try { await navigator.clipboard.writeText(url); toast('Link copied'); } catch { toast('Could not copy the link'); } };
+  openDialog('Device Preview', [
+    h('div', { class: 'dp' },
+      qr ? h('div', { class: 'dp-qr' }, qr, h('p', { class: 'desc' }, 'Point a phone’s camera at the code, then tap the link it shows.')) : h('p', { class: 'desc dp-big' }, `This project is too big for a QR code (${kb(url.length)} link). Send the link instead: it opens the same way.`),
+      !live && h('p', { class: 'desc dp-warn' }, 'This editor is running on this computer only, so a phone can’t open the link. Use the published editor (an https address) to test on a phone.'),
+      h('input', { class: 'dp-link', readOnly: true, value: url, onclick: (e) => e.target.select() }),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: share }, icon('link'), navigator.share ? 'Share link' : 'Copy link'), h('button', { class: 'btn', onclick: () => window.open(url, '_blank') }, icon('globe'), 'Open here')),
+      h('p', { class: 'desc' }, 'The project travels inside the link (nothing is uploaded). Make a new code after you change things. Data people add while testing stays on their phone.'))]);
+}
+function openPreviewMenu(anchor) {
+  popMenu(anchor, [
+    { icon: 'play', label: playing ? 'Stop' : 'Play in the editor', fn: () => (playing ? stop() : play()) },
+    { icon: 'globe', label: 'Standalone preview', k: 'new tab, no editor', fn: () => standalonePreview(false) },
+    { icon: 'phone', label: 'Phone-size window', k: 'on a computer', fn: () => standalonePreview(true) },
+    { icon: 'link', label: 'Device preview', k: 'QR code or link', fn: devicePreview },
+    { icon: 'download', label: 'Test the built web app', k: 'as it ships', fn: testInSafari },
+  ]);
+}
 /** Build the web app exactly as it ships and open it in a new browser tab (Safari on an iPhone), to try it before uploading. */
 async function testInSafari() {
   const w = window.open('', '_blank'); // (opened straight away, inside the tap, so Safari doesn't block it)
@@ -7311,11 +7355,13 @@ const setHideUI = (on) => { hideUiBtn.classList.toggle('on', on); hideUiBtn.repl
 hideUiBtn.addEventListener('click', () => { const on = !EP.hideUI; setEP('hideUI', on); setHideUI(on); if (on && ent(selectedId)?.ui && !uiMode) select(null); toast(on ? 'UI hidden in the Scene (the UI button still edits it)' : 'UI shown'); });
 cleanBtn.before(hideUiBtn); setHideUI(!!EP.hideUI);
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
+{ const pv = h('button', { class: 'tb', id: 'previewBtn', title: 'Preview: standalone, phone window or on a phone' }, icon('phone')); $('#pauseBtn').after(pv); pv.addEventListener('click', () => openPreviewMenu(pv)); }
 $('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
 $('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));
 $('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) return; engine.stepFrames = 1; buzz(4); setTimeout(() => { if (inspectId) renderInspectCard(); }, 60); });
 $('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
 $('#pbStats').addEventListener('click', toggleStats);
+$('#pbPreview').append(icon('phone')); $('#pbPreview').addEventListener('click', () => openPreviewMenu($('#pbPreview')));
 $('#pbShot').append(icon('camera')); $('#pbShot').addEventListener('click', captureShot);
 $('#pbLog').addEventListener('click', () => { const pc = $('#playConsole'); pc.hidden = !pc.hidden; if (!pc.hidden) renderPlayConsole(); });
 // ---- where the play bar goes: above the game (default) or below it, so it never covers the game's own UI; or floating / a small button you drag ----
@@ -7547,7 +7593,7 @@ function pageCard(j, b, i, threeD, C, menu) {
     C(`behaviors.${i}.whenUnset`, { label: 'The app opens on this page', type: 'bool', def: false }),
     bar ? h('div', { class: 'row' }, h('label', {}, 'Title in the App Bar'), h('input', { type: 'text', value: titleOf(), placeholder: val, oninput: (e) => setTitle(e.target.value) })) : null,
     navs.length && !inTab ? h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { const nm = (j.name || val).replace(/ Page$/, ''); for (const n of navs) n.tabs = navTabsText([...navTabs(n), [nm, guessIcon(nm), val]]); changed({ structure: true }); pushHistory(); toast(`“${nm}” is a tab now`); } }, icon('plus'), 'Add to the bottom bar')) : null,
-    P('stack', { structure: true }), P('stackGap'), P('stackTop'),
+    P('kind'), P('stack', { structure: true }), P('stackGap'), P('stackTop'),
     fold('page:content', 'What’s on this page', [pageContent(j)], true),
     fold('page:look', 'Look', [
       C('shape.fill', { label: 'Background', type: 'color' }),

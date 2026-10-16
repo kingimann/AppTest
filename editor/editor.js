@@ -992,6 +992,10 @@ function pick(sx, sy) {
     const b = uiBounds(e), pad = Math.max(6, 22 - Math.min(b.hx, b.hy)); // thin text and small icons get a bigger target
     if (Math.abs(sx - b.x) <= b.hx + pad && Math.abs(sy - b.y) <= b.hy + pad) { const a = (b.hx + 4) * (b.hy + 4) + (Math.abs(sx - b.x) > b.hx || Math.abs(sy - b.y) > b.hy ? 1e6 : 0); if (a < bestA) { bestA = a; bestUI = e; } } // (a hit right on it beats one only near it)
   }
+  if (bestUI && !cover) { // the ☰ on an App Bar: tapping it shows the Side Menu it opens, like in play
+    const ab = bestUI.behaviors?.find((x) => x.type === 'uiAppBar');
+    if (ab) { const b = uiBounds(bestUI), m = (ab.params?.menuMessage || 'menu'); if (sx < b.x - b.hx + b.hy * 2.2) { const sm = menus.find((q) => (q.behaviors.find((x) => x.sideMenu)?.params?.message || 'menu') === m); if (sm) return sm; } }
+  }
   if (bestUI) return bestUI;
   if (cover) return cover; // anywhere on the open menu's panel
   for (const e of list) {

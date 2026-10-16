@@ -121,23 +121,15 @@ Tap the level row at the top of the Hierarchy. The same settings open in a bigge
 
 ### Project Settings
 
-**Project Settings** starts with a **Project** section:
+**Project Settings** opens on an **overview**:
 
-- name, version, *Made by*, description and category (the same ones Build Settings uses);
-- what kind of project it is, how many levels and objects it has, and whether it is saved;
-- buttons for **Save**, Build Settings and Preferences.
+- a card with the project's icon, name, kind (2D game, 3D game or app), version, levels, objects and whether it's saved, with **Edit** for the name, version, *Made by*, description and category (the same ones Build Settings uses);
+- buttons for **Save**, **Build Settings**, **Copy from…** and **Preferences**;
+- a **tile per category**, with what's in it and how many sections: Project; Screen & start; Gameplay; Look & lighting; Controls; Saving & data; App & online; Notifications & phone; Plugins & mods. In an app, Gameplay and Controls sit apart under *For games*, since an app doesn't use them.
 
-Then come all the Game Settings sections, sorted by category chips:
+Tap a tile to see only that category's sections. **‹ All settings** goes back, and **Next** moves on to the following category. **Search** looks through every category at once and opens the sections that match.
 
-- Project;
-- Screen & start;
-- Gameplay;
-- Look & lighting;
-- Controls;
-- Saving & data;
-- App & online;
-- Notifications & phone;
-- Plugins & mods.
+**Copy from…** takes another project's settings (screen and start, look and theme, saving, controls, online and phone) for this one. Its levels, objects and name stay as they are, and Undo puts the old settings back.
 
 **Search** shows only the sections that match. **Expand all** and **Collapse all** open or fold every section. Settings that show or hide others update straight away.
 

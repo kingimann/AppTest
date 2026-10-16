@@ -6398,47 +6398,83 @@ function psCatOf(title) {
   const t = String(title).toLowerCase();
   if (/^project$/.test(t)) return 'project';
   if (/level|orientation|screen|start screen|environment/.test(t)) return 'screen';
-  if (/physics|collision|inventory|items|recipes|quests|dialogues/.test(t)) return 'gameplay';
+  if (/physics|collision|inventory|items|recipes|quests|dialogues|rules/.test(t)) return 'gameplay';
   if (/light|post processing|theme|motion/.test(t)) return 'look';
   if (/touch|control/.test(t)) return 'input';
+  if (/^app$|supabase|online|gif/.test(t)) return 'online'; // (before data: “accounts & online data” is online)
   if (/saving|data/.test(t)) return 'data';
-  if (/^app$|supabase|online/.test(t)) return 'online';
-  if (/notification|permission/.test(t)) return 'phone';
+  if (/notification|permission|mobile|phone/.test(t)) return 'phone';
   if (/plugin|mod/.test(t)) return 'ext';
   return 'project';
 }
-let psCat = 'all';
+let psCat = 'home'; // Project Settings: the overview, or one category
+const PS_DESC = { project: 'Name, version, description', screen: 'Levels, orientation, start screen, safe area', gameplay: 'Physics, collisions, items, quests, rules', look: 'Theme, dark mode, lighting, effects', input: 'Touch controls', data: 'Saving and data collections', online: 'App mode, accounts, online play, GIFs', phone: 'Notifications, permissions, phone feel', ext: 'Plugins and player mods' };
 /** Project Settings: everything about this game in one window: its details, then every Game Settings section by category. */
 function openProjectSettings() {
   saveNow();
   const box = h('div', { class: 'ps-box' }), B = () => (root.build ||= {});
+  let q = '';
   const draw = () => {
     const sc = $('.dialog .db')?.scrollTop;
     box.replaceChildren();
-    const o = buildOpts(), lv = levelList(), nObj = lv.reduce((n, l) => n + (l.entities || []).filter((e) => !e.template).length, 0);
-    box.append(comp('Project', [
+    const o = buildOpts(), lv = levelList(), nObj = lv.reduce((n, l) => n + (l.entities || []).filter((e) => !e.template).length, 0), app = !!root.settings?.app;
+    const saved = allProjects()[projectId] ? (manualSave() && dirty ? 'Unsaved changes' : 'Saved') : 'Not saved yet';
+    const projectComp = comp('Project', [
       control(() => root, 'name', { label: 'Name', type: 'text', def: root.name }),
       control(B, 'version', { label: 'Version', type: 'text', def: BUILD_DEFAULTS.version }),
       control(B, 'author', { label: 'Made by', type: 'text', def: '' }),
       control(B, 'description', { label: 'Description', type: 'code', def: '' }),
-      control(B, 'category', { label: 'Category', type: 'select', options: [['', root.settings?.app ? 'App: Productivity' : 'Game: Casual'], ...STORE_CATEGORIES], def: '' }),
-      h('div', { class: 'br-row' }, h('span', {}, 'Kind'), h('b', {}, KIND_INFO[projKind(root)].label)),
-      h('div', { class: 'br-row' }, h('span', {}, 'Levels · objects'), h('b', {}, `${lv.length} · ${nObj}`)),
-      h('div', { class: 'br-row' }, h('span', {}, 'Saved'), h('b', {}, allProjects()[projectId] ? (manualSave() && dirty ? 'unsaved changes' : 'yes') : 'not yet')),
-      h('div', { class: 'btns' },
+      control(B, 'category', { label: 'Category', type: 'select', options: [['', app ? 'App: Productivity' : 'Game: Casual'], ...STORE_CATEGORIES], def: '' }),
+    ], { icon: 'gear', key: 'ps-project' });
+    projectComp.dataset.ps = 'project';
+    const tmp = h('div'); renderSceneSettings(tmp);
+    const comps = [projectComp, ...tmp.querySelectorAll(':scope > .comp')];
+    const titleOf = (c) => c.querySelector('.comp-h .t')?.firstChild?.textContent || '';
+    for (const c of comps) if (!c.dataset.ps) c.dataset.ps = psCatOf(titleOf(c));
+    const byCat = new Map(); for (const c of comps) { if (!byCat.has(c.dataset.ps)) byCat.set(c.dataset.ps, []); byCat.get(c.dataset.ps).push(c); }
+    if (q) { // searching: every section with a match, open
+      let hits = 0; for (const c of comps) if (c.textContent.toLowerCase().includes(q)) { c.classList.remove('closed'); box.append(c); hits++; }
+      if (!hits) box.append(h('div', { class: 'empty' }, `No setting matches “${q}”`));
+    } else if (psCat === 'home' || !byCat.has(psCat)) { // the overview: this project, then a tile per category
+      psCat = 'home';
+      const ic = h('div', { class: 'ps-icon', style: `background:${o.icon ? `center/cover url("${o.icon}")` : hexOr(o.iconBg, '#3a8dff')}` }, o.icon ? '' : (o.iconEmoji || '🎮'));
+      box.append(h('div', { class: 'ps-hero' }, ic,
+        h('div', { class: 'ps-hero-t' }, h('b', {}, root.name || 'Untitled'), h('span', {}, [KIND_INFO[projKind(root)].label, 'v' + (o.version || '1.0'), `${lv.length} level${lv.length === 1 ? '' : 's'}`, `${nObj} object${nObj === 1 ? '' : 's'}`].join(' · ')),
+          h('span', { class: 'ps-saved ' + (saved === 'Saved' ? 'ok' : 'warn') }, saved)),
+        h('button', { class: 'btn', title: 'Name, version and description', onclick: () => { psCat = 'project'; draw(); } }, icon('edit'), 'Edit')));
+      box.append(h('div', { class: 'btns ps-actions' },
         manualSave() && h('button', { class: 'btn primary', onclick: () => { commitSave(); draw(); } }, icon('save'), 'Save'),
         h('button', { class: 'btn', onclick: () => { closeLayer(); openBuildSettings(); } }, icon('download'), 'Build Settings'),
-        h('button', { class: 'btn', onclick: () => { closeLayer(); openPreferences(); } }, icon('gear'), 'Preferences')),
-    ], { icon: 'gear', key: 'ps-project' }));
-    const tmp = h('div'); renderSceneSettings(tmp);
-    for (const c of tmp.querySelectorAll(':scope > .comp')) { c.dataset.ps = psCatOf(c.querySelector('.comp-h .t')?.firstChild?.textContent || ''); box.append(c); }
-    for (const c of box.querySelectorAll(':scope > .comp')) { if (!c.dataset.ps) c.dataset.ps = 'project'; c.hidden = psCat !== 'all' && c.dataset.ps !== psCat; }
+        h('button', { class: 'btn', onclick: () => copySettingsFrom(draw) }, icon('copy'), 'Copy from…'),
+        h('button', { class: 'btn', onclick: () => { closeLayer(); openPreferences(); } }, icon('gear'), 'Preferences')));
+      const tile = (k, dim) => { const [, label, ic2] = PS_CATS.find((c) => c[0] === k), list = byCat.get(k) || [];
+        return h('button', { type: 'button', class: 'ps-tile' + (dim ? ' dim' : ''), onclick: () => { psCat = k; draw(); $('.dialog .db')?.scrollTo({ top: 0 }); } },
+          h('span', { class: 'ps-tile-ic' }, icon(ic2)), h('span', { class: 'ps-tile-t' }, h('b', {}, label), h('small', {}, PS_DESC[k] || list.map(titleOf).slice(0, 3).join(', '))), h('span', { class: 'ps-tile-n' }, String(list.length))); };
+      const cats = PS_CATS.map((c) => c[0]).filter((k) => k !== 'all' && byCat.has(k)), gameOnly = app ? cats.filter((k) => ['gameplay', 'input'].includes(k)) : [];
+      box.append(h('div', { class: 'ps-tiles' }, cats.filter((k) => !gameOnly.includes(k)).map((k) => tile(k))));
+      if (gameOnly.length) box.append(h('p', { class: 'desc', style: 'margin:14px 4px 6px' }, 'For games (an app doesn’t use these):'), h('div', { class: 'ps-tiles' }, gameOnly.map((k) => tile(k, true))));
+    } else { // one category
+      const [, label, ic2] = PS_CATS.find((c) => c[0] === psCat);
+      box.append(h('div', { class: 'ps-crumb' }, h('button', { type: 'button', class: 'btn', onclick: () => { psCat = 'home'; draw(); } }, icon('chevron'), 'All settings'), h('span', { class: 'ps-crumb-t' }, icon(ic2), label)));
+      for (const c of byCat.get(psCat)) box.append(c);
+      const cats = PS_CATS.map((c) => c[0]).filter((k) => k !== 'all' && byCat.has(k)), at = cats.indexOf(psCat), nx = cats[at + 1];
+      if (nx) box.append(h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { psCat = nx; draw(); $('.dialog .db')?.scrollTo({ top: 0 }); } }, 'Next: ' + PS_CATS.find((c) => c[0] === nx)[1], icon('right'))));
+    }
     if (sc != null && $('.dialog .db')) $('.dialog .db').scrollTop = sc;
   };
-  const chips = h('div', { class: 'ps-cats' }, PS_CATS.map(([k, l, ic]) => h('button', { type: 'button', class: 'chip' + (psCat === k ? ' on' : ''), onclick: (e) => { psCat = k; for (const b of e.currentTarget.parentNode.children) b.classList.toggle('on', b === e.currentTarget); for (const c of box.querySelectorAll(':scope > .comp')) c.hidden = psCat !== 'all' && c.dataset.ps !== psCat; $('.dialog .db')?.scrollTo?.(0, 0); } }, icon(ic), l)));
+  const tools = foldTools(box, 'Search project settings'), inp = tools.querySelector('input');
+  inp.oninput = () => { q = inp.value.trim().toLowerCase(); draw(); }; // (searches every category, not just the one shown)
   draw();
   projectSettingsRedraw = () => { if (box.isConnected) draw(); else projectSettingsRedraw = null; };
-  openDialog('Project Settings', [h('p', { class: 'desc' }, 'This game’s settings, saved with it. Build Settings has how it is packaged; Preferences are for you on this device.'), chips, foldTools(box, 'Search project settings'), box]);
+  openDialog('Project Settings', [h('p', { class: 'desc' }, 'This game’s settings, saved with it. Build Settings has how it is packaged; Preferences are for you on this device.'), tools, box]);
+}
+/** Take another project's settings (screen, look, saving, controls, online…) for this one; its levels and objects stay as they are. */
+function copySettingsFrom(after) {
+  const all = Object.entries(allProjects()).filter(([id]) => id !== projectId).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0));
+  if (!all.length) return toast('There are no other projects to copy from');
+  openDialog('Copy settings from…', [h('p', { class: 'desc' }, 'Uses another project’s settings for this one: screen and start, look and theme, saving, controls, online and phone. Your levels, objects and name stay as they are. Undo puts them back.'),
+    h('div', { class: 'snap-list' }, all.slice(0, 30).map(([id, rec]) => h('div', { class: 'proj-row' }, h('span', { class: 'nm' }, h('b', {}, rec.name || 'Untitled'), h('small', {}, ` ${KIND_INFO[projKind(rec.json || {})]?.label || ''} · ${ago(rec.updated || 0)}`)),
+      h('button', { class: 'btn', onclick: () => { const src = rec.json?.settings; if (!src) return toast('That project has no settings to copy'); const keepApp = root.settings?.app; root.settings = { ...clone(src), app: keepApp }; closeLayer(); changed({ structure: true }); pushHistory(); toast(`Settings copied from “${rec.name}”`); openProjectSettings(); after?.(); } }, 'Use these'))))]);
 }
 let projectSettingsRedraw = null;
 function openPreferences() {

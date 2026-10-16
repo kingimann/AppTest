@@ -2,7 +2,7 @@
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
 import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
-import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER } from './library.js';
+import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
@@ -3847,6 +3847,10 @@ function renderInspector() {
       def && { icon: 'help', label: 'Docs', fn: () => openDocs('ref/component/' + b.type) },
     ].filter(Boolean);
     if (!def) { box.append(comp(b.type, [h('p', { class: 'desc' }, 'Unknown component')], { menu })); return; }
+    const floatBtns = b.type === 'uiSideBar' && b.style !== 'rail' && b.side !== 'right' ? floatingMenuButtons(b.message || 'menu') : [];
+    if (floatBtns.length) box.append(h('div', { class: 'insp-fix', style: 'margin:8px;padding:12px;border-radius:12px;background:color-mix(in srgb, var(--accent) 14%, transparent);display:flex;flex-direction:column;gap:8px' },
+      h('div', {}, h('b', {}, 'The ☰ floats over your pages. '), 'Templates and rows at the top can run into it. Put it in a top bar and everything lays out under the bar, like in an app.'),
+      h('button', { class: 'btn', onclick: () => menuToTopBar(b.message || 'menu') }, icon('menu'), 'Put the ☰ in a top bar')));
     if (b.type === 'uiShowIf' && j.ui && j.stretch === 'both' && (b.op || '=') === '=') { box.append(pageCard(j, b, i, threeD, C, menu)); return; } // a page: its own card
     const summary = def.params.filter((p) => !p.group && !p.advanced && ['number', 'select', 'text'].includes(p.type || 'text') && shown({ ...p, def: paramDefault(p, threeD) }, b, threeD)).slice(0, 2)
       .map((p) => { const v = b[p.key] ?? paramDefault(p, threeD); const t = String(v ?? ''); return t === '' ? null : `${String(p.label || p.key).replace(/\s*\(.*\)$/, '').split(' ').slice(0, 2).join(' ').toLowerCase()} ${t.length > 14 ? t.slice(0, 13) + '…' : t}`; }).filter(Boolean).join(' · ');
@@ -5310,7 +5314,8 @@ function addPrefab(def, at) {
   };
   const sends = (bh) => { const P = bh?.params || bh; return bh?.type === 'button' && P?.action === 'send message' && String(P.value ?? '').trim(); };
   const haveBtn = (m) => m && project.entities.some((q) => q.ui && q.visible !== false && (q.behaviors || []).some((bh) => sends(bh) === m));
-  for (const b of def.before || []) { const m = sends((b.behaviors || [])[0]); if (haveBtn(m)) continue; addTree(b, null, at); } // you already have a button that opens it (a ☰ from another menu): don't stack a second one on it
+  const haveBar = () => project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiAppBar'));
+  for (const b of def.before || []) { const b0 = (b.behaviors || [])[0], m = sends(b0); if (haveBtn(m) || (b0?.type === 'uiAppBar' && haveBar())) continue; addTree(b, null, at); } // you already have a button that opens it (a ☰ from another menu): don't stack a second one on it
   const kids = def.children || def.props.children; // children can sit on the widget or inside its props
   const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
   for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)
@@ -5439,6 +5444,19 @@ function duplicateEntity(id) {
   project.entities.splice(project.entities.indexOf(j) + ids.length, 0, ...copies);
   selectedId = c.id;
   changed({ structure: true }); pushHistory();
+}
+/** Buttons of your own (not inside a bar or a page) that open this Side Menu and float in a top corner. */
+function floatingMenuButtons(msg) {
+  if (project.entities.some((q) => (q.behaviors || []).some((bh) => bh.type === 'uiAppBar'))) return [];
+  return project.entities.filter((q) => q.ui && !q.parent && /^top/.test(q.anchor || '') && (q.behaviors || []).some((bh) => bh.type === 'button' && bh.action === 'send message' && String(bh.value ?? '').trim() === msg));
+}
+/** Swap floating ☰ buttons for a top bar whose ☰ opens the menu. */
+function menuToTopBar(msg) {
+  const ids = new Set(floatingMenuButtons(msg).flatMap((q) => subtree(q.id)));
+  project.entities = project.entities.filter((e) => !ids.has(e.id));
+  const bar = { id: uid(), ...clone(topBar(msg)) }; let n = 1; while (project.entities.some((e) => e.name === bar.name)) bar.name = `App Bar (${n++})`;
+  project.entities.push(bar); selectedId = bar.id;
+  changed({ structure: true }); pushHistory(); updateCtxBar(); toast('The ☰ is in a top bar now. Undo to go back.');
 }
 function deleteEntity(id) {
   const j = ent(id); if (!j) return;

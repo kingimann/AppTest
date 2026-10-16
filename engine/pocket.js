@@ -14080,8 +14080,13 @@ registerBehavior('uiShowIf', {
       }
       if (y !== (e._scrollY || 0)) { s.emit('uiScroll', y - (e._scrollY || 0), e, maxS ? clamp(y / maxS, 0, 1) : 0); e._scrollY = y; }
     };
-    const test = (v) => {
+    let orphanT = -1, orphan = false;
+    const test = (v, s) => {
       if (v == null || v === '') return !!p.whenUnset;
+      if (p.whenUnset && (p.op || '=') === '=' && s && !sameVal(v, p.value)) { // the first page also shows when no page is for this value (a menu starting on “home” with no Home page yet)
+        if (orphanT !== s.time) { orphanT = s.time; orphan = !s.entities.some((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiShowIf' && x.params && x.params.var === p.var && (x.params.op || '=') === '=' && sameVal(v, x.params.value))); }
+        if (orphan) return true;
+      }
       const a = +v, b = +p.value, num = p.value !== '' && Number.isFinite(a) && Number.isFinite(b);
       switch (p.op) {
         case '≠': return num ? a !== b : !sameVal(v, p.value);
@@ -14093,14 +14098,14 @@ registerBehavior('uiShowIf', {
       uiAlways: true,
       start(e, s) {
         if (s.engine.editing) return; // (the editor shows the pages itself)
-        shown = test(s.vars[p.var]); e.visible = shown;
+        shown = test(s.vars[p.var], s); e.visible = shown;
         if (shown && p.showMessage) queueMicrotask(() => s.send(p.showMessage));
         if (shown && p.firstMessage && !s.engine.editing) { firstDone = true; queueMicrotask(() => s.send(p.firstMessage)); }
         s.on('pageScrollTop', (pg, v) => { if (!e.dead && pg === String(p.value) && (v || 'page') === (p.var || 'page') && (e._scrollY || 0) > 0) goal = 0; }); // tapping its tab again
         if (p.scrollTopOn) s.on('message', (m) => { if (!e.dead && m === p.scrollTopOn) goal = 0; });
       },
       update(e, dt, s) {
-        let want = test(s.vars[p.var]);
+        let want = test(s.vars[p.var], s);
         if (want && !shown && p.requireVar && !s.engine.editing && !isSet(s.vars[p.requireVar]) && p.otherwise && !sameVal(p.otherwise, p.value)) { s.navTo(p.otherwise, p.var || 'page', { history: false }); want = false; return; } // not signed in (or the like): somewhere else instead
         if ((p.scroll || p.refreshMessage) && shown && e.visible && !s.engine.editing) scrollTick(e, dt, s);
         if (want !== shown) {

@@ -10037,14 +10037,14 @@ registerBehavior('uiFeed', {
     const tabPosts = (s, ti) => {
       const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : p.filter, tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
       { const ow = ownerOf(s), pf = /^\s*handle\s*=/i.test(String(p.filter || '')); if ((pf && !ow && kw !== 'likes') || (ow && s.engine.social?.isBlocked(ow))) { repostCtx = ''; return []; } } // a person's page with no one picked yet, or someone you blocked
-      let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
+      let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: qVars(s) }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
       if (kw === 'posts') P = P.filter((r) => !F(r, 'reply_to')); else if (kw === 'replies') P = P.filter((r) => !!F(r, 'reply_to')); else if (kw === 'media') P = P.filter((r) => String(F(r, 'media') || '').trim()); else if (kw === 'likes') P = P.filter((r) => truthy(F(r, 'liked')));
       P = P.filter((r) => canSee(s, r)); // (posts for followers, friends or only their author)
       repostCtx = '';
       const hm = p.withReposts !== false && has(s) && (!kw || kw === 'posts') && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
-      if (hm) { const h = handleOf(fillTemplate(hm[1], s.vars)); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
+      if (hm) { const h = handleOf(fillTemplate(hm[1], qVars(s))); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
       return P;
     };
     /** The page this feed is on (things above it scroll away), and how far up they have gone. */
@@ -10155,7 +10155,7 @@ registerBehavior('uiFeed', {
     let sheetUp = false; const cMem = new Map();
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
     /** Who a post is for (the composer's audience) and who may reply to it. */
-    const ownerOf = (s) => { const m = String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i); return m ? handleOf(fillTemplate(m[1], s.vars)) : ''; }; // a person's page
+    const ownerOf = (s) => { const m = String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i); return m ? handleOf(fillTemplate(m[1], qVars(s))) : ''; }; // a person's page
     const canSee = (s, r) => { const SG = s.engine.social, h = who(r); if (SG && !isMine(s, r) && SG.hides(h) && !(ownerOf(s) === h && !SG.isBlocked(h))) return false; // muted / blocked (a muted person's own page still shows their posts)
       if (SG && !isMine(s, r) && SG.isPrivate(h) && !SG.isFollowing(h)) return false; // a private account: only the people who follow them
       const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
@@ -10201,7 +10201,10 @@ registerBehavior('uiFeed', {
     const CKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.comments';
     const cDev = (s) => { try { return JSON.parse(store.get(CKEY(s), '{}')) || {}; } catch { return {}; } };
     const cColl = (s) => (p.commentsCollection && D(s).def(p.commentsCollection) ? p.commentsCollection : '');
-    const meOf = (s) => { const a = fillTemplate(String(p.commentAs ?? '{playerName}'), s.vars).trim(); const author = a && !/[{}]/.test(a) ? a : 'You'; const h = fillTemplate('{playerHandle}', s.vars).trim(); return { author, handle: h && !/[{}]/.test(h) ? h.replace(/^@/, '') : author.toLowerCase().replace(/\s+/g, '') }; };
+    let fixedMine = '';
+    const meOf = (s) => meOfVars(s, p.commentAs ?? '{playerName}', '{playerHandle}');
+    /** The variables a filter is read with: {playerHandle} / {playerName} are me as the profile sees me (signed in, or You / @you). */
+    const qVars = (s) => { const m = meOfVars(s); return { ...s.vars, playerName: m.author, playerHandle: m.handle }; };
     const cmtsOf = (s, r) => {
       const out = [], me0 = meOf(s), tc = String(F(r, 'topComment') ?? '').trim();
       const mem = (id, o) => { if (!cMem.has(id)) cMem.set(id, o); return cMem.get(id); };
@@ -10285,6 +10288,9 @@ registerBehavior('uiFeed', {
       uiAlways: true,
       update(e, dt, s) {
         SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
+        if (has(s) && !s.engine.editing && fixedMine !== D(s).rows(p.collection).length + '|' + meOfVars(s).handle) { fixedMine = D(s).rows(p.collection).length + '|' + meOfVars(s).handle; // posts I wrote before the post box and my profile agreed on who I am (“Me @me”, or signed in under another handle) move to me
+          const m = meOfVars(s), mh = handleOf(m.handle), hk = K('handle'), ak = K('author');
+          for (const r of D(s).rows(p.collection)) { const h = handleOf(r[hk]); if (h === mh) continue; if (r._mine || (h === 'me' && r[ak] === 'Me' && mh !== 'me')) D(s).update(p.collection, r.id, { [hk]: m.handle, [ak]: m.author }); } }
         const b = boxOf(e, s); S.max = Math.max(0, total - b.h + (inset || 0) + 12 + coveredBottom(s, e, b)); // (under the tabs, which stay at the top)
         S.update(s, e, dt, room > 0 ? { ...b, y: b.y - room, h: b.h + room, cy: b.cy - room / 2 } : b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         collapse(s, e, dt);
@@ -10778,7 +10784,13 @@ const SAMPLE_CHATS = () => { const t = Date.now(), M = 60e3; return [
 const ONLY_EMOJI = (s) => { const t = String(s || '').trim(); return !!t && [...t].length <= 6 && !/[\p{L}\p{N}]/u.test(t) && /\p{Extended_Pictographic}/u.test(t); };
 const chatSeenKey = (s) => 'pocket.chatSeen.' + (s.engine.gameKey || 'game');
 const chatSeen = (s) => { try { return JSON.parse(store.get(chatSeenKey(s), '{}')) || {}; } catch { return {}; } };
-const meOfVars = (s, a, h) => { const author = fillTemplate(String(a ?? '{playerName}'), s.vars).trim(), handle = fillTemplate(String(h ?? '{playerHandle}'), s.vars).trim().replace(/^@/, ''); const A = author && !/[{}]/.test(author) ? author : 'You'; return { author: A, handle: handle && !/[{}]/.test(handle) ? handle : A.toLowerCase().replace(/\s+/g, '') }; };
+/** Who "I" am for a post, comment, story or message. Left at {playerName} / {playerHandle} (or blank), it is the social graph's me: the signed-in person, or those variables, or You / @you. So a post box, the feed and my profile always agree on whose posts are mine. */
+const meOfVars = (s, a, h) => {
+  const A0 = String(a ?? '{playerName}').trim(), H0 = String(h ?? '{playerHandle}').trim(), dA = !A0 || A0 === '{playerName}', dH = !H0 || H0 === '{playerHandle}', me = s.engine?.social?.me?.() || null;
+  const author = dA && me ? me.author : fillTemplate(A0, s.vars).trim(), handle = dH && dA && me ? me.handle : fillTemplate(H0, s.vars).trim().replace(/^@/, '');
+  const A = author && !/[{}]/.test(author) ? author : me?.author || 'You';
+  return { author: A, handle: handle && !/[{}]/.test(handle) ? handle : dA && me ? me.handle : A.toLowerCase().replace(/\s+/g, '') };
+};
 const isMineMsg = (r, me) => !!(r._me || r._mine || (r.handle ? String(r.handle).replace(/^@/, '') === me.handle : r.author === me.author));
 /** A direct-message conversation id for two people (the same from both sides). */
 const dmId = (a, b) => 'dm-' + [String(a).replace(/^@/, ''), String(b).replace(/^@/, '')].sort().join('-');
@@ -12796,7 +12808,7 @@ registerBehavior('uiComposer', {
         if (!busy && !asked) for (const t of UK.taps(s, e)) { if (!UK.in(t, UK.box(e))) continue; const hit = tools.find((q) => UK.in(t, q, 4)); tool = hit ? hit.k : ''; asked = true; pressT = s.time; break; }
         if (busy || !asked) return; asked = false; const startWith = tool; tool = '';
         UK.tap(s, p); busy = true;
-        const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
+        const me = meOfVars(s, p.author, p.handle);
         if (p.style !== 'simple text box' && !s.engine.editing) {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
           const ok = postComposer(s, { startWith, look: p.composerLook, title: p.composerTitle, buttonStyle: p.buttonStyle, audience: !!p.audience, audienceDefault: p.audienceDefault, replyControl: !!p.replyControl, backgrounds: !!p.backgrounds, emoji: p.emoji !== false, counter: p.counter, drafts: p.drafts !== false, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
@@ -12807,13 +12819,13 @@ registerBehavior('uiComposer', {
         }
         askTextBox(s, { question: 'New post', max: +p.max || 280, placeholder: p.placeholder }, (v) => {
           busy = false; if (!v) return;
-          const author = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', handle = fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author.toLowerCase().replace(/\s+/g, '');
+          const { author, handle } = meOfVars(s, p.author, p.handle);
           const coll = ensurePosts(s.engine, p.collection); s.engine.data.add(coll, { author, handle, text: v, likes: 0, liked: false, comments: 0, reposts: 0 }); s.emit('posted'); s.snackbar?.('Posted');
           if (p.message) s.send(p.message, v);
         });
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), look = p.look || 'pill', name = fillTemplate(String(p.author || ''), s.vars) || 'Me', pic = fillTemplate(String(p.avatar || ''), s.vars).trim(), dark = isDark(s);
+        const b = UK.box(e), look = p.look || 'pill', name = meOfVars(s, p.author, p.handle).author, pic = fillTemplate(String(p.avatar || ''), s.vars).trim(), dark = isDark(s);
         const field = tok(p.field || '@field') || (dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'), hint = tok(p.text || '@sub') || '#8b8f97', acc = tok(p.accent || '@accent') || '#1d9bf0', line = tok(p.line || '@line') || 'rgba(128,128,128,0.25)', txt = tok(p.name || '@text') || '#111';
         const press = Math.max(0, 1 - (s.time - pressT) / 0.25), avatar = (x, y, d) => miniAvatar(ctx, name, x, y, d, isPic(pic) ? pic : '');
         const toolRow = (x, y, w, list, big) => { tools = []; const n = list.length, step = w / n; list.forEach(([k, ic, label, col], i) => { const cx = x + step * i + step / 2; if (big) { ctx.font = `700 14px ${THEME.font}`; const tw = ctx.measureText(label).width, gx = cx - (tw + 26) / 2; drawIco(ctx, ic, gx + 10, y, 20, col, { stroke: 2.1 }); UK.text(ctx, label, gx + 26, y + 1, { size: 14, weight: 700, color: hint, align: 'left' }); tools.push({ k, x: x + step * i, y: y - 18, w: step, h: 36 }); } else { drawIco(ctx, ic, cx, y, 20, col, { stroke: 2 }); tools.push({ k, x: cx - 18, y: y - 18, w: 36, h: 36 }); } }); };

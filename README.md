@@ -1229,7 +1229,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     - Close: **drag it back**, tap outside, use the phone's Back gesture, or pick an item.
     - Choose whether picking an item switches page or opens it as a page that Back returns from.
   - **Works with the bars:**
-    - **With a Bottom Nav / App Bar:** *stay between them* (the menu fits between the bars, which stay tappable and draw over it, so a Bottom Nav's raised middle button stays whole; the menu leaves room for it; tapping a bar closes the menu), *cover them*, or *hide them while open*.
+    - **With a Bottom Nav / App Bar:** *stay between them* (the menu fits between the bars, which stay tappable; tapping one closes the menu; with a raised middle button on the Bottom Nav the menu goes over the bottom bar instead), *cover them*, or *hide them while open*.
     - **Opening:** *over the screen*, or *push the screen* (the rest of the UI slides aside, so nothing is hidden under the menu).
     - **Built-in ☰ button** in the top or bottom corner of its side (it steps aside while an App Bar shows its own ☰).
     - Side Menu presets add an **App Bar** with the ☰ (in games too), so pages lay out under it; older projects get a **Put the ☰ in a top bar** button in the Side Menu's Inspector.

@@ -4498,12 +4498,6 @@ function uiDrawOrder(s) {
   const under = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) { const i = top.indexOf(q); if (i >= 0) return i; } return -1; };
   const groups = top.map(() => []), rest = [];
   for (const e of out) { const i = under(e); if (i >= 0) groups[i].push(e); else rest.push(e); }
-  // a Side Menu that stays between the bars: the bars (a Bottom Nav's raised middle button too) go over it, not cut off by its edge
-  const si = top.findIndex((e) => e.behaviors?.some((b) => b.sideMenu && (b.params?.bars ?? 'stay between them') === 'stay between them'));
-  if (si >= 0) {
-    const isBar = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (q._dock && q.behaviors?.some((b) => b.type === 'uiBottomNav' || b.type === 'uiAppBar')) return true; return false; };
-    const bars = rest.filter(isBar); if (bars.length) { const r2 = rest.filter((e) => !isBar(e)); return r2.concat(...groups.slice(0, si + 1), bars, ...groups.slice(si + 1)); }
-  }
   return rest.concat(...groups);
 }
 function barsFor(e, safe) {
@@ -7644,7 +7638,7 @@ registerBehavior('uiBottomNav', {
             ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4; const ry = top ? G.cy : G.by + 4, Rr = top ? Math.min(R, G.bh * 0.4) : R; // (top tabs: the round button stays inside the bar)
             ctx.fillStyle = indC; ctx.beginPath(); ctx.arc(x, ry, Rr * (1 + Math.sin(pz * Math.PI) * 0.08), 0, Math.PI * 2); ctx.fill(); ctx.restore();
             drawNavIcon(ctx, icon, x, ry, isz * (top ? 1 : 1.15), '#ffffff');
-            if (showLabel(i, on) && !top) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, top ? G.by + lsz * 0.9 : G.by + G.bh - lsz * 0.9); }
+            if (showLabel(i, on) && !top) { ctx.font = `700 ${lsz}px ${THEME.font}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = col; ctx.fillText(t.label, x, Math.min(G.cy + isz * 0.5 + lsz * 0.2, G.by + G.bh - lsz * 0.7)); } // (on the same line as the other tabs' names)
             return;
           }
           const lab = showLabel(i, on) && t.label;
@@ -7937,7 +7931,9 @@ registerBehavior('uiSideBar', {
         if (p.openVar) s.setVar(p.openVar, v);
       },
       /** Space a Bottom Nav / App Bar holds above and below the menu ('stay between them'). */
-      between(s) { const B = s.engine.safe.bars; return p.bars === 'stay between them' || p.bars === undefined ? { top: B?.top || 0, bottom: B?.bottom || 0 } : { top: 0, bottom: 0 }; },
+      between(s) { const B = s.engine.safe.bars; if (!(p.bars === 'stay between them' || p.bars === undefined)) return { top: 0, bottom: 0 };
+        const sticksUp = s.entities.some((q) => q.visible && !q._parentHidden && !q.dead && q._dock && q.behaviors.some((x) => x.type === 'uiBottomNav' && x.params?.position !== 'top' && (x.params?.style === 'raised center' || x.params?.style === 'curved'))); // a raised middle button would poke into the menu: it goes over the bottom bar instead
+        return { top: B?.top || 0, bottom: sticksUp ? 0 : B?.bottom || 0 }; },
       rect(s) { // the panel when fully open, in screen pixels
         const E = s.engine, W = E.width, H = E.height, m = floaty() ? +p.margin || 0 : 0, bt = inst.between(s), S = E.safe;
         const top = bt.top ? S.top + bt.top : 0, bot = bt.bottom ? S.bottom + bt.bottom : 0; // with bars, the menu fits between them
@@ -8101,7 +8097,7 @@ registerBehavior('uiSideBar', {
             if (floaty()) { rr(x + 1, R.y + 1, w - 2, R.h - 2, rad); ctx.stroke(); } else { const ex = left ? x + w - 1 : x + 1; ctx.beginPath(); ctx.moveTo(ex, R.y); ctx.lineTo(ex, R.y + R.h); ctx.stroke(); } ctx.restore(); }
         }
         ctx.save(); rr(x, R.y, w, R.h, rad); ctx.clip();
-        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = (floaty() ? 0 : E.safe.bottom) + ((p.bars ?? 'stay between them') === 'stay between them' && s.entities.some((q) => q.visible && !q._parentHidden && !q.dead && q.behaviors.some((x) => x.type === 'uiBottomNav' && x.params?.style === 'raised center')) ? 34 * uiK(E.safe) : 0); // (room for a Bottom Nav's raised middle button, which sits over the menu)
+        const compact = rail() && tt < 0.5, pad = 14, safeT = floaty() || full() ? (full() ? E.safe.top : 0) : E.safe.top, safeB = floaty() ? 0 : E.safe.bottom;
         let y = R.y + safeT + 10;
         // the top bar: ✕ (or ‹ in a submenu), a title, and icon buttons
         const tb = !!p.topBar && !compact, TH = Math.max(36, +p.topHeight || 52);

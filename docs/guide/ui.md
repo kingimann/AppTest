@@ -427,6 +427,10 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - One per line: `Name | emoji or picture | colour | text`.
   - "Your story" (first) sends a message.
 - **Like Button:** a heart (or 👍, or ★) that pops with little sparks, turns a variable on or off and counts. Tick *Hold to pick a reaction* for 👍 ❤️ 😂 😮 😢 😡.
+- **Feeds and profiles are connected:**
+  - Each post shows its author's **current name, picture and verified tick** from their profile, so changing your picture in *Edit profile* updates all your posts. *Names and pictures come from profiles* turns this off.
+  - Tapping a name or picture opens their profile. If *Tapping a name or avatar opens page* and *Tapping my own name opens page* are blank, the feed finds the page that has a Profile Header (someone else's, or your own).
+  - With no profile page at all, a **profile card** slides up: picture, name, bio, counts, Follow, Message and their latest posts.
 - **Profile Header:** a cover, a big avatar, name with a verified tick, @handle, bio, and counts (`Label | value` lines; `{variables}` work).
   - **Look:** **x** (a wide cover with the picture over its edge and buttons on the right), **instagram** (the picture with the counts beside it, the bio under it and wide Follow / Message buttons) or **centered** (everything in the middle, like TikTok or Facebook).
   - It shows pronouns after the @handle, a **Follows you** chip, and a row with the **place**, a tappable **website** and **Joined** month. **Followed by …** lists people you follow who follow them, with their pictures.
@@ -435,6 +439,15 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Follow / Following** toggles a variable and changes the followers count. A ✉ button sends a message.
   - Tick *This is my profile* for **Edit profile** instead. With the social graph it opens an **editor**: change the cover (a photo or one of the colours), your picture, name, bio, pronouns, place and website, then **Save**. A new name also goes on your posts, comments and stories and in `{playerName}`.
   - Everything shown comes from a **Profiles** collection (handle, name, bio, avatar, cover, location, website, pronouns, joined, verified) when there is one, otherwise from the settings; your own edits stay on the phone without one.
+  - **Settings and privacy** (the ⚙ next to *Edit profile*, the ⋯ menu, or the message `settings` from anywhere, e.g. a Side Menu item `Settings and privacy | settings | msg:settings`) opens a full-screen page:
+    - **Your account**: your picture and name (tap to edit your profile), *Copy your username*.
+    - **Private account**: only people who follow you see your posts. Other people's feeds hide them, and your Profile Header says the account is private until they follow you.
+    - **Who can message you**: Everyone, People I follow, Friends or No one. *Message* on your profile or profile card says when you aren't taking messages.
+    - **Notifications**: switch off likes, comments and replies, reposts and quotes, mentions, new followers and friends, or messages.
+    - **Appearance**: Light, Dark or Automatic.
+    - **Muted accounts** and **Blocked accounts**, each with *Unmute* / *Unblock*.
+    - **Log out**, when people sign in with Supabase.
+    - The choices are saved with your profile (fields `private`, `dm`, `notes_off`).
   - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
   - Tapping the **Followers / Following / Friends** counts opens *Lists page* (the Friends page) on that person's lists, with a Follow button on each.
 - **Profile tabs on a feed:** a feed's tabs can use `posts` (no replies), `replies`, `media` (posts with pictures or videos) and `likes` (posts you liked). A third column gives a tab its own look, e.g. `Media | media | grid`. The Social template's profiles use `Posts | posts`, `Replies | replies`, `Media | media | grid` and, on your own, `Likes | likes`.

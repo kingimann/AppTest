@@ -9263,6 +9263,80 @@ function photoViewer(s, src) {
 }
 const PROFILE_COVERS = ['#1d9bf0', '#7c3aed', '#f91880', '#f59e0b', '#10b981', '#ef4444', '#0f172a', 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', 'linear-gradient(135deg,#4f7cff,#22d3ee)', 'linear-gradient(135deg,#10b981,#a3e635)'];
 /** Edit profile: cover (picture or colour), picture, name, bio, pronouns, place, website. o: { data, colors, font, fields, upload, onSave(patch) }. */
+/** The page that shows a Profile Header (someone else's, or my own): the value of the Show If page it sits on. */
+function profilePageOf(s, own) {
+  for (const e of s.entities || []) {
+    const pb = e.behaviors?.find((b) => b.type === 'uiProfile'); if (!pb || !!pb.params?.own !== !!own) continue;
+    for (let q = e; q; q = q.parentEnt) { const sb = q.behaviors?.find((b) => b.type === 'uiShowIf' && (b.params?.var || 'page') === 'page'); if (sb && sb.params?.value != null && sb.params.value !== '') return String(sb.params.value); }
+  }
+  return '';
+}
+/** A quick look at someone (a feed with no profile page): picture, name, bio, counts, Follow / Message and their latest posts. */
+function profileCard(s, handle, o = {}) {
+  const G = s.engine.social, D = s.engine.data, h = handleOf(handle); if (!h) return null;
+  const c = o.colors || { bg: tok('@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok('@accent') || '#1d9bf0' };
+  const coll = o.collection || 'Posts', pr = G?.profile(h) || {}, mine = G && h === handleOf(G.me().handle);
+  const posts = D.def(coll) ? D.rows(coll).filter((q) => handleOf(q.handle) === h).sort((a, b) => (b._at || 0) - (a._at || 0)) : [];
+  const name = pr.name || o.name || h;
+  return socialSheet(s, { kind: 'profile-card', title: 'Profile', colors: c, tall: 'auto', build: (api) => {
+    const { el, body } = api; body.style.cssText += 'padding:4px 18px 22px;';
+    const top = el('div', 'display:flex;align-items:center;gap:14px;margin-bottom:10px;'); const av = el('div', 'flex:none;'); av.append(api.avatar(name, isPic(pr.avatar) ? pr.avatar : '', 64));
+    const who = el('div', 'min-width:0;flex:1;'); const nm = el('div', `font-weight:900;font-size:19px;color:${c.text};display:flex;align-items:center;gap:6px;`, name); if (truthy(pr.verified) || posts.some((q) => truthy(q.verified))) { const v = el('span', `display:inline-flex;color:${c.acc};`); v.innerHTML = svgIcon('check-circle', 18, { stroke: 2.4 }); nm.append(v); }
+    if (truthy(pr.private)) { const lk = el('span', `display:inline-flex;color:${c.sub};`); lk.innerHTML = svgIcon('lock', 15, { stroke: 2.2 }); lk.title = 'Private account'; nm.append(lk); }
+    who.append(nm, el('div', `color:${c.sub};font-size:14px;font-weight:500;`, '@' + h + (pr.pronouns ? ' · ' + pr.pronouns : ''))); top.append(av, who); body.append(top);
+    if (pr.bio) body.append(el('div', `color:${c.text};font-size:15px;line-height:1.4;margin-bottom:10px;white-space:pre-wrap;`, pr.bio));
+    if (G) { const row = el('div', `display:flex;gap:18px;font-size:14px;color:${c.sub};margin-bottom:14px;`); for (const [n, l] of [[posts.length, 'Posts'], [G.followers(h).length, 'Followers'], [G.following(h).length, 'Following']]) { const it = el('span'); it.append(el('b', `color:${c.text};font-weight:800;`, shortNum(n)), ' ' + l); row.append(it); } body.append(row); }
+    if (G && !mine) {
+      const btns = el('div', 'display:flex;gap:8px;margin-bottom:14px;');
+      const mk = (label, fill) => { const b = el('button', `flex:1;height:38px;border-radius:19px;border:${fill ? 0 : '1px solid ' + c.line};background:${fill ? c.acc : 'transparent'};color:${fill ? '#fff' : c.text};font-weight:800;font-size:14px;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;`, label); b.type = 'button'; return b; };
+      const fb = mk('', true); fb.dataset.follow = '1'; const paint = () => { const on = G.isFollowing(h); fb.textContent = on ? 'Following' : 'Follow'; fb.style.background = on ? 'transparent' : c.acc; fb.style.color = on ? c.text : '#fff'; fb.style.border = on ? '1px solid ' + c.line : '0'; };
+      fb.onclick = () => { G.toggleFollow(h, name); paint(); }; paint(); btns.append(fb);
+      if (o.onMessage) { const mb = mk('Message', false); mb.onclick = () => { if (!G.canMessage(h)) { s.snackbar?.(`@${h} isn’t taking messages`); return; } api.close(); o.onMessage(); }; btns.append(mb); }
+      body.append(btns);
+    }
+    const hidden = G && !mine && G.isPrivate(h) && !G.isFollowing(h);
+    if (hidden) body.append(el('div', `color:${c.sub};font-size:14px;padding:12px 0;border-top:1px solid ${c.line};`, 'This account is private. Follow them to see their posts.'));
+    else for (const q of posts.slice(0, 3)) { const r0 = el('div', `padding:10px 0;border-top:1px solid ${c.line};color:${c.text};font-size:14.5px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;`, String(q.text || '').trim() || (q.media ? '📷 Photo' : '…')); body.append(r0); }
+  } });
+}
+/** Settings and privacy: my account, a private account, who can message me, which notifications I get, muted and blocked people, light or dark, log out. */
+function settingsSheet(s, o = {}) {
+  const G = s.engine.social; if (!G) return null;
+  const c = o.colors || { bg: tok('@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok('@accent') || '#1d9bf0' };
+  return socialSheet(s, { kind: 'settings', full: true, title: o.title || 'Settings and privacy', colors: c, build: (api) => {
+    const { el, body } = api; body.style.cssText += 'padding-bottom:30px;'; body.dataset.settings = '1';
+    const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, text); b.type = 'button'; return b; };
+    const save = (patch) => { G.saveProfile(patch); };
+    const section = (title, note) => { body.append(el('div', `padding:20px 16px 6px;color:${c.sub};font-size:13px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;`, title)); const box = el('div', `margin:0 12px;border-radius:14px;background:${withAlpha(c.text.startsWith('#') ? c.text : '#888888', 0.05)};overflow:hidden;`); body.append(box); if (note) body.append(el('div', `padding:6px 18px 0;color:${c.sub};font-size:12.5px;line-height:1.35;`, note)); return box; };
+    const row = (box, icon, label, right, onclick, key) => { const rowCss = `display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:50px;padding:10px 14px;text-align:left;color:${c.text};font-size:15.5px;font-weight:600;${box.childElementCount ? `border-top:1px solid ${c.line};` : ''}`, r = onclick ? btn(rowCss) : el('div', rowCss); if (onclick) r.onclick = onclick; if (key) r.dataset.set = key;
+      if (icon) { const ic = el('span', `flex:none;display:inline-flex;color:${c.sub};`); ic.innerHTML = svgIcon(icon, 20, { stroke: 2 }); r.append(ic); } r.append(el('span', 'flex:1;min-width:0;', label)); if (right) r.append(right); box.append(r); return r; };
+    const toggle = (on, set) => { const t = el('span', `flex:none;width:46px;height:28px;border-radius:14px;position:relative;transition:background .2s;`), k = el('span', 'position:absolute;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .2s;'); t.append(k);
+      const paint = (v) => { t.style.background = v ? c.acc : withAlpha(c.sub.startsWith('#') ? c.sub : '#888888', 0.4); k.style.left = v ? '21px' : '3px'; t.dataset.on = v ? '1' : '0'; }; paint(on); t.flip = () => { on = !on; paint(on); set(on); }; return t; };
+    const chips = (box, opts, cur, set, key) => { const w = el('div', `display:flex;gap:6px;flex-wrap:wrap;padding:4px 14px 12px;`); w.dataset.set = key; const paint = () => w.replaceChildren(...opts.map((v) => { const b = btn(`padding:7px 13px;border-radius:16px;font-size:14px;font-weight:700;${v === cur ? `background:${c.acc};color:#fff;` : `border:1px solid ${c.line};color:${c.text};`}`, v); b.onclick = () => { cur = v; set(v); paint(); }; return b; })); paint(); box.append(w); };
+    const me = G.me(), pr = G.profile(me.handle), st = G.settings();
+    // you
+    const onEdit = o.onEdit || (() => editProfileSheet(s, { colors: c, upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null, data: { handle: me.handle, name: pr.name || me.author, bio: pr.bio || '', avatar: isPic(pr.avatar) ? pr.avatar : '', cover: pr.cover || '', location: pr.location || '', website: pr.website || '', pronouns: pr.pronouns || '' }, onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } }));
+    { const box = section('Your account'); const r = btn(`display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;text-align:left;color:${c.text};`); r.dataset.set = 'edit'; r.append(api.avatar(pr.name || me.author, isPic(pr.avatar) ? pr.avatar : '', 48)); const t = el('span', 'flex:1;min-width:0;'); t.append(el('div', 'font-weight:800;font-size:16px;', pr.name || me.author), el('div', `color:${c.sub};font-size:14px;`, '@' + me.handle)); r.append(t); const ar = el('span', `color:${c.sub};display:inline-flex;`); ar.innerHTML = svgIcon('chevron-right', 18, { stroke: 2.2 }); r.append(ar);
+      r.onclick = () => { api.close(); setTimeout(onEdit, 280); }; box.append(r);
+      row(box, 'link', 'Copy your username', null, () => { navigator.clipboard?.writeText('@' + me.handle).catch(() => {}); s.snackbar?.('Copied @' + me.handle); }); }
+    // privacy
+    { const box = section('Privacy', 'With a private account, only people who follow you see your posts.'); const t = toggle(st.private, (v) => save({ private: v })); row(box, 'lock', 'Private account', t, () => t.flip(), 'private'); }
+    { const box = section('Who can message you'); chips(box, ['Everyone', 'People I follow', 'Friends', 'No one'], st.dm, (v) => save({ dm: v }), 'dm'); }
+    // notifications
+    { const box = section('Notifications', 'Turn off what you don’t want to hear about.'); const off = new Set(st.notes_off);
+      for (const [k, icon, label] of [['likes', 'heart', 'Likes'], ['comments', 'comment', 'Comments and replies'], ['reposts', 'repost', 'Reposts and quotes'], ['mentions', 'at', 'Mentions'], ['follows', 'user-plus', 'New followers and friends'], ['messages', 'mail', 'Messages']]) {
+        const t = toggle(!off.has(k), (v) => { if (v) off.delete(k); else off.add(k); save({ notes_off: [...off].join(', ') }); }); row(box, icon, label, t, () => t.flip(), 'note-' + k); } }
+    // appearance
+    { const box = section('Appearance'); const dv = s.vars.darkMode, cur = dv === '' || dv == null ? 'Automatic' : truthy(dv) ? 'Dark' : 'Light'; chips(box, ['Light', 'Dark', 'Automatic'], cur, (v) => s.setVar('darkMode', v === 'Automatic' ? '' : v === 'Dark' ? 1 : 0), 'theme'); }
+    // muted and blocked
+    for (const [kind, title, verb] of [['muted', 'Muted accounts', 'Unmute'], ['blocked', 'Blocked accounts', 'Unblock']]) {
+      const box = section(title), paint = () => { box.replaceChildren(); const L = G.listOf(kind); if (!L.length) { box.append(el('div', `padding:14px;color:${c.sub};font-size:14.5px;`, kind === 'muted' ? 'No one muted. Mute people from the ⋯ menu on their posts or profile.' : 'No one blocked.')); return; }
+        for (const h of L) { const p0 = G.profile(h), b = btn(`flex:none;padding:6px 14px;border-radius:15px;border:1px solid ${c.line};color:${c.text};font-size:13.5px;font-weight:800;`, verb); b.dataset.un = h; b.onclick = (ev) => { ev.stopPropagation(); G.toggleList(kind, h); s.snackbar?.(`${verb}ed @${h}`); paint(); }; const r = row(box, null, '', b); r.children[0].replaceChildren(el('div', 'font-weight:700;', p0.name || h), el('div', `color:${c.sub};font-size:13px;font-weight:500;`, '@' + h)); r.prepend(api.avatar(p0.name || h, isPic(p0.avatar) ? p0.avatar : '', 34)); } };
+      paint(); }
+    // account
+    { const box = section('Account'); const su = s.engine.supa; if (su?.user?.()) row(box, 'logout', 'Log out', null, () => { api.close(); su.signOut(); s.snackbar?.('Logged out'); }, 'logout'); else row(box, 'info', 'You’re using this app on this phone only', null, null); }
+  } });
+}
 function editProfileSheet(s, o) {
   const c = o.colors, d = { ...o.data }, want = new Set(o.fields || ['name', 'bio', 'pronouns', 'location', 'website']);
   return socialSheet(s, { kind: 'profile-edit', full: true, title: 'Edit profile', colors: c, font: o.font,
@@ -9889,6 +9963,9 @@ registerBehavior('uiFeed', {
     { key: 'deleteMessage', label: 'Deleting your post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour' },
     { key: 'profilePage', label: 'Tapping a name or avatar opens page (sets {profile})', type: 'text', default: '', group: 'Behaviour', info: 'A page with a Profile Header for {profile} (their handle) and {profile_name}.' },
     { key: 'myProfilePage', label: 'Tapping my own name opens page', type: 'text', default: '', group: 'Behaviour' },
+    { key: 'findProfilePage', label: 'Blank pages: find the page with a Profile Header', type: 'bool', default: true, group: 'Behaviour', info: 'With the two pages above blank, a name opens the page that has a Profile Header for {profile} (or your own, for your name).' },
+    { key: 'profileCard', label: 'No profile page: open a profile card', type: 'bool', default: true, group: 'Behaviour', info: 'A sheet with their picture, bio, counts, Follow and Message, and their latest posts.' },
+    { key: 'profileInfo', label: 'Names and pictures come from profiles', type: 'bool', default: true, group: 'Behaviour', info: 'When someone changes their name, picture or tick in their profile (the Profiles collection, or your own Edit profile), every post of theirs shows it.' },
     { key: 'openVar', label: 'Opens the post whose id is put in variable', type: 'text', default: 'openPost', suggest: 'vars', group: 'Behaviour', info: 'Notifications put a post id here and come to this feed\'s page; the feed opens that post.' },
     { key: 'threads', label: 'Threads: replies (reply_to) come under their post, joined by a line', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'gridColumns', label: 'Grid: columns', type: 'number', default: 3, range: [2, 5], step: 1, group: 'Layout', showIf: (b) => b.look === 'grid' },
@@ -9939,7 +10016,11 @@ registerBehavior('uiFeed', {
     const TABS = () => UK.lines(p.tabs).map(([label = '', where = '', look = '']) => ({ label, where, look: look.trim().toLowerCase() })); // (a tab can have its own look: Media | media | grid)
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
-    const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
+    const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); };
+    // names, pictures and ticks come from each person's profile (when they have one), so a new picture shows on all their posts
+    let SGr = null; const profs = new Map(), PK = { author: 'name', avatar: 'avatar', verified: 'verified' };
+    const profOf = (r) => { const h = handleOf(r[K('handle')] || ''); if (!h) return null; if (!profs.has(h)) profs.set(h, SGr.profile(h)); return profs.get(h); };
+    const F = (r, k) => { if (SGr && PK[k] && r) { const pr = profOf(r), v = pr?.[PK[k]]; if (v != null && v !== '') return v; } return r?.[K(k)]; };
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
       const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : p.filter, tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
@@ -10063,6 +10144,7 @@ registerBehavior('uiFeed', {
     /** Who a post is for (the composer's audience) and who may reply to it. */
     const ownerOf = (s) => { const m = String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i); return m ? handleOf(fillTemplate(m[1], s.vars)) : ''; }; // a person's page
     const canSee = (s, r) => { const SG = s.engine.social, h = who(r); if (SG && !isMine(s, r) && SG.hides(h) && !(ownerOf(s) === h && !SG.isBlocked(h))) return false; // muted / blocked (a muted person's own page still shows their posts)
+      if (SG && !isMine(s, r) && SG.isPrivate(h) && !SG.isFollowing(h)) return false; // a private account: only the people who follow them
       const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
     const canReply = (s, r) => { const v = String(F(r, 'reply_setting') || ''); if (!v || v === 'Everyone' || isMine(s, r)) return true; const me1 = meOf(s).handle.toLowerCase(); return v === 'People you follow' ? !!s.engine.social?.isFollowing(me1, who(r)) : new RegExp('@' + me1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(String(F(r, 'text') || '')); };
     const editIt = (s, r) => {
@@ -10086,7 +10168,9 @@ registerBehavior('uiFeed', {
     };
     const messageIt = (s, r) => { const id = dmId(meOf(s).handle, who(r)); if (p.chatVar) s.setVar(p.chatVar, id); s.setVar('chatTitle', F(r, 'author') || who(r)); if (p.messagePage) s.navTo(p.messagePage); else s.snackbar?.(`Set the feed's “Message” page to open chats`); if (p.messageMessage) s.send(p.messageMessage, who(r)); };
     /** Someone's profile page: {profile} (their handle) and {profile_name}, then the page in “Tapping a name opens page”. */
-    const openProfile = (s, r) => { const h = who(r); if (!h) return; s.setVar('profile', h); s.setVar('profile_name', F(r, 'author') || h); if (p.profileVerifiedVar !== false) s.setVar('profile_verified', truthy(F(r, 'verified')) ? 1 : 0); if (p.profilePage && h !== meOf(s).handle) s.navTo(p.profilePage); else if (p.myProfilePage && h === meOf(s).handle) s.navTo(p.myProfilePage); if (p.profileMessage) s.send(p.profileMessage, h); };
+    const openProfile = (s, r) => { const h = who(r); if (!h) return; s.setVar('profile', h); s.setVar('profile_name', F(r, 'author') || h); if (p.profileVerifiedVar !== false) s.setVar('profile_verified', truthy(F(r, 'verified')) ? 1 : 0); const mine = h === meOf(s).handle, pg = (mine ? p.myProfilePage : p.profilePage) || (p.findProfilePage !== false ? profilePageOf(s, mine) : '');
+      if (pg && s.vars.page !== pg) s.navTo(pg); else if (!pg && !s.engine.editing && p.profileCard !== false && !p.profileMessage) profileCard(s, h, { name: F(r, 'author'), colors: colorsOf(), onMessage: (p.messagePage || p.chatPage) ? () => messageIt(s, r) : null });
+      if (p.profileMessage) s.send(p.profileMessage, h); };
     const findPost = (s, id) => { if (id == null || id === '') return null; return has(s) ? D(s).get(p.collection, String(id)) : (sample || []).find((q) => String(q.id) === String(id)) || null; };
     const openQuote = (s, r) => {
       const me0 = meOf(s), c = colorsOf();
@@ -10187,6 +10271,7 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
+        SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
         const b = boxOf(e, s); S.max = Math.max(0, total - b.h + 12 + coveredBottom(s, e, b));
         S.update(s, e, dt, b, p.pullRefresh === false ? null : () => { if (p.refreshMessage) s.send(p.refreshMessage); s.engine.vibrate?.(10); });
         collapse(s, e, dt);
@@ -10283,6 +10368,7 @@ registerBehavior('uiFeed', {
         }
       },
       drawUI(ctx, e, s) {
+        if (s.engine.editing) { SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear(); }
         const b = boxOf(e, s), look = look0(), txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
         const keepTheme = THEME; if (p.font) THEME = { ...THEME, font: /[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}", ${keepTheme.font}` : `${p.font}, ${keepTheme.font}` };
         try { this.paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC); } finally { THEME = keepTheme; }
@@ -10734,6 +10820,10 @@ const POST_ICONS = {
 };
 /** Line icons for the app UI (24×24, drawn with the text colour): use these instead of emoji. */
 const UI_SVG = {
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.5"/>',
+  'chevron-right': '<path d="M9 6l6 6-6 6"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
   camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
   video: '<path d="M22 8l-6 4 6 4z"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
@@ -12385,6 +12475,7 @@ registerBehavior('uiProfile', {
     { key: 'storyRing', label: 'A ring when they have a story (tap to watch)', type: 'bool', default: true, showIf: (b) => !!b.social, info: 'Their stories open on the page with the Stories.' },
     { key: 'storiesPage', label: 'Stories are on page', type: 'text', default: 'home', showIf: (b) => !!b.social && b.storyRing !== false },
     { key: 'moreMenu', label: '⋯ menu (share, mute, block, report)', type: 'bool', default: true },
+    { key: 'settingsButton', label: 'Settings button (⚙ Settings and privacy)', type: 'bool', default: true, showIf: (b) => !!b.social && !!b.own, info: 'Private account, who can message you, notifications, muted and blocked people, light or dark, log out. The message “settings” opens it from anywhere too (a Side Menu item: Settings | settings | button:msg:settings).' },
     { key: 'editSheet', label: 'Edit profile opens an editor (pictures, name, bio, place, website)', type: 'bool', default: true, showIf: (b) => !!b.social && !!b.own, info: 'Changes are saved in the Profiles collection (or on the phone without one); a new name also goes on your posts.' },
     { key: 'postsCollection', label: 'Posts collection (for the posts count)', type: 'text', default: 'Posts', suggest: 'collections', showIf: (b) => !!b.social },
     { key: 'chatPage', label: 'Message opens page (a Chat)', type: 'text', default: 'chat', showIf: (b) => !!b.social },
@@ -12422,9 +12513,10 @@ registerBehavior('uiProfile', {
         onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } });
       setTimeout(() => { sheetUp = false; }, 400);
     };
+    const openSettings = (s, I) => { if (!SG(s) || s.engine.editing || sheetUp) return; settingsSheet(s, { colors: colorsOf(), onEdit: () => edit(s, I) }); };
     const more = (s, I) => {
       const G = SG(s), items = [{ icon: '📤', label: 'Share profile', run: () => share(s, I) }, { icon: '🔗', label: 'Copy username', run: () => { navigator.clipboard?.writeText('@' + I.handle).catch(() => {}); s.snackbar?.('Copied @' + I.handle); } }];
-      if (p.own) items.push({ icon: '✏️', label: 'Edit profile', run: () => setTimeout(() => edit(s, I), 280) });
+      if (p.own) { items.push({ icon: '✏️', label: 'Edit profile', run: () => setTimeout(() => edit(s, I), 280) }); if (G) items.push({ icon: '⚙️', label: 'Settings and privacy', run: () => setTimeout(() => openSettings(s, I), 280) }); }
       else if (G) {
         const m = G.isMuted(I.handle), bl = G.isBlocked(I.handle);
         items.push({ icon: '🔇', label: m ? `Unmute @${I.handle}` : `Mute @${I.handle}`, run: () => { const on = G.toggleList('muted', I.handle); s.snackbar?.(on ? `Muted @${I.handle}. You won’t see their posts.` : `Unmuted @${I.handle}`); } });
@@ -12446,8 +12538,9 @@ registerBehavior('uiProfile', {
             if (st === 'friends') { G.unfriend(W.handle); s.snackbar?.(`Removed ${I.name || '@' + W.handle} from friends`, 'Undo', () => { G.add('friends', { from: G.me().handle, to: W.handle, from_name: G.me().author, to_name: I.name, status: 'accepted' }); }); }
             else if (st === 'sent') { G.cancel(W.handle); s.snackbar?.('Friend request cancelled'); }
             else { const r = G.addFriend(W.handle, I.name); s.snackbar?.(r === 'friends' ? `You and ${I.name || '@' + W.handle} are friends now` : 'Friend request sent'); } }
-          else if (k === 'message') { if (G) { if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, W.handle)); s.setVar('chatTitle', I.name || '@' + W.handle); if (p.chatPage) s.navTo(p.chatPage); if (p.message) s.send(p.message, W.handle); } else if (p.message) s.send(p.message); }
+          else if (k === 'message') { if (G && !G.canMessage(W.handle)) s.snackbar?.(`@${W.handle} isn’t taking messages`); else if (G) { if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, W.handle)); s.setVar('chatTitle', I.name || '@' + W.handle); if (p.chatPage) s.navTo(p.chatPage); if (p.message) s.send(p.message, W.handle); } else if (p.message) s.send(p.message); }
           else if (k === 'edit') edit(s, I);
+          else if (k === 'settings') openSettings(s, I);
           else if (k === 'share') share(s, I);
           else if (k === 'more') more(s, I);
           else if (k === 'avatar') { if (I.hasStory && !s.engine.editing) { if (p.storiesPage && s.vars.page !== p.storiesPage) s.navTo(p.storiesPage); s.send('open story', I.handle); } else photoViewer(s, I.avatar); }
@@ -12475,6 +12568,7 @@ registerBehavior('uiProfile', {
         const chip = (label, x, y, align = 'left') => { ctx.font = `600 12px ${F}`; const w = ctx.measureText(label).width + 12, x0 = align === 'center' ? x - w / 2 : x; ctx.fillStyle = soft; UK.rr(ctx, x0, y - 9, w, 18, 5); ctx.fill(); UK.text(ctx, label, x0 + 6, y + 0.5, { size: 12, weight: 600, color: sub, align: 'left' }); return w; };
         /** Lines of text (wrapped), left or in the middle. Returns the y under them. */
         const para = (text, y, size, color, align = 'left', max = 4, lh = size + 5) => { const W0 = b.w - 32; for (const l of wrapLines(ctx, text, W0, size, max)) { UK.text(ctx, l, align === 'center' ? b.cx : b.x + 16, y, { size, weight: 500, color, align }); y += lh; } return y; };
+        const lockLine = (y, align = 'left') => (G && !p.own && !blocked && G.isPrivate(I.handle) && !on ? para('🔒 This account is private. Follow them to see their posts.', y, 14, sub, align, 2, 19) + 4 : y);
         /** Place · website · joined, wrapping onto a second line. */
         const details = (y, align = 'left') => {
           if (p.details === false) return y; const D = []; if (I.location) D.push(['place', I.location]); if (I.website) D.push(['link', I.website.replace(/^https?:\/\//i, '').replace(/\/$/, ''), 'link']);
@@ -12507,7 +12601,7 @@ registerBehavior('uiProfile', {
         };
         /** Follow / Add friend / Message (someone else) or Edit profile / Share (me), across a width. */
         const wideButtons = (y, x0, x1, h) => {
-          if (p.own) { const w = (x1 - x0 - 8) / 2; button('edit', 'Edit profile', x0, y, w, h, 'soft'); button('share', 'Share profile', x0 + w + 8, y, w, h, 'soft'); return y + h; }
+          if (p.own) { const gw = G && p.settingsButton !== false ? h + 8 : 0, w = (x1 - x0 - 8 - gw) / 2; button('edit', 'Edit profile', x0, y, w, h, 'soft'); button('share', 'Share profile', x0 + w + 8, y, w, h, 'soft'); if (gw) iconButton('settings', 'settings', x1 - h, y, h, h, 'soft'); return y + h; }
           if (blocked) { button('unblock', 'Unblock', x0, y, x1 - x0, h, 'outline', '#f4212e'); return y + h; }
           const fr = G && p.friendButton !== false, mw = 0, iw = fr ? h + 6 : 0, w = (x1 - x0 - iw - 8) / 2;
           button('follow', on ? 'Following' : 'Follow', x0, y, w, h, on ? 'soft' : 'fill'); button('message', 'Message', x0 + w + 8, y, w, h, 'soft');
@@ -12522,7 +12616,7 @@ registerBehavior('uiProfile', {
           if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 50, b.y + 10, 34, 34, coverH ? 'dark' : 'bare');
           // buttons on the right, under the cover
           const by = ay + 12; ctx.font = `800 14px ${F}`;
-          if (p.own) { const fw = ctx.measureText('Edit profile').width + 32; button('edit', 'Edit profile', b.x + b.w - 16 - fw, by - 18, fw, 36, 'outline'); }
+          if (p.own) { const fw = ctx.measureText('Edit profile').width + 32; button('edit', 'Edit profile', b.x + b.w - 16 - fw, by - 18, fw, 36, 'outline'); if (G && p.settingsButton !== false) iconButton('settings', 'settings', b.x + b.w - 16 - fw - 46, by - 18, 36, 36, 'outline'); }
           else if (blocked) { const fw = ctx.measureText('Blocked').width + 32; button('unblock', 'Blocked', b.x + b.w - 16 - fw, by - 18, fw, 36, 'fill', '#f4212e'); }
           else {
             const fl = on ? 'Following' : 'Follow', fw = ctx.measureText(fl).width + 32, fx = b.x + b.w - 16 - fw; button('follow', fl, fx, by - 18, fw, 36, on ? 'outline' : 'fill');
@@ -12533,7 +12627,7 @@ registerBehavior('uiProfile', {
           y = ay + av / 2 + 22; nameLine(b.x + 16, y, 20);
           y += 23; ctx.font = `500 14px ${F}`; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) chip('Follows you', b.x + 16 + Math.min(ctx.measureText(hl).width, b.w - 120) + 8, y); y += 27; }
           if (blocked) y = para(`You blocked @${I.handle}. You won’t see their posts.`, y, 15, sub) + 4; else if (I.bio) y = para(I.bio, y, 15, txt) + 3;
-          y = details(y); y = counts(y + 6, 'inline'); y = mutuals(y + 12); y += 6;
+          y = details(y); y = lockLine(y); y = counts(y + 6, 'inline'); y = mutuals(y + 12); y += 6;
         } else if (look === 'instagram') {
           const av = 86, ay = b.y + 14 + av / 2, ax = b.x + 16 + av / 2; avatar(ax, ay, av);
           const S0 = statsOf(s, I).filter(([l]) => l !== 'Friends' || !G); // three columns fit beside the picture
@@ -12543,7 +12637,7 @@ registerBehavior('uiProfile', {
           if (I.pronouns) { ctx.font = `900 15px ${F}`; const nw = Math.min(ctx.measureText(I.name).width, b.w - 140) + (I.verified ? 22 : 0); UK.text(ctx, I.pronouns, b.x + 16 + nw + 8, y, { size: 14, weight: 500, color: sub, align: 'left' }); }
           y += 20; if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.x + 16, y); y += 22; }
           if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub) + 2; else if (I.bio) y = para(I.bio, y, 14, txt, 'left', 4, 19) + 2;
-          y = details(y); y = mutuals(y + 2); y = wideButtons(y + 4, b.x + 16, b.x + b.w - 16, 34) + 14;
+          y = details(y); y = lockLine(y); y = mutuals(y + 2); y = wideButtons(y + 4, b.x + 16, b.x + b.w - 16, 34) + 14;
         } else {
           const coverH = I.cover ? 104 : 0, av = 96, ay = b.y + (coverH ? coverH : 10 + av / 2);
           if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }
@@ -12553,7 +12647,7 @@ registerBehavior('uiProfile', {
           if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.cx, y, 'center'); y += 24; }
           y = counts(y + 8, 'centered'); const bw = Math.min(b.w - 32, 320); y = wideButtons(y + 2, b.cx - bw / 2, b.cx + bw / 2, 40) + 16;
           if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub, 'center') + 2; else if (I.bio) y = para(I.bio, y, 15, txt, 'center', 4, 20) + 2;
-          y = details(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
+          y = details(y, 'center'); y = lockLine(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
         }
         // grow to fit what it shows: a page that lines things up moves what is under it; otherwise the top stays put
         const need = Math.ceil(y - b.y);
@@ -17324,6 +17418,8 @@ export class Mods {
  * Kept in the collections Follows (follower, followee), Friends (from, to, status) and Notifications (to, from, from_name, type, post, text, read)
  * when the app has them (so they can be online with Supabase), else on the device. Feeds, profiles, Who To Follow, Friends and Notifications all use it.
  */
+/** Which settings switch turns each kind of notification off. */
+const NOTE_KIND = { like: 'likes', comment_like: 'likes', comment: 'comments', reply: 'comments', repost: 'reposts', quote: 'reposts', mention: 'mentions', follow: 'follows', friend_request: 'follows', friend_accept: 'follows', message: 'messages' };
 export class SocialGraph {
   constructor(engine) { this.engine = engine; this.t = 0; this.seenN = null; }
   get D() { return this.engine.data; }
@@ -17395,6 +17491,12 @@ export class SocialGraph {
     }
     this.changed('profile'); s?.emit('profileSaved', patch);
   }
+  /** A private account: only people who follow them see their posts. */
+  isPrivate(who) { const b = this.h(who); return !!b && b !== this.h(this.me().handle) && truthy(this.profile(b).private); }
+  /** My settings ({ private, dm, notes_off: [...], theme }) kept with my profile. */
+  settings() { const r = this.profile(this.me().handle); let off = r.notes_off; if (typeof off === 'string') off = off.split(/\s*,\s*/).filter(Boolean); return { private: truthy(r.private), dm: r.dm || 'Everyone', notes_off: Array.isArray(off) ? off : [], theme: r.theme || '' }; }
+  /** Can I message them (their “Who can message you”)? */
+  canMessage(who) { const b = this.h(who); if (!b || b === this.h(this.me().handle)) return true; const dm = String(this.profile(b).dm || 'Everyone'); return dm === 'Everyone' ? true : dm === 'People I follow' ? this.isFollowing(this.me().handle, b) : dm === 'Friends' ? this.friendStatus(b) === 'friends' : false; }
   /** Does this person follow me? */
   followsMe(who) { return this.isFollowing(this.me().handle, who); }
   /** People I follow who follow them ("Followed by …"). */
@@ -17416,6 +17518,7 @@ export class SocialGraph {
   /** Tell someone something happened: like, comment, reply, repost, quote, mention, follow, friend_request, friend_accept, message. */
   notify(to, type, o = {}) {
     const me = this.me(), b = this.h(to); if (!b || b === this.h(me.handle)) return null;
+    { const off = this.profile(b).notes_off, kind = NOTE_KIND[type]; if (kind && off && (Array.isArray(off) ? off : String(off).split(/\s*,\s*/)).includes(kind)) return null; } // they turned these off in their settings
     if (['like', 'repost', 'follow', 'comment_like'].includes(type) && this.rows('notes').some((n) => this.h(n.to) === b && this.h(n.from) === this.h(me.handle) && n.type === type && String(n.post ?? '') === String(o.post ?? '') && (type !== 'comment_like' || n.text === String(o.text || '').slice(0, 140)) && Date.now() - (n._at || 0) < 864e5)) return null; // (once, not every tap)
     return this.add('notes', { to: b, from: me.handle, from_name: me.author, type, post: o.post != null ? String(o.post) : '', text: String(o.text || '').slice(0, 140), read: false });
   }
@@ -23392,7 +23495,7 @@ export class Engine {
   wireDarkMode(scene) {
     const key = 'pocket.dark.' + (this.gameKey || 'game'), saved = store.get(key, '');
     if (saved !== '' && (scene.vars.darkMode === undefined || scene.vars.darkMode === '')) scene.vars.darkMode = +saved;
-    scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
+    scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if ((k === 'settings' || k === 'open settings') && !this.editing && this.social && !this.root?.querySelector('[data-pocket-sheet="settings"]')) settingsSheet(scene); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
     scene.on('var', (k, v) => { if (k !== 'darkMode' || this.editing) return; if (v === '' || v == null) { try { localStorage.removeItem(key); } catch { /* storage unavailable */ } } else store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); }); // blank = follow the game's setting again
   }
   setScene(scene, { skipRestore = false } = {}) {

@@ -320,6 +320,8 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
     - follower, following and friend lists;
     - a ⋯ menu to share, **mute**, **block** or report;
     - an **Edit profile** editor for your cover, picture, name, bio, pronouns, place and website, saved in a **Profiles** collection.
+    - **Settings and privacy**: private account, who can message you, which notifications you get, light or dark, muted and blocked people, log out.
+    - Feeds show each author's current name, picture and tick from their profile; tapping a name opens their profile page (found by itself) or a profile card.
 - The **Social** template has Explore, Messages, Chat, Notifications, Friends and profile pages.
 - **Shimmering placeholders** while online feeds load.
 - Opened posts (as a sheet or full screen) show the whole post: swipeable pictures with a full-screen viewer and double-tap to like, polls, link cards, the full time and views, counts, Comment / Repost / Like / Save / Share buttons and a ⋯ menu. Comments have threaded replies, Top / Newest sorting, Author tags, pinned comments and quick emoji.

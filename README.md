@@ -308,7 +308,14 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - private **direct messages** and groups (only their members can see and write);
   - **bookmarks** for posts and comments (each person's own) and a **Saved** page with All / Posts / Comments tabs;
   - a **Notifications** page (grouped likes, comments, mentions, follows, friend requests and messages) with unread badges and live banners;
-  - profile pages for everyone, opened by tapping their name.
+  - profile pages for everyone, opened by tapping their name:
+    - X, Instagram or centered looks;
+    - pronouns, **Follows you**, place, website and join date, and **Followed by …** people you know;
+    - a story ring that plays their story;
+    - **Posts / Replies / Media / Likes** tabs;
+    - follower, following and friend lists;
+    - a ⋯ menu to share, **mute**, **block** or report;
+    - an **Edit profile** editor for your cover, picture, name, bio, pronouns, place and website, saved in a **Profiles** collection.
 - The **Social** template has Explore, Messages, Chat, Notifications, Friends and profile pages.
 - **Shimmering placeholders** while online feeds load.
 - Opened posts (as a sheet or full screen) show the whole post: swipeable pictures with a full-screen viewer and double-tap to like, polls, link cards, the full time and views, counts, Comment / Repost / Like / Save / Share buttons and a ⋯ menu. Comments have threaded replies, Top / Newest sorting, Author tags, pinned comments and quick emoji.

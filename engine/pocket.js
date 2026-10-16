@@ -9227,6 +9227,53 @@ function shrinkPicture(file, max = 1080, q = 0.82) {
     fr.readAsDataURL(file);
   });
 }
+/** A picture full screen (an avatar or a cover): tap anywhere to close. */
+function photoViewer(s, src) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined' || !isPic(src)) return null;
+  const v = document.createElement('div'); v.style.cssText = 'position:absolute;inset:0;z-index:60;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;transition:background .2s;touch-action:auto;'; v.dataset.pocketViewer = '1';
+  const im = document.createElement('img'); im.src = artURL(src); im.alt = ''; im.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;transform:scale(.9);opacity:0;transition:transform .25s cubic-bezier(.2,.8,.2,1),opacity .2s;';
+  v.append(im); root.append(v); requestAnimationFrame(() => { v.style.background = 'rgba(0,0,0,.94)'; im.style.transform = 'none'; im.style.opacity = '1'; });
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) v.addEventListener(t, (ev) => ev.stopPropagation());
+  v.addEventListener('click', () => { v.style.background = 'rgba(0,0,0,0)'; im.style.opacity = '0'; setTimeout(() => v.remove(), 220); });
+  return v;
+}
+const PROFILE_COVERS = ['#1d9bf0', '#7c3aed', '#f91880', '#f59e0b', '#10b981', '#ef4444', '#0f172a', 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', 'linear-gradient(135deg,#4f7cff,#22d3ee)', 'linear-gradient(135deg,#10b981,#a3e635)'];
+/** Edit profile: cover (picture or colour), picture, name, bio, pronouns, place, website. o: { data, colors, font, fields, upload, onSave(patch) }. */
+function editProfileSheet(s, o) {
+  const c = o.colors, d = { ...o.data }, want = new Set(o.fields || ['name', 'bio', 'pronouns', 'location', 'website']);
+  return socialSheet(s, { kind: 'profile-edit', full: true, title: 'Edit profile', colors: c, font: o.font,
+    action: { label: 'Save', run: (api) => { const patch = {}; for (const k of ['name', 'bio', 'pronouns', 'location', 'website', 'avatar', 'cover']) if (d[k] !== o.data[k]) patch[k] = typeof d[k] === 'string' ? d[k].trim() : d[k]; if (patch.name === '') delete patch.name; if (patch.website && !/^https?:\/\//i.test(patch.website)) patch.website = 'https://' + patch.website; api.close(); if (Object.keys(patch).length) o.onSave(patch); } },
+    build: (api) => {
+      const { el, body } = api; body.style.borderTop = '0';
+      const pick = (max, cb) => { const f = el('input'); f.type = 'file'; f.accept = 'image/*'; f.style.display = 'none'; body.append(f); f.onchange = async () => { const file = f.files?.[0]; f.remove(); if (!file) return; try { cb(o.upload ? await o.upload(file) : await shrinkPicture(file, max, 0.85)); } catch { s.snackbar?.('Could not use that picture'); } }; f.click(); };
+      const camBtn = (label) => { const b = el('button', 'position:absolute;width:42px;height:42px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;-webkit-tap-highlight-color:transparent;'); b.type = 'button'; b.innerHTML = svgIcon('camera', 21, { stroke: 2 }); b.setAttribute('aria-label', label); return b; };
+      // the cover, with the picture over its edge
+      const cover = el('div', 'position:relative;height:140px;background-size:cover;background-position:center;'); cover.dataset.editCover = '1';
+      const paintCover = () => { const v = d.cover || o.coverColor || '#1d9bf0'; cover.style.background = isPic(v) ? `#333 center/cover url("${artURL(v)}")` : v; };
+      const cb = camBtn('Change cover'); cb.style.cssText += 'left:50%;top:50%;transform:translate(-50%,-50%);'; cb.dataset.pick = 'cover'; cb.onclick = () => pick(1500, (u) => { d.cover = u; paintCover(); }); cover.append(cb);
+      const avWrap = el('div', `position:absolute;left:16px;bottom:-44px;width:88px;height:88px;border-radius:50%;border:4px solid ${c.bg};overflow:hidden;`);
+      const paintAv = () => { avWrap.replaceChildren(api.avatar(d.name || o.data.name, isPic(d.avatar) ? d.avatar : '', 80)); const ab = camBtn('Change picture'); ab.style.cssText += 'left:19px;top:19px;'; ab.dataset.pick = 'avatar'; ab.onclick = () => pick(480, (u) => { d.avatar = u; paintAv(); }); avWrap.append(ab); };
+      cover.append(avWrap); body.append(cover); paintCover(); paintAv();
+      // cover colours (when there is no cover picture)
+      const sw = el('div', 'display:flex;gap:8px;justify-content:flex-end;padding:10px 14px 0 120px;flex-wrap:wrap;min-height:34px;');
+      for (const col of PROFILE_COVERS) { const b = el('button', `width:24px;height:24px;border-radius:50%;border:2px solid ${c.bg};box-shadow:0 0 0 1px ${c.line};background:${col};cursor:pointer;padding:0;`); b.type = 'button'; b.setAttribute('aria-label', 'Cover colour'); b.dataset.coverColor = col; b.onclick = () => { d.cover = col; paintCover(); }; sw.append(b); }
+      if (isPic(d.cover) || isPic(d.avatar)) { const rm = el('button', `border:0;background:none;color:${c.sub};font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;padding:0 0 0 6px;`, 'Remove photos'); rm.type = 'button'; rm.onclick = () => { if (isPic(d.cover)) d.cover = ''; d.avatar = ''; paintCover(); paintAv(); }; sw.append(rm); }
+      body.append(sw);
+      const form = el('div', 'padding:18px 16px 30px;display:flex;flex-direction:column;gap:14px;');
+      const field = (k, label, max, multi, hint) => {
+        if (!want.has(k)) return; const box = el('label', `display:block;border:1px solid ${c.line};border-radius:10px;padding:8px 12px 10px;`), top = el('div', `display:flex;justify-content:space-between;color:${c.sub};font-size:13px;font-weight:600;margin-bottom:2px;`);
+        const lab = el('span', '', label), cnt = el('span', 'font-variant-numeric:tabular-nums;', ''); top.append(lab, cnt);
+        const inp = el(multi ? 'textarea' : 'input', `width:100%;box-sizing:border-box;border:0;outline:0;background:transparent;color:${c.text};font-size:16px;font-weight:500;font-family:inherit;line-height:1.35;resize:none;padding:0;${multi ? 'min-height:66px;' : ''}`);
+        inp.value = d[k] || ''; inp.maxLength = max; if (hint) inp.placeholder = hint; inp.dataset.field = k; if (k === 'website') { inp.type = 'url'; inp.autocapitalize = 'off'; }
+        const sync = () => { d[k] = inp.value; cnt.textContent = `${inp.value.length}/${max}`; if (multi) { inp.style.height = 'auto'; inp.style.height = Math.max(66, inp.scrollHeight) + 'px'; } };
+        inp.oninput = sync; inp.onfocus = () => { box.style.borderColor = c.acc; lab.style.color = c.acc; }; inp.onblur = () => { box.style.borderColor = c.line; lab.style.color = c.sub; };
+        box.append(top, inp); form.append(box); sync();
+      };
+      field('name', 'Name', 50, false, 'Your name'); field('bio', 'Bio', 160, true, 'A few words about you'); field('pronouns', 'Pronouns', 30, false, 'e.g. she/her'); field('location', 'Location', 40, false, 'City, country'); field('website', 'Website', 100, false, 'example.com');
+      if (o.data.handle) form.append(el('div', `color:${c.sub};font-size:13px;padding:0 2px;`, `Your username is @${o.data.handle}`));
+      body.append(form);
+    } });
+}
 /** What the composer made, as a Posts record (author, handle, text, media, poll, votes, location, quote). */
 function postRecord(me, out, extra = {}) {
   const r = { author: me.author, handle: me.handle, text: out.text, likes: 0, liked: false, comments: 0, reposts: 0, following: true, ...extra };
@@ -9418,16 +9465,17 @@ function socialSheet(s, o) {
   const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
   const c = o.colors, font = o.font || 'system-ui,-apple-system,sans-serif', el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
   const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
-  const full = o.kind === 'post' && o.fullScreen;
+  const full = o.full || (o.kind === 'post' && o.fullScreen);
   const wrap = el('div', `position:absolute;inset:0;z-index:50;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;overflow:hidden;`);
   wrap.dataset.pocketSheet = o.kind || 'sheet';
-  const tall = full ? '100%' : o.kind === 'post' ? '92%' : o.kind === 'comments' ? '72%' : 'auto';
+  const tall = full ? '100%' : o.tall ? o.tall : o.kind === 'post' ? '92%' : o.kind === 'comments' ? '72%' : 'auto';
   const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;${tall === 'auto' ? 'max-height:80%;' : `height:${tall};`}background:${c.bg};color:${c.text};border-radius:${full ? 0 : '18px 18px 0 0'};display:flex;flex-direction:column;transform:${full ? 'translateX(100%)' : 'translateY(100%)'};transition:transform .28s cubic-bezier(.2,.8,.2,1);box-shadow:0 -8px 30px rgba(0,0,0,.25);padding-bottom:env(safe-area-inset-bottom);`);
   const head = el('div', `flex:none;padding:${full ? '12px' : '8px'} 14px 6px;cursor:grab;touch-action:none;`);
   if (!full) head.append(el('div', `width:38px;height:4px;border-radius:2px;background:${c.sub};opacity:.45;margin:0 auto 8px;`));
   const titleRow = el('div', 'display:flex;align-items:center;justify-content:center;position:relative;min-height:28px;');
   if (o.title) titleRow.append(el('div', 'font-weight:800;font-size:16px;', o.title));
   const x = btn(`position:absolute;${full ? 'left:-6px' : 'right:0'};top:50%;transform:translateY(-50%);color:${full ? c.text : c.sub};font-size:${full ? 24 : 20}px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); x.innerHTML = full ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>' : svgIcon('x', 22, { stroke: 2.2 }); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
+  if (o.action) { const ab = btn(`position:absolute;right:0;top:50%;transform:translateY(-50%);padding:7px 16px;border-radius:999px;background:${c.text};color:${c.bg};font-weight:800;font-size:14px;`, o.action.label); ab.dataset.action = '1'; ab.onclick = () => o.action.run(api); titleRow.append(ab); }
   if (o.onMore) { const mb = btn(`position:absolute;${full ? 'right:0' : 'right:34px'};top:50%;transform:translateY(-50%);color:${c.sub};font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); mb.innerHTML = svgIcon('more', 22, { stroke: 3 }); mb.setAttribute('aria-label', 'More'); mb.onclick = () => o.onMore(); titleRow.append(mb); }
   head.append(titleRow);
   const body = el('div', `flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-top:${HAIR} solid ${c.line};`);
@@ -9814,19 +9862,21 @@ registerBehavior('uiFeed', {
     let reelH = 0, reelIdx = 0, reelDrag = null, searchR = null, tab = 0, tabsR = [], inset = 0, tabShown = 0, tabNewT = -9, tabNew = [];
     const TSt = new TabStrip(), tabScroll = new Map(), tabSeen = new Map(); // the tabs: their look, where each was scrolled to, the newest post seen in each
     let known = null, fresh = 0, goTop = false, pillR = null, press = null, held = false, askedAt = -1;
-    const TABS = () => UK.lines(p.tabs).map(([label = '', where = '']) => ({ label, where }));
+    const TABS = () => UK.lines(p.tabs).map(([label = '', where = '', look = '']) => ({ label, where, look: look.trim().toLowerCase() })); // (a tab can have its own look: Media | media | grid)
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const MAP = (() => { const o = {}; for (const part of String(p.fields || '').split(/[,\n]/)) { const [k, v] = part.split('=').map((q) => q?.trim()); if (k && v) o[k.toLowerCase()] = fieldKey(v); } return o; })();
     const K = (k) => { const sk = k.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase()); return MAP[k.toLowerCase()] || MAP[sk] || (k === 'time' ? '_at' : sk); }, F = (r, k) => r[K(k)];
     /** The posts a tab holds (before hiding, search and threads). */
     const tabPosts = (s, ti) => {
-      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), tw = onlyFollowing || onlySaved ? '' : tw0, filter = [p.filter, tw].filter((q) => String(q || '').trim()).join(' and ');
+      const T = TABS(), tw0 = T.length ? T[clamp(ti, 0, T.length - 1)].where : '', onlyFollowing = /^\s*following\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), onlySaved = /^\s*saved\s*(=\s*(yes|true|1))?\s*$/i.test(tw0), kw = /^\s*(posts|replies|media|likes)\s*$/i.test(tw0) ? tw0.trim().toLowerCase() : '', tw = onlyFollowing || onlySaved || kw ? '' : tw0, filter = [kw === 'likes' ? '' : p.filter, tw].filter((q) => String(q || '').trim()).join(' and '); // (a profile's tabs: posts, replies, media, likes)
+      { const ow = ownerOf(s); if (ow && s.engine.social?.isBlocked(ow)) { repostCtx = ''; return []; } } // the page of someone you blocked
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
+      if (kw === 'posts') P = P.filter((r) => !F(r, 'reply_to')); else if (kw === 'replies') P = P.filter((r) => !!F(r, 'reply_to')); else if (kw === 'media') P = P.filter((r) => String(F(r, 'media') || '').trim()); else if (kw === 'likes') P = P.filter((r) => truthy(F(r, 'liked')));
       P = P.filter((r) => canSee(s, r)); // (posts for followers, friends or only their author)
       repostCtx = '';
-      const hm = p.withReposts !== false && has(s) && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
+      const hm = p.withReposts !== false && has(s) && (!kw || kw === 'posts') && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
       if (hm) { const h = handleOf(fillTemplate(hm[1], s.vars)); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
       return P;
     };
@@ -9930,14 +9980,16 @@ registerBehavior('uiFeed', {
       if (F(r, 'saves') != null && F(r, 'saves') !== '') patch(s, r, { saves: Math.max(0, (+F(r, 'saves') || 0) + (on ? 1 : -1)) });
       if (on) awardPoints(s, 'save'); s.snackbar?.(on ? 'Saved' : 'Removed from saved', p.savedPage ? (on ? 'View' : '') : '', on && p.savedPage ? () => s.navTo(p.savedPage) : null); return on; };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
-    const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
+    const C = (k, d) => p[k] || d, look0 = () => (p.tabs && TABS()[tab]?.look) || p.look || 'timeline';
     const ACTS = { timeline: 'comment, repost, like, views, share', compact: 'comment, repost, like, views, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
-    const acts = () => String(p.actions || ACTS[p.look] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
+    const acts = () => String(p.actions || ACTS[look0()] || ACTS.timeline).split(',').map((q) => q.trim().toLowerCase()).filter((q) => ['comment', 'repost', 'like', 'share', 'save', 'views'].includes(q));
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
     /** Who a post is for (the composer's audience) and who may reply to it. */
-    const canSee = (s, r) => { const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; const SG = s.engine.social; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
+    const ownerOf = (s) => { const m = String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i); return m ? handleOf(fillTemplate(m[1], s.vars)) : ''; }; // a person's page
+    const canSee = (s, r) => { const SG = s.engine.social, h = who(r); if (SG && !isMine(s, r) && SG.hides(h) && !(ownerOf(s) === h && !SG.isBlocked(h))) return false; // muted / blocked (a muted person's own page still shows their posts)
+      const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
     const canReply = (s, r) => { const v = String(F(r, 'reply_setting') || ''); if (!v || v === 'Everyone' || isMine(s, r)) return true; const me1 = meOf(s).handle.toLowerCase(); return v === 'People you follow' ? !!s.engine.social?.isFollowing(me1, who(r)) : new RegExp('@' + me1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(String(F(r, 'text') || '')); };
     const editIt = (s, r) => {
       sheetUp = true;
@@ -10157,7 +10209,7 @@ registerBehavior('uiFeed', {
         }
       },
       drawUI(ctx, e, s) {
-        const b = boxOf(e, s), look = p.look || 'timeline', txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
+        const b = boxOf(e, s), look = look0(), txt = C('text', '#e7e9ea'), sub = C('sub', '#71767b'), line = C('line', 'rgba(255,255,255,0.12)'), acc = C('accent', '#1d9bf0'), likeC = C('like', '#f91880'), repC = C('repost', '#00ba7c'), card = C('card', '#16181c'), verC = C('verified', acc);
         const keepTheme = THEME; if (p.font) THEME = { ...THEME, font: /[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}", ${keepTheme.font}` : `${p.font}, ${keepTheme.font}` };
         try { this.paint(ctx, e, s, b, look, txt, sub, line, acc, likeC, repC, card, verC); } finally { THEME = keepTheme; }
       },
@@ -10615,6 +10667,7 @@ const UI_SVG = {
   quote: '<path d="M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.5-1.5 4-4 5"/><path d="M19 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.5-1.5 4-4 5"/>',
   copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
   bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
   'eye-off': '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 8 10 8a17 17 0 0 1-2.2 3.2"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/>',
@@ -11807,7 +11860,11 @@ registerBehavior('uiFriends', {
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, tabsR = [], rows = [], btns = [], total = 0;
+    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, tabsR = [], rows = [], btns = [], total = 0, pKey = '', wasLive = false;
+    const PT = ['followers', 'following', 'friends'];
+    /** Opened from a profile's counts: that person's followers, following and friends ({people_of}, {people_tab}). */
+    const pmode = (s) => (PT.includes(String(s.vars.people_tab || '').toLowerCase()) && s.vars.people_of ? handleOf(s.vars.people_of) : '');
+    const peopleLists = (s, h) => { const G = s.engine.social, pp = peopleFromPosts(s, p.postsCollection), full = (q) => ({ ...(pp.get(q.handle) || {}), ...q, name: G.profile(q.handle).name || q.name || pp.get(q.handle)?.name || q.handle }); return [G.followers(h).map(full), G.following(h).map(full), G.friends(h).map(full)]; };
     const lists = (s) => {
       const G = s.engine.social, me = G.me().handle.toLowerCase(), people = peopleFromPosts(s, p.postsCollection), friends = G.friends(), req = G.requests(), sent = G.sentRequests();
       for (const q of [...friends, ...req, ...sent, ...G.followers(), ...G.following()]) if (!people.has(q.handle)) people.set(q.handle, { handle: q.handle, name: q.name || q.handle, likes: 0 });
@@ -11819,6 +11876,9 @@ registerBehavior('uiFriends', {
       uiAlways: true,
       update(e, dt, s) {
         const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, list = { x: b.x, y: b.y + 46, w: b.w, h: b.h - 46 };
+        const live = UK.live(s, e), pm = pmode(s);
+        if (pm) { const k = pm + '|' + s.vars.people_tab; if (k !== pKey) { pKey = k; tab = PT.indexOf(String(s.vars.people_tab).toLowerCase()); S.v = 0; } } else if (pKey) { pKey = ''; tab = 0; S.v = 0; }
+        if (wasLive && !live && pm && !s.engine.editing) s.setVar('people_tab', ''); wasLive = live; // back to your own friends next time
         S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
         for (const t of UK.taps(s, e)) {
           if (S.moved) continue;
@@ -11839,7 +11899,8 @@ registerBehavior('uiFriends', {
       drawUI(ctx, e, s) {
         const b = UK.fit(s, e, UK.box(e)), G = s.engine.social, txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), Ls = lists(s);
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
-        tabsR = tabsRow(ctx, b, [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line, TSt, p.tabStyle, s);
+        const pm = pmode(s), PL = pm ? peopleLists(s, pm) : null;
+        tabsR = tabsRow(ctx, b, PL ? [`${PL[0].length} Followers`, `${PL[1].length} Following`, `${PL[2].length} Friends`] : [`Friends${Ls.friends.length ? ' ' + Ls.friends.length : ''}`, `Requests${Ls.req.length ? ' (' + Ls.req.length + ')' : ''}`, 'Find people'], tab, txt, sub, acc, line, TSt, p.tabStyle, s);
         rows = []; btns = [];
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + 46, b.w, b.h - 46); ctx.clip();
         let y = b.y + 46 - S.v; const H = 68;
@@ -11857,7 +11918,9 @@ registerBehavior('uiFriends', {
           }
           rows.push({ x: b.x, y, w: b.w, h: H, handle: q.handle, name: q.name }); y += H;
         };
-        if (tab === 0) { if (!Ls.friends.length) { drawIco(ctx, 'users', b.cx, y + 70, 40, sub, { stroke: 1.6 }); UK.text(ctx, 'No friends yet', b.cx, y + 118, { size: 15, weight: 700, color: sub }); UK.text(ctx, 'Find people and add them', b.cx, y + 142, { size: 13, weight: 500, color: sub }); y += 170; } for (const q of Ls.friends) person(q, [['message', 'Message', false, 86]]); }
+        if (PL) { const L = PL[clamp(tab, 0, 2)], meH = G.me().handle.toLowerCase(); if (!L.length) { drawIco(ctx, 'users', b.cx, y + 70, 40, sub, { stroke: 1.6 }); UK.text(ctx, ['No followers yet', 'Not following anyone yet', 'No friends yet'][clamp(tab, 0, 2)], b.cx, y + 118, { size: 15, weight: 700, color: sub }); y += 150; }
+          for (const q of L) { const f = G.isFollowing(q.handle); person(q, q.handle === meH ? [] : [['follow', f ? 'Following' : 'Follow', !f, f ? 84 : 68]]); } }
+        else if (tab === 0) { if (!Ls.friends.length) { drawIco(ctx, 'users', b.cx, y + 70, 40, sub, { stroke: 1.6 }); UK.text(ctx, 'No friends yet', b.cx, y + 118, { size: 15, weight: 700, color: sub }); UK.text(ctx, 'Find people and add them', b.cx, y + 142, { size: 13, weight: 500, color: sub }); y += 170; } for (const q of Ls.friends) person(q, [['message', 'Message', false, 86]]); }
         else if (tab === 1) {
           if (!Ls.req.length && !Ls.sent.length) { UK.text(ctx, 'No friend requests', b.cx, y + 70, { size: 15, weight: 700, color: sub }); y += 100; }
           if (Ls.req.length) { head('Friend requests'); for (const q of Ls.req) person(q, [['accept', 'Accept', true, 78], ['decline', 'Decline', false, 78]]); }
@@ -11972,6 +12035,7 @@ registerBehavior('uiStories', {
       const SG = s.engine.social, ss = seenSet(s); let G = [...by.values()];
       for (const g of G) { g.slides.sort((a, b) => (a.at || 0) - (b.at || 0)); g.latest = Math.max(0, ...g.slides.map((q) => q.at || 0)); g.seen = g.slides.every((q) => ss.has(q.id)); }
       if (p.onlyFollowing && SG) G = G.filter((g) => g.mine || SG.isFollowing(g.handle));
+      if (SG) G = G.filter((g) => g.mine || !SG.hides(g.handle)); // muted / blocked
       const mine = G.find((g) => g.mine) || null, others = G.filter((g) => !g.mine).sort((a, b) => (a.seen - b.seen) || (b.latest - a.latest));
       return { mine, others };
     };
@@ -11983,6 +12047,7 @@ registerBehavior('uiStories', {
       if (D(s).def('StoryViews')) { const M = me(s); D(s).add('StoryViews', { story: sl.id, handle: M.handle, name: M.author }); } // they can see who viewed it
     };
     /** Open someone's stories (from their first one you haven't seen). */
+    let wantOpen = '';
     const openAt = (e, s, handle, list) => {
       order = list.map((g) => g.handle); gi = order.indexOf(handle); if (gi < 0) return;
       const g = list[gi], ss = seenSet(s); si = Math.max(0, g.slides.findIndex((q) => !ss.has(q.id))); if (si < 0 || g.seen) si = 0; prog = 0; tr = 0;
@@ -12028,7 +12093,9 @@ registerBehavior('uiStories', {
     };
     return {
       uiAlways: true,
+      start(e, s) { s.on('message', (m, v) => { if (m === 'open story' && v && !e.dead) wantOpen = handleOf(v); }); }, // (a profile picture with a ring)
       update(e, dt, s) {
+        if (wantOpen && gi < 0 && UK.live(s, e)) { const G0 = groups(s), all = [G0.mine, ...G0.others].filter(Boolean), h = wantOpen; wantOpen = ''; if (all.some((g) => g.handle === h)) openAt(e, s, h, all); }
         k = clamp(k + (gi >= 0 ? dt : -dt) / 0.2, 0, 1); tr += (0 - tr) * Math.min(1, dt * 12); if (Math.abs(tr) < 0.002) tr = 0;
         const b = UK.box(e), Dz = +p.size || 64, gap = 14, G = groups(s), n = G.others.length + (p.yours !== false ? 1 : 0);
         if (gi >= 0) {
@@ -12193,78 +12260,214 @@ registerBehavior('uiLike', {
   },
 });
 
+/** A cover: a picture (cropped to fill), a CSS gradient's colours, or one colour fading to the right. */
+function drawCover(ctx, v, x, y, w, h) {
+  if (isPic(v)) { const im = loadImage(v); ctx.fillStyle = '#333'; ctx.fillRect(x, y, w, h); if (im.complete && im.naturalWidth) { const k = Math.max(w / im.naturalWidth, h / im.naturalHeight), iw = im.naturalWidth * k, ih = im.naturalHeight * k; ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip(); ctx.drawImage(im, x + (w - iw) / 2, y + (h - ih) / 2, iw, ih); ctx.restore(); } return; }
+  const cols = String(v).match(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi) || ['#1d9bf0'], g = ctx.createLinearGradient(x, y, x + w, y + h);
+  if (cols.length > 1) cols.forEach((q, i) => g.addColorStop(i / (cols.length - 1), q)); else { g.addColorStop(0, cols[0]); g.addColorStop(1, withAlpha(cols[0], 0.55)); }
+  ctx.fillStyle = g; ctx.fillRect(x, y, w, h);
+}
+const PROFILE_LOOKS = ['x', 'instagram', 'centered'];
 registerBehavior('uiProfile', {
-  label: 'Profile Header', description: 'The top of a profile page: a cover, a big avatar, name with a verified tick, @handle, a bio, counts (posts, followers, following) and Follow / Message buttons. Following adds one to the followers count.',
+  label: 'Profile Header', description: 'The top of a profile page in the look of X, Instagram or TikTok: a cover, a big picture (with a ring when they have a story), name and verified tick, @handle and pronouns, “Follows you”, a bio, place, website and join date, counts, “Followed by …” people you know, and Follow / Add friend / Message, or Edit profile on your own. The ⋯ menu shares, mutes, blocks and reports. It grows to fit what it shows.',
   params: [
+    { key: 'look', label: 'Look', type: 'select', options: PROFILE_LOOKS, default: 'x', info: { x: 'A wide cover, the picture over its edge on the left, buttons on the right (X, Twitter).', instagram: 'The picture on the left with the counts beside it, the bio under it and wide buttons (Instagram).', centered: 'Everything in the middle: a big picture, the name, the counts and buttons (TikTok, Facebook).' } },
     { key: 'name', label: 'Name ({variables} work)', type: 'text', default: 'Maya Chen' },
     { key: 'handle', label: 'Handle', type: 'text', default: 'maya' },
     { key: 'bio', label: 'Bio', type: 'text', default: 'Photographer · Coffee first ☕ · Based in Lisbon' },
     { key: 'avatar', label: 'Avatar (emoji or picture; blank = initials)', type: 'text', default: '' },
+    { key: 'location', label: 'Place', type: 'text', default: '' },
+    { key: 'website', label: 'Website', type: 'text', default: '' },
     { key: 'verified', label: 'Verified tick', type: 'bool', default: true },
     { key: 'stats', label: 'Counts (Label | value, one per line)', type: 'code', default: 'Posts | 248\nFollowers | {followers}\nFollowing | 312' },
     { key: 'followVar', label: 'Following variable (1 / 0)', type: 'text', default: 'following', suggest: 'vars' },
     { key: 'countVar', label: 'Followers count variable', type: 'text', default: 'followers', suggest: 'vars' },
     { key: 'own', label: 'This is my profile (Edit profile instead of Follow)', type: 'bool', default: false },
-    { key: 'social', label: 'Follow, friends and counts from the social graph', type: 'bool', default: false, info: 'Follow / Following, Add friend / Requested / Accept / Friends and Message work for real (with notifications), and the counts come from posts, followers, following and friends.' },
+    { key: 'social', label: 'Follow, friends and counts from the social graph', type: 'bool', default: false, info: 'Follow / Following, Add friend / Requested / Accept / Friends and Message work for real (with notifications), the counts come from posts, followers, following and friends, and the bio, pictures, place and website come from a Profiles collection (handle, name, bio, avatar, cover, location, website, pronouns, joined, verified).' },
     { key: 'friendButton', label: 'Add friend button', type: 'bool', default: true, showIf: (b) => !!b.social },
+    { key: 'details', label: 'Place, website and join date', type: 'bool', default: true },
+    { key: 'followsYou', label: '“Follows you”', type: 'bool', default: true, showIf: (b) => !!b.social },
+    { key: 'mutuals', label: '“Followed by …” people you follow', type: 'bool', default: true, showIf: (b) => !!b.social },
+    { key: 'storyRing', label: 'A ring when they have a story (tap to watch)', type: 'bool', default: true, showIf: (b) => !!b.social, info: 'Their stories open on the page with the Stories.' },
+    { key: 'storiesPage', label: 'Stories are on page', type: 'text', default: 'home', showIf: (b) => !!b.social && b.storyRing !== false },
+    { key: 'moreMenu', label: '⋯ menu (share, mute, block, report)', type: 'bool', default: true },
+    { key: 'editSheet', label: 'Edit profile opens an editor (pictures, name, bio, place, website)', type: 'bool', default: true, showIf: (b) => !!b.social && !!b.own, info: 'Changes are saved in the Profiles collection (or on the phone without one); a new name also goes on your posts.' },
     { key: 'postsCollection', label: 'Posts collection (for the posts count)', type: 'text', default: 'Posts', suggest: 'collections', showIf: (b) => !!b.social },
     { key: 'chatPage', label: 'Message opens page (a Chat)', type: 'text', default: 'chat', showIf: (b) => !!b.social },
     { key: 'chatVar', label: 'Conversation id goes in variable', type: 'text', default: 'chat', suggest: 'vars', showIf: (b) => !!b.social },
-    { key: 'listPage', label: 'Tapping the counts opens page (Friends)', type: 'text', default: '', showIf: (b) => !!b.social },
+    { key: 'listPage', label: 'Tapping the counts opens page (Friends)', type: 'text', default: '', showIf: (b) => !!b.social, infoText: 'The person goes in {people_of}, the count tapped (followers, following, friends) in {people_tab}.' },
     { key: 'message', label: 'Message / Edit button sends', type: 'text', default: 'message', suggest: 'messages' },
+    { key: 'autoHeight', label: 'Grows to fit (what is under it moves down)', type: 'bool', default: true },
     { key: 'cover', label: 'Cover colour (blank = none)', type: 'color', default: '#4f7cff', group: 'Colours' },
     ...colorParams({ text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Follow button', '@accent'], bg: ['Behind the avatar', '@bg'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    let fb = null, mb = null, frb = null, statsR = null, popT = -9;
-    const SG = (s) => (p.social ? s.engine.social : null);
-    const who = (s) => { const G = SG(s); if (p.own && G) return { handle: G.me().handle, name: fillTemplate(String(p.name || ''), s.vars) || G.me().author }; return { handle: fillTemplate(String(p.handle || ''), s.vars).replace(/^@/, '').trim().toLowerCase(), name: fillTemplate(String(p.name || ''), s.vars) }; };
+    let hits = [], popK = '', popT = -9, sheetUp = false;
+    const SG = (s) => (p.social ? s.engine.social : null), fill = (v, s) => fillTemplate(String(v ?? ''), s.vars);
+    const who = (s) => { const G = SG(s); if (p.own && G) return { handle: G.me().handle, name: fill(p.name, s) || G.me().author }; return { handle: fill(p.handle, s).replace(/^@/, '').trim().toLowerCase(), name: fill(p.name, s) }; };
     const following = (s) => { const G = SG(s); return G ? G.isFollowing(who(s).handle) : !!+s.vars[p.followVar] || truthy(s.vars[p.followVar]); };
     const FRIEND_LABEL = { none: 'Add friend', sent: 'Requested', received: 'Accept', friends: 'Friends ✓' }; const FRIEND_SHORT = { none: '+ Friend', sent: 'Sent', received: 'Accept', friends: 'Friends' };
+    /** Everything shown about them: the Profiles row first, then the settings, then their posts. */
+    const info = (s) => {
+      const G = SG(s), W = who(s), r = G && W.handle ? G.profile(W.handle) : {}, D = s.engine.data, pc = p.postsCollection || 'Posts';
+      const posts = G && D.def(pc) ? D.rows(pc).filter((q) => handleOf(q.handle) === W.handle) : [];
+      const pick = (k, dflt) => (r[k] != null && (r[k] !== '' || k === 'bio') && Object.prototype.hasOwnProperty.call(r, k) ? String(r[k]) : dflt);
+      const hasStory = !!(G && p.storyRing !== false && D.def('Stories') && D.rows('Stories').some((q) => handleOf(q.handle) === W.handle && (!q._at || Date.now() - q._at < 24 * 3600e3)));
+      return { handle: W.handle, name: (p.own ? W.name : r.name || W.name) || W.handle || 'Someone', bio: pick('bio', fill(p.bio, s)), avatar: r.avatar || fill(p.avatar, s), cover: r.cover || p.cover || '', location: r.location || fill(p.location, s), website: r.website || fill(p.website, s), pronouns: r.pronouns || '',
+        joined: +r.joined || (posts.length ? Math.min(...posts.map((q) => +q._at || Date.now())) : 0), verified: r.verified != null && r.verified !== '' ? truthy(r.verified) : !!p.verified || posts.some((q) => truthy(q.verified)), posts, hasStory, r };
+    };
+    const statsOf = (s, I) => { const G = SG(s); if (!G) return UK.lines(p.stats).map(([label = '', val = '']) => [label, fill(val, s)]); return [['Posts', String(I.posts.length)], ['Followers', String(G.followers(I.handle).length + (+fill(p.baseFollowers, s) || 0))], ['Following', String(G.following(I.handle).length)], ['Friends', String(G.friends(I.handle).length)]]; };
+    const colorsOf = () => ({ bg: tok('@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0' });
+    const share = (s, I) => { const t = `${I.name} (@${I.handle})`, url = typeof location !== 'undefined' ? location.href.split('#')[0] : ''; if (navigator.share) navigator.share({ title: t, text: t, ...(url ? { url } : {}) }).catch(() => {}); else { navigator.clipboard?.writeText(url ? t + ' ' + url : t).catch(() => {}); s.snackbar?.('Profile link copied'); } };
+    const people = (s, I, tab) => { if (!p.listPage) return; s.setVar('people_of', I.handle); s.setVar('people_tab', tab); s.navTo(p.listPage); };
+    const edit = (s, I) => {
+      const G = SG(s); if (p.message) s.send(p.message); if (!G || p.editSheet === false || s.engine.editing || sheetUp) return;
+      sheetUp = true; editProfileSheet(s, { colors: colorsOf(), coverColor: p.cover || '#1d9bf0', upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null,
+        data: { handle: I.handle, name: I.name, bio: I.bio, avatar: isPic(I.avatar) ? I.avatar : '', cover: I.r.cover || '', location: I.location, website: I.website, pronouns: I.pronouns },
+        onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); s.emit('profileSaved', patch); } });
+      setTimeout(() => { sheetUp = false; }, 400);
+    };
+    const more = (s, I) => {
+      const G = SG(s), items = [{ icon: '📤', label: 'Share profile', run: () => share(s, I) }, { icon: '🔗', label: 'Copy username', run: () => { navigator.clipboard?.writeText('@' + I.handle).catch(() => {}); s.snackbar?.('Copied @' + I.handle); } }];
+      if (p.own) items.push({ icon: '✏️', label: 'Edit profile', run: () => setTimeout(() => edit(s, I), 280) });
+      else if (G) {
+        const m = G.isMuted(I.handle), bl = G.isBlocked(I.handle);
+        items.push({ icon: '🔇', label: m ? `Unmute @${I.handle}` : `Mute @${I.handle}`, run: () => { const on = G.toggleList('muted', I.handle); s.snackbar?.(on ? `Muted @${I.handle}. You won’t see their posts.` : `Unmuted @${I.handle}`); } });
+        items.push({ icon: '🚫', label: bl ? `Unblock @${I.handle}` : `Block @${I.handle}`, danger: !bl, run: () => { const on = G.toggleList('blocked', I.handle); s.snackbar?.(on ? `Blocked @${I.handle}` : `Unblocked @${I.handle}`); } });
+        items.push({ icon: '🚩', label: `Report @${I.handle}`, danger: true, run: () => { s.snackbar?.('Thanks — we’ll take a look'); s.send('report', I.handle); } });
+      }
+      socialSheet(s, { kind: 'profile-more', colors: colorsOf(), items });
+    };
     return {
       uiAlways: true,
       start(e, s) { if (p.social) return; if (p.followVar && s.vars[p.followVar] == null) s.setVar(p.followVar, 0); if (p.countVar && s.vars[p.countVar] == null) s.setVar(p.countVar, 1280); },
       update(e, dt, s) {
         const G = SG(s), W = who(s);
         for (const t of UK.taps(s, e)) {
-          if (fb && UK.in(t, fb, 4) && !p.own) { UK.tap(s, p); if (G) { if (!W.handle) continue; G.toggleFollow(W.handle, W.name); } else { const on = !following(s); s.setVar(p.followVar, on ? 1 : 0); if (p.countVar) s.setVar(p.countVar, Math.max(0, (+s.vars[p.countVar] || 0) + (on ? 1 : -1))); } popT = s.time; }
-          else if (G && frb && UK.in(t, frb, 4) && !p.own) { UK.tap(s, p); const st = G.friendStatus(W.handle);
-            if (st === 'friends') { G.unfriend(W.handle); s.snackbar?.(`Removed ${W.name || '@' + W.handle} from friends`, 'Undo', () => { G.add('friends', { from: G.me().handle, to: W.handle, from_name: G.me().author, to_name: W.name, status: 'accepted' }); }); }
+          const h = hits.find((q) => UK.in(t, q, 3)); if (!h) continue; const k = h.k; UK.tap(s, p); popK = k; popT = s.time; const I = info(s);
+          if (k === 'follow') { if (G) { if (W.handle) G.toggleFollow(W.handle, I.name); } else { const on = !following(s); s.setVar(p.followVar, on ? 1 : 0); if (p.countVar) s.setVar(p.countVar, Math.max(0, (+s.vars[p.countVar] || 0) + (on ? 1 : -1))); } }
+          else if (k === 'unblock' && G) { G.toggleList('blocked', W.handle); s.snackbar?.(`Unblocked @${W.handle}`); }
+          else if (k === 'friend' && G) { const st = G.friendStatus(W.handle);
+            if (st === 'friends') { G.unfriend(W.handle); s.snackbar?.(`Removed ${I.name || '@' + W.handle} from friends`, 'Undo', () => { G.add('friends', { from: G.me().handle, to: W.handle, from_name: G.me().author, to_name: I.name, status: 'accepted' }); }); }
             else if (st === 'sent') { G.cancel(W.handle); s.snackbar?.('Friend request cancelled'); }
-            else { const r = G.addFriend(W.handle, W.name); s.snackbar?.(r === 'friends' ? `You and ${W.name || '@' + W.handle} are friends now` : 'Friend request sent'); } popT = s.time; }
-          else if (G && mb && UK.in(t, mb, 4) && !p.own) { UK.tap(s, p); if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, W.handle)); s.setVar('chatTitle', W.name || '@' + W.handle); if (p.chatPage) s.navTo(p.chatPage); if (p.message) s.send(p.message, W.handle); }
-          else if (G && statsR && UK.in(t, statsR) && p.listPage) { UK.tap(s, p); s.setVar('people_of', W.handle); s.navTo(p.listPage); }
-          else if ((mb && UK.in(t, mb, 4)) || (p.own && fb && UK.in(t, fb, 4))) { UK.tap(s, p); if (p.message) s.send(p.message); }
+            else { const r = G.addFriend(W.handle, I.name); s.snackbar?.(r === 'friends' ? `You and ${I.name || '@' + W.handle} are friends now` : 'Friend request sent'); } }
+          else if (k === 'message') { if (G) { if (p.chatVar) s.setVar(p.chatVar, dmId(G.me().handle, W.handle)); s.setVar('chatTitle', I.name || '@' + W.handle); if (p.chatPage) s.navTo(p.chatPage); if (p.message) s.send(p.message, W.handle); } else if (p.message) s.send(p.message); }
+          else if (k === 'edit') edit(s, I);
+          else if (k === 'share') share(s, I);
+          else if (k === 'more') more(s, I);
+          else if (k === 'avatar') { if (I.hasStory && !s.engine.editing) { if (p.storiesPage && s.vars.page !== p.storiesPage) s.navTo(p.storiesPage); s.send('open story', I.handle); } else photoViewer(s, I.avatar); }
+          else if (k === 'cover') photoViewer(s, I.cover);
+          else if (k === 'link') { const u = /^https?:/i.test(I.website) ? I.website : 'https://' + I.website; if (!s.engine.editing) try { window.open(u, '_blank', 'noopener'); } catch { /* blocked */ } }
+          else if (k.startsWith('stat:')) { const l = k.slice(5).toLowerCase(); if (G && l !== 'posts') people(s, I, l); }
+          else if (k === 'mutuals') people(s, I, 'followers');
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.box(e), txt = p.text || '#e7e9ea', sub = p.sub || '#71767b', acc = p.accent || '#1d9bf0', coverH = p.cover ? Math.min(110, b.h * 0.34) : 0, av = 84;
-        if (p.cover) { const g = ctx.createLinearGradient(b.x, b.y, b.x + b.w, b.y + coverH); g.addColorStop(0, p.cover); g.addColorStop(1, withAlpha(p.cover, 0.55)); ctx.fillStyle = g; ctx.fillRect(b.x, b.y, b.w, coverH); }
-        const ay = b.y + (coverH ? coverH : av / 2 + 8), ax = b.x + 16 + av / 2, name = fillTemplate(String(p.name || ''), s.vars), handle = fillTemplate(String(p.handle || ''), s.vars).replace(/^@/, '');
-        ctx.fillStyle = p.bg || '#000'; ctx.beginPath(); ctx.arc(ax, ay, av / 2 + 4, 0, Math.PI * 2); ctx.fill();
-        miniAvatar(ctx, name, ax, ay, av, p.avatar || '');
-        // buttons on the right, under the cover
-        const on = following(s), by = ay + 12, a = (s.time - popT) / 0.3, z = a >= 0 && a < 1 ? 1 - Math.sin(a * Math.PI) * 0.08 : 1;
-        ctx.font = `800 14px ${THEME.font}`; const fl = p.own ? 'Edit profile' : on ? 'Following' : 'Follow', fw = ctx.measureText(fl).width + 32;
-        fb = { x: b.x + b.w - 16 - fw, y: by - 18, w: fw, h: 36 };
-        ctx.save(); ctx.translate(fb.x + fw / 2, by); ctx.scale(z, z); ctx.translate(-(fb.x + fw / 2), -by);
-        if (on || p.own) { ctx.strokeStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.4); ctx.lineWidth = 1.5; UK.rr(ctx, fb.x, fb.y, fw, 36, 18); ctx.stroke(); UK.text(ctx, fl, fb.x + fw / 2, by + 1, { size: 14, weight: 800, color: txt }); }
-        else { ctx.fillStyle = acc; UK.rr(ctx, fb.x, fb.y, fw, 36, 18); ctx.fill(); UK.text(ctx, fl, fb.x + fw / 2, by + 1, { size: 14, weight: 800, color: '#fff' }); }
-        ctx.restore();
-        if (!p.own) { mb = { x: fb.x - 46, y: by - 18, w: 36, h: 36 }; ctx.strokeStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.4); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(mb.x + 18, by, 18, 0, Math.PI * 2); ctx.stroke(); drawNavIcon(ctx, 'ui-mail', mb.x + 18, by, 18, txt); } else mb = null;
-        frb = null;
-        if (SG(s) && !p.own && p.friendButton !== false) { const st = SG(s).friendStatus(who(s).handle), room = mb.x - 10 - (ax + av / 2 + 10); ctx.font = `800 13px ${THEME.font}`; let fl2 = FRIEND_LABEL[st], w2 = ctx.measureText(fl2).width + 26; if (w2 > room) { fl2 = FRIEND_SHORT[st]; w2 = ctx.measureText(fl2).width + 22; } /* a narrow phone: the short label, clear of the avatar */ frb = { x: mb.x - 10 - w2, y: by - 16, w: w2, h: 32 };
-          if (st === 'received') { ctx.fillStyle = acc; UK.rr(ctx, frb.x, frb.y, w2, 32, 16); ctx.fill(); UK.text(ctx, fl2, frb.x + w2 / 2, by + 1, { size: 13, weight: 800, color: '#fff' }); }
-          else { ctx.strokeStyle = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.4); ctx.lineWidth = 1.5; UK.rr(ctx, frb.x, frb.y, w2, 32, 16); ctx.stroke(); UK.text(ctx, fl2, frb.x + w2 / 2, by + 1, { size: 13, weight: 800, color: st === 'friends' ? acc : txt }); } }
-        let y = ay + av / 2 + 22;
-        UK.text(ctx, name, b.x + 16, y, { size: 20, weight: 900, color: txt, align: 'left', maxW: b.w - 60 }); if (p.verified) { ctx.font = `900 20px ${THEME.font}`; verifiedBadge(ctx, b.x + 16 + Math.min(ctx.measureText(name).width, b.w - 60) + 13, y, 9, acc); }
-        y += 22; if (handle) { UK.text(ctx, '@' + handle, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left' }); y += 26; }
-        const bio = fillTemplate(String(p.bio || ''), s.vars); if (bio) for (const l of wrapLines(ctx, bio, b.w - 32, 15, 3)) { UK.text(ctx, l, b.x + 16, y, { size: 15, weight: 500, color: txt, align: 'left' }); y += 20; }
-        y += 8; let x = b.x + 16;
-        const G = SG(s), W0 = who(s), stats = G ? [['Posts', String((s.engine.data.def(p.postsCollection || 'Posts') ? s.engine.data.rows(p.postsCollection || 'Posts') : []).filter((r) => String(r.handle || '').replace(/^@/, '').toLowerCase() === W0.handle).length)], ['Followers', String(G.followers(W0.handle).length + (+fillTemplate(String(p.baseFollowers ?? ''), s.vars) || 0))], ['Following', String(G.following(W0.handle).length)], ['Friends', String(G.friends(W0.handle).length)]] : UK.lines(p.stats);
-        statsR = { x: b.x, y: y - 12, w: b.w, h: 26 };
-        for (const [label = '', val = ''] of stats) { const v = fillTemplate(val, s.vars), n = Number.isFinite(+v) && v !== '' ? shortNum(v) : v; ctx.font = `900 15px ${THEME.font}`; const nw = ctx.measureText(n).width; UK.text(ctx, n, x, y, { size: 15, weight: 900, color: txt, align: 'left' }); ctx.font = `500 15px ${THEME.font}`; const lw = ctx.measureText(label).width; UK.text(ctx, label, x + nw + 5, y, { size: 15, weight: 500, color: sub, align: 'left' }); x += nw + lw + 22; }
+        const b = UK.box(e), txt = p.text || '#e7e9ea', sub = p.sub || '#71767b', acc = p.accent || '#1d9bf0', bgc = p.bg || '#000', G = SG(s), I = info(s), look = PROFILE_LOOKS.includes(p.look) ? p.look : 'x', soft = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.1), edge = withAlpha(txt.startsWith('#') ? txt : '#888888', 0.35);
+        const blocked = !!(G && !p.own && G.isBlocked(I.handle)), on = following(s), F = THEME.font; hits = [];
+        const pop = (k) => { const a = (s.time - popT) / 0.3; return popK === k && a >= 0 && a < 1 ? 1 - Math.sin(a * Math.PI) * 0.07 : 1; };
+        /** A button: fill (accent), outline or soft (grey). */
+        const button = (k, label, x, y, w, h, style, color) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = look === 'x' ? h / 2 : 9;
+          if (style === 'fill') { ctx.fillStyle = color || acc; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else if (style === 'soft') { ctx.fillStyle = soft; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else { ctx.strokeStyle = color ? withAlpha(color, 0.6) : edge; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke(); }
+          UK.text(ctx, label, x + w / 2, y + h / 2 + 1, { size: h >= 36 ? 14 : 13.5, weight: 800, color: style === 'fill' ? '#fff' : color || txt, maxW: w - 12 }); ctx.restore(); hits.push({ k, x, y, w, h }); };
+        const iconButton = (k, icon, x, y, w, h, style) => { const z = pop(k); ctx.save(); ctx.translate(x + w / 2, y + h / 2); ctx.scale(z, z); ctx.translate(-(x + w / 2), -(y + h / 2)); const r = look === 'x' ? h / 2 : 9;
+          if (style === 'dark') { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.arc(x + w / 2, y + h / 2, h / 2, 0, Math.PI * 2); ctx.fill(); } else if (style === 'soft') { ctx.fillStyle = soft; UK.rr(ctx, x, y, w, h, r); ctx.fill(); } else if (style !== 'bare') { ctx.strokeStyle = edge; ctx.lineWidth = 1.2; UK.rr(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.stroke(); }
+          drawIco(ctx, icon, x + w / 2, y + h / 2, Math.min(20, h * 0.52), style === 'dark' ? '#fff' : txt, { stroke: icon === 'more' ? 2.6 : 2 }); ctx.restore(); hits.push({ k, x, y, w, h }); };
+        const avatar = (cx, cy, d) => { if (I.hasStory) { const g = ctx.createLinearGradient(cx - d / 2, cy + d / 2, cx + d / 2, cy - d / 2); g.addColorStop(0, '#f9ce34'); g.addColorStop(0.5, '#ee2a7b'); g.addColorStop(1, '#6228d7'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 7, 0, Math.PI * 2); ctx.fill(); }
+          ctx.fillStyle = bgc; ctx.beginPath(); ctx.arc(cx, cy, d / 2 + 4, 0, Math.PI * 2); ctx.fill(); miniAvatar(ctx, I.name, cx, cy, d, I.avatar || ''); hits.push({ k: 'avatar', x: cx - d / 2, y: cy - d / 2, w: d, h: d }); };
+        const nameLine = (x, y, size, align = 'left', maxW = b.w - 60) => { ctx.font = `900 ${size}px ${F}`; const w = Math.min(ctx.measureText(I.name).width, maxW), x0 = align === 'center' ? x - w / 2 - (I.verified ? size * 0.6 : 0) : x;
+          UK.text(ctx, I.name, x0, y, { size, weight: 900, color: txt, align: 'left', maxW }); if (I.verified) verifiedBadge(ctx, x0 + w + size * 0.62, y, size * 0.45, acc); };
+        const chip = (label, x, y, align = 'left') => { ctx.font = `600 12px ${F}`; const w = ctx.measureText(label).width + 12, x0 = align === 'center' ? x - w / 2 : x; ctx.fillStyle = soft; UK.rr(ctx, x0, y - 9, w, 18, 5); ctx.fill(); UK.text(ctx, label, x0 + 6, y + 0.5, { size: 12, weight: 600, color: sub, align: 'left' }); return w; };
+        /** Lines of text (wrapped), left or in the middle. Returns the y under them. */
+        const para = (text, y, size, color, align = 'left', max = 4, lh = size + 5) => { const W0 = b.w - 32; for (const l of wrapLines(ctx, text, W0, size, max)) { UK.text(ctx, l, align === 'center' ? b.cx : b.x + 16, y, { size, weight: 500, color, align }); y += lh; } return y; };
+        /** Place · website · joined, wrapping onto a second line. */
+        const details = (y, align = 'left') => {
+          if (p.details === false) return y; const D = []; if (I.location) D.push(['place', I.location]); if (I.website) D.push(['link', I.website.replace(/^https?:\/\//i, '').replace(/\/$/, ''), 'link']);
+          if (I.joined) { let j = ''; try { j = 'Joined ' + new Date(I.joined).toLocaleDateString(localeOf(), { month: 'long', year: 'numeric' }); } catch { /* no locale */ } if (j) D.push(['calendar', j]); }
+          if (!D.length) return y; ctx.font = `500 14px ${F}`; const W0 = b.w - 32, rows = [[]]; let w = 0;
+          for (const d of D) { const dw = 20 + Math.min(ctx.measureText(d[1]).width, W0 - 20) + 14; if (w + dw > W0 && rows[rows.length - 1].length) { rows.push([]); w = 0; } rows[rows.length - 1].push({ d, dw }); w += dw; }
+          for (const row of rows) { const tw = row.reduce((a, q) => a + q.dw, 0) - 14; let x = align === 'center' ? b.cx - tw / 2 : b.x + 16;
+            for (const { d, dw } of row) { const col = d[2] ? acc : sub; drawIco(ctx, d[0], x + 8, y, 15, sub, { stroke: 2 }); UK.text(ctx, d[1], x + 20, y + 0.5, { size: 14, weight: 500, color: col, align: 'left', maxW: dw - 34 }); if (d[2]) hits.push({ k: d[2], x, y: y - 10, w: dw - 14, h: 20 }); x += dw; }
+            y += 21; }
+          return y + 2;
+        };
+        /** "Followed by Maya Chen and 2 others you follow", with their pictures. */
+        const mutuals = (y, align = 'left') => {
+          if (!G || p.own || p.mutuals === false) return y; const M = G.mutuals(I.handle); if (!M.length) return y;
+          const names = M.slice(0, 2).map((q) => G.profile(q.handle).name || q.name || '@' + q.handle), rest = M.length - names.length;
+          const text = `Followed by ${names.join(rest ? ', ' : ' and ')}${rest ? ` and ${rest} other${rest > 1 ? 's' : ''} you follow` : ''}`;
+          const n = Math.min(3, M.length), aw = 14 + (n - 1) * 13 + 8; ctx.font = `500 13px ${F}`; const lines = wrapLines(ctx, text, b.w - 32 - aw, 13, 2), tw = Math.max(...lines.map((l) => (ctx.font = `600 13px ${F}`, ctx.measureText(l).width)));
+          const x0 = align === 'center' ? b.cx - (aw + tw) / 2 : b.x + 16, yy = y + (lines.length - 1) * 8.5;
+          for (let i = n - 1; i >= 0; i--) { const cx = x0 + 10 + i * 13; ctx.fillStyle = bgc; ctx.beginPath(); ctx.arc(cx, yy, 11.5, 0, Math.PI * 2); ctx.fill(); miniAvatar(ctx, M[i].name, cx, yy, 20, G.profile(M[i].handle).avatar || ''); }
+          lines.forEach((l, i) => UK.text(ctx, l, x0 + aw, y + i * 17, { size: 13, weight: 500, color: sub, align: 'left' }));
+          hits.push({ k: 'mutuals', x: x0, y: y - 11, w: aw + tw, h: lines.length * 17 + 4 }); return y + lines.length * 17 - 4;
+        };
+        /** Counts side by side ("12 Following  340 Followers") or in columns (number over label). */
+        const counts = (y, mode, x0 = b.x + 16, x1 = b.x + b.w - 16) => {
+          const S = statsOf(s, I), fmt = (v) => (Number.isFinite(+v) && v !== '' ? shortNum(v) : v);
+          if (mode === 'inline') { let x = x0; for (const [label, val] of S) { const n = fmt(val); ctx.font = `800 15px ${F}`; const nw = ctx.measureText(n).width; ctx.font = `500 15px ${F}`; const lw = ctx.measureText(label).width; if (x + nw + lw + 5 > x1 + 4) break; UK.text(ctx, n, x, y, { size: 15, weight: 800, color: txt, align: 'left' }); UK.text(ctx, label, x + nw + 5, y, { size: 15, weight: 500, color: sub, align: 'left' }); hits.push({ k: 'stat:' + label, x: x - 4, y: y - 13, w: nw + lw + 13, h: 26 }); x += nw + lw + 20; } return y + 12; }
+          const cw = mode === 'centered' ? Math.min(90, (x1 - x0) / S.length) : (x1 - x0) / S.length, sx = mode === 'centered' ? b.cx - cw * S.length / 2 : x0;
+          S.forEach(([label, val], i) => { const cx = sx + cw * i + cw / 2; UK.text(ctx, fmt(val), cx, y, { size: 17, weight: 800, color: txt }); UK.text(ctx, label, cx, y + 19, { size: 13, weight: 500, color: sub, maxW: cw - 4 }); hits.push({ k: 'stat:' + label, x: cx - cw / 2, y: y - 14, w: cw, h: 44 }); });
+          return y + 46;
+        };
+        /** Follow / Add friend / Message (someone else) or Edit profile / Share (me), across a width. */
+        const wideButtons = (y, x0, x1, h) => {
+          if (p.own) { const w = (x1 - x0 - 8) / 2; button('edit', 'Edit profile', x0, y, w, h, 'soft'); button('share', 'Share profile', x0 + w + 8, y, w, h, 'soft'); return y + h; }
+          if (blocked) { button('unblock', 'Unblock', x0, y, x1 - x0, h, 'outline', '#f4212e'); return y + h; }
+          const fr = G && p.friendButton !== false, mw = 0, iw = fr ? h + 6 : 0, w = (x1 - x0 - iw - 8) / 2;
+          button('follow', on ? 'Following' : 'Follow', x0, y, w, h, on ? 'soft' : 'fill'); button('message', 'Message', x0 + w + 8, y, w, h, 'soft');
+          if (fr) { const st = G.friendStatus(I.handle); iconButton('friend', st === 'friends' ? 'check' : st === 'sent' ? 'user' : 'user-plus', x1 - h - mw, y, h, h, st === 'received' ? 'soft' : 'soft'); if (st === 'received') { ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(x1 - 4, y + 4, 4.5, 0, Math.PI * 2); ctx.fill(); } }
+          return y + h;
+        };
+        let y;
+        if (look === 'x') {
+          const coverH = I.cover ? 118 : 0, av = 84;
+          if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }
+          const ay = b.y + (coverH ? coverH : av / 2 + 8), ax = b.x + 16 + av / 2; avatar(ax, ay, av);
+          if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 50, b.y + 10, 34, 34, coverH ? 'dark' : 'bare');
+          // buttons on the right, under the cover
+          const by = ay + 12; ctx.font = `800 14px ${F}`;
+          if (p.own) { const fw = ctx.measureText('Edit profile').width + 32; button('edit', 'Edit profile', b.x + b.w - 16 - fw, by - 18, fw, 36, 'outline'); }
+          else if (blocked) { const fw = ctx.measureText('Blocked').width + 32; button('unblock', 'Blocked', b.x + b.w - 16 - fw, by - 18, fw, 36, 'fill', '#f4212e'); }
+          else {
+            const fl = on ? 'Following' : 'Follow', fw = ctx.measureText(fl).width + 32, fx = b.x + b.w - 16 - fw; button('follow', fl, fx, by - 18, fw, 36, on ? 'outline' : 'fill');
+            const mx = fx - 46; iconButton('message', 'mail', mx, by - 18, 36, 36, 'outline');
+            if (G && p.friendButton !== false) { const st = G.friendStatus(I.handle), room = mx - 10 - (ax + av / 2 + 10); ctx.font = `800 13px ${F}`; let l2 = FRIEND_LABEL[st], w2 = ctx.measureText(l2).width + 26; if (w2 > room) { l2 = FRIEND_SHORT[st]; w2 = ctx.measureText(l2).width + 22; }
+              button('friend', l2, mx - 10 - w2, by - 16, w2, 32, st === 'received' ? 'fill' : 'outline', st === 'friends' ? acc : ''); }
+          }
+          y = ay + av / 2 + 22; nameLine(b.x + 16, y, 20);
+          y += 23; ctx.font = `500 14px ${F}`; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.x + 16, y, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) chip('Follows you', b.x + 16 + Math.min(ctx.measureText(hl).width, b.w - 120) + 8, y); y += 27; }
+          if (blocked) y = para(`You blocked @${I.handle}. You won’t see their posts.`, y, 15, sub) + 4; else if (I.bio) y = para(I.bio, y, 15, txt) + 3;
+          y = details(y); y = counts(y + 6, 'inline'); y = mutuals(y + 12); y += 6;
+        } else if (look === 'instagram') {
+          const av = 86, ay = b.y + 14 + av / 2, ax = b.x + 16 + av / 2; avatar(ax, ay, av);
+          const S0 = statsOf(s, I).filter(([l]) => l !== 'Friends' || !G); // three columns fit beside the picture
+          { const x0 = ax + av / 2 + 18, x1 = b.x + b.w - 16, cw = (x1 - x0) / S0.length, fmt = (v) => (Number.isFinite(+v) && v !== '' ? shortNum(v) : v); S0.forEach(([label, val], i) => { const cx = x0 + cw * i + cw / 2; UK.text(ctx, fmt(val), cx, ay - 9, { size: 18, weight: 800, color: txt }); UK.text(ctx, label, cx, ay + 12, { size: 13, weight: 500, color: txt, maxW: cw - 2 }); hits.push({ k: 'stat:' + label, x: cx - cw / 2, y: ay - 26, w: cw, h: 52 }); }); }
+          if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 40, b.y + 2, 32, 24, 'bare');
+          y = ay + av / 2 + 20; nameLine(b.x + 16, y, 15, 'left', b.w - 140);
+          if (I.pronouns) { ctx.font = `900 15px ${F}`; const nw = Math.min(ctx.measureText(I.name).width, b.w - 140) + (I.verified ? 22 : 0); UK.text(ctx, I.pronouns, b.x + 16 + nw + 8, y, { size: 14, weight: 500, color: sub, align: 'left' }); }
+          y += 20; if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.x + 16, y); y += 22; }
+          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub) + 2; else if (I.bio) y = para(I.bio, y, 14, txt, 'left', 4, 19) + 2;
+          y = details(y); y = mutuals(y + 2); y = wideButtons(y + 4, b.x + 16, b.x + b.w - 16, 34) + 14;
+        } else {
+          const coverH = I.cover ? 104 : 0, av = 96, ay = b.y + (coverH ? coverH : 10 + av / 2);
+          if (coverH) { drawCover(ctx, I.cover, b.x, b.y, b.w, coverH); if (isPic(I.cover)) hits.push({ k: 'cover', x: b.x, y: b.y, w: b.w, h: coverH }); }
+          avatar(b.cx, ay, av); if (p.moreMenu !== false) iconButton('more', 'more', b.x + b.w - 50, b.y + 10, 34, 34, coverH ? 'dark' : 'bare');
+          y = ay + av / 2 + 24; nameLine(b.cx, y, 20, 'center');
+          y += 22; const hl = (I.handle ? '@' + I.handle : '') + (I.pronouns ? ' · ' + I.pronouns : ''); if (hl) { UK.text(ctx, hl, b.cx, y, { size: 14, weight: 500, color: sub, maxW: b.w - 40 }); y += 22; }
+          if (G && !p.own && p.followsYou !== false && G.followsMe(I.handle)) { chip('Follows you', b.cx, y, 'center'); y += 24; }
+          y = counts(y + 8, 'centered'); const bw = Math.min(b.w - 32, 320); y = wideButtons(y + 2, b.cx - bw / 2, b.cx + bw / 2, 40) + 16;
+          if (blocked) y = para(`You blocked @${I.handle}.`, y, 14, sub, 'center') + 2; else if (I.bio) y = para(I.bio, y, 15, txt, 'center', 4, 20) + 2;
+          y = details(y, 'center'); y = mutuals(y + 2, 'center'); y += 8;
+        }
+        // grow to fit what it shows: a page that lines things up moves what is under it; otherwise the top stays put
+        const need = Math.ceil(y - b.y);
+        if (!s.engine.editing && p.autoHeight !== false && e.shape && Math.abs((e.shape.h || 0) - need) > 1) {
+          const stacked = e.parentEnt?.behaviors?.some((x) => x.type === 'uiShowIf' && x.params?.stack);
+          if (!stacked && /^top/.test(e.anchor || '')) e.y += (need - (e.shape.h || 0)) / 2;
+          e.shape.h = need;
+        }
       },
     };
   },
@@ -17074,6 +17277,43 @@ export class SocialGraph {
   friends(who = this.me().handle) { const a = this.h(who); return this.rows('friends').filter((r) => r.status === 'accepted' && (this.h(r.from) === a || this.h(r.to) === a)).map((r) => (this.h(r.from) === a ? { handle: this.h(r.to), name: r.to_name || r.to } : { handle: this.h(r.from), name: r.from_name || r.from })); }
   requests() { const a = this.h(this.me().handle); return this.rows('friends').filter((r) => r.status !== 'accepted' && this.h(r.to) === a).map((r) => ({ handle: this.h(r.from), name: r.from_name || r.from, at: r._at })); }
   sentRequests() { const a = this.h(this.me().handle); return this.rows('friends').filter((r) => r.status !== 'accepted' && this.h(r.from) === a).map((r) => ({ handle: this.h(r.to), name: r.to_name || r.to })); }
+  // ---- profiles ----
+  /** Someone's profile ({ name, bio, avatar, cover, location, website, pronouns, joined, verified, private }): their row in a Profiles collection, or (for me, without one) this phone. */
+  profile(who) {
+    const b = this.h(who); if (!b) return {}; const c = this.D.def('Profiles') ? 'Profiles' : null;
+    let r = c ? this.D.rows(c).find((q) => this.h(q.handle) === b) : null;
+    if (!r && b === this.h(this.me().handle)) r = this.local().profile || null;
+    return r || {};
+  }
+  /** Change my profile. A new name also goes on my posts, comments and stories (and in {playerName}). */
+  saveProfile(patch) {
+    const me = this.me(), c = this.D.def('Profiles') ? 'Profiles' : null, a = this.h(me.handle);
+    if (c) { const r = this.D.rows(c).find((q) => this.h(q.handle) === a); if (r) this.D.update(c, r.id, patch); else this.D.add(c, { handle: me.handle, name: me.author, joined: Date.now(), ...patch }); }
+    else { const o = this.local(); o.profile = { handle: me.handle, joined: Date.now(), ...(o.profile || {}), ...patch }; this.saveLocal(o); }
+    const nm = String(patch.name || '').trim(), s = this.engine.scene;
+    if (nm && nm !== me.author) {
+      if (s && !this.engine.supa?.user?.()) s.setVar('playerName', nm);
+      for (const C of ['Posts', 'Comments', 'Stories']) if (this.D.def(C)) for (const r of this.D.rows(C).filter((q) => this.h(q.handle) === a && q.author !== nm)) this.D.update(C, r.id, { author: nm });
+    }
+    this.changed('profile');
+  }
+  /** Does this person follow me? */
+  followsMe(who) { return this.isFollowing(this.me().handle, who); }
+  /** People I follow who follow them ("Followed by …"). */
+  mutuals(who) { const b = this.h(who), me = this.h(this.me().handle); if (!b || b === me) return []; return this.following(me).filter((f) => f.handle !== b && this.isFollowing(b, f.handle)); }
+  // ---- mute / block (kept on this phone) ----
+  listOf(kind) { return (this.local()[kind] || []).map((x) => this.h(x)); }
+  isMuted(who) { return this.listOf('muted').includes(this.h(who)); }
+  isBlocked(who) { return this.listOf('blocked').includes(this.h(who)); }
+  /** Turn muting or blocking someone on or off; returns the new state. Blocking also unfollows and unfriends. */
+  toggleList(kind, who) {
+    const o = this.local(), b = this.h(who), L = (o[kind] || []).map((x) => this.h(x)), on = !L.includes(b);
+    o[kind] = on ? [...L, b] : L.filter((x) => x !== b); this.saveLocal(o);
+    if (on && kind === 'blocked') { if (this.isFollowing(b)) this.unfollow(b); if (this.friendStatus(b) !== 'none') this.unfriend(b); const a = this.h(this.me().handle); this.remove('follows', (r) => this.h(r.follower) === b && this.h(r.followee) === a); } // (and they no longer follow me)
+    this.changed(kind); return on;
+  }
+  /** Posts, comments and stories from them stay out of sight. */
+  hides(who) { const b = this.h(who); return !!b && (this.isMuted(b) || this.isBlocked(b)); }
   // ---- notifications ----
   /** Tell someone something happened: like, comment, reply, repost, quote, mention, follow, friend_request, friend_accept, message. */
   notify(to, type, o = {}) {

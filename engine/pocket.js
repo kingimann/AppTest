@@ -7899,7 +7899,7 @@ registerBehavior('uiSideBar', {
         const B = inst.btn(s);
         if (B && !want && e.visible && !e._parentHidden) for (const tp of inp.taps) if (Math.hypot(tp.x - B.x, tp.y - B.y) < B.r * 1.3) { inst.set(e, s, true); if (p.haptics !== false) E.vibrate(8); if (p.sound) E.audio.sfx(p.sound); inp.taps = inp.taps.filter((q) => q !== tp); break; }
         // swipe from the edge / drag to close
-        if (!drag && p.swipeOpen !== false && !want && !full()) for (const d of inp.downs) { if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, open: false, side: true }; break; } }
+        if (!drag && p.swipeOpen !== false && !want && !full() && !(s.settings.edgeSwipeBack !== false && left && s.canGoBack())) for (const d of inp.downs) { /* (where you can go back, the edge swipe goes back, like iOS) */ if ((left ? d.x < edge : d.x > E.width - edge) && d.y > R.y && d.y < R.y + R.h) { drag = { id: d.id, x0: d.x, y0: d.y, t0: t, open: false, side: true }; break; } }
         // a slider in the menu: press and drag along it
         if (sl) { const q = inp.pointers.get(sl.id); if (q) setSlider(s, sl, q.x); else sl = null; }
         else if (want && t > 0.9 && !drag) for (const d of inp.downs) { const r = rows.find((r) => r.track && condOk(s, r.item) === true && d.x >= r.track.x0 - 14 && d.x <= r.track.x1 + 14 && d.y >= r.y && d.y <= r.y + r.h && (!r.clipped || (d.y >= r.clipped[0] && d.y <= r.clipped[1]))); if (r) { sl = { id: d.id, it: r.item, x0: r.track.x0, x1: r.track.x1 }; setSlider(s, sl, d.x); break; } }
@@ -9199,13 +9199,13 @@ function postComposer(s, o) {
   const gifBox = el('div', 'margin:10px 0 0 54px;'), threadBox = el('div', 'margin-top:6px;');
   body.append(mediaBox, gifBox, pollBox, quoteBox, placeBox, threadBox);
   if (o.quote) { const Q = o.quote, qc = el('div', `border:1px solid ${c.line};border-radius:14px;padding:10px 12px;`); qc.dataset.quoteCard = '1';
-    const h1 = el('div', 'font-size:14px;'); h1.append(el('b', '', Q.author || ''), el('span', `color:${c.sub};margin-left:6px;`, Q.handle ? '@' + Q.handle : '')); qc.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:84px;overflow:hidden;', Q.text || (Q.media ? '📷 Photo' : ''))); quoteBox.append(qc); }
+    const h1 = el('div', 'font-size:14px;'); h1.append(el('b', '', Q.author || ''), el('span', `color:${c.sub};margin-left:6px;`, Q.handle ? '@' + Q.handle : '')); qc.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:84px;overflow:hidden;', Q.text || (Q.media ? 'Photo' : ''))); quoteBox.append(qc); }
   // bottom: picture, poll, place … counter
   const bar = el('div', `flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid ${c.line};`);
-  const tool = (ic, label) => { const b = btn(`font-size:22px;width:42px;height:40px;border-radius:12px;color:${c.acc};`, ic); b.setAttribute('aria-label', label); b.title = label; bar.append(b); return b; };
+  const tool = (ic, label) => { const b = btn(`font-size:22px;width:42px;height:40px;border-radius:12px;color:${c.acc};display:inline-flex;align-items:center;justify-content:center;`, svgIcon(ic, 22) ? '' : ic); if (svgIcon(ic, 22)) b.innerHTML = svgIcon(ic, 22); b.setAttribute('aria-label', label); b.title = label; bar.append(b); return b; };
   const file = el('input'); file.type = 'file'; file.accept = o.videos !== false ? 'image/*,video/*' : 'image/*'; file.multiple = true; file.style.display = 'none'; sheet.append(file);
   const bPic = o.photos !== false ? tool('🖼️', 'Add photos') : null, bPoll = o.polls !== false && !o.quote ? tool('📊', 'Add a poll') : null, bPlace = o.places !== false ? tool('📍', 'Add a place') : null;
-  const bGif = o.photos !== false && o.gifs !== false ? tool('', 'Add a GIF') : null; if (bGif) { bGif.textContent = 'GIF'; bGif.style.cssText += `font:900 12px ${font};border:2px solid ${c.acc};border-radius:7px;width:36px;height:26px;margin:0 3px;`; }
+  const bGif = o.photos !== false && o.gifs !== false ? tool('gif', 'Add a GIF') : null;
   const bThread = o.threads && !o.quote && !o.noDraft ? tool('🧵', 'Add another post to the thread') : null;
   bar.append(el('div', 'flex:1;'));
   const NS = 'http://www.w3.org/2000/svg', ring = document.createElementNS(NS, 'svg'); ring.setAttribute('width', '30'); ring.setAttribute('height', '30'); ring.setAttribute('viewBox', '0 0 30 30');
@@ -9245,7 +9245,7 @@ function postComposer(s, o) {
     const chip = el('div', `display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:16px;background:${c.field};color:${c.acc};font:700 14px ${font};`);
     const inp = el('input', `border:0;outline:none;background:transparent;color:${c.text};font:600 14px ${font};width:160px;`); inp.placeholder = 'Where are you?'; inp.value = st.place; inp.maxLength = 40; inp.oninput = () => { st.place = inp.value; };
     const x = btn(`color:${c.sub};font-size:13px;`, '✕'); x.onclick = () => { st.place = ''; placeBox.dataset.editing = ''; paintPlace(); };
-    chip.append(el('span', '', '📍'), inp, x); placeBox.append(chip); return inp;
+    chip.append(iconSpan('place', 16), inp, x); placeBox.append(chip); return inp;
   };
   ta.addEventListener('input', () => { st.text = ta.value; grow(); sync(); });
   bPic && (bPic.onclick = () => { if (st.media.length >= 4 || st.poll) return; file.click(); });
@@ -9315,13 +9315,13 @@ function socialSheet(s, o) {
   if (!full) head.append(el('div', `width:38px;height:4px;border-radius:2px;background:${c.sub};opacity:.45;margin:0 auto 8px;`));
   const titleRow = el('div', 'display:flex;align-items:center;justify-content:center;position:relative;min-height:28px;');
   if (o.title) titleRow.append(el('div', 'font-weight:800;font-size:16px;', o.title));
-  const x = btn(`position:absolute;${full ? 'left:-6px' : 'right:0'};top:50%;transform:translateY(-50%);color:${full ? c.text : c.sub};font-size:${full ? 24 : 20}px;width:36px;height:36px;`, full ? '←' : '✕'); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
-  if (o.onMore) { const mb = btn(`position:absolute;${full ? 'right:0' : 'right:34px'};top:50%;transform:translateY(-50%);color:${c.sub};font-size:20px;width:36px;height:36px;letter-spacing:1px;`, '⋯'); mb.setAttribute('aria-label', 'More'); mb.onclick = () => o.onMore(); titleRow.append(mb); }
+  const x = btn(`position:absolute;${full ? 'left:-6px' : 'right:0'};top:50%;transform:translateY(-50%);color:${full ? c.text : c.sub};font-size:${full ? 24 : 20}px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); x.innerHTML = full ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>' : svgIcon('x', 22, { stroke: 2.2 }); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
+  if (o.onMore) { const mb = btn(`position:absolute;${full ? 'right:0' : 'right:34px'};top:50%;transform:translateY(-50%);color:${c.sub};font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); mb.innerHTML = svgIcon('more', 22, { stroke: 3 }); mb.setAttribute('aria-label', 'More'); mb.onclick = () => o.onMore(); titleRow.append(mb); }
   head.append(titleRow);
   const body = el('div', `flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-top:1px solid ${c.line};`);
   sheet.append(head, body); wrap.append(sheet); root.append(wrap);
   let closed = false;
-  const close = () => { if (closed) return; closed = true; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = full ? 'translateX(100%)' : 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
+  const close = () => { if (closed) return; closed = true; wrap.dataset.closing = '1'; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = full ? 'translateX(100%)' : 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
   const key = (ev) => { if (ev.key === 'Escape' && wrap === root.querySelector('[data-pocket-sheet]:last-of-type')) close(); }; document.addEventListener('keydown', key);
   requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.45)'; sheet.style.transform = 'none'; }));
   wrap.addEventListener('pointerdown', (ev) => { if (ev.target === wrap) close(); }); x.onclick = close;
@@ -9350,13 +9350,14 @@ function socialSheet(s, o) {
     }
     for (const it of o.items) {
       const b = btn(`display:flex;align-items:center;gap:14px;width:100%;padding:14px 20px;color:${it.danger ? '#f4212e' : c.text};font:600 16px ${font};text-align:left;`);
-      b.append(el('span', 'width:24px;text-align:center;font-size:19px;', it.icon || ''), el('span', '', it.label));
+      b.append(iconSpan(it.icon, 21, `width:24px;font-size:19px;color:${it.danger ? '#f4212e' : c.sub};`), el('span', '', it.label));
       b.dataset.action = it.label; b.onclick = () => { close(); it.run?.(); }; body.append(b);
     }
     body.append(el('div', 'height:10px;'));
     return api;
   }
   // pictures: swipe through them, double-tap to like, tap to see them full screen
+  const zoomPic = (src) => { const z = el('div', 'position:absolute;inset:0;z-index:5;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .18s;'); z.dataset.zoom = '1'; const im = el('img', 'max-width:100%;max-height:100%;object-fit:contain;'); im.src = artURL(src); z.append(im); z.onclick = () => { z.style.opacity = '0'; setTimeout(() => z.remove(), 180); }; sheet.append(z); requestAnimationFrame(() => { z.style.opacity = '1'; }); };
   const gallery = (P, start = 0, big = false) => {
     const media = P.media || [], box = el('div', `position:relative;${big ? 'width:100%;height:100%;' : 'margin-top:12px;border-radius:14px;overflow:hidden;'}`);
     const strip = el('div', `display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;${big ? 'height:100%;' : ''}`); strip.className = 'pocket-strip';
@@ -9396,12 +9397,12 @@ function socialSheet(s, o) {
   // the post itself (when it was tapped)
   if (o.post) {
     const P = o.post, box = el('div', 'padding:14px 16px 4px;');
-    if (P.repostedBy) box.append(el('div', `color:${c.sub};font-size:13px;font-weight:700;margin:0 0 8px 6px;`, `🔁 ${P.repostedBy} reposted`));
+    if (P.repostedBy) { const rb = el('div', `display:flex;align-items:center;gap:6px;color:${c.sub};font-size:13px;font-weight:700;margin:0 0 8px 6px;`); rb.append(iconSpan('repost', 15), el('span', '', `${P.repostedBy} reposted`)); box.append(rb); }
     else if (P.label) box.append(el('div', `color:${c.sub};font-size:13px;font-weight:700;margin:0 0 8px 6px;`, P.label));
     const top = el('div', 'display:flex;align-items:center;gap:10px;'), who = el('div', 'flex:1;min-width:0;');
     const nm = el('div', 'font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', P.author || '');
     if (P.verified) nm.append(el('span', `color:${c.acc};margin-left:4px;`, '✓'));
-    who.append(nm, el('div', `color:${c.sub};font-size:13px;`, [P.handle ? '@' + P.handle : '', P.location ? '📍 ' + P.location : ''].filter(Boolean).join(' · ')));
+    { const ln = el('div', `display:flex;align-items:center;gap:4px;color:${c.sub};font-size:13px;`, P.handle ? '@' + P.handle : ''); if (P.location) { if (P.handle) ln.append(document.createTextNode(' · ')); ln.append(iconSpan('place', 13), document.createTextNode(P.location)); } who.append(nm, ln); }
     top.append(avatar(P.author, P.avatar, 44), who);
     if (o.onFollow && P.following === false) {
       const fb = btn(`flex:none;padding:7px 16px;border-radius:18px;background:${c.text};color:${c.bg};font:800 14px ${font};`, 'Follow');
@@ -9431,7 +9432,7 @@ function socialSheet(s, o) {
     if (P.link) {
       const lk = btn(`display:flex;width:100%;margin-top:12px;border:1px solid ${c.line};border-radius:14px;overflow:hidden;text-align:left;`);
       const im = el('div', `flex:none;width:92px;min-height:76px;display:flex;align-items:center;justify-content:center;font-size:36px;background:rgba(128,128,128,.15);`);
-      if (isPic(P.linkImage)) { im.style.background = `#444 center/cover url("${artURL(P.linkImage)}")`; } else im.textContent = P.linkImage || '🔗';
+      if (isPic(P.linkImage)) { im.style.background = `#444 center/cover url("${artURL(P.linkImage)}")`; } else if (P.linkImage) im.textContent = P.linkImage; else { im.innerHTML = svgIcon('link', 26); im.style.color = c.sub; }
       const tx = el('div', 'flex:1;min-width:0;padding:10px 12px;display:flex;flex-direction:column;justify-content:center;gap:2px;');
       tx.append(el('div', `color:${c.sub};font-size:12px;`, P.domain || ''), el('div', 'font-weight:700;font-size:15px;line-height:1.3;', P.linkTitle || P.link));
       lk.append(im, tx); lk.onclick = () => o.onLink?.(); box.append(lk);
@@ -9441,7 +9442,7 @@ function socialSheet(s, o) {
       const Q = P.quote, qc = btn(`display:block;width:100%;margin-top:12px;border:1px solid ${c.line};border-radius:14px;padding:10px 12px;text-align:left;`); qc.dataset.quoteCard = '1';
       if (Q.gone) qc.append(el('div', `color:${c.sub};font-size:14px;`, 'This post is unavailable'));
       else { const row0 = el('div', 'display:flex;gap:10px;'), tx = el('div', 'flex:1;min-width:0;'), h1 = el('div', 'font-size:14px;display:flex;align-items:center;gap:6px;'); h1.append(avatar(Q.author, '', 20), el('b', '', Q.author || ''), el('span', `color:${c.sub};`, Q.handle ? '@' + Q.handle : ''));
-        tx.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:62px;overflow:hidden;', Q.text || (Q.media ? '📷 Photo' : ''))); row0.append(tx);
+        tx.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:62px;overflow:hidden;', Q.text || (Q.media ? 'Photo' : ''))); row0.append(tx);
         if (Q.media) { const th = el('div', `flex:none;width:58px;height:58px;border-radius:8px;overflow:hidden;background:rgba(128,128,128,.2);display:flex;align-items:center;justify-content:center;font-size:30px;`); if (isPic(Q.media) && !isVid(Q.media)) th.style.background = `#333 center/cover url("${artURL(Q.media)}")`; else th.textContent = isVid(Q.media) ? '▶' : Q.media; row0.append(th); }
         qc.append(row0); qc.onclick = () => o.onOpenQuote?.(); }
       box.append(qc);
@@ -9482,18 +9483,22 @@ function socialSheet(s, o) {
   const list = el('div', 'padding:2px 0 10px;'); body.append(list);
   const openThreads = new Set(); let replyTo = null;
   const fmt = (n) => (+n ? shortNum(+n) : '');
-  const row = (cm, isReply) => {
-    const r = el('div', `display:flex;gap:10px;padding:8px 16px 8px ${isReply ? 58 : 16}px;transition:background .6s;`); r.dataset.comment = cm.text; r.dataset.cid = cm.id;
+  const IND = (d) => 16 + Math.min(d, 3) * 42; // indent of a reply d levels deep (deeper ones line up with the third)
+  const row = (cm, depth = 0) => {
+    const isReply = depth > 0;
+    const r = el('div', `position:relative;display:flex;gap:10px;padding:8px 16px 8px ${IND(depth)}px;transition:background .6s;`); r.dataset.comment = cm.text; r.dataset.cid = cm.id;
     const mid = el('div', 'flex:1;min-width:0;'), line1 = el('div', 'font-size:13px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;');
     line1.append(el('span', 'font-weight:800;', cm.author || 'Someone'));
     if (o.post && cm.author && cm.author === o.post.author) line1.append(el('span', `background:${c.acc};color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px;`, 'Author'));
-    if (cm.pinned) line1.append(el('span', `color:${c.sub};`, '📌 Pinned'));
+    if (cm.pinned) { const pn = el('span', `display:inline-flex;align-items:center;gap:3px;color:${c.sub};`); pn.append(iconSpan('pin', 12), document.createTextNode('Pinned')); line1.append(pn); }
     line1.append(el('span', `color:${c.sub};`, (cm.at ? shortAgo(cm.at) : '') + (cm.edited ? ' · edited' : '')));
     const txt = el('div', 'font-size:15px;line-height:1.35;margin-top:2px;white-space:pre-wrap;word-wrap:break-word;');
     for (const part of String(cm.text).split(/(@[\w.]+)/)) txt.append(/^@[\w.]+$/.test(part) ? el('span', `color:${c.acc};font-weight:600;`, part) : document.createTextNode(part));
-    mid.append(line1, txt);
+    mid.append(line1); if (String(cm.text || '').trim()) mid.append(txt);
+    if (cm.media && isPic(cm.media)) { const im = el('img', `display:block;max-width:min(240px,100%);max-height:260px;border-radius:14px;margin-top:6px;object-fit:cover;background:rgba(128,128,128,.15);cursor:zoom-in;`); im.src = artURL(cm.media); im.alt = isGif(cm.media) ? 'GIF' : 'Photo'; im.dataset.commentMedia = '1'; im.onclick = () => zoomPic(cm.media); mid.append(im); }
     const acts = el('div', `display:flex;gap:16px;margin-top:5px;color:${c.sub};font-size:13px;font-weight:700;`);
-    const reply = btn('', 'Reply'); reply.onclick = () => { replyTo = cm.parent || cm.id; chip(cm.handle || String(cm.author || '').split(/\s+/)[0]); inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
+    const reply = btn('', 'Reply'); reply.onclick = () => { replyTo = cm.id; // (a reply to this very comment: threads nest)
+      chip(cm.handle || String(cm.author || '').split(/\s+/)[0]); inp.value = '@' + (cm.handle || String(cm.author || '').split(/\s+/)[0]) + ' '; inp.focus(); sync(); };
     acts.append(reply);
     if (o.onSaveComment) { const sv = !!o.isCommentSaved?.(cm), sb = btn(`display:flex;align-items:center;gap:4px;color:${sv ? c.acc : c.sub};`); sb.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="${sv ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true">${POST_ICONS.bookmark}</svg>`; sb.append(document.createTextNode(sv ? 'Saved' : 'Save')); sb.dataset.saveComment = sv ? '1' : ''; sb.setAttribute('aria-label', sv ? 'Remove comment from saved' : 'Save comment'); sb.onclick = () => { o.onSaveComment(cm); paint(); }; acts.append(sb); }
     if (cm.mine && o.onEditComment) { const ed = btn('', 'Edit'); ed.onclick = () => { // edit it where it is
@@ -9518,12 +9523,19 @@ function socialSheet(s, o) {
     sortB.textContent = sortBy === 'top' ? 'Top ▾' : 'Newest ▾';
     tops.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (sortBy === 'top' ? (+b.likes || 0) - (+a.likes || 0) || (b.at || 0) - (a.at || 0) : (b.at || 0) - (a.at || 0)));
     if (!tops.length) { list.append(el('div', `text-align:center;color:${c.sub};padding:28px 20px;font-size:15px;`, 'No comments yet. Start the conversation.')); return; }
-    for (const cm of tops) {
-      list.append(row(cm, false));
-      const ks = kids(cm.id); if (!ks.length) continue;
-      if (openThreads.has(String(cm.id))) { for (const k of ks) list.append(row(k, true)); const hide = btn(`display:block;margin:0 0 6px 58px;color:${c.sub};font:700 13px ${font};`, '— Hide replies'); hide.onclick = () => { openThreads.delete(String(cm.id)); paint(); }; list.append(hide); }
-      else { const more = btn(`display:block;margin:0 0 6px 58px;color:${c.sub};font:700 13px ${font};`, `— View ${ks.length} repl${ks.length === 1 ? 'y' : 'ies'}`); more.dataset.replies = cm.id; more.onclick = () => { openThreads.add(String(cm.id)); paint(); }; list.append(more); }
-    }
+    const desc = (id) => kids(id).reduce((n, k) => n + 1 + desc(k.id), 0);
+    const tree = (cm, depth, into) => { // a comment, then its replies under a thread line (each reply can have replies of its own)
+      into.append(row(cm, depth));
+      const ks = kids(cm.id); if (!ks.length) return;
+      const lx = IND(depth) + (depth ? 13 : 17) - 1, cx = IND(depth + 1);
+      if (openThreads.has(String(cm.id))) {
+        const box = el('div', 'position:relative;'); box.dataset.thread = cm.id;
+        box.append(el('div', `position:absolute;left:${lx}px;top:-8px;bottom:34px;width:2px;border-radius:1px;background:${c.line};pointer-events:none;`));
+        for (const k of ks) tree(k, depth + 1, box);
+        const hide = btn(`display:block;margin:0 0 6px ${cx}px;color:${c.sub};font:700 13px ${font};`, '— Hide replies'); hide.onclick = () => { openThreads.delete(String(cm.id)); paint(); }; box.append(hide); into.append(box);
+      } else { const n = desc(cm.id), more = btn(`display:flex;align-items:center;gap:8px;margin:0 0 6px ${cx}px;color:${c.sub};font:700 13px ${font};`, ''); more.append(el('span', `width:22px;height:2px;background:${c.line};border-radius:1px;`), document.createTextNode(`View ${n} repl${n === 1 ? 'y' : 'ies'}`)); more.dataset.replies = cm.id; more.onclick = () => { openThreads.add(String(cm.id)); paint(); }; into.append(more); }
+    };
+    for (const cm of tops) tree(cm, 0, list);
   };
   // the box to write a comment
   const foot = el('div', `flex:none;border-top:1px solid ${c.line};background:${c.bg};`);
@@ -9537,16 +9549,24 @@ function socialSheet(s, o) {
   const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:20px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`);
   inp.placeholder = o.placeholder || 'Add a comment…'; inp.maxLength = 500; inp.setAttribute('enterkeyhint', 'send');
   const send = btn(`flex:none;color:${c.acc};font:800 15px ${font};padding:6px 4px;`, 'Post');
-  const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.disabled = !on; };
+  let att = ''; const attRow = el('div', 'display:none;padding:8px 16px 0;'); attRow.dataset.attachment = '1';
+  const setAtt = (m) => { att = m || ''; attRow.textContent = ''; attRow.style.display = att ? 'block' : 'none'; if (att) { const w0 = el('div', 'position:relative;display:inline-block;'), im = el('img', 'display:block;height:84px;max-width:160px;border-radius:12px;object-fit:cover;'); im.src = artURL(att); const x0 = btn('position:absolute;right:4px;top:4px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;display:flex;align-items:center;justify-content:center;', ''); x0.innerHTML = svgIcon('x', 14, { stroke: 2.6 }); x0.setAttribute('aria-label', 'Remove'); x0.onclick = () => { setAtt(''); sync(); }; w0.append(im, x0); attRow.append(w0); } sync(); };
+  const cFile = el('input'); cFile.type = 'file'; cFile.accept = 'image/*'; cFile.style.display = 'none';
+  const mediaBtn = (ic, label) => { const b0 = btn(`flex:none;width:34px;height:34px;border-radius:50%;color:${c.acc};display:flex;align-items:center;justify-content:center;`, ''); b0.innerHTML = svgIcon(ic, 22); b0.setAttribute('aria-label', label); return b0; };
+  const bPhoto = o.commentPhotos !== false ? mediaBtn('image', 'Add a photo') : null, bGifC = o.commentPhotos !== false && o.gifs !== false ? mediaBtn('gif', 'Add a GIF') : null;
+  if (bPhoto) bPhoto.onclick = () => cFile.click();
+  cFile.onchange = async () => { const f = cFile.files?.[0]; cFile.value = ''; if (!f) return; try { setAtt(o.upload && f.size > 1.5e6 ? await o.upload(f) : f.type === 'image/gif' ? (f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)) : await shrinkPicture(f, 1080)); } catch { s.snackbar?.('That picture could not be added'); } };
+  if (bGifC) bGifC.onclick = () => gifPicker(s, { colors: c, font, upload: o.upload, onPick: (u) => { setAtt(u); inp.focus(); } });
+  const sync = () => { const on = !!inp.value.trim() || !!att; send.style.opacity = on ? '1' : '.4'; send.disabled = !on; };
   const submit = () => {
-    const v = inp.value.trim(); if (!v) return; const parent = replyTo; o.onAdd(v, parent); inp.value = ''; replyTo = null; chip(''); sync();
+    const v = inp.value.trim(); if (!v && !att) return; const parent = replyTo, m0 = att; o.onAdd(v, parent, m0); inp.value = ''; replyTo = null; chip(''); setAtt(''); sync();
     if (parent) openThreads.add(String(parent)); else sortBy = 'newest';
-    paint(); requestAnimationFrame(() => { const rows = [...list.querySelectorAll('[data-comment]')].filter((q) => q.dataset.comment === v); (rows[rows.length - 1] || list).scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); });
+    paint(); requestAnimationFrame(() => { const rows = [...list.querySelectorAll('[data-comment]')].filter((q) => q.dataset.comment === (v || '')); (rows[rows.length - 1] || list).scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); });
   };
   inp.addEventListener('input', sync); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } }); send.onclick = submit;
-  inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send); foot.append(chipRow, emo, inRow); sheet.append(foot);
+  inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), ...(bPhoto ? [bPhoto] : []), ...(bGifC ? [bGifC] : []), inp, send, cFile); foot.append(chipRow, emo, attRow, inRow); sheet.append(foot);
   const fc = o.focusComment ?? s.engine._focusComment; s.engine._focusComment = null; // opened from a saved comment: show it
-  if (fc != null) { const cm = o.comments().find((q) => String(q.id) === String(fc)); if (cm?.parent) openThreads.add(String(cm.parent)); }
+  if (fc != null) { const A0 = o.comments(); let cm = A0.find((q) => String(q.id) === String(fc)), n0 = 0; while (cm?.parent && n0++ < 20) { openThreads.add(String(cm.parent)); cm = A0.find((q) => String(q.id) === String(cm.parent)); } }
   sync(); paint(); if (o.focus) setTimeout(() => inp.focus(), 300);
   if (fc != null) setTimeout(() => { const q = list.querySelector(`[data-cid="${CSS.escape(String(fc))}"]`); if (!q) return; q.scrollIntoView?.({ block: 'center', behavior: 'smooth' }); q.style.background = withAlpha(c.acc, 0.16); setTimeout(() => { q.style.background = ''; }, 1600); }, 350);
   api.input = inp; api.paint = paint; return api;
@@ -9564,6 +9584,8 @@ registerBehavior('uiFeed', {
     { key: 'fields', label: 'My field names (e.g. text = body, media = photo)', type: 'text', default: '', info: 'Only if your collection uses other names. Keys: author, handle, text, media, color, avatar, likes, liked, comments, reposts, reposted, saved, verified, time, poll, votes, voted, reaction, following, live, video, duration, location, edited, reposted_by, top_comment, link, link_title, link_image.' },
     { key: 'empty', label: 'When there are no posts', type: 'text', default: 'No posts yet' },
     { key: 'tabs', label: 'Tabs on top (Label | only where…, one per line)', type: 'code', default: '', info: 'E.g. “For you |”, “Following | following” and “Saved | saved” (the posts you bookmarked). Blank = no tabs.' },
+    { key: 'withReposts', label: 'A person’s feed (handle = …) also shows what they reposted', type: 'bool', default: true },
+    { key: 'commentPhotos', label: 'Photos and GIFs in comments', type: 'bool', default: true },
     { key: 'countViews', label: 'Count views (each person once, like X)', type: 'bool', default: true, info: 'A post gets a view when it has been on someone’s screen for a moment, or they open it. Show the count with “views” in Buttons.' },
     { key: 'savedPage', label: 'Saved page (“View” after saving, blank = none)', type: 'text', default: '', info: 'A page with a Saved list (bookmarked posts and comments).' },
     { key: 'tabVar', label: 'Picked tab goes in variable', type: 'text', default: '', suggest: 'vars', showIf: (b) => !!String(b.tabs || '').trim() },
@@ -9686,6 +9708,9 @@ registerBehavior('uiFeed', {
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
+      repostCtx = '';
+      const hm = p.withReposts !== false && has(s) && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
+      if (hm) { const h = handleOf(fillTemplate(hm[1], s.vars)); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
       return P;
     };
     /** The page this feed is on (things above it scroll away), and how far up they have gone. */
@@ -9754,6 +9779,29 @@ registerBehavior('uiFeed', {
       return out;
     };
     const isSaved = (s, r) => bmHas(s, 'post', r.id);
+    /** Reposts, per person: who reposted is kept on the post (reposters), this phone remembers its own too. */
+    const RKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.reposts'; let myRep = null;
+    const myReposts = (s) => { if (myRep) return myRep; try { myRep = new Set(JSON.parse(store.get(RKEY(s), '[]')) || []); } catch { myRep = new Set(); } return myRep; };
+    const reposters = (r) => String(F(r, 'reposters') ?? '').split(',').map(handleOf).filter(Boolean);
+    const isReposted = (s, r) => myReposts(s).has(String(r.id)) || reposters(r).includes(meOf(s).handle.toLowerCase()) || (F(r, 'reposters') == null && truthy(F(r, 'reposted')) && !myReposts(s).has('-' + r.id));
+    const repostIt = (s, r) => {
+      const me1 = meOf(s).handle.toLowerCase(), on = !isReposted(s, r), R0 = myReposts(s), by = reposters(r);
+      R0.delete(String(r.id)); R0.delete('-' + r.id); R0.add(on ? String(r.id) : '-' + r.id); store.set(RKEY(s), JSON.stringify([...R0].slice(-3000)));
+      const next = on ? [...new Set([...by, me1])] : by.filter((h) => h !== me1);
+      patch(s, r, { reposters: next.join(','), reposted: on, reposts: Math.max(0, (+F(r, 'reposts') || 0) + (on ? 1 : -1)) });
+      if (on) { s.engine.social?.notify(who(r), 'repost', { post: r.id }); s.engine.vibrate?.(10); s.snackbar?.('Reposted'); }
+      return on;
+    };
+    let repostCtx = ''; // a profile's feed: whose reposts it shows
+    /** “… reposted” over a post: the profile's owner on their page, else you, else someone you follow (or the post's own label). */
+    const repostLabel = (s, r) => {
+      const by = reposters(r), me1 = meOf(s).handle.toLowerCase(), SG = s.engine.social;
+      if (repostCtx && by.includes(repostCtx) && who(r) !== repostCtx) return repostCtx === me1 ? 'You' : nameOfHandle(s, repostCtx);
+      if (repostCtx) return '';
+      if (isReposted(s, r) && who(r) !== me1) return 'You';
+      const f = by.find((h) => h !== me1 && h !== who(r) && SG?.isFollowing(h)); if (f) return nameOfHandle(s, f);
+      return F(r, 'repostedBy') ? String(F(r, 'repostedBy')) : '';
+    };
     /** Views, like X: a post counts one view from each person, once it has been on their screen for a moment (or opened). */
     const VKEY = (s) => 'pocket.feed.' + (s.engine.gameKey || 'game') + '.viewed'; let viewedS = null; const viewT = new Map();
     const myViews = (s) => { if (viewedS) return viewedS; try { viewedS = new Set(JSON.parse(store.get(VKEY(s), '[]')) || []); } catch { viewedS = new Set(); } return viewedS; };
@@ -9772,7 +9820,7 @@ registerBehavior('uiFeed', {
     const editIt = (s, r) => {
       sheetUp = true;
       const ok = postComposer(s, { me: meOf(s), max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Edit post', button: 'Save', text: String(F(r, 'text') || ''), noDraft: true, photos: false, polls: false, places: false,
-        onPost: (out) => { patch(s, r, { text: out.text, edited: true }); s.snackbar?.('Post updated'); }, onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+        onPost: (out) => { patch(s, r, { text: out.text, edited: true }); s.snackbar?.('Post updated'); }, onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
       if (!ok) sheetUp = false;
     };
     const threadIt = (s, r) => { // add a post under one of yours: the thread continues
@@ -9780,7 +9828,7 @@ registerBehavior('uiFeed', {
       const me0 = meOf(s), ok = postComposer(s, { me: me0, max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Add to thread', placeholder: 'Add another post…', button: 'Post', noDraft: true, allowSame: true, photos: true, polls: false, places: false,
         upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
         onPost: (out) => { let last = r; for (;;) { const nx = (has(s) ? D(s).rows(p.collection) : sample || []).find((q) => rid(q) === String(last.id) && who(q) === who(r)); if (!nx) break; last = nx; } const rec = postRecord(me0, out, { reply_to: last.id }); if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_POSTS()).unshift({ id: 't' + Date.now().toString(36), ...rec, _at: Date.now() }); s.snackbar?.('Added to the thread'); },
-        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
       if (!ok) sheetUp = false;
     };
     const deleteIt = (s, r) => {
@@ -9798,7 +9846,7 @@ registerBehavior('uiFeed', {
       const ok = postComposer(s, { me: me0, max: +p.maxQuote || 280, colors: c, font: fontOf(), button: 'Post', photos: true, polls: false, places: false,
         quote: { author: F(r, 'author'), handle: who(r), text: F(r, 'text'), media: mediaList(r)[0] },
         onPost: (out) => { const rec = postRecord(me0, out, { quote: r.id }); const nr = has(s) ? D(s).add(p.collection, rec) : ((sample ||= SAMPLE_POSTS()).unshift({ id: 'q' + Date.now().toString(36), ...rec, _at: Date.now() }), sample[0]); s.engine.social?.notify(who(r), 'quote', { post: nr?.id, text: out.text }); s.engine.social?.notifyMentions(out.text, nr?.id); patch(s, r, { reposts: (+F(r, 'reposts') || 0) + 1 }); goTop = true; if (p.quoteMessage) s.send(p.quoteMessage, r.id); s.snackbar?.('Posted'); },
-        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
       if (!ok) sheetUp = false;
     };
     const hideIt = (s, r, kind) => { const H = hid(s), list = kind === 'hide' ? H.posts : H.authors, v = kind === 'hide' ? r.id : who(r); list.push(v); saveHid(s); if (p.hideMessage) s.send(p.hideMessage, v); s.snackbar?.(kind === 'hide' ? 'Post hidden' : `Muted @${v}`, 'Undo', () => { const i = list.indexOf(v); if (i >= 0) list.splice(i, 1); saveHid(s); }); };
@@ -9817,7 +9865,7 @@ registerBehavior('uiFeed', {
         for (let k = 0; k < n; k++) { const [author, handle, text] = SAMPLE_COMMENTS[(h + k * 2) % SAMPLE_COMMENTS.length]; if (author === F(r, 'author')) continue; const on = myL.has(r.id + ':s' + k); out.push(mem(r.id + ':s' + k, { id: 's' + k, author, handle, text, at: (+F(r, 'time') || Date.now()) + (k + 2) * 240e3, likes: (h >> k) % 30 + (on ? 1 : 0), liked: on })); } }
       const cc = cColl(s);
       const mine0 = myCLikes(s), mh = String(me0.handle).toLowerCase();
-      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; const by = likedBy(q), local = mine0.has(r.id + ':' + q.id), liked = local || by.includes(mh); out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, at: q._at, likes: Math.max(0, +q.likes || 0) + (local && !by.includes(mh) ? 1 : 0), liked, parent: q.parent || '', pinned: truthy(q.pinned), edited: truthy(q.edited), mine: q.author === me0.author }); } // (liked by me: who liked it is kept on the comment; this phone remembers too)
+      if (cc) for (const q of D(s).rows(cc)) { if (String(q.post ?? '') !== String(r.id)) continue; const by = likedBy(q), local = mine0.has(r.id + ':' + q.id), liked = local || by.includes(mh); out.push({ id: q.id, row: true, author: q.author, handle: q.handle, text: q.text, media: q.media || '', at: q._at, likes: Math.max(0, +q.likes || 0) + (local && !by.includes(mh) ? 1 : 0), liked, parent: q.parent || '', pinned: truthy(q.pinned), edited: truthy(q.edited), mine: q.author === me0.author }); } // (liked by me: who liked it is kept on the comment; this phone remembers too)
       else for (const q of cDev(s)[r.id] || []) out.push({ ...q, mine: q.author === me0.author });
       return out;
     };
@@ -9834,25 +9882,25 @@ registerBehavior('uiFeed', {
       if (navigator.share) items.push({ icon: '📤', label: 'Share via…', run: () => navigator.share({ text: tx, ...(url ? { url } : {}) }).catch((er) => { if (er?.name !== 'AbortError') copy(tx, 'Copied to clipboard'); }) });
       items.push({ icon: '📋', label: 'Copy text', run: () => copy(tx, 'Copied to clipboard') });
       if (url) items.push({ icon: '🔗', label: 'Copy link', run: () => copy(String(url), 'Link copied') });
-      items.push({ icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } });
+      items.push({ icon: '🔁', label: isReposted(s, r) ? 'Undo repost' : 'Repost', run: () => { repostIt(s, r); pops.set(r.id + 'r', s.time); } });
       items.push({ icon: '🔖', label: isSaved(s, r) ? 'Remove from saved' : 'Save post', run: () => saveIt(s, r) });
-      sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } })) sheetUp = false;
+      sheetUp = true; if (!socialSheet(s, { kind: 'share', title: 'Share', items, colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } })) sheetUp = false;
     };
     const openPost = (s, r, kind, focus) => {
       const cc = cColl(s), me0 = meOf(s); countView(s, r);
       sheetUp = true;
       const isPost = kind === 'post', fol = F(r, 'following'), lnk = F(r, 'link');
-      const sh = socialSheet(s, { kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
+      const sh = socialSheet(s, { upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'comments') : null, gifs: p.gifs !== false, commentPhotos: p.commentPhotos !== false, kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
         onOpenQuote: () => { const q = findPost(s, F(r, 'quote')); if (q) { sh?.close(); setTimeout(() => openPost(s, q, 'post'), 280); } }, onQuote: p.quotes !== false ? () => openQuote(s, r) : null,
         post: isPost ? { quote: (() => { const q = findPost(s, F(r, 'quote')); return q ? { author: F(q, 'author'), handle: who(q), text: F(q, 'text'), media: mediaList(q)[0] } : F(r, 'quote') ? { gone: true } : null; })(), author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
-          repostedBy: F(r, 'repostedBy'), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
+          repostedBy: repostLabel(s, r), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
           following: p.followButtons !== false && fol != null && fol !== '' && who(r) !== me0.handle && !r._mine ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
-        stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: truthy(F(r, 'reposted')), saved: isSaved(s, r), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
+        stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: isReposted(s, r), saved: isSaved(s, r), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
         count: () => +F(r, 'comments') || 0,
         poll: isPost && pollOf(r) ? () => pollOf(r) : null,
         onVote: (i) => { const P0 = pollOf(r); if (!P0 || P0.voted) return; P0.v[i]++; patch(s, r, { votes: P0.v.join(', '), voted: i + 1 }); pops.set(r.id + 'p', s.time); if (p.pollMessage) s.send(p.pollMessage, P0.o[i]); },
         onLike: (only) => { if (only && truthy(F(r, 'liked'))) return; if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); },
-        onRepost: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); }, onSave: () => { saveIt(s, r); pops.set(r.id + 's', s.time); },
+        onRepost: () => { repostIt(s, r); pops.set(r.id + 'r', s.time); }, onSave: () => { saveIt(s, r); pops.set(r.id + 's', s.time); },
         onFollow: () => followIt(s, r), onLink: () => { if (!s.engine.editing && /^https?:/.test(String(lnk))) window.open(lnk, '_blank', 'noopener'); },
         onMore: isPost && p.moreMenu !== false ? () => socialSheet(s, { kind: 'more', colors: colorsOf(), font: fontOf(), items: isMine(s, r) ? [
           { icon: '✏️', label: 'Edit post', run: () => { sh?.close(); setTimeout(() => editIt(s, r), 280); } },
@@ -9865,11 +9913,11 @@ registerBehavior('uiFeed', {
           { icon: '🚩', label: 'Report post', danger: true, run: () => reportIt(s, r) }] }) : null,
         onShare: () => shareMenu(s, r),
         comments: () => cmtsOf(s, r),
-        onAdd: (text, parent) => {
-          const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false, ...(parent ? { parent: String(parent) } : {}) };
+        onAdd: (text, parent, media) => {
+          const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false, ...(parent ? { parent: String(parent) } : {}), ...(media ? { media } : {}) };
           if (cc) D(s).add(cc, { post: r.id, ...c0 }); else cSave(s, r, (L) => L.push({ id: 'c' + Date.now().toString(36), ...c0, at: Date.now() }));
           patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
-          const SG = s.engine.social; if (SG) { SG.notify(who(r), 'comment', { post: r.id, text }); if (parent) { const pc = cmtsOf(s, r).find((q) => String(q.id) === String(parent)); if (pc && pc.handle && pc.handle !== who(r)) SG.notify(pc.handle, 'reply', { post: r.id, text }); } SG.notifyMentions(text, r.id); }
+          const SG = s.engine.social; if (SG) { text = text || (media ? (isGif(media) ? 'GIF' : 'Photo') : ''); SG.notify(who(r), 'comment', { post: r.id, text }); if (parent) { const pc = cmtsOf(s, r).find((q) => String(q.id) === String(parent)); if (pc && pc.handle && pc.handle !== who(r)) SG.notify(pc.handle, 'reply', { post: r.id, text }); } SG.notifyMentions(text, r.id); }
         },
         onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
         onDelete: (cm) => { if (cm.row) D(s).remove(cc, cm.id); else cSave(s, r, (L) => { const i = L.findIndex((q) => q.id === cm.id); if (i >= 0) L.splice(i, 1); }); patch(s, r, { comments: Math.max(0, (+F(r, 'comments') || 0) - 1) }); },
@@ -9884,7 +9932,7 @@ registerBehavior('uiFeed', {
           if (on && cm.handle && String(cm.handle).replace(/^@/, '').toLowerCase() !== mh) s.engine.social?.notify(cm.handle, 'comment_like', { post: r.id, text: cm.text }); // they hear about it
           if (on) s.engine.vibrate?.(8);
         },
-        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+        onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
       if (!sh) sheetUp = false;
     };
     const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); s.engine.social?.notify(who(r), 'like', { post: r.id, text: F(r, 'text') }); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
@@ -9965,8 +10013,8 @@ registerBehavior('uiFeed', {
           const lx = t.x - b.x, ly = t.y - (b.y + inset + it.y - S.v), hit = it.hits.find((h) => lx >= h.x - 6 && lx <= h.x + h.w + 6 && ly >= h.y - 6 && ly <= h.y + h.h + 6), r = it.r, k = hit?.k;
           if (k === 'like') { UK.tap(s, p); if (truthy(F(r, 'liked')) && F(r, 'reaction')) patch(s, r, { reaction: '' }); like(s, r); }
           else if (k === 'repost') { UK.tap(s, p); if (p.quotes !== false && !s.engine.editing) { sheetUp = true; if (!socialSheet(s, { kind: 'repost', colors: colorsOf(), font: fontOf(), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet], [data-pocket-composer]'); }, items: [
-              { icon: '🔁', label: truthy(F(r, 'reposted')) ? 'Undo repost' : 'Repost', run: () => { if (flip(s, r, 'reposted', 'reposts')) s.engine.social?.notify(who(r), 'repost', { post: r.id }); pops.set(r.id + 'r', s.time); } },
-              { icon: '✏️', label: 'Quote', run: () => openQuote(s, r) }] })) sheetUp = false; } else { flip(s, r, 'reposted', 'reposts'); pops.set(r.id + 'r', s.time); } }
+              { icon: '🔁', label: isReposted(s, r) ? 'Undo repost' : 'Repost', run: () => { repostIt(s, r); pops.set(r.id + 'r', s.time); } },
+              { icon: '✏️', label: 'Quote', run: () => openQuote(s, r) }] })) sheetUp = false; } else { repostIt(s, r); pops.set(r.id + 'r', s.time); } }
           else if (k === 'profile') { UK.tap(s, p); openProfile(s, r); }
           else if (k === 'gridOpen') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) { if (p.openPage) { if (has(s)) openRecord(s, p.collection, q); s.navTo(p.openPage); } else openPost(s, q, 'post'); } }
           else if (k === 'quote') { UK.tap(s, p); const q = findPost(s, hit.id); if (q && !s.engine.editing) openPost(s, q, 'post'); }
@@ -10054,7 +10102,7 @@ registerBehavior('uiFeed', {
         const textH = (T) => (T.lines.length + (T.more ? 1 : 0)) * LH;
         const countOf = (r, k) => (k === 'comment' ? F(r, 'comments') : k === 'repost' ? F(r, 'reposts') : k === 'like' ? F(r, 'likes') : k === 'views' ? F(r, 'views') : 0);
         const actionRow = (r, x, w, yy, hits, ox, oy, sz0) => { const sz = +p.actionSize > 0 ? +p.actionSize : sz0; // spread evenly; save sits at the end
-          const list = A.filter((k) => k !== 'save' || look !== 'photos'), liked = truthy(F(r, 'liked')), rep = truthy(F(r, 'reposted'));
+          const list = A.filter((k) => k !== 'save' || look !== 'photos'), liked = truthy(F(r, 'liked')), rep = isReposted(s, r);
           const step0 = w / Math.max(1, list.length), fs = Math.round(TS * 0.87), tail = list.length > 4 ? list.filter((k) => k === 'save' || k === 'share') : [];
           let pos = null; if (tail.length) { // many buttons, like X: each takes its own width (icon + count), the space between is even, save and share sit together at the end
             ctx.font = `500 ${fs}px ${THEME.font}`; const ws = list.map((k) => { const n = countOf(r, k), t = p.showCounts !== false && +n ? fmtN(n, true) : ''; return sz + (t ? sz * 0.35 + ctx.measureText(t).width : 0); });
@@ -10116,9 +10164,9 @@ registerBehavior('uiFeed', {
         // a link preview card
         const linkH = (r) => (F(r, 'link') ? 72 : 0);
         const drawLink = (r, x, yy, w, hits, ox, oy) => {
-          const u = String(F(r, 'link') || ''); if (!u) return; const img = String(F(r, 'linkImage') || '🔗'), title = String(F(r, 'linkTitle') || domainOf(u));
+          const u = String(F(r, 'link') || ''); if (!u) return; const img = String(F(r, 'linkImage') || ''), title = String(F(r, 'linkTitle') || domainOf(u));
           ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, x + 0.5, yy + 0.5, w - 1, 71, 12); ctx.stroke();
-          ctx.save(); UK.rr(ctx, x + 0.5, yy + 0.5, 72, 71, 12); ctx.clip(); dm(ctx, isPic(img) ? img : '', isPic(img) ? '' : 'rgba(128,128,128,0.18)', x, yy, 72, 72, 0); if (!isPic(img)) UK.text(ctx, img, x + 36, yy + 37, { size: 28 }); ctx.restore();
+          ctx.save(); UK.rr(ctx, x + 0.5, yy + 0.5, 72, 71, 12); ctx.clip(); dm(ctx, isPic(img) ? img : '', isPic(img) ? '' : 'rgba(128,128,128,0.18)', x, yy, 72, 72, 0); if (!isPic(img)) { if (img) UK.text(ctx, img, x + 36, yy + 37, { size: 28 }); else drawIco(ctx, 'link', x + 36, yy + 36, 26, sub); } ctx.restore();
           UK.text(ctx, domainOf(u), x + 84, yy + 20, { size: 12, weight: 500, color: sub, align: 'left', maxW: w - 96 });
           ctx.font = `700 ${TS - 1}px ${THEME.font}`; wrapLines(ctx, title, w - 96, TS - 1, 2).forEach((l, i) => UK.text(ctx, l, x + 84, yy + 40 + i * 18, { size: TS - 1, weight: 700, color: txt, align: 'left' }));
           if (hits) hits.push({ k: 'link', url: u, x: x - ox, y: yy - oy, w, h: 72 });
@@ -10134,7 +10182,7 @@ registerBehavior('uiFeed', {
           ctx.font = `800 ${TS - 2}px ${THEME.font}`; const an = String(F(q, 'author') || ''), aw = Math.min(ctx.measureText(an).width, tw - 20);
           UK.text(ctx, an, x + 36, yy + 20, { size: TS - 2, weight: 800, color: nameC, align: 'left', maxW: tw - 20 });
           if (who(q)) UK.text(ctx, '@' + who(q), x + 42 + aw, yy + 20, { size: TS - 2, weight: 500, color: handleC, align: 'left', maxW: Math.max(0, tw - aw - 30) });
-          ctx.font = `500 ${TS - 1}px ${THEME.font}`; const tx0 = String(F(q, 'text') || (m ? '📷 Photo' : ''));
+          ctx.font = `500 ${TS - 1}px ${THEME.font}`; const tx0 = String(F(q, 'text') || (m ? 'Photo' : ''));
           wrapLines(ctx, tx0, tw, TS - 1, 2).forEach((l, i) => UK.text(ctx, l, x + 12, yy + 44 + i * 18, { size: TS - 1, weight: 500, color: txt, align: 'left' }));
           if (th) dm(ctx, m, F(q, 'color'), x + w - th - 12, yy + 12, th, th, 8);
           if (hits) hits.push({ k: 'quote', id: q.id, x: x - ox, y: yy - oy, w, h: H });
@@ -10174,7 +10222,7 @@ registerBehavior('uiFeed', {
               else { let hh = 0; for (const ch0 of String(r.id)) hh = (hh * 31 + ch0.charCodeAt(0)) >>> 0; dm(ctx, '', F(r, 'color') || AVATAR_COLORS[hh % AVATAR_COLORS.length], x, at0, cw, ch, 0); ctx.font = `700 ${Math.max(11, Math.round(cw / 9))}px ${THEME.font}`; wrapLines(ctx, String(F(r, 'text') || ''), cw - 16, Math.max(11, Math.round(cw / 9)), 4).forEach((l, k) => UK.text(ctx, l, x + 8, at0 + 18 + k * Math.round(cw / 7.5), { size: Math.max(11, Math.round(cw / 9)), weight: 700, color: '#fff', align: 'left' })); }
               const badge = M.length > 1 ? '⧉' : M.some(isVid) || truthy(F(r, 'video')) ? '▶' : truthy(F(r, 'live')) ? 'LIVE' : '';
               if (badge) { ctx.font = `800 12px ${THEME.font}`; const bw0 = Math.max(22, ctx.measureText(badge).width + 10); ctx.fillStyle = badge === 'LIVE' ? '#f4212e' : 'rgba(0,0,0,0.55)'; UK.rr(ctx, x + cw - bw0 - 6, at0 + 6, bw0, 20, 6); ctx.fill(); UK.text(ctx, badge, x + cw - bw0 / 2 - 6, at0 + 16, { size: 12, weight: 800, color: '#fff' }); }
-              if (p.gridLikes !== false && +F(r, 'likes') > 0) { const lb = '♥ ' + fmtN(F(r, 'likes'), true); ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4; UK.text(ctx, lb, x + 8, at0 + ch - 12, { size: 12, weight: 800, color: '#fff', align: 'left' }); ctx.restore(); }
+              if (p.gridLikes !== false && +F(r, 'likes') > 0) { const lb = fmtN(F(r, 'likes'), true); ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 4; drawIco(ctx, 'heart', x + 14, at0 + ch - 12, 13, '#fff', { fill: true }); UK.text(ctx, lb, x + 24, at0 + ch - 12, { size: 12, weight: 800, color: '#fff', align: 'left' }); ctx.restore(); }
               hits.push({ k: 'gridOpen', id: r.id, x: x - b.x, y: 0, w: cw, h: ch });
             });
             L.push({ r: row[0], y, h: ch + g, hits }); y += ch + g;
@@ -10199,7 +10247,7 @@ registerBehavior('uiFeed', {
               const lk = truthy(F(r, 'liked')), pk = pop(r.id);
               side('like', (x, y0) => { ctx.save(); ctx.translate(x, y0); ctx.scale(pk, pk); if (curR) UK.text(ctx, curR, 0, 0, { size: 26 }); else { heartPath(ctx, 0, 0, 30); ctx.fillStyle = lk ? likeC : '#fff'; ctx.fill(); } ctx.restore(); }, fmtN(F(r, 'likes'), true));
               side('comment', (x, y0) => icon('ui-chat', x, y0, 28, '#fff'), fmtN(F(r, 'comments'), true));
-              side('repost', (x, y0) => icon('ui-repeat', x, y0, 28, truthy(F(r, 'reposted')) ? repC : '#fff'), fmtN(F(r, 'reposts'), true));
+              side('repost', (x, y0) => icon('ui-repeat', x, y0, 28, isReposted(s, r) ? repC : '#fff'), fmtN(F(r, 'reposts'), true));
               side('share', (x, y0) => icon('ui-share', x, y0, 26, '#fff'), null);
               side('more', (x, y0) => icon('ui-more', x, y0, 24, '#fff'), null);
               // the bottom: who, the text, the place
@@ -10208,7 +10256,7 @@ registerBehavior('uiFeed', {
               UK.text(ctx, nm, b.x + 16, by, { size: 16, weight: 800, color: '#fff', align: 'left', maxW: tw0 }); if (truthy(F(r, 'verified'))) verifiedBadge(ctx, b.x + 16 + nw + 10, by, 15, tick(r));
               UK.text(ctx, '· ' + when(r), b.x + 16 + nw + (truthy(F(r, 'verified')) ? 24 : 6), by, { size: 13, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
               ctx.font = `500 15px ${THEME.font}`; wrapLines(ctx, String(F(r, 'text') || ''), tw0, 15, M.length ? 2 : 0).slice(0, M.length ? 2 : 0).forEach((l, k) => UK.text(ctx, l, b.x + 16, by + 24 + k * 20, { size: 15, weight: 500, color: '#fff', align: 'left' }));
-              if (F(r, 'location')) UK.text(ctx, '📍 ' + F(r, 'location'), b.x + 16, by + (M.length ? 70 : 26), { size: 13, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left', maxW: tw0 });
+              if (F(r, 'location')) { drawIco(ctx, 'place', b.x + 23, by + (M.length ? 70 : 26), 14, 'rgba(255,255,255,0.85)'); UK.text(ctx, String(F(r, 'location')), b.x + 34, by + (M.length ? 70 : 26), { size: 13, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left', maxW: tw0 - 18 }); }
               if (M.length > 1) { const i0 = clamp(cIdx.get(r.id) || 0, 0, M.length - 1); M.forEach((_, k) => { ctx.fillStyle = k === i0 ? '#fff' : 'rgba(255,255,255,0.45)'; ctx.beginPath(); ctx.arc(b.cx + (k - (M.length - 1) / 2) * 12, at0 + 14, 3.5, 0, Math.PI * 2); ctx.fill(); }); }
               burst(r, b.cx, at0 + ph * 0.45, 110);
               ctx.restore();
@@ -10227,12 +10275,13 @@ registerBehavior('uiFeed', {
           const ea = p.entrance === 'at once' || s.engine.editing ? 1 : clamp((s.time - born.get(r.id)) / 0.35, 0, 1), ek = UK.ease(ea), dy = p.entrance === 'slide up' ? (1 - ek) * 24 : 0, at1 = at0 + dy;
           let at = at1;
           const par = rid(r) && !tUp.has(r.id) ? findPost(s, rid(r)) : null;
-          const lab = look !== 'photos' ? (p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? '📌 Pinned' : F(r, 'repostedBy') ? `🔁 ${F(r, 'repostedBy')} reposted` : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : par ? `↩ Replying to @${who(par)}` : '') : '';
+          const rpBy = repostLabel(s, r), labIc = look === 'photos' ? '' : p.pinnedFirst !== false && truthy(F(r, 'pinned')) ? 'pin' : rpBy ? 'repost' : p.labels !== false && F(r, 'label') ? '' : par ? 'reply' : '';
+          const lab = look !== 'photos' ? (labIc === 'pin' ? 'Pinned' : rpBy ? `${rpBy} reposted` : p.labels !== false && F(r, 'label') ? String(F(r, 'label')) : par ? `Replying to @${who(par)}` : '') : '';
           curR = truthy(F(r, 'liked')) ? String(F(r, 'reaction') || '') : '';
           const hp = hPrev.get(r.id), bgC = look !== 'cards' ? (pressedId === r.id && s.time - pressedT > 0.06 ? p.pressed || 'rgba(128,128,128,0.10)' : p.postBg) : '';
           if (bgC && hp) { ctx.fillStyle = bgC; ctx.fillRect(x0, at, W, hp); }
           ctx.save(); ctx.globalAlpha *= ek;
-          if (lab) { const lx = look === 'cards' ? x0 + 8 + pad : x0 + pad + (showAv ? (+p.avatarSize || (look === 'compact' ? 36 : 44)) + 12 : 0); UK.text(ctx, lab, lx, at + (look === 'cards' ? 16 : pad + 4), { size: 13, weight: 700, color: handleC, align: 'left' }); at += look === 'cards' ? 22 : 20; } if (p.entrance === 'pop' && ek < 1) { const z = 0.94 + 0.06 * ek; ctx.translate(b.cx, at + 40); ctx.scale(z, z); ctx.translate(-b.cx, -(at + 40)); }
+          if (lab) { const lx = look === 'cards' ? x0 + 8 + pad : x0 + pad + (showAv ? (+p.avatarSize || (look === 'compact' ? 36 : 44)) + 12 : 0); const ly = at + (look === 'cards' ? 16 : pad + 4); if (labIc && drawIco(ctx, labIc, lx + 7, ly, 14, handleC, { stroke: 2.3 })) UK.text(ctx, lab, lx + 20, ly, { size: 13, weight: 700, color: handleC, align: 'left' }); else UK.text(ctx, lab, lx, ly, { size: 13, weight: 700, color: handleC, align: 'left' }); at += look === 'cards' ? 22 : 20; } if (p.entrance === 'pop' && ek < 1) { const z = 0.94 + 0.06 * ek; ctx.translate(b.cx, at + 40); ctx.scale(z, z); ctx.translate(-b.cx, -(at + 40)); }
           if (look === 'photos') {
             const AV = +p.avatarSize || 32, head = Math.max(44, AV + 22), mh = mediaH(W, 1), mr = mRad(0); ctx.font = `600 ${TS}px ${THEME.font}`;
             const T = textLines({ ...r, [K('text')]: `${name}  ${F(r, 'text') || ''}` }, W - pad * 2, 3);
@@ -10249,7 +10298,7 @@ registerBehavior('uiFeed', {
               gallery(r, x0, at + head, W, mh, mr, 'carousel', hits, x0, at);
               burst(r, x0 + W / 2, at + head + mh / 2, 96, 'white');
               const ay = at + actY; let ix = x0 + pad + 10;
-              for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && truthy(F(r, 'reposted')) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
+              for (const k of A) { if (k === 'save') continue; const on = k === 'like' ? liked : false; if (k === 'like') likeMark(ix, ay, 24, on, r.id); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-send', views: 'ui-chart' }[k], ix, ay, 23, k === 'repost' && isReposted(s, r) ? repC : txt); hits.push({ k: k === 'views' ? 'none' : k, x: ix - 16 - x0, y: actY - 16, w: 32, h: 32 }); ix += 40; }
               if (A.includes('save')) { const sv = isSaved(s, r); ctx.save(); const sz = pop(r.id + 's'); ctx.translate(x0 + W - pad - 10, ay); ctx.scale(sz, sz); bookmarkMark(ctx, 0, 0, 24, txt, sv); ctx.restore(); hits.push({ k: 'save', x: W - pad - 26, y: actY - 16, w: 32, h: 32 }); }
               let yy = ay + 34;
               if (p.showCounts !== false && A.includes('like')) { UK.text(ctx, `${fmtN(F(r, 'likes'))} like${+F(r, 'likes') === 1 ? '' : 's'}`, x0 + pad, yy, { size: TS - 1, weight: 800, color: txt, align: 'left' }); } yy += 21;
@@ -10274,7 +10323,7 @@ registerBehavior('uiFeed', {
               hits.push({ k: 'profile', x: cx - x0 + pad, y: cy - at + head / 2 - AV / 2, w: AV + 110, h: AV });
               const nx = cx + pad + (showAv ? AV + 10 : 0), fwC = followable(r) ? followPill(r, cx + cw - (p.showMore !== false ? 44 : pad), cy + head / 2, hits, x0, at) : 0;
               nameRow(r, nx, cy + head / 2 - (p.time === 'hidden' ? 0 : 9), cw - (nx - cx) - 40 - fwC, false);
-              if (p.time !== 'hidden') UK.text(ctx, [when(r), truthy(F(r, 'edited')) ? 'edited' : '', F(r, 'location') ? '📍 ' + F(r, 'location') : '', '🌐'].filter(Boolean).join(' · '), nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left', maxW: cw - (nx - cx) - 40 - fwC });
+              if (p.time !== 'hidden') UK.text(ctx, [when(r), truthy(F(r, 'edited')) ? 'edited' : '', F(r, 'location') ? String(F(r, 'location')) : ''].filter(Boolean).join(' · '), nx, cy + head / 2 + 11, { size: 12, weight: 500, color: sub, align: 'left', maxW: cw - (nx - cx) - 40 - fwC });
               if (p.showMore !== false) { icon('ui-more', cx + cw - 24, cy + head / 2, 20, sub); hits.push({ k: 'more', x: cw - 30, y: 8 + head / 2 - 14, w: 28, h: 28 }); }
               let yy = cy + head + LH / 2; yy = drawText(T, cx + pad, yy, hits, x0, at);
               if (exC) drawExtras(r, cx + pad, cy + head + tH, cw - pad * 2, hits, x0, at);
@@ -10289,7 +10338,7 @@ registerBehavior('uiFeed', {
                 if (p.dividers !== false) { ctx.fillStyle = line; ctx.fillRect(cx + pad, ry + 17, cw - pad * 2, 1); }
                 const by = ry + 18 + 22, part = cw / A.length;
                 A.forEach((k, i) => {
-                  const on = k === 'like' ? liked : k === 'repost' ? truthy(F(r, 'reposted')) : k === 'save' ? isSaved(s, r) : false, l = { like: on ? (curR ? REACT_WORD[curR] || 'Liked' : 'Liked') : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
+                  const on = k === 'like' ? liked : k === 'repost' ? isReposted(s, r) : k === 'save' ? isSaved(s, r) : false, l = { like: on ? (curR ? REACT_WORD[curR] || 'Liked' : 'Liked') : 'Like', comment: 'Comment', share: 'Share', repost: on ? 'Reposted' : 'Repost', save: on ? 'Saved' : 'Save', views: fmtN(F(r, 'views')) }[k], col = on ? acc : sub;
                   const mx = cx + part * i + part / 2; ctx.font = `700 14px ${THEME.font}`; const tw = A.length > 3 ? 0 : ctx.measureText(l).width, x1 = mx - (tw + (tw ? 26 : 18)) / 2;
                   ctx.save(); ctx.translate(x1 + 9, by); if (k === 'like') { ctx.translate(-0, 0); likeMark(0, 0, 18, on, r.id); } else if (k === 'save') bookmarkMark(ctx, 0, 0, 18, col, on); else icon({ comment: 'ui-chat', repost: 'ui-repeat', share: 'ui-share', views: 'ui-chart' }[k], 0, 0, 18, col); ctx.restore();
                   if (tw) UK.text(ctx, l, x1 + 26, by + 1, { size: 14, weight: 700, color: col, align: 'left' });
@@ -10351,7 +10400,7 @@ registerBehavior('uiFeed', {
             : [['save', sv ? 'Remove from saved' : 'Save post', '🔖'], ['copy', 'Copy text', '📋'], ...(p.messages !== false ? [['message', `Message @${who(r)}`, '💬']] : []), ['hide', 'Not interested', '🙈'], ['mute', `Mute @${who(r)}`, '🔇'], ['report', 'Report post', '🚩', true]];
           const w = 220, rh = 44, hh = IT.length * rh + 12, x = clamp(menu.sx - w, b.x + 8, b.x + b.w - w - 8), yy = menu.sy + hh > b.y + b.h - 8 ? Math.max(b.y + inset + 8, menu.sy - hh - 30) : menu.sy;
           ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 22; ctx.shadowOffsetY = 8; ctx.fillStyle = card; UK.rr(ctx, x, yy, w, hh, 14); ctx.fill(); ctx.restore();
-          IT.forEach(([k, l, ic, danger], i) => { const ry = yy + 6 + i * rh; UK.text(ctx, ic, x + 24, ry + rh / 2, { size: 17 }); UK.text(ctx, l, x + 46, ry + rh / 2 + 1, { size: 15, weight: 600, color: danger ? '#f4212e' : txt, align: 'left', maxW: w - 56 }); menuR.push({ k, x, y: ry, w, h: rh }); });
+          IT.forEach(([k, l, ic, danger], i) => { const ry = yy + 6 + i * rh; if (!drawIco(ctx, ic, x + 24, ry + rh / 2, 19, danger ? '#f4212e' : sub)) UK.text(ctx, ic, x + 24, ry + rh / 2, { size: 17 }); UK.text(ctx, l, x + 46, ry + rh / 2 + 1, { size: 15, weight: 600, color: danger ? '#f4212e' : txt, align: 'left', maxW: w - 56 }); menuR.push({ k, x, y: ry, w, h: rh }); });
         }
         if (p.scrollbar && S.max > 0 && s.time - scrollT < 1) { const f = clamp(S.v / S.max, 0, 1), bh = Math.max(30, b.h * b.h / (total + 12)), a = clamp(1 - (s.time - scrollT - 0.6) / 0.4, 0, 1); ctx.globalAlpha *= a * 0.5; ctx.fillStyle = isDark(s) ? '#ffffff' : '#000000'; UK.rr(ctx, b.x + b.w - 5, b.y + 2 + f * (b.h - bh - 4), 3, bh, 1.5); ctx.fill(); }
         ctx.restore();
@@ -10387,10 +10436,11 @@ function chatInputBar(s, o) {
   const bar = el('div', `position:absolute;left:0;right:0;bottom:0;z-index:45;display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:${c.bg};border-top:1px solid ${c.line};font-family:${font};transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.8,.2,1);`);
   bar.dataset.pocketChatbar = '1';
   const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none';
-  const pic = el('button', `flex:none;border:0;background:none;font-size:22px;width:38px;height:38px;cursor:pointer;`, '🖼️'); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
+  const pic = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); pic.innerHTML = svgIcon('image', 23); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
+  const gif = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); gif.innerHTML = svgIcon('gif', 25); gif.type = 'button'; gif.setAttribute('aria-label', 'Send a GIF');
   const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:22px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); inp.placeholder = o.placeholder || 'Message…'; inp.maxLength = 1000; inp.setAttribute('enterkeyhint', 'send');
-  const send = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;font-size:18px;cursor:pointer;transition:opacity .15s,transform .15s;`, '➤'); send.type = 'button'; send.setAttribute('aria-label', 'Send');
-  if (o.photos !== false) bar.append(pic); bar.append(inp, send, file); root.append(bar);
+  const send = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;transition:opacity .15s,transform .15s;display:flex;align-items:center;justify-content:center;`); send.innerHTML = svgIcon('send', 19, { stroke: 2.2 }); send.type = 'button'; send.setAttribute('aria-label', 'Send');
+  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(inp, send, file); root.append(bar);
   let rp = null; // "Replying to Maya" above the bar
   const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:1px solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
     const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', `font-weight:800;font-size:13px;color:${c.acc};`, '↩ Replying to ' + (r.author || '')), el('div', `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${c.sub};font-size:13px;`, r.text || ''));
@@ -10407,7 +10457,7 @@ function chatInputBar(s, o) {
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
-  send.onclick = go; pic.onclick = () => file.click();
+  send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => { const was = o.onClose; gifPicker(s, { colors: { ...c, field: c.field || 'rgba(128,128,128,0.12)' }, font, onPick: (u) => o.onSend({ text: '', media: u }) }); };
   file.onchange = async () => { const f = file.files[0]; file.value = ''; if (!f) return; try { o.onSend({ text: '', media: await shrinkPicture(f, 900) }); } catch { s.snackbar?.('That picture could not be sent'); } };
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
   setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
@@ -10422,6 +10472,106 @@ const POST_ICONS = {
   bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
   share: '<path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/>',
 };
+/** Line icons for the app UI (24×24, drawn with the text colour): use these instead of emoji. */
+const UI_SVG = {
+  image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 15l-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>',
+  video: '<path d="M22 8l-6 4 6 4z"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+  poll: '<path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/>',
+  views: '<path d="M5 20V12"/><path d="M10 20V5"/><path d="M15 20v-9"/><path d="M20 20V8"/>',
+  place: '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>',
+  thread: '<circle cx="6" cy="5" r="2.5"/><circle cx="6" cy="19" r="2.5"/><path d="M6 7.5v9"/><path d="M11 5h10"/><path d="M11 19h10"/><path d="M11 12h7"/>',
+  repost: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  quote: '<path d="M10 11H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.5-1.5 4-4 5"/><path d="M19 11h-4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v6c0 2.5-1.5 4-4 5"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  'eye-off': '<path d="M9.9 4.2A10 10 0 0 1 12 4c6.5 0 10 8 10 8a17 17 0 0 1-2.2 3.2"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M14.1 14.1a3 3 0 1 1-4.2-4.2"/><path d="M2 2l20 20"/>',
+  mute: '<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6"/><path d="M16 9l6 6"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><path d="M4 22v-7"/>',
+  trash: '<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/>',
+  pin: '<path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V17h14v-1.8a2 2 0 0 0-1.1-1.8l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>',
+  share: '<path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+  'user-plus': '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M19 8v6"/><path d="M22 11h-6"/>',
+  users: '<circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M16 3.1a4 4 0 0 1 0 7.8"/><path d="M22 21a7 7 0 0 0-4-6.3"/>',
+  comment: '<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-3.9-.9L3 20.5l1.4-4.3A8.4 8.4 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5z"/>',
+  heart: '<path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21.2l8.8-8.8a5.5 5.5 0 0 0 0-7.8z"/>',
+  reply: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  at: '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>',
+  'bell-off': '<path d="M8.7 3A6 6 0 0 1 18 8c0 2.3.4 4 .9 5.3"/><path d="M17 17H3s3-2 3-9a5.6 5.6 0 0 1 .3-1.7"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/><path d="M2 2l20 20"/>',
+  mail: '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 6L2 7"/>',
+  send: '<path d="M22 2l-7 20-4-9-9-4z"/><path d="M22 2L11 13"/>',
+  smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01"/><path d="M15 9h.01"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  check: '<path d="M20 6L9 17l-5-5"/>',
+  x: '<path d="M18 6L6 18"/><path d="M6 6l12 12"/>',
+  more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  ban: '<circle cx="12" cy="12" r="10"/><path d="M4.9 4.9l14.2 14.2"/>',
+  star: '<path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  phone: '<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/>',
+  gif: '<rect x="2" y="5" width="20" height="14" rx="3"/><path d="M9.5 10.2A2 2 0 0 0 8 9.5a2.5 2.5 0 0 0 0 5 2 2 0 0 0 1.8-1.2V12H8.3"/><path d="M12.5 9.5v5"/><path d="M15.5 14.5v-5h3"/><path d="M15.5 12h2.4"/>',
+  fire: '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.4-.5-2-1-3-1.1-2.1-.2-4 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.2.4-2.3 1-3.3a2.5 2.5 0 0 0 2.5 2.8z"/>',
+  sparkle: '<path d="M12 3l1.9 5.8L20 11l-6.1 2.2L12 19l-1.9-5.8L4 11l6.1-2.2z"/>',
+};
+/** Emoji that menus and labels used as icons → the line icon that replaces them. */
+const EMOJI_ICON = { '🔁': 'repost', '✏️': 'edit', '📋': 'copy', '🔗': 'link', '🔖': 'bookmark', '🙈': 'eye-off', '🔇': 'mute', '🔕': 'bell-off', '🚩': 'flag', '🗑️': 'trash', '🗑': 'trash', '📌': 'pin', '🧵': 'thread', '📤': 'share', '👤': 'user', '👥': 'users', '🤝': 'user-plus', '💬': 'comment', '❤️': 'heart', '♥': 'heart', '↩️': 'reply', '↩': 'reply', '📷': 'camera', '🖼️': 'image', '🖼': 'image', '📊': 'poll', '📍': 'place', '✉️': 'mail', '@': 'at', '🔔': 'bell', '👀': 'eye', '👁': 'eye', '👁️': 'eye', '🔒': 'lock', '📞': 'phone', '🎥': 'video', '➕': 'plus', '🚫': 'ban', '✅': 'check', '🔍': 'search', '😊': 'smile', '⭐': 'star', '✕': 'x', 'ℹ️': 'info', '🙂': 'smile', '🔥': 'fire', '✨': 'sparkle', '📝': 'edit', '🕶️': 'eye-off', '🔓': 'lock', '📣': 'bell', '💾': 'bookmark', '🫥': 'eye-off', '📥': 'mail' };
+const iconName = (ic) => (ic && UI_SVG[ic] ? ic : EMOJI_ICON[String(ic || '').trim()] || '');
+/** An icon as SVG markup for the page (sheets, bars). Unknown names give ''. */
+function svgIcon(ic, size = 20, o = {}) { const n = iconName(ic); if (!n) return ''; return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="${o.fill ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="${o.stroke || 2}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block;flex:none">${UI_SVG[n]}</svg>`; }
+/** A span holding the icon for a menu item: the line icon when there is one, else the text as it was. */
+function iconSpan(ic, size = 20, css = '') { const sp = document.createElement('span'); sp.style.cssText = `display:inline-flex;align-items:center;justify-content:center;flex:none;${css}`; const m = svgIcon(ic, size); if (m) sp.innerHTML = m; else sp.textContent = ic || ''; return sp; }
+const icoCache = new Map();
+/** Draw a line icon on a canvas, centred on x, y. Returns false when there is no such icon. */
+function drawIco(ctx, ic, x, y, size, color, o = {}) {
+  const n = iconName(ic); if (!n || typeof Path2D === 'undefined') return false;
+  let P = icoCache.get(n);
+  if (!P) { P = []; for (const m of UI_SVG[n].matchAll(/<(path|circle|rect)\s([^>]*?)\/>/g)) { const A = {}; for (const a of m[2].matchAll(/([\w-]+)="([^"]*)"/g)) A[a[1]] = a[2]; const q = new Path2D(); if (m[1] === 'path') q.addPath(new Path2D(A.d)); else if (m[1] === 'circle') { q.arc(+A.cx, +A.cy, +A.r, 0, Math.PI * 2); } else { const rx = +A.rx || 0; if (q.roundRect) q.roundRect(+A.x, +A.y, +A.width, +A.height, rx); else q.rect(+A.x, +A.y, +A.width, +A.height); } P.push(q); } icoCache.set(n, P); }
+  ctx.save(); ctx.translate(x, y); ctx.scale(size / 24, size / 24); ctx.translate(-12, -12); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = o.stroke || 2; ctx.strokeStyle = color; ctx.fillStyle = color;
+  for (const q of P) { if (o.fill) ctx.fill(q); ctx.stroke(q); } ctx.restore(); return true;
+}
+/** Pick a GIF: search GIPHY or Tenor (a key in Game Settings › GIFs), upload one from the phone, or paste a link. */
+function gifPicker(s, o) {
+  const c = o.colors, font = o.font || THEME.font, key = String(s.settings?.gifKey || '').trim(), tenor = /^AIza/.test(key);
+  return socialSheet(s, { kind: 'gif', title: 'GIFs', colors: c, font, onClose: o.onClose, build: (api) => {
+    const { el, body, close } = api, btn = (css, t) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, t); b.type = 'button'; return b; };
+    const pick = (u) => { if (!u) return; o.onPick(u); close(); };
+    const top = el('div', `position:sticky;top:0;z-index:1;display:flex;gap:8px;align-items:center;padding:10px 12px;background:${c.bg};`);
+    const field = el('div', `flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:0 12px;height:40px;border-radius:20px;background:${c.field};color:${c.sub};`); field.innerHTML = svgIcon('search', 18);
+    const q = el('input', `flex:1;min-width:0;border:0;outline:none;background:none;font:16px ${font};color:${c.text};`); q.placeholder = key ? 'Search GIFs' : 'Paste a GIF link (https://…)'; q.dataset.gifSearch = '1'; field.append(q);
+    const up = btn(`flex:none;display:flex;align-items:center;gap:6px;height:40px;padding:0 14px;border-radius:20px;background:${c.field};color:${c.text};font:700 14px ${font};`, ''); up.innerHTML = svgIcon('upload', 18); up.append(document.createTextNode('Upload')); up.dataset.gifUpload = '1';
+    const file = el('input'); file.type = 'file'; file.accept = 'image/gif'; file.style.display = 'none';
+    top.append(field, up, file);
+    const grid = el('div', 'display:grid;grid-template-columns:repeat(2,1fr);gap:6px;padding:0 12px 16px;'); grid.dataset.gifGrid = '1';
+    const note = el('div', `color:${c.sub};font-size:14px;line-height:1.4;padding:18px 20px;text-align:center;`);
+    body.append(top, grid, note);
+    const show = (L) => { grid.textContent = ''; for (const g of L) { const b = btn('position:relative;display:block;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:rgba(128,128,128,.15);', ''); const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.loading = 'lazy'; im.src = g.thumb; im.alt = g.title || 'GIF'; b.append(im); b.dataset.gif = g.url; b.onclick = () => pick(g.url); grid.append(b); } };
+    let seq = 0;
+    const search = async (term) => {
+      if (!key) return; const my = ++seq; note.textContent = 'Loading…';
+      try {
+        const url = tenor ? `https://tenor.googleapis.com/v2/${term ? 'search' : 'featured'}?key=${encodeURIComponent(key)}&client_key=pocket&limit=30&media_filter=tinygif,gif${term ? '&q=' + encodeURIComponent(term) : ''}`
+          : `https://api.giphy.com/v1/gifs/${term ? 'search' : 'trending'}?api_key=${encodeURIComponent(key)}&limit=30&rating=pg-13${term ? '&q=' + encodeURIComponent(term) : ''}`;
+        const j = await (await fetch(url)).json(); if (my !== seq) return;
+        const L = tenor ? (j.results || []).map((r) => ({ thumb: r.media_formats?.tinygif?.url, url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url, title: r.content_description })) : (j.data || []).map((d) => ({ thumb: d.images?.fixed_width_small?.url || d.images?.fixed_width?.url, url: d.images?.fixed_width?.url || d.images?.original?.url, title: d.title }));
+        show(L.filter((g) => g.url)); note.textContent = L.length ? (tenor ? 'Via Tenor' : 'Powered by GIPHY') : 'No GIFs found';
+      } catch { if (my === seq) note.textContent = 'GIFs could not be loaded. Check the key in Game Settings › GIFs.'; }
+    };
+    let t0 = null; q.addEventListener('input', () => { if (!key) return; clearTimeout(t0); t0 = setTimeout(() => search(q.value.trim()), 350); });
+    q.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter') return; ev.preventDefault(); const v = q.value.trim(); if (/^https?:\/\/\S+$/.test(v)) pick(v); else if (key) search(v); else s.snackbar?.('Paste a link that starts with https://'); });
+    up.onclick = () => file.click();
+    file.onchange = async () => { const f = file.files?.[0]; file.value = ''; if (!f) return; try { pick(o.upload ? await o.upload(f) : f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)); } catch { s.snackbar?.('That GIF could not be added'); } };
+    if (key) search(''); else note.textContent = 'Upload a GIF from your phone, or paste a link to one. To search GIFs here, add a GIPHY or Tenor key in Game Settings › GIFs.';
+    setTimeout(() => q.focus(), 250);
+  } });
+}
 const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
 
 // ---- messaging: conversations, groups, replies, reactions, read receipts ----
@@ -10525,13 +10675,13 @@ registerBehavior('uiChat', {
     const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; return all(s).filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
-    const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? '📷 Photo' : '');
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
       const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
       if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
       replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
-      const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || '📷 Photo'), post: '' }); // (they get a notification)
+      const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || 'Photo'), post: '' }); // (they get a notification)
     };
     const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, reply: replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; }, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); };
     /** Press and hold: react, reply, copy, edit, unsend. */
@@ -10603,7 +10753,7 @@ registerBehavior('uiChat', {
         y += 10; total = y;
         // draw
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, listH); ctx.clip(); ctx.translate(0, b.y - S.v);
-        const ok = allowed(s); if (!ok) { UK.text(ctx, '🔒', b.cx, listH / 2 - 30 + S.v, { size: 34 }); UK.text(ctx, chatOf(s) ? 'You’re not in this conversation' : 'Pick a conversation from your messages', b.cx, listH / 2 + 14 + S.v, { size: 15, weight: 700, color: sub, maxW: b.w - 40 }); } else if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
+        const ok = allowed(s); if (!ok) { drawIco(ctx, 'lock', b.cx, listH / 2 - 30 + S.v, 34, sub, { stroke: 1.6 }); UK.text(ctx, chatOf(s) ? 'You’re not in this conversation' : 'Pick a conversation from your messages', b.cx, listH / 2 + 14 + S.v, { size: 15, weight: 700, color: sub, maxW: b.w - 40 }); } else if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
         const vis0 = S.v - 60, vis1 = S.v + listH + 60;
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
@@ -10648,8 +10798,8 @@ registerBehavior('uiChat', {
         ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, brr.y - 8, b.w, barH);
         ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, brr.x, brr.y, brr.w, brr.h, brr.h / 2); ctx.fill();
         UK.text(ctx, replyTo ? '↩ Replying to ' + (replyTo.author || '') : p.placeholder || 'Message…', brr.x + (p.photos !== false ? 44 : 16), brr.y + brr.h / 2 + 1, { size: 15, weight: 500, color: sub, align: 'left', maxW: brr.w - 100 });
-        if (p.photos !== false) UK.text(ctx, '🖼️', brr.x + 22, brr.y + brr.h / 2 + 1, { size: 18 });
-        ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(brr.x + brr.w - brr.h / 2, brr.y + brr.h / 2, brr.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, '➤', brr.x + brr.w - brr.h / 2 + 1, brr.y + brr.h / 2 + 1, { size: 15, color: '#fff' });
+        if (p.photos !== false) drawIco(ctx, 'image', brr.x + 22, brr.y + brr.h / 2, 20, tok(p.accent || '@accent') || sub);
+        ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(brr.x + brr.w - brr.h / 2, brr.y + brr.h / 2, brr.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); drawIco(ctx, 'send', brr.x + brr.w - brr.h / 2 - 1, brr.y + brr.h / 2 + 1, 16, '#fff', { stroke: 2.2 });
       },
       destroy() { bar?.close(); },
     };
@@ -10716,7 +10866,7 @@ registerBehavior('uiInbox', {
     const newMenu = (s) => {
       const pick = (multi) => { sheetUp = true; peoplePicker(s, { colors: colors(), title: multi ? 'New group' : 'New message', multi, people: chatPeople(s, { ...me(s), handle: handleOf(me(s).handle) }), onPick: (L, nm) => startChat(s, L, nm), onClose: () => { sheetUp = false; } }); };
       if (p.groups === false) { pick(false); return; }
-      sheetUp = true; socialSheet(s, { kind: 'new-chat', colors: colors(), items: [{ icon: '✉️', label: 'New message', run: () => pick(false) }, { icon: '👥', label: 'New group', run: () => pick(true) }], onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]'); } });
+      sheetUp = true; socialSheet(s, { kind: 'new-chat', colors: colors(), items: [{ icon: '✉️', label: 'New message', run: () => pick(false) }, { icon: '👥', label: 'New group', run: () => pick(true) }], onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
     };
     const rowMenu = (s, q) => {
       const meta = chatMeta(s), save = (f) => { const m = chatMeta(s); f(m); saveChatMeta(s, m); };
@@ -10771,11 +10921,12 @@ registerBehavior('uiInbox', {
           const ax = b.x + 16 + 26;
           if (q.group) { miniAvatar(ctx, nameOfHandle(s, q.mem[0] || ''), ax - 8, ry + H / 2 - 8, 36); ctx.fillStyle = tok(p.bg) || tok('@bg') || (dark ? '#000' : '#fff'); ctx.beginPath(); ctx.arc(ax + 9, ry + H / 2 + 9, 20, 0, Math.PI * 2); ctx.fill(); miniAvatar(ctx, nameOfHandle(s, q.mem[1] || q.mem[0] || ''), ax + 9, ry + H / 2 + 9, 36); }
           else miniAvatar(ctx, q.who, ax, ry + H / 2, 52, q.room ? '#' : '');
-          const tx = b.x + 16 + 52 + 12, tw = b.w - (tx - b.x) - 16, when = (q.pin ? '📌 ' : '') + (q.mute ? '🔕 ' : '') + shortAgo(q.last._at);
-          ctx.font = `600 12px ${THEME.font}`; const ww = ctx.measureText(when).width + 6;
+          const tx = b.x + 16 + 52 + 12, tw = b.w - (tx - b.x) - 16, when = shortAgo(q.last._at), flags = [q.pin && 'pin', q.mute && 'bell-off'].filter(Boolean);
+          ctx.font = `600 12px ${THEME.font}`; const ww = ctx.measureText(when).width + 6 + flags.length * 17;
           UK.text(ctx, q.title, tx, ry + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
           UK.text(ctx, when, b.x + b.w - 16, ry + H / 2 - 11, { size: 12, weight: 600, color: q.unread && !q.mute ? acc : sub, align: 'right' });
-          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.text || (l0.media ? '📷 Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
+          flags.forEach((f, i) => drawIco(ctx, f, b.x + b.w - 16 - ww - 4 - i * 17, ry + H / 2 - 11, 13, sub));
+          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.text || (l0.media ? 'Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
           const right = q.unread ? 34 : q.mine ? 24 : 0;
           UK.text(ctx, who0 + body0, tx, ry + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - right });
           if (q.unread > 0) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = q.mute ? sub : acc; UK.rr(ctx, b.x + b.w - 16 - bw, ry + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, ry + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }
@@ -10900,7 +11051,7 @@ function searchScreen(s, o) {
   const field = el('div', `flex:1;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:22px;background:${c.field};`);
   const inp = el('input', `flex:1;min-width:0;border:0;outline:none;background:transparent;color:${c.text};font:16px ${font};padding:11px 0;`); inp.type = 'search'; inp.placeholder = o.placeholder || 'Search'; inp.value = o.value || ''; inp.setAttribute('enterkeyhint', 'search');
   const clr = btn(`color:${c.sub};font-size:15px;padding:4px;`, '✕'); clr.setAttribute('aria-label', 'Clear');
-  field.append(el('span', `color:${c.sub};font-size:16px;`, '🔍'), inp, clr);
+  field.append(iconSpan('search', 18, `color:${c.sub};`), inp, clr);
   const cancel = btn(`flex:none;font:600 16px ${font};color:${c.text};padding:6px 2px;`, 'Cancel');
   top.append(field, cancel);
   const body = el('div', 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;');
@@ -10917,7 +11068,7 @@ function searchScreen(s, o) {
     body.textContent = ''; const q = inp.value.trim(), ql = q.toLowerCase(); clr.style.visibility = q ? 'visible' : 'hidden';
     // filters
     const chips = el('div', 'display:flex;gap:8px;padding:12px 16px 4px;overflow-x:auto;');
-    for (const [lab, add] of [['📷 Photos', 'has:photo'], ['🎬 Videos', 'has:video'], ['GIFs', 'has:gif'], ['📊 Polls', 'has:poll']]) { const ch = btn(`flex:none;padding:7px 12px;border-radius:16px;border:1px solid ${c.line};font:700 13px ${font};`, lab); ch.onclick = () => pick((q ? q + ' ' : '') + add); chips.append(ch); }
+    for (const [lab, add] of [['Photos', 'has:photo'], ['Videos', 'has:video'], ['GIFs', 'has:gif'], ['Polls', 'has:poll']]) { const ch = btn(`flex:none;padding:7px 12px;border-radius:16px;border:1px solid ${c.line};font:700 13px ${font};`, lab); ch.onclick = () => pick((q ? q + ' ' : '') + add); chips.append(ch); }
     body.append(chips);
     if (!q) {
       const R = recentOf(s);
@@ -10927,7 +11078,7 @@ function searchScreen(s, o) {
       if (D0.people.length) { body.append(head('People')); for (const pp of D0.people.slice(0, 6)) body.append(row(face(pp.name), pp.name + (pp.verified ? ' ✓' : ''), '@' + pp.h, () => pick('@' + pp.h))); }
       return;
     }
-    const go = row('🔍', `Search for “${q}”`, '', () => pick(q)); go.dataset.searchFor = q; body.append(go);
+    const go = row(iconSpan('search', 18, `flex:none;width:40px;height:40px;border-radius:50%;background:${c.field};color:${c.sub};`), `Search for “${q}”`, '', () => pick(q)); go.dataset.searchFor = q; body.append(go);
     const tg = D0.tags.filter(([t0]) => t0.toLowerCase().includes(ql.replace(/^#/, '#')) || t0.toLowerCase().slice(1).startsWith(ql.replace(/^#/, ''))).slice(0, 5);
     for (const [t0, n] of tg) body.append(row('#', t0, `${shortNum(n)} post${n === 1 ? '' : 's'}`, () => pick(t0)));
     const pl = D0.people.filter((pp) => pp.name.toLowerCase().includes(ql.replace(/^@/, '')) || pp.h.toLowerCase().includes(ql.replace(/^@/, ''))).slice(0, 6);
@@ -11045,7 +11196,7 @@ registerBehavior('uiActivity', {
         tabsR = p.tabs !== false ? tabsRow(ctx, b, ['All', 'Mentions', reqN ? `Requests (${reqN})` : 'Requests'], tab, txt, sub, acc, line, TSt, p.tabStyle, s) : [];
         const L = items(s); rows = []; btns = [];
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y + top, b.w, b.h - top); ctx.clip();
-        if (!L.length) { UK.text(ctx, '🔔', b.cx, b.y + top + 70, { size: 40 }); UK.text(ctx, tab === 2 ? 'No friend requests' : p.empty || 'No notifications yet', b.cx, b.y + top + 120, { size: 15, weight: 700, color: sub }); }
+        if (!L.length) { drawIco(ctx, 'bell', b.cx, b.y + top + 70, 40, sub, { stroke: 1.6 }); UK.text(ctx, tab === 2 ? 'No friend requests' : p.empty || 'No notifications yet', b.cx, b.y + top + 120, { size: 15, weight: 700, color: sub }); }
         let y = b.y + top - S.v;
         for (const g of L) {
           const n = g.n, act = n.type === 'friend_request' && G.friendStatus(n.from) === 'received' ? 'request' : n.type === 'follow' && !G.isFollowing(n.from) ? 'followback' : '', snippet = n.post && n.type !== 'comment' && n.type !== 'mention' && n.type !== 'reply' ? '' : n.text && n.type !== 'comment' ? n.text : '';
@@ -11055,7 +11206,7 @@ registerBehavior('uiActivity', {
             if (g.unread || fresh?.has(n.id)) { ctx.fillStyle = tok(p.unread) || (dark ? 'rgba(29,155,240,0.10)' : 'rgba(29,155,240,0.07)'); ctx.fillRect(b.x, y, b.w, h); }
             miniAvatar(ctx, g.who[0].name, b.x + 16 + 24, y + 12 + 24, 48);
             if (g.who.length > 1) miniAvatar(ctx, g.who[1].name, b.x + 16 + 40, y + 12 + 40, 22);
-            const ic = NOTE_ICON[n.type] || '🔔'; ctx.fillStyle = dark ? '#1c1f26' : '#fff'; ctx.beginPath(); ctx.arc(b.x + 16 + 44, y + 12 + 6, 11, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, ic, b.x + 16 + 44, y + 12 + 7, { size: 12, weight: 900, color: acc });
+            const ic = NOTE_ICON[n.type] || '🔔', icC = /like/.test(n.type) ? '#f91880' : n.type === 'repost' ? '#00ba7c' : acc; ctx.fillStyle = icC; ctx.beginPath(); ctx.arc(b.x + 16 + 44, y + 12 + 6, 11, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = dark ? '#16181d' : '#fff'; ctx.lineWidth = 2; ctx.stroke(); if (!drawIco(ctx, ic, b.x + 16 + 44, y + 12 + 6, 12, '#fff', { fill: /like/.test(n.type), stroke: 2.4 })) UK.text(ctx, ic, b.x + 16 + 44, y + 12 + 7, { size: 12, weight: 900, color: '#fff' });
             lines.forEach((l, i) => UK.text(ctx, l, tx, y + 22 + i * 19, { size: 14, weight: i === 0 ? 600 : 500, color: txt, align: 'left' }));
             let yy = y + 22 + lines.length * 19;
             if (snippet) { UK.text(ctx, snippet, tx, yy + 2, { size: 13, weight: 500, color: sub, align: 'left', maxW: tw }); yy += 20; }
@@ -11160,11 +11311,11 @@ registerBehavior('uiBookmarks', {
         for (const it of L) {
           const pic = it.media && (isPic(it.media) || isVid(it.media)), emo = it.media && !pic, thumb = it.media ? 58 : 0;
           const tx = b.x + 16 + 40 + 12, tw = b.w - (tx - b.x) - 16 - 34 - (thumb ? thumb + 10 : 0);
-          ctx.font = `500 15px ${THEME.font}`; const lines = it.gone ? ['This post is no longer available'] : wrapLines(ctx, fillTemplate(String(it.text || (pic ? '📷 Photo' : '')), s.vars), tw, 15, 3);
+          ctx.font = `500 15px ${THEME.font}`; const lines = it.gone ? ['This post is no longer available'] : wrapLines(ctx, fillTemplate(String(it.text || (pic ? 'Photo' : '')), s.vars), tw, 15, 3);
           const h = Math.max(thumb + 24, (it.label ? 20 : 0) + 34 + lines.length * 20 + 12);
           if (y + h > b.y && y < b.y + b.h) {
             let yy = y + 14;
-            if (it.label) { UK.text(ctx, '💬 ' + it.label, tx, yy + 6, { size: 12, weight: 700, color: sub, align: 'left', maxW: tw + thumb }); yy += 20; }
+            if (it.label) { drawIco(ctx, 'comment', tx + 6, yy + 6, 13, sub); UK.text(ctx, it.label, tx + 17, yy + 6, { size: 12, weight: 700, color: sub, align: 'left', maxW: tw + thumb - 17 }); yy += 20; }
             miniAvatar(ctx, it.author || '?', b.x + 16 + 20, yy + 20, 40);
             ctx.font = `800 15px ${THEME.font}`; const nm = String(it.author || 'Someone'), nw = Math.min(tw * 0.62, ctx.measureText(nm).width);
             UK.text(ctx, nm, tx, yy + 9, { size: 15, weight: 800, color: txt, align: 'left', maxW: tw * 0.62 });
@@ -11245,7 +11396,7 @@ registerBehavior('uiFriends', {
           }
           rows.push({ x: b.x, y, w: b.w, h: H, handle: q.handle, name: q.name }); y += H;
         };
-        if (tab === 0) { if (!Ls.friends.length) { UK.text(ctx, '👥', b.cx, y + 70, { size: 40 }); UK.text(ctx, 'No friends yet', b.cx, y + 118, { size: 15, weight: 700, color: sub }); UK.text(ctx, 'Find people and add them', b.cx, y + 142, { size: 13, weight: 500, color: sub }); y += 170; } for (const q of Ls.friends) person(q, [['message', 'Message', false, 86]]); }
+        if (tab === 0) { if (!Ls.friends.length) { drawIco(ctx, 'users', b.cx, y + 70, 40, sub, { stroke: 1.6 }); UK.text(ctx, 'No friends yet', b.cx, y + 118, { size: 15, weight: 700, color: sub }); UK.text(ctx, 'Find people and add them', b.cx, y + 142, { size: 13, weight: 500, color: sub }); y += 170; } for (const q of Ls.friends) person(q, [['message', 'Message', false, 86]]); }
         else if (tab === 1) {
           if (!Ls.req.length && !Ls.sent.length) { UK.text(ctx, 'No friend requests', b.cx, y + 70, { size: 15, weight: 700, color: sub }); y += 100; }
           if (Ls.req.length) { head('Friend requests'); for (const q of Ls.req) person(q, [['accept', 'Accept', true, 78], ['decline', 'Decline', false, 78]]); }
@@ -11281,7 +11432,7 @@ function storyComposer(s, o) {
   top.append(x, clr); stage.append(top);
   const bar = el('div', 'flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px calc(env(safe-area-inset-bottom,0px) + 12px);');
   const file = el('input'); file.type = 'file'; file.accept = 'image/*,video/*'; file.style.display = 'none';
-  const media = btn('flex:none;padding:10px 14px;border-radius:22px;background:#24262e;color:#fff;', '🖼️ Photo / video'); media.dataset.storyMedia = '1';
+  const media = btn('flex:none;display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:22px;background:#24262e;color:#fff;', ''); media.append(iconSpan('image', 18), document.createTextNode('Photo / video')); media.dataset.storyMedia = '1';
   const sw = el('div', 'flex:1;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:4px 2px;');
   const share = btn('flex:none;padding:11px 18px;border-radius:22px;background:#fff;color:#111;font-weight:800;', 'Share'); share.dataset.storyShare = '1';
   const swatches = STORY_BGS.map((c) => { const b = btn(`flex:none;width:30px;height:30px;border-radius:50%;background:${c};border:3px solid ${c === st.color ? '#fff' : 'rgba(255,255,255,.25)'};`, ''); b.dataset.storyColor = c; b.onclick = () => { st.color = c; paint(); }; return b; });
@@ -11500,17 +11651,17 @@ registerBehavior('uiStories', {
         ctx.font = `800 15px ${THEME.font}`; const nw = ctx.measureText(g.mine ? 'Your story' : g.name).width;
         UK.text(ctx, g.mine ? 'Your story' : g.name, 56, hy, { size: 15, weight: 800, color: '#fff', align: 'left' });
         if (sl.at) UK.text(ctx, shortAgo(sl.at), 64 + nw, hy, { size: 14, weight: 600, color: 'rgba(255,255,255,0.75)', align: 'left' });
-        UK.text(ctx, '✕', W - 26, hy, { size: 22, weight: 700, color: '#fff' });
-        if (g.mine) UK.text(ctx, '⋯', W - 74, hy, { size: 22, weight: 900, color: '#fff' });
+        drawIco(ctx, 'x', W - 26, hy, 24, '#fff', { stroke: 2.4 });
+        if (g.mine) drawIco(ctx, 'more', W - 74, hy, 24, '#fff', { stroke: 3 });
         if (sl.text) { const media = sl.pic && (isPic(sl.pic) || isVid(sl.pic)), big = !media && !(sl.pic && !isPic(sl.pic)); const sz = big ? 32 : 24; ctx.font = `800 ${sz}px ${THEME.font}`; const T = wrapLines(ctx, fillTemplate(String(sl.text), s.vars), W - 56, sz, 6), lh = sz * 1.3, y0 = big ? H / 2 - (T.length - 1) * lh / 2 : media ? H - sB - 130 - (T.length - 1) * lh : H * 0.66;
           ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10; T.forEach((l, j) => UK.text(ctx, l, W / 2, y0 + j * lh, { size: sz, weight: 800, color: '#fff' })); ctx.restore(); }
         // the bottom bar: reply and ♥ (theirs), who saw it (yours)
         const by = H - sB - 42;
-        if (g.mine) { if (p.views !== false) { const N = viewers(s, sl).length; UK.text(ctx, `👁  ${N ? 'Seen by ' + N : 'No views yet'}`, 18, by, { size: 15, weight: 700, color: '#fff', align: 'left' }); } }
+        if (g.mine) { if (p.views !== false) { const N = viewers(s, sl).length; drawIco(ctx, 'eye', 30, by, 20, '#fff'); UK.text(ctx, N ? 'Seen by ' + N : 'No views yet', 48, by, { size: 15, weight: 700, color: '#fff', align: 'left' }); } }
         else {
           const likeOn = likedSet(s).has(sl.id), lw = p.likes !== false ? 56 : 0;
           if (p.replies !== false) { ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; UK.rr(ctx, 14, by - 22, W - 28 - lw, 44, 22); ctx.stroke(); UK.text(ctx, `Reply to ${g.name.split(' ')[0]}…`, 32, by, { size: 15, weight: 600, color: 'rgba(255,255,255,0.85)', align: 'left' }); }
-          if (p.likes !== false) { const a = (s.time - popT) / 0.35, zz = a >= 0 && a < 1 ? 1 + Math.sin(a * Math.PI) * 0.35 : 1; ctx.save(); ctx.translate(W - 36, by); ctx.scale(zz, zz); UK.text(ctx, likeOn ? '♥' : '♡', 0, 1, { size: 30, weight: 700, color: likeOn ? '#ff3b6b' : '#fff' }); ctx.restore(); }
+          if (p.likes !== false) { const a = (s.time - popT) / 0.35, zz = a >= 0 && a < 1 ? 1 + Math.sin(a * Math.PI) * 0.35 : 1; ctx.save(); ctx.translate(W - 36, by); ctx.scale(zz, zz); drawIco(ctx, 'heart', 0, 0, 28, likeOn ? '#ff3b6b' : '#fff', { fill: likeOn }); ctx.restore(); }
         }
         if ((drag && held > 0.18 && !dx && !dy) || replying) UK.text(ctx, 'Ⅱ', W / 2, sT + 76, { size: 18, weight: 900, color: 'rgba(255,255,255,0.75)' });
         ctx.restore(); ctx.restore();
@@ -22138,6 +22289,9 @@ export class Engine {
     this.stayAwake = opts.keepAwake !== false; // keep the screen on while playing
     this.root = document.createElement('div');
     this.root.className = 'pocket-root';
+    if (!document.getElementById('pocket-native-css')) { const st = document.createElement('style'); st.id = 'pocket-native-css'; // a press shows on every button (like a native app), no grey flash, no text picking
+      st.textContent = '.pocket-root button{-webkit-tap-highlight-color:transparent;transition:opacity .14s ease,background-color .14s ease,transform .14s ease}.pocket-root button:active:not(:disabled){opacity:.55}.pocket-root input,.pocket-root textarea{-webkit-user-select:text;user-select:text}.pocket-root [data-pocket-sheet] *{-webkit-touch-callout:none}.pocket-root img{-webkit-user-drag:none;user-select:none}';
+      document.head.append(st); }
     const fixed = this.parent === document.body;
     this.rootBase = `position:${fixed ? 'fixed' : 'absolute'};overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
     this.root.style.cssText = this.rootBase + 'inset:0;';
@@ -22569,8 +22723,19 @@ export class Engine {
 
   /** An open side bar or popup takes the taps: one outside it closes it and goes no further. */
   /** Keep the browser history in step with the game's pages, and go back on a swipe in from the left edge. */
+  /** Feel like a native app: the phone's status bar takes the app's colour (and dark mode), the page around it too. */
+  nativeChrome(s) {
+    if (this.editing || typeof document === 'undefined' || !s.settings.app || s.settings.nativeChrome === false) return;
+    const t = performance.now(); if (t - (this._chromeT || 0) < 400) return; this._chromeT = t;
+    const bar = tok('@bar') || tok('@bg'), bg = tok('@bg') || bar, key = bar + '|' + bg; if (key === this._chrome) return; this._chrome = key;
+    let m = document.querySelector('meta[name="theme-color"]'); if (!m) { m = document.createElement('meta'); m.name = 'theme-color'; document.head.append(m); } m.content = bar;
+    let st = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]'); if (!st) { st = document.createElement('meta'); st.name = 'apple-mobile-web-app-status-bar-style'; document.head.append(st); } st.content = 'default';
+    if (this.parent === document.body) { document.documentElement.style.background = bg; document.body.style.background = bg; }
+    document.documentElement.style.colorScheme = isDark(s) ? 'dark' : 'light';
+  }
+
   navTick(s) {
-    const inp = this.input;
+    const inp = this.input; this.nativeChrome(s);
     if (s.settings.edgeSwipeBack !== false && s.canGoBack()) {
       for (const u of inp.ups) if (u.sx < 28 && u.x - u.sx > 70 && Math.abs(u.y - u.sy) < 90 && u.time < 0.7) { s.navBack(); inp.taps.length = 0; break; }
     }

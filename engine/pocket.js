@@ -8598,7 +8598,7 @@ const UK = {
   floatBottom(s, e, x0, x1, top) {
     const E = s.engine; let low = -1e9; const mine = (q) => { for (let a = e; a; a = a.parentEnt) if (a === q) return true; return false; };
     for (const q of s.entities) {
-      if (!q.ui || q.dead || q.parentEnt || !q.visible || q._dock || q.stretch === 'both' || mine(q) || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
+      if (!q.ui || q.dead || q.parentEnt || !q.visible || (q._dock && !q.behaviors.some((b) => b.sideMenu)) || q.stretch === 'both' || mine(q) || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
       const sb = q.behaviors.find((b) => b.sideMenu), bt = sb?.btn?.(s); let r = null;
       if (bt) r = { x0: bt.x - bt.r, x1: bt.x + bt.r, y0: bt.y - bt.r, y1: bt.y + bt.r };
       else if (!sb && !q.behaviors.some((b) => b.uiAlways && b.open !== undefined)) { const u = uiBox(q, E.width, E.height, E.safe); r = { x0: u.x - u.w / 2, x1: u.x + u.w / 2, y0: u.y - u.h / 2, y1: u.y + u.h / 2 }; }
@@ -9757,22 +9757,24 @@ registerBehavior('uiFeed', {
     const collapse = (s, e, dt) => {
       const h = hostOf(e); if (!h || s.engine.editing || look0() === 'reels') { if (h && h._collapseBy === e) h._collapseY = 0; return; }
       const E = s.engine, k = uiK(E.safe) || 1, pr = uiBox(h, E.width, E.height, E.safe), fr = uiBox(e, E.width, E.height, E.safe);
-      let c = h._collapseBy === e ? h._collapseY || 0 : 0; let A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c);
+      let c = h._collapseBy === e ? h._collapseY || 0 : 0; let A = Math.max(0, ((fr.y - fr.h / 2) - (pr.y - pr.h / 2)) / k + c), lowest = -1e9;
       { // not up under a button that floats over the page (a ☰ in the corner): the feed stops below it
-        const top0 = fr.y - fr.h / 2 + c * k, x0 = fr.x - fr.w / 2, x1 = fr.x + fr.w / 2; let lowest = -1e9;
+        const top0 = fr.y - fr.h / 2 + c * k, x0 = fr.x - fr.w / 2, x1 = fr.x + fr.w / 2;
         for (const q of s.entities) {
-          if (!q.ui || q.dead || q.parentEnt || !q.visible || q._dock || q === h || q.stretch === 'both' || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
+          if (!q.ui || q.dead || q.parentEnt || !q.visible || (q._dock && !q.behaviors.some((b) => b.sideMenu)) || q === h || q.stretch === 'both' || q.behaviors.some((b) => b.type === 'uiShowIf')) continue;
           const sb = q.behaviors.find((b) => b.sideMenu), bt = sb?.btn?.(s); let r = null;
           if (bt) r = { x0: bt.x - bt.r, x1: bt.x + bt.r, y0: bt.y - bt.r, y1: bt.y + bt.r }; else if (!sb) { const u = uiBox(q, E.width, E.height, E.safe); r = { x0: u.x - u.w / 2, x1: u.x + u.w / 2, y0: u.y - u.h / 2, y1: u.y + u.h / 2 }; }
           if (r && r.y1 <= top0 + 2 && r.y1 > pr.y - pr.h / 2 && r.x1 > x0 && r.x0 < x1 && r.y1 - r.y0 < E.height * 0.4) lowest = Math.max(lowest, r.y1);
         }
         if (lowest > -1e9) A = Math.min(A, Math.max(0, (top0 - lowest - 6) / k));
       }
-      if (A < 12) { h._collapseY = 0; return; }
+      if (A < 12) { h._collapseY = 0; if (h._clipBy === e) { h._clipRect = null; h._clipBy = null; } return; }
       if (goTop) c += (0 - c) * Math.min(1, dt * 10);
       else if (S.v > 0 && c < A && S.max > 0) { const t = Math.min(S.v, A - c); c += t; S.v -= t; if (S.drag) S.drag.v0 -= t; }
       else if (S.v < 0 && c > 0) { const t = Math.min(-S.v, c); c -= t; S.v += t; if (S.drag) S.drag.v0 += t; }
       c = clamp(c, 0, A); if (c < 0.3) c = 0; h._collapseY = c; h._collapseBy = e; if (c > 0) h._clipChildren = true;
+      // what scrolls away above the feed (a search bar, the post box, tabs) goes out of sight just under a floating ☰, not behind it
+      const pb = pr.y + pr.h / 2; if (c > 0 && lowest > pr.y - pr.h / 2) { const t0 = lowest + 2; h._clipRect = { x: pr.x, y: (t0 + pb) / 2, w: pr.w, h: Math.max(0, pb - t0) }; h._clipBy = e; } else if (h._clipBy === e) { h._clipRect = null; h._clipBy = null; }
     };
     /** Switch tab: each tab keeps where it was scrolled to. */
     const setTab = (s, i) => { const T = TABS(); if (!T[i] || i === tab) return; tabScroll.set(tab, S.v); tab = i; S.v = tabScroll.get(i) || 0; S.flick = 0; born.clear(); fresh = 0; known = null; tabNew[i] = false; if (p.tabVar) s.setVar(p.tabVar, T[i].label); };
@@ -13689,6 +13691,9 @@ registerBehavior('uiShowIf', {
       const E = s.engine, inp = E.input, k = uiK(E.safe) || 1, b = uiBox(e, E.width, E.height, E.safe);
       maxS = overflow(s, e);
       e._clipChildren = maxS > 0 || (e._scrollY || 0) !== 0 || (e._collapseY || 0) > 0;
+      if (!e._clipBy) { // scrolled: what is on the page goes out of sight just under a floating ☰ in the corner, not behind it
+        let cr = null; if ((e._scrollY || 0) > 0.5) { const fl = UK.floatBottom(s, e, b.x - b.w / 2, b.x + b.w / 2, b.y - b.h / 2); if (fl > b.y - b.h / 2 + 1) { const t0 = fl, pbm = b.y + b.h / 2; cr = { x: b.x, y: (t0 + pbm) / 2, w: b.w, h: Math.max(0, pbm - t0) }; } }
+        e._clipRect = cr; }
       const canScroll = maxS > 0.5, canPull = !!p.refreshMessage;
       if (canScroll || canPull) for (const d of inp.downs) if (Math.abs(d.x - b.x) < b.w / 2 && Math.abs(d.y - b.y) < b.h / 2 && !ownsDrag(s, e, d) && !s.entities.some((q) => q._dock && q.visible && !q._parentHidden && hitTest(s, q, d.x, d.y))) { drag = { id: d.id, y0: d.y, s0: e._scrollY || 0, on: false, last: d.y }; vel = 0; } // (nothing below the screen and no pull-to-refresh: the page stays put)
       let y = e._scrollY || 0;

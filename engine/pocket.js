@@ -12015,7 +12015,16 @@ function storyComposer(s, o) {
 /** Where a Stories Row draws: a floating ☰ (or other small control) in its top corner pushes it down below the button, keeping its left edge, or (corner: starts after it) makes it start beside the button. */
 function storyBox(s, e) {
   const p = e.behaviors.find((x) => x.type === 'uiStories') || {}, b0 = UK.box(e), c = UK.clearCorner(s, e, b0, 160, (+p.size || 64) + 34);
-  if (c === b0 || p.corner === 'starts after it' || !(c.below > b0.y)) return c; const y = c.below; return { ...b0, y, cy: b0.cy + (y - b0.y) };
+  if (c === b0 || p.corner === 'starts after it' || !(c.below > b0.y)) return c; const y = c.below, band = (+p.size || 64) + 34;
+  // only when that room is free: something already under the row (a post box, tabs…) keeps it in place, starting after the button
+  const E = s.engine, k = uiK(E.safe) || 1, o = uiOrigin(e, E.width, E.height, E.safe), X0 = o.x + b0.x * k, X1 = o.x + (b0.x + b0.w) * k, Y0 = o.y + (b0.y + band) * k, Y1 = o.y + (y + band) * k;
+  const rel = (q) => { for (let a = q; a; a = a.parentEnt) if (a === e) return true; for (let a = e; a; a = a.parentEnt) if (a === q) return true; return false; };
+  for (const q of s.entities) {
+    if (!q.ui || q.dead || !q.visible || q._parentHidden || q._dock || rel(q) || q.behaviors.some((x) => x.sideMenu || x.type === 'uiShowIf' || (x.uiAlways && x.open !== undefined))) continue;
+    const u = uiBox(q, E.width, E.height, E.safe); if (u.w < 8 || u.h < 8) continue; const top = u.y - u.h / 2 + (q.stretch === 'both' ? (+q.marginTop || 0) * k : 0); // (a feed filling the screen starts at its top margin)
+    if (u.x + u.w / 2 > X0 && u.x - u.w / 2 < X1 && u.y + u.h / 2 > Y0 + 2 && top < Y1 - 2) return c;
+  }
+  return { ...b0, y, cy: b0.cy + (y - b0.y) };
 }
 registerBehavior('uiStories', {
   label: 'Stories', description: 'Story bubbles with a coloured ring (grey once you have seen them all). Tap to watch full screen: a story per person with several slides, progress bars, tap to go on, hold to pause, swipe sideways for the next person and down to close. Reply by message or with a quick emoji, like a story, and see who viewed yours. “Your story” makes one: a photo, video, GIF or words on a colour. Stories come from a Stories collection (and disappear after a day), else the list below.',

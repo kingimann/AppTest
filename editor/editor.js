@@ -5308,7 +5308,9 @@ function addPrefab(def, at) {
     for (const c of children || []) addTree({ ui: rest.ui, ...c }, k.id);
     return k;
   };
-  for (const b of def.before || []) addTree(b, null, at);
+  const sends = (bh) => { const P = bh?.params || bh; return bh?.type === 'button' && P?.action === 'send message' && String(P.value ?? '').trim(); };
+  const haveBtn = (m) => m && project.entities.some((q) => q.ui && q.visible !== false && (q.behaviors || []).some((bh) => sends(bh) === m));
+  for (const b of def.before || []) { const m = sends((b.behaviors || [])[0]); if (haveBtn(m)) continue; addTree(b, null, at); } // you already have a button that opens it (a ☰ from another menu): don't stack a second one on it
   const kids = def.children || def.props.children; // children can sit on the widget or inside its props
   const j = kids ? addTree({ ...def.props, children: kids }, null, at) : addEntity(def.props, at);
   for (const a of def.after || []) addTree(a, null, at); // drawn above the main element (e.g. a Next button under a pager)

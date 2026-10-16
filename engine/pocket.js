@@ -2644,7 +2644,7 @@ export class Input {
     const p = this.local(e);
     this.el.setPointerCapture?.(e.pointerId);
     const btn = this.engine.scene?.modal ? null : this.buttons.find((b) => !b.off && (b.w ? Math.abs(p.x - b.x) < b.w / 2 && Math.abs(p.y - b.y) < b.h / 2 : Math.hypot(p.x - b.x, p.y - b.y) < b.r * 1.3));
-    const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' };
+    const ptr = { id: e.pointerId, x: p.x, y: p.y, sx: p.x, sy: p.y, t: performance.now(), role: 'free' }; ptr.hist = [{ x: p.x, y: p.y, t: ptr.t }]; // where the finger was lately: how fast it is moving when it lets go
     const st = this.engine.scene?.settings || {};
     const zone = { third: 1 / 3, full: 1, half: 0.5 }[st.joystickZone] || 0.5, W = this.engine.width;
     const stickSide = zone >= 1 || (this.engine.stickSide === 'right' ? p.x > W * (1 - zone) : p.x < W * zone);
@@ -2660,6 +2660,16 @@ export class Input {
     if (ptr.role === 'free') this.downs.push({ id: e.pointerId, x: p.x, y: p.y });
   }
 
+  /** How fast a finger is moving (screen px per second), from where it was over the last ~0.1 s. A finger that stopped before lifting isn't moving. */
+  velocity(ptr) {
+    const h = ptr?.hist, now = performance.now(); if (!h || h.length < 2 || now - h[h.length - 1].t > 60) return { x: 0, y: 0 };
+    const b = h[h.length - 1]; let a = h[0]; for (const q of h) if (b.t - q.t <= 100) { a = q; break; }
+    if (a === b) a = h[h.length - 2]; const dt = Math.max(8, b.t - a.t) / 1000, M = 8000;
+    return { x: clamp((b.x - a.x) / dt, -M, M), y: clamp((b.y - a.y) / dt, -M, M) };
+  }
+  /** The finger with this id that lifted this frame ({ x, y, vx, vy }), or null. */
+  lifted(id) { return this.ups.find((u) => u.id === id) || null; }
+
   /** Is there something under this point that listens for taps (On Tap nodes, tap triggers, buttons)? Then the finger is a tap, not the joystick. */
   onTapTarget(p) {
     const s = this.engine.scene; if (!s?.tapTargets?.size) return false;
@@ -2673,6 +2683,7 @@ export class Input {
     const p = this.local(e);
     if (ptr.role === 'free') { this.drag.dx += p.x - ptr.x; this.drag.dy += p.y - ptr.y; }
     ptr.x = p.x; ptr.y = p.y;
+    if (ptr.hist) { const t = performance.now(), h = ptr.hist; h.push({ x: p.x, y: p.y, t }); while (h.length > 2 && t - h[0].t > 120) h.shift(); }
     if (this.stick && this.stick.id === e.pointerId) {
       const max = this.stickRadius, dx = p.x - this.stick.bx, dy = p.y - this.stick.by, d = Math.hypot(dx, dy);
       if (d > max && !this.stick.fixed && !this.stick.stay) { this.stick.bx = p.x - dx / d * max; this.stick.by = p.y - dy / d * max; } // base follows the thumb
@@ -2684,11 +2695,13 @@ export class Input {
   up(e, cancelled) {
     const ptr = this.pointers.get(e.pointerId);
     if (!ptr) return;
+    if (!cancelled && e.clientX != null) { const p = this.local(e); ptr.x = p.x; ptr.y = p.y; }
+    const fv = this.velocity(ptr);
     this.pointers.delete(e.pointerId);
     if (this.stick && this.stick.id === e.pointerId) this.stick = null;
     for (const b of this.buttons) if (b.id === e.pointerId) b.id = null;
     const dt = performance.now() - ptr.t, dx = ptr.x - ptr.sx, dy = ptr.y - ptr.sy, dist = Math.hypot(dx, dy);
-    if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000 });
+    if (!cancelled && ptr.role === 'free') this.ups.push({ id: e.pointerId, x: ptr.x, y: ptr.y, sx: ptr.sx, sy: ptr.sy, time: dt / 1000, vx: fv.x, vy: fv.y });
     const tapDist = Math.max(16, Math.min(this.engine.width, this.engine.height) * 0.04); // a finger wobbles a little: more room on big screens
     if (!cancelled && (ptr.role === 'free' || ptr.role === 'stick') && dt < 450 && dist < tapDist) {
       this.taps.push({ x: ptr.sx, y: ptr.sy, ex: ptr.x, ey: ptr.y }); // where the finger landed is what was aimed at
@@ -8658,6 +8671,8 @@ const UK = {
   taps(s, e) { return UK.live(s, e) ? s.engine.input.taps.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
   downs(s, e) { return UK.live(s, e) ? s.engine.input.downs.filter((t) => UK.mine(s, e, t)).map((t) => UK.local(s, e, t)) : []; },
   ptr(s, e, id) { const q = s.engine.input.pointers.get(id); return q ? UK.local(s, e, q) : null; },
+  /** The finger with this id lifted this frame: where (in e's space) and how fast it was moving ({ x, y, vx, vy } per second), else null. */
+  lifted(s, e, id) { const u = s.engine.input.lifted?.(id); if (!u) return null; const a = UK.local(s, e, u), b = UK.local(s, e, { x: u.x + 100, y: u.y + 100 }); return { x: a.x, y: a.y, vx: u.vx * (b.x - a.x) / 100, vy: u.vy * (b.y - a.y) / 100 }; },
   in(p, r, pad = 0) { return p.x >= r.x - pad && p.x <= r.x + r.w + pad && p.y >= r.y - pad && p.y <= r.y + r.h + pad; },
   rr(ctx, x, y, w, h, r) { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, h, Math.max(0, Math.min(r, h / 2, w / 2))); else ctx.rect(x, y, w, h); },
   text(ctx, str, x, y, { size = 16, weight = 700, color = '#fff', align = 'center', base = 'middle', maxW } = {}) { ctx.font = `${weight} ${size}px ${THEME.font}`; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = base; ctx.fillText(maxW ? fitText(ctx, String(str), maxW) : String(str), x, y); },
@@ -9168,21 +9183,24 @@ function coveredBottom(s, e, b) {
   const o = uiOrigin(e, E.width, E.height, S), K = uiK(S) || 1;
   return Math.max(0, (o.y + (b.y + b.h) * K - (E.height - bar)) / K);
 }
+/** How much of a flick's speed is left after a second of gliding (like iPhone's normal scrolling). */
+const SCROLL_DECAY = 0.135;
 /** Drag-to-scroll with a flick and a rubber band; pull down past the top to refresh. */
 function makeScroller(axis = 'y') {
   const S = { v: 0, max: 0, drag: null, flick: 0, pulled: 0, refreshT: -9, moved: false };
   S.update = (s, e, dt, box, onRefresh) => {
-    const k = axis === 'y' ? 'y' : 'x';
+    const k = axis === 'y' ? 'y' : 'x'; e._scroller = S; // (for tests and tools)
     for (const d of UK.downs(s, e)) if (UK.in(d, box)) { S.drag = { id: d.id, p0: d[k], o0: d[k === 'y' ? 'x' : 'y'], v0: S.v, on: false }; S.flick = 0; S.moved = false; }
     if (S.drag) {
       const q = UK.ptr(s, e, S.drag.id);
       if (q) {
         const dd = q[k] - S.drag.p0, other = q[k === 'y' ? 'x' : 'y'] - S.drag.o0;
-        if (!S.drag.on && Math.abs(dd) > 8 && Math.abs(dd) > Math.abs(other)) S.drag.on = true;
-        if (S.drag.on) { const ep = s.engine.input.pointers.get(S.drag.id); if (ep && k === 'y') ep.claimed = true; S.moved = true; let nv = S.drag.v0 - dd; if (nv < 0) nv = -Math.pow(-nv, 0.82); else if (nv > S.max) nv = S.max + Math.pow(nv - S.max, 0.82); S.flick = (nv - S.v) / Math.max(dt, 1 / 120); S.v = nv; }
-      } else { if (S.v < -70 && onRefresh) { S.refreshT = s.time; onRefresh(); } S.drag = null; }
+        if (!S.drag.on && Math.abs(dd) > 8 && Math.abs(dd) > Math.abs(other)) { S.drag.on = true; S.drag.p0 = q[k]; } // (starts from here: no jump)
+        if (S.drag.on) { const ep = s.engine.input.pointers.get(S.drag.id); if (ep && k === 'y') ep.claimed = true; S.moved = true; let nv = S.drag.v0 - (q[k] - S.drag.p0); if (nv < 0) nv = -Math.pow(-nv, 0.82); else if (nv > S.max) nv = S.max + Math.pow(nv - S.max, 0.82); S.flick = (nv - S.v) / Math.max(dt, 1 / 120); S.v = nv; }
+      } else { const u = S.drag.on && UK.lifted(s, e, S.drag.id); if (u) S.flick = S.v < 0 || S.v > S.max ? 0 : -u['v' + k]; if (S.v < -70 && onRefresh) { S.refreshT = s.time; onRefresh(); } S.drag = null; } // the flick: how fast the finger was going as it let go
     } else {
-      S.v += S.flick * dt; S.flick *= Math.pow(0.04, dt); if (Math.abs(S.flick) < 6) S.flick = 0;
+      S.v += S.flick * dt; S.flick *= Math.pow(SCROLL_DECAY, dt); if (Math.abs(S.flick) < 6) S.flick = 0;
+      if (S.v < 0 && S.flick < 0 || S.v > S.max && S.flick > 0) S.flick *= Math.pow(1e-6, dt); // gliding past an end: a quick stop, then it springs back
       const hold = s.time - S.refreshT < 0.9 ? -46 : 0, goal = clamp(S.v, hold, Math.max(hold, S.max)); S.v += (goal - S.v) * Math.min(1, dt * 12);
     }
   };
@@ -13157,8 +13175,8 @@ function scroller() {
     update(s, e, b, contentH, dt) {
       const max = Math.max(0, contentH - b.h);
       for (const d of UK.downs(s, e)) if (UK.in(d, b) && !drag) drag = { id: d.id, y0: d.y, s0: y, moved: false, last: d.y };
-      if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { if (Math.abs(q.y - drag.y0) > 8) drag.moved = true; vel = (drag.last - q.y) / Math.max(dt, 1e-3); drag.last = q.y; y = clamp(drag.s0 - (q.y - drag.y0), -40, max + 40); } else drag = null; }
-      else { y += vel * dt; vel *= Math.pow(0.02, dt); if (y < 0) y += (0 - y) * Math.min(1, dt * 12); if (y > max) y += (max - y) * Math.min(1, dt * 12); }
+      if (drag) { const q = UK.ptr(s, e, drag.id); if (q) { if (Math.abs(q.y - drag.y0) > 8) drag.moved = true; vel = (drag.last - q.y) / Math.max(dt, 1e-3); drag.last = q.y; y = clamp(drag.s0 - (q.y - drag.y0), -40, max + 40); } else { const u = UK.lifted(s, e, drag.id); if (u) vel = y < 0 || y > max ? 0 : -u.vy; drag = null; } }
+      else { y += vel * dt; vel *= Math.pow(SCROLL_DECAY, dt); if (Math.abs(vel) < 4) vel = 0; if (y < 0) y += (0 - y) * Math.min(1, dt * 12); if (y > max) y += (max - y) * Math.min(1, dt * 12); }
     },
     get moved() { return !!drag?.moved; },
   };
@@ -13812,11 +13830,12 @@ registerBehavior('uiShowIf', {
             vel = (drag.last - q.y) / k / Math.max(dt, 1 / 120); drag.last = q.y; barT = performance.now() / 1000;
             inp.taps.length = 0; // a scroll is not a tap on a button
           }
-        } else { if (drag.on) inp.taps.length = 0; if (pulled) { pulled = false; refreshT = performance.now() / 1000; vel = 0; s.engine.vibrate(10); s.send(p.refreshMessage); } drag = null; }
+        } else { if (drag.on) { inp.taps.length = 0; const u = inp.lifted?.(drag.id); if (u) vel = y < 0 || y > maxS ? 0 : -u.vy / k; } if (pulled) { pulled = false; refreshT = performance.now() / 1000; vel = 0; s.engine.vibrate(10); s.send(p.refreshMessage); } drag = null; }
       } else if (goal != null) { y += (goal - y) * Math.min(1, dt * 10); vel = 0; barT = performance.now() / 1000; if (Math.abs(goal - y) < 0.5) { y = goal; goal = null; } } // scrolling to the top
       else {
         const spin = performance.now() / 1000 - refreshT < 0.9; // a moment with the spinner showing
-        y += vel * dt; vel *= Math.pow(0.04, dt); if (Math.abs(vel) < 4) vel = 0; else barT = performance.now() / 1000;
+        y += vel * dt; vel *= Math.pow(SCROLL_DECAY, dt); if (Math.abs(vel) < 4) vel = 0; else barT = performance.now() / 1000;
+        if ((y < 0 && vel < 0) || (y > maxS && vel > 0)) vel *= Math.pow(1e-6, dt); // gliding past an end: a quick stop, then back
         const c = clamp(y, spin ? -44 : 0, maxS); y += (c - y) * Math.min(1, dt * 12); if (Math.abs(c - y) < 0.3) y = c;
       }
       if (y !== (e._scrollY || 0)) { s.emit('uiScroll', y - (e._scrollY || 0), e, maxS ? clamp(y / maxS, 0, 1) : 0); e._scrollY = y; }
@@ -14356,7 +14375,8 @@ class Scroller {
       if (p.refresh && this.axes.includes('y')) this.pull = Math.max(0, this.off.y - ranges.y[1]);
     } else {
       if (this.drag) { // let go
-        const from = this.drag.from; this.drag = null;
+        const from = this.drag.from, lock = this.drag.lock, u = inp.lifted?.(this.drag.id); this.drag = null;
+        if (u) for (const a of this.axes) { const [mn, mx] = ranges[a], v = (a === 'x' ? u.vx : u.vy) / K; this.vel[a] = (this.axes.length === 1 && lock !== a) || this.off[a] > mx || this.off[a] < mn ? 0 : v; } // the flick: how fast the finger was going as it let go
         if (p.refresh && this.pull > 70 && !this.refreshing) { this.refreshing = now; s.send(p.refresh); s.engine.vibrate?.(10); }
         if (p.fling === 'off') this.vel.x = this.vel.y = 0;
         if (p.snap && p.snap !== 'anywhere') for (const a of this.axes) { // settle on the nearest stop, a little ahead in the flick's direction
@@ -14381,7 +14401,7 @@ class Scroller {
       } else for (const a of this.axes) {
         const [mn, mx] = ranges[a], held = this.refreshing && a === 'y' ? mx + 56 : mx;
         this.off[a] += this.vel[a] * dt;
-        this.vel[a] *= Math.pow(p.fling === 'short' ? 0.002 : 0.04, dt);
+        this.vel[a] *= Math.pow(p.fling === 'short' ? 0.002 : SCROLL_DECAY, dt);
         if (Math.abs(this.vel[a]) < 5) this.vel[a] = 0;
         if (this.off[a] > held) { this.off[a] += (held - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] > 0) this.vel[a] = 0; }
         else if (this.off[a] < mn) { this.off[a] += (mn - this.off[a]) * Math.min(1, dt * 12); if (this.vel[a] < 0) this.vel[a] = 0; }
@@ -17683,10 +17703,11 @@ registerBehavior('uiDataList', {
             if (drag.axis === 'x') swX[drag.row.r.id] = Math.min(0, dx);
           } else {
             if (drag.axis === 'x') { const id = drag.row.r.id; if ((swX[id] || 0) < -G.b.w * 0.35) { gone.set(id, 0); UK.tap(s, p); } else swX[id] = 0; }
+            if (drag.axis === 'y') { const u = UK.lifted(s, e, drag.id); if (u) flick = scroll < 0 || scroll > maxS ? 0 : -u.vy; }
             drag = null; pressId = null;
           }
         } else {
-          scroll += flick * dt; flick *= Math.pow(0.03, dt); if (Math.abs(flick) < 5) flick = 0; else scrollT = now();
+          scroll += flick * dt; flick *= Math.pow((scroll < 0 && flick < 0) || (scroll > maxS && flick > 0) ? 1e-6 : SCROLL_DECAY, dt); if (Math.abs(flick) < 5) flick = 0; else scrollT = now();
           scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12);
         }
         if (Math.abs(scroll - lastScroll) > 0.5) { lastScroll = scroll; s.emit('uiScroll', 0, e, maxS ? scroll / maxS : 0); }

@@ -8340,7 +8340,9 @@ registerBehavior('uiAppBar', {
     const BH = new BarHider(p);
     const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
     const canBack = (s) => Object.values(s.navStacks || {}).some((st) => st.length);
-    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'custom' ? 'custom' : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' ? null : 'menu'; };
+    let sideT = -1, side = false; // is there a Side Menu for the ☰ to open?
+    const hasSide = (s) => { if (sideT !== s.time) { sideT = s.time; const m = p.menuMessage || 'menu'; side = s.entities.some((q) => !q.dead && q.behaviors.some((x) => x.sideMenu && (x.params?.message || 'menu') === m)); } return side; };
+    const leftKind = (s) => { const l = p.left || 'back, else menu'; return l === 'none' ? null : l === 'custom' ? 'custom' : l === 'menu' ? 'menu' : canBack(s) ? 'back' : l === 'back' && !hasSide(s) ? null : 'menu'; }; // (‹ only: still ☰ when there is no page to go back to and a Side Menu to open)
     const titleOf = (s) => {
       if (p.title) return fillTemplate(String(p.title), s.vars);
       const page = s.vars[p.var];

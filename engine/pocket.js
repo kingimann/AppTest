@@ -12347,7 +12347,7 @@ registerBehavior('uiProfile', {
       const G = SG(s); if (p.message) s.send(p.message); if (!G || p.editSheet === false || s.engine.editing || sheetUp) return;
       sheetUp = true; editProfileSheet(s, { colors: colorsOf(), coverColor: p.cover || '#1d9bf0', upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'avatars') : null,
         data: { handle: I.handle, name: I.name, bio: I.bio, avatar: isPic(I.avatar) ? I.avatar : '', cover: I.r.cover || '', location: I.location, website: I.website, pronouns: I.pronouns },
-        onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); s.emit('profileSaved', patch); } });
+        onSave: (patch) => { G.saveProfile(patch); s.snackbar?.('Profile saved'); } });
       setTimeout(() => { sheetUp = false; }, 400);
     };
     const more = (s, I) => {
@@ -12542,7 +12542,7 @@ registerBehavior('uiComposer', {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
           const ok = postComposer(s, { startWith, look: p.composerLook, title: p.composerTitle, buttonStyle: p.buttonStyle, audience: !!p.audience, audienceDefault: p.audienceDefault, replyControl: !!p.replyControl, backgrounds: !!p.backgrounds, emoji: p.emoji !== false, counter: p.counter, drafts: p.drafts !== false, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
-            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
+            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); s.emit('posted', first?.id); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
           if (ok) return;
         }
@@ -17317,7 +17317,7 @@ export class SocialGraph {
       if (s && !this.engine.supa?.user?.()) s.setVar('playerName', nm);
       for (const C of ['Posts', 'Comments', 'Stories']) if (this.D.def(C)) for (const r of this.D.rows(C).filter((q) => this.h(q.handle) === a && q.author !== nm)) this.D.update(C, r.id, { author: nm });
     }
-    this.changed('profile');
+    this.changed('profile'); s?.emit('profileSaved', patch);
   }
   /** Does this person follow me? */
   followsMe(who) { return this.isFollowing(this.me().handle, who); }
@@ -17361,7 +17361,7 @@ export class SocialGraph {
     const s = this.engine.scene; if (!s || this.engine.editing) return;
     const L = this.mine(), newest = L[0]; // a new one arrived (another phone, live): a banner and a buzz
     if (this.seenN == null) { this.seenN = newest?.id ?? ''; return; }
-    if (newest && newest.id !== this.seenN && !truthy(newest.read)) { this.seenN = newest.id; if (s.settings?.socialBanners !== false) { this.engine.notify?.({ type: 'info', title: newest.from_name || '@' + newest.from, text: NOTE_TEXT(newest, false), icon: NOTE_ICON[newest.type] || '🔔', duration: 3 }); this.engine.vibrate?.(15); } s.emit('notification', newest.type, newest); }
+    if (newest && newest.id !== this.seenN && !truthy(newest.read)) { this.seenN = newest.id; s.emit('socialNote', newest); if (s.settings?.socialBanners !== false) { this.engine.notify?.({ type: 'info', title: newest.from_name || '@' + newest.from, text: NOTE_TEXT(newest, false), icon: NOTE_ICON[newest.type] || '🔔', duration: 3 }); this.engine.vibrate?.(15); } s.emit('notification', newest.type, newest); }
     else if (newest) this.seenN = newest.id;
   }
 }
@@ -20326,6 +20326,34 @@ Object.assign(NODE_TYPES, {
   supaField: { cat: 'Online', label: 'My Account Field (Supabase)', value: 'text', params: [txt('field', 'username', 'field')] },
   supaRpc: { cat: 'Online', label: 'Call Database Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   supaEdge: { cat: 'Online', label: 'Call Edge Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
+  // ---- Social: feeds, profiles, friends, messages, points ----
+  socFollow: { cat: 'Social', label: 'Follow Someone', exec: true, outs: ['then'], params: [txt('who', '{profile}', 'who (@handle)'), opt('how', ['follow', 'unfollow', 'toggle'], 'follow', 'do')] },
+  socFriend: { cat: 'Social', label: 'Friend Request', exec: true, outs: ['then'], params: [txt('who', '{profile}', 'who (@handle)'), opt('how', ['send / accept', 'decline', 'cancel', 'unfriend'], 'send / accept', 'do')] },
+  socMute: { cat: 'Social', label: 'Mute / Block Someone', exec: true, outs: ['then'], params: [txt('who', '{profile}', 'who (@handle)'), opt('list', ['mute', 'block'], 'mute', 'list'), opt('how', ['on', 'off', 'toggle'], 'on', 'turn')] },
+  socOpenProfile: { cat: 'Social', label: 'Open Profile', exec: true, outs: ['then'], params: [txt('who', 'maya', 'who (@handle; blank = me)'), txt('page', 'user', 'their profile page'), txt('mine', 'profile', 'my profile page')] },
+  socSetProfile: { cat: 'Social', label: 'Change My Profile', exec: true, outs: ['then'], params: [opt('field', ['name', 'bio', 'location', 'website', 'pronouns', 'avatar', 'cover'], 'bio', 'field'), txt('value', '{bio}', 'to (variables in braces)')] },
+  socEditProfile: { cat: 'Social', label: 'Open Edit Profile', exec: true, outs: ['then', 'saved'] },
+  socPost: { cat: 'Social', label: 'Create Post', exec: true, outs: ['then'], params: [txt('text', 'Hello world! #pocket', 'text (variables in braces)'), txt('media', '', 'picture, GIF or emoji (optional)'), txt('collection', 'Posts', 'collection')] },
+  socCompose: { cat: 'Social', label: 'Open Post Composer', exec: true, outs: ['then'] },
+  socDM: { cat: 'Social', label: 'Send Direct Message', exec: true, outs: ['then'], params: [txt('who', 'maya', 'to (@handle)'), txt('text', 'Hey! 👋', 'message (variables in braces)'), { key: 'open', type: 'bool', default: false, label: 'then open the chat' }, txt('page', 'chat', 'chat page')] },
+  socSave: { cat: 'Social', label: 'Save Post', exec: true, outs: ['then'], params: [txt('post', '{openPost}', 'post id'), opt('how', ['save', 'unsave', 'toggle'], 'toggle', 'do')] },
+  socNotify: { cat: 'Social', label: 'Send Notification', exec: true, outs: ['then'], params: [txt('who', 'maya', 'to (@handle)'), opt('type', ['mention', 'like', 'comment', 'follow', 'message'], 'mention', 'kind'), txt('text', '', 'text')] },
+  socReadAll: { cat: 'Social', label: 'Mark Notifications Read', exec: true, outs: ['then'] },
+  socPoints: { cat: 'Social', label: 'Award Points', exec: true, outs: ['then'], params: [opt('for', ['post', 'story', 'listing', 'comment', 'repost', 'follow', 'like', 'message', 'save'], 'post', 'for doing'), num('times', 1, 'times')] },
+  socStory: { cat: 'Social', label: 'Watch Their Story', exec: true, outs: ['then', 'no story'], params: [txt('who', '{profile}', 'who (@handle)'), txt('page', 'home', 'page with the Stories')] },
+  socCheck: { cat: 'Social', label: 'Social Check', value: 'bool', params: [txt('who', '{profile}', 'who (@handle)'), opt('check', ['I follow them', 'they follow me', 'we are friends', 'I asked to be friends', 'they asked to be friends', 'muted', 'blocked', 'has a story', 'is me'], 'I follow them', 'is it true that')] },
+  socCount: { cat: 'Social', label: 'Social Count', value: 'number', params: [txt('who', '', 'whose (@handle; blank = me)'), opt('what', ['followers', 'following', 'friends', 'posts', 'mutuals', 'friend requests', 'unread notifications'], 'followers', 'count')] },
+  socProfile: { cat: 'Social', label: 'Profile Field', value: 'text', params: [txt('who', '', 'whose (@handle; blank = me)'), opt('field', ['name', 'handle', 'bio', 'location', 'website', 'pronouns', 'avatar', 'cover', 'joined', 'friend status'], 'name', 'field')] },
+  socPointsV: { cat: 'Social', label: 'My Points', value: 'number', params: [opt('what', ['points', 'streak (days)', 'trophies'], 'points', 'value')] },
+  socTrophy: { cat: 'Social', label: 'Has Achievement', value: 'bool', params: [opt('trophy', ACHIEVEMENTS.map((a) => a.title), 'First post', 'achievement')] },
+  socIsSaved: { cat: 'Social', label: 'Post Is Saved', value: 'bool', params: [txt('post', '{openPost}', 'post id')] },
+  socWho: { cat: 'Social', label: 'Who (Social Event)', value: 'text' },
+  onSocFollow: { cat: 'Social', label: 'On Follow', outs: ['followed', 'unfollowed'] },
+  onSocFriend: { cat: 'Social', label: 'On New Friend', outs: ['then'] },
+  onSocNote: { cat: 'Social', label: 'On New Notification', outs: ['then'], params: [opt('type', ['any', 'like', 'comment', 'reply', 'repost', 'mention', 'follow', 'friend_request', 'friend_accept', 'message'], 'any', 'kind')] },
+  onSocPosted: { cat: 'Social', label: 'On Posted', outs: ['then'] },
+  onSocProfile: { cat: 'Social', label: 'On Profile Saved', outs: ['then'] },
+  onSocTrophy: { cat: 'Social', label: 'On Achievement Unlocked', outs: ['then'] },
   supaUser: { cat: 'Online', label: 'Signed-in Person (Supabase)', value: 'text', params: [opt('what', ['name', 'email', 'id'], 'name', 'show')] },
   onSlotSaved: { cat: 'Events', label: 'On Slot Saved', outs: ['then'], params: [txt('slot', '', 'slot (blank = any; auto = auto-save)')] },
   slotInfo: { cat: 'Save Files', label: 'Save Slot Info', value: 'text', params: [txt('slot', '1', 'slot (number or auto)'), opt('what', ['saved ago', 'date and time', 'play time', 'level', 'level name', 'name', 'is saved'], 'saved ago', 'show')] },
@@ -21295,6 +21323,17 @@ registerBehavior('graph', {
         }
         case 'slotInfo': { const I = s.engine.slotInfo(P('slot') || 1), w = P('what'); return w === 'is saved' ? I.exists : !I.exists ? '' : w === 'date and time' ? I.when : w === 'play time' ? I.playTime : w === 'level' ? I.level : w === 'level name' ? I.levelName : w === 'name' ? I.label : I.ago; }
         case 'newestSlot': return String(s.engine.newestSlot() || '');
+        case 'socCheck': { const G = s.engine.social, h = handleOf(fillTemplate(P('who') || '', s.vars)); if (!G || !h) return false; const st = () => G.friendStatus(h);
+          switch (P('check')) { case 'they follow me': return G.followsMe(h); case 'we are friends': return st() === 'friends'; case 'I asked to be friends': return st() === 'sent'; case 'they asked to be friends': return st() === 'received'; case 'muted': return G.isMuted(h); case 'blocked': return G.isBlocked(h); case 'is me': return h === handleOf(G.me().handle);
+            case 'has a story': return !!(s.engine.data.def('Stories') && s.engine.data.rows('Stories').some((q) => handleOf(q.handle) === h && (!q._at || Date.now() - q._at < 864e5))); default: return G.isFollowing(h); } }
+        case 'socCount': { const G = s.engine.social; if (!G) return 0; const h = handleOf(fillTemplate(P('who') || '', s.vars)) || handleOf(G.me().handle), w = P('what');
+          return w === 'following' ? G.following(h).length : w === 'friends' ? G.friends(h).length : w === 'mutuals' ? G.mutuals(h).length : w === 'friend requests' ? G.requests().length : w === 'unread notifications' ? G.unread() : w === 'posts' ? (s.engine.data.def('Posts') ? s.engine.data.rows('Posts').filter((q) => handleOf(q.handle) === h).length : 0) : G.followers(h).length; }
+        case 'socProfile': { const G = s.engine.social; if (!G) return ''; const h = handleOf(fillTemplate(P('who') || '', s.vars)) || handleOf(G.me().handle), r = G.profile(h), f = P('field');
+          if (f === 'handle') return h; if (f === 'friend status') return G.friendStatus(h); if (f === 'name') return r.name || (h === handleOf(G.me().handle) ? G.me().author : h); if (f === 'joined') return r.joined ? new Date(+r.joined).toLocaleDateString(localeOf(), { month: 'long', year: 'numeric' }) : ''; return String(r[f] ?? ''); }
+        case 'socPointsV': { const st = pointsState(s), w = P('what'); return w === 'trophies' ? Object.keys(st.unlocked).length : w === 'streak (days)' ? (st.lastDay === dayOf() || st.lastDay === dayOf(Date.now() - 864e5) ? st.streak : 0) : st.points; }
+        case 'socTrophy': { const a = ACHIEVEMENTS.find((q) => q.title === P('trophy')); return !!(a && pointsState(s).unlocked[a.id]); }
+        case 'socIsSaved': return bmHas(s, 'post', fillTemplate(P('post') || '', s.vars));
+        case 'socWho': return String(ctx.socWho ?? '');
         case 'supaSignedIn': return !!s.engine.supa.user();
         case 'supaField': { const u = s.engine.supa.user(); return u ? u.user_metadata?.[fieldKey(P('field'))] ?? '' : ''; }
         case 'supaUser': { const u = s.engine.supa.user(), w = P('what'); return !u ? '' : w === 'email' ? u.email || '' : w === 'id' ? u.id : s.engine.supa.name(u); }
@@ -21906,6 +21945,26 @@ registerBehavior('graph', {
         case 'netRefreshRooms': s.engine.online.roomsChanged(); break;
         case 'netRoomProp': s.engine.online.setRoomProp(P('name'), listVal(I('value'))); break;
         case 'netPlayerProp': s.engine.online.setPlayerProp(P('name'), listVal(I('value'))); break;
+        case 'socFollow': { const G = s.engine.social, h = handleOf(fillTemplate(P('who') || '', s.vars)), how = P('how'); if (G && h) { if (how === 'unfollow') G.unfollow(h); else if (how === 'toggle') G.toggleFollow(h); else G.follow(h); } break; }
+        case 'socFriend': { const G = s.engine.social, h = handleOf(fillTemplate(P('who') || '', s.vars)), how = P('how'); if (G && h) { if (how === 'decline') G.decline(h); else if (how === 'cancel') G.cancel(h); else if (how === 'unfriend') G.unfriend(h); else G.addFriend(h); } break; }
+        case 'socMute': { const G = s.engine.social, h = handleOf(fillTemplate(P('who') || '', s.vars)), kind = P('list') === 'block' ? 'blocked' : 'muted', how = P('how'); if (G && h) { const on = kind === 'blocked' ? G.isBlocked(h) : G.isMuted(h); if (how === 'toggle' || (how === 'off' ? on : !on)) G.toggleList(kind, h); } break; }
+        case 'socOpenProfile': { const G = s.engine.social, h = handleOf(fillTemplate(P('who') || '', s.vars)), me = G ? handleOf(G.me().handle) : handleOf(s.vars.playerHandle); if (!h || h === me) { if (P('mine')) s.navTo(P('mine')); } else { s.setVar('profile', h); s.setVar('profile_name', G?.profile(h).name || h); if (P('page')) s.navTo(P('page')); } break; }
+        case 'socSetProfile': { const G = s.engine.social; if (G) G.saveProfile({ [P('field') || 'bio']: fillTemplate(P('value') || '', s.vars) }); break; }
+        case 'socEditProfile': { const G = s.engine.social; if (!G || s.engine.editing) break; const me = G.me(), r = G.profile(me.handle), later = { ...ctx, steps: 0 };
+          editProfileSheet(s, { colors: { bg: tok('@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok('@accent') || '#1d9bf0' }, coverColor: '#1d9bf0', upload: s.engine.supa?.canUpload?.() ? (fl) => s.engine.supa.upload(fl, 'avatars') : null,
+            data: { handle: me.handle, name: r.name || me.author, bio: r.bio || '', avatar: r.avatar || '', cover: r.cover || '', location: r.location || '', website: r.website || '', pronouns: r.pronouns || '' }, onSave: (patch) => { G.saveProfile(patch); if (!e.dead) follow(n, 'saved', later); } }); break; }
+        case 'socPost': { const D = s.engine.data, col = P('collection') || 'Posts', text = fillTemplate(P('text') || '', s.vars), media = fillTemplate(P('media') || '', s.vars); if (!D.def(col)) { Log.add('warn', `Create Post: there is no “${col}” collection`, 'Data'); break; }
+          const r = postThread(D, col, meOfVars(s), { text, media: media ? [media] : [] }); s.engine.social?.notifyMentions(text, r?.id); awardPoints(s, 'post'); s.emit('posted', r?.id); break; }
+        case 'socCompose': s.send('compose'); break;
+        case 'socDM': { const G = s.engine.social, M = meOfVars(s), h = handleOf(fillTemplate(P('who') || '', s.vars)), text = fillTemplate(P('text') || '', s.vars); if (!h || !text) break; const chat = dmId(M.handle, h);
+          if (s.engine.data.def('Messages')) s.engine.data.add('Messages', { chat, author: M.author, handle: M.handle, text }); G?.notify(h, 'message', { text }); awardPoints(s, 'message');
+          if (P('open')) { s.setVar('chat', chat); s.setVar('chatTitle', G?.profile(h).name || h); if (P('page')) s.navTo(P('page')); } break; }
+        case 'socSave': { const id = fillTemplate(P('post') || '', s.vars), how = P('how'); if (!id) break; const on = bmHas(s, 'post', id); if (how === 'toggle' || (how === 'unsave' ? on : !on)) { const r = s.engine.data.def('Posts') ? s.engine.data.rows('Posts').find((q) => String(q.id) === id) : null; bmToggle(s, { kind: 'post', ref: id, post: id, author: r?.author || '', author_handle: r?.handle || '', text: String(r?.text || '').slice(0, 140), media: r?.media || '' }); } break; }
+        case 'socNotify': { const h = handleOf(fillTemplate(P('who') || '', s.vars)); if (h) s.engine.social?.notify(h, P('type') || 'mention', { text: fillTemplate(P('text') || '', s.vars) }); break; }
+        case 'socReadAll': s.engine.social?.markRead(); break;
+        case 'socPoints': awardPoints(s, P('for') || 'post', Math.max(1, Math.round(+P('times') || 1))); break;
+        case 'socStory': { const h = handleOf(fillTemplate(P('who') || '', s.vars)), has = !!(h && s.engine.data.def('Stories') && s.engine.data.rows('Stories').some((q) => handleOf(q.handle) === h && (!q._at || Date.now() - q._at < 864e5)));
+          if (!has) { follow(n, 'no story', ctx); return; } if (P('page') && s.vars.page !== P('page')) s.navTo(P('page')); s.send('open story', h); break; }
         case 'netSetName': s.engine.online.setNetName(fillTemplate(P('name'), s.vars)); break;
         case 'netChatN': s.engine.online.chat(fillTemplate(P('text'), s.vars)); break;
         case 'netSpawn': { const at = P('at') === 'position' ? { x: +I('x') || 0, y: +I('y') || 0, z: +I('z') || 0 } : { x: e.x, y: e.y, z: e.z }; const c = s.engine.online.spawnForAll(P('template'), at); if (c) ctx = { ...ctx, other: c }; break; }
@@ -22222,6 +22281,12 @@ registerBehavior('graph', {
         try { for (const n of list('onDataChanged')) { const c = param(n, 'collection'); if (c && fieldKey(c) !== col) continue; const ex = { eventValue: rec?.id ?? '', record: rec ? { col, rec } : null }; if (port) out(n, port, e, s, ex); out(n, 'any change', e, s, ex); } } finally { s._dataEvDepth--; }
       });
       if (list('onPageClosed').length) s.on('pageChange', (on, who, pg) => { if (!e.dead && !on) for (const n of list('onPageClosed')) if (!param(n, 'page') || param(n, 'page') === pg) out(n, 'then', e, s, { eventValue: pg }); });
+      if (list('onSocFollow').length) { s.on('followed', (h) => { if (!e.dead) for (const n of list('onSocFollow')) out(n, 'followed', e, s, { socWho: h, eventValue: h }); }); s.on('unfollowed', (h) => { if (!e.dead) for (const n of list('onSocFollow')) out(n, 'unfollowed', e, s, { socWho: h, eventValue: h }); }); }
+      if (list('onSocFriend').length) s.on('friendAdded', (h) => { if (!e.dead) for (const n of list('onSocFriend')) out(n, 'then', e, s, { socWho: h, eventValue: h }); });
+      if (list('onSocNote').length) s.on('socialNote', (note) => { if (!e.dead) for (const n of list('onSocNote')) { const t = param(n, 'type'); if (t && t !== 'any' && t !== note.type) continue; out(n, 'then', e, s, { socWho: note.from, eventValue: note.text || note.type }); } });
+      if (list('onSocPosted').length) s.on('posted', (id) => { if (!e.dead) for (const n of list('onSocPosted')) out(n, 'then', e, s, { eventValue: id ?? '' }); });
+      if (list('onSocProfile').length) s.on('profileSaved', () => { if (!e.dead) for (const n of list('onSocProfile')) out(n, 'then', e, s); });
+      if (list('onSocTrophy').length) s.on('achievement', (id) => { if (!e.dead) { const a = ACHIEVEMENTS.find((q) => q.id === id); for (const n of list('onSocTrophy')) out(n, 'then', e, s, { eventValue: a?.title || id }); } });
       if (list('onScrolled').length) s.on('uiScroll', (d) => { if (!e.dead && d) for (const n of list('onScrolled')) out(n, d > 0 ? 'down' : 'up', e, s, { eventValue: d }); });
       if (list('onResize').length) s.on('resize', (w, hh) => { if (!e.dead) for (const n of list('onResize')) out(n, 'then', e, s, { eventValue: w + 'x' + hh }); });
       if (list('onDarkMode').length && typeof matchMedia === 'function') { const mq = matchMedia('(prefers-color-scheme: dark)'); mq.addEventListener?.('change', (ev) => { if (!e.dead && E.scene === s) for (const n of list('onDarkMode')) out(n, ev.matches ? 'dark' : 'light', e, s); }); }

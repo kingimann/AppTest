@@ -14346,7 +14346,7 @@ registerBehavior('uiShowIf', {
     const overflow = (s, e) => {
       const E = s.engine, k = uiK(E.safe) || 1, pb = uiBox(e, E.width, E.height, E.safe), top = pb.y - pb.h / 2, sy = e._scrollY || 0;
       let bottom = 0;
-      for (const q of s.entities) { if (q.parentEnt !== e || !q.visible || !q.ui || q.dead) continue; const r = uiBox(q, E.width, E.height, E.safe); bottom = Math.max(bottom, (r.y + r.h / 2 - top) / k + sy); }
+      for (const q of s.entities) { if (q.parentEnt !== e || !q.visible || !q.ui || q.dead) continue; if (q.stretch === 'both' && q.behaviors.some((x) => STACK_FILLERS.has(x.type))) return 0; const r = uiBox(q, E.width, E.height, E.safe); bottom = Math.max(bottom, (r.y + r.h / 2 - top) / k + sy); } // (a feed or list filling the page does the scrolling: what is above it scrolls away with it)
       const Un = underOf(e, E.safe);
       return Math.max(0, bottom + 16 - (pb.h - (Un ? Un.bottom : 0)) / k); // (the last things can scroll up above a see-through bar)
     };

@@ -4426,6 +4426,10 @@ function renderSceneSettings(box) {
     h('p', { class: 'desc' }, 'Show {userName}, {userEmail} and {signedIn} in text; {authError} says why signing in failed. Buttons can sign in, create account, sign out and send password reset (they use the variables email, password and name). The Online nodes and Triggers do the same.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => openDocs('guide/apps') }, icon('help'), 'Guide')),
   ], { icon: 'player', key: 's-supabase' }));
+  box.append(comp('GIFs', [
+    h('p', { class: 'desc' }, 'People can add GIFs to posts, comments and messages: upload one from the phone or paste a link. With a free GIPHY or Tenor key, the GIF picker also searches and shows trending GIFs.'),
+    RS('settings.gifKey', { label: 'GIPHY or Tenor API key', type: 'text', def: '', placeholder: 'GIPHY key, or a Tenor key (AIza…)', infoText: 'GIPHY: developers.giphy.com › Create an app. Tenor: Google Cloud › Tenor API. Keys that start with AIza are used with Tenor.' }),
+  ], { icon: 'image', key: 's-gifs' }));
   box.append(comp('Plugins & Mods', pluginsAndMods(R), { icon: 'bolt', key: 's-plugins' }));
   box.append(comp('Online (PlayFab & Photon)', [
     h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),

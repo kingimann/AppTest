@@ -7859,7 +7859,7 @@ registerBehavior('uiSideBar', {
       const [label = '', icon = '', act = '', badge = '', sub = '', right = '', color = '', cond = ''] = l.split('|').map((x) => x.trim()), a = act || label.toLowerCase();
       return actOf(a, { label, icon, badge, sub, right, color, cond });
     });
-    let otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
+    let toggledAt = null, otherBtn = {}, I = parse(p.items), F = parse(p.footer), want = !!p.startOpen, t = want ? 1 : 0, drag = null, rows = [], press = new Map(), age = 9, scroll = 0, overflow = 0; // age: seconds since it started opening (items flow in by it)
     const st = () => p.style || 'rounded', rail = () => st() === 'rail', full = () => st() === 'fullscreen', floaty = () => ['floating', 'glass', 'grouped', 'gradient'].includes(st()), grouped = () => st() === 'grouped';
     const ease = (x) => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
     /** Where the panel is when it is tt open (0..1): it slides in, or an Icon Rail widens. */
@@ -7951,7 +7951,7 @@ registerBehavior('uiSideBar', {
         e._modalPass = () => { if (p.pageWorks) { const R = inst.rect(s), W = s.engine.width, H = s.engine.height; return [{ x: 0, y: 0, w: R.x, h: H }, { x: R.x + R.w, y: 0, w: W - R.x - R.w, h: H }, { x: R.x, y: 0, w: R.w, h: R.y }, { x: R.x, y: R.y + R.h, w: R.w, h: H - R.y - R.h }]; }
           if (p.openMode === 'push the screen') return []; /* the bars have slid aside */ const R = inst.rect(s); return [R.top && { x: 0, y: 0, w: s.engine.width, h: R.top }, R.bot && { x: 0, y: s.engine.height - R.bot, w: s.engine.width, h: R.bot }].filter(Boolean); }; // taps on the bars still work (and close the menu)
         if (want) { s.modal = e; (s.openMenus ||= new Set()).add(p.message); if (p.bars === 'hide them while open') s.barsHidden = (s.barsHidden || 0) + 1; if (p.openVar) s.setVar(p.openVar, true); }
-        s.on('message', (m) => { if (e.dead) return; if (typeof m === 'string' && m.startsWith(p.message + ' sub:')) { inst.set(e, s, true); openSub(s, m.slice(p.message.length + 5).trim()); return; } if (m === p.message) inst.set(e, s, !want); else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
+        s.on('message', (m) => { if (e.dead) return; if (typeof m === 'string' && m.startsWith(p.message + ' sub:')) { inst.set(e, s, true); openSub(s, m.slice(p.message.length + 5).trim()); return; } if (m === p.message) { const f = performance.now(); if (toggledAt != null && f - toggledAt < 120) return; toggledAt = f; inst.set(e, s, !want); } else if (m === p.message + ' open' || m === 'open ' + p.message) inst.set(e, s, true); else if (m === p.message + ' close' || m === 'close ' + p.message) inst.set(e, s, false); });
       },
       destroy(e, s) { if (want) inst.set(e, s, false); if (s.modal === e) s.modal = null; if (s.uiShiftBy === e) { s.uiShift = 0; s.uiShiftBy = null; } },
       update(e, dt, s) {

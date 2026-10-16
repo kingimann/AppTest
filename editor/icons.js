@@ -1,5 +1,7 @@
 // Line icons (24×24 grid) for the editor UI.
 const P = {
+  lock: 'M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 7 0V11',
+  unlock: 'M6 11h12v10H6zM8.5 11V7.5a3.5 3.5 0 0 1 6.8-1.2',
   menu: 'M4 6h16M4 12h16M4 18h16',
   phone: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10.5 18.5h3',
   nodes: 'M3 5h6v5H3zM15 14h6v5h-6zM9 7.5h2a2 2 0 0 1 2 2v5a2 2 0 0 0 2 2M3 15h5v4H3zM8 17h7',

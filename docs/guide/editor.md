@@ -40,7 +40,7 @@ The **tool bar** on the left shows only the tool you're using; tap it to see the
 
 - **Hand:** only pans and zooms the view, so you can't move things by accident.
 - **Move / Rotate / Scale:** drag the handles. With the magnet on, moves snap (2D: 10 px by default, 3D: 0.5) and rotations snap (15° by default). Set the steps in *☰ → Preferences*.
-- **Rect:** eight handles to resize UI elements and 2D objects; the opposite edge stays put. A live **W × H** label shows the size.
+- **Rect:** eight handles to resize UI elements and 2D objects; the opposite edge stays put. A live **W × H** label shows the size. Hold **Shift** (or turn on the 🔒 in *Size*) to keep its proportions; UI also snaps to other elements' edges, matching widths and heights, and equal spacing. In the Scene, the **arrow keys** nudge what's selected (Shift: 10).
 - **Paint:** stamps copies of the selected object where you tap or drag. On a Tilemap it paints tiles; on a Voxel World it adds or removes blocks.
 
 ### View modes

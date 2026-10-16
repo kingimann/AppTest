@@ -195,7 +195,7 @@ function renderMultiBar() {
       act('child', 'Group', () => multiGroup(list)),
       act(visible ? 'eyeoff' : 'eye', visible ? 'Hide' : 'Show', () => { for (const e of list) e.visible = !visible; changed({ structure: true }); pushHistory(); }),
       act('folder', 'Folder', () => moveToFolder(list)),
-      list.filter((e) => e.ui).length >= 2 ? h('button', { onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Line up' }, { icon: 'alignl', label: 'Left edges', fn: () => alignUI(list, 'left') }, { icon: 'alignc', label: 'Centres (across)', fn: () => alignUI(list, 'hcenter') }, { icon: 'alignr', label: 'Right edges', fn: () => alignUI(list, 'right') }, { icon: 'alignt', label: 'Top edges', fn: () => alignUI(list, 'top') }, { icon: 'alignm', label: 'Middles (down)', fn: () => alignUI(list, 'vcenter') }, { icon: 'alignb', label: 'Bottom edges', fn: () => alignUI(list, 'bottom') }, { cap: 'Spread out' }, { icon: 'spreadh', label: 'Even gaps across', fn: () => alignUI(list, 'hspace') }, { icon: 'spreadv', label: 'Even gaps down', fn: () => alignUI(list, 'vspace') }, { cap: 'Size' }, { icon: 'scale', label: 'Same width as the first', fn: () => alignUI(list, 'samew') }, { icon: 'scale', label: 'Same height as the first', fn: () => alignUI(list, 'sameh') }]) }, icon('alignl'), 'Align') : null,
+      list.filter((e) => e.ui).length >= 2 ? h('button', { onclick: (ev) => popMenu(ev.currentTarget, alignMenuItems(list)) }, icon('alignl'), 'Align') : null,
       act('trash', 'Delete', () => multiDelete(list), 'danger'))));
 }
 /** Top-most picks only: a ticked child is already covered by its ticked parent. */
@@ -1077,6 +1077,7 @@ function armLongPress(fn) { clearTimeout(lpTimer); lpTimer = setTimeout(() => { 
 const cancelLongPress = () => { clearTimeout(lpTimer); lpTimer = 0; };
 
 surface.addEventListener('pointerdown', (ev) => {
+  sceneFocus = true;
   if (playing) return;
   surface.setPointerCapture(ev.pointerId);
   const { x, y } = localXY(ev);
@@ -1178,6 +1179,7 @@ function beginTransform(giz, x, y) {
 }
 
 surface.addEventListener('pointermove', (ev) => {
+  shiftHeld = !!ev.shiftKey;
   const p = ptrs.get(ev.pointerId);
   if (!p || !gesture || playing) return;
   const { x, y } = localXY(ev);
@@ -1243,16 +1245,18 @@ surface.addEventListener('pointermove', (ev) => {
       const [hx, hy] = g.dir, k = g.f.k, scX = Math.abs(j.sx ?? 1) || 1, scY = Math.abs(j.sy ?? 1) || 1, [w0, h0] = g.size0;
       let w = w0 + hx * dx / k / scX, hgt = h0 + hy * dy / k / scY;
       if (!hx) w = w0; if (!hy) hgt = h0;
+      const keep = !g.square && (j.lockAspect || shiftHeld) && w0 > 0 && h0 > 0; // keep its proportions (the lock in Size, or Shift)
       if (g.square) { const m = hx && hy ? Math.max(w, hgt) : hx ? w : hgt; w = hgt = m; }
-      if (snap) { const st = g.ui ? 4 : 5; w = Math.round(w / st) * st; hgt = Math.round(hgt / st) * st; }
+      else if (keep) { const r = w0 / h0; if (hx && hy) { const f = Math.max(w / w0, hgt / h0); w = w0 * f; hgt = h0 * f; } else if (hx) hgt = w / r; else w = hgt * r; }
+      if (snap && !keep) { const st = g.ui ? 4 : 5; if (hx) w = Math.round(w / st) * st; if (hy) hgt = Math.round(hgt / st) * st; } // (only the side you pull)
       w = Math.max(4, w); hgt = Math.max(4, hgt);
-      if (g.ui && !g.square) [w, hgt] = snapUISize(j, g, w, hgt, scX, scY);
+      if (g.ui && !g.square && !keep) [w, hgt] = snapUISize(j, g, w, hgt, scX, scY); else uiGuide = null;
       setSize(j, w, hgt);
       if (!(j.text && !j.shape && !j.sprite && !j.bar && !j.minimap)) { // the opposite edge stays put
         j.x = round(g.orig.x + (g.square && !hx ? 0 : hx) * (w - w0) * scX / 2, 2);
         j.y = round(g.orig.y + (g.square && !hy ? 0 : hy) * (hgt - h0) * scY / 2, 2);
       }
-      g.label = `${Math.round(w)} × ${Math.round(hgt)}`;
+      g.label = `${Math.round(w)} × ${Math.round(hgt)}${keep ? '  🔒' : ''}${uiGuide?.matchLabel ? '  ' + uiGuide.matchLabel : ''}`;
       requestRebuild();
     } else if (g.type === 'scale') {
       const keys = g.handle === 'free' ? (is3D() && !g.ui ? ['sx', 'sy', 'sz'] : ['sx', 'sy']) : ['s' + g.handle];
@@ -3356,12 +3360,32 @@ function placeRow(j) {
     b('t', 'Top (16 in)', () => go(null, 0)), b('m', 'Middle', () => go(null, 1)), b('b', 'Bottom (16 in)', () => go(null, 2)), h('i', { class: 'place-sep' }),
     j.stretch === 'width' || j.stretch === 'both' ? null : b('w', 'Full width (16 in)', fullW)));
 }
+/** The Align menu: what to line up against, then edges, centres, spacing and sizes. */
+function alignMenuItems(list) {
+  const to = EP.alignTo || 'selection', pick = (v) => () => { setEP('alignTo', v); toast(`Aligning to ${v === 'first' ? 'the first selected' : v === 'page' ? 'the page' : 'the selection'}`); };
+  return [{ cap: 'Align to' }, { icon: to === 'selection' ? 'check' : 'square', label: 'The selection', k: 'its outer edges', fn: pick('selection') }, { icon: to === 'first' ? 'check' : 'square', label: 'The first selected', k: 'it stays put', fn: pick('first') }, { icon: to === 'page' ? 'check' : 'square', label: 'The page', k: 'or the screen', fn: pick('page') },
+    { cap: 'Line up' }, { icon: 'alignl', label: 'Left edges', fn: () => alignUI(list, 'left') }, { icon: 'alignc', label: 'Centres (across)', fn: () => alignUI(list, 'hcenter') }, { icon: 'alignr', label: 'Right edges', fn: () => alignUI(list, 'right') }, { icon: 'alignt', label: 'Top edges', fn: () => alignUI(list, 'top') }, { icon: 'alignm', label: 'Middles (down)', fn: () => alignUI(list, 'vcenter') }, { icon: 'alignb', label: 'Bottom edges', fn: () => alignUI(list, 'bottom') },
+    { cap: 'Spread out' }, { icon: 'spreadh', label: 'Even gaps across', fn: () => alignUI(list, 'hspace') }, { icon: 'spreadv', label: 'Even gaps down', fn: () => alignUI(list, 'vspace') }, { icon: 'spreadv', label: 'Stack down, gap…', k: 'top to bottom', fn: () => stackUI(list, 'y') }, { icon: 'spreadh', label: 'Row across, gap…', k: 'left to right', fn: () => stackUI(list, 'x') },
+    { cap: 'Size' }, { icon: 'scale', label: 'Same width as the first', fn: () => alignUI(list, 'samew') }, { icon: 'scale', label: 'Same height as the first', fn: () => alignUI(list, 'sameh') }, { icon: 'scale', label: 'Same size as the first', fn: () => alignUI(list, 'samewh') }];
+}
+/** Line them up one after another with an exact gap, in the order they are now (the first stays put). */
+function stackUI(list, axis) {
+  const S = UIS(), live = list.map((j) => ({ j, q: engine.scene.byId(j.id) })).filter((o) => o.q && o.j.ui); if (live.length < 2) { toast('Select two or more UI elements'); return; }
+  const v = prompt(`Gap between them (${axis === 'y' ? 'top to bottom' : 'left to right'})`, String(EP.stackGap ?? 12)); if (v == null) return; const gap = Math.max(0, parseFloat(v) || 0); setEP('stackGap', gap);
+  const k = S.safe?.k || 1, top = (o) => (axis === 'y' ? o.b.y - o.b.h / 2 : o.b.x - o.b.w / 2), B = live.map((o) => ({ ...o, b: uiBox(o.q, S.w, S.h, S.safe) })).sort((a, c) => top(a) - top(c));
+  let at = top(B[0]);
+  for (const o of B) { const sz = axis === 'y' ? o.b.h : o.b.w; if (axis === 'y') placeUIAt(o.j, null, at + sz / 2, o.b); else placeUIAt(o.j, at + sz / 2, null, o.b); at += sz + gap * k; }
+  rebuild(); changed({ inspector: true }); pushHistory(); toast(`Lined up with ${gap} between`);
+}
 /** Several UI elements at once: line up their edges or centres, spread them out evenly, or give them the same size. */
 function alignUI(list, how) {
   const S = UIS(), live = list.map((j) => ({ j, q: engine.scene.byId(j.id) })).filter((o) => o.q && o.j.ui);
   if (live.length < 2) { toast('Select two or more UI elements'); return; }
   const B = live.map((o) => ({ ...o, b: uiBox(o.q, S.w, S.h, S.safe) }));
-  const L = Math.min(...B.map((o) => o.b.x - o.b.w / 2)), R = Math.max(...B.map((o) => o.b.x + o.b.w / 2)), T = Math.min(...B.map((o) => o.b.y - o.b.h / 2)), Bt = Math.max(...B.map((o) => o.b.y + o.b.h / 2));
+  let L = Math.min(...B.map((o) => o.b.x - o.b.w / 2)), R = Math.max(...B.map((o) => o.b.x + o.b.w / 2)), T = Math.min(...B.map((o) => o.b.y - o.b.h / 2)), Bt = Math.max(...B.map((o) => o.b.y + o.b.h / 2));
+  const to = /space|same/.test(how) ? 'selection' : EP.alignTo || 'selection';
+  if (to === 'first') { const f = B[0].b; L = f.x - f.w / 2; R = f.x + f.w / 2; T = f.y - f.h / 2; Bt = f.y + f.h / 2; }
+  else if (to === 'page') { const Rm = uiRoomOf(B[0].q); L = Rm.l; R = Rm.l + Rm.w; T = Rm.t; Bt = Rm.t + Rm.h; }
   if (how === 'left') for (const o of B) placeUIAt(o.j, L + o.b.w / 2, null, o.b);
   else if (how === 'hcenter') for (const o of B) placeUIAt(o.j, (L + R) / 2, null, o.b);
   else if (how === 'right') for (const o of B) placeUIAt(o.j, R - o.b.w / 2, null, o.b);
@@ -3373,15 +3397,17 @@ function alignUI(list, how) {
     const hz = how === 'hspace', sz = (o) => (hz ? o.b.w : o.b.h), pos = (o) => (hz ? o.b.x : o.b.y), S0 = [...B].sort((a, c) => pos(a) - pos(c));
     const span = (hz ? R - L : Bt - T), gap = (span - S0.reduce((a, o) => a + sz(o), 0)) / (S0.length - 1); let at = hz ? L : T;
     for (const o of S0) { const c = at + sz(o) / 2; if (hz) placeUIAt(o.j, c, null, o.b); else placeUIAt(o.j, null, c, o.b); at += sz(o) + gap; }
-  } else if (how === 'samew' || how === 'sameh') { const ref = sizeOf(B[0].j); if (!ref) return; for (const o of B.slice(1)) { const z = sizeOf(o.j); if (z) setSize(o.j, how === 'samew' ? ref[0] : z[0], how === 'sameh' ? ref[1] : z[1]); } rebuild(); }
+  } else if (how === 'samew' || how === 'sameh' || how === 'samewh') { const ref = sizeOf(B[0].j); if (!ref) return; for (const o of B.slice(1)) { const z = sizeOf(o.j); if (z) setSize(o.j, how !== 'sameh' ? ref[0] : z[0], how !== 'samew' ? ref[1] : z[1]); } rebuild(); }
   rebuild(); changed({ inspector: true }); pushHistory(); toast('Lined up');
 }
 /** Width / height of a UI element (what the Rect tool changes). */
 function sizeRow(j) {
   const sz = sizeOf(j); if (!sz) return null;
   const inp = (i) => h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: Math.round(sz[i]),
-    onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; const n = [...sizeOf(j)]; n[i] = v; if (n[2]) n[1 - i] = v; setSize(j, n[0], n[1]); changed({ inspector: true }); pushHistory(); } });
-  return h('div', { class: 'row' }, h('label', {}, 'Size (W × H)'), h('div', { class: 'pair' }, h('span', {}, 'W'), inp(0), h('span', {}, 'H'), inp(1)));
+    onchange: (e) => { const v = parseFloat(e.target.value); if (Number.isNaN(v)) return; const o = sizeOf(j), n = [...o]; n[i] = v; if (n[2]) n[1 - i] = v; else if (j.lockAspect && o[i] > 0) n[1 - i] = Math.round(o[1 - i] * v / o[i]); setSize(j, n[0], n[1]); changed({ inspector: true }); pushHistory(); } });
+  const lock = !sz[2] && h('button', { type: 'button', class: 'size-lock' + (j.lockAspect ? ' on' : ''), title: j.lockAspect ? 'Proportions kept (tap to free them)' : 'Keep proportions when resizing (or hold Shift)', 'aria-label': 'Keep proportions', 'aria-pressed': j.lockAspect ? 'true' : 'false',
+    onclick: () => { if (j.lockAspect) delete j.lockAspect; else j.lockAspect = true; changed({ inspector: true }); pushHistory(); toast(j.lockAspect ? 'Keeps its proportions when resized' : 'Width and height change on their own'); } }, icon(j.lockAspect ? 'lock' : 'unlock'));
+  return h('div', { class: 'row' }, h('label', {}, 'Size (W × H)'), h('div', { class: 'pair' }, h('span', {}, 'W'), inp(0), lock || null, h('span', {}, 'H'), inp(1)));
 }
 const INSP_CATS = [['all', 'All'], ['visual', 'Visual'], ['physics', 'Physics'], ['logic', 'Logic'], ['anim', 'Animation'], ['game', 'Gameplay']];
 const CAT_TINT = { visual: '#4c8bd6', physics: '#26a69a', logic: '#ffca28', anim: '#ab47bc', game: '#ef5350', other: '#777' };
@@ -3514,7 +3540,7 @@ function renderMultiInspector(box, list) {
     kinds.length === 1 && (threeD ? [vecRow(TP, 'Rotation', ['rx', 'ry', 'rz'], [0, 0, 0], 1), vecRow(TP, 'Scale', ['sx', 'sy', 'sz'], [1, 1, 1], 0.05)] : [vecRow(TP, 'Rotation', ['rz'], [0], 1), vecRow(TP, 'Scale', ['sx', 'sy'], [1, 1], 0.05)]),
     h('div', { class: 'btns' },
       h('button', { class: 'btn', onclick: () => nudgeMany(list) }, icon('move'), 'Move all by…'),
-      all((o) => o.ui) && h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, [{ cap: 'Line up' }, { icon: 'alignl', label: 'Left edges', fn: () => alignUI(list, 'left') }, { icon: 'alignc', label: 'Centres (across)', fn: () => alignUI(list, 'hcenter') }, { icon: 'alignr', label: 'Right edges', fn: () => alignUI(list, 'right') }, { icon: 'alignt', label: 'Top edges', fn: () => alignUI(list, 'top') }, { icon: 'alignm', label: 'Middles (down)', fn: () => alignUI(list, 'vcenter') }, { icon: 'alignb', label: 'Bottom edges', fn: () => alignUI(list, 'bottom') }]) }, icon('alignc'), 'Line up…')),
+      all((o) => o.ui) && h('button', { class: 'btn', onclick: (ev) => popMenu(ev.currentTarget, alignMenuItems(list)) }, icon('alignc'), 'Line up…')),
   ], { icon: 'layers', key: 'multi-shared' }));
   if (all((o) => o.shape && o.shape.type !== 'emoji')) box.append(comp('Shape', [
     C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
@@ -8689,10 +8715,16 @@ engine.onAfterUI = (ctx) => {
       const lab = String(Math.round(Math.abs(a1 - a0))), fs = 11 / V.z; ctx.font = `700 ${fs}px system-ui, sans-serif`; const tw = ctx.measureText(lab).width + 8 / V.z, mx = vert ? c + 6 / V.z : (a0 + a1) / 2 - tw / 2, my = vert ? (a0 + a1) / 2 - fs * 0.7 : c - fs * 1.9;
       ctx.fillStyle = '#ff5ad1'; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(mx, my, tw, fs * 1.4, 3 / V.z); else ctx.rect(mx, my, tw, fs * 1.4); ctx.fill(); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(lab, mx + tw / 2, my + fs * 0.72); ctx.fillStyle = '#ff5ad1';
     }
+    for (const q of uiGuide.match || []) { // the same size: a bar with its length across each
+      const r = q.r, t = 4 / V.z, o = 8 / V.z; ctx.beginPath();
+      if (q.dim === 'w') { const y = r.y0 - o; ctx.moveTo(r.x0, y); ctx.lineTo(r.x1, y); ctx.moveTo(r.x0, y - t); ctx.lineTo(r.x0, y + t); ctx.moveTo(r.x1, y - t); ctx.lineTo(r.x1, y + t); }
+      else { const x = r.x1 + o; ctx.moveTo(x, r.y0); ctx.lineTo(x, r.y1); ctx.moveTo(x - t, r.y0); ctx.lineTo(x + t, r.y0); ctx.moveTo(x - t, r.y1); ctx.lineTo(x + t, r.y1); }
+      ctx.stroke();
+    }
     ctx.restore();
   }
 };
-let uiGuide = null;
+let uiGuide = null, shiftHeld = false, sceneFocus = false, nudgeT = 0;
 /**
  * UI snapping: a dragged or resized UI element's edges and centre line up with other elements on the page (edges, centres,
  * or a gap away, so elements sit snugly next to each other), its parent's edges and centre, and the screen's centre and
@@ -8700,7 +8732,7 @@ let uiGuide = null;
  */
 let uiSnapKey = '';
 function uiSnapTargets(live) {
-  const S = UIS(), W = S.w, H = S.h, sf = S.safe || {}, G = Math.max(0, +EP.uiSnapGap || 0), xs = [], ys = [];
+  const S = UIS(), W = S.w, H = S.h, sf = S.safe || {}, G = Math.max(0, +EP.uiSnapGap || 0), xs = [], ys = [], rects = [];
   const add = (arr, v, r, kind, gap = 0) => arr.push({ v, r, kind, gap });
   const scr = { x0: 0, y0: 0, x1: W, y1: H, screen: true };
   add(xs, W / 2, scr, 'center'); add(ys, H / 2, scr, 'center');
@@ -8716,17 +8748,31 @@ function uiSnapTargets(live) {
     if (engine.uiFilter && !engine.uiFilter(q)) continue; // (other pages)
     if (engine.screenFilter && !engine.screenFilter(q)) continue;
     const r = rectOf(q); if (!(r.x1 > r.x0 && r.y1 > r.y0) || (r.x1 - r.x0 > W * 0.96 && r.y1 - r.y0 > H * 0.8)) continue; // whole pages and backgrounds
+    r.name = q.name || ''; rects.push(r);
     add(xs, r.x0, r, 'edge'); add(xs, r.x1, r, 'edge'); add(xs, (r.x0 + r.x1) / 2, r, 'center');
     add(ys, r.y0, r, 'edge'); add(ys, r.y1, r, 'edge'); add(ys, (r.y0 + r.y1) / 2, r, 'center');
     if (G) { add(xs, r.x0 - G, r, 'gap', -1); add(xs, r.x1 + G, r, 'gap', 1); add(ys, r.y0 - G, r, 'gap', -1); add(ys, r.y1 + G, r, 'gap', 1); }
   }
-  return { xs, ys, G };
+  return { xs, ys, G, rects };
+}
+/** Equal spacing along x or y: sit halfway between my neighbours in a row (or column), or leave the gap the others already have. */
+function uiSpaceTargets(rects, me, axis) {
+  const [A0, A1, B0, B1] = axis === 'x' ? ['x0', 'x1', 'y0', 'y1'] : ['y0', 'y1', 'x0', 'x1'];
+  const row = rects.filter((r) => Math.min(r[B1], me[B1]) - Math.max(r[B0], me[B0]) > 2).sort((a, c) => a[A0] - c[A0]); // (side by side with me)
+  const mc = (me[A0] + me[A1]) / 2, len = me[A1] - me[A0], out = [];
+  let L = null, R = null; for (const r of row) { if (r[A1] <= mc && (!L || r[A1] > L[A1])) L = r; if (r[A0] >= mc && (!R || r[A0] < R[A0])) R = r; }
+  if (L && R && R[A0] - L[A1] > len) out.push({ v: (L[A1] + R[A0]) / 2, side: 0, kind: 'space', axis, L, R });
+  for (let i = 0; i + 1 < row.length; i++) { const a = row[i], b = row[i + 1], g = b[A0] - a[A1]; if (g <= 0 || a === L && b === R) continue;
+    if (L && a !== L) out.push({ v: L[A1] + g, side: -1, kind: 'space', axis, L, ref: [a, b] });
+    if (R && b !== R) out.push({ v: R[A0] - g, side: 1, kind: 'space', axis, R, ref: [a, b] }); }
+  return out;
 }
 /** The nearest target to any of my edges: { d (how far to move), t (target), e (my edge) }. A gap target only pairs with the facing edge. */
 function uiSnapBest(list, edges, T) {
   let best = null;
   for (const t of list) for (const e of edges) {
     if (t.gap && t.gap !== -e.side) continue;
+    if (t.kind === 'space' && t.side !== e.side) continue;
     const d = t.v - e.v;
     if (Math.abs(d) <= T && (!best || Math.abs(d) < Math.abs(best.d) - 0.01 || (Math.abs(Math.abs(d) - Math.abs(best.d)) < 0.01 && t.kind === 'edge' && best.t.kind !== 'edge'))) best = { d, t, e };
   }
@@ -8736,8 +8782,13 @@ function uiSnapBest(list, edges, T) {
 function uiSnapGuides(bx, by, me) {
   const out = { lines: [], gaps: [] };
   const span = (r, a0, a1) => (r.screen ? [0, Infinity] : [Math.min(a0, r.y0 ?? a0), Math.max(a1, r.y1 ?? a1)]);
-  if (bx) { const r = bx.t.r, v = bx.t.v, [y0, y1] = r.screen ? [0, UIS().h] : [Math.min(me.y0, r.y0), Math.max(me.y1, r.y1)]; out.lines.push({ x: v, y0, y1 }); if (bx.t.kind === 'gap') { const yy = (Math.max(me.y0, r.y0) + Math.min(me.y1, r.y1)) / 2; out.gaps.push({ x0: bx.t.gap < 0 ? v : r.x1, x1: bx.t.gap < 0 ? r.x0 : v, y: Number.isFinite(yy) ? yy : me.y0 }); } }
-  if (by) { const r = by.t.r, v = by.t.v, [x0, x1] = r.screen ? [0, UIS().w] : [Math.min(me.x0, r.x0), Math.max(me.x1, r.x1)]; out.lines.push({ y: v, x0, x1 }); if (by.t.kind === 'gap') { const xx = (Math.max(me.x0, r.x0) + Math.min(me.x1, r.x1)) / 2; out.gaps.push({ y0: by.t.gap < 0 ? v : r.y1, y1: by.t.gap < 0 ? r.y0 : v, x: Number.isFinite(xx) ? xx : me.x0 }); } }
+  if (bx && bx.t.kind !== 'space') { const r = bx.t.r, v = bx.t.v, [y0, y1] = r.screen ? [0, UIS().h] : [Math.min(me.y0, r.y0), Math.max(me.y1, r.y1)]; out.lines.push({ x: v, y0, y1 }); if (bx.t.kind === 'gap') { const yy = (Math.max(me.y0, r.y0) + Math.min(me.y1, r.y1)) / 2; out.gaps.push({ x0: bx.t.gap < 0 ? v : r.x1, x1: bx.t.gap < 0 ? r.x0 : v, y: Number.isFinite(yy) ? yy : me.y0 }); } }
+  if (by && by.t.kind !== 'space') { const r = by.t.r, v = by.t.v, [x0, x1] = r.screen ? [0, UIS().w] : [Math.min(me.x0, r.x0), Math.max(me.x1, r.x1)]; out.lines.push({ y: v, x0, x1 }); if (by.t.kind === 'gap') { const xx = (Math.max(me.x0, r.x0) + Math.min(me.x1, r.x1)) / 2; out.gaps.push({ y0: by.t.gap < 0 ? v : r.y1, y1: by.t.gap < 0 ? r.y0 : v, x: Number.isFinite(xx) ? xx : me.x0 }); } }
+  for (const b of [bx, by]) { // equal spacing: the gaps that match
+    const t = b?.t; if (t?.kind !== 'space') continue; const X = t.axis === 'x', [A0, A1, B0, B1] = X ? ['x0', 'x1', 'y0', 'y1'] : ['y0', 'y1', 'x0', 'x1'];
+    const gap = (a, c) => { const mid = (Math.max(a[B0], c[B0]) + Math.min(a[B1], c[B1])) / 2; out.gaps.push(X ? { x0: a[A1], x1: c[A0], y: mid } : { y0: a[A1], y1: c[A0], x: mid }); };
+    if (t.L) gap(t.L, me); if (t.R) gap(me, t.R); if (t.ref) gap(t.ref[0], t.ref[1]);
+  }
   void span; return out;
 }
 const uiSnapFeel = (bx, by) => { const k = (bx ? bx.t.v.toFixed(1) : '') + '|' + (by ? by.t.v.toFixed(1) : ''); if (k !== '|' && k !== uiSnapKey) buzz(4); uiSnapKey = k; };
@@ -8747,7 +8798,8 @@ function snapUI(j) {
   uiGuide = null;
   if (!live || EP.uiSnap === false) { if (snap) { j.x = Math.round(j.x / 4) * 4; j.y = Math.round(j.y / 4) * 4; } return; }
   const T = (+EP.uiSnapDist || 8) / S.v.z, me = boundsOf(live), off = { x: me.x - (live.x || 0), y: me.y - (live.y || 0) };
-  const cx = a.x + j.x + off.x, cy = a.y + j.y + off.y, { xs, ys, G } = uiSnapTargets(live);
+  const cx = a.x + j.x + off.x, cy = a.y + j.y + off.y, { xs, ys, G, rects } = uiSnapTargets(live);
+  { const meR = { x0: cx - me.hx, x1: cx + me.hx, y0: cy - me.hy, y1: cy + me.hy }; xs.push(...uiSpaceTargets(rects, meR, 'x')); ys.push(...uiSpaceTargets(rects, meR, 'y')); }
   // the element's anchor point is a target too (x / y = 0)
   xs.push({ v: a.x + off.x, r: { x0: a.x, x1: a.x, y0: a.y, y1: a.y }, kind: 'anchor', gap: 0 }); ys.push({ v: a.y + off.y, r: { x0: a.x, x1: a.x, y0: a.y, y1: a.y }, kind: 'anchor', gap: 0 });
   const bx = uiSnapBest(xs, [{ v: cx - me.hx, side: -1 }, { v: cx, side: 0 }, { v: cx + me.hx, side: 1 }], T);
@@ -8762,14 +8814,19 @@ function snapUI(j) {
 function snapUISize(j, g, w, hgt, scX, scY) {
   uiGuide = null;
   const S = UIS(), live = engine.scene.byId(j.id); if (!live || EP.uiSnap === false || (j.text && !j.shape && !j.sprite && !j.bar)) return [w, hgt];
-  const a = uiOrigin(live, S.w, S.h, S.safe), [hx, hy] = g.dir, [w0, h0] = g.size0, T = (+EP.uiSnapDist || 8) / S.v.z, { xs, ys, G } = uiSnapTargets(live);
+  const a = uiOrigin(live, S.w, S.h, S.safe), [hx, hy] = g.dir, [w0, h0] = g.size0, T = (+EP.uiSnapDist || 8) / S.v.z, { xs, ys, G, rects } = uiSnapTargets(live);
   const fx = a.x + g.orig.x - hx * w0 * scX / 2, fy = a.y + g.orig.y - hy * h0 * scY / 2; // the edges that stay put
   let bx = null, by = null;
   if (hx) { const m = fx + hx * w * scX; bx = uiSnapBest(xs, [{ v: m, side: hx }], T); if (bx) w = Math.max(4, Math.round((m + bx.d - fx) * hx / scX)); }
   if (hy) { const m = fy + hy * hgt * scY; by = uiSnapBest(ys, [{ v: m, side: hy }], T); if (by) hgt = Math.max(4, Math.round((m + by.d - fy) * hy / scY)); }
+  const match = [], names = []; // the same width / height as another element
+  const same = (dim, cur, sc) => { let best = null; for (const r of rects) { const v = dim === 'w' ? r.x1 - r.x0 : r.y1 - r.y0, d = Math.abs(v - cur * sc); if (v > 4 && d <= T && (!best || d < best.d)) best = { d, v, r }; } return best; };
+  if (hx && !bx) { const m = same('w', w, scX); if (m) { w = Math.max(4, Math.round(m.v / scX)); match.push({ r: m.r, dim: 'w' }); names.push(`width of ${m.r.name || 'that'}`); } }
+  if (hy && !by) { const m = same('h', hgt, scY); if (m) { hgt = Math.max(4, Math.round(m.v / scY)); match.push({ r: m.r, dim: 'h' }); names.push(`height of ${m.r.name || 'that'}`); } }
   const x0 = hx ? Math.min(fx, fx + hx * w * scX) : a.x + g.orig.x - w * scX / 2, y0 = hy ? Math.min(fy, fy + hy * hgt * scY) : a.y + g.orig.y - hgt * scY / 2;
   uiGuide = uiSnapGuides(bx, by, { x0, x1: x0 + w * scX, y0, y1: y0 + hgt * scY }); uiGuide.G = G;
-  uiSnapFeel(bx, by);
+  if (match.length) { uiGuide.match = [...match, ...match.map((q) => ({ r: { x0, x1: x0 + w * scX, y0, y1: y0 + hgt * scY }, dim: q.dim }))]; uiGuide.matchLabel = '= ' + names.join(', '); }
+  uiSnapFeel(bx || (match.find((q) => q.dim === 'w') && { t: { v: w } }), by || (match.find((q) => q.dim === 'h') && { t: { v: hgt } }));
   return [w, hgt];
 }
 $('#addFab').addEventListener('click', () => openCreate());
@@ -8836,6 +8893,15 @@ storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('S
 }
 addEventListener('beforeunload', (e) => { if (manualSave() && dirty) { writeDraft(true); e.preventDefault(); e.returnValue = ''; } }); // "Leave site? Changes may not be saved"
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); commitSave(); } });
+addEventListener('pointerdown', (e) => { if (!surface.contains(e.target)) sceneFocus = false; }, true); // (arrows go back to the Hierarchy once you tap elsewhere)
+/** Arrow keys in the Scene: move what is selected a pixel (or 10) at a time. */
+function nudgeSelection(k, step) {
+  const L = (multi && multi.size ? [...multi] : [selectedId]).map(ent).filter((j) => j && j.id !== SCENE_ID && !(multi && multi.size && j.parent && multi.has(j.parent))); if (!L.length) return;
+  const dx = k === 'arrowleft' ? -step : k === 'arrowright' ? step : 0, dy = k === 'arrowup' ? -step : k === 'arrowdown' ? step : 0;
+  for (const j of L) { j.x = round((j.x || 0) + dx, 2); j.y = round((j.y || 0) + dy, 2); const live = engine.scene.byId(j.id); if (live) { if (live.parentEnt && !live.ui && live.local) { live.local.x = j.x; live.local.y = j.y; } else { live.x = j.x; live.y = j.y; } } }
+  requestRebuild(); syncTransformInputs?.(); changed({});
+  clearTimeout(nudgeT); nudgeT = setTimeout(() => { changed({ inspector: true }); pushHistory(); }, 450); // one undo step for a run of taps
+}
 /** Keyboard shortcuts (a keyboard on a tablet or computer): undo, delete, duplicate, copy / paste, rename, move through the Hierarchy. Not while typing. */
 addEventListener('keydown', (e) => {
   const tEl = e.target, typing = tEl && (tEl.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tEl.tagName));
@@ -8854,6 +8920,7 @@ addEventListener('keydown', (e) => {
   if (mod && k === 'c') return go(() => { objClipboard = clone(j); toast(`Copied ${j.name || 'object'}: Ctrl+V pastes`); });
   if (k === 'f2') return go(() => inlineRename(j.id));
   if (k === 'f' && !mod) return go(frameSelected);
+  if (sceneFocus && !mod && /^arrow/.test(k) && !is3D()) return go(() => nudgeSelection(k, e.shiftKey ? 10 : 1)); // in the Scene: arrows move it (Shift: 10)
   if (k === 'arrowup' || k === 'arrowdown') { const rows = [...document.querySelectorAll('#hierarchy .h-row[data-id]')], i = rows.findIndex((r) => r.dataset.id === j.id), n = rows[i + (k === 'arrowup' ? -1 : 1)]; if (i >= 0 && n) return go(() => { select(n.dataset.id); document.querySelector(`#hierarchy .h-row[data-id="${n.dataset.id}"]`)?.scrollIntoView({ block: 'nearest' }); }); }
   if ((k === 'arrowleft' || k === 'arrowright') && kidsOf(j.id).length && document.querySelector(`#hierarchy .h-row[data-id="${j.id}"]`)) return go(() => { if (k === 'arrowleft') closedKids.add(j.id); else closedKids.delete(j.id); renderHierarchy(); }); // fold / unfold its children
 });

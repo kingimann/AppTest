@@ -480,6 +480,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - The choices are saved with your profile (fields `private`, `dm`, `notes_off`).
   - At the top of a page that lines things up, a full-width Profile Header sits right under the App Bar: no gap above its cover.
   - It **grows to fit** what it shows. On a page set to *Line everything up*, what is under it (a feed) moves down; otherwise its top stays put.
+  - A page with a feed (or list) filling it doesn't scroll by itself: the feed does the scrolling, and what is above it scrolls away with it. No more page bouncing on top of the feed.
   - **Pull to refresh** on a profile keeps the page together: the header, tabs and posts stay put and the spinner shows on the cover.
   - It grows to fit in the editor too, and a feed filling the page under it starts below it, even on a page that doesn't *Line everything up* (like the ready-made *My Profile* page), so the feed is never drawn over it.
   - With a feed under it, the **whole page scrolls**: dragging on the header (not just the posts) moves it up out of the way, then the posts scroll. A feed with tabs now scrolls far enough to show its last post in full.

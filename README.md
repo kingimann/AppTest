@@ -1219,6 +1219,7 @@ Find them in *Project › UI* (grouped) or the UI editor's + button. Widgets com
     - **With a Bottom Nav / App Bar:** *stay between them* (the menu fits between the bars, which stay tappable; tapping one closes the menu), *cover them*, or *hide them while open*.
     - **Opening:** *over the screen*, or *push the screen* (the rest of the UI slides aside, so nothing is hidden under the menu).
     - **Built-in ☰ button** in the top or bottom corner of its side (it steps aside while an App Bar shows its own ☰).
+    - Side Menu presets add an **App Bar** with the ☰ (in games too), so pages lay out under it; older projects get a **Put the ☰ in a top bar** button in the Side Menu's Inspector.
     - **Icon Rail** keeps its column of the screen: other UI is laid out next to it.
   - Long menus **scroll** (drag up and down; sideways still closes it) with a thin scroll bar, and never run under the footer.
   - **Set variable while open** (e.g. `menuOpen`), and **Edge swipe area** (how close to the edge a swipe has to start).

@@ -152,6 +152,9 @@ const goBtn = (name, label, page, y, color = '#3a6ea5') => ({ name, ui: true, an
 const slide = (i, title, text, color) => ({ name: `Slide ${i + 1}`, ui: true, anchor: 'center', x: i * 340, y: -10, shape: { type: 'rect', w: 300, h: 230, radius: 22, fill: color },
   children: [{ name: `Slide ${i + 1} Title`, ui: true, anchor: 'center', x: 0, y: -30, text: { value: title, size: 26, color: '#ffffff', weight: '900' } },
     { name: `Slide ${i + 1} Text`, ui: true, anchor: 'center', x: 0, y: 20, text: { value: text, size: 15, color: 'rgba(255,255,255,0.85)', wrap: 240 } }] });
+/** A top bar (App Bar) whose ☰ opens the Side Menu: its title follows the page, and other UI stays below it. Colours follow the theme. */
+export const topBar = (msg = 'menu') => ({ name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
+  behaviors: [{ type: 'uiAppBar', title: '', var: 'page', left: 'back, else menu', menuMessage: msg, actions: '', style: 'solid', bg: '@bar', text: '@text', iconColor: '@text', accent: '@accent', borderColor: '@line', shadow: 'never' }] });
 const iconBtn = (name, icon, anchor, x, y, msg) => ({ name, ui: true, anchor, x, y, shape: { type: 'circle', r: 24, fill: 'rgba(255,255,255,0.14)' },
   behaviors: [{ type: 'button', action: 'send message', value: msg, amount: 1, sound: 'click' }], children: [{ name: name + ' Icon', ui: true, anchor: 'center', x: 0, y: 0, sprite: { src: 'art:ui-' + icon, w: 24, h: 24 } }] });
 
@@ -211,7 +214,7 @@ export const UI_WIDGETS_MORE = [
       behaviors: [{ type: 'uiSideBar', items: 'Home | home | home\nShop | shop | shop | shopNew\nMap | map | map\nLeaderboard | trophy | awards\n-\n# Settings\nMusic | music | toggle:music\nSound | sound | toggle:sound\nSettings | gear | settings', footer: 'Help | info | msg:help',
         var: 'page', side: 'left', message: 'menu', style: 'rounded', title: 'My Game', subtitle: 'Score: {score}', avatar: '🙂', header: 'simple', closeButton: true, bg: '#151826', text: '#e8eaf2', accent: '#4fa3ff', headerColor: '', badgeColor: '#ff3b5c',
         width: 290, itemHeight: 50, textSize: 16, iconSize: 22, showIcons: true, margin: 12, anim: 'slide', duration: 0.28, stagger: true, dim: 0.5, sound: 'click', haptics: true, swipeOpen: true, dragClose: true, closeOnPick: true, startOpen: false, mode: 'switch page', ...extra }] },
-    before: btn ? [iconBtn(btn === 'gear' ? 'Settings Button' : 'Menu Button', btn, extra.side === 'right' ? 'top-right' : 'top-left', extra.side === 'right' ? -36 : 36, 36, extra.message || 'menu')] : [],
+    before: btn === 'menu' && extra.side !== 'right' ? [topBar(extra.message || 'menu')] : btn ? [iconBtn(btn === 'gear' ? 'Settings Button' : 'Menu Button', btn, extra.side === 'right' ? 'top-right' : 'top-left', extra.side === 'right' ? -36 : 36, 36, extra.message || 'menu')] : [], // (the ☰ sits in a top bar, so pages and templates lay out under it instead of colliding with a floating button)
     vars: { page: 'home', shopNew: 2, music: true, sound: true },
     note: 'One component draws the whole menu: each item is a card (pick its icon, its name, and a page, a switch or a message; ⋯ adds a badge or a line under it), add sections and lines, pick a Style (9), and open it with the button, a swipe from the edge, or the message ' + (extra.message || 'menu') + '.' })),
   { icon: 'menu', label: 'Side Bar (left, separate items)', group: 'Navigation', props: { name: 'Side Bar', ui: true, anchor: 'left', x: 140, y: 0, stretch: 'height', margin: 0, ignoreSafe: false, shape: { type: 'rect', w: 280, h: 600, radius: 0, fill: '#141726', stroke: 'rgba(255,255,255,0.08)', lineWidth: 1 },
@@ -222,7 +225,7 @@ export const UI_WIDGETS_MORE = [
       { name: 'Side Bar Items', ui: true, anchor: 'top', x: 0, y: 220, shape: { type: 'rect', w: 240, h: 260, radius: 0, fill: '' }, behaviors: [{ type: 'uiLayout', tag: '', direction: 'vertical', spacing: 6, align: 'center', justify: 'start', pad: 0 }],
         children: [row('Home', 'home', 'home', -100, true), row('Shop', 'shop', 'shop', -44), row('Map', 'map', 'map', 12), row('Settings', 'gear', 'settings', 68)] },
     ],
-    before: [iconBtn('Menu Button', 'menu', 'top-left', 36, 36, 'menu')], vars: { page: 'home' }, note: 'The ☰ button sends the message menu, which opens and closes the side bar.' },
+    before: [topBar('menu')], vars: { page: 'home' }, note: 'The ☰ button sends the message menu, which opens and closes the side bar.' },
   { icon: 'menu', label: 'Side Bar (right, separate items)', group: 'Navigation', props: { name: 'Right Side Bar', ui: true, anchor: 'right', x: -140, y: 0, stretch: 'height', margin: 0, shape: { type: 'rect', w: 280, h: 600, radius: 0, fill: '#141726', stroke: 'rgba(255,255,255,0.08)', lineWidth: 1 },
     behaviors: [{ type: 'drawer', side: 'right', message: 'settings', startOpen: false, duration: 0.25, dim: 0.5, closeOnPick: false, var: 'page' }] },
     children: [

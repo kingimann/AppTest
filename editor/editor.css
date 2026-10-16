@@ -2171,3 +2171,25 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .cm-spin { display: inline-block; width: 14px; height: 14px; margin-right: 8px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: cmspin .8s linear infinite; vertical-align: -2px; }
 @keyframes cmspin { to { transform: rotate(360deg); } }
 .cm-panel a.btn { color: inherit; text-decoration: none; }
+/* Project Settings: overview, category tiles, one category at a time */
+.ps-hero { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 16px; background: var(--g2, rgba(255,255,255,.06)); }
+.ps-icon { flex: none; width: 60px; height: 60px; border-radius: 15px; display: flex; align-items: center; justify-content: center; font-size: 32px; box-shadow: 0 4px 14px rgba(0,0,0,.25); }
+.ps-hero-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ps-hero-t b { font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-hero-t span { font-size: 13px; opacity: .7; }
+.ps-hero-t .ps-saved { opacity: 1; font-weight: 700; font-size: 12px; }
+.ps-saved.ok { color: #2bb673; } .ps-saved.warn { color: #f7a02c; }
+.ps-actions { margin: 10px 0 4px; flex-wrap: wrap; }
+.ps-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 10px; }
+.ps-tile { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 14px; border: 1px solid var(--g0, rgba(255,255,255,.08)); background: var(--g1, rgba(255,255,255,.03)); color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.ps-tile:active { transform: scale(.98); }
+.ps-tile.dim { opacity: .6; }
+.ps-tile-ic { flex: none; width: 38px; height: 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--accent, #4c8bd6) 18%, transparent); color: var(--accent, #4c8bd6); }
+.ps-tile-ic svg { width: 20px; height: 20px; }
+.ps-tile-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ps-tile-t small { opacity: .65; font-size: 12px; line-height: 1.3; }
+.ps-tile-n { flex: none; min-width: 24px; padding: 2px 8px; border-radius: 10px; background: var(--g2, rgba(255,255,255,.08)); font-size: 12px; font-weight: 700; text-align: center; }
+.ps-crumb { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.ps-crumb .btn svg { transform: rotate(90deg); }
+.ps-crumb-t { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.ps-crumb-t svg { width: 20px; height: 20px; color: var(--accent, #4c8bd6); }

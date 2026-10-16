@@ -18,6 +18,11 @@
   const q = new URLSearchParams(location.search);
   let json = templates[q.get('game') || 'sky-dodge'];
   if (q.get('src')) json = await (await fetch(q.get('src'))).json();
+  if (location.hash.startsWith('#p=')) { // a test link from the editor: the game is packed (gzip, base64url) into the link
+    try { const b = location.hash.slice(3).replace(/-/g, '+').replace(/_/g, '/'), bin = atob(b + '==='.slice((b.length + 3) % 4)), u = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      json = JSON.parse(await new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text()); }
+    catch (err) { document.body.innerHTML = '<p style="color:#fff;font:16px system-ui;padding:24px">This test link could not be opened. Copy it again from the editor.</p>'; throw err; }
+  }
   document.title = json.name;
   window.engine = new Engine();
   window.engine.start(json);

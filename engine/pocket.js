@@ -2067,7 +2067,7 @@ export function keyName(k) {
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
 }
 /** Components the editor keeps while editing: they only draw (Bottom Nav), so the Scene shows what the game will. */
-const EDIT_PREVIEW = new Set(['uiActivity', 'uiBookmarks', 'uiFriends', 'uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
+const EDIT_PREVIEW = new Set(['uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiSearchBar', 'uiChat', 'uiInbox', 'uiTrending', 'uiWhoToFollow', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiScroll', 'uiDropdown', 'uiKeypad', 'uiColorPicker', 'uiCarousel', 'uiSkillButton', 'uiRadialMenu', 'uiSpinWheel', 'uiChart', 'uiXPBar', 'uiTimerRing', 'uiOffscreen', 'uiCrosshair', 'uiTicker', 'uiNotifications', 'uiScreenFX', 'uiShop', 'uiInventoryGrid', 'uiQuestLog', 'uiDailyReward', 'uiLevelMap', 'uiTutorial', 'uiList', 'uiSegmented', 'uiStepper', 'uiSlider', 'uiDataList', 'uiForm', 'uiInput', 'uiPanel', 'netRoomList', 'netChat', 'uiShowIf', 'uiTooltip', 'uiPopover', 'uiSpinner', 'uiSkeleton', 'uiChips', 'uiAvatar', 'uiBanner', 'uiSteps', 'uiDivider', 'uiFeed', 'uiStories', 'uiLike', 'uiProfile', 'uiComposer', 'uiPhotoGrid']);
 /** Each player's own settings (Pause › Settings), saved per game on their device. */
 export const PLAYER_PREFS = { lefty: false, controlScale: 1, opacity: 1, stickSens: 1, dragSens: 1, tiltSens: 1, tiltInvert: false, lookSens: 1, invertLook: false, sfx: 1, music: 1, vibration: true };
 const fmtPref = (k, v) => (k === 'sfx' || k === 'music' || k === 'opacity' ? Math.round(v * 100) + '%' : '×' + (+v).toFixed(2).replace(/0$/, ''));
@@ -4639,7 +4639,7 @@ function ownScreen(scene, screen) {
 }
 
 
-const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
+const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
 /**
  * A page set to "Line everything up": what is in it stacks top to bottom, in the order it was put there, with an even gap, so
  * nothing overlaps on any screen (a text that wraps to more lines, or an element that hides, moves what is under it). Elements
@@ -9188,7 +9188,7 @@ function postComposer(s, o) {
   };
   const draftSaved = () => !o.quote && !o.noDraft && !!(st.text.trim() || st.media.length || st.poll);
   // top: Cancel … Post
-  const top = el('div', `flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid ${c.line};`);
+  const top = el('div', `flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:${HAIR} solid ${c.line};`);
   const cancel = btn(`font:600 16px ${font};color:${c.text};padding:6px 4px;`, 'Cancel'); cancel.onclick = () => close(false);
   const post = btn(`font:800 15px ${font};background:${c.acc};color:#fff;padding:9px 18px;border-radius:20px;transition:opacity .2s;`, o.button || 'Post'); post.dataset.post = '1';
   top.append(cancel, el('div', 'font-weight:800;font-size:16px;', o.quote ? 'Quote' : o.title || 'New post'), post);
@@ -9209,7 +9209,7 @@ function postComposer(s, o) {
   if (o.quote) { const Q = o.quote, qc = el('div', `border:1px solid ${c.line};border-radius:14px;padding:10px 12px;`); qc.dataset.quoteCard = '1';
     const h1 = el('div', 'font-size:14px;'); h1.append(el('b', '', Q.author || ''), el('span', `color:${c.sub};margin-left:6px;`, Q.handle ? '@' + Q.handle : '')); qc.append(h1, el('div', 'font-size:15px;line-height:1.35;margin-top:4px;max-height:84px;overflow:hidden;', Q.text || (Q.media ? 'Photo' : ''))); quoteBox.append(qc); }
   // bottom: picture, poll, place … counter
-  const bar = el('div', `flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:1px solid ${c.line};`);
+  const bar = el('div', `flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px;border-top:${HAIR} solid ${c.line};`);
   const tool = (ic, label) => { const b = btn(`font-size:22px;width:42px;height:40px;border-radius:12px;color:${c.acc};display:inline-flex;align-items:center;justify-content:center;`, svgIcon(ic, 22) ? '' : ic); if (svgIcon(ic, 22)) b.innerHTML = svgIcon(ic, 22); b.setAttribute('aria-label', label); b.title = label; bar.append(b); return b; };
   const file = el('input'); file.type = 'file'; file.accept = o.videos !== false ? 'image/*,video/*' : 'image/*'; file.multiple = true; file.style.display = 'none'; sheet.append(file);
   const bPic = o.photos !== false ? tool('🖼️', 'Add photos') : null, bPoll = o.polls !== false && !o.quote ? tool('📊', 'Add a poll') : null, bPlace = o.places !== false ? tool('📍', 'Add a place') : null;
@@ -9326,7 +9326,7 @@ function socialSheet(s, o) {
   const x = btn(`position:absolute;${full ? 'left:-6px' : 'right:0'};top:50%;transform:translateY(-50%);color:${full ? c.text : c.sub};font-size:${full ? 24 : 20}px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); x.innerHTML = full ? '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>' : svgIcon('x', 22, { stroke: 2.2 }); x.setAttribute('aria-label', 'Close'); titleRow.append(x);
   if (o.onMore) { const mb = btn(`position:absolute;${full ? 'right:0' : 'right:34px'};top:50%;transform:translateY(-50%);color:${c.sub};font-size:20px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;`, ''); mb.innerHTML = svgIcon('more', 22, { stroke: 3 }); mb.setAttribute('aria-label', 'More'); mb.onclick = () => o.onMore(); titleRow.append(mb); }
   head.append(titleRow);
-  const body = el('div', `flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-top:1px solid ${c.line};`);
+  const body = el('div', `flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;border-top:${HAIR} solid ${c.line};`);
   sheet.append(head, body); wrap.append(sheet); root.append(wrap);
   let closed = false;
   const close = () => { if (closed) return; closed = true; wrap.dataset.closing = '1'; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = full ? 'translateX(100%)' : 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
@@ -9352,7 +9352,7 @@ function socialSheet(s, o) {
   if (o.items) {
     body.style.borderTop = '0';
     if (o.emojis?.length) { // a row of reactions on top (press and hold a message)
-      const row = el('div', `display:flex;justify-content:space-around;padding:6px 14px 10px;border-bottom:1px solid ${c.line};`);
+      const row = el('div', `display:flex;justify-content:space-around;padding:6px 14px 10px;border-bottom:${HAIR} solid ${c.line};`);
       for (const em of o.emojis) { const b = btn(`font-size:28px;width:46px;height:46px;border-radius:50%;${em === o.current ? `background:${c.line};` : ''}`, em); b.dataset.react = em; b.onclick = () => { close(); o.onEmoji?.(em); }; row.append(b); }
       body.append(row);
     }
@@ -9459,8 +9459,8 @@ function socialSheet(s, o) {
     const when = [P.when, P.edited ? 'Edited' : '', P.views ? `${shortNum(P.views)} views` : ''].filter(Boolean).join(' · ');
     if (when) box.append(el('div', `color:${c.sub};font-size:14px;margin-top:14px;`, when));
     // counts and buttons
-    const stats = el('div', `display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:12px;padding:10px 0;border-top:1px solid ${c.line};font-size:14px;color:${c.sub};`); stats.dataset.stats = '1';
-    const acts = el('div', `display:flex;justify-content:space-between;padding:6px 6px;border-top:1px solid ${c.line};`);
+    const stats = el('div', `display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:12px;padding:10px 0;border-top:${HAIR} solid ${c.line};font-size:14px;color:${c.sub};`); stats.dataset.stats = '1';
+    const acts = el('div', `display:flex;justify-content:space-between;padding:6px 6px;border-top:${HAIR} solid ${c.line};`);
     const act = (k, label) => { const b = btn(`display:flex;align-items:center;justify-content:center;gap:6px;min-width:44px;height:42px;font:700 21px ${font};color:${c.sub};`); b.dataset.act = k; b.setAttribute('aria-label', label); acts.append(b); return b; };
     const bC = act('comment', 'Comment'), bR = act('repost', 'Repost'), bL = act('like', 'Like'), bS = act('save', 'Save'), bSh = act('share', 'Share');
     const pop = (b) => { b.animate?.([{ transform: 'scale(1)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'ease-out' }); };
@@ -9546,7 +9546,7 @@ function socialSheet(s, o) {
     for (const cm of tops) tree(cm, 0, list);
   };
   // the box to write a comment
-  const foot = el('div', `flex:none;border-top:1px solid ${c.line};background:${c.bg};`);
+  const foot = el('div', `flex:none;border-top:${HAIR} solid ${c.line};background:${c.bg};`);
   const chipRow = el('div', `display:none;align-items:center;justify-content:space-between;padding:8px 16px 0;color:${c.sub};font-size:13px;`);
   const chipTx = el('span', ''), chipX = btn(`color:${c.sub};font-size:15px;`, '✕'); chipRow.append(chipTx, chipX);
   const chip = (h) => { chipTx.textContent = `Replying to @${h}`; chipRow.style.display = h ? 'flex' : 'none'; };
@@ -9561,10 +9561,13 @@ function socialSheet(s, o) {
   const setAtt = (m) => { att = m || ''; attRow.textContent = ''; attRow.style.display = att ? 'block' : 'none'; if (att) { const w0 = el('div', 'position:relative;display:inline-block;'), im = el('img', 'display:block;height:84px;max-width:160px;border-radius:12px;object-fit:cover;'); im.src = artURL(att); const x0 = btn('position:absolute;right:4px;top:4px;width:24px;height:24px;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;display:flex;align-items:center;justify-content:center;', ''); x0.innerHTML = svgIcon('x', 14, { stroke: 2.6 }); x0.setAttribute('aria-label', 'Remove'); x0.onclick = () => { setAtt(''); sync(); }; w0.append(im, x0); attRow.append(w0); } sync(); };
   const cFile = el('input'); cFile.type = 'file'; cFile.accept = 'image/*'; cFile.style.display = 'none';
   const mediaBtn = (ic, label) => { const b0 = btn(`flex:none;width:34px;height:34px;border-radius:50%;color:${c.acc};display:flex;align-items:center;justify-content:center;`, ''); b0.innerHTML = svgIcon(ic, 22); b0.setAttribute('aria-label', label); return b0; };
-  const bPhoto = o.commentPhotos !== false ? mediaBtn('image', 'Add a photo') : null, bGifC = o.commentPhotos !== false && o.gifs !== false ? mediaBtn('gif', 'Add a GIF') : null;
+  const bPhoto = o.commentPhotos !== false ? mediaBtn('image', 'Add a photo') : null, bEmo = mediaBtn('smile', 'Emoji'), bGifC = o.commentPhotos !== false && o.gifs !== false ? mediaBtn('gif', 'Add a GIF') : null;
   if (bPhoto) bPhoto.onclick = () => cFile.click();
   cFile.onchange = async () => { const f = cFile.files?.[0]; cFile.value = ''; if (!f) return; try { setAtt(o.upload && f.size > 1.5e6 ? await o.upload(f) : f.type === 'image/gif' ? (f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)) : await shrinkPicture(f, 1080)); } catch { s.snackbar?.('That picture could not be added'); } };
-  if (bGifC) bGifC.onclick = () => gifPicker(s, { colors: c, font, upload: o.upload, onPick: (u) => { setAtt(u); inp.focus(); } });
+  const tray = mediaTray(s, { colors: c, font, upload: o.upload, gifs: !!bGifC, onEmoji: (em) => { const a0 = inp.selectionStart ?? inp.value.length, b0 = inp.selectionEnd ?? a0; inp.value = inp.value.slice(0, a0) + em + inp.value.slice(b0); try { inp.setSelectionRange(a0 + em.length, a0 + em.length); } catch { /* not focused */ } sync(); }, onGif: (u) => setAtt(u),
+    onToggle: (k) => { emo.style.display = k ? 'none' : 'flex'; bEmo.style.color = k === 'emoji' ? c.text : c.acc; if (bGifC) bGifC.style.color = k === 'gif' ? c.text : c.acc; if (k) inp.blur(); } }); // (in place under the box: it pushes the comments up, nothing covers them)
+  bEmo.onclick = () => tray.toggle('emoji'); if (bGifC) bGifC.onclick = () => tray.toggle('gif');
+  inp.addEventListener('focus', () => tray.close());
   const sync = () => { const on = !!inp.value.trim() || !!att; send.style.opacity = on ? '1' : '.4'; send.disabled = !on; };
   const submit = () => {
     const v = inp.value.trim(); if (!v && !att) return; const parent = replyTo, m0 = att; o.onAdd(v, parent, m0); inp.value = ''; replyTo = null; chip(''); setAtt(''); sync();
@@ -9572,7 +9575,7 @@ function socialSheet(s, o) {
     paint(); requestAnimationFrame(() => { const rows = [...list.querySelectorAll('[data-comment]')].filter((q) => q.dataset.comment === (v || '')); (rows[rows.length - 1] || list).scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); });
   };
   inp.addEventListener('input', sync); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } }); send.onclick = submit;
-  inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), ...(bPhoto ? [bPhoto] : []), ...(bGifC ? [bGifC] : []), inp, send, cFile); foot.append(chipRow, emo, attRow, inRow); sheet.append(foot);
+  inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send, cFile); const tools = el('div', 'display:flex;align-items:center;gap:2px;padding:0 10px 8px 54px;'); tools.append(...[bPhoto, bEmo, bGifC].filter(Boolean)); foot.append(chipRow, emo, attRow, inRow, tools, tray.el); sheet.append(foot);
   const fc = o.focusComment ?? s.engine._focusComment; s.engine._focusComment = null; // opened from a saved comment: show it
   if (fc != null) { const A0 = o.comments(); let cm = A0.find((q) => String(q.id) === String(fc)), n0 = 0; while (cm?.parent && n0++ < 20) { openThreads.add(String(cm.parent)); cm = A0.find((q) => String(q.id) === String(cm.parent)); } }
   sync(); paint(); if (o.focus) setTimeout(() => inp.focus(), 300);
@@ -9797,7 +9800,7 @@ registerBehavior('uiFeed', {
       R0.delete(String(r.id)); R0.delete('-' + r.id); R0.add(on ? String(r.id) : '-' + r.id); store.set(RKEY(s), JSON.stringify([...R0].slice(-3000)));
       const next = on ? [...new Set([...by, me1])] : by.filter((h) => h !== me1);
       patch(s, r, { reposters: next.join(','), reposted: on, reposts: Math.max(0, (+F(r, 'reposts') || 0) + (on ? 1 : -1)) });
-      if (on) { s.engine.social?.notify(who(r), 'repost', { post: r.id }); s.engine.vibrate?.(10); s.snackbar?.('Reposted'); }
+      if (on) { awardPoints(s, 'repost'); s.engine.social?.notify(who(r), 'repost', { post: r.id }); s.engine.vibrate?.(10); s.snackbar?.('Reposted'); }
       return on;
     };
     let repostCtx = ''; // a profile's feed: whose reposts it shows
@@ -9817,7 +9820,7 @@ registerBehavior('uiFeed', {
     /** Bookmark a post (yours only: a Bookmarks collection or this phone); a Saves count on the post goes up / down. */
     const saveIt = (s, r) => { const m = mediaList(r)[0], on = bmToggle(s, { kind: 'post', ref: String(r.id), post: String(r.id), author: F(r, 'author') || '', author_handle: who(r), text: String(F(r, 'text') || '').slice(0, 280), media: isPic(m) && !isVid(m) && String(m).length < 4000 ? m : '' });
       if (F(r, 'saves') != null && F(r, 'saves') !== '') patch(s, r, { saves: Math.max(0, (+F(r, 'saves') || 0) + (on ? 1 : -1)) });
-      s.snackbar?.(on ? 'Saved' : 'Removed from saved', p.savedPage ? (on ? 'View' : '') : '', on && p.savedPage ? () => s.navTo(p.savedPage) : null); return on; };
+      if (on) awardPoints(s, 'save'); s.snackbar?.(on ? 'Saved' : 'Removed from saved', p.savedPage ? (on ? 'View' : '') : '', on && p.savedPage ? () => s.navTo(p.savedPage) : null); return on; };
     const flip = (s, r, k, countK) => { const kk = K(k), on = !truthy(r[kk]), patch = { [kk]: on }; if (countK) patch[K(countK)] = Math.max(0, (+r[K(countK)] || 0) + (on ? 1 : -1)); if (has(s)) D(s).update(p.collection, r.id, patch); else Object.assign(r, patch); return on; };
     const C = (k, d) => p[k] || d, look0 = () => p.look || 'timeline';
     const ACTS = { timeline: 'comment, repost, like, views, share', compact: 'comment, repost, like, views, share', photos: 'like, comment, share, save', cards: 'like, comment, repost, share' };
@@ -9924,7 +9927,7 @@ registerBehavior('uiFeed', {
         onAdd: (text, parent, media) => {
           const c0 = { author: me0.author, handle: me0.handle, text, likes: 0, liked: false, ...(parent ? { parent: String(parent) } : {}), ...(media ? { media } : {}) };
           if (cc) D(s).add(cc, { post: r.id, ...c0 }); else cSave(s, r, (L) => L.push({ id: 'c' + Date.now().toString(36), ...c0, at: Date.now() }));
-          patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
+          patch(s, r, { comments: (+F(r, 'comments') || 0) + 1 }); awardPoints(s, 'comment'); if (p.commentAddedMessage) s.send(p.commentAddedMessage, text); s.engine.vibrate?.(10);
           const SG = s.engine.social; if (SG) { text = text || (media ? (isGif(media) ? 'GIF' : 'Photo') : ''); SG.notify(who(r), 'comment', { post: r.id, text }); if (parent) { const pc = cmtsOf(s, r).find((q) => String(q.id) === String(parent)); if (pc && pc.handle && pc.handle !== who(r)) SG.notify(pc.handle, 'reply', { post: r.id, text }); } SG.notifyMentions(text, r.id); }
         },
         onEditComment: (cm, text) => { if (cm.row) D(s).update(cc, cm.id, { text, edited: true }); else if (String(cm.id).startsWith('c')) cSave(s, r, (L) => { const q = L.find((x) => x.id === cm.id); if (q) { q.text = text; q.edited = true; } }); else { cm.text = text; cm.edited = true; } },
@@ -9943,7 +9946,7 @@ registerBehavior('uiFeed', {
         onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } });
       if (!sh) sheetUp = false;
     };
-    const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { pops.set(r.id, s.time); s.engine.vibrate?.(12); s.engine.social?.notify(who(r), 'like', { post: r.id, text: F(r, 'text') }); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
+    const like = (s, r) => { const on = flip(s, r, 'liked', 'likes'); if (on) { awardPoints(s, 'like'); pops.set(r.id, s.time); s.engine.vibrate?.(12); s.engine.social?.notify(who(r), 'like', { post: r.id, text: F(r, 'text') }); } if (p.likeMessage) s.send(p.likeMessage, r.id); return on; };
     return {
       uiAlways: true,
       update(e, dt, s) {
@@ -10441,16 +10444,21 @@ function chatInputBar(s, o) {
   const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
   root.querySelector('[data-pocket-chatbar]')?.remove();
   const c = o.colors, font = o.font || THEME.font, el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
-  const bar = el('div', `position:absolute;left:0;right:0;bottom:0;z-index:45;display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:${c.bg};border-top:1px solid ${c.line};font-family:${font};transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.8,.2,1);`);
+  const bar = el('div', `position:absolute;left:0;right:0;bottom:0;z-index:45;display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:${c.bg};border-top:${HAIR} solid ${c.line};font-family:${font};transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.8,.2,1);`);
   bar.dataset.pocketChatbar = '1';
   const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none';
   const pic = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); pic.innerHTML = svgIcon('image', 23); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
   const gif = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); gif.innerHTML = svgIcon('gif', 25); gif.type = 'button'; gif.setAttribute('aria-label', 'Send a GIF');
   const inp = el('input', `flex:1;min-width:0;font:16px ${font};padding:10px 14px;border-radius:22px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); inp.placeholder = o.placeholder || 'Message…'; inp.maxLength = 1000; inp.setAttribute('enterkeyhint', 'send');
   const send = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;transition:opacity .15s,transform .15s;display:flex;align-items:center;justify-content:center;`); send.innerHTML = svgIcon('send', 19, { stroke: 2.2 }); send.type = 'button'; send.setAttribute('aria-label', 'Send');
-  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(inp, send, file); root.append(bar);
+  const emoB = el('button', `flex:none;border:0;background:none;width:34px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); emoB.innerHTML = svgIcon('smile', 23); emoB.type = 'button'; emoB.setAttribute('aria-label', 'Emoji');
+  const tray = mediaTray(s, { colors: { bg: c.bg, text: c.text, sub: c.sub, line: c.line, acc: c.acc, field: c.field }, font, height: 270, gifs: o.photos !== false && o.gifs !== false,
+    onEmoji: (em) => { inp.value += em; sync(); }, onGif: (u) => o.onSend({ text: '', media: u }), onToggle: (k) => { emoB.style.color = k === 'emoji' ? c.text : c.acc; gif.style.color = k === 'gif' ? c.text : c.acc; } });
+  tray.el.style.flexBasis = '100%'; tray.el.style.margin = '6px -10px calc(-8px - env(safe-area-inset-bottom))'; bar.style.flexWrap = 'wrap';
+  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, file, tray.el); root.append(bar);
+  emoB.onclick = () => tray.toggle('emoji'); inp.addEventListener('focus', () => tray.close());
   let rp = null; // "Replying to Maya" above the bar
-  const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:1px solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
+  const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:${HAIR} solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
     const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', `font-weight:800;font-size:13px;color:${c.acc};`, '↩ Replying to ' + (r.author || '')), el('div', `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${c.sub};font-size:13px;`, r.text || ''));
     const x = el('button', `flex:none;border:0;background:none;color:${c.sub};font-size:18px;cursor:pointer;`, '✕'); x.type = 'button'; x.setAttribute('aria-label', 'Cancel reply'); x.onclick = () => { setReply(null); o.onCancelReply?.(); inp.focus(); };
     rp.append(t, x); bar.append(rp); };
@@ -10465,7 +10473,7 @@ function chatInputBar(s, o) {
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
-  send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => { const was = o.onClose; gifPicker(s, { colors: { ...c, field: c.field || 'rgba(128,128,128,0.12)' }, font, onPick: (u) => o.onSend({ text: '', media: u }) }); };
+  send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => tray.toggle('gif');
   file.onchange = async () => { const f = file.files[0]; file.value = ''; if (!f) return; try { o.onSend({ text: '', media: await shrinkPicture(f, 900) }); } catch { s.snackbar?.('That picture could not be sent'); } };
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
   setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
@@ -10545,41 +10553,102 @@ function drawIco(ctx, ic, x, y, size, color, o = {}) {
   ctx.save(); ctx.translate(x, y); ctx.scale(size / 24, size / 24); ctx.translate(-12, -12); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.lineWidth = o.stroke || 2; ctx.strokeStyle = color; ctx.fillStyle = color;
   for (const q of P) { if (o.fill) ctx.fill(q); ctx.stroke(q); } ctx.restore(); return true;
 }
-/** Pick a GIF: search GIPHY or Tenor (a key in Game Settings › GIFs), upload one from the phone, or paste a link. */
-function gifPicker(s, o) {
+/** The GIF finder (search with a GIPHY / Tenor key, trending, upload, paste a link) as an element, for a sheet or an inline tray. */
+function gifPanel(s, o) {
   const c = o.colors, font = o.font || THEME.font, key = String(s.settings?.gifKey || '').trim(), tenor = /^AIza/.test(key);
-  return socialSheet(s, { kind: 'gif', title: 'GIFs', colors: c, font, onClose: o.onClose, build: (api) => {
-    const { el, body, close } = api, btn = (css, t) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, t); b.type = 'button'; return b; };
-    const pick = (u) => { if (!u) return; o.onPick(u); close(); };
-    const top = el('div', `position:sticky;top:0;z-index:1;display:flex;gap:8px;align-items:center;padding:10px 12px;background:${c.bg};`);
-    const field = el('div', `flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:0 12px;height:40px;border-radius:20px;background:${c.field};color:${c.sub};`); field.innerHTML = svgIcon('search', 18);
-    const q = el('input', `flex:1;min-width:0;border:0;outline:none;background:none;font:16px ${font};color:${c.text};`); q.placeholder = key ? 'Search GIFs' : 'Paste a GIF link (https://…)'; q.dataset.gifSearch = '1'; field.append(q);
-    const up = btn(`flex:none;display:flex;align-items:center;gap:6px;height:40px;padding:0 14px;border-radius:20px;background:${c.field};color:${c.text};font:700 14px ${font};`, ''); up.innerHTML = svgIcon('upload', 18); up.append(document.createTextNode('Upload')); up.dataset.gifUpload = '1';
-    const file = el('input'); file.type = 'file'; file.accept = 'image/gif'; file.style.display = 'none';
-    top.append(field, up, file);
-    const grid = el('div', 'display:grid;grid-template-columns:repeat(2,1fr);gap:6px;padding:0 12px 16px;'); grid.dataset.gifGrid = '1';
-    const note = el('div', `color:${c.sub};font-size:14px;line-height:1.4;padding:18px 20px;text-align:center;`);
-    body.append(top, grid, note);
-    const show = (L) => { grid.textContent = ''; for (const g of L) { const b = btn('position:relative;display:block;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:rgba(128,128,128,.15);', ''); const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.loading = 'lazy'; im.src = g.thumb; im.alt = g.title || 'GIF'; b.append(im); b.dataset.gif = g.url; b.onclick = () => pick(g.url); grid.append(b); } };
-    let seq = 0;
-    const search = async (term) => {
-      if (!key) return; const my = ++seq; note.textContent = 'Loading…';
-      try {
-        const url = tenor ? `https://tenor.googleapis.com/v2/${term ? 'search' : 'featured'}?key=${encodeURIComponent(key)}&client_key=pocket&limit=30&media_filter=tinygif,gif${term ? '&q=' + encodeURIComponent(term) : ''}`
-          : `https://api.giphy.com/v1/gifs/${term ? 'search' : 'trending'}?api_key=${encodeURIComponent(key)}&limit=30&rating=pg-13${term ? '&q=' + encodeURIComponent(term) : ''}`;
-        const j = await (await fetch(url)).json(); if (my !== seq) return;
-        const L = tenor ? (j.results || []).map((r) => ({ thumb: r.media_formats?.tinygif?.url, url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url, title: r.content_description })) : (j.data || []).map((d) => ({ thumb: d.images?.fixed_width_small?.url || d.images?.fixed_width?.url, url: d.images?.fixed_width?.url || d.images?.original?.url, title: d.title }));
-        show(L.filter((g) => g.url)); note.textContent = L.length ? (tenor ? 'Via Tenor' : 'Powered by GIPHY') : 'No GIFs found';
-      } catch { if (my === seq) note.textContent = 'GIFs could not be loaded. Check the key in Game Settings › GIFs.'; }
-    };
-    let t0 = null; q.addEventListener('input', () => { if (!key) return; clearTimeout(t0); t0 = setTimeout(() => search(q.value.trim()), 350); });
-    q.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter') return; ev.preventDefault(); const v = q.value.trim(); if (/^https?:\/\/\S+$/.test(v)) pick(v); else if (key) search(v); else s.snackbar?.('Paste a link that starts with https://'); });
-    up.onclick = () => file.click();
-    file.onchange = async () => { const f = file.files?.[0]; file.value = ''; if (!f) return; try { pick(o.upload ? await o.upload(f) : f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)); } catch { s.snackbar?.('That GIF could not be added'); } };
-    if (key) search(''); else note.textContent = 'Upload a GIF from your phone, or paste a link to one. To search GIFs here, add a GIPHY or Tenor key in Game Settings › GIFs.';
-    setTimeout(() => q.focus(), 250);
+  const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const btn = (css, t) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, t); b.type = 'button'; return b; };
+  const box = el('div', 'display:flex;flex-direction:column;min-height:0;height:100%;'); box.dataset.gifPanel = '1';
+  const top = el('div', `flex:none;display:flex;gap:8px;align-items:center;padding:8px 12px;`);
+  const field = el('div', `flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:0 12px;height:38px;border-radius:19px;background:${c.field};color:${c.sub};`); field.innerHTML = svgIcon('search', 17);
+  const q = el('input', `flex:1;min-width:0;border:0;outline:none;background:none;font:16px ${font};color:${c.text};`); q.placeholder = key ? 'Search GIFs' : 'Paste a GIF link (https://…)'; q.dataset.gifSearch = '1'; q.setAttribute('enterkeyhint', 'search'); field.append(q);
+  const up = btn(`flex:none;display:flex;align-items:center;gap:6px;height:38px;padding:0 13px;border-radius:19px;background:${c.field};color:${c.text};font:700 14px ${font};`, ''); up.innerHTML = svgIcon('upload', 17); up.append(document.createTextNode('Upload')); up.dataset.gifUpload = '1';
+  const file = el('input'); file.type = 'file'; file.accept = 'image/gif'; file.style.display = 'none';
+  top.append(field, up, file);
+  const scroll = el('div', 'flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;');
+  const grid = el('div', `display:grid;grid-template-columns:repeat(${o.columns || 2},1fr);gap:6px;padding:0 12px 10px;`); grid.dataset.gifGrid = '1';
+  const note = el('div', `color:${c.sub};font-size:13px;line-height:1.4;padding:14px 20px;text-align:center;`);
+  scroll.append(grid, note); box.append(top, scroll);
+  const pick = (u) => { if (u) o.onPick(u); };
+  const show = (L) => { grid.textContent = ''; for (const g of L) { const b = btn('position:relative;display:block;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:rgba(128,128,128,.15);', ''); const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.loading = 'lazy'; im.src = g.thumb; im.alt = g.title || 'GIF'; b.append(im); b.dataset.gif = g.url; b.onclick = () => pick(g.url); grid.append(b); } };
+  let seq = 0;
+  const search = async (term) => {
+    if (!key) return; const my = ++seq; note.textContent = 'Loading…';
+    try {
+      const url = tenor ? `https://tenor.googleapis.com/v2/${term ? 'search' : 'featured'}?key=${encodeURIComponent(key)}&client_key=pocket&limit=30&media_filter=tinygif,gif${term ? '&q=' + encodeURIComponent(term) : ''}`
+        : `https://api.giphy.com/v1/gifs/${term ? 'search' : 'trending'}?api_key=${encodeURIComponent(key)}&limit=30&rating=pg-13${term ? '&q=' + encodeURIComponent(term) : ''}`;
+      const j = await (await fetch(url)).json(); if (my !== seq) return;
+      const L = tenor ? (j.results || []).map((r) => ({ thumb: r.media_formats?.tinygif?.url, url: r.media_formats?.gif?.url || r.media_formats?.tinygif?.url, title: r.content_description })) : (j.data || []).map((d) => ({ thumb: d.images?.fixed_width_small?.url || d.images?.fixed_width?.url, url: d.images?.fixed_width?.url || d.images?.original?.url, title: d.title }));
+      show(L.filter((g) => g.url)); note.textContent = L.length ? (tenor ? 'Via Tenor' : 'Powered by GIPHY') : 'No GIFs found';
+    } catch { if (my === seq) note.textContent = 'GIFs could not be loaded. Check the key in Game Settings › GIFs.'; }
+  };
+  let t0 = null; q.addEventListener('input', () => { if (!key) return; clearTimeout(t0); t0 = setTimeout(() => search(q.value.trim()), 350); });
+  q.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter') return; ev.preventDefault(); const v = q.value.trim(); if (/^https?:\/\/\S+$/.test(v)) { pick(v); q.value = ''; } else if (key) search(v); else s.snackbar?.('Paste a link that starts with https://'); });
+  up.onclick = () => file.click();
+  file.onchange = async () => { const f = file.files?.[0]; file.value = ''; if (!f) return; try { pick(o.upload ? await o.upload(f) : f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)); } catch { s.snackbar?.('That GIF could not be added'); } };
+  if (key) search(''); else note.textContent = 'Upload a GIF or paste a link to one. Add a GIPHY or Tenor key in Game Settings › GIFs to search here.';
+  return { el: box, input: q };
+}
+/** Pick a GIF in a sheet of its own (the post composer). */
+function gifPicker(s, o) {
+  return socialSheet(s, { kind: 'gif', title: 'GIFs', colors: o.colors, font: o.font, onClose: o.onClose, build: (api) => {
+    const g = gifPanel(s, { ...o, onPick: (u) => { o.onPick(u); api.close(); } }); g.el.style.height = 'auto'; api.body.append(g.el); setTimeout(() => g.input.focus(), 250);
   } });
 }
+const EMOJI_SETS = [
+  ['smile', 'Smileys', '😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺️😚😙🥲😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬😮‍💨🤥😌😔😪🤤😴😷🤒🤕🤢🤮🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😕😟🙁☹️😮😯😲😳🥺😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀💩🤡👻👽🤖'],
+  ['hand', 'People', '👋🤚🖐️✋🖖👌🤌🤏✌️🤞🫶🤟🤘🤙👈👉👆👇☝️👍👎✊👊🤛🤜👏🙌👐🤲🤝🙏✍️💅🤳💪🦾🧠👀👁️👅👄💋👶🧒👦👧🧑👱👨🧔👩🧓👴👵🙍🙎🙅🙆💁🙋🧏🙇🤦🤷👮🕵️💂🥷👷🤴👸👳👲🧕🤵👰🤰🤱👼🎅🤶🦸🦹🧙🧚🧛🧜🧝🧞🧟💆💇🚶🏃💃🕺👯🧘🛀👭👫👬💏💑👪'],
+  ['heart', 'Hearts', '❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝💟♥️💌💯💢💥💫💦💨🕳️💬💭💤✨🌟⭐🔥🎉🎊'],
+  ['dog', 'Animals', '🐶🐱🐭🐹🐰🦊🐻🐼🐻‍❄️🐨🐯🦁🐮🐷🐸🐵🙈🙉🙊🐔🐧🐦🐤🦆🦅🦉🦇🐺🐗🐴🦄🐝🐛🦋🐌🐞🐜🪲🐢🐍🦎🐙🦑🦐🦀🐡🐠🐟🐬🐳🐋🦈🐊🐅🐆🦓🦍🐘🦛🦏🐪🦒🦘🐃🐄🐎🐖🐏🐑🦙🐐🦌🐕🐩🐈🐓🦃🦚🦜🦢🌵🎄🌲🌳🌴🌱🌿☘️🍀🍁🍂🍃🌸🌼🌻🌺🌹🌷💐🌞🌝🌛🌈☀️⛅☁️🌧️⛈️❄️☃️🌊'],
+  ['food', 'Food', '🍏🍎🍐🍊🍋🍌🍉🍇🍓🫐🍈🍒🍑🥭🍍🥥🥝🍅🍆🥑🥦🥬🥒🌶️🌽🥕🧄🧅🥔🍠🥐🥯🍞🥖🥨🧀🥚🍳🧈🥞🧇🥓🥩🍗🍖🌭🍔🍟🍕🥪🌮🌯🥗🍝🍜🍲🍛🍣🍱🥟🍤🍙🍚🍘🍥🥮🍢🍡🍧🍨🍦🥧🧁🍰🎂🍮🍭🍬🍫🍿🍩🍪🌰🥜🍯🥛☕🍵🧃🥤🧋🍶🍺🍻🥂🍷🥃🍸🍹🍾🧊'],
+  ['ball', 'Activity', '⚽🏀🏈⚾🥎🎾🏐🏉🥏🎱🏓🏸🏒🏑🥍🏏⛳🏹🎣🤿🥊🥋🎽🛹🛼⛸️🥌🎿⛷️🏂🏋️🤸⛹️🤺🤾🏌️🏇🧗🚴🚵🏆🥇🥈🥉🏅🎖️🎗️🎫🎟️🎪🎭🎨🎬🎤🎧🎼🎹🥁🎷🎺🎸🪕🎻🎲♟️🎯🎳🎮🎰🧩'],
+  ['car', 'Travel', '🚗🚕🚙🚌🚎🏎️🚓🚑🚒🚐🛻🚚🚛🚜🛵🏍️🚲🛴🚨🚔🚍🚘🚖🚡🚠🚟🚃🚋🚞🚝🚄🚅🚈🚂🚆🚇🚊🚉✈️🛫🛬🛩️💺🛰️🚀🛸🚁🛶⛵🚤🛥️🛳️⛴️🚢⚓⛽🚧🚦🚥🗺️🗿🗽🗼🏰🏯🏟️🎡🎢🎠⛲⛱️🏖️🏝️🏜️🌋⛰️🏔️🗻🏕️⛺🏠🏡🏘️🏗️🏭🏢🏬🏣🏤🏥🏦🏨🏪🏫🏩💒🏛️⛪🕌🕍🛕🌅🌄🌠🎇🎆🌇🌆🏙️🌃🌌🌉🌁'],
+  ['bulb', 'Objects', '⌚📱💻⌨️🖥️🖨️🖱️💽💾💿📀📷📸📹🎥📞☎️📺📻🎙️⏰⌛⏳📡🔋🔌💡🔦🕯️🧯💸💵💴💶💷💰💳💎⚖️🧰🔧🔨⚒️🛠️⛏️🔩⚙️🧱⛓️🧲🔫💣🧨🪓🔪🗡️⚔️🛡️🚬⚰️🏺🔮📿🧿💈⚗️🔭🔬💊💉🩸🧬🦠🧫🧪🌡️🧹🧺🧻🚽🚰🚿🛁🧼🪥🧽🧴🛎️🔑🗝️🚪🪑🛋️🛏️🧸🖼️🛍️🛒🎁🎈🎏🎀🎊🎉🎎🏮🎐🧧✉️📩📨📧💌📥📤📦🏷️📪📫📬📭📮📜📃📄📑🧾📊📈📉🗒️🗓️📆📅📇🗃️🗳️🗄️📋📁📂🗂️🗞️📰📓📔📒📕📗📘📙📚📖🔖🧷🔗📎🖇️📐📏🧮📌📍✂️🖊️🖋️✒️🖌️🖍️📝✏️🔍🔎🔏🔐🔒🔓'],
+  ['flag', 'Symbols', '✅☑️✔️❌❎➕➖➗✖️♾️‼️⁉️❓❔❕❗〰️💲⚕️♻️⚜️🔱📛🔰⭕✳️❇️🔆🔅〽️⚠️🚸🔞📵🚫⛔🆗🆒🆕🆓🆙🆘🔝🔜🔛🔚🔙🎵🎶➰➿✔️🔃🔄🔂🔁▶️⏸️⏯️⏹️⏺️⏭️⏮️⏩⏪🔀🔼🔽⬆️⬇️⬅️➡️↗️↘️↙️↖️↕️↔️🔟🔢🔣🔤🅰️🅱️🆎🅾️🔴🟠🟡🟢🔵🟣🟤⚫⚪🟥🟧🟨🟩🟦🟪🟫⬛⬜🔶🔷🔸🔹🔺🔻💠🔘🔳🔲🏁🚩🎌🏴🏳️🏳️‍🌈🏴‍☠️'],
+];
+const emojiSplit = (str) => { try { return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(str)].map((x) => x.segment); } catch { return [...str]; } };
+/** An emoji keyboard: categories, recently used, tap to type one. */
+function emojiPanel(s, o) {
+  const c = o.colors, font = o.font || THEME.font, RK = 'pocket.emojiRecent';
+  const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const box = el('div', 'display:flex;flex-direction:column;min-height:0;height:100%;'); box.dataset.emojiPanel = '1';
+  const scroll = el('div', 'flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:0 8px 6px;');
+  const cats = el('div', `flex:none;display:flex;justify-content:space-around;padding:4px 6px;border-top:0.5px solid ${c.line};`);
+  const recent = () => { try { return JSON.parse(store.get(RK, '[]')) || []; } catch { return []; } };
+  const heads = [];
+  const section = (id, title, list) => { const h = el('div', `position:sticky;top:0;background:${c.bg};color:${c.sub};font:700 12px ${font};text-transform:uppercase;letter-spacing:.04em;padding:8px 6px 4px;`, title); h.dataset.cat = id; const g = el('div', 'display:grid;grid-template-columns:repeat(8,1fr);'); for (const em of list) { const b = el('button', 'border:0;background:none;padding:0;height:42px;font-size:27px;line-height:42px;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent;', em); b.type = 'button'; b.dataset.emoji = em; b.onclick = () => { o.onEmoji(em); const R = [em, ...recent().filter((x) => x !== em)].slice(0, 24); store.set(RK, JSON.stringify(R)); }; g.append(b); } scroll.append(h, g); heads.push(h); };
+  const R0 = recent(); if (R0.length) section('recent', 'Recently used', R0);
+  for (const [id, title, str] of EMOJI_SETS) section(id, title, emojiSplit(str).filter((x) => x.trim()));
+  const first = { recent: '🕘', smile: '😀', hand: '👋', heart: '❤️', dog: '🐶', food: '🍔', ball: '⚽', car: '🚗', bulb: '💡', flag: '🏁' };
+  for (const h of heads) { const b = el('button', `border:0;background:none;padding:4px;font-size:19px;cursor:pointer;opacity:.75;filter:grayscale(.3);-webkit-tap-highlight-color:transparent;`, first[h.dataset.cat] || '•'); b.type = 'button'; b.setAttribute('aria-label', h.textContent); b.onclick = () => { scroll.scrollTo({ top: h.offsetTop - 2, behavior: 'smooth' }); }; cats.append(b); }
+  box.append(scroll, cats);
+  return { el: box };
+}
+/**
+ * The tray under a comment box or chat bar: Emoji and GIFs side by side as tabs, opened in place (it pushes the
+ * box up; nothing covers the comments). onEmoji types into the box, onGif attaches a GIF.
+ */
+function mediaTray(s, o) {
+  const c = { ...o.colors, field: o.colors.field || 'rgba(128,128,128,0.12)' }, font = o.font || THEME.font;
+  const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
+  const tray = el('div', `display:none;flex-direction:column;height:${o.height || 290}px;background:${c.bg};border-top:0.5px solid ${c.line};`); tray.dataset.mediaTray = '1';
+  const tabs = el('div', 'flex:none;display:flex;gap:6px;padding:8px 12px 2px;');
+  const body = el('div', 'flex:1;min-height:0;display:flex;flex-direction:column;');
+  const mk = (k, label) => { const b = el('button', `border:0;padding:6px 14px;border-radius:16px;font:700 14px ${font};cursor:pointer;-webkit-tap-highlight-color:transparent;`, label); b.type = 'button'; b.dataset.trayTab = k; b.onclick = () => show(k); tabs.append(b); return b; };
+  const T = { emoji: mk('emoji', 'Emoji'), gif: o.gifs !== false ? mk('gif', 'GIFs') : null };
+  tray.append(tabs, body);
+  let cur = '', panels = {};
+  const paintTabs = () => { for (const [k, b] of Object.entries(T)) if (b) { const on = k === cur; b.style.background = on ? c.text : c.field; b.style.color = on ? c.bg : c.text; } };
+  const show = (k) => {
+    cur = k; tray.style.display = 'flex'; body.textContent = '';
+    panels[k] ||= k === 'emoji' ? emojiPanel(s, { colors: c, font, onEmoji: o.onEmoji }) : gifPanel(s, { colors: c, font, upload: o.upload, columns: 3, onPick: (u) => { o.onGif(u); close(); } });
+    body.append(panels[k].el); paintTabs(); o.onToggle?.(k);
+  };
+  const close = () => { if (!cur) return; cur = ''; tray.style.display = 'none'; o.onToggle?.(''); };
+  return { el: tray, show, close, toggle: (k) => (cur === k ? close() : show(k)), get open() { return cur; } };
+}
+/** A hairline: half a pixel on sharp (retina) screens, like native separators. */
+const HAIR = typeof devicePixelRatio !== 'undefined' && devicePixelRatio >= 2 ? '0.5px' : '1px';
 const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
 
 // ---- messaging: conversations, groups, replies, reactions, read receipts ----
@@ -10686,7 +10755,7 @@ registerBehavior('uiChat', {
     const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
       const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
-      if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+      if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true }); awardPoints(s, 'message');
       replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
       const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || 'Photo'), post: '' }); // (they get a notification)
@@ -11055,7 +11124,7 @@ function searchScreen(s, o) {
   const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;text-align:left;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
   const wrap = el('div', `position:absolute;inset:0;z-index:52;background:${c.bg};color:${c.text};font-family:${font};display:flex;flex-direction:column;opacity:0;transform:translateY(12px);transition:opacity .2s,transform .2s;padding-bottom:env(safe-area-inset-bottom);`); wrap.dataset.pocketSearch = '1';
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
-  const top = el('div', `flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid ${c.line};`);
+  const top = el('div', `flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:${HAIR} solid ${c.line};`);
   const field = el('div', `flex:1;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:22px;background:${c.field};`);
   const inp = el('input', `flex:1;min-width:0;border:0;outline:none;background:transparent;color:${c.text};font:16px ${font};padding:11px 0;`); inp.type = 'search'; inp.placeholder = o.placeholder || 'Search'; inp.value = o.value || ''; inp.setAttribute('enterkeyhint', 'search');
   const clr = btn(`color:${c.sub};font-size:15px;padding:4px;`, '✕'); clr.setAttribute('aria-label', 'Clear');
@@ -11342,6 +11411,263 @@ registerBehavior('uiBookmarks', {
   },
 });
 
+// ---- points & achievements: a score for being active (like a Snap Score), a daily streak and trophies ----
+const POINTS = { post: 10, story: 6, listing: 5, comment: 3, repost: 2, follow: 2, like: 1, message: 1, save: 1, daily: 5 };
+const POINT_WORDS = { post: 'Posting', story: 'A story', listing: 'Listing something', comment: 'Commenting', repost: 'Reposting', follow: 'Following someone', like: 'Liking', message: 'Sending a message', save: 'Saving', daily: 'Opening the app each day' };
+const ACHIEVEMENTS = [
+  { id: 'first-post', icon: 'edit', color: '#4f7cff', title: 'First post', text: 'Share your first post', k: 'post', n: 1 },
+  { id: 'regular', icon: 'edit', color: '#2563eb', title: 'Regular', text: 'Share 10 posts', k: 'post', n: 10 },
+  { id: 'first-story', icon: 'camera', color: '#d62976', title: 'Storyteller', text: 'Post a story', k: 'story', n: 1 },
+  { id: 'chatty', icon: 'comment', color: '#10b981', title: 'Chatterbox', text: 'Write 25 comments', k: 'comment', n: 25 },
+  { id: 'fan', icon: 'heart', color: '#f91880', title: 'Big fan', text: 'Like 50 posts', k: 'like', n: 50 },
+  { id: 'amplifier', icon: 'repost', color: '#00ba7c', title: 'Amplifier', text: 'Repost 10 posts', k: 'repost', n: 10 },
+  { id: 'connector', icon: 'users', color: '#7c3aed', title: 'Connector', text: 'Follow 10 people', k: 'follow', n: 10 },
+  { id: 'messenger', icon: 'send', color: '#0ea5e9', title: 'Messenger', text: 'Send 20 messages', k: 'message', n: 20 },
+  { id: 'seller', icon: 'star', color: '#f59e0b', title: 'Seller', text: 'List something on Marketplace', k: 'listing', n: 1 },
+  { id: 'streak-3', icon: 'fire', color: '#ff7a1a', title: 'Warming up', text: 'A 3-day streak', k: 'streak', n: 3 },
+  { id: 'streak-7', icon: 'fire', color: '#ef4444', title: 'On fire', text: 'A 7-day streak', k: 'streak', n: 7 },
+  { id: 'club-100', icon: 'sparkle', color: '#14b8a6', title: '100 club', text: 'Reach 100 points', k: 'points', n: 100 },
+  { id: 'superstar', icon: 'star', color: '#eab308', title: 'Superstar', text: 'Reach 1,000 points', k: 'points', n: 1000 },
+];
+const dayOf = (t = Date.now()) => { const d = new Date(t); return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); };
+const ptsKey = (s) => 'pocket.points.' + (s.engine.gameKey || 'game') + '.' + handleOf(meOfVars(s).handle);
+/** My points, counts of what I did, my streak and my trophies (this phone; a Points collection shares them). */
+function pointsState(s) {
+  let st = null; try { st = JSON.parse(store.get(ptsKey(s), 'null')); } catch { /* storage unavailable */ }
+  st ||= { points: 0, counts: {}, unlocked: {}, streak: 0, lastDay: 0 }; st.counts ||= {}; st.unlocked ||= {};
+  return st;
+}
+const achProgress = (st, a) => { const v = a.k === 'points' ? st.points : a.k === 'streak' ? st.streak : st.counts[a.k] || 0; return [Math.min(v, a.n), a.n]; };
+/** Do something worth points: add them, keep the streak, unlock trophies (with a banner). */
+function awardPoints(s, action, times = 1) {
+  if (!s || s.engine.editing || s.settings?.points === false) return; const st = pointsState(s), today = dayOf(); let add = (POINTS[action] || 0) * times;
+  if (st.lastDay !== today) { const y = dayOf(Date.now() - 864e5); st.streak = st.lastDay === y ? st.streak + 1 : 1; st.lastDay = today; add += POINTS.daily; }
+  st.points += add; if (action !== 'daily') st.counts[action] = (st.counts[action] || 0) + times;
+  const fresh = ACHIEVEMENTS.filter((a) => !st.unlocked[a.id] && achProgress(st, a)[0] >= a.n); for (const a of fresh) st.unlocked[a.id] = Date.now();
+  store.set(ptsKey(s), JSON.stringify(st)); s.setVar('points', st.points); s.setVar('streak', st.streak);
+  const D = s.engine.data, M = meOfVars(s); if (D.def('Points')) { const h = handleOf(M.handle), r = D.rows('Points').find((q) => handleOf(q.handle) === h), rec = { handle: h, name: M.author, points: st.points, streak: st.streak, achievements: Object.keys(st.unlocked).join(',') }; if (r) D.update('Points', r.id, rec); else D.add('Points', rec); }
+  fresh.forEach((a, i) => setTimeout(() => { s.engine.notify?.({ type: 'achievement', title: a.title, text: a.text, icon: '', duration: 3 }); s.engine.vibrate?.(30); s.emit?.('achievement', a.id); }, 300 + i * 900));
+}
+/** Show my score in {points} and {streak} (and count today towards the streak). */
+function pointsSync(s) { if (s.vars.points === undefined && !s.engine.editing) { const st = pointsState(s); s.vars.points = st.points; s.vars.streak = st.lastDay === dayOf() || st.lastDay === dayOf(Date.now() - 864e5) ? st.streak : 0; } }
+
+registerBehavior('uiAchievements', {
+  label: 'Achievements', description: 'Your score (points for posting, stories, comments, likes, reposts, messages, follows and opening the app each day), your daily streak, and a trophy case: unlocked trophies in colour, the rest grey with how far along you are. Tap a trophy for what it takes; tap the score for how points are earned. {points} and {streak} show them anywhere.',
+  params: [
+    { key: 'title', label: 'Score label', type: 'text', default: 'Score' },
+    { key: 'columns', label: 'Trophies per row', type: 'number', default: 3, range: [2, 5], step: 1 },
+    ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'); let cells = [], scoreR = null, total = 0, sheet = false;
+    const colors = () => ({ bg: tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
+    const medal = (ctx, a, cx, cy, r, on, f) => {
+      ctx.save(); if (on) { const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r); g.addColorStop(0, withAlpha(a.color, 0.85)); g.addColorStop(1, a.color); ctx.fillStyle = g; } else ctx.fillStyle = 'rgba(128,128,128,0.16)';
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      if (!on && f > 0) { ctx.strokeStyle = a.color; ctx.lineWidth = 3.5; ctx.lineCap = 'round'; ctx.beginPath(); ctx.arc(cx, cy, r - 2, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * f); ctx.stroke(); }
+      drawIco(ctx, on ? a.icon : 'lock', cx, cy, r * (on ? 0.95 : 0.7), on ? '#fff' : 'rgba(128,128,128,0.75)', { stroke: on ? 2.2 : 2 }); ctx.restore();
+    };
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        pointsSync(s); const b = UK.fit(s, e, UK.box(e)); S.max = Math.max(0, total - b.h + coveredBottom(s, e, b)); S.update(s, e, dt, b);
+        if (s.engine.editing || sheet) return;
+        for (const t of UK.taps(s, e)) {
+          if (S.moved || !UK.in(t, b)) continue; const c = colors();
+          if (scoreR && UK.in(t, scoreR)) { UK.tap(s, p); sheet = true; socialSheet(s, { kind: 'points', title: 'How to earn points', colors: c, onClose: () => { sheet = false; }, items: Object.entries(POINTS).map(([k, v]) => ({ icon: { post: 'edit', story: 'camera', listing: 'star', comment: 'comment', repost: 'repost', follow: 'user-plus', like: 'heart', message: 'send', save: 'bookmark', daily: 'fire' }[k], label: `${POINT_WORDS[k]}  ·  +${v}` })) }); continue; }
+          const cl = cells.find((q) => UK.in(t, q)); if (!cl) continue; UK.tap(s, p); const st = pointsState(s), a = cl.a, [v, n] = achProgress(st, a), on = !!st.unlocked[a.id];
+          sheet = true; socialSheet(s, { kind: 'achievement', title: a.title, colors: c, onClose: () => { sheet = false; }, items: [{ icon: on ? 'check' : 'lock', label: on ? `Unlocked ${new Date(st.unlocked[a.id]).toLocaleDateString(localeOf())}` : `${a.text}: ${formatNumber(v)} / ${formatNumber(n)}` }] });
+        }
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.fit(s, e, UK.box(e)), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), st = pointsState(s), streak = st.lastDay === dayOf() || st.lastDay === dayOf(Date.now() - 864e5) ? st.streak : 0;
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip(); let y = b.y + 16 - S.v;
+        // the score card
+        const cw = b.w - 32, ch = 112, g = ctx.createLinearGradient(b.x + 16, y, b.x + 16 + cw, y + ch); g.addColorStop(0, '#ffcc00'); g.addColorStop(1, '#ff9500'); ctx.fillStyle = g; UK.rr(ctx, b.x + 16, y, cw, ch, 20); ctx.fill();
+        drawIco(ctx, 'star', b.x + 52, y + 44, 34, '#fff', { fill: true });
+        UK.text(ctx, formatNumber(st.points), b.x + 80, y + 46, { size: 34, weight: 900, color: '#1c1f26', align: 'left' });
+        UK.text(ctx, p.title || 'Score', b.x + 82, y + 76, { size: 14, weight: 700, color: 'rgba(28,31,38,0.7)', align: 'left' });
+        drawIco(ctx, 'fire', b.x + 16 + cw - 64, y + 44, 26, streak ? '#c2410c' : 'rgba(28,31,38,0.35)', { fill: !!streak });
+        UK.text(ctx, String(streak), b.x + 16 + cw - 44, y + 46, { size: 24, weight: 900, color: '#1c1f26', align: 'left' }); UK.text(ctx, streak === 1 ? 'day' : 'days', b.x + 16 + cw - 64, y + 76, { size: 13, weight: 700, color: 'rgba(28,31,38,0.7)', align: 'left' });
+        scoreR = { x: b.x + 16, y, w: cw, h: ch }; y += ch + 24;
+        const got = ACHIEVEMENTS.filter((a) => st.unlocked[a.id]).length;
+        UK.text(ctx, 'Trophies', b.x + 16, y, { size: 18, weight: 800, color: txt, align: 'left' }); UK.text(ctx, `${got} of ${ACHIEVEMENTS.length}`, b.x + b.w - 16, y, { size: 14, weight: 600, color: sub, align: 'right' }); y += 22;
+        const cols = clamp(Math.round(+p.columns || 3), 2, 5), w = (b.w - 32) / cols, r0 = Math.min(34, w * 0.3); cells = [];
+        ACHIEVEMENTS.forEach((a, i) => { const cx = b.x + 16 + (i % cols) * w + w / 2, yy = y + Math.floor(i / cols) * (r0 * 2 + 58), on = !!st.unlocked[a.id], [v, n] = achProgress(st, a);
+          medal(ctx, a, cx, yy + r0 + 6, r0, on, v / n); UK.text(ctx, a.title, cx, yy + r0 * 2 + 24, { size: 13, weight: 700, color: on ? txt : sub, maxW: w - 8 }); if (!on) UK.text(ctx, `${formatNumber(v)}/${formatNumber(n)}`, cx, yy + r0 * 2 + 42, { size: 11, weight: 600, color: sub });
+          cells.push({ x: cx - w / 2, y: yy, w, h: r0 * 2 + 52, a }); });
+        y += Math.ceil(ACHIEVEMENTS.length / cols) * (r0 * 2 + 58); void acc;
+        total = y + S.v - b.y + 10; ctx.restore();
+      },
+    };
+  },
+});
+
+const MARKET_CATS = 'Vehicles, Property, Electronics, Clothing, Home & Garden, Hobbies, Toys & Games, Sports, Free';
+const MARKET_SAMPLE = [
+  { id: 'l1', title: 'Road bike, 54 cm', price: 320, category: 'Sports', condition: 'Used – good', location: 'Lisbon', description: 'Aluminium frame, Shimano gears, new tyres last month. Great for commuting.', media: '🚲', color: '#10b981', seller: 'Maya Chen', handle: 'maya', h: 3 },
+  { id: 'l2', title: 'iPhone 13, 128 GB', price: 410, category: 'Electronics', condition: 'Used – like new', location: 'Porto', description: 'Always in a case, battery 91%. Comes with the box and cable.', media: '📱', color: '#4f7cff', seller: 'Leo Park', handle: 'leop', h: 7 },
+  { id: 'l3', title: 'Mid-century armchair', price: 140, category: 'Home & Garden', condition: 'Used – good', location: 'Lisbon', description: 'Solid wood, original fabric. Pick up only.', media: '🛋️', color: '#f59e0b', seller: 'Sofia Ruiz', handle: 'sofiaruiz', h: 20 },
+  { id: 'l4', title: 'Acoustic guitar + case', price: 95, category: 'Hobbies', condition: 'Used – fair', location: 'Braga', description: 'Plays well, a few scratches. Strings changed in May.', media: '🎸', color: '#ef4444', seller: 'Amir Haddad', handle: 'amir', h: 30 },
+  { id: 'l5', title: 'Board games bundle', price: 0, category: 'Free', condition: 'Used – good', location: 'Lisbon', description: 'Catan, Ticket to Ride and Codenames. Free to a good home!', media: '🎲', color: '#7c3aed', seller: 'Ava Brooks', handle: 'avab', h: 2 },
+  { id: 'l6', title: 'Denim jacket (M)', price: 25, category: 'Clothing', condition: 'Used – like new', location: 'Coimbra', description: 'Worn twice. Smoke-free home.', media: '🧥', color: '#0ea5e9', seller: 'Jon Doe', handle: 'jondoe', h: 50 },
+];
+registerBehavior('uiMarketplace', {
+  label: 'Marketplace', description: 'Buy and sell, like Facebook Marketplace: a grid of listings (photo, price, title, place), categories, search, and tabs for Browse, Your listings and Saved. Tap a listing for its photos, details and seller, then Message the seller (with “Is this still available?” and other quick messages). Sell opens a form for photos, title, price, category, condition, place and description. Your own listings can be marked sold or deleted.',
+  params: [
+    { key: 'collection', label: 'Listings collection', type: 'text', default: 'Listings', suggest: 'collections', info: 'Fields: title, price, category, condition, location, description, media (pictures, | between them), seller, handle, sold. Without it, sample listings show and yours stay on this phone.' },
+    { key: 'currency', label: 'Currency sign', type: 'text', default: '$' },
+    { key: 'categories', label: 'Categories (comma between)', type: 'text', default: MARKET_CATS },
+    { key: 'tabs', label: 'Tabs: Browse, Your listings, Saved', type: 'bool', default: true },
+    { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'pills', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
+    { key: 'sell', label: '“Sell” button', type: 'bool', default: true },
+    { key: 'messages', label: 'Message the seller (a direct message in Messages)', type: 'bool', default: true },
+    { key: 'chatPage', label: '…then go to page (a Chat)', type: 'text', default: '', info: 'Blank: stay here (the message is sent and a snackbar says so).' },
+    { key: 'columns', label: 'Columns', type: 'number', default: 2, range: [1, 4], step: 1 },
+    ...colorParams({ bg: ['Background', ''], card: ['Cards', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], accent: ['Accent', '@accent'], line: ['Lines', '@line'] }),
+    ...UI_COMMON,
+  ],
+  create(p) {
+    const S = makeScroller('y'), TSt = new TabStrip(); let tab = 0, cat = 'All', q = '', tabsR = [], chipsR = [], cards = [], searchR = null, sellR = null, clearR = null, total = 0, sheet = false, chipX = 0, chipMax = 0, chipDrag = null;
+    const D = (s) => s.engine.data, has = (s) => !!(p.collection && D(s).def(p.collection));
+    const me = (s) => { const m = meOfVars(s); return { ...m, handle: handleOf(m.handle) }; };
+    const LK = (s) => 'pocket.market.' + (s.engine.gameKey || 'game');
+    const local = (s) => { try { return JSON.parse(store.get(LK(s), '[]')) || []; } catch { return []; } };
+    const saveLocal = (s, L) => store.set(LK(s), JSON.stringify(L.slice(-60)));
+    const cats = () => ['All', ...String(p.categories || MARKET_CATS).split(',').map((x) => x.trim()).filter(Boolean)];
+    const all = (s) => { const t = Date.now(); const L = has(s) ? D(s).rows(p.collection).map((r) => ({ ...r, at: +r._at || 0, row: true })) : [...MARKET_SAMPLE.map((r) => ({ ...r, at: t - r.h * 3600e3 })), ...local(s)]; return L.sort((a, b) => (b.at || 0) - (a.at || 0)); };
+    const pics = (r) => String(r.media || '').split('|').map((x) => x.trim()).filter(Boolean);
+    const money = (n) => (+n > 0 ? (p.currency ?? '$') + formatNumber(Math.round(+n)) : 'Free');
+    const shown = (s) => { const M = me(s), t = q.toLowerCase(); return all(s).filter((r) => (tab === 0 ? !truthy(r.sold) || handleOf(r.handle) === M.handle : tab === 1 ? handleOf(r.handle) === M.handle : bmHas(s, 'listing', r.id)) && (cat === 'All' || r.category === cat || (cat === 'Free' && !(+r.price > 0))) && (!t || `${r.title} ${r.description} ${r.location} ${r.category}`.toLowerCase().includes(t))); };
+    const colors = () => ({ bg: tok(p.card) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), like: '#f91880', field: 'rgba(128,128,128,0.12)' });
+    const patchL = (s, r, o) => { if (r.row) D(s).update(p.collection, r.id, o); else { const L = local(s), x = L.find((y) => y.id === r.id); if (x) { Object.assign(x, o); saveLocal(s, L); } } };
+    const removeL = (s, r) => { if (r.row) D(s).remove(p.collection, r.id); else saveLocal(s, local(s).filter((y) => y.id !== r.id)); };
+    const message = (s, r, text) => {
+      const M = me(s), c0 = dmId(M.handle, handleOf(r.handle)), rec = { chat: c0, author: M.author, handle: M.handle, text, reply_to: 'listing:' + r.id, reply_text: `${r.title} · ${money(r.price)}`, reply_author: r.seller || r.handle };
+      if (D(s).def('Messages')) D(s).add('Messages', rec); s.engine.social?.notify(handleOf(r.handle), 'message', { text, post: '' }); awardPoints(s, 'message');
+      if (p.chatPage) { s.setVar('chat', c0); s.setVar('chatTitle', r.seller || r.handle); s.navTo(p.chatPage); } else s.snackbar?.(`Sent to ${String(r.seller || r.handle).split(' ')[0]}`);
+    };
+    /** A listing, full screen: photos, price, details, the seller, and Message. */
+    const openListing = (s, r) => {
+      const c = colors(), font = THEME.font, mine = handleOf(r.handle) === me(s).handle; sheet = true;
+      socialSheet(s, { kind: 'listing', title: '', fullScreen: true, colors: c, font, onClose: () => { sheet = false; }, build: (api) => {
+        const { el, body, close } = api, btn = (css, t) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, t); b.type = 'button'; return b; };
+        const P = pics(r), strip = el('div', 'display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;aspect-ratio:1;max-height:60vh;background:#000;'); strip.dataset.listingPhotos = '1';
+        if (!P.length) P.push('');
+        for (const m of P) { const f = el('div', `flex:none;width:100%;height:100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;background:${r.color || '#888'};font-size:120px;`); if (isPic(m)) { const im = el('img', 'width:100%;height:100%;object-fit:cover;'); im.src = artURL(m); f.style.background = '#000'; f.append(im); } else f.textContent = m || '🏷️'; strip.append(f); }
+        const info = el('div', 'padding:16px 16px 8px;');
+        info.append(el('div', 'font-size:22px;font-weight:800;line-height:1.25;', r.title || 'Item'), el('div', 'font-size:20px;font-weight:700;margin-top:4px;', money(r.price) + (truthy(r.sold) ? ' · Sold' : '')));
+        info.append(el('div', `color:${c.sub};font-size:14px;margin-top:6px;`, [r.at ? `Listed ${shortAgo(r.at)} ago` : '', r.location ? `in ${r.location}` : ''].filter(Boolean).join(' ')));
+        const acts = el('div', 'display:flex;gap:8px;padding:6px 16px 12px;');
+        const act = (ic, label, fn, primary) => { const b = btn(`flex:${primary ? 2 : 1};display:flex;align-items:center;justify-content:center;gap:8px;height:42px;border-radius:10px;font:700 15px ${font};background:${primary ? c.acc : c.field};color:${primary ? '#fff' : c.text};`, ''); b.innerHTML = svgIcon(ic, 19); b.append(document.createTextNode(label)); b.dataset.listingAct = label; b.onclick = fn; acts.append(b); return b; };
+        const saveB = () => { const on = bmHas(s, 'listing', r.id); return [on ? 'bookmark' : 'bookmark', on ? 'Saved' : 'Save']; };
+        if (!mine && p.messages !== false) act('comment', 'Message', () => { askTextBox(s, { question: `Message ${String(r.seller || '').split(' ')[0] || 'the seller'}`, value: 'Is this still available?', max: 300 }, (v) => { if (v && String(v).trim()) { message(s, r, String(v).trim()); close(); } }); }, true);
+        const sv = act(...saveB(), () => { bmToggle(s, { kind: 'listing', ref: String(r.id), post: String(r.id), author: r.seller || '', author_handle: handleOf(r.handle), text: r.title, media: isPic(pics(r)[0]) ? pics(r)[0] : '' }); const [, l] = saveB(); sv.lastChild.textContent = l; sv.style.color = l === 'Saved' ? c.acc : c.text; });
+        act('share', 'Share', () => { const t = `${r.title} – ${money(r.price)}`; if (navigator.share) navigator.share({ text: t }).catch(() => {}); else { navigator.clipboard?.writeText(t).catch(() => {}); s.snackbar?.('Copied'); } });
+        if (mine) { const own = el('div', 'display:flex;gap:8px;padding:0 16px 12px;'); acts.after?.(own);
+          const b1 = btn(`flex:1;height:42px;border-radius:10px;font:700 15px ${font};background:${c.field};color:${c.text};`, truthy(r.sold) ? 'Mark as available' : 'Mark as sold'); b1.dataset.listingAct = 'sold'; b1.onclick = () => { patchL(s, r, { sold: !truthy(r.sold) }); s.snackbar?.(truthy(r.sold) ? 'Marked as available' : 'Marked as sold'); close(); };
+          const b2 = btn(`flex:1;height:42px;border-radius:10px;font:700 15px ${font};background:${c.field};color:#f4212e;`, 'Delete'); b2.dataset.listingAct = 'delete'; b2.onclick = () => { removeL(s, r); s.snackbar?.('Listing deleted'); close(); };
+          own.append(b1, b2); info.dataset.mine = '1'; body.append(strip, info, acts, own); }
+        else body.append(strip, info, acts);
+        if (!mine && p.messages !== false) { // quick messages, like Facebook
+          const qm = el('div', `margin:0 16px 12px;padding:12px;border-radius:12px;background:${c.field};`); qm.append(el('div', 'font-weight:800;font-size:15px;margin-bottom:8px;', 'Send seller a message'));
+          const row = el('div', 'display:flex;gap:8px;flex-wrap:wrap;'); for (const t of ['Is this still available?', 'Is the price negotiable?', 'When can I pick it up?']) { const b = btn(`padding:8px 12px;border-radius:16px;background:${c.bg};border:1px solid ${c.line};font:600 13px ${font};`, t); b.dataset.quickMsg = t; b.onclick = () => { message(s, r, t); close(); }; row.append(b); } qm.append(row); body.append(qm); }
+        const det = el('div', `padding:4px 16px 12px;border-top:0.5px solid ${c.line};`); det.append(el('div', 'font-weight:800;font-size:17px;margin:12px 0 8px;', 'Details'));
+        for (const [k, v] of [['Condition', r.condition], ['Category', r.category]]) if (v) { const l = el('div', 'display:flex;justify-content:space-between;font-size:15px;padding:4px 0;'); l.append(el('span', `color:${c.sub};`, k), el('span', 'font-weight:600;', v)); det.append(l); }
+        if (r.description) det.append(el('div', 'font-size:15px;line-height:1.45;margin-top:8px;white-space:pre-wrap;', r.description));
+        const sel = el('div', `display:flex;align-items:center;gap:12px;padding:14px 16px 24px;border-top:0.5px solid ${c.line};`); sel.append(api.avatar(r.seller || r.handle, '', 44)); const sn = el('div', 'flex:1;min-width:0;'); sn.append(el('div', 'font-weight:800;font-size:16px;', r.seller || r.handle || 'Seller'), el('div', `color:${c.sub};font-size:13px;`, mine ? 'You' : '@' + handleOf(r.handle))); sel.append(sn);
+        body.append(det, sel);
+      } });
+    };
+    /** Sell something: photos, title, price, category, condition, place, description. */
+    const sellForm = (s) => {
+      const c = colors(), font = THEME.font; sheet = true; const st = { media: [] };
+      socialSheet(s, { kind: 'sell', title: 'New listing', colors: c, font, onClose: () => { sheet = false; }, build: (api) => {
+        const { el, body, close } = api, btn = (css, t) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css}`, t); b.type = 'button'; return b; };
+        const wrap = el('div', 'padding:12px 16px 20px;display:flex;flex-direction:column;gap:12px;');
+        const ph = el('div', 'display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;'); const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.multiple = true; file.style.display = 'none'; file.dataset.sellPhotos = '1';
+        const paintPh = () => { ph.textContent = ''; const add = btn(`flex:none;width:92px;height:92px;border-radius:12px;border:1.5px dashed ${c.line};color:${c.acc};display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font:700 12px ${font};`, ''); add.innerHTML = svgIcon('camera', 24); add.append(document.createTextNode(st.media.length ? `${st.media.length}/6` : 'Add photos')); add.onclick = () => file.click(); ph.append(add);
+          st.media.forEach((m, i) => { const t = el('div', `flex:none;position:relative;width:92px;height:92px;border-radius:12px;overflow:hidden;background:#333 center/cover url("${m}");`); const x = btn('position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:flex;align-items:center;justify-content:center;', ''); x.innerHTML = svgIcon('x', 13, { stroke: 2.6 }); x.onclick = () => { st.media.splice(i, 1); paintPh(); }; t.append(x); ph.append(t); }); };
+        file.onchange = async () => { for (const f of [...(file.files || [])].slice(0, 6 - st.media.length)) { try { st.media.push(await shrinkPicture(f, 1080)); } catch { /* skip */ } } file.value = ''; paintPh(); };
+        const field = (label, tag = 'input', attrs = {}) => { const l = el('label', `display:flex;flex-direction:column;gap:5px;font:700 13px ${font};color:${c.sub};`, label); const f = el(tag, `font:16px ${font};padding:12px 14px;border-radius:10px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;${tag === 'textarea' ? 'min-height:90px;resize:vertical;' : ''}`); Object.assign(f, attrs); l.append(f); wrap.append(l); return f; };
+        wrap.append(ph, file); paintPh();
+        const fT = field('Title', 'input', { placeholder: 'What are you selling?', maxLength: 80 }); fT.dataset.sell = 'title';
+        const fP = field('Price', 'input', { placeholder: '0 = free', inputMode: 'decimal' }); fP.dataset.sell = 'price';
+        const fC = field('Category', 'select'); for (const k of cats().slice(1)) { const o0 = el('option', '', k); o0.value = k; fC.append(o0); } fC.dataset.sell = 'category';
+        const fK = field('Condition', 'select'); for (const k of ['New', 'Used – like new', 'Used – good', 'Used – fair']) { const o0 = el('option', '', k); o0.value = k; fK.append(o0); } fK.dataset.sell = 'condition';
+        const fL = field('Location', 'input', { placeholder: 'City or neighbourhood', maxLength: 60 }); fL.dataset.sell = 'location';
+        const fD = field('Description', 'textarea', { placeholder: 'Details, size, pick-up…', maxLength: 1000 }); fD.dataset.sell = 'description';
+        const go = btn(`height:46px;border-radius:12px;background:${c.acc};color:#fff;font:800 16px ${font};margin-top:4px;`, 'Publish'); go.dataset.sell = 'publish';
+        go.onclick = () => {
+          const title = fT.value.trim(); if (!title) { fT.focus(); s.snackbar?.('Add a title'); return; }
+          const M = me(s), rec = { title, price: Math.max(0, parseFloat(String(fP.value).replace(/[^\d.]/g, '')) || 0), category: fC.value, condition: fK.value, location: fL.value.trim(), description: fD.value.trim(), media: st.media.join(' | '), seller: M.author, handle: M.handle, sold: false };
+          if (has(s)) D(s).add(p.collection, rec); else { const L = local(s); L.push({ id: 'm' + Date.now().toString(36), ...rec, at: Date.now() }); saveLocal(s, L); }
+          awardPoints(s, 'listing'); s.snackbar?.('Your listing is up'); tab = 1; S.v = 0; close();
+        };
+        wrap.append(go); body.append(wrap); setTimeout(() => fT.focus(), 250);
+      } });
+    };
+    const TOP = () => (p.tabs !== false ? 46 : 0);
+    return {
+      uiAlways: true,
+      update(e, dt, s) {
+        const b = UK.fit(s, e, UK.box(e)), head = TOP() + 52 + 44, list = { x: b.x, y: b.y + head, w: b.w, h: b.h - head };
+        S.max = Math.max(0, total - list.h + coveredBottom(s, e, b)); S.update(s, e, dt, list);
+        if (s.engine.editing || sheet) return;
+        const inp = s.engine.input, cy0 = b.y + TOP() + 52;
+        for (const d of UK.downs(s, e)) if (d.y >= cy0 && d.y <= cy0 + 44 && UK.in(d, b)) chipDrag = { id: d.id, x: d.x, v: chipX, moved: false };
+        if (chipDrag) { const ptr = UK.ptr(s, e, chipDrag.id); if (ptr) { const dx = ptr.x - chipDrag.x; if (Math.abs(dx) > 6) chipDrag.moved = true; chipX = clamp(chipDrag.v - dx, 0, chipMax); } else setTimeout(() => { chipDrag = null; }, 0); }
+        for (const t of UK.taps(s, e)) {
+          if (S.moved || chipDrag?.moved) continue;
+          const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { UK.tap(s, p); tab = ti; S.v = 0; continue; }
+          if (clearR && UK.in(t, clearR, 6)) { UK.tap(s, p); q = ''; continue; }
+          if (searchR && UK.in(t, searchR)) { UK.tap(s, p); askTextBox(s, { question: 'Search Marketplace', placeholder: 'Bike, sofa, phone…', value: q, max: 60 }, (v) => { if (v != null) { q = String(v).trim(); S.v = 0; } }); continue; }
+          if (sellR && UK.in(t, sellR)) { UK.tap(s, p); sellForm(s); continue; }
+          const ci = chipsR.findIndex((r) => UK.in(t, r)); if (ci >= 0) { UK.tap(s, p); cat = chipsR[ci].cat; S.v = 0; continue; }
+          if (!UK.in(t, list)) continue;
+          const k = cards.find((r) => UK.in(t, r)); if (k) { UK.tap(s, p); openListing(s, k.r); }
+        }
+        void inp;
+      },
+      drawUI(ctx, e, s) {
+        const b = UK.fit(s, e, UK.box(e)), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub'), acc = tok(p.accent || '@accent'), line = tok(p.line || '@line'), dark = isDark(s), field = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)';
+        if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
+        tabsR = p.tabs !== false ? tabsRow(ctx, b, ['Browse', 'Your listings', 'Saved'], tab, txt, sub, acc, line, TSt, p.tabStyle, s) : [];
+        // search + sell
+        const ry = b.y + TOP() + 8, sw = p.sell !== false ? 84 : 0; searchR = { x: b.x + 12, y: ry, w: b.w - 24 - (sw ? sw + 8 : 0), h: 36 };
+        ctx.fillStyle = field; UK.rr(ctx, searchR.x, ry, searchR.w, 36, 18); ctx.fill(); drawIco(ctx, 'search', searchR.x + 20, ry + 18, 17, sub);
+        UK.text(ctx, q || 'Search Marketplace', searchR.x + 36, ry + 19, { size: 15, weight: q ? 700 : 500, color: q ? txt : sub, align: 'left', maxW: searchR.w - 70 });
+        clearR = null; if (q) { const cx = searchR.x + searchR.w - 18; drawIco(ctx, 'x', cx, ry + 18, 15, sub, { stroke: 2.4 }); clearR = { x: cx - 14, y: ry + 4, w: 28, h: 28 }; }
+        sellR = null; if (sw) { sellR = { x: b.x + b.w - 12 - sw, y: ry, w: sw, h: 36 }; ctx.fillStyle = acc; UK.rr(ctx, sellR.x, ry, sw, 36, 18); ctx.fill(); drawIco(ctx, 'edit', sellR.x + 22, ry + 18, 16, '#fff', { stroke: 2.2 }); UK.text(ctx, 'Sell', sellR.x + 36, ry + 19, { size: 15, weight: 800, color: '#fff', align: 'left' }); }
+        // category chips
+        const cy = b.y + TOP() + 52 + 6; chipsR = []; ctx.save(); ctx.beginPath(); ctx.rect(b.x, cy - 4, b.w, 40); ctx.clip(); let x = b.x + 12 - chipX;
+        for (const k of cats()) { ctx.font = `700 13px ${THEME.font}`; const w = ctx.measureText(k).width + 26, on = k === cat; ctx.fillStyle = on ? (dark ? '#ffffff' : '#1c1f26') : field; UK.rr(ctx, x, cy, w, 32, 16); ctx.fill(); UK.text(ctx, k, x + w / 2, cy + 16.5, { size: 13, weight: 700, color: on ? (dark ? '#111' : '#fff') : txt }); chipsR.push({ x, y: cy, w, h: 32, cat: k }); x += w + 8; }
+        chipMax = Math.max(0, x + chipX - (b.x + b.w) + 4); ctx.restore();
+        // grid
+        const head = TOP() + 52 + 44, top = b.y + head, L = shown(s), cols = clamp(Math.round(+p.columns || 2), 1, 4), gap = 8, pad = 12, cw = (b.w - pad * 2 - gap * (cols - 1)) / cols, ph = cw, chh = ph + 64;
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, b.h - head); ctx.clip(); cards = [];
+        if (!L.length) { drawIco(ctx, tab === 2 ? 'bookmark' : 'search', b.cx, top + 70, 38, sub, { stroke: 1.6 }); UK.text(ctx, tab === 1 ? 'You have no listings yet' : tab === 2 ? 'Nothing saved yet' : 'No listings found', b.cx, top + 118, { size: 16, weight: 800, color: txt }); UK.text(ctx, tab === 1 ? 'Tap Sell to list something' : tab === 2 ? 'Save listings to find them here' : 'Try another search or category', b.cx, top + 142, { size: 14, weight: 500, color: sub }); }
+        L.forEach((r, i) => {
+          const col = i % cols, row = Math.floor(i / cols), cx = b.x + pad + col * (cw + gap), y = top + 4 + row * (chh + 10) - S.v;
+          if (y + chh >= top - 10 && y <= b.y + b.h + 10) {
+            const m = pics(r)[0] || '', pic = isPic(m);
+            ctx.save(); UK.rr(ctx, cx, y, cw, ph, 10); ctx.clip(); if (pic) drawMedia(ctx, m, '#333', cx, y, cw, ph, 0, 'cover'); else { ctx.fillStyle = r.color || (dark ? '#2a2d35' : '#e9ebf0'); ctx.fillRect(cx, y, cw, ph); UK.text(ctx, m || '🏷️', cx + cw / 2, y + ph / 2 + 2, { size: Math.round(cw * 0.42) }); }
+            if (truthy(r.sold)) { ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(cx, y, cw, ph); UK.text(ctx, 'SOLD', cx + cw / 2, y + ph / 2, { size: 18, weight: 900, color: '#fff' }); }
+            ctx.restore();
+            if (bmHas(s, 'listing', r.id)) { ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(cx + cw - 18, y + 18, 13, 0, Math.PI * 2); ctx.fill(); bookmarkMark(ctx, cx + cw - 18, y + 18, 14, '#fff', true); }
+            UK.text(ctx, money(r.price) + (r.title ? ' · ' + r.title : ''), cx + 2, y + ph + 18, { size: 15, weight: 700, color: txt, align: 'left', maxW: cw - 4 });
+            UK.text(ctx, r.location || r.category || '', cx + 2, y + ph + 38, { size: 13, weight: 500, color: sub, align: 'left', maxW: cw - 4 });
+          }
+          cards.push({ x: cx, y, w: cw, h: chh, r });
+        });
+        total = Math.ceil(L.length / cols) * (chh + 10) + 16; ctx.restore();
+      },
+    };
+  },
+});
+
 registerBehavior('uiFriends', {
   label: 'Friends', description: 'Your friends (with Message), friend requests (Accept / Decline, and the ones you sent) and people to find (Add friend, Follow), from the social graph. Tapping a person opens their profile.',
   params: [
@@ -11570,7 +11896,7 @@ registerBehavior('uiStories', {
         const M = me(s);
         if (has(s)) D(s).add(p.collection, { author: M.author, handle: M.handle, media: out.media, color: out.color, text: out.text });
         else { const L = localStories(s); L.push({ id: 'l' + Date.now().toString(36), pic: out.media, color: out.color, text: out.text, at: Date.now() }); store.set(localKey(s), JSON.stringify(L.slice(-30))); }
-        s.snackbar?.('Your story is up'); s.engine.vibrate?.(10);
+        s.snackbar?.('Your story is up'); s.engine.vibrate?.(10); awardPoints(s, 'story');
       } });
     };
     return {
@@ -11851,7 +12177,7 @@ registerBehavior('uiComposer', {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
           const ok = postComposer(s, { me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
-            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
+            onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });
           if (ok) return;
         }
@@ -13311,7 +13637,7 @@ registerBehavior('uiShowIf', {
   create(p) {
     let shown = null, drag = null, vel = 0, maxS = 0, barT = -9, goal = null, pulled = false, refreshT = -9, firstDone = false;
     const D = (d) => d / clamp(+p.animSpeed || 1, 0.25, 3); // Transition speed
-    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick', 'uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']; // (a feed scrolls itself: the page doesn't move with it)
+    const SCROLLERS = ['uiScroll', 'uiDataList', 'uiList', 'uiPager', 'uiCarousel', 'uiSlider', 'uiForm', 'uiSheet', 'uiPanel', 'uiSpinWheel', 'uiColorPicker', 'joystick', 'uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']; // (a feed scrolls itself: the page doesn't move with it)
     const ownsDrag = (s, e, d) => s.entities.some((q) => q !== e && q.visible && q.ui && !q._parentHidden && q.behaviors.some((b) => SCROLLERS.includes(b.type)) && isInside(q, e) && hitTest(s, q, d.x, d.y));
     const isInside = (q, e) => { for (let a = q.parentEnt, n = 0; a && n < 40; a = a.parentEnt, n++) if (a === e) return true; return false; };
     /** How far what is inside reaches below the page's bottom (UI units). */
@@ -16556,7 +16882,7 @@ export class SocialGraph {
   follow(who, name = '') {
     const me = this.me(), b = this.h(who); if (!b || b === this.h(me.handle) || this.isFollowing(b)) return false;
     this.add('follows', { follower: me.handle, followee: b, follower_name: me.author, followee_name: name || b });
-    this.notify(b, 'follow'); this.engine.scene?.emit('followed', b); return true;
+    this.notify(b, 'follow'); this.engine.scene?.emit('followed', b); if (this.engine.scene) awardPoints(this.engine.scene, 'follow'); return true;
   }
   unfollow(who) { const a = this.h(this.me().handle), b = this.h(who); this.remove('follows', (r) => this.h(r.follower) === a && this.h(r.followee) === b); this.engine.scene?.emit('unfollowed', b); }
   toggleFollow(who, name) { if (this.isFollowing(who)) { this.unfollow(who); return false; } this.follow(who, name); return true; }
@@ -22298,7 +22624,7 @@ export class Engine {
     this.root = document.createElement('div');
     this.root.className = 'pocket-root';
     if (!document.getElementById('pocket-native-css')) { const st = document.createElement('style'); st.id = 'pocket-native-css'; // a press shows on every button (like a native app), no grey flash, no text picking
-      st.textContent = '.pocket-root button{-webkit-tap-highlight-color:transparent;transition:opacity .14s ease,background-color .14s ease,transform .14s ease}.pocket-root button:active:not(:disabled){opacity:.55}.pocket-root input,.pocket-root textarea{-webkit-user-select:text;user-select:text}.pocket-root [data-pocket-sheet] *{-webkit-touch-callout:none}.pocket-root img{-webkit-user-drag:none;user-select:none}';
+      st.textContent = '.pocket-root{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;font-kerning:normal}.pocket-root button{-webkit-tap-highlight-color:transparent;transition:opacity .14s ease,background-color .14s ease,transform .14s ease}.pocket-root button:active:not(:disabled){opacity:.55}.pocket-root input,.pocket-root textarea{-webkit-user-select:text;user-select:text}.pocket-root [data-pocket-sheet] *{-webkit-touch-callout:none}.pocket-root img{-webkit-user-drag:none;user-select:none}';
       document.head.append(st); }
     const fixed = this.parent === document.body;
     this.rootBase = `position:${fixed ? 'fixed' : 'absolute'};overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;`;
@@ -22743,7 +23069,7 @@ export class Engine {
   }
 
   navTick(s) {
-    const inp = this.input; this.nativeChrome(s);
+    const inp = this.input; this.nativeChrome(s); if (s.settings.app) pointsSync(s);
     if (s.settings.edgeSwipeBack !== false && s.canGoBack()) {
       for (const u of inp.ups) if (u.sx < 28 && u.x - u.sx > 70 && Math.abs(u.y - u.sy) < 90 && u.time < 0.7) { s.navBack(); inp.taps.length = 0; break; }
     }

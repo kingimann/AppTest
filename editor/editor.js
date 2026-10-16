@@ -5532,6 +5532,8 @@ function openFileMenu() {
     { icon: 'play', label: 'Play', fn: play },
     { icon: 'download', label: 'Build HTML', k: 'offline file', fn: exportHTML },
     { icon: 'download', label: 'Build Web App (.zip)', k: 'for a website', fn: exportWebApp },
+    { icon: 'globe', label: 'Test in Safari', k: 'the built web app', fn: testInSafari },
+    { icon: 'link', label: 'Copy test link', k: 'open it on your iPhone', fn: copyTestLink },
     { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
@@ -6683,6 +6685,26 @@ async function exportAndroid() {
   } catch (err) { toast('Could not make the Android Studio project: ' + err.message); }
 }
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
+/** Build the web app exactly as it ships and open it in a new browser tab (Safari on an iPhone), to try it before uploading. */
+async function testInSafari() {
+  const w = window.open('', '_blank'); // (opened straight away, inside the tap, so Safari doesn't block it)
+  try {
+    toast('Building the web app…'); const b = await buildHTML(), url = URL.createObjectURL(new Blob([b.html], { type: 'text/html' }));
+    if (w && !w.closed) w.location.href = url; else location.assign(url);
+    noteBuild('html', b.html.length); toast(`Opened in a new tab (${kb(b.html.length)}). Close the tab to come back.`);
+  } catch (err) { w?.close?.(); toast('Build failed: ' + err.message); }
+}
+/** A link that opens this project in the Pocket player (the game is packed into the link): send it to your iPhone and open it in Safari. */
+async function copyTestLink() {
+  try {
+    const { game } = buildGameJSON(), z = (await gzip64(JSON.stringify(game))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const url = new URL('../play.html', location.href).href + '#p=' + z; // (the player sits next to the editor folder)
+    if (url.length > 1.5e6) { toast('The game is too big for a link (pictures and sounds). Use Test in Safari or Build Web App instead.'); return; }
+    const title = (buildOpts().title || root.name || 'My app') + ' (test)';
+    if (navigator.share && /iPhone|iPad|Android|Mobi/i.test(navigator.userAgent)) { await navigator.share({ title, url }).catch(() => {}); return; }
+    await navigator.clipboard.writeText(url); toast(`Test link copied (${kb(url.length)}): open it in Safari on your phone`);
+  } catch (err) { toast('Could not make the link: ' + err.message); }
+}
 async function exportHTML() {
   try { const b = await buildHTML(); download(buildFileName(), b.html, 'text/html'); noteBuild('html', b.html.length); toast(`Build complete (${kb(b.html.length)}): open the file in any browser`); }
   catch (err) { toast('Build failed: ' + err.message); }
@@ -6953,6 +6975,8 @@ function openBuildSettings() {
   openDialog('Build Settings', [
     h('h4', { class: 'bt-q' }, 'What are you making?'),
     h('div', { class: 'build-targets' }, BUILD_TARGETS.map(([k, ic, label, desc]) => h('button', { type: 'button', class: 'bt' + (k === target ? ' on' : ''), onclick: () => { B().target = k; changed(); redo(); } }, icon(ic), h('b', {}, label), h('small', {}, desc)))),
+    h('div', { class: 'build-test' }, h('div', {}, h('b', {}, 'Try it in Safari first'), h('small', {}, 'Builds the web app and opens it in a new tab, exactly as people will get it. Or copy a test link and open it on your iPhone.')),
+      h('div', { class: 'btns' }, h('button', { type: 'button', class: 'btn primary', onclick: testInSafari }, icon('globe'), 'Test in Safari'), h('button', { type: 'button', class: 'btn', onclick: copyTestLink }, icon('link'), 'Copy test link'))),
     last && h('p', { class: 'desc build-last' }, `Last built ${ago(last.at)}: ${BUILD_TARGETS.find((t) => t[0] === last.target)?.[2] || last.target}, version ${last.version}, ${kb(last.size || 0)}`),
     (o.history || []).length > 1 && h('details', { class: 'build-hist' }, h('summary', {}, `Recent builds (${o.history.length})`),
       h('div', {}, o.history.map((b) => h('div', { class: 'bh-row' }, h('b', {}, BUILD_TARGETS.find((t) => t[0] === b.target)?.[2] || b.target), h('span', {}, `v${b.version}`), h('span', {}, kb(b.size || 0)), h('small', {}, ago(b.at)))))),
@@ -7806,7 +7830,7 @@ function renamePage(pg) {
 }
 // ---- Content on a page: blocks that stack under what's there (or under the selected one), rows you can reorder ----
 const PAGE_GAP = 16;
-const PAGE_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiFriends', 'uiDataList', 'uiPhotoGrid']); // long lists: on a page they fill the room under the rest
+const PAGE_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiDataList', 'uiPhotoGrid']); // long lists: on a page they fill the room under the rest
 const PAGE_SKIP = new Set(['uiShowIf', 'uiBottomNav', 'uiSideBar', 'uiAppBar', 'uiPopup', 'uiSheet', 'uiNotifications', 'uiScreenFX', 'uiTutorial', 'uiOffscreen', 'uiCrosshair']); // bars, pop-ups and screen effects aren't page content
 /** The page shown in the UI editor (or the one the selected object is on). */
 function shownPageEnt() {

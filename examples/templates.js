@@ -162,7 +162,7 @@ function blankApp() {
 
 /** A social app: a timeline with stories and a post box, a photo feed, a friends feed of cards, and a profile with a photo grid. */
 /** The App Bar with ☰ (opens the Side Menu) on pages with nowhere to go back to. */
-const menuBar = (bar) => ({ ...bar, behaviors: [{ ...bar.behaviors[0], left: 'back, else menu' }] });
+const menuBar = (bar) => ({ ...bar, behaviors: [{ ...bar.behaviors[0], left: 'back, else menu', look: 'x', brandPages: 'home', iconColor: INK }] });
 function socialApp() {
   const A = '#1d9bf0', t = Date.now(), H = 3600e3;
   const feed = (id, look, top, o = {}) => ({ id, name: 'Feed', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, marginTop: top, marginBottom: 0, shape: { type: 'rect', w: 400, h: 500, radius: 0, fill: '' },
@@ -173,7 +173,7 @@ function socialApp() {
     collections: [{ name: 'Posts', fields: [{ name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Color', type: 'text' },
       { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Comments', type: 'number' }, { name: 'Reposts', type: 'number' }, { name: 'Reposted', type: 'yes/no' }, { name: 'Saved', type: 'yes/no' }, { name: 'Verified', type: 'yes/no' },
       { name: 'Location', type: 'text' }, { name: 'Poll', type: 'text' }, { name: 'Votes', type: 'text' }, { name: 'Voted', type: 'number' }, { name: 'Reaction', type: 'text' }, { name: 'Following', type: 'yes/no' },
-      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Reposters', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }, { name: 'Quote', type: 'text' }, { name: 'Reply To', type: 'text' }],
+      { name: 'Live', type: 'yes/no' }, { name: 'Reposted By', type: 'text' }, { name: 'Reposters', type: 'text' }, { name: 'Audience', type: 'text' }, { name: 'Reply Setting', type: 'text' }, { name: 'Background', type: 'text' }, { name: 'Top Comment', type: 'text' }, { name: 'Link', type: 'text' }, { name: 'Link Title', type: 'text' }, { name: 'Link Image', type: 'text' }, { name: 'Quote', type: 'text' }, { name: 'Reply To', type: 'text' }],
     rows: [
       { author: 'Maya Chen', handle: 'maya', text: 'Sunrise hike, worth the 5am alarm. #sunrise #hiking', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, comments: 48, reposts: 120, verified: true, following: true, views: 48200, location: 'Banff', top_comment: 'Leo Park: Unreal colours!', _at: t - 0.15 * H },
       { author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', views: 21300, likes: 312, liked: true, comments: 27, reposts: 41, following: true, poll: 'Dark mode | Faster sync | Fewer bugs', votes: '64, 21, 33', _at: t - 2.5 * H },
@@ -184,6 +184,7 @@ function socialApp() {
       { author: 'Leo Park', handle: 'leop', text: 'Full list of changes on the blog 👇 #indiedev', views: 512000, likes: 51, comments: 2, reposts: 3, following: true, reply_to: 's5', link: 'https://example.com/changelog', link_title: 'What’s new in 2.0', link_image: '📝', _at: t - 2.4 * H },
       { author: 'Ava Brooks', handle: 'avab', text: 'Adding this to my list of places to see 😍 #hiking', views: 3100, likes: 64, comments: 5, reposts: 2, following: false, quote: 's0', _at: t - 30 * H },
       { author: 'Alex Rivera', handle: 'alex', text: 'Just joined! Say hi 👋 #newhere', views: 2200, likes: 3, comments: 1, reposts: 0, following: true, _at: t - 5 * H },
+      { author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Good morning everyone! What are you up to this weekend? ☀️', background: 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', views: 3400, likes: 210, comments: 14, reposts: 5, following: true, _at: t - 1.2 * H },
     ] },
     { name: 'Messages', fields: [{ name: 'Chat', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Media', type: 'text' }, { name: 'Reaction', type: 'text' },
       { name: 'Reply To', type: 'text' }, { name: 'Reply Text', type: 'text' }, { name: 'Reply Author', type: 'text' }, { name: 'Edited', type: 'yes/no' }, { name: 'Deleted', type: 'yes/no' }, { name: 'System', type: 'yes/no' }, { name: 'Members', type: 'text' }, { name: 'Title', type: 'text' }],
@@ -240,7 +241,7 @@ function socialApp() {
       menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\npost = Post\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
-        { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', field: '@field', text: MUTED, accent: '@accent' }] },
+        { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', audience: true, replyControl: true, backgrounds: true, field: '@field', text: MUTED, accent: '@accent' }] },
         feed('feed-home', 'timeline', 156, { tabs: 'For you |\nFollowing | following', tabStyle: 'underline', profilePage: 'user', myProfilePage: 'profile', savedPage: 'saved', actions: 'comment, repost, like, views, save, share' }),
       ]),
       ...app.page('p-reels', 'reels', false, [feed('feed-reels', 'reels', 0, { profilePage: 'user', myProfilePage: 'profile' })]),

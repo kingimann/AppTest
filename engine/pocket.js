@@ -8250,6 +8250,16 @@ const APPBAR_STYLES = ['solid', 'transparent', 'glass', 'large title', 'centered
 registerBehavior('uiAppBar', {
   label: 'App Bar', description: 'A top bar like a phone app: ☰ (opens the Side Menu) or ‹ Back on the left, a logo, the page title and subtitle, and action buttons with badges. It can hide itself while scrolling or when idle and come back. Works with Bottom Nav and Side Menu: the title follows the page, and other UI stays below it.',
   params: [
+    { key: 'look', label: 'Look', type: 'select', options: ['standard', 'x', 'facebook', 'instagram', 'threads'], default: 'standard', info: { standard: 'Button, title and action icons.', x: 'Your avatar on the left (opens the Side Menu), a logo in the middle, one icon on the right (X).', facebook: 'A big wordmark on the left and round grey icon buttons on the right (Facebook).', instagram: 'A wordmark in a script font on the left and plain icons on the right (Instagram).', threads: 'Just a logo in the middle (Threads).' } },
+    { key: 'brandPages', label: 'Show the logo / wordmark on pages (comma list, blank = all)', type: 'text', default: 'home', showIf: (b) => b.look && b.look !== 'standard', info: 'Other pages show their title (and ‹ Back), like X and Facebook do.' },
+    { key: 'wordmark', label: 'Wordmark (blank = the app name)', type: 'text', default: '', showIf: (b) => ['facebook', 'instagram'].includes(b.look) },
+    { key: 'wordmarkFont', label: 'Wordmark font', type: 'select', options: ['bold', 'rounded', 'serif', 'script', 'condensed', 'mono'], default: 'bold', showIf: (b) => ['facebook', 'instagram'].includes(b.look) },
+    { key: 'wordmarkSize', label: 'Wordmark size', type: 'number', default: 28, range: [16, 44], step: 1, showIf: (b) => ['facebook', 'instagram'].includes(b.look) },
+    { key: 'wordmarkColor', label: 'Wordmark colour (blank = accent for facebook, title colour otherwise)', type: 'color', default: '', optional: true, showIf: (b) => ['facebook', 'instagram'].includes(b.look) },
+    { key: 'leftAvatar', label: 'Your avatar instead of ☰ (opens the Side Menu)', type: 'select', options: ['for the look', 'yes', 'no'], default: 'for the look' },
+    { key: 'avatar', label: 'Avatar picture ({variables} work, blank = initials of {playerName})', type: 'text', default: '' },
+    { key: 'iconStyle', label: 'Icon buttons', type: 'select', options: ['for the look', 'plain', 'circles', 'outlined circles'], default: 'for the look' },
+    { key: 'iconBg', label: 'Circle colour (blank = soft grey)', type: 'color', default: '', optional: true, group: 'Colours' },
     { key: 'title', label: 'Title (blank = the page\'s name; variables in braces)', type: 'text', default: '' },
     { key: 'subtitle', label: 'Subtitle (variables in braces)', type: 'text', default: '' },
     { key: 'var', label: 'Page variable', type: 'text', default: 'page', suggest: 'vars' },
@@ -8342,25 +8352,27 @@ registerBehavior('uiAppBar', {
       },
       drawUI(ctx, e, s) {
         if (s.engine.editing) sizeBar(e);
-        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = p.text || '#ffffff', icol = p.iconColor || col, acc = p.accent || '#4fa3ff', isz = +p.iconSize || 24;
+        const E = s.engine, G = geo(e), st = p.style || 'solid', K = uiK(E.safe), safeT = p.fillSafe !== false ? (E.safe?.top || 0) / K : 0, col = tok(p.text || '#ffffff'), icol = tok(p.iconColor) || col, acc = tok(p.accent || '#4fa3ff'), isz = +p.iconSize || 24;
+        const look = p.look || 'standard', brand = look !== 'standard' && (!String(p.brandPages ?? 'home').trim() || list(p.brandPages ?? 'home').some((v) => sameVal(s.vars[p.var], v))), circ = (p.iconStyle && p.iconStyle !== 'for the look' ? p.iconStyle : look === 'facebook' ? 'circles' : 'plain'), useAv = p.leftAvatar === 'yes' || (p.leftAvatar !== 'no' && look === 'x');
         if (hide > 0.99) return;
         BH.apply(ctx, hide, -(G.h + safeT + 10));
         const R = +p.radius || 0, rr = (x, y, w, h) => { ctx.beginPath(); if (R && ctx.roundRect) ctx.roundRect(x, y, w, h, [0, 0, R, R]); else ctx.rect(x, y, w, h); };
         if (st !== 'transparent') {
           const sh = p.shadow === 'never' || p.shadow === false ? 0 : p.shadow === 'once scrolled' ? clamp(scrolled * 40, 0, 1) : 1;
           if (sh && st !== 'glass') { ctx.shadowColor = `rgba(0,0,0,${0.35 * sh})`; ctx.shadowBlur = 12; ctx.shadowOffsetY = 2; }
-          let fill = st === 'glass' ? withAlpha('#ffffff', 0.1) : p.bg || '#12141f';
-          if (p.bg2 && st !== 'glass') { const g = ctx.createLinearGradient(G.x, 0, G.x + G.w, 0); g.addColorStop(0, p.bg || '#12141f'); g.addColorStop(1, p.bg2); fill = g; }
+          let fill = st === 'glass' ? withAlpha('#ffffff', 0.1) : tok(p.bg || '#12141f');
+          if (p.bg2 && st !== 'glass') { const g = ctx.createLinearGradient(G.x, 0, G.x + G.w, 0); g.addColorStop(0, tok(p.bg || '#12141f')); g.addColorStop(1, tok(p.bg2)); fill = g; }
           const ba = ctx.globalAlpha; ctx.globalAlpha *= clamp(p.barOpacity ?? 1, 0, 1);
           ctx.fillStyle = fill; rr(G.x, G.y - safeT, G.w, G.h + safeT); ctx.fill(); ctx.shadowColor = 'transparent'; ctx.globalAlpha = ba;
-          if ((p.border !== false || st === 'glass') && !R) { ctx.fillStyle = p.borderColor || 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')'; ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
+          if ((p.border !== false || st === 'glass') && !R) { ctx.fillStyle = tok(p.borderColor) || (isDark(s) ? 'rgba(255,255,255,' + (st === 'glass' ? 0.22 : 0.08) + ')' : 'rgba(0,0,0,0.08)'); ctx.fillRect(G.x, G.y + G.h - 1, G.w, 1); }
         }
         hits = [];
         const bigNow = big() && (p.collapse === false || shrink < 0.99), rowH = Math.min(G.h, 56), rowY = big() ? G.y + rowH / 2 : G.y + G.h / 2, lk = leftKind(s);
         const button = (key, icon, x, msg, badge) => {
           const pr = press.get(key) || 0, lit = key === 'left' && lk === 'menu' && s.openMenus?.has(p.menuMessage || 'menu');
+          if (circ !== 'plain' && key !== 'left') { ctx.save(); ctx.beginPath(); ctx.arc(x, rowY, isz * 0.83, 0, Math.PI * 2); if (circ === 'circles') { ctx.fillStyle = tok(p.iconBg) || (isDark(s) ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'); ctx.fill(); } else { ctx.strokeStyle = tok(p.iconBg) || withAlpha(icol.startsWith('#') ? icol : '#888888', 0.35); ctx.lineWidth = 1.4; ctx.stroke(); } ctx.restore(); }
           if (pr || lit) { ctx.save(); ctx.globalAlpha *= lit ? 0.25 : 0.2 * pr; ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(x, rowY, isz * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.restore(); }
-          drawNavIcon(ctx, icon, x, rowY, isz, lit ? acc : icol);
+          drawNavIcon(ctx, icon, x, rowY, circ !== 'plain' && key !== 'left' ? isz * 0.82 : isz, lit ? acc : icol);
           const bv = badge ? s.vars[badge] : null;
           if (bv != null && bv !== '' && bv !== 0 && bv !== false && bv !== '0') {
             const n = +bv, t = Number.isFinite(n) && bv !== true ? (n > 99 ? '99+' : String(Math.round(n))) : '', bx = x + isz * 0.45, by = rowY - isz * 0.45;
@@ -8370,9 +8382,23 @@ registerBehavior('uiAppBar', {
           hits.push({ key, x, y: rowY, r: Math.max(22, isz), msg });
         };
         let lx = G.x + 10;
-        if (lk) { button('left', lk === 'back' ? 'back' : lk === 'custom' ? p.leftIcon || 'gear' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
-        let rx = G.x + G.w - 28;
-        A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= 46; });
+        if (lk === 'menu' && useAv) { const d = isz * 1.35, nm = fillTemplate('{playerName}', s.vars), pic = fillTemplate(String(p.avatar || ''), s.vars).trim(), lit = s.openMenus?.has(p.menuMessage || 'menu'); miniAvatar(ctx, /[{}]/.test(nm) ? 'Me' : nm, G.x + 14 + d / 2, rowY, d, isPic(pic) ? pic : '', lit ? acc : null); hits.push({ key: 'left', x: G.x + 14 + d / 2, y: rowY, r: Math.max(22, d / 2 + 4), msg: null }); lx = G.x + 24 + d; }
+        else if (lk && !(brand && (look === 'facebook' || look === 'instagram') && lk === 'menu' && p.left !== 'menu')) { button('left', lk === 'back' ? 'back' : lk === 'custom' ? p.leftIcon || 'gear' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
+        let rx = G.x + G.w - (circ !== 'plain' ? 32 : 28);
+        A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= circ !== 'plain' ? 48 : 46; });
+        if (brand) { // the brand: a wordmark on the left (Facebook, Instagram) or a logo in the middle (X, Threads)
+          if (look === 'facebook' || look === 'instagram') {
+            const wm = fillTemplate(String(p.wordmark || s.settings.appName || s.settings.title || titleOf(s) || 'app'), s.vars), size = +p.wordmarkSize || (look === 'facebook' ? 28 : 26), fam = { bold: THEME.font, rounded: '"SF Pro Rounded","Nunito","Varela Round",system-ui,sans-serif', serif: 'Georgia,"Times New Roman",serif', script: '"Snell Roundhand","Brush Script MT","Segoe Script","Lobster",cursive', condensed: '"Avenir Next Condensed","Arial Narrow",sans-serif', mono: 'ui-monospace,Menlo,monospace' }[p.wordmarkFont || (look === 'instagram' ? 'script' : 'bold')] || THEME.font;
+            ctx.save(); ctx.font = `${p.wordmarkFont === 'script' || (!p.wordmarkFont && look === 'instagram') ? 600 : 900} ${size}px ${fam}`; ctx.fillStyle = tok(p.wordmarkColor) || (look === 'facebook' ? acc : col); ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; const wx = lk === 'back' || useAv || (lk && p.left === 'menu') ? lx + 4 : G.x + 16; ctx.fillText(wm, wx, rowY + 1, Math.max(60, rx + 20 - wx - 8)); ctx.restore();
+            if (p.titleTap) hits.push({ key: 'title', x: wx + 60, w: 120, y: rowY, r: 20, msg: p.titleTap });
+          } else {
+            const lg = p.logo || '', sz = isz * 1.2;
+            if (lg && drawNavIcon) { if (!drawIco(ctx, lg, G.x + G.w / 2, rowY, sz, col, { stroke: 2.2 })) drawNavIcon(ctx, lg, G.x + G.w / 2, rowY, sz, col); }
+            else UK.text(ctx, fillTemplate(String(s.settings.appName || titleOf(s) || ''), s.vars), G.x + G.w / 2, rowY + 1, { size: (+p.titleSize || 19) + 1, weight: 900, color: col });
+            if (p.titleTap) hits.push({ key: 'title', x: G.x + G.w / 2, w: 80, y: rowY, r: 20, msg: p.titleTap });
+          }
+          return;
+        }
         const title = titleOf(s), sub = p.subtitle ? fillTemplate(String(p.subtitle), s.vars) : '', tsz = +p.titleSize || 19, wt = { heavy: 900, normal: 600 }[p.titleWeight] || 800;
         const center = p.titleAlign === 'center' || (p.titleAlign !== 'left' && st === 'centered'), room = center ? Math.max(40, Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2) : Math.max(40, rx + 22 - lx - 12);
         const drawTitle = (x, y, size, align, alpha) => {
@@ -9189,6 +9215,7 @@ function postRecord(me, out, extra = {}) {
   if (out.media?.length) r.media = out.media.join(' | ');
   if (out.poll?.length >= 2) { r.poll = out.poll.join(' | '); r.votes = out.poll.map(() => 0).join(', '); r.voted = 0; }
   if (out.place) r.location = out.place;
+  if (out.audience) r.audience = out.audience; if (out.reply_setting) r.reply_setting = out.reply_setting; if (out.background) r.background = out.background;
   return r;
 }
 /** The first post, then each extra one as a reply to the one before (a thread). */
@@ -9204,7 +9231,7 @@ function postComposer(s, o) {
   const el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
   const btn = (css, text) => { const b = el('button', `border:0;background:none;padding:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;${css || ''}`, text); b.type = 'button'; return b; };
   const DKEY = 'pocket.draft.' + (s.engine.gameKey || 'game') + '.' + (o.draftKey || 'post');
-  let draft = null; if (!o.quote && !o.noDraft) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
+  let draft = null; if (!o.quote && !o.noDraft && o.drafts !== false) try { draft = JSON.parse(localStorage.getItem(DKEY) || 'null'); } catch { /* storage unavailable */ }
   const st = { text: draft?.text || o.text || '', media: (draft?.media || []).filter((m) => !/^(video:)?blob:/.test(m)), poll: draft?.poll || null, place: draft?.place || '', more: draft?.more || [], busy: 0 };
   const wrap = el('div', `position:absolute;inset:0;z-index:55;background:rgba(0,0,0,0);transition:background .25s;font-family:${font};touch-action:auto;`); wrap.dataset.pocketComposer = '1';
   const sheet = el('div', `position:absolute;left:0;right:0;bottom:0;top:0;background:${c.bg};color:${c.text};display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);padding-bottom:env(safe-area-inset-bottom);`);
@@ -9214,26 +9241,44 @@ function postComposer(s, o) {
   let done = false;
   const close = (posted) => {
     if (done) return; done = true;
-    if (!o.quote && !o.noDraft) try { if (!posted && (st.text.trim() || st.media.length || st.poll)) localStorage.setItem(DKEY, JSON.stringify(st)); else localStorage.removeItem(DKEY); } catch { /* full, or storage unavailable */ }
+    if (!o.quote && !o.noDraft && o.drafts !== false) try { if (!posted && (st.text.trim() || st.media.length || st.poll)) localStorage.setItem(DKEY, JSON.stringify(st)); else localStorage.removeItem(DKEY); } catch { /* full, or storage unavailable */ }
     if (!posted && draftSaved()) s.snackbar?.('Draft saved');
     sheet.style.transform = 'translateY(100%)'; wrap.style.background = 'rgba(0,0,0,0)'; setTimeout(() => { wrap.remove(); o.onClose?.(); }, 300);
   };
-  const draftSaved = () => !o.quote && !o.noDraft && !!(st.text.trim() || st.media.length || st.poll);
+  const draftSaved = () => !o.quote && !o.noDraft && o.drafts !== false && !!(st.text.trim() || st.media.length || st.poll);
   // top: Cancel … Post
+  const LOOK = o.look || 'x', FB = LOOK === 'facebook';
+  if (LOOK === 'sheet') { sheet.style.top = 'auto'; sheet.style.maxHeight = '78%'; sheet.style.borderRadius = '20px 20px 0 0'; }
   const top = el('div', `flex:none;display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:${HAIR} solid ${c.line};`);
-  const cancel = btn(`font:600 16px ${font};color:${c.text};padding:6px 4px;`, 'Cancel'); cancel.onclick = () => close(false);
-  const post = btn(`font:800 15px ${font};background:${c.acc};color:#fff;padding:9px 18px;border-radius:20px;transition:opacity .2s;`, o.button || 'Post'); post.dataset.post = '1';
-  top.append(cancel, el('div', 'font-weight:800;font-size:16px;', o.quote ? 'Quote' : o.title || 'New post'), post);
+  const cancel = btn(`font:600 16px ${font};color:${c.text};padding:6px 4px;display:flex;align-items:center;`, FB ? '' : o.cancelText || 'Cancel'); if (FB) cancel.innerHTML = svgIcon('x', 24, { stroke: 2.2 }); cancel.setAttribute('aria-label', 'Cancel'); cancel.onclick = () => close(false);
+  const post = btn(o.buttonStyle === 'text' ? `font:800 16px ${font};color:${c.acc};padding:8px 4px;transition:opacity .2s;` : `font:800 15px ${font};background:${c.acc};color:#fff;padding:9px 18px;border-radius:${o.buttonStyle === 'square' ? 8 : 20}px;transition:opacity .2s;`, o.button || 'Post'); post.dataset.post = '1';
+  top.append(cancel, el('div', 'font-weight:800;font-size:16px;', o.quote ? 'Quote' : o.title || (FB ? 'Create post' : 'New post')), post);
   // the writing area
   const body = el('div', 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px 16px;');
   const row = el('div', 'display:flex;gap:12px;'), av = el('div', `flex:none;width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:16px;`);
   { const n = o.me?.author || 'Me'; let h0 = 0; for (const ch of n) h0 = (h0 * 31 + ch.charCodeAt(0)) >>> 0; av.style.background = AVATAR_COLORS[h0 % AVATAR_COLORS.length]; av.textContent = n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join(''); }
   const col = el('div', 'flex:1;min-width:0;');
   col.append(el('div', 'font-weight:800;font-size:15px;margin:2px 0 4px;', o.me?.author || 'Me'));
+  st.audience ||= draft?.audience || o.audienceDefault || 'Everyone'; st.replies ||= draft?.replies || 'Everyone'; st.background ||= draft?.background || '';
+  const chipBtn = (ic, getLabel, opts, set, kind) => { const b0 = btn(`display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:14px;border:1px solid ${withAlpha(c.acc, 0.5)};color:${c.acc};font:700 13px ${font};margin:0 6px 6px 0;`, ''); b0.dataset.composerChip = kind;
+    const paint0 = () => { b0.innerHTML = svgIcon(ic, 14, { stroke: 2.4 }); b0.append(document.createTextNode(getLabel() + ' ▾')); };
+    b0.onclick = () => socialSheet(s, { kind: 'composer-' + kind, title: kind === 'audience' ? 'Who can see your post?' : 'Who can reply?', colors: c, font, items: opts.map(([ic2, l]) => ({ icon: ic2, label: l + (getLabel() === l ? '  ✓' : ''), run: () => { set(l); paint0(); } })) });
+    paint0(); return b0; };
+  if (o.audience && !o.quote) col.append(chipBtn('users', () => st.audience, [['users', 'Everyone'], ['user-plus', 'Followers'], ['user', 'Friends'], ['lock', 'Only me']], (v) => { st.audience = v; }, 'audience'));
+  if (o.replyControl && !o.quote) col.append(chipBtn('comment', () => (st.replies === 'Everyone' ? 'Everyone can reply' : st.replies), [['users', 'Everyone'], ['user-plus', 'People you follow'], ['at', 'Only people you mention']], (v) => { st.replies = v; }, 'replies'));
   const ta = el('textarea', `display:block;width:100%;min-height:90px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:18px/1.4 ${font};padding:0;`);
   ta.placeholder = o.quote ? 'Add a comment…' : o.placeholder || 'What’s happening?'; ta.value = st.text;
   const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.max(90, ta.scrollHeight) + 'px'; };
   col.append(ta); row.append(av, col); body.append(row);
+  // text on a colour (Facebook): short posts without pictures can sit on a coloured background
+  const BGS = ['', '#1877f2', '#f02849', '#45bd62', '#f7b928', '#9360f7', 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', 'linear-gradient(135deg,#00c6ff,#0072ff)', '#111827'];
+  const bgRow = el('div', 'display:none;gap:8px;padding:10px 0 0 54px;overflow-x:auto;scrollbar-width:none;'); bgRow.dataset.bgRow = '1';
+  const paintBg = () => { const can = o.backgrounds && !o.quote && !st.media.length && !st.poll && st.text.length <= 130; bgRow.style.display = o.backgrounds && !o.quote ? 'flex' : 'none'; bgRow.style.opacity = can ? '1' : '.35'; if (!can && st.background) st.background = '';
+    const on = !!st.background; ta.style.cssText = on ? `display:block;width:100%;min-height:200px;border:0;outline:none;resize:none;color:#fff;font:800 26px/1.3 ${font};padding:28px 18px;text-align:center;border-radius:14px;background:${st.background};` : `display:block;width:100%;min-height:90px;border:0;outline:none;resize:none;background:transparent;color:${c.text};font:18px/1.4 ${font};padding:0;`;
+    for (const sw of bgRow.children) sw.style.outline = sw.dataset.bg === st.background ? `3px solid ${c.acc}` : 'none'; };
+  for (const bgc of BGS) { const sw = btn(`flex:none;width:32px;height:32px;border-radius:9px;outline-offset:2px;background:${bgc || c.field};${bgc ? '' : `border:1px solid ${c.line};`}`, ''); sw.dataset.bg = bgc; sw.setAttribute('aria-label', bgc ? 'Background colour' : 'No background'); if (!bgc) sw.innerHTML = svgIcon('ban', 18); sw.style.color = c.sub; sw.style.display = 'flex'; sw.style.alignItems = 'center'; sw.style.justifyContent = 'center';
+    sw.onclick = () => { if (st.media.length || st.poll || st.text.length > 130) return; st.background = bgc; paintBg(); grow(); ta.focus(); }; bgRow.append(sw); }
+  body.append(bgRow);
   const mediaBox = el('div', 'display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:12px 0 0 54px;');
   const pollBox = el('div', 'margin:12px 0 0 54px;'), placeBox = el('div', 'margin:10px 0 0 54px;'), quoteBox = el('div', 'margin:12px 0 0 54px;');
   const gifBox = el('div', 'margin:10px 0 0 54px;'), threadBox = el('div', 'margin-top:6px;');
@@ -9252,15 +9297,23 @@ function postComposer(s, o) {
   const bg = document.createElementNS(NS, 'circle'), fg = document.createElementNS(NS, 'circle');
   for (const [k0, v] of Object.entries({ cx: 15, cy: 15, r: 12, fill: 'none', 'stroke-width': 3 })) { bg.setAttribute(k0, v); fg.setAttribute(k0, v); }
   bg.setAttribute('stroke', c.line); fg.setAttribute('stroke', c.acc); fg.setAttribute('stroke-linecap', 'round'); fg.setAttribute('transform', 'rotate(-90 15 15)'); fg.setAttribute('stroke-dasharray', String(2 * Math.PI * 12));
-  ring.append(bg, fg); const left = el('div', `font:700 13px ${font};min-width:28px;text-align:right;`); bar.append(left, ring);
-  sheet.append(top, body, bar);
+  ring.append(bg, fg); const left = el('div', `font:700 13px ${font};min-width:28px;text-align:right;`); if (o.counter !== 'hidden') bar.append(left); if (!o.counter || o.counter === 'ring') bar.append(ring);
+  const bEmo = o.emoji !== false ? tool('smile', 'Emoji') : null; if (bEmo) bar.insertBefore(bEmo, bar.children[Math.max(0, [...bar.children].findIndex((q) => q.style.flex === '1 1 0%' || q.style.flex === '1'))]);
+  const tray = mediaTray(s, { colors: c, font, upload: o.upload, gifs: !!bGif, height: 280, onEmoji: (em) => { const a0 = ta.selectionStart ?? ta.value.length, b0 = ta.selectionEnd ?? a0; ta.value = ta.value.slice(0, a0) + em + ta.value.slice(b0); st.text = ta.value; try { ta.setSelectionRange(a0 + em.length, a0 + em.length); } catch { /* not focused */ } grow(); sync(); },
+    onGif: (u) => { if (st.media.length >= 4 || st.poll) return; st.media.push(u); st.background = ''; paintMedia(); sync(); }, onToggle: (k) => { if (bEmo) bEmo.style.color = k === 'emoji' ? c.text : c.acc; if (bGif) bGif.style.color = k === 'gif' ? c.text : c.acc; if (k) ta.blur(); } });
+  if (bEmo) bEmo.onclick = () => tray.toggle('emoji'); ta.addEventListener('focus', () => tray.close());
+  if (FB) { // Facebook: “Add to your post” with coloured icons
+    bar.style.cssText = `flex:none;display:flex;align-items:center;gap:2px;padding:10px 12px;margin:0 12px 10px;border:1px solid ${c.line};border-radius:12px;`; bar.prepend(el('div', `font:700 15px ${font};margin-right:auto;`, 'Add to your post'));
+    const tint = (b0, col0) => { if (b0) b0.style.color = col0; }; tint(bPic, '#45bd62'); tint(bGif, '#1877f2'); tint(bPoll, '#f7b928'); tint(bPlace, '#f02849'); tint(bEmo, '#f7b928'); tint(bThread, '#9360f7');
+    for (const q of [...bar.children]) if (q.style.flex === '1 1 0%' || q.style.flex === '1') q.remove(); }
+  sheet.append(top, body, bar, tray.el);
   // keep everything up to date
   const pollOpts = () => (st.poll || []).map((q) => q.trim()).filter(Boolean);
   const ready = () => !st.busy && (st.text.trim().length > 0 || st.media.length > 0 || o.quote) && st.more.every((q) => q.length <= max) && st.text.length <= max && (!o.noDraft || st.text !== (o.text || '') || o.allowSame) && (!st.poll || pollOpts().length >= 2);
   const sync = () => {
     const n = st.text.length, k = Math.min(1, n / max), L = 2 * Math.PI * 12; fg.setAttribute('stroke-dashoffset', String(L * (1 - k)));
     fg.setAttribute('stroke', n > max ? '#f4212e' : n > max - 20 ? '#ffad1f' : c.acc); left.textContent = n > max - 20 ? String(max - n) : ''; left.style.color = n > max ? '#f4212e' : c.sub;
-    const ok = ready(); post.disabled = !ok; post.style.opacity = ok ? '1' : '.45';
+    const ok = ready(); post.disabled = !ok; post.style.opacity = ok ? '1' : '.45'; paintBg?.();
     if (bPic) bPic.style.opacity = st.media.length >= 4 || st.poll ? '.35' : '1'; if (bPoll) bPoll.style.opacity = st.media.length ? '.35' : '1';
   };
   const paintMedia = () => {
@@ -9314,7 +9367,7 @@ function postComposer(s, o) {
     add.onclick = go; inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } }; x.onclick = () => { gifBox.dataset.editing = ''; paintGif(); };
     row0.append(inp, add, x); gifBox.append(row0); setTimeout(() => inp.focus(), 30);
   };
-  bGif && (bGif.onclick = () => { if (st.media.length >= 4 || st.poll) return; gifBox.dataset.editing = '1'; paintGif(); });
+  bGif && (bGif.onclick = () => { if (st.media.length >= 4 || st.poll) return; tray.toggle('gif'); }); // (the GIF finder opens in place, beside the emoji)
   const paintThread = () => {
     threadBox.textContent = '';
     st.more.forEach((q, i) => {
@@ -9331,7 +9384,7 @@ function postComposer(s, o) {
   bPlace && (bPlace.onclick = () => { placeBox.dataset.editing = '1'; paintPlace()?.focus(); });
   post.onclick = () => {
     if (!ready()) return;
-    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim(), thread: st.more.map((q) => q.trim()).filter(Boolean) };
+    const out = { text: st.text.trim(), media: st.media.slice(), poll: st.poll ? pollOpts() : null, place: String(st.place || '').trim(), thread: st.more.map((q) => q.trim()).filter(Boolean), ...(o.audience && st.audience !== 'Everyone' ? { audience: st.audience } : {}), ...(o.replyControl && st.replies !== 'Everyone' ? { reply_setting: st.replies } : {}), ...(st.background && !st.media.length ? { background: st.background } : {}) };
     if (o.onPost?.(out) === false) return; close(true);
   };
   if (st.place) placeBox.dataset.editing = '1';
@@ -9451,7 +9504,7 @@ function socialSheet(s, o) {
       top.append(fb);
     }
     box.append(top);
-    if (P.text) box.append(el('div', 'font-size:18px;line-height:1.4;margin-top:12px;white-space:pre-wrap;word-wrap:break-word;', P.text));
+    if (P.text) box.append(el('div', P.background ? `font:800 24px/1.3 ${font};margin-top:12px;white-space:pre-wrap;word-wrap:break-word;color:#fff;text-align:center;padding:48px 20px;border-radius:14px;background:${P.background};` : 'font-size:18px;line-height:1.4;margin-top:12px;white-space:pre-wrap;word-wrap:break-word;', P.text));
     if (P.media?.length) box.append(gallery(P));
     // a poll
     if (o.poll) {
@@ -9608,6 +9661,7 @@ function socialSheet(s, o) {
     paint(); requestAnimationFrame(() => { const rows = [...list.querySelectorAll('[data-comment]')].filter((q) => q.dataset.comment === (v || '')); (rows[rows.length - 1] || list).scrollIntoView?.({ block: 'nearest', behavior: 'smooth' }); });
   };
   inp.addEventListener('input', sync); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); submit(); } }); send.onclick = submit;
+  if (o.canReply === false) { foot.append(el('div', `display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 16px calc(14px + env(safe-area-inset-bottom));color:${c.sub};font:600 14px ${font};`, '')); foot.lastChild.append(iconSpan('lock', 16), document.createTextNode(o.replyNote || 'The author limited who can reply')); sheet.append(foot); return Object.assign(api, { paint }), (paint(), api); }
   inRow.append(avatar(o.me?.author || 'Me', o.me?.avatar, 32), inp, send, cFile); const tools = el('div', 'display:flex;align-items:center;gap:2px;padding:0 10px 8px 54px;'); tools.append(...[bPhoto, bEmo, bGifC].filter(Boolean)); foot.append(chipRow, emo, attRow, inRow, tools, tray.el); sheet.append(foot);
   const fc = o.focusComment ?? s.engine._focusComment; s.engine._focusComment = null; // opened from a saved comment: show it
   if (fc != null) { const A0 = o.comments(); let cm = A0.find((q) => String(q.id) === String(fc)), n0 = 0; while (cm?.parent && n0++ < 20) { openThreads.add(String(cm.parent)); cm = A0.find((q) => String(q.id) === String(cm.parent)); } }
@@ -9752,6 +9806,7 @@ registerBehavior('uiFeed', {
       let P = has(s) ? D(s).query(p.collection, { filter, sort: p.sort || 'newest first', vars: s.vars }) : (sample ||= SAMPLE_POSTS());
       if (onlyFollowing) { const SG = s.engine.social, me0 = meOf(s).handle; P = P.filter((r) => who(r) === me0 || r._mine || SG?.isFollowing(who(r)) || truthy(F(r, 'following'))); } // people I follow (the social graph), and me
       if (onlySaved) P = P.filter((r) => bmHas(s, 'post', r.id)); // my bookmarks
+      P = P.filter((r) => canSee(s, r)); // (posts for followers, friends or only their author)
       repostCtx = '';
       const hm = p.withReposts !== false && has(s) && String(p.filter || '').match(/^\s*handle\s*=\s*(.+?)\s*$/i);
       if (hm) { const h = handleOf(fillTemplate(hm[1], s.vars)); if (h && !/[{}]/.test(h)) { repostCtx = h; const have = new Set(P.map((q) => q.id)), extra = D(s).rows(p.collection).filter((q) => !have.has(q.id) && reposters(q).includes(h)); if (extra.length) P = [...P, ...extra].sort((a, b) => (+b._at || 0) - (+a._at || 0)); } } // a person's page: their posts and what they reposted
@@ -9863,6 +9918,9 @@ registerBehavior('uiFeed', {
     const when = (r) => { const t = F(r, 'time'), f = p.time || 'short (3h)'; if (f === 'hidden' || t == null || t === '') return ''; if (f === 'date') return dateTextOf(+t || textToDate(t), 'date (12 Mar 2026)'); if (f.startsWith('long')) return dateTextOf(+t || textToDate(t), 'relative (3 min ago)'); return shortAgo(+t || textToDate(t)); };
     let sheetUp = false; const cMem = new Map();
     const isMine = (s, r) => !!(r._mine || (who(r) && who(r) === meOf(s).handle));
+    /** Who a post is for (the composer's audience) and who may reply to it. */
+    const canSee = (s, r) => { const a = String(F(r, 'audience') || ''); if (!a || a === 'Everyone' || isMine(s, r)) return true; const SG = s.engine.social; return a === 'Followers' ? !!SG?.isFollowing(who(r)) : a === 'Friends' ? SG?.friendStatus(who(r)) === 'friends' : false; };
+    const canReply = (s, r) => { const v = String(F(r, 'reply_setting') || ''); if (!v || v === 'Everyone' || isMine(s, r)) return true; const me1 = meOf(s).handle.toLowerCase(); return v === 'People you follow' ? !!s.engine.social?.isFollowing(me1, who(r)) : new RegExp('@' + me1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(String(F(r, 'text') || '')); };
     const editIt = (s, r) => {
       sheetUp = true;
       const ok = postComposer(s, { me: meOf(s), max: +p.maxQuote || 280, colors: colorsOf(), font: fontOf(), title: 'Edit post', button: 'Save', text: String(F(r, 'text') || ''), noDraft: true, photos: false, polls: false, places: false,
@@ -9936,10 +9994,10 @@ registerBehavior('uiFeed', {
       const cc = cColl(s), me0 = meOf(s); countView(s, r);
       sheetUp = true;
       const isPost = kind === 'post', fol = F(r, 'following'), lnk = F(r, 'link');
-      const sh = socialSheet(s, { upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'comments') : null, gifs: p.gifs !== false, commentPhotos: p.commentPhotos !== false, kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
+      const sh = socialSheet(s, { canReply: canReply(s, r), replyNote: String(F(r, 'reply_setting')) === 'Only people you mention' ? 'Only people mentioned can reply' : `Only people @${who(r)} follows can reply`, upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f, 'comments') : null, gifs: p.gifs !== false, commentPhotos: p.commentPhotos !== false, kind, title: isPost ? 'Post' : 'Comments', fullScreen: p.postView === 'full screen', sort: p.commentSort === 'newest' ? 'newest' : 'top', colors: colorsOf(), font: fontOf(), focus, me: me0,
         onOpenQuote: () => { const q = findPost(s, F(r, 'quote')); if (q) { sh?.close(); setTimeout(() => openPost(s, q, 'post'), 280); } }, onQuote: p.quotes !== false ? () => openQuote(s, r) : null,
         post: isPost ? { quote: (() => { const q = findPost(s, F(r, 'quote')); return q ? { author: F(q, 'author'), handle: who(q), text: F(q, 'text'), media: mediaList(q)[0] } : F(r, 'quote') ? { gone: true } : null; })(), author: F(r, 'author'), handle: who(r), avatar: F(r, 'avatar'), verified: truthy(F(r, 'verified')), location: F(r, 'location'), text: F(r, 'text'), media: p.showMedia === false ? [] : mediaList(r), color: F(r, 'color'),
-          repostedBy: repostLabel(s, r), label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
+          repostedBy: repostLabel(s, r), background: F(r, 'background') && !mediaList(r).length ? String(F(r, 'background')) : '', label: F(r, 'label'), live: truthy(F(r, 'live')), video: truthy(F(r, 'video')), duration: F(r, 'duration'), edited: truthy(F(r, 'edited')), views: +F(r, 'views') || 0, when: p.time === 'hidden' ? '' : fullWhen(F(r, 'time')),
           following: p.followButtons !== false && fol != null && fol !== '' && who(r) !== me0.handle && !r._mine ? truthy(fol) : undefined, link: lnk, linkTitle: F(r, 'linkTitle'), linkImage: F(r, 'linkImage'), domain: lnk ? domainOf(lnk) : '' } : null,
         stats: () => ({ likes: +F(r, 'likes') || 0, reposts: +F(r, 'reposts') || 0, saves: +F(r, 'saves') || 0, liked: truthy(F(r, 'liked')), reposted: isReposted(s, r), saved: isSaved(s, r), reaction: truthy(F(r, 'liked')) ? F(r, 'reaction') || '' : '' }),
         count: () => +F(r, 'comments') || 0,
@@ -10395,7 +10453,7 @@ registerBehavior('uiFeed', {
             }
           } else { // timeline and compact
             const compact = look === 'compact', AV = +p.avatarSize || (compact ? 36 : 44), tx = x0 + pad + (showAv ? AV + 12 : 0), thumb = compact && hasM ? 64 : 0, tw = W - (tx - x0) - pad - (thumb ? thumb + 10 : 0);
-            const T = textLines(r, tw, compact ? 2 : 14), mh = hasM && !compact ? mediaH(tw, 0.56) : 0, mr = mRad(16), actH = A.length ? (compact ? 30 : 38) : 8;
+            const bgP = !compact && !hasM && F(r, 'background') ? String(F(r, 'background')) : '', T = textLines(bgP ? { ...r, [K('text')]: '' } : r, tw, compact ? 2 : 14), mh = hasM && !compact ? mediaH(tw, 0.56) : bgP ? Math.round(Math.min(tw * 0.62, 240)) : 0, mr = mRad(16), actH = A.length ? (compact ? 30 : 38) : 8;
             const exT = extrasH(r);
             h = pad - 2 + NS + 8 + textH(T) + (exT ? exT + 4 : 0) + (mh ? 10 + mh : 0) + actH + 4;
             if (compact && thumb) h = Math.max(h, pad + thumb + 10);
@@ -10409,7 +10467,9 @@ registerBehavior('uiFeed', {
               let yy = at + pad + NS + 8 + LH / 2 - 2; yy = drawText(T, tx, yy, hits, x0, at);
               let ey = yy - LH / 2 + 6; if (exT) ey = drawExtras(r, tx, ey, tw, hits, x0, at);
               if (thumb) { gallery(r, x0 + W - pad - thumb, at + pad, thumb, thumb, mRad(10), 'single', hits, x0, at); burst(r, x0 + W - pad - thumb / 2, at + pad + thumb / 2, 40); }
-              if (mh) { const my = ey; gallery(r, tx, my, tw, mh, mr, 'grid', hits, x0, at); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); }
+              if (mh && bgP) { const my = ey; ctx.save(); UK.rr(ctx, tx, my, tw, mh, mr); ctx.clip(); const gm = /linear-gradient\((.*)\)/.exec(bgP); if (gm) { const cols = gm[1].split(',').slice(1).map((q) => q.trim()); const g = ctx.createLinearGradient(tx, my, tx + tw, my + mh); cols.forEach((cc, i) => g.addColorStop(i / Math.max(1, cols.length - 1), cc)); ctx.fillStyle = g; } else ctx.fillStyle = bgP; ctx.fillRect(tx, my, tw, mh);
+                ctx.font = `800 22px ${THEME.font}`; const L0 = wrapLines(ctx, fillTemplate(String(F(r, 'text') || ''), s.vars), tw - 36, 22, 6), lh = 28; L0.forEach((l, i) => UK.text(ctx, l, tx + tw / 2, my + mh / 2 - (L0.length - 1) * lh / 2 + i * lh, { size: 22, weight: 800, color: '#fff' })); ctx.restore(); }
+              else if (mh) { const my = ey; gallery(r, tx, my, tw, mh, mr, 'grid', hits, x0, at); ctx.strokeStyle = line; ctx.lineWidth = 1; UK.rr(ctx, tx + 0.5, my + 0.5, tw - 1, mh - 1, mr); ctx.stroke(); burst(r, tx + tw / 2, my + mh / 2, 70); }
               if (A.length) actionRow(r, tx, compact ? Math.min(tw + thumb, 240) : tw, at + h - (compact ? 18 : 22), hits, x0, at, compact ? 16 : 18);
               if (p.dividers !== false && !tDown.has(r.id)) { const dx = p.dividerInset ? tx : x0; ctx.fillStyle = line; ctx.fillRect(dx, at + h - 1, x0 + W - dx, 1); }
             }
@@ -12211,7 +12271,17 @@ registerBehavior('uiComposer', {
     { key: 'gifs', label: 'GIFs (from the phone or a link)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' && b.photos !== false },
     { key: 'threads', label: 'Threads (🧵 adds more posts)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
     { key: 'polls', label: 'Polls', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
-    { key: 'places', label: 'Place (📍)', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
+    { key: 'places', label: 'Place', type: 'bool', default: true, showIf: (b) => b.style !== 'simple text box' },
+    { key: 'composerLook', label: 'Composer look', type: 'select', options: ['x', 'facebook', 'sheet'], default: 'x', group: 'Composer', showIf: (b) => b.style !== 'simple text box', info: { x: 'Full screen: Cancel, the title and a Post button; tools along the bottom.', facebook: '“Create post” with ✕, and an “Add to your post” row of coloured tools.', sheet: 'A sheet from the bottom, for quick posts.' } },
+    { key: 'composerTitle', label: 'Composer title (blank = for the look)', type: 'text', default: '', group: 'Composer', showIf: (b) => b.style !== 'simple text box' },
+    { key: 'buttonStyle', label: 'Post button', type: 'select', options: ['pill', 'square', 'text'], default: 'pill', group: 'Composer', showIf: (b) => b.style !== 'simple text box' },
+    { key: 'audience', label: 'Choose who can see it (Everyone, Followers, Friends, Only me)', type: 'bool', default: false, group: 'Composer', showIf: (b) => b.style !== 'simple text box', info: 'Feeds only show a post to the people it is for. Add an Audience field to the Posts collection.' },
+    { key: 'audienceDefault', label: 'Starts as', type: 'select', options: ['Everyone', 'Followers', 'Friends', 'Only me'], default: 'Everyone', group: 'Composer', showIf: (b) => !!b.audience && b.style !== 'simple text box' },
+    { key: 'replyControl', label: 'Choose who can reply (everyone, people you follow, people you mention)', type: 'bool', default: false, group: 'Composer', showIf: (b) => b.style !== 'simple text box', info: 'Others see “The author limited who can reply” instead of the comment box. Add a Reply Setting field to the Posts collection.' },
+    { key: 'backgrounds', label: 'Text on a colour (short posts without pictures)', type: 'bool', default: false, group: 'Composer', showIf: (b) => b.style !== 'simple text box', info: 'Like Facebook: pick a colour or gradient and the post shows as big text on it. Add a Background field to the Posts collection.' },
+    { key: 'emoji', label: 'Emoji button (opens beside the GIFs)', type: 'bool', default: true, group: 'Composer', showIf: (b) => b.style !== 'simple text box' },
+    { key: 'counter', label: 'Characters left', type: 'select', options: ['ring', 'number', 'hidden'], default: 'ring', group: 'Composer', showIf: (b) => b.style !== 'simple text box' },
+    { key: 'drafts', label: 'Keep unfinished posts as drafts', type: 'bool', default: true, group: 'Composer', showIf: (b) => b.style !== 'simple text box' },
     ...colorParams({ field: ['Field', '@field'], text: ['Hint', '@sub'], accent: ['Button', '@accent'], card: ['Card (card look)', '@card'], name: ['Name (threads look)', '@text'], line: ['Lines', '@line'] }),
     ...UI_COMMON,
   ],
@@ -12227,7 +12297,7 @@ registerBehavior('uiComposer', {
         const author0 = fillTemplate(String(p.author || ''), s.vars).trim() || 'Me', me = { author: author0, handle: fillTemplate(String(p.handle || ''), s.vars).trim().replace(/^@/, '') || author0.toLowerCase().replace(/\s+/g, '') };
         if (p.style !== 'simple text box' && !s.engine.editing) {
           const c = { bg: tok(p.sheetBg || '@card') || '#fff', text: tok('@text') || '#111', sub: tok('@sub') || '#888', line: tok('@line') || 'rgba(128,128,128,0.25)', acc: tok(p.accent || '@accent') || '#1d9bf0', field: 'rgba(128,128,128,0.12)' };
-          const ok = postComposer(s, { startWith, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
+          const ok = postComposer(s, { startWith, look: p.composerLook, title: p.composerTitle, buttonStyle: p.buttonStyle, audience: !!p.audience, audienceDefault: p.audienceDefault, replyControl: !!p.replyControl, backgrounds: !!p.backgrounds, emoji: p.emoji !== false, counter: p.counter, drafts: p.drafts !== false, me, max: +p.max || 280, placeholder: p.placeholder, button: p.button || 'Post', colors: c, photos: p.photos !== false, polls: p.polls !== false, places: p.places !== false, videos: p.videos !== false, gifs: p.gifs !== false, threads: p.threads !== false, draftKey: e.name || e.id,
             upload: s.engine.supa?.canUpload?.() ? (f) => s.engine.supa.upload(f) : null,
             onPost: (out) => { if (!s.engine.data.def(p.collection)) { s.snackbar?.(`There is no “${p.collection}” collection to post in`); return false; } awardPoints(s, 'post'); const first = postThread(s.engine.data, p.collection, me, out); const SG = s.engine.social; if (SG) { SG.notifyMentions(out.text, first?.id); for (const tx of out.thread || []) SG.notifyMentions(tx, first?.id); } if (p.message) s.send(p.message, out.text); s.snackbar?.(out.thread?.length ? 'Thread posted' : 'Posted'); },
             onClose: () => { busy = false; } });

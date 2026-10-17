@@ -401,6 +401,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
 - **Chat:** a conversation in bubbles, like a messaging app. It works for direct messages and group chats.
   - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
   - Times appear between messages more than 15 minutes apart, as *Today · 7:32 PM*, *Yesterday · …*, the weekday for this week, then the date (*Today / Yesterday between days*). Emoji-only messages show big, and photos show in the bubble.
+  - **No conversation of yours open** (a Messages tab that goes straight to the Chat page, or a chat you're not in): the Chat lists **your conversations**, newest first, with a **New message** button. Tap one to open it.
   - **Voice messages:** with nothing typed, the send button is a **microphone**. Tap it, talk (up to a minute; the bar shows a timer and your voice level), then **send** or **bin** it. A voice message shows ▶, a waveform and its length; tap it to play or pause. Turn it off with *Voice messages*.
   - **Links:** a message with a web address gets a **card** with the site's name; tap the card to open it (*Link cards*).
   - **Swipe a message right to reply** (a reply arrow appears; let go past it). *Swipe a message right to reply* turns it off.

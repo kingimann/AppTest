@@ -7184,7 +7184,13 @@ class BarHider {
   constructor(p) { this.p = p; this.byScroll = false; this.byMsg = null; this.idle = 0; }
   start(s, e) {
     const p = this.p, base = (p.barMessage || '').trim();
-    s.on('uiScroll', (d, who, frac) => { if (e.dead || !/scroll/.test(p.autoHide || '')) return; if (d < -1.5 && frac > 0.01) this.byScroll = true; else if (d > 1.5 || frac <= 0.01) this.byScroll = false; });
+    s.on('uiScroll', (d, who, frac) => { // d > 0: scrolling down. Hides after a little way down, comes back after a little way up or at the top
+      if (e.dead || !/scroll/.test(p.autoHide || '') || !d) return;
+      if (frac <= 0.01) { this.byScroll = false; this.run = 0; return; }
+      this.run = Math.sign(d) === Math.sign(this.run || 0) ? this.run + d : d;
+      if (this.run > 14) this.byScroll = true; else if (this.run < -10) this.byScroll = false;
+    });
+    s.on('var', (k) => { if (!e.dead && k === (p.var || 'page') && this.byScroll) { this.byScroll = false; this.run = 0; } }); // a new page: the bar comes back
     if (base) s.on('message', (m) => { if (e.dead) return; if (m === base + ' hide') this.byMsg = true; else if (m === base + ' show') { this.byMsg = false; this.idle = 0; this.byScroll = false; } else if (m === base + ' toggle') this.byMsg = !(this.byMsg ?? this.hidden); });
   }
   /** True when the bar wants to be hidden right now. */
@@ -9260,6 +9266,8 @@ function makeScroller(axis = 'y') {
       if (S.v < 0 && S.flick < 0 || S.v > S.max && S.flick > 0) S.flick *= Math.pow(1e-6, dt); // gliding past an end: a quick stop, then it springs back
       const hold = s.time - S.refreshT < 0.9 ? -46 : 0, goal = clamp(S.v, hold, Math.max(hold, S.max)); S.v += (goal - S.v) * Math.min(1, dt * 12);
     }
+    if (axis === 'y' && Math.abs(S.v - (S.lastV ?? S.v)) > 0.3) s.emit('uiScroll', S.v - S.lastV, e, S.max > 0 ? clamp(S.v / S.max, 0, 1) : 0); // App Bar / Bottom Nav can hide on scroll
+    if (axis === 'y' && (S.lastV == null || Math.abs(S.v - S.lastV) > 0.3)) S.lastV = S.v;
   };
   return S;
 }
@@ -15052,7 +15060,7 @@ class Scroller {
     if (end && !this.atEnd && p.endMessage) s.send(p.endMessage);
     this.atEnd = end || (this.atEnd && this.off[a] <= mn + 40);
     const dy = this.off.y - start.y, dx = this.off.x - start.x;
-    if (dx || dy) s.emit('uiScroll', a === 'y' ? dy : dx, e, this.frac(a)); // App Bar / Bottom Nav can hide on scroll
+    if (dx || dy) s.emit('uiScroll', -(a === 'y' ? dy : dx), e, this.frac(a)); // App Bar / Bottom Nav can hide on scroll
   }
   /** Listens for "scroll top / bottom / next / prev / to NAME" and "<refresh> done". */
   listen(s, e, itemPos) {
@@ -18629,7 +18637,7 @@ registerBehavior('uiDataList', {
           scroll += flick * dt; flick *= Math.pow((scroll < 0 && flick < 0) || (scroll > maxS && flick > 0) ? 1e-6 : SCROLL_DECAY, dt); if (Math.abs(flick) < 5) flick = 0; else scrollT = now();
           scroll += (clamp(scroll, 0, maxS) - scroll) * Math.min(1, dt * 12);
         }
-        if (Math.abs(scroll - lastScroll) > 0.5) { lastScroll = scroll; s.emit('uiScroll', 0, e, maxS ? scroll / maxS : 0); }
+        if (Math.abs(scroll - lastScroll) > 0.5) { const d = scroll - lastScroll; lastScroll = scroll; s.emit('uiScroll', d, e, maxS ? clamp(scroll / maxS, 0, 1) : 0); }
         for (const id of Object.keys(swX)) if (!drag || drag.row?.r.id !== id) { swX[id] *= Math.pow(0.001, dt); if (Math.abs(swX[id]) < 0.5) delete swX[id]; }
         for (const [id, t] of gone) { const k = t + dt * 4; if (k >= 1) { gone.delete(id); del(s, id); } else gone.set(id, k); }
         // taps: the checkbox, else open the row

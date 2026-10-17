@@ -207,6 +207,7 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
     - Colours: a **background picture** (and how strong it is), and separate colours for **icons**, the **selected item's text**, **section titles** and **lines**.
     - Size: **width as a % of the screen**.
 - **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 5 right buttons.
+  - **Hides by itself › when scrolling down** (on the App Bar and the Bottom Nav): scrolling any page, list, feed or chat down slides the bar away; scrolling up a little, reaching the top or changing page brings it back.
   - **Right buttons** are cards in the Inspector, shown left to right as on the bar. Each one has:
     - an **icon** (any icon, an emoji or your own);
     - what it **does**: open a page, light / dark mode, open the side menu, new post, settings, or send a message;

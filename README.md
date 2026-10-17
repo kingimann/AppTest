@@ -300,7 +300,7 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - tapping the current tab scrolls back to the top.
 - **Stories and the post box scroll away** as you scroll the feed, so the posts get the whole screen.
 - **Messaging system:**
-  - **Chat:** direct messages and group chats with bubbles, photos and big emoji. Press and hold a message to react, reply (with quotes), copy, edit or unsend it. Read receipts show Seen / Seen by.
+  - **Chat:** direct messages and group chats with bubbles, photos and big emoji. Press and hold a message to react, reply (with quotes), copy, forward, pin (a banner at the top for everyone), edit or unsend it; swipe a message right to reply. ✓ / ✓✓ ticks and Seen / Seen by show who has read it, Today / Yesterday mark the days, a ↓ button with a count jumps back to new messages, and while testing people “type” and answer.
   - **Inbox:** search, All / Unread / Groups tabs, ✏️ new message or **new group** (pick people), pin, mute, mark unread and delete. Unread badges, and ✓✓ once they have read yours.
   - **Message @someone** from any post. Live with Supabase, with notifications for the people in the conversation.
 - **Your own posts:** edit, pin and delete with Undo.

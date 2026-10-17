@@ -11128,7 +11128,7 @@ function peoplePicker(s, o) {
       list.replaceChildren(); if (!L.length) list.append(el('div', `padding:26px;text-align:center;color:${c.sub};font:600 15px ${font};`, 'No one found'));
       for (const pp of L) {
         const row = el('button', `display:flex;align-items:center;gap:12px;width:100%;padding:10px 16px;border:0;background:none;color:${c.text};font:inherit;text-align:left;cursor:pointer;`); row.type = 'button'; row.dataset.person = pp.handle;
-        const col = el('div', 'flex:1;min-width:0;'); col.append(el('div', `font:800 16px ${font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, pp.name), el('div', `font:500 14px ${font};color:${c.sub};`, '@' + pp.handle + (pp.tag ? ' · ' + pp.tag : '')));
+        const col = el('div', 'flex:1;min-width:0;'); col.append(el('div', `font:800 16px ${font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, pp.name), el('div', `font:500 14px ${font};color:${c.sub};`, pp.group ? pp.tag || 'Group' : '@' + pp.handle + (pp.tag ? ' · ' + pp.tag : '')));
         row.append(avatar(pp.name, '', 44), col);
         if (o.multi) { const on = sel.has(pp.handle); row.append(el('span', `flex:none;width:24px;height:24px;border-radius:50%;border:2px solid ${on ? c.acc : c.line};background:${on ? c.acc : 'transparent'};color:#fff;font:900 14px ${font};display:flex;align-items:center;justify-content:center;`, on ? '✓' : '')); }
         row.onclick = () => { if (!o.multi) { close(); o.onPick([pp]); return; } if (sel.has(pp.handle)) sel.delete(pp.handle); else sel.set(pp.handle, pp); draw(); sync(); };
@@ -11162,6 +11162,13 @@ registerBehavior('uiChat', {
     { key: 'replies', label: 'Replies (quote a message)', type: 'bool', default: true, showIf: (b) => b.hold !== false },
     { key: 'edits', label: 'Edit and unsend your messages', type: 'bool', default: true, showIf: (b) => b.hold !== false },
     { key: 'seen', label: '“Seen” under your last message', type: 'bool', default: true, info: 'Add a Reads collection (chat, handle, at) and it works across phones; without one, only this phone knows what it has read.' },
+    { key: 'swipeReply', label: 'Swipe a message right to reply', type: 'bool', default: true, showIf: (b) => b.replies !== false },
+    { key: 'ticks', label: '✓ sent / ✓✓ seen next to your messages', type: 'bool', default: true },
+    { key: 'pins', label: 'Pin messages (a banner at the top)', type: 'bool', default: true, info: 'Press and hold a message › Pin. Everyone in the conversation sees it; tap the banner to jump to it.' },
+    { key: 'forward', label: 'Forward messages', type: 'bool', default: true, info: 'Press and hold a message › Forward, then pick a person or a group.' },
+    { key: 'jump', label: '↓ button back to the newest message', type: 'bool', default: true, info: 'Shows when you scroll up, with how many new messages came in.' },
+    { key: 'dayLabels', label: 'Today / Yesterday between days', type: 'bool', default: true },
+    { key: 'demoReplies', label: 'Sample replies while testing', type: 'bool', default: true, info: 'With the built-in sample chats (no Messages collection), people “type” and answer what you send, so you can try the chat. Off with real data.' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 24], step: 1 },
     { key: 'sendMessage', label: 'Sending sends', type: 'text', default: '', suggest: 'messages' },
     ...colorParams(CHAT_COLORS),
@@ -11169,6 +11176,8 @@ registerBehavior('uiChat', {
   ],
   create(p) {
     const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
+    let swipe = null, swipeBack = new Map(), typing = null, newCount = 0, lastCount = -1, jumpR = null, pinR = null, pinId = null, list0 = null, eatTaps = 0;
+    const DEMO_REPLIES = ['Haha yes! 😂', 'Sounds good 👍', 'On my way!', 'Tell me more…', 'Love it ❤️', 'For real?', 'Same here', 'See you soon 👋', 'Nice!! 🔥', 'Let me check and get back to you'];
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const pub = () => p.access === 'anyone (a public room)';
     const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? (pub() ? p.room || 'general' : '') : v); };
@@ -11186,6 +11195,27 @@ registerBehavior('uiChat', {
       replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
       const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || 'Photo'), post: '' }); // (they get a notification)
+      if (p.demoReplies !== false && !s.engine.editing && !(has(s) && s.engine.supa?.online?.(D(s).def(p.collection)))) { // (not when the messages are online for real) // sample chats: someone types, then answers
+        const mh = handleOf(M.handle), who = chatMembers(all(s), c).filter((h) => h !== mh), h = who[Math.floor(Math.random() * who.length)];
+        if (h) { const nm = all(s).find((q) => handleOf(q.handle) === h && q.author)?.author || nameOfHandle(s, h); typing = { chat: c, handle: h, name: nm, t0: s.time + 0.7, until: s.time + 2.2 + Math.random() }; }
+      }
+    };
+    /** Add a message row (a collection, else the sample chats). */
+    const addRow = (s, rec) => { if (has(s)) return D(s).add(p.collection, rec); const r = { id: 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...rec, _at: Date.now(), _me: rec._me ?? true }; (sample ||= SAMPLE_CHATS()).push(r); return r; };
+    /** The pinned message: the newest "pinned / unpinned" note in the conversation (a note is your own row, so it works online for everyone). */
+    const pinnedOf = (R) => { const n = [...R].reverse().find((r) => r.system && r.pin != null); return n && n.pin ? R.find((r) => String(r.id) === String(n.pin) && !r.deleted) || null : null; };
+    const setPin = (s, r, on) => { const M = me(s); addRow(s, { chat: chatOf(s), author: M.author, handle: M.handle, system: true, pin: on ? String(r.id) : '', text: `${M.author || 'Someone'} ${on ? 'pinned' : 'unpinned'} “${snippet(r).slice(0, 40)}”` }); s.snackbar?.(on ? 'Pinned' : 'Unpinned'); };
+    /** Forward: pick a person (or a group you're in), send a copy marked Forwarded. */
+    const forwardIt = (s, r) => {
+      const M = me(s), mh = handleOf(M.handle), A = all(s), groups = [...new Set(A.filter((q) => isGroupChat(q.chat)).map((q) => String(q.chat)))].filter((g) => g !== chatOf(s) && chatMembers(A, g).includes(mh));
+      const people = [...groups.map((g) => ({ handle: g, name: A.find((q) => String(q.chat) === g && q.title)?.title || 'Group', tag: 'Group', group: true })), ...chatPeople(s, { ...M, handle: mh })];
+      sheetOpen = true;
+      peoplePicker(s, { title: 'Forward to', colors: colors(), people, onClose: () => { sheetOpen = false; }, onPick: ([pp]) => {
+        const to = pp.group ? pp.handle : dmId(mh, pp.handle);
+        addRow(s, { chat: to, author: M.author, handle: M.handle, text: r.text || '', ...(r.media ? { media: r.media } : {}), forwarded: true });
+        const G = s.engine.social; if (G) for (const h of chatMembers(all(s), to)) if (h !== mh) G.notify(h, 'message', { text: r.text || 'Photo', post: '' });
+        s.snackbar?.('Forwarded to ' + pp.name); s.engine.vibrate?.(8);
+      } });
     };
     const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, reply: replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; }, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); };
     /** Press and hold: react, reply, copy, edit, unsend. */
@@ -11193,6 +11223,8 @@ registerBehavior('uiChat', {
       if (r.deleted) return; const items = [];
       if (p.replies !== false) items.push({ icon: '↩️', label: 'Reply', run: () => { replyTo = r; bar?.close(); bar = null; openBar(s); } });
       if (r.text) items.push({ icon: '📋', label: 'Copy', run: () => { try { navigator.clipboard?.writeText(String(r.text)); } catch { /* no clipboard */ } s.snackbar?.('Copied'); } });
+      if (p.forward !== false) items.push({ icon: '📤', label: 'Forward', run: () => setTimeout(() => forwardIt(s, r), 60) });
+      if (p.pins !== false && allowed(s)) { const on = pinId != null && String(pinId) === String(r.id); items.push({ icon: '📌', label: on ? 'Unpin' : 'Pin', run: () => setPin(s, r, !on) }); }
       if (mine && p.edits !== false && r.text) items.push({ icon: '✏️', label: 'Edit', run: () => askTextBox(s, { question: 'Edit message', value: String(r.text), max: 1000 }, (v) => { if (v && v !== r.text) patch(s, r, { text: v, edited: true }); }) });
       if (mine && p.edits !== false) items.push({ icon: '🗑️', label: 'Unsend', danger: true, run: () => { const was = { text: r.text || '', media: r.media || '', reaction: r.reaction || '' }; patch(s, r, { text: '', media: '', reaction: '', deleted: true }); s.snackbar?.('Message unsent', 'Undo', () => patch(s, r, { ...was, deleted: false })); } });
       sheetOpen = true;
@@ -11202,30 +11234,52 @@ registerBehavior('uiChat', {
     return {
       uiAlways: true,
       update(e, dt, s) {
-        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), list = { x: b.x, y: b.y, w: b.w, h: b.h - barH - cov };
+        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
+        pinId = pinned ? pinned.id : null; list0 = list;
         barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
-        const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; }
-        const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); S.update(s, e, dt, list);
+        const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; typing = null; newCount = 0; lastCount = -1; swipe = null; }
+        if (typing && typing.chat === c && s.time > typing.until) { const t = typing; typing = null; addRow(s, { chat: t.chat, author: t.name, handle: t.handle, text: DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)], _me: false }); }
+        const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); if (!swipe?.on) S.update(s, e, dt, list);
         if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length;
+        const cnt = R0.filter((r) => !r.system).length; if (lastCount >= 0 && cnt > lastCount && !wasBottom && !isMineMsg(R0[R0.length - 1] || {}, me(s))) newCount += cnt - lastCount; lastCount = cnt; if (S.v >= S.max - 30) newCount = 0;
+        jumpR = p.jump !== false && S.max - S.v > 160 ? { x: b.x + b.w - 54, y: list.y + list.h - 56, w: 44, h: 44 } : null;
+        pinR = pinned ? { x: b.x, y: b.y, w: b.w, h: pinH } : null;
+        // swipe a message right to reply
+        if (p.swipeReply !== false && p.replies !== false && allowed(s) && !s.engine.editing && !sheetOpen) {
+          for (const d of UK.downs(s, e)) if (UK.in(d, list)) { const it = L.find((q) => q.bub && !q.del && d.y + S.v - list.y >= q.y && d.y + S.v - list.y <= q.y + q.h); swipe = it ? { id: d.id, x0: d.x, y0: d.y, it, dx: 0, on: false, buzz: false } : null; }
+          if (swipe) {
+            const q = UK.ptr(s, e, swipe.id);
+            if (!q) { if (swipe.on) { eatTaps = 2; if (swipe.dx > 56) { replyTo = swipe.it.r; bar?.close(); bar = null; openBar(s); } swipeBack.set(swipe.it.r.id, swipe.dx); } swipe = null; }
+            else { const dx = q.x - swipe.x0, dy = q.y - swipe.y0; if (!swipe.on && dx > 12 && dx > Math.abs(dy) * 1.6 && !S.moved) { swipe.on = true; hold = null; const ep = s.engine.input.pointers.get(swipe.id); if (ep) ep.claimed = true; } else if (!swipe.on && (S.moved || Math.abs(dy) > 14)) swipe = null;
+              if (swipe?.on) { swipe.dx = clamp(dx, 0, 96); if (swipe.dx > 56 && !swipe.buzz) { swipe.buzz = true; s.engine.vibrate?.(10); } } }
+          }
+        }
+        for (const [id, v] of swipeBack) { const n = v * Math.pow(0.0008, dt); if (n < 0.5) swipeBack.delete(id); else swipeBack.set(id, n); }
+        const TP = UK.taps(s, e); if (eatTaps > 0) { eatTaps--; TP.forEach((t) => { t.used = true; }); } // (the end of a swipe is not a tap)
+        for (const t of TP) {
+          if (t.used) continue;
+          if (jumpR && UK.in(t, jumpR)) { t.used = true; S.v = S.max; S.flick = 0; newCount = 0; s.engine.vibrate?.(6); continue; }
+          if (pinR && UK.in(t, pinR)) { t.used = true; const to = L.find((q) => q.bub && String(q.r.id) === String(pinId)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; }
+        }
         if (!s.engine.editing && shown(e) && (readT += dt) > 0.6) { readT = 0; const RR = rows(s), last = RR[RR.length - 1], M = me(s); if (last && readAt(s, c, handleOf(M.handle)) < (last._at || 0)) markChatRead(s, c, handleOf(M.handle), last._at || Date.now()); } // you have seen it
-        const itemAt = (pt) => L.find((q) => q.bub && pt.x >= q.bx && pt.x <= q.bx + q.bw && pt.y + S.v - b.y >= q.y && pt.y + S.v - b.y <= q.y + q.h);
+        const itemAt = (pt) => L.find((q) => q.bub && pt.x >= q.bx && pt.x <= q.bx + q.bw && pt.y + S.v - list.y >= q.y && pt.y + S.v - list.y <= q.y + q.h);
         if (p.hold !== false && !s.engine.editing && !sheetOpen) {
           for (const d of UK.downs(s, e)) if (UK.in(d, list)) { const it = itemAt(d); hold = it ? { id: d.id, t: 0, x: d.x, y: d.y, it } : null; }
-          if (hold) { const q = UK.ptr(s, e, hold.id); if (!q || S.moved || Math.hypot(q.x - hold.x, q.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const it = hold.it; hold = null; s.engine.vibrate?.(15); msgMenu(s, it.r, it.mine); } }
+          if (hold) { const q = UK.ptr(s, e, hold.id); if (!q || S.moved || swipe?.on || Math.hypot(q.x - hold.x, q.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const it = hold.it; hold = null; s.engine.vibrate?.(15); msgMenu(s, it.r, it.mine); } }
         }
-        for (const t of UK.taps(s, e)) {
-          if (S.moved) continue;
+        for (const t of TP) {
+          if (S.moved || t.used) continue;
           if (UK.in(t, barRect)) { if (!allowed(s)) continue; UK.tap(s, p); openBar(s); continue; }
           if (!UK.in(t, list)) continue;
           const it = itemAt(t); if (!it) continue;
-          if (it.quote && t.y + S.v - b.y <= it.y + it.quote) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
+          if (it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0)) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
           if (p.react === false || it.r.deleted) continue;
           if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; if (patch(s, it.r, { reaction: it.r.reaction ? '' : '❤️' })) { pops.set(it.r.id, s.time); s.engine.vibrate?.(10); } }
           else lastTap = { id: it.r.id, t: s.time };
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), listH = b.h - barH - cov, M = me(s), R = rows(s), TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32), c = chatOf(s);
+        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), M = me(s), R = rows(s), pinned = p.pins !== false ? pinnedOf(R) : null, pinH = pinned ? 50 : 0, top = b.y + pinH, listH = b.h - barH - cov - pinH, TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32), c = chatOf(s);
         const dark = isDark(s), mineC = tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         const authors = new Set(R.filter((r) => !r.system).map((r) => r.handle || r.author)), group = isGroupChat(c) || authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
@@ -11240,7 +11294,7 @@ registerBehavior('uiChat', {
           if (p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 30, t: r._at }); y += 30; }
           else if (!sameAsPrev) y += 6;
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
-          const del = !!r.deleted, big = !del && !r.media && !r.reply_to && ONLY_EMOJI(r.text), media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
+          const del = !!r.deleted, big = !del && !r.media && !r.reply_to && !r.forwarded && ONLY_EMOJI(r.text), fwd = !del && r.forwarded ? 20 : 0, media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
           else {
@@ -11249,21 +11303,33 @@ registerBehavior('uiChat', {
             bw = Math.max(44, Math.min(maxW, Math.max(...lines.map((l) => ctx.measureText(l).width), 0) + 28)); bh = lines.length ? lines.length * LH + 16 : 0;
             if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; }
             if (quote) { ctx.font = `600 12px ${THEME.font}`; bw = Math.max(bw, Math.min(maxW, Math.max(ctx.measureText(String(r.reply_text || '')).width, ctx.measureText(String(r.reply_author || '')).width) + 40)); bh += quote; }
+            if (fwd) { bw = Math.max(bw, 116); bh += fwd; }
           }
           const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (r.reaction ? 14 : 0) + (r.edited && !del ? 14 : 0);
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
           y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
-        y += 10; total = y;
+        if (typing && typing.chat === c && s.time >= typing.t0) { L.push({ kind: 'typing', y: y + 4, h: 36 }); y += 44; } // someone is typing
+        y += 10; total = y; e._chat = { L, top, v: S.v, b }; // (for tests)
         // draw
-        ctx.save(); ctx.beginPath(); ctx.rect(b.x, b.y, b.w, listH); ctx.clip(); ctx.translate(0, b.y - S.v);
+        ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.translate(0, top - S.v);
+        const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), reads = p.ticks !== false ? others.map((h) => Math.max(readAt(s, c, h), ...R.filter((r) => !r.system && handleOf(r.handle) === h).map((r) => r._at || 0))) : [], /* (answering means they saw it) */ pend = has(s) ? new Set((s.engine.supa?.pending?.() || []).map((op) => op.rec?.id).filter(Boolean)) : null;
+        const tick = (x, y, col, dbl) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; const one = (ox) => { ctx.beginPath(); ctx.moveTo(x + ox - 9, y); ctx.lineTo(x + ox - 5.5, y + 3.5); ctx.lineTo(x + ox, y - 3.5); ctx.stroke(); }; one(0); if (dbl) one(-5); ctx.restore(); };
         const ok = allowed(s); if (!ok) { drawIco(ctx, 'lock', b.cx, listH / 2 - 30 + S.v, 34, sub, { stroke: 1.6 }); UK.text(ctx, chatOf(s) ? 'You’re not in this conversation' : 'Pick a conversation from your messages', b.cx, listH / 2 + 14 + S.v, { size: 15, weight: 700, color: sub, maxW: b.w - 40 }); } else if (!R.length) UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub });
         const vis0 = S.v - 60, vis1 = S.v + listH + 60;
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
-          if (it.kind === 'time') { const d = new Date(it.t || Date.now()), today = new Date().toDateString() === d.toDateString(); let ts = ''; try { ts = (today ? '' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ') + d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { ts = shortAgo(it.t); } UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: sub }); continue; }
+          if (it.kind === 'time') { const d = new Date(it.t || Date.now()), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), ago = Math.round((day(new Date()) - day(d)) / 864e5); let ts = '';
+            try { const tm = d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); ts = (p.dayLabels !== false && ago === 0 ? 'Today · ' : p.dayLabels !== false && ago === 1 ? 'Yesterday · ' : ago === 0 ? '' : ago > 0 && ago < 7 ? d.toLocaleDateString(localeOf(), { weekday: 'long' }) + ' · ' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }) + ' · ') + tm; } catch { ts = shortAgo(it.t); }
+            UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: sub }); continue; }
+          if (it.kind === 'typing') { const x = b.x + pad + avW, w = 64, h2 = 36; ctx.fillStyle = theirsC; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, it.y, w, h2, [18, 18, 18, 6]); else UK.rr(ctx, x, it.y, w, h2, 18); ctx.fill();
+            for (let k = 0; k < 3; k++) { const ph = s.time * 7 - k * 0.8, up = Math.max(0, Math.sin(ph)) * 4; ctx.fillStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.55 + Math.max(0, Math.sin(ph)) * 0.45); ctx.beginPath(); ctx.arc(x + 18 + k * 14, it.y + h2 / 2 - up, 4, 0, Math.PI * 2); ctx.fill(); }
+            if (avW) miniAvatar(ctx, typing?.name || '', b.x + pad + 14, it.y + h2 - 14, 28); continue; }
           if (it.kind === 'system') { it.lines.forEach((l, k) => UK.text(ctx, l, b.cx, it.y + 8 + k * 17, { size: 13, weight: 600, color: sub })); continue; }
           if (it.kind === 'name') { UK.text(ctx, it.name, it.x + 12, it.y + 9, { size: 12, weight: 700, color: sub, align: 'left' }); continue; }
+          const sdx = (swipe?.on && swipe.it.r.id === it.r.id ? swipe.dx : swipeBack.get(it.r.id) || 0) * 0.85;
+          if (sdx > 2) { const a = clamp(sdx / 48, 0, 1); ctx.save(); ctx.globalAlpha *= a; ctx.fillStyle = withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.beginPath(); ctx.arc(b.x + 24, it.y + it.h / 2, 15 * (0.6 + 0.4 * a), 0, Math.PI * 2); ctx.fill(); drawIco(ctx, 'reply', b.x + 24, it.y + it.h / 2, 16, sdx > 47 ? mineC : sub, { stroke: 2 }); ctx.restore(); }
+          ctx.save(); if (sdx) ctx.translate(sdx, 0);
           const r = it.r, pk = pops.get(r.id), sc = pk != null && s.time - pk < 0.35 ? 1 + Math.sin((s.time - pk) / 0.35 * Math.PI) * 0.12 : 1, fresh = it.mine && s.time - sendT < 0.3 && it === L[L.length - 1] ? Ease.outBack(clamp((s.time - sendT) / 0.3, 0, 1)) : 1;
           ctx.save(); const cx0 = it.bx + it.bw / 2, cy0 = it.y + it.h / 2; ctx.translate(cx0, cy0); ctx.scale(sc * fresh, sc * fresh); ctx.translate(-cx0, -cy0);
           if (it.big) UK.text(ctx, String(r.text).trim(), it.mine ? it.bx + it.bw : it.bx, it.y + it.h / 2 + 2, { size: 40, align: it.mine ? 'right' : 'left' });
@@ -11272,8 +11338,9 @@ registerBehavior('uiChat', {
             ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y0, w, h, [rad, rad, br, bl]); else UK.rr(ctx, x, y0, w, h, rad);
             if (it.del) { ctx.strokeStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.6); ctx.lineWidth = 1.2; ctx.stroke(); } else { ctx.fillStyle = it.mine ? mineC : theirsC; ctx.fill(); }
             let ty = y0;
+            if (it.fwd) { UK.text(ctx, '↪ Forwarded', x + 14, ty + 14, { size: 12, weight: 600, color: it.mine ? withAlpha('#ffffff', 0.8) : sub, align: 'left', italic: true }); ty += it.fwd; }
             if (it.quote) { // the message it replies to
-              const qx = x + 8, qy = y0 + 7, qw = w - 16, qh = it.quote - 8; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.18)' : withAlpha(dark ? '#ffffff' : '#000000', 0.06); UK.rr(ctx, qx, qy, qw, qh, 10); ctx.fill();
+              const qx = x + 8, qy = ty + 7, qw = w - 16, qh = it.quote - 8; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.18)' : withAlpha(dark ? '#ffffff' : '#000000', 0.06); UK.rr(ctx, qx, qy, qw, qh, 10); ctx.fill();
               ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.85)' : mineC; ctx.fillRect(qx, qy + 5, 3, qh - 10);
               UK.text(ctx, r.reply_author && r.reply_author === M.author ? 'You' : String(r.reply_author || ''), qx + 10, qy + 11, { size: 12, weight: 800, color: it.mine ? mineT : mineC, align: 'left', maxW: qw - 16 });
               UK.text(ctx, String(r.reply_text || ''), qx + 10, qy + 25, { size: 12, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'left', maxW: qw - 16 });
@@ -11287,6 +11354,12 @@ registerBehavior('uiChat', {
           if (r.reaction && !it.del) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); uy += 14; }
           if (r.edited && !it.del) UK.text(ctx, 'Edited', it.mine ? it.bx + it.bw - 4 : it.bx + 4, uy + 7, { size: 11, weight: 600, color: sub, align: it.mine ? 'right' : 'left' });
           if (it.avatar) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
+          if (p.ticks !== false && it.mine && !it.del) { // ✓ sent, ✓✓ seen (blue when everyone has)
+            const at = r._at || 0, all2 = reads.length && reads.every((t) => t >= at), some = reads.some((t) => t >= at), tx = it.bx - 5, tyy = it.y + it.h - 8;
+            if (pend?.has(r.id)) { ctx.save(); ctx.strokeStyle = sub; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(tx - 5, tyy, 4.5, 0, Math.PI * 2); ctx.moveTo(tx - 5, tyy - 2.5); ctx.lineTo(tx - 5, tyy); ctx.lineTo(tx - 3.5, tyy + 1); ctx.stroke(); ctx.restore(); }
+            else tick(tx, tyy, all2 ? mineC : sub, some);
+          }
+          ctx.restore();
         }
         // Sent / Sending… / Seen under my last message
         const lastMine = [...L].reverse().find((q) => q.bub);
@@ -11296,6 +11369,19 @@ registerBehavior('uiChat', {
           UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: label.startsWith('Seen') ? mineC : sub, align: 'right' });
         }
         ctx.restore();
+        if (pinned) { // the pinned message, at the top: tap to jump to it
+          ctx.fillStyle = p.bg ? tok(p.bg) : dark ? '#17191f' : '#ffffff'; ctx.fillRect(b.x, b.y, b.w, pinH);
+          ctx.fillStyle = withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(b.x, b.y + pinH - 1, b.w, 1);
+          ctx.fillStyle = mineC; UK.rr(ctx, b.x + 12, b.y + 10, 3, pinH - 20, 1.5); ctx.fill();
+          drawIco(ctx, 'pin', b.x + 33, b.y + pinH / 2, 18, mineC, { stroke: 2 });
+          UK.text(ctx, 'Pinned message', b.x + 52, b.y + 16, { size: 12, weight: 800, color: mineC, align: 'left' });
+          UK.text(ctx, (pinned.author && pinned.author !== M.author ? pinned.author.split(' ')[0] + ': ' : '') + snippet(pinned), b.x + 52, b.y + 34, { size: 14, weight: 500, color: txt, align: 'left', maxW: b.w - 70 });
+        }
+        if (jumpR) { // back to the newest message
+          const jx = jumpR.x + jumpR.w / 2, jy = jumpR.y + jumpR.h / 2; ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.22)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 2; ctx.fillStyle = dark ? '#2a2d35' : '#ffffff'; ctx.beginPath(); ctx.arc(jx, jy, 21, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+          drawIco(ctx, 'chevron-down', jx, jy + 1, 20, txt, { stroke: 2.2 });
+          if (newCount > 0) { const t = newCount > 99 ? '99+' : String(newCount); ctx.font = `800 11px ${THEME.font}`; const bw2 = Math.max(18, ctx.measureText(t).width + 10); ctx.fillStyle = mineC; UK.rr(ctx, jx + 8, jy - 27, bw2, 18, 9); ctx.fill(); UK.text(ctx, t, jx + 8 + bw2 / 2, jy - 18, { size: 11, weight: 800, color: '#fff' }); }
+        }
         if (!ok) return; // (no bar where you can't write)
         // the bar
         const brr = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };

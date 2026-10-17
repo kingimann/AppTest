@@ -4038,6 +4038,8 @@ function buildMeshData(q) {
   return new Float32Array(out);
 }
 
+/** Words a node's object field takes besides a name. */
+export const OBJ_WORDS = new Set(['this', 'me', 'self', 'other', 'player', 'camera', 'parent']);
 /** Can this browser draw 3D (WebGL)? Asked once. */
 let webglOK_;
 export function webglOK() {
@@ -22803,6 +22805,7 @@ registerBehavior('graph', {
       for (const fn of g.nodes) if (fn.type === 'funcDef' && param(fn, 'name') === name) { follow(fn, 'then', { s, e, other: ctx.other, steps: 0, dt: ctx.dt, args, ret, callDepth: depth }); if (ret.done) break; }
       return ret.v;
     };
+    const missWarned = new Set();
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const st = ctx.s.engine.graphStats;
@@ -22822,6 +22825,10 @@ registerBehavior('graph', {
         sync = false; if (doneNow) follow(n, 'then', ctx); return;
       }
       const s = ctx.s, e = ctx.e, I = (k) => input(n, k, ctx), P = (k) => param(n, k), up = s.mode === '3d' ? 1 : -1;
+      if (!s.engine.editing && NODE_TYPES[n.type]?.params?.some((q) => q.key === 'object')) { // a target that isn't there: say so once in the Console (it used to do nothing, silently)
+        const v = String(P('object') ?? '').trim();
+        if (v && !/[{}]/.test(v) && !OBJ_WORDS.has(v.toLowerCase()) && !s.find(v) && !s.findAll(v).length && !(missWarned.has(n.id + '|' + v))) { missWarned.add(n.id + '|' + v); Log.add('warn', `${NODE_TYPES[n.type].label}: there's no object called “${v}”, so it did nothing. Check the name (it must match exactly).`, 'Visual Script'); }
+      }
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
         case '_signal': if (ctx.onSignal) ctx.onSignal(P('port'), ctx); else (e._sig ||= []).push({ tag: P('tag'), port: P('port'), other: ctx.other, value: ctx.eventValue }); return; // a node run by Triggers reports its output

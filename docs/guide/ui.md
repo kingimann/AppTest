@@ -55,6 +55,8 @@ UI grows and shrinks with the screen, using the level's design size (view width 
 
 ## Screens: title, pause, game over, win
 
+**Pages and the iPhone home bar:** a full-screen page's background runs all the way to the bottom edge, under the home indicator (no strip of another colour under a floating Bottom Nav); what's on the page stays clear of it.
+
 The engine has built-in screens: a title screen (when the level has a title), a pause screen, game over and win. Their look follows the **UI Theme**, and they animate in with springs. Their buttons (Play, Resume, Restart, Sound, Back to app…) and the on-screen Pause, Sound, Jump and Action buttons are also real, labelled buttons for screen readers and the keyboard (Tab to them, Enter to press; Pause moves the focus to Resume). Touch and mouse play is unchanged:
 
 | Screen | What it shows |

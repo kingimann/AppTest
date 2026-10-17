@@ -4515,7 +4515,7 @@ function barsFor(e, safe) {
   return { top: U.top >= B.top ? 0 : B.top, right: U.right >= B.right ? 0 : B.right, bottom: U.bottom >= B.bottom ? 0 : B.bottom, left: U.left >= B.left ? 0 : B.left };
 }
 /** The part of a backdrop that's under see-through bars (its children stay out of it). */
-function underOf(p, safe) { const U = safe?.under; if (!U || !isBackdrop(p)) return null; const B = safe.bars, k = uiK(safe) || 1; return { top: (B.top - barsFor(p, safe).top), bottom: (B.bottom - barsFor(p, safe).bottom), left: (B.left - barsFor(p, safe).left), right: (B.right - barsFor(p, safe).right), k }; }
+function underOf(p, safe) { if (!isBackdrop(p)) return null; const U = safe?.under, sb = safe?.bottom || 0; if (!U && !sb) return null; const B = safe.bars || { top: 0, right: 0, bottom: 0, left: 0 }, F = U ? barsFor(p, safe) : B, k = uiK(safe) || 1; return { top: (B.top - F.top), bottom: (B.bottom - F.bottom) + sb, left: (B.left - F.left), right: (B.right - F.right), k }; } // (+ the home-indicator strip: the page's colour runs to the bottom edge, what's on it stays clear)
 export function uiOrigin(e, W, H, safe) {
   if (e._at && e._atBy && e._atBy === e.parentEnt) { const ex = e.extents(), k = uiK(safe); return { x: e._at.x - (e.x + (ex.ox || 0)) * k, y: e._at.y - (e.y + (ex.oy || 0)) * k }; } // laid out by its parent (inside a Side Menu)
   const p = e.parentEnt, P = e._push;
@@ -4536,7 +4536,7 @@ export function uiOrigin(e, W, H, safe) {
 }
 /** The screen area left for UI once the safe area and the nav bars are taken out. */
 export function uiArea(W, H, safe, e) {
-  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && (e ? barsFor(e, safe) : safe?.bars) || { top: 0, right: 0, bottom: 0, left: 0 };
+  const sf = e?.ignoreSafe ? { top: 0, right: 0, bottom: 0, left: 0 } : e && isBackdrop(e) && safe?.bottom ? { ...safe, bottom: 0 } : safe, B = !e?.ignoreSafe && !e?.ignoreBars && !e?._dock && (e ? barsFor(e, safe) : safe?.bars) || { top: 0, right: 0, bottom: 0, left: 0 };
   const l = sf.left + B.left, t = sf.top + B.top;
   return { l, t, w: Math.max(1, W - l - sf.right - B.right), h: Math.max(1, H - t - sf.bottom - B.bottom) };
 }

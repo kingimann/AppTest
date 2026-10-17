@@ -400,16 +400,22 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   Picking something puts it in its variable (`q`). Give a Social Feed the same *Search with variable* and it shows the results. *Searching goes to page* can open a results page.
 - **Chat:** a conversation in bubbles, like a messaging app. It works for direct messages and group chats.
   - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
-  - Times appear between messages more than 15 minutes apart. Emoji-only messages show big, and photos show in the bubble.
+  - Times appear between messages more than 15 minutes apart, as *Today · 7:32 PM*, *Yesterday · …*, the weekday for this week, then the date (*Today / Yesterday between days*). Emoji-only messages show big, and photos show in the bubble.
+  - **Swipe a message right to reply** (a reply arrow appears; let go past it). *Swipe a message right to reply* turns it off.
   - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.
   - **Press and hold a message:**
     - react with ❤️ 😂 😮 😢 😡 👍 (*Reactions*);
     - **Reply** (the reply quotes it; tap the quote to jump to the original);
     - **Copy**;
+    - **Forward**: pick a person or a group you're in; the copy is marked *↪ Forwarded*;
+    - **Pin** / **Unpin**: the message shows in a **Pinned message** banner at the top of the chat for everyone in it (tap the banner to jump to it). Pinning adds a note like “Alex pinned …” to the chat;
     - for your own messages, **Edit** (marked *Edited*) and **Unsend** (with Undo).
   - Double-tap a message for ❤️.
   - Under your last message: *Sending…*, *Sent*, then **Seen** (in a group, *Seen by Maya, Leo* or *Seen by everyone*).
-  - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reply_to, reply_text, reply_author, edited, deleted, system, members, title.
+  - **Ticks** next to your messages: a little clock while sending, **✓** sent, **✓✓** once someone has seen it (or answered after it), blue when everyone has (*✓ sent / ✓✓ seen*).
+  - **↓ back to the newest:** scroll up and a round button appears above the bar, with how many new messages came in; tap it to jump down.
+  - **Typing and sample replies:** with sample or local chats (not online yet), the person you write to shows *typing…* dots and answers, so you can try the chat in the editor (*Sample replies while testing*). Online chats never do this.
+  - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reply_to, reply_text, reply_author, edited, deleted, system, members, title, forwarded, pin.
     - The conversation comes from the variable `chat` (blank = the room in *Room*).
     - With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once, and the people in the conversation get a notification.
   - **Read receipts:** add a **Reads** collection (chat, handle, at) and "Seen" works across phones. Without one, each phone only knows what it has read.

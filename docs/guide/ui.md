@@ -412,6 +412,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - for your own messages, **Edit** (marked *Edited*) and **Unsend** (with Undo).
   - Double-tap a message for ❤️.
   - Under your last message: *Sending…*, *Sent*, then **Seen** (in a group, *Seen by Maya, Leo* or *Seen by everyone*).
+  - **Message yourself:** in the Inbox, ✏️ › *New message* lists **you** first (*Message yourself*). Pick yourself to get a chat only you can see, for notes, links and photos. It's also offered when forwarding. It shows in the Inbox as *Your Name (you)*, with no ticks, *Seen* or sample replies. Turn it off with the Inbox's *Message yourself*.
   - **Ticks** next to your messages: a little clock while sending, **✓** sent, **✓✓** once someone has seen it (or answered after it), blue when everyone has (*✓ sent / ✓✓ seen*).
   - **↓ back to the newest:** scroll up and a round button appears above the bar, with how many new messages came in; tap it to jump down.
   - **Typing and sample replies:** with sample or local chats (not online yet), the person you write to shows *typing…* dots and answers, so you can try the chat in the editor (*Sample replies while testing*). Online chats never do this.

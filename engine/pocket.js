@@ -7334,6 +7334,11 @@ function badge(ctx, x, y, t, o, left = false) {
   ctx.restore();
 }
 
+/** On the sign-in or sign-up page (Game Settings › Supabase): the app's bars and side menu stay out of the way. */
+function onAuthPage(s, v = 'page') {
+  const st = s?.engine?.levels?.[0]?.settings || s?.settings || {}, pg = String(st.signInPage || '').trim(); if (!pg || v !== 'page' || s.engine?.editing) return false;
+  const cur = s.vars?.page; return sameVal(cur, pg) || sameVal(cur, String(st.signUpPage || 'signup').trim());
+}
 const NAV_STYLES = ['classic', 'pill', 'underline', 'dot', 'bubble', 'floating', 'raised center', 'glass', 'minimal', 'segmented', 'curved', 'neon', 'dock', 'spotlight', 'outline', 'chips'];
 registerBehavior('uiBottomNav', {
   label: 'Bottom Nav', description: 'A complete navigation bar along the bottom (16 styles) or the top (10 top styles: tabs, short line, text, pills, chips, segmented, folder, gradient, neon, boxed): tabs with icons, labels and badges, a sliding indicator and tap animations. Tapping a tab sets a variable (page = home), so Pages with Show If appear.',
@@ -7442,7 +7447,7 @@ registerBehavior('uiBottomNav', {
     const placeTop = (e, s) => { const d = belowAppBar(e, s); if (d > 0) e._push = { x: 0, y: d }; else if (e._push && isTop()) delete e._push; };
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     const tabIdx = (s) => T.findIndex((t) => t.page != null && sameVal(s.vars[p.var], t.page));
-    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || pagesHiding(s).some((v) => sameVal(s.vars[p.var], v)) || s.barsHidden > 0 || !!s.navBarsOff;
+    const hidden = (s) => onAuthPage(s, p.var || 'page') || (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || (p.otherPage === 'hide the bar' && tabIdx(s) < 0 && T.some((t) => t.page != null)) || pagesHiding(s).some((v) => sameVal(s.vars[p.var], v)) || s.barsHidden > 0 || !!s.navBarsOff;
     const activeIdx = (s) => {
       const m = T.findIndex((t) => t.msg && s.openMenus?.has(t.msg)); if (m >= 0) return m; // a "menu" tab lights up while its menu is open
       const i = tabIdx(s); if (i >= 0) return i;
@@ -7920,6 +7925,7 @@ registerBehavior('uiSideBar', {
       pageLabel(page, v) { if (v !== p.var) return null; const it = [...I, ...F, ...Object.values(G).flat()].find((q) => q.kind === 'page' && sameVal(q.page, page)); return it ? it.label : null; },
       set(e, s, v) {
         if (v === want) return;
+        if (v && onAuthPage(s)) { openWhy = ''; return; } // (not on the sign-in page)
         if (v && !s.engine.editing && s._tabPickedAt != null && s.time - s._tabPickedAt < 0.5 && openWhy !== 'its own ☰ button' && !/\((App Bar|Button)\)$/.test(openWhy)) { // a page tab was just picked: whatever this is, it isn't someone asking for the menu
           Log.add('warn', `${e.name || 'Side Menu'} didn't open: ${openWhy || 'a node or action'} came right after a Bottom Nav tab was picked`, 'UI'); openWhy = ''; return;
         }
@@ -8351,7 +8357,7 @@ registerBehavior('uiAppBar', {
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     let A = acts(), hide = 0, press = new Map(), hits = [], scrolled = 0, shrink = 0;
     const BH = new BarHider(p);
-    const hidden = (s) => (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
+    const hidden = (s) => onAuthPage(s, p.var || 'page') || (!!p.hideOn && list(p.hideOn).some((v) => sameVal(s.vars[p.var], v))) || (!!p.showOn && !list(p.showOn).some((v) => sameVal(s.vars[p.var], v))) || s.barsHidden > 0 || !!s.navBarsOff;
     const canBack = (s) => Object.values(s.navStacks || {}).some((st) => st.length);
     let sideT = -1, side = false; // is there a Side Menu for the ☰ to open?
     const hasSide = (s) => { if (sideT !== s.time) { sideT = s.time; const m = p.menuMessage || 'menu'; side = s.entities.some((q) => !q.dead && q.behaviors.some((x) => x.sideMenu && (x.params?.message || 'menu') === m)); } return side; };
@@ -17711,8 +17717,8 @@ export class SocialGraph {
   me() {
     const s = this.engine.scene, v = s?.vars || {}, u = this.engine.supa?.user?.(), md = u?.user_metadata || {};
     const author = (u && (md.name || this.engine.supa.name(u))) || (typeof v.playerName === 'string' && v.playerName) || 'You';
-    const handle = String(md.username || md.handle || (typeof v.playerHandle === 'string' && v.playerHandle) || author.toLowerCase().replace(/\s+/g, '')).replace(/^@/, '');
-    return { author, handle };
+    const handle = String(md.username || md.handle || (!u && typeof v.playerHandle === 'string' && v.playerHandle) || author.toLowerCase().replace(/\s+/g, '')).replace(/^@/, ''); // (signed in: always the account's, the same the server checks)
+    return { author, handle: u ? handle.toLowerCase() : handle };
   }
   h(x) { return String(x ?? '').trim().replace(/^@/, '').toLowerCase(); }
   // ---- following ----
@@ -17844,7 +17850,7 @@ export class Supa {
     h.Authorization = 'Bearer ' + (auth && se?.access_token ? se.access_token : c.key);
     const r = await fetch(c.url + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) });
     const txt = await r.text(); let j = null; try { j = txt ? JSON.parse(txt) : null; } catch { j = txt; }
-    if (!r.ok) throw new Error(j?.msg || j?.error_description || j?.message || j?.error || `Error ${r.status}`);
+    if (!r.ok) { const err = new Error(j?.msg || j?.error_description || j?.message || j?.error || `Error ${r.status}`); err.status = r.status; err.code = j?.code; throw err; }
     return j;
   }
   async fresh() {
@@ -17939,6 +17945,7 @@ export class Supa {
     if (!s) return; const u = this.user(), md = u?.user_metadata || {}; s.setVar('signedIn', u ? 1 : 0); s.setVar('userName', this.name(u)); s.setVar('userEmail', u?.email || ''); s.setVar('userId', u?.id || '');
     for (const f of this.accountFields()) { const v = md[f.key] ?? (f.type === 'yes/no' ? false : ''); s.setVar('user_' + f.key, v); if (u) s.setVar(f.key, v); } // {user_username}, and the edit form's {username}
     if (u && md.name) s.setVar('name', md.name);
+    if (u) { const me = this.engine.social?.me?.(); if (me) { s.setVar('playerName', me.author); s.setVar('playerHandle', me.handle); } } // (posts, comments and the profile show the account)
   }
   signedIn() { const s = this.engine.scene; this.vars(s); s?.setVar('authError', ''); s?.emit('signedIn'); this.pullAll(); this.route(s, true); this.saveProfileRow().catch((e) => Log.add('warn', 'Profile: ' + e.message, 'Supabase')); } // (the profile row catches up after an email confirmation)
   signedOut() {
@@ -17951,7 +17958,7 @@ export class Supa {
     const st = this.cfg().st, pg = String(st.signInPage || '').trim(); if (!s || !pg || !s.settings.app) return;
     const v = 'page', start = String(st.afterSignInPage || this.engine.levels?.[0]?.vars?.page || 'home').trim();
     if (!inNow && s.vars[v] !== pg) s.navTo?.(pg, v, { clear: true }); else if (!inNow && s.vars[v] === pg) { /* already there */ }
-    else if (inNow && sameVal(s.vars[v], pg)) s.navTo?.(start, v, { clear: true });
+    else if (inNow && [pg, String(st.signUpPage || 'signup').trim()].some((q) => q && sameVal(s.vars[v], q))) s.navTo?.(start, v, { clear: true }); // (signed in from the sign-in or the sign-up page: into the app)
   }
   /** Once the app opens: back from Google / an email link, the variables, the sign-in page, then the online records. */
   async start(s) {
@@ -17979,7 +17986,19 @@ export class Supa {
   }
   ownRow(def, rec) { const o = {}, idc = this.idCol(def); for (const f of fieldsOf(def)) { if (f.key === idc || f.readOnly) continue; if (rec && f.key in rec) o[f.column || f.key] = rec[f.key] === '' && ['number', 'money', 'rating', 'date'].includes(f.type) ? null : rec[f.key]; } return o; }
   ownQuery(def) { const q = ['select=*']; const w = String(def.where || '').trim(); if (w) q.push(...w.split(/\s*[&\n]\s*/).filter(Boolean)); const ob = String(def.orderBy || '').trim(); if (ob) q.push('order=' + ob.replace(/\s+(asc|desc)$/i, '.$1').replace(/\s+/g, '')); q.push('limit=' + Math.max(1, Math.min(5000, +def.limit || 500))); return q.join('&'); }
-  toRec(def, row) { if (this.own(def)) return this.ownRec(def, row); const me = this.user()?.id; return { ...this.engine.data.newRecord(def.name), ...this.engine.data.norm(def, row.data || {}), id: row.id, _at: +row.at || 0, _by: row.user_id || '', _mine: !!me && row.user_id === me, author: row.data?.author ?? row.author ?? '' }; }
+  toRec(def, row) {
+    if (this.own(def)) return this.ownRec(def, row); const me = this.user()?.id;
+    const rec = { ...this.engine.data.newRecord(def.name), ...this.engine.data.norm(def, row.data || {}), id: row.id, _at: +row.at || 0, _by: row.user_id || '', _mine: !!me && row.user_id === me, author: row.data?.author ?? row.author ?? '' };
+    if (def.online === 'shared with everyone') { // "did I like it?" comes from the lists, not what the writer saved
+      const h = this.myHandle(), find = (k) => String(rec[k] ?? '').split(',').map((x) => x.trim()).find((x) => x && handleOf(x.split(':')[0]) === h);
+      if ('liked' in rec || rec.liked_by != null) rec.liked = !!find('liked_by');
+      if ('reposted' in rec && rec.reposters != null) rec.reposted = !!find('reposters');
+      if (rec.voters != null && rec.voters !== '') { const v = find('voters'); rec.voted = v ? (+v.split(':')[1] || 0) + 1 : 0; } else if ('voted' in rec && !rec._mine) rec.voted = 0;
+      if (rec.reactions != null && rec.reactions !== '') { const mineR = find('reactions'), all = String(rec.reactions).split(',').map((x) => x.split(':')[1]).filter(Boolean); rec.reaction = mineR ? mineR.split(':').slice(1).join(':') : all[all.length - 1] || ''; }
+      if ('saved' in rec && !rec._mine) rec.saved = false;
+    }
+    return rec;
+  }
   fields(rec) { const o = {}; for (const [k, v] of Object.entries(rec || {})) if (k !== 'id' && !k.startsWith('_')) o[k] = v; return o; }
   async pull(def) {
     if (!this.online(def) || !this.canRead(def)) return false;
@@ -17997,8 +18016,14 @@ export class Supa {
   isLoading(name) { return !!this.loading?.has(fieldKey(name)); }
   pullAll(name) { for (const d of this.engine.data.defs()) if (this.online(d) && (!name || fieldKey(d.name) === fieldKey(name))) this.pull(d); }
   /** The same change in the table. */
-  send(def, kind, rec) {
+  send(def, kind, rec, patch, addressed) {
     const T = encodeURIComponent(this.table(def)), u = this.user(), id = encodeURIComponent(rec?.id || '');
+    if (kind === 'react' && !this.own(def)) { // a like, repost, vote or reaction: just this person, on the server (Social helpers SQL)
+      const t = this.table(def), rpc = (fn, body) => this.call('/rest/v1/rpc/' + fn, { method: 'POST', body }).catch((e) => { if (e.status === 404 || e.code === 'PGRST202' || /Could not find the function/i.test(e.message)) throw new Error('Run the latest setup SQL (Game Settings › Supabase › Copy all setup SQL) so likes and votes work for everyone'); throw e; });
+      return rec.bump ? rpc('pocket_bump', { p_table: t, p_id: rec.id, p_field: rec.bump, p_delta: rec.delta }) : rpc('pocket_react', { p_table: t, p_id: rec.id, p_list: rec.list, p_on: !!rec.on, p_value: rec.value ?? null, p_count: rec.count || null });
+    }
+    if (kind === 'changed' && patch && !this.own(def) && !addressed && !this.noMerge) // the writer's edit: only what changed (others' likes stay)
+      return this.call('/rest/v1/rpc/pocket_merge', { method: 'POST', body: { p_table: this.table(def), p_id: rec.id, p_patch: patch } }).catch((e) => { if (e.status === 404 || e.code === 'PGRST202' || /Could not find the function/i.test(e.message)) { this.noMerge = true; return this.send(def, kind, rec); } throw e; }); // (no Social helpers yet: the whole record, as before)
     if (this.own(def)) {
       const idc = encodeURIComponent(this.idCol(def));
       if (kind === 'added') return this.call(`/rest/v1/${T}`, { method: 'POST', headers: { Prefer: 'return=representation' }, body: this.ownRow(def, rec) }).then((j) => { const row = Array.isArray(j) ? j[0] : j; if (row && row[this.idCol(def)] != null) this.renamed(def, rec.id, String(row[this.idCol(def)])); }); // the table picks the id
@@ -18024,19 +18049,43 @@ export class Supa {
     for (const op of L) {
       const def = this.engine.data.def(op.c); if (!def || !this.online(def)) continue;
       if (left.length) { left.push(op); continue; } // keep the order
-      try { await this.send(def, op.kind, op.rec); } catch (e) { if (e instanceof TypeError) left.push(op); else Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase'); }
+      try { await this.send(def, op.kind, op.rec, op.patch, op.addressed); } catch (e) { if (e instanceof TypeError) left.push(op); else Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase'); }
     }
     this.setPending(left);
   }
   /** A record was added, changed or deleted on this phone: the same change goes to the table. */
-  wrote(def, kind, rec) {
+  /** The signed-in person's @handle (lower case). */
+  myHandle() { return handleOf(this.engine.social?.me?.().handle || ''); }
+  /** Sent to me (a notification, a friend request): I may change or delete it. */
+  addressedToMe(r) { const to = handleOf(r?.to); return !!to && !!this.user() && to === this.myHandle(); }
+  /** How a change to a shared record goes online: per-person lists (who liked, reposted, voted, reacted) one person at a time; counts others may move by one; the writer's own fields merged. null = refused. */
+  plan(def, r, patch) {
+    const me = this.myHandle(), mine = !r._by || r._mine, addressed = this.addressedToMe(r), local = {}, ops = [], merge = {}; let refused = false;
+    const list = (v) => String(v ?? '').split(',').map((x) => x.trim()).filter(Boolean), inL = (L, h) => L.find((x) => handleOf(x.split(':')[0]) === h);
+    const setMe = (k, on, value) => { const L = list(local[k] ?? r[k]).filter((x) => handleOf(x.split(':')[0]) !== me); if (on) L.push(me + (value != null && value !== '' ? ':' + value : '')); local[k] = L.join(','); };
+    for (const [k, v] of Object.entries(patch)) {
+      if (k in SOCIAL_LISTS) { local[k] = v; const was = inL(list(r[k]), me), now = inL(list(v), me); if (!!was !== !!now || (now && now !== was)) ops.push({ list: k, on: !!now, value: now && now.includes(':') ? now.split(':').slice(1).join(':') : null, count: SOCIAL_LISTS[k] || null }); continue; }
+      if (k in SOCIAL_FLAGS) { local[k] = v; const L = SOCIAL_FLAGS[k]; if (!(L in patch)) { const was = !!inL(list(r[L]), me), on = truthy(v); if (on !== was || mine) { if (on !== was) ops.push({ list: L, on, value: null, count: SOCIAL_LISTS[L] || null }); setMe(L, on); } } continue; }
+      if (Object.values(SOCIAL_LISTS).includes(k) || k === 'votes') { local[k] = v; continue; } // counts follow their lists on the server
+      if (k === 'voted') { local[k] = v; const i = Math.round(+v) - 1; if (i >= 0) { ops.push({ list: 'voters', on: true, value: String(i), count: null }); setMe('voters', true, String(i)); } continue; }
+      if (k === 'reaction') { local[k] = v; ops.push({ list: 'reactions', on: !!v, value: v ? String(v) : null, count: null }); setMe('reactions', !!v, v); continue; }
+      if (SOCIAL_BUMPS.includes(k)) { local[k] = v; const d = Math.sign((+v || 0) - (+r[k] || 0)); if (d && (!mine || k !== 'views')) ops.push({ bump: k, delta: d }); else if (d && mine) merge[k] = v; continue; }
+      if (SOCIAL_LOCAL.includes(k) && !mine) { local[k] = v; continue; } // (kept on this phone)
+      if (mine || addressed) { local[k] = v; merge[k] = v; continue; }
+      refused = true;
+    }
+    if (refused) { this.engine.scene?.message('Only the person who wrote it can change it', 1.8); if (!ops.length && !Object.keys(local).length) return null; }
+    if (!this.user()) { this.engine.scene?.setVar('dataError', 'Sign in to save this online'); }
+    return { local, ops, merge: mine || addressed ? merge : {}, addressed: addressed && !mine };
+  }
+  wrote(def, kind, rec, patch, addressed) {
     if (!this.online(def) || this.pulling) return;
     const s = this.engine.scene, u = this.user();
     if (!u && !this.own(def)) { s?.setVar('dataError', 'Sign in to save this online'); Log.add('warn', `“${def.name}” is online: sign in to add or change records`, 'Supabase'); return; }
     if (kind === 'added' && u && !this.own(def)) { rec._by = u.id; rec._mine = true; }
-    const op = { c: def.name, kind, rec: rec ? { ...rec } : null };
+    const op = { c: def.name, kind, rec: rec ? { ...rec } : null, patch: patch || null, addressed: !!addressed };
     if (this.pending().length) { this.setPending([...this.pending(), op]); this.flush(); return; } // still offline from before: queue behind the others
-    return this.send(def, kind, rec).then(() => s?.setVar('dataError', '')).catch((e) => {
+    return this.send(def, kind, rec, op.patch, op.addressed).then(() => s?.setVar('dataError', '')).catch((e) => {
       if (e instanceof TypeError) { this.setPending([...this.pending(), op]); s?.setVar('dataError', 'Offline: it will be saved online when you are back'); return; } // no connection
       s?.setVar('dataError', e.message); Log.add('warn', `Online data “${def.name}”: ${e.message}`, 'Supabase');
     });
@@ -18142,12 +18191,121 @@ create policy "${b} upload" on storage.objects for insert to authenticated with 
 create policy "${b} remove" on storage.objects for delete to authenticated using (bucket_id = '${b}' and owner = auth.uid());
 `;
 }
+/** Fields that hold one entry per person (who liked, reposted, voted, reacted), changed one person at a time on the server; and the count each keeps up. */
+export const SOCIAL_LISTS = { liked_by: 'likes', reposters: 'reposts', voters: '', reactions: '' };
+/** A yes/no that means "I am in that list". */
+const SOCIAL_FLAGS = { liked: 'liked_by', reposted: 'reposters' };
+/** Counts anyone may move by one (a comment under your post, a view). */
+const SOCIAL_BUMPS = ['comments', 'views', 'shares'];
+/** Per person, kept on each phone (bookmarks, the social graph), never written to someone else's record. */
+const SOCIAL_LOCAL = ['saved', 'following'];
+/** How a shared collection's rows may be read and changed: by its name (the social parts use these names). */
+function socialAccess(def) {
+  const n = fieldKey(def?.name || ''), F = fieldsOf(def || {}).map((f) => f.key), has = (k) => F.includes(k);
+  const kind = def?.access || (n === 'notifications' ? 'addressed' : n === 'friends' ? 'between' : n === 'messages' ? 'conversation' : 'public');
+  const who = ['handle', 'from', 'follower'].filter(has); // fields that name the writer: they must be the signed-in person
+  return { kind, who };
+}
+/** The helper functions every social table uses: who is signed in (their @handle), reactions, counts and safe edits. Safe to run again. */
+export function socialHelpersSQL() {
+  return `-- Social helpers (Pocket Engine): run once; running again is safe
+create table if not exists public.pocket_social_tables (name text primary key);
+alter table public.pocket_social_tables enable row level security;
+drop policy if exists "pocket tables read" on public.pocket_social_tables;
+create policy "pocket tables read" on public.pocket_social_tables for select using (true);
+
+-- the signed-in person's @handle: their username, else their name without spaces, else their email's first part
+create or replace function public.pocket_handle() returns text language sql stable security definer set search_path = public as $$
+  select lower(regexp_replace(coalesce(nullif(u.raw_user_meta_data->>'username', ''), nullif(u.raw_user_meta_data->>'handle', ''), nullif(u.raw_user_meta_data->>'name', ''), split_part(u.email, '@', 1)), '\\s+|^@', '', 'g'))
+  from auth.users u where u.id = auth.uid()
+$$;
+
+-- like / repost / vote / react: adds or removes only the caller in the list, and keeps its count
+create or replace function public.pocket_react(p_table text, p_id text, p_list text, p_on boolean, p_value text default null, p_count text default null)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare h text := public.pocket_handle(); d jsonb; arr text[]; had text; res jsonb; n numeric; v text[]; i int;
+begin
+  if auth.uid() is null or coalesce(h, '') = '' then raise exception 'Sign in first'; end if;
+  if not exists (select 1 from public.pocket_social_tables where name = p_table) then raise exception 'This table does not take reactions'; end if;
+  if not (p_list = any (array['liked_by', 'reposters', 'voters', 'reactions'])) then raise exception 'Not allowed'; end if;
+  execute format('select data from public.%I where id = $1 for update', p_table) into d using p_id;
+  if d is null then raise exception 'Not found'; end if;
+  if d ? 'chat' and not public.pocket_in_chat(p_table, d->>'chat') then raise exception 'Not found'; end if; -- (a private conversation: only its people)
+  arr := coalesce(array(select trim(x) from unnest(string_to_array(coalesce(d->>p_list, ''), ',')) x where trim(x) <> ''), '{}');
+  select x into had from unnest(arr) x where lower(split_part(x, ':', 1)) = h limit 1;
+  arr := coalesce(array(select x from unnest(arr) x where lower(split_part(x, ':', 1)) <> h), '{}');
+  if p_on then arr := arr || (h || case when coalesce(p_value, '') = '' then '' else ':' || left(p_value, 40) end); end if;
+  res := jsonb_build_object(p_list, array_to_string(arr, ','));
+  if p_count in ('likes', 'reposts') then
+    n := greatest(0, coalesce(nullif(d->>p_count, '')::numeric, 0) + (case when p_on and had is null then 1 when not p_on and had is not null then -1 else 0 end));
+    res := res || jsonb_build_object(p_count, n);
+  end if;
+  if p_list = 'voters' then
+    v := coalesce(string_to_array(nullif(regexp_replace(coalesce(d->>'votes', ''), '\\s', '', 'g'), ''), ','), '{}');
+    if had is not null then i := nullif(split_part(had, ':', 2), '')::int; if i is not null and i >= 0 and i < coalesce(array_length(v, 1), 0) then v[i + 1] := greatest(0, coalesce(nullif(v[i + 1], '')::int, 0) - 1)::text; end if; end if;
+    if p_on then i := nullif(p_value, '')::int; if i is not null and i >= 0 and i < 20 then while coalesce(array_length(v, 1), 0) < i + 1 loop v := v || '0'::text; end loop; v[i + 1] := (coalesce(nullif(v[i + 1], '')::int, 0) + 1)::text; end if; end if;
+    res := res || jsonb_build_object('votes', array_to_string(v, ', '));
+  end if;
+  execute format('update public.%I set data = data || $1 where id = $2', p_table) using res, p_id;
+  return res;
+end $$;
+
+-- a count anyone may move by one (comments under a post, views)
+create or replace function public.pocket_bump(p_table text, p_id text, p_field text, p_delta int)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare d jsonb; res jsonb;
+begin
+  if auth.uid() is null then raise exception 'Sign in first'; end if;
+  if not exists (select 1 from public.pocket_social_tables where name = p_table) or not (p_field = any (array['comments', 'views', 'shares'])) then raise exception 'Not allowed'; end if;
+  execute format('select data from public.%I where id = $1 for update', p_table) into d using p_id;
+  if d is null then raise exception 'Not found'; end if;
+  if d ? 'chat' and not public.pocket_in_chat(p_table, d->>'chat') then raise exception 'Not found'; end if;
+  res := jsonb_build_object(p_field, greatest(0, coalesce(nullif(d->>p_field, '')::numeric, 0) + greatest(-1, least(1, p_delta))));
+  execute format('update public.%I set data = data || $1 where id = $2', p_table) using res, p_id;
+  return res;
+end $$;
+
+-- the writer changes some fields of their own record (others' likes and counts stay as they are)
+create or replace function public.pocket_merge(p_table text, p_id text, p_patch jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  if auth.uid() is null then raise exception 'Sign in first'; end if;
+  if not exists (select 1 from public.pocket_social_tables where name = p_table) then raise exception 'Not allowed'; end if;
+  execute format('update public.%I set data = data || ($1 - ''liked_by'' - ''reposters'' - ''voters'' - ''reactions'' - ''likes'' - ''reposts'' - ''votes'' - ''comments'' - ''views'') where id = $2 and user_id = auth.uid()', p_table) using p_patch, p_id;
+  get diagnostics n = row_count;
+  if n = 0 then raise exception 'Only the person who wrote it can change it'; end if;
+end $$;
+
+-- is the signed-in person in this conversation? (a direct message names both people; a group lists its members on its first message)
+create or replace function public.pocket_in_chat(p_table text, p_chat text, p_members text default null) returns boolean language plpgsql stable security definer set search_path = public as $$
+declare h text := public.pocket_handle(); m text;
+begin
+  if coalesce(h, '') = '' or p_chat is null then return false; end if;
+  p_chat := lower(p_chat);
+  if p_chat like 'dm-%' then return p_chat like 'dm-' || h || '-%' or p_chat like 'dm-%-' || h; end if;
+  if p_chat not like 'g-%' then return true; end if; -- a public room
+  if p_members is not null and (',' || lower(replace(p_members, ' ', '')) || ',') like '%,' || h || ',%' then return true; end if;
+  if not exists (select 1 from public.pocket_social_tables where name = p_table) then return false; end if;
+  execute format('select data->>''members'' from public.%I where data->>''chat'' = $1 and coalesce(data->>''members'', ) <>  limit 1', p_table) into m using p_chat;
+  return m is not null and (',' || lower(replace(m, ' ', '')) || ',') like '%,' || h || ',%';
+end $$;
+`;
+}
 /** The SQL that makes a collection's table in Supabase, with the rules for private or shared records. */
 export function supabaseSQL(def) {
-  if (def.online === 'my own table') { const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(); return def.live ? `-- ${def.name}: live updates for your table\n` + liveSQL(t) : `-- ${def.name} uses your own table “${t}”: nothing to set up. Its row level security rules decide who can read and write.\n`; }
+  if (def.online === 'my own table') { const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(); return def.live ? `-- ${def.name}: live updates for your table
+` + liveSQL(t) : `-- ${def.name} uses your own table “${t}”: nothing to set up. Its row level security rules decide who can read and write.
+`; }
   const t = String(def.table || fieldKey(def.name)).trim().replace(/[^a-z0-9_]/gi, '_').toLowerCase(), shared = def.online === 'shared with everyone';
-  return `-- ${def.name}: ${shared ? 'everyone can read; people add, change and delete their own records' : 'each person sees only their own records'}
-create table if not exists public.${t} (
+  const A = socialAccess(def), me = (k) => `(data->>'${k}' is null or lower(regexp_replace(data->>'${k}', '^@', '')) = public.pocket_handle())`;
+  const writer = ['auth.uid() = user_id', ...A.who.map(me)].join(' and ');
+  const read = !shared ? 'auth.uid() = user_id' : A.kind === 'addressed' ? `auth.uid() = user_id or lower(data->>'to') = public.pocket_handle()` : A.kind === 'conversation' ? `auth.uid() = user_id or public.pocket_in_chat('${t}', data->>'chat')` : 'true';
+  const add = shared && A.kind === 'conversation' ? `${writer} and public.pocket_in_chat('${t}', data->>'chat', data->>'members')` : shared ? writer : 'auth.uid() = user_id';
+  const change = shared && (A.kind === 'addressed' || A.kind === 'between') ? `auth.uid() = user_id or lower(data->>'to') = public.pocket_handle()` : 'auth.uid() = user_id';
+  const what = !shared ? 'each person sees only their own records' : A.kind === 'addressed' ? 'each person sees what is sent to them; they can mark it read or delete it' : A.kind === 'between' ? 'everyone can read; the person a request is for can accept or delete it' : A.kind === 'conversation' ? 'only the people in a conversation can read and write in it' : 'everyone can read; people add, change and delete their own records';
+  return `-- ${def.name}: ${what}
+${shared ? socialHelpersSQL() : ''}create table if not exists public.${t} (
   id text primary key,
   user_id uuid not null default auth.uid() references auth.users on delete cascade,
   author text not null default '',
@@ -18159,13 +18317,42 @@ drop policy if exists "${t} read" on public.${t};
 drop policy if exists "${t} add" on public.${t};
 drop policy if exists "${t} change" on public.${t};
 drop policy if exists "${t} remove" on public.${t};
-create policy "${t} read" on public.${t} for select using (${shared ? 'true' : 'auth.uid() = user_id'});
-create policy "${t} add" on public.${t} for insert with check (auth.uid() = user_id);
-create policy "${t} change" on public.${t} for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "${t} remove" on public.${t} for delete using (auth.uid() = user_id);
-${def.live ? liveSQL(t) : ''}`;
+create policy "${t} read" on public.${t} for select using (${read});
+create policy "${t} add" on public.${t} for insert with check (${add});
+create policy "${t} change" on public.${t} for update using (${change}) with check (${change});
+create policy "${t} remove" on public.${t} for delete using (${change});
+${shared ? `insert into public.pocket_social_tables (name) values ('${t}') on conflict do nothing;
+` : ''}${shared && fieldKey(def.name) === 'profiles' ? `create unique index if not exists ${t}_handle_unique on public.${t} ((lower(data->>'handle')));
+` : ''}${def.live ? liveSQL(t) : ''}`;
 }
-
+/** The collections a social app keeps online, and how. */
+const SOCIAL_ONLINE = { posts: 'shared with everyone', comments: 'shared with everyone', stories: 'shared with everyone', storyviews: 'shared with everyone', listings: 'shared with everyone', profiles: 'shared with everyone', points: 'shared with everyone', reads: 'shared with everyone', follows: 'shared with everyone', friends: 'shared with everyone', notifications: 'shared with everyone', messages: 'shared with everyone', bookmarks: 'private to each person' };
+/** Turn a social app online in one go: accounts with a unique username, a public profiles table, every social collection on Supabase with live updates, and a media bucket. Returns what it changed. */
+export function socialOnlineSetup(root) {
+  const st = (root.settings ||= {}), done = [];
+  if (!st.profiles || st.profiles === 'off') { st.profiles = 'everyone can see them'; st.profilesTable ||= 'accounts'; done.push('Profiles table: everyone can see them'); }
+  const F = (st.accountFields ||= []);
+  if (!F.some((f) => fieldKey(f.name || '') === 'username')) { F.unshift({ name: 'Username', type: 'text', required: true, unique: true }); done.push('Account field: Username (required, unique)'); }
+  else for (const f of F) if (fieldKey(f.name || '') === 'username' && !(f.required && f.unique)) { f.required = true; f.unique = true; done.push('Username is required and unique'); }
+  if (!String(st.supabaseBucket || '').trim()) { st.supabaseBucket = 'media'; done.push('Media bucket: media'); }
+  for (const c of root.collections || []) {
+    const mode = SOCIAL_ONLINE[fieldKey(c.name)]; if (!mode || c.online === 'my own table') continue;
+    const was = c.online; c.online = mode; c.live = true; if (fieldKey(c.name) === 'profiles' && (!c.table || c.table === 'profiles')) c.table = 'social_profiles';
+    if (was !== mode) done.push(`${c.name}: ${mode}, live`);
+  }
+  return done;
+}
+/** Everything a social app needs in one script: accounts (profiles), helpers, every online collection and the media bucket. */
+export function socialSQL(st = {}, defs = []) {
+  const on = defs.filter((d) => SUPA_MODES.includes(d.online)), seen = new Set();
+  const parts = [`-- ${st.name || 'App'}: everything for Supabase (accounts, helpers, ${on.length} tables${st.supabaseBucket ? ', media' : ''}). Paste in Supabase › SQL Editor and press Run. Running it again is safe.
+`];
+  if (st.profiles && st.profiles !== 'off') parts.push(profilesSQL(st));
+  if (on.some((d) => d.online === 'shared with everyone')) parts.push(socialHelpersSQL());
+  for (const d of on) { const sql = supabaseSQL(d).replace(socialHelpersSQL(), ''); if (!seen.has(sql)) { seen.add(sql); parts.push(sql); } }
+  if (st.supabaseBucket) parts.push(storageSQL(st.supabaseBucket));
+  return parts.join('\n');
+}
 export class DataStore {
   constructor(engine) { this.engine = engine; this.cache = {}; this.n = 0; }
   defs() { return this.engine.collections || []; }
@@ -18193,9 +18380,19 @@ export class DataStore {
   }
   get(name, id) { return this.rows(name).find((r) => r.id === id) || null; }
   /** Shared online records belong to whoever wrote them. */
-  notMine(def, r) { if (this.engine.supa?.online(def) && r._by && !r._mine) { this.engine.scene?.message('Only the person who wrote it can change it', 1.8); return true; } return false; }
-  update(name, id, patch) { const def = this.def(name), r = this.get(name, id); if (!r || this.notMine(def, r)) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r; }
-  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0 || this.notMine(this.def(name), L[i])) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
+  notMine(def, r) { if (this.engine.supa?.online(def) && r._by && !r._mine && !this.engine.supa.addressedToMe(r)) { this.engine.scene?.message('Only the person who wrote it can change it', 1.8); return true; } return false; }
+  update(name, id, patch) {
+    const def = this.def(name), r = this.get(name, id), S = this.engine.supa; if (!r) return null;
+    if (S?.online(def) && !S.own(def)) { // online: likes, reposts and votes go one person at a time; the writer's edits change only what changed
+      const plan = S.plan(def, r, this.norm(def, patch)); if (!plan) return null;
+      Object.assign(r, plan.local); this.save(name);
+      for (const op of plan.ops) S.wrote(def, 'react', { id: r.id, ...op });
+      if (Object.keys(plan.merge).length) S.wrote(def, 'changed', r, plan.merge, plan.addressed);
+      const s = this.engine.scene; if (s) { this.syncVars(s); s.emit('data', fieldKey(name), 'changed', r); } return r;
+    }
+    if (this.notMine(def, r)) return null; Object.assign(r, this.norm(def, patch)); this.changed(name, 'changed', r); return r;
+  }
+  remove(name, id) { const L = this.rows(name), i = L.findIndex((r) => r.id === id); if (i < 0 || (this.notMine(this.def(name), L[i]) && !this.engine.supa?.addressedToMe(L[i]))) return null; const [r] = L.splice(i, 1); this.changed(name, 'deleted', r); return r; }
   clear(name) { const L = this.rows(name); L.length = 0; this.changed(name, 'cleared', null); }
   /** Back to the starting rows from Game Settings (forgets what was saved on this device). */
   reset(name) { const def = this.def(name); if (!def) return; try { localStorage.removeItem(this.key(def)); } catch { /* storage unavailable */ } delete this.cache[fieldKey(def.name)]; this.changed(name, 'reset', null); }

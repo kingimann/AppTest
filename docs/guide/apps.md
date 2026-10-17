@@ -146,6 +146,26 @@ Apps can have their own accounts and keep data online with a free [Supabase](htt
 
 The anon key is safe in your app. Never use the *service_role* key.
 
+### A social app online in one click
+
+For a social app (the Social template, or any app with Posts, Comments, Follows, Messages…): *Game Settings › Supabase › **Set up social app***. It:
+
+- adds a required, unique **Username** to accounts and turns on a public profiles table (`accounts`);
+- puts every social collection online with live updates: Posts, Comments, Stories, StoryViews, Listings, Profiles (table `social_profiles`), Points, Reads, Follows, Friends, Notifications and Messages are shared; Bookmarks are private to each person;
+- sets a media bucket (`media`) for photos and videos;
+- adds a **Sign In** page and a **sign-up page** with Email, Password, Name and Username, and makes people sign in first;
+- shows **one SQL script**. Copy it, paste it in Supabase › SQL Editor and press Run. (*Copy all setup SQL* gives the same script later; run it again after adding a collection.)
+
+What the script makes sure of:
+
+- **Everyone is who they say they are.** A post, comment, message, story, follow or friend request can only be written under the signed-in person's own @handle (their username), and only they can change or delete it.
+- **Likes, reposts and poll votes count each person once.** Liking someone's post adds you to its `liked_by` list and moves its count by one on the server; unliking takes you out. The same for reposts (`reposters`), poll votes (`voters`) and reactions on messages (`reactions`). "Did I like it?" comes from those lists, so each phone shows its own person's likes. Comment counts and views move by one at a time.
+- **Editing your own post keeps everyone's likes.** Only the fields you changed are saved.
+- **Private things stay private.** Direct messages and group chats can only be read and written by the people in them; notifications only by the person they're for (who can mark them read). A friend request can be accepted or declined only by the person it was sent to.
+- **One profile per person.** Each @handle has one profile, which only its owner can change.
+
+While someone is on the sign-in or sign-up page, the App Bar, Bottom Nav and Side Menu stay hidden; signing in from either page goes on into the app. Signed in, `{playerName}` and `{playerHandle}` are the account's name and username, so posts, comments and the profile show them.
+
 ### Sign-in
 
 - *Add → UI & Menus → App → **Sign-in Page***: a page (`page = signin`) with Email, Password and Name boxes, **Sign in**, **Create account**, **Forgot password?**, **Continue with Google**, and `{authError}` for what went wrong.

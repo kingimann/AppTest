@@ -1439,6 +1439,7 @@ export class Scene {
     if (o.history !== false && cur != null && cur !== '') { st.push(cur); if (st.length > 50) st.shift(); }
     this.navDir = o.dir ?? 1; this.navAt = this.time;
     this.setVar(v, page);
+    if (typeof autoPage === 'function' && !this.engine?.editing) { const pageFor = (val) => [...this.entities, ...this.pending].some((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiShowIf' && x.params && (x.params.var || 'page') === v && (x.params.op || '=') === '=' && (val == null || sameVal(val, x.params.value)))); if (pageFor() && !pageFor(page)) autoPage(this, v, page); } // a page the app doesn't have yet
     this.emit('page', v, page, this.navDir);
     return true;
   }
@@ -14485,6 +14486,19 @@ registerBehavior('uiTutorial', {
   },
 });
 
+/** Pages an app goes to that it doesn't have yet (a Messages tab with no Messages page): the usual social screens are made while it runs, others say so in the Console. */
+const AUTO_PAGES = { inbox: ['uiInbox', 'Messages', { collection: 'Messages', openPage: 'chat' }], messages: ['uiInbox', 'Messages', { collection: 'Messages', openPage: 'chat' }], chat: ['uiChat', 'Chat', { collection: 'Messages' }], chats: ['uiInbox', 'Messages', { collection: 'Messages', openPage: 'chat' }],
+  notifications: ['uiActivity', 'Notifications', {}], activity: ['uiActivity', 'Activity', {}], friends: ['uiFriends', 'Friends', {}], saved: ['uiBookmarks', 'Saved', {}], bookmarks: ['uiBookmarks', 'Saved', {}], marketplace: ['uiMarketplace', 'Marketplace', {}], achievements: ['uiAchievements', 'Achievements', {}] };
+function autoPage(s, v, value) {
+  const k = String(value ?? '').trim().toLowerCase(), A = AUTO_PAGES[k], seen = (s._autoPages ||= new Set()), key = v + '=' + k;
+  if (s.engine.editing || seen.has(key)) return !!A;
+  seen.add(key);
+  if (!A) { Log.add('warn', `There is no “${value}” page, so the first page shows instead. Make a page called “${value}” in the editor (Pages › New page), or point the button at a page you have.`, 'UI'); return false; }
+  const pg = s.add({ name: A[1] + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' }, behaviors: [{ type: 'uiShowIf', var: v, op: '=', value: String(value), anim: 'push (iOS, follows navigation)' }] });
+  s.add({ name: A[1], ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, parent: pg.id, shape: { type: 'rect', w: 400, h: 600, radius: 0, fill: '' }, behaviors: [{ type: A[0], ...A[2] }] });
+  Log.add('info', `The app has no “${value}” page yet, so a ${A[1]} page was made while it runs. Add one in the editor (Pages › New page) to keep and change it.`, 'UI');
+  return true;
+}
 registerBehavior('uiShowIf', {
   label: 'Show If (pages)', description: 'Show this UI only when a variable matches, e.g. page = shop for a Shop page, or messages > 0 for a badge. Everything inside it shows and hides with it.',
   params: [
@@ -14566,7 +14580,7 @@ registerBehavior('uiShowIf', {
     const test = (v, s) => {
       if (v == null || v === '') return !!p.whenUnset;
       if (p.whenUnset && (p.op || '=') === '=' && s && !sameVal(v, p.value)) { // the first page also shows when no page is for this value (a menu starting on “home” with no Home page yet)
-        if (orphanT !== s.time) { orphanT = s.time; orphan = !s.entities.some((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiShowIf' && x.params && x.params.var === p.var && (x.params.op || '=') === '=' && sameVal(v, x.params.value))); }
+        if (orphanT !== s.time) { orphanT = s.time; orphan = ![...s.entities, ...s.pending].some((q) => !q.dead && q.behaviors.some((x) => x.type === 'uiShowIf' && x.params && x.params.var === p.var && (x.params.op || '=') === '=' && sameVal(v, x.params.value))); if (orphan && autoPage(s, p.var || 'page', v)) orphan = false; } // (a Messages page that isn't there yet is made)
         if (orphan) return true;
       }
       const a = +v, b = +p.value, num = p.value !== '' && Number.isFinite(a) && Number.isFinite(b);

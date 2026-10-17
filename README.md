@@ -83,6 +83,8 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    - Held sideways, the panels move to the right.
 5. **▶ Play** tests the game instantly; **■ Stop** (or the phone's back gesture) returns to editing.
 
+A tab, menu item or App Bar button that opens a page you haven't made yet no longer drops you on the first page. Messages, chat, notifications, friends, saved, marketplace and achievements pages are made while the app runs, and ⋯ › **Make the “inbox” page** builds the ready-made page in the editor.
+
 The Hierarchy has **quick filters** (All, Pages, UI, Player, Logic, Physics, Hidden, Templates, with counts), **Fold all / Unfold all**, a **path** to the selected object (tap a parent to select it, the target button scrolls to it), each component's own icon, and in apps a marker on the page that's **showing** (tapping a page shows it).
 
 New projects show a **Getting started** checklist at the top of the Hierarchy: add a player, ground, something to collect, some node logic, and press Play. Each step has a button that does it for you.

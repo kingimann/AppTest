@@ -38,6 +38,10 @@ App projects show an **App** badge in your list of projects.
 An app is a set of **pages**. A page is a full-screen panel with **Show If** on the `page` variable (`page = home`, `page = detail`…), and everything inside it shows and hides with it. Pages slide in when you open them and slide back when you go back.
 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
+- **A button that opens a page you haven't made yet:**
+  - **Social pages are made while the app runs.** These are *inbox* / *messages*, *chat*, *notifications*, *friends*, *saved*, *marketplace* and *achievements*. A Messages tab with no Messages page still opens your messages, and the Console says it was made for you.
+  - **Any other missing page** shows the first page, with a warning in the Console.
+  - **In the editor:** the tab, menu item or App Bar button says *(no page yet)*, and its ⋯ menu has **Make the “inbox” page**. That builds the ready-made page (Messages with an Inbox, Chat, Notifications, Friends…), so you can keep and change it.
 - **App Bar** shows the page title (*Page titles*: `home = My Tasks`, one per line) and a ‹ Back button. The phone's back gesture, the browser's Back button and Esc go back too.
 - **Page templates:** ready-made pages you can find in three places:
   - **+ Add › Page Templates** (or search, e.g. “settings”) makes a new page from one;

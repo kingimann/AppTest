@@ -300,6 +300,22 @@ const outKind = (d) => d.value || 'exec';
  * opts: { graph, title, h, popMenu, toast, buzz, templates: [names], objects: [names], vars: [names], onChange(graph), onClose() }
  * Returns { close }.
  */
+/** What looks wrong in a script: Map of node id → why (nodes that never run, values wired to nothing…). Find Problems and Check use it. */
+export function graphProblems(g) {
+  const nodes = g?.nodes || [], links = g?.links || [], byId = new Map(nodes.map((n) => [n.id, n])), W = new Map();
+  for (const n of nodes) {
+    const d = def(n);
+    if (!NODE_TYPES[n.type]) { W.set(n.id, 'Unknown node (from a newer version?)'); continue; }
+    if (d.comment || d.hidden && d.cat === '(internal)') continue;
+    if (n.off) W.set(n.id, 'Turned off: it is skipped');
+    else if (d.value && !links.some((l) => l.from.node === n.id)) W.set(n.id, 'Its value isn’t wired to anything');
+    else if (d.exec && !links.some((l) => l.to.node === n.id && l.to.port === 'in')) W.set(n.id, 'Never runs: nothing is wired into its white dot');
+    else if (!d.exec && !d.value && (d.outs || []).length && !links.some((l) => l.from.node === n.id)) W.set(n.id, 'Does nothing yet: wire something to it');
+    for (const l of links) if (l.to.node === n.id && !byId.has(l.from.node)) W.set(n.id, 'A wire comes from a node that was removed');
+  }
+  if (nodes.length && !nodes.some((n) => NODE_TYPES[n.type]?.cat === 'Events' || def(n).outs?.length && !def(n).exec && !def(n).value)) W.set(nodes[0].id, W.get(nodes[0].id) || 'No Event node: nothing starts this script (add a green Event, like On Tap)');
+  return W;
+}
 export function openNodeEditor(opts) {
   const { h, popMenu, toast, buzz = () => {} } = opts;
   const g = JSON.parse(JSON.stringify(opts.graph || { nodes: [], links: [] }));
@@ -313,7 +329,8 @@ export function openNodeEditor(opts) {
 
   const emit = () => { warn = null; opts.onChange(JSON.parse(JSON.stringify(g))); };
   const syncUndo = () => { undoBtn.disabled = !undo.length; redoBtn.disabled = !redo.length; };
-  const snap = () => { undo.push(JSON.stringify(g)); if (undo.length > 60) undo.shift(); redo.length = 0; syncUndo(); };
+  let editKey = null; // the field being typed in: one Undo step per edit of a field, not per letter
+  const snap = () => { editKey = null; undo.push(JSON.stringify(g)); if (undo.length > 60) undo.shift(); redo.length = 0; syncUndo(); };
   const nid = () => { let i = g.nodes.length + 1; while (g.nodes.some((n) => n.id === 'n' + i)) i++; return 'n' + i; };
 
   // ---------- DOM ----------
@@ -443,18 +460,24 @@ export function openNodeEditor(opts) {
 
   // ---------- nodes ----------
   function field(n, spec) {
-    const val = n.params?.[spec.key] ?? spec.default;
-    const set = (v) => { (n.params ||= {})[spec.key] = v; emit(); };
-    const pick = (list, none) => h('select', { onchange: (e) => set(e.target.value) },
+    const val = n.params?.[spec.key] ?? spec.default, key = n.id + '|' + spec.key;
+    const set = (v, done) => { if (editKey !== key) { snap(); editKey = key; } (n.params ||= {})[spec.key] = v; if (done) editKey = null; emit(); }; // (undoable: Undo puts the field back)
+    const end = () => { if (editKey === key) editKey = null; };
+    const pick = (list, none) => h('select', { onchange: (e) => set(e.target.value, true) },
       h('option', { value: '' }, none), list.map((o) => h('option', { value: o, selected: o === val }, o)));
     if (n.type === 'spawn' && spec.key === 'template') return pick(opts.templates || [], opts.templates?.length ? '— choose —' : '(no templates yet)');
     if (n.type === 'showHide' && spec.key === 'object') return pick((opts.objects || []).filter(Boolean), 'this object');
-    if (spec.type === 'select') return h('select', { onchange: (e) => set(e.target.value) }, spec.options.map((o) => h('option', { value: o, selected: o === val }, o)));
-    if (spec.type === 'bool') return h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
-    if (spec.type === 'longtext') return h('textarea', { rows: 3, spellcheck: true, oninput: (e) => set(e.target.value) }, val ?? '');
-    if (spec.type === 'color') return h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value) });
-    if (spec.type === 'number') return h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, oninput: (e) => { const v = parseFloat(e.target.value); if (!Number.isNaN(v)) set(v); } });
-    const inp = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value) });
+    if (spec.type === 'select') return h('select', { onchange: (e) => set(e.target.value, true) }, spec.options.map((o) => h('option', { value: o, selected: o === val }, o)));
+    if (spec.type === 'bool') return h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked, true) });
+    if (spec.type === 'longtext') return h('textarea', { rows: 3, spellcheck: true, oninput: (e) => set(e.target.value), onblur: end }, val ?? '');
+    if (spec.type === 'color') return h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value), onchange: end });
+    if (spec.type === 'number') { // a number: anything else is shown in red while typing, then put back with a note
+      const ok = (t) => /^\s*[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?\s*$/i.test(t);
+      const num = h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, 'aria-invalid': 'false', oninput: (e) => { const t = e.target.value, good = ok(t); num.classList.toggle('bad', !good && t.trim() !== ''); num.setAttribute('aria-invalid', String(!good)); num.title = good ? '' : `${spec.label || spec.key} needs a number`; if (good) set(parseFloat(t)); },
+        onblur: () => { end(); if (!ok(num.value)) { const was = n.params?.[spec.key] ?? spec.default ?? 0; opts.toast?.(`“${num.value}” isn’t a number: ${spec.label || spec.key} is back to ${was}`); num.value = was; num.classList.remove('bad'); num.setAttribute('aria-invalid', 'false'); num.title = ''; } } });
+      return num;
+    }
+    const inp = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value), onblur: end });
     if (spec.key === 'name' && opts.vars?.length) { inp.setAttribute('list', 'ne-vars'); }
     return inp;
   }
@@ -596,17 +619,7 @@ export function openNodeEditor(opts) {
     emit(); render(); requestAnimationFrame(fit); toast('Tidied up');
   }
   function checkProblems() {
-    const byId = new Map(g.nodes.map((n) => [n.id, n])), W = new Map();
-    for (const n of g.nodes) {
-      const d = def(n);
-      if (!NODE_TYPES[n.type]) { W.set(n.id, 'Unknown node (from a newer version?)'); continue; }
-      if (d.comment) continue;
-      if (n.off) W.set(n.id, 'Turned off: it is skipped');
-      else if (d.value && !g.links.some((l) => l.from.node === n.id)) W.set(n.id, 'Its value isn’t wired to anything');
-      else if (d.exec && !g.links.some((l) => l.to.node === n.id && l.to.port === 'in')) W.set(n.id, 'Never runs: nothing is wired into its white dot');
-      else if (!d.exec && !d.value && (d.outs || []).length && !g.links.some((l) => l.from.node === n.id)) W.set(n.id, 'Does nothing yet: wire something to it');
-      for (const l of g.links) if (l.to.node === n.id && !byId.has(l.from.node)) W.set(n.id, 'A wire comes from a node that was removed');
-    }
+    const byId = new Map(g.nodes.map((n) => [n.id, n])), W = graphProblems(g);
     warn = W.size ? W : null; render();
     if (!W.size) { toast('No problems found ✓'); return; }
     const list = sheet(`${W.size} thing${W.size > 1 ? 's' : ''} to check`, (L) => [L]);

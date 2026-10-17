@@ -6,7 +6,7 @@ A **Visual Script** is logic built from **nodes** joined by **wires**. It can do
 
 - *Add Component → Logic → Visual Script*, then **Open Node Editor**.
 - *Create → Logic & Scripts → Visual Script*.
-- The **Scripts** tab lists every visual script in the game, with a mini map of each. **New Visual Script** adds one to the selected object. It asks how to start: a **Blank script** (an empty canvas) or a small working **Example** (*Tap to score*: On Tap → add 1 to score → show it and play a sound; *Score every second* on an object you can't tap; *Page opened → message* in an app).
+- The **Scripts** tab lists every visual script in the game, with a mini map of each. **New Visual Script** adds one to the selected object. It asks how to start: a **Blank script** (an empty canvas) or a small working **Example** (*Tap to score*: On Tap → add 1 to score → show it; *Score every second* on an object you can't tap; *Page opened → message* in an app).
 
 A script belongs to an object: "this object" in a node means that object.
 
@@ -36,6 +36,9 @@ A step with several white outputs chooses one: **If** has *true* / *false*, **Ra
 ## Editing
 
 - **Add Node** (the + button) opens a picker with search, **Suggested next** (what usually follows the selected node), **Recently used**, **Common actions** (the handful most scripts use: Add to Variable, Set Variable, Play Sound, Show Message, Wait, If, Move By, Jump, Spawn, Destroy, Show / Hide, Win, Game Over) and one folder per category. Each name appears once: where a trigger instruction does the same as a node (Play Sound, Wait…), only the node is listed (old scripts using the other one keep working).
+- **Undo / Redo** in the Node Editor cover field edits too: changing a message, a sound or a number is one step (typing a whole word is one step, not one per letter). The main Undo after closing the editor also goes back one edit at a time.
+- **Number fields** turn red while what you type isn't a number; leave the field and it goes back to the last good value, with a note saying so.
+- **Find Problems** (☰) also looks inside Visual Scripts: a node nothing is wired into (it never runs), a value wired to nothing, an event that does nothing yet, or a script with no Event node.
 - If a node is selected, the new node is **wired to it automatically** and placed next to it. Scripts grow as a chain without touching a wire.
 - **Wire** two nodes by tapping a dot and then a glowing dot, or drag from dot to dot.
 - Tap a wired input to unplug it, or tap a wire to delete it.

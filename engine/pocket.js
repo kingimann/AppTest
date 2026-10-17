@@ -9681,7 +9681,7 @@ function socialSheet(s, o) {
   sheet.append(head, body); wrap.append(sheet); root.append(wrap);
   let closed = false;
   const close = () => { if (closed) return; closed = true; wrap.dataset.closing = '1'; wrap.style.background = 'rgba(0,0,0,0)'; sheet.style.transform = full ? 'translateX(100%)' : 'translateY(100%)'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 260); };
-  const key = (ev) => { if (ev.key === 'Escape' && wrap === root.querySelector('[data-pocket-sheet]:last-of-type')) close(); }; document.addEventListener('keydown', key);
+  const key = (ev) => { if (ev.key === 'Escape' && wrap === [...root.querySelectorAll('[data-pocket-sheet]:not([data-closing])')].pop()) close(); }; document.addEventListener('keydown', key); // (Escape closes the top one)
   requestAnimationFrame(() => requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.45)'; sheet.style.transform = 'none'; }));
   // a press that began before the sheet opened (press and hold) must not tap what slid in under the finger
   let armed = false; const fresh = (ev) => armed || !ev || ev.detail === 0;
@@ -10880,6 +10880,11 @@ function chatInputBar(s, o) {
   const c = o.colors, font = o.font || THEME.font, el = (tag, css, text) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (text != null) n.textContent = text; return n; };
   const bar = el('div', `position:absolute;left:0;right:0;bottom:0;z-index:45;display:flex;align-items:center;gap:8px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));background:${c.bg};border-top:${HAIR} solid ${c.line};font-family:${font};transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.8,.2,1);`);
   bar.dataset.pocketChatbar = '1';
+  // where the drawn bar is (above a Bottom Nav), not over the nav; down on the keyboard while typing
+  const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+  const place = () => { const off = Math.max(0, +(typeof o.bottom === 'function' ? o.bottom() : o.bottom) || 0), kb = vv ? innerHeight - vv.height > 120 : false, b2 = kb ? 0 : off;
+    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; };
+  place(); vv?.addEventListener('resize', place);
   const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none';
   const pic = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); pic.innerHTML = svgIcon('image', 23); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
   const gif = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); gif.innerHTML = svgIcon('gif', 25); gif.type = 'button'; gif.setAttribute('aria-label', 'Send a GIF');
@@ -10937,7 +10942,7 @@ function chatInputBar(s, o) {
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
-  const close = () => { if (gone || recUI) return; gone = true; bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
+  const close = () => { if (gone || recUI) return; gone = true; vv?.removeEventListener('resize', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
@@ -10945,8 +10950,8 @@ function chatInputBar(s, o) {
   file.onchange = async () => { const f = file.files[0]; file.value = ''; if (!f) return; try { o.onSend({ text: '', media: await shrinkPicture(f, 900) }); } catch { s.snackbar?.('That picture could not be sent'); } };
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
   setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
-  sync(); setTimeout(() => inp.focus(), 60);
-  return { bar, input: inp, close, setReply, record };
+  sync(); if (o.focusNow) inp.focus(); else setTimeout(() => inp.focus(), 60); // (now: inside the tap, or a phone won't show its keyboard)
+  return { bar, input: inp, close, setReply, record, place };
 }
 /** Line icons for a post's buttons (the open post sheet). */
 const POST_ICONS = {
@@ -11300,7 +11305,7 @@ registerBehavior('uiChat', {
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
+    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, barOff = 0, tapEl = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
     let myPk = null, keyAsked = false, editing = null;
     let swipe = null, swipeBack = new Map(), typing = null, newCount = 0, lastCount = -1, jumpR = null, pinR = null, pinId = null, list0 = null, eatTaps = 0;
     const DEMO_REPLIES = ['Haha yes! 😂', 'Sounds good 👍', 'On my way!', 'Tell me more…', 'Love it ❤️', 'For real?', 'Same here', 'See you soon 👋', 'Nice!! 🔥', 'Let me check and get back to you'];
@@ -11355,7 +11360,7 @@ registerBehavior('uiChat', {
         s.snackbar?.('Forwarded to ' + pp.name); s.engine.vibrate?.(8);
       } });
     };
-    const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : '', edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: () => { bar = null; editing = null; } }); };
+    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : '', edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: () => { bar = null; editing = null; } }); };
     /** Press and hold: react, reply, copy, edit, unsend. */
     /** Change the words of one of my messages (re-sealed when the chat is encrypted). */
     const editMsg = (s, r, v) => { v = String(v || '').trim(); if (!v || v === r.text) return; if (r._e2ee && !r._locked) { const mem = encMembers(s, String(r.chat)); if (mem) { const pl = {}; for (const k of SECRET) if (r[k] != null && r[k] !== '') pl[k] = r[k]; pl.text = v; E2EE.seal(s, String(r.chat), pl, mem).then((enc) => { E2EE.cache.set(r.id + ':' + enc.iv, pl); patch(s, r, { enc, edited: true }); }); return; } } patch(s, r, { text: v, edited: true }); pops.set(r.id, s.time); };
@@ -11522,6 +11527,15 @@ registerBehavior('uiChat', {
         const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
         pinId = pinned ? pinned.id : null; list0 = list;
         barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
+        { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; barOff = Math.max(0, E.height - (o.y + (b.y + b.h - cov) * k)); bar?.place?.();
+          // a real button over the drawn bar: tapping it opens the typing bar inside the tap, so a phone shows its keyboard
+          const want = !bar && !E.editing && UK.live(s, e) && shown(e) && allowed(s) && !sheetOpen && !selecting && !E.root?.querySelector?.('[data-pocket-sheet]') && !(s.tapOwner && s.tapOwner !== e) && E.root && typeof document !== 'undefined';
+          if (want && !tapEl) { tapEl = document.createElement('div'); tapEl.dataset.chatTap = '1'; tapEl.setAttribute('role', 'button'); tapEl.setAttribute('aria-label', 'Write a message'); tapEl.style.cssText = 'position:absolute;z-index:44;cursor:text;-webkit-tap-highlight-color:transparent;touch-action:manipulation;';
+            for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) tapEl.addEventListener(t, (ev) => ev.stopPropagation());
+            tapEl.addEventListener('click', (ev) => { const r2 = tapEl.getBoundingClientRect(), onMic = p.voice !== false && ev.clientX > r2.right - r2.height - 6 && !!ev.detail; tapEl.remove(); tapEl = null; UK.tap(s, p); openBar(s, true); if (onMic) bar?.record?.(); });
+            E.root.append(tapEl); }
+          if (tapEl && !want) { tapEl.remove(); tapEl = null; }
+          if (tapEl) { const st = tapEl.style; st.left = (o.x + barRect.x * k) + 'px'; st.top = (o.y + barRect.y * k) + 'px'; st.width = (barRect.w * k) + 'px'; st.height = (barRect.h * k) + 'px'; } }
         const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; typing = null; newCount = 0; lastCount = -1; swipe = null; editing = null; if (selecting) { selecting = null; selUI?.remove(); selUI = null; } }
         if (selecting && !shown(e)) { selecting = null; selUI?.remove(); selUI = null; }
         if (typing && typing.chat === c && s.time > typing.until) { const t = typing; typing = null; addRow(s, { chat: t.chat, author: t.name, handle: t.handle, text: DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)], _me: false }); }
@@ -11722,7 +11736,7 @@ registerBehavior('uiChat', {
         if (p.photos !== false) drawIco(ctx, 'image', brr.x + 22, brr.y + brr.h / 2, 20, tok(p.accent || '@accent') || sub);
         ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(brr.x + brr.w - brr.h / 2, brr.y + brr.h / 2, brr.h / 2 - 4, 0, Math.PI * 2); ctx.fill(); drawIco(ctx, p.voice !== false ? 'mic' : 'send', brr.x + brr.w - brr.h / 2 - (p.voice !== false ? 0 : 1), brr.y + brr.h / 2 + (p.voice !== false ? 0 : 1), p.voice !== false ? 18 : 16, '#fff', { stroke: 2.2 });
       },
-      destroy() { bar?.close(); selUI?.remove(); },
+      destroy() { bar?.close(); selUI?.remove(); tapEl?.remove(); },
     };
   },
 });

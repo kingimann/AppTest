@@ -426,14 +426,15 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - **Copy**;
     - **Star** (a ★ next to it; *Starred messages* lists them);
     - **Info**: when it was sent, edited or forwarded, and for your messages who has **seen** it and when;
-    - **Delete for me**: hides it on your phone only (with Undo). *Unsend* removes your own message for everyone;
+    - **Delete for me**: hides it on your phone only (with Undo). **Delete for everyone** removes your own message for everyone (it shows *This message was deleted*);
     - **Forward**: pick a person or a group you're in; the copy is marked *↪ Forwarded*;
     - **Pin** / **Unpin**: the message shows in a **Pinned message** banner at the top of the chat for everyone in it (tap the banner to jump to it). Pinning adds a note like “Alex pinned …” to the chat;
-    - for your own messages, **Edit** (marked *Edited*) and **Unsend** (with Undo).
+    - for your own messages, **Edit**: the text goes back into the bar (*✏️ Editing your message*, ✓ saves, ✕ cancels); it's marked *Edited* (encrypted messages are sealed again);
+    - **Select**: tap more messages to pick them; the bar on top has **Copy**, **Star** and **Delete** (*Delete for everyone* when they're all yours, otherwise *Delete for me*) and *Cancel*.
   - Double-tap a message for ❤️.
   - Under your last message: *Sending…*, *Sent*, then **Seen** (in a group, *Seen by Maya, Leo* or *Seen by everyone*).
   - **Message yourself:** in the Inbox, ✏️ › *New message* lists **you** first (*Message yourself*). Pick yourself to get a chat only you can see, for notes, links and photos. It's also offered when forwarding. It shows in the Inbox as *Your Name (you)*, with no ticks, *Seen* or sample replies. Turn it off with the Inbox's *Message yourself*.
-  - **Chat info:** the message `chat info` opens it (the Social template has an ⓘ button in the App Bar on the chat page; the App Bar's *Add Button › Chat info* adds one). It shows the person or group, **Search**, **Mute**, **Wallpaper** and **Starred**, the chat's **photos and media** (tap one to jump to it), its **links**, a count of voice messages, the **members** of a group, and **Delete chat**.
+  - **Chat info:** the message `chat info` opens it (the Social template has an ⓘ button in the App Bar on the chat page; the App Bar's *Add Button › Chat info* adds one). It shows the person or group, **Search**, **Mute**, **Wallpaper** and **Starred**, the chat's **photos and media** (tap one to jump to it), its **links**, a count of voice messages, the **members** of a group, **Archive chat** and **Delete chat**.
   - **Search this chat:** the message `search chat` (or Chat info › Search). Type a word; tap a result to jump to it.
   - **Wallpaper:** pick a colour or gradient for each chat (Chat info › Wallpaper, or the message `chat wallpaper`). *Default wallpaper* sets one for every chat. Times get a pill so they stay readable.
   - **@mentions** in a group notify the person mentioned (“mentioned you: …”).
@@ -451,7 +452,10 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **✏️ starts a conversation:**
     - **New message:** pick a person (friends, people you follow, your followers and everyone who has posted, with search).
     - **New group:** tick two or more people and give it a name.
-  - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
+  - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **archive** it, **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
+  - **Swipe a conversation:** left for **Mute**, **Archive** and **Delete**; right for **Pin** and **Read / Unread**. Tap a button, or swipe it back.
+  - **Mute for** *8 hours*, *1 week* or *Always* (also in Chat info). A timed mute ends by itself.
+  - **Archived:** archived chats leave the list for an *Archived* row at the top (with a count); tap it to see them and *‹ Back* to return. They don't count in the badge; Unarchive from the menu, a swipe or Chat info.
   - The unread total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`). Tapping a conversation sets `chat` and `chatTitle` and goes to the page `chat`.
   - Direct messages use ids like `dm-alex-maya`, the same from both sides. Groups use `g-…` with their members and name on their first message.
   - **Private by default:** a Chat only shows a direct message to its two people and a group to its members. Anyone else (or no conversation picked) sees “You’re not in this conversation” and no message bar. Set *Who can see and write* to *anyone (a public room)* for an open room (other ids, like `general`); the Inbox lists rooms only with *Also list public rooms*.

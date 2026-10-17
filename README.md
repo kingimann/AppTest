@@ -781,6 +781,17 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Home screen:** the open game big at the top with a picture, *Play* and *Keep editing*; a **Games | Apps** switch that splits the rest into two sections (remembered); **New 2D game / New 3D game**, or **New app / To-do list / App with games**, in one tap; your games or apps as picture cards (the game as you last played it) with when you edited them and a ⋯ menu (open, play, rename, duplicate, delete); then templates with richer tiles. Side by side on wide screens.
 - **Search bars:** suggestions while typing (from a word list, a list variable or a data collection, with the typed part in bold), recent searches kept on the phone, ✕ while typing, an iPhone-style **Cancel**, **voice search** 🎤, hints that take turns (`Search recipes | Try “pasta”`), a message once typing pauses, and `{searchResults}` from the Data List. New preset: *Search Bar (suggestions + voice)*.
 
+### In-app purchases
+
+- **Game Settings › In-App Purchases** lists the products: consumables that add to a variable (coins), unlocks (Remove Ads) and subscriptions.
+- Nodes: **Buy Product** (bought / cancelled / failed), **Restore Purchases**, **Owns Product** and **Product Price**. Triggers get matching actions.
+- The editor and test links show a **test sheet** (Buy, Cancel, Fail); nothing is charged.
+- Native exports use the real stores:
+  - Xcode: **StoreKit 2**.
+  - Android Studio: **Google Play Billing 7**.
+  - Expo: **expo-iap**.
+- Unlocks are remembered on the device and synced from the store; consumables are used up so they can be bought again. See *Publishing › In-app purchases*.
+
 ### Page transitions and Build Settings
 
 - **New page transitions** that follow navigation (Back reverses them): **zoom**, **card stack** (iPhone-sheet style), **reveal from tap** (a circle growing from your finger) and **wipe**.

@@ -167,6 +167,24 @@ The download has a `YourGame-android/` folder and the `store-listing/` folder.
 
 Inside are a small Java app (`MainActivity.java` and `NotifyReceiver.java` for notifications), the game (`app/src/main/assets/index.html`), the adaptive icon and the older icon sizes, and the notification icon. It runs on Android 8 and newer and targets Android 16 (API 36), as Google Play asks. To update the game later, replace `index.html`.
 
+## In-app purchases
+
+Sell coins, unlocks (Remove Ads, a level pack) and subscriptions with the App Store and Google Play.
+
+1. **Game Settings › In-App Purchases**: add each product with a **Product ID** (like `coins_100` or `remove_ads`), a name, the price to show while testing, and its kind:
+   - **Consumable** (buy again and again): set *Adds to variable* and *Amount*, e.g. `coins` + `100`.
+   - **Unlock** (bought once, kept forever): check it with **Owns Product**.
+   - **Subscription** (VIP, monthly): also checked with **Owns Product**.
+2. In a script, use **Buy Product** (ports *bought*, *cancelled*, *failed*), **Restore Purchases** (*done*), **Owns Product** (true / false) and **Product Price** (the store's price in the player's money once known). Triggers have *Buy product* and *Restore purchases* actions. Scripts get the `purchase` event (`id`, `status`) and the messages `purchase bought` / `purchase cancelled` / `purchase failed` (with the product ID), plus `purchased` when an approval arrives later (Ask to Buy, a pending card payment).
+3. **Testing**: in the editor and test links, Buy Product shows a test sheet with *Buy*, *Cancel* and *Test a failed payment*. Nothing is charged. Unlocks are remembered on the device like real ones.
+4. **Builds**: the Xcode export answers with **StoreKit 2**. The Android Studio export adds **Google Play Billing 7** (`Billing.java`). The Expo export adds **expo-iap** (StoreKit 2 / Play Billing; needs an EAS or dev build, not Expo Go). Each README lists your products and the store steps:
+   - create each product with **the same ID** in App Store Connect (*Monetization › In-App Purchases*) and in Google Play Console (*Monetize › Products*, after uploading a testing build);
+   - sign Apple's Paid Apps agreement;
+   - test with an Apple Sandbox account and a Google Play license tester.
+5. A plain web build can't take payments: Buy Product reports *failed* and tells the player to use the app.
+
+Apple requires a **Restore Purchases** button when you sell unlocks or subscriptions. Consumables are used up right away (so they can be bought again); unlocks and subscriptions are acknowledged so Google doesn't refund them. On Google Play, consumables paid for while the game was closed are given the next time it starts.
+
 ## itch.io
 
 Pick **itch.io** in Build Settings. The download has:

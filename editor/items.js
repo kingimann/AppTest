@@ -197,3 +197,30 @@ export function inventorySettings() {
     h('label', { class: 'it-f bool' }, h('span', {}, 'Keep the inventory between levels'), h('input', { type: 'checkbox', checked: st.keepInventory !== false, onchange: (e) => { if (e.target.checked) delete st.keepInventory; else st.keepInventory = false; X.save(); } })),
     h('p', { class: 'desc' }, 'With slots, each stack of an item takes one slot; picking up more than fits shows “Inventory full”. Saves and auto-save keep the inventory, equipment and learned recipes.'));
 }
+
+/** In-App Purchases (Game Settings): the products the game sells. The same IDs go in App Store Connect / Google Play Console. */
+export function productsEditor() {
+  const wrap = h('div', { class: 'it-ed' });
+  const list = () => (rootOf().products ||= []);
+  const draw = () => {
+    const ps = list();
+    wrap.replaceChildren(...[
+      h('p', { class: 'desc' }, 'Sell coins, unlocks (Remove Ads, a level pack) and subscriptions. Use the Buy Product node (or the Triggers action) and Owns Product to check. While testing, a test sheet stands in for the store; in the Xcode, Android Studio and Expo builds it is the real App Store / Google Play sheet.'),
+      ps.map((p, i) => h('div', { class: 'it-card', style: 'border:1px solid var(--line,rgba(127,127,127,.25));border-radius:10px;padding:8px 10px;margin:6px 0' },
+        h('div', { class: 'it-grid' },
+          field(p, 'id', 'Product ID (same in the stores)', 'text', { ph: 'coins_100', after: () => { if (p.id) p.id = String(p.id).trim().replace(/\s+/g, '_'); } }),
+          field(p, 'name', 'Name', 'text', { ph: '100 Coins' }),
+          field(p, 'price', 'Price to show while testing', 'text', { ph: '$0.99' }),
+          field(p, 'type', 'Kind', 'select', { def: 'consumable', options: [['consumable', 'Consumable (buy again: coins, lives)'], ['unlock', 'Unlock (once: Remove Ads, full game)'], ['subscription', 'Subscription (VIP, monthly)']], after: draw })),
+        (p.type || 'consumable') === 'consumable' && h('div', { class: 'it-grid' },
+          field(p, 'var', 'Adds to variable', 'text', { ph: 'coins' }),
+          field(p, 'amount', 'Amount', 'number', { ph: '100', step: 1 })),
+        h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { if (!confirm(`Delete “${p.name || p.id || 'product'}”?`)) return; ps.splice(i, 1); if (!ps.length) delete rootOf().products; X.save(); draw(); } }, icon('trash'), 'Delete')))),
+      h('div', { class: 'btns' },
+        h('button', { class: 'btn', onclick: () => { list().push({ id: `coins_${list().length ? list().length * 100 + 100 : 100}`, name: 'Coins', price: '$0.99', type: 'consumable', var: 'coins', amount: 100 }); X.save(); draw(); } }, icon('plus'), 'Add product'),
+        !ps.some((p) => p.type === 'unlock') && h('button', { class: 'btn', onclick: () => { list().push({ id: 'remove_ads', name: 'Remove Ads', price: '$2.99', type: 'unlock' }); X.save(); draw(); } }, icon('plus'), 'Remove Ads')),
+      ps.length ? h('p', { class: 'desc' }, 'Apple needs a Restore Purchases button when you sell unlocks or subscriptions (Restore Purchases node). Create each product with the same ID in App Store Connect › In-App Purchases and Google Play Console › Monetize › Products.') : null].flat().filter(Boolean));
+  };
+  draw();
+  return wrap;
+}

@@ -11281,7 +11281,17 @@ registerBehavior('uiChat', {
     };
     const when = (t) => { try { return new Date(t).toLocaleString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return shortAgo(t); } };
     const jumpTo = (s, id) => { const to = L.find((q) => q.bub && String(q.r.id) === String(id)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } };
-    const titleOf = (s) => { const c = chatOf(s), M = me(s), mh = handleOf(M.handle), A = all(s), mem = chatMembers(A, c); if (/^dm-/.test(c)) { const o2 = mem.find((h) => h !== mh); return o2 ? A.find((q) => handleOf(q.handle) === o2 && q.author)?.author || nameOfHandle(s, o2) : (M.author || 'Me') + ' (you)'; } return A.find((q) => String(q.chat) === c && q.title)?.title || (isGroupChat(c) ? 'Group' : '# ' + c); };
+    const titleOf = (s, c = chatOf(s)) => { const M = me(s), mh = handleOf(M.handle), A = all(s), mem = chatMembers(A, c); if (/^dm-/.test(c)) { const o2 = mem.find((h) => h !== mh); return o2 ? A.find((q) => handleOf(q.handle) === o2 && q.author)?.author || nameOfHandle(s, o2) : (M.author || 'Me') + ' (you)'; } return A.find((q) => String(q.chat) === c && q.title)?.title || (isGroupChat(c) ? 'Group' : '# ' + c); };
+    /** Your conversations (for the Chat when none of yours is open): newest first. */
+    const myConvs = (s) => {
+      const mh = handleOf(me(s).handle), A = all(s), by = new Map(), hide = chatMeta(s).hide, out = [];
+      for (const r of A) { const c = String(r.chat ?? ''); if (!c || !(/^dm-/.test(c) || isGroupChat(c))) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
+      for (const [c, L2] of by) { if (!chatMembers(A, c).includes(mh)) continue; let last = L2[0]; for (const r of L2) if ((r._at || 0) >= (last._at || 0)) last = r; if ((hide[c] || 0) >= (last._at || 0)) continue; out.push({ c, title: titleOf(s, c), last }); }
+      return out.sort((a, b2) => (b2.last._at || 0) - (a.last._at || 0));
+    };
+    const openConv = (s, c, title) => { if (p.chatVar) s.setVar(p.chatVar, c); s.setVar('chatTitle', title); atBottom = true; };
+    const newChat = (s) => { const M = me(s), mh = handleOf(M.handle); sheetOpen = true; peoplePicker(s, { colors: colors(), title: 'New message', people: chatPeople(s, { ...M, handle: mh }, { self: true }), onClose: () => { sheetOpen = false; }, onPick: ([pp]) => openConv(s, dmId(mh, pp.handle), pp.name) }); };
+    let pickL = [], newR = null;
     const sheetRow = (api, c, o) => { const { el } = api; const b = el('button', `display:flex;align-items:center;gap:12px;width:100%;padding:11px 18px;border:0;background:none;color:${c.text};font:inherit;text-align:left;cursor:pointer;`); b.type = 'button'; if (o.lead) b.append(o.lead); const col = el('div', 'flex:1;min-width:0;'); col.append(el('div', `font:700 15px ${THEME.font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, o.title)); if (o.sub) col.append(el('div', `font:500 13px ${THEME.font};color:${c.sub};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, o.sub)); b.append(col); if (o.right) b.append(el('span', `flex:none;font:600 12px ${THEME.font};color:${c.sub};`, o.right)); if (o.run) b.onclick = o.run; return b; };
     const cap = (api, c, t) => api.el('div', `padding:14px 18px 6px;font:800 12px ${THEME.font};letter-spacing:.06em;text-transform:uppercase;color:${c.sub};`, t);
     /** Message info: when it was sent, edited, and who has seen it. */
@@ -11379,7 +11389,7 @@ registerBehavior('uiChat', {
         const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; typing = null; newCount = 0; lastCount = -1; swipe = null; }
         if (typing && typing.chat === c && s.time > typing.until) { const t = typing; typing = null; addRow(s, { chat: t.chat, author: t.name, handle: t.handle, text: DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)], _me: false }); }
         const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); if (!swipe?.on) S.update(s, e, dt, list);
-        if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length;
+        if (!allowed(s)) { if (atBottom) { atBottom = false; S.v = 0; S.flick = 0; } } else if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length; // (the list of conversations starts at the top)
         const cnt = R0.filter((r) => !r.system).length; if (lastCount >= 0 && cnt > lastCount && !wasBottom && !isMineMsg(R0[R0.length - 1] || {}, me(s))) newCount += cnt - lastCount; lastCount = cnt; if (S.v >= S.max - 30) newCount = 0;
         jumpR = p.jump !== false && S.max - S.v > 160 ? { x: b.x + b.w - 54, y: list.y + list.h - 56, w: 44, h: 44 } : null;
         pinR = pinned ? { x: b.x, y: b.y, w: b.w, h: pinH } : null;
@@ -11395,6 +11405,11 @@ registerBehavior('uiChat', {
         }
         for (const [id, v] of swipeBack) { const n = v * Math.pow(0.0008, dt); if (n < 0.5) swipeBack.delete(id); else swipeBack.set(id, n); }
         const TP = UK.taps(s, e); if (eatTaps > 0) { eatTaps--; TP.forEach((t) => { t.used = true; }); } // (the end of a swipe is not a tap)
+        if (!allowed(s) && p.chatVar) for (const t of TP) { // no conversation of yours open: the list of yours
+          if (t.used || S.moved || !UK.in(t, list)) continue; const ly = t.y + S.v - list.y; t.used = true;
+          if (newR && ly >= newR.y && ly <= newR.y + newR.h) { UK.tap(s, p); newChat(s); continue; }
+          const row = pickL.find((q) => ly >= q.y && ly <= q.y + q.h); if (row) { UK.tap(s, p); openConv(s, row.c, row.title); }
+        }
         for (const t of TP) {
           if (t.used) continue;
           if (jumpR && UK.in(t, jumpR)) { t.used = true; S.v = S.max; S.flick = 0; newCount = 0; s.engine.vibrate?.(6); continue; }
@@ -11460,7 +11475,18 @@ registerBehavior('uiChat', {
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.translate(0, top - S.v);
         const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), selfChat = /^dm-/.test(c) && !others.length, reads = p.ticks !== false ? others.map((h) => Math.max(readAt(s, c, h), ...R.filter((r) => !r.system && handleOf(r.handle) === h).map((r) => r._at || 0))) : [], /* (answering means they saw it) */ pend = has(s) ? new Set((s.engine.supa?.pending?.() || []).map((op) => op.rec?.id).filter(Boolean)) : null;
         const tick = (x, y, col, dbl) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; const one = (ox) => { ctx.beginPath(); ctx.moveTo(x + ox - 9, y); ctx.lineTo(x + ox - 5.5, y + 3.5); ctx.lineTo(x + ox, y - 3.5); ctx.stroke(); }; one(0); if (dbl) one(-5); ctx.restore(); };
-        const ok = allowed(s); if (!ok) { drawIco(ctx, 'lock', b.cx, listH / 2 - 30 + S.v, 34, sub, { stroke: 1.6 }); UK.text(ctx, chatOf(s) ? 'You’re not in this conversation' : 'Pick a conversation from your messages', b.cx, listH / 2 + 14 + S.v, { size: 15, weight: 700, color: sub, maxW: b.w - 40 }); } else if (!R.length) { if (selfChat) { drawIco(ctx, 'bookmark', b.cx, listH / 2 - 34 + S.v, 30, sub, { stroke: 1.6 }); UK.text(ctx, 'Your own space', b.cx, listH / 2 + 4 + S.v, { size: 16, weight: 800, color: txt }); UK.text(ctx, 'Notes, links and photos to keep.', b.cx, listH / 2 + 28 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); UK.text(ctx, 'Only you can see them.', b.cx, listH / 2 + 46 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); } else UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub }); }
+        const ok = allowed(s); if (!ok) { // none of your conversations is open: list yours (and start a new one)
+          const CV = myConvs(s); pickL = []; newR = { y: 12, h: 46 };
+          ctx.fillStyle = mineC; UK.rr(ctx, b.x + 16, newR.y, b.w - 32, newR.h, 23); ctx.fill(); drawIco(ctx, 'edit', b.cx - 62, newR.y + 23, 18, '#fff', { stroke: 2.2 }); UK.text(ctx, 'New message', b.cx + 10, newR.y + 24, { size: 15, weight: 800, color: '#fff' });
+          let yy = 74; if (CV.length) { UK.text(ctx, 'Your conversations', b.x + 18, yy + 8, { size: 12, weight: 800, color: sub, align: 'left' }); yy += 22; }
+          for (const q of CV) { const h = 68, L0 = q.last; pickL.push({ c: q.c, title: q.title, y: yy, h });
+            if (isGroupChat(q.c)) { const mm = chatMembers(all(s), q.c).filter((x) => x !== handleOf(M.handle)); miniAvatar(ctx, nameOfHandle(s, mm[0] || ''), b.x + 34, yy + 28, 36); miniAvatar(ctx, nameOfHandle(s, mm[1] || mm[0] || ''), b.x + 46, yy + 40, 30); } else miniAvatar(ctx, q.title.replace(/ \(you\)$/, ''), b.x + 40, yy + h / 2, 48);
+            UK.text(ctx, q.title, b.x + 76, yy + 24, { size: 16, weight: 800, color: txt, align: 'left', maxW: b.w - 150 }); UK.text(ctx, shortAgo(L0._at || Date.now()), b.x + b.w - 16, yy + 24, { size: 12, weight: 600, color: sub, align: 'right' });
+            UK.text(ctx, (isMineMsg(L0, M) && !L0.system ? 'You: ' : '') + snippet(L0), b.x + 76, yy + 46, { size: 14, weight: 500, color: sub, align: 'left', maxW: b.w - 100 });
+            ctx.fillStyle = withAlpha(dark ? '#ffffff' : '#000000', 0.07); ctx.fillRect(b.x + 76, yy + h - 1, b.w - 76, 1); yy += h; }
+          if (!CV.length) UK.text(ctx, 'No conversations yet. Start one above.', b.cx, yy + 40, { size: 14, weight: 600, color: sub, maxW: b.w - 40 });
+          total = yy + 20;
+        } else if (!R.length) { if (selfChat) { drawIco(ctx, 'bookmark', b.cx, listH / 2 - 34 + S.v, 30, sub, { stroke: 1.6 }); UK.text(ctx, 'Your own space', b.cx, listH / 2 + 4 + S.v, { size: 16, weight: 800, color: txt }); UK.text(ctx, 'Notes, links and photos to keep.', b.cx, listH / 2 + 28 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); UK.text(ctx, 'Only you can see them.', b.cx, listH / 2 + 46 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); } else UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub }); }
         const vis0 = S.v - 60, vis1 = S.v + listH + 60;
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;

@@ -1809,17 +1809,25 @@ function consoleMenu(anchor) {
     { icon: clearOnPlay() ? 'check' : 'square', label: 'Clear when you press Play', fn: () => { store.set('pocket.editor.clearOnPlay', clearOnPlay() ? '' : '1'); refreshConsoles(); } },
     { icon: 'clock', label: 'Times: ' + { play: 'since Play', clock: 'clock', off: 'hidden' }[o.time], fn: () => set('time', { play: 'clock', clock: 'off', off: 'play' }[o.time]) },
     '-',
+    { icon: 'copy', label: 'Copy for Help', k: 'app, device, problems, log', fn: copyHelp },
     { icon: 'copy', label: 'Copy All', fn: () => navigator.clipboard?.writeText(logText()).then(() => toast('Console copied')).catch(() => toast('Couldn’t copy')) },
     { icon: 'download', label: 'Save as a File', fn: () => download('console-' + slug(root?.name || 'game') + '.txt', logText(), 'text/plain') },
   ]);
 }
+/** Everything someone helping needs: the app, where it was, the device, then every warning and error (and the rest of the log). */
+const helpReport = () => { const E = Log.entries, bad = E.filter((x) => x.level === 'error' || x.level === 'warn'), line = (x) => `${x.level.toUpperCase()}${x.source ? ' (' + x.source + ')' : ''}: ${x.text}${x.count > 1 ? ' ×' + x.count : ''}${x.stack ? '\n' + String(x.stack).split('\n').slice(0, 4).join('\n') : ''}`;
+  let ver = ''; try { ver = document.querySelector('meta[name="pocket-version"]')?.content || ''; } catch { /* none */ }
+  return [`Pocket Engine report${ver ? ' · ' + ver : ''} · ${new Date().toLocaleString()}`, `Project: ${root?.name || '?'} (${levelList()[0]?.settings?.app ? 'app' : 'game'}, ${levelList().length} level${levelList().length > 1 ? 's' : ''}) · page: ${engine.scene?.vars?.page ?? '-'} · ${playing ? 'playing' : 'editing'}`, `Device: ${navigator.userAgent}`, '',
+    bad.length ? `Problems (${bad.length}):` : 'No warnings or errors.', ...bad.map(line), '', 'Full log:', logText()].join('\n'); };
+const copyHelp = () => navigator.clipboard?.writeText(helpReport()).then(() => toast('Copied: paste it to whoever is helping you')).catch(() => { download('pocket-report.txt', helpReport(), 'text/plain'); toast('Saved the report as a file'); });
 const logText = () => Log.entries.map((x) => `[${new Date(x.t0 || x.t).toLocaleTimeString()}] ${x.level.toUpperCase()}${x.source ? ' (' + x.source + ')' : ''}: ${x.text}${x.count > 1 ? ' ×' + x.count : ''}${x.stack ? '\n' + x.stack : ''}`).join('\n');
 function consoleTools(compact) {
   const E = Log.entries, n = (lv) => E.filter((x) => x.level === lv).reduce((a, x) => a + x.count, 0);
   const search = h('input', { type: 'search', class: 'log-search', placeholder: 'Search', value: consoleQuery, autocapitalize: 'off', oninput: (e) => { consoleQuery = e.target.value; refreshConsoles(true); } });
   const chips = [['all', 'All', E.filter((x) => x.level !== 'cmd' && x.level !== 'result').reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
       h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; refreshConsoles(); } }, compact ? null : l, h('b', {}, c), compact ? icon(LOG_ICON[k] || 'list') : null));
-  const btns = [h('button', { class: 'log-clear', title: 'More', onclick: (e) => consoleMenu(e.currentTarget) }, icon('more')),
+  const nBad = n('warn') + n('error');
+  const btns = [nBad ? h('button', { class: 'log-clear log-help', title: 'Copy the problems for help (app, device, warnings, errors)', onclick: copyHelp }, icon('copy')) : null, h('button', { class: 'log-clear', title: 'More', onclick: (e) => consoleMenu(e.currentTarget) }, icon('more')),
     h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash'))];
   if (compact) return h('div', { class: 'log-tools compact' }, ...chips, search, ...btns);
   return h('div', { class: 'log-tools' }, h('div', { class: 'log-chips' }, ...chips), h('div', { class: 'log-find' }, search, watches().length ? null : h('button', { class: 'log-clear', title: 'Watch a variable', onclick: addWatch }, icon('eye')), ...btns)); // the kinds on one line, search and buttons on the next

@@ -2295,3 +2295,4 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .h-head .h-tools { padding: 10px 12px 8px; gap: 8px; }
 .h-head .h-tools button, .h-head .h-tools input { height: 44px; }
 .h-head .h-chips { padding-bottom: 8px; }
+.log-clear.log-help { color: #ffca28; border-color: #6b5a1e; }

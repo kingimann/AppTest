@@ -401,8 +401,21 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
 - **Chat:** a conversation in bubbles, like a messaging app. It works for direct messages and group chats.
   - Yours are on the right in the accent colour, theirs on the left with avatars, plus names in group chats.
   - Times appear between messages more than 15 minutes apart, as *Today · 7:32 PM*, *Yesterday · …*, the weekday for this week, then the date (*Today / Yesterday between days*). Emoji-only messages show big, and photos show in the bubble.
+  - **End-to-end encryption** (*End-to-end encryption*: on by default):
+    - **What it covers:** messages, photos and voice messages are sealed on the phone. Only the people in the chat can open them, not the app or its server (online, the row holds only the sealed bytes).
+    - **How:** each person has a key pair made on their phone; the private half never leaves it. The public half goes on their profile (*Profiles* collection) and on every message they send.
+    - **When it starts:** a chat is sealed once everyone in it has a key. The chat then shows *Messages are end-to-end encrypted*. Until then, Chat info says who it's waiting for.
+    - **Chat info:** shows 🔒 and a **safety code**. Compare it with the others in person; if it matches, nobody is listening in.
+    - **On the server:** pinned-message notes and notifications don't show the words (*🔒 New message*).
+    - **New phone:** a new phone has a new key, so messages from before can't be opened there.
+  - **Group chats:** ✏️ › *New group* picks 2 or more people and an optional name. In **Chat info** for a group:
+    - **＋ Add people**;
+    - **✎ Rename group**;
+    - the members list, with the **Admin** (who made the group), who can **Remove** people;
+    - **Leave group**.
+    Each change is a note in the chat, and the newest member list decides who can read and write, online too. Someone removed or who left can't read new messages; in a sealed group, new members can only open messages sent after they joined.
   - **No conversation of yours open** (a Messages tab that goes straight to the Chat page, or a chat you're not in): the Chat lists **your conversations**, newest first, with a **New message** button. Tap one to open it.
-  - **Voice messages:** with nothing typed, the send button is a **microphone**. Tap it, talk (up to a minute; the bar shows a timer and your voice level), then **send** or **bin** it. A voice message shows ▶, a waveform and its length; tap it to play or pause. Turn it off with *Voice messages*.
+  - **Voice messages:** the 🎙 on the message bar starts recording straight away (and, in the open bar, with nothing typed the send button is a **microphone**). Tap it, talk (up to a minute; the bar shows a timer and your voice level), then **send** or **bin** it. A voice message shows ▶, a waveform and its length; tap it to play or pause. Turn it off with *Voice messages*.
   - **Links:** a message with a web address gets a **card** with the site's name; tap the card to open it (*Link cards*).
   - **Swipe a message right to reply** (a reply arrow appears; let go past it). *Swipe a message right to reply* turns it off.
   - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.

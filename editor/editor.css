@@ -2257,3 +2257,41 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .log-find .log-clear { flex: none; }
 #console .log-watch { padding-bottom: 8px; }
 #console .log-list .log-row:first-child { border-top: 1px solid var(--g3); }
+/* auto-save: the Save button shows a little dot while a change waits, a green tick once it's written */
+#saveBtn { position: relative; }
+#saveBtn.auto::after { content: ''; position: absolute; right: 9px; bottom: 9px; width: 8px; height: 8px; border-radius: 50%; background: #34c759; box-shadow: 0 0 0 2px var(--g1, #1e1e1e); transition: background .2s; }
+#saveBtn.auto.pending::after { background: var(--accent, #4c8bd6); animation: autoPulse 1s ease-in-out infinite; }
+@keyframes autoPulse { 50% { opacity: .35; } }
+/* Hierarchy: one sticky head (tools, quick filters, where the selection is) */
+.h-head { position: sticky; top: 0; z-index: 2; background: var(--panel); border-bottom: 1px solid var(--line); }
+.h-head .h-tools { position: static; border-bottom: 0; }
+.h-chips { display: flex; gap: 6px; padding: 0 12px 10px; overflow-x: auto; scrollbar-width: none; }
+.h-chips::-webkit-scrollbar { display: none; }
+.h-chip { flex: none; height: 34px; padding: 0 12px; border: 1px solid var(--g2); border-radius: 17px; background: var(--g4); color: var(--text); font-size: 13.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.h-chip b { font-size: 12px; color: var(--muted); font-weight: 700; }
+.h-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; } .h-chip.on b { color: #dfeaf7; }
+.h-chip.h-fold { margin-left: auto; color: var(--muted); } .h-chip svg.i { width: 15px; height: 15px; }
+.h-crumbs { display: flex; align-items: center; gap: 2px; padding: 6px 8px 8px 10px; overflow-x: auto; scrollbar-width: none; border-top: 1px solid var(--g3); background: var(--g3); }
+.h-crumbs::-webkit-scrollbar { display: none; }
+.h-crumb { flex: none; height: 32px; max-width: 46vw; padding: 0 9px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font-size: 13.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.h-crumb span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.h-crumb svg.i { width: 15px; height: 15px; flex: none; }
+.h-crumb.cur { background: var(--sel); color: #fff; }
+.h-sep { color: var(--dim); flex: none; }
+.h-locate { margin-left: auto; flex: none; width: 34px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--accent-text); display: grid; place-items: center; }
+.h-locate svg.i { width: 17px; height: 17px; }
+/* pages stand out; the one showing is marked */
+.h-row.page .nm { font-weight: 700; }
+.h-row.live { box-shadow: inset 3px 0 0 var(--accent, #4c8bd6); }
+.h-row .tagchip.livechip { color: #9fd3ff; border-color: color-mix(in srgb, var(--accent, #4c8bd6) 70%, transparent); background: color-mix(in srgb, var(--accent, #4c8bd6) 18%, transparent); }
+/* on touch screens: the eye shows on hidden objects and the selected one, the drag handle on the selected one (less clutter) */
+@media (hover: none) {
+  #hierarchy .h-row:not(.sel):not(.off) > .eye[title="Toggle visibility"] { display: none; }
+  #hierarchy .h-row:not(.sel) > .h-grip { display: none; }
+}
+@media (hover: hover) {
+  #hierarchy .h-row:not(.sel):not(:hover) > .h-grip { opacity: 0; }
+}
+.h-head .h-tools { padding: 10px 12px 8px; gap: 8px; }
+.h-head .h-tools button, .h-head .h-tools input { height: 44px; }
+.h-head .h-chips { padding-bottom: 8px; }

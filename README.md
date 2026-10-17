@@ -83,6 +83,8 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
    - Held sideways, the panels move to the right.
 5. **▶ Play** tests the game instantly; **■ Stop** (or the phone's back gesture) returns to editing.
 
+The Hierarchy has **quick filters** (All, Pages, UI, Player, Logic, Physics, Hidden, Templates, with counts), **Fold all / Unfold all**, a **path** to the selected object (tap a parent to select it, the target button scrolls to it), each component's own icon, and in apps a marker on the page that's **showing** (tapping a page shows it).
+
 New projects show a **Getting started** checklist at the top of the Hierarchy: add a player, ground, something to collect, some node logic, and press Play. Each step has a button that does it for you.
 
 
@@ -157,7 +159,7 @@ Settings for you on this device (games keep their own settings):
 |---|---|
 | Look | theme (Dark, Black, Slate, Midnight, Warm, Light), accent colour (it colours the Play and Add buttons, selections and highlights too), panel text size, reduce motion |
 | Editing | snap on / off, snap step for 2D (1–50 px) and 3D (0.1–1), rotation snap (5°–90°), grid, all colliders, vibration on taps |
-| Saving | only when I tap Save (the default; asks before leaving), straight away, after a few seconds, or every 10 seconds; how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
+| Saving | after a few seconds (the default), straight away, every 10 seconds, when I leave, or only when I tap Save (asks before leaving); how often restore points are taken (1–10 min) and how many are kept (6–40); back up and restore |
 | App | open on the Home screen or straight into the last game, keep the screen on while editing, version and **Check for updates**, **Install app**, storage used and **Protect my games** (asks the browser not to clear them) |
 
 **Reset preferences** puts them back.
@@ -1374,7 +1376,8 @@ Games can keep anything between plays in **named save files** of keys, like Unit
 
 ### Saving, restore points and backups
 
-- **Saved only when you save** (top-bar Save, ☰ → Save, Ctrl/⌘ S): a dot marks unsaved changes; switching or starting a project asks Save / Don't save / Cancel; closing the tab warns; unsaved changes from a closed app are offered back next time. Preferences › *Save my work* can switch back to saving as you go.
+- **Auto-save** (on by default): a few seconds after each change. The top-bar Save button's dot blinks blue while a change waits and turns green when saved; tap it to save now, hold it (or ☰ → *Auto-save: On / Off*) to change how often or turn it off.
+- **With auto-save off, saved only when you save** (top-bar Save, ☰ → Save, Ctrl/⌘ S): a dot marks unsaved changes; switching or starting a project asks Save / Don't save / Cancel; closing the tab warns; unsaved changes from a closed app are offered back next time. Preferences › *Save my work* can switch back to saving as you go.
 - Projects live in the browser's database (IndexedDB), one record per game, with room for hundreds of MB, so imported pictures and sounds no longer fill a ~5 MB limit. Games saved by older versions move across by themselves the first time.
 - **Safety copy:** when you switch apps, lock the phone or close the tab, the open game is also copied instantly, so a phone freezing the page mid-save can't lose the last edits.
 - **Earlier versions** (☰ → *Restore Earlier Version…*): a restore point every few minutes while you work (the last 12 per game). Restoring keeps your current version as a restore point too.

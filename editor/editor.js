@@ -41,9 +41,10 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, uiSnap: true, uiSnapGap: 8, uiSnapDist: 8, rotSnap: 15, haptics: true, autosave: 'manual', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, uiSnap: true, uiSnapGap: 8, uiSnapDist: 8, rotSnap: 15, haptics: true, autosave: '3', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 try { if (!localStorage.getItem('pocket.editor.manualSave')) { localStorage.setItem('pocket.editor.manualSave', '1'); if (EP.autosave !== 'manual') { EP.autosave = 'manual'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // projects are saved only when you save them
+try { if (!localStorage.getItem('pocket.editor.autoSaveOn')) { localStorage.setItem('pocket.editor.autoSaveOn', '1'); if (EP.autosave === 'manual') { EP.autosave = '3'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // auto-save is on (a few seconds after each change); Preferences › Saving or the Save button's menu turns it off
 const THEMES = {
   dark: {},
   black: { '--toolbar': '#000', '--bg': '#0a0a0a', '--panel': '#151515', '--card': '#1a1a1a', '--tab': '#222', '--tab-off': '#101010', '--header': '#1c1c1c', '--field': '#0f0f0f', '--field-b': '#050505', '--line': '#000', '--hover': '#262626',
@@ -138,7 +139,20 @@ const DRAFT_KEY = 'pocket.editor.draft';
 let dirty = false, edited = false, draftTimer = 0; // edited: changed since it was opened (only then is a draft worth keeping)
 /** Unsaved changes: a dot by the name and a lit Save button. */
 let savedAt = 0;
-function setDirty(v) { dirty = !!v; $('#projectTitle')?.classList.toggle('unsaved', manualSave() && dirty); const b = $('#saveBtn'); if (b) { b.hidden = !manualSave(); b.classList.toggle('on', dirty); b.title = dirty ? 'Save (Ctrl+S): you have unsaved changes' : savedAt ? `All changes saved (${new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})` : 'Save (Ctrl+S)'; } }
+function setDirty(v) { dirty = !!v; $('#projectTitle')?.classList.toggle('unsaved', manualSave() && dirty); const b = $('#saveBtn'); if (!b) return; b.hidden = false; b.classList.toggle('on', manualSave() && dirty); b.classList.toggle('auto', !manualSave()); b.classList.toggle('pending', !manualSave() && autoPending);
+  const at = savedAt ? new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  b.title = manualSave() ? (dirty ? 'Save (Ctrl+S): you have unsaved changes · hold for auto-save' : at ? `All changes saved (${at}) · hold for auto-save` : 'Save (Ctrl+S) · hold for auto-save') : autoPending ? 'Auto-save on: saving in a moment… (tap to save now, hold for options)' : `Auto-save on${at ? ': saved ' + at : ''} (tap to save now, hold for options)`; }
+let autoPending = false; // auto-save: a change is waiting to be written
+/** Auto-save on or off (and how soon), from the Save button's menu or ☰. */
+function setAutoSave(v) { EP.autosave = v; try { localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } catch { /* storage unavailable */ } if (v !== 'manual' && project) { autoPending = false; saveNow({ force: true }); savedAt = Date.now(); } setDirty(dirty); toast(v === 'manual' ? 'Auto-save off: tap Save to keep your changes' : `Auto-save on: ${AUTOSAVE_WHEN[v] || 'after each change'}`); }
+const AUTOSAVE_WHEN = { '0.5': 'straight after each change', '3': 'a few seconds after each change', '10': 'every 10 seconds', leave: 'when you leave the app' };
+function saveMenu(anchor) {
+  popMenu(anchor, [{ cap: manualSave() ? (dirty ? 'Unsaved changes' : 'Saved') : 'Auto-save is on' + (savedAt ? ' · saved ' + new Date(savedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '') },
+    { icon: 'save', label: 'Save Now', k: 'Ctrl S', fn: commitSave },
+    '-',
+    ...[['3', 'Auto-save after a few seconds'], ['0.5', 'Auto-save straight away'], ['10', 'Auto-save every 10 seconds'], ['leave', 'Save when I leave the app'], ['manual', 'Only when I tap Save']].map(([v, l]) => ({ icon: EP.autosave === v ? 'check' : v === 'manual' ? 'close' : 'clock', label: l, fn: () => setAutoSave(v) })),
+    '-', { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints }].filter(Boolean));
+}
 /** Writes the project to the device. In "only when I save" mode, only Save (force) does; everything else keeps a safety draft. */
 function saveNow({ force = false } = {}) {
   if (!project) return;
@@ -146,7 +160,7 @@ function saveNow({ force = false } = {}) {
   const rec = { name: root.name, updated: Date.now(), json: root };
   saveProject(projectId, rec).then((ok) => { if (!ok) storageFull(); });
   store.set(CURRENT_KEY, projectId);
-  setDirty(false); edited = false; clearDraft();
+  autoPending = false; if (!manualSave()) savedAt = Date.now(); setDirty(false); edited = false; clearDraft();
 }
 function commitSave() { if (!project) return; savedAt = Date.now(); saveNow({ force: true }); const sb = $('#saveBtn'); if (sb) { sb.classList.remove('saved'); void sb.offsetWidth; sb.classList.add('saved'); } toast(`Saved “${root.name}”`); buzz(8); if (!$('#home').hidden) showHome({ keep: true }); }
 /** Not a save: if the app is closed with unsaved changes, it offers them back next time. */
@@ -239,7 +253,7 @@ let colliderEdit = null; // object whose 2D collider is being edited with handle
 let multi = null; // Hierarchy "Select" mode: the ids ticked (null when off) // object waiting for the user to tap its new parent (Attach mode)
 const saveSoon = () => {
   if (manualSave()) { setDirty(true); edited = true; clearTimeout(draftTimer); draftTimer = setTimeout(writeDraft, 1500); return; } // only Save saves
-  clearTimeout(saveTimer); if (EP.autosave === 'leave') return; saveTimer = setTimeout(saveNow, (+EP.autosave || 0.5) * 1000);
+  clearTimeout(saveTimer); autoPending = true; setDirty(true); edited = true; if (EP.autosave === 'leave') return; saveTimer = setTimeout(() => { autoPending = false; savedAt = Date.now(); saveNow(); }, (+EP.autosave || 0.5) * 1000);
 }; // Preferences › Saving
 
 const levelList = () => [root, ...(root.levels || [])];
@@ -2108,7 +2122,11 @@ function iconFor(e) {
   if (e.light && !e.shape && !e.mesh && !e.model) return 'bulb';
   if (e.model) return 'cube';
   if (e.bar) return 'hud';
-  if (e.ui) return 'hud';
+  if (e.ui) { // its main component's icon (a page shows as pages)
+    if (showIfOf(e) && kidsOf(e.id).length) return 'layers';
+    const b = (e.behaviors || []).find((x) => x.type !== 'uiShowIf' && BEH_META[x.type]?.[1]);
+    return b ? BEH_META[b.type][1] : e.text ? 'text' : e.sprite ? 'image' : e.shape ? 'square' : 'hud';
+  }
   if (e.mesh) return ({ box: 'cube', sphere: 'sphere', cylinder: 'cylinder', cone: 'cone', plane: 'plane' })[e.mesh.geometry] || 'cube';
   if (e.shape) return ({ rect: 'square', circle: 'circle', triangle: 'triangle', star: 'star' })[e.shape.type] || 'square';
   if (e.text) return 'text';
@@ -2136,7 +2154,7 @@ function kindOf(e) {
   if ((e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules', 'script'].includes(b.type))) return 'logic';
   return '';
 }
-const H_FILTERS = [['all', 'All'], ['player', 'Player'], ['logic', 'Logic'], ['physics', 'Physics'], ['ui', 'UI'], ['template', 'Templates']];
+const H_FILTERS = [['all', 'All'], ['pages', 'Pages'], ['ui', 'UI'], ['player', 'Player'], ['logic', 'Logic'], ['physics', 'Physics'], ['hidden', 'Hidden'], ['template', 'Templates']];
 let hKind = 'all';
 const closedFolders = new Set();
 const closedKids = new Set(); // parents whose children are folded away in the Hierarchy
@@ -2197,6 +2215,8 @@ function hMatch(e) {
   if (hKind.startsWith('tag:')) return (e.tags || []).includes(hKind.slice(4));
   if (hKind.startsWith('layer:')) return layerOf(e) === +hKind.slice(6);
   if (hKind === 'physics') return !!e.body;
+  if (hKind === 'pages') return !!(e.ui && showIfOf(e));
+  if (hKind === 'hidden') return e.visible === false;
   if (hKind === 'logic') return kindOf(e) === 'logic' || (e.behaviors || []).some((b) => ['triggers', 'fsm', 'graph', 'rules'].includes(b.type));
   return hKind === 'all' || kindOf(e) === hKind;
 }
@@ -2233,7 +2253,21 @@ function renderHierarchy() {
         '-', { icon: 'gear', label: 'Tags & Layers…', fn: openTagsLayers }].filter(Boolean)); } },
     icon('list'), hKind === 'all' ? '' : kindLabel);
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
-  box.append(h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn));
+  const tools = h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn);
+  // quick filters: only the kinds this level has, with how many
+  const kindCount = (k) => { const keep = hKind; hKind = k; const f = hFilter; hFilter = ''; const n = project.entities.filter(hMatch).length; hKind = keep; hFilter = f; return n; };
+  const parents = project.entities.filter((q) => kidsOf(q.id).length), anyOpen = parents.some((q) => !closedKids.has(q.id));
+  const chips = h('div', { class: 'h-chips' },
+    ...H_FILTERS.map(([k, l]) => [k, l, k === 'all' ? project.entities.length : kindCount(k)]).filter(([k, , n]) => k === 'all' || n || hKind === k).map(([k, l, n]) =>
+      h('button', { class: 'h-chip' + (hKind === k ? ' on' : ''), onclick: () => { hKind = hKind === k && k !== 'all' ? 'all' : k; renderHierarchy(); } }, l, h('b', {}, n))),
+    parents.length ? h('button', { class: 'h-chip h-fold', title: anyOpen ? 'Fold everything' : 'Unfold everything', onclick: () => { if (anyOpen) for (const q of parents) closedKids.add(q.id); else closedKids.clear(); renderHierarchy(); } }, icon(anyOpen ? 'collapse' : 'chevron'), anyOpen ? 'Fold all' : 'Unfold all') : null);
+  // where the selected object sits: tap a step to go there
+  const path = []; for (let q = selectedId && selectedId !== SCENE_ID ? ent(selectedId) : null, n = 0; q && n < 40; q = q.parent ? ent(q.parent) : null, n++) path.unshift(q);
+  const crumbs = path.length > 1 ? h('div', { class: 'h-crumbs' },
+    h('button', { class: 'h-crumb', title: 'Scene settings', onclick: () => select(SCENE_ID) }, icon('scene')),
+    ...path.flatMap((q, i) => [h('span', { class: 'h-sep' }, '›'), h('button', { class: 'h-crumb' + (i === path.length - 1 ? ' cur' : ''), onclick: () => { if (q.id === selectedId) box.querySelector(`.h-row[data-id="${q.id}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); else select(q.id); } }, icon(iconFor(q)), h('span', {}, q.name || 'Object'))]),
+    h('button', { class: 'h-locate', title: 'Scroll to it', onclick: () => { reveal(selectedId); renderRows(); box.querySelector(`.h-row[data-id="${selectedId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }); } }, icon('crosshair'))) : null;
+  box.append(h('div', { class: 'h-head' }, tools, chips, crumbs));
   if (hKind !== 'all') box.append(h('div', { class: 'h-active' }, `Showing ${kindLabel} only`, h('button', { onclick: () => { hKind = 'all'; renderHierarchy(); } }, icon('close'), 'Show all')));
   const dups = findDuplicates(), dupIds = new Set(dups.flatMap((g) => g.ids)), sig = dups.map((g) => g.ids.join(',')).join(';');
   if (dups.length) box.append(h('div', { class: 'h-dups' }, dups.map((g) => h('div', { class: 'h-dup' }, icon('warn'),
@@ -2248,10 +2282,11 @@ function renderHierarchy() {
   const gs = gettingStarted(); // after the list, so your objects come first
   if (gs) box.append(gs);
   const row = (e, depth = 0) => {
-    const badges = compBadges(e), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
+    const pg = e.ui && showIfOf(e), pageKey = pg ? `${pg.var || 'page'}=${pg.value ?? ''}` : '', live = pg && curPage() === pageKey;
+    const badges = compBadges(e).filter((b) => b !== e.name && !(pg && b === 'Show If')), kind = kindOf(e), kids = kidsOf(e.id).length, shut = closedKids.has(e.id);
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
-      class: 'h-row' + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : '') + (dupIds.has(e.id) ? ' dup' : ''),
+      class: 'h-row' + (pg ? ' page' : '') + (live ? ' live' : '') + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : '') + (dupIds.has(e.id) ? ' dup' : ''),
       'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
       onclick: (ev) => {
         if (ev.currentTarget._held) { ev.currentTarget._held = false; return; }
@@ -2261,7 +2296,7 @@ function renderHierarchy() {
         rowTap = { id: e.id, t: now };
         if (ev.shiftKey && selectedId && selectedId !== e.id && selectedId !== SCENE_ID) { multi = new Set([selectedId, e.id]); renderHierarchy(); }
         else if (selectedId === e.id && !isDesktop()) rowTap.timer = setTimeout(() => setDock('inspector'), 380); // (tapping it again opens its Inspector, unless that was a double-tap)
-        else select(e.id);
+        else { select(e.id); if (pg && !live) setUIPage(pageKey); } // a page: show it too
       },
       oncontextmenu: (ev) => { if (multi) return; ev.preventDefault(); openObjectMenu(e.id, 0, 0, ev.currentTarget.querySelector('.nm') || ev.currentTarget); },
       onpointerdown: (ev) => { if (multi || ev.pointerType === 'mouse' || ev.button > 0 || ev.target.closest('button')) return; const row = ev.currentTarget, x0 = ev.clientX, y0 = ev.clientY; clearTimeout(row._hold); row._held = false; // hold for the object menu
@@ -2275,8 +2310,8 @@ function renderHierarchy() {
     kids ? h('button', { class: 'h-twisty' + (shut ? ' shut' : ''), title: shut ? 'Show children' : 'Hide children', onclick: (ev) => { ev.stopPropagation(); shut ? closedKids.delete(e.id) : closedKids.add(e.id); renderHierarchy(); } }, icon('chevron')) : h('span', { class: 'h-twisty-sp' }),
     h('span', { class: 'h-ico', style: kind ? `color:${KIND_TINT[kind]};background:${KIND_TINT[kind]}22` : '' }, icon(iconFor(e))),
     h('span', { class: 'h-txt' },
-      h('span', { class: 'nm' }, e.name || 'Object', dupIds.has(e.id) && h('span', { class: 'tagchip dupchip', title: 'Duplicate: see the note at the top' }, 'duplicate'), e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
-      (badges.length || kids || parentName) ? h('span', { class: 'h-sub' }, [parentName && `in ${parentName}`, kids && `${kids} child${kids > 1 ? 'ren' : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
+      h('span', { class: 'nm' }, e.name || 'Object', dupIds.has(e.id) && h('span', { class: 'tagchip dupchip', title: 'Duplicate: see the note at the top' }, 'duplicate'), live && h('span', { class: 'tagchip livechip', title: 'This page is the one showing' }, 'showing'), e.template && h('span', { class: 'tagchip' }, 'template'), (e.tags || []).includes('player') && h('span', { class: 'tagchip' }, 'player')),
+      (badges.length || kids || parentName || pg) ? h('span', { class: 'h-sub' }, [pg && `Page “${pg.value ?? ''}”`, parentName && `in ${parentName}`, kids && `${kids} ${pg ? 'item' : 'child'}${kids > 1 ? (pg ? 's' : 'ren') : ''}`, ...badges.slice(0, 3)].filter(Boolean).join(' · ') + (badges.length > 3 ? ` +${badges.length - 3}` : '')) : ''),
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
     e.id === selectedId && h('button', { class: 'eye', title: 'More actions', onclick: (ev) => { ev.stopPropagation(); openObjectMenu(e.id, 0, 0, ev.currentTarget); } }, icon('more')),
@@ -5881,7 +5916,8 @@ function openFileMenu() {
     { icon: 'undo', label: 'Undo', k: '2-finger tap', fn: () => undoRedo(-1) },
     { icon: 'redo', label: 'Redo', k: '3-finger tap', fn: () => undoRedo(1) },
     '-',
-    { icon: 'save', label: manualSave() && dirty ? 'Save •' : 'Save', k: manualSave() ? 'Ctrl S' : 'auto', fn: commitSave },
+    { icon: 'save', label: manualSave() && dirty ? 'Save •' : 'Save', k: manualSave() ? 'Ctrl S' : 'auto-save on', fn: commitSave },
+    { icon: manualSave() ? 'close' : 'check', label: manualSave() ? 'Auto-save: Off' : 'Auto-save: On', k: manualSave() ? 'turn it on' : AUTOSAVE_WHEN[EP.autosave] || '', fn: () => setAutoSave(manualSave() ? '3' : 'manual') },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Project name', root.name); if (n) { root.name = n; changed(); refreshAll(); } } },
     { icon: 'copy', label: 'Duplicate Project', fn: () => askSave(() => { const c = clone(root); c.name += ' (copy)'; openProject(c); toast(manualSave() ? 'Copy made: tap Save to keep it' : 'Project duplicated'); }) },
     { icon: 'layers', label: 'Levels…', fn: openLevelMenu },
@@ -9077,5 +9113,7 @@ addEventListener('keydown', (e) => {
   if (k === 'arrowup' || k === 'arrowdown') { const rows = [...document.querySelectorAll('#hierarchy .h-row[data-id]')], i = rows.findIndex((r) => r.dataset.id === j.id), n = rows[i + (k === 'arrowup' ? -1 : 1)]; if (i >= 0 && n) return go(() => { select(n.dataset.id); document.querySelector(`#hierarchy .h-row[data-id="${n.dataset.id}"]`)?.scrollIntoView({ block: 'nearest' }); }); }
   if ((k === 'arrowleft' || k === 'arrowright') && kidsOf(j.id).length && document.querySelector(`#hierarchy .h-row[data-id="${j.id}"]`)) return go(() => { if (k === 'arrowleft') closedKids.add(j.id); else closedKids.delete(j.id); renderHierarchy(); }); // fold / unfold its children
 });
-$('#saveBtn')?.append(icon('save')); $('#saveBtn')?.addEventListener('click', commitSave); setDirty(dirty);
+$('#saveBtn')?.append(icon('save')); $('#saveBtn')?.addEventListener('click', (e) => { if (e.currentTarget._held) { e.currentTarget._held = false; return; } commitSave(); }); setDirty(dirty);
+$('#saveBtn')?.addEventListener('contextmenu', (e) => { e.preventDefault(); saveMenu(e.currentTarget); });
+$('#saveBtn')?.addEventListener('pointerdown', (e) => { const b = e.currentTarget; if (e.pointerType === 'mouse') return; clearTimeout(b._hold); b._held = false; const stop = () => { clearTimeout(b._hold); b.removeEventListener('pointerup', stop); b.removeEventListener('pointercancel', stop); }; b.addEventListener('pointerup', stop); b.addEventListener('pointercancel', stop); b._hold = setTimeout(() => { b._held = true; buzz(10); saveMenu(b); }, 480); }); // hold: auto-save on / off
 window.pocketReady = true; // boot finished (index.html recovers from a half-updated cache otherwise)

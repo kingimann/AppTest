@@ -1891,11 +1891,11 @@ Log.listeners.add(() => { // while playing, say what opened a Side Menu (or what
   const L = Log.entries, last = L[L.length - 1]; if (!playing || !last || L.length === menuNoteN) return; menuNoteN = L.length;
   if (/ (opened by|didn't open:) /.test(last.text) && last.source === 'UI' && !/\((App Bar|Button)\)$|its own ☰/.test(last.text)) toast(last.text);
 });
-Log.listeners.add(() => { // batch redraws to once a frame
+Log.listeners.add(() => { // batch redraws: once a frame, or 4 times a second while the game runs (a game logging every frame stays smooth)
   const last = Log.entries[Log.entries.length - 1];
   if (last?.level === 'error' && playing && consoleOpts().pauseOnError && !engine.paused && last.count === 1) { engine.paused = true; updatePauseButtons(); toast('Paused on an error (see Console)'); }
   if (consoleFrame) return;
-  consoleFrame = requestAnimationFrame(() => { consoleFrame = 0; if (document.activeElement?.classList?.contains('log-cmd')) { const a = document.activeElement; refreshConsoles(true); if (!a.isConnected) $$('.log-cmd').find?.((q) => q.dataset.where === a.dataset.where)?.focus(); return; } refreshConsoles(true); });
+  consoleFrame = (playing ? (f) => setTimeout(f, 250) : requestAnimationFrame)(() => { consoleFrame = 0; if (document.activeElement?.classList?.contains('log-cmd')) { const a = document.activeElement; refreshConsoles(true); if (!a.isConnected) $$('.log-cmd').find?.((q) => q.dataset.where === a.dataset.where)?.focus(); return; } refreshConsoles(true); });
 });
 setInterval(() => { // live watches
   if (!playing) return;
@@ -3187,7 +3187,7 @@ function editGraph(target, path) {
   const ed = openNodeEditor({
     hideNode: (t) => !gameOnlineOK() && /^(net|pf)[A-Z]/.test(t), // (PlayFab / Photon nodes: games only)
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz, app: !!levelList()[0].settings?.app,
-    stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
+    stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id)?.get((sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
     allNames: () => new Set(levelList().flatMap((lv) => (lv.entities || []).flatMap((x) => [x.name, ...(x.tags || [])]).filter(Boolean))), // (Check: a target on any level, or a tag)

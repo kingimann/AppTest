@@ -781,6 +781,14 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Home screen:** the open game big at the top with a picture, *Play* and *Keep editing*; a **Games | Apps** switch that splits the rest into two sections (remembered); **New 2D game / New 3D game**, or **New app / To-do list / App with games**, in one tap; your games or apps as picture cards (the game as you last played it) with when you edited them and a ⋯ menu (open, play, rename, duplicate, delete); then templates with richer tiles. Side by side on wide screens.
 - **Search bars:** suggestions while typing (from a word list, a list variable or a data collection, with the typed part in bold), recent searches kept on the phone, ✕ while typing, an iPhone-style **Cancel**, **voice search** 🎤, hints that take turns (`Search recipes | Try “pasta”`), a message once typing pauses, and `{searchResults}` from the Data List. New preset: *Search Bar (suggestions + voice)*.
 
+### Performance
+
+- **Off-screen culling:** 2D objects outside the camera, and 3D meshes outside its view, aren't drawn. Frames are pixel-identical. A 3,000-object 2D level renders about 6× faster, and a 1,500-mesh 3D scene about 7× faster.
+- **Play in the editor runs close to a build:**
+  - The node editor's live debug is stored per placed object, with no string keys and nothing for spawned copies.
+  - The game area's size is cached instead of measured every frame, so a frame never forces a layout of the editor page.
+  - The Console redraws at most 4 times a second while the game runs.
+
 ### WebAssembly speed-ups
 
 - **Pathfinding** (A* with a binary heap) and **voxel chunk meshing** run in a 1.5 KB WebAssembly module embedded in the engine (`engine/wasm/pocket.wat`). They give the same results as the JS versions: pathfinding is about 7× faster on big maps and re-meshing is about 8× faster.

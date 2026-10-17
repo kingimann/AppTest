@@ -68,6 +68,11 @@ Start with the **Console** (bottom bar, or the console button while playing). Mo
 - Build Settings › Player › graphics quality *battery saver* lowers the resolution.
 - The engine lowers its resolution by itself when a phone can't keep up.
 - Check the play bar's **Stats** (FPS, objects, bodies).
+- Only what's on screen is drawn, in 2D and 3D, so big levels cost little until you look at them. Text and tilemaps are always drawn.
+- Playing in the editor runs about as fast as a build. Two editor helpers stay cheap:
+  - The node editor's live run counts are kept only for objects you placed, not for spawned copies.
+  - The Console redraws a few times a second while the game runs.
+  An open Console full of messages still costs a little, so close it for smooth testing. A build has no editor at all, so it is still the most accurate test.
 
 ## FAQ
 

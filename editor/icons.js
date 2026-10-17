@@ -115,7 +115,13 @@ const P = {
 };
 const FILLED = { play: 'M7 4.5v15l12.5-7.5z', pause: 'M6 4h4.5v16H6zM13.5 4H18v16h-4.5z', stop: 'M6 6h12v12H6z' };
 
+const made = new Map(); // each icon is built once, then copied (lists show hundreds)
 export function icon(name, cls = '') {
+  const k = name + '|' + cls, t = made.get(k);
+  if (t) return t.cloneNode(true);
+  const svg = build(name, cls); made.set(k, svg); return svg.cloneNode(true);
+}
+function build(name, cls) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');

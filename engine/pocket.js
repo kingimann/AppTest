@@ -3423,9 +3423,17 @@ export function artURL(src) {
   return artCache.get(k);
 }
 
+/** Bumped when a picture or font finishes loading, so an idle editor redraws once to show it. */
+export const Redraw = { tick: 0 };
+const bumpRedraw = () => { Redraw.tick++; };
+if (typeof document !== 'undefined') document.fonts?.addEventListener?.('loadingdone', bumpRedraw);
+const imgOf = new WeakMap();
+/** An object's picture, remembered on the object: a big picture's text (a data URL) isn't compared against the cache every frame. */
+function spriteImage(S) { const c = imgOf.get(S); if (c && c.src === S.src) return c.img; const img = loadImage(S.src); imgOf.set(S, { src: S.src, img }); return img; }
 export function loadImage(src) {
   if (!images.has(src)) {
     const img = new Image();
+    img.addEventListener('load', bumpRedraw);
     img.crossOrigin = 'anonymous';
     img.src = artURL(src);
     images.set(src, img);
@@ -3696,38 +3704,45 @@ function drawText2D(ctx, e, vars, time) {
     }
     return { lines, widths };
   };
-  let size = +t.size || 24, L = layout(size);
   const lhK = +t.lineHeight || 1.2;
-  const fits = (Lx, s) => {
-    const n = maxLines ? Math.min(maxLines, Lx.lines.length) : Lx.lines.length, w = Math.max(...Lx.widths, 0);
-    const limW = wrapW ? Infinity : +t.fit > 0 ? +t.fit : box ? box.w - 2 * Math.max(padX, 6) : Infinity, limH = box ? box.h - 2 * padY : Infinity;
-    return w <= limW + 0.5 && n * s * lhK <= limH + 0.5 && (!maxLines || Lx.lines.length <= maxLines);
-  };
-  if (t.autoSize) { // the biggest size (up to its size) that fits its box, wrap width and line limit
-    const lo0 = Math.max(4, +t.minSize || 8);
-    if (!fits(L, size)) {
-      let lo = lo0, hi = size;
-      for (let i = 0; i < 8; i++) { const mid = (lo + hi) / 2; if (fits(layout(mid), mid)) lo = mid; else hi = mid; }
-      size = lo; L = layout(size);
+  // the laid-out lines are kept until something that changes them does (the words, size, font, wrap, box, a font loading)
+  const lkey = `${str}\u0001${t.size}|${t.weight}|${t.italic}|${t.font}|${wrapW}|${maxLines}|${t.autoSize}|${t.minSize}|${t.fit}|${box ? box.w + 'x' + box.h : ''}|${padX}|${padY}|${t.spacing}|${t.rich}|${lhK}|${Redraw.tick}`;
+  let size, lines, widths;
+  if (e._lay?.k === lkey) ({ size, lines, widths } = e._lay);
+  else {
+    size = +t.size || 24; let L = layout(size);
+    const fits = (Lx, s) => {
+      const n = maxLines ? Math.min(maxLines, Lx.lines.length) : Lx.lines.length, w = Math.max(...Lx.widths, 0);
+      const limW = wrapW ? Infinity : +t.fit > 0 ? +t.fit : box ? box.w - 2 * Math.max(padX, 6) : Infinity, limH = box ? box.h - 2 * padY : Infinity;
+      return w <= limW + 0.5 && n * s * lhK <= limH + 0.5 && (!maxLines || Lx.lines.length <= maxLines);
+    };
+    if (t.autoSize) { // the biggest size (up to its size) that fits its box, wrap width and line limit
+      const lo0 = Math.max(4, +t.minSize || 8);
+      if (!fits(L, size)) {
+        let lo = lo0, hi = size;
+        for (let i = 0; i < 8; i++) { const mid = (lo + hi) / 2; if (fits(layout(mid), mid)) lo = mid; else hi = mid; }
+        size = lo; L = layout(size);
+      }
+    } else if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
+      const w = Math.max(...L.widths, 1);
+      if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); L = layout(size); }
     }
-  } else if (+t.fit > 0) { // shrink to fit a width (long names, big numbers)
-    const w = Math.max(...L.widths, 1);
-    if (w > +t.fit) { size = Math.max(6, size * (+t.fit / w)); L = layout(size); }
-  }
-  let { lines, widths } = L;
-  // a line limit: the last line ends in "…"
-  if (maxLines && lines.length > maxLines) {
-    lines = lines.slice(0, maxLines); widths = widths.slice(0, maxLines);
-    const last = lines[maxLines - 1], lim = (wrapW || Math.max(...widths)) , ell = '…';
-    ctx.font = fontFor(last[last.length - 1]?.st || {}, size);
-    const ew = ctx.measureText(ell).width;
-    let w = widths[maxLines - 1];
-    while (last.length && (w + ew > lim || /^\s+$/.test(last[last.length - 1].text || ''))) {
-      const p = last[last.length - 1];
-      if (p.icon || p.text.length <= 1 || /^\s+$/.test(p.text)) { w -= p.w; last.pop(); continue; }
-      ctx.font = fontFor(p.st, size); p.text = p.text.slice(0, -1); const nw = ctx.measureText(p.text).width; w -= p.w - nw; p.w = nw;
+    ({ lines, widths } = L);
+    // a line limit: the last line ends in "…"
+    if (maxLines && lines.length > maxLines) {
+      lines = lines.slice(0, maxLines); widths = widths.slice(0, maxLines);
+      const last = lines[maxLines - 1], lim = (wrapW || Math.max(...widths)) , ell = '…';
+      ctx.font = fontFor(last[last.length - 1]?.st || {}, size);
+      const ew = ctx.measureText(ell).width;
+      let w = widths[maxLines - 1];
+      while (last.length && (w + ew > lim || /^\s+$/.test(last[last.length - 1].text || ''))) {
+        const p = last[last.length - 1];
+        if (p.icon || p.text.length <= 1 || /^\s+$/.test(p.text)) { w -= p.w; last.pop(); continue; }
+        ctx.font = fontFor(p.st, size); p.text = p.text.slice(0, -1); const nw = ctx.measureText(p.text).width; w -= p.w - nw; p.w = nw;
+      }
+      const st = last[last.length - 1]?.st || {}; ctx.font = fontFor(st, size); last.push({ text: ell, st, w: ew }); widths[maxLines - 1] = w + ew;
     }
-    const st = last[last.length - 1]?.st || {}; ctx.font = fontFor(st, size); last.push({ text: ell, st, w: ew }); widths[maxLines - 1] = w + ew;
+    e._lay = { k: lkey, size, lines, widths };
   }
   // typewriter: letters appear one by one (restarts when the text changes)
   let budget = Infinity;
@@ -3980,7 +3995,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
     ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
   }
   if (e.sprite && e.sprite.src) {
-    const img = loadImage(e.sprite.src);
+    const img = spriteImage(e.sprite);
     if (img.complete && img.naturalWidth) {
       const S = e.sprite, cols = Math.max(1, S.cols | 0 || 1), rows = Math.max(1, S.rows | 0 || 1);
       if (S.flip) ctx.scale(-1, 1);
@@ -24781,6 +24796,7 @@ export class Engine {
 
   resize() {
     queueMicrotask(() => this.scene?.emit('resize', this.width, this.height));
+    this.wake();
     const r = this.root.getBoundingClientRect();
     this.width = Math.max(1, r.width); this.height = Math.max(1, r.height);
     this.dpr = Math.min(window.devicePixelRatio || 1, this.maxDpr);
@@ -24924,7 +24940,11 @@ export class Engine {
     scene.on('message', (m) => { const k = String(m).trim().toLowerCase(); if (k === 'dark mode toggle') scene.setVar('darkMode', isDark(scene) ? 0 : 1); else if ((k === 'settings' || k === 'open settings') && !this.editing && this.social && !this.root?.querySelector('[data-pocket-sheet="settings"]')) settingsSheet(scene); else if (k === 'dark mode on') scene.setVar('darkMode', 1); else if (k === 'dark mode off') scene.setVar('darkMode', 0); });
     scene.on('var', (k, v) => { if (k !== 'darkMode' || this.editing) return; if (v === '' || v == null) { try { localStorage.removeItem(key); } catch { /* storage unavailable */ } } else store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); }); // blank = follow the game's setting again
   }
+  /** Keep drawing every frame for a while (the editor calls this on taps, edits and camera moves). */
+  wake(ms = 300) { this.awakeUntil = Math.max(this.awakeUntil || 0, performance.now() + ms); }
+
   setScene(scene, { skipRestore = false } = {}) {
+    this.wake();
     this.useRenderer(scene.mode); // first: a level this device can't draw (3D without WebGL) throws here and leaves the current one running
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
@@ -25372,7 +25392,8 @@ export class Engine {
     if (this.scene) {
       try { // a bug in one frame shows in the Console instead of freezing the game
         if (!this.editing) this.update(dt * this.timeScale);
-        this.render();
+        // editing (lazyEdit): draw while something is happening (wake), when a picture loads, and twice a second otherwise
+        if (!this.editing || !this.lazyEdit || now < (this.awakeUntil || 0) || Redraw.tick !== this._redrawTick || now - (this._editDrawn || 0) > 500) { this._redrawTick = Redraw.tick; this._editDrawn = now; this.render(); }
         this.updateSettingsUI();
       } catch (err) {
         const k = err?.message + '|' + (err?.stack || '').split('\n')[1];

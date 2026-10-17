@@ -133,7 +133,7 @@ export function openTimeline(opts) {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       t += dt;
       if (t > clip.length) t = clip.loop === 'once' ? (stop(), clip.length) : 0;
-      applyPose(); updateHeads();
+      applyPose(); updateHeads(); window.engine?.wake?.(); // (the Scene keeps drawing while the clip plays)
       return;
     }
     const j = opts.get(); if (!j || !lastPose) return;

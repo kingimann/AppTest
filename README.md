@@ -789,6 +789,16 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
   - The game area's size is cached instead of measured every frame, so a frame never forces a layout of the editor page.
   - The Console redraws at most 4 times a second while the game runs.
 
+### Editor speed (big projects, phones)
+
+- **Lazy redraw while idle:** the Scene redraws while something happens (touch, typing, camera moves, previews, Timeline playback) and about twice a second otherwise. Idle CPU in a 3D level dropped from a full core to about a fifth.
+- **On a 600-object level:**
+  - Selecting is about 4× cheaper: only the two Hierarchy rows that changed are redrawn, and the Parent list fills in when you open it.
+  - Dragging is about 5× faster: the snap list is built once per drag, collider outlines are culled and batched, and pictures aren't looked up by their full data URL.
+  - Undo, duplicate and delete are 2–3× cheaper.
+- **Undo memory:** steps share big pictures and sounds instead of copying them.
+- **Text:** laid-out text is reused until it changes.
+
 ### WebAssembly speed-ups
 
 - **Pathfinding** (A* with a binary heap) and **voxel chunk meshing** run in a 1.5 KB WebAssembly module embedded in the engine (`engine/wasm/pocket.wat`). They give the same results as the JS versions: pathfinding is about 7× faster on big maps and re-meshing is about 8× faster.

@@ -7531,7 +7531,7 @@ registerBehavior('uiBottomNav', {
         const k = Math.min(1, dt * (+p.speed || 14)), autoHid = BH.update(s, dt);
         navScene = s; if (p.sync && p.sync !== 'nothing' && s.time - navSyncT > 1) { navSyncT = s.time; const sig = tabsText(); if (sig !== navSig) { navSig = sig; T = tabs(); } } // the Side Menu or the pages changed
         sizeBar(e); placeTop(e, s);
-        hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
+        hide += ((hidden(s) || autoHid || (s.engine.keyboardUp && p.position !== 'top') ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14)); // (the phone's keyboard is up: it covers the bottom bar, like a native app)
         for (const [i, t] of pulse) { const n = t - dt * 2.5; if (n <= 0) pulse.delete(i); else pulse.set(i, n); }
         for (const r of ripples) r.t += dt * 2.2; while (ripples.length && ripples[0].t >= 1) ripples.shift();
         const ti = tabIdx(s); if (ti >= 0) lastTab = ti;
@@ -10935,7 +10935,7 @@ function chatInputBar(s, o) {
     let b2 = off;
     const kbUp = typing && touch && vv && vv.height < (screen?.height || 0) * 0.8; // (iPhone: innerHeight shrinks with the keyboard too, so compare the visible area with the screen)
     if (kbUp) { const rr = root.getBoundingClientRect(), kbTop = vv.offsetTop + vv.height; b2 = Math.max(0, Math.round(rr.bottom - kbTop)); } // right on top of the keyboard
-    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 || kbUp ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; bar.dataset.onKeyboard = kbUp ? '1' : '';
+    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 || kbUp ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; bar.dataset.onKeyboard = kbUp ? '1' : ''; s.engine.keyboardUp = !!kbUp;
   };
   const replace = () => { place(); requestAnimationFrame(place); setTimeout(place, 320); }; // (the keyboard slides in: place again once it's up)
   place(); vv?.addEventListener('resize', replace); vv?.addEventListener('scroll', place);
@@ -10996,7 +10996,7 @@ function chatInputBar(s, o) {
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
-  const close = () => { if (gone || recUI) return; gone = true; vv?.removeEventListener('resize', replace); vv?.removeEventListener('scroll', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
+  const close = () => { if (gone || recUI) return; gone = true; s.engine.keyboardUp = false; vv?.removeEventListener('resize', replace); vv?.removeEventListener('scroll', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
@@ -11810,7 +11810,7 @@ registerBehavior('uiChat', {
           drawIco(ctx, 'chevron-down', jx, jy + 1, 20, txt, { stroke: 2.2 });
           if (newCount > 0) { const t = newCount > 99 ? '99+' : String(newCount); ctx.font = `800 11px ${THEME.font}`; const bw2 = Math.max(18, ctx.measureText(t).width + 10); ctx.fillStyle = mineC; UK.rr(ctx, jx + 8, jy - 27, bw2, 18, 9); ctx.fill(); UK.text(ctx, t, jx + 8 + bw2 / 2, jy - 18, { size: 11, weight: 800, color: '#fff' }); }
         }
-        if (!ok) return; // (no bar where you can't write)
+        if (!ok || bar) return; // (no bar where you can't write; none while the typing bar is open, which sits there or on the keyboard)
         // the bar
         const brr = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
         ctx.fillStyle = p.bg ? tok(p.bg) : 'rgba(0,0,0,0)'; ctx.fillRect(b.x, brr.y - 8, b.w, barH);

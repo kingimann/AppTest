@@ -268,7 +268,7 @@ function openProject(json, id = uid('p')) {
   projectId = id;
   syncSoundNames();
   selectedId = null;
-  history = []; hIndex = -1; pushHistory();
+  history = []; hIndex = -1; bigToTok.clear(); tokToBig.clear(); pushHistory();
   resetCamera();
   rebuild();
   refreshAll();
@@ -419,8 +419,16 @@ function openLevelMenu() {
 // ============================================================================
 // Undo history
 // ============================================================================
+// big text (pictures, sounds, fonts as data URLs) is kept once for all Undo steps, not copied into each one
+const bigToTok = new Map(), tokToBig = new Map();
+const histStr = (o) => JSON.stringify(o, (k, v) => {
+  if (typeof v !== 'string' || v.length < 4096) return v;
+  let t = bigToTok.get(v); if (!t) { t = '\u0000big:' + bigToTok.size; bigToTok.set(v, t); tokToBig.set(t, v); }
+  return t;
+});
+const histParse = (str) => JSON.parse(str, (k, v) => (typeof v === 'string' && v.startsWith('\u0000big:') ? tokToBig.get(v) ?? v : v));
 function pushHistory() {
-  const s = JSON.stringify(root);
+  const s = histStr(root);
   if (history[hIndex] === s) return;
   history = history.slice(0, hIndex + 1);
   history.push(s);
@@ -438,7 +446,7 @@ function undoRedo(step) {
   const i = hIndex + step;
   if (i < 0 || i >= history.length) return;
   hIndex = i;
-  root = JSON.parse(history[i]);
+  root = histParse(history[i]);
   levelIdx = Math.min(levelIdx, levelList().length - 1);
   project = levelList()[levelIdx];
   if (selectedId !== SCENE_ID && !ent(selectedId)) selectedId = null;
@@ -449,6 +457,7 @@ function updateUndoButtons() { $('#undoBtn').disabled = hIndex <= 0; $('#redoBtn
 
 /** Call after any edit. structure: object list / inspector layout changed. */
 function changed({ structure = false, inspector = false } = {}) {
+  engine.wake();
   requestRebuild();
   if (!reqBusy) queueReqCheck();
   saveSoon();
@@ -467,6 +476,8 @@ function changed({ structure = false, inspector = false } = {}) {
 window.POCKET_STORE_TEST = true; // in-app purchases show a test sheet here (no store)
 const engine = new Engine({ parent: $('#viewport'), systemBack: false }); // the editor handles the phone's Back itself
 engine.recordGraphs = true; // remember which Visual Script nodes ran, for the node editor's badges
+engine.lazyEdit = true; // while editing, the Scene redraws only when something happens (saves the phone's battery and keeps the panels smooth)
+for (const t of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown', 'input', 'change', 'click']) document.addEventListener(t, () => engine.wake(), { capture: true, passive: true });
 engine.editing = true;
 engine.showUI = true;
 engine.input.enabled = false;
@@ -569,6 +580,7 @@ function orientationRow() {
 }
 function refreshOrientBtn() { const b = $('.orient-btn'); if (b) b.replaceChildren(icon(orientationOf() === 'any' ? 'rotate' : 'phone'), h('span', {}, { portrait: 'Portrait', landscape: 'Landscape', any: 'Either way' }[orientationOf()])); const ic = b?.querySelector('svg'); if (ic && orientationOf() === 'landscape') ic.style.transform = 'rotate(90deg)'; }
 function applyCamera() {
+  engine.wake();
   const s = engine.scene;
   if (!s || playing) return;
   if (s.mode === '2d') Object.assign(s.camera, { x: cam2d.x, y: cam2d.y, zoom: cam2d.zoom });
@@ -638,8 +650,15 @@ engine.onRenderWorld = (r, s, z) => {
   const sel = s.byId(selectedId), hover = s.byId(dropHoverId);
   if (s.mode === '2d') {
     const ctx = r;
-    for (const e of colliderShown(s, sel)) { // collider outlines (green; triggers dashed)
+    // collider outlines (green; triggers dashed): only those on screen, and the plain ones drawn as one path
+    const inv = ctx.getTransform().inverse(), cw = ctx.canvas.width, chh = ctx.canvas.height, corners = [[0, 0], [cw, 0], [0, chh], [cw, chh]].map(([x, y]) => inv.transformPoint({ x, y }));
+    const vx0 = Math.min(...corners.map((q) => q.x)), vx1 = Math.max(...corners.map((q) => q.x)), vy0 = Math.min(...corners.map((q) => q.y)), vy1 = Math.max(...corners.map((q) => q.y));
+    const batch = new Path2D(); let batched = 0;
+    for (const e of colliderShown(s, sel)) {
       const ex = e.extents(); if (!Number.isFinite(ex.hx ?? ex.r)) continue;
+      const cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0), R = ex.sphere ? ex.r : ex.kind ? Math.max(...ex.pts.map(([px, py]) => Math.hypot(px, py)), 0) : Math.hypot(ex.hx, ex.hy);
+      if (cx + R < vx0 || cx - R > vx1 || cy + R < vy0 || cy - R > vy1) continue; // off screen
+      if (!e.body.sensor && e !== sel && !ex.kind && !ex.rot) { if (ex.sphere) { batch.moveTo(cx + ex.r, cy); batch.arc(cx, cy, ex.r, 0, Math.PI * 2); } else batch.rect(cx - ex.hx, cy - ex.hy, ex.hx * 2, ex.hy * 2); batched++; continue; }
       ctx.save(); ctx.strokeStyle = e.body.sensor ? TRIGGER_GREEN : COLLIDER_GREEN; ctx.globalAlpha = e === sel ? 1 : 0.85; ctx.lineWidth = (e === sel ? 2.5 : 1.75) / z;
       if (e.body.sensor) ctx.setLineDash([5 / z, 4 / z]);
       ctx.translate(e.x + (ex.ox || 0), e.y + (ex.oy || 0)); ctx.beginPath();
@@ -648,6 +667,7 @@ engine.onRenderWorld = (r, s, z) => {
       else { ctx.rotate(ex.rot || 0); ctx.rect(-ex.hx, -ex.hy, ex.hx * 2, ex.hy * 2); }
       ctx.stroke(); ctx.restore();
     }
+    if (batched) { ctx.save(); ctx.strokeStyle = COLLIDER_GREEN; ctx.globalAlpha = 0.85; ctx.lineWidth = 1.75 / z; ctx.stroke(batch); ctx.restore(); }
     // game camera frame
     ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5 / z;
     ctx.strokeRect(0, 0, s.view.width, s.view.height);
@@ -931,16 +951,22 @@ function drawRectGizmo(ctx, f) {
 
 
 /** Smart guides (2D): while dragging, the object's centre and edges snap to other objects' centres and edges, with a line to show it. */
-let sceneGuide = null, lastObjTap = { id: null, t: 0 };
+let sceneGuide = null, lastObjTap = { id: null, t: 0 }, snapList = null;
 function snapScene2D(j, live, z) {
   sceneGuide = null;
   if (!live) return;
   const ex = live.extents(), hw = ex.sphere ? ex.r : ex.hx, hh = ex.sphere ? ex.r : ex.hy, T = 7 / z;
   let bx = null, by = null;
-  for (const q of engine.scene.entities) {
-    if (q === live || q.ui || q.dead || q.parentEnt || !q.visible || q.tiles || !hasVisual(q)) continue;
-    const qe = q.extents(), qw = qe.sphere ? qe.r : qe.hx, qh = qe.sphere ? qe.r : qe.hy;
-    if (qw > 4000 || qh > 4000) continue; // backgrounds
+  if (snapList?.live !== live || snapList.scene !== engine.scene) { // the other objects' centres and sizes, once per drag (they don't move while you drag)
+    snapList = { live, scene: engine.scene, list: [] };
+    for (const q of engine.scene.entities) {
+      if (q === live || q.ui || q.dead || q.parentEnt || !q.visible || q.tiles || !hasVisual(q)) continue;
+      const qe = q.extents(), qw = qe.sphere ? qe.r : qe.hx, qh = qe.sphere ? qe.r : qe.hy;
+      if (!(qw > 4000 || qh > 4000)) snapList.list.push({ x: q.x, y: q.y, qw, qh }); // (not backgrounds)
+    }
+  }
+  for (const q of snapList.list) {
+    const { qw, qh } = q;
     for (const [mine, theirs] of [[0, 0], [-hw, -qw], [hw, qw], [-hw, qw], [hw, -qw]]) { const d = (q.x + theirs) - (j.x + mine); if (Math.abs(d) < T && (!bx || Math.abs(d) < Math.abs(bx.d))) bx = { d, at: q.x + theirs }; }
     for (const [mine, theirs] of [[0, 0], [-hh, -qh], [hh, qh], [-hh, qh], [hh, -qh]]) { const d = (q.y + theirs) - (j.y + mine); if (Math.abs(d) < T && (!by || Math.abs(d) < Math.abs(by.d))) by = { d, at: q.y + theirs }; }
   }
@@ -1399,8 +1425,13 @@ function tagLayerRows(j) {
           SORT_LAYERS.map(([n]) => h('option', { value: n, selected: n === so.name }, n))),
         h('input', { class: 'ord', type: 'number', inputMode: 'numeric', value: so.order, title: 'Order: higher draws in front',
           oninput: (e) => { j.layer = sortOf(j).base + (parseInt(e.target.value, 10) || 0); if (!j.layer) delete j.layer; changed(); } })), 'Draw layer and order: Background is behind, Top is in front'),
-      pill('Parent', h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
-        h('option', { value: '' }, 'None'), parentChoices(j).map((q) => h('option', { value: q.id, selected: q.id === j.parent }, q.name || 'Object'))), 'Put it inside another object: it moves with it'),
+      pill('Parent', (() => { // the full list is built when it's opened (a big level has hundreds of objects)
+        const par = j.parent && ent(j.parent), sel = h('select', { class: 'parent-sel', onchange: (e) => setParent(j.id, e.target.value || null) },
+          h('option', { value: '' }, 'None'), par && h('option', { value: par.id, selected: true }, par.name || 'Object'));
+        const fill = () => { if (sel._full) return; sel._full = true; sel.replaceChildren(h('option', { value: '' }, 'None'), ...parentChoices(j).map((q) => h('option', { value: q.id, selected: q.id === j.parent }, q.name || 'Object'))); };
+        for (const t of ['pointerdown', 'focus', 'keydown']) sel.addEventListener(t, fill);
+        return sel;
+      })(), 'Put it inside another object: it moves with it'),
       h('button', { type: 'button', class: 'pill pill-btn', onclick: (e) => popMenu(e.currentTarget, [{ icon: 'plus', label: 'New Child', fn: () => addChild(j.id) }, { icon: 'link', label: 'Add Existing…', fn: () => addExistingMenu(j, e.target) }]) },
         icon('child'), kids.length ? `${kids.length} child${kids.length === 1 ? '' : 'ren'}` : 'Child')),
   ];
@@ -2065,12 +2096,14 @@ const sheetState = () => $('#app').dataset.sheet || 'half';
 }
 
 function select(id, { fromScene = false } = {}) {
+  engine.wake();
+  const prevSel = selectedId;
   selectedId = id === SCENE_ID || ent(id) ? id : null;
   engine.editSelected = selectedId; // a Side Menu previews open only while it's selected
   const pg = selectedId && pageOf(selectedId); if (pg && pg !== curPage()) setUIPage(pg); // picking something on another page shows that page
   $('#app')?.classList.toggle('has-sel', !!selectedId && selectedId !== SCENE_ID);
   if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
-  renderHierarchy();
+  if (!hierarchySelect(prevSel, selectedId)) renderHierarchy();
   renderInspector();
   updateCtxBar();
   markTabs();
@@ -2133,6 +2166,7 @@ function stepSelection(d) {
 }
 
 function refreshAll() {
+  engine.wake();
   refreshPageBtn(); $('#uiScreens')?.classList.toggle('app', !!levelList()[0].settings?.app); // apps have pages, not title / pause / game-over screens
   $('#sceneTab').replaceChildren(icon(uiMode ? 'hud' : is3D() ? 'cube' : 'grid'), uiMode ? 'UI' : viewMode === 'top' ? 'Top' : is3D() ? '3D' : '2D', icon('chevron'));
   $('#projectTitle').textContent = levelList()[0].name || 'Untitled'; setDirty(dirty);
@@ -2270,6 +2304,26 @@ function keepOnlyOne(g, keepId) {
   toast(`Deleted ${others.length} duplicate${others.length > 1 ? 's' : ''}. Undo to restore.`);
 }
 let dupSig = null;
+let hRow = null;
+/** Selection changed but the list didn't: redraw only the old and the new row. False when the whole list must be redrawn. */
+function hierarchySelect(oldId, newId) {
+  const box = $('#hierarchy'); if (!hRow || multi || !box?.isConnected) return false;
+  const rowEl = (id) => box.querySelector(`.h-row[data-id="${CSS.escape(String(id))}"]`), simple = (id) => { // a top-level object that isn't folded into a "×3" group, with no breadcrumb trail
+    if (!id || id === SCENE_ID) return true;
+    const e = ent(id); if (!e || e.parent || kidsOf(id).length) return false;
+    const nm = e.name || 'Object'; let n = 0; for (const q of project.entities) if (!q.parent && (q.name || 'Object') === nm && ++n >= 3) return false;
+    return true;
+  };
+  if (!simple(oldId) || !simple(newId) || box.querySelector('.h-crumbs')) return false;
+  for (const id of [oldId, newId]) {
+    if (!id) continue;
+    if (id === SCENE_ID) { box.querySelector('.h-row.scene')?.classList.toggle('sel', id === newId); continue; }
+    const el = rowEl(id); if (!el) { if (id === newId) return false; continue; } // (not in the list: filtered out or in a closed folder)
+    el.replaceWith(hRow(ent(id), +el.dataset.depth || 0));
+  }
+  if (newId && newId !== SCENE_ID) { hRevealed = newId; rowEl(newId)?.scrollIntoView({ block: 'nearest' }); }
+  return true;
+}
 function renderHierarchy() {
   const box = $('#hierarchy');
   const scroll = box.scrollTop;
@@ -2323,7 +2377,7 @@ function renderHierarchy() {
     const parentName = depth === 0 && e.parent && ent(e.parent)?.name;
     return h('div', {
       class: 'h-row' + (pg ? ' page' : '') + (live ? ' live' : '') + (e.prefab ? ' pf' : '') + (e.id === selectedId ? ' sel' : '') + (e.visible === false ? ' off' : '') + (e.template ? ' tpl' : '') + (e.folder && !depth ? ' in-folder' : '') + (dupIds.has(e.id) ? ' dup' : ''),
-      'data-id': e.id, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
+      'data-id': e.id, 'data-depth': depth, style: depth ? `padding-left:${14 + depth * 26}px;--tree:${depth * 26}px` : '',
       onclick: (ev) => {
         if (ev.currentTarget._held) { ev.currentTarget._held = false; return; }
         if (multi) { multi.has(e.id) ? multi.delete(e.id) : multi.add(e.id); renderRows(); renderMultiBar(); return; }
@@ -2383,6 +2437,7 @@ function renderHierarchy() {
       h('button', { class: 'eye', title: vis ? 'Hide all' : 'Show all', onclick: (ev) => { ev.stopPropagation(); for (const m of g.members) m.visible = !vis; changed({ structure: true }); } }, icon(vis ? 'eye' : 'eyeoff')));
   };
   const rowsOf = (items) => tree(items).map(([e, d]) => (e === 'group' ? groupRow(d) : row(e, d)));
+  hRow = row; // (a new selection redraws just its two rows: hierarchySelect)
   function renderRows() {
     const list = project.entities.filter(hMatch), flat = !!hFilter || hKind !== 'all';
     const topOf = (e) => { let q = e, n = 0; while (q.parent && ent(q.parent) && n++ < 60) q = ent(q.parent); return q; }, folderOf = (e) => (flat ? e.folder : topOf(e).folder);
@@ -4928,6 +4983,7 @@ function previewBehavior(j, b, seconds) {
     if (!inst.play) inst.update?.(e, dt, s);
     for (const tw of s.tweens) tw.update(dt);
     for (let k = s.particles.length - 1; k >= 0; k--) { const q = s.particles[k]; q.x += q.vx * dt; q.y += q.vy * dt; q.vy += (q.g ?? 0) * dt; if (q.shrink) q.size *= 1 - dt * 1.2; if ((q.life -= q.decay * dt) <= 0) s.particles.splice(k, 1); }
+    engine.wake();
     if (now - t0 < dur * 1000 && previewing) previewing.raf = requestAnimationFrame(step); else cancelPreview();
   };
   previewing = { raf: requestAnimationFrame(step) };

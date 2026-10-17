@@ -74,6 +74,16 @@ Start with the **Console** (bottom bar, or the console button while playing). Mo
   - The Console redraws a few times a second while the game runs.
   An open Console full of messages still costs a little, so close it for smooth testing. A build has no editor at all, so it is still the most accurate test.
 
+### The editor itself
+
+- **When idle,** the Scene redraws about twice a second (pictures that finish loading show at once). It redraws smoothly while you touch, drag, type, move the camera, or preview an animation. This saves the phone's battery and keeps the panels quick.
+- **Big levels:**
+  - Selecting redraws just the two Hierarchy rows that changed.
+  - The Parent list fills in when you open it.
+  - Text layout is reused until the text changes.
+  - Dragging snaps against a list of the other objects built once per drag.
+- **Undo** keeps pictures and sounds once for all its steps, not in each one, so big projects don't run out of memory.
+
 ## FAQ
 
 **Do players need to install anything?** No. Games run in the phone's browser. They can also be installed as web apps or built as App Store / Google Play apps.

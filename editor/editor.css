@@ -2321,3 +2321,5 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ne-morecats { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin: 10px 0 4px; height: 46px; border: 1px dashed var(--g3); border-radius: 12px; background: none; color: var(--muted); font: 600 15px inherit; cursor: pointer; }
 .ne-morecats svg { transform: rotate(-90deg); }
 .ne-hint[hidden] { display: none; }
+/* long object lists: rows scrolled out of view skip layout and painting */
+#hierarchy .h-row { content-visibility: auto; contain-intrinsic-size: auto 46px; }

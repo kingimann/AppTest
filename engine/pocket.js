@@ -9657,16 +9657,6 @@ function shrinkPicture(file, max = 1080, q = 0.82) {
     fr.readAsDataURL(file);
   });
 }
-/** A picture full screen (an avatar or a cover): tap anywhere to close. */
-function photoViewer(s, src) {
-  const root = s.engine.root; if (!root || typeof document === 'undefined' || !isPic(src)) return null;
-  const v = document.createElement('div'); v.style.cssText = 'position:absolute;inset:0;z-index:60;background:rgba(0,0,0,0);display:flex;align-items:center;justify-content:center;transition:background .2s;touch-action:auto;'; v.dataset.pocketViewer = '1';
-  const im = document.createElement('img'); im.src = artURL(src); im.alt = ''; im.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;transform:scale(.9);opacity:0;transition:transform .25s cubic-bezier(.2,.8,.2,1),opacity .2s;';
-  v.append(im); root.append(v); requestAnimationFrame(() => { v.style.background = 'rgba(0,0,0,.94)'; im.style.transform = 'none'; im.style.opacity = '1'; });
-  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) v.addEventListener(t, (ev) => ev.stopPropagation());
-  v.addEventListener('click', () => { v.style.background = 'rgba(0,0,0,0)'; im.style.opacity = '0'; setTimeout(() => v.remove(), 220); });
-  return v;
-}
 const PROFILE_COVERS = ['#1d9bf0', '#7c3aed', '#f91880', '#f59e0b', '#10b981', '#ef4444', '#0f172a', 'linear-gradient(135deg,#f58529,#dd2a7b,#8134af)', 'linear-gradient(135deg,#4f7cff,#22d3ee)', 'linear-gradient(135deg,#10b981,#a3e635)'];
 /** Edit profile: cover (picture or colour), picture, name, bio, pronouns, place, website. o: { data, colors, font, fields, upload, onSave(patch) }. */
 /** The page that shows a Profile Header (someone else's, or my own): the value of the Show If page it sits on. */
@@ -11346,7 +11336,21 @@ function chatInputBar(s, o) {
   const close = (force) => { if (gone) return; if (recUI) { if (!force) return; stopRec?.(false); } gone = true; /* (a tap outside doesn't stop a recording; leaving the chat bins it) */ s.engine.keyboardUp = false; vv?.removeEventListener('resize', replace); vv?.removeEventListener('scroll', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(inp.value); root.removeEventListener('pointerdown', outside, true); };
   const sync = () => { const on = !!inp.value.trim(); if (plus) pic.style.display = on ? 'none' : 'flex'; send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
-  inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
+  inp.addEventListener('input', () => { sync(); o.onTyping?.(); });
+  // @: the people in a group to pick from, like WhatsApp and Telegram
+  let mBox = null;
+  const mentionCheck = () => { mBox?.remove(); mBox = null; const L0 = typeof o.mentions === 'function' ? o.mentions() : o.mentions; if (!L0?.length) return;
+    const m = /(^|\s)@([\w.]*)$/.exec(inp.value.slice(0, inp.selectionStart ?? inp.value.length)); if (!m) return;
+    const q = m[2].toLowerCase(), hits = L0.filter((x) => x.handle.toLowerCase().startsWith(q) || String(x.name || '').toLowerCase().includes(q)).slice(0, 5); if (!hits.length) return;
+    mBox = el('div', `position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);background:${c.bg};border:${HAIR} solid ${c.line};border-radius:16px;box-shadow:0 8px 24px rgba(0,0,0,.18);overflow:hidden;z-index:3;`); mBox.dataset.mentions = '1';
+    for (const h of hits) { const b = el('button', `display:flex;align-items:center;gap:10px;width:100%;padding:9px 14px;border:0;background:none;color:${c.text};font:700 15px ${font};text-align:left;cursor:pointer;`); b.type = 'button'; b.dataset.mention = h.handle;
+      const av = el('span', `flex:none;width:30px;height:30px;border-radius:50%;background:${c.acc};color:#fff;display:flex;align-items:center;justify-content:center;font:800 12px ${font};`, String(h.name || h.handle).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase());
+      b.append(av, el('span', '', h.name || h.handle), el('span', `color:${c.sub};font-weight:500;font-size:13px;`, '@' + h.handle));
+      b.onpointerdown = (ev) => ev.preventDefault(); // (keeps the keyboard up)
+      b.onclick = () => { const pos = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, pos).replace(/@([\w.]*)$/, '@' + h.handle + ' '); inp.value = before + inp.value.slice(pos); inp.focus(); try { inp.setSelectionRange(before.length, before.length); } catch { /* not a text box */ } mBox?.remove(); mBox = null; sync(); };
+      mBox.append(b); }
+    bar.append(mBox); };
+  inp.addEventListener('input', mentionCheck); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
   send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => tray.toggle('gif');
   file.onchange = async () => { const f = file.files[0]; file.value = ''; if (!f) return; try { o.onSend({ text: '', media: await shrinkPicture(f, 900) }); } catch { s.snackbar?.('That picture could not be sent'); } };
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
@@ -11537,6 +11541,75 @@ function mediaTray(s, o) {
   const close = () => { if (!cur) return; cur = ''; tray.style.display = 'none'; o.onToggle?.(''); };
   return { el: tray, show, close, toggle: (k) => (cur === k ? close() : show(k)), get open() { return cur; } };
 }
+/** Press and hold a message: the message stays lit while the rest dims, emoji float above it and the actions sit under it (like iMessage and WhatsApp).
+ *  rect is where the bubble is on screen (px in the engine's root). */
+const MENU_ICONS = { Reply: 'reply', Copy: 'copy', Forward: 'share', Star: 'star', Unstar: 'star', Pin: 'pin', Unpin: 'pin', Select: 'check-circle', Info: 'info', Edit: 'edit', 'Delete for me': 'eye-off', 'Delete for everyone': 'trash' };
+function messageMenu(s, o) {
+  const root = s.engine.root; if (!root || typeof document === 'undefined') return null;
+  const c = o.colors, font = THEME.font, el = (tag, css, t) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (t != null) n.textContent = t; return n; };
+  const W = root.clientWidth, H = root.clientHeight, R = o.rect, pad = 10;
+  const wrap = el('div', 'position:absolute;inset:0;z-index:55;touch-action:none;'); wrap.dataset.pocketSheet = 'message'; wrap.dataset.msgMenu = '1';
+  const spot = el('div', `position:absolute;left:${R.x - 4}px;top:${R.y - 4}px;width:${R.w + 8}px;height:${R.h + 8}px;border-radius:22px;box-shadow:0 0 0 200vmax rgba(0,0,0,0);transition:box-shadow .2s;pointer-events:none;`);
+  wrap.append(spot);
+  const card = (css) => el('div', `position:absolute;background:${c.bg};color:${c.text};border-radius:18px;box-shadow:0 10px 34px rgba(0,0,0,.28);font-family:${font};transform:scale(.6);opacity:0;transition:transform .22s cubic-bezier(.2,1.4,.4,1),opacity .15s;${css}`);
+  // the emoji bar
+  const bar = card(`display:flex;gap:2px;padding:6px 8px;border-radius:999px;`); bar.dataset.reactBar = '1';
+  for (const em of o.emojis || []) { const b = el('button', `border:0;background:${em === o.current ? c.field : 'none'};border-radius:50%;width:42px;height:42px;font-size:26px;cursor:pointer;transition:transform .12s;padding:0;`, em); b.type = 'button'; b.dataset.react = em; b.onpointerdown = () => { b.style.transform = 'scale(1.35)'; }; b.onclick = () => { close(); o.onEmoji?.(em); }; bar.append(b); }
+  if (o.onMore) { const b = el('button', `border:0;background:${c.field};border-radius:50%;width:38px;height:38px;margin:2px;color:${c.sub};cursor:pointer;display:flex;align-items:center;justify-content:center;`); b.innerHTML = svgIcon('plus', 20, { stroke: 2.4 }); b.type = 'button'; b.setAttribute('aria-label', 'More emoji'); b.onclick = () => { close(); o.onMore(); }; bar.append(b); }
+  // the actions
+  const list = card('min-width:210px;max-width:260px;overflow:hidden;padding:4px 0;'); list.dataset.msgActions = '1';
+  for (const it of o.items || []) { const b = el('button', `display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;padding:11px 16px;border:0;background:none;color:${it.danger ? '#f4212e' : c.text};font:600 15px ${font};text-align:left;cursor:pointer;`); b.type = 'button'; b.dataset.action = it.label;
+    const ic = el('span', 'flex:none;display:flex;opacity:.85;'); const n = MENU_ICONS[it.label]; if (n && iconName(n)) ic.innerHTML = svgIcon(n, 19); else ic.textContent = it.icon || '';
+    b.append(el('span', '', it.label), ic); b.onclick = () => { close(); setTimeout(() => it.run(), 30); }; list.append(b);
+    if (it !== o.items[o.items.length - 1]) list.append(el('div', `height:${HAIR};background:${c.line};margin-left:16px;`)); }
+  wrap.append(bar, list); root.append(wrap);
+  // place them: emoji above the bubble (below when there's no room), the actions under it (or above)
+  const bw = bar.offsetWidth, bh = bar.offsetHeight, lw = list.offsetWidth, lh = list.offsetHeight, side = (w) => clamp(o.mine ? R.x + R.w - w : R.x, pad, W - w - pad);
+  let by = R.y - bh - 10, ly = R.y + R.h + 10;
+  if (ly + lh > H - pad) { ly = R.y - lh - 10; by = ly - bh - 8; }
+  if (by < pad) by = Math.min(R.y + R.h + 10, H - bh - pad), ly = ly < R.y ? ly : by + bh + 8;
+  if (ly < pad) ly = pad; if (ly + lh > H - pad) ly = H - lh - pad;
+  bar.style.left = side(bw) + 'px'; bar.style.top = by + 'px'; bar.style.transformOrigin = o.mine ? 'right bottom' : 'left bottom';
+  list.style.left = side(lw) + 'px'; list.style.top = ly + 'px'; list.style.transformOrigin = o.mine ? 'right top' : 'left top';
+  requestAnimationFrame(() => { spot.style.boxShadow = '0 0 0 200vmax rgba(0,0,0,.42)'; for (const q of [bar, list]) { q.style.transform = 'none'; q.style.opacity = '1'; } });
+  let done = false;
+  const close = () => { if (done) return; done = true; spot.style.boxShadow = '0 0 0 200vmax rgba(0,0,0,0)'; for (const q of [bar, list]) { q.style.opacity = '0'; q.style.transform = 'scale(.9)'; } wrap.dataset.closing = '1'; document.removeEventListener('keydown', key); setTimeout(() => { wrap.remove(); o.onClose?.(); }, 180); };
+  const key = (ev) => { if (ev.key === 'Escape') close(); }; document.addEventListener('keydown', key);
+  let armed = false; wrap.addEventListener('pointerdown', (ev) => { armed = true; if (ev.target === wrap) close(); });
+  wrap.addEventListener('click', (ev) => { if (ev.target === wrap && armed) close(); });
+  for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) wrap.addEventListener(t, (ev) => ev.stopPropagation());
+  return { close, el: wrap };
+}
+/** A photo, full screen: double-tap (or pinch) to zoom, drag down to close. */
+function photoViewer(s, o) {
+  if (typeof o === 'string') o = { src: o }; // (an avatar or a cover)
+  const root = s.engine.root; if (!root || typeof document === 'undefined' || !isPic(o?.src)) return null;
+  const el = (tag, css, t) => { const n = document.createElement(tag); if (css) n.style.cssText = css; if (t != null) n.textContent = t; return n; };
+  const wrap = el('div', `position:absolute;inset:0;z-index:60;background:rgba(0,0,0,0);transition:background .2s;display:flex;align-items:center;justify-content:center;touch-action:none;overflow:hidden;font-family:${THEME.font};`); wrap.dataset.pocketSheet = 'photo'; wrap.dataset.photoViewer = '1';
+  const img = el('img', 'max-width:100%;max-height:100%;object-fit:contain;transform:scale(.9);opacity:0;transition:transform .22s cubic-bezier(.2,.8,.2,1),opacity .2s;user-select:none;-webkit-user-drag:none;'); img.src = artURL(o.src); img.alt = o.title || 'Photo'; img.draggable = false;
+  const top = el('div', 'position:absolute;left:0;right:0;top:0;display:flex;align-items:center;gap:12px;padding:calc(10px + env(safe-area-inset-top)) 12px 12px;background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0));color:#fff;');
+  const x = el('button', 'flex:none;border:0;background:rgba(255,255,255,.14);color:#fff;width:38px;height:38px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;'); x.innerHTML = svgIcon('x', 20, { stroke: 2.4 }); x.type = 'button'; x.setAttribute('aria-label', 'Close'); x.dataset.closePhoto = '1';
+  const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', 'font-weight:800;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;', o.title || ''), el('div', 'font-size:12px;opacity:.75;', o.sub || ''));
+  top.append(x, t);
+  if (o.note) { const nb = el('div', 'position:absolute;left:0;right:0;bottom:0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.6));color:#fff;font-size:14px;text-align:center;', o.note); wrap.append(nb); }
+  wrap.append(img, top); root.append(wrap);
+  requestAnimationFrame(() => { wrap.style.background = 'rgba(0,0,0,.96)'; img.style.transform = 'none'; img.style.opacity = '1'; });
+  let zoom = 1, px = 0, py = 0, drag = null, lastTap = 0, pinch = null, tapT = 0; const pts = new Map();
+  const apply = (anim) => { img.style.transition = anim ? 'transform .22s cubic-bezier(.2,.8,.2,1)' : 'none'; img.style.transform = `translate(${px}px,${py}px) scale(${zoom})`; };
+  const close = () => { img.style.transition = 'transform .2s,opacity .2s'; img.style.opacity = '0'; wrap.style.background = 'rgba(0,0,0,0)'; setTimeout(() => { wrap.remove(); o.onClose?.(); }, 200); document.removeEventListener('keydown', key); };
+  const key = (ev) => { if (ev.key === 'Escape') close(); }; document.addEventListener('keydown', key); x.onclick = close;
+  wrap.addEventListener('pointerdown', (ev) => { if (ev.target.closest('button')) return; clearTimeout(tapT); pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY }); wrap.setPointerCapture?.(ev.pointerId);
+    if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: zoom }; drag = null; return; }
+    const now = performance.now(); if (now - lastTap < 300) { zoom = zoom > 1 ? 1 : 2.4; px = py = 0; apply(true); lastTap = 0; return; } lastTap = now; drag = { x: ev.clientX, y: ev.clientY, px, py }; });
+  wrap.addEventListener('pointermove', (ev) => { if (!pts.has(ev.pointerId)) return; pts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; zoom = clamp(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, 1, 5); apply(false); return; }
+    if (!drag) return; const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (zoom > 1) { px = drag.px + dx; py = drag.py + dy; apply(false); } else { py = Math.max(0, dy); apply(false); wrap.style.background = `rgba(0,0,0,${0.96 - Math.min(0.6, py / 500)})`; } });
+  const up = (ev) => { pts.delete(ev.pointerId); if (pts.size < 2) pinch = null; if (!drag) return; const was = drag; drag = null; if (zoom === 1) { if (py > 110) close(); else { const tap = py < 4 && Math.abs(ev.clientX - was.x) < 4; py = 0; apply(true); wrap.style.background = 'rgba(0,0,0,.96)'; if (tap && lastTap) tapT = setTimeout(close, 300); } } /* (one tap closes; a second one zooms instead) */ else if (Math.hypot(px - was.px, py - was.py) < 3 && ev.target === wrap) close(); };
+  wrap.addEventListener('pointerup', up); wrap.addEventListener('pointercancel', up);
+  for (const ty of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) wrap.addEventListener(ty, (ev) => ev.stopPropagation());
+  return { close, el: wrap };
+}
 /** A hairline: half a pixel on sharp (retina) screens, like native separators. */
 const HAIR = typeof devicePixelRatio !== 'undefined' && devicePixelRatio >= 2 ? '0.5px' : '1px';
 const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], mineText: ['My text', '#ffffff'], theirs: ['Their bubbles', ''], text: ['Their text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Accent', '@accent'] };
@@ -11545,7 +11618,7 @@ const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], m
 const chatMetaKey = (s) => 'pocket.chatMeta.' + (s.engine.gameKey || 'game');
 /** This phone's own settings for conversations: pinned, muted, deleted (hidden up to a time) and marked unread. */
 const chatMetaCache = new Map(); // (read every frame: parsed once, kept in step with saves)
-const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {}, acc: o.acc || [], block: o.block || [], draft: o.draft || {}, fav: o.fav || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {}, acc: [], block: [], draft: {}, fav: [] }; chatMetaCache.set(k, m); return m; };
+const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {}, acc: o.acc || [], block: o.block || [], draft: o.draft || {}, fav: o.fav || [], played: o.played || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {}, acc: [], block: [], draft: {}, fav: [] }; chatMetaCache.set(k, m); return m; };
 /** Muted now (a mute can run out: 8 hours, a week, or always). */
 const chatMuted = (m, c) => m.mute.includes(c) && !(m.muteUntil?.[c] && m.muteUntil[c] < Date.now());
 /** Mute for a while, or unmute: a sheet of choices. */
@@ -11740,6 +11813,8 @@ registerBehavior('uiChat', {
     { key: 'wallpapers', label: 'People can pick a wallpaper per chat', type: 'bool', default: true, info: 'In Chat info (the message “chat info”, e.g. an App Bar button on the chat page).' },
     { key: 'bubbleTimes', label: 'Time and ticks inside the bubbles', type: 'bool', default: true, info: 'Like WhatsApp: each message shows its time (and ✓ / ✓✓ for yours) in its corner, and the chat shows a date chip when the day changes. Off: times between messages and ticks beside them.' },
     { key: 'bubbleStyle', label: 'My bubbles', type: 'select', options: ['gradient', 'solid'], default: 'gradient', info: { gradient: 'A soft colour shift down the screen, like Messenger.', solid: 'One flat colour.' } },
+    { key: 'holdStyle', label: 'Press and hold shows', type: 'select', options: ['menu by the message', 'sheet'], default: 'menu by the message', info: { 'menu by the message': 'The message stays lit while the rest dims, with emoji above it and the actions under it, like iMessage and WhatsApp.', sheet: 'A sheet from the bottom of the screen.' } },
+    { key: 'viewOnce', label: 'View once photos (＋ › View once)', type: 'bool', default: true, info: 'A photo that opens once, like WhatsApp: the other person taps to see it full screen, then it shows “Opened”. You can’t open your own.' },
     { key: 'unreadLine', label: '“N unread messages” line', type: 'bool', default: true, info: 'Opening a chat with new messages shows a line above the first one you haven’t read, and starts there.' },
     { key: 'drafts', label: 'Keep what you were typing (drafts)', type: 'bool', default: true, info: 'Close the bar with words in it and they wait for you in that chat; the Inbox shows “Draft:”.' },
     { key: 'polls', label: 'Polls (＋ › Poll)', type: 'bool', default: true, info: 'Ask a question with up to 8 answers. Everyone taps one (tap again to take it back) and sees the counts; “View votes” shows who picked what.' },
@@ -11788,9 +11863,9 @@ registerBehavior('uiChat', {
       E2EE.seal(s, String(rec.chat), payload, mem).then((enc) => { const r = addRow(s, { ...open, enc }); if (r?.id) E2EE.cache.set(r.id + ':' + enc.iv, payload); done?.(r); }).catch((err) => { Log.add('warn', 'Encryption failed, sent as it is: ' + err.message, 'Chat'); done?.(addRow(s, base)); }); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (r?._e2ee || r?._locked) r = all(s).find((q) => q.id === r.id) || r; if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
-    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.poll ? '📊 ' + String(r.poll).split('|')[0].trim() : r.loc ? '📍 Location' : r.voice ? '🎤 Voice message' : r.media ? 'Photo' : '');
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.poll ? '📊 ' + String(r.poll).split('|')[0].trim() : r.loc ? '📍 Location' : r.voice ? '🎤 Voice message' : r.once ? '👁 Photo' : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
-      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(m.poll ? { poll: m.poll, pvotes: '' } : {}), ...(m.loc ? { loc: m.loc } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
+      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(m.poll ? { poll: m.poll, pvotes: '' } : {}), ...(m.loc ? { loc: m.loc } : {}), ...(m.once ? { once: true } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
       const ttl = p.disappearing !== false ? +chatSetting(rows(s), 'ttl') || 0 : 0; if (ttl > 0) rec.ttl = ttl; // (disappearing messages are on)
       const sealed = !!encMembers(s, c); post(s, rec); awardPoints(s, 'message');
       replyTo = null; bar?.setReply?.(null); unreadFrom = Date.now(); // (you answered: the unread line goes)
@@ -11827,7 +11902,7 @@ registerBehavior('uiChat', {
     const clockOf = (t) => { try { return new Date(t).toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
     const refreshChat = (s) => { s.engine.vibrate?.(10); const sp = s.engine.supa, D0 = D(s); // pull down at the top: fetch what's new (online), else it's all here already
       if (has(s) && sp?.online?.(D0.def(p.collection))) { try { sp.pullAll(p.collection); if (D0.def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh the chat: ' + err.message, 'Chat'); } } else s.snackbar?.('Up to date'); };
-    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; const edMode = !!editing, c0 = chatOf(s); bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, attach: editing ? [] : [...(p.polls !== false ? [{ key: 'poll', icon: 'poll', label: 'Poll', color: '#f5a623', run: () => { bar?.close(); bar = null; setTimeout(() => pollSheet(s), 60); } }] : []), ...(p.location !== false ? [{ key: 'location', icon: 'place', label: 'Location', color: '#20b15a', run: () => shareLoc(s) }] : [])], voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : draftOf(s, c0), edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: (v) => { if (!edMode) saveDraft(s, c0, v); bar = null; editing = null; } }); };
+    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; const edMode = !!editing, c0 = chatOf(s); bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, attach: editing ? [] : [...(p.polls !== false ? [{ key: 'poll', icon: 'poll', label: 'Poll', color: '#f5a623', run: () => { bar?.close(); bar = null; setTimeout(() => pollSheet(s), 60); } }] : []), ...(p.location !== false ? [{ key: 'location', icon: 'place', label: 'Location', color: '#20b15a', run: () => shareLoc(s) }] : []), ...(p.viewOnce !== false && p.photos !== false ? [{ key: 'once', icon: 'eye', label: 'View once', color: '#0ea5e9', run: () => sendOnce(s) }] : [])], mentions: () => { const c1 = chatOf(s); if (!isGroupChat(c1)) return []; const mh1 = handleOf(me(s).handle); return chatMembers(all(s), c1).filter((h) => h !== mh1).map((h) => ({ handle: h, name: nameOfHandle(s, h) })); }, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : draftOf(s, c0), edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: (v) => { if (!edMode) saveDraft(s, c0, v); bar = null; editing = null; } }); };
     /** One reaction each: the same emoji again takes it back. */
     const react = (s, r, em) => { const m = reactsOf(r), mh = handleOf(me(s).handle); if (m.get(mh) === em) m.delete(mh); else m.set(mh, em); if (patch(s, r, { reacts: [...m].map(([h, x]) => h + ':' + x).join(','), reaction: [...m.values()].pop() || '' })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } };
     /** Who reacted, and with what (tap yours to take it back). */
@@ -11889,7 +11964,18 @@ registerBehavior('uiChat', {
     };
     /** Block someone: their messages stop showing, and their chat is gone from your list. */
     const blockIt = (s, h, on = true) => { const m = chatMeta(s); m.block = on ? [...new Set([...m.block, h])] : m.block.filter((x) => x !== h); if (on) m.hide = { ...m.hide, [chatOf(s)]: Date.now() }; saveChatMeta(s, m); s.snackbar?.(on ? `Blocked ${nameOfHandle(s, h).split(' ')[0]}` : 'Unblocked'); };
-    let reqNow = false, reqBtns = [], unreadFrom = 0, jumpUnread = false;
+    let reqNow = false, reqBtns = [], unreadFrom = 0, jumpUnread = false, chatE = null, s0 = null;
+    /** View once: a photo that opens one time for each person, then shows “Opened”. */
+    const sendOnce = (s) => { bar?.close(); bar = null; const f = document.createElement('input'); f.type = 'file'; f.accept = 'image/*'; f.onchange = async () => { const fl = f.files?.[0]; if (!fl) return; try { sendIt(s, { text: '', media: await shrinkPicture(fl, 1200), once: true }); } catch { s.snackbar?.('That picture could not be sent'); } }; f.click(); };
+    const openedBy = (r) => String(r.opened || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const onceTap = (s, r, mine) => { const mh = handleOf(me(s).handle), op = openedBy(r);
+      if (mine) { s.snackbar?.(op.length ? 'Opened' : 'Not opened yet'); return; }
+      if (op.includes(mh)) { s.snackbar?.('You already opened this photo'); return; }
+      sheetOpen = true; photoViewer(s, { src: r.media, title: r.author || '', sub: 'View once', note: 'View once: when you close it, it’s gone.', onClose: () => { sheetOpen = false; patch(s, r, { opened: [...op, mh].join(',') }); pops.set(r.id, s.time); } }); };
+    const playedSet = (s) => new Set(chatMeta(s).played || []);
+    const markPlayed = (s, r) => { const m = chatMeta(s), L0 = m.played || []; if (L0.includes(String(r.id))) return; m.played = [...L0, String(r.id)].slice(-500); saveChatMeta(s, m); };
+    const NAME_COLORS = ['#e5484d', '#f76b15', '#c99a00', '#30a46c', '#12a594', '#0090ff', '#6e56cf', '#d6409f'];
+    const nameColor = (n) => { let h = 0; for (const ch of String(n || '')) h = (h * 31 + ch.codePointAt(0)) | 0; return NAME_COLORS[Math.abs(h) % NAME_COLORS.length]; };
     const draftOf = (s, c = chatOf(s)) => (p.drafts !== false ? chatMeta(s).draft?.[c] || '' : '');
     const saveDraft = (s, c, v) => { if (p.drafts === false || !c) return; const m = chatMeta(s), t = String(v || '').trim(); if ((m.draft?.[c] || '') === t) return; m.draft = { ...(m.draft || {}) }; if (t) m.draft[c] = t; else delete m.draft[c]; saveChatMeta(s, m); };
     const reqAct = (s, k) => { const c = chatOf(s), mh = handleOf(me(s).handle), o = chatMembers(all(s), c).find((h) => h !== mh), m = chatMeta(s);
@@ -11903,21 +11989,27 @@ registerBehavior('uiChat', {
     const forAll = (s, list) => { const KEEP = ['text', 'media', 'voice', 'dur', 'wave', 'reaction', 'reacts', 'poll', 'pvotes', 'loc', 'enc']; const was = list.map((r) => { const raw = all(s).find((q) => q.id === r.id) || r; return [r, Object.fromEntries(KEEP.map((k) => [k, raw[k] ?? (k === 'enc' ? null : '')]))]; }); // (the stored row: a sealed message comes back sealed)
       for (const r of list) patch(s, r, { text: '', media: '', voice: '', reaction: '', reacts: '', poll: '', loc: '', deleted: true, ...(r.enc ? { enc: null } : {}) }); s.snackbar?.(list.length > 1 ? `Deleted ${list.length} messages for everyone` : 'Deleted for everyone', 'Undo', () => { for (const [r, w] of was) patch(s, r, { ...w, deleted: false }); }); };
     /** Press and hold: react, reply, edit, copy, forward, star, pin, select, info, delete. */
-    const msgMenu = (s, r, mine) => {
+    const msgMenu = (s, r, mine, it) => {
       if (r.deleted) return; const items = [];
       if (p.replies !== false) items.push({ icon: '↩️', label: 'Reply', run: () => { editing = null; replyTo = r; bar?.close(); bar = null; openBar(s); } });
       if (mine && p.edits !== false && r.text && !r._locked) items.push({ icon: '✏️', label: 'Edit', run: () => { replyTo = null; editing = r; bar?.close(); bar = null; setTimeout(() => openBar(s), 60); } });
-      if (r.text) items.push({ icon: '📋', label: 'Copy', run: () => { try { navigator.clipboard?.writeText(String(r.text)); } catch { /* no clipboard */ } s.snackbar?.('Copied'); } });
-      if (p.forward !== false) items.push({ icon: '📤', label: 'Forward', run: () => setTimeout(() => forwardIt(s, r), 60) });
+      if (r.text && !r.once) items.push({ icon: '📋', label: 'Copy', run: () => { try { navigator.clipboard?.writeText(String(r.text)); } catch { /* no clipboard */ } s.snackbar?.('Copied'); } });
+      if (p.forward !== false && !r.once) items.push({ icon: '📤', label: 'Forward', run: () => setTimeout(() => forwardIt(s, r), 60) });
       if (p.stars !== false) { const on = chatMeta(s).star.includes(String(r.id)); items.push({ icon: '⭐', label: on ? 'Unstar' : 'Star', run: () => { const m = chatMeta(s); m.star = on ? m.star.filter((x) => x !== String(r.id)) : [...m.star, String(r.id)]; saveChatMeta(s, m); pops.set(r.id, s.time); s.snackbar?.(on ? 'Unstarred' : 'Starred'); } }); }
       if (p.pins !== false && allowed(s)) { const on = pinId != null && String(pinId) === String(r.id); items.push({ icon: '📌', label: on ? 'Unpin' : 'Pin', run: () => setPin(s, r, !on) }); }
       items.push({ icon: '✅', label: 'Select', run: () => { selecting = new Set([String(r.id)]); bar?.close(); bar = null; setTimeout(() => selectBar(s), 60); } });
       items.push({ icon: 'ℹ️', label: 'Info', run: () => setTimeout(() => infoSheet(s, r, mine), 60) });
       items.push({ icon: '🙈', label: 'Delete for me', danger: !mine, run: () => forMe(s, [r.id]) });
       if (mine && p.edits !== false) items.push({ icon: '🗑️', label: 'Delete for everyone', danger: true, run: () => forAll(s, [r]) });
-      sheetOpen = true;
-      socialSheet(s, { kind: 'message', colors: colors(), emojis: String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 8), current: reactsOf(r).get(handleOf(me(s).handle)) || '', onEmoji: (em) => react(s, r, em), items, onClose: () => { sheetOpen = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); } }); // (Forward or Info may have opened from it)
+      sheetOpen = true; const emojis = String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 7), current = reactsOf(r).get(handleOf(me(s).handle)) || '', onClose = () => { sheetOpen = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); }; // (Forward or Info may have opened from it)
+      const rect = it ? bubbleRect(it) : null;
+      if (rect && p.holdStyle !== 'sheet') messageMenu(s, { rect, mine, emojis, current, colors: colors(), items, onEmoji: (em) => react(s, r, em), onMore: () => setTimeout(() => moreReact(s, r), 200), onClose });
+      else socialSheet(s, { kind: 'message', colors: colors(), emojis, current, onEmoji: (em) => react(s, r, em), items, onClose });
     };
+    /** Where a bubble is on screen (px in the engine's root), for the press-and-hold menu. */
+    const bubbleRect = (it) => { const e = chatE, En = s0?.engine; if (!e || !En || !list0) return null; const o = uiOrigin(e, En.width, En.height, En.safe), k = uiK(En.safe) || 1; return { x: o.x + it.bx * k, y: o.y + (list0.y + it.y - S.v) * k, w: it.bw * k, h: it.h * k }; };
+    /** Any emoji as a reaction. */
+    const moreReact = (s, r) => { sheetOpen = true; socialSheet(s, { kind: 'react-more', title: 'React with', colors: colors(), onClose: () => { sheetOpen = false; }, build: (api) => { const ep = emojiPanel(s, { colors: { ...colors() }, onEmoji: (em) => { api.close(); react(s, r, em); } }); ep.el.style.height = '330px'; api.body.append(ep.el); } }); };
     /** Select several messages: delete, star or copy them together. */
     let selecting = null, selUI = null;
     const selectBar = (s) => {
@@ -12066,6 +12158,7 @@ registerBehavior('uiChat', {
           if (k === 'chat info') chatInfoSheet(s); else if (k === 'search chat') searchSheet(s); else if (k === 'starred messages') starredSheet(s); else if (k === 'chat wallpaper' && p.wallpapers !== false) wallSheet(s); });
       },
       update(e, dt, s) {
+        chatE = e; s0 = s;
         { const c0 = chatOf(s), M0 = me(s); reqNow = p.requests !== false && !s.engine.editing && allowed(s) && chatRequest(s, rows(s), c0, M0, chatMembers(all(s), c0)); }
         const b = UK.fit(s, e, UK.box(e)), barH = reqNow ? 112 : 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
         pinId = pinned ? pinned.id : null; list0 = list;
@@ -12118,7 +12211,7 @@ registerBehavior('uiChat', {
         if (selecting) for (const t of TP) { if (t.used || S.moved || !UK.in(t, list)) continue; t.used = true; const it = L.find((q) => q.bub && t.y + S.v - list.y >= q.y - 3 && t.y + S.v - list.y <= q.y + q.h + 3); if (it && !it.del) { const k = String(it.r.id); if (selecting.has(k)) selecting.delete(k); else selecting.add(k); s.engine.vibrate?.(5); } } // select mode: a tap anywhere on a message's row ticks it
         if (p.hold !== false && !s.engine.editing && !sheetOpen && !selecting) {
           for (const d of UK.downs(s, e)) if (UK.in(d, list)) { const it = itemAt(d); hold = it ? { id: d.id, t: 0, x: d.x, y: d.y, it } : null; }
-          if (hold) { const q = UK.ptr(s, e, hold.id); if (!q || S.moved || swipe?.on || Math.hypot(q.x - hold.x, q.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const it = hold.it; hold = null; s.engine.vibrate?.(15); msgMenu(s, it.r, it.mine); } }
+          if (hold) { const q = UK.ptr(s, e, hold.id); if (!q || S.moved || swipe?.on || Math.hypot(q.x - hold.x, q.y - hold.y) > 10) hold = null; else if ((hold.t += dt) > 0.45) { const it = hold.it; hold = null; s.engine.vibrate?.(15); msgMenu(s, it.r, it.mine, it); } }
         }
         for (const t of TP) {
           if (S.moved || t.used) continue;
@@ -12127,9 +12220,11 @@ registerBehavior('uiChat', {
           { const ly = t.y + S.v - list.y, pl = L.find((q) => q.pill && t.x >= q.pill.x - 4 && t.x <= q.pill.x + q.pill.w + 4 && ly >= q.pill.y - 4 && ly <= q.pill.y + q.pill.h + 4); if (pl) { UK.tap(s, p); reactSheet(s, pl.r); continue; } } // who reacted
           const it = itemAt(t); if (!it) continue;
           if (it.poll) { const rel = t.y + S.v - list.y - it.y - it.poll.y1, i = Math.floor(rel / 44); if (rel >= it.poll.n * 44) { UK.tap(s, p); votersSheet(s, it.r); continue; } if (i >= 0 && i < it.poll.n) { UK.tap(s, p); vote(s, it.r, i); continue; } }
+          if (it.once) { UK.tap(s, p); onceTap(s, it.r, it.mine); continue; }
+          if (it.media && isPic(it.media)) { const rel = t.y + S.v - list.y - it.y - (it.quote || 0) - (it.fwd || 0); if (rel >= 0 && rel <= 170) { UK.tap(s, p); sheetOpen = true; photoViewer(s, { src: it.media, title: it.mine ? 'You' : it.r.author || '', sub: when(it.r._at || Date.now()), note: it.r.text || '', onClose: () => { sheetOpen = false; } }); continue; } } // a photo: full screen
           if (it.loc && !(it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0))) { openLink(mapURL(it.r.loc)); continue; }
           if (it.link && t.y + S.v - list.y >= it.y + it.h - 46 - (it.meta?.mode === 'row' ? 18 : 0)) { openLink(it.link); continue; } // the link card
-          if (it.vox) { if (voicePlayer.id === it.r.id && t.x >= it.bx + it.bw - 50) { voicePlayer.speed(); s.engine.vibrate?.(6); continue; } voicePlayer.play(it.r); s.engine.vibrate?.(6); continue; } // play / pause (the 1× pill changes the speed)
+          if (it.vox) { if (voicePlayer.id === it.r.id && t.x >= it.bx + it.bw - 50) { voicePlayer.speed(); s.engine.vibrate?.(6); continue; } voicePlayer.play(it.r); if (!it.mine) markPlayed(s, it.r); s.engine.vibrate?.(6); continue; } // play / pause (the 1× pill changes the speed)
           if (it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0)) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
           if (p.react === false || it.r.deleted) continue;
           if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; react(s, it.r, '❤️'); }
@@ -12158,12 +12253,13 @@ registerBehavior('uiChat', {
           if (p.unreadLine !== false && unreadFrom >= 0 && !divDone && !isMineMsg(r, M) && (r._at || 0) > unreadFrom) { divDone = true; const n = R.filter((q) => !q.system && !isMineMsg(q, M) && (q._at || 0) > unreadFrom).length; if (n) { L.push({ kind: 'unread', y: y + 4, h: 30, n }); y += 40; } }
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
           const poll = !del0(r) && r.poll ? pollOf(r) : null, loc = !del0(r) && !poll && r.loc ? String(r.loc) : '';
-          const del = !!r.deleted, big = !del && !r.media && !r.voice && !r.reply_to && !r.forwarded && !poll && !loc && emojiOnly(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
+          const once = !!r.once && !del0(r) && !poll && !loc, op1 = once ? openedBy(r) : [], onceLbl = once ? (mine ? (op1.length ? '👁  Opened' : '👁  View once photo') : op1.includes(handleOf(M.handle)) ? '👁  Opened' : '👁  Photo · tap to view') : '';
+          const del = !!r.deleted, big = !del && !once && !r.media && !r.voice && !r.reply_to && !r.forwarded && !poll && !loc && emojiOnly(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del || once ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
           else {
             if (del) ctx.font = `italic 500 ${TS - 1}px ${THEME.font}`;
-            let lw0 = 0; if (del) { lines = ['Message unsent']; lw0 = ctx.measureText(lines[0]).width; } else if (r.text) { const W0 = lay(ctx, String(r.text), maxW - 28, TS, 40); lines = W0.lines; lw0 = W0.w; } else lines = [];
+            let lw0 = 0; if (del) { lines = ['Message unsent']; lw0 = ctx.measureText(lines[0]).width; } else if (r.text || once) { const W0 = lay(ctx, once ? onceLbl : String(r.text), maxW - 28, TS, 40); lines = W0.lines; lw0 = W0.w; } else lines = [];
             bw = Math.max(44, Math.min(maxW, lw0 + 28)); bh = lines.length ? lines.length * LH + 16 : 0;
             if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; }
             if (quote) { ctx.font = `600 12px ${THEME.font}`; bw = Math.max(bw, Math.min(maxW, Math.max(ctx.measureText(String(r.reply_text || '')).width, ctx.measureText(String(r.reply_author || '')).width) + 40)); bh += quote; }
@@ -12179,7 +12275,7 @@ registerBehavior('uiChat', {
             else if (media && !lines.length) meta.mode = 'over';
             else { meta.mode = 'row'; bh += 18; } }
           const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (!del && reactsOf(r).size ? 14 : 0) + (!inMeta && r.edited && !del ? 14 : 0);
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, poll, loc, del, meta, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, poll, loc, once, del, meta, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
           y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
         if (typing && typing.chat === c && s.time >= typing.t0) { L.push({ kind: 'typing', y: y + 4, h: 36 }); y += 44; } // someone is typing
@@ -12205,7 +12301,7 @@ registerBehavior('uiChat', {
           if (!CV.length) UK.text(ctx, 'No conversations yet. Start one above.', b.cx, yy + 40, { size: 14, weight: 600, color: sub, maxW: b.w - 40 });
           total = yy + 20;
         } else if (!R.length) { if (selfChat) { drawIco(ctx, 'bookmark', b.cx, listH / 2 - 34 + S.v, 30, sub, { stroke: 1.6 }); UK.text(ctx, 'Your own space', b.cx, listH / 2 + 4 + S.v, { size: 16, weight: 800, color: txt }); UK.text(ctx, 'Notes, links and photos to keep.', b.cx, listH / 2 + 28 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); UK.text(ctx, 'Only you can see them.', b.cx, listH / 2 + 46 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); } else UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub }); }
-        const vis0 = S.v - 60, vis1 = S.v + listH + 60, mh0 = handleOf(M.handle);
+        const vis0 = S.v - 60, vis1 = S.v + listH + 60, mh0 = handleOf(M.handle), playedT = playedSet(s);
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
           if (it.kind === 'time') { const d = new Date(it.t || Date.now()), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), ago = Math.round((day(new Date()) - day(d)) / 864e5); let ts = '';
@@ -12220,7 +12316,7 @@ registerBehavior('uiChat', {
             for (let k = 0; k < 3; k++) { const ph = s.time * 7 - k * 0.8, up = Math.max(0, Math.sin(ph)) * 4; ctx.fillStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.55 + Math.max(0, Math.sin(ph)) * 0.45); ctx.beginPath(); ctx.arc(x + 18 + k * 14, it.y + h2 / 2 - up, 4, 0, Math.PI * 2); ctx.fill(); }
             if (avW) miniAvatar(ctx, typing?.name || '', b.x + pad + 14, it.y + h2 - 14, 28); continue; }
           if (it.kind === 'system') { const pw = Math.min(b.w - 40, (it.w || 0) + 26); ctx.fillStyle = wall ? (darkWall ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.86)') : dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.045)'; UK.rr(ctx, b.cx - pw / 2, it.y - 2, pw, it.h, Math.min(14, it.h / 2)); ctx.fill(); it.lines.forEach((l, k) => UK.text(ctx, l, b.cx, it.y + 8 + k * 17, { size: 13, weight: 600, color: wall && darkWall ? '#e5e7eb' : sub })); continue; }
-          if (it.kind === 'name') { UK.text(ctx, it.name, it.x + 12, it.y + 9, { size: 12, weight: 700, color: sub, align: 'left' }); continue; }
+          if (it.kind === 'name') { UK.text(ctx, it.name, it.x + 12, it.y + 9, { size: 12, weight: 800, color: nameColor(it.name), align: 'left' }); continue; } // each person their own colour, like WhatsApp groups
           if (selecting && !it.del) { const on = selecting.has(String(it.r.id)); if (on) { ctx.fillStyle = withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.12); ctx.fillRect(b.x, it.y - 3, b.w, it.h + 6); }
             const cx = b.x + 16, cy = it.y + it.h / 2; ctx.beginPath(); ctx.arc(cx, cy, 10, 0, Math.PI * 2); if (on) { ctx.fillStyle = mineC; ctx.fill(); drawIco(ctx, 'check', cx, cy, 13, '#fff', { stroke: 3 }); } else { ctx.strokeStyle = sub; ctx.lineWidth = 1.6; ctx.stroke(); } }
           const sdx = (swipe?.on && swipe.it.r.id === it.r.id ? swipe.dx : swipeBack.get(it.r.id) || 0) * 0.85;
@@ -12253,6 +12349,7 @@ registerBehavior('uiChat', {
               const w0 = String(r.wave || ''), flat = !w0 || Math.max(...w0) - Math.min(...w0) < 2, wv = !flat ? w0 : Array.from({ length: 28 }, (_, i) => String((Math.abs(Math.sin((i + 1) * 12.9898 + String(r.id).length * 78.233)) * 9) | 0)).join(''), n = wv.length, x0 = x + 52, span = w - 52 - 50, step = span / n;
               for (let i = 0; i < n; i++) { const hh = 4 + (+wv[i] || 0) / 9 * 20; ctx.globalAlpha = i / n <= f && f > 0 ? 1 : 0.45; ctx.fillStyle = fg; UK.rr(ctx, x0 + i * step, cy - hh / 2, Math.max(2, step * 0.55), hh, 1.5); ctx.fill(); }
               ctx.globalAlpha = 1; const sec = Math.round(f > 0 ? f * (+r.dur || 1) : +r.dur || 1);
+              if (!it.mine && !playedT.has(String(r.id))) { ctx.fillStyle = mineC; ctx.beginPath(); ctx.arc(x + 40, cy - 13, 4.5, 0, Math.PI * 2); ctx.fill(); } // not listened to yet
               if (playing) { const sp = voicePlayer.rate + '×'; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.16); UK.rr(ctx, x + w - 44, cy - 10, 34, 20, 10); ctx.fill(); UK.text(ctx, sp, x + w - 27, cy, { size: 11, weight: 800, color: fg }); } // tap it: 1× → 1.5× → 2×
               else UK.text(ctx, `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, x + w - 12, cy, { size: 12, weight: 700, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'right' });
             }

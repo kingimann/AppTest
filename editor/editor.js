@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { webglOK, jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
 const UI_WIDGETS_ALL = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 /** PlayFab and Photon are for games: an app shows them only once it has a game inside. Supabase works for both. */
@@ -303,16 +303,28 @@ function addSceneEssentials(lv, mode) {
   E.unshift(...add);
 }
 
+/** This browser can't draw 3D (WebGL is off or blocked): say so instead of breaking the editor. */
+function no3D() {
+  openDialog('3D isn’t available here', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('cube')),
+    h('h4', {}, 'This browser can’t show 3D'),
+    h('p', {}, 'Its 3D graphics (WebGL) are turned off or blocked, so 3D levels can’t be shown or edited here. 2D levels work as normal. Try another browser, turn on hardware acceleration, or open the game on your phone.'),
+    h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: closeLayer }, 'OK')))]);
+}
 function setLevel(i) {
-  levelIdx = Math.max(0, Math.min(i, levelList().length - 1));
+  const to = Math.max(0, Math.min(i, levelList().length - 1));
+  if ((levelList()[to].mode || root.mode) === '3d' && !webglOK() && project) { no3D(); return false; } // (stay on the level you're on)
+  const was = levelIdx;
+  levelIdx = to;
   project = levelList()[levelIdx];
   project.mode ||= root.mode;
   selectedId = null; try { reqKnown = new Set(unmetReqs().keys()); } catch { reqKnown = null; }
   if (viewMode === 'top' && project.mode !== '3d') { viewMode = 'scene'; $('#app').dataset.view = 'scene'; }
-  resetCamera(); rebuild(); refreshAll();
+  resetCamera(); if (!rebuild() && was !== to && levelList()[was]) { levelIdx = was; project = levelList()[was]; selectedId = null; resetCamera(); rebuild(); refreshAll(); return false; } // (couldn't show it: back where you were)
+  refreshAll(); return true;
 }
 function addLevel(duplicate, mode) {
   const n = levelList().length + 1, m = mode || project.mode || root.mode, same = m === project.mode;
+  if (m === '3d' && !webglOK()) { no3D(); return; }
   const lv = duplicate ? clone(project) : {
     mode: m, background: same ? project.background : m === '3d' ? '#87b8e8' : '#0b0b1a', view: clone(project.view || { width: 400, height: 700 }), gravity: same ? project.gravity : m === '3d' ? -25 : 0,
     settings: { joystick: !!project.settings.joystick, jumpButton: !!project.settings.jumpButton }, vars: {},
@@ -323,7 +335,7 @@ function addLevel(duplicate, mode) {
   for (const e of lv.entities) e.id = uid();
   (root.levels ||= []).push(normalize(lv));
   pushHistory(); saveSoon();
-  setLevel(levelList().length - 1);
+  if (setLevel(levelList().length - 1) === false) { root.levels.pop(); pushHistory(); return; } // (it couldn't be shown here: don't leave it behind)
   toast(`Added ${lv.levelName}`);
 }
 /** Put a whole game (a template or one of your projects) into this project as new levels: apps open it with Play Game. */
@@ -519,9 +531,11 @@ function requestRebuild() {
   requestAnimationFrame(() => { rebuildQueued = false; if (!playing) rebuild(); });
 }
 function rebuild() {
-  engine.setScene(Scene.fromJSON(project, { editing: true }));
+  try { engine.setScene(Scene.fromJSON(project, { editing: true })); }
+  catch (err) { Log.add('error', 'This level could not be shown: ' + err.message, 'Editor', err); if (/WebGL/i.test(err.message)) no3D(); else toast('This level could not be shown: ' + err.message); return false; }
   fitEditorScreen();
   applyCamera();
+  return true;
 }
 /** The UI editor and Play show the game's screen in its own shape (a landscape box on a portrait phone, and the other way). */
 function fitEditorScreen() {
@@ -616,6 +630,7 @@ const colliderShown = (s, sel) => s.entities.filter((e) => e.body && !e.ui && !e
 const BOX_EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6], [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]];
 engine.onRenderWorld = (r, s, z) => {
   if (playing) return;
+  if (s.mode !== '2d' && typeof r.drawLines !== 'function') return; // (a 3D level the 3D renderer couldn't start for: draw nothing rather than fail every frame)
   const sel = s.byId(selectedId), hover = s.byId(dropHoverId);
   if (s.mode === '2d') {
     const ctx = r;

@@ -48,6 +48,7 @@ Start with the **Console** (bottom bar, or the console button while playing). Mo
 | UI is under the notch / nav bar | Keep *Ignore safe area* off; the nav bars push UI aside by default. |
 | UI is the wrong size on some phones | *Screen & Safe Area › Match width ↔ height*; anchor to the nearest edge. |
 | A menu shows during play | Set its *Show when* (title / paused / over / win), or use Show If on `page`. |
+| A message with Undo covers the screen | It stays for 6 seconds. Tap Undo or wait; messages now use the screen's width, so they are short. |
 | A popup can't be closed | Popups close on their own message (`close`) or a tap outside; check the message name. |
 
 ## Saving and storage

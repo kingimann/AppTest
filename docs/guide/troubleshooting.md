@@ -73,6 +73,7 @@ Start with the **Console** (bottom bar, or the console button while playing). Mo
 - Playing in the editor runs about as fast as a build. Two editor helpers stay cheap:
   - The node editor's live run counts are kept only for objects you placed, not for spawned copies.
   - The Console redraws a few times a second while the game runs.
+  - A long chat keeps each message's wrapped lines and works out its list once a frame, so hundreds of messages scroll smoothly while testing.
   An open Console full of messages still costs a little, so close it for smooth testing. A build has no editor at all, so it is still the most accurate test.
 
 ### The editor itself

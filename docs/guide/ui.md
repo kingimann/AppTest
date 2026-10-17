@@ -422,7 +422,11 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Links:** a message with a web address gets a **card** with the site's name; tap the card to open it (*Link cards*).
   - **Swipe a message right to reply** (a reply arrow appears; let go past it). *Swipe a message right to reply* turns it off.
   - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.
-  - **＋ on the open bar** (like WhatsApp's attach menu):
+  - **Look:** each bubble shows its **time** in the corner, with **✓ / ✓✓** on yours (blue-ish once seen), like WhatsApp; a **date chip** (Today, Yesterday, Monday…) marks each new day, and notes (pins, themes, people added) sit in soft pills. Your bubbles have a soft **gradient** like Messenger (*My bubbles* › solid for a flat colour). **@mentions**, **#hashtags** and **links** are highlighted (links underlined). *Time and ticks inside the bubbles* off goes back to times between messages and ticks beside them.
+  - **“N unread messages”:** opening a chat with new messages shows a line above the first one you haven't read and starts there; it goes once you answer (*“N unread messages” line*).
+  - **Drafts:** close the bar with words in it and they wait in that chat (the bar shows them, and the Inbox says **Draft:** in red) until you send or clear them (*Keep what you were typing*).
+  - **Voice speed:** while a voice message plays, tap the **1×** pill to switch to 1.5× and 2× (it stays for the next ones).
+  - **＋ on the open bar** (like WhatsApp's attach menu) has **Photo** and **GIF** too (their buttons hide while you type, so the box has room):
     - **Poll**: a question with 2 to 8 answers (*＋ Add an answer*). Everyone taps one answer and sees the counts and bars; tap yours again to take it back. **View votes** lists who picked what (*Polls*).
     - **Location**: the phone asks first, then sends a map card with your position. Tapping the card opens it in Maps (*Share where you are*).
   - **Press and hold a message:**
@@ -467,6 +471,8 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **archive** it, **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
   - **Swipe a conversation:** left for **Mute**, **Archive** and **Delete**; right for **Pin** and **Read / Unread**. Tap a button, or swipe it back.
   - **Mute for** *8 hours*, *1 week* or *Always* (also in Chat info). A timed mute ends by itself.
+  - **Favourites:** press and hold a chat › *Add to favourites*; a **Favourites** tab lists them and a ☆ marks them (*Favourites tab*).
+  - **Search** looks through every message, not just the last one. Previews show an icon for voice messages, photos, polls and locations.
   - **Message requests:** first messages from people you don't follow wait in a *Message requests* row at the top (with a count), like X and Messenger. Tap it to see them; opening one offers Accept, Delete or Block. Requests don't count in the badge (*Message requests* on the Inbox).
   - **Archived:** archived chats leave the list for an *Archived* row at the top (with a count); tap it to see them and *‹ Back* to return. They don't count in the badge; Unarchive from the menu, a swipe or Chat info.
   - The unread total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`). Tapping a conversation sets `chat` and `chatTitle` and goes to the page `chat`.

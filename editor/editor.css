@@ -2243,3 +2243,17 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .comp-tools .ct.one-btn { width: auto; padding: 0 10px; gap: 6px; display: inline-flex; align-items: center; color: var(--text); font-size: 13.5px; font-weight: 600; }
 .comp-tools .ct.one-btn svg { width: 16px; height: 16px; }
 .comp-tools .ct.one-btn.on { background: var(--accent-faint); border-color: var(--accent-strong); color: #fff; }
+/* Console dock: the kinds and search stay on top, only the messages scroll, the command line stays at the bottom */
+#console { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 0; }
+#console > * { flex: none; }
+#console > .log-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#console > .log-cmdrow { position: static; }
+#console .log-tools { position: static; flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 8px; padding: 10px 12px 8px; }
+.log-chips { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.log-chips::-webkit-scrollbar { display: none; }
+.log-chips .log-f { flex: 1 0 auto; max-width: 150px; justify-content: center; padding: 0 10px; }
+.log-find { display: flex; gap: 6px; align-items: center; }
+.log-find .log-search { flex: 1 1 auto; min-width: 0; }
+.log-find .log-clear { flex: none; }
+#console .log-watch { padding-bottom: 8px; }
+#console .log-list .log-row:first-child { border-top: 1px solid var(--g3); }

@@ -1732,15 +1732,18 @@ function logRow(x) {
     x.count > 1 && h('span', { class: 'log-n' }, x.count > 999 ? '999+' : x.count));
   return row;
 }
-function watchBar() {
+function addWatch() { const W = watches(), vars = Object.keys(engine.scene?.vars || {}).filter((k) => !W.includes(k)); const k = prompt('Watch which variable?' + (vars.length ? '\n\n' + vars.slice(0, 30).join(', ') : ''), vars[0] || 'score'); if (k?.trim()) { setWatches([...watches(), k.trim()]); refreshConsoles(); } }
+/** Live values being watched (dock: nothing when there are none; the Watch button sits by the search). */
+function watchBar(dock) {
   const W = watches();
+  if (dock && !W.length) return h('div', { hidden: true });
   return h('div', { class: 'log-watch' },
     ...W.map((k) => h('span', { class: 'lw', 'data-k': k }, h('b', {}, k), h('em', {}, fmtVal(engine.scene?.vars?.[k])), h('button', { title: 'Stop watching', onclick: () => { setWatches(watches().filter((q) => q !== k)); refreshConsoles(); } }, icon('close')))),
-    h('button', { class: 'lw-add', onclick: () => { const vars = Object.keys(engine.scene?.vars || {}).filter((k) => !W.includes(k)); const k = prompt('Watch which variable?' + (vars.length ? '\n\n' + vars.slice(0, 30).join(', ') : ''), vars[0] || 'score'); if (k?.trim()) { setWatches([...watches(), k.trim()]); refreshConsoles(); } } }, icon('plus'), W.length ? '' : 'Watch a variable'));
+    h('button', { class: 'lw-add', title: 'Watch a variable', onclick: addWatch }, icon('plus'), W.length ? '' : 'Watch a variable'));
 }
 let cmdHistory = [], cmdPos = -1;
 function cmdLine() {
-  const inp = h('input', { type: 'text', class: 'log-cmd', placeholder: 'Command: score = 10, send win, vars, help…', autocapitalize: 'off', autocomplete: 'off', spellcheck: false, enterkeyhint: 'go',
+  const inp = h('input', { type: 'text', class: 'log-cmd', placeholder: 'Command (try help)', title: 'Commands: score = 10, send win, vars, help…', autocapitalize: 'off', autocomplete: 'off', spellcheck: false, enterkeyhint: 'go',
     onkeydown: (e) => {
       if (e.key === 'Enter' && inp.value.trim()) { const c = inp.value.trim(); cmdHistory.push(c); cmdPos = cmdHistory.length; inp.value = ''; runCommand(c); setTimeout(() => $$('.log-cmd').forEach((q) => { if (q.isConnected && q.dataset.where === inp.dataset.where) q.focus(); }), 30); }
       else if (e.key === 'ArrowUp' && cmdHistory.length) { cmdPos = Math.max(0, cmdPos - 1); inp.value = cmdHistory[cmdPos] || ''; e.preventDefault(); }
@@ -1800,18 +1803,18 @@ const logText = () => Log.entries.map((x) => `[${new Date(x.t0 || x.t).toLocaleT
 function consoleTools(compact) {
   const E = Log.entries, n = (lv) => E.filter((x) => x.level === lv).reduce((a, x) => a + x.count, 0);
   const search = h('input', { type: 'search', class: 'log-search', placeholder: 'Search', value: consoleQuery, autocapitalize: 'off', oninput: (e) => { consoleQuery = e.target.value; refreshConsoles(true); } });
-  return h('div', { class: 'log-tools' + (compact ? ' compact' : '') },
-    ...[['all', 'All', E.filter((x) => x.level !== 'cmd' && x.level !== 'result').reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
-      h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; refreshConsoles(); } }, compact ? null : l, h('b', {}, c), compact ? icon(LOG_ICON[k] || 'list') : null)),
-    search,
-    h('button', { class: 'log-clear', title: 'More', onclick: (e) => consoleMenu(e.currentTarget) }, icon('more')),
-    h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash')));
+  const chips = [['all', 'All', E.filter((x) => x.level !== 'cmd' && x.level !== 'result').reduce((a, x) => a + x.count, 0)], ['info', 'Log', n('info')], ['warn', 'Warn', n('warn')], ['error', 'Error', n('error')]].map(([k, l, c]) =>
+      h('button', { class: 'log-f ' + k + (consoleLevel === k ? ' on' : ''), onclick: () => { consoleLevel = k; refreshConsoles(); } }, compact ? null : l, h('b', {}, c), compact ? icon(LOG_ICON[k] || 'list') : null));
+  const btns = [h('button', { class: 'log-clear', title: 'More', onclick: (e) => consoleMenu(e.currentTarget) }, icon('more')),
+    h('button', { class: 'log-clear', title: 'Clear', onclick: () => { Log.clear(); consoleSeen = 0; } }, icon('trash'))];
+  if (compact) return h('div', { class: 'log-tools compact' }, ...chips, search, ...btns);
+  return h('div', { class: 'log-tools' }, h('div', { class: 'log-chips' }, ...chips), h('div', { class: 'log-find' }, search, watches().length ? null : h('button', { class: 'log-clear', title: 'Watch a variable', onclick: addWatch }, icon('eye')), ...btns)); // the kinds on one line, search and buttons on the next
 }
 function renderConsole(keepSearch) {
   const box = $('#console'); if (!box) return;
   const rows = consoleRows(), focused = keepSearch && document.activeElement?.classList.contains('log-search') && box.contains(document.activeElement), list = box.querySelector('.log-list');
   if (focused) { list?.replaceWith(rows.length ? h('div', { class: 'log-list' }, rows.map(logRow)) : h('div', { class: 'log-list' }, h('div', { class: 'empty' }, 'Nothing matches.'))); updateConsoleBadge(); return; }
-  box.replaceChildren(consoleTools(false), watchBar(),
+  box.replaceChildren(consoleTools(false), watchBar(true),
     rows.length ? h('div', { class: 'log-list' }, rows.map(logRow))
       : h('div', { class: 'log-list' }, h('div', { class: 'empty' }, Log.entries.length ? 'Nothing of this kind.' : 'Messages from your game appear here while it runs: the Debug Log action and nodes, P.log() in scripts, warnings and errors. Tap a message for details. Below, type commands to look inside the running game.')),
     cmdLine());

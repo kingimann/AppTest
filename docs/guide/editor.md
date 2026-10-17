@@ -64,9 +64,11 @@ The blue **+**, the Hierarchy's **Create** button and the Project tab all open i
 
 - **Search** across everything.
 - **Quick add:** player, jumper / 3D player, platform, coin, enemy, score.
-- **Folders:** Gameplay, Characters & Sprites, Shapes & Objects, 3D Models, UI & Menus, Logic & Scripts, Camera & Lights, My Prefabs.
+- **Folders:** Gameplay, Characters & Sprites, Shapes & Objects, 3D Models, UI & Menus, Logic & Scripts, Camera & Lights, My Prefabs. Big folders (UI & Menus) start with **Most used**: Button, Label, Score, Panel, Health Bar, Timer…
 
-Tap a tile to add it at the centre, or press, hold and drag it to the exact spot.
+Tap a tile to add it at the centre, or press, hold and drag it to the exact spot. If something is already there (the Player), the new object goes to the nearest free spot beside it, so a new Coin doesn't land on the Player and get collected the moment you press Play.
+
+Wording follows the device you edit on: *Saved on this computer* at a desk, *this phone* on a phone; the “turn your phone” hint only shows on phones and tablets.
 
 ## Hierarchy
 

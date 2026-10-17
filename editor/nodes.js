@@ -10,6 +10,9 @@ const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: 
 const CATS = ['App', 'Plugins', 'Events', 'Flow', 'Actions', 'Instructions', 'Conditions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Social', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
 const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Social: 'users', Variables: 'key', 'Save Files': 'save', Instructions: 'list', Conditions: 'check', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud', App: 'phone', Plugins: 'bolt' };
 /** "What usually comes next" for the Add Node picker. */
+/** The handful of actions most scripts need, shown before the full list (it has hundreds). */
+const COMMON_GAME = ['addVar', 'setVar', 'sound', 'message', 'wait', 'branch', 'moveBy', 'jump', 'spawn', 'destroy', 'showHide', 'win', 'gameOver'];
+const COMMON_APP = ['goToPage', 'toast', 'setVar', 'setText', 'showHide', 'branch', 'wait', 'sound'];
 const NEXT = {
   _events: ['start', 'tap', 'touch', 'triggerEnter', 'collisionEnter', 'update', 'every', 'button', 'swipe', 'onMessage'],
   _exec: ['addVar', 'sound', 'tweenMove', 'punch', 'branch', 'wait', 'popText', 'goToPage', 'destroy'],
@@ -738,7 +741,7 @@ export function openNodeEditor(opts) {
     const sel = g.nodes.find((n) => n.id === selected), sd = sel && def(sel);
     let folder = null;
     const list = h('div', { class: 'ne-plist' });
-    const search = h('input', { type: 'search', placeholder: `Search ${Object.keys(NODE_TYPES).length} nodes`, autocapitalize: 'off', oninput: () => draw() });
+    const search = h('input', { type: 'search', placeholder: 'Search nodes (play sound, score, jump…)', autocapitalize: 'off', oninput: () => draw() });
     const match = (t, d, q) => d.label.toLowerCase().includes(q) || t.toLowerCase().includes(q) || (NODE_HELP[t] || '').toLowerCase().includes(q) || d.cat.toLowerCase().includes(q);
     const item = (t, showCat) => { const d = NODE_TYPES[t]; return h('button', { class: 'ne-pitem', 'data-type': t, style: `--c:${CAT_COLOR[d.cat]}`, onclick: () => { closePicker(); rememberNode(t); addNode(t); } },
       h('b', {}, d.label), showCat ? h('em', { class: 'ne-pcatname', style: `color:${CAT_COLOR[d.cat]}` }, d.cat) : null, h('small', {}, NODE_HELP[t] || '')); };
@@ -769,6 +772,7 @@ export function openNodeEditor(opts) {
         ...(c ? [h('button', { class: 'ne-paste', onclick: () => { closePicker(); paste(); } }, icon('paste'), h('b', {}, `Paste ${c.nodes.length} copied node${c.nodes.length > 1 ? 's' : ''}`), h('small', {}, c.nodes.slice(0, 3).map((q) => NODE_TYPES[q.type]?.label).filter(Boolean).join(' → ') + (c.nodes.length > 3 ? ' …' : '')))] : []),
         ...section(sd ? 'Suggested next' : 'Start with an event', suggestions(), true, sd ? `after “${sd.label}”` : 'green nodes start a script'),
         ...section('Recently used', recent, true),
+        ...section('Common actions', (opts.app ? COMMON_APP : COMMON_GAME).filter((t) => NODE_TYPES[t] && !NODE_TYPES[t].hidden && !opts.hideNode?.(t) && !recent.includes(t)), true, 'what most scripts use'),
         h('div', { class: 'ne-pcat' }, 'All nodes', h('small', {}, 'by category')),
         h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).filter((cat) => cat !== 'Plugins' || Object.values(NODE_TYPES).some((d) => d.also === 'Plugins')).map((cat) => {
           const n = Object.values(NODE_TYPES).filter((d) => !d.hidden && (d.cat === cat || d.also === cat)).length;

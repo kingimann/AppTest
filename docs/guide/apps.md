@@ -281,7 +281,7 @@ The Levels menu (the button showing *App* at the top of the editor) keeps them a
 
 Apps use the same Visual Scripts as games (and Triggers, State Machines and JavaScript too).
 
-- *Scripts › New Visual Script* in an app puts the script on an **App Logic** object, which runs on every page. It starts with *On Page Opened → Show Toast*. (Pages hide when they aren't shown, so app-wide scripts don't go on a page.)
+- *Scripts › New Visual Script* in an app puts the script on an **App Logic** object, which runs on every page. Pick *Blank script*, or the example that starts with *On Page Opened → Show Toast*. (Pages hide when they aren't shown, so app-wide scripts don't go on a page.)
 - In the Node Editor, the **App** folder comes first. It has everything for apps in one place: page events and *Go To Page*, *Go Back*, the side menu and nav bars, toasts and alerts, data (*Add / Change / Delete / Open Record*, *Data Value*, record events), and games (*Play Game*, *Back to App*, *On Back From a Game*, *Opened From an App*).
 - **More App nodes:**
   - **Pages:** *Current Page* (as text), *Pages To Go Back*, and *Go To Page With Value*. That last one puts a value in a variable and opens a page, e.g. tap a product and open “details” with its name.

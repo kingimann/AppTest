@@ -189,7 +189,7 @@ function storageFull() {
   if (Date.now() - fullWarned < 60000) return; fullWarned = Date.now();
   openDialog('Storage is full', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('save')),
     h('h4', {}, 'Your latest changes could not be saved'),
-    h('p', {}, 'The phone has run out of space for this app. Back up your games to a file now, then delete games you no longer need or remove big imported pictures and sounds.'),
+    h('p', {}, `The ${DEVICE} has run out of space for this app. Back up your games to a file now, then delete games you no longer need or remove big imported pictures and sounds.`),
     h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => { closeLayer(); backupAll(); } }, icon('download'), 'Back Up Now'), h('button', { class: 'btn', onclick: closeLayer }, 'Later')))]);
 }
 let saveTimer;
@@ -458,6 +458,9 @@ window.engine = engine;
 
 const ent = (id) => project?.entities.find((e) => e.id === id);
 const is3D = () => project.mode === '3d';
+/** What the editor runs on, for wording (“saved on this computer”, not “this phone”, at a desk). */
+const TOUCH = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+const DEVICE = (() => { try { return TOUCH ? (Math.min(screen.width, screen.height) >= 700 ? 'tablet' : 'phone') : 'computer'; } catch { return 'device'; } })();
 const hasVisual = (e) => !!(e.shape || e.mesh || e.text || e.sprite || e.voxels || e.tiles || e.model || e.bar);
 
 let cam2d = { x: 200, y: 350, zoom: 0.85 };
@@ -2518,14 +2521,28 @@ function gettingStarted() {
 }
 
 /** Add a Visual Script to the selected object (or the player, or a new logic object) and open the Node Editor. */
-function addVisualScript() {
+/** New Visual Script: start blank, or from a small working example (tap to score…). */
+function addVisualScript(mode) {
+  if (mode !== 'blank' && mode !== 'example') {
+    const app = !!levelList()[0].settings?.app, j0 = ent(selectedId), tapish = !app && ((j0 && !j0.template && !j0.ui && hasVisual(j0)) || (!j0 && project.entities.some((e) => (e.tags || []).includes('player'))));
+    const ex = app ? ['Page opened → message', 'When a page opens, show a message. Change it into what you need.'] : tapish ? ['Tap to score', 'On Tap → add 1 to score → show it and play a sound.'] : ['Score every second', 'Every second → add 1 to score.'];
+    const opt = (ic, t, d, m, primary) => h('button', { class: 'btn' + (primary ? ' primary' : ''), style: 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px', 'data-script': m, onclick: () => { closeLayer(); addVisualScript(m); } }, h('b', { style: 'display:flex;align-items:center;gap:8px' }, icon(ic), t), h('small', { style: 'opacity:.8;font-weight:500' }, d));
+    openDialog('New Visual Script', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('nodes')),
+      h('h4', {}, 'How do you want to start?'),
+      h('div', { class: 'btns', style: 'flex-direction:column;align-items:stretch' },
+        opt('plus', 'Blank script', 'An empty canvas: tap Add Node and start with an event.', 'blank', true),
+        opt('play', 'Example: ' + ex[0], ex[1], 'example'),
+        h('button', { class: 'btn', onclick: closeLayer }, 'Cancel')))]);
+    return;
+  }
   let j = ent(selectedId);
   const app = !!levelList()[0].settings?.app;
   if (app && j && (j.template || (j.behaviors || []).some((q) => q.type === 'uiShowIf'))) j = null; // a page hides when it isn't shown: app scripts live on an App Logic object that always runs
   if (!j || j.template) j = app ? project.entities.find((e) => e.name === 'App Logic') : project.entities.find((e) => (e.tags || []).includes('player'));
   if (!j) j = addEntity(app ? { name: 'App Logic' } : { name: 'Game Logic', ...(is3D() ? { y: 0 } : {}) });
   const b = defaultBehavior('graph', is3D() && !j.ui);
-  if (app && !j.ui && !hasVisual(j)) // an app starts from a page opening
+  if (mode === 'blank') b.graph = { nodes: [], links: [] };
+  else if (app && !j.ui && !hasVisual(j)) // an app starts from a page opening
     b.graph = { nodes: [{ id: 'n1', type: 'onPage', x: 20, y: 40, params: { page: '', var: 'page' } }, { id: 'n2', type: 'toast', x: 330, y: 20, params: { text: 'Opened {page}', where: 'bottom' } }],
       links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
   else if (!(j.tags || []).includes('player') && !j.ui && !hasVisual(j)) // no shape to tap: start from a timer instead
@@ -2543,6 +2560,8 @@ function addVisualScript() {
   editGraph(() => ent(j.id) || {}, `behaviors.${j.behaviors.length - 1}.graph`);
 }
 
+/** The few things most people add from a big Create folder, shown first in it. */
+const MOST_USED = { ui: ['Button', 'Label', 'Score', 'Panel', 'Health Bar', 'Timer', 'Pause Button', 'Start Menu', 'Game Over Menu', 'Coin Counter', 'Toggle', 'Progress Bar'] };
 /** The Create screen: everything you can add, in big, easy groups. Search, quick picks, then folders. */
 function openCreate(startCat) {
   $('.cs')?.remove();
@@ -2555,7 +2574,7 @@ function openCreate(startCat) {
     return { label: nm, art: 'art:' + k, group: g, fn: () => addEntity({ name: nm, sprite: { src: 'art:' + k, w: 56, h: 56 } }) };
   }));
   const logicItems = [
-    { label: 'Visual Script', icon: 'nodes', desc: 'Connect nodes: On Tap → Add Score…', fn: addVisualScript },
+    { label: 'Visual Script', icon: 'nodes', desc: 'Connect nodes: On Tap → Add Score…', fn: () => addVisualScript() },
     { label: 'Triggers', icon: 'bolt', desc: 'When … if … do …, in plain words', fn: () => addLogic('triggers') },
     { label: 'State Machine', icon: 'nodes', desc: 'Idle, chase, attack… and what switches them', fn: () => addLogic('fsm') },
     ...userScripts().map((sc) => ({ label: sc.name, icon: 'link', desc: 'Your saved script: added to the selected object', fn: () => { const j = ent(selectedId) || project.entities.find((e) => (e.tags || []).includes('player')); if (!j) { toast('Select an object first'); return; } addSavedScript(j, sc); changed({ structure: true }); pushHistory(); toast(`Added “${sc.name}” to ${j.name}`); } })),
@@ -2598,7 +2617,8 @@ function openCreate(startCat) {
       const c = cats.find((x) => x.key === cat); if (!c) { cat = null; return draw(); }
       title.textContent = c.title;
       const groups = [...new Set(c.items.map((it) => it.group).filter(Boolean))];
-      body.replaceChildren(...(groups.length > 1 ? groups.flatMap((g) => [h('div', { class: 'cs-sec' }, g), grid(c.items.filter((it) => it.group === g))]) : [grid(c.items)]));
+      const most = (MOST_USED[c.key] || []).map((l) => c.items.find((it) => it.label === l)).filter(Boolean); // a big folder starts with what most people want
+      body.replaceChildren(...(most.length >= 3 ? [h('div', { class: 'cs-sec' }, 'Most used'), grid(most)] : []), ...(groups.length > 1 ? groups.flatMap((g) => [h('div', { class: 'cs-sec' }, g), grid(c.items.filter((it) => it.group === g))]) : [...(most.length >= 3 ? [h('div', { class: 'cs-sec' }, 'Everything')] : []), grid(c.items)]));
       body.scrollTop = 0;
       return;
     }
@@ -2628,7 +2648,7 @@ function openCreateMenu(anchor) {
     '-', { cap: 'Logic' },
     { icon: 'bolt', label: 'Triggers (On → If → Do)', fn: () => addLogic('triggers') },
     { icon: 'nodes', label: 'State Machine', fn: () => addLogic('fsm') },
-    { icon: 'nodes', label: 'Visual Script (nodes)', fn: addVisualScript },
+    { icon: 'nodes', label: 'Visual Script (nodes)', fn: () => addVisualScript() },
     is3D() && { icon: 'cube', label: 'New 3D Model (Modeler)', fn: newModel },
     { icon: 'brush', label: 'Draw a Sprite (2D Editor)', fn: () => editSprite2D(null) },
   ]);
@@ -3678,7 +3698,13 @@ function nudgeMany(list) {
   for (const o of topPicks(list)) { o.x = round((o.x || 0) + dx, 3); o.y = round((o.y || 0) + dy, 3); if (is3D() && !o.ui) o.z = round((o.z || 0) + dz, 3); }
   changed({ structure: true }); pushHistory();
 }
+// a redraw in the middle of a press would swap the button under the finger and lose the click (“needs another tap”): wait until it lifts
+let inspPress = false, inspPending = false;
+let inspPressT = 0; const inspLift = () => { if (!inspPress) return; inspPress = false; clearTimeout(inspPressT); if (inspPending) setTimeout(() => { if (inspPending && !inspPress) renderInspector(); }, 0); };
+$('#inspector')?.addEventListener('pointerdown', () => { inspPress = true; clearTimeout(inspPressT); inspPressT = setTimeout(inspLift, 1500); }, true); // (never stuck if the lift is missed)
+for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, inspLift, true);
 function renderInspector() {
+  if (inspPress) { inspPending = true; return; } inspPending = false;
   if (projectSettingsRedraw) setTimeout(() => projectSettingsRedraw?.()); // (Project Settings shows the same settings)
   const box = $('#inspector');
   const scroll = box.scrollTop;
@@ -5516,15 +5542,24 @@ function tapPayload(p) {
 // ============================================================================
 // Creating objects
 // ============================================================================
+/** Near (x, y) but not on top of another object in the level: the spot itself, else the nearest free one around it (so a new Coin doesn't land on the Player). */
+function freeSpot(x, y, step, pos) {
+  const others = project.entities.filter((e) => !e.ui && !e.template && hasVisual(e) && e.x != null).map(pos), busy = (qx, qy) => others.some(([ex, ey]) => Math.abs(ex - qx) < step * 0.8 && Math.abs(ey - qy) < step * 0.8);
+  if (!busy(x, y)) return { x, y };
+  for (let r = 1; r < 8; r++) for (const [dx, dy] of [[1, 0], [-1, 0], [0, -1], [0, 1], [1, -1], [-1, -1], [1, 1], [-1, 1]]) { const qx = x + dx * r * step, qy = y + dy * r * step; if (!busy(qx, qy)) return { x: qx, y: qy }; }
+  return { x, y };
+}
 function addEntity(props, at) {
   const s = engine.scene, j = { id: uid(), ...clone(props) };
   if (!j.ui) {
     if (is3D()) {
       const p = at || orbit.target;
       j.x = snapV(p.x, 0.5); j.z = snapV(p.z, 0.5); j.y ??= 0.5;
+      if (!at && hasVisual(j)) { const q = freeSpot(j.x, j.z, 1.5, (e) => [e.x, e.z ?? 0]); j.x = q.x; j.z = q.y; }
     } else {
       const p = at || { x: s.camera.x, y: s.camera.y };
       j.x = snapV(p.x, 10); j.y = snapV(p.y, 10);
+      if (!at && hasVisual(j)) { const q = freeSpot(j.x, j.y, 70, (e) => [e.x, e.y]); j.x = q.x; j.y = q.y; }
     }
   }
   let n = 1; const base = j.name;
@@ -5596,7 +5631,10 @@ function addPrefab(def, at) {
   }
   const addTree = (props, parent, where) => { // an element and everything inside it
     const { children, offset, ...rest } = props;
-    const base = where || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
+    let base = where || (is3D() ? orbit.target : { x: engine.scene.camera.x, y: engine.scene.camera.y });
+    if (!where && !parent && !rest.ui && hasVisual(rest)) { // a free spot near the middle, not on top of the Player
+      if (is3D()) { const q = freeSpot(snapV(base.x, 0.5), snapV(base.z, 0.5), 1.5, (e) => [e.x, e.z ?? 0]); base = { x: q.x, y: base.y, z: q.y }; }
+      else { const q = freeSpot(snapV(base.x, 10) + (offset?.x || 0), snapV(base.y, 10) + (offset?.y || 0), 70, (e) => [e.x, e.y]); base = { x: q.x - (offset?.x || 0), y: q.y - (offset?.y || 0) }; } }
     const k = addEntity({ ...rest, ...(parent ? { parent } : {}) }, rest.ui || parent ? undefined : { x: (base.x || 0) + (offset?.x || 0), y: (base.y || 0) + (offset?.y || 0), z: base.z || 0 });
     for (const c of children || []) addTree({ ui: rest.ui, ...c }, k.id);
     return k;
@@ -5810,7 +5848,7 @@ function importSound() {
   fi.onchange = () => {
     const f = fi.files[0]; fi.value = '';
     if (!f) return;
-    if (f.size > 600 * 1024 && !confirm(`${f.name} is ${Math.round(f.size / 1024)} KB. Big sounds fill up the phone's project storage. Use it anyway? (Short clips under 200 KB work best.)`)) return;
+    if (f.size > 600 * 1024 && !confirm(`${f.name} is ${Math.round(f.size / 1024)} KB. Big sounds fill up the ${DEVICE}'s project storage. Use it anyway? (Short clips under 200 KB work best.)`)) return;
     const rd = new FileReader();
     rd.onload = () => {
       let base = f.name.replace(/\.[^.]+$/, '').replace(/[^\w -]+/g, '').trim().slice(0, 24) || 'sound', name = base, n = 2;
@@ -5835,7 +5873,7 @@ function soundsTab() {
     ]) }, icon('more')));
   return [
     h('div', { class: 'snd-tools' }, h('button', { class: 'btn primary', onclick: importSound }, icon('download'), 'Import Sound'),
-      h('p', { class: 'p-note' }, 'MP3, WAV, OGG or M4A from your phone. Then choose it in a Sound component, a Play Sound action or node, or from code with s.engine.audio.sfx("name").')),
+      h('p', { class: 'p-note' }, `MP3, WAV, OGG or M4A from your ${DEVICE}. Then choose it in a Sound component, a Play Sound action or node, or from code with s.engine.audio.sfx("name").`)),
     h('div', { class: 'p-sec' }, 'My Sounds'),
     mine.length ? h('div', { class: 'snd-list' }, mine.map((n) => row(n, true))) : h('p', { class: 'p-note' }, 'No imported sounds yet.'),
     h('div', { class: 'p-sec' }, 'Built-in'),
@@ -6350,7 +6388,7 @@ function openAccount() {
     let main;
     if (!cloud.configured()) main = [
       h('div', { class: 'acct-card' }, h('b', {}, icon('phone'), 'Profile on this device'),
-        h('p', {}, 'Your name and colour are kept on this phone. Your games are saved here too (back them up with ☰ → Back Up All Games).'),
+        h('p', {}, `Your name and colour are kept on this ${DEVICE}. Your games are saved here too (back them up with ☰ → Back Up All Games).`),
         h('p', { class: 'muted' }, 'Sign-in and syncing your games between devices turn on when this Pocket Engine is connected to a Supabase server.')),
       connectFold(),
     ];
@@ -6435,7 +6473,7 @@ function openProjectsDialog() {
     } }, icon('trash')))) : h('div', { class: 'empty' }, 'No saved projects.'));
 }
 const TOUR = [
-  ['cube', 'Welcome to Pocket Editor', 'Build 2D and 3D games right on your phone. Here is a quick tour; it takes 30 seconds.'],
+  ['cube', 'Welcome to Pocket Editor', `Build 2D and 3D games right on your ${DEVICE}. Here is a quick tour; it takes 30 seconds.`],
   ['plus', 'Add things', 'Tap the blue + button (or the Project tab). Tap a tile to add it, or press, hold and drag it to the exact spot in the Scene.'],
   ['move', 'Arrange', 'Tap an object to select it and drag to move it. The tools at the top rotate, scale, and paint copies.'],
   ['info', 'Customize', 'The Inspector lists the selected object\'s components. Change any value, or tap Add Component for movement, scoring, enemies, doors and more.'],
@@ -6769,8 +6807,8 @@ function safetyCard(count) {
   if (!count) return null;
   const last = lastBackup(), stale = !last || Date.now() - last > 7 * 86400000;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  const info = h('small', { class: 'safe-info' }, `Saved on this phone · ${count} game${count === 1 ? '' : 's'}`);
-  storageUse().then((u) => isPersisted().then((p) => { if (u) info.textContent = `Saved on this phone · ${count} game${count === 1 ? '' : 's'} · ${u.used < 1048576 ? Math.max(1, Math.round(u.used / 1024)) + ' KB' : (u.used / 1048576).toFixed(1) + ' MB'}${p ? ' · kept safe ✓' : ''}`; }));
+  const info = h('small', { class: 'safe-info' }, `Saved on this ${DEVICE} · ${count} game${count === 1 ? '' : 's'}`);
+  storageUse().then((u) => isPersisted().then((p) => { if (u) info.textContent = `Saved on this ${DEVICE} · ${count} game${count === 1 ? '' : 's'} · ${u.used < 1048576 ? Math.max(1, Math.round(u.used / 1024)) + ' KB' : (u.used / 1048576).toFixed(1) + ' MB'}${p ? ' · kept safe ✓' : ''}`; }));
   return h('div', { class: 'safe-card' + (stale ? ' warn' : '') },
     h('div', { class: 'safe-top' }, icon(stale ? 'info' : 'check'), h('b', {}, stale ? (last ? `Last backup ${ago(last)}` : 'Your games aren\'t backed up yet') : `Backed up ${ago(last)}`)),
     info,
@@ -7771,7 +7809,7 @@ function play() {
   updatePauseButtons();
   pushBack(stop);
   store.set('pocket.editor.played.' + projectId, '1');
-  requestAnimationFrame(() => { engine.fitScreen(); engine.resize(); engine.layoutButtons(); if (engine.boxed && (orientationOf() === 'portrait') === (innerWidth > innerHeight)) toast(`A ${orientationOf()} game: turn your phone to play it full screen`); }); // (only when it really is held the other way)
+  requestAnimationFrame(() => { engine.fitScreen(); engine.resize(); engine.layoutButtons(); if (engine.boxed && TOUCH && (orientationOf() === 'portrait') === (innerWidth > innerHeight)) toast(`A ${orientationOf()} game: turn your ${DEVICE} to play it full screen`); }); // (only when it really is held the other way)
 }
 function stop() {
   if (!playing) return;

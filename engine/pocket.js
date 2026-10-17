@@ -8823,7 +8823,7 @@ registerBehavior('uiAppBar', {
           }
           return;
         }
-        const title = titleOf(s), sub = p.subtitle ? fillTemplate(String(p.subtitle), s.vars) : '', tsz = +p.titleSize || 19, wt = { heavy: 900, normal: 600 }[p.titleWeight] || 800;
+        const title = titleOf(s), sub = p.subtitle ? fillTemplate(String(p.subtitle), s.vars) : s.vars.chatStatus && s.entities.some((q) => q.ui && q.visible && !q._parentHidden && q.behaviors.some((b) => b.type === 'uiChat')) ? String(s.vars.chatStatus) : '', tsz = +p.titleSize || 19, wt = { heavy: 900, normal: 600 }[p.titleWeight] || 800;
         const center = p.titleAlign === 'center' || (p.titleAlign !== 'left' && st === 'centered'), room = center ? Math.max(40, Math.min(G.x + G.w / 2 - lx, rx + 22 - (G.x + G.w / 2)) * 2) : Math.max(40, rx + 22 - lx - 12);
         const drawTitle = (x, y, size, align, alpha) => {
           if (alpha <= 0.01) return;
@@ -11618,7 +11618,7 @@ const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], m
 const chatMetaKey = (s) => 'pocket.chatMeta.' + (s.engine.gameKey || 'game');
 /** This phone's own settings for conversations: pinned, muted, deleted (hidden up to a time) and marked unread. */
 const chatMetaCache = new Map(); // (read every frame: parsed once, kept in step with saves)
-const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {}, acc: o.acc || [], block: o.block || [], draft: o.draft || {}, fav: o.fav || [], played: o.played || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {}, acc: [], block: [], draft: {}, fav: [] }; chatMetaCache.set(k, m); return m; };
+const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {}, acc: o.acc || [], block: o.block || [], draft: o.draft || {}, fav: o.fav || [], played: o.played || [], sched: o.sched || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {}, acc: [], block: [], draft: {}, fav: [] }; chatMetaCache.set(k, m); return m; };
 /** Muted now (a mute can run out: 8 hours, a week, or always). */
 const chatMuted = (m, c) => m.mute.includes(c) && !(m.muteUntil?.[c] && m.muteUntil[c] < Date.now());
 /** Mute for a while, or unmute: a sheet of choices. */
@@ -11813,6 +11813,9 @@ registerBehavior('uiChat', {
     { key: 'wallpapers', label: 'People can pick a wallpaper per chat', type: 'bool', default: true, info: 'In Chat info (the message “chat info”, e.g. an App Bar button on the chat page).' },
     { key: 'bubbleTimes', label: 'Time and ticks inside the bubbles', type: 'bool', default: true, info: 'Like WhatsApp: each message shows its time (and ✓ / ✓✓ for yours) in its corner, and the chat shows a date chip when the day changes. Off: times between messages and ticks beside them.' },
     { key: 'bubbleStyle', label: 'My bubbles', type: 'select', options: ['gradient', 'solid'], default: 'gradient', info: { gradient: 'A soft colour shift down the screen, like Messenger.', solid: 'One flat colour.' } },
+    { key: 'status', label: 'online / typing… / last seen under the title', type: 'bool', default: true, info: 'Puts it in the variable chatStatus, and an App Bar on the chat page shows it under the name (unless you gave it a subtitle). A group shows who is in it.' },
+    { key: 'schedule', label: 'Send later (＋ › Send later)', type: 'bool', default: true, info: 'Type a message, then ＋ › Send later: in an hour, tonight, tomorrow morning or a time you pick. It waits in the chat with a 🕓 and goes when the time comes (while the app is open). Tap it to send now or delete it.' },
+    { key: 'contacts', label: 'Share a contact (＋ › Contact)', type: 'bool', default: true, info: 'A card with someone’s name and handle; tapping Message on it opens a chat with them.' },
     { key: 'holdStyle', label: 'Press and hold shows', type: 'select', options: ['menu by the message', 'sheet'], default: 'menu by the message', info: { 'menu by the message': 'The message stays lit while the rest dims, with emoji above it and the actions under it, like iMessage and WhatsApp.', sheet: 'A sheet from the bottom of the screen.' } },
     { key: 'viewOnce', label: 'View once photos (＋ › View once)', type: 'bool', default: true, info: 'A photo that opens once, like WhatsApp: the other person taps to see it full screen, then it shows “Opened”. You can’t open your own.' },
     { key: 'unreadLine', label: '“N unread messages” line', type: 'bool', default: true, info: 'Opening a chat with new messages shows a line above the first one you haven’t read, and starts there.' },
@@ -11855,7 +11858,7 @@ registerBehavior('uiChat', {
     const pkOf = (s, h) => { if (h === handleOf(me(s).handle)) return myPk; const G = s.engine.social, pr = G?.profile?.(h)?.pubkey; if (pr) return String(pr); const A = all(s); for (let i = A.length - 1; i >= 0; i--) if (A[i].pk && handleOf(A[i].handle) === h) return String(A[i].pk); return null; };
     /** Everyone in the chat with their key, or null when someone has none yet (then it isn't sealed). */
     const encMembers = (s, c) => { if (!encOn() || !myPk || !(/^dm-/.test(c) || isGroupChat(c))) return null; const mem = [...new Set(chatMembers(all(s), c))]; if (!mem.length) return null; const out = []; for (const h of mem) { const k = pkOf(s, h); if (!k) return null; out.push({ h, pk: k }); } if (!out.some((m) => m.h === handleOf(me(s).handle))) return null; return out; };
-    const SECRET = ['text', 'media', 'voice', 'dur', 'wave', 'reply_text', 'poll', 'loc'];
+    const SECRET = ['text', 'media', 'voice', 'dur', 'wave', 'reply_text', 'poll', 'loc', 'contact'];
     /** Send a row: sealed when everyone in the chat has a key, as it is otherwise. */
     const post = (s, rec, done) => { const mem = encMembers(s, String(rec.chat)), base = { ...rec, ...(myPk ? { pk: myPk } : {}) };
       if (!mem) { const r = addRow(s, base); done?.(r); return; }
@@ -11863,9 +11866,9 @@ registerBehavior('uiChat', {
       E2EE.seal(s, String(rec.chat), payload, mem).then((enc) => { const r = addRow(s, { ...open, enc }); if (r?.id) E2EE.cache.set(r.id + ':' + enc.iv, payload); done?.(r); }).catch((err) => { Log.add('warn', 'Encryption failed, sent as it is: ' + err.message, 'Chat'); done?.(addRow(s, base)); }); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (r?._e2ee || r?._locked) r = all(s).find((q) => q.id === r.id) || r; if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
-    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.poll ? '📊 ' + String(r.poll).split('|')[0].trim() : r.loc ? '📍 Location' : r.voice ? '🎤 Voice message' : r.once ? '👁 Photo' : r.media ? 'Photo' : '');
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.poll ? '📊 ' + String(r.poll).split('|')[0].trim() : r.loc ? '📍 Location' : r.voice ? '🎤 Voice message' : r.once ? '👁 Photo' : r.contact ? '👤 ' + String(r.contact).split('|')[1] : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
-      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(m.poll ? { poll: m.poll, pvotes: '' } : {}), ...(m.loc ? { loc: m.loc } : {}), ...(m.once ? { once: true } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
+      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(m.poll ? { poll: m.poll, pvotes: '' } : {}), ...(m.loc ? { loc: m.loc } : {}), ...(m.once ? { once: true } : {}), ...(m.contact ? { contact: m.contact } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
       const ttl = p.disappearing !== false ? +chatSetting(rows(s), 'ttl') || 0 : 0; if (ttl > 0) rec.ttl = ttl; // (disappearing messages are on)
       const sealed = !!encMembers(s, c); post(s, rec); awardPoints(s, 'message');
       replyTo = null; bar?.setReply?.(null); unreadFrom = Date.now(); // (you answered: the unread line goes)
@@ -11902,7 +11905,7 @@ registerBehavior('uiChat', {
     const clockOf = (t) => { try { return new Date(t).toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
     const refreshChat = (s) => { s.engine.vibrate?.(10); const sp = s.engine.supa, D0 = D(s); // pull down at the top: fetch what's new (online), else it's all here already
       if (has(s) && sp?.online?.(D0.def(p.collection))) { try { sp.pullAll(p.collection); if (D0.def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh the chat: ' + err.message, 'Chat'); } } else s.snackbar?.('Up to date'); };
-    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; const edMode = !!editing, c0 = chatOf(s); bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, attach: editing ? [] : [...(p.polls !== false ? [{ key: 'poll', icon: 'poll', label: 'Poll', color: '#f5a623', run: () => { bar?.close(); bar = null; setTimeout(() => pollSheet(s), 60); } }] : []), ...(p.location !== false ? [{ key: 'location', icon: 'place', label: 'Location', color: '#20b15a', run: () => shareLoc(s) }] : []), ...(p.viewOnce !== false && p.photos !== false ? [{ key: 'once', icon: 'eye', label: 'View once', color: '#0ea5e9', run: () => sendOnce(s) }] : [])], mentions: () => { const c1 = chatOf(s); if (!isGroupChat(c1)) return []; const mh1 = handleOf(me(s).handle); return chatMembers(all(s), c1).filter((h) => h !== mh1).map((h) => ({ handle: h, name: nameOfHandle(s, h) })); }, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : draftOf(s, c0), edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: (v) => { if (!edMode) saveDraft(s, c0, v); bar = null; editing = null; } }); };
+    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; const edMode = !!editing, c0 = chatOf(s); bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, attach: editing ? [] : [...(p.polls !== false ? [{ key: 'poll', icon: 'poll', label: 'Poll', color: '#f5a623', run: () => { bar?.close(); bar = null; setTimeout(() => pollSheet(s), 60); } }] : []), ...(p.location !== false ? [{ key: 'location', icon: 'place', label: 'Location', color: '#20b15a', run: () => shareLoc(s) }] : []), ...(p.viewOnce !== false && p.photos !== false ? [{ key: 'once', icon: 'eye', label: 'View once', color: '#0ea5e9', run: () => sendOnce(s) }] : []), ...(p.contacts !== false ? [{ key: 'contact', icon: 'user', label: 'Contact', color: '#64748b', run: () => { bar?.close(); bar = null; setTimeout(() => shareContact(s), 60); } }] : []), ...(p.schedule !== false && !editing ? [{ key: 'later', icon: 'calendar', label: 'Send later', color: '#e11d48', run: () => { const v = String(bar?.input?.value || '').trim(); if (!v) { s.snackbar?.('Type the message first, then ＋ › Send later'); return; } if (bar?.input) bar.input.value = ''; bar?.close(); bar = null; saveDraft(s, chatOf(s), ''); setTimeout(() => laterSheet(s, v), 60); } }] : [])], mentions: () => { const c1 = chatOf(s); if (!isGroupChat(c1)) return []; const mh1 = handleOf(me(s).handle); return chatMembers(all(s), c1).filter((h) => h !== mh1).map((h) => ({ handle: h, name: nameOfHandle(s, h) })); }, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : draftOf(s, c0), edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: (v) => { if (!edMode) saveDraft(s, c0, v); bar = null; editing = null; } }); };
     /** One reaction each: the same emoji again takes it back. */
     const react = (s, r, em) => { const m = reactsOf(r), mh = handleOf(me(s).handle); if (m.get(mh) === em) m.delete(mh); else m.set(mh, em); if (patch(s, r, { reacts: [...m].map(([h, x]) => h + ':' + x).join(','), reaction: [...m.values()].pop() || '' })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } };
     /** Who reacted, and with what (tap yours to take it back). */
@@ -11974,6 +11977,49 @@ registerBehavior('uiChat', {
       sheetOpen = true; photoViewer(s, { src: r.media, title: r.author || '', sub: 'View once', note: 'View once: when you close it, it’s gone.', onClose: () => { sheetOpen = false; patch(s, r, { opened: [...op, mh].join(',') }); pops.set(r.id, s.time); } }); };
     const playedSet = (s) => new Set(chatMeta(s).played || []);
     const markPlayed = (s, r) => { const m = chatMeta(s), L0 = m.played || []; if (L0.includes(String(r.id))) return; m.played = [...L0, String(r.id)].slice(-500); saveChatMeta(s, m); };
+    /** Contacts: “handle|Name” on the message; the card's Message opens a chat with them. */
+    const shareContact = (s) => { const M = me(s), mh = handleOf(M.handle); sheetOpen = true; peoplePicker(s, { title: 'Share a contact', colors: colors(), people: chatPeople(s, { ...M, handle: mh }), onClose: () => { sheetOpen = false; }, onPick: ([pp]) => sendIt(s, { text: '', contact: pp.handle + '|' + (pp.name || pp.handle) }) }); };
+    /** Send later: kept on this phone, sent when the time comes (while the app is open). */
+    const schedOf = (s) => chatMeta(s).sched || [];
+    const saveSched = (s, L0) => { const m = chatMeta(s); m.sched = L0; saveChatMeta(s, m); };
+    const atText = (t) => { const d = new Date(t), now = new Date(), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), dd = Math.round((day(d) - day(now)) / 864e5); let tm = ''; try { tm = d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { tm = ''; } return (dd === 0 ? 'today ' : dd === 1 ? 'tomorrow ' : dd === -1 ? 'yesterday ' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }) + ' ') + tm; };
+    const laterSheet = (s, text) => {
+      const c = colors(), now = new Date(), at = (h, m = 0, plusDay = 0) => { const d = new Date(now); d.setDate(d.getDate() + plusDay); d.setHours(h, m, 0, 0); return d.getTime(); };
+      const tonight = at(20) > Date.now() + 10 * 60e3 ? at(20) : null, ch = chatOf(s);
+      const add = (t) => { saveSched(s, [...schedOf(s), { id: 's' + Date.now().toString(36), chat: ch, text, at: t }]); s.snackbar?.('Scheduled for ' + atText(t)); atBottom = true; };
+      sheetOpen = true;
+      socialSheet(s, { kind: 'send-later', title: 'Send later', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close } = api;
+        body.append(el('div', `margin:8px 18px 6px;padding:10px 14px;border-radius:14px;background:${c.field};font:500 15px ${THEME.font};white-space:pre-wrap;word-break:break-word;`, text));
+        const opt = (label, t, key) => { const row = sheetRow(api, c, { title: label, sub: atText(t), run: () => { close(); add(t); } }); row.dataset.later = key; body.append(row); };
+        opt('In 1 hour', Date.now() + 3600e3, '1h'); if (tonight) opt('Tonight', tonight, 'tonight'); opt('Tomorrow morning', at(9, 0, 1), 'tomorrow');
+        const pick = el('div', 'display:flex;gap:8px;align-items:center;padding:8px 18px 18px;'); const inp = el('input', `flex:1;min-width:0;font:15px ${THEME.font};padding:10px 12px;border-radius:12px;border:1px solid ${c.line};background:${c.field};color:${c.text};`); inp.type = 'datetime-local'; inp.dataset.laterPick = '1';
+        const go = el('button', `flex:none;border:0;border-radius:12px;padding:11px 16px;background:${c.acc};color:#fff;font:800 14px ${THEME.font};cursor:pointer;`, 'Schedule'); go.type = 'button'; go.onclick = () => { const t = new Date(inp.value).getTime(); if (!(t > Date.now())) { s.snackbar?.('Pick a time later than now'); return; } close(); add(t); };
+        pick.append(inp, go); body.append(cap(api, c, 'Pick a time'), pick);
+      } });
+    };
+    const schedTap = (s, q) => { const c = colors(); sheetOpen = true; socialSheet(s, { kind: 'scheduled', title: 'Scheduled for ' + atText(q.at), colors: c, onClose: () => { sheetOpen = false; }, items: [
+      { icon: '📤', label: 'Send now', run: () => { saveSched(s, schedOf(s).filter((x) => x.id !== q.id)); sendIt(s, { text: q.text }); } },
+      { icon: '✏️', label: 'Edit', run: () => { saveSched(s, schedOf(s).filter((x) => x.id !== q.id)); saveDraft(s, q.chat, q.text); setTimeout(() => openBar(s), 300); } },
+      { icon: '🗑️', label: 'Delete', danger: true, run: () => { saveSched(s, schedOf(s).filter((x) => x.id !== q.id)); s.snackbar?.('Scheduled message deleted'); } }] }); };
+    /** Send what's due (to its own chat). */
+    const sendDue = (s) => { const L0 = schedOf(s); if (!L0.length) return; const now = Date.now(), due = L0.filter((q) => q.at <= now); if (!due.length) return; saveSched(s, L0.filter((q) => q.at > now)); const M = me(s);
+      for (const q of due) { const ttl = +chatSetting(all(s).filter((r) => String(r.chat) === q.chat).sort((a, b) => (a._at || 0) - (b._at || 0)), 'ttl') || 0; post(s, { chat: q.chat, author: M.author, handle: M.handle, text: q.text, ...(ttl > 0 ? { ttl } : {}) }); } };
+    /** online / typing… / last seen, for the App Bar under the name. */
+    const statusOf = (s, c) => { const mh = handleOf(me(s).handle), A = all(s), mem = chatMembers(A, c), others = mem.filter((h) => h !== mh);
+      if (typing && typing.chat === c && s.time >= typing.t0) return isGroupChat(c) ? `${String(typing.name || '').split(' ')[0]} is typing…` : 'typing…';
+      if (/^dm-/.test(c) && !others.length) return 'Message yourself';
+      if (isGroupChat(c)) { const n = others.map((h) => nameOfHandle(s, h).split(' ')[0]); return n.length ? n.slice(0, 4).join(', ') + (n.length > 4 ? ` +${n.length - 4}` : '') + ', You' : ''; }
+      if (!/^dm-/.test(c)) return '';
+      const o = others[0]; let last = 0; for (const r of A) if (String(r.chat) === c && handleOf(r.handle) === o) last = Math.max(last, r._at || 0); last = Math.max(last, readAt(s, c, o) || 0);
+      if (!last) return ''; const ago = Date.now() - last; if (ago < 2 * 60e3) return 'online';
+      return 'last seen ' + atText(last).replace(/^tomorrow /, ''); };
+    let statusT = 9, scrollT = -9;
+    /** The Doodles wallpaper: a tile of little line drawings, made once. */
+    const doodleFill = (ctx, dark) => { const k = dark ? 'd' : 'l'; doodleC[k] ||= (() => { const cv = document.createElement('canvas'); cv.width = cv.height = 240; const x = cv.getContext('2d'); x.fillStyle = dark ? '#0b141a' : '#efeae2'; x.fillRect(0, 0, 240, 240); const ic = ['heart', 'star', 'smile', 'camera', 'mic', 'send', 'bell', 'fire', 'sparkle', 'image', 'place', 'comment']; let i = 0;
+      for (let gy = 0; gy < 4; gy++) for (let gx = 0; gx < 4; gx++) { const cx = gx * 60 + 30 + (gy % 2 ? 15 : -8), cy = gy * 60 + 30; x.save(); x.translate(cx, cy); x.rotate(((i * 47) % 60 - 30) * Math.PI / 180); drawIco(x, ic[i % ic.length], 0, 0, 22, dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.075)', { stroke: 1.6 }); x.restore(); i++; }
+      return ctx.createPattern(cv, 'repeat'); })(); return doodleC[k]; };
+    const doodleC = {};
     const NAME_COLORS = ['#e5484d', '#f76b15', '#c99a00', '#30a46c', '#12a594', '#0090ff', '#6e56cf', '#d6409f'];
     const nameColor = (n) => { let h = 0; for (const ch of String(n || '')) h = (h * 31 + ch.codePointAt(0)) | 0; return NAME_COLORS[Math.abs(h) % NAME_COLORS.length]; };
     const draftOf = (s, c = chatOf(s)) => (p.drafts !== false ? chatMeta(s).draft?.[c] || '' : '');
@@ -11990,6 +12036,7 @@ registerBehavior('uiChat', {
       for (const r of list) patch(s, r, { text: '', media: '', voice: '', reaction: '', reacts: '', poll: '', loc: '', deleted: true, ...(r.enc ? { enc: null } : {}) }); s.snackbar?.(list.length > 1 ? `Deleted ${list.length} messages for everyone` : 'Deleted for everyone', 'Undo', () => { for (const [r, w] of was) patch(s, r, { ...w, deleted: false }); }); };
     /** Press and hold: react, reply, edit, copy, forward, star, pin, select, info, delete. */
     const msgMenu = (s, r, mine, it) => {
+      if (r._sched) { schedTap(s, r._sched); return; }
       if (r.deleted) return; const items = [];
       if (p.replies !== false) items.push({ icon: '↩️', label: 'Reply', run: () => { editing = null; replyTo = r; bar?.close(); bar = null; openBar(s); } });
       if (mine && p.edits !== false && r.text && !r._locked) items.push({ icon: '✏️', label: 'Edit', run: () => { replyTo = null; editing = r; bar?.close(); bar = null; setTimeout(() => openBar(s), 60); } });
@@ -12087,13 +12134,13 @@ registerBehavior('uiChat', {
         body.append(el('div', 'height:10px;'));
       } });
     };
-    const WALLS = [['', 'None'], ['#dbeafe', 'Sky'], ['#dcfce7', 'Mint'], ['#ffedd5', 'Peach'], ['#ede9fe', 'Lavender'], ['#fce7f3', 'Blush'], ['#0b141a', 'Night'], ['linear:#a1c4fd,#c2e9fb', 'Morning'], ['linear:#fbc2eb,#a6c1ee', 'Candy'], ['linear:#f6d365,#fda085', 'Sunset'], ['linear:#0f2027,#2c5364', 'Deep sea']];
+    const WALLS = [['', 'None'], ['doodle', 'Doodles'], ['#dbeafe', 'Sky'], ['#dcfce7', 'Mint'], ['#ffedd5', 'Peach'], ['#ede9fe', 'Lavender'], ['#fce7f3', 'Blush'], ['#0b141a', 'Night'], ['linear:#a1c4fd,#c2e9fb', 'Morning'], ['linear:#fbc2eb,#a6c1ee', 'Candy'], ['linear:#f6d365,#fda085', 'Sunset'], ['linear:#0f2027,#2c5364', 'Deep sea']];
     const wallOf = (s) => chatMeta(s).wall[chatOf(s)] ?? (p.wallpaper || '');
     const wallSheet = (s) => {
       const c = colors(); sheetOpen = true;
       socialSheet(s, { kind: 'wallpaper', title: 'Chat wallpaper', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
         const { body, el, close } = api, cur = wallOf(s), grid = el('div', 'display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 16px 16px;');
-        for (const [v, l] of WALLS) { const g = v.startsWith('linear:') ? v.slice(7).split(',') : null, b = el('button', `aspect-ratio:3/4;border-radius:14px;border:${v === cur ? `3px solid ${c.acc}` : `1px solid ${c.line}`};background:${g ? `linear-gradient(160deg,${g[0]},${g[1]})` : v || c.field};cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding:6px;font:700 11px ${THEME.font};color:${v === '#0b141a' || v.includes('#0f2027') ? '#fff' : '#333'};`, l); b.type = 'button'; b.dataset.wall = v || 'none';
+        for (const [v, l] of WALLS) { const g = v.startsWith('linear:') ? v.slice(7).split(',') : null, b = el('button', `aspect-ratio:3/4;border-radius:14px;border:${v === cur ? `3px solid ${c.acc}` : `1px solid ${c.line}`};background:${g ? `linear-gradient(160deg,${g[0]},${g[1]})` : v === 'doodle' ? (isDark(s) ? '#0b141a' : '#efeae2') : v || c.field};cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding:6px;font:700 11px ${THEME.font};color:${v === '#0b141a' || v.includes('#0f2027') ? '#fff' : '#333'};`, l); b.type = 'button'; b.dataset.wall = v || 'none';
           b.onclick = () => { const m = chatMeta(s); m.wall = { ...m.wall, [chatOf(s)]: v }; saveChatMeta(s, m); close(); }; grid.append(b); }
         body.append(grid);
       } });
@@ -12159,6 +12206,7 @@ registerBehavior('uiChat', {
       },
       update(e, dt, s) {
         chatE = e; s0 = s;
+        if (!s.engine.editing && (statusT += dt) > 0.5) { statusT = 0; sendDue(s); if (p.status !== false && shown(e)) { const st = allowed(s) ? statusOf(s, chatOf(s)) : ''; if (s.vars.chatStatus !== st) s.setVar('chatStatus', st); } }
         { const c0 = chatOf(s), M0 = me(s); reqNow = p.requests !== false && !s.engine.editing && allowed(s) && chatRequest(s, rows(s), c0, M0, chatMembers(all(s), c0)); }
         const b = UK.fit(s, e, UK.box(e)), barH = reqNow ? 112 : 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
         pinId = pinned ? pinned.id : null; list0 = list;
@@ -12220,6 +12268,8 @@ registerBehavior('uiChat', {
           { const ly = t.y + S.v - list.y, pl = L.find((q) => q.pill && t.x >= q.pill.x - 4 && t.x <= q.pill.x + q.pill.w + 4 && ly >= q.pill.y - 4 && ly <= q.pill.y + q.pill.h + 4); if (pl) { UK.tap(s, p); reactSheet(s, pl.r); continue; } } // who reacted
           const it = itemAt(t); if (!it) continue;
           if (it.poll) { const rel = t.y + S.v - list.y - it.y - it.poll.y1, i = Math.floor(rel / 44); if (rel >= it.poll.n * 44) { UK.tap(s, p); votersSheet(s, it.r); continue; } if (i >= 0 && i < it.poll.n) { UK.tap(s, p); vote(s, it.r, i); continue; } }
+          if (it.r._sched) { UK.tap(s, p); schedTap(s, it.r._sched); continue; }
+          if (it.contact) { UK.tap(s, p); const [h, nm] = it.contact; if (handleOf(h) !== handleOf(me(s).handle)) openConv(s, dmId(handleOf(me(s).handle), handleOf(h)), nm || h); continue; }
           if (it.once) { UK.tap(s, p); onceTap(s, it.r, it.mine); continue; }
           if (it.media && isPic(it.media)) { const rel = t.y + S.v - list.y - it.y - (it.quote || 0) - (it.fwd || 0); if (rel >= 0 && rel <= 170) { UK.tap(s, p); sheetOpen = true; photoViewer(s, { src: it.media, title: it.mine ? 'You' : it.r.author || '', sub: when(it.r._at || Date.now()), note: it.r.text || '', onClose: () => { sheetOpen = false; } }); continue; } } // a photo: full screen
           if (it.loc && !(it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0))) { openLink(mapURL(it.r.loc)); continue; }
@@ -12239,13 +12289,14 @@ registerBehavior('uiChat', {
         const showNames = p.names === 'always' || (p.names !== 'never' && group), avW = p.avatars !== false ? 36 : 0, maxW = Math.min(b.w * 0.74, 420), pad = 12;
         // lay out
         L = []; let y = 10, prev = null, divDone = false, lastDay = 0; const del0 = (r) => !!r.deleted, inMeta = p.bubbleTimes !== false;
-        const metaOf = (r, mine) => { const t = (r.edited && !r.deleted ? 'Edited · ' : '') + clockOf(r._at || Date.now()); ctx.font = `500 11px ${THEME.font}`; return { t, w: ctx.measureText(t).width + (mine && p.ticks !== false ? 20 : 0) + 4 }; };
+        const metaOf = (r, mine) => { const t = r._sched ? '🕓 ' + atText(r._at) : (r.edited && !r.deleted ? 'Edited · ' : '') + clockOf(r._at || Date.now()); ctx.font = `500 11px ${THEME.font}`; return { t, w: ctx.measureText(t).width + (mine && p.ticks !== false ? 20 : 0) + 4 }; };
         const sealedChat = !!encMembers(s, c); if (sealedChat) { L.push({ kind: 'e2ee', y: 6, h: 30 }); y = 44; } // 🔒 a note that the chat is end-to-end encrypted
         const ttlOn = p.disappearing !== false ? +chatSetting(R, 'ttl') || 0 : 0; if (ttlOn) { L.push({ kind: 'ttl', y: y - 4, h: 30, t: ttlOn }); y += 34; } // ⏱ disappearing messages are on
-        R.forEach((r, i) => {
+        const SCH = p.schedule !== false ? schedOf(s).filter((q) => q.chat === c).sort((a, b) => a.at - b.at).map((q) => ({ id: 'sched:' + q.id, chat: c, author: M.author, handle: M.handle, text: q.text, _at: q.at, _me: true, _sched: q })) : [];
+        [...R, ...SCH].forEach((r, i, RR) => {
           if (r.system) { const W1 = lay(ctx, String(r.text || ''), b.w - 80, 13, 3), ls = W1.lines; L.push({ kind: 'system', y: y + 8, h: ls.length * 17 + 10, lines: ls, w: W1.w }); y += ls.length * 17 + 26; prev = null; return; }
           ctx.font = `500 ${TS}px ${THEME.font}`;
-          const mine = isMineMsg(r, M), next = R[i + 1] && !R[i + 1].system ? R[i + 1] : null, gapPrev = prev ? (r._at || 0) - (prev._at || 0) : 1e12, sameAsPrev = prev && (prev.handle || prev.author) === (r.handle || r.author) && gapPrev < 3 * 60e3;
+          const mine = isMineMsg(r, M), next = RR[i + 1] && !RR[i + 1].system ? RR[i + 1] : null, gapPrev = prev ? (r._at || 0) - (prev._at || 0) : 1e12, sameAsPrev = prev && (prev.handle || prev.author) === (r.handle || r.author) && gapPrev < 3 * 60e3;
           const sameAsNext = next && (next.handle || next.author) === (r.handle || r.author) && (next._at || 0) - (r._at || 0) < 3 * 60e3;
           const dayOf = (t) => { const d = new Date(t || Date.now()); return d.getFullYear() * 400 + d.getMonth() * 32 + d.getDate(); };
           if (inMeta ? (!lastDay || dayOf(r._at) !== lastDay) : p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 32, t: r._at, day: inMeta }); y += 34; lastDay = dayOf(r._at); }
@@ -12253,8 +12304,9 @@ registerBehavior('uiChat', {
           if (p.unreadLine !== false && unreadFrom >= 0 && !divDone && !isMineMsg(r, M) && (r._at || 0) > unreadFrom) { divDone = true; const n = R.filter((q) => !q.system && !isMineMsg(q, M) && (q._at || 0) > unreadFrom).length; if (n) { L.push({ kind: 'unread', y: y + 4, h: 30, n }); y += 40; } }
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
           const poll = !del0(r) && r.poll ? pollOf(r) : null, loc = !del0(r) && !poll && r.loc ? String(r.loc) : '';
+          const contact = !del0(r) && !poll && !loc && r.contact ? String(r.contact).split('|') : null;
           const once = !!r.once && !del0(r) && !poll && !loc, op1 = once ? openedBy(r) : [], onceLbl = once ? (mine ? (op1.length ? '👁  Opened' : '👁  View once photo') : op1.includes(handleOf(M.handle)) ? '👁  Opened' : '👁  Photo · tap to view') : '';
-          const del = !!r.deleted, big = !del && !once && !r.media && !r.voice && !r.reply_to && !r.forwarded && !poll && !loc && emojiOnly(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del || once ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
+          const del = !!r.deleted, big = !del && !once && !contact && !r.media && !r.voice && !r.reply_to && !r.forwarded && !poll && !loc && emojiOnly(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del || once ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
           else {
@@ -12268,22 +12320,24 @@ registerBehavior('uiChat', {
             if (link) { bw = Math.max(bw, Math.min(maxW, 240)); bh += 46; }
             if (poll) { bw = Math.max(bw, Math.min(maxW, 280)); ctx.font = `800 15px ${THEME.font}`; poll.lines = lay(ctx, poll.q, bw - 28, 15, 4).lines; poll.y1 = (bh || 0) + 14 + poll.lines.length * 20 + 8; poll.n = poll.opts.length; bh = poll.y1 + poll.n * 44 + 30; }
             if (loc) { bw = Math.max(bw, Math.min(maxW, 250)); bh += 164; }
+            if (contact) { bw = Math.max(bw, Math.min(maxW, 250)); bh += 104; }
           }
           let meta = null; if (inMeta) { meta = metaOf(r, mine); // the time (and ticks) in the bubble's corner
             if (big) { meta.mode = 'under'; bh += 18; }
-            else if (lines.length && !vox && !link && !poll && !loc) { ctx.font = del ? `italic 500 ${TS - 1}px ${THEME.font}` : `600 ${TS}px ${THEME.font}`; const lastW = ctx.measureText(lines[lines.length - 1]).width; if (lastW + meta.w + 10 <= maxW - 28) { meta.mode = 'inline'; bw = Math.min(maxW, Math.max(bw, lastW + meta.w + 10 + 28)); } else { meta.mode = 'row'; bh += 15; } }
+            else if (lines.length && !vox && !link && !poll && !loc && !contact) { ctx.font = del ? `italic 500 ${TS - 1}px ${THEME.font}` : `600 ${TS}px ${THEME.font}`; const lastW = ctx.measureText(lines[lines.length - 1]).width; if (lastW + meta.w + 10 <= maxW - 28) { meta.mode = 'inline'; bw = Math.min(maxW, Math.max(bw, lastW + meta.w + 10 + 28)); } else { meta.mode = 'row'; bh += 15; } }
             else if (media && !lines.length) meta.mode = 'over';
             else { meta.mode = 'row'; bh += 18; } }
           const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (!del && reactsOf(r).size ? 14 : 0) + (!inMeta && r.edited && !del ? 14 : 0);
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, poll, loc, once, del, meta, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, poll, loc, once, contact, del, meta, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
           y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
         if (typing && typing.chat === c && s.time >= typing.t0) { L.push({ kind: 'typing', y: y + 4, h: 36 }); y += 44; } // someone is typing
         y += 10; total = y; e._chat = { L, top, v: S.v, b, sel: !!selecting, sheet: sheetOpen, hold: !!hold }; // (for tests)
         if (jumpUnread) { jumpUnread = false; const dv = L.find((q) => q.kind === 'unread'); if (dv && total - dv.y > listH) { S.max = Math.max(0, total - listH); S.v = clamp(dv.y - 40, 0, S.max); S.flick = 0; atBottom = false; } } // start at the first unread message
         // draw
-        const wall = wallOf(s), darkWall = /#0b141a|#0f2027/i.test(wall), starSet = p.stars !== false ? new Set(chatMeta(s).star) : new Set();
-        if (wall) { if (wall.startsWith('linear:')) { const [g1, g2] = wall.slice(7).split(','), gr = ctx.createLinearGradient(b.x, top, b.x + b.w * 0.4, top + listH); gr.addColorStop(0, g1); gr.addColorStop(1, g2 || g1); ctx.fillStyle = gr; } else ctx.fillStyle = wall; ctx.fillRect(b.x, top, b.w, listH); }
+        const wall = wallOf(s), darkWall = /#0b141a|#0f2027/i.test(wall) || (wall === 'doodle' && dark), starSet = p.stars !== false ? new Set(chatMeta(s).star) : new Set();
+        if (wall === 'doodle') { ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.fillStyle = doodleFill(ctx, dark); ctx.translate(0, -(S.v % 240)); ctx.fillRect(b.x, top, b.w, listH + 240); ctx.restore(); } // little drawings that scroll with the chat, like WhatsApp
+        else if (wall) { if (wall.startsWith('linear:')) { const [g1, g2] = wall.slice(7).split(','), gr = ctx.createLinearGradient(b.x, top, b.x + b.w * 0.4, top + listH); gr.addColorStop(0, g1); gr.addColorStop(1, g2 || g1); ctx.fillStyle = gr; } else ctx.fillStyle = wall; ctx.fillRect(b.x, top, b.w, listH); }
         if (p.pullRefresh !== false) pullSpinner(ctx, s, S, b.cx, top, mineC, dark ? '#1f2330' : '#ffffff');
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.translate(0, top - S.v);
         let mineFill = mineC; if (p.bubbleStyle !== 'solid' && /^#[0-9a-f]{6}$/i.test(mineC)) { const g = ctx.createLinearGradient(0, S.v, 0, S.v + listH); g.addColorStop(0, mixColor(mineC, '#ffffff', 0.2)); g.addColorStop(1, mixColor(mineC, '#000000', 0.12)); mineFill = g; }
@@ -12328,13 +12382,13 @@ registerBehavior('uiChat', {
           else {
             const rad = 18, small = 6, x = it.bx, y0 = it.y, w = it.bw, h = it.h, br = it.mine && it.tail ? small : rad, bl = !it.mine && it.tail ? small : rad;
             ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y0, w, h, [rad, rad, br, bl]); else UK.rr(ctx, x, y0, w, h, rad);
-            if (it.del) { ctx.strokeStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.6); ctx.lineWidth = 1.2; ctx.stroke(); } else { ctx.fillStyle = it.mine ? mineFill : theirsC; ctx.fill(); if (!it.mine && !dark && !wall) { ctx.strokeStyle = 'rgba(0,0,0,0.04)'; ctx.lineWidth = 1; ctx.stroke(); } }
+            if (it.del) { ctx.strokeStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.6); ctx.lineWidth = 1.2; ctx.stroke(); } else if (r._sched) { ctx.save(); ctx.globalAlpha *= 0.5; ctx.fillStyle = mineFill; ctx.fill(); ctx.restore(); ctx.save(); ctx.setLineDash([5, 4]); ctx.strokeStyle = mineC; ctx.lineWidth = 1.5; ctx.stroke(); ctx.restore(); } else { ctx.fillStyle = it.mine ? mineFill : theirsC; ctx.fill(); if (!it.mine && !dark && !wall) { ctx.strokeStyle = 'rgba(0,0,0,0.04)'; ctx.lineWidth = 1; ctx.stroke(); } }
             let ty = y0;
             if (it.fwd) { UK.text(ctx, '↪ Forwarded', x + 14, ty + 14, { size: 12, weight: 600, color: it.mine ? withAlpha('#ffffff', 0.8) : sub, align: 'left', italic: true }); ty += it.fwd; }
             if (it.quote) { // the message it replies to
               const qx = x + 8, qy = ty + 7, qw = w - 16, qh = it.quote - 8; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.18)' : withAlpha(dark ? '#ffffff' : '#000000', 0.06); UK.rr(ctx, qx, qy, qw, qh, 10); ctx.fill();
               ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.85)' : mineC; ctx.fillRect(qx, qy + 5, 3, qh - 10);
-              UK.text(ctx, r.reply_author && r.reply_author === M.author ? 'You' : String(r.reply_author || ''), qx + 10, qy + 11, { size: 12, weight: 800, color: it.mine ? mineT : mineC, align: 'left', maxW: qw - 16 });
+              UK.text(ctx, r.reply_author && r.reply_author === M.author ? 'You' : String(r.reply_author || ''), qx + 10, qy + 11, { size: 12, weight: 800, color: it.mine ? mineT : group && r.reply_author ? nameColor(r.reply_author) : mineC, align: 'left', maxW: qw - 16 });
               UK.text(ctx, String(r.reply_text || ''), qx + 10, qy + 25, { size: 12, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'left', maxW: qw - 16 });
               ty += it.quote;
             }
@@ -12372,6 +12426,13 @@ registerBehavior('uiChat', {
               const fy = y0 + P.y1 + P.n * 44; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(x + 10, fy, w - 20, 1);
               UK.text(ctx, total2 ? `View votes · ${total2}` : 'No votes yet · tap to vote', x + w / 2, fy + 15, { size: 13, weight: 800, color: it.mine ? mineT : mineC });
             }
+            if (it.contact) { // 👤 a contact card: picture, name, handle, Message
+              const [h, nm = h] = it.contact, cy0 = ty + 6, fg = it.mine ? mineT : txt, fg2 = it.mine ? withAlpha('#ffffff', 0.78) : sub;
+              ctx.fillStyle = nameColor(nm); ctx.beginPath(); ctx.arc(x + 34, cy0 + 30, 21, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, String(nm).split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase(), x + 34, cy0 + 31, { size: 14, weight: 800, color: '#ffffff' });
+              UK.text(ctx, nm, x + 64, cy0 + 22, { size: 15, weight: 800, color: fg, align: 'left', maxW: w - 76 }); UK.text(ctx, '@' + h, x + 64, cy0 + 41, { size: 13, weight: 500, color: fg2, align: 'left', maxW: w - 76 });
+              ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(x + 10, cy0 + 62, w - 20, 1);
+              UK.text(ctx, 'Message', x + w / 2, cy0 + 82, { size: 14, weight: 800, color: it.mine ? mineT : mineC });
+            }
             if (it.loc) { // 📍 a little map with a pin, then the place
               const [la, lo] = String(it.loc).split(',').map(Number), mx = x + 4, my = ty + 4, mw = w - 8, mh2 = 116; ctx.save(); ctx.beginPath(); UK.rr(ctx, mx, my, mw, mh2, 14); ctx.clip();
               ctx.fillStyle = dark ? '#243128' : '#e7f0dc'; ctx.fillRect(mx, my, mw, mh2); let sd = Math.abs(Math.floor((la || 1) * 1000 + (lo || 1) * 777)) || 7; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
@@ -12384,7 +12445,7 @@ registerBehavior('uiChat', {
             }
           }
           if (it.meta && !it.del) { // the time (and ✓ / ✓✓) in the corner
-            const m = it.meta, st = it.mine && p.ticks !== false && !selfChat ? stOf(RD, r._at || 0) : null, readAll = st && st.length && st.every((q) => q === 'read'), dbl = st && st.length && st.every((q) => q !== 'sent'), over = m.mode === 'over' || m.mode === 'under';
+            const m = it.meta, st = it.mine && p.ticks !== false && !selfChat && !r._sched ? stOf(RD, r._at || 0) : null, readAll = st && st.length && st.every((q) => q === 'read'), dbl = st && st.length && st.every((q) => q !== 'sent'), over = m.mode === 'over' || m.mode === 'under';
             const rx = it.bx + it.bw - (over ? 10 : 10), my = m.mode === 'under' ? it.y + it.h - 6 : it.y + it.h - (m.mode === 'over' ? 14 : 11);
             if (m.mode === 'over') { ctx.fillStyle = 'rgba(0,0,0,0.45)'; UK.rr(ctx, rx - m.w - 8, my - 9, m.w + 12, 18, 9); ctx.fill(); }
             const mc = over && m.mode === 'over' ? '#ffffff' : it.mine && m.mode !== 'under' ? withAlpha('#ffffff', 0.78) : sub;
@@ -12418,6 +12479,9 @@ registerBehavior('uiChat', {
           UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (reactsOf(lastMine.r).size ? 22 : 10) + (!inMeta && lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: /^(Seen|Read)/.test(label) ? mineC : sub, align: 'right' }); e._chat.status = label; // (for tests)
         }
         ctx.restore();
+        if (S.drag?.on || Math.abs(S.flick || 0) > 30) scrollT = s.time; // the day you're looking at, while scrolling (like WhatsApp)
+        if (inMeta && s.time - scrollT < 1.4 && S.v > 30 && ok) { const ti = L.find((q) => q.bub && q.y + q.h > S.v + 6); if (ti) { const d = new Date(ti.r._at || Date.now()), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), ago = Math.round((day(new Date()) - day(d)) / 864e5); let lab = ''; try { lab = ago === 0 ? 'Today' : ago === 1 ? 'Yesterday' : ago > 0 && ago < 7 ? d.toLocaleDateString(localeOf(), { weekday: 'long' }) : d.toLocaleDateString(localeOf(), { day: 'numeric', month: 'short', year: 'numeric' }); } catch { lab = ''; }
+          if (lab) { const a = clamp((1.4 - (s.time - scrollT)) / 0.35, 0, 1); ctx.save(); ctx.globalAlpha *= a; ctx.font = `700 12px ${THEME.font}`; const tw = ctx.measureText(lab).width + 24; ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 6; ctx.fillStyle = dark ? '#2a2d35' : '#ffffff'; UK.rr(ctx, b.cx - tw / 2, top + 10, tw, 24, 12); ctx.fill(); ctx.shadowBlur = 0; UK.text(ctx, lab, b.cx, top + 22, { size: 12, weight: 700, color: dark ? '#e5e7eb' : sub }); ctx.restore(); } } }
         if (pinned) { // the pinned message, at the top: tap to jump to it
           ctx.fillStyle = p.bg ? tok(p.bg) : dark ? '#17191f' : '#ffffff'; ctx.fillRect(b.x, b.y, b.w, pinH);
           ctx.fillStyle = withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(b.x, b.y + pinH - 1, b.w, 1);

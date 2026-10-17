@@ -431,6 +431,11 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **＋ on the open bar** (like WhatsApp's attach menu) has **Photo** and **GIF** too (their buttons hide while you type, so the box has room):
     - **Poll**: a question with 2 to 8 answers (*＋ Add an answer*). Everyone taps one answer and sees the counts and bars; tap yours again to take it back. **View votes** lists who picked what (*Polls*).
     - **Location**: the phone asks first, then sends a map card with your position. Tapping the card opens it in Maps (*Share where you are*).
+  - **Status under the name:** the App Bar on the chat page shows **online**, **typing…** or **last seen today 9:41** for a direct message, and who's in a group (*online / typing… / last seen*; it's also in `{chatStatus}`). Your own App Bar subtitle wins if you set one.
+  - **Send later** (type a message, then ＋ › *Send later*): in 1 hour, tonight, tomorrow morning, or a time you pick. It waits in the chat as a dashed bubble with 🕓 and the time; tap it to **Send now**, **Edit** or **Delete**. It goes when the time comes while the app is open (kept on this phone).
+  - **Contacts** (＋ › *Contact*): a card with someone's picture, name and @handle; **Message** on it opens a chat with them.
+  - **Doodles** wallpaper (Chat info › Wallpaper): little drawings behind the chat, light or dark, like WhatsApp.
+  - **While you scroll**, a pill at the top shows the day you're looking at. In groups, quoted names use each person's colour.
   - **Photos:** tap one to see it **full screen** (double-tap or pinch to zoom, drag down or tap to close), with who sent it, when, and its words.
   - **View once** (＋ › *View once*): a photo the other person can open one time, full screen; then it shows **Opened** for both of you. You can't open your own (*View once photos*).
   - **@ in a group:** typing @ lists the people in the group; tap one to put in their @name.

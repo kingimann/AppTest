@@ -10876,7 +10876,39 @@ function chatInputBar(s, o) {
   const tray = mediaTray(s, { colors: { bg: c.bg, text: c.text, sub: c.sub, line: c.line, acc: c.acc, field: c.field }, font, height: 270, gifs: o.photos !== false && o.gifs !== false,
     onEmoji: (em) => { inp.value += em; sync(); }, onGif: (u) => o.onSend({ text: '', media: u }), onToggle: (k) => { emoB.style.color = k === 'emoji' ? c.text : c.acc; gif.style.color = k === 'gif' ? c.text : c.acc; } });
   tray.el.style.flexBasis = '100%'; tray.el.style.margin = '6px -10px calc(-8px - env(safe-area-inset-bottom))'; bar.style.flexWrap = 'wrap';
-  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, file, tray.el); root.append(bar);
+  const mic = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;`); mic.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'; mic.type = 'button'; mic.setAttribute('aria-label', 'Record a voice message'); mic.dataset.mic = '1';
+  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, mic, file, tray.el); root.append(bar);
+  // voice messages: tap the mic, talk, then send (or bin it); up to a minute
+  let recUI = null;
+  const record = async () => {
+    if (recUI) return; if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { s.snackbar?.('Voice messages need a microphone'); return; }
+    let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { s.snackbar?.('Allow the microphone to send voice messages'); return; }
+    const type = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg'].find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+    let mr; try { mr = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 24000 }); } catch { stream.getTracks().forEach((t) => t.stop()); s.snackbar?.('Voice messages are not supported here'); return; }
+    const chunks = [], peaks = [], t0 = performance.now(); let keep = true, ac = null, an = null, timer = 0;
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); an = ac.createAnalyser(); an.fftSize = 512; ac.createMediaStreamSource(stream).connect(an); } catch { an = null; }
+    recUI = el('div', `position:absolute;inset:0;display:flex;align-items:center;gap:10px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));background:${c.bg};z-index:2;`); recUI.dataset.recording = '1';
+    const bin = el('button', `flex:none;border:0;background:none;color:#f4212e;width:38px;height:38px;cursor:pointer;display:flex;align-items:center;justify-content:center;`); bin.innerHTML = svgIcon('trash', 22); bin.type = 'button'; bin.setAttribute('aria-label', 'Cancel the voice message'); bin.dataset.binVoice = '1';
+    const dot = el('span', 'flex:none;width:10px;height:10px;border-radius:50%;background:#f4212e;animation:pocketRecBlink 1s infinite;'), tm = el('span', `flex:none;font:700 15px ${font};color:${c.text};min-width:40px;`, '0:00');
+    const lv = el('div', 'flex:1;min-width:0;height:28px;display:flex;align-items:center;gap:2px;overflow:hidden;justify-content:flex-end;');
+    const ok = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;`); ok.innerHTML = svgIcon('send', 19, { stroke: 2.2 }); ok.type = 'button'; ok.setAttribute('aria-label', 'Send the voice message'); ok.dataset.sendVoice = '1';
+    if (!document.getElementById('pocketRecCSS')) { const st = el('style'); st.id = 'pocketRecCSS'; st.textContent = '@keyframes pocketRecBlink{50%{opacity:.25}}'; document.head.append(st); }
+    recUI.append(bin, dot, tm, lv, ok); bar.append(recUI);
+    const buf = an ? new Uint8Array(an.fftSize) : null;
+    const finish = (send2) => { if (!recUI) return; keep = send2; clearInterval(timer); try { if (mr.state !== 'inactive') mr.stop(); } catch { /* stopped */ } recUI.remove(); recUI = null; };
+    const tick = () => { const sec = (performance.now() - t0) / 1000; tm.textContent = `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+      let v = 0.15 + Math.random() * 0.2; if (an) { an.getByteTimeDomainData(buf); let sum = 0; for (const x of buf) sum += (x - 128) ** 2; v = Math.min(1, Math.sqrt(sum / buf.length) / 40); } peaks.push(v);
+      const b2 = el('span', `flex:none;width:3px;border-radius:2px;background:${c.acc};height:${Math.round(4 + v * 22)}px;`); lv.append(b2); while (lv.children.length > 60) lv.firstChild.remove();
+      if (sec >= 60) finish(true); };
+    timer = setInterval(tick, 100);
+    mr.ondataavailable = (ev) => { if (ev.data?.size) chunks.push(ev.data); };
+    mr.onstop = () => { stream.getTracks().forEach((t) => t.stop()); try { ac?.close(); } catch { /* closed */ } const dur = Math.max(1, Math.round((performance.now() - t0) / 1000)); if (!keep || !chunks.length) return;
+      const n = 28, wave = Array.from({ length: n }, (_, i) => { const a = peaks.slice(Math.floor(i * peaks.length / n), Math.max(Math.floor(i * peaks.length / n) + 1, Math.floor((i + 1) * peaks.length / n))); return Math.round(Math.min(9, (Math.max(0, ...a) || 0.1) * 9)); }).join('');
+      const rd = new FileReader(); rd.onload = () => o.onSend({ text: '', voice: rd.result, dur, wave }); rd.readAsDataURL(new Blob(chunks, { type: mr.mimeType || type || 'audio/webm' })); };
+    bin.onclick = () => finish(false); ok.onclick = () => finish(true);
+    try { mr.start(250); } catch { finish(false); s.snackbar?.('Could not record'); }
+  };
+  mic.onclick = record;
   emoB.onclick = () => tray.toggle('emoji'); inp.addEventListener('focus', () => tray.close());
   let rp = null; // "Replying to Maya" above the bar
   const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:${HAIR} solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
@@ -10890,8 +10922,8 @@ function chatInputBar(s, o) {
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
-  const close = () => { if (gone) return; gone = true; bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
-  const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; };
+  const close = () => { if (gone || recUI) return; gone = true; bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
+  const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
   send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => tray.toggle('gif');
@@ -11082,8 +11114,14 @@ const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], m
 // ---- messaging: conversations, groups, replies, reactions, read receipts ----
 const chatMetaKey = (s) => 'pocket.chatMeta.' + (s.engine.gameKey || 'game');
 /** This phone's own settings for conversations: pinned, muted, deleted (hidden up to a time) and marked unread. */
-const chatMeta = (s) => { try { const o = JSON.parse(store.get(chatMetaKey(s), 'null')); if (o) return { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [] }; } catch { /* storage unavailable */ } return { pin: [], mute: [], hide: {}, unread: [] }; };
-const saveChatMeta = (s, m) => store.set(chatMetaKey(s), JSON.stringify(m));
+const chatMetaCache = new Map(); // (read every frame: parsed once, kept in step with saves)
+const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [] }; chatMetaCache.set(k, m); return m; };
+const saveChatMeta = (s, m) => { chatMetaCache.set(chatMetaKey(s), m); store.set(chatMetaKey(s), JSON.stringify(m)); };
+/** Play a voice message (one at a time). */
+const voicePlayer = { audio: null, id: null, play(r) { try { if (this.id === r.id && this.audio && !this.audio.paused) { this.audio.pause(); this.id = null; return; } this.audio?.pause(); this.audio = new Audio(String(r.voice)); this.id = r.id; this.audio.onended = () => { this.id = null; }; this.audio.play()?.catch?.(() => { this.id = null; }); } catch { this.id = null; } }, frac(r) { const a = this.audio; return this.id === r.id && a && a.duration && isFinite(a.duration) ? a.currentTime / a.duration : this.id === r.id && a ? a.currentTime / Math.max(0.5, +r.dur || 1) : 0; } };
+const LINK_RE = /\b((?:https?:\/\/|www\.)[^\s<>"']+[^\s<>"'.,;:!?)])/i;
+const linkOf = (t) => { const m = LINK_RE.exec(String(t || '')); return m ? (/^www\./i.test(m[1]) ? 'https://' + m[1] : m[1]) : ''; };
+const openLink = (u) => { try { window.open(u, '_blank', 'noopener'); } catch { /* blocked */ } };
 const isGroupChat = (c) => /^g-/.test(String(c));
 const handleOf = (h) => String(h ?? '').trim().replace(/^@/, '').toLowerCase();
 /** Who is in a conversation: both people of a direct message, or a group's members (kept on its first message). */
@@ -11170,6 +11208,11 @@ registerBehavior('uiChat', {
     { key: 'forward', label: 'Forward messages', type: 'bool', default: true, info: 'Press and hold a message › Forward, then pick a person or a group.' },
     { key: 'jump', label: '↓ button back to the newest message', type: 'bool', default: true, info: 'Shows when you scroll up, with how many new messages came in.' },
     { key: 'dayLabels', label: 'Today / Yesterday between days', type: 'bool', default: true },
+    { key: 'voice', label: 'Voice messages (🎙 in the bar)', type: 'bool', default: true, info: 'With nothing typed, the send button is a microphone: tap it, talk (up to a minute), then send or bin it. Tap a voice message to play it.' },
+    { key: 'links', label: 'Link cards for web addresses', type: 'bool', default: true, info: 'A message with a link gets a card with the site; tapping the card opens it.' },
+    { key: 'stars', label: 'Star messages', type: 'bool', default: true, info: 'Press and hold › Star. The message “starred messages” (or Chat info) lists them.' },
+    { key: 'wallpapers', label: 'People can pick a wallpaper per chat', type: 'bool', default: true, info: 'In Chat info (the message “chat info”, e.g. an App Bar button on the chat page).' },
+    { key: 'wallpaper', label: 'Default wallpaper (blank = none)', type: 'color', default: '', optional: true },
     { key: 'demoReplies', label: 'Sample replies while testing', type: 'bool', default: true, info: 'With the built-in sample chats (no Messages collection), people “type” and answer what you send, so you can try the chat. Off with real data.' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 24], step: 1 },
     { key: 'sendMessage', label: 'Sending sends', type: 'text', default: '', suggest: 'messages' },
@@ -11187,16 +11230,17 @@ registerBehavior('uiChat', {
     const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
     /** Private: only the two people of a direct message, or a group's members, can see and write in it. */
     const allowed = (s) => { if (pub()) return true; const c = chatOf(s); if (!c || !(/^dm-/.test(c) || isGroupChat(c))) return false; return chatMembers(all(s), c).includes(handleOf(me(s).handle)); };
-    const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; return all(s).filter((r) => String(r.chat ?? '') === c).sort((a, b) => (a._at || 0) - (b._at || 0)); };
+    const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; const gone = chatMeta(s).gone; return all(s).filter((r) => String(r.chat ?? '') === c && !(gone.length && gone.includes(String(r.id)))).sort((a, b) => (a._at || 0) - (b._at || 0)); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
-    const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.media ? 'Photo' : '');
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.text ? String(r.text).slice(0, 80) : r.voice ? '🎤 Voice message' : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
-      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
+      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
       if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true }); awardPoints(s, 'message');
       replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
-      const G = s.engine.social; if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) ? '' : '') + (m.text || 'Photo'), post: '' }); // (they get a notification)
+      const G = s.engine.social, ment = new Set((String(m.text || '').match(/@([\w.]+)/g) || []).map((x) => handleOf(x)));
+      if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: (isGroupChat(c) && ment.has(h) ? 'mentioned you: ' : '') + (m.text || (m.voice ? '🎤 Voice message' : 'Photo')), post: '' }); // (they get a notification; @mentions in a group say so)
       if (p.demoReplies !== false && !s.engine.editing && !(has(s) && s.engine.supa?.online?.(D(s).def(p.collection)))) { // (not when the messages are online for real) // sample chats: someone types, then answers
         const mh = handleOf(M.handle), who = chatMembers(all(s), c).filter((h) => h !== mh), h = who[Math.floor(Math.random() * who.length)];
         if (h) { const nm = all(s).find((q) => handleOf(q.handle) === h && q.author)?.author || nameOfHandle(s, h); typing = { chat: c, handle: h, name: nm, t0: s.time + 0.7, until: s.time + 2.2 + Math.random() }; }
@@ -11219,22 +11263,115 @@ registerBehavior('uiChat', {
         s.snackbar?.('Forwarded to ' + pp.name); s.engine.vibrate?.(8);
       } });
     };
-    const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, reply: replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; }, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); };
+    const openBar = (s) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), placeholder: p.placeholder, photos: p.photos !== false, voice: p.voice !== false, reply: replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; }, onSend: (m) => sendIt(s, m), onClose: () => { bar = null; } }); };
     /** Press and hold: react, reply, copy, edit, unsend. */
     const msgMenu = (s, r, mine) => {
       if (r.deleted) return; const items = [];
       if (p.replies !== false) items.push({ icon: '↩️', label: 'Reply', run: () => { replyTo = r; bar?.close(); bar = null; openBar(s); } });
       if (r.text) items.push({ icon: '📋', label: 'Copy', run: () => { try { navigator.clipboard?.writeText(String(r.text)); } catch { /* no clipboard */ } s.snackbar?.('Copied'); } });
       if (p.forward !== false) items.push({ icon: '📤', label: 'Forward', run: () => setTimeout(() => forwardIt(s, r), 60) });
+      if (p.stars !== false) { const on = chatMeta(s).star.includes(String(r.id)); items.push({ icon: '⭐', label: on ? 'Unstar' : 'Star', run: () => { const m = chatMeta(s); m.star = on ? m.star.filter((x) => x !== String(r.id)) : [...m.star, String(r.id)]; saveChatMeta(s, m); pops.set(r.id, s.time); s.snackbar?.(on ? 'Unstarred' : 'Starred'); } }); }
+      items.push({ icon: 'ℹ️', label: 'Info', run: () => setTimeout(() => infoSheet(s, r, mine), 60) });
+      items.push({ icon: '🙈', label: 'Delete for me', run: () => { const m = chatMeta(s); m.gone = [...m.gone, String(r.id)]; saveChatMeta(s, m); s.snackbar?.('Deleted for you', 'Undo', () => { const m2 = chatMeta(s); m2.gone = m2.gone.filter((x) => x !== String(r.id)); saveChatMeta(s, m2); }); } });
       if (p.pins !== false && allowed(s)) { const on = pinId != null && String(pinId) === String(r.id); items.push({ icon: '📌', label: on ? 'Unpin' : 'Pin', run: () => setPin(s, r, !on) }); }
       if (mine && p.edits !== false && r.text) items.push({ icon: '✏️', label: 'Edit', run: () => askTextBox(s, { question: 'Edit message', value: String(r.text), max: 1000 }, (v) => { if (v && v !== r.text) patch(s, r, { text: v, edited: true }); }) });
       if (mine && p.edits !== false) items.push({ icon: '🗑️', label: 'Unsend', danger: true, run: () => { const was = { text: r.text || '', media: r.media || '', reaction: r.reaction || '' }; patch(s, r, { text: '', media: '', reaction: '', deleted: true }); s.snackbar?.('Message unsent', 'Undo', () => patch(s, r, { ...was, deleted: false })); } });
       sheetOpen = true;
       socialSheet(s, { kind: 'message', colors: colors(), emojis: String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 8), current: r.reaction || '', onEmoji: (em) => { if (patch(s, r, { reaction: r.reaction === em ? '' : em })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } }, items, onClose: () => { sheetOpen = false; } });
     };
+    const when = (t) => { try { return new Date(t).toLocaleString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); } catch { return shortAgo(t); } };
+    const jumpTo = (s, id) => { const to = L.find((q) => q.bub && String(q.r.id) === String(id)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } };
+    const titleOf = (s) => { const c = chatOf(s), M = me(s), mh = handleOf(M.handle), A = all(s), mem = chatMembers(A, c); if (/^dm-/.test(c)) { const o2 = mem.find((h) => h !== mh); return o2 ? A.find((q) => handleOf(q.handle) === o2 && q.author)?.author || nameOfHandle(s, o2) : (M.author || 'Me') + ' (you)'; } return A.find((q) => String(q.chat) === c && q.title)?.title || (isGroupChat(c) ? 'Group' : '# ' + c); };
+    const sheetRow = (api, c, o) => { const { el } = api; const b = el('button', `display:flex;align-items:center;gap:12px;width:100%;padding:11px 18px;border:0;background:none;color:${c.text};font:inherit;text-align:left;cursor:pointer;`); b.type = 'button'; if (o.lead) b.append(o.lead); const col = el('div', 'flex:1;min-width:0;'); col.append(el('div', `font:700 15px ${THEME.font};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, o.title)); if (o.sub) col.append(el('div', `font:500 13px ${THEME.font};color:${c.sub};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;`, o.sub)); b.append(col); if (o.right) b.append(el('span', `flex:none;font:600 12px ${THEME.font};color:${c.sub};`, o.right)); if (o.run) b.onclick = o.run; return b; };
+    const cap = (api, c, t) => api.el('div', `padding:14px 18px 6px;font:800 12px ${THEME.font};letter-spacing:.06em;text-transform:uppercase;color:${c.sub};`, t);
+    /** Message info: when it was sent, edited, and who has seen it. */
+    const infoSheet = (s, r, mine) => {
+      const c = colors(), ch = chatOf(s), mh = handleOf(me(s).handle), others = chatMembers(all(s), ch).filter((h) => h !== mh), R = rows(s);
+      sheetOpen = true;
+      socialSheet(s, { kind: 'message-info', title: 'Message info', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, avatar } = api;
+        body.append(el('div', `margin:6px 18px 10px;padding:12px 14px;border-radius:16px;background:${c.field};font:500 15px ${THEME.font};color:${c.text};white-space:pre-wrap;word-break:break-word;`, snippet(r) || '…'));
+        body.append(sheetRow(api, c, { title: mine ? 'Sent' : 'From ' + (r.author || 'someone'), sub: when(r._at || Date.now()) }));
+        if (r.edited) body.append(sheetRow(api, c, { title: 'Edited' }));
+        if (r.forwarded) body.append(sheetRow(api, c, { title: 'Forwarded' }));
+        if (r.voice) body.append(sheetRow(api, c, { title: 'Voice message', sub: `${r.dur || 1} seconds` }));
+        if (mine && others.length) {
+          body.append(cap(api, c, 'Seen by'));
+          for (const h of others) { const t = Math.max(readAt(s, ch, h), ...R.filter((q) => !q.system && handleOf(q.handle) === h).map((q) => q._at || 0)), seen = t >= (r._at || 0), nm = nameOfHandle(s, h);
+            body.append(sheetRow(api, c, { lead: avatar(nm, '', 36), title: nm, sub: seen ? (readAt(s, ch, h) >= (r._at || 0) ? 'Seen ' + when(readAt(s, ch, h)) : 'Answered after it') : 'Not seen yet', right: seen ? '✓✓' : '✓' })); }
+        }
+        body.append(el('div', 'height:12px;'));
+      } });
+    };
+    /** Search this conversation: tap a result to jump to it. */
+    const searchSheet = (s) => {
+      const c = colors(); sheetOpen = true;
+      socialSheet(s, { kind: 'chat-search', title: 'Search this chat', colors: c, tall: '78%', onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close, avatar } = api; body.style.borderTop = '0';
+        const q = el('input', `display:block;margin:4px 14px 8px;width:calc(100% - 28px);box-sizing:border-box;font:16px ${THEME.font};padding:10px 14px;border-radius:12px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); q.placeholder = 'Search messages'; q.dataset.chatSearch = '1'; q.setAttribute('autocomplete', 'off');
+        const list = el('div', '');
+        const draw = () => { const t = q.value.trim().toLowerCase(); list.replaceChildren(); if (!t) { list.append(el('div', `padding:24px;text-align:center;color:${c.sub};font:600 14px ${THEME.font};`, 'Type a word to find it in this chat')); return; }
+          const hits = rows(s).filter((r) => !r.system && !r.deleted && String(r.text || '').toLowerCase().includes(t)).reverse();
+          if (!hits.length) list.append(el('div', `padding:24px;text-align:center;color:${c.sub};font:600 14px ${THEME.font};`, 'No messages found'));
+          for (const r of hits.slice(0, 60)) { const row = sheetRow(api, c, { lead: avatar(r.author || '?', r.avatar || '', 36), title: r.author || '', sub: String(r.text), right: shortAgo(r._at || Date.now()), run: () => { close(); jumpTo(s, r.id); } }); row.dataset.hit = String(r.id); list.append(row); } };
+        q.oninput = draw; body.append(q, list); draw(); setTimeout(() => q.focus(), 80);
+      } });
+    };
+    /** Starred messages in this chat. */
+    const starredSheet = (s) => {
+      const c = colors(), st = new Set(chatMeta(s).star), L2 = rows(s).filter((r) => st.has(String(r.id))).reverse(); sheetOpen = true;
+      socialSheet(s, { kind: 'starred', title: 'Starred messages', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close, avatar } = api;
+        if (!L2.length) body.append(el('div', `padding:26px 24px;text-align:center;color:${c.sub};font:600 14px ${THEME.font};`, 'No starred messages yet. Press and hold a message › Star.'));
+        for (const r of L2) body.append(sheetRow(api, c, { lead: avatar(r.author || '?', r.avatar || '', 36), title: '⭐ ' + (r.author || ''), sub: snippet(r), right: shortAgo(r._at || Date.now()), run: () => { close(); jumpTo(s, r.id); } }));
+        body.append(el('div', 'height:10px;'));
+      } });
+    };
+    const WALLS = [['', 'None'], ['#dbeafe', 'Sky'], ['#dcfce7', 'Mint'], ['#ffedd5', 'Peach'], ['#ede9fe', 'Lavender'], ['#fce7f3', 'Blush'], ['#0b141a', 'Night'], ['linear:#a1c4fd,#c2e9fb', 'Morning'], ['linear:#fbc2eb,#a6c1ee', 'Candy'], ['linear:#f6d365,#fda085', 'Sunset'], ['linear:#0f2027,#2c5364', 'Deep sea']];
+    const wallOf = (s) => chatMeta(s).wall[chatOf(s)] ?? (p.wallpaper || '');
+    const wallSheet = (s) => {
+      const c = colors(); sheetOpen = true;
+      socialSheet(s, { kind: 'wallpaper', title: 'Chat wallpaper', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close } = api, cur = wallOf(s), grid = el('div', 'display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:8px 16px 16px;');
+        for (const [v, l] of WALLS) { const g = v.startsWith('linear:') ? v.slice(7).split(',') : null, b = el('button', `aspect-ratio:3/4;border-radius:14px;border:${v === cur ? `3px solid ${c.acc}` : `1px solid ${c.line}`};background:${g ? `linear-gradient(160deg,${g[0]},${g[1]})` : v || c.field};cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding:6px;font:700 11px ${THEME.font};color:${v === '#0b141a' || v.includes('#0f2027') ? '#fff' : '#333'};`, l); b.type = 'button'; b.dataset.wall = v || 'none';
+          b.onclick = () => { const m = chatMeta(s); m.wall = { ...m.wall, [chatOf(s)]: v }; saveChatMeta(s, m); close(); }; grid.append(b); }
+        body.append(grid);
+      } });
+    };
+    /** Chat info: who, search, mute, wallpaper, photos, links, starred, members, delete. */
+    const chatInfoSheet = (s) => {
+      const c = colors(), ch = chatOf(s), M = me(s), mh = handleOf(M.handle), A = all(s), R = rows(s), mem = chatMembers(A, ch), title = titleOf(s), meta = chatMeta(s), muted = meta.mute.includes(ch);
+      const photos = R.filter((r) => r.media && !r.deleted).reverse(), links = R.filter((r) => !r.deleted && linkOf(r.text)).reverse(), voices = R.filter((r) => r.voice && !r.deleted).length, starred = R.filter((r) => meta.star.includes(String(r.id))).length;
+      sheetOpen = true;
+      socialSheet(s, { kind: 'chat-info', title: 'Chat info', colors: c, tall: '90%', onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close, avatar } = api;
+        const top = el('div', 'display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 16px 6px;'); top.append(avatar(title.replace(/ \(you\)$/, ''), '', 84), el('div', `font:800 20px ${THEME.font};text-align:center;`, title), el('div', `font:500 14px ${THEME.font};color:${c.sub};`, /^dm-/.test(ch) ? (mem.every((h) => h === mh) ? 'Only you can see this chat' : '@' + (mem.find((h) => h !== mh) || '')) : isGroupChat(ch) ? `Group · ${mem.length} members` : 'Public room')); body.append(top);
+        const acts = el('div', 'display:flex;justify-content:center;gap:10px;padding:10px 12px 6px;');
+        const act = (ic, label, run, key) => { const b = el('button', `flex:1;max-width:88px;display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px;border:0;border-radius:14px;background:${c.field};color:${c.text};font:700 12px ${THEME.font};cursor:pointer;`); b.type = 'button'; b.dataset.infoAct = key; b.innerHTML = svgIcon(ic, 22); b.append(el('span', '', label)); b.onclick = run; return b; };
+        acts.append(act('search', 'Search', () => { close(); setTimeout(() => searchSheet(s), 300); }, 'search'), act(muted ? 'bell' : 'bell-off', muted ? 'Unmute' : 'Mute', () => { const m = chatMeta(s); m.mute = muted ? m.mute.filter((x) => x !== ch) : [...m.mute, ch]; saveChatMeta(s, m); close(); s.snackbar?.(muted ? 'Notifications on' : 'Muted'); }, 'mute'));
+        if (p.wallpapers !== false) acts.append(act('image', 'Wallpaper', () => { close(); setTimeout(() => wallSheet(s), 300); }, 'wallpaper'));
+        if (p.stars !== false) acts.append(act('star', 'Starred', () => { close(); setTimeout(() => starredSheet(s), 300); }, 'starred'));
+        body.append(acts);
+        body.append(cap(api, c, `Photos and media · ${photos.length}`));
+        if (photos.length) { const g = el('div', 'display:grid;grid-template-columns:repeat(4,1fr);gap:3px;padding:0 14px;'); for (const r of photos.slice(0, 16)) { const t = el('button', `aspect-ratio:1;border:0;padding:0;border-radius:8px;overflow:hidden;background:${c.field} center/cover no-repeat;cursor:pointer;font-size:28px;`); t.type = 'button'; t.dataset.media = String(r.id); const u = String(r.media); if (/^(data:image|https?:|blob:)/.test(u)) t.style.backgroundImage = `url("${u}")`; else t.textContent = u.split('|')[0].trim().slice(0, 2); t.onclick = () => { close(); jumpTo(s, r.id); }; g.append(t); } body.append(g); }
+        else body.append(el('div', `padding:2px 18px 6px;color:${c.sub};font:500 13px ${THEME.font};`, 'Photos you send here show up here.'));
+        body.append(cap(api, c, `Links · ${links.length}`));
+        for (const r of links.slice(0, 10)) { const u = linkOf(r.text); let host = u; try { host = new URL(u).hostname.replace(/^www\./, ''); } catch { /* not a url */ } body.append(sheetRow(api, c, { lead: el('span', `flex:none;width:36px;height:36px;border-radius:10px;background:${c.field};display:flex;align-items:center;justify-content:center;font-size:18px;`, '🔗'), title: host, sub: u, run: () => openLink(u) })); }
+        if (!links.length) body.append(el('div', `padding:2px 18px 6px;color:${c.sub};font:500 13px ${THEME.font};`, 'No links yet.'));
+        if (voices || starred) body.append(el('div', `padding:8px 18px 0;color:${c.sub};font:600 13px ${THEME.font};`, [voices && `🎤 ${voices} voice message${voices > 1 ? 's' : ''}`, starred && `⭐ ${starred} starred`].filter(Boolean).join(' · ')));
+        if (isGroupChat(ch) && mem.length) { body.append(cap(api, c, `${mem.length} members`)); for (const h of mem) { const nm = h === mh ? (M.author || 'You') + ' (you)' : nameOfHandle(s, h); body.append(sheetRow(api, c, { lead: avatar(nm, '', 36), title: nm, sub: '@' + h })); } }
+        const del = el('button', `display:block;width:calc(100% - 28px);margin:16px 14px 18px;padding:13px;border:0;border-radius:14px;background:${c.field};color:#f4212e;font:800 15px ${THEME.font};cursor:pointer;`, 'Delete chat'); del.type = 'button'; del.dataset.deleteChat = '1';
+        del.onclick = () => { const m = chatMeta(s); m.hide = { ...m.hide, [ch]: Date.now() }; saveChatMeta(s, m); close(); s.snackbar?.('Chat deleted for you'); if (!s.navBack?.()) s.navTo?.('inbox'); };
+        body.append(del);
+      } });
+    };
     const shown = (e) => { for (let q = e, n = 0; q && n < 50; q = q.parentEnt, n++) if (!q.visible || q.dead || q._parentHidden) return false; return true; };
     return {
       uiAlways: true,
+      start(e, s) { // messages anything can send: an App Bar button on the chat page, a Button, a node
+        s.on('message', (m) => { if (e.dead || s.engine.editing || !shown(e) || sheetOpen || !allowed(s)) return; const k = String(m).trim().toLowerCase();
+          if (k === 'chat info') chatInfoSheet(s); else if (k === 'search chat') searchSheet(s); else if (k === 'starred messages') starredSheet(s); else if (k === 'chat wallpaper' && p.wallpapers !== false) wallSheet(s); });
+      },
       update(e, dt, s) {
         const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
         pinId = pinned ? pinned.id : null; list0 = list;
@@ -11274,6 +11411,8 @@ registerBehavior('uiChat', {
           if (UK.in(t, barRect)) { if (!allowed(s)) continue; UK.tap(s, p); openBar(s); continue; }
           if (!UK.in(t, list)) continue;
           const it = itemAt(t); if (!it) continue;
+          if (it.link && t.y + S.v - list.y >= it.y + it.h - 46) { openLink(it.link); continue; } // the link card
+          if (it.vox) { voicePlayer.play(it.r); s.engine.vibrate?.(6); continue; } // play / pause
           if (it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0)) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
           if (p.react === false || it.r.deleted) continue;
           if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; if (patch(s, it.r, { reaction: it.r.reaction ? '' : '❤️' })) { pops.set(it.r.id, s.time); s.engine.vibrate?.(10); } }
@@ -11296,7 +11435,7 @@ registerBehavior('uiChat', {
           if (p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 30, t: r._at }); y += 30; }
           else if (!sameAsPrev) y += 6;
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
-          const del = !!r.deleted, big = !del && !r.media && !r.reply_to && !r.forwarded && ONLY_EMOJI(r.text), fwd = !del && r.forwarded ? 20 : 0, media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
+          const del = !!r.deleted, big = !del && !r.media && !r.voice && !r.reply_to && !r.forwarded && ONLY_EMOJI(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
           else {
@@ -11306,14 +11445,18 @@ registerBehavior('uiChat', {
             if (media) { bw = Math.min(maxW, 230); bh += isPic(media) ? 170 : 120; }
             if (quote) { ctx.font = `600 12px ${THEME.font}`; bw = Math.max(bw, Math.min(maxW, Math.max(ctx.measureText(String(r.reply_text || '')).width, ctx.measureText(String(r.reply_author || '')).width) + 40)); bh += quote; }
             if (fwd) { bw = Math.max(bw, 116); bh += fwd; }
+            if (vox) { bw = Math.max(bw, Math.min(maxW, 240)); bh += 54; }
+            if (link) { bw = Math.max(bw, Math.min(maxW, 240)); bh += 46; }
           }
           const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (r.reaction ? 14 : 0) + (r.edited && !del ? 14 : 0);
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
           y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
         if (typing && typing.chat === c && s.time >= typing.t0) { L.push({ kind: 'typing', y: y + 4, h: 36 }); y += 44; } // someone is typing
         y += 10; total = y; e._chat = { L, top, v: S.v, b }; // (for tests)
         // draw
+        const wall = wallOf(s), darkWall = /#0b141a|#0f2027/i.test(wall), starSet = p.stars !== false ? new Set(chatMeta(s).star) : new Set();
+        if (wall) { if (wall.startsWith('linear:')) { const [g1, g2] = wall.slice(7).split(','), gr = ctx.createLinearGradient(b.x, top, b.x + b.w * 0.4, top + listH); gr.addColorStop(0, g1); gr.addColorStop(1, g2 || g1); ctx.fillStyle = gr; } else ctx.fillStyle = wall; ctx.fillRect(b.x, top, b.w, listH); }
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.translate(0, top - S.v);
         const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), selfChat = /^dm-/.test(c) && !others.length, reads = p.ticks !== false ? others.map((h) => Math.max(readAt(s, c, h), ...R.filter((r) => !r.system && handleOf(r.handle) === h).map((r) => r._at || 0))) : [], /* (answering means they saw it) */ pend = has(s) ? new Set((s.engine.supa?.pending?.() || []).map((op) => op.rec?.id).filter(Boolean)) : null;
         const tick = (x, y, col, dbl) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; const one = (ox) => { ctx.beginPath(); ctx.moveTo(x + ox - 9, y); ctx.lineTo(x + ox - 5.5, y + 3.5); ctx.lineTo(x + ox, y - 3.5); ctx.stroke(); }; one(0); if (dbl) one(-5); ctx.restore(); };
@@ -11323,7 +11466,8 @@ registerBehavior('uiChat', {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
           if (it.kind === 'time') { const d = new Date(it.t || Date.now()), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), ago = Math.round((day(new Date()) - day(d)) / 864e5); let ts = '';
             try { const tm = d.toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); ts = (p.dayLabels !== false && ago === 0 ? 'Today · ' : p.dayLabels !== false && ago === 1 ? 'Yesterday · ' : ago === 0 ? '' : ago > 0 && ago < 7 ? d.toLocaleDateString(localeOf(), { weekday: 'long' }) + ' · ' : d.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }) + ' · ') + tm; } catch { ts = shortAgo(it.t); }
-            UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: sub }); continue; }
+            if (wall) { ctx.font = `600 12px ${THEME.font}`; const tw = ctx.measureText(ts).width + 18; ctx.fillStyle = darkWall ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.82)'; UK.rr(ctx, b.cx - tw / 2, it.y + 5, tw, 20, 10); ctx.fill(); }
+            UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: wall && darkWall ? '#e5e7eb' : sub }); continue; }
           if (it.kind === 'typing') { const x = b.x + pad + avW, w = 64, h2 = 36; ctx.fillStyle = theirsC; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, it.y, w, h2, [18, 18, 18, 6]); else UK.rr(ctx, x, it.y, w, h2, 18); ctx.fill();
             for (let k = 0; k < 3; k++) { const ph = s.time * 7 - k * 0.8, up = Math.max(0, Math.sin(ph)) * 4; ctx.fillStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.55 + Math.max(0, Math.sin(ph)) * 0.45); ctx.beginPath(); ctx.arc(x + 18 + k * 14, it.y + h2 / 2 - up, 4, 0, Math.PI * 2); ctx.fill(); }
             if (avW) miniAvatar(ctx, typing?.name || '', b.x + pad + 14, it.y + h2 - 14, 28); continue; }
@@ -11350,12 +11494,29 @@ registerBehavior('uiChat', {
             }
             if (it.media) { const mh = isPic(it.media) ? 170 : 120; ctx.save(); ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, ty, w, it.lines.length ? mh : h - (ty - y0), it.lines.length ? (ty === y0 ? [rad, rad, 0, 0] : 0) : [ty === y0 ? rad : 0, ty === y0 ? rad : 0, br, bl]); else ctx.rect(x, ty, w, mh); ctx.clip(); drawMedia(ctx, it.media, it.mine ? mineC : '#888', x, ty, w, mh, 0); ctx.restore(); ty += mh; }
             it.lines.forEach((l, k) => UK.text(ctx, l, x + 14, ty + 8 + LH / 2 + k * LH, { size: it.del ? TS - 1 : TS, weight: 500, color: it.del ? sub : it.mine ? mineT : txt, align: 'left', ...(it.del ? { italic: true } : {}) }));
+            if (it.vox) { // ▶ a waveform and the time
+              const vy = ty + (it.lines.length ? it.lines.length * LH + 16 : 0), cy = vy + 27, f = voicePlayer.frac(r), playing = voicePlayer.id === r.id, fg = it.mine ? mineT : mineC;
+              ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.22)' : withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.14); ctx.beginPath(); ctx.arc(x + 26, cy, 17, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = fg;
+              if (playing) { ctx.fillRect(x + 20, cy - 7, 4, 14); ctx.fillRect(x + 28, cy - 7, 4, 14); } else { ctx.beginPath(); ctx.moveTo(x + 22, cy - 8); ctx.lineTo(x + 33, cy); ctx.lineTo(x + 22, cy + 8); ctx.closePath(); ctx.fill(); }
+              const wv = String(r.wave || '') || Array.from({ length: 28 }, (_, i) => String((Math.abs(Math.sin((i + 1) * 12.9898 + String(r.id).length * 78.233)) * 9) | 0)).join(''), n = wv.length, x0 = x + 52, span = w - 52 - 50, step = span / n;
+              for (let i = 0; i < n; i++) { const hh = 4 + (+wv[i] || 0) / 9 * 20; ctx.globalAlpha = i / n <= f && f > 0 ? 1 : 0.45; ctx.fillStyle = fg; UK.rr(ctx, x0 + i * step, cy - hh / 2, Math.max(2, step * 0.55), hh, 1.5); ctx.fill(); }
+              ctx.globalAlpha = 1; const sec = Math.round(f > 0 ? f * (+r.dur || 1) : +r.dur || 1);
+              UK.text(ctx, `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`, x + w - 12, cy, { size: 12, weight: 700, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'right' });
+            }
+            if (it.link) { // a card for the link
+              const lx = x + 8, ly = y0 + h - 44, lw = w - 16, lh = 36; let host = it.link, path = ''; try { const u = new URL(it.link); host = u.hostname.replace(/^www\./, ''); path = (u.pathname + u.search).replace(/^\/$/, ''); } catch { /* not a url */ }
+              ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.18)' : withAlpha(dark ? '#ffffff' : '#000000', 0.06); UK.rr(ctx, lx, ly, lw, lh, 10); ctx.fill();
+              drawIco(ctx, 'link', lx + 18, ly + lh / 2, 16, it.mine ? mineT : mineC, { stroke: 2 });
+              UK.text(ctx, host, lx + 34, ly + (path ? 12 : lh / 2), { size: 13, weight: 800, color: it.mine ? mineT : txt, align: 'left', maxW: lw - 44 });
+              if (path) UK.text(ctx, path, lx + 34, ly + 26, { size: 11, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.8) : sub, align: 'left', maxW: lw - 44 });
+            }
           }
           ctx.restore();
           let uy = it.y + it.h;
           if (r.reaction && !it.del) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); uy += 14; }
           if (r.edited && !it.del) UK.text(ctx, 'Edited', it.mine ? it.bx + it.bw - 4 : it.bx + 4, uy + 7, { size: 11, weight: 600, color: sub, align: it.mine ? 'right' : 'left' });
           if (it.avatar) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
+          if (starSet.size && starSet.has(String(r.id)) && !it.del) UK.text(ctx, '★', it.mine ? it.bx - 10 : it.bx + it.bw + 10, it.y + 11, { size: 13, weight: 800, color: '#f5b301' });
           if (p.ticks !== false && it.mine && !it.del && !selfChat) { // ✓ sent, ✓✓ seen (blue when everyone has)
             const at = r._at || 0, all2 = reads.length && reads.every((t) => t >= at), some = reads.some((t) => t >= at), tx = it.bx - 5, tyy = it.y + it.h - 8;
             if (pend?.has(r.id)) { ctx.save(); ctx.strokeStyle = sub; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(tx - 5, tyy, 4.5, 0, Math.PI * 2); ctx.moveTo(tx - 5, tyy - 2.5); ctx.lineTo(tx - 5, tyy); ctx.lineTo(tx - 3.5, tyy + 1); ctx.stroke(); ctx.restore(); }
@@ -11520,7 +11681,7 @@ registerBehavior('uiInbox', {
           UK.text(ctx, q.title, tx, ry + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
           UK.text(ctx, when, b.x + b.w - 16, ry + H / 2 - 11, { size: 12, weight: 600, color: q.unread && !q.mute ? acc : sub, align: 'right' });
           flags.forEach((f, i) => drawIco(ctx, f, b.x + b.w - 16 - ww - 4 - i * 17, ry + H / 2 - 11, 13, sub));
-          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.text || (l0.media ? 'Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
+          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.text || (l0.voice ? '🎤 Voice message' : l0.media ? 'Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
           const right = q.unread ? 34 : q.mine && !q.self ? 24 : 0;
           UK.text(ctx, who0 + body0, tx, ry + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - right });
           if (q.unread > 0) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = q.mute ? sub : acc; UK.rr(ctx, b.x + b.w - 16 - bw, ry + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, ry + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }

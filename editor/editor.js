@@ -8320,7 +8320,7 @@ function appBarActionsEditor(get, set, path, b) {
     const stored = parse(), rows = [...stored].reverse(); // stored first = right edge; the cards read left to right like the bar
     const save = (r) => { set(text([...r].reverse())); if (box.isConnected) draw(); else renderInspector(); };
     const pages = [...(uiPages().get(v) || [])], pg = (n, alt) => (pages.includes(n) ? 'page:' + n : alt);
-    const BUILT = [['dark mode toggle', '☾ Light / dark mode'], ['menu', '☰ Opens the side menu'], ['compose', '✎ New post'], ['settings', '⚙ Settings']];
+    const BUILT = [['dark mode toggle', '☾ Light / dark mode'], ['menu', '☰ Opens the side menu'], ['compose', '✎ New post'], ['settings', '⚙ Settings'], ['chat info', 'ⓘ Chat info'], ['search chat', '🔍 Search the chat']];
     const doesLabel = (a) => (a.startsWith('page:') ? '→ ' + a.slice(5) + (pages.includes(a.slice(5)) ? '' : ' (no page yet)') : (BUILT.find((x) => x[0] === a.toLowerCase())?.[1] || `sends “${a}”`));
     const PRESETS = [
       ['bell', 'Notifications', ['bell', pg('notifications', 'page:notifications'), 'notifications_unread']],
@@ -8332,6 +8332,7 @@ function appBarActionsEditor(get, set, path, b) {
       ['plus', 'New post', ['plus', 'compose']],
       ['gear', 'Settings', ['gear', 'settings']],
       ['menu', 'Side menu', ['menu', 'menu']],
+      ['info', 'Chat info', ['info', 'chat info', '', pages.includes('chat') ? 'chat' : ''], 'on the chat page: search, photos, wallpaper'],
       ['star', 'Custom…', null, 'your own icon and message']];
     const has = (r) => stored.some((s) => s[0] === r[0] && s[1] === r[1]);
     box.replaceChildren(

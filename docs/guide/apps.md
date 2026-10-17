@@ -38,12 +38,16 @@ App projects show an **App** badge in your list of projects.
 An app is a set of **pages**. A page is a full-screen panel with **Show If** on the `page` variable (`page = home`, `page = detail`…), and everything inside it shows and hides with it. Pages slide in when you open them and slide back when you go back.
 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
-- **Everything comes with what it needs:** components and page templates have requirements. When you add one, the editor checks what it needs and asks you to add it in one tap (**Needed to work › Add them**), or **Undo**. That covers:
+- **Everything comes with what it needs:** components, page templates and links have requirements. When something needs a page or data the app doesn't have, the editor **adds it for you** and says so in a message with **Undo**, for example: *Added the “rewards” page so the Bottom Nav tab “Rewards” works*. That covers:
   - **Data:** for example, an Inbox needs *Messages* (and *Reads*), a Feed needs *Posts* and *Comments*, Friends needs *Follows* and *Friends*, Notifications needs *Notifications*.
   - **Pages it opens:** for example, an Inbox opens the *chat* page, and a Feed's message button opens it too.
-  - **Pages your tabs, menu items and App Bar buttons open.**
+  - **Every page a link opens:** Bottom Nav tabs, Side Menu items, App Bar buttons, buttons set to *Go to page*, forms that go to a page after saving, and components' page fields. Known names get a ready-made page (inbox, chat, settings, profile, notifications, friends, marketplace…). Any other name gets a page with its title and a note saying what it was made for. The page uses exactly the name the link uses, so the link works straight away.
 
-  It works in a chain: a new chat page brings its own Messages data. Taking away something another part needs (deleting the chat page, a collection, a page a tab opens) asks the same way: put it back with **Undo**, or make a new one. Projects that already miss something show it at the top of the **Hierarchy** with **Add them**.
+  It works in a chain: a new chat page brings its own Messages data.
+  - **While typing:** typing a page name into a button waits until you stop, so you get one page, not one per letter.
+  - **Opening a project:** anything an existing project is missing is added when it opens, with Undo.
+  - **Deleting something a part needs** (the chat page, a collection, a page a tab opens) asks first instead of putting it back behind your back: **Add it** or **Undo**.
+  - **Asking instead:** *Preferences › Editing › Missing pages & data › Ask me first* asks before adding. Then the **Hierarchy** lists what's missing with **Make them for me**.
 - **A button that opens a page you haven't made yet:**
   - **Social pages are made while the app runs.** These are *inbox* / *messages*, *chat*, *notifications*, *friends*, *saved*, *marketplace* and *achievements*. A Messages tab with no Messages page still opens your messages, and the Console says it was made for you.
   - **Any other missing page** shows the first page, with a warning in the Console.

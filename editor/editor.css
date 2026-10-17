@@ -2323,3 +2323,6 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ne-hint[hidden] { display: none; }
 /* long object lists: rows scrolled out of view skip layout and painting */
 #hierarchy .h-row { content-visibility: auto; contain-intrinsic-size: auto 46px; }
+/* a message with a button (Undo) */
+.toast.has-act { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: min(92vw, 560px); }
+.toast-act { flex: none; border: 0; border-radius: 10px; padding: 7px 12px; font: 700 14px system-ui, sans-serif; background: var(--accent, #4c8bd6); color: #fff; cursor: pointer; }

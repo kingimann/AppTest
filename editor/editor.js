@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { webglOK, usesRapier, jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { webglOK, usesRapier, jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, LOGIC_ACTIONS, LOGIC_CONDITIONS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
 const UI_WIDGETS_ALL = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 /** PlayFab and Photon are for games: an app shows them only once it has a game inside. Supabase works for both. */
@@ -8433,17 +8433,52 @@ let collDefs = null;
 /** A ready-made collection by name (from the templates: Posts, Messages, Stories, Tasks…). */
 const collDef = (name) => { if (!collDefs) { collDefs = new Map(); const add = (c) => { if (c?.name && !collDefs.has(ck(c.name))) collDefs.set(ck(c.name), c); }; for (const t of Object.values(templates)) for (const c of t?.collections || []) add(c); for (const c of Object.values(STARTER_COLLECTIONS)) add(c); } return collDefs.get(ck(name)); };
 const REQ_WHAT = { Posts: 'the posts', Comments: 'comments on posts', Messages: 'the conversations', Reads: 'who has seen which messages', Stories: 'the stories', StoryViews: 'who watched each story', Profiles: 'people’s profiles (and chat keys)', Follows: 'who follows whom', Friends: 'friends and requests', Notifications: 'notifications', Bookmarks: 'saved posts', Points: 'points and achievements', Listings: 'things for sale' };
-/** Everything something in the game needs that isn't there: Map key → { kind: 'coll' | 'page', name, by: [labels] }. */
+/** Other things a field can name that the editor can make for you (by the field's suggestion kind). */
+const REQ_KINDS = {
+  dialogues: { k: 'dlg', title: (n) => `The “${n}” dialogue`, sub: 'a short dialogue to fill in (Game Settings › Dialogues)', ic: 'chat', has: (n) => (root.dialogues || []).some((d) => ck(d.name) === ck(n)),
+    make: (n) => { (root.dialogues ||= []).push({ name: n, script: `Guide: Hello! (Edit “${n}” in Game Settings › Dialogues.)` }); return `the “${n}” dialogue`; } },
+  quests: { k: 'quest', title: (n) => `The “${n}” quest`, sub: 'a quest to fill in (Game Settings › Quests)', ic: 'flag', has: (n) => (root.quests || []).some((q) => ck(q.name) === ck(n)),
+    make: (n) => { (root.quests ||= []).push({ name: n, icon: '📜', objectives: '' }); return `the “${n}” quest`; } },
+  products: { k: 'prod', title: (n) => `The “${n}” product`, sub: 'an in-app purchase (Game Settings › In-App Purchases)', ic: 'gem', has: (n) => (root.products || []).some((p) => p.id === n),
+    make: (n) => { (root.products ||= []).push({ id: n, name: n.replace(/[_-]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), price: '$0.99', type: /remove|unlock|premium|full|vip/i.test(n) ? 'unlock' : 'consumable' }); return `the “${n}” product`; } },
+  items: { k: 'item', title: (n) => `The “${n}” item`, sub: 'an item (Game Settings › Items)', ic: 'gem', has: (n) => (root.items || []).some((d) => ck(d.name) === ck(n)) || levelList().some((lv) => (lv.entities || []).some((e) => (e.behaviors || []).some((b) => ['inventoryItem', 'resource'].includes(b.type) && ck(b.item) === ck(n)))),
+    make: (n) => { (root.items ||= []).push({ name: n, icon: '📦', type: 'material', rarity: 'common', stack: 99 }); return `the “${n}” item`; } },
+  templates: { k: 'tpl', title: (n) => `The “${n}” template`, sub: 'an object to spawn copies of', ic: 'copy', has: (n) => levelList().some((lv) => (lv.entities || []).some((e) => ck(e.name) === ck(n))), // (any object with that name can be copied)
+    make: (n) => { project.entities.push(is3D() ? { id: uid(), name: n, template: true, x: 0, y: 0.5, z: 0, mesh: { geometry: 'box', w: 1, h: 1, d: 1, color: '#ffb347' } } : { id: uid(), name: n, template: true, x: 0, y: 0, shape: { type: 'rect', w: 32, h: 32, radius: 6, fill: '#ffb347' } }); return `the “${n}” template`; } },
+  notifyTypes: { k: 'notify', title: (n) => `The “${n}” notification type`, sub: 'how these notifications look (Game Settings › Notifications)', ic: 'bell', has: (n) => allNotifyTypes().some((t) => t.name === n),
+    make: (n) => { const st = gameSettings(); (st.notifyTypes ||= []).push({ name: n }); return `the “${n}” notification type`; } },
+};
+const REQ_BY_KEY = Object.fromEntries(Object.entries(REQ_KINDS).map(([kind, d]) => [d.k, { ...d, kind }]));
+/** Everything something in the game needs that isn't there: Map key → { kind: 'coll' | 'page' | dlg | quest | prod | item | tpl | notify, name, by: [labels] }. */
 function unmetReqs() {
   const out = new Map(); if (!root || !project) return out;
   const have = new Set((root.collections || []).map((c) => ck(c.name))), app = !!levelList()[0]?.settings?.app, pages = new Set([...(uiPages().get('page') || [])].map((v) => String(v).toLowerCase()));
   const need = (key, o, by) => { const q = out.get(key); if (q) { if (!q.by.includes(by)) q.by.push(by); } else out.set(key, { ...o, by: [by] }); };
-  const wantColl = (n, by) => { n = String(n || '').trim(); const d = n && !have.has(ck(n)) && collDef(n); if (d) need('coll:' + ck(n), { kind: 'coll', name: d.name }, by); };
-  const wantPage = (raw, by) => { const v = String(raw || '').trim(); if (!(app || pages.size) || !v || /[:=]/.test(v) || ['back', 'none'].includes(v.toLowerCase()) || pages.has(v.toLowerCase())) return; need('page:' + v.toLowerCase(), { kind: 'page', name: v }, by); }; // (every page something opens, made ready-made when its name says what it is)
+  const wantColl = (n, by, any) => { n = String(n || '').trim(); if (!n || /[{}]/.test(n) || have.has(ck(n))) return; const d = collDef(n); if (d || any) need('coll:' + ck(n), { kind: 'coll', name: d ? d.name : n }, by); }; // (any: named on purpose, so made empty when there's no ready-made one)
+  const wantKind = (kind, raw, by) => { const K = REQ_KINDS[kind], n = String(raw ?? '').trim(); if (!K || !n || /[{}]/.test(n) || K.has(n)) return; need(K.k + ':' + n.toLowerCase(), { kind: K.k, name: n }, by); };
+  /** A field (by its definition) naming a page, data, a dialogue, quest, product, item, template or notification type. */
+  const field = (P, v, by, lv, named) => { if (v == null || typeof v !== 'string') return; if (P.suggest === 'collections' || /collection$/i.test(P.key)) wantColl(v, by, named); else if (REQ_KINDS[P.suggest]) wantKind(P.suggest, v, by); else if (P.key === 'template' && P.type === 'text') wantKind('templates', v, by); else if (lv === project && (P.key === 'page' || /Page$/.test(P.key)) && P.type === 'text') wantPage(v, by); };
+  const scanActions = (o, owner, lv, depth = 0) => { // Triggers / State Machine instruction lists, however deep
+    if (!o || typeof o !== 'object' || depth > 12) return;
+    if (Array.isArray(o)) { for (const x of o) scanActions(x, owner, lv, depth + 1); return; }
+    const A = o.type && (LOGIC_ACTIONS[o.type] || LOGIC_CONDITIONS[o.type]);
+    if (A) { const lb = `${A.label} (${owner})`; for (const P of A.params || []) field(P, o[P.key] ?? P.default, lb, lv, true); if (o.type === 'goPage' || o.type === 'navigate') wantPage(o.page ?? o.value, lb); }
+    for (const v of Object.values(o)) if (v && typeof v === 'object') scanActions(v, owner, lv, depth + 1);
+  };
+  const pageList = [...(uiPages().get('page') || [])].map(String);
+  const wantPage = (raw, by) => { const v = String(raw || '').trim(); if (!(app || pages.size) || !v || /[:=]/.test(v) || ['back', 'none'].includes(v.toLowerCase()) || pages.has(v.toLowerCase())) return;
+    const near = pageList.find((q) => ck(q) === ck(v)); // "signin" while the page is "sign-in": point the link at it instead of making another
+    if (near) need('relink:' + v.toLowerCase(), { kind: 'relink', name: v, to: near }, by); else need('page:' + v.toLowerCase(), { kind: 'page', name: v }, by); }; // (every page something opens, made ready-made when its name says what it is)
   for (const lv of levelList()) for (const e of lv.entities || []) for (const b of e.behaviors || []) {
     const D = Behaviors[b.type]; if (!D) continue; if (b.type === 'uiSideBar' && !b.social) continue;
     const lb = D.label.replace(/ \(.*\)$/, ''), by = e.name && e.name !== lb ? `${lb} (${e.name})` : lb, val = (k) => b[k] ?? D.params?.find((q) => q.key === k)?.default;
-    for (const P of D.params || []) { if (/collection$/i.test(P.key)) wantColl(val(P.key), by); else if (lv === project && /Page$/.test(P.key) && P.type === 'text' && typeof val(P.key) === 'string') wantPage(val(P.key), by); } // (a page name field, not a setting that happens to end in “Page”)
+    const bb = { ...Object.fromEntries((D.params || []).map((q) => [q.key, q.default])), ...b };
+    for (const P of D.params || []) { if (!shown(P, bb, (lv.mode || root.mode) === '3d')) continue; /* (a field that doesn't apply with these settings) */ if (/collection$/i.test(P.key) || P.suggest === 'collections') wantColl(val(P.key), by, b[P.key] !== undefined); else if (REQ_KINDS[P.suggest]) { if (b[P.key] !== undefined) wantKind(P.suggest, b[P.key], by); } else if (lv === project && /Page$/.test(P.key) && P.type === 'text' && typeof val(P.key) === 'string') wantPage(val(P.key), by); } // (a page name field, not a setting that happens to end in “Page”; other kinds only when you set them)
+    if (b.type === 'graph') for (const g of [b.graph, ...(b.scripts || []).map((q) => q.graph)]) for (const n of g?.nodes || []) { // Visual Script nodes
+      const ND = NODE_TYPES[n.type]; if (!ND || n.off) continue; const nb = `the ${ND.label} node (${e.name || 'Object'})`;
+      for (const P of ND.params || []) field(P, n.params?.[P.key] ?? P.default, nb, lv, true);
+    }
+    if (b.type !== 'graph') scanActions(b, e.name || lb, lv);
     for (const n of REQ_EXTRA[b.type] || []) wantColl(n, by);
     if (lv !== project) continue;
     if (b.type === 'button' && val('action') === 'go to page') wantPage(val('value') || 'home', `the button “${e.name || 'Button'}”`);
@@ -8458,7 +8493,9 @@ function unmetReqs() {
 let reqKnown = null, reqBusy = false, reqTimer = 0, reqHave = null, lastTypeAt = -1e9;
 document.addEventListener('input', (e) => { if (e.target?.matches?.('input[type=text], input:not([type]), input[type=search], textarea')) lastTypeAt = performance.now(); }, true);
 /** The pages and data the app has now (to tell "you just removed it" from "something new needs it"). */
-const haveKeys = () => new Set([...(root?.collections || []).map((c) => 'coll:' + ck(c.name)), ...[...(uiPages().get('page') || [])].map((v) => 'page:' + String(v).toLowerCase())]);
+const haveKeys = () => new Set([...(root?.collections || []).map((c) => 'coll:' + ck(c.name)), ...[...(uiPages().get('page') || [])].map((v) => 'page:' + String(v).toLowerCase()),
+  ...(root?.dialogues || []).map((d) => 'dlg:' + String(d.name).toLowerCase()), ...(root?.quests || []).map((d) => 'quest:' + String(d.name).toLowerCase()), ...(root?.products || []).map((d) => 'prod:' + String(d.id).toLowerCase()),
+  ...(root?.items || []).map((d) => 'item:' + String(d.name).toLowerCase()), ...(project?.entities || []).filter((e) => e.template).map((e) => 'tpl:' + String(e.name).toLowerCase())]);
 const autoReqs = () => EP.autoReqs !== 'ask';
 /** A project or level just opened: with "Add them for me", what it's missing is added (once the Scene is up). */
 function openedReqs() { if (!autoReqs()) return; setTimeout(() => { if (playing || reqBusy || !root) return; try { const U = unmetReqs(); if (U.size) autoFixReqs([...U.values()]); } catch { /* not ready */ } }, 400); }
@@ -8467,14 +8504,29 @@ function autoFixReqs(list) {
   flushHistory(); pushHistory(); const before = history[hIndex]; // (Undo goes back to just before, however many steps adding them took)
   const by = [...new Set(list.flatMap((q) => q.by))], made = fixReqs(list, { quiet: true }); if (!made.length) return; pushHistory();
   const what = made.length > 2 ? `${made.slice(0, 2).join(', ')} and ${made.length - 2} more` : made.join(' and ');
-  toast(`Added ${what} so ${by.slice(0, 2).join(' and ')}${by.length > 2 ? ' and more' : ''} work${by.length === 1 ? 's' : ''}`, { label: 'Undo', fn: () => { flushHistory(); pushHistory(); const i = history.lastIndexOf(before); undoRedo(i >= 0 ? i - hIndex : -1); reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); toast('Undone'); } });
+  toast(`${made.some((m) => /they open your/.test(m)) && made.length === 1 ? 'Fixed' : 'Added'} ${what} so ${by.slice(0, 2).join(' and ')}${by.length > 2 ? ' and more' : ''} work${by.length === 1 ? 's' : ''}`, { label: 'Undo', fn: () => { flushHistory(); pushHistory(); const i = history.lastIndexOf(before); undoRedo(i >= 0 ? i - hIndex : -1); reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); toast('Undone'); } });
+}
+/** Every link to page `from` (tabs, menu items, App Bar buttons, buttons, forms, page fields) now opens page `to`. */
+function relinkPage(from, to) {
+  let n = 0; const same = (x) => String(x ?? '').trim().toLowerCase() === from.toLowerCase();
+  const cells = (text, col, pre = '') => String(text || '').split('\n').map((l) => { const c = l.split('|'); if (c.length > col && same(String(c[col]).trim().replace(pre, ''))) { c[col] = ` ${pre}${to}${c.length - 1 > col ? ' ' : ''}`; n++; } return c.join('|'); }).join('\n');
+  for (const e of project.entities) for (const b of e.behaviors || []) {
+    if (b.type === 'uiBottomNav' && b.tabs) b.tabs = cells(b.tabs, 2);
+    if (b.type === 'uiSideBar') { if (b.items) b.items = cells(b.items, 2); if (b.footer) b.footer = cells(b.footer, 2); }
+    if (b.type === 'uiAppBar' && b.actions) b.actions = String(b.actions).split('\n').map((l) => { const c = l.split('|'); if (c[1] && /^\s*page:/.test(c[1]) && same(c[1].trim().slice(5))) { c[1] = ` page:${to} `; n++; } return c.join('|'); }).join('\n');
+    if (b.action === 'go to page' && same(b.value)) { b.value = to; n++; }
+    for (const k of Object.keys(b)) if ((k === 'page' || /Page$/.test(k)) && typeof b[k] === 'string' && same(b[k])) { b[k] = to; n++; }
+  }
+  return n;
 }
 /** Add what's missing: the ready-made collections and pages. */
 function fixReqs(list, { quiet = false } = {}) {
   reqBusy = true; const made = [], before = new Set(reqKnown || []);
-  for (const q of list) before.delete('coll:' + ck(q.name)), before.delete('page:' + String(q.name).toLowerCase());
+  for (const q of list) before.delete('coll:' + ck(q.name)), before.delete('page:' + String(q.name).toLowerCase()), before.delete(q.kind + ':' + String(q.name).toLowerCase());
   try { for (let round = 0; round < 5 && list.length; round++) { for (const q of list) {
-    if (q.kind === 'coll' && !(root.collections || []).some((c) => ck(c.name) === ck(q.name))) { const d = collDef(q.name); if (d) { (root.collections ||= []).push({ ...clone(d), rows: [] }); made.push(`${d.name} data`); } }
+    if (q.kind === 'coll' && !(root.collections || []).some((c) => ck(c.name) === ck(q.name))) { const d = collDef(q.name); (root.collections ||= []).push(d ? { ...clone(d), rows: [] } : { name: q.name, fields: [{ name: 'Title', type: 'text' }, { name: 'Notes', type: 'long text' }], rows: [] }); made.push(`${d ? d.name : q.name} data`); }
+    const K = REQ_BY_KEY[q.kind]; if (K && !K.has(q.name)) made.push(K.make(q.name));
+    if (q.kind === 'relink' && relinkPage(q.name, q.to)) made.push(`the “${q.name}” links (they open your “${q.to}” page now)`);
     if (q.kind === 'page' && ![...(uiPages().get('page') || [])].some((v) => String(v).toLowerCase() === String(q.name).toLowerCase())) { const nv = newPage(null, { name: q.name.charAt(0).toUpperCase() + q.name.slice(1), value: q.name, tab: false, side: false, stay: true, template: pageTplFor(q.name) });
       if (nv) { made.push(`the “${q.name}” page`); const top = !pageTplFor(q.name) && project.entities.find((j) => j.ui && showIfOf(j)?.value === nv && !j.parent); // a plain page says what it's for
         if (top) project.entities.push({ id: uid(), name: 'About This Page', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 90, text: { value: `Made for ${q.by[0] || 'a link'}. Add what this page shows here.`, size: 15, color: levelList()[0].settings?.app ? '@muted' : '#b8bdd0', align: 'left', wrap: 340 } }); } }
@@ -8482,7 +8534,7 @@ function fixReqs(list, { quiet = false } = {}) {
   reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); changed({ structure: true });
   if (made.length && !quiet) toast('Added ' + made.join(', ')); return made;
 }
-const reqLine = (q) => h('div', { class: 'req-row' }, h('span', { class: 'req-ic' }, icon(q.kind === 'coll' ? 'list' : 'layers')), h('div', {}, h('b', {}, q.kind === 'coll' ? `${q.name} data` : `The “${q.name}” page`), h('small', {}, (q.kind === 'coll' ? `keeps ${REQ_WHAT[q.name] || 'its records'}` : `ready-made: ${pageTplFor(q.name)?.label || q.name}`) + ' · for ' + q.by.slice(0, 2).join(', ') + (q.by.length > 2 ? ` +${q.by.length - 2}` : ''))));
+const reqLine = (q) => { const K = REQ_BY_KEY[q.kind]; return h('div', { class: 'req-row' }, h('span', { class: 'req-ic' }, icon(K ? K.ic : q.kind === 'coll' ? 'list' : 'layers')), h('div', {}, h('b', {}, K ? K.title(q.name) : q.kind === 'coll' ? `${q.name} data` : q.kind === 'relink' ? `Links to “${q.name}”` : `The “${q.name}” page`), h('small', {}, (K ? K.sub : q.kind === 'relink' ? `point them at your “${q.to}” page` : q.kind === 'coll' ? `keeps ${REQ_WHAT[q.name] || 'its records'}` : pageTplFor(q.name) ? `ready-made: ${pageTplFor(q.name).label}` : 'a page with its title, to fill in') + ' · for ' + q.by.slice(0, 2).join(', ') + (q.by.length > 2 ? ` +${q.by.length - 2}` : '')))); };
 /** After a change: anything newly missing (something was added that needs more, or something it needed was taken away) is offered right away. */
 function queueReqCheck() {
   clearTimeout(reqTimer); reqTimer = setTimeout(() => {
@@ -8493,7 +8545,7 @@ function queueReqCheck() {
     if (reqKnown === null) { reqKnown = new Set(U.keys()); if (autoReqs() && U.size) autoFixReqs([...U.values()]); return; } // (a project just opened: what's missing is added, or the Hierarchy says what it is)
     let fresh = [...U.entries()].filter(([k]) => !reqKnown.has(k)).map(([, q]) => q); reqKnown = new Set(U.keys());
     if (autoReqs()) { // something new needs a page or data: add it; something you just removed is asked about below
-      const removed = (q) => hadBefore.has(q.kind === 'coll' ? 'coll:' + ck(q.name) : 'page:' + String(q.name).toLowerCase());
+      const removed = (q) => hadBefore.has(q.kind === 'coll' ? 'coll:' + ck(q.name) : (q.kind === 'page' ? 'page:' : q.kind + ':') + String(q.name).toLowerCase());
       const add = fresh.filter((q) => !removed(q)); fresh = fresh.filter(removed);
       if (add.length) autoFixReqs(add);
     }
@@ -9031,7 +9083,7 @@ function addTemplateToPage(pg, tpl) {
   changed({ structure: true }); pushHistory(); toast(`Added the ${tpl.label} template to the “${showIfOf(pg).value}” page`);
 }
 /** Name a page and build it from a template. */
-const newPageFrom = (t) => { const name = prompt('Name of the new page', t.key === 'blank' ? '' : t.label)?.trim(); if (name) newPage(null, { name, template: t }); };
+const newPageFrom = (t) => { const name = prompt('Name of the new page', t.key === 'blank' ? '' : t.label)?.trim(); if (name) newPage(null, { name, template: t, ...(t.key !== 'blank' && name === t.label ? { value: t.key } : {}) }); }; // (keeping its name keeps the page name its links use: signin, signup, chat…)
 /** New Page: pick a ready-made page (or a blank one), then name it. */
 function openPageTemplates() {
   const L = pageTemplates(), groups = [...new Set(L.map((t) => t.group))];

@@ -43,6 +43,14 @@ An app is a set of **pages**. A page is a full-screen panel with **Show If** on 
   - **Pages it opens:** for example, an Inbox opens the *chat* page, and a Feed's message button opens it too.
   - **Every page a link opens:** Bottom Nav tabs, Side Menu items, App Bar buttons, buttons set to *Go to page*, forms that go to a page after saving, and components' page fields. Known names get a ready-made page (inbox, chat, settings, profile, notifications, friends, marketplace…). Any other name gets a page with its title and a note saying what it was made for. The page uses exactly the name the link uses, so the link works straight away.
 
+  - **Everything else something names:**
+    - in-app **products** (a Buy Product node), **quests** (Start Quest, Quest State), **dialogues** (an NPC, Start Dialogue) and **items** (Can Craft, Has Equipped), each made with a starter entry to fill in;
+    - data **collections** a node or trigger uses (ready-made when known, otherwise an empty one);
+    - **templates** a Spawn copies, and **notification types**.
+
+    This covers component settings you changed, Visual Script nodes, and Triggers and State Machine instructions. A setting that doesn't apply with the current choices is ignored.
+  - **Near-miss names:** a link to “signin” when your page is called “sign-in” (or “Sign In”) is pointed at your page instead of making another. The running app also finds a page whose name differs only in dashes, spaces or capitals. Ready-made pages keep the name their links expect (Sign In is *signin*, Create Account is *signup*) when you keep the suggested name.
+
   It works in a chain: a new chat page brings its own Messages data.
   - **While typing:** typing a page name into a button waits until you stop, so you get one page, not one per letter.
   - **Opening a project:** anything an existing project is missing is added when it opens, with Undo.

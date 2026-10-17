@@ -8264,6 +8264,11 @@ function editTabBadge(r, rows, save, b) {
       r[3] ? h('button', { type: 'button', class: 'btn danger', onclick: () => { pad(); r[3] = r[6] = r[7] = ''; closeLayer(); save(rows); toast('Badge removed'); } }, icon('trash'), 'Remove badge') : null),
   ]);
 }
+/** A ready-made page for a page name a button points at (inbox → the Messages page with an Inbox…), or none. */
+const PAGE_TPL_FOR = { inbox: 'inbox', messages: 'inbox', chats: 'inbox', chat: 'chat', notifications: 'activity', activity: 'activity', friends: 'friends', marketplace: 'market', market: 'market', settings: 'settings', signin: 'signin', signup: 'signup', explore: 'explore', feed: 'feed', profile: 'profile' };
+const pageTplFor = (name) => { const k = PAGE_TPL_FOR[String(name || '').toLowerCase()]; return k ? pageTemplates().find((t) => t.key === k) : undefined; };
+/** Make a page a button points at, ready-made when its name says what it is. */
+const makeLinkedPage = (val) => newPage(null, { name: String(val).charAt(0).toUpperCase() + String(val).slice(1), tab: false, stay: true, template: pageTplFor(val) });
 /** The Bottom Nav's tabs as cards: an icon to pick, a label, the page it opens, a badge; add a tab from a page (or a new one). */
 function navTabEditor(get, set, path, b) {
   const box = h('div', { class: 'navtabs' });
@@ -8283,7 +8288,7 @@ function navTabEditor(get, set, path, b) {
             h('option', { value: '\u0000new' }, '+ New page…'))),
         h('button', { type: 'button', class: 'tl-m', title: 'Tab', onclick: (e) => popMenu(e.currentTarget, [
           r[2] && !r[2].startsWith('msg:') && pages.includes(r[2]) && { icon: 'eye', label: `Show the “${r[2]}” page`, fn: () => { if (!uiMode) setViewMode('ui'); setUIPage(`${v}=${r[2]}`); } },
-          r[2] && !r[2].startsWith('msg:') && !pages.includes(r[2]) && { icon: 'plus', label: `Make the “${r[2]}” page`, fn: () => { newPage(null, { name: r[0] || r[2], tab: false, stay: true }); draw(); } },
+          r[2] && !r[2].startsWith('msg:') && !pages.includes(r[2]) && { icon: 'plus', label: `Make the “${r[2]}” page`, k: pageTplFor(r[2]) ? 'ready-made: ' + pageTplFor(r[2]).label : '', fn: () => { makeLinkedPage(r[2]); draw(); } },
           { icon: 'bell', label: r[3] ? `Badge: {${r[3]}}…` : 'Badge…', k: r[3] ? 'its look, its number' : 'a count or a dot on the tab', fn: () => editTabBadge(r, rows, save, b) },
           { icon: 'star', label: r[4] ? `Icon when selected: ${r[4]}` : 'Icon when selected…', k: 'e.g. a filled heart', fn: () => pickNavIcon(r[4], (ic) => { while (r.length < 4) r.push(''); r[4] = ic; save(rows); }) },
           r[4] && { icon: 'close', label: 'Same icon when selected', fn: () => { r[4] = ''; save(rows); } },
@@ -8318,10 +8323,10 @@ function appBarActionsEditor(get, set, path, b) {
     const BUILT = [['dark mode toggle', '☾ Light / dark mode'], ['menu', '☰ Opens the side menu'], ['compose', '✎ New post'], ['settings', '⚙ Settings']];
     const doesLabel = (a) => (a.startsWith('page:') ? '→ ' + a.slice(5) + (pages.includes(a.slice(5)) ? '' : ' (no page yet)') : (BUILT.find((x) => x[0] === a.toLowerCase())?.[1] || `sends “${a}”`));
     const PRESETS = [
-      ['bell', 'Notifications', ['bell', pg('notifications', 'notifications'), 'notifications_unread']],
+      ['bell', 'Notifications', ['bell', pg('notifications', 'page:notifications'), 'notifications_unread']],
       ['search', 'Search', ['search', pg('search', pg('explore', 'search'))]],
-      ['chat', 'Messages', ['chat', pg('inbox', pg('messages', 'inbox')), 'unread']],
-      ['users', 'Friends', ['users', pg('friends', 'friends'), 'friend_requests']],
+      ['chat', 'Messages', ['chat', pg('inbox', pg('messages', 'page:inbox')), 'unread']],
+      ['users', 'Friends', ['users', pg('friends', 'page:friends'), 'friend_requests']],
       ['moon', 'Light / dark mode', ['theme', 'dark mode toggle'], 'moon in light mode, sun in dark'],
       ['user', 'Your profile picture', ['avatar', pg('profile', 'page:profile')]],
       ['plus', 'New post', ['plus', 'compose']],
@@ -8345,6 +8350,7 @@ function appBarActionsEditor(get, set, path, b) {
               r[2] ? h('button', { type: 'button', class: 'nt-badge', title: `Badge: {${r[2]}}`, onclick: () => badge(r, rows, save) }, String(project.vars?.[r[2]] || 3)) : null),
             r[3] ? h('small', { class: 'si-sub' }, 'only on ' + r[3]) : null),
           h('button', { type: 'button', class: 'tl-m', title: 'Button', onclick: (e) => popMenu(e.currentTarget, [
+            a.startsWith('page:') && !pages.includes(a.slice(5)) && { icon: 'plus', label: `Make the “${a.slice(5)}” page`, k: pageTplFor(a.slice(5)) ? 'ready-made: ' + pageTplFor(a.slice(5)).label : '', fn: () => { makeLinkedPage(a.slice(5)); draw(); } },
             { icon: 'bell', label: r[2] ? `Badge: {${r[2]}}…` : 'Badge…', k: 'a count from a variable', fn: () => badge(r, rows, save) },
             { icon: 'eye', label: r[3] ? `Only on: ${r[3]}…` : 'Only on some pages…', k: 'blank = every page', fn: () => onPages(r, rows, save, pages) },
             r[0] !== 'theme' && a === 'dark mode toggle' && { icon: 'star', label: 'Moon / sun icon', k: 'switches with the mode', fn: () => { r[0] = 'theme'; save(rows); } },

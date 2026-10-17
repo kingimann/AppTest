@@ -429,7 +429,10 @@ function pushHistory() {
   updateUndoButtons();
 }
 let histTimer;
-const pushHistorySoon = () => { clearTimeout(histTimer); histTimer = setTimeout(pushHistory, 400); };
+const pushHistorySoon = () => { clearTimeout(histTimer); histTimer = setTimeout(() => { histTimer = 0; pushHistory(); }, 400); };
+/** Moving to another field ends the last one's Undo step (rename, then X, then Y are three steps, not one). */
+const flushHistory = () => { if (histTimer) { clearTimeout(histTimer); histTimer = 0; pushHistory(); } };
+for (const sel of ['#inspector', '#hierarchy']) { $(sel)?.addEventListener('focusin', flushHistory, true); $(sel)?.addEventListener('pointerdown', flushHistory, true); }
 function undoRedo(step) {
   clearTimeout(histTimer); pushHistory();
   const i = hIndex + step;
@@ -2694,6 +2697,12 @@ function scrubber(labelEl, inputEl, get, set, step) {
 }
 
 /** An input bound to target()[path]. spec: { type, label, options, def, structure, step } */
+/** The smallest a number field can be, from what it is: sizes, counts and times can't be negative; a font size is at least 1. */
+function minFor(path) {
+  const k = String(path).split('.').pop();
+  if (/^(text\.size|size)$/.test(path) || (k === 'size' && /^text\./.test(path))) return 1;
+  return /^(w|h|r|radius|width|height|depth|size|fontSize|lineHeight|count|lifetime|duration|seconds|maxW|thickness|border|strokeWidth|range|blur)$/.test(k) ? 0 : null;
+}
 function control(target, path, spec) {
   let rowEl = null; // the finished row (deco)
   const get = () => { const v = getPath(target(), path); return v === undefined ? spec.def : v; };
@@ -2721,12 +2730,15 @@ function control(target, path, spec) {
       const step = spec.step || (is3D() ? 0.1 : 1);
       let slider = null;
       const lazy = () => { if (spec.lazy) renderInspector(); }; // other fields depend on this one: refresh when done typing
-      const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path,
-        oninput: (e) => { const n = parseFloat(e.target.value); if (!Number.isNaN(n)) { set(n); if (slider) slider.value = n; } }, onchange: lazy });
-      const bump = (d) => { let v = round((+get() || 0) + d * step, 3); if (spec.range) v = Math.min(spec.range[1], Math.max(spec.range[0], v)); inp.value = v; if (slider) slider.value = v; set(v); buzz(4); lazy(); };
+      const min = spec.min ?? (spec.range ? null : minFor(path)), name0 = text || path; // sizes can't go below 0 (a font size below 1)
+      const setN = (n) => set(min != null && n < min ? min : n);
+      const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path, ...(min != null ? { min } : {}),
+        oninput: (e) => { const n = parseFloat(e.target.value), bad = min != null && n < min; inp.classList.toggle('bad', bad); inp.title = bad ? `${name0} can’t be below ${min}` : ''; if (!Number.isNaN(n) && !bad) { set(n); if (slider) slider.value = n; } },
+        onchange: (e) => { const n = parseFloat(e.target.value); if (min != null && !Number.isNaN(n) && n < min) { set(min); inp.value = min; if (slider) slider.value = min; toast(`${name0} can’t be below ${min}: set to ${min}`); } inp.classList.remove('bad'); inp.title = ''; lazy(); } });
+      const bump = (d) => { let v = round((+get() || 0) + d * step, 3); if (spec.range) v = Math.min(spec.range[1], Math.max(spec.range[0], v)); if (min != null) v = Math.max(min, v); inp.value = v; if (slider) slider.value = v; set(v); buzz(4); lazy(); };
       el = h('div', { class: 'num' + (unit ? ' has-unit' : '') }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), unit ? h('span', { class: 'num-u' }, inp, h('i', { class: 'unit' }, unit)) : inp,
         h('button', { type: 'button', 'aria-label': 'Increase', onclick: () => bump(1) }, '+'));
-      scrubber(label, inp, get, set, step);
+      scrubber(label, inp, get, setN, step);
       if (spec.range) { // Odin-style [Range] slider under the number
         slider = h('input', { type: 'range', class: 'slider', min: spec.range[0], max: spec.range[1], step: spec.step || 'any', value: val ?? spec.range[0],
           oninput: (e) => { const n = parseFloat(e.target.value); inp.value = n; set(n); }, onchange: lazy });
@@ -3766,7 +3778,7 @@ function renderInspector() {
   box.append(h('div', { class: 'insp-head' },
     h('div', { class: 'big-ico' }, icon(iconFor(j))),
     h('input', { type: 'checkbox', checked: j.visible !== false, title: 'Active', onchange: (e) => { j.visible = e.target.checked; changed({ structure: true }); } }),
-    h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); } }),
+    h('input', { type: 'text', value: j.name || '', oninput: (e) => { j.name = e.target.value; changed(); renderHierarchy(); const cr = $('#inspector .insp-crumbs .cr.cur'); if (cr) cr.textContent = j.name || 'Object'; }, onchange: () => { renderInspector(); } }), // (the breadcrumb follows as you type)
     headDetails(j),
     kidsOf(j.id).length ? kidsCard(j) : null,
     showAdvanced && h('div', { class: 'sub' },

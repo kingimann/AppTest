@@ -326,7 +326,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - Turn it off with *Repost button offers "Quote"*; *Quoting a post sends* sends a message.
   - **Videos:** a `media` link ending in .mp4, .webm, .mov or .m4v shows a play button in the feed. Tapping it opens the post, where the video plays with controls; it also plays in the full-screen viewer.
   - **Loading placeholders:** while a feed's Supabase collection loads, grey placeholder posts shimmer instead of "No posts yet" (*Grey placeholder posts while loading*).
-  - **Share:** opens a share menu: *Share via…* (the phone's share sheet), Copy text, Copy link, Repost and Save. Set *Share button sends* to send a message instead.
+  - **Share:** opens a share menu: *Share via…* (the phone's share sheet), **Send in a message** (pick a person, add a note if you like; the post shows as a quote in that chat, like X's *Send via Direct Message*), Copy text, Copy link, Repost and Save. Set *Share button sends* to send a message instead.
 - **Feed settings** (in the Inspector, grouped):
   - **Content:** collection, sort, filter, a search variable (matches name, handle and text), most posts shown, and *My field names* (e.g. `text = body, media = photo`) if your collection uses other names.
   - **Show:**
@@ -422,8 +422,11 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Links:** a message with a web address gets a **card** with the site's name; tap the card to open it (*Link cards*).
   - **Swipe a message right to reply** (a reply arrow appears; let go past it). *Swipe a message right to reply* turns it off.
   - Tap the bar at the bottom to type; Enter sends and 🖼️ sends a photo. Tapping elsewhere closes it.
+  - **＋ on the open bar** (like WhatsApp's attach menu):
+    - **Poll**: a question with 2 to 8 answers (*＋ Add an answer*). Everyone taps one answer and sees the counts and bars; tap yours again to take it back. **View votes** lists who picked what (*Polls*).
+    - **Location**: the phone asks first, then sends a map card with your position. Tapping the card opens it in Maps (*Share where you are*).
   - **Press and hold a message:**
-    - react with ❤️ 😂 😮 😢 😡 👍 (*Reactions*);
+    - react with ❤️ 😂 😮 😢 😡 👍 (*Reactions*). Everyone gets **one reaction each**, like Messenger and WhatsApp: pick another to change it, the same one to take it back. Under the bubble a pill shows the emoji and how many (outlined when one is yours); **tap it to see who reacted** and tap your own to remove it;
     - **Reply** (the reply quotes it; tap the quote to jump to the original);
     - **Copy**;
     - **Star** (a ★ next to it; *Starred messages* lists them);
@@ -438,16 +441,20 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Message yourself:** in the Inbox, ✏️ › *New message* lists **you** first (*Message yourself*). Pick yourself to get a chat only you can see, for notes, links and photos. It's also offered when forwarding. It shows in the Inbox as *Your Name (you)*, with no ticks, *Seen* or sample replies. Turn it off with the Inbox's *Message yourself*.
   - **Chat info:** the message `chat info` opens it (the Social template has an ⓘ button in the App Bar on the chat page; the App Bar's *Add Button › Chat info* adds one). It shows the person or group, **Search**, **Mute**, **Wallpaper** and **Starred**, the chat's **photos and media** (tap one to jump to it), its **links**, a count of voice messages, the **members** of a group, **Archive chat** and **Delete chat**.
   - **Search this chat:** the message `search chat` (or Chat info › Search). Type a word; tap a result to jump to it.
+  - **Disappearing messages** (Chat info › *Disappearing messages*): *Off*, *24 hours*, *7 days* or *90 days*. New messages then disappear for everyone after that time; messages sent before stay. A note says who turned it on, and a ⏱ pill at the top of the chat shows it's on. Expired messages leave the chat and the Inbox (*Disappearing messages*).
+  - **Theme** (Chat info › *Theme*): pick a colour for the chat, like Messenger (Classic, Berry, Love, Mint, Citrus, Cherry, Grape, Ocean, Honey, Graphite). Your bubbles, ticks and buttons use it, for everyone in the chat; a note says who changed it (*Chat themes*).
+  - **Block** (Chat info, in direct messages): their messages stop showing and the chat leaves your list. *Unblock* in the same place.
+  - **Message requests:** a first direct message from someone you don't follow, aren't friends with and never wrote to opens with **Accept**, **Delete** and **Block** instead of the message bar. They don't see that you read it until you accept. Following them accepts it too (*Message requests*).
   - **Wallpaper:** pick a colour or gradient for each chat (Chat info › Wallpaper, or the message `chat wallpaper`). *Default wallpaper* sets one for every chat. Times get a pill so they stay readable.
   - **@mentions** in a group notify the person mentioned (“mentioned you: …”).
-  - Stars, wallpapers and *Delete for me* are kept on the phone. Messages, voice messages, pins and forwards are shared with the conversation.
+  - Stars, wallpapers, *Delete for me*, accepted requests and blocks are kept on the phone. Messages, voice messages, polls and votes, reactions, pins, forwards, themes and disappearing messages are shared with the conversation.
   - **Typing:** tap the message bar and it opens right where it is (above the Bottom Nav), with the phone's keyboard up at once; while the keyboard is up the bar sits right on top of it, the Bottom Nav slides away (the keyboard covers it in native apps too) and there is only one bar on screen; both come back when the keyboard closes. Tap the 🎙 to record straight away.
   - **Ticks** next to your messages: a little clock while sending, **✓** sent, grey **✓✓** delivered to everyone in the chat, blue **✓✓** once everyone has seen it (or answered after it). The Inbox shows the same ✓ / ✓✓ on your last message.
   - **Message info** groups the people as *Seen by*, *Delivered to* and *Not delivered yet*, with the times.
   - **Pull down to refresh:** at the top of a conversation (and in the Inbox), pull down: a spinner shows and online messages are fetched again (*Up to date* when the chat isn't online). Turn it off with *Pull down to refresh*.
   - **↓ back to the newest:** scroll up and a round button appears above the bar, with how many new messages came in; tap it to jump down.
   - **Typing and sample replies:** with sample or local chats (not online yet), the person you write to shows *typing…* dots and answers, so you can try the chat in the editor (*Sample replies while testing*). Online chats never do this.
-  - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reply_to, reply_text, reply_author, edited, deleted, system, members, title, forwarded, pin, voice, dur, wave.
+  - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reacts (one per person, `handle:emoji, …`), reply_to, reply_text, reply_author, edited, deleted, system, members, title, forwarded, pin, voice, dur, wave, poll (`question | answer | …`), pvotes (`handle:answer, …`), loc (`latitude,longitude`), ttl (seconds, for disappearing messages), and on notes theme.
     - The conversation comes from the variable `chat` (blank = the room in *Room*).
     - With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once, and the people in the conversation get a notification.
   - **Read receipts:** add a **Reads** collection (chat, handle, at, got) and Delivered and Seen work across phones: each phone fills in *got* when the messages reach it and *at* when they're read. Without one, each phone only knows what it has read (while testing, sample chats show Delivered a moment after you send).
@@ -460,6 +467,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Press and hold** a conversation to **pin** it to the top (📌), **mute** it (🔕, it doesn't count in the badge), **archive** it, **mark it unread or read**, or **delete** it (with Undo; it comes back when a new message arrives). These choices are kept on the phone.
   - **Swipe a conversation:** left for **Mute**, **Archive** and **Delete**; right for **Pin** and **Read / Unread**. Tap a button, or swipe it back.
   - **Mute for** *8 hours*, *1 week* or *Always* (also in Chat info). A timed mute ends by itself.
+  - **Message requests:** first messages from people you don't follow wait in a *Message requests* row at the top (with a count), like X and Messenger. Tap it to see them; opening one offers Accept, Delete or Block. Requests don't count in the badge (*Message requests* on the Inbox).
   - **Archived:** archived chats leave the list for an *Archived* row at the top (with a count); tap it to see them and *‹ Back* to return. They don't count in the badge; Unarchive from the menu, a swipe or Chat info.
   - The unread total goes in `{unread}`, for a Bottom Nav badge (`Messages | chat | inbox | unread`). Tapping a conversation sets `chat` and `chatTitle` and goes to the page `chat`.
   - Direct messages use ids like `dm-alex-maya`, the same from both sides. Groups use `g-…` with their members and name on their first message.

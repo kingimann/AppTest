@@ -10393,6 +10393,7 @@ registerBehavior('uiFeed', {
     { key: 'autoplay', label: 'Videos play (muted) as they scroll by', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'skeletons', label: 'Grey placeholder posts while loading (Supabase)', type: 'bool', default: true, group: 'Behaviour' },
     { key: 'quotes', label: 'Repost button offers “Quote”', type: 'bool', default: true, group: 'Behaviour' },
+    { key: 'dmShare', label: 'Share › Send in a message', type: 'bool', default: true, group: 'Behaviour', info: 'Send a post to someone (or yourself) in a direct message, with a note: it shows in the chat as a quote of the post.' },
     { key: 'quoteMessage', label: 'Quoting a post sends', type: 'text', default: '', suggest: 'messages', group: 'Behaviour', showIf: (b) => b.quotes !== false },
     { key: 'commentSort', label: 'Comments sorted by', type: 'select', options: ['top', 'newest'], default: 'top', group: 'Behaviour' },
     { key: 'commentAs', label: 'Comments are written as', type: 'text', default: '{playerName}', group: 'Behaviour', info: 'The name on comments you write. {variables} work; blank = “You”.' },
@@ -10652,10 +10653,21 @@ registerBehavior('uiFeed', {
     const cSave = (s, r, fn) => { const all = cDev(s), L = all[r.id] || (all[r.id] = []); fn(L); if (!L.length) delete all[r.id]; store.set(CKEY(s), JSON.stringify(all)); };
     const colorsOf = () => { const bg0 = tok(p.card || '@card'); return { bg: bg0 && !/^(transparent|rgba\([^)]*,\s*0\))$/.test(bg0) ? bg0 : tok('@bg') || '#fff', text: tok(C('text', '#e7e9ea')), sub: tok(C('sub', '#71767b')), line: tok(C('line', 'rgba(128,128,128,0.25)')), acc: tok(C('accent', '#1d9bf0')), like: tok(C('like', '#f91880')), repost: tok(C('repost', '#00ba7c')), field: 'rgba(128,128,128,0.12)' }; };
     const fontOf = () => (p.font ? `${/[\s,]/.test(p.font) && !/["']/.test(p.font) ? `"${p.font}"` : p.font}, ${THEME.font}` : THEME.font);
+    /** Send a post to someone in a direct message (with a note if you like), like X's “Send via Direct Message”. */
+    const sendInMessage = (s, r) => {
+      const M = meOf(s), mh = handleOf(M.handle), D0 = s.engine.data; sheetUp = true;
+      peoplePicker(s, { title: 'Send to', colors: colorsOf(), people: chatPeople(s, { ...M, handle: mh }, { self: true }), onClose: () => { sheetUp = !!s.engine.root?.querySelector('[data-pocket-sheet]:not([data-closing])'); }, onPick: ([pp]) => askTextBox(s, { question: 'Add a message (optional)', value: '', max: 300, placeholder: 'Say something about it' }, (v) => {
+        const rec = { chat: dmId(mh, pp.handle), author: M.author, handle: M.handle, text: String(v || '').trim(), reply_to: 'post:' + r.id, reply_text: '📝 ' + (String(F(r, 'text') || '').slice(0, 60) || 'Post'), reply_author: F(r, 'author') || '' };
+        const ttl = +chatSetting((D0.def('Messages') ? D0.rows('Messages') : sampleChats(s)).filter((q) => String(q.chat) === rec.chat).sort((a, b) => (a._at || 0) - (b._at || 0)), 'ttl') || 0; if (ttl > 0) rec.ttl = ttl; // (disappearing messages are on there)
+        if (D0.def('Messages')) D0.add('Messages', rec); else sampleChats(s).push({ id: 'x' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+        s.engine.social?.notify?.(pp.handle, 'message', { text: 'sent you a post', post: '' }); s.snackbar?.('Sent to ' + pp.name); s.engine.vibrate?.(8);
+      }) });
+    };
     const shareMenu = (s, r) => {
       const tx = `${F(r, 'author') || ''}: ${F(r, 'text') || ''}`.trim(), url = F(r, 'link'), copy = (v, msg) => { navigator.clipboard?.writeText(v).catch(() => {}); s.snackbar?.(msg); };
       const items = [];
       if (navigator.share) items.push({ icon: '📤', label: 'Share via…', run: () => navigator.share({ text: tx, ...(url ? { url } : {}) }).catch((er) => { if (er?.name !== 'AbortError') copy(tx, 'Copied to clipboard'); }) });
+      if (p.dmShare !== false) items.push({ icon: '✉️', label: 'Send in a message', run: () => setTimeout(() => sendInMessage(s, r), 280) });
       items.push({ icon: '📋', label: 'Copy text', run: () => copy(tx, 'Copied to clipboard') });
       if (url) items.push({ icon: '🔗', label: 'Copy link', run: () => copy(String(url), 'Link copied') });
       items.push({ icon: '🔁', label: isReposted(s, r) ? 'Undo repost' : 'Repost', run: () => { repostIt(s, r); pops.set(r.id + 'r', s.time); } });
@@ -10715,6 +10727,7 @@ registerBehavior('uiFeed', {
     return {
       uiAlways: true,
       update(e, dt, s) {
+        e._share = (id) => { const r = findPost(s, id); if (r) shareMenu(s, r); }; // (for tests)
         selfE = e; SGr = p.profileInfo !== false ? s.engine.social || null : null; profs.clear();
         { const ow = ownerOf(s); ownerPrefs = ow && SGr ? SGr.profile(ow) : null;
           const why = !s.engine.editing && ow ? `@${ow}` : ''; if (why && why !== saidWho) Log.add('info', `“${e.name || 'Social Feed'}” shows only posts by ${why} (Show posts from: ${SRC()}${String(p.filter || '').trim() ? ', Only show: ' + String(p.filter).trim() : ''})`, 'Social Feed'); saidWho = why; }
@@ -11207,7 +11220,8 @@ const SAMPLE_CHATS = () => { const t = Date.now(), M = 60e3; return [
   { id: 'm1', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Are you coming hiking on Saturday? 🏔️', _at: t - 50 * M },
   { id: 'm2', chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: 'Yes! What time?', _at: t - 48 * M, _me: true },
   { id: 'm3', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Meet at 7 by the lake', _at: t - 47 * M },
-  { id: 'm4', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Bring snacks 😄', _at: t - 46.6 * M, reaction: '❤️' },
+  { id: 'm4', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: 'Bring snacks 😄', _at: t - 46.6 * M, reacts: 'alex:❤️', reaction: '❤️' },
+  { id: 'm4p', chat: 'dm-alex-maya', author: 'Maya Chen', handle: 'maya', text: '', poll: 'Lunch after the hike? | Tacos 🌮 | Pizza 🍕 | Sushi 🍣', pvotes: 'maya:0', _at: t - 46 * M },
   { id: 'm5', chat: 'dm-alex-maya', author: 'Alex Rivera', handle: 'alex', text: '👍', _at: t - 3 * M, _me: true },
   { id: 'm6', chat: 'dm-alex-leop', author: 'Leo Park', handle: 'leop', text: 'Did you try the new update?', _at: t - 26 * 60 * M },
   { id: 'm7', chat: 'dm-alex-sofiaruiz', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome to the app! 🎉', _at: t - 3 * 24 * 60 * M },
@@ -11230,6 +11244,7 @@ function sampleChats(s) {
     if (String(o.handle).toLowerCase() === 'alex') { o.handle = mh; o.author = nm; }
     if (/^dm-/.test(o.chat)) { const [a, b] = o.chat.slice(3).split('-').map(sw); o.chat = dmId(a, b); }
     if (o.members) o.members = String(o.members).split(',').map((x) => sw(x.trim())).join(',');
+    if (o.reacts) o.reacts = String(o.reacts).replace(/\balex:/g, mh + ':');
     if (o.text) o.text = String(o.text).replace(/\bAlex\b/g, nm.split(' ')[0]);
     return o; }));
 }
@@ -11266,7 +11281,16 @@ function chatInputBar(s, o) {
     onEmoji: (em) => { inp.value += em; sync(); }, onGif: (u) => o.onSend({ text: '', media: u }), onToggle: (k) => { emoB.style.color = k === 'emoji' ? c.text : c.acc; gif.style.color = k === 'gif' ? c.text : c.acc; } });
   tray.el.style.flexBasis = '100%'; tray.el.style.margin = '6px -10px calc(-8px - env(safe-area-inset-bottom))'; bar.style.flexWrap = 'wrap';
   const mic = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;`); mic.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'; mic.type = 'button'; mic.setAttribute('aria-label', 'Record a voice message'); mic.dataset.mic = '1';
-  if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, mic, file, tray.el); root.append(bar);
+  let plus = null, menu = null; // ＋: more to send (a poll, where you are), like WhatsApp's attach menu
+  const closeMenu = () => { menu?.remove(); menu = null; if (plus) plus.style.transform = 'none'; };
+  if (o.attach?.length) { plus = el('button', `flex:none;border:0;background:none;width:34px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;transition:transform .2s;`); plus.innerHTML = svgIcon('plus', 25, { stroke: 2.2 }); plus.type = 'button'; plus.setAttribute('aria-label', 'More to send'); plus.dataset.attach = '1';
+    plus.onclick = () => { if (menu) { closeMenu(); return; } tray.close(); plus.style.transform = 'rotate(45deg)';
+      menu = el('div', `position:absolute;left:8px;bottom:calc(100% + 8px);display:flex;gap:14px;padding:14px 16px;border-radius:18px;background:${c.bg};border:${HAIR} solid ${c.line};box-shadow:0 8px 28px rgba(0,0,0,.22);`); menu.dataset.attachMenu = '1';
+      for (const a of o.attach) { const b = el('button', `border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:6px;color:${c.text};font:700 12px ${font};cursor:pointer;`); b.type = 'button'; b.dataset.attachItem = a.key || a.label;
+        const ic = el('span', `width:50px;height:50px;border-radius:50%;background:${a.color || c.acc};color:#fff;display:flex;align-items:center;justify-content:center;`); ic.innerHTML = svgIcon(a.icon, 24, { stroke: 2.2 }); b.append(ic, el('span', '', a.label));
+        b.onclick = () => { closeMenu(); a.run(); }; menu.append(b); }
+      bar.append(menu); }; }
+  if (plus) bar.append(plus); if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, mic, file, tray.el); root.append(bar);
   // voice messages: tap the mic, talk, then send (or bin it); up to a minute
   let recUI = null;
   const record = async () => {
@@ -11322,7 +11346,7 @@ function chatInputBar(s, o) {
   const outside = (ev) => { if (!bar.contains(ev.target)) close(); };
   setTimeout(() => root.addEventListener('pointerdown', outside, true), 50);
   sync(); if (o.focusNow) inp.focus(); else setTimeout(() => inp.focus(), 60); // (now: inside the tap, or a phone won't show its keyboard)
-  return { bar, input: inp, close, setReply, record, place };
+  return { bar, input: inp, close, setReply, record, place, closeMenu };
 }
 /** Line icons for a post's buttons (the open post sheet). */
 const POST_ICONS = {
@@ -11507,7 +11531,7 @@ const CHAT_COLORS = { bg: ['Background', ''], mine: ['My bubbles', '@accent'], m
 const chatMetaKey = (s) => 'pocket.chatMeta.' + (s.engine.gameKey || 'game');
 /** This phone's own settings for conversations: pinned, muted, deleted (hidden up to a time) and marked unread. */
 const chatMetaCache = new Map(); // (read every frame: parsed once, kept in step with saves)
-const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {} }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {} }; chatMetaCache.set(k, m); return m; };
+const chatMeta = (s) => { const k = chatMetaKey(s); if (chatMetaCache.has(k)) return chatMetaCache.get(k); let m = null; try { const o = JSON.parse(store.get(k, 'null')); if (o) m = { pin: o.pin || [], mute: o.mute || [], hide: o.hide || {}, unread: o.unread || [], star: o.star || [], wall: o.wall || {}, gone: o.gone || [], arch: o.arch || [], muteUntil: o.muteUntil || {}, acc: o.acc || [], block: o.block || [] }; } catch { /* storage unavailable */ } m ||= { pin: [], mute: [], hide: {}, unread: [], star: [], wall: {}, gone: [], arch: [], muteUntil: {}, acc: [], block: [] }; chatMetaCache.set(k, m); return m; };
 /** Muted now (a mute can run out: 8 hours, a week, or always). */
 const chatMuted = (m, c) => m.mute.includes(c) && !(m.muteUntil?.[c] && m.muteUntil[c] < Date.now());
 /** Mute for a while, or unmute: a sheet of choices. */
@@ -11518,6 +11542,22 @@ function muteSheet(s, c, colors, done) {
     { icon: '🔕', label: 'For 8 hours', run: () => set(Date.now() + 8 * 3600e3) }, { icon: '🔕', label: 'For 1 week', run: () => set(Date.now() + 7 * 864e5) }, { icon: '🔕', label: 'Always', run: () => set(0) }] });
 }
 const saveChatMeta = (s, m) => { chatMetaCache.set(chatMetaKey(s), m); store.set(chatMetaKey(s), JSON.stringify(m)); };
+/** A message sent while disappearing messages were on, and its time is up. */
+const msgExpired = (r, now = Date.now()) => !!(r && !r.system && +r.ttl > 0 && (r._at || now) + +r.ttl * 1000 < now);
+/** A chat's newest setting note (disappearing messages, theme): the value of that field, or null when never set. */
+const chatSetting = (L, key) => { for (let i = L.length - 1; i >= 0; i--) { const r = L[i]; if (r.system && r[key] != null) return r[key]; } return null; };
+/** Reactions, one per person: "handle:emoji, …" (an old single reaction counts as someone's). */
+const reactsOf = (r) => { const m = new Map(); for (const part of String(r?.reacts || '').split(',')) { const i = part.indexOf(':'); if (i > 0 && part.slice(i + 1).trim()) m.set(part.slice(0, i).trim().toLowerCase(), part.slice(i + 1).trim()); } if (!m.size && r?.reaction) m.set('?', String(r.reaction)); return m; };
+/** A direct message from someone you don't follow, aren't friends with and never wrote to: it waits in Message requests until you accept or answer it. */
+const chatRequest = (s, L, c, M, mem) => {
+  if (!/^dm-/.test(c) || !L.length) return false; const mh = handleOf(M.handle), o = mem.find((h) => h !== mh); if (!o) return false;
+  if (L.some((r) => isMineMsg(r, M))) return false; const meta = chatMeta(s); if (meta.acc.includes(c)) return false;
+  const G = s.engine.social; try { if (G && (G.isFollowing(o) || G.friends().some((f) => f.handle === o))) return false; } catch { /* no social graph */ }
+  return true;
+};
+const CHAT_THEMES = [['', 'Default'], ['#0084ff', 'Classic'], ['#a033ff', 'Berry'], ['#ff5ca1', 'Love'], ['#13b56a', 'Mint'], ['#ff7e29', 'Citrus'], ['#e8344e', 'Cherry'], ['#6e3dff', 'Grape'], ['#0aa3b5', 'Ocean'], ['#c79a00', 'Honey'], ['#3a3f4b', 'Graphite']];
+const TTL_CHOICES = [[0, 'Off'], [86400, '24 hours'], [604800, '7 days'], [7776000, '90 days']];
+const ttlLabel = (t) => (TTL_CHOICES.find((x) => x[0] === +t) || [0, `${Math.round(+t / 3600)} hours`])[1];
 /** Play a voice message (one at a time). */
 const voicePlayer = { audio: null, id: null, play(r) { try { if (this.id === r.id && this.audio && !this.audio.paused) { this.audio.pause(); this.id = null; return; } this.audio?.pause(); this.audio = new Audio(String(r.voice)); this.id = r.id; this.audio.onended = () => { this.id = null; }; this.audio.play()?.catch?.(() => { this.id = null; }); } catch { this.id = null; } }, frac(r) { const a = this.audio; return this.id === r.id && a && a.duration && isFinite(a.duration) ? a.currentTime / a.duration : this.id === r.id && a ? a.currentTime / Math.max(0.5, +r.dur || 1) : 0; } };
 /** End-to-end encryption for chats: each person has a key pair kept on their phone (the public half goes on their profile and their messages).
@@ -11650,7 +11690,7 @@ function peoplePicker(s, o) {
 }
 
 registerBehavior('uiChat', {
-  label: 'Chat', description: 'A conversation in bubbles, like a messaging app: yours on the right, theirs on the left with avatars, times, photos, big emoji and replies. Press and hold a message to react, reply, copy, edit or unsend it; double-tap for ❤️. "Seen" shows when they have read it. Works for direct messages and group chats. Messages are kept in a Messages collection; with Supabase (shared, live) they arrive instantly.',
+  label: 'Chat', description: 'A conversation in bubbles, like a messaging app: yours on the right, theirs on the left with avatars, times, photos, big emoji and replies. ＋ sends a poll or your location. Press and hold a message to react (one reaction each; tap the reactions to see who), reply, copy, edit or unsend it; double-tap for ❤️. Chat info has disappearing messages, themes and blocking. "Seen" shows when they have read it. Works for direct messages and group chats. Messages are kept in a Messages collection; with Supabase (shared, live) they arrive instantly.',
   params: [
     { key: 'collection', label: 'Messages collection', type: 'text', default: 'Messages', suggest: 'collections' },
     { key: 'chatVar', label: 'Conversation id comes from variable', type: 'text', default: 'chat', suggest: 'vars', info: 'The Inbox and “Message @someone” set it. Blank, or the variable empty = the room below.' },
@@ -11684,6 +11724,11 @@ registerBehavior('uiChat', {
     { key: 'links', label: 'Link cards for web addresses', type: 'bool', default: true, info: 'A message with a link gets a card with the site; tapping the card opens it.' },
     { key: 'stars', label: 'Star messages', type: 'bool', default: true, info: 'Press and hold › Star. The message “starred messages” (or Chat info) lists them.' },
     { key: 'wallpapers', label: 'People can pick a wallpaper per chat', type: 'bool', default: true, info: 'In Chat info (the message “chat info”, e.g. an App Bar button on the chat page).' },
+    { key: 'polls', label: 'Polls (＋ › Poll)', type: 'bool', default: true, info: 'Ask a question with up to 8 answers. Everyone taps one (tap again to take it back) and sees the counts; “View votes” shows who picked what.' },
+    { key: 'location', label: 'Share where you are (＋ › Location)', type: 'bool', default: true, info: 'Sends a map card with your position (the phone asks first). Tapping it opens the map.' },
+    { key: 'disappearing', label: 'Disappearing messages (in Chat info)', type: 'bool', default: true, info: 'Anyone in the chat can set new messages to disappear after 24 hours, 7 days or 90 days, like WhatsApp. A note in the chat says who turned it on.' },
+    { key: 'themes', label: 'Chat themes (in Chat info)', type: 'bool', default: true, info: 'Pick a colour for the chat, like Messenger: everyone in it sees the new colour.' },
+    { key: 'requests', label: 'Message requests', type: 'bool', default: true, info: 'A first message from someone you don’t follow (and never wrote to) waits as a request, like X and Messenger: Accept, Delete or Block. They don’t see that you read it until you accept. Add the same setting on the Inbox.' },
     { key: 'wallpaper', label: 'Default wallpaper (blank = none)', type: 'color', default: '', optional: true },
     { key: 'demoReplies', label: 'Sample replies while testing', type: 'bool', default: true, info: 'With the built-in sample chats (no Messages collection), people “type” and answer what you send, so you can try the chat. Off with real data.' },
     { key: 'textSize', label: 'Text size', type: 'number', default: 16, range: [11, 24], step: 1 },
@@ -11703,13 +11748,13 @@ registerBehavior('uiChat', {
     const all = (s) => (has(s) ? D(s).rows(p.collection) : sampleChats(s));
     /** Private: only the two people of a direct message, or a group's members, can see and write in it. */
     const allowed = (s) => { if (pub()) return true; const c = chatOf(s); if (!c || !(/^dm-/.test(c) || isGroupChat(c))) return false; return chatMembers(all(s), c).includes(handleOf(me(s).handle)); };
-    const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; const gone = chatMeta(s).gone; return all(s).filter((r) => String(r.chat ?? '') === c && !(gone.length && gone.includes(String(r.id)))).sort((a, b) => (a._at || 0) - (b._at || 0)).map((r) => (r.enc ? E2EE.view(s, r) : r)); }; // (sealed messages opened)
+    const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; const { gone, block } = chatMeta(s), now = Date.now(); return all(s).filter((r) => String(r.chat ?? '') === c && !(gone.length && gone.includes(String(r.id))) && !msgExpired(r, now) && !(block.length && !r.system && block.includes(handleOf(r.handle)))).sort((a, b) => (a._at || 0) - (b._at || 0)).map((r) => (r.enc ? E2EE.view(s, r) : r)); }; // (sealed messages opened)
     const encOn = () => p.encrypt !== 'off' && E2EE.ok();
     /** A person's public key: from their profile, else from a message they sent. */
     const pkOf = (s, h) => { if (h === handleOf(me(s).handle)) return myPk; const G = s.engine.social, pr = G?.profile?.(h)?.pubkey; if (pr) return String(pr); const A = all(s); for (let i = A.length - 1; i >= 0; i--) if (A[i].pk && handleOf(A[i].handle) === h) return String(A[i].pk); return null; };
     /** Everyone in the chat with their key, or null when someone has none yet (then it isn't sealed). */
     const encMembers = (s, c) => { if (!encOn() || !myPk || !(/^dm-/.test(c) || isGroupChat(c))) return null; const mem = [...new Set(chatMembers(all(s), c))]; if (!mem.length) return null; const out = []; for (const h of mem) { const k = pkOf(s, h); if (!k) return null; out.push({ h, pk: k }); } if (!out.some((m) => m.h === handleOf(me(s).handle))) return null; return out; };
-    const SECRET = ['text', 'media', 'voice', 'dur', 'wave', 'reply_text'];
+    const SECRET = ['text', 'media', 'voice', 'dur', 'wave', 'reply_text', 'poll', 'loc'];
     /** Send a row: sealed when everyone in the chat has a key, as it is otherwise. */
     const post = (s, rec, done) => { const mem = encMembers(s, String(rec.chat)), base = { ...rec, ...(myPk ? { pk: myPk } : {}) };
       if (!mem) { const r = addRow(s, base); done?.(r); return; }
@@ -11717,14 +11762,15 @@ registerBehavior('uiChat', {
       E2EE.seal(s, String(rec.chat), payload, mem).then((enc) => { const r = addRow(s, { ...open, enc }); if (r?.id) E2EE.cache.set(r.id + ':' + enc.iv, payload); done?.(r); }).catch((err) => { Log.add('warn', 'Encryption failed, sent as it is: ' + err.message, 'Chat'); done?.(addRow(s, base)); }); };
     const colors = () => ({ bg: tok(p.bg) || tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
     const patch = (s, r, o) => { if (r?._e2ee || r?._locked) r = all(s).find((q) => q.id === r.id) || r; if (has(s) && !r._me) { if (D(s).update(p.collection, r.id, o) === null) return false; } else Object.assign(r, o); return true; };
-    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.voice ? '🎤 Voice message' : r.media ? 'Photo' : '');
+    const snippet = (r) => (r.deleted ? 'Message unsent' : r.enc && !r._e2ee ? (E2EE.peek(r)?.text || '🔒 Encrypted message') : r.text ? String(r.text).slice(0, 80) : r.poll ? '📊 ' + String(r.poll).split('|')[0].trim() : r.loc ? '📍 Location' : r.voice ? '🎤 Voice message' : r.media ? 'Photo' : '');
     const sendIt = (s, m) => {
-      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
+      const c = chatOf(s), M = me(s), rp = replyTo, rec = { chat: c, author: M.author, handle: M.handle, text: m.text || '', ...(m.media ? { media: m.media } : {}), ...(m.voice ? { voice: m.voice, dur: m.dur || 1, wave: m.wave || '' } : {}), ...(m.poll ? { poll: m.poll, pvotes: '' } : {}), ...(m.loc ? { loc: m.loc } : {}), ...(rp ? { reply_to: String(rp.id), reply_text: snippet(rp), reply_author: rp.author || '' } : {}) };
+      const ttl = p.disappearing !== false ? +chatSetting(rows(s), 'ttl') || 0 : 0; if (ttl > 0) rec.ttl = ttl; // (disappearing messages are on)
       const sealed = !!encMembers(s, c); post(s, rec); awardPoints(s, 'message');
       replyTo = null; bar?.setReply?.(null);
       atBottom = true; sendT = s.time; if (p.sendMessage) s.send(p.sendMessage, m.text || '📷'); s.engine.vibrate?.(8);
       const G = s.engine.social, ment = new Set((String(m.text || '').match(/@([\w.]+)/g) || []).map((x) => handleOf(x)));
-      if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: sealed ? (isGroupChat(c) && ment.has(h) ? 'mentioned you 🔒' : '🔒 New message') : (isGroupChat(c) && ment.has(h) ? 'mentioned you: ' : '') + (m.text || (m.voice ? '🎤 Voice message' : 'Photo')), post: '' }); // (they get a notification; @mentions in a group say so)
+      if (G) for (const h of chatMembers(all(s), c)) if (h !== handleOf(M.handle)) G.notify(h, 'message', { text: sealed ? (isGroupChat(c) && ment.has(h) ? 'mentioned you 🔒' : '🔒 New message') : (isGroupChat(c) && ment.has(h) ? 'mentioned you: ' : '') + (m.text || (m.poll ? '📊 Poll: ' + String(m.poll).split('|')[0].trim() : m.loc ? '📍 Location' : m.voice ? '🎤 Voice message' : 'Photo')), post: '' }); // (they get a notification; @mentions in a group say so)
       if (p.demoReplies !== false && !s.engine.editing && !(has(s) && s.engine.supa?.online?.(D(s).def(p.collection)))) { // (not when the messages are online for real) // sample chats: someone types, then answers
         const mh = handleOf(M.handle), who = chatMembers(all(s), c).filter((h) => h !== mh), h = who[Math.floor(Math.random() * who.length)];
         if (h) { const nm = all(s).find((q) => handleOf(q.handle) === h && q.author)?.author || nameOfHandle(s, h); typing = { chat: c, handle: h, name: nm, t0: s.time + 0.7, until: s.time + 2.2 + Math.random() }; }
@@ -11754,7 +11800,73 @@ registerBehavior('uiChat', {
     const clockOf = (t) => { try { return new Date(t).toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
     const refreshChat = (s) => { s.engine.vibrate?.(10); const sp = s.engine.supa, D0 = D(s); // pull down at the top: fetch what's new (online), else it's all here already
       if (has(s) && sp?.online?.(D0.def(p.collection))) { try { sp.pullAll(p.collection); if (D0.def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh the chat: ' + err.message, 'Chat'); } } else s.snackbar?.('Up to date'); };
-    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : '', edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: () => { bar = null; editing = null; } }); };
+    const openBar = (s, now = false) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, attach: editing ? [] : [...(p.polls !== false ? [{ key: 'poll', icon: 'poll', label: 'Poll', color: '#f5a623', run: () => { bar?.close(); bar = null; setTimeout(() => pollSheet(s), 60); } }] : []), ...(p.location !== false ? [{ key: 'location', icon: 'place', label: 'Location', color: '#20b15a', run: () => shareLoc(s) }] : [])], voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : '', edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: () => { bar = null; editing = null; } }); };
+    /** One reaction each: the same emoji again takes it back. */
+    const react = (s, r, em) => { const m = reactsOf(r), mh = handleOf(me(s).handle); if (m.get(mh) === em) m.delete(mh); else m.set(mh, em); if (patch(s, r, { reacts: [...m].map(([h, x]) => h + ':' + x).join(','), reaction: [...m.values()].pop() || '' })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } };
+    /** Who reacted, and with what (tap yours to take it back). */
+    const reactSheet = (s, r) => {
+      const c = colors(), RM = reactsOf(r), mh = handleOf(me(s).handle), counts = new Map(); for (const x of RM.values()) counts.set(x, (counts.get(x) || 0) + 1); sheetOpen = true;
+      socialSheet(s, { kind: 'reactions', title: RM.size === 1 ? '1 reaction' : `${RM.size} reactions`, colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close, avatar } = api; body.append(el('div', `padding:10px 18px 4px;font:700 15px ${THEME.font};word-spacing:6px;`, [...counts].map(([x, n]) => x + ' ' + n).join('   ')));
+        for (const [h, x] of RM) { const mine = h === mh, nm = h === '?' ? 'Someone' : mine ? 'You' : nameOfHandle(s, h), row = sheetRow(api, c, { lead: avatar(nm, '', 36), title: nm, sub: mine ? 'Tap to remove' : h === '?' ? '' : '@' + h, right: x, run: mine ? () => { close(); react(s, r, x); } : null }); row.dataset.reactor = h; if (row.lastElementChild) row.lastElementChild.style.fontSize = '22px'; body.append(row); }
+        body.append(el('div', 'height:12px;'));
+      } });
+    };
+    /** Polls: "question | answer | answer", votes "handle:answer, …" (one each; tap it again to take it back). */
+    const pollOf = (r) => { const P = String(r.poll || '').split('|').map((x) => x.trim()); return { q: P[0] || '', opts: P.slice(1).filter(Boolean) }; };
+    const votesOf = (r) => { const m = new Map(); for (const part of String(r.pvotes || '').split(',')) { const i = part.lastIndexOf(':'); if (i > 0) m.set(part.slice(0, i).trim().toLowerCase(), +part.slice(i + 1)); } return m; };
+    const vote = (s, r, i) => { const m = votesOf(r), mh = handleOf(me(s).handle); if (m.get(mh) === i) m.delete(mh); else m.set(mh, i); if (patch(s, r, { pvotes: [...m].map(([h, k]) => h + ':' + k).join(',') })) { pops.set(r.id, s.time); s.engine.vibrate?.(8); } };
+    let pollQ = null, pollIns = [];
+    const pollSheet = (s) => {
+      const c = colors(); sheetOpen = true;
+      socialSheet(s, { kind: 'poll', title: 'Create poll', colors: c, onClose: () => { sheetOpen = false; }, action: { label: 'Send', run: (api) => { const q = String(pollQ?.value || '').trim().replace(/\|/g, '/'), opts = pollIns.map((x) => x.value.trim().replace(/[|,]/g, ' ')).filter(Boolean); if (!q || opts.length < 2) { s.snackbar?.('Add a question and at least two answers'); return; } api.close(); sendIt(s, { text: '', poll: [q, ...opts].join(' | ') }); } }, build: (api) => {
+        const { body, el } = api, box = (ph, max) => { const i = el('input', `display:block;margin:6px 14px;width:calc(100% - 28px);box-sizing:border-box;font:16px ${THEME.font};padding:11px 14px;border-radius:12px;border:1px solid ${c.line};background:${c.field};color:${c.text};outline:none;`); i.placeholder = ph; i.maxLength = max; i.setAttribute('autocomplete', 'off'); return i; };
+        body.append(cap(api, c, 'Question')); pollQ = box('Ask a question', 120); pollQ.dataset.pollQ = '1'; body.append(pollQ, cap(api, c, 'Answers'));
+        const list = el('div', ''); pollIns = []; const addOpt = () => { if (pollIns.length >= 8) return; const i = box('Answer ' + (pollIns.length + 1), 60); i.dataset.pollOpt = String(pollIns.length); pollIns.push(i); list.append(i); more.style.display = pollIns.length >= 8 ? 'none' : 'block'; return i; };
+        const more = el('button', `display:block;margin:4px 14px 16px;border:0;background:none;color:${c.acc};font:800 15px ${THEME.font};cursor:pointer;padding:8px 0;`, '＋ Add an answer'); more.type = 'button'; more.dataset.pollMore = '1'; more.onclick = () => addOpt()?.focus();
+        body.append(list, more); addOpt(); addOpt(); setTimeout(() => pollQ.focus(), 80);
+      } });
+    };
+    /** Who picked what. */
+    const votersSheet = (s, r) => {
+      const c = colors(), P = pollOf(r), V = votesOf(r), mh = handleOf(me(s).handle); sheetOpen = true;
+      socialSheet(s, { kind: 'poll-votes', title: 'Poll results', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, avatar } = api; body.append(el('div', `padding:12px 18px 2px;font:800 17px ${THEME.font};`, P.q));
+        P.opts.forEach((o, i) => { const who = [...V].filter(([, k]) => k === i).map(([h]) => h); body.append(cap(api, c, `${o} · ${who.length} vote${who.length === 1 ? '' : 's'}`)); for (const h of who) body.append(sheetRow(api, c, { lead: avatar(h === mh ? 'You' : nameOfHandle(s, h), '', 32), title: h === mh ? 'You' : nameOfHandle(s, h) })); });
+        body.append(el('div', 'height:12px;'));
+      } });
+    };
+    /** Send where you are (the phone asks first). */
+    const shareLoc = (s) => { bar?.close(); bar = null; if (typeof navigator === 'undefined' || !navigator.geolocation) { s.snackbar?.('Location isn’t available on this device'); return; } s.snackbar?.('Finding where you are…');
+      navigator.geolocation.getCurrentPosition((pos) => sendIt(s, { text: '', loc: pos.coords.latitude.toFixed(5) + ',' + pos.coords.longitude.toFixed(5) }), () => s.snackbar?.('Allow location to share where you are'), { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 }); };
+    const mapURL = (loc) => 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(String(loc));
+    /** Disappearing messages and themes: a note in the chat, so everyone in it gets the setting. */
+    const note = (s, rec) => { const M = me(s); addRow(s, { chat: chatOf(s), author: M.author, handle: M.handle, system: true, ...rec }); };
+    const ttlSheet = (s) => {
+      const c = colors(), cur = +chatSetting(rows(s), 'ttl') || 0, nm = (me(s).author || 'Someone').split(' ')[0]; sheetOpen = true;
+      socialSheet(s, { kind: 'disappearing', title: 'Disappearing messages', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close } = api; body.append(el('div', `padding:12px 18px 6px;color:${c.sub};font:500 14px ${THEME.font};`, 'New messages in this chat disappear for everyone after the time you pick. Messages already sent stay.'));
+        for (const [v, l] of TTL_CHOICES) { const row = sheetRow(api, c, { title: l, right: v === cur ? '✓' : '', run: () => { close(); if (v === cur) return; note(s, { ttl: v, text: v ? `${nm} turned on disappearing messages. New messages disappear after ${l}.` : `${nm} turned off disappearing messages.` }); s.snackbar?.(v ? 'Disappearing messages on' : 'Disappearing messages off'); } }); row.dataset.ttl = String(v); if (v === cur && row.lastElementChild) { row.lastElementChild.style.color = c.acc; row.lastElementChild.style.fontSize = '16px'; } body.append(row); }
+        body.append(el('div', 'height:12px;'));
+      } });
+    };
+    const themeSheet = (s) => {
+      const c = colors(), cur = chatSetting(rows(s), 'theme') || '', nm = (me(s).author || 'Someone').split(' ')[0]; sheetOpen = true;
+      socialSheet(s, { kind: 'chat-theme', title: 'Theme', colors: c, onClose: () => { sheetOpen = false; }, build: (api) => {
+        const { body, el, close } = api, grid = el('div', 'display:grid;grid-template-columns:repeat(4,1fr);gap:14px 10px;padding:12px 16px 18px;');
+        for (const [v, l] of CHAT_THEMES) { const b = el('button', `border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:6px;color:${c.text};font:700 12px ${THEME.font};cursor:pointer;`); b.type = 'button'; b.dataset.theme = v || 'default';
+          const dot = el('span', `width:54px;height:54px;border-radius:50%;background:${v || tok(p.mine || '@accent') || '#1d9bf0'};box-shadow:${v === cur ? `0 0 0 3px ${c.bg},0 0 0 5px ${c.acc}` : 'none'};`); b.append(dot, el('span', '', l));
+          b.onclick = () => { close(); if (v === cur) return; note(s, { theme: v, text: `${nm} changed the theme to ${l}` }); }; grid.append(b); }
+        body.append(grid);
+      } });
+    };
+    /** Block someone: their messages stop showing, and their chat is gone from your list. */
+    const blockIt = (s, h, on = true) => { const m = chatMeta(s); m.block = on ? [...new Set([...m.block, h])] : m.block.filter((x) => x !== h); if (on) m.hide = { ...m.hide, [chatOf(s)]: Date.now() }; saveChatMeta(s, m); s.snackbar?.(on ? `Blocked ${nameOfHandle(s, h).split(' ')[0]}` : 'Unblocked'); };
+    let reqNow = false, reqBtns = [];
+    const reqAct = (s, k) => { const c = chatOf(s), mh = handleOf(me(s).handle), o = chatMembers(all(s), c).find((h) => h !== mh), m = chatMeta(s);
+      if (k === 'accept') { m.acc = [...new Set([...m.acc, c])]; saveChatMeta(s, m); s.snackbar?.('Accepted: you can reply now'); return; }
+      if (k === 'block' && o) { blockIt(s, o, true); } else { m.hide = { ...m.hide, [c]: Date.now() }; saveChatMeta(s, m); s.snackbar?.('Request deleted'); }
+      if (!s.navBack?.()) s.navTo?.('inbox'); };
     /** Press and hold: react, reply, copy, edit, unsend. */
     /** Change the words of one of my messages (re-sealed when the chat is encrypted). */
     const editMsg = (s, r, v) => { v = String(v || '').trim(); if (!v || v === r.text) return; if (r._e2ee && !r._locked) { const mem = encMembers(s, String(r.chat)); if (mem) { const pl = {}; for (const k of SECRET) if (r[k] != null && r[k] !== '') pl[k] = r[k]; pl.text = v; E2EE.seal(s, String(r.chat), pl, mem).then((enc) => { E2EE.cache.set(r.id + ':' + enc.iv, pl); patch(s, r, { enc, edited: true }); }); return; } } patch(s, r, { text: v, edited: true }); pops.set(r.id, s.time); };
@@ -11774,7 +11886,7 @@ registerBehavior('uiChat', {
       items.push({ icon: '🙈', label: 'Delete for me', danger: !mine, run: () => forMe(s, [r.id]) });
       if (mine && p.edits !== false) items.push({ icon: '🗑️', label: 'Delete for everyone', danger: true, run: () => forAll(s, [r]) });
       sheetOpen = true;
-      socialSheet(s, { kind: 'message', colors: colors(), emojis: String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 8), current: r.reaction || '', onEmoji: (em) => { if (patch(s, r, { reaction: r.reaction === em ? '' : em })) { pops.set(r.id, s.time); s.engine.vibrate?.(10); } }, items, onClose: () => { sheetOpen = false; } });
+      socialSheet(s, { kind: 'message', colors: colors(), emojis: String(p.reactions || '❤️ 😂 😮 😢 😡 👍').split(/\s+/).filter(Boolean).slice(0, 8), current: reactsOf(r).get(handleOf(me(s).handle)) || '', onEmoji: (em) => react(s, r, em), items, onClose: () => { sheetOpen = false; } });
     };
     /** Select several messages: delete, star or copy them together. */
     let selecting = null, selUI = null;
@@ -11877,7 +11989,9 @@ registerBehavior('uiChat', {
         acts.append(act('search', 'Search', () => { close(); setTimeout(() => searchSheet(s), 300); }, 'search'), act(muted ? 'bell' : 'bell-off', muted ? 'Unmute' : 'Mute', () => { close(); if (muted) { const m = chatMeta(s); m.mute = m.mute.filter((x) => x !== ch); saveChatMeta(s, m); s.snackbar?.('Notifications on'); } else setTimeout(() => { sheetOpen = true; muteSheet(s, ch, colors(), () => { sheetOpen = false; }); }, 300); }, 'mute'));
         if (p.wallpapers !== false) acts.append(act('image', 'Wallpaper', () => { close(); setTimeout(() => wallSheet(s), 300); }, 'wallpaper'));
         if (p.stars !== false) acts.append(act('star', 'Starred', () => { close(); setTimeout(() => starredSheet(s), 300); }, 'starred'));
+        if (p.themes !== false) acts.append(act('sparkle', 'Theme', () => { close(); setTimeout(() => themeSheet(s), 300); }, 'theme'));
         body.append(acts);
+        if (p.disappearing !== false) { const t = +chatSetting(R, 'ttl') || 0, row = sheetRow(api, c, { lead: el('span', `flex:none;width:36px;height:36px;border-radius:10px;background:${c.field};display:flex;align-items:center;justify-content:center;font-size:18px;`, '⏱'), title: 'Disappearing messages', sub: t ? `New messages disappear after ${ttlLabel(t)}` : 'Off', run: () => { close(); setTimeout(() => ttlSheet(s), 300); } }); row.dataset.infoAct = 'disappearing'; body.append(row); }
         if (encOn()) { const mem2 = encMembers(s, ch), box = el('div', `margin:10px 14px 2px;padding:12px 14px;border-radius:14px;background:${mem2 ? 'rgba(255,214,102,0.14)' : c.field};font:500 13px ${THEME.font};color:${c.text};`); box.dataset.e2ee = mem2 ? 'on' : 'off';
           if (mem2) { box.append(el('div', 'font-weight:800;font-size:14px;margin-bottom:4px;', '🔒 End-to-end encrypted'), el('div', `color:${c.sub};`, 'Messages, photos and voice messages are sealed on your phone. Only the people in this chat can open them, not the app or its server.'));
             const code = el('div', `margin-top:8px;font:700 13px ui-monospace,Menlo,monospace;letter-spacing:.04em;color:${c.text};`, 'Safety code: …'); code.dataset.safety = '1'; box.append(code, el('div', `color:${c.sub};font-size:12px;margin-top:2px;`, 'Compare it with the others in person: if it matches, nobody is listening in.'));
@@ -11902,6 +12016,9 @@ registerBehavior('uiChat', {
             body.append(row); }
           body.append(gb('Leave group', () => { if (!confirm('Leave this group? You won’t get its messages any more.')) return; note({ members: mem.filter((x) => x !== mh).join(','), text: `${M.author.split(' ')[0]} left` }); const m = chatMeta(s); m.hide = { ...m.hide, [ch]: Date.now() + 1000 }; saveChatMeta(s, m); close(); if (!s.navBack?.()) s.navTo?.('inbox'); }, 'leave', true));
         }
+        const other = /^dm-/.test(ch) ? mem.find((h) => h !== mh) : null;
+        if (other) { const blocked = meta.block.includes(other), bl = el('button', `display:block;width:calc(100% - 28px);margin:16px 14px 0;padding:13px;border:0;border-radius:14px;background:${c.field};color:#f4212e;font:800 15px ${THEME.font};cursor:pointer;`, (blocked ? 'Unblock ' : 'Block ') + nameOfHandle(s, other).split(' ')[0]); bl.type = 'button'; bl.dataset.blockChat = '1';
+          bl.onclick = () => { if (!blocked && !confirm(`Block ${nameOfHandle(s, other)}? Their messages won’t show and this chat leaves your list.`)) return; close(); blockIt(s, other, !blocked); if (!blocked && !s.navBack?.()) s.navTo?.('inbox'); }; body.append(bl); }
         const arc = el('button', `display:block;width:calc(100% - 28px);margin:16px 14px 0;padding:13px;border:0;border-radius:14px;background:${c.field};color:${c.text};font:800 15px ${THEME.font};cursor:pointer;`, archived ? 'Unarchive chat' : 'Archive chat'); arc.type = 'button'; arc.dataset.archiveChat = '1';
         arc.onclick = () => { const m = chatMeta(s); m.arch = archived ? m.arch.filter((x) => x !== ch) : [...m.arch, ch]; saveChatMeta(s, m); close(); s.snackbar?.(archived ? 'Unarchived' : 'Archived: it’s in Archived at the top of your messages'); };
         body.append(arc);
@@ -11919,12 +12036,13 @@ registerBehavior('uiChat', {
           if (k === 'chat info') chatInfoSheet(s); else if (k === 'search chat') searchSheet(s); else if (k === 'starred messages') starredSheet(s); else if (k === 'chat wallpaper' && p.wallpapers !== false) wallSheet(s); });
       },
       update(e, dt, s) {
-        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
+        { const c0 = chatOf(s), M0 = me(s); reqNow = p.requests !== false && !s.engine.editing && allowed(s) && chatRequest(s, rows(s), c0, M0, chatMembers(all(s), c0)); }
+        const b = UK.fit(s, e, UK.box(e)), barH = reqNow ? 112 : 58, cov = coveredBottom(s, e, b), R0 = rows(s), pinned = p.pins !== false ? pinnedOf(R0) : null, pinH = pinned ? 50 : 0, list = { x: b.x, y: b.y + pinH, w: b.w, h: b.h - barH - cov - pinH };
         pinId = pinned ? pinned.id : null; list0 = list;
         barRect = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
         { const E = s.engine, o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1; barOff = Math.max(0, E.height - (o.y + (b.y + b.h - cov) * k)); bar?.place?.();
           // a real button over the drawn bar: tapping it opens the typing bar inside the tap, so a phone shows its keyboard
-          const want = !bar && !E.editing && UK.live(s, e) && shown(e) && allowed(s) && !sheetOpen && !selecting && !E.root?.querySelector?.('[data-pocket-sheet]') && !(s.tapOwner && s.tapOwner !== e) && E.root && typeof document !== 'undefined';
+          const want = !bar && !reqNow && !E.editing && UK.live(s, e) && shown(e) && allowed(s) && !sheetOpen && !selecting && !E.root?.querySelector?.('[data-pocket-sheet]') && !(s.tapOwner && s.tapOwner !== e) && E.root && typeof document !== 'undefined';
           if (want && !tapEl) { tapEl = document.createElement('div'); tapEl.dataset.chatTap = '1'; tapEl.setAttribute('role', 'button'); tapEl.setAttribute('aria-label', 'Write a message'); tapEl.style.cssText = 'position:absolute;z-index:44;cursor:text;-webkit-tap-highlight-color:transparent;touch-action:manipulation;';
             for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel']) tapEl.addEventListener(t, (ev) => ev.stopPropagation());
             tapEl.addEventListener('click', (ev) => { const r2 = tapEl.getBoundingClientRect(), onMic = p.voice !== false && ev.clientX > r2.right - r2.height - 6 && !!ev.detail; tapEl.remove(); tapEl = null; UK.tap(s, p); openBar(s, true); if (onMic) bar?.record?.(); });
@@ -11961,9 +12079,10 @@ registerBehavior('uiChat', {
         for (const t of TP) {
           if (t.used) continue;
           if (jumpR && UK.in(t, jumpR)) { t.used = true; S.v = S.max; S.flick = 0; newCount = 0; s.engine.vibrate?.(6); continue; }
+          if (reqNow) { const rb = reqBtns.find((q) => UK.in(t, q)); if (rb) { t.used = true; UK.tap(s, p); reqAct(s, rb.k); continue; } if (t.y >= list.y + list.h) { t.used = true; continue; } }
           if (pinR && UK.in(t, pinR)) { t.used = true; const to = L.find((q) => q.bub && String(q.r.id) === String(pinId)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; }
         }
-        if (!s.engine.editing && shown(e) && (readT += dt) > 0.6) { readT = 0; const RR = rows(s), last = RR[RR.length - 1], M = me(s); if (last && readAt(s, c, handleOf(M.handle)) < (last._at || 0)) markChatRead(s, c, handleOf(M.handle), last._at || Date.now()); } // you have seen it
+        if (!s.engine.editing && shown(e) && !reqNow && (readT += dt) > 0.6) { readT = 0; const RR = rows(s), last = RR[RR.length - 1], M = me(s); if (last && readAt(s, c, handleOf(M.handle)) < (last._at || 0)) markChatRead(s, c, handleOf(M.handle), last._at || Date.now()); } // you have seen it
         const itemAt = (pt) => L.find((q) => q.bub && pt.x >= q.bx && pt.x <= q.bx + q.bw && pt.y + S.v - list.y >= q.y && pt.y + S.v - list.y <= q.y + q.h);
         if (selecting) for (const t of TP) { if (t.used || S.moved || !UK.in(t, list)) continue; t.used = true; const it = L.find((q) => q.bub && t.y + S.v - list.y >= q.y - 3 && t.y + S.v - list.y <= q.y + q.h + 3); if (it && !it.del) { const k = String(it.r.id); if (selecting.has(k)) selecting.delete(k); else selecting.add(k); s.engine.vibrate?.(5); } } // select mode: a tap anywhere on a message's row ticks it
         if (p.hold !== false && !s.engine.editing && !sheetOpen && !selecting) {
@@ -11972,26 +12091,30 @@ registerBehavior('uiChat', {
         }
         for (const t of TP) {
           if (S.moved || t.used) continue;
-          if (UK.in(t, barRect)) { if (!allowed(s)) continue; UK.tap(s, p); const onMic = p.voice !== false && t.x > barRect.x + barRect.w - barRect.h - 6; openBar(s); if (onMic) setTimeout(() => bar?.record?.(), 260); continue; } // the mic: open the bar and start recording
+          if (UK.in(t, barRect)) { if (!allowed(s) || reqNow) continue; UK.tap(s, p); const onMic = p.voice !== false && t.x > barRect.x + barRect.w - barRect.h - 6; openBar(s); if (onMic) setTimeout(() => bar?.record?.(), 260); continue; } // the mic: open the bar and start recording
           if (!UK.in(t, list)) continue;
+          { const ly = t.y + S.v - list.y, pl = L.find((q) => q.pill && t.x >= q.pill.x - 4 && t.x <= q.pill.x + q.pill.w + 4 && ly >= q.pill.y - 4 && ly <= q.pill.y + q.pill.h + 4); if (pl) { UK.tap(s, p); reactSheet(s, pl.r); continue; } } // who reacted
           const it = itemAt(t); if (!it) continue;
+          if (it.poll) { const rel = t.y + S.v - list.y - it.y - it.poll.y1, i = Math.floor(rel / 44); if (rel >= it.poll.n * 44) { UK.tap(s, p); votersSheet(s, it.r); continue; } if (i >= 0 && i < it.poll.n) { UK.tap(s, p); vote(s, it.r, i); continue; } }
+          if (it.loc) { openLink(mapURL(it.r.loc)); continue; }
           if (it.link && t.y + S.v - list.y >= it.y + it.h - 46) { openLink(it.link); continue; } // the link card
           if (it.vox) { voicePlayer.play(it.r); s.engine.vibrate?.(6); continue; } // play / pause
           if (it.quote && t.y + S.v - list.y <= it.y + it.quote + (it.fwd || 0)) { const to = L.find((q) => q.bub && String(q.r.id) === String(it.r.reply_to)); if (to) { S.v = clamp(to.y - 40, 0, S.max); S.flick = 0; pops.set(to.r.id, s.time); } continue; } // tap the quote: jump to the message
           if (p.react === false || it.r.deleted) continue;
-          if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; if (patch(s, it.r, { reaction: it.r.reaction ? '' : '❤️' })) { pops.set(it.r.id, s.time); s.engine.vibrate?.(10); } }
+          if (lastTap && lastTap.id === it.r.id && s.time - lastTap.t < 0.35) { lastTap = null; react(s, it.r, '❤️'); }
           else lastTap = { id: it.r.id, t: s.time };
         }
       },
       drawUI(ctx, e, s) {
-        const b = UK.fit(s, e, UK.box(e)), barH = 58, cov = coveredBottom(s, e, b), M = me(s), R = rows(s), pinned = p.pins !== false ? pinnedOf(R) : null, pinH = pinned ? 50 : 0, top = b.y + pinH, listH = b.h - barH - cov - pinH, TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32), c = chatOf(s);
-        const dark = isDark(s), mineC = tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
+        const b = UK.fit(s, e, UK.box(e)), barH = reqNow ? 112 : 58, cov = coveredBottom(s, e, b), M = me(s), R = rows(s), pinned = p.pins !== false ? pinnedOf(R) : null, pinH = pinned ? 50 : 0, top = b.y + pinH, listH = b.h - barH - cov - pinH, TS = Math.max(11, +p.textSize || 16), LH = Math.round(TS * 1.32), c = chatOf(s);
+        const dark = isDark(s), mineC = (p.themes !== false && chatSetting(R, 'theme')) || tok(p.mine || '@accent') || '#1d9bf0', mineT = tok(p.mineText || '#ffffff'), theirsC = tok(p.theirs) || (dark ? '#2a2d35' : '#eceef2'), txt = tok(p.text || '@text'), sub = tok(p.sub || '@sub');
         if (p.bg) { ctx.fillStyle = tok(p.bg); ctx.fillRect(b.x, b.y, b.w, b.h); }
         const authors = new Set(R.filter((r) => !r.system).map((r) => r.handle || r.author)), group = isGroupChat(c) || authors.size > 2 || (authors.size === 2 && !R.some((r) => isMineMsg(r, M)));
         const showNames = p.names === 'always' || (p.names !== 'never' && group), avW = p.avatars !== false ? 36 : 0, maxW = Math.min(b.w * 0.74, 420), pad = 12;
         // lay out
-        L = []; let y = 10, prev = null;
+        L = []; let y = 10, prev = null; const del0 = (r) => !!r.deleted;
         const sealedChat = !!encMembers(s, c); if (sealedChat) { L.push({ kind: 'e2ee', y: 6, h: 30 }); y = 44; } // 🔒 a note that the chat is end-to-end encrypted
+        const ttlOn = p.disappearing !== false ? +chatSetting(R, 'ttl') || 0 : 0; if (ttlOn) { L.push({ kind: 'ttl', y: y - 4, h: 30, t: ttlOn }); y += 34; } // ⏱ disappearing messages are on
         R.forEach((r, i) => {
           if (r.system) { ctx.font = `600 13px ${THEME.font}`; const ls = wrapLines(ctx, String(r.text || ''), b.w - 60, 13, 3); L.push({ kind: 'system', y: y + 6, h: ls.length * 17 + 8, lines: ls }); y += ls.length * 17 + 20; prev = null; return; }
           ctx.font = `500 ${TS}px ${THEME.font}`;
@@ -12000,7 +12123,8 @@ registerBehavior('uiChat', {
           if (p.times !== false && (!prev || gapPrev > 15 * 60e3)) { L.push({ kind: 'time', y, h: 30, t: r._at }); y += 30; }
           else if (!sameAsPrev) y += 6;
           if (showNames && !mine && (!sameAsPrev || gapPrev > 15 * 60e3)) { L.push({ kind: 'name', y, h: 18, name: r.author, x: b.x + pad + avW }); y += 18; }
-          const del = !!r.deleted, big = !del && !r.media && !r.voice && !r.reply_to && !r.forwarded && ONLY_EMOJI(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
+          const poll = !del0(r) && r.poll ? pollOf(r) : null, loc = !del0(r) && !poll && r.loc ? String(r.loc) : '';
+          const del = !!r.deleted, big = !del && !r.media && !r.voice && !r.reply_to && !r.forwarded && !poll && !loc && ONLY_EMOJI(r.text), fwd = !del && r.forwarded ? 20 : 0, vox = !del && !!r.voice, link = !del && !vox && p.links !== false ? linkOf(r.text) : '', media = del ? '' : r.media ? String(r.media) : '', quote = !del && r.reply_to ? 42 : 0;
           let bw, bh, lines = [];
           if (big) { bw = Math.min(maxW, [...String(r.text).trim()].length * 44 + 8); bh = 54; }
           else {
@@ -12012,9 +12136,11 @@ registerBehavior('uiChat', {
             if (fwd) { bw = Math.max(bw, 116); bh += fwd; }
             if (vox) { bw = Math.max(bw, Math.min(maxW, 240)); bh += 54; }
             if (link) { bw = Math.max(bw, Math.min(maxW, 240)); bh += 46; }
+            if (poll) { bw = Math.max(bw, Math.min(maxW, 280)); ctx.font = `800 15px ${THEME.font}`; poll.lines = wrapLines(ctx, poll.q, bw - 28, 15, 4); poll.y1 = (bh || 0) + 14 + poll.lines.length * 20 + 8; poll.n = poll.opts.length; bh = poll.y1 + poll.n * 44 + 30; }
+            if (loc) { bw = Math.max(bw, Math.min(maxW, 250)); bh += 164; }
           }
-          const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (r.reaction ? 14 : 0) + (r.edited && !del ? 14 : 0);
-          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
+          const bx = mine ? b.x + b.w - pad - bw : b.x + pad + avW, under = (!del && reactsOf(r).size ? 14 : 0) + (r.edited && !del ? 14 : 0);
+          L.push({ kind: 'msg', bub: true, r, mine, y, h: bh, bx, bw, lines, big, media, quote, fwd, vox, link, poll, loc, del, tail: !sameAsNext, avatar: !mine && avW && !sameAsNext });
           y += bh + under + (sameAsNext ? 3 : 4); prev = r;
         });
         if (typing && typing.chat === c && s.time >= typing.t0) { L.push({ kind: 'typing', y: y + 4, h: 36 }); y += 44; } // someone is typing
@@ -12038,7 +12164,7 @@ registerBehavior('uiChat', {
           if (!CV.length) UK.text(ctx, 'No conversations yet. Start one above.', b.cx, yy + 40, { size: 14, weight: 600, color: sub, maxW: b.w - 40 });
           total = yy + 20;
         } else if (!R.length) { if (selfChat) { drawIco(ctx, 'bookmark', b.cx, listH / 2 - 34 + S.v, 30, sub, { stroke: 1.6 }); UK.text(ctx, 'Your own space', b.cx, listH / 2 + 4 + S.v, { size: 16, weight: 800, color: txt }); UK.text(ctx, 'Notes, links and photos to keep.', b.cx, listH / 2 + 28 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); UK.text(ctx, 'Only you can see them.', b.cx, listH / 2 + 46 + S.v, { size: 13, weight: 500, color: sub, maxW: b.w - 40 }); } else UK.text(ctx, p.empty || 'Say hi 👋', b.cx, listH / 2 + S.v, { size: 15, weight: 600, color: sub }); }
-        const vis0 = S.v - 60, vis1 = S.v + listH + 60;
+        const vis0 = S.v - 60, vis1 = S.v + listH + 60, mh0 = handleOf(M.handle);
         for (const it of L) {
           if (it.y + it.h < vis0 || it.y > vis1) continue;
           if (it.kind === 'time') { const d = new Date(it.t || Date.now()), day = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(), ago = Math.round((day(new Date()) - day(d)) / 864e5); let ts = '';
@@ -12046,6 +12172,7 @@ registerBehavior('uiChat', {
             if (wall) { ctx.font = `600 12px ${THEME.font}`; const tw = ctx.measureText(ts).width + 18; ctx.fillStyle = darkWall ? 'rgba(0,0,0,0.45)' : 'rgba(255,255,255,0.82)'; UK.rr(ctx, b.cx - tw / 2, it.y + 5, tw, 20, 10); ctx.fill(); }
             UK.text(ctx, ts, b.cx, it.y + 15, { size: 12, weight: 600, color: wall && darkWall ? '#e5e7eb' : sub }); continue; }
           if (it.kind === 'e2ee') { const t = 'Messages are end-to-end encrypted'; ctx.font = `600 12px ${THEME.font}`; const tw = ctx.measureText(t).width + 40; ctx.fillStyle = dark ? 'rgba(255,214,102,0.12)' : 'rgba(255,214,102,0.35)'; UK.rr(ctx, b.cx - tw / 2, it.y + 3, tw, 24, 12); ctx.fill(); drawIco(ctx, 'lock', b.cx - tw / 2 + 15, it.y + 15, 12, dark ? '#ffd666' : '#8a6d00', { stroke: 2 }); UK.text(ctx, t, b.cx + 8, it.y + 15, { size: 12, weight: 600, color: dark ? '#ffd666' : '#6b5500' }); continue; }
+          if (it.kind === 'ttl') { const t = '⏱ Disappearing messages: ' + ttlLabel(it.t); ctx.font = `600 12px ${THEME.font}`; const tw = ctx.measureText(t).width + 24; ctx.fillStyle = dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'; UK.rr(ctx, b.cx - tw / 2, it.y + 3, tw, 24, 12); ctx.fill(); UK.text(ctx, t, b.cx, it.y + 15, { size: 12, weight: 600, color: wall && darkWall ? '#e5e7eb' : sub }); continue; }
           if (it.kind === 'typing') { const x = b.x + pad + avW, w = 64, h2 = 36; ctx.fillStyle = theirsC; ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, it.y, w, h2, [18, 18, 18, 6]); else UK.rr(ctx, x, it.y, w, h2, 18); ctx.fill();
             for (let k = 0; k < 3; k++) { const ph = s.time * 7 - k * 0.8, up = Math.max(0, Math.sin(ph)) * 4; ctx.fillStyle = withAlpha(sub.startsWith('#') ? sub : '#888888', 0.55 + Math.max(0, Math.sin(ph)) * 0.45); ctx.beginPath(); ctx.arc(x + 18 + k * 14, it.y + h2 / 2 - up, 4, 0, Math.PI * 2); ctx.fill(); }
             if (avW) miniAvatar(ctx, typing?.name || '', b.x + pad + 14, it.y + h2 - 14, 28); continue; }
@@ -12090,10 +12217,36 @@ registerBehavior('uiChat', {
               UK.text(ctx, host, lx + 34, ly + (path ? 12 : lh / 2), { size: 13, weight: 800, color: it.mine ? mineT : txt, align: 'left', maxW: lw - 44 });
               if (path) UK.text(ctx, path, lx + 34, ly + 26, { size: 11, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.8) : sub, align: 'left', maxW: lw - 44 });
             }
+            if (it.poll) { // 📊 the question, the answers with bars and counts, who voted
+              const P = it.poll, V = votesOf(r), total2 = V.size, mine2 = V.get(mh0), fg = it.mine ? mineT : txt, fg2 = it.mine ? withAlpha('#ffffff', 0.8) : sub, ac = it.mine ? '#ffffff' : mineC, py = y0 + (P.y1 - P.lines.length * 20 - 8);
+              P.lines.forEach((l, k) => UK.text(ctx, l, x + 14, py + 10 + k * 20, { size: 15, weight: 800, color: fg, align: 'left' }));
+              P.opts.forEach((o2, i) => { const oy = y0 + P.y1 + i * 44, n = [...V.values()].filter((k) => k === i).length, f = total2 ? n / total2 : 0, on = mine2 === i;
+                ctx.beginPath(); ctx.arc(x + 24, oy + 15, 9, 0, Math.PI * 2); if (on) { ctx.fillStyle = ac; ctx.fill(); drawIco(ctx, 'check', x + 24, oy + 15, 11, it.mine ? mineC : '#ffffff', { stroke: 3 }); } else { ctx.strokeStyle = fg2; ctx.lineWidth = 1.6; ctx.stroke(); }
+                UK.text(ctx, o2, x + 42, oy + 15, { size: 14, weight: on ? 800 : 600, color: fg, align: 'left', maxW: w - 90 });
+                UK.text(ctx, String(n), x + w - 14, oy + 15, { size: 13, weight: 700, color: fg2, align: 'right' });
+                ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(dark ? '#ffffff' : '#000000', 0.08); UK.rr(ctx, x + 42, oy + 30, w - 56, 5, 2.5); ctx.fill();
+                if (f > 0) { ctx.fillStyle = ac; UK.rr(ctx, x + 42, oy + 30, Math.max(5, (w - 56) * f), 5, 2.5); ctx.fill(); } });
+              const fy = y0 + P.y1 + P.n * 44; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(x + 10, fy, w - 20, 1);
+              UK.text(ctx, total2 ? `View votes · ${total2}` : 'No votes yet · tap to vote', x + w / 2, fy + 15, { size: 13, weight: 800, color: it.mine ? mineT : mineC });
+            }
+            if (it.loc) { // 📍 a little map with a pin, then the place
+              const [la, lo] = String(it.loc).split(',').map(Number), mx = x + 4, my = y0 + 4, mw = w - 8, mh2 = 116; ctx.save(); ctx.beginPath(); UK.rr(ctx, mx, my, mw, mh2, 14); ctx.clip();
+              ctx.fillStyle = dark ? '#243128' : '#e7f0dc'; ctx.fillRect(mx, my, mw, mh2); let sd = Math.abs(Math.floor((la || 1) * 1000 + (lo || 1) * 777)) || 7; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+              ctx.fillStyle = dark ? '#1d3a4f' : '#cfe3f2'; ctx.beginPath(); ctx.ellipse(mx + rnd() * mw, my + rnd() * mh2, 30 + rnd() * 30, 18 + rnd() * 16, rnd() * 3, 0, Math.PI * 2); ctx.fill();
+              ctx.strokeStyle = dark ? '#3c4a40' : '#ffffff'; ctx.lineCap = 'round'; for (let k = 0; k < 5; k++) { ctx.lineWidth = k < 2 ? 7 : 4; ctx.beginPath(); const hz = k % 2 === 0; if (hz) { const yy = my + rnd() * mh2; ctx.moveTo(mx - 5, yy); ctx.lineTo(mx + mw + 5, yy + (rnd() - 0.5) * 40); } else { const xx = mx + rnd() * mw; ctx.moveTo(xx, my - 5); ctx.lineTo(xx + (rnd() - 0.5) * 50, my + mh2 + 5); } ctx.stroke(); }
+              const px = mx + mw / 2, pyy = my + mh2 / 2 + 6; ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.beginPath(); ctx.ellipse(px, pyy + 2, 7, 3, 0, 0, Math.PI * 2); ctx.fill();
+              ctx.fillStyle = '#ea4335'; ctx.beginPath(); ctx.arc(px, pyy - 18, 11, Math.PI * 0.85, Math.PI * 2.15); ctx.lineTo(px, pyy); ctx.closePath(); ctx.fill(); ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(px, pyy - 18, 4, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+              UK.text(ctx, '📍 Location', x + 14, y0 + mh2 + 20, { size: 14, weight: 800, color: it.mine ? mineT : txt, align: 'left' });
+              UK.text(ctx, Number.isFinite(la) && Number.isFinite(lo) ? `${la.toFixed(4)}, ${lo.toFixed(4)} · Open in Maps` : 'Open in Maps', x + 14, y0 + mh2 + 38, { size: 12, weight: 500, color: it.mine ? withAlpha('#ffffff', 0.85) : sub, align: 'left', maxW: w - 28 });
+            }
           }
           ctx.restore();
           let uy = it.y + it.h;
-          if (r.reaction && !it.del) { const rx = it.mine ? it.bx + 6 : it.bx + it.bw - 26, ry = it.y + it.h - 6; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; ctx.beginPath(); ctx.arc(rx + 10, ry + 10, 12, 0, Math.PI * 2); ctx.fill(); UK.text(ctx, r.reaction, rx + 10, ry + 11, { size: 13 }); uy += 14; }
+          it.pill = null; const RM = !it.del ? reactsOf(r) : null;
+          if (RM?.size) { const ems = [...new Set(RM.values())].slice(0, 3), n = RM.size, lab = ems.join('') + (n > 1 ? ' ' + n : ''), meIn = RM.has(mh0); ctx.font = `700 12px ${THEME.font}`; const pw = Math.max(26, ctx.measureText(lab).width + 14), ph = 22, px = it.mine ? it.bx + 6 : it.bx + it.bw - pw - 4, py = it.y + it.h - 6;
+            ctx.save(); ctx.shadowColor = 'rgba(0,0,0,0.15)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1; ctx.fillStyle = dark ? '#1c1f26' : '#ffffff'; UK.rr(ctx, px, py, pw, ph, ph / 2); ctx.fill(); ctx.restore();
+            if (meIn) { ctx.strokeStyle = withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.7); ctx.lineWidth = 1.2; UK.rr(ctx, px, py, pw, ph, ph / 2); ctx.stroke(); }
+            UK.text(ctx, lab, px + pw / 2, py + ph / 2 + 1, { size: 12, weight: 700, color: txt }); it.pill = { x: px, y: py, w: pw, h: ph }; uy += 14; }
           if (r.edited && !it.del) UK.text(ctx, 'Edited', it.mine ? it.bx + it.bw - 4 : it.bx + 4, uy + 7, { size: 11, weight: 600, color: sub, align: it.mine ? 'right' : 'left' });
           if (it.avatar && !selecting) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
           if (starSet.size && starSet.has(String(r.id)) && !it.del) UK.text(ctx, '★', it.mine ? it.bx - 10 : it.bx + it.bw + 10, it.y + 11, { size: 13, weight: 800, color: '#f5b301' });
@@ -12111,7 +12264,7 @@ registerBehavior('uiChat', {
           if (label === 'Sent' && p.seen !== false && others.length) { const at = lastMine.r._at || 0, st = stOf(RD, at), W = p.seenWord === 'Read' ? 'Read' : 'Seen', by = others.filter((h, i) => st[i] === 'read');
             if (by.length) { if (/^dm-/.test(c)) { const t = RD[0].rd >= at ? RD[0].rd : 0; label = W + (p.seenTime !== false && t ? ' ' + clockOf(t) : ''); } else label = by.length === others.length ? W + ' by everyone' : W + ' by ' + by.map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
             else if (st.every((x) => x !== 'sent')) label = 'Delivered'; else if (st.some((x) => x === 'got')) label = 'Delivered to ' + others.filter((h, i) => st[i] === 'got').map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
-          UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: /^(Seen|Read)/.test(label) ? mineC : sub, align: 'right' }); e._chat.status = label; // (for tests)
+          UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (reactsOf(lastMine.r).size ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: /^(Seen|Read)/.test(label) ? mineC : sub, align: 'right' }); e._chat.status = label; // (for tests)
         }
         ctx.restore();
         if (pinned) { // the pinned message, at the top: tap to jump to it
@@ -12127,6 +12280,14 @@ registerBehavior('uiChat', {
           drawIco(ctx, 'chevron-down', jx, jy + 1, 20, txt, { stroke: 2.2 });
           if (newCount > 0) { const t = newCount > 99 ? '99+' : String(newCount); ctx.font = `800 11px ${THEME.font}`; const bw2 = Math.max(18, ctx.measureText(t).width + 10); ctx.fillStyle = mineC; UK.rr(ctx, jx + 8, jy - 27, bw2, 18, 9); ctx.fill(); UK.text(ctx, t, jx + 8 + bw2 / 2, jy - 18, { size: 11, weight: 800, color: '#fff' }); }
         }
+        if (ok && reqNow) { // a message request: Accept, Delete or Block instead of the bar
+          const py = b.y + b.h - cov - barH, o2 = chatMembers(all(s), c).find((h) => h !== mh0) || '', nm = nameOfHandle(s, o2) || titleOf(s);
+          ctx.fillStyle = p.bg ? tok(p.bg) : dark ? '#17191f' : '#ffffff'; ctx.fillRect(b.x, py, b.w, barH); ctx.fillStyle = withAlpha(dark ? '#ffffff' : '#000000', 0.08); ctx.fillRect(b.x, py, b.w, 1);
+          UK.text(ctx, `${nm.split(' ')[0]} wants to send you messages`, b.cx, py + 18, { size: 14, weight: 800, color: txt, maxW: b.w - 24 });
+          UK.text(ctx, 'They won’t know you’ve seen it until you accept.', b.cx, py + 37, { size: 12, weight: 500, color: sub, maxW: b.w - 24 });
+          const bw2 = (b.w - 40) / 3; reqBtns = [['block', 'Block'], ['delete', 'Delete'], ['accept', 'Accept']].map(([k, l], i) => { const r2 = { k, x: b.x + 10 + i * (bw2 + 10), y: py + 54, w: bw2, h: 44 }; ctx.fillStyle = k === 'accept' ? mineC : dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)'; UK.rr(ctx, r2.x, r2.y, r2.w, r2.h, 14); ctx.fill(); UK.text(ctx, l, r2.x + r2.w / 2, r2.y + 23, { size: 15, weight: 800, color: k === 'accept' ? '#ffffff' : '#f4212e' }); return r2; });
+          e._chat.request = true; e._chat.reqBtns = reqBtns; return; }
+        reqBtns = [];
         if (!ok || bar) return; // (no bar where you can't write; none while the typing bar is open, which sits there or on the keyboard)
         // the bar
         const brr = { x: b.x + 8, y: b.y + b.h - cov - barH + 8, w: b.w - 16, h: barH - 16 };
@@ -12161,6 +12322,7 @@ registerBehavior('uiInbox', {
     { key: 'tabs', label: 'Tabs: All, Unread, Groups', type: 'bool', default: true },
     { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'pills', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
     { key: 'hold', label: 'Press and hold: pin, mute, mark unread, delete', type: 'bool', default: true },
+    { key: 'requests', label: 'Message requests', type: 'bool', default: true, info: 'A first message from someone you don’t follow (and never wrote to) goes in “Message requests” at the top instead of your chats, like X and Messenger. Opening it shows Accept, Delete and Block.' },
     { key: 'pullRefresh', label: 'Pull down to refresh', type: 'bool', default: true, info: 'Fetches new messages when they are online.' },
     ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Unread dot', '@accent'] }),
     ...UI_COMMON,
@@ -12173,7 +12335,8 @@ registerBehavior('uiInbox', {
     const all = (s) => (has(s) ? D(s).rows(p.collection) : sampleChats(s));
     const convs = (s) => {
       const M = me(s), mh = handleOf(M.handle), A = all(s), meta = chatMeta(s), by = new Map(), out = [];
-      for (const r of A) { const c = String(r.chat ?? ''); if (!c) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
+      const now = Date.now(), blk = meta.block;
+      for (const r of A) { const c = String(r.chat ?? ''); if (!c || msgExpired(r, now) || (blk.length && !r.system && blk.includes(handleOf(r.handle)))) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
       for (const [c, L] of by) {
         const mem = chatMembers(L, c), mine = L.some((q) => isMineMsg(q, M));
         if (has(s) && /^dm-/.test(c) && !mem.includes(mh) && !mine) continue; // other people's direct messages
@@ -12185,15 +12348,17 @@ registerBehavior('uiInbox', {
         const title = selfDm ? (M.author || 'Me') + ' (you)' : /^dm-/.test(c) ? other?.author || nameOfHandle(s, mem.find((h) => h !== mh) || '') || 'Chat' : group ? chatTitleOf(L, c) || mem.filter((h) => h !== mh).map((h) => nameOfHandle(s, h).split(' ')[0]).join(', ') || 'Group' : '# ' + c;
         const myRead = readAt(s, c, mh); let unread = L.filter((q) => !isMineMsg(q, M) && !q.system && (q._at || 0) > myRead).length; if (!unread && meta.unread.includes(c)) unread = -1; // -1: marked unread (a dot)
         const lastMine = isMineMsg(last, M) && !last.system, others = mem.filter((h) => h !== mh), seen = lastMine && others.length && others.every((h) => readAt(s, c, h) >= (last._at || 0)), got = seen || (lastMine && others.length && others.every((h) => gotAt(s, c, h) >= (last._at || 0)));
-        out.push({ c, title, last, mine: lastMine, unread, who: other?.author || title, group, room: !group && !/^dm-/.test(c), self: selfDm, pin: meta.pin.includes(c), mute: chatMuted(meta, c), arch: meta.arch.includes(c), seen, got, mem: others });
+        out.push({ c, title, last, mine: lastMine, unread, who: other?.author || title, group, room: !group && !/^dm-/.test(c), self: selfDm, pin: meta.pin.includes(c), mute: chatMuted(meta, c), arch: meta.arch.includes(c), seen, got, mem: others, req: p.requests !== false && !selfDm && chatRequest(s, L, c, M, mem) });
       }
       return out.sort((a, b) => (b.pin - a.pin) || (b.last._at || 0) - (a.last._at || 0));
     };
-    let archView = false, sw = null, sdrag = null, swEat = 0;
-    /** The rows shown: an “Archived” folder on top (or ‹ back inside it), then the conversations of this tab. */
-    const shownList = (s) => { const t = filter.toLowerCase(), A = convs(s), nArch = A.filter((q) => q.arch).length; if (archView && !nArch) archView = false;
-      const L = A.filter((q) => (archView ? q.arch : !q.arch) && (tab !== 1 || q.unread) && (tab !== 2 || q.group) && (!t || q.title.toLowerCase().includes(t) || String(q.last.text || '').toLowerCase().includes(t)));
-      return archView ? [{ kind: 'back', c: '\u0000back', n: nArch }, ...L] : nArch && !t ? [{ kind: 'arch', c: '\u0000arch', n: nArch, unread: A.filter((q) => q.arch && q.unread > 0).length }, ...L] : L; };
+    let archView = false, reqView = false, sw = null, sdrag = null, swEat = 0;
+    /** The rows shown: “Message requests” and “Archived” folders on top (or ‹ back inside one), then the conversations of this tab. */
+    const shownList = (s) => { const t = filter.toLowerCase(), A = convs(s), nReq = A.filter((q) => q.req && !q.arch).length, nArch = A.filter((q) => q.arch).length; if (archView && !nArch) archView = false; if (reqView && !nReq) reqView = false;
+      const L = A.filter((q) => (reqView ? q.req && !q.arch : archView ? q.arch : !q.arch && !q.req) && (tab !== 1 || q.unread) && (tab !== 2 || q.group) && (!t || q.title.toLowerCase().includes(t) || String(q.last.text || '').toLowerCase().includes(t)));
+      if (reqView) return [{ kind: 'reqback', c: '\u0000reqback', n: nReq }, ...L];
+      if (archView) return [{ kind: 'back', c: '\u0000back', n: nArch }, ...L];
+      return [...(nReq && !t ? [{ kind: 'req', c: '\u0000req', n: nReq, unread: A.filter((q) => q.req && !q.arch && q.unread > 0).length }] : []), ...(nArch && !t ? [{ kind: 'arch', c: '\u0000arch', n: nArch, unread: A.filter((q) => q.arch && q.unread > 0).length }] : []), ...L]; };
     const saveM = (s, f) => { const m = chatMeta(s); f(m); saveChatMeta(s, m); };
     const toggleArch = (s, q) => { const on = q.arch; saveM(s, (m) => { m.arch = on ? m.arch.filter((x) => x !== q.c) : [...m.arch, q.c]; }); s.snackbar?.(on ? 'Unarchived' : 'Archived', 'Undo', () => saveM(s, (m) => { m.arch = on ? [...m.arch, q.c] : m.arch.filter((x) => x !== q.c); })); };
     const togglePin = (s, q) => saveM(s, (m) => { m.pin = m.pin.includes(q.c) ? m.pin.filter((x) => x !== q.c) : [...m.pin, q.c]; });
@@ -12237,7 +12402,7 @@ registerBehavior('uiInbox', {
         S.max = Math.max(0, C.length * H - list.h + coveredBottom(s, e, b) + 70); S.update(s, e, dt, list, p.pullRefresh === false || s.engine.editing ? null : () => { s.engine.vibrate?.(10); const sp = s.engine.supa; if (has(s) && sp?.online?.(D(s).def(p.collection))) { try { sp.pullAll(p.collection); if (D(s).def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh: ' + err.message, 'Inbox'); } } else s.snackbar?.('Up to date'); });
         if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
         if (!s.engine.editing && (gotT += dt) > 1.5) { gotT = 0; markDelivered(s, all(s), handleOf(me(s).handle)); } // my phone has them: Delivered
-        if (p.unreadVar && !s.engine.editing) { const n = convs(s).reduce((a, q) => a + (q.mute || q.arch ? 0 : Math.max(0, q.unread)), 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
+        if (p.unreadVar && !s.engine.editing) { const n = convs(s).reduce((a, q) => a + (q.mute || q.arch || q.req ? 0 : Math.max(0, q.unread)), 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
         if (s.engine.editing || sheetUp) { hold = null; sdrag = null; return; }
         const rowAt = (pt) => (UK.in(pt, list) ? C[Math.floor((pt.y - list.y + S.v) / H)] : null);
         // swipe a conversation: left for Mute / Archive / Delete, right for Pin / Unread
@@ -12258,7 +12423,7 @@ registerBehavior('uiInbox', {
           if (newR && Math.hypot(t.x - newR.x, t.y - newR.y) < newR.r + 6) { UK.tap(s, p); newMenu(s); continue; }
           if (searchR && UK.in(t, searchR)) { UK.tap(s, p); if (filter && t.x > searchR.x + searchR.w - 40) { filter = ''; continue; } askTextBox(s, { question: 'Search messages', value: filter, max: 40, placeholder: 'Name or words' }, (v) => { filter = v || ''; S.v = 0; }); continue; }
           const ti = tabsR.findIndex((r) => UK.in(t, r)); if (ti >= 0) { if (ti !== tab) { UK.tap(s, p); TSt.tap(ti); tab = ti; S.v = 0; } continue; }
-          const q = rowAt(t); if (!q) continue; UK.tap(s, p); if (q.kind === 'arch') { archView = true; S.v = 0; continue; } if (q.kind === 'back') { archView = false; S.v = 0; continue; } open(s, q);
+          const q = rowAt(t); if (!q) continue; UK.tap(s, p); if (q.kind === 'arch') { archView = true; S.v = 0; continue; } if (q.kind === 'back') { archView = false; S.v = 0; continue; } if (q.kind === 'req') { reqView = true; S.v = 0; continue; } if (q.kind === 'reqback') { reqView = false; S.v = 0; continue; } open(s, q);
         }
       },
       drawUI(ctx, e, s) {
@@ -12274,7 +12439,7 @@ registerBehavior('uiInbox', {
         }
         if (p.tabs !== false) { const C0 = convs(s), un = C0.filter((q) => q.unread).length; tabsR = TSt.draw(ctx, { x: b.x, y, w: b.w, h: 44 }, [{ label: 'All' }, { label: un ? `Unread ${un}` : 'Unread' }, ...(p.groups !== false ? [{ label: 'Groups' }] : [])], tab, { style: p.tabStyle || 'pills', act: acc, idle: sub, text: txt, on: ['pills', 'gradient', 'chips'].includes(p.tabStyle || 'pills') ? '#ffffff' : '', line, size: 14, now: s.time, snap: s.engine.editing, layout: 'fit the names (scrolls)', thumb: dark ? '#2a2d36' : '#ffffff' }); y += 46; }
         top = y - b.y;
-        const C = shownList(s);
+        const C = shownList(s); e._inbox = C.map((q) => q.kind || q.c); // (for tests)
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, y, b.w, b.h - top); ctx.clip();
         if (p.pullRefresh !== false) pullSpinner(ctx, s, S, b.cx, y, acc, dark ? '#1f2330' : '#ffffff');
         if (!C.length) UK.text(ctx, filter ? `No results for “${filter}”` : tab === 1 ? 'You’re all caught up' : tab === 2 ? 'No group chats yet' : p.empty || 'No messages yet', b.cx, y + 60, { size: 15, weight: 600, color: sub });
@@ -12282,10 +12447,11 @@ registerBehavior('uiInbox', {
           const ry = y + i * H - S.v; if (ry + H < y || ry > b.y + b.h) return;
           if (q.kind) { // the Archived folder (or ‹ back out of it)
             const ax0 = b.x + 16 + 26; ctx.fillStyle = withAlpha(acc.startsWith('#') ? acc : '#1d9bf0', 0.14); ctx.beginPath(); ctx.arc(ax0, ry + H / 2, 24, 0, Math.PI * 2); ctx.fill();
-            drawIco(ctx, 'bookmark', ax0, ry + H / 2, 20, acc, { stroke: 2 });
-            UK.text(ctx, q.kind === 'back' ? '‹ Archived chats' : 'Archived', b.x + 80, ry + H / 2 - (q.kind === 'back' ? 8 : 0), { size: 16, weight: 800, color: txt, align: 'left' });
-            if (q.kind === 'back') UK.text(ctx, 'Tap to go back · swipe a chat to unarchive it', b.x + 80, ry + H / 2 + 14, { size: 13, weight: 500, color: sub, align: 'left', maxW: b.w - 96 });
-            else UK.text(ctx, String(q.n), b.x + b.w - 16, ry + H / 2, { size: 14, weight: 700, color: q.unread ? acc : sub, align: 'right' });
+            const rq = q.kind === 'req' || q.kind === 'reqback', bk = q.kind === 'back' || q.kind === 'reqback';
+            drawIco(ctx, rq ? 'mail' : 'bookmark', ax0, ry + H / 2, 20, acc, { stroke: 2 });
+            UK.text(ctx, rq ? (bk ? '‹ Message requests' : 'Message requests') : bk ? '‹ Archived chats' : 'Archived', b.x + 80, ry + H / 2 - (bk || rq ? 8 : 0), { size: 16, weight: 800, color: txt, align: 'left' });
+            if (bk) UK.text(ctx, rq ? 'Tap to go back · open one to accept, delete or block' : 'Tap to go back · swipe a chat to unarchive it', b.x + 80, ry + H / 2 + 14, { size: 13, weight: 500, color: sub, align: 'left', maxW: b.w - 96 });
+            else { if (rq) UK.text(ctx, 'From people you don’t follow', b.x + 80, ry + H / 2 + 14, { size: 13, weight: 500, color: sub, align: 'left', maxW: b.w - 120 }); UK.text(ctx, String(q.n), b.x + b.w - 16, ry + H / 2, { size: 14, weight: 700, color: q.unread ? acc : sub, align: 'right' }); }
             ctx.fillStyle = line; ctx.fillRect(b.x + 80, ry + H - 0.5, b.w - 80, 0.5); return; }
           const sdx = sw?.c === q.c ? sw.dx : 0;
           if (sdx) { // the actions under the row
@@ -12301,7 +12467,7 @@ registerBehavior('uiInbox', {
           UK.text(ctx, q.title, tx, ry + H / 2 - 11, { size: 16, weight: q.unread ? 800 : 700, color: txt, align: 'left', maxW: tw - ww - 12 });
           UK.text(ctx, when, b.x + b.w - 16, ry + H / 2 - 11, { size: 12, weight: 600, color: q.unread && !q.mute ? acc : sub, align: 'right' });
           flags.forEach((f, i) => drawIco(ctx, f, b.x + b.w - 16 - ww - 4 - i * 17, ry + H / 2 - 11, 13, sub));
-          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.enc ? (() => { const pl = E2EE.peek(l0); return pl ? pl.text || (pl.voice ? '🎤 Voice message' : pl.media ? 'Photo' : '') : '🔒 Encrypted message'; })() : l0.text || (l0.voice ? '🎤 Voice message' : l0.media ? 'Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
+          const l0 = q.last, body0 = l0.system ? String(l0.text || '') : l0.deleted ? 'Message unsent' : l0.enc ? (() => { const pl = E2EE.peek(l0); return pl ? pl.text || (pl.poll ? '📊 ' + String(pl.poll).split('|')[0].trim() : pl.loc ? '📍 Location' : pl.voice ? '🎤 Voice message' : pl.media ? 'Photo' : '') : '🔒 Encrypted message'; })() : l0.text || (l0.poll ? '📊 ' + String(l0.poll).split('|')[0].trim() : l0.loc ? '📍 Location' : l0.voice ? '🎤 Voice message' : l0.media ? 'Photo' : ''), who0 = q.mine ? 'You: ' : q.group && !l0.system ? String(l0.author || '').split(' ')[0] + ': ' : '';
           const right = q.unread ? 34 : q.mine && !q.self ? 24 : 0;
           UK.text(ctx, who0 + body0, tx, ry + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - right });
           if (q.unread > 0) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = q.mute ? sub : acc; UK.rr(ctx, b.x + b.w - 16 - bw, ry + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, ry + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }

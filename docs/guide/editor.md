@@ -73,7 +73,11 @@ Tap a tile to add it at the centre, or press, hold and drag it to the exact spot
 Every object in the current level, in drawing order.
 
 - **The top row is the level itself.** Tap it to open **Game Settings** in the Inspector.
-- Rows show a coloured icon by kind (player, UI, logic, camera, light, template) and a line listing the object's components.
+- Rows show the icon of the object's main component (App Bar, Feed, Stories, Button…), coloured by kind (player, UI, logic, camera, light, template), and a line listing its components.
+- **Quick filters** under the search: *All*, *Pages*, *UI*, *Player*, *Logic*, *Physics*, *Hidden*, *Templates* (only the ones the level has, with how many). Tap one to see only those; tap it again for everything. **Fold all / Unfold all** opens or closes every parent at once.
+- **Pages** (in apps) show with a pages icon and their page name. Tapping a page also shows it in the preview, and the page showing is marked **showing**.
+- **Where you are:** when the selected object sits inside another, a path at the top (*Home Page › Feed*) shows its parents. Tap one to select it; the target button scrolls the list to the selected object.
+- On a phone, a row's eye and drag handle show on the selected row (and the eye on hidden objects), so the list stays clean.
 - Three or more objects with the same name fold into one row (**Gem ×8**).
 - **Children** sit indented under their parent with a fold arrow and a tree line. Drag a row's grip onto another object to make it a child.
 - **Reorder by dragging:** drop the grip on the **top or bottom edge** of a row (a blue line shows) to move the object just above or below it, with the same parent. The order is the drawing order.
@@ -225,10 +229,11 @@ Long-press an object → **Make Prefab**. It appears in *Project › Prefabs ›
 
 ## Saving, history and backups
 
-- **Projects are saved only when you save them.** Tap the **Save** button in the top bar (or ☰ → *Save*, or Ctrl/⌘ S). A dot after the game's name means there are unsaved changes.
-- **New games and templates aren't kept until you save them.** Before another project replaces the open one (opening a game, starting a new one, importing), it asks: **Save**, **Don't save** or **Cancel**. The browser also asks before the tab is closed with unsaved changes.
+- **Auto-save is on:** a few seconds after each change, the project is saved. A small dot on the top bar's **Save** button shows it: blue and blinking while a change waits, green once it's saved. Its tooltip says when.
+- **Tap Save** (or ☰ → *Save*, or Ctrl/⌘ S) to save right away. **Hold it** (or right-click) to choose: auto-save after a few seconds, straight away or every 10 seconds, save when you leave the app, or **Only when I tap Save**. ☰ → *Auto-save: On / Off* switches it too, and so does *Preferences… › Save my work*.
+- **With auto-save off**, projects are saved only when you save them: a dot after the game's name means there are unsaved changes.
+- **New games and templates (with auto-save off) aren't kept until you save them.** Before another project replaces the open one (opening a game, starting a new one, importing), it asks: **Save**, **Don't save** or **Cancel**. The browser also asks before the tab is closed with unsaved changes.
 - **If the app is closed with unsaved changes**, they are kept aside (not saved as the project), and next time it asks whether to bring them back. They're kept in the device's database, so big games with pictures and sounds are kept too. The Save button's tooltip says when you last saved, and it gives a little check when you do.
-- To save as you go instead, pick *Straight away*, *After a few seconds* or *Every 10 seconds* in *☰ → Preferences… › Save my work*.
 - Saved projects live in the browser's database (IndexedDB).
 - *☰ → Restore Earlier Version…* keeps a restore point every few minutes (the last 12), of unsaved work too (marked *not saved yet*), so an hour of changes is never one tap away from being lost.
 - *☰ → Back Up All Games* makes one file with every game and your saved scripts; **Restore** brings it back on any device.

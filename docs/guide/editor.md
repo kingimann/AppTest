@@ -102,6 +102,10 @@ Things there should be one of, found twice: two **Bottom Navs** (or top tab bars
 
 ## Inspector
 
+- **Number fields stay sensible:** sizes, widths, heights, radii, counts and times can't go below 0, and a Font Size can't go below 1. A value below that turns the field red while you type and is set to the lowest allowed when you leave it, with a note.
+- **Renaming** updates the breadcrumb at the top as you type.
+- **Undo** is one step per field: rename, then change X, then Y, and Undo goes back through Y, X and the name one at a time (typing in one field is still one step).
+
 The selected object's settings, as **components** (cards).
 
 - **Header:** the name, with one line under it ("No tags · Layer Default · in Home Page"). Tap it for the **Details**: **tags** (chips; + adds one), **Layer** (collision layer), **Draw** layer and order and **Parent**. It stays open or closed as you leave it.

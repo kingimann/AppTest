@@ -2303,3 +2303,4 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .req-row b { display: block; font-size: 15px; } .req-row small { color: var(--muted); font-size: 12.5px; }
 .req-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent, #4c8bd6) 22%, transparent); color: var(--accent-text); }
 .h-reqs .h-dup { background: color-mix(in srgb, #ffca28 12%, var(--g3)); }
+.num input.bad { outline: 2px solid #ff5d5d; outline-offset: -1px; background: rgba(255,93,93,.12); }

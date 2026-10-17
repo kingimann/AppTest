@@ -3877,6 +3877,19 @@ function drawEntity2D(ctx, e, vars, time) {
   if (tx) e.text = { ...tx, color: tok(tx.color), color2: tok(tx.color2), outline: tok(tx.outline), glow: tok(tx.glow), shadowColor: tok(tx.shadowColor), bg: tok(tx.bg), bgBorder: tok(tx.bgBorder) };
   try { return drawEntity2DRaw(ctx, e, vars, time); } finally { if (sh) e.shape = sh; if (tx) e.text = tx; }
 }
+/** How far from its centre an object can draw (for skipping off-screen ones); 0 = always draw it (text, tilemaps). */
+function drawRadius2D(e) {
+  if (e.text || e.tiles) return 0;
+  const s = e.shape, S = e.sprite, b = e.bar;
+  let r = 0;
+  if (s) r = Math.max(r, s.r || 0, Math.hypot(s.w || 0, s.h || 0) / 2) + (s.lineWidth || 0) + (s.shadow ? (s.shadowBlur ?? 10) + Math.abs(s.shadowX || 0) + Math.abs(s.shadowY ?? 4) : 0) + (s.glow || 0);
+  if (s?.points) for (const q of s.points) r = Math.max(r, Math.hypot(q[0], q[1]));
+  if (s?.type === 'emoji') r = Math.max(r, (s.h || 0) * 0.8);
+  if (S) r = Math.max(r, Math.hypot(S.w || 0, S.h || 0) / 2);
+  if (b) r = Math.max(r, Math.hypot(b.w || 0, b.h || 0) / 2 + (b.icon ? (b.h || 0) * 1.15 * Math.min(20, +b.max || 20) / 2 : 0));
+  if (!r) return 0; // (nothing sized: don't guess)
+  return r * Math.max(Math.abs(e.sx) || 1, Math.abs(e.sy) || 1) + 40;
+}
 function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
@@ -4046,7 +4059,13 @@ export class Renderer2D {
     ctx.translate(-c.x, -c.y);
     if (engine.editing && engine.drawGrid) engine.drawGrid(ctx, scene, z);
     for (const e of scene.entities) { const L = e.data._line; if (L && !e.dead) { ctx.strokeStyle = L[6]; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(L[3], L[4]); ctx.stroke(); } }
-    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead && !e._parentHidden) drawEntity2D(ctx, e, scene.vars, scene.time);
+    // skip what's off the screen (a generous margin: shadows, glows, badges, a camera roll or shake)
+    const a = (c.roll ? Math.SQRT2 : 1), HW = engine.width / 2 / z * a + sk, HH = engine.height / 2 / z * a + sk, cx = c.x, cy = c.y;
+    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead && !e._parentHidden) {
+      const R = drawRadius2D(e);
+      if (R > 0 && !engine.noCull && (Math.abs(e.x - cx) > HW + R || Math.abs(e.y - cy) > HH + R)) continue;
+      drawEntity2D(ctx, e, scene.vars, scene.time);
+    }
     for (const p of scene.particles) {
       ctx.globalAlpha = Math.max(0, p.life) * (p.alpha ?? 1);
       ctx.fillStyle = p.color;
@@ -4443,6 +4462,19 @@ export class Renderer3D {
     gl.uniform1f(this.u.uVColor, 0);
   }
 
+  /** Could this mesh be on screen? Its bounding sphere against the six sides of the camera's view (planes from viewProj). */
+  inView(e) {
+    const m = this.viewProj; if (!m) return true;
+    if (this._vpFor !== m) { // planes once per frame
+      this._vpFor = m; const P = this._planes ||= [[], [], [], [], [], []], r = (i) => [m[i], m[4 + i], m[8 + i], m[12 + i]], R0 = r(0), R1 = r(1), R2 = r(2), R3 = r(3);
+      [[1, R0], [-1, R0], [1, R1], [-1, R1], [1, R2], [-1, R2]].forEach(([sg, R], k) => { const q = P[k]; for (let i = 0; i < 4; i++) q[i] = R3[i] + sg * R[i]; const l = Math.hypot(q[0], q[1], q[2]) || 1; for (let i = 0; i < 4; i++) q[i] /= l; });
+    }
+    const [gx, gy0, gz] = partSize(e.mesh), gy = e.mesh.geometry === 'plane' ? 1 : gy0;
+    const rad = 0.55 * Math.hypot(gx * Math.abs(e.sx), gy * Math.abs(e.sy), gz * Math.abs(e.sz)) + 0.05;
+    for (const q of this._planes) if (q[0] * e.x + q[1] * e.y + q[2] * e.z + q[3] < -rad) return false;
+    return true;
+  }
+
   meshModel(e) {
     const m = e.mesh, [gx, gy0, gz] = partSize(m), gy = m.geometry === 'plane' ? 1 : gy0;
     return M4.trs(e.x, e.y, e.z, e.rx * DEG, e.ry * DEG, e.rz * DEG, e.sx * gx, e.sy * gy, e.sz * gz);
@@ -4553,8 +4585,9 @@ export class Renderer3D {
       if (!e.mesh || !e.visible || e.dead || e._parentHidden) continue;
       let op = e.mesh.opacity * e.alpha;
       if (e.data.invuln > 0 && Math.floor(scene.time * 12) % 2) op *= 0.3;
-      if (op < 1) { transparent.push([e, op]); } else this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive);
       if (e.body && e.body.type !== 'static' && !e.body.sensor) shadows.push(e);
+      if (!engine.noCull && !this.inView(e)) continue; // outside the camera's view
+      if (op < 1) { transparent.push([e, op]); } else this.drawMesh(e.mesh.geometry, this.meshModel(e), e.mesh.color, e.mesh.emissive);
     }
     // blob shadows onto the highest static surface below each moving body
     gl.enable(gl.BLEND); gl.depthMask(false);
@@ -22775,6 +22808,8 @@ registerBehavior('graph', {
     }
     const g = p.graph || { nodes: [], links: [] }, byId = new Map(g.nodes.map((n) => [n.id, n])), state = new Map();
     const SK = p._sk ? p._sk + ':' : ''; // which script of the component (live debug badges)
+    /** The editor's live debug record for a node (placed objects only, so spawned copies cost nothing). */
+    const stat = (ctx, n) => { const m = ctx.s?.engine?.graphStats?.get(ctx.e.id); if (!m) return null; const k = SK ? SK + n.id : n.id; return m.get(k) || m.set(k, { runs: 0 }).get(k); };
     const def = (n) => NODE_TYPES[n.type] || {};
     const anims = (e) => ['animator', 'spriteSheet'].map((t) => e.getBehavior(t)).filter(Boolean);
     const param = (n, key) => { const d = [...(def(n).params || []), ...(def(n).inputs || [])].find((q) => q.key === key); return n.params?.[key] ?? d?.default; };
@@ -22803,8 +22838,8 @@ registerBehavior('graph', {
     };
     const debugRays = [], repeats = new Map(), frameQueue = [], press = new Map(); let lastTapT = -9, varWas = new Map();
     const value = (n, ctx, depth) => { // remember the last value for the editor's live debug badges
-      const v = valueOf(n, ctx, depth), st = ctx.s?.engine?.graphStats;
-      if (st && n) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
+      const v = valueOf(n, ctx, depth), r = n && stat(ctx, n);
+      if (r) { r.runs++; r.value = typeof v === 'number' ? Math.round(v * 1000) / 1000 : v; }
       return v;
     };
     const valueOf = (n, ctx, depth) => {
@@ -23073,8 +23108,8 @@ registerBehavior('graph', {
       }
     };
     const follow = (n, port, ctx) => {
-      const st = ctx.s?.engine?.graphStats, d = def(n);
-      if (st && !d.exec && !d.value) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; } // events count when they fire
+      const d = def(n);
+      if (!d.exec && !d.value) { const r = stat(ctx, n); if (r) { r.runs++; r.t = ctx.s.time; } } // events count when they fire
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
     };
     /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
@@ -23105,8 +23140,7 @@ registerBehavior('graph', {
     };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
-      const st = ctx.s.engine.graphStats;
-      if (st) { const k = ctx.e.id + '|' + SK + n.id, r = st.get(k) || st.set(k, { runs: 0 }).get(k); r.runs++; r.t = ctx.s.time; }
+      const r0 = stat(ctx, n); if (r0) { r0.runs++; r0.t = ctx.s.time; }
       if (n.off) { const outs = def(n).outs || []; return follow(n, outs.includes('then') ? 'then' : outs[0], ctx); } // switched off: pass straight through
       const PR = NODE_TYPES[n.type]?.pluginRun; // a plugin's node: its run() returns the output to follow (or a promise of it)
       if (PR) {
@@ -24671,6 +24705,8 @@ export const Haptics = {
 export class Engine {
   constructor(opts = {}) {
     this.parent = opts.parent || document.body;
+    // inside a page (the editor): remember the parent's size when it changes, so frames never force a page layout to measure it
+    if (this.parent !== document.body && typeof ResizeObserver === 'function') new ResizeObserver(() => { this.parentSize = this.parent.getBoundingClientRect(); }).observe(this.parent);
     this.maxDpr = opts.maxPixelRatio || 2;
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
     this.store = new Store(this); // in-app purchases (Game Settings › In-App Purchases)
@@ -24783,7 +24819,10 @@ export class Engine {
       installPlugins(source.plugins); // (each plugin runs once per page)
       if (!this.editing) source = this.mods.apply(source); // turned-on mods
     }
-    if (!this.editing && this.recordGraphs) this.graphStats = new Map(); // the node editor's live debug: what ran in this play
+    if (!this.editing && this.recordGraphs) { // the node editor's live debug: what ran in this play (per placed object with a script)
+      this.graphStats = new Map();
+      if (source && typeof source === 'object' && !(source instanceof Scene)) for (const lv of [source, ...(source.levels || [])]) for (const e of lv?.entities || []) if ((e.behaviors || []).some((b) => b.type === 'graph')) this.graphStats.set(e.id, new Map());
+    }
     if (source && typeof source === 'object' && !(source instanceof Scene)) this.audio.clips = { ...(source.sounds || {}) }; // imported sounds
     if (typeof source === 'function') this.factory = source;
     else if (source instanceof Scene) this.factory = () => source;
@@ -25103,7 +25142,7 @@ export class Engine {
    */
   fitScreen() {
     const s = this.scene, o = s?.settings.orientation, want = this.letterbox ?? (s?.settings.wrongWay === 'letterbox');
-    const P = this.parent === document.body ? { width: innerWidth, height: innerHeight } : this.parent.getBoundingClientRect();
+    const P = this.parent === document.body ? { width: innerWidth, height: innerHeight } : this.parentSize || (this.parentSize = this.parent.getBoundingClientRect());
     let box = null;
     if (s && want && (o === 'portrait' || o === 'landscape') && P.width > 0 && P.height > 0 && (o === 'landscape') === (P.height > P.width)) {
       const v = s.view || {}, a = Math.max(+v.width || 0, +v.height || 0) / Math.max(1, Math.min(+v.width || 0, +v.height || 0));

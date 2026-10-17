@@ -41,7 +41,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
 };
 // ---------- Editor Preferences (this device only) ----------
-const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, uiSnap: true, uiSnapGap: 8, uiSnapDist: 8, rotSnap: 15, haptics: true, autosave: '3', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false };
+const EDITOR_PREFS = { dense: true, compactTools: true, clean: false, theme: 'dark', accent: '#4c8bd6', uiSize: 1, reduceMotion: false, snap2D: 10, snap3D: 0.5, uiSnap: true, uiSnapGap: 8, uiSnapDist: 8, rotSnap: 15, haptics: true, autosave: '3', snapEvery: 3, snapKeep: 12, startOn: 'home', keepAwake: false, autoReqs: 'auto' };
 let EP = (() => { try { return { ...EDITOR_PREFS, ...JSON.parse(localStorage.getItem('pocket.editor.prefs') || '{}') }; } catch { return { ...EDITOR_PREFS }; } })();
 try { if (!localStorage.getItem('pocket.editor.manualSave')) { localStorage.setItem('pocket.editor.manualSave', '1'); if (EP.autosave !== 'manual') { EP.autosave = 'manual'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // projects are saved only when you save them
 try { if (!localStorage.getItem('pocket.editor.autoSaveOn')) { localStorage.setItem('pocket.editor.autoSaveOn', '1'); if (EP.autosave === 'manual') { EP.autosave = '3'; localStorage.setItem('pocket.editor.prefs', JSON.stringify(EP)); } } } catch { /* storage unavailable */ } // auto-save is on (a few seconds after each change); Preferences › Saving or the Save button's menu turns it off
@@ -98,11 +98,11 @@ function h(tag, attrs = {}, ...kids) {
 }
 
 let toastTimer;
-function toast(msg) {
+function toast(msg, act) { // act: { label, fn } adds a button (e.g. Undo) and keeps the message up longer
   $('.toast')?.remove();
-  const t = h('div', { class: 'toast' }, msg);
+  const t = h('div', { class: 'toast' + (act ? ' has-act' : '') }, msg, act && h('button', { class: 'toast-act', onclick: () => { t.remove(); act.fn(); } }, act.label));
   document.body.append(t);
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 2200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), act ? 6000 : 2200);
 }
 
 // ============================================================================
@@ -273,7 +273,7 @@ function openProject(json, id = uid('p')) {
   rebuild();
   refreshAll();
   installPlugins(root.plugins); // its components and nodes show in the editor
-  try { reqKnown = new Set(unmetReqs().keys()); } catch { reqKnown = null; } // (what's already missing shows in the Hierarchy; only new gaps ask)
+  try { reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); } catch { reqKnown = null; } openedReqs(); // (what's already missing is added, or shows in the Hierarchy)
   if (manualSave()) { setDirty(!allProjects()[id]); edited = false; return; } // a new project isn't saved until you save it
   installPlugins(root.plugins);
   saveNow();
@@ -317,7 +317,7 @@ function setLevel(i) {
   levelIdx = to;
   project = levelList()[levelIdx];
   project.mode ||= root.mode;
-  selectedId = null; try { reqKnown = new Set(unmetReqs().keys()); } catch { reqKnown = null; }
+  selectedId = null; try { reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); } catch { reqKnown = null; } openedReqs();
   if (viewMode === 'top' && project.mode !== '3d') { viewMode = 'scene'; $('#app').dataset.view = 'scene'; }
   resetCamera(); if (!rebuild() && was !== to && levelList()[was]) { levelIdx = was; project = levelList()[was]; selectedId = null; resetCamera(); rebuild(); refreshAll(); return false; } // (couldn't show it: back where you were)
   refreshAll(); return true;
@@ -2364,7 +2364,7 @@ function renderHierarchy() {
   const UR = unmetReqs(); // parts that can't work yet: what they need, added in one tap
   if (UR.size) box.append(h('div', { class: 'h-dups h-reqs' }, h('div', { class: 'h-dup' }, icon('warn'),
     h('div', { class: 'h-dup-t' }, h('b', {}, `${UR.size} thing${UR.size > 1 ? 's' : ''} missing for parts of your app to work`), h('small', {}, [...UR.values()].slice(0, 3).map((q) => (q.kind === 'coll' ? `${q.name} data` : `the “${q.name}” page`) + ' for ' + q.by[0]).join(' · ') + (UR.size > 3 ? ' …' : ''))),
-    h('div', { class: 'h-dup-b' }, h('button', { class: 'btn primary', 'data-req-fix': '1', onclick: () => fixReqs([...UR.values()]) }, icon('plus'), 'Add them')))));
+    h('div', { class: 'h-dup-b' }, h('button', { class: 'btn primary', 'data-req-fix': '1', onclick: () => fixReqs([...UR.values()]) }, icon('plus'), 'Make them for me')))));
   if (sig && sig !== dupSig && (dupSig === null || dups.some((g) => !dupSig.includes(g.ids.join(','))))) { const g = dups.find((q) => !(dupSig || '').includes(q.ids.join(','))); toast(`Heads up: ${g.label}. The Hierarchy shows them.`); } // a duplicate just appeared (or was there when the project opened)
   dupSig = sig;
   const rows = h('div');
@@ -2764,6 +2764,7 @@ function control(target, path, spec) {
   const get = () => { const v = getPath(target(), path); return v === undefined ? spec.def : v; };
   const set = (v) => {
     setPath(target(), path, v); markMod();
+    if (v === 'go to page' && /(^|\.)action$/.test(path)) { const o = getPath(target(), path.replace(/(^|\.)action$/, '')) || target(), pv = String(o?.value ?? ''); if (pv && ![...(uiPages().get('page') || [])].some((q) => String(q).toLowerCase() === pv.toLowerCase())) o.value = ''; } // (its old message isn't a page: it opens the first page until you type one)
     if (path === 'name' && target() === project) refreshAll();
     changed({ structure: spec.structure || ['name', 'tags', 'template', 'locked'].includes(path) });
   };
@@ -6799,6 +6800,7 @@ function openPreferences() {
       tog('reduceMotion', 'Reduce motion', 'Turns off sliding and fading animations'),
     ]),
     sec('Editing', 'move', [
+      sel('autoReqs', 'Missing pages & data', [['auto', 'Add them for me (Undo in the message)'], ['ask', 'Ask me first']], 'When a tab, menu item, button or component opens a page (or needs data) the app doesn’t have'),
       flag('Snap when moving', () => snap, (v) => { snap = v; store.set('pocket.editor.snap', v ? '1' : '0'); $('#snapBtn')?.classList.toggle('on', v); }),
       sel('snap2D', 'Snap step (2D)', [[1, '1 px'], [5, '5 px'], [10, '10 px'], [16, '16 px (tiles)'], [20, '20 px'], [32, '32 px'], [50, '50 px']]),
       sel('snap3D', 'Snap step (3D)', [[0.1, '0.1'], [0.25, '0.25'], [0.5, '0.5'], [1, '1']]),
@@ -8316,7 +8318,7 @@ const pageSlug = (t) => String(t || '').trim().toLowerCase().replace(/[^\w\s-]/g
 /** A new page (or a copy of one): it opens with a Go To Page button, a tab or a list row set to its name. */
 function newPage(from, o = {}) {
   const name = (o.name ?? prompt(from ? 'Name of the copy' : 'Name of the new page (e.g. Settings, Shop)', from ? (from.name || 'Page').replace(/ Page$/, '') + ' 2' : ''))?.trim(); if (!name) return;
-  const val = pageSlug(name) || 'page' + Math.floor(Math.random() * 1000), v = from ? showIfOf(from).var || 'page' : 'page';
+  const val = o.value ?? (pageSlug(name) || 'page' + Math.floor(Math.random() * 1000)), v = from ? showIfOf(from).var || 'page' : 'page'; // (o.value: exactly what a tab or button already opens)
   if (uiPages().get(v)?.has(val)) { toast(`There is already a page “${val}”`); return; }
   let top;
   if (from) {
@@ -8437,13 +8439,15 @@ function unmetReqs() {
   const have = new Set((root.collections || []).map((c) => ck(c.name))), app = !!levelList()[0]?.settings?.app, pages = new Set([...(uiPages().get('page') || [])].map((v) => String(v).toLowerCase()));
   const need = (key, o, by) => { const q = out.get(key); if (q) { if (!q.by.includes(by)) q.by.push(by); } else out.set(key, { ...o, by: [by] }); };
   const wantColl = (n, by) => { n = String(n || '').trim(); const d = n && !have.has(ck(n)) && collDef(n); if (d) need('coll:' + ck(n), { kind: 'coll', name: d.name }, by); };
-  const wantPage = (v, by) => { v = String(v || '').trim().toLowerCase(); if (!app || !v || v.includes(':') || pages.has(v) || !pageTplFor(v)) return; need('page:' + v, { kind: 'page', name: v }, by); };
+  const wantPage = (raw, by) => { const v = String(raw || '').trim(); if (!(app || pages.size) || !v || /[:=]/.test(v) || ['back', 'none'].includes(v.toLowerCase()) || pages.has(v.toLowerCase())) return; need('page:' + v.toLowerCase(), { kind: 'page', name: v }, by); }; // (every page something opens, made ready-made when its name says what it is)
   for (const lv of levelList()) for (const e of lv.entities || []) for (const b of e.behaviors || []) {
     const D = Behaviors[b.type]; if (!D) continue; if (b.type === 'uiSideBar' && !b.social) continue;
     const lb = D.label.replace(/ \(.*\)$/, ''), by = e.name && e.name !== lb ? `${lb} (${e.name})` : lb, val = (k) => b[k] ?? D.params?.find((q) => q.key === k)?.default;
-    for (const P of D.params || []) { if (/collection$/i.test(P.key)) wantColl(val(P.key), by); else if (lv === project && /Page$/.test(P.key) && typeof val(P.key) === 'string') wantPage(val(P.key), by); }
+    for (const P of D.params || []) { if (/collection$/i.test(P.key)) wantColl(val(P.key), by); else if (lv === project && /Page$/.test(P.key) && P.type === 'text' && typeof val(P.key) === 'string') wantPage(val(P.key), by); } // (a page name field, not a setting that happens to end in “Page”)
     for (const n of REQ_EXTRA[b.type] || []) wantColl(n, by);
     if (lv !== project) continue;
+    if (b.type === 'button' && val('action') === 'go to page') wantPage(val('value') || 'home', `the button “${e.name || 'Button'}”`);
+    if (val('after') === 'go to page' && typeof val('page') === 'string') wantPage(val('page'), by);
     const rowsOf = (t) => String(t || '').split('\n').map((l) => l.trim()).filter((l) => l && !/^[#>=~-]/.test(l)).map((l) => l.split('|').map((x) => x.trim()));
     if (b.type === 'uiBottomNav') for (const r of rowsOf(b.tabs)) wantPage(r[2], `the Bottom Nav tab “${r[0] || r[2]}”`);
     if (b.type === 'uiSideBar') for (const r of [...rowsOf(b.items), ...rowsOf(b.footer)]) wantPage(String(r[2] || '').replace(/^button:/, ''), `the Side Menu item “${r[0] || r[2]}”`);
@@ -8451,25 +8455,48 @@ function unmetReqs() {
   }
   return out;
 }
-let reqKnown = null, reqBusy = false, reqTimer = 0;
+let reqKnown = null, reqBusy = false, reqTimer = 0, reqHave = null, lastTypeAt = -1e9;
+document.addEventListener('input', (e) => { if (e.target?.matches?.('input[type=text], input:not([type]), input[type=search], textarea')) lastTypeAt = performance.now(); }, true);
+/** The pages and data the app has now (to tell "you just removed it" from "something new needs it"). */
+const haveKeys = () => new Set([...(root?.collections || []).map((c) => 'coll:' + ck(c.name)), ...[...(uiPages().get('page') || [])].map((v) => 'page:' + String(v).toLowerCase())]);
+const autoReqs = () => EP.autoReqs !== 'ask';
+/** A project or level just opened: with "Add them for me", what it's missing is added (once the Scene is up). */
+function openedReqs() { if (!autoReqs()) return; setTimeout(() => { if (playing || reqBusy || !root) return; try { const U = unmetReqs(); if (U.size) autoFixReqs([...U.values()]); } catch { /* not ready */ } }, 400); }
+/** Add what's missing straight away, and say so with an Undo. */
+function autoFixReqs(list) {
+  flushHistory(); pushHistory(); const before = history[hIndex]; // (Undo goes back to just before, however many steps adding them took)
+  const by = [...new Set(list.flatMap((q) => q.by))], made = fixReqs(list, { quiet: true }); if (!made.length) return; pushHistory();
+  const what = made.length > 2 ? `${made.slice(0, 2).join(', ')} and ${made.length - 2} more` : made.join(' and ');
+  toast(`Added ${what} so ${by.slice(0, 2).join(' and ')}${by.length > 2 ? ' and more' : ''} work${by.length === 1 ? 's' : ''}`, { label: 'Undo', fn: () => { flushHistory(); pushHistory(); const i = history.lastIndexOf(before); undoRedo(i >= 0 ? i - hIndex : -1); reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); toast('Undone'); } });
+}
 /** Add what's missing: the ready-made collections and pages. */
-function fixReqs(list) {
+function fixReqs(list, { quiet = false } = {}) {
   reqBusy = true; const made = [], before = new Set(reqKnown || []);
-  for (const q of list) before.delete('coll:' + ck(q.name)), before.delete('page:' + q.name);
+  for (const q of list) before.delete('coll:' + ck(q.name)), before.delete('page:' + String(q.name).toLowerCase());
   try { for (let round = 0; round < 5 && list.length; round++) { for (const q of list) {
     if (q.kind === 'coll' && !(root.collections || []).some((c) => ck(c.name) === ck(q.name))) { const d = collDef(q.name); if (d) { (root.collections ||= []).push({ ...clone(d), rows: [] }); made.push(`${d.name} data`); } }
-    if (q.kind === 'page' && !(uiPages().get('page') || new Set()).has(q.name)) { const nv = newPage(null, { name: q.name.charAt(0).toUpperCase() + q.name.slice(1), tab: false, side: false, stay: true, template: pageTplFor(q.name) }); if (nv) made.push(`the “${q.name}” page`); }
+    if (q.kind === 'page' && ![...(uiPages().get('page') || [])].some((v) => String(v).toLowerCase() === String(q.name).toLowerCase())) { const nv = newPage(null, { name: q.name.charAt(0).toUpperCase() + q.name.slice(1), value: q.name, tab: false, side: false, stay: true, template: pageTplFor(q.name) });
+      if (nv) { made.push(`the “${q.name}” page`); const top = !pageTplFor(q.name) && project.entities.find((j) => j.ui && showIfOf(j)?.value === nv && !j.parent); // a plain page says what it's for
+        if (top) project.entities.push({ id: uid(), name: 'About This Page', ui: true, parent: top.id, anchor: 'top-left', x: 20, y: 90, text: { value: `Made for ${q.by[0] || 'a link'}. Add what this page shows here.`, size: 15, color: levelList()[0].settings?.app ? '@muted' : '#b8bdd0', align: 'left', wrap: 340 } }); } }
   } list = [...unmetReqs().entries()].filter(([k]) => !before.has(k)).map(([, q]) => q); } } finally { reqBusy = false; } // (what the added parts need in turn)
-  reqKnown = new Set(unmetReqs().keys()); changed({ structure: true });
-  if (made.length) toast('Added ' + made.join(', ')); return made;
+  reqKnown = new Set(unmetReqs().keys()); reqHave = haveKeys(); changed({ structure: true });
+  if (made.length && !quiet) toast('Added ' + made.join(', ')); return made;
 }
 const reqLine = (q) => h('div', { class: 'req-row' }, h('span', { class: 'req-ic' }, icon(q.kind === 'coll' ? 'list' : 'layers')), h('div', {}, h('b', {}, q.kind === 'coll' ? `${q.name} data` : `The “${q.name}” page`), h('small', {}, (q.kind === 'coll' ? `keeps ${REQ_WHAT[q.name] || 'its records'}` : `ready-made: ${pageTplFor(q.name)?.label || q.name}`) + ' · for ' + q.by.slice(0, 2).join(', ') + (q.by.length > 2 ? ` +${q.by.length - 2}` : ''))));
 /** After a change: anything newly missing (something was added that needs more, or something it needed was taken away) is offered right away. */
 function queueReqCheck() {
   clearTimeout(reqTimer); reqTimer = setTimeout(() => {
-    if (reqBusy || playing || !project || !root) return; const U = unmetReqs();
-    if (reqKnown === null) { reqKnown = new Set(U.keys()); return; } // (a project just opened: the Hierarchy says what's missing)
-    const fresh = [...U.entries()].filter(([k]) => !reqKnown.has(k)).map(([, q]) => q); reqKnown = new Set(U.keys());
+    if (reqBusy || playing || !project || !root) return;
+    const quiet = performance.now() - lastTypeAt; if (quiet < 1500) { reqTimer = setTimeout(queueReqCheck, 1550 - quiet); return; } // still typing (a page name): wait until the typing stops
+    const U = unmetReqs();
+    const hadBefore = reqHave || new Set(); reqHave = haveKeys();
+    if (reqKnown === null) { reqKnown = new Set(U.keys()); if (autoReqs() && U.size) autoFixReqs([...U.values()]); return; } // (a project just opened: what's missing is added, or the Hierarchy says what it is)
+    let fresh = [...U.entries()].filter(([k]) => !reqKnown.has(k)).map(([, q]) => q); reqKnown = new Set(U.keys());
+    if (autoReqs()) { // something new needs a page or data: add it; something you just removed is asked about below
+      const removed = (q) => hadBefore.has(q.kind === 'coll' ? 'coll:' + ck(q.name) : 'page:' + String(q.name).toLowerCase());
+      const add = fresh.filter((q) => !removed(q)); fresh = fresh.filter(removed);
+      if (add.length) autoFixReqs(add);
+    }
     if (!fresh.length || !layer.hidden) { if (fresh.length) setTimeout(queueReqCheck, 800); return; }
     const by = [...new Set(fresh.flatMap((q) => q.by))];
     openDialog('Needed to work', [h('div', { class: 'tour' }, h('p', {}, `${by.slice(0, 2).join(' and ')}${by.length > 2 ? ` and ${by.length - 2} more` : ''} can't work without:`), h('div', { class: 'req-list' }, fresh.map(reqLine)),

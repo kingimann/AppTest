@@ -15296,7 +15296,7 @@ function pageCheck(s) {
   const seen = new Set();
   for (const [pg, from0] of links) { const from = from0.charAt(0).toUpperCase() + from0.slice(1), k = String(pg).trim().toLowerCase(); if (!k || pages.has(k) || seen.has(k + from)) continue; seen.add(k + from);
     if (AUTO_PAGES[k]) Log.add('info', `${from} opens the page “${pg}”, which isn't in the app: a ${AUTO_PAGES[k][1]} page is made while it runs. Make it in the editor (⋯ › Make the “${pg}” page) to keep and change it.`, 'Pages');
-    else Log.add('warn', `${from} opens the page “${pg}”, which isn't in the app, so the first page shows instead. Make a page called “${pg}” (Pages › New page) or point it at a page you have.`, 'Pages'); }
+    else Log.add('warn', `${from} opens the page “${pg}”, which isn't in the app, so the first page shows instead. The editor makes missing pages for you (Preferences › Editing › Missing pages & data), or make one called “${pg}” (Pages › New page).`, 'Pages'); }
 }
 registerBehavior('uiShowIf', {
   label: 'Show If (pages)', description: 'Show this UI only when a variable matches, e.g. page = shop for a Shop page, or messages > 0 for a badge. Everything inside it shows and hides with it.',

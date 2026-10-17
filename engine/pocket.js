@@ -9250,6 +9250,13 @@ function coveredBottom(s, e, b) {
 /** How much of a flick's speed is left after a second of gliding (like iPhone's normal scrolling). */
 const SCROLL_DECAY = 0.135;
 /** Drag-to-scroll with a flick and a rubber band; pull down past the top to refresh. */
+/** The pull-to-refresh spinner in the gap a list opens when pulled down past its top: fills as you pull, spins while it refreshes. */
+function pullSpinner(ctx, s, S, cx, y0, acc, card) {
+  if (S.v >= -8) return; const busy = s.time - S.refreshT < 0.9, a = busy ? 1 : clamp(-S.v / 58, 0, 1), cy = y0 + Math.min(-S.v, 70) / 2, R = 16;
+  ctx.save(); ctx.globalAlpha *= Math.min(1, (-S.v - 8) / 20);
+  ctx.shadowColor = 'rgba(0,0,0,0.18)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 2; ctx.fillStyle = card; ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill(); ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = acc; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.beginPath(); const st = busy ? s.time * 7 : -Math.PI / 2 + a * 1.5; ctx.arc(cx, cy, R - 7, st, st + (busy ? Math.PI * 1.5 : Math.PI * 1.7 * a)); ctx.stroke(); ctx.restore();
+}
 function makeScroller(axis = 'y') {
   const S = { v: 0, max: 0, drag: null, flick: 0, pulled: 0, refreshT: -9, moved: false };
   S.update = (s, e, dt, box, onRefresh) => {
@@ -11219,6 +11226,19 @@ function readAt(s, c, h) {
   if (D.def('Reads')) for (const r of D.rows('Reads')) if (String(r.chat) === c && handleOf(r.handle) === h) t = Math.max(t, +r.at || 0);
   return t;
 }
+/** When h's phone got this conversation's messages (Delivered): the `got` time on their Reads row, or when they read it. */
+function gotAt(s, c, h) {
+  const D = s.engine.data; let t = readAt(s, c, h);
+  if (D.def('Reads')) for (const r of D.rows('Reads')) if (String(r.chat) === c && handleOf(r.handle) === h) t = Math.max(t, +r.got || 0);
+  return t;
+}
+/** This phone has the messages people sent me: say so on my Reads rows, so their ✓✓ turns to Delivered. */
+function markDelivered(s, rows, mh) {
+  const D = s.engine.data; if (!D.def('Reads') || s.engine.editing || !mh) return;
+  const newest = new Map(); for (const r of rows) { const c = String(r.chat || ''); if (r.system || !/^(dm|g)-/.test(c) || handleOf(r.handle) === mh) continue; if ((r._at || 0) > (newest.get(c) || 0)) newest.set(c, r._at || 0); }
+  for (const [c, at] of newest) { if (!at || !chatMembers(rows, c).includes(mh)) continue; const q = D.rows('Reads').find((x) => String(x.chat) === c && handleOf(x.handle) === mh);
+    if (!q) D.add('Reads', { chat: c, handle: mh, at: 0, got: at }); else if (Math.max(+q.got || 0, +q.at || 0) < at) D.update('Reads', q.id, { got: at }); }
+}
 function markChatRead(s, c, h, at) {
   const seen = chatSeen(s); if ((seen[c] || 0) < at) { seen[c] = at; store.set(chatSeenKey(s), JSON.stringify(seen)); }
   const D = s.engine.data; if (!D.def('Reads')) return;
@@ -11285,9 +11305,12 @@ registerBehavior('uiChat', {
     { key: 'reactions', label: 'Reactions', type: 'text', default: '❤️ 😂 😮 😢 😡 👍', showIf: (b) => b.hold !== false },
     { key: 'replies', label: 'Replies (quote a message)', type: 'bool', default: true, showIf: (b) => b.hold !== false },
     { key: 'edits', label: 'Edit and unsend your messages', type: 'bool', default: true, showIf: (b) => b.hold !== false },
-    { key: 'seen', label: '“Seen” under your last message', type: 'bool', default: true, info: 'Add a Reads collection (chat, handle, at) and it works across phones; without one, only this phone knows what it has read.' },
+    { key: 'seen', label: 'Sent / Delivered / Seen under your last message', type: 'bool', default: true, info: 'Add a Reads collection (chat, handle, at, got) and it works across phones: got is when their phone received it (Delivered), at is when they read it. Without one, only this phone knows.' },
+    { key: 'seenWord', label: 'Read receipts say', type: 'choice', options: ['Seen', 'Read'], default: 'Seen', showIf: (b) => b.seen !== false || b.ticks !== false },
+    { key: 'seenTime', label: 'Show the time it was seen', type: 'bool', default: true, showIf: (b) => b.seen !== false },
+    { key: 'pullRefresh', label: 'Pull down to refresh', type: 'bool', default: true, info: 'At the top of the conversation, pull down to fetch new messages (online) and load older ones.' },
     { key: 'swipeReply', label: 'Swipe a message right to reply', type: 'bool', default: true, showIf: (b) => b.replies !== false },
-    { key: 'ticks', label: '✓ sent / ✓✓ seen next to your messages', type: 'bool', default: true },
+    { key: 'ticks', label: '✓ sent / ✓✓ delivered / blue ✓✓ seen next to your messages', type: 'bool', default: true },
     { key: 'pins', label: 'Pin messages (a banner at the top)', type: 'bool', default: true, info: 'Press and hold a message › Pin. Everyone in the conversation sees it; tap the banner to jump to it.' },
     { key: 'forward', label: 'Forward messages', type: 'bool', default: true, info: 'Press and hold a message › Forward, then pick a person or a group.' },
     { key: 'jump', label: '↓ button back to the newest message', type: 'bool', default: true, info: 'Shows when you scroll up, with how many new messages came in.' },
@@ -11305,7 +11328,7 @@ registerBehavior('uiChat', {
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, barOff = 0, tapEl = null, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
+    const S = makeScroller('y'); let sample = null, L = [], total = 0, lastN = -1, lastChat = null, atBottom = true, bar = null, barRect = null, barOff = 0, tapEl = null, gotT = 9, lastTap = null, pops = new Map(), sendT = -9, hold = null, replyTo = null, readT = 0, sheetOpen = false;
     let myPk = null, keyAsked = false, editing = null;
     let swipe = null, swipeBack = new Map(), typing = null, newCount = 0, lastCount = -1, jumpR = null, pinR = null, pinId = null, list0 = null, eatTaps = 0;
     const DEMO_REPLIES = ['Haha yes! 😂', 'Sounds good 👍', 'On my way!', 'Tell me more…', 'Love it ❤️', 'For real?', 'Same here', 'See you soon 👋', 'Nice!! 🔥', 'Let me check and get back to you'];
@@ -11360,6 +11383,13 @@ registerBehavior('uiChat', {
         s.snackbar?.('Forwarded to ' + pp.name); s.engine.vibrate?.(8);
       } });
     };
+    // how far a message of mine got with each person: read (or they answered after it), delivered (their phone has it) or only sent
+    const reachOf = (s, c, others, R) => { const sim = p.demoReplies !== false && !(has(s) && s.engine.supa?.online?.(D(s).def(p.collection))); // (testing: their phone “gets” it a moment after it goes)
+      return others.map((h) => ({ h, rd: readAt(s, c, h), ans: Math.max(0, ...R.filter((r) => !r.system && handleOf(r.handle) === h).map((r) => r._at || 0)), got: gotAt(s, c, h), sim })); };
+    const stOf = (RD, at) => RD.map((x) => (x.rd >= at || x.ans >= at ? 'read' : x.got >= at || (x.sim && Date.now() - at > 1500) ? 'got' : 'sent'));
+    const clockOf = (t) => { try { return new Date(t).toLocaleTimeString(localeOf(), { hour: 'numeric', minute: '2-digit' }); } catch { return ''; } };
+    const refreshChat = (s) => { s.engine.vibrate?.(10); const sp = s.engine.supa, D0 = D(s); // pull down at the top: fetch what's new (online), else it's all here already
+      if (has(s) && sp?.online?.(D0.def(p.collection))) { try { sp.pullAll(p.collection); if (D0.def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh the chat: ' + err.message, 'Chat'); } } else s.snackbar?.('Up to date'); };
     const openBar = (s, now = false) => { if (bar || s.engine.editing) return; bar = chatInputBar(s, { colors: colors(), focusNow: now, bottom: () => barOff, placeholder: p.placeholder, photos: p.photos !== false, voice: p.voice !== false && !editing, value: editing ? String(editing.text || '') : '', edit: editing ? { label: '✏️ Edit message', text: snippet(editing) } : null, reply: editing ? { label: '✏️ Editing your message', text: snippet(editing) } : replyTo ? { author: replyTo.author === me(s).author ? 'yourself' : replyTo.author, text: snippet(replyTo) } : null, onCancelReply: () => { replyTo = null; if (editing) { editing = null; bar?.close(); bar = null; } }, onSend: (m) => { if (editing) { const r = editing; editing = null; editMsg(s, r, m.text); bar?.close(); bar = null; s.snackbar?.('Message edited'); return; } sendIt(s, m); }, onClose: () => { bar = null; editing = null; } }); };
     /** Press and hold: react, reply, copy, edit, unsend. */
     /** Change the words of one of my messages (re-sealed when the chat is encrypted). */
@@ -11427,9 +11457,10 @@ registerBehavior('uiChat', {
         if (r.forwarded) body.append(sheetRow(api, c, { title: 'Forwarded' }));
         if (r.voice) body.append(sheetRow(api, c, { title: 'Voice message', sub: `${r.dur || 1} seconds` }));
         if (mine && others.length) {
-          body.append(cap(api, c, 'Seen by'));
-          for (const h of others) { const t = Math.max(readAt(s, ch, h), ...R.filter((q) => !q.system && handleOf(q.handle) === h).map((q) => q._at || 0)), seen = t >= (r._at || 0), nm = nameOfHandle(s, h);
-            body.append(sheetRow(api, c, { lead: avatar(nm, '', 36), title: nm, sub: seen ? (readAt(s, ch, h) >= (r._at || 0) ? 'Seen ' + when(readAt(s, ch, h)) : 'Answered after it') : 'Not seen yet', right: seen ? '✓✓' : '✓' })); }
+          const W = p.seenWord === 'Read' ? 'Read' : 'Seen', RD = reachOf(s, ch, others, R), st = stOf(RD, r._at || 0);
+          for (const [k, title] of [['read', W + ' by'], ['got', 'Delivered to'], ['sent', 'Not delivered yet']]) { const hs = RD.filter((x, i) => st[i] === k); if (!hs.length) continue; body.append(cap(api, c, title));
+            for (const x of hs) { const nm = nameOfHandle(s, x.h), sub = k === 'read' ? (x.rd >= (r._at || 0) ? W + ' ' + when(x.rd) : 'Answered after it') : k === 'got' ? (x.got >= (r._at || 0) ? 'Delivered ' + when(x.got) : 'Delivered') : 'Sent, not on their phone yet';
+              const row = sheetRow(api, c, { lead: avatar(nm, '', 36), title: nm, sub, right: k === 'sent' ? '✓' : '✓✓' }); row.dataset.reach = k; if (k === 'read') { const rr = row.lastElementChild; if (rr) rr.style.color = c.acc; } body.append(row); } }
         }
         body.append(el('div', 'height:12px;'));
       } });
@@ -11539,7 +11570,9 @@ registerBehavior('uiChat', {
         const c = chatOf(s); if (c !== lastChat) { lastChat = c; atBottom = true; S.v = 1e9; replyTo = null; typing = null; newCount = 0; lastCount = -1; swipe = null; editing = null; if (selecting) { selecting = null; selUI?.remove(); selUI = null; } }
         if (selecting && !shown(e)) { selecting = null; selUI?.remove(); selUI = null; }
         if (typing && typing.chat === c && s.time > typing.until) { const t = typing; typing = null; addRow(s, { chat: t.chat, author: t.name, handle: t.handle, text: DEMO_REPLIES[Math.floor(Math.random() * DEMO_REPLIES.length)], _me: false }); }
-        const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); if (!swipe?.on) S.update(s, e, dt, list);
+        const wasBottom = S.v >= S.max - 30; S.max = Math.max(0, total - list.h); if (!swipe?.on) S.update(s, e, dt, list, p.pullRefresh === false || s.engine.editing ? null : () => refreshChat(s));
+        if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
+        if (!s.engine.editing && (gotT += dt) > 1.5) { gotT = 0; markDelivered(s, all(s), handleOf(me(s).handle)); } // my phone has them: Delivered
         if (!allowed(s)) { if (atBottom) { atBottom = false; S.v = 0; S.flick = 0; } } else if (atBottom || (wasBottom && L.length !== lastN)) { S.v = S.max; S.flick = 0; atBottom = false; } lastN = L.length; // (the list of conversations starts at the top)
         const cnt = R0.filter((r) => !r.system).length; if (lastCount >= 0 && cnt > lastCount && !wasBottom && !isMineMsg(R0[R0.length - 1] || {}, me(s))) newCount += cnt - lastCount; lastCount = cnt; if (S.v >= S.max - 30) newCount = 0;
         jumpR = p.jump !== false && S.max - S.v > 160 ? { x: b.x + b.w - 54, y: list.y + list.h - 56, w: 44, h: 44 } : null;
@@ -11625,8 +11658,9 @@ registerBehavior('uiChat', {
         // draw
         const wall = wallOf(s), darkWall = /#0b141a|#0f2027/i.test(wall), starSet = p.stars !== false ? new Set(chatMeta(s).star) : new Set();
         if (wall) { if (wall.startsWith('linear:')) { const [g1, g2] = wall.slice(7).split(','), gr = ctx.createLinearGradient(b.x, top, b.x + b.w * 0.4, top + listH); gr.addColorStop(0, g1); gr.addColorStop(1, g2 || g1); ctx.fillStyle = gr; } else ctx.fillStyle = wall; ctx.fillRect(b.x, top, b.w, listH); }
+        if (p.pullRefresh !== false) pullSpinner(ctx, s, S, b.cx, top, mineC, dark ? '#1f2330' : '#ffffff');
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, top, b.w, listH); ctx.clip(); ctx.translate(0, top - S.v);
-        const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), selfChat = /^dm-/.test(c) && !others.length, reads = p.ticks !== false ? others.map((h) => Math.max(readAt(s, c, h), ...R.filter((r) => !r.system && handleOf(r.handle) === h).map((r) => r._at || 0))) : [], /* (answering means they saw it) */ pend = has(s) ? new Set((s.engine.supa?.pending?.() || []).map((op) => op.rec?.id).filter(Boolean)) : null;
+        const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), selfChat = /^dm-/.test(c) && !others.length, RD = reachOf(s, c, others, R), pend = has(s) ? new Set((s.engine.supa?.pending?.() || []).map((op) => op.rec?.id).filter(Boolean)) : null;
         const tick = (x, y, col, dbl) => { ctx.save(); ctx.strokeStyle = col; ctx.lineWidth = 1.8; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; const one = (ox) => { ctx.beginPath(); ctx.moveTo(x + ox - 9, y); ctx.lineTo(x + ox - 5.5, y + 3.5); ctx.lineTo(x + ox, y - 3.5); ctx.stroke(); }; one(0); if (dbl) one(-5); ctx.restore(); };
         const ok = allowed(s); if (!ok) { // none of your conversations is open: list yours (and start a new one)
           const CV = myConvs(s); pickL = []; newR = { y: 12, h: 46 };
@@ -11700,18 +11734,20 @@ registerBehavior('uiChat', {
           if (it.avatar && !selecting) miniAvatar(ctx, r.author, b.x + pad + 14, it.y + it.h - 14, 28, r.avatar);
           if (starSet.size && starSet.has(String(r.id)) && !it.del) UK.text(ctx, '★', it.mine ? it.bx - 10 : it.bx + it.bw + 10, it.y + 11, { size: 13, weight: 800, color: '#f5b301' });
           if (p.ticks !== false && it.mine && !it.del && !selfChat) { // ✓ sent, ✓✓ seen (blue when everyone has)
-            const at = r._at || 0, all2 = reads.length && reads.every((t) => t >= at), some = reads.some((t) => t >= at), tx = it.bx - 5, tyy = it.y + it.h - 8;
+            const st = stOf(RD, r._at || 0), all2 = st.length && st.every((x) => x === 'read'), dbl = st.length && st.every((x) => x !== 'sent'), tx = it.bx - 5, tyy = it.y + it.h - 8;
             if (pend?.has(r.id)) { ctx.save(); ctx.strokeStyle = sub; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(tx - 5, tyy, 4.5, 0, Math.PI * 2); ctx.moveTo(tx - 5, tyy - 2.5); ctx.lineTo(tx - 5, tyy); ctx.lineTo(tx - 3.5, tyy + 1); ctx.stroke(); ctx.restore(); }
-            else tick(tx, tyy, all2 ? mineC : sub, some);
+            else tick(tx, tyy, all2 ? mineC : sub, dbl); // ✓ sent, ✓✓ delivered, blue ✓✓ seen
           }
           ctx.restore();
         }
-        // Sent / Sending… / Seen under my last message
+        // Sending… / Sent / Delivered / Seen under my last message
         const lastMine = [...L].reverse().find((q) => q.bub);
         if (lastMine?.mine && lastMine.r === R[R.length - 1] && !lastMine.del && !selfChat) {
           let label = has(s) && s.engine.supa?.pending?.().some((op) => op.rec?.id === lastMine.r.id) ? 'Sending…' : 'Sent';
-          if (label === 'Sent' && p.seen !== false) { const mh = handleOf(M.handle), others = chatMembers(all(s), c).filter((h) => h !== mh), by = others.filter((h) => readAt(s, c, h) >= (lastMine.r._at || 0)); if (by.length) label = /^dm-/.test(c) ? 'Seen' : by.length === others.length ? 'Seen by everyone' : 'Seen by ' + by.map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
-          UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: label.startsWith('Seen') ? mineC : sub, align: 'right' });
+          if (label === 'Sent' && p.seen !== false && others.length) { const at = lastMine.r._at || 0, st = stOf(RD, at), W = p.seenWord === 'Read' ? 'Read' : 'Seen', by = others.filter((h, i) => st[i] === 'read');
+            if (by.length) { if (/^dm-/.test(c)) { const t = RD[0].rd >= at ? RD[0].rd : 0; label = W + (p.seenTime !== false && t ? ' ' + clockOf(t) : ''); } else label = by.length === others.length ? W + ' by everyone' : W + ' by ' + by.map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
+            else if (st.every((x) => x !== 'sent')) label = 'Delivered'; else if (st.some((x) => x === 'got')) label = 'Delivered to ' + others.filter((h, i) => st[i] === 'got').map((h) => nameOfHandle(s, h).split(' ')[0]).join(', '); }
+          UK.text(ctx, label, lastMine.bx + lastMine.bw - 2, lastMine.y + lastMine.h + (lastMine.r.reaction ? 22 : 10) + (lastMine.r.edited ? 14 : 0), { size: 11, weight: 600, color: /^(Seen|Read)/.test(label) ? mineC : sub, align: 'right' }); e._chat.status = label; // (for tests)
         }
         ctx.restore();
         if (pinned) { // the pinned message, at the top: tap to jump to it
@@ -11761,11 +11797,12 @@ registerBehavior('uiInbox', {
     { key: 'tabs', label: 'Tabs: All, Unread, Groups', type: 'bool', default: true },
     { key: 'tabStyle', label: 'Tab look', type: 'select', options: TOP_STYLES, default: 'pills', showIf: (b) => b.tabs !== false, info: TOP_STYLE_INFO },
     { key: 'hold', label: 'Press and hold: pin, mute, mark unread, delete', type: 'bool', default: true },
+    { key: 'pullRefresh', label: 'Pull down to refresh', type: 'bool', default: true, info: 'Fetches new messages when they are online.' },
     ...colorParams({ bg: ['Background', ''], text: ['Text', '@text'], sub: ['Grey text', '@sub'], line: ['Lines', '@line'], accent: ['Unread dot', '@accent'] }),
     ...UI_COMMON,
   ],
   create(p) {
-    const S = makeScroller('y'), TSt = new TabStrip(); let sample = null, tab = 0, filter = '', hold = null, tabsR = [], searchR = null, newR = null, top = 0, sheetUp = false;
+    const S = makeScroller('y'), TSt = new TabStrip(); let sample = null, tab = 0, filter = '', hold = null, tabsR = [], searchR = null, newR = null, top = 0, sheetUp = false, gotT = 9;
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const me = (s) => meOfVars(s, p.author, p.handle);
     const colors = () => ({ bg: tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
@@ -11783,8 +11820,8 @@ registerBehavior('uiInbox', {
         const selfDm = /^dm-/.test(c) && mem.length && mem.every((h) => h === mh);
         const title = selfDm ? (M.author || 'Me') + ' (you)' : /^dm-/.test(c) ? other?.author || nameOfHandle(s, mem.find((h) => h !== mh) || '') || 'Chat' : group ? chatTitleOf(L, c) || mem.filter((h) => h !== mh).map((h) => nameOfHandle(s, h).split(' ')[0]).join(', ') || 'Group' : '# ' + c;
         const myRead = readAt(s, c, mh); let unread = L.filter((q) => !isMineMsg(q, M) && !q.system && (q._at || 0) > myRead).length; if (!unread && meta.unread.includes(c)) unread = -1; // -1: marked unread (a dot)
-        const lastMine = isMineMsg(last, M) && !last.system, others = mem.filter((h) => h !== mh), seen = lastMine && others.length && others.every((h) => readAt(s, c, h) >= (last._at || 0));
-        out.push({ c, title, last, mine: lastMine, unread, who: other?.author || title, group, room: !group && !/^dm-/.test(c), self: selfDm, pin: meta.pin.includes(c), mute: chatMuted(meta, c), arch: meta.arch.includes(c), seen, mem: others });
+        const lastMine = isMineMsg(last, M) && !last.system, others = mem.filter((h) => h !== mh), seen = lastMine && others.length && others.every((h) => readAt(s, c, h) >= (last._at || 0)), got = seen || (lastMine && others.length && others.every((h) => gotAt(s, c, h) >= (last._at || 0)));
+        out.push({ c, title, last, mine: lastMine, unread, who: other?.author || title, group, room: !group && !/^dm-/.test(c), self: selfDm, pin: meta.pin.includes(c), mute: chatMuted(meta, c), arch: meta.arch.includes(c), seen, got, mem: others });
       }
       return out.sort((a, b) => (b.pin - a.pin) || (b.last._at || 0) - (a.last._at || 0));
     };
@@ -11833,7 +11870,9 @@ registerBehavior('uiInbox', {
       uiAlways: true,
       update(e, dt, s) {
         const b = UK.fit(s, e, UK.box(e)), C = shownList(s), list = { x: b.x, y: b.y + top, w: b.w, h: b.h - top };
-        S.max = Math.max(0, C.length * H - list.h + coveredBottom(s, e, b) + 70); S.update(s, e, dt, list);
+        S.max = Math.max(0, C.length * H - list.h + coveredBottom(s, e, b) + 70); S.update(s, e, dt, list, p.pullRefresh === false || s.engine.editing ? null : () => { s.engine.vibrate?.(10); const sp = s.engine.supa; if (has(s) && sp?.online?.(D(s).def(p.collection))) { try { sp.pullAll(p.collection); if (D(s).def('Reads')) sp.pullAll('Reads'); } catch (err) { Log.add('warn', 'Could not refresh: ' + err.message, 'Inbox'); } } else s.snackbar?.('Up to date'); });
+        if (p.pullRefresh === false && S.v < 0 && !S.drag) S.v = Math.min(0, S.v + (0 - S.v) * Math.min(1, dt * 20));
+        if (!s.engine.editing && (gotT += dt) > 1.5) { gotT = 0; markDelivered(s, all(s), handleOf(me(s).handle)); } // my phone has them: Delivered
         if (p.unreadVar && !s.engine.editing) { const n = convs(s).reduce((a, q) => a + (q.mute || q.arch ? 0 : Math.max(0, q.unread)), 0); if (s.vars[p.unreadVar] !== n) s.setVar(p.unreadVar, n); }
         if (s.engine.editing || sheetUp) { hold = null; sdrag = null; return; }
         const rowAt = (pt) => (UK.in(pt, list) ? C[Math.floor((pt.y - list.y + S.v) / H)] : null);
@@ -11873,6 +11912,7 @@ registerBehavior('uiInbox', {
         top = y - b.y;
         const C = shownList(s);
         ctx.save(); ctx.beginPath(); ctx.rect(b.x, y, b.w, b.h - top); ctx.clip();
+        if (p.pullRefresh !== false) pullSpinner(ctx, s, S, b.cx, y, acc, dark ? '#1f2330' : '#ffffff');
         if (!C.length) UK.text(ctx, filter ? `No results for “${filter}”` : tab === 1 ? 'You’re all caught up' : tab === 2 ? 'No group chats yet' : p.empty || 'No messages yet', b.cx, y + 60, { size: 15, weight: 600, color: sub });
         C.forEach((q, i) => {
           const ry = y + i * H - S.v; if (ry + H < y || ry > b.y + b.h) return;
@@ -11902,7 +11942,7 @@ registerBehavior('uiInbox', {
           UK.text(ctx, who0 + body0, tx, ry + H / 2 + 12, { size: 14, weight: q.unread ? 700 : 500, color: q.unread ? txt : sub, align: 'left', maxW: tw - right });
           if (q.unread > 0) { const n = String(q.unread > 99 ? '99+' : q.unread); ctx.font = `800 11px ${THEME.font}`; const bw = Math.max(20, ctx.measureText(n).width + 10); ctx.fillStyle = q.mute ? sub : acc; UK.rr(ctx, b.x + b.w - 16 - bw, ry + H / 2 + 2, bw, 20, 10); ctx.fill(); UK.text(ctx, n, b.x + b.w - 16 - bw / 2, ry + H / 2 + 12, { size: 11, weight: 800, color: '#fff' }); }
           else if (q.unread < 0) { ctx.fillStyle = acc; ctx.beginPath(); ctx.arc(b.x + b.w - 24, ry + H / 2 + 12, 5, 0, Math.PI * 2); ctx.fill(); }
-          else if (q.mine && !q.self) UK.text(ctx, q.seen ? '✓✓' : '✓', b.x + b.w - 16, ry + H / 2 + 12, { size: 13, weight: 800, color: q.seen ? acc : sub, align: 'right' }); // sent, or read
+          else if (q.mine && !q.self) UK.text(ctx, q.got ? '✓✓' : '✓', b.x + b.w - 16, ry + H / 2 + 12, { size: 13, weight: 800, color: q.seen ? acc : sub, align: 'right' }); // sent, delivered, or read (blue)
           ctx.fillStyle = line; ctx.fillRect(tx, ry + H - 0.5, b.w - (tx - b.x), 0.5);
           if (sdx) ctx.restore();
         });

@@ -432,7 +432,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - for your own messages, **Edit**: the text goes back into the bar (*✏️ Editing your message*, ✓ saves, ✕ cancels); it's marked *Edited* (encrypted messages are sealed again);
     - **Select**: tap more messages to pick them; the bar on top has **Copy**, **Star** and **Delete** (*Delete for everyone* when they're all yours, otherwise *Delete for me*) and *Cancel*.
   - Double-tap a message for ❤️.
-  - Under your last message: *Sending…*, *Sent*, then **Seen** (in a group, *Seen by Maya, Leo* or *Seen by everyone*).
+  - Under your last message: *Sending…*, **Sent**, **Delivered** (their phone has it), then **Seen 9:41 PM** (in a group, *Delivered to Maya*, *Seen by Maya, Leo* or *Seen by everyone*). *Read receipts say* switches the word to **Read**; *Show the time it was seen* turns the time off.
   - **Message yourself:** in the Inbox, ✏️ › *New message* lists **you** first (*Message yourself*). Pick yourself to get a chat only you can see, for notes, links and photos. It's also offered when forwarding. It shows in the Inbox as *Your Name (you)*, with no ticks, *Seen* or sample replies. Turn it off with the Inbox's *Message yourself*.
   - **Chat info:** the message `chat info` opens it (the Social template has an ⓘ button in the App Bar on the chat page; the App Bar's *Add Button › Chat info* adds one). It shows the person or group, **Search**, **Mute**, **Wallpaper** and **Starred**, the chat's **photos and media** (tap one to jump to it), its **links**, a count of voice messages, the **members** of a group, **Archive chat** and **Delete chat**.
   - **Search this chat:** the message `search chat` (or Chat info › Search). Type a word; tap a result to jump to it.
@@ -440,13 +440,15 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **@mentions** in a group notify the person mentioned (“mentioned you: …”).
   - Stars, wallpapers and *Delete for me* are kept on the phone. Messages, voice messages, pins and forwards are shared with the conversation.
   - **Typing:** tap the message bar and it opens right where it is (above the Bottom Nav), with the phone's keyboard up at once; tap the 🎙 to record straight away.
-  - **Ticks** next to your messages: a little clock while sending, **✓** sent, **✓✓** once someone has seen it (or answered after it), blue when everyone has (*✓ sent / ✓✓ seen*).
+  - **Ticks** next to your messages: a little clock while sending, **✓** sent, grey **✓✓** delivered to everyone in the chat, blue **✓✓** once everyone has seen it (or answered after it). The Inbox shows the same ✓ / ✓✓ on your last message.
+  - **Message info** groups the people as *Seen by*, *Delivered to* and *Not delivered yet*, with the times.
+  - **Pull down to refresh:** at the top of a conversation (and in the Inbox), pull down: a spinner shows and online messages are fetched again (*Up to date* when the chat isn't online). Turn it off with *Pull down to refresh*.
   - **↓ back to the newest:** scroll up and a round button appears above the bar, with how many new messages came in; tap it to jump down.
   - **Typing and sample replies:** with sample or local chats (not online yet), the person you write to shows *typing…* dots and answers, so you can try the chat in the editor (*Sample replies while testing*). Online chats never do this.
   - Messages are kept in a **Messages** collection: chat, author, handle, text, media, reaction, reply_to, reply_text, reply_author, edited, deleted, system, members, title, forwarded, pin, voice, dur, wave.
     - The conversation comes from the variable `chat` (blank = the room in *Room*).
     - With Supabase (*shared with everyone*, *Update live*), messages arrive on every phone at once, and the people in the conversation get a notification.
-  - **Read receipts:** add a **Reads** collection (chat, handle, at) and "Seen" works across phones. Without one, each phone only knows what it has read.
+  - **Read receipts:** add a **Reads** collection (chat, handle, at, got) and Delivered and Seen work across phones: each phone fills in *got* when the messages reach it and *at* when they're read. Without one, each phone only knows what it has read (while testing, sample chats show Delivered a moment after you send).
 - **Inbox:** your conversations, newest first: your direct messages and the group chats you are in (public rooms only if you turn them on).
   - Each row shows the person (or two faces for a group), the last message (*You:* for yours, the name in groups), when it was sent, and an unread count. Your last message shows ✓ when sent and ✓✓ once they have read it.
   - **Search** by name or words. **All / Unread / Groups** tabs, in any Top Nav *Tab look*.

@@ -2844,6 +2844,8 @@ export class Input {
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
 
+  /** A tap from the accessibility layer (a screen reader or the keyboard pressed a control drawn on the canvas). */
+  injectTap(x, y, action) { if (action) { this.justPressed.add(action); return; } this.taps.push({ x, y, ex: x, ey: y }); this.justPressed.add('tap'); }
   endFrame() {
     if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
     if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
@@ -4036,6 +4038,13 @@ function buildMeshData(q) {
   return new Float32Array(out);
 }
 
+/** Can this browser draw 3D (WebGL)? Asked once. */
+let webglOK_;
+export function webglOK() {
+  if (webglOK_ !== undefined) return webglOK_;
+  try { const c = document.createElement('canvas'), gl = c.getContext('webgl') || c.getContext('experimental-webgl'); webglOK_ = !!gl; gl?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { webglOK_ = false; }
+  return webglOK_;
+}
 export class Renderer3D {
   constructor(canvas) {
     this.canvas = canvas; this.kind = '3d';
@@ -4732,6 +4741,36 @@ function layoutStack(pg, scene) {
   for (const r of rows) { const d = at - r.top; for (const it of r.items) { const q = it.q, y = q._y0 + d, B = q._animBase; if (B) { q.y += y - B.y; B.y = y; } else q.y = y; q._ys = y; } at += r.bot - r.top + gap; } // (arriving with an animation: it lands in its place)
   for (const q of fill) q.marginTop = rows.length ? at : q.marginTop; // the feed fills what is left under them
 }
+/** Controls drawn on the canvas (the title / pause / end screens' buttons, the pause and sound buttons) get real, labelled, invisible buttons on top,
+ * so screen readers and the keyboard can find and press them. They let taps through, so touch and mouse play is unchanged. */
+const A11Y_NAMES = { start: 'Play', resume: 'Resume', restart: 'Restart', sound: 'Sound', app: 'Back to app', mods: 'Mods', share: 'Share score', next: 'Next level', again: 'Play again', menu: 'Menu' };
+function syncA11y(engine) {
+  if (engine.editing || typeof document === 'undefined' || !engine.root) return;
+  let L = engine._a11y;
+  if (!L) {
+    L = engine._a11y = document.createElement('div'); L.dataset.pocketA11y = '1'; L.setAttribute('role', 'group'); L.setAttribute('aria-label', 'Game controls');
+    L.style.cssText = 'position:absolute;inset:0;z-index:4;pointer-events:none;';
+    if (!document.getElementById('pocketA11yCSS')) { const st = document.createElement('style'); st.id = 'pocketA11yCSS'; st.textContent = '[data-pocket-a11y] button{position:absolute;margin:0;padding:0;border:0;background:transparent;color:transparent;font-size:1px;pointer-events:none;border-radius:12px}[data-pocket-a11y] button:focus-visible{outline:3px solid #8fc3ff;outline-offset:2px}'; document.head.append(st); }
+    engine.root.append(L); engine._a11yEls = new Map();
+  }
+  const want = [], sc = engine.scene, inp = engine.input;
+  for (const r of engine.screenBtns || []) want.push({ key: 's:' + r.id, label: r.id === 'sound' ? (engine.audio.muted ? 'Sound off (turn on)' : 'Sound on (turn off)') : r.label || A11Y_NAMES[r.id] || r.id, x: r.x, y: r.y, w: r.w, h: r.h, tap: [r.x + r.w / 2, r.y + r.h / 2] });
+  if (sc?.state === 'play' && !engine.paused && !sc.loading && !sc.modal) for (const b of inp?.buttons || []) {
+    if (b.hidden || b.off || !['pause', 'mute', 'jump', 'action'].includes(b.action)) continue;
+    const w = b.w || b.r * 2 || 48, h = b.h || b.r * 2 || 48, lab = b.action === 'pause' ? 'Pause' : b.action === 'mute' ? (engine.audio.muted ? 'Sound off (turn on)' : 'Sound on (turn off)') : b.label || (b.action === 'jump' ? 'Jump' : 'Action');
+    want.push({ key: 'b:' + b.action, label: lab, x: b.x - w / 2, y: b.y - h / 2, w, h, act: 'btn:' + b.action });
+  }
+  const els = engine._a11yEls, keep = new Set();
+  for (const it of want) {
+    keep.add(it.key); let el = els.get(it.key);
+    if (!el) { el = document.createElement('button'); el.type = 'button'; el.dataset.ctl = it.key; el.addEventListener('click', () => { const c = el._it; if (!c) return; if (c.act === 'btn:mute') { engine.audio.setMuted(!engine.audio.muted); return; } engine.input.injectTap(c.tap?.[0], c.tap?.[1], c.act); }); L.append(el); els.set(it.key, el); }
+    el._it = it; if (el.getAttribute('aria-label') !== it.label) el.setAttribute('aria-label', it.label);
+    const st = `left:${Math.round(it.x)}px;top:${Math.round(it.y)}px;width:${Math.round(it.w)}px;height:${Math.round(it.h)}px;`; if (el._st !== st) { el._st = st; el.style.cssText = st; }
+  }
+  let lost = false; for (const [k, el] of els) if (!keep.has(k)) { if (document.activeElement === el) lost = true; el.remove(); els.delete(k); }
+  if (lost) engine._a11yRefocus = true;
+  if (engine._a11yRefocus && want.length) { engine._a11yRefocus = false; els.get(want[0].key)?.focus({ preventScroll: true }); } // (pressed Pause with the keyboard: Resume gets the focus)
+}
 function renderUI(engine, scene) {
   const ctx = engine.uiCtx, W = engine.width, H = engine.height, inp = engine.input;
   ctx.setTransform(engine.uiDpr, 0, 0, engine.uiDpr, 0, 0);
@@ -4920,7 +4959,7 @@ function drawGameScreens(ctx, engine, scene, W, H, TH) {
   const text = (str, x, y, size, color, w = 800, alpha = 1) => { ctx.save(); ctx.globalAlpha *= alpha; ctx.font = font(w, size); ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(str, x, y); ctx.restore(); };
   const button = (id, label, icon, cx, y, w, h, primary, d, breathe = 0) => {
     const a = P(d, 0.45); if (a <= 0) return;
-    engine.screenBtns.push({ id, x: cx - w / 2, y, w, h });
+    engine.screenBtns.push({ id, x: cx - w / 2, y, w, h, label });
     const k = (0.86 + 0.14 * Ease.springSnappy(a)) * (held === id ? 0.94 : 1) * (1 + breathe * Math.sin(t * 3.2));
     ctx.save(); ctx.globalAlpha *= Math.min(1, a * 2); ctx.translate(cx, y + h / 2); ctx.scale(k, k);
     const R = TH.radius ? Math.min(h / 2, TH.radius * 1.6) : 0;
@@ -24413,12 +24452,13 @@ export class Engine {
 
   useRenderer(kind) {
     if (this.renderer?.kind === kind) return;
-    this.canvas?.remove();
-    this.canvas = document.createElement('canvas'); this._grade = null;
-    this.canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
-    this.root.insertBefore(this.canvas, this.uiCanvas);
-    this.canvas.width = Math.round(this.width * this.dpr); this.canvas.height = Math.round(this.height * this.dpr);
-    this.renderer = kind === '3d' ? new Renderer3D(this.canvas) : new Renderer2D(this.canvas);
+    const c = document.createElement('canvas'); // the new one first: if it can't start (no WebGL), the old canvas and renderer stay as they were
+    c.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:1;';
+    c.width = Math.round(this.width * this.dpr); c.height = Math.round(this.height * this.dpr);
+    const r = kind === '3d' ? new Renderer3D(c) : new Renderer2D(c);
+    this.canvas?.remove(); this.canvas = c; this._grade = null;
+    this.root.insertBefore(c, this.uiCanvas);
+    this.renderer = r;
   }
 
   /**
@@ -24536,6 +24576,7 @@ export class Engine {
     scene.on('var', (k, v) => { if (k !== 'darkMode' || this.editing) return; if (v === '' || v == null) { try { localStorage.removeItem(key); } catch { /* storage unavailable */ } } else store.set(key, String(+(v === true || v === 1 || v === '1' || v === 'on'))); }); // blank = follow the game's setting again
   }
   setScene(scene, { skipRestore = false } = {}) {
+    this.useRenderer(scene.mode); // first: a level this device can't draw (3D without WebGL) throws here and leaves the current one running
     if (this.scene && this.scene !== scene && !this.editing) this.scene.emit('sceneEnd'); // Auto Save keeps the level it is leaving
     scene.engine = this;
     this.scene = scene; if (!this.editing) { this.fitScreen(); if (pluginHooks.sceneStart.length) runHooks('sceneStart', scene, this); setTimeout(() => { try { if (this.scene === scene) pageCheck(scene); } catch (err) { Log.add('warn', 'Page check: ' + err.message, 'Pages'); } }, 0); } this.updateSafe(); this.data.syncVars(scene); this.wireDarkMode(scene);
@@ -25151,7 +25192,7 @@ export class Engine {
       layoutUI(this, this.scene); // nav bars for this screen
       const c = this.uiCtx; c.save(); if (F.clip) { c.beginPath(); c.rect(F.clip.x, F.clip.y, F.clip.w, F.clip.h); c.clip(); } // what's off the game's screen stays hidden
       try { renderUI(this, this.scene); } finally { c.restore(); [this.width, this.height, this.safe, this.uiView] = keep; }
-    } else renderUI(this, this.scene);
+    } else { renderUI(this, this.scene); syncA11y(this); }
     this.onRenderUI?.(this.uiCtx, this.scene);
     if (this.photoWanted) { const cbs = this.photoWanted; this.photoWanted = null; try { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const g = c.getContext('2d'); g.drawImage(this.canvas, 0, 0); if (this.uiCanvas) g.drawImage(this.uiCanvas, 0, 0, c.width, c.height); const url = c.toDataURL('image/png'); for (const f of cbs) f(url); } catch { for (const f of cbs) f(null); } } // Take Photo: the frame just drawn, game + UI
   }

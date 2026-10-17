@@ -15,6 +15,11 @@ Start with the **Console** (bottom bar, or the console button while playing). Mo
 | A spawn fails | The template's **name** must match, and the template must be ticked *Template*. The Console warns "no template called…". |
 | Variable text shows `{score}` | Check the spelling inside the braces. Variables are case-sensitive. |
 
+## 3D levels don't open
+
+- **“This browser can't show 3D”** means its 3D graphics (WebGL) are turned off or blocked (some locked-down or automated browsers, or hardware acceleration switched off). New 3D Level and switching to a 3D level stop there and you stay on your current level; nothing breaks, and 2D levels keep working. Try another browser, turn hardware acceleration on, or open the game on your phone.
+- If a 3D level fails to start for another reason, the editor goes back to the level you were on (a new level that couldn't be shown is removed) and the Console says why.
+
 ## Movement and physics
 
 | Symptom | Check |

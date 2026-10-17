@@ -67,7 +67,7 @@ An app is a set of **pages**. A page is a full-screen panel with **Show If** on 
   - the page button › **New Page…** opens the same gallery.
   Pick one, name it, and it's built for you. Everything on it lines up by itself and uses your theme colours; change any of it afterwards.
   - **Start:** Blank, Welcome, Coming Soon, Dashboard.
-  - **Account:** Sign In and Create Account (Supabase accounts), Settings (switches, a volume slider, rows, Sign out), My Profile (an editable profile with Posts / Replies / Media / Likes), Account.
+  - **Account:** Sign In and Create Account (Supabase accounts): a logo, a short welcome, the boxes, a main button, an “or” line and a **Continue with Google** button, with **Forgot password?** under the password box. The `{authError}` line takes no room until sign-in fails. Then Settings (switches, a volume slider, rows, Sign out), My Profile (an editable profile with Posts / Replies / Media / Likes), Account.
   - **Social:** Feed (stories, a post box, For you / Following), Explore, Messages, Chat, Notifications, Friends.
   - **Shop:** Marketplace, Product (picture, price, sizes, Add to cart), Game Shop (coins & gems and items), Pricing (Free / Pro / Team plans).
   - **Info:** About, FAQ, Contact (a form with Send), List (search and your records).

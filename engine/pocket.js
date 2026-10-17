@@ -287,6 +287,7 @@ export const BODY_DEFAULTS = {
   ox: 0, oy: 0, oz: 0, // collider offset from the object's center
   oneWay: false, // platforms you can jump up through and land on
   mass: 1, friction: 0, drag: 0, maxFall: 0,
+  rotate: false, // Rapier physics: the body rolls and tips over
   lockX: false, lockY: false, lockZ: false, // freeze movement along an axis
   maxSpeed: 0, // 0 = no limit
   ignore: '', // comma-separated tags this body passes through
@@ -1869,11 +1870,41 @@ const passes = (a, b) => { const ia = ignoreSet(a.body), ib = ignoreSet(b.body);
 /** Half-size of the box around a collider on the sweep axis (x). */
 const spanX = (ex) => (ex.sphere ? ex.r : ex.bx ?? ex.hx);
 
+// ---- WebAssembly physics (Rapier, written in Rust): Game Settings › Physics engine › Rapier ----
+const RAPIER_LOAD = {};
+/** Load Rapier for '2d' or '3d' once. Exported games carry it inside (window.POCKET_RAPIER); the editor and play.html load engine/vendor/. */
+export function loadRapier(dim) {
+  if (RAPIER_LOAD[dim]) return RAPIER_LOAD[dim];
+  let url = globalThis.POCKET_RAPIER?.[dim];
+  if (!url) { try { url = new URL(`./vendor/rapier${dim}.mjs`, import.meta.url).href; } catch { url = `engine/vendor/rapier${dim}.mjs`; } }
+  return (RAPIER_LOAD[dim] = import(url).then(async (m) => { const R = m.default || m; await R.init(); return R; }));
+}
+/** Does this game (any level) use Rapier? (Builds then pack it in.) */
+export const usesRapier = (game) => [game, ...(game?.levels || [])].some((lv) => lv?.settings?.physics === 'rapier');
+const rapierDim = (scene) => (scene.mode === '3d' ? '3d' : '2d');
+/** Euler angles in degrees (the engine's Y·X·Z order) ⇄ a quaternion. */
+const eulerToQuat = (rx, ry, rz) => { const [x, y, z] = [rx * DEG / 2, ry * DEG / 2, rz * DEG / 2], cx = Math.cos(x), sx = Math.sin(x), cy = Math.cos(y), sy = Math.sin(y), cz = Math.cos(z), sz = Math.sin(z);
+  return { x: sx * cy * cz + cx * sy * sz, y: cx * sy * cz - sx * cy * sz, z: cx * cy * sz - sx * sy * cz, w: cx * cy * cz + sx * sy * sz }; };
+const quatToEuler = (q) => { const { x, y, z, w } = q, m13 = 2 * (x * z + y * w), m21 = 2 * (x * y + z * w), m22 = 1 - 2 * (x * x + z * z), m23 = 2 * (y * z - x * w), m31 = 2 * (x * z - y * w), m11 = 1 - 2 * (y * y + z * z), m33 = 1 - 2 * (x * x + y * y);
+  const rx = Math.asin(-clamp(m23, -1, 1)); return Math.abs(m23) < 0.9999999 ? { rx: rx / DEG, ry: Math.atan2(m13, m33) / DEG, rz: Math.atan2(m21, m22) / DEG } : { rx: rx / DEG, ry: Math.atan2(-m31, m11) / DEG, rz: 0 }; };
+
 export class Physics {
   constructor() { this.contacts = new Map(); }
+  /** Rapier for this scene, if it asked for it and it's loaded (it loads in the background; the built-in physics runs meanwhile, and stays if Rapier can't load). */
+  rapierFor(scene) {
+    if (scene?.settings?.physics !== 'rapier') { if (this.W) { try { this.W.world.free(); } catch { /* freed */ } this.W = null; } return null; }
+    const dim = rapierDim(scene);
+    if (this.R?.dim === dim) return this.R.mod;
+    if (this.rLoading !== dim && this.rFailed !== dim) {
+      this.rLoading = dim;
+      loadRapier(dim).then((mod) => { this.R = { dim, mod }; this.rLoading = null; }).catch((err) => { this.rFailed = dim; this.rLoading = null; Log.add('warn', `Rapier physics could not load (${err.message}): the built-in physics is used instead`, 'Physics'); });
+    }
+    return null;
+  }
 
   /** How many sub-steps this frame needs so fast, small bodies can't tunnel through walls. */
   substeps(scene, dt) {
+    if (this.rapierFor(scene)) return 1; // (Rapier has its own continuous collision detection)
     let n = Math.ceil(dt / (1 / 120));
     for (const e of scene.entities) {
       const b = e.body;
@@ -1887,6 +1918,7 @@ export class Physics {
   }
 
   step(scene, dt) {
+    const RAP = this.rapierFor(scene); if (RAP) return this.stepRapier(RAP, scene, dt);
     const g = scene.gravity, gd = Math.sign(g); // gravity along y
     const minHit = Math.abs(g || 0) * 0.02; // slower than this is just settling, not a landing
     const land = (b, speed) => { if (!b.wasGrounded && speed > minHit) b.landed = Math.max(b.landed || 0, speed); }; // remembered for the whole frame, so a quick bounce still counts
@@ -1916,66 +1948,7 @@ export class Physics {
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
       b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
     }
-    // dynamic bodies collide with voxel worlds block by block
-    const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
-    if (worlds.length) {
-      for (const e of list) {
-        const b = e.body;
-        if (b.type !== 'dynamic' || b.sensor) continue;
-        for (const w of worlds) {
-          const V = w.voxels, sz = V.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: half };
-          let ex = e.extents();
-          const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz;
-          const [i0, j0, k0] = V.cell(w, e.x - hx, e.y - hy, e.z - hz), [i1, j1, k1] = V.cell(w, e.x + hx, e.y + hy, e.z + hz);
-          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
-            if (!V.get(i, j, k)) continue;
-            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: w.z + (k + 0.5) * sz };
-            ex = e.extents();
-            const m = overlap(e, ex, c, box);
-            if (!m) continue;
-            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
-            const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
-            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
-            if (gd && m.ny * gd > 0.5) { b.grounded = true; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
-          }
-        }
-      }
-    }
-    // dynamic bodies collide with 2D tilemaps cell by cell
-    const maps = scene.mode === '3d' ? [] : scene.entities.filter((e) => e.tiles && !e.dead && e.visible !== false);
-    if (maps.length) {
-      for (const e of list) {
-        const b = e.body;
-        if (b.type !== 'dynamic' || b.sensor) continue;
-        for (const w of maps) {
-          if (!((scene.layerMask[b.layer | 0] >> (w.tileLayer | 0)) & 1)) continue;
-          const T = w.tiles, sz = T.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: Infinity };
-          let ex = e.extents();
-          const hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
-          const [i0, j0] = T.cell(w, cx - hx, cy - hy), [i1, j1] = T.cell(w, cx + hx - 1e-6, cy + hy - 1e-6);
-          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-            const n = T.get(i, j), kind = T.kindOf(n);
-            if (!kind || kind === 'decor') continue;
-            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: e.z };
-            ex = e.extents();
-            const m = overlap(e, ex, c, box);
-            if (!m) continue;
-            if (kind === 'hazard') { if (e.has('player') && scene.state === 'play' && !(e.data.invuln > 0)) respawnOrEnd(e, scene, 'damage'); continue; }
-            if (kind === 'platform') { // only solid for something landing on top while falling
-              if (!(gd && m.ny * gd > 0.5) || b.vel.y * gd < -0.01) continue;
-              const top = gd > 0 ? w.y + j * sz : w.y + (j + 1) * sz, was = (b.ly ?? e.y) + (ex.oy || 0) + hy * gd; // where its feet were last step
-              if ((was - top) * gd > 1) continue; // it was already below the top: let it pass
-              if (T.get(i, j - gd) && T.kindOf(T.get(i, j - gd)) === 'platform') continue; // only the top of a stack
-            } else if (Math.abs(m.nx) > 0.5 && T.kindOf(T.get(i - Math.sign(m.nx), j)) === 'solid') continue; // inner seam between two solid cells: don't snag
-            else if (Math.abs(m.ny) > 0.5 && T.kindOf(T.get(i, j - Math.sign(m.ny))) === 'solid') continue;
-            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
-            const vn = b.vel.x * m.nx + b.vel.y * m.ny;
-            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
-            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
-          }
-        }
-      }
-    }
+    this.envPass(scene, list, gd, land);
     // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
     const items = list.map((e) => { const ex = e.extents(), cx = e.x + (ex.ox || 0), w = spanX(ex); return { e, ex, l: cx - w, r: cx + w }; });
     items.sort((p, q) => p.l - q.l);
@@ -2038,6 +2011,191 @@ export class Physics {
       const b = e.body;
       if (b.type !== 'dynamic') { b.px = e.x; b.py = e.y; b.pz = e.z; }
       else { if (b.lockX) e.x = b.lx; if (b.lockY) e.y = b.ly; if (b.lockZ) e.z = b.lz; }
+    }
+  }
+
+  /** One step with Rapier: the engine's own rules set velocities (gravity, drag, limits, force zones), Rapier moves the bodies and
+   * solves contacts (real stacking, rotation if a body allows it, no tunnelling), then grounded / wall / ceiling and collision events come back as usual. */
+  stepRapier(R, scene, dt) {
+    const D3 = scene.mode === '3d', g = scene.gravity, gd = Math.sign(g), gx = scene.gravityX || 0, gz = scene.gravityZ || 0;
+    const minHit = Math.abs(g || 0) * 0.02, land = (b, speed) => { if (!b.wasGrounded && speed > minHit) b.landed = Math.max(b.landed || 0, speed); };
+    let W = this.W;
+    if (!W || W.scene !== scene || W.R !== R) {
+      if (W) { try { W.world.free(); } catch { /* freed */ } }
+      for (const [, [a, b]] of this.contacts) { separate(a, b); separate(b, a); } this.contacts = new Map();
+      W = this.W = { R, scene, world: new R.World(D3 ? { x: 0, y: 0, z: 0 } : { x: 0, y: 0 }), map: new Map(), byCol: new Map(), queue: new R.EventQueue(true) };
+      if (!D3) W.world.lengthUnit = 50; // (2D works in pixels: about 50 to a metre)
+      W.hooks = { // layers, "passes through" tags and one-way platforms decide which pairs touch
+        filterContactPair: (c1, c2) => { const a = W.byCol.get(c1), b = W.byCol.get(c2); return !a || !b || this.pairOK(scene, a, b, gd, true) ? R.SolverFlags.COMPUTE_IMPULSE : null; },
+        filterIntersectionPair: (c1, c2) => { const a = W.byCol.get(c1), b = W.byCol.get(c2); return !a || !b || this.pairOK(scene, a, b, gd, false); },
+      };
+    }
+    if (scene.wantedTags) for (const e of scene.entities) { if (e.body || e.dead || e.ui) continue; for (const t of e.tags) if (scene.wantedTags.has(t)) { e.setBody({ type: 'kinematic', sensor: true }); break; } }
+    const list = scene.entities.filter((e) => e.body && !e.dead && !e.ui && !e.tiles && !e.voxels), live = new Set(list);
+    for (const [e, r] of W.map) if (!live.has(e)) { this.rDrop(W, e, r); } // gone, or its body was removed
+    const V = (x, y, z) => (D3 ? { x, y, z } : { x, y });
+    for (const e of list) {
+      const b = e.body, T = b.type;
+      if (T !== 'dynamic') { b.dx = e.x - (b.px ?? e.x); b.dy = e.y - (b.py ?? e.y); b.dz = e.z - (b.pz ?? e.z); }
+      if (T === 'dynamic') { // the same velocity rules as the built-in physics
+        b.vel.y += g * b.gravityScale * dt; b.vel.x += gx * b.gravityScale * dt; b.vel.z += gz * b.gravityScale * dt;
+        if (b.force && b.forceT === scene.time) { b.vel.x += b.force.x * dt; b.vel.y += b.force.y * dt; b.vel.z += b.force.z * dt; }
+        if (b.drag) { const k = Math.max(0, 1 - b.drag * dt); b.vel.x *= k; b.vel.z *= k; if (!g || !b.gravityScale) b.vel.y *= k; }
+        if (b.maxFall && gd && b.vel.y * gd > b.maxFall) b.vel.y = b.maxFall * gd;
+        if (b.maxSpeed) { const v = Math.hypot(b.vel.x, b.vel.y, b.vel.z); if (v > b.maxSpeed) { const k = b.maxSpeed / v; b.vel.x *= k; b.vel.y *= k; b.vel.z *= k; } }
+      }
+      if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
+      b.lx = e.x; b.ly = e.y; b.lz = e.z; b.preVel = { ...b.vel };
+      let r = W.map.get(e); const key = this.rKey(e);
+      if (!r || r.key !== key) { if (r) this.rDrop(W, e, r); r = this.rMake(W, e, key); }
+      const rb = r.rb, moved = Math.abs(e.x - r.x) > 1e-6 || Math.abs(e.y - r.y) > 1e-6 || (D3 && Math.abs(e.z - r.z) > 1e-6), turned = b.rotate && (D3 ? e.rx !== r.rx || e.ry !== r.ry || e.rz !== r.rz : e.rz !== r.rz);
+      if (T === 'kinematic') { r.next = { x: e.x + b.vel.x * dt, y: e.y + b.vel.y * dt, z: e.z + b.vel.z * dt }; rb.setNextKinematicTranslation(V(r.next.x, r.next.y, r.next.z)); }
+      else if (moved || turned) { rb.setTranslation(V(e.x, e.y, e.z), true); if (turned || !b.rotate) rb.setRotation(D3 ? eulerToQuat(e.rx || 0, e.ry || 0, e.rz || 0) : (e.rz || 0) * DEG, true); }
+      if (T === 'dynamic') rb.setLinvel(V(b.vel.x, b.vel.y, b.vel.z), true);
+      b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
+    }
+    W.world.timestep = Math.max(1e-4, dt);
+    W.world.step(W.queue, W.hooks);
+    for (const e of list) { // read back where Rapier put them
+      const b = e.body, r = W.map.get(e); if (!r) continue;
+      if (b.type === 'dynamic') {
+        const t = r.rb.translation(), v = r.rb.linvel(); e.x = t.x; e.y = t.y; if (D3) e.z = t.z;
+        b.vel.x = v.x; b.vel.y = v.y; if (D3) b.vel.z = v.z;
+        if (b.rotate) { if (D3) Object.assign(e, quatToEuler(r.rb.rotation())); else e.rz = r.rb.rotation() / DEG; }
+      } else if (b.type === 'kinematic' && r.next) { e.x = r.next.x; e.y = r.next.y; if (D3) e.z = r.next.z; }
+    }
+    for (const e of list) { // what each moving body is touching: ground, walls, ceiling
+      const b = e.body, r = W.map.get(e); if (!r || b.type !== 'dynamic' || b.sensor) continue;
+      W.world.contactPairsWith(r.col, (c2) => W.world.contactPair(r.col, c2, (m, flipped) => {
+        if (!m.numContacts()) return; const n0 = m.normal(), k = flipped ? -1 : 1, n = { x: n0.x * k, y: n0.y * k, z: (n0.z || 0) * k }, o = W.byCol.get(c2.handle);
+        if (o && (o.body?.sensor)) return;
+        const vn = b.preVel.x * n.x + b.preVel.y * n.y + b.preVel.z * n.z;
+        if (gd && n.y * gd > 0.5) { b.grounded = true; b.groundedOn = o || null; land(b, vn); }
+        else if (gd && n.y * gd < -0.5) b.ceiling = true; else if (Math.abs(n.x) > 0.5) b.wall = Math.sign(n.x);
+      }));
+      const p = b.groundedOn?.body; // ride moving platforms
+      if (p && p.type !== 'dynamic' && p.dx !== undefined) { e.x += p.dx; e.z += p.dz; if (p.dy * gd < 0) e.y += p.dy; }
+    }
+    W.queue.drainCollisionEvents((h1, h2, started) => { // collisions and triggers starting and ending
+      const a = W.byCol.get(h1), b = W.byCol.get(h2); if (!a || !b) return;
+      const key = a.id < b.id ? a.id + '|' + b.id : b.id + '|' + a.id;
+      if (started && !this.contacts.has(key)) {
+        let m = null; W.world.contactPair(W.map.get(a).col, W.map.get(b).col, (mf, fl) => { if (!m && mf.numContacts()) { const n0 = mf.normal(), k = fl ? -1 : 1; m = { nx: n0.x * k, ny: n0.y * k, nz: (n0.z || 0) * k, depth: Math.max(0, -mf.contactDist(0)) }; } });
+        if (!m) { const dx = b.x - a.x, dy = b.y - a.y, dz = D3 ? b.z - a.z : 0, d = Math.hypot(dx, dy, dz) || 1; m = { nx: dx / d, ny: dy / d, nz: dz / d, depth: 0 }; }
+        this.contacts.set(key, [a, b]); collide(a, b, m); collide(b, a, { nx: -m.nx, ny: -m.ny, nz: -m.nz, depth: m.depth });
+      } else if (!started && this.contacts.has(key)) { this.contacts.delete(key); separate(a, b); separate(b, a); }
+    });
+    for (const [key, [a, b]] of this.contacts) if (a.dead || b.dead || !a.body || !b.body) { this.contacts.delete(key); separate(a, b); separate(b, a); } // (an object removed mid-touch)
+    const dyn = list.filter((e) => e.body.type === 'dynamic');
+    this.envPass(scene, dyn, gd, land); // tilemaps and voxel worlds
+    for (const e of list) {
+      const b = e.body, r = W.map.get(e);
+      if (b.type !== 'dynamic') { b.px = e.x; b.py = e.y; b.pz = e.z; }
+      else { if (b.lockX) e.x = b.lx; if (b.lockY) e.y = b.ly; if (b.lockZ) e.z = b.lz; }
+      if (r) { r.x = e.x; r.y = e.y; r.z = e.z; r.rx = e.rx; r.ry = e.ry; r.rz = e.rz; } // (so a script moving it next frame is noticed)
+    }
+  }
+  /** Do these two touch at all (layers and "passes through" tags), and is a one-way platform solid for this pair right now? */
+  pairOK(scene, a, b, gd, solid) {
+    const ba = a.body, bb = b.body; if (!ba || !bb) return true;
+    if (!((scene.layerMask[ba.layer | 0] >> (bb.layer | 0)) & 1)) return false;
+    if ((ba.ignore || bb.ignore) && passes(a, b)) return false;
+    if (solid && (ba.oneWay || bb.oneWay)) {
+      const [dyn, plat] = ba.oneWay && !bb.oneWay ? [b, a] : bb.oneWay && !ba.oneWay ? [a, b] : [null, null]; if (!dyn || !gd) return true;
+      if ((dyn.body.preVel?.y ?? dyn.body.vel.y) * gd < -0.01) return false; // going up: pass through
+      const de = dyn.extents(), pe = plat.extents(), dh = de.sphere ? de.r : de.by ?? de.hy, ph = pe.sphere ? pe.r : pe.by ?? pe.hy;
+      const feet = (dyn.body.ly ?? dyn.y) + (de.oy || 0) + dh * gd, top = plat.y + (pe.oy || 0) - ph * gd;
+      return (feet - top) * gd <= Math.max(2, ph); // only if it was on or above the top
+    }
+    return true;
+  }
+  /** What a body's Rapier collider depends on: rebuilt when any of it changes. */
+  rKey(e) {
+    const b = e.body, rz = e.rz, rx = e.rx, ry = e.ry; e.rz = 0; e.rx = 0; e.ry = 0; let ex; try { ex = e.rawExtents(); } finally { e.rz = rz; e.rx = rx; e.ry = ry; }
+    return JSON.stringify([b.type, !!b.sensor, !!b.rotate, b.bounce, b.friction, b.mass, ex.sphere ? ['s', ex.r] : ex.kind ? [ex.kind, ex.r, ex.half, ex.hx, ex.hy, ex.pts] : [ex.hx, ex.hy, Number.isFinite(ex.hz) ? ex.hz : 0], ex.ox || 0, ex.oy || 0, ex.oz || 0]);
+  }
+  rMake(W, e, key) {
+    const R = W.R, D3 = !!W.scene && W.scene.mode === '3d', b = e.body, T = b.type, sh = JSON.parse(key)[6], ox = JSON.parse(key)[7], oy = JSON.parse(key)[8], oz = JSON.parse(key)[9];
+    const bd = T === 'static' ? R.RigidBodyDesc.fixed() : T === 'kinematic' ? R.RigidBodyDesc.kinematicPositionBased() : R.RigidBodyDesc.dynamic().setCcdEnabled(true).setGravityScale(0);
+    bd.setTranslation(...(D3 ? [e.x, e.y, e.z] : [e.x, e.y])); bd.setRotation(D3 ? eulerToQuat(e.rx || 0, e.ry || 0, e.rz || 0) : (e.rz || 0) * DEG);
+    if (T === 'dynamic' && !b.rotate) bd.lockRotations();
+    const rb = W.world.createRigidBody(bd);
+    if (T === 'dynamic' && (b.lockX || b.lockY || b.lockZ)) { if (D3) rb.setEnabledTranslations(!b.lockX, !b.lockY, !b.lockZ, true); else rb.setEnabledTranslations(!b.lockX, !b.lockY, true); }
+    let cd = null;
+    if (sh[0] === 's') cd = R.ColliderDesc.ball(Math.max(1e-3, sh[1]));
+    else if (sh[0] === 'capsule' && D3) cd = R.ColliderDesc.capsule(Math.max(1e-3, sh[2]), Math.max(1e-3, sh[1]));
+    else if (sh[0] === 'cylinder' && D3) cd = R.ColliderDesc.cylinder(Math.max(1e-3, sh[4]), Math.max(1e-3, sh[1]));
+    else if ((sh[0] === 'poly' || sh[0] === 'edge') && !D3 && sh[5]?.length >= 2) { const f = new Float32Array(sh[5].flat()); cd = sh[0] === 'edge' ? R.ColliderDesc.polyline(f) : R.ColliderDesc.convexHull(f); }
+    if (!cd) { const hx = Array.isArray(sh) && typeof sh[0] === 'number' ? sh[0] : sh[3], hy = typeof sh[0] === 'number' ? sh[1] : sh[4], hz = typeof sh[0] === 'number' ? sh[2] : sh[3]; cd = D3 ? R.ColliderDesc.cuboid(Math.max(1e-3, hx), Math.max(1e-3, hy), Math.max(1e-3, hz || 0.5)) : R.ColliderDesc.cuboid(Math.max(1e-3, hx), Math.max(1e-3, hy)); }
+    cd.setTranslation(...(D3 ? [ox, oy, oz] : [ox, oy])).setRestitution(b.bounce || 0).setFriction(b.rotate ? Math.max(0.5, b.friction || 0) : b.friction || 0).setSensor(!!b.sensor)
+      .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS).setActiveCollisionTypes(R.ActiveCollisionTypes.ALL).setActiveHooks(R.ActiveHooks.FILTER_CONTACT_PAIRS | R.ActiveHooks.FILTER_INTERSECTION_PAIRS);
+    if (T === 'dynamic') cd.setMass(Math.max(0.01, +b.mass || 1));
+    const col = W.world.createCollider(cd, rb), r = { rb, col, key, x: e.x, y: e.y, z: e.z, rx: e.rx, ry: e.ry, rz: e.rz };
+    W.map.set(e, r); W.byCol.set(col.handle, e); e._rapier = rb; return r;
+  }
+  rDrop(W, e, r) { W.byCol.delete(r.col.handle); W.map.delete(e); try { W.world.removeRigidBody(r.rb); } catch { /* gone */ } if (e._rapier === r.rb) e._rapier = null; }
+
+  /** Dynamic bodies against voxel worlds and 2D tilemaps, cell by cell (both physics engines use this). */
+  envPass(scene, list, gd, land) {
+    // dynamic bodies collide with voxel worlds block by block
+    const worlds = scene.entities.filter((e) => e.voxels && !e.dead);
+    if (worlds.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of worlds) {
+          const V = w.voxels, sz = V.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: half };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy, hz = ex.sphere ? ex.r : ex.hz;
+          const [i0, j0, k0] = V.cell(w, e.x - hx, e.y - hy, e.z - hz), [i1, j1, k1] = V.cell(w, e.x + hx, e.y + hy, e.z + hz);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
+            if (!V.get(i, j, k)) continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: w.z + (k + 0.5) * sz };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth; e.z -= m.nz * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny + b.vel.z * m.nz;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; b.vel.z -= m.nz * vn; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
+          }
+        }
+      }
+    }
+    // dynamic bodies collide with 2D tilemaps cell by cell
+    const maps = scene.mode === '3d' ? [] : scene.entities.filter((e) => e.tiles && !e.dead && e.visible !== false);
+    if (maps.length) {
+      for (const e of list) {
+        const b = e.body;
+        if (b.type !== 'dynamic' || b.sensor) continue;
+        for (const w of maps) {
+          if (!((scene.layerMask[b.layer | 0] >> (w.tileLayer | 0)) & 1)) continue;
+          const T = w.tiles, sz = T.size, half = sz / 2, box = { sphere: false, hx: half, hy: half, hz: Infinity };
+          let ex = e.extents();
+          const hx = ex.sphere ? ex.r : ex.bx ?? ex.hx, hy = ex.sphere ? ex.r : ex.by ?? ex.hy, cx = e.x + (ex.ox || 0), cy = e.y + (ex.oy || 0);
+          const [i0, j0] = T.cell(w, cx - hx, cy - hy), [i1, j1] = T.cell(w, cx + hx - 1e-6, cy + hy - 1e-6);
+          for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+            const n = T.get(i, j), kind = T.kindOf(n);
+            if (!kind || kind === 'decor') continue;
+            const c = { x: w.x + (i + 0.5) * sz, y: w.y + (j + 0.5) * sz, z: e.z };
+            ex = e.extents();
+            const m = overlap(e, ex, c, box);
+            if (!m) continue;
+            if (kind === 'hazard') { if (e.has('player') && scene.state === 'play' && !(e.data.invuln > 0)) respawnOrEnd(e, scene, 'damage'); continue; }
+            if (kind === 'platform') { // only solid for something landing on top while falling
+              if (!(gd && m.ny * gd > 0.5) || b.vel.y * gd < -0.01) continue;
+              const top = gd > 0 ? w.y + j * sz : w.y + (j + 1) * sz, was = (b.ly ?? e.y) + (ex.oy || 0) + hy * gd; // where its feet were last step
+              if ((was - top) * gd > 1) continue; // it was already below the top: let it pass
+              if (T.get(i, j - gd) && T.kindOf(T.get(i, j - gd)) === 'platform') continue; // only the top of a stack
+            } else if (Math.abs(m.nx) > 0.5 && T.kindOf(T.get(i - Math.sign(m.nx), j)) === 'solid') continue; // inner seam between two solid cells: don't snag
+            else if (Math.abs(m.ny) > 0.5 && T.kindOf(T.get(i, j - Math.sign(m.ny))) === 'solid') continue;
+            e.x -= m.nx * m.depth; e.y -= m.ny * m.depth;
+            const vn = b.vel.x * m.nx + b.vel.y * m.ny;
+            if (vn > 0) { b.vel.x -= m.nx * vn; b.vel.y -= m.ny * vn; }
+            if (gd && m.ny * gd > 0.5) { b.grounded = true; b.groundedOn = w; land(b, vn); } else if (gd && m.ny * gd < -0.5) b.ceiling = true; else if (Math.abs(m.nx) > 0.5) b.wall = Math.sign(m.nx);
+          }
+        }
+      }
     }
   }
 

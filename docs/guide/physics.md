@@ -62,6 +62,19 @@ If a level's gravity is off, the Rigidbody card shows a **Turn on gravity** butt
 
 Each level has gravity along Y, and optionally X and Z (*Game Settings › Physics*). In 2D, positive Y is down: about `1600` feels like a platformer. In 3D, negative Y is down: about `-25`. `scene.gravityX` / `scene.gravityZ` give sideways gravity (wind, tilted worlds), and the **Set Gravity** node changes it while playing. **Force Zones** push bodies inside an area: wind, conveyors, magnets, blasts.
 
+## Physics engine: built-in or Rapier (WebAssembly)
+
+*Game Settings › Physics › Physics engine* picks what moves the bodies in that level:
+
+- **Built-in** (the default): light and loads instantly. Bodies keep their angle; it's tuned for platformers, top-down games and arcade feel.
+- **Rapier**: a professional physics engine written in Rust and compiled to WebAssembly ([rapier.rs](https://rapier.rs), Apache-2.0). Stacks of boxes settle and topple, balls roll, and fast objects never tunnel through walls. Turn on **Rigidbody › Rolls & tips over** for the bodies that should spin from hits (crates, balls, ragdoll pieces); the others stay upright like before.
+
+Everything else works the same with Rapier: gravity and Force Zones, drag, max speed and max fall, freeze position, collision layers, pass-through tags, one-way platforms, triggers, moving platforms carrying riders, `body.grounded` / `wall` / `ceiling`, and the collide / separate events (Triggers, nodes and scripts). Voxel and tilemap ground still collide too.
+
+Rapier loads in the background when the level starts (the built-in physics runs until then, a fraction of a second). Exported games carry it inside the file (about 1.3 MB for 2D, 1.7 MB for 3D, only when a level uses it), so they still work offline and in the App Store / Google Play builds. If it can't load, the game keeps going on the built-in physics and the Console says why.
+
+In the game file: `settings: { physics: 'rapier' }` on a level, and `body: { rotate: true }` on a body.
+
 ## Collision layers
 
 Every body is on one of eight **layers**: Default, Player, Enemy, Bullet, Ground, Pickup and two spare ones you can rename. *Game Settings › Collision Layers* is a grid of which layers collide. Untick a box and those two layers pass through each other, with no touch events at all.

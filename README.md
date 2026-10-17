@@ -519,6 +519,8 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 
 ### Colliders and Rigidbody (Unity-style)
 
+- **Rapier physics (WebAssembly):** *Game Settings › Physics › Physics engine › Rapier* runs a level on the Rapier engine (Rust compiled to WebAssembly) for realistic stacking, tipping and rolling (**Rigidbody › Rolls & tips over**). Layers, triggers, one-way platforms, grounded checks and collision events all keep working; exports embed it, and the built-in physics takes over if it can't load. See the physics guide.
+
 - **Every landing counts, even quick bounces.** The physics now records every time a body lands during a frame. A bouncy body that hits the ground and leaves again between two frames still fires **On Landed**, the Triggers event **Lands on the ground** and a Camera Impulse set to *it lands*. The hit speed is the Event Value. Bodies settling slowly don't count as new landings.
 
 - **2D games:** Box, Circle, Capsule, Polygon and Edge Collider 2D. **3D games:** Box, Sphere, Capsule and Cylinder Collider. Find them in *Add Component → Colliders* (an object without one gets a collider suggested first).

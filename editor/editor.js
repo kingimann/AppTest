@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { webglOK, jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { webglOK, usesRapier, jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
 const UI_WIDGETS_ALL = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 /** PlayFab and Photon are for games: an app shows them only once it has a game inside. Supabase works for both. */
@@ -4129,6 +4129,7 @@ function renderInspector() {
         C('body.drag', { label: 'Linear Drag (air)', type: 'number', def: 0, step: 0.1 }),
         C('body.bounce', { label: 'Bounciness', type: 'number', def: 0, step: 0.05, range: [0, 1.2] }),
         C('body.friction', { label: 'Friction', type: 'number', def: 0, step: 0.1 }),
+        C('body.rotate', { label: 'Rolls & tips over (Rapier physics)', type: 'bool', def: false }),
       ],
       h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { Object.assign(j.body, m); changed({ inspector: true }); pushHistory(); } } },
         h('option', { value: '' }, materialOf(j.body)), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
@@ -4576,6 +4577,8 @@ function renderSceneSettings(box) {
     C('gravity', { label: threeD ? 'Gravity Y (down is −)' : 'Gravity Y (down is +)', type: 'number', def: threeD ? -25 : 0, step: threeD ? 1 : 50 }),
     C('gravityX', { label: 'Gravity X (sideways)', type: 'number', def: 0, step: threeD ? 1 : 50 }),
     threeD && C('gravityZ', { label: 'Gravity Z', type: 'number', def: 0, step: 1 }),
+    C('settings.physics', { label: 'Physics engine', type: 'select', options: [['', 'Built-in (light, fast to load)'], ['rapier', 'Rapier (WebAssembly, realistic stacking & rolling)']], def: '', structure: true }),
+    project.settings?.physics === 'rapier' && h('p', { class: 'desc' }, 'Rapier is a pro physics engine compiled to WebAssembly. Boxes stack, tip over and roll (turn on Rigidbody › Rolls & tips over). It adds about 1 MB to exported games. If it can\'t load, the built-in physics takes over.'),
     h('p', { class: 'desc' }, 'Fast objects are checked in small steps so they never pass through walls. Rotated 2D boxes collide at their angle. Use Rigidbody → Material for ice, rubber or sticky surfaces, and a Force Zone for wind, water or magnets.'),
   ], { icon: 'body', key: 's-phys' }));
   box.append(comp('Inventory', [inventorySettings()], { icon: 'key', key: 's-inv' }));
@@ -6951,11 +6954,20 @@ async function buildHTML({ native = false } = {}) {
   const gf = (root.settings?.fonts || []).filter(Boolean), nameGF = /^"([^"]+)", system-ui, sans-serif$/.exec(o.nameFont || '')?.[1];
   const cfg = JSON.stringify({ start, dpr: QUALITY[o.quality] || 2, back: o.backGesture !== false, fps: !!o.showFps, errors: !!o.showErrors, noMenu: o.noMenu !== false, title, version: o.version, author: o.author, fonts: gf,
     install: o.installable !== false ? o.installHint || 'off' : 'off', installText: o.installText, pauseHidden: o.pauseHidden !== false, keepAwake: o.keepAwake !== false, confirmLeave: !!o.confirmLeave });
-  let payload, engineBytes, gameBytes;
+  let payload, engineBytes, gameBytes, rapier = '';
+  if (usesRapier(game)) { // Rapier physics (WebAssembly) goes in the file too, only for the 2D / 3D kinds the game uses
+    const dims = [...new Set([game, ...(game.levels || [])].filter((lv) => lv?.settings?.physics === 'rapier').map((lv) => (lv.mode === '3d' ? '3d' : '2d')))];
+    for (const d of dims) {
+      const r = await (await fetch(new URL(`../engine/vendor/rapier${d}.mjs`, import.meta.url))).text();
+      rapier += typeof CompressionStream === 'function'
+        ? `(window.POCKET_RAPIER ||= {})['${d}'] = URL.createObjectURL(new Blob([await new Response(new Blob([Uint8Array.from(atob("${await gzip64(r)}"), (c) => c.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream('gzip'))).text()], { type: 'text/javascript' }));\n`
+        : `(window.POCKET_RAPIER ||= {})['${d}'] = URL.createObjectURL(new Blob([${JSON.stringify(r).replace(/<\/script/gi, '<\\/script')}], { type: 'text/javascript' }));\n`;
+    }
+  }
   if (o.compress && typeof CompressionStream === 'function') {
     const [E, G] = await Promise.all([gzip64(src), gzip64(json)]);
     engineBytes = E.length; gameBytes = G.length;
-    payload = `const un = async (b) => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); };
+    payload = `${rapier}const un = async (b) => { const s = atob(b), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream('gzip'))).text(); };
 LD.set(0.08);
 const src = await un("${E}"); LD.set(0.45);
 const { Engine } = await import(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))); LD.set(0.6);
@@ -6964,7 +6976,7 @@ boot(Engine, game);`;
   } else {
     const code = src.replace(/<\/script/gi, '<\\/script'), data = json.replace(/</g, '\\u003c');
     engineBytes = code.length; gameBytes = data.length;
-    payload = `${code}\nLD.set(0.6);\nboot(Engine, ${data});`;
+    payload = `${rapier}${code}\nLD.set(0.6);\nboot(Engine, ${data});`;
   }
   const html = `<!doctype html>
 <html lang="${escHTML(o.lang || 'en')}"><head><meta charset="utf-8">

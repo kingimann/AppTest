@@ -385,7 +385,7 @@ The **Scripts** tab (between Inspector and Project) lists every Visual Script in
 - Each card shows the object, a mini map of its nodes, which events start it and how many nodes it has.
 - Tap a card to open it in the Node Editor. Scripts on other levels are listed under their level; opening one switches to that level.
 - ⋮ shows the object in the Inspector, saves the script for reuse (or unlinks it), turns it off or on, or removes it.
-- **New Visual Script** adds one to the selected object. With more than a few scripts, search by object, event or node name.
+- **New Visual Script** adds one to the selected object, starting **blank** or from a small working **example** (tap to score). Add Node lists **Common actions** first and each node name once. New objects from Create land in a free spot instead of on top of the Player. With more than a few scripts, search by object, event or node name.
 - **Saved scripts** lists your reusable scripts with how often each is used; **Add** puts one on the selected object.
 
 The editor fills the screen:

@@ -21972,6 +21972,10 @@ for (const [k, d] of Object.entries(LOGIC_ACTIONS)) if (!d.hidden && !d.noNode) 
 for (const [k, d] of Object.entries(LOGIC_CONDITIONS)) if (!d.hidden) NODE_TYPES['lc_' + k] = { cat: 'Conditions', label: d.label, value: 'bool', params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
 const evLabel = (l) => 'When: ' + l.charAt(0).toLowerCase() + l.slice(1);
 for (const [k, d] of Object.entries(LOGIC_EVENTS)) if (!d.hidden && !d.fsm && !['always'].includes(k)) NODE_TYPES['le_' + k] = { cat: 'Events', label: evLabel(d.label), outs: ['then'], params: (d.params || []).map((q) => ({ ...q })), fromLogic: true };
+queueMicrotask(() => { // (after every node is in) one node per name in the picker: hide the trigger-list copy of a node that already exists as its own node; scripts using it still run
+  const own = new Set(Object.values(NODE_TYPES).filter((d) => !d.fromLogic && !d.hidden).map((d) => String(d.label).toLowerCase().trim()));
+  for (const d of Object.values(NODE_TYPES)) if (d.fromLogic && own.has(String(d.label).toLowerCase().trim())) d.hidden = true;
+});
 NODE_TYPES.onGameDone = { cat: 'Events', label: 'On Back From a Game', outs: ['won', 'lost', 'quit'], params: [txt('game', '', 'game (level name; blank = any)')] };
 NODE_TYPES.playGameN = { cat: 'Actions', label: 'Play Game', exec: true, outs: ['then', 'no such game'], params: [txt('game', '2', 'game (level number or name)')] };
 NODE_TYPES.backToAppN = { cat: 'Actions', label: 'Back to App', exec: true, outs: ['then', 'not in an app'] };

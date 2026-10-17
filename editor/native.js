@@ -52,6 +52,7 @@ import SwiftUI
 import WebKit
 import UserNotifications
 import AudioToolbox
+import StoreKit
 
 @main
 struct GameApp: App {
@@ -115,6 +116,7 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         w.scrollView.contentInsetAdjustmentBehavior = .never
         w.navigationDelegate = self
         if #available(iOS 16.4, *) { w.isInspectable = true } // Safari › Develop can inspect it
+        listenForPurchases()
         if let url = Bundle.main.url(forResource: "index", withExtension: "html") { w.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) }
         web = w
         return w
@@ -138,6 +140,41 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         let id = (m["id"] as? NSNumber)?.intValue ?? 0
         handle(m["plugin"] as? String ?? "", m["method"] as? String ?? "", m["args"] as? [String: Any] ?? [:]) { ok, value in
             self.run("window.__pkReply(\\(id), \\(ok), \\(ok ? self.json(value) : self.json(String(describing: value ?? "failed"))))")
+        }
+    }
+
+    // In-app purchases (StoreKit 2): approvals that arrive later (Ask to Buy, a pending payment) and refunds
+    private var purchaseUpdates: Task<Void, Never>?
+    private func listenForPurchases() {
+        purchaseUpdates = Task.detached { [weak self] in
+            for await r in Transaction.updates {
+                guard case .verified(let t) = r else { continue }
+                await t.finish()
+                self?.run("window.__pkEvent && window.__pkEvent('purchase', \\(self?.json(["id": t.productID, "status": t.revocationDate == nil ? "bought" : "revoked"]) ?? "null"))")
+            }
+        }
+    }
+    private func purchase(_ id: String, _ done: @escaping (Bool, Any?) -> Void) {
+        Task {
+            do {
+                guard let p = try await Product.products(for: [id]).first else { done(true, ["status": "failed", "error": "No product \\(id) in App Store Connect (or it isn't ready yet)"]); return }
+                switch try await p.purchase() {
+                case .success(let v):
+                    if case .verified(let t) = v { await t.finish(); done(true, ["status": "bought", "id": t.productID]) }
+                    else { done(true, ["status": "failed", "error": "The App Store could not verify the purchase"]) }
+                case .userCancelled: done(true, ["status": "cancelled"])
+                case .pending: done(true, ["status": "pending"])
+                @unknown default: done(true, ["status": "failed"])
+                }
+            } catch { done(true, ["status": "failed", "error": error.localizedDescription]) }
+        }
+    }
+    private func entitlements(sync: Bool, _ done: @escaping (Bool, Any?) -> Void) {
+        Task {
+            if sync { try? await AppStore.sync() } // Restore Purchases: may ask to sign in to the App Store
+            var ids: [String] = []
+            for await r in Transaction.currentEntitlements { if case .verified(let t) = r, t.revocationDate == nil { ids.append(t.productID) } }
+            done(true, ["ids": ids])
         }
     }
 
@@ -199,6 +236,18 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
             center.removePendingNotificationRequests(withIdentifiers: ids); done(true, [:])
         case ("LocalNotifications", "getPending"):
             center.getPendingNotificationRequests { reqs in done(true, ["notifications": reqs.map { r -> [String: Any] in ["id": Int(r.identifier).map { $0 as Any } ?? r.identifier] }]) }
+        case ("Purchases", "products"):
+            let ids = (a["items"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String }
+            Task {
+                do { let ps = try await Product.products(for: ids); done(true, ["products": ps.map { ["id": $0.id, "title": $0.displayName, "description": $0.description, "price": $0.displayPrice] }]) }
+                catch { done(false, error.localizedDescription) }
+            }
+        case ("Purchases", "buy"):
+            purchase(a["id"] as? String ?? "", done)
+        case ("Purchases", "owned"):
+            entitlements(sync: false, done)
+        case ("Purchases", "restore"):
+            entitlements(sync: true, done)
         default:
             done(false, "\\(plugin).\\(method) is not available")
         }
@@ -449,7 +498,16 @@ Made with Pocket Engine: the game runs in a full-screen WKWebView, with native n
 
 The **store-listing/** folder (next to this one) has the App Store icon, the listing text and the privacy answers.
 
-## What's inside
+${o.products?.length ? `## In-app purchases
+The game sells ${o.products.length} product${o.products.length > 1 ? 's' : ''} (StoreKit 2, in \`GameApp.swift\`):
+
+${o.products.map((p) => `- \`${p.id}\`: ${p.name} (${p.type === 'subscription' ? 'auto-renewable subscription' : p.type === 'unlock' ? 'non-consumable' : 'consumable'})`).join('\n')}
+
+1. In App Store Connect › your app › **Monetization › In-App Purchases** (subscriptions: **Subscriptions**), create each one with exactly that **Product ID**, a price and a display name.
+2. Sign the Paid Apps agreement (Business section), or the store returns no products.
+3. Test on a device with a **Sandbox** account (Settings › App Store › Sandbox Account) or a TestFlight build. Apple needs a **Restore Purchases** button for unlocks and subscriptions.
+
+` : ''}## What's inside
 - \`App/GameApp.swift\`: the app, the web view and the native bridge (notifications, haptics).
 - \`App/index.html\`: the whole game (the same as Build HTML). Replace it to update the game.
 - \`App/Assets.xcassets\`: the app icon (1024, no transparency) and the launch background colour.
@@ -481,7 +539,7 @@ export function xcodeFiles(o, { html, icon }) {
 // ============================================================================
 // Android Studio
 // ============================================================================
-export const ANDROID_VERSIONS = { agp: '8.10.1', gradle: '8.11.1', compileSdk: 36, targetSdk: 36, minSdk: 26 };
+export const ANDROID_VERSIONS = { agp: '8.10.1', gradle: '8.11.1', compileSdk: 36, targetSdk: 36, minSdk: 26, billing: '7.1.1' };
 
 function manifest(o) {
   const perms = o.perms || [], has = (k) => perms.some((p) => p.kind === k);
@@ -556,7 +614,7 @@ public class MainActivity extends Activity {
     private boolean loaded = false;
     private String pendingKey = null;
     private int permissionCallId = -1;
-
+${o.products?.length ? '    private Billing billing; // in-app purchases (Google Play Billing)\n' : ''}
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -656,7 +714,13 @@ public class MainActivity extends Activity {
                     for (String nid : NotifyReceiver.pendingIds(this)) out.put(new JSONObject().put("id", nid.matches("-?\\\\d+") ? (Object) Long.parseLong(nid) : nid));
                     reply(id, true, new JSONObject().put("notifications", out)); return;
                 }
-                default: reply(id, false, plugin + "." + method + " is not available");
+${o.products?.length ? `                case "Purchases.products": case "Purchases.buy": case "Purchases.owned": case "Purchases.restore": {
+                    if (billing == null) billing = new Billing(this, (d) -> run("window.__pkEvent && window.__pkEvent('purchase', " + d + ")"));
+                    final int rid = id; Billing.Reply ok = (v) -> reply(rid, true, v), fail = (v) -> reply(rid, false, v);
+                    if (method.equals("products")) billing.products(a, ok, fail); else if (method.equals("buy")) billing.buy(a, ok); else billing.owned(a, ok, fail);
+                    return;
+                }
+` : ''}                default: reply(id, false, plugin + "." + method + " is not available");
             }
         } catch (Exception e) { if (id >= 0) reply(id, false, String.valueOf(e.getMessage())); }
     }
@@ -669,6 +733,177 @@ public class MainActivity extends Activity {
     private static void buzz(Vibrator v, int ms) {
         if (v == null || !v.hasVibrator()) return;
         v.vibrate(VibrationEffect.createOneShot(ms, VibrationEffect.DEFAULT_AMPLITUDE));
+    }
+}
+`;
+}
+
+/** Billing.java (only when the game sells products): Google Play Billing for Buy Product, Restore Purchases and Owns Product. */
+function billingJava(pkg) {
+  return `package ${pkg};
+
+import android.app.Activity;
+
+import com.android.billingclient.api.AcknowledgePurchaseParams;
+import com.android.billingclient.api.BillingClient;
+import com.android.billingclient.api.BillingClientStateListener;
+import com.android.billingclient.api.BillingFlowParams;
+import com.android.billingclient.api.BillingResult;
+import com.android.billingclient.api.ConsumeParams;
+import com.android.billingclient.api.PendingPurchasesParams;
+import com.android.billingclient.api.ProductDetails;
+import com.android.billingclient.api.ProductDetailsResponseListener;
+import com.android.billingclient.api.Purchase;
+import com.android.billingclient.api.PurchasesResponseListener;
+import com.android.billingclient.api.PurchasesUpdatedListener;
+import com.android.billingclient.api.QueryProductDetailsParams;
+import com.android.billingclient.api.QueryPurchasesParams;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/** In-app purchases through Google Play Billing: answers the game's Purchases calls (products, buy, owned, restore). */
+final class Billing implements PurchasesUpdatedListener {
+    interface Reply { void send(Object value); }
+    interface Event { void send(JSONObject data); }
+    private final Activity activity;
+    private final Event event;
+    private final BillingClient client;
+    private final Map<String, ProductDetails> details = new HashMap<>();
+    private final Map<String, String> types = new HashMap<>(); // product ID → consumable | unlock | subscription
+    private Reply buying;
+    private String buyingId;
+
+    Billing(Activity activity, Event event) {
+        this.activity = activity; this.event = event;
+        client = BillingClient.newBuilder(activity).setListener(this)
+            .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build()).build();
+    }
+
+    private void ready(Runnable then, Reply fail) {
+        if (client.isReady()) { then.run(); return; }
+        client.startConnection(new BillingClientStateListener() {
+            @Override public void onBillingSetupFinished(BillingResult r) {
+                activity.runOnUiThread(() -> { if (r.getResponseCode() == BillingClient.BillingResponseCode.OK) then.run(); else fail.send("Google Play billing is not available: " + r.getDebugMessage()); });
+            }
+            @Override public void onBillingServiceDisconnected() { }
+        });
+    }
+    private void remember(JSONArray items) {
+        for (int i = 0; items != null && i < items.length(); i++) { JSONObject it = items.optJSONObject(i); if (it != null) types.put(it.optString("id"), it.optString("type", "consumable")); }
+    }
+    private String kind(String id) { return "subscription".equals(types.get(id)) ? BillingClient.ProductType.SUBS : BillingClient.ProductType.INAPP; }
+
+    /** Product details (prices in the player's money) for these IDs; one-time products and subscriptions are asked separately. */
+    private void query(List<String> ids, Runnable then) {
+        List<QueryProductDetailsParams.Product> inapp = new ArrayList<>(), subs = new ArrayList<>();
+        for (String id : ids) {
+            QueryProductDetailsParams.Product p = QueryProductDetailsParams.Product.newBuilder().setProductId(id).setProductType(kind(id)).build();
+            if (kind(id).equals(BillingClient.ProductType.SUBS)) subs.add(p); else inapp.add(p);
+        }
+        final int[] left = { (inapp.isEmpty() ? 0 : 1) + (subs.isEmpty() ? 0 : 1) };
+        if (left[0] == 0) { then.run(); return; }
+        ProductDetailsResponseListener got = (r, list) -> activity.runOnUiThread(() -> {
+            if (list != null) for (ProductDetails d : list) details.put(d.getProductId(), d);
+            if (--left[0] == 0) then.run();
+        });
+        if (!inapp.isEmpty()) client.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(inapp).build(), got);
+        if (!subs.isEmpty()) client.queryProductDetailsAsync(QueryProductDetailsParams.newBuilder().setProductList(subs).build(), got);
+    }
+    private static String price(ProductDetails d) {
+        if (d.getOneTimePurchaseOfferDetails() != null) return d.getOneTimePurchaseOfferDetails().getFormattedPrice();
+        List<ProductDetails.SubscriptionOfferDetails> offers = d.getSubscriptionOfferDetails();
+        if (offers != null && !offers.isEmpty()) {
+            List<ProductDetails.PricingPhase> ph = offers.get(0).getPricingPhases().getPricingPhaseList();
+            if (!ph.isEmpty()) return ph.get(ph.size() - 1).getFormattedPrice();
+        }
+        return "";
+    }
+
+    void products(JSONObject a, Reply ok, Reply fail) {
+        remember(a.optJSONArray("items"));
+        ready(() -> query(new ArrayList<>(types.keySet()), () -> {
+            try {
+                JSONArray out = new JSONArray();
+                for (ProductDetails d : details.values()) out.put(new JSONObject().put("id", d.getProductId()).put("title", d.getName()).put("description", d.getDescription()).put("price", price(d)));
+                ok.send(new JSONObject().put("products", out));
+            } catch (Exception e) { fail.send(String.valueOf(e.getMessage())); }
+        }), fail);
+    }
+
+    void buy(JSONObject a, Reply ok) {
+        String id = a.optString("id");
+        types.put(id, a.optString("type", "consumable"));
+        ready(() -> query(Collections.singletonList(id), () -> {
+            ProductDetails d = details.get(id);
+            if (d == null) { send(ok, "failed", "No product " + id + " in Google Play Console (the app must be uploaded to a testing track first)"); return; }
+            BillingFlowParams.ProductDetailsParams.Builder p = BillingFlowParams.ProductDetailsParams.newBuilder().setProductDetails(d);
+            List<ProductDetails.SubscriptionOfferDetails> offers = d.getSubscriptionOfferDetails();
+            if (offers != null && !offers.isEmpty()) p.setOfferToken(offers.get(0).getOfferToken());
+            if (buying != null) send(buying, "cancelled", null);
+            buying = ok; buyingId = id;
+            BillingResult r = client.launchBillingFlow(activity, BillingFlowParams.newBuilder().setProductDetailsParamsList(Collections.singletonList(p.build())).build());
+            if (r.getResponseCode() != BillingClient.BillingResponseCode.OK) {
+                buying = null;
+                send(ok, r.getResponseCode() == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ? "bought" : r.getResponseCode() == BillingClient.BillingResponseCode.USER_CANCELED ? "cancelled" : "failed", r.getDebugMessage());
+            }
+        }), (m) -> send(ok, "failed", String.valueOf(m)));
+    }
+
+    @Override public void onPurchasesUpdated(BillingResult r, List<Purchase> purchases) {
+        activity.runOnUiThread(() -> {
+            int code = r.getResponseCode();
+            Reply to = buying; String id = buyingId; buying = null;
+            if (code == BillingClient.BillingResponseCode.OK && purchases != null) {
+                for (Purchase p : purchases) {
+                    String pid = p.getProducts().isEmpty() ? id : p.getProducts().get(0);
+                    if (p.getPurchaseState() == Purchase.PurchaseState.PURCHASED) {
+                        settle(p);
+                        if (to != null && pid.equals(id)) { send(to, "bought", null); to = null; } else event(pid, "bought"); // (a pending payment that went through)
+                    } else if (p.getPurchaseState() == Purchase.PurchaseState.PENDING && to != null) { send(to, "pending", null); to = null; }
+                }
+                if (to != null) send(to, "failed", null);
+            } else if (to != null) {
+                send(to, code == BillingClient.BillingResponseCode.USER_CANCELED ? "cancelled" : code == BillingClient.BillingResponseCode.ITEM_ALREADY_OWNED ? "bought" : "failed", r.getDebugMessage());
+            }
+        });
+    }
+    /** Consumables are used up (so they can be bought again); unlocks and subscriptions are acknowledged (or Google refunds them after 3 days). */
+    private void settle(Purchase p) {
+        String pid = p.getProducts().isEmpty() ? "" : p.getProducts().get(0);
+        if ("consumable".equals(types.get(pid))) client.consumeAsync(ConsumeParams.newBuilder().setPurchaseToken(p.getPurchaseToken()).build(), (r, token) -> { });
+        else if (!p.isAcknowledged()) client.acknowledgePurchase(AcknowledgePurchaseParams.newBuilder().setPurchaseToken(p.getPurchaseToken()).build(), (r) -> { });
+    }
+
+    /** What this Google account owns (Restore Purchases asks the same). Consumables paid for while the game was closed are given now. */
+    void owned(JSONObject a, Reply ok, Reply fail) {
+        remember(a.optJSONArray("items"));
+        ready(() -> {
+            JSONArray ids = new JSONArray(); final int[] left = { 2 };
+            PurchasesResponseListener got = (r, list) -> activity.runOnUiThread(() -> {
+                for (Purchase p : list) {
+                    if (p.getPurchaseState() != Purchase.PurchaseState.PURCHASED) continue;
+                    settle(p);
+                    for (String pid : p.getProducts()) { if ("consumable".equals(types.get(pid))) event(pid, "bought"); else ids.put(pid); }
+                }
+                if (--left[0] == 0) { try { ok.send(new JSONObject().put("ids", ids)); } catch (Exception e) { fail.send(String.valueOf(e.getMessage())); } }
+            });
+            client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build(), got);
+            client.queryPurchasesAsync(QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.SUBS).build(), got);
+        }, fail);
+    }
+
+    private void send(Reply to, String status, String error) {
+        try { JSONObject o = new JSONObject().put("status", status); if (error != null && !error.isEmpty()) o.put("error", error); to.send(o); } catch (Exception ignored) { }
+    }
+    private void event(String id, String status) {
+        try { event.send(new JSONObject().put("id", id).put("status", status)); } catch (Exception ignored) { }
     }
 }
 `;
@@ -805,7 +1040,16 @@ From a terminal instead: \`gradle wrapper\` once (or let Android Studio make the
 
 The **store-listing/** folder (next to this one) has the Play icon, the feature graphic, the listing text and the Data safety answers.
 
-## What's inside
+${o.products?.length ? `## In-app purchases
+The game sells ${o.products.length} product${o.products.length > 1 ? 's' : ''} through Google Play Billing (\`Billing.java\`):
+
+${o.products.map((p) => `- \`${p.id}\`: ${p.name} (${p.type === 'subscription' ? 'subscription' : p.type === 'unlock' ? 'one-time product, kept' : 'one-time product, consumed'})`).join('\n')}
+
+1. Upload a release (an internal testing track is enough) so Play Console unlocks **Monetize › Products**.
+2. Create each product with exactly that **Product ID** (subscriptions: **Subscriptions**, with a base plan) and activate it.
+3. Add your Google account under **Settings › License testing** to buy without being charged, and install the app from the testing track's link.
+
+` : ''}## What's inside
 - \`app/src/main/java/${pkg.replace(/\./g, '/')}/MainActivity.java\`: the WebView and the native bridge. \`NotifyReceiver.java\`: scheduled notifications.
 - \`app/src/main/assets/index.html\`: the whole game (the same as Build HTML). Replace it to update the game.
 - \`app/src/main/res\`: the icons (adaptive and older phones), the notification icon, colours and the theme.
@@ -825,10 +1069,11 @@ export function androidFiles(o, { html, icons }) {
     { name: dir + 'build.gradle.kts', data: `plugins {\n    id("com.android.application") version "${V.agp}" apply false\n}\n` },
     { name: dir + 'gradle.properties', data: 'org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8\nandroid.useAndroidX=true\nandroid.nonTransitiveRClass=true\n' },
     { name: dir + 'gradle/wrapper/gradle-wrapper.properties', data: `distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-${V.gradle}-bin.zip\nnetworkTimeout=10000\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n` },
-    { name: dir + 'app/build.gradle.kts', data: `plugins {\n    id("com.android.application")\n}\n\nandroid {\n    namespace = "${pkg}"\n    compileSdk = ${V.compileSdk}\n\n    defaultConfig {\n        applicationId = "${pkg}"\n        minSdk = ${V.minSdk}\n        targetSdk = ${V.targetSdk}\n        versionCode = ${Math.max(1, +o.buildNumber || 1)}\n        versionName = "${String(o.version || '1.0').replace(/"/g, '')}"\n    }\n\n    buildTypes {\n        release {\n            isMinifyEnabled = false\n        }\n    }\n    buildFeatures {\n        buildConfig = true\n    }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n}\n` },
+    { name: dir + 'app/build.gradle.kts', data: `plugins {\n    id("com.android.application")\n}\n\nandroid {\n    namespace = "${pkg}"\n    compileSdk = ${V.compileSdk}\n\n    defaultConfig {\n        applicationId = "${pkg}"\n        minSdk = ${V.minSdk}\n        targetSdk = ${V.targetSdk}\n        versionCode = ${Math.max(1, +o.buildNumber || 1)}\n        versionName = "${String(o.version || '1.0').replace(/"/g, '')}"\n    }\n\n    buildTypes {\n        release {\n            isMinifyEnabled = false\n        }\n    }\n    buildFeatures {\n        buildConfig = true\n    }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n}\n${o.products?.length ? `\ndependencies {\n    implementation("com.android.billingclient:billing:${V.billing}") // in-app purchases\n}\n` : ''}` },
     { name: dir + 'app/src/main/AndroidManifest.xml', data: manifest(o) },
     { name: dir + jdir + 'MainActivity.java', data: mainActivity(o, pkg) },
     { name: dir + jdir + 'NotifyReceiver.java', data: notifyReceiver(o, pkg) },
+    ...(o.products?.length ? [{ name: dir + jdir + 'Billing.java', data: billingJava(pkg) }] : []),
     { name: dir + 'app/src/main/assets/index.html', data: withBridge(html, 'android', 'PocketAndroid.postMessage(s)') },
     { name: dir + 'app/src/main/res/values/strings.xml', data: `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <string name="app_name">${xmlEsc(o.name)}</string>\n</resources>\n` },
     { name: dir + 'app/src/main/res/values/colors.xml', data: `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="launch_background">${o.splashBg}</color>\n    <color name="ic_launcher_background">${o.iconBg}</color>\n</resources>\n` },

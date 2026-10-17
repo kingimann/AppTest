@@ -2644,6 +2644,82 @@ class Permissions {
 }
 
 /**
+ * In-app purchases (engine.store): the products in Game Settings › In-App Purchases, bought through the App Store
+ * (StoreKit) or Google Play Billing in the Xcode, Android Studio and Expo builds. In the editor and test players a
+ * test sheet stands in for the store (nothing is charged). Products: { id, name, price, type: 'consumable' | 'unlock'
+ * | 'subscription', var, amount } — a bought consumable adds amount to the variable; unlocks and subscriptions are owned.
+ */
+export const PRODUCT_TYPES = ['consumable', 'unlock', 'subscription'];
+class Store {
+  constructor(engine) { this.engine = engine; this.prices = {}; this.owned = new Set(); this.busy = null; this.key = ''; }
+  get native() { const C = typeof window !== 'undefined' && window.Capacitor; return C?.isNativePlatform?.() && C.isPluginAvailable?.('Purchases') ? C.Plugins?.Purchases : null; }
+  /** Test sheet instead of a store: the editor and test players (window.POCKET_STORE_TEST), never a published web build. */
+  get test() { return !this.native && typeof window !== 'undefined' && !!window.POCKET_STORE_TEST; }
+  get list() { return this.engine.products || []; }
+  product(id) { const k = String(id ?? '').trim(); return this.list.find((p) => p.id === k || p.name === k) || null; }
+  start() { // (each game run) the owned list from this device, then the store's own answer
+    this.key = 'pocket.iap.' + (this.engine.gameKey || 'game');
+    try { this.owned = new Set(JSON.parse(localStorage.getItem(this.key) || '[]')); } catch { this.owned = new Set(); }
+    const P = this.native; if (!P || !this.list.length) return;
+    if (!this.listening) { this.listening = true; P.addListener?.('purchase', (ev) => this.done(this.product(ev?.id), ev?.status || 'bought', true)); } // (approved later: Ask to Buy, a pending card payment)
+    P.products({ items: this.list.map((p) => ({ id: p.id, type: p.type || 'consumable' })) }).then((r) => { for (const q of r?.products || []) this.prices[q.id] = q.price; }).catch(() => {});
+    this.sync(P.owned({ items: this.list.map((p) => ({ id: p.id, type: p.type || 'consumable' })) }));
+  }
+  save() { try { localStorage.setItem(this.key, JSON.stringify([...this.owned])); } catch { /* storage unavailable */ } }
+  sync(pr) { return pr.then((r) => { const ids = (r?.ids || []).filter((id) => this.product(id)?.type !== 'consumable'); this.owned = new Set(ids); this.save(); return ids.length; }).catch(() => 0); }
+  owns(id) { const p = this.product(id); return !!p && this.owned.has(p.id); }
+  /** The price to show: the store's (in the player's money) when known, else the one typed in Game Settings. */
+  price(id) { const p = this.product(id); return p ? this.prices[p.id] || p.price || '' : ''; }
+  /** Buy a product: resolves 'bought', 'cancelled', 'pending' (waiting for approval) or 'failed'. */
+  buy(id) {
+    if (this.busy) return this.busy;
+    const p = this.product(id), E = this.engine;
+    if (!p) { Log.add('warn', `There's no product "${id}" (Game Settings › In-App Purchases)`, 'Purchases'); return Promise.resolve('failed'); }
+    if (p.type !== 'consumable' && this.owned.has(p.id)) return Promise.resolve('bought'); // (already theirs)
+    const P = this.native;
+    const run = P ? P.buy({ id: p.id, type: p.type || 'consumable' }).then((r) => { if (r?.error) Log.add('warn', r.error, 'Purchases'); return r?.status || 'failed'; }, (err) => { Log.add('warn', String(err?.message || err), 'Purchases'); return 'failed'; })
+      : this.test ? this.sheet(p)
+      : (E.scene?.message('Purchases work in the App Store / Google Play app', 2.5), Promise.resolve('failed'));
+    this.busy = run.then((st) => { this.busy = null; this.done(p, st); return st; });
+    return this.busy;
+  }
+  done(p, st, later) {
+    if (!p) return;
+    const s = this.engine.scene;
+    if (st === 'bought' || st === 'restored') {
+      if (p.type === 'consumable') { if (p.var) { s.vars[p.var] = (+s.vars[p.var] || 0) + (Number.isFinite(+p.amount) ? +p.amount : 1); } }
+      else { this.owned.add(p.id); this.save(); }
+    } else if (st === 'revoked') { this.owned.delete(p.id); this.save(); }
+    s?.emit('purchase', p.id, st); s?.send('purchase ' + st, p.id); if (later) s?.send('purchased', p.id);
+  }
+  /** Restore Purchases (needed on iPhone): asks the store which unlocks and subscriptions this account owns. Resolves how many. */
+  restore() {
+    const P = this.native;
+    if (P) return this.sync(P.restore({ items: this.list.map((p) => ({ id: p.id, type: p.type || 'consumable' })) })).then((n) => { this.engine.scene?.send('purchases restored', n); return n; });
+    return Promise.resolve(this.owned.size);
+  }
+  /** Test mode: a sheet like the store's, with Buy, Cancel and Fail (to try each outcome). */
+  sheet(p) {
+    const E = this.engine; if (typeof document === 'undefined' || !E.root) return Promise.resolve('cancelled');
+    injectPrefsCss();
+    const wasPaused = E.paused; if (E.scene?.state === 'play') { E.paused = true; E.quietPause = true; }
+    const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const what = p.type === 'subscription' ? 'Subscription' : p.type === 'unlock' ? 'One-time unlock' : p.var ? `+${Number.isFinite(+p.amount) ? +p.amount : 1} ${p.var}` : 'Consumable';
+    const wrap = document.createElement('div'); wrap.className = 'pk-ps pk-perm'; wrap.dataset.pocketStore = '1';
+    wrap.innerHTML = `<div class="pk-card" role="dialog" aria-label="Test purchase"><div class="pk-perm-ic">🛒</div><b class="pk-perm-t">${esc(p.name || p.id)}</b>` +
+      `<p class="pk-perm-w">${esc(what)} · <b>${esc(this.price(p.id) || 'Free')}</b><br><small>Test purchase: nothing is charged. In the App Store / Google Play build this is the real store sheet.</small></p>` +
+      `<div class="pk-perm-b"><button data-act="cancelled" class="pk-pb ghost">Cancel</button><button data-act="bought" class="pk-pb">Buy</button></div>` +
+      `<button data-act="failed" class="pk-btn ghost" style="margin:2px 0 0;font-size:13px">Test a failed payment</button></div>`;
+    for (const ev of ['pointerdown', 'pointerup', 'touchstart', 'touchend']) wrap.addEventListener(ev, (e) => e.stopPropagation());
+    E.root.appendChild(wrap);
+    return new Promise((resolve) => wrap.addEventListener('click', (e) => {
+      const act = e.target.closest?.('[data-act]')?.dataset.act; if (!act) return;
+      wrap.remove(); E.quietPause = false; if (E.scene?.state === 'play') E.paused = wasPaused; resolve(act);
+    }));
+  }
+}
+
+/**
  * Easy Save-style save files (engine.saves): named files of keys, each holding any value (numbers, text, lists,
  * dictionaries, whole objects). Optional encryption with a password (tampered files are refused), automatic backups,
  * export / import as text (move a save to another phone), key timestamps.
@@ -21743,6 +21819,10 @@ Object.assign(NODE_TYPES, {
   supaChangePw: { cat: 'Online', label: 'Change Password (Supabase)', exec: true, outs: ['then', 'changed', 'failed'], params: [txt('password', '{newPassword}', 'new password')] },
   supaLoadProfile: { cat: 'Online', label: 'Load Profile (Supabase)', exec: true, outs: ['then', 'found', 'not found'], params: [txt('who', '{username}', 'username or id')] },
   supaField: { cat: 'Online', label: 'My Account Field (Supabase)', value: 'text', params: [txt('field', 'username', 'field')] },
+  buyProduct: { cat: 'Online', label: 'Buy Product (in-app purchase)', exec: true, outs: ['then', 'bought', 'cancelled', 'failed'], params: [{ ...txt('product', 'coins_100', 'product'), suggest: 'products' }] },
+  restorePurchases: { cat: 'Online', label: 'Restore Purchases', exec: true, outs: ['then', 'done'] },
+  ownsProduct: { cat: 'Online', label: 'Owns Product', value: 'bool', params: [{ ...txt('product', 'remove_ads', 'product'), suggest: 'products' }] },
+  productPrice: { cat: 'Online', label: 'Product Price', value: 'text', params: [{ ...txt('product', 'coins_100', 'product'), suggest: 'products' }] },
   supaRpc: { cat: 'Online', label: 'Call Database Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   supaEdge: { cat: 'Online', label: 'Call Edge Function (Supabase)', exec: true, outs: ['then', 'done', 'failed'], params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value, {variables} work)'), txt('into', 'supaResult', 'answer into variable')] },
   // ---- Social: feeds, profiles, friends, messages, points ----
@@ -22046,6 +22126,8 @@ export const LOGIC_ACTIONS = {
   supaReset: { cat: 'Data', label: 'Send password reset (Supabase)', icon: 'mail', noNode: true, params: [txt('email', '{email}', 'email')], run: (c, p) => { c.s.engine.supa.reset(fillTemplate(p.email, c.s.vars).trim()).then(() => c.s.message('Check your email', 2)).catch(() => {}); }, say: () => 'Send a password reset email' },
   supaSaveProfile: { cat: 'Data', label: 'Save my profile (Supabase)', icon: 'user', noNode: true, run: (c) => { let done = false; c.s.engine.supa.saveProfile().then(() => { done = true; }); return { until: () => done }; }, say: () => 'Save my profile' },
   supaLoadProfile: { cat: 'Data', label: 'Load a profile (Supabase)', icon: 'user', noNode: true, params: [txt('who', '{username}', 'username or id')], run: (c, p) => { let done = false; c.s.engine.supa.loadProfile(fillTemplate(p.who, c.s.vars)).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Load the profile of ${p.who}` },
+  buyProduct: { cat: 'Data', label: 'Buy product (in-app purchase)', icon: 'gem', noNode: true, params: [sug(txt('product', 'coins_100', 'product'), 'products')], run: (c, p) => { let done = false; c.s.engine.store.buy(fillTemplate(p.product || '', c.s.vars)).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Buy ${p.product}` },
+  restorePurchases: { cat: 'Data', label: 'Restore purchases', icon: 'gem', noNode: true, run: (c) => { let done = false; c.s.engine.store.restore().then(() => { done = true; }); return { until: () => done }; }, say: () => 'Restore purchases' },
   supaRpc: { cat: 'Data', label: 'Call database function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'get_top_scores', 'function'), txt('args', '', 'arguments (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.rpc(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call database function ${p.fn}` },
   supaEdge: { cat: 'Data', label: 'Call Edge Function (Supabase)', icon: 'bolt', noNode: true, params: [txt('fn', 'hello', 'function'), txt('args', '', 'body (name = value)'), sug(txt('into', 'supaResult', 'answer into variable'), 'vars')], run: (c, p) => { let done = false; c.s.engine.supa.edge(p.fn, kvText(fillTemplate(p.args || '', c.s.vars)), p.into).then(() => { done = true; }); return { until: () => done }; }, say: (p) => `Call Edge Function ${p.fn}` },
   supaRefresh: { cat: 'Data', label: 'Refresh online data (Supabase)', icon: 'refresh', noNode: true, params: [sug(txt('collection', '', 'collection (empty = all)'), 'collections')], run: (c, p) => { c.s.engine.supa.pullAll(p.collection); }, say: (p) => `Refresh ${p.collection || 'online data'}` },
@@ -22908,6 +22990,8 @@ registerBehavior('graph', {
         case 'hasFunction': return g.nodes.some((q) => q.type === 'funcDef' && param(q, 'name') === P('func'));
         case 'batteryLevel': { const E = s.engine; if (!E._batt && navigator.getBattery) { E._batt = 1; navigator.getBattery().then((b) => { E.battery = b; }).catch(() => {}); } return E.battery ? Math.round(E.battery.level * 100) : 100; }
         case 'deviceLanguage': { const l = (typeof navigator !== 'undefined' && navigator.language) || 'en'; return String(P('form')).startsWith('full') ? l : l.slice(0, 2); }
+        case 'ownsProduct': return s.engine.store.owns(fillTemplate(P('product') || '', s.vars));
+        case 'productPrice': return s.engine.store.price(fillTemplate(P('product') || '', s.vars));
         case 'notifyAllowed': { const ph = s.engine.phone; if (!ph._checking) { ph._checking = true; ph.status().then((v) => { ph.perm = v; ph._checking = false; }); } return ph.perm === 'granted'; }
         case 'netPlayers': return s.engine.online.inRoom() ? s.engine.online.lbc.myRoomActorCount() : 0;
         case 'netIsMaster': return s.engine.online.isMaster();
@@ -23065,6 +23149,8 @@ registerBehavior('graph', {
           const pr = n.type === 'supaSignIn' ? S.signIn(f('email').trim(), f('password')).then(() => 'signed in') : n.type === 'supaSignUp' ? S.signUp(f('email').trim(), f('password'), f('name').trim()) : n.type === 'supaReset' ? S.reset(f('email').trim()).then(() => 'sent') : S.setName(f('name').trim()).then((ok) => (ok ? 'then' : 'failed'));
           pr.then((port) => follow(n, port, later)).catch(() => follow(n, 'failed', later)); return;
         }
+        case 'buyProduct': { const later = { ...ctx, steps: 0 }; s.engine.store.buy(fillTemplate(P('product') || '', s.vars)).then((st) => { if (!e.dead) follow(n, st === 'bought' ? 'bought' : st === 'failed' ? 'failed' : 'cancelled', later); }); break; }
+        case 'restorePurchases': { const later = { ...ctx, steps: 0 }; s.engine.store.restore().then(() => { if (!e.dead) follow(n, 'done', later); }); break; }
         case 'supaSignOut': { const later = { ...ctx, steps: 0 }; s.engine.supa.signOut().then(() => follow(n, 'then', later)); return; }
         case 'supaProvider': s.engine.supa.provider(P('provider')); return;
         case 'supaSaveProfile': case 'supaChangePw': case 'supaLoadProfile': { const later = { ...ctx, steps: 0 }, S = s.engine.supa, f = (k) => fillTemplate(P(k) || '', s.vars);
@@ -24550,6 +24636,7 @@ export class Engine {
     this.parent = opts.parent || document.body;
     this.maxDpr = opts.maxPixelRatio || 2;
     this.notifier = new NotifyCenter(this); // game-wide notifications (notify:type …)
+    this.store = new Store(this); // in-app purchases (Game Settings › In-App Purchases)
     this.phone = new PhoneNotify(this); // the phone's own notification area (scheduled reminders etc.)
     this.perms = new Permissions(this); // location, camera, microphone, motion… (Ask Permission node)
     this.saves = new SaveFiles(this); // Easy Save-style save files (Save Key / Load Key nodes, Auto Save component)
@@ -24670,10 +24757,10 @@ export class Engine {
     }
     this.gameKey = (source && typeof source === 'object' && !(source instanceof Scene) && source.name) || this.gameKey || 'game';
     if (source && typeof source === 'object' && !(source instanceof Scene) && !this.editing) setCustomLogic(source); // My Instructions / My Conditions
-    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
+    if (source && typeof source === 'object' && !(source instanceof Scene)) { this.itemDB = buildItemDB(source.items); this.products = Array.isArray(source.products) ? source.products.filter((p) => p?.id).map((p) => ({ ...p, id: String(p.id).trim() })) : []; this.recipes = Array.isArray(source.recipes) ? source.recipes.filter((r) => r?.result) : []; this.quests = Array.isArray(source.quests) ? source.quests.filter((q) => q?.name) : []; this.dialogues = Array.isArray(source.dialogues) ? source.dialogues.filter((q) => q?.name) : []; this.collections = Array.isArray(source.collections) ? source.collections.filter((q) => q?.name) : []; this.data.cache = {}; } // Items, Recipes, Quests, Dialogues, Data
     this.loadPrefs();
     this.setScene(this.factory());
-    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); this.supa.start(this.scene); this.scene.vars.modsActive = (this.mods.applied || []).length; }
+    if (!this.editing) { this.phone.listen(); this.phone.planReminders(this.levels?.[0]?.settings); this.supa.start(this.scene); this.store.start(); this.scene.vars.modsActive = (this.mods.applied || []).length; }
     return this.scene;
   }
 

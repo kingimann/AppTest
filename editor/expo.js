@@ -9,6 +9,9 @@ export const EXPO_VERSIONS = {
   'expo-screen-orientation': '~57.0.3', 'expo-navigation-bar': '~57.0.3', 'expo-system-ui': '~57.0.4',
 };
 
+/** In-app purchases (only when the game sells products): StoreKit 2 and Google Play Billing through expo-iap. */
+export const EXPO_IAP_VERSION = '~6.0.3';
+
 const slugOf = (s) => String(s || 'game').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'game';
 const semver = (v) => (/^\d+\.\d+\.\d+$/.test(v) ? v : String(v || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.'));
 
@@ -31,7 +34,7 @@ export function appJson(o) {
         privacyManifests: { NSPrivacyTracking: false, NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] }] } },
       android: { package: o.appId, adaptiveIcon: { foregroundImage: './assets/adaptive-icon.png', backgroundColor: o.iconBg }, permissions: androidPerms,
         ...(o.localVersions ? { versionCode: Math.max(1, +o.buildNumber || 1) } : {}) },
-      plugins: [['expo-notifications', { icon: './assets/notification-icon.png', color: o.notifyColor || '#4fa3ff' }], ['expo-splash-screen', { image: './assets/splash.png', backgroundColor: o.splashBg, imageWidth: 200 }], 'expo-screen-orientation'],
+      plugins: [['expo-notifications', { icon: './assets/notification-icon.png', color: o.notifyColor || '#4fa3ff' }], ['expo-splash-screen', { image: './assets/splash.png', backgroundColor: o.splashBg, imageWidth: 200 }], 'expo-screen-orientation', ...(o.products?.length ? ['expo-iap'] : [])],
       extra: { madeWith: 'Pocket Engine' },
     },
   };
@@ -64,8 +67,8 @@ export const BRIDGE = String.raw`(function () {
   window.__pkReply = function (id, ok, value) { var w = waiting[id]; if (!w) return; delete waiting[id]; ok ? w.resolve(value) : w.reject(new Error(value || 'failed')); };
   window.__pkEvent = function (name, data) { (listeners[name] || []).forEach(function (f) { try { f(data); } catch (e) {} }); };
   var plugin = function (name, methods) { var o = { addListener: function (ev, f) { (listeners[ev] = listeners[ev] || []).push(f); return Promise.resolve({ remove: function () {} }); } }; methods.forEach(function (m) { o[m] = function (a) { return call(name, m, a); }; }); return o; };
-  window.Capacitor = { isNativePlatform: function () { return true; }, getPlatform: function () { return window.__pkPlatform || 'ios'; }, isPluginAvailable: function (n) { return n === 'LocalNotifications' || n === 'Haptics'; },
-    Plugins: { LocalNotifications: plugin('LocalNotifications', ['checkPermissions', 'requestPermissions', 'schedule', 'cancel', 'getPending', 'createChannel']), Haptics: plugin('Haptics', ['impact', 'notification', 'vibrate']) } };
+  window.Capacitor = { isNativePlatform: function () { return true; }, getPlatform: function () { return window.__pkPlatform || 'ios'; }, isPluginAvailable: function (n) { return n === 'LocalNotifications' || n === 'Haptics' || n === 'Purchases'; },
+    Plugins: { LocalNotifications: plugin('LocalNotifications', ['checkPermissions', 'requestPermissions', 'schedule', 'cancel', 'getPending', 'createChannel']), Haptics: plugin('Haptics', ['impact', 'notification', 'vibrate']), Purchases: plugin('Purchases', ['products', 'buy', 'owned', 'restore']) } };
   // Android Back: the game goes back a page (or closes a popup); if there's nowhere to go, the app closes
   window.__pkBack = function () { var s = window.engine && window.engine.scene; var went = !!(s && s.canGoBack && s.canGoBack() && s.navBack()); if (!went) window.ReactNativeWebView.postMessage(JSON.stringify({ exit: true })); };
 })(); true;`;
@@ -82,7 +85,10 @@ import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import * as SplashScreen from 'expo-splash-screen';
 import GAME_HTML from './game/game-html';
-
+${o.products?.length ? `
+// In-app purchases (expo-iap: StoreKit 2 / Google Play Billing). Needs a build (eas build or a dev build), not Expo Go.
+let IAP = null; try { IAP = require('expo-iap'); } catch { /* Expo Go: purchases aren't available */ }
+` : ''}
 SplashScreen.preventAutoHideAsync().catch(() => {});
 // notifications show even while the game is open
 Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }) });
@@ -95,9 +101,56 @@ async function permissionState() {
   const p = await Notifications.getPermissionsAsync();
   return { display: p.granted ? 'granted' : p.canAskAgain === false ? 'denied' : 'prompt' };
 }
-/** The game's Capacitor-style calls, answered by Expo. */
+${o.products?.length ? `const KIND = {}; // product ID → consumable | unlock | subscription
+let iapReady = null, buying = null, onPurchase = null;
+const remember = (items) => (items || []).forEach((it) => { KIND[it.id] = it.type || 'consumable'; });
+const cancelled = (e) => /cancel/i.test(String(e?.code || ''));
+function iap() {
+  if (!IAP) return Promise.reject(new Error('In-app purchases need an EAS build or a dev build (not Expo Go)'));
+  return (iapReady ||= IAP.initConnection().then(() => {
+    IAP.purchaseUpdatedListener(async (p) => {
+      if (p.purchaseState === 'pending') { if (buying?.id === p.productId) { buying.done({ status: 'pending' }); buying = null; } return; }
+      try { await IAP.finishTransaction({ purchase: p, isConsumable: (KIND[p.productId] || 'consumable') === 'consumable' }); } catch { /* finished already */ }
+      if (buying?.id === p.productId) { buying.done({ status: 'bought', id: p.productId }); buying = null; }
+      else onPurchase?.({ id: p.productId, status: 'bought' }); // (approved later: Ask to Buy, a pending payment)
+    });
+    IAP.purchaseErrorListener((e) => { if (buying) { buying.done({ status: cancelled(e) ? 'cancelled' : 'failed', error: e?.message }); buying = null; } });
+  }));
+}
+const priceOf = (p) => p.displayPrice || p.localizedPrice || '';
+async function purchases(method, a) {
+  if (method === 'products') {
+    remember(a.items); await iap();
+    const one = a.items.filter((i) => i.type !== 'subscription').map((i) => i.id), subs = a.items.filter((i) => i.type === 'subscription').map((i) => i.id);
+    const [p1, p2] = await Promise.all([one.length ? IAP.fetchProducts({ skus: one, type: 'in-app' }) : [], subs.length ? IAP.fetchProducts({ skus: subs, type: 'subs' }) : []]);
+    return { products: [...(p1 || []), ...(p2 || [])].map((p) => ({ id: p.id, title: p.title, description: p.description, price: priceOf(p) })) };
+  }
+  if (method === 'buy') {
+    KIND[a.id] = a.type || 'consumable'; await iap();
+    const type = a.type === 'subscription' ? 'subs' : 'in-app';
+    const found = await IAP.fetchProducts({ skus: [a.id], type }).catch(() => []);
+    if (!found?.length) return { status: 'failed', error: 'No product ' + a.id + ' in the store yet (App Store Connect / Google Play Console)' };
+    return new Promise((done) => {
+      buying?.done({ status: 'cancelled' }); buying = { id: a.id, done };
+      IAP.requestPurchase({ request: { apple: { sku: a.id }, google: { skus: [a.id] } }, type }).catch((e) => {
+        if (buying?.done === done) { buying = null; done({ status: cancelled(e) ? 'cancelled' : 'failed', error: e?.message }); }
+      });
+    });
+  }
+  // owned / restore: what this account owns; consumables paid for while the game was closed are given now
+  remember(a.items); await iap();
+  if (method === 'restore' && IAP.restorePurchases) await IAP.restorePurchases().catch(() => {});
+  const ids = new Set();
+  for (const p of (await IAP.getAvailablePurchases()) || []) {
+    if ((KIND[p.productId] || 'consumable') === 'consumable') { try { await IAP.finishTransaction({ purchase: p, isConsumable: true }); onPurchase?.({ id: p.productId, status: 'bought' }); } catch { /* already used */ } }
+    else ids.add(p.productId);
+  }
+  return { ids: [...ids] };
+}
+
+` : ''}/** The game's Capacitor-style calls, answered by Expo. */
 async function handle(plugin, method, a) {
-  if (plugin === 'Haptics') {
+${o.products?.length ? "  if (plugin === 'Purchases') return purchases(method, a);\n" : ''}  if (plugin === 'Haptics') {
     if (method === 'impact') return Haptics.impactAsync({ LIGHT: Haptics.ImpactFeedbackStyle.Light, MEDIUM: Haptics.ImpactFeedbackStyle.Medium, HEAVY: Haptics.ImpactFeedbackStyle.Heavy }[a.style] || Haptics.ImpactFeedbackStyle.Medium);
     if (method === 'notification') return Haptics.notificationAsync({ SUCCESS: Haptics.NotificationFeedbackType.Success, WARNING: Haptics.NotificationFeedbackType.Warning, ERROR: Haptics.NotificationFeedbackType.Error }[a.type] || Haptics.NotificationFeedbackType.Success);
     if (method === 'vibrate') return Vibration.vibrate(Math.max(1, Math.round(a.duration || 300)));
@@ -135,7 +188,7 @@ export default function App() {
     Notifications.getLastNotificationResponseAsync().then((r) => r && setTimeout(() => tapped(r), 1500)).catch(() => {});
     // Android Back goes back in the game first
     const back = BackHandler.addEventListener('hardwareBackPress', () => { send('window.__pkBack && window.__pkBack()'); return true; });
-    return () => { sub.remove(); back.remove(); };
+${o.products?.length ? "    onPurchase = (d) => send('window.__pkEvent && window.__pkEvent(\"purchase\", ' + JSON.stringify(d) + ')');\n" : ''}    return () => { sub.remove(); back.remove(); };
   }, []);
   const onMessage = async (ev) => {
     let m; try { m = JSON.parse(ev.nativeEvent.data); } catch { return; }
@@ -208,7 +261,13 @@ small bridge in \`App.js\` gives it phone notifications, haptics and the Android
 - \`eas submit --platform android\` uploads to Google Play (the first upload must be done by hand in the Play Console; then it uses a Google service account${o.playKeyFile ? ': save its JSON key as **google-play-key.json** in this folder (it is in .gitignore)' : ', see expo.dev/accounts → credentials'}).
 ${o.appleId || o.ascAppId ? `- iOS uploads go to ${o.ascAppId ? 'App Store Connect app ' + o.ascAppId : 'your App Store Connect account'}${o.appleId ? ' as ' + o.appleId : ''} (eas.json › submit).` : ''}
 
-## Store listing
+${o.products?.length ? `## In-app purchases
+The game sells ${o.products.map((p) => '\`' + p.id + '\`').join(', ')} through [expo-iap](https://openiap.dev) (StoreKit 2 / Google Play Billing).
+Purchases need a real build (\`eas build\`, or a dev build with \`npx expo run:ios\` / \`run:android\`): in Expo Go they report "failed".
+Create each product with the same ID in App Store Connect (Monetization › In-App Purchases) and Google Play Console (Monetize › Products; upload a testing build first),
+then test with an Apple Sandbox account and a Google Play license tester.
+
+` : ''}## Store listing
 The **store-listing/** folder has the App Store icon (1024, no transparency), the Google Play icon and feature graphic, **LISTING.md** (text to paste, with each store's limits, plus the App Privacy and Data safety answers for what your game uses) and a starter **privacy-policy.md** to put online.
 
 ## Updating the game
@@ -228,7 +287,7 @@ export function expoFiles(o, { html, icon, fg, splash, notif }) {
   const pkg = {
     name: slugOf(o.name), version: semver(o.version), private: true, main: 'index.js',
     scripts: { start: 'expo start', android: 'expo start --android', ios: 'expo start --ios', 'build:preview': 'eas build --profile preview --platform all', 'build:store': 'eas build --profile production --platform all', submit: 'eas submit --platform all' },
-    dependencies: { ...EXPO_VERSIONS },
+    dependencies: { ...EXPO_VERSIONS, ...(o.products?.length ? { 'expo-iap': EXPO_IAP_VERSION } : {}) },
   };
   return [
     { name: 'README.md', data: expoReadme(o) },

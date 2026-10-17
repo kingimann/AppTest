@@ -21,7 +21,7 @@ import { openSprite2D, newDrawing } from './sprite2d.js';
 import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
-import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
+import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems, productsEditor } from './items.js';
 import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
 import { initData, dataEditor, ensureCollection, connectSupabase, STARTER_COLLECTIONS } from './data.js';
 import { makeCube } from './meshops.js';
@@ -464,6 +464,7 @@ function changed({ structure = false, inspector = false } = {}) {
 // ============================================================================
 // Engine in edit mode
 // ============================================================================
+window.POCKET_STORE_TEST = true; // in-app purchases show a test sheet here (no store)
 const engine = new Engine({ parent: $('#viewport'), systemBack: false }); // the editor handles the phone's Back itself
 engine.recordGraphs = true; // remember which Visual Script nodes ran, for the node editor's badges
 engine.editing = true;
@@ -3008,6 +3009,7 @@ function suggestions(kind) {
   const all = levelList().flatMap((lv) => lv.entities || []), uniq = (a) => [...new Set(a.filter(Boolean))];
   if (kind === 'tags') return uniq([...allTags(), ...all.map((e) => e.name)]);
   if (kind === 'items') return uniq([...(root.items || []).map((d) => d.name), ...all.flatMap((e) => (e.behaviors || []).filter((b) => ['inventoryItem', 'resource'].includes(b.type)).map((b) => b.item))]);
+  if (kind === 'products') return uniq((root.products || []).map((d) => d.id).filter(Boolean));
   if (kind === 'quests') return uniq((root.quests || []).map((q) => q.name));
   if (kind === 'collections') return uniq((root.collections || []).map((c) => c.name));
   if (kind === 'dialogues') return uniq((root.dialogues || []).map((d) => d.name));
@@ -4583,6 +4585,7 @@ function renderSceneSettings(box) {
   ], { icon: 'body', key: 's-phys' }));
   box.append(comp('Inventory', [inventorySettings()], { icon: 'key', key: 's-inv' }));
   box.append(comp('Items', [itemsEditor()], { icon: 'gem', key: 's-items' }));
+  box.append(comp('In-App Purchases', [productsEditor()], { icon: 'gem', key: 's-iap' }));
   box.append(comp('Recipes', [recipesEditor()], { icon: 'list', key: 's-recipes' }));
   box.append(comp('Quests', [questsEditor()], { icon: 'flag', key: 's-quests' }));
   box.append(comp('Dialogues', [dialoguesEditor()], { icon: 'sign', key: 's-dialogues' }));
@@ -7068,7 +7071,8 @@ function storeOpts() {
     iconBg: hexOr(o.iconBg, '#3a8dff'), splashBg: hexOr(o.splashBg, hexOr(root.background, '#000000')),
     author: o.author, description: o.description, subtitle: o.subtitle, shortDesc: o.shortDesc, keywords: o.keywords, category: o.category || (root.settings?.app ? 'app-productivity' : 'game-casual'),
     privacyUrl: o.privacyUrl, supportUrl: o.supportUrl, marketingUrl: o.marketingUrl, localVersions: !!o.localVersions, buildNumber: +o.buildNumber || 1,
-    appleId: o.appleId, ascAppId: o.ascAppId, appleTeamId: o.appleTeamId, playKeyFile: !!o.playKeyFile, itchUser: o.itchUser, itchGame: o.itchGame, whatsNew: o.whatsNew, shots: (o.shots || []).length };
+    appleId: o.appleId, ascAppId: o.ascAppId, appleTeamId: o.appleTeamId, playKeyFile: !!o.playKeyFile, itchUser: o.itchUser, itchGame: o.itchGame, whatsNew: o.whatsNew, shots: (o.shots || []).length,
+    products: (root.products || []).filter((p) => p?.id).map((p) => ({ id: String(p.id).trim(), name: p.name || p.id, price: p.price || '', type: p.type || 'consumable' })) };
 }
 /** What the game uses that the stores' privacy questions ask about (for LISTING.md and the starter privacy policy). */
 function appFacts() {

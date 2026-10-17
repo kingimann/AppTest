@@ -8729,6 +8729,7 @@ registerBehavior('uiAppBar', {
       if (p.title) return fillTemplate(String(p.title), s.vars);
       const page = s.vars[p.var];
       for (const l of String(p.titles || '').split('\n')) { const m = /^\s*([^=]+?)\s*=\s*(.*)$/.exec(l); if (m && sameVal(m[1], page)) return fillTemplate(m[2], s.vars); }
+      if (s.vars.chatTitle && s.entities.some((q) => q.ui && q.visible && !q._parentHidden && q.behaviors.some((b) => b.type === 'uiChat'))) return String(s.vars.chatTitle); // a chat is open: the person's (or group's) name
       for (const q of s.entities) for (const b of q.behaviors || []) { const t = b.pageLabel?.(page, p.var); if (t) return t; }
       const t = String(page ?? ''); return t ? t[0].toUpperCase() + t.slice(1) : '';
     };
@@ -11264,13 +11265,13 @@ function chatInputBar(s, o) {
   // where the drawn bar is (above a Bottom Nav), not over the nav; down on the keyboard while typing
   const vv = typeof window !== 'undefined' ? window.visualViewport : null;
   const touch = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
-  let typing = false; // the text box has the focus on a phone: its keyboard is up, so the bar sits right on the keyboard (over the Bottom Nav, like a native app)
+  let trayEl = null, typing = false; // the text box has the focus on a phone: its keyboard is up, so the bar sits right on the keyboard (over the Bottom Nav, like a native app)
   const place = () => {
     const off = Math.max(0, +(typeof o.bottom === 'function' ? o.bottom() : o.bottom) || 0);
     let b2 = off;
     const kbUp = typing && touch && vv && vv.height < (screen?.height || 0) * 0.8; // (iPhone: innerHeight shrinks with the keyboard too, so compare the visible area with the screen)
     if (kbUp) { const rr = root.getBoundingClientRect(), kbTop = vv.offsetTop + vv.height; b2 = Math.max(0, Math.round(rr.bottom - kbTop)); } // right on top of the keyboard
-    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 || kbUp ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; bar.dataset.onKeyboard = kbUp ? '1' : ''; s.engine.keyboardUp = !!kbUp;
+    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 || kbUp ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; if (trayEl) trayEl.style.marginBottom = b2 > 0 || kbUp ? '-8px' : 'calc(-8px - env(safe-area-inset-bottom))'; /* (above a Bottom Nav the panel ends at the bar's edge, not under the nav) */ bar.dataset.onKeyboard = kbUp ? '1' : ''; s.engine.keyboardUp = !!kbUp;
   };
   const replace = () => { place(); requestAnimationFrame(place); setTimeout(place, 320); }; // (the keyboard slides in: place again once it's up)
   place(); vv?.addEventListener('resize', replace); vv?.addEventListener('scroll', place);
@@ -11282,7 +11283,7 @@ function chatInputBar(s, o) {
   const emoB = el('button', `flex:none;border:0;background:none;width:34px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); emoB.innerHTML = svgIcon('smile', 23); emoB.type = 'button'; emoB.setAttribute('aria-label', 'Emoji');
   const tray = mediaTray(s, { colors: { bg: c.bg, text: c.text, sub: c.sub, line: c.line, acc: c.acc, field: c.field }, font, height: 270, gifs: o.photos !== false && o.gifs !== false,
     onEmoji: (em) => { inp.value += em; sync(); }, onGif: (u) => o.onSend({ text: '', media: u }), onToggle: (k) => { emoB.style.color = k === 'emoji' ? c.text : c.acc; gif.style.color = k === 'gif' ? c.text : c.acc; } });
-  tray.el.style.flexBasis = '100%'; tray.el.style.margin = '6px -10px calc(-8px - env(safe-area-inset-bottom))'; bar.style.flexWrap = 'wrap';
+  trayEl = tray.el; tray.el.style.flexBasis = 'calc(100% + 20px)'; tray.el.style.width = 'calc(100% + 20px)'; tray.el.style.boxSizing = 'border-box'; tray.el.style.margin = '6px -10px calc(-8px - env(safe-area-inset-bottom))'; bar.style.flexWrap = 'wrap'; place(); // (edge to edge)
   const mic = el('button', `flex:none;border:0;width:40px;height:40px;border-radius:50%;background:${c.acc};color:#fff;cursor:pointer;display:none;align-items:center;justify-content:center;`); mic.innerHTML = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'; mic.type = 'button'; mic.setAttribute('aria-label', 'Record a voice message'); mic.dataset.mic = '1';
   let plus = null, menu = null; // ＋: more to send (a poll, where you are), like WhatsApp's attach menu
   const closeMenu = () => { menu?.remove(); menu = null; if (plus) plus.style.transform = 'none'; };
@@ -11294,7 +11295,7 @@ function chatInputBar(s, o) {
         const ic = el('span', `width:50px;height:50px;border-radius:50%;background:${a.color || c.acc};color:#fff;display:flex;align-items:center;justify-content:center;`); ic.innerHTML = svgIcon(a.icon, 24, { stroke: 2.2 }); b.append(ic, el('span', '', a.label));
         b.onclick = () => { closeMenu(); a.run(); }; menu.append(b); }
       bar.append(menu); }; }
-  if (plus) bar.append(plus); if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false) bar.append(gif); bar.append(emoB, inp, send, mic, file, tray.el); root.append(bar);
+  if (plus) bar.append(plus); if (o.photos !== false) bar.append(pic); if (o.photos !== false && o.gifs !== false && !plus) bar.append(gif); /* (with ＋, GIFs live there and in the emoji panel) */ bar.append(emoB, inp, send, mic, file, tray.el); root.append(bar);
   // voice messages: tap the mic, talk, then send (or bin it); up to a minute
   let recUI = null, stopRec = null;
   const record = async () => {
@@ -11315,7 +11316,7 @@ function chatInputBar(s, o) {
     const buf = an ? new Uint8Array(an.fftSize) : null;
     const finish = (send2) => { if (!recUI) return; keep = send2; stopRec = null; clearInterval(timer); try { if (mr.state !== 'inactive') mr.stop(); } catch { /* stopped */ } recUI.remove(); recUI = null; };
     const tick = () => { const sec = (performance.now() - t0) / 1000; tm.textContent = `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
-      let v = 0.15 + Math.random() * 0.2; if (an) { an.getByteTimeDomainData(buf); let sum = 0; for (const x of buf) sum += (x - 128) ** 2; v = Math.min(1, Math.sqrt(sum / buf.length) / 40); } peaks.push(v);
+      let v = 0.2 + Math.random() * 0.7; if (an) { an.getByteTimeDomainData(buf); let sum = 0; for (const x of buf) sum += (x - 128) ** 2; v = Math.min(1, Math.sqrt(sum / buf.length) / 40); } peaks.push(v);
       const b2 = el('span', `flex:none;width:3px;border-radius:2px;background:${c.acc};height:${Math.round(4 + v * 22)}px;`); lv.append(b2); while (lv.children.length > 60) lv.firstChild.remove();
       if (sec >= 60) finish(true); };
     timer = setInterval(tick, 100);
@@ -11343,7 +11344,7 @@ function chatInputBar(s, o) {
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
   const close = (force) => { if (gone) return; if (recUI) { if (!force) return; stopRec?.(false); } gone = true; /* (a tap outside doesn't stop a recording; leaving the chat bins it) */ s.engine.keyboardUp = false; vv?.removeEventListener('resize', replace); vv?.removeEventListener('scroll', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(inp.value); root.removeEventListener('pointerdown', outside, true); };
-  const sync = () => { const on = !!inp.value.trim(); if (plus) { pic.style.display = on ? 'none' : 'flex'; gif.style.display = on ? 'none' : 'flex'; } send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
+  const sync = () => { const on = !!inp.value.trim(); if (plus) pic.style.display = on ? 'none' : 'flex'; send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });
   send.onclick = go; pic.onclick = () => file.click(); gif.onclick = () => tray.toggle('gif');
@@ -11450,7 +11451,8 @@ function gifPanel(s, o) {
   const grid = el('div', `display:grid;grid-template-columns:repeat(${o.columns || 2},1fr);gap:6px;padding:0 12px 10px;`); grid.dataset.gifGrid = '1';
   const note = el('div', `color:${c.sub};font-size:13px;line-height:1.4;padding:14px 20px;text-align:center;`);
   scroll.append(grid, note); box.append(top, scroll);
-  const pick = (u) => { if (u) o.onPick(u); };
+  const RK = 'pocket.gifRecent.' + (s.engine.gameKey || 'game'), recent = () => { try { return JSON.parse(store.get(RK, '[]')) || []; } catch { return []; } };
+  const pick = (u) => { if (!u) return; if (!/^blob:/.test(u)) try { store.set(RK, JSON.stringify([u, ...recent().filter((x) => x !== u)].slice(0, 24))); } catch { /* storage full */ } o.onPick(u); }; // (kept for Recent)
   const show = (L) => { grid.textContent = ''; for (const g of L) { const b = btn('position:relative;display:block;width:100%;aspect-ratio:1;border-radius:10px;overflow:hidden;background:rgba(128,128,128,.15);', ''); const im = el('img', 'width:100%;height:100%;object-fit:cover;display:block;'); im.loading = 'lazy'; im.src = g.thumb; im.alt = g.title || 'GIF'; b.append(im); b.dataset.gif = g.url; b.onclick = () => pick(g.url); grid.append(b); } };
   let seq = 0;
   const search = async (term) => {
@@ -11467,7 +11469,14 @@ function gifPanel(s, o) {
   q.addEventListener('keydown', (ev) => { if (ev.key !== 'Enter') return; ev.preventDefault(); const v = q.value.trim(); if (/^https?:\/\/\S+$/.test(v)) { pick(v); q.value = ''; } else if (key) search(v); else s.snackbar?.('Paste a link that starts with https://'); });
   up.onclick = () => file.click();
   file.onchange = async () => { const f = file.files?.[0]; file.value = ''; if (!f) return; try { pick(o.upload ? await o.upload(f) : f.size <= 3e6 ? await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); }) : URL.createObjectURL(f)); } catch { s.snackbar?.('That GIF could not be added'); } };
-  if (key) search(''); else note.textContent = 'Upload a GIF or paste a link to one. Add a GIPHY or Tenor key in Game Settings › GIFs to search here.';
+  const testing = typeof window !== 'undefined' && !!window.POCKET_STORE_TEST;
+  const empty = () => { const R0 = recent(); if (R0.length) { show(R0.map((u) => ({ thumb: u, url: u, title: 'Recent GIF' }))); note.textContent = ''; const h = el('div', `grid-column:1/-1;padding:4px 2px 2px;font:800 12px ${font};letter-spacing:.06em;text-transform:uppercase;color:${c.sub};`, 'Recent'); grid.prepend(h); }
+    if (!key) { const card = el('div', `display:flex;flex-direction:column;align-items:center;gap:8px;padding:${R0.length ? 10 : 22}px 20px 18px;color:${c.sub};text-align:center;`); card.dataset.gifEmpty = '1';
+      if (!R0.length) { const ic = el('div', `width:56px;height:56px;border-radius:18px;background:${c.field};color:${c.text};display:flex;align-items:center;justify-content:center;`); ic.innerHTML = svgIcon('gif', 30); card.append(ic, el('div', `font:800 16px ${font};color:${c.text};`, 'Send a GIF')); }
+      card.append(el('div', `font:500 13px ${font};line-height:1.4;max-width:280px;`, 'Upload one from your phone, or paste a link to a GIF and press Enter.'));
+      if (testing) card.append(el('div', `font:500 12px ${font};line-height:1.4;max-width:300px;opacity:.75;`, 'Only you see this while testing: add a GIPHY or Tenor key in Game Settings › GIFs to search GIFs here.'));
+      note.textContent = ''; note.append(card); } };
+  if (key) search(''); else empty();
   return { el: box, input: q };
 }
 /** Pick a GIF in a sheet of its own (the post composer). */
@@ -12241,7 +12250,7 @@ registerBehavior('uiChat', {
               const vy = ty + (it.lines.length ? it.lines.length * LH + 16 : 0), cy = vy + 27, f = voicePlayer.frac(r), playing = voicePlayer.id === r.id, fg = it.mine ? mineT : mineC;
               ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.22)' : withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.14); ctx.beginPath(); ctx.arc(x + 26, cy, 17, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = fg;
               if (playing) { ctx.fillRect(x + 20, cy - 7, 4, 14); ctx.fillRect(x + 28, cy - 7, 4, 14); } else { ctx.beginPath(); ctx.moveTo(x + 22, cy - 8); ctx.lineTo(x + 33, cy); ctx.lineTo(x + 22, cy + 8); ctx.closePath(); ctx.fill(); }
-              const wv = String(r.wave || '') || Array.from({ length: 28 }, (_, i) => String((Math.abs(Math.sin((i + 1) * 12.9898 + String(r.id).length * 78.233)) * 9) | 0)).join(''), n = wv.length, x0 = x + 52, span = w - 52 - 50, step = span / n;
+              const w0 = String(r.wave || ''), flat = !w0 || Math.max(...w0) - Math.min(...w0) < 2, wv = !flat ? w0 : Array.from({ length: 28 }, (_, i) => String((Math.abs(Math.sin((i + 1) * 12.9898 + String(r.id).length * 78.233)) * 9) | 0)).join(''), n = wv.length, x0 = x + 52, span = w - 52 - 50, step = span / n;
               for (let i = 0; i < n; i++) { const hh = 4 + (+wv[i] || 0) / 9 * 20; ctx.globalAlpha = i / n <= f && f > 0 ? 1 : 0.45; ctx.fillStyle = fg; UK.rr(ctx, x0 + i * step, cy - hh / 2, Math.max(2, step * 0.55), hh, 1.5); ctx.fill(); }
               ctx.globalAlpha = 1; const sec = Math.round(f > 0 ? f * (+r.dur || 1) : +r.dur || 1);
               if (playing) { const sp = voicePlayer.rate + '×'; ctx.fillStyle = it.mine ? 'rgba(255,255,255,0.25)' : withAlpha(mineC.startsWith('#') ? mineC : '#1d9bf0', 0.16); UK.rr(ctx, x + w - 44, cy - 10, 34, 20, 10); ctx.fill(); UK.text(ctx, sp, x + w - 27, cy, { size: 11, weight: 800, color: fg }); } // tap it: 1× → 1.5× → 2×

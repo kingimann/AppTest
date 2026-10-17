@@ -35,6 +35,7 @@ A step with several white outputs chooses one: **If** has *true* / *false*, **Ra
 
 ## Editing
 
+- **Kept simple:** a script opens at a size you can read (a big one starts at its top-left; ⋯ › Fit All Nodes shows it all); the tip at the bottom is one short line and goes away after your first few visits; Add Node shows the 8 main categories (*All 30 categories* shows the rest); a node's ⋯ menu has the few things you need (What Does This Do?, Duplicate, Turn Off, Delete) and *More…* for the rest (Copy, Copy From Here, Collapse, Select Several, Remove Wires).
 - **Add Node** (the + button) opens a picker with search, **Suggested next** (what usually follows the selected node), **Recently used**, **Common actions** (the handful most scripts use: Add to Variable, Set Variable, Play Sound, Show Message, Wait, If, Move By, Jump, Spawn, Destroy, Show / Hide, Win, Game Over) and one folder per category. Each name appears once: where a trigger instruction does the same as a node (Play Sound, Wait…), only the node is listed (old scripts using the other one keep working).
 - **Drag a wire into empty space** (or tap a dot, then empty space) and a picker opens with only the nodes that can plug in there (*Fits here* first); the new node lands where you let go, already wired.
 - **Tap a white wire › Insert Node Here…** puts an action in the middle of it (from → new node → to).

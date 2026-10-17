@@ -431,7 +431,11 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **＋ on the open bar** (like WhatsApp's attach menu) has **Photo** and **GIF** too (their buttons hide while you type, so the box has room):
     - **Poll**: a question with 2 to 8 answers (*＋ Add an answer*). Everyone taps one answer and sees the counts and bars; tap yours again to take it back. **View votes** lists who picked what (*Polls*).
     - **Location**: the phone asks first, then sends a map card with your position. Tapping the card opens it in Maps (*Share where you are*).
-  - **Press and hold a message:**
+  - **Photos:** tap one to see it **full screen** (double-tap or pinch to zoom, drag down or tap to close), with who sent it, when, and its words.
+  - **View once** (＋ › *View once*): a photo the other person can open one time, full screen; then it shows **Opened** for both of you. You can't open your own (*View once photos*).
+  - **@ in a group:** typing @ lists the people in the group; tap one to put in their @name.
+  - In a group, each person's **name has its own colour**, and a **dot** marks voice messages you haven't played yet.
+  - **Press and hold a message** (*Press and hold shows* › *menu by the message*, the default): the message stays lit while the rest of the chat dims, emoji float above it (＋ for any emoji) and the actions sit under it, like iMessage and WhatsApp. *sheet* uses a sheet from the bottom instead. The actions:
     - react with ❤️ 😂 😮 😢 😡 👍 (*Reactions*). Everyone gets **one reaction each**, like Messenger and WhatsApp: pick another to change it, the same one to take it back. Under the bubble a pill shows the emoji and how many (outlined when one is yours); **tap it to see who reacted** and tap your own to remove it;
     - **Reply** (the reply quotes it; tap the quote to jump to the original);
     - **Copy**;

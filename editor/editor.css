@@ -468,6 +468,7 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .ne-row input, .ne-row select { height: 40px; font-size: 15px; padding: 4px 10px; border-radius: 8px; flex: 1; }
 .ne-row select { padding-right: 28px; background-position: calc(100% - 15px) 16px, calc(100% - 10px) 16px; }
 .ne-row input[type=checkbox] { flex: none; height: 26px; }
+.ne-row input.bad { outline: 2px solid #ff5d5d; outline-offset: -1px; background: rgba(255,93,93,.12); }
 .ne-row.in { padding-right: 10px; }
 .ne-row.note { color: var(--muted); font-size: 13px; padding: 4px 12px; min-height: 0; }
 .wired-tag { color: var(--accent-text); font-size: 13px; font-style: italic; }

@@ -15,7 +15,7 @@ import * as cloud from './cloud.js';
 import { onStorage, initStorage, allProjects, saveProject, deleteProject, rescueCopy, snapshot, snapshotUnsaved, saveDraft, readDraft, dropDraft, listSnapshots, askPersist, isPersisted, storageUse, makeBackup, restoreBackup, lastBackup, markBackedUp, usingIndexedDB, setSnapshotPolicy } from './storage.js';
 import { icon } from './icons.js';
 import { NAV_STYLE_THUMBS, SIDE_STYLE_THUMBS, TOP_STYLE_THUMBS } from './navstyles.js';
-import { openNodeEditor, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
+import { openNodeEditor, graphProblems, CAT_COLOR as NODE_CAT_COLOR } from './nodes.js';
 import { openModeler } from './modeler.js';
 import { openSprite2D, newDrawing } from './sprite2d.js';
 import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
@@ -2525,7 +2525,7 @@ function gettingStarted() {
 function addVisualScript(mode) {
   if (mode !== 'blank' && mode !== 'example') {
     const app = !!levelList()[0].settings?.app, j0 = ent(selectedId), tapish = !app && ((j0 && !j0.template && !j0.ui && hasVisual(j0)) || (!j0 && project.entities.some((e) => (e.tags || []).includes('player'))));
-    const ex = app ? ['Page opened → message', 'When a page opens, show a message. Change it into what you need.'] : tapish ? ['Tap to score', 'On Tap → add 1 to score → show it and play a sound.'] : ['Score every second', 'Every second → add 1 to score.'];
+    const ex = app ? ['Page opened → message', 'When a page opens, show a message. Change it into what you need.'] : tapish ? ['Tap to score', 'On Tap → add 1 to score → show it.'] : ['Score every second', 'Every second → add 1 to score.'];
     const opt = (ic, t, d, m, primary) => h('button', { class: 'btn' + (primary ? ' primary' : ''), style: 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px', 'data-script': m, onclick: () => { closeLayer(); addVisualScript(m); } }, h('b', { style: 'display:flex;align-items:center;gap:8px' }, icon(ic), t), h('small', { style: 'opacity:.8;font-weight:500' }, d));
     openDialog('New Visual Script', [h('div', { class: 'tour' }, h('div', { class: 'big' }, icon('nodes')),
       h('h4', {}, 'How do you want to start?'),
@@ -3069,6 +3069,8 @@ function projectProblems() {
           for (const [lvl, msg] of validate(b, e)) if (lvl !== 'info') add(lvl, def.label, msg);
           for (const p of def.params) if (p.required && (b[p.key] ?? '') === '') add('error', def.label, `${p.label || p.key} is required.`);
         }
+        for (const b of e.behaviors || []) if (b.type === 'graph') for (const [gr, nm] of [[b.graph, ''], ...(b.scripts || []).map((x) => [x.graph, x.name || 'script'])]) { // inside Visual Scripts: nodes that never run, loose values…
+          for (const [nid, why] of graphProblems(gr)) { const n = (gr?.nodes || []).find((q) => q.id === nid); add('warn', 'Visual Script' + (nm ? ` (${nm})` : ''), `${NODE_TYPES[n?.type]?.label || n?.type || 'A node'}: ${why}.`); } }
       }
       for (const g of findDuplicates(lv.entities || [])) { const e = (lv.entities || []).find((q) => q.id === g.ids[g.ids.length - 1]); out.push({ lvl: 'warn', li, id: e?.id, name: g.label, comp: 'Duplicate', msg: g.why }); }
     } finally { project = keep; }
@@ -3147,6 +3149,7 @@ function graphCard(target, path) {
     h('button', { class: 'btn primary gc-open', onclick: () => editGraph(target, path) }, icon('nodes'), 'Open Node Editor'),
     !sc && (g.nodes || []).length ? h('button', { class: 'btn gc-save', onclick: () => { const n = prompt('Name this script so you can reuse it', target().name ? `${target().name} script` : 'My script'); if (n?.trim()) { saveScript(beh, g, n.trim()); renderInspector(); } } }, icon('save'), 'Save as Reusable Script') : null);
 }
+let graphHistT = 0;
 function editGraph(target, path) {
   const e = target(), id = e.id;
   const T = () => ent(id) || e;
@@ -3163,8 +3166,8 @@ function editGraph(target, path) {
     linked: () => { const sc = scriptOf(B()); if (!sc) return null; let n = 0; eachScriptUse(sc.id, () => n++); return { name: sc.name, uses: n }; },
     saveScript: (name, g) => saveScript(B(), g, name),
     unlink: () => { delete B().scriptRef; changed(); },
-    onChange: (g) => { setPath(T(), path, g); const b = B(); if (b?.scriptRef) syncScript(b.scriptRef, g, b); requestRebuild(); saveSoon(); },
-    onClose: () => { dropBack(back); pushHistory(); renderInspector(); if (dockTab === 'scripts') renderScripts(); },
+    onChange: (g) => { setPath(T(), path, g); const b = B(); if (b?.scriptRef) syncScript(b.scriptRef, g, b); requestRebuild(); saveSoon(); clearTimeout(graphHistT); graphHistT = setTimeout(pushHistory, 700); }, // (each edit is its own step for the main Undo too, not one for the whole visit)
+    onClose: () => { dropBack(back); clearTimeout(graphHistT); pushHistory(); renderInspector(); if (dockTab === 'scripts') renderScripts(); },
   });
   pushBack(back);
 }

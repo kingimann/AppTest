@@ -10,6 +10,9 @@ const KIND_COLOR = { exec: '#e8e8e8', number: '#4fc3f7', bool: '#f7a02c', text: 
 const CATS = ['App', 'Plugins', 'Events', 'Flow', 'Actions', 'Instructions', 'Conditions', 'Variables', 'Save Files', 'Lists', 'Text', 'Functions', 'Time', 'Input', 'Physics', 'Sensing', 'AI', 'Online', 'Social', 'Move', 'Looks', 'Animation', 'Tween', 'UI', 'Camera', 'Audio', 'Objects', 'Game', 'Device', 'Values', 'Math'];
 const CAT_ICON = { Events: 'bolt', Flow: 'nodes', Actions: 'step', Move: 'move', Looks: 'brush', Animation: 'clock', Tween: 'rotate', Objects: 'cube', Game: 'trophy', Values: 'list', Math: 'plus', Physics: 'magnet', Sensing: 'crosshair', Online: 'globe', Social: 'users', Variables: 'key', 'Save Files': 'save', Instructions: 'list', Conditions: 'check', Lists: 'list', Functions: 'script', Text: 'text', Time: 'clock', Input: 'hand', Camera: 'camera', Audio: 'bulb', AI: 'enemy', Device: 'phone', UI: 'hud', App: 'phone', Plugins: 'bolt' };
 /** "What usually comes next" for the Add Node picker. */
+/** The categories shown first in Add Node (all of them are one tap away). */
+const MAIN_CATS = ['Events', 'Actions', 'Flow', 'Variables', 'Move', 'Looks', 'Audio', 'Game'];
+const MAIN_CATS_APP = ['App', 'Events', 'Flow', 'Variables', 'UI', 'Text', 'Lists', 'Device'];
 /** The handful of actions most scripts need, shown before the full list (it has hundreds). */
 const COMMON_GAME = ['addVar', 'setVar', 'sound', 'message', 'wait', 'branch', 'moveBy', 'jump', 'spawn', 'destroy', 'showHide', 'win', 'gameOver'];
 const COMMON_APP = ['goToPage', 'toast', 'setVar', 'setText', 'showHide', 'branch', 'wait', 'sound'];
@@ -44,8 +47,8 @@ const rememberNode = (t) => { try { localStorage.setItem(RECENT_KEY, JSON.string
 const CAT_HELP = {
   App: 'Pages, menus, data and games inside apps.',
   Plugins: 'Added by this game’s plugins.',
-  Events: 'Start here: when something happens…',
-  Actions: '…do something.',
+  Events: 'Start here: when something happens',
+  Actions: 'Do something: score, sound, move, spawn…',
   Move: 'Position, rotation and size.',
   Looks: 'Text, colour and effects.',
   Animation: 'Play clips, sprite frames, fades and flips.',
@@ -370,7 +373,7 @@ export function openNodeEditor(opts) {
 
   // ---------- view ----------
   const applyView = () => { world.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
-  function fit() {
+  function fit(readable = false) { // readable (on opening): never so small you can't read it; a big script starts at its top-left instead
     const a = area.getBoundingClientRect();
     if (!g.nodes.length) { k = 0.85; tx = 20; ty = 20; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -379,7 +382,7 @@ export function openNodeEditor(opts) {
       x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + NODE_W); y1 = Math.max(y1, n.y + hgt);
     }
     const pad = 24;
-    k = Math.max(0.35, Math.min(1.1, (a.width - pad * 2) / (x1 - x0), (a.height - pad * 2 - 90) / (y1 - y0)));
+    k = Math.max(readable ? 0.75 : 0.35, Math.min(1.1, (a.width - pad * 2) / (x1 - x0), (a.height - pad * 2 - 90) / (y1 - y0)));
     tx = pad - x0 * k + Math.max(0, (a.width - pad * 2 - (x1 - x0) * k) / 2);
     ty = pad - y0 * k;
     applyView(); drawLinks();
@@ -452,11 +455,14 @@ export function openNodeEditor(opts) {
     }
     setPending(q); buzz(6);
   }
+  let hintSeen = 0; try { hintSeen = +localStorage.getItem('pocket.ne.hints') || 0; localStorage.setItem('pocket.ne.hints', String(hintSeen + 1)); } catch { /* storage unavailable */ } // (the basic tip only the first few times)
   function updateHint() {
     hint.replaceChildren(...(pending
-      ? [h('span', {}, 'Now tap a glowing dot to connect, or empty space for a new node'), h('button', { onclick: () => setPending(null) }, 'Cancel')]
-      : hasStats() ? [h('span', {}, 'From your last Play: ×N = times a node ran, = its last value. Faded nodes never ran.')]
-      : [h('span', {}, g.nodes.length ? 'Tap a dot, then another dot to wire them (or empty space to add a node there) · tap a wire to insert or delete' : 'Events (green) start a script · Actions (blue) do things')]));
+      ? [h('span', {}, 'Tap a glowing dot, or empty space for a new node'), h('button', { onclick: () => setPending(null) }, 'Cancel')]
+      : hasStats() ? [h('span', {}, '×N = times it ran last Play')]
+      : !g.nodes.length ? [h('span', {}, 'Start with a green event, like On Tap')]
+      : hintSeen < 4 ? [h('span', {}, 'Tap a dot, then another, to wire them')] : []));
+    hint.hidden = !hint.childNodes.length;
   }
 
   // ---------- nodes ----------
@@ -536,19 +542,23 @@ export function openNodeEditor(opts) {
       ...(d.inputs || []).map((i) => row('● ' + i.key, `${i.type} in (type it, or wire a value)`)),
       ...(d.params || []).map((q) => row(q.label || q.key, 'setting'))));
   }
-  function nodeMenu(n, anchor) {
-    popMenu(anchor, [
-      { cap: def(n).label },
-      !def(n).comment && { icon: 'help', label: 'What Does This Do?', fn: () => nodeHelp(n) },
+  function nodeMenu(n, anchor, more = false) {
+    const d = def(n), del = { icon: 'trash', label: 'Delete Node', fn: () => { snap(); g.nodes = g.nodes.filter((q) => q !== n); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); if (selected === n.id) selected = null; emit(); render(); } };
+    if (!more) return popMenu(anchor, [ // the few things people do with a node; the rest one tap away
+      { cap: d.label },
+      !d.comment && { icon: 'help', label: 'What Does This Do?', fn: () => nodeHelp(n) },
       { icon: 'copy', label: 'Duplicate', fn: () => { snap(); const c = JSON.parse(JSON.stringify(n)); c.id = nid(); const p0 = freeSpotFor(n); c.x = p0.x; c.y = p0.y; g.nodes.push(c); selected = c.id; emit(); render(); focusNode?.(c.id); } }, // (beside it, never on top of it)
+      !d.comment && { icon: n.off ? 'eye' : 'eyeoff', label: n.off ? 'Turn On' : 'Turn Off (skip it)', fn: () => { snap(); n.off = !n.off; if (!n.off) delete n.off; emit(); render(); } },
+      { icon: 'more', label: 'More…', fn: () => setTimeout(() => nodeMenu(n, anchor, true), 0) },
+      '-', del,
+    ]);
+    popMenu(anchor, [
+      { cap: d.label },
       { icon: 'copy', label: 'Copy', fn: () => copyNodes([n]) },
-      def(n).outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
-      !def(n).comment && { icon: n.off ? 'eye' : 'eyeoff', label: n.off ? 'Turn On' : 'Turn Off (skip it)', fn: () => { snap(); n.off = !n.off; if (!n.off) delete n.off; emit(); render(); } },
-      !def(n).comment && { icon: 'collapse', label: n.min ? 'Expand' : 'Collapse (smaller)', fn: () => { if (n.min) delete n.min; else n.min = true; emit(); render(); } },
+      d.outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
+      !d.comment && { icon: 'collapse', label: n.min ? 'Expand' : 'Collapse (smaller)', fn: () => { if (n.min) delete n.min; else n.min = true; emit(); render(); } },
       { icon: 'select', label: 'Select Several…', fn: () => { setSelMode(true); multi.add(n.id); refreshSel(); } },
       { icon: 'close', label: 'Remove Wires', fn: () => { snap(); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); emit(); render(); } },
-      '-',
-      { icon: 'trash', label: 'Delete Node', fn: () => { snap(); g.nodes = g.nodes.filter((q) => q !== n); g.links = g.links.filter((l) => l.from.node !== n.id && l.to.node !== n.id); if (selected === n.id) selected = null; emit(); render(); } },
     ]);
   }
 
@@ -813,7 +823,7 @@ export function openNodeEditor(opts) {
     closePicker();
     const fits = (t) => fitsPlace(NODE_TYPES[t], place); // (dragged off a dot: only nodes that can plug into it)
     const sel = g.nodes.find((n) => n.id === selected), sd = sel && def(sel);
-    let folder = null;
+    let folder = null, allCats = !!place; // (the main few categories first; the rest are one tap away)
     const list = h('div', { class: 'ne-plist' });
     const search = h('input', { type: 'search', placeholder: 'Search nodes (play sound, score, jump…)', autocapitalize: 'off', oninput: () => draw() });
     const match = (t, d, q) => d.label.toLowerCase().includes(q) || t.toLowerCase().includes(q) || (NODE_HELP[t] || '').toLowerCase().includes(q) || d.cat.toLowerCase().includes(q);
@@ -849,11 +859,11 @@ export function openNodeEditor(opts) {
         ...section('Recently used', recent.filter(fits), true),
         ...section('Common actions', (opts.app ? COMMON_APP : COMMON_GAME).filter((t) => NODE_TYPES[t] && !NODE_TYPES[t].hidden && !opts.hideNode?.(t) && fits(t) && !recent.includes(t)), true, 'what most scripts use'),
         h('div', { class: 'ne-pcat' }, 'All nodes', h('small', {}, 'by category')),
-        h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).filter((cat) => cat !== 'Plugins' || Object.values(NODE_TYPES).some((d) => d.also === 'Plugins')).map((cat) => {
+        h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).filter((cat) => cat !== 'Plugins' || Object.values(NODE_TYPES).some((d) => d.also === 'Plugins')).filter((cat) => allCats || (opts.app ? MAIN_CATS_APP : MAIN_CATS).includes(cat)).map((cat) => {
           const n = Object.values(NODE_TYPES).filter((d) => !d.hidden && fitsPlace(d, place) && (d.cat === cat || d.also === cat)).length; if (place && !n) return null;
           return h('button', { class: 'ne-folder', 'data-cat': cat, style: `--c:${CAT_COLOR[cat]}`, onclick: () => { folder = cat; draw(); } },
             h('span', { class: 'ne-ficon' }, icon(CAT_ICON[cat] || 'folder')), h('b', {}, cat), h('small', {}, CAT_HELP[cat]), h('em', {}, String(n)));
-        })));
+        })), allCats ? null : h('button', { class: 'ne-morecats', onclick: () => { allCats = true; draw(); } }, icon('chevron'), `All ${CATS.length - 1} categories`));
     }
     const back = h('button', { class: 'ne-btn', title: 'Back', onclick: () => { folder = null; draw(); } }, icon('left'));
     const title = h('b', {}, place ? 'Connect a Node' : 'Add Node');
@@ -982,6 +992,6 @@ export function openNodeEditor(opts) {
     opts.onClose?.();
   }
   render();
-  requestAnimationFrame(() => fit());
+  requestAnimationFrame(() => fit(true));
   return { close };
 }

@@ -3,7 +3,11 @@
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
 import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
-const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
+const UI_WIDGETS_ALL = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
+/** PlayFab and Photon are for games: an app shows them only once it has a game inside. Supabase works for both. */
+const gameOnlineOK = () => !root?.settings?.app || levelList().length > 1;
+const GAME_ONLINE_BEH = new Set(['netSync', 'pfLeaderboard', 'netRoomList', 'netChat']);
+const uiWidgets = () => (gameOnlineOK() ? UI_WIDGETS_ALL : UI_WIDGETS_ALL.filter((o) => o.group !== 'Online'));
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
 import { templates, templateInfo } from '../examples/templates.js';
 import { qrCanvas } from './qr.js';
@@ -2509,7 +2513,7 @@ function openCreate(startCat) {
     !three && { key: 'sprites', title: 'Characters & Sprites', icon: 'image', color: '#8e44ad', desc: 'Drawn characters, items, nature, blocks, or draw your own', items: [{ label: 'Draw Your Own', icon: 'brush', group: 'Draw', desc: '2D Sprite Editor: shapes, pen, pixels, frames', fn: () => editSprite2D(null) }, ...spriteItems] },
     { key: 'objects', title: three ? 'Shapes' : 'Shapes & Objects', icon: 'square', color: '#2e7d5b', desc: three ? 'Cube, sphere, plane, text…' : 'Boxes, circles, text, images…', items: objs.filter((o) => !CAMLIGHT.includes(o.label)).map((o) => fromDef(o, 'entity')) },
     three && { key: 'models', title: '3D Models', icon: 'cube', color: '#2e7d5b', desc: 'Trees, houses, cars… or build your own', items: [{ label: 'New Model (Modeler)', icon: 'edit', desc: 'Model it like in Blender', fn: newModel }, ...MODELS_3D.map((m) => ({ label: m.label, icon: m.icon, fn: () => addEntity({ name: m.label, y: 0, model: { parts: clone(m.parts) } }) }))] },
-    { key: 'ui', title: 'UI & Menus', icon: 'hud', color: '#c2185b', desc: 'Buttons, nav bars, side bars, popups…', items: UI_WIDGETS.map((o) => fromDef(o)) },
+    { key: 'ui', title: 'UI & Menus', icon: 'hud', color: '#c2185b', desc: 'Buttons, nav bars, side bars, popups…', items: uiWidgets().map((o) => fromDef(o)) },
     { key: 'pages', title: 'Page Templates', icon: 'layers', color: '#5b5bd6', desc: 'Ready-made pages: sign in, settings, feed, shop, menus…', items: pageTemplates().map((t) => ({ label: t.label, icon: t.icon, desc: t.desc, group: t.group, fn: () => newPageFrom(t) })) },
     { key: 'logic', title: 'Logic & Scripts', icon: 'bolt', color: '#e67e22', desc: 'Make things happen: nodes or triggers', items: logicItems },
     { key: 'camera', title: 'Camera & Lights', icon: 'camera', color: '#00897b', desc: 'What the player sees, and how it is lit', items: objs.filter((o) => CAMLIGHT.includes(o.label)).map((o) => fromDef({ ...o, label: o.label === 'Light' ? 'Point Light' : o.label }, 'entity')) },
@@ -2517,7 +2521,7 @@ function openCreate(startCat) {
   ].filter(Boolean);
   const quick = (three ? ['Player (3rd person)', 'Player', 'Platform', 'Coin', 'Enemy', 'Goal'] : ['Player', 'Jumper', 'Platform', 'Coin', 'Enemy', 'Goal'])
     .map((l) => prefabs.find((o) => o.label === l)).filter(Boolean).slice(0, 5).map((o) => fromDef(o));
-  const scoreUI = UI_WIDGETS.find((o) => o.label === 'Score'); if (scoreUI) quick.push(fromDef(scoreUI));
+  const scoreUI = uiWidgets().find((o) => o.label === 'Score'); if (scoreUI) quick.push(fromDef(scoreUI));
   let cat = startCat || (uiMode ? 'ui' : null);
   const body = h('div', { class: 'cs-body' });
   const search = h('input', { type: 'search', class: 'cs-search', placeholder: 'Search everything you can add', autocapitalize: 'off', oninput: () => draw() });
@@ -2562,7 +2566,7 @@ function openCreate(startCat) {
   draw();
 }
 function openCreateMenu(anchor) {
-  if (uiMode) { popMenu(anchor, [{ cap: 'Pages' }, { icon: 'layers', label: 'New page from a template…', k: 'sign in, settings, feed…', fn: openPageTemplates }, ...UI_GROUPS.flatMap((g) => [{ cap: g }, ...UI_WIDGETS.filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])]); return; }
+  if (uiMode) { popMenu(anchor, [{ cap: 'Pages' }, { icon: 'layers', label: 'New page from a template…', k: 'sign in, settings, feed…', fn: openPageTemplates }, ...UI_GROUPS.flatMap((g) => [{ cap: g }, ...uiWidgets().filter((o) => o.group === g).map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o) }))])]); return; }
   const groups = is3D() ? PREFABS_3D : PREFABS_2D, objs = is3D() ? OBJECTS_3D : OBJECTS_2D;
   const sceneObj = (label) => objs.find((o) => o.label === label);
   popMenu(anchor, [
@@ -2729,6 +2733,7 @@ function control(target, path, spec) {
     }
     case 'code':
       if (/\.(items|footer)$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.(items|footer)$/, '.type')) === 'uiSideBar') { el = sideItemEditor(get, set, path, getPath(target(), path.replace(/\.(items|footer)$/, ''))); label.textContent = /footer$/.test(path) ? 'Footer items' : 'Items'; break; } // pick icons, pages, switches
+      if (/\.actions$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.actions$/, '.type')) === 'uiAppBar') { el = appBarActionsEditor(get, set, path, getPath(target(), path.replace(/\.actions$/, ''))); label.textContent = 'Right buttons'; break; } // icons, what they do, badges, pages
       if (/\.tabs$/.test(path) && !rawTables.has(path) && getPath(target(), path.replace(/\.tabs$/, '.type')) === 'uiBottomNav') { el = navTabEditor(get, set, path, getPath(target(), path.replace(/\.tabs$/, ''))); label.textContent = 'Tabs'; break; } // pick pages and icons
       if (/\|/.test(text) && !rawTables.has(path)) { el = tableList(get, set, text, path); label.textContent = text.replace(/\s*\(.*$/, '') || text; break; } // the columns say the rest
       el = h('textarea', { spellcheck: false, autocapitalize: 'off', value: val ?? '', oninput: (e) => set(e.target.value) });
@@ -3076,6 +3081,7 @@ function editGraph(target, path) {
   const B = () => getPath(T(), path.replace(/\.graph$/, ''));
   const back = () => ed.close();
   const ed = openNodeEditor({
+    hideNode: (t) => !gameOnlineOK() && /^(net|pf)[A-Z]/.test(t), // (PlayFab / Photon nodes: games only)
     graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz, app: !!levelList()[0].settings?.app,
     stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
@@ -4723,7 +4729,7 @@ function renderSceneSettings(box) {
     RS('settings.gifKey', { label: 'GIPHY or Tenor API key', type: 'text', def: '', placeholder: 'GIPHY key, or a Tenor key (AIza…)', infoText: 'GIPHY: developers.giphy.com › Create an app. Tenor: Google Cloud › Tenor API. Keys that start with AIza are used with Tenor.' }),
   ], { icon: 'image', key: 's-gifs' }));
   box.append(comp('Plugins & Mods', pluginsAndMods(R), { icon: 'bolt', key: 's-plugins' }));
-  box.append(comp('Online (PlayFab & Photon)', [
+  if (gameOnlineOK()) box.append(comp('Online (PlayFab & Photon)', [
     h('p', { class: 'desc' }, 'Add online features with your own free accounts. PlayFab: player accounts, leaderboards, cloud saves and remote config. Photon: real-time multiplayer rooms. Players need the internet for these; the rest of the game works offline.'),
     h('h5', { class: 'sub-head' }, 'PlayFab'),
     R('settings.playfab.titleId', { label: 'Title ID', type: 'text', def: '', infoText: 'From developer.playfab.com: create a title, then copy its Title ID (like 1A2B3).' }),
@@ -4971,6 +4977,7 @@ function componentsFor(j) {
   for (const sc of allScripts()) list.push({ cat: 'My Scripts', key: 'sc:' + sc.id, label: sc.name, icon: 'nodes', desc: sc.here ? `Your saved Visual Script · ${sc.graph.nodes.length} nodes` : `Saved in another game · ${sc.graph.nodes.length} nodes`, ok: () => true, add: (e) => addSavedScript(e, sc) });
   for (const [type, def] of Object.entries(Behaviors)) {
     if (def.hidden) continue; // engine-internal helpers
+    if (GAME_ONLINE_BEH.has(type) && !gameOnlineOK()) continue; // (PlayFab / Photon: games only)
     if (type === 'controller2d' && threeD) continue; // 2D only
     if (!threeD && (type === 'firstPerson' || type === 'thirdPerson')) continue; // 3D only
     list.push({ cat: BEH_META[type]?.[0] || (def.plugin ? 'Plugins' : 'Other'), key: 'b:' + type, label: def.label, icon: BEH_META[type]?.[1] || 'bolt', desc: def.description,
@@ -5301,7 +5308,7 @@ function projectItems(tab) {
   const src = tab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
     : tab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
       : tab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
-        : tab === 'ui' ? UI_WIDGETS : (is3D() ? OBJECTS_3D : OBJECTS_2D);
+        : tab === 'ui' ? uiWidgets() : (is3D() ? OBJECTS_3D : OBJECTS_2D);
   return src.map((o) => ({ icon: o.icon, emoji: o.emoji, art: o.art, group: o.group, label: o.label, payload: { kind: 'prefab', def: o, label: o.emoji ? `${o.emoji} ${o.label}` : o.label, icon: o.icon || 'image' } }));
 }
 function renderProject() {
@@ -8255,6 +8262,70 @@ function navTabEditor(get, set, path, b) {
         h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')),
       ...(rows.length > 5 ? [h('p', { class: 'desc' }, 'More than 5 tabs get crowded on a phone: put the rest in a Side Menu.')] : []));
   };
+  draw();
+  return box;
+}
+/** The App Bar's right buttons as cards, in the order they show (left to right): an icon, what it does, a badge, the pages it shows on. */
+function appBarActionsEditor(get, set, path, b) {
+  const box = h('div', { class: 'navtabs' });
+  const v = b?.var || 'page';
+  const parse = () => String(get() ?? '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]);
+  const text = (rows) => rows.map((r) => { const c = [...r]; while (c.length > 2 && !c[c.length - 1]) c.pop(); return c.join(' | '); }).join('\n');
+  const icOf = (ic) => (ic === 'theme' ? 'moon' : ic === 'avatar' ? 'user' : ic);
+  const draw = () => {
+    const stored = parse(), rows = [...stored].reverse(); // stored first = right edge; the cards read left to right like the bar
+    const save = (r) => { set(text([...r].reverse())); if (box.isConnected) draw(); else renderInspector(); };
+    const pages = [...(uiPages().get(v) || [])], pg = (n, alt) => (pages.includes(n) ? 'page:' + n : alt);
+    const BUILT = [['dark mode toggle', '☾ Light / dark mode'], ['menu', '☰ Opens the side menu'], ['compose', '✎ New post'], ['settings', '⚙ Settings']];
+    const doesLabel = (a) => (a.startsWith('page:') ? '→ ' + a.slice(5) + (pages.includes(a.slice(5)) ? '' : ' (no page yet)') : (BUILT.find((x) => x[0] === a.toLowerCase())?.[1] || `sends “${a}”`));
+    const PRESETS = [
+      ['bell', 'Notifications', ['bell', pg('notifications', 'notifications'), 'notifications_unread']],
+      ['search', 'Search', ['search', pg('search', pg('explore', 'search'))]],
+      ['chat', 'Messages', ['chat', pg('inbox', pg('messages', 'inbox')), 'unread']],
+      ['users', 'Friends', ['users', pg('friends', 'friends'), 'friend_requests']],
+      ['moon', 'Light / dark mode', ['theme', 'dark mode toggle'], 'moon in light mode, sun in dark'],
+      ['user', 'Your profile picture', ['avatar', pg('profile', 'page:profile')]],
+      ['plus', 'New post', ['plus', 'compose']],
+      ['gear', 'Settings', ['gear', 'settings']],
+      ['menu', 'Side menu', ['menu', 'menu']],
+      ['star', 'Custom…', null, 'your own icon and message']];
+    const has = (r) => stored.some((s) => s[0] === r[0] && s[1] === r[1]);
+    box.replaceChildren(
+      ...rows.map((r, i) => {
+        const a = r[1] || '';
+        return h('div', { class: 'nt-row' },
+          h('button', { type: 'button', class: 'nt-icbtn', title: r[0] === 'theme' ? 'Light / dark (moon or sun)' : r[0] === 'avatar' ? 'Your profile picture' : 'Pick an icon', onclick: () => pickNavIcon(r[0], (ic) => { r[0] = ic; save(rows); }) }, navIconImg(icOf(r[0]))),
+          h('div', { class: 'nt-mid' },
+            h('div', { class: 'nt-lab' },
+              h('select', { 'aria-label': 'What it does', onchange: (e) => { const x = e.target.value;
+                if (x === '\u0000msg') { const n = prompt('Message it sends (e.g. open shop, refresh)', a.startsWith('page:') ? '' : a)?.trim(); if (n) r[1] = n; save(rows); return; }
+                if (x === '\u0000new') { const nv = newPage(null, { name: prompt('Name of the new page', '') || '', tab: false, stay: true }); if (nv) r[1] = 'page:' + nv; save(rows); return; }
+                r[1] = x; if (x === 'dark mode toggle' && /^(moon|sun)$/.test(r[0])) r[0] = 'theme'; save(rows); } },
+                [...new Set([...pages.map((p) => 'page:' + p), ...BUILT.map((x) => x[0]), a].filter(Boolean))].map((x) => h('option', { value: x, selected: x === a }, doesLabel(x))),
+                h('option', { value: '\u0000msg' }, '✉ Send a message…'), h('option', { value: '\u0000new' }, '+ New page…')),
+              r[2] ? h('button', { type: 'button', class: 'nt-badge', title: `Badge: {${r[2]}}`, onclick: () => badge(r, rows, save) }, String(project.vars?.[r[2]] || 3)) : null),
+            r[3] ? h('small', { class: 'si-sub' }, 'only on ' + r[3]) : null),
+          h('button', { type: 'button', class: 'tl-m', title: 'Button', onclick: (e) => popMenu(e.currentTarget, [
+            { icon: 'bell', label: r[2] ? `Badge: {${r[2]}}…` : 'Badge…', k: 'a count from a variable', fn: () => badge(r, rows, save) },
+            { icon: 'eye', label: r[3] ? `Only on: ${r[3]}…` : 'Only on some pages…', k: 'blank = every page', fn: () => onPages(r, rows, save, pages) },
+            r[0] !== 'theme' && a === 'dark mode toggle' && { icon: 'star', label: 'Moon / sun icon', k: 'switches with the mode', fn: () => { r[0] = 'theme'; save(rows); } },
+            i > 0 && { icon: 'upload', label: 'Move Left', fn: () => { rows.splice(i - 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+            i < rows.length - 1 && { icon: 'download', label: 'Move Right', fn: () => { rows.splice(i + 1, 0, rows.splice(i, 1)[0]); save(rows); } },
+            { icon: 'trash', label: 'Remove Button', danger: true, fn: () => { rows.splice(i, 1); save(rows); } },
+          ].filter(Boolean)) }, icon('more')));
+      }),
+      ...(rows.length ? [] : [h('p', { class: 'desc' }, 'No buttons on the right. Add notifications, search, light / dark mode and more.')]),
+      h('div', { class: 'tl-foot' },
+        h('button', { type: 'button', class: 'btn primary', disabled: rows.length >= 5, title: rows.length >= 5 ? 'The bar fits 5 buttons' : '', onclick: (e) => popMenu(e.currentTarget, [{ cap: 'Add a button' },
+          ...PRESETS.filter(([, , r]) => !r || !has(r)).map(([ic, label, r, k]) => ({ icon: ic, label, k: k || (r ? doesLabel(r[1]) : ''), fn: () => {
+            if (r) return save([r.slice(), ...rows]);
+            const n = prompt('Message it sends, or page:name to open a page', 'page:' + (pages[0] || 'home'))?.trim(); if (n) save([['star', n], ...rows]); } }))]) }, icon('plus'), 'Add Button'),
+        h('span', { class: 'tl-n' }, `${rows.length} of 5`),
+        h('button', { type: 'button', class: 'btn', title: 'Edit as plain text', onclick: () => { rawTables.add(path); renderInspector(); } }, icon('text'), 'Text')),
+      h('p', { class: 'desc' }, 'New buttons go on the left of the others. Light / dark mode shows a moon or a sun to match.'));
+  };
+  const badge = (r, rows, save) => { const n = prompt('Badge: the variable it counts (e.g. unread). 0 or blank hides it. Leave empty for no badge', r[2] || ''); if (n === null) return; while (r.length < 3) r.push(''); r[2] = n.trim().replace(/[^\w]/g, ''); if (r[2] && !(r[2] in (project.vars ||= {}))) project.vars[r[2]] = 0; save(rows); };
+  const onPages = (r, rows, save, pages) => { const n = prompt(`Show it only on these pages (comma list${pages.length ? ', e.g. ' + pages.slice(0, 2).join(', ') : ''}). Blank = every page`, r[3] || ''); if (n === null) return; while (r.length < 4) r.push(''); r[3] = n.split(',').map((x) => x.trim()).filter(Boolean).join(', '); save(rows); };
   draw();
   return box;
 }

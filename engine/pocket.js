@@ -8324,7 +8324,7 @@ registerBehavior('uiAppBar', {
     { key: 'leftIcon', label: 'Custom button icon', type: 'text', default: 'gear', showIf: { left: ['custom'] } },
     { key: 'leftMessage', label: 'Custom button sends', type: 'text', default: 'settings', suggest: 'messages', showIf: { left: ['custom'] } },
     { key: 'logo', label: 'Logo next to the title (icon, emoji or blank)', type: 'text', default: '' },
-    { key: 'actions', label: 'Right buttons (icon | message | badge variable)', type: 'code', default: 'bell | notifications | unread\nsearch | search' },
+    { key: 'actions', label: 'Right buttons (icon | does | badge variable | only on pages)', type: 'code', default: 'bell | notifications | unread\nsearch | search', infoText: 'Up to 5, the first at the right edge. Does: a message, page:name to open a page, or dark mode toggle. Icons theme (moon / sun) and avatar (your picture) are special. Only on pages: a comma list (blank = every page).' },
     { key: 'titleTap', label: 'Tapping the title sends', type: 'text', default: '', suggest: 'messages', infoText: 'e.g. scroll top' },
     { key: 'style', label: 'Style', type: 'select', options: APPBAR_STYLES, default: 'solid', info: { solid: 'A coloured bar.', transparent: 'No bar, just buttons and title over the game.', glass: 'See-through frosted bar.', 'large title': 'A tall bar with a big title on the left (iOS style). It can shrink to a normal bar when you scroll.', centered: 'Title in the middle.' } },
     { key: 'collapse', label: 'Large title shrinks when scrolling', type: 'bool', default: true, showIf: { style: ['large title'] } },
@@ -8353,7 +8353,7 @@ registerBehavior('uiAppBar', {
     { key: 'haptics', label: 'Vibrate on tap', type: 'bool', default: true, group: 'Feel' },
   ],
   create(p) {
-    const acts = () => String(p.actions || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).slice(0, 4).map(([icon, msg = '', badge = '']) => ({ icon, msg, badge }));
+    const acts = (s) => String(p.actions || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).map(([icon, msg = '', badge = '', pages = '']) => ({ icon, msg, badge, pages })).filter((a) => !s || !a.pages || String(a.pages).split(',').map((x) => x.trim()).filter(Boolean).some((v) => sameVal(s.vars[p.var || 'page'], v))).slice(0, 5); // (each can show only on some pages)
     const list = (v) => String(v || '').split(',').map((x) => x.trim()).filter(Boolean);
     let A = acts(), hide = 0, press = new Map(), hits = [], scrolled = 0, shrink = 0;
     const BH = new BarHider(p);
@@ -8387,7 +8387,7 @@ registerBehavior('uiAppBar', {
         s.on('uiScroll', (d, who, frac) => { if (!e.dead) { scrolled = frac; } });
       },
       update(e, dt, s) {
-        A = acts();
+        A = acts(s);
         const autoHid = BH.update(s, dt);
         hide += ((hidden(s) || autoHid ? 1 : 0) - hide) * Math.min(1, dt * (+p.hideSpeed || 14));
         shrink += ((scrolled > 0.01 ? 1 : 0) - shrink) * Math.min(1, dt * 10);
@@ -8441,7 +8441,11 @@ registerBehavior('uiAppBar', {
         if (lk === 'menu' && useAv) { const d = isz * 1.35, nm = fillTemplate('{playerName}', s.vars), pic = fillTemplate(String(p.avatar || ''), s.vars).trim(), lit = s.openMenus?.has(p.menuMessage || 'menu'); miniAvatar(ctx, /[{}]/.test(nm) ? 'Me' : nm, G.x + 14 + d / 2, rowY, d, isPic(pic) ? pic : '', lit ? acc : null); hits.push({ key: 'left', x: G.x + 14 + d / 2, y: rowY, r: Math.max(22, d / 2 + 4), msg: null }); lx = G.x + 24 + d; }
         else if (lk && !(brand && (look === 'facebook' || look === 'instagram') && lk === 'menu' && p.left !== 'menu')) { button('left', lk === 'back' ? 'back' : lk === 'custom' ? p.leftIcon || 'gear' : 'menu', G.x + 28, null, ''); lx = G.x + 54; }
         let rx = G.x + G.w - (circ !== 'plain' ? 32 : 28);
-        A.forEach((a, i) => { button('a' + i, a.icon, rx, a.msg, a.badge); rx -= circ !== 'plain' ? 48 : 46; });
+        A.forEach((a, i) => { // theme: a moon in light mode, a sun in dark; avatar: your picture
+          const ic = a.icon === 'theme' || (/^(moon|sun)$/.test(a.icon) && /^dark mode/i.test(a.msg)) ? (isDark(s) ? 'sun' : 'moon') : a.icon;
+          if (a.icon === 'avatar') { const d = isz * 1.3, nm = fillTemplate('{playerName}', s.vars), pic = fillTemplate(String(p.avatar || '{avatar}'), s.vars).trim(); miniAvatar(ctx, /[{}]/.test(nm) ? 'Me' : nm, rx, rowY, d, isPic(pic) ? pic : ''); hits.push({ key: 'a' + i, x: rx, y: rowY, r: Math.max(22, d / 2 + 4), msg: a.msg || 'page:profile' }); }
+          else button('a' + i, ic, rx, a.msg, a.badge);
+          rx -= circ !== 'plain' ? 48 : 46; });
         if (brand) { // the brand: a wordmark on the left (Facebook, Instagram) or a logo in the middle (X, Threads)
           if (look === 'facebook' || look === 'instagram') {
             const wm = fillTemplate(String(p.wordmark || s.settings.appName || s.settings.title || titleOf(s) || 'app'), s.vars), size = +p.wordmarkSize || (look === 'facebook' ? 28 : 26), fam = { bold: THEME.font, rounded: '"SF Pro Rounded","Nunito","Varela Round",system-ui,sans-serif', serif: 'Georgia,"Times New Roman",serif', script: '"Snell Roundhand","Brush Script MT","Segoe Script","Lobster",cursive', condensed: '"Avenir Next Condensed","Arial Narrow",sans-serif', mono: 'ui-monospace,Menlo,monospace' }[p.wordmarkFont || (look === 'instagram' ? 'script' : 'bold')] || THEME.font;

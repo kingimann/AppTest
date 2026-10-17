@@ -758,7 +758,7 @@ Every object has **Tags**, a **Layer** and (in 2D and UI) a **draw layer**, at t
 - **Record Forms:** fields come in one by one; focus glow, sliding switches and choices, stars that fill, and a shake for a missing field.
 - **Spring Sheet:** a Bottom Sheet that springs up, with a drag handle, half and full stops, and flick to close.
 - **Theme colours** (`@bg`, `@card`, `@text`, `@accent`…) follow **light and dark mode**. The **@** button in every colour box picks one. *Game Settings › Theme & Dark Mode* chooses light, dark or follow the phone, and the accent colour.
-- The message `dark mode toggle` (or the variable `darkMode`) switches it while the app runs, and the phone remembers the choice. Every app template has a 🌙 button.
+- The message `dark mode toggle` (or the variable `darkMode`) switches it while the app runs, and the phone remembers the choice. Every app template has a light / dark button in the App Bar (a moon, or a sun in dark mode). The App Bar's **Right buttons** editor picks which buttons show (notifications, search, messages, light / dark, your picture, new post, settings, side menu or your own), their badges and the pages they show on.
 - *Game Settings › Motion:* animation speed and **Reduce motion** (follows the phone's setting by default).
 - **Snackbars:** the *Show snackbar* instruction, or `scene.snackbar(text, 'Undo', fn)`.
 
@@ -1329,6 +1329,8 @@ The 2D cousin of the 3D Modeler. Open it from **Create → Characters & Sprites 
 - **Copy Style / Paste Style** (UI Element card) copies colours, fonts, outlines and shadows from one element to another.
 
 ### Online: PlayFab and Photon
+
+PlayFab and Photon are for **games**. An app shows them only once it has a game inside it; Supabase works in both.
 
 Each game uses **your own free accounts**: Game Settings › **Online (PlayFab & Photon)** takes a PlayFab **Title ID** and a Photon **App ID** (with *Test PlayFab* / *Test Photon* buttons). Nothing goes online until you add one, and the rest of the game keeps working offline.
 

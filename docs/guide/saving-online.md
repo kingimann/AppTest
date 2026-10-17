@@ -85,6 +85,8 @@ saves.saveVars('coins, gems'); saves.loadVars('coins, gems');
 
 ## Online: PlayFab and Photon
 
+PlayFab and Photon are for **games**: in an app they show only once the app has a game inside it (the Online panel, the Online UI widgets, the components and the nodes). Supabase (accounts and data) works in both games and apps.
+
 Each game uses **your own free accounts**: *Game Settings › Online* takes a PlayFab **Title ID** and a Photon **App ID**, with test buttons. Nothing goes online until you add one, and the game keeps working offline.
 
 ### PlayFab (accounts, leaderboards, cloud saves)

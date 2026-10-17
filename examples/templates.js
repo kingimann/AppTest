@@ -41,7 +41,7 @@ function squadGame(turnBased) {
 // ---- apps: pages shown by the `page` variable, an app bar, data lists and forms ----
 const INK = '@text', MUTED = '@sub'; // theme colours: they follow light / dark mode
 const app = {
-  bar: (titles, accent, actions = 'moon | dark mode toggle') => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
+  bar: (titles, accent, actions = 'theme | dark mode toggle') => ({ id: 'appbar', name: 'App Bar', ui: true, anchor: 'top', x: 0, y: 28, stretch: 'width', margin: 0, layer: 5, shape: { type: 'rect', w: 400, h: 56, radius: 0, fill: '' },
     behaviors: [{ type: 'uiAppBar', title: '', var: 'page', titles, left: 'back', actions, style: 'solid', bg: '@bar', text: INK, iconColor: '@accent', accent: '@accent', borderColor: '@line', shadow: 'once scrolled' }] }),
   page: (id, value, home, kids, o = {}) => [{ id, name: value[0].toUpperCase() + value.slice(1) + ' Page', ui: true, anchor: 'center', x: 0, y: 0, stretch: 'both', margin: 0, layer: 0, shape: { type: 'rect', w: 400, h: 700, radius: 0, fill: '@bg' },
     behaviors: [{ type: 'uiShowIf', var: 'page', op: '=', value, whenUnset: !!home, anim: o.anim || 'push (iOS, follows navigation)', stagger: o.stagger || 'rise one after another', ...(o.stack ? { stack: true, stackGap: 0, stackTop: 0 } : {}) }] }, ...kids.map((k) => ({ ...k, parent: k.parent || id }))],
@@ -248,7 +248,7 @@ function socialApp() {
       ] },
     { name: 'Comments', fields: [{ name: 'Post', type: 'text' }, { name: 'Author', type: 'text' }, { name: 'Handle', type: 'text' }, { name: 'Text', type: 'long text' }, { name: 'Likes', type: 'number' }, { name: 'Liked', type: 'yes/no' }, { name: 'Parent', type: 'text' }, { name: 'Pinned', type: 'yes/no' }, { name: 'Liked By', type: 'text' }, { name: 'Media', type: 'text' }], rows: [{ post: 's8', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Welcome Alex! 🎉', likes: 2, _at: t - 0.6 * H }] }],
     entities: [
-      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\nmoon | dark mode toggle')),
+      menuBar(app.bar('home = Home\nreels = Reels\nexplore = Explore\nnotifications = Notifications\nfriends = Friends\nuser = {profile_name}\ninbox = Messages\nchat = {chatTitle}\nprofile = Profile\nsaved = Saved\nmarketplace = Marketplace\nachievements = Achievements', A, 'bell | page:notifications | notifications_unread\nusers | page:friends | friend_requests\ntheme | dark mode toggle')),
       ...app.page('p-home', 'home', true, [
         { id: 'stories', name: 'Stories', ui: true, anchor: 'top', x: 0, y: 46, stretch: 'width', margin: 0, shape: { type: 'rect', w: 400, h: 92, radius: 0, fill: '' }, behaviors: [{ type: 'uiStories', collection: 'Stories', text: INK }] },
         { id: 'composer', name: 'New Post Box', ui: true, anchor: 'top', x: 0, y: 124, stretch: 'width', margin: 6, shape: { type: 'rect', w: 388, h: 56, radius: 0, fill: '' }, behaviors: [{ type: 'uiComposer', audience: true, replyControl: true, backgrounds: true, field: '@field', text: MUTED, accent: '@accent' }] },

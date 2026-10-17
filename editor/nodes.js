@@ -754,13 +754,13 @@ export function openNodeEditor(opts) {
       back.hidden = !folder || !!q;
       title.textContent = q ? 'Search' : folder || 'Add Node';
       if (q) {
-        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && match(t, d, q)).map(([t]) => t);
+        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && match(t, d, q)).map(([t]) => t);
         list.replaceChildren(...(hits.length ? section(`${hits.length} found`, hits, true) : [h('div', { class: 'ne-pnone' }, `No node matches “${search.value}”`)]));
         return;
       }
       if (folder) {
         list.replaceChildren(h('div', { class: 'ne-pcat' }, h('i', { style: `background:${CAT_COLOR[folder]}` }), CAT_HELP[folder] || ''),
-          h('div', { class: 'ne-pgrid' }, Object.entries(NODE_TYPES).filter(([, d]) => !d.hidden && (d.cat === folder || d.also === folder)).map(([t]) => item(t))));
+          h('div', { class: 'ne-pgrid' }, Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && (d.cat === folder || d.also === folder)).map(([t]) => item(t))));
         list.scrollTop = 0;
         return;
       }

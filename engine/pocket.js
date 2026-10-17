@@ -10928,9 +10928,17 @@ function chatInputBar(s, o) {
   bar.dataset.pocketChatbar = '1';
   // where the drawn bar is (above a Bottom Nav), not over the nav; down on the keyboard while typing
   const vv = typeof window !== 'undefined' ? window.visualViewport : null;
-  const place = () => { const off = Math.max(0, +(typeof o.bottom === 'function' ? o.bottom() : o.bottom) || 0), kb = vv ? innerHeight - vv.height > 120 : false, b2 = kb ? 0 : off;
-    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; };
-  place(); vv?.addEventListener('resize', place);
+  const touch = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
+  let typing = false; // the text box has the focus on a phone: its keyboard is up, so the bar sits right on the keyboard (over the Bottom Nav, like a native app)
+  const place = () => {
+    const off = Math.max(0, +(typeof o.bottom === 'function' ? o.bottom() : o.bottom) || 0);
+    let b2 = off;
+    const kbUp = typing && touch && vv && vv.height < (screen?.height || 0) * 0.8; // (iPhone: innerHeight shrinks with the keyboard too, so compare the visible area with the screen)
+    if (kbUp) { const rr = root.getBoundingClientRect(), kbTop = vv.offsetTop + vv.height; b2 = Math.max(0, Math.round(rr.bottom - kbTop)); } // right on top of the keyboard
+    bar.style.bottom = b2 + 'px'; bar.style.paddingBottom = b2 > 0 || kbUp ? '8px' : 'calc(8px + env(safe-area-inset-bottom))'; bar.dataset.onKeyboard = kbUp ? '1' : '';
+  };
+  const replace = () => { place(); requestAnimationFrame(place); setTimeout(place, 320); }; // (the keyboard slides in: place again once it's up)
+  place(); vv?.addEventListener('resize', replace); vv?.addEventListener('scroll', place);
   const file = el('input'); file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none';
   const pic = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); pic.innerHTML = svgIcon('image', 23); pic.type = 'button'; pic.setAttribute('aria-label', 'Send a photo');
   const gif = el('button', `flex:none;border:0;background:none;width:36px;height:38px;cursor:pointer;color:${c.acc};display:flex;align-items:center;justify-content:center;`); gif.innerHTML = svgIcon('gif', 25); gif.type = 'button'; gif.setAttribute('aria-label', 'Send a GIF');
@@ -10973,7 +10981,7 @@ function chatInputBar(s, o) {
     try { mr.start(250); } catch { finish(false); s.snackbar?.('Could not record'); }
   };
   mic.onclick = record;
-  emoB.onclick = () => tray.toggle('emoji'); inp.addEventListener('focus', () => tray.close());
+  emoB.onclick = () => tray.toggle('emoji'); inp.addEventListener('focus', () => { tray.close(); typing = true; replace(); }); inp.addEventListener('blur', () => { typing = false; replace(); });
   let rp = null; // "Replying to Maya" above the bar
   const setReply = (r) => { rp?.remove(); rp = null; if (!r) return; rp = el('div', `position:absolute;left:0;right:0;bottom:100%;display:flex;align-items:center;gap:10px;padding:8px 14px;background:${c.bg};border-top:${HAIR} solid ${c.line};font:14px ${font};color:${c.text};`); rp.dataset.replyBar = '1';
     const t = el('div', 'flex:1;min-width:0;'); t.append(el('div', `font-weight:800;font-size:13px;color:${c.acc};`, r.label || '↩ Replying to ' + (r.author || '')), el('div', `white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:${c.sub};font-size:13px;`, r.text || ''));
@@ -10988,7 +10996,7 @@ function chatInputBar(s, o) {
   for (const t of ['pointerdown', 'pointermove', 'pointerup', 'touchstart', 'touchmove', 'touchend', 'wheel', 'keydown', 'keyup']) bar.addEventListener(t, (ev) => ev.stopPropagation());
   requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.transform = 'none'; }));
   let gone = false;
-  const close = () => { if (gone || recUI) return; gone = true; vv?.removeEventListener('resize', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
+  const close = () => { if (gone || recUI) return; gone = true; vv?.removeEventListener('resize', replace); vv?.removeEventListener('scroll', place); bar.style.transform = 'translateY(100%)'; setTimeout(() => bar.remove(), 240); o.onClose?.(); root.removeEventListener('pointerdown', outside, true); };
   const sync = () => { const on = !!inp.value.trim(); send.style.opacity = on ? '1' : '.4'; send.style.transform = on ? 'scale(1)' : 'scale(.9)'; if (o.voice) { send.style.display = on ? 'flex' : 'none'; mic.style.display = on ? 'none' : 'flex'; } };
   const go = () => { const v = inp.value.trim(); if (!v) return; o.onSend({ text: v }); inp.value = ''; sync(); inp.focus(); };
   inp.addEventListener('input', () => { sync(); o.onTyping?.(); }); inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); go(); } else if (ev.key === 'Escape') close(); });

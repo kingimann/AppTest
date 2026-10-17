@@ -2304,3 +2304,15 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .req-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent, #4c8bd6) 22%, transparent); color: var(--accent-text); }
 .h-reqs .h-dup { background: color-mix(in srgb, #ffca28 12%, var(--g3)); }
 .num input.bad { outline: 2px solid #ff5d5d; outline-offset: -1px; background: rgba(255,93,93,.12); }
+/* node help and the Variables sheet */
+.ne-help { padding: 4px 6px 12px; display: flex; flex-direction: column; gap: 6px; }
+.ne-help p { margin: 0 0 4px; font-size: 15px; line-height: 1.45; }
+.ne-help .ne-help-cat { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
+.ne-help-row { display: flex; gap: 10px; align-items: baseline; padding: 7px 10px; border-radius: 10px; background: var(--g2); font-size: 14px; }
+.ne-help-row b { flex: none; min-width: 92px; font-weight: 800; }
+.ne-help-row span { opacity: .8; }
+.ne-var { display: flex; align-items: center; gap: 10px; cursor: default; }
+.ne-var b { font-family: ui-monospace, Menlo, monospace; }
+.ne-var small { flex: 1; }
+.ne-var-btns { display: flex; gap: 6px; }
+.ne-var-btns .btn { padding: 6px 12px; font-size: 13px; }

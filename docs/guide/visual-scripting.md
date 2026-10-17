@@ -36,6 +36,10 @@ A step with several white outputs chooses one: **If** has *true* / *false*, **Ra
 ## Editing
 
 - **Add Node** (the + button) opens a picker with search, **Suggested next** (what usually follows the selected node), **Recently used**, **Common actions** (the handful most scripts use: Add to Variable, Set Variable, Play Sound, Show Message, Wait, If, Move By, Jump, Spawn, Destroy, Show / Hide, Win, Game Over) and one folder per category. Each name appears once: where a trigger instruction does the same as a node (Play Sound, Wait…), only the node is listed (old scripts using the other one keep working).
+- **Drag a wire into empty space** (or tap a dot, then empty space) and a picker opens with only the nodes that can plug in there (*Fits here* first); the new node lands where you let go, already wired.
+- **Tap a white wire › Insert Node Here…** puts an action in the middle of it (from → new node → to).
+- **⋯ on a node › What Does This Do?** explains the node: what it does, each dot (▷ runs, ● values) and its settings.
+- **⋯ › Variables in This Script…** lists every variable the script uses (name fields and `{braces}` in text) with how many nodes use it: **Show** selects them, **Rename** changes the name everywhere in the script at once (one Undo step).
 - **Undo / Redo** in the Node Editor cover field edits too: changing a message, a sound or a number is one step (typing a whole word is one step, not one per letter). The main Undo after closing the editor also goes back one edit at a time.
 - **Number fields** turn red while what you type isn't a number; leave the field and it goes back to the last good value, with a note saying so.
 - **Loops wait for their passes:** in Repeat N Times, For Range, While, Repeat Until and the For Each loops, a pass with a Wait (Random Wait, Wait Until, a timed fade…) finishes before the next pass starts, and *done* runs after the last one. Repeat 3 → Wait 1 s → Add 1, then done → Set Text shows 3 after three seconds. Loops without waits still run all at once.

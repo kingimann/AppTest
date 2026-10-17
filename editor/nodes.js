@@ -454,9 +454,9 @@ export function openNodeEditor(opts) {
   }
   function updateHint() {
     hint.replaceChildren(...(pending
-      ? [h('span', {}, 'Now tap a glowing dot to connect'), h('button', { onclick: () => setPending(null) }, 'Cancel')]
+      ? [h('span', {}, 'Now tap a glowing dot to connect, or empty space for a new node'), h('button', { onclick: () => setPending(null) }, 'Cancel')]
       : hasStats() ? [h('span', {}, 'From your last Play: ×N = times a node ran, = its last value. Faded nodes never ran.')]
-      : [h('span', {}, g.nodes.length ? 'Tap a dot, then another dot to wire them · tap a wire to delete it' : 'Events (green) start a script · Actions (blue) do things')]));
+      : [h('span', {}, g.nodes.length ? 'Tap a dot, then another dot to wire them (or empty space to add a node there) · tap a wire to insert or delete' : 'Events (green) start a script · Actions (blue) do things')]));
   }
 
   // ---------- nodes ----------
@@ -524,9 +524,22 @@ export function openNodeEditor(opts) {
     setPending(pending && g.nodes.some((n) => n.id === pending.node) ? pending : null);
     requestAnimationFrame(drawLinks);
   }
+  /** A node explained: what it does, its dots, and its settings. */
+  function nodeHelp(n) {
+    const d = def(n), list = sheet(d.label, (L) => [L]), row = (k, t) => h('div', { class: 'ne-help-row' }, h('b', {}, k), h('span', {}, t));
+    list.replaceChildren(h('div', { class: 'ne-help' },
+      h('p', {}, NODE_HELP[n.type] || CAT_HELP[d.cat] || 'No description yet.'),
+      h('p', { class: 'ne-help-cat', style: `color:${CAT_COLOR[d.cat] || '#aaa'}` }, d.cat),
+      d.exec ? row('▷ in', 'runs it (wire a white dot here)') : (d.outs || []).length && !d.value ? row('event', 'starts a script by itself') : null,
+      ...(d.outs || []).map((o) => row('▷ ' + o, o === 'then' ? 'runs next' : `runs when it's “${o}”`)),
+      d.value ? row('● ' + (d.value === 'bool' ? 'true / false' : d.value), 'a value to wire into another node') : null,
+      ...(d.inputs || []).map((i) => row('● ' + i.key, `${i.type} in (type it, or wire a value)`)),
+      ...(d.params || []).map((q) => row(q.label || q.key, 'setting'))));
+  }
   function nodeMenu(n, anchor) {
     popMenu(anchor, [
       { cap: def(n).label },
+      !def(n).comment && { icon: 'help', label: 'What Does This Do?', fn: () => nodeHelp(n) },
       { icon: 'copy', label: 'Duplicate', fn: () => { snap(); const c = JSON.parse(JSON.stringify(n)); c.id = nid(); const p0 = freeSpotFor(n); c.x = p0.x; c.y = p0.y; g.nodes.push(c); selected = c.id; emit(); render(); focusNode?.(c.id); } }, // (beside it, never on top of it)
       { icon: 'copy', label: 'Copy', fn: () => copyNodes([n]) },
       def(n).outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
@@ -633,12 +646,34 @@ export function openNodeEditor(opts) {
     const list = sheet(`${W.size} thing${W.size > 1 ? 's' : ''} to check`, (L) => [L]);
     list.replaceChildren(h('div', { class: 'ne-pgrid' }, [...W].map(([id, why]) => { const n = byId.get(id), d = def(n); return h('button', { class: 'ne-pitem', style: `--c:${CAT_COLOR[d.cat] || '#c77'}`, onclick: () => { closePicker(); focusNode(id); } }, h('b', {}, d.label || n.type), h('small', {}, why)); })));
   }
+  /** Every variable this script uses (name fields and {braces} in text): how many nodes, jump to them, rename them all at once. */
+  const VAR_KEYS = new Set(['name', 'variable', 'var']);
+  function varsOf() {
+    const M = new Map(), add = (v, n) => { v = String(v || '').trim(); if (!v || v.length > 40) return; const s0 = M.get(v) || new Set(); s0.add(n.id); M.set(v, s0); };
+    for (const n of g.nodes) { const d = def(n); if (d.comment) continue; for (const [k, v] of Object.entries(n.params || {})) { if (typeof v !== 'string') continue; if (VAR_KEYS.has(k) && /var|score|count|list|dict|map|timer|save/i.test(n.type + ' ' + (d.label || '')) ) add(v, n); for (const m of v.matchAll(/\{([A-Za-z_][\w.]*)\}/g)) add(m[1], n); } }
+    return M;
+  }
+  function openVars() {
+    const draw = () => { const M = varsOf(), list = sheet(`Variables (${M.size})`, (L) => [L]);
+      list.replaceChildren(...(M.size ? [h('div', { class: 'ne-pgrid' }, [...M].sort((a, b) => a[0].localeCompare(b[0])).map(([v, ids]) => h('div', { class: 'ne-pitem ne-var', 'data-var': v },
+        h('b', {}, v), h('small', {}, `${ids.size} node${ids.size > 1 ? 's' : ''}`),
+        h('div', { class: 'ne-var-btns' }, h('button', { class: 'btn', onclick: () => { closePicker(); multi.clear(); for (const id of ids) multi.add(id); setSelMode(true); focusNode([...ids][0]); } }, 'Show'),
+          h('button', { class: 'btn', 'data-rename': v, onclick: () => { const nv = prompt(`Rename “${v}” everywhere in this script to:`, v)?.trim(); if (!nv || nv === v || !/^[A-Za-z_][\w.]*$/.test(nv)) { if (nv && nv !== v) toast('Use letters, numbers and _ (start with a letter)'); return; } renameVar(v, nv); draw(); } }, 'Rename'))))) ]
+        : [h('div', { class: 'ne-pnone' }, 'No variables yet. Add to Variable, Set Variable or {name} in a text use them.')])); };
+    draw();
+  }
+  function renameVar(from, to) {
+    snap(); let c = 0; const esc = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), re = new RegExp('\\{' + esc + '\\}', 'g');
+    for (const n of g.nodes) for (const [k, v] of Object.entries(n.params || {})) { if (typeof v !== 'string') continue; let nv = v.replace(re, '{' + to + '}'); if (VAR_KEYS.has(k) && nv.trim() === from) nv = to; if (nv !== v) { n.params[k] = nv; c++; } }
+    emit(); render(); toast(`Renamed “${from}” to “${to}” in ${c} place${c === 1 ? '' : 's'}`);
+  }
   function moreMenu(anchor) {
     const anyMin = g.nodes.some((n) => n.min);
     popMenu(anchor, [
       { icon: 'select', label: selMode ? 'Stop Selecting' : 'Select Several…', fn: () => setSelMode(!selMode) },
       { icon: 'tidy', label: 'Tidy Up (arrange in order)', fn: tidy },
       { icon: 'warn', label: 'Check for Problems', fn: checkProblems },
+      { icon: 'list', label: 'Variables in This Script…', fn: openVars },
       { icon: 'collapse', label: anyMin ? 'Expand All' : 'Collapse All', fn: () => { for (const n of g.nodes) { if (anyMin) delete n.min; else if (!def(n).comment) n.min = true; } emit(); render(); } },
       { icon: 'frame', label: 'Fit All Nodes', fn: () => fit() },
       '-',
@@ -713,9 +748,17 @@ export function openNodeEditor(opts) {
   }
 
   // ---------- add node ----------
-  function addNode(type) {
+  /** Can a node of this kind plug into a dragged-off dot (or go in the middle of a wire)? */
+  const fitsPlace = (d, pl) => {
+    if (!pl || !d) return true;
+    if (pl.splice) return !!d.exec && (d.outs || []).length > 0;
+    const f = pl.from;
+    if (f.dir === 'out') return f.kind === 'exec' ? !!d.exec : (d.inputs || []).length > 0;
+    return f.kind === 'exec' ? (d.outs || []).length > 0 : !!d.value;
+  };
+  function addNode(type, place) {
     const d = NODE_TYPES[type], a = area.getBoundingClientRect();
-    const sel = g.nodes.find((n) => n.id === selected);
+    const sel = place ? null : g.nodes.find((n) => n.id === selected);
     const c = toWorld(a.left + a.width / 2 - NODE_W * k / 2, a.top + a.height * 0.35);
     const n = { id: nid(), type, x: Math.round(c.x), y: Math.round(c.y), params: {} };
     for (const p of [...(d.params || []), ...(d.inputs || [])]) n.params[p.key] = p.default;
@@ -731,10 +774,19 @@ export function openNodeEditor(opts) {
         if (free) { link = { from: { node: n.id, port: 'value' }, to: { node: sel.id, port: free.key } }; n.x = sel.x - NODE_W - 50; n.y = sel.y + 60; }
       }
     }
+    if (place) { // dragged off a dot, or inserted on a wire: put it there and wire it in
+      n.x = Math.round(place.at.x - (place.from?.dir === 'in' ? NODE_W + 20 : 0)); n.y = Math.round(place.at.y - 20);
+      const f = place.from, outOf = (dd) => (dd.outs || []).includes('then') ? 'then' : (dd.outs || [])[0];
+      if (place.splice) { const l = place.splice; g.links = g.links.filter((q) => q !== l); g.links.push({ from: l.from, to: { node: n.id, port: 'in' } }); link = { from: { node: n.id, port: outOf(d) }, to: l.to }; }
+      else if (f.dir === 'out' && f.kind === 'exec') { g.links = g.links.filter((q) => !(q.from.node === f.node && q.from.port === f.port)); link = { from: { node: f.node, port: f.port }, to: { node: n.id, port: 'in' } }; }
+      else if (f.dir === 'out') { const inp = (d.inputs || []).find((i) => i.type === f.kind) || (d.inputs || [])[0]; link = { from: { node: f.node, port: f.port }, to: { node: n.id, port: inp.key } }; }
+      else if (f.kind === 'exec') link = { from: { node: n.id, port: outOf(d) }, to: { node: f.node, port: f.port } };
+      else { g.links = g.links.filter((q) => !(q.to.node === f.node && q.to.port === f.port)); link = { from: { node: n.id, port: 'value' }, to: { node: f.node, port: f.port } }; }
+    }
     // slide down until it doesn't cover another node
     const estH = 56 + 46 * (((d.outs || []).length > 1 ? d.outs.length : 0) + (d.value ? 1 : 0) + (d.inputs || []).length + (d.params || []).length || 1);
     const rectOf = (q) => { const el = world.querySelector(`[data-id="${q.id}"]`); return { x: q.x, y: q.y, h: el ? el.offsetHeight : 150 }; };
-    for (let tries = 0; tries < 50; tries++) {
+    for (let tries = 0; tries < 50; tries++) { // (dragged-off and inserted nodes too: never on top of another)
       const r = g.nodes.map(rectOf).find((q) => n.x < q.x + NODE_W + 16 && n.x + NODE_W + 16 > q.x && n.y < q.y + q.h + 16 && n.y + estH + 16 > q.y);
       if (!r) break;
       n.y = r.y + r.h + 30;
@@ -757,14 +809,15 @@ export function openNodeEditor(opts) {
   }
   let picker = null;
   /** Add Node: search, "suggested next", recently used, then category folders (tap one to open it). */
-  function openPicker() {
+  function openPicker(place) {
     closePicker();
+    const fits = (t) => fitsPlace(NODE_TYPES[t], place); // (dragged off a dot: only nodes that can plug into it)
     const sel = g.nodes.find((n) => n.id === selected), sd = sel && def(sel);
     let folder = null;
     const list = h('div', { class: 'ne-plist' });
     const search = h('input', { type: 'search', placeholder: 'Search nodes (play sound, score, jump…)', autocapitalize: 'off', oninput: () => draw() });
     const match = (t, d, q) => d.label.toLowerCase().includes(q) || t.toLowerCase().includes(q) || (NODE_HELP[t] || '').toLowerCase().includes(q) || d.cat.toLowerCase().includes(q);
-    const item = (t, showCat) => { const d = NODE_TYPES[t]; return h('button', { class: 'ne-pitem', 'data-type': t, style: `--c:${CAT_COLOR[d.cat]}`, onclick: () => { closePicker(); rememberNode(t); addNode(t); } },
+    const item = (t, showCat) => { const d = NODE_TYPES[t]; return h('button', { class: 'ne-pitem', 'data-type': t, style: `--c:${CAT_COLOR[d.cat]}`, onclick: () => { closePicker(); rememberNode(t); addNode(t, place); } },
       h('b', {}, d.label), showCat ? h('em', { class: 'ne-pcatname', style: `color:${CAT_COLOR[d.cat]}` }, d.cat) : null, h('small', {}, NODE_HELP[t] || '')); };
     const section = (title, types, showCat, sub) => types.length ? [h('div', { class: 'ne-pcat' }, title, sub ? h('small', {}, sub) : null), h('div', { class: 'ne-pgrid' }, types.map((t) => item(t, showCat)))] : [];
     function suggestions() {
@@ -773,39 +826,40 @@ export function openNodeEditor(opts) {
       const out = [...(NEXT[sel.type] || []), ...((sd.outs || []).length ? NEXT._exec : []), ...(freeIn ? NEXT['_' + freeIn.type] || [] : [])];
       return [...new Set(out)].filter((t) => NODE_TYPES[t]).slice(0, 8);
     }
+    const placeSugg = () => { const f = place.from, pool = place.splice || (f.dir === 'out' && f.kind === 'exec') ? NEXT._exec : f.dir === 'in' && f.kind === 'exec' ? NEXT._events : NEXT['_' + f.kind] || []; return pool.filter((t) => NODE_TYPES[t] && fits(t)).slice(0, 8); };
     function draw() {
       const q = search.value.trim().toLowerCase();
       back.hidden = !folder || !!q;
-      title.textContent = q ? 'Search' : folder || 'Add Node';
+      title.textContent = q ? 'Search' : folder || (place ? 'Connect a Node' : 'Add Node');
       if (q) {
-        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && match(t, d, q)).map(([t]) => t);
+        const hits = Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && fits(t) && match(t, d, q)).map(([t]) => t);
         list.replaceChildren(...(hits.length ? section(`${hits.length} found`, hits, true) : [h('div', { class: 'ne-pnone' }, `No node matches “${search.value}”`)]));
         return;
       }
       if (folder) {
         list.replaceChildren(h('div', { class: 'ne-pcat' }, h('i', { style: `background:${CAT_COLOR[folder]}` }), CAT_HELP[folder] || ''),
-          h('div', { class: 'ne-pgrid' }, Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && (d.cat === folder || d.also === folder)).map(([t]) => item(t))));
+          h('div', { class: 'ne-pgrid' }, Object.entries(NODE_TYPES).filter(([t, d]) => !d.hidden && !opts.hideNode?.(t) && fits(t) && (d.cat === folder || d.also === folder)).map(([t]) => item(t))));
         list.scrollTop = 0;
         return;
       }
       const recent = recentNodes(), c = clip();
       list.replaceChildren(
         ...(c ? [h('button', { class: 'ne-paste', onclick: () => { closePicker(); paste(); } }, icon('paste'), h('b', {}, `Paste ${c.nodes.length} copied node${c.nodes.length > 1 ? 's' : ''}`), h('small', {}, c.nodes.slice(0, 3).map((q) => NODE_TYPES[q.type]?.label).filter(Boolean).join(' → ') + (c.nodes.length > 3 ? ' …' : '')))] : []),
-        ...section(sd ? 'Suggested next' : 'Start with an event', suggestions(), true, sd ? `after “${sd.label}”` : 'green nodes start a script'),
-        ...section('Recently used', recent, true),
-        ...section('Common actions', (opts.app ? COMMON_APP : COMMON_GAME).filter((t) => NODE_TYPES[t] && !NODE_TYPES[t].hidden && !opts.hideNode?.(t) && !recent.includes(t)), true, 'what most scripts use'),
+        ...(place ? section('Fits here', placeSugg(), true, place.splice ? 'goes in the middle of the wire' : 'wired up for you') : section(sd ? 'Suggested next' : 'Start with an event', suggestions(), true, sd ? `after “${sd.label}”` : 'green nodes start a script')),
+        ...section('Recently used', recent.filter(fits), true),
+        ...section('Common actions', (opts.app ? COMMON_APP : COMMON_GAME).filter((t) => NODE_TYPES[t] && !NODE_TYPES[t].hidden && !opts.hideNode?.(t) && fits(t) && !recent.includes(t)), true, 'what most scripts use'),
         h('div', { class: 'ne-pcat' }, 'All nodes', h('small', {}, 'by category')),
         h('div', { class: 'ne-folders' }, (opts.app ? CATS : [...CATS.slice(1), 'App']).filter((cat) => cat !== 'Plugins' || Object.values(NODE_TYPES).some((d) => d.also === 'Plugins')).map((cat) => {
-          const n = Object.values(NODE_TYPES).filter((d) => !d.hidden && (d.cat === cat || d.also === cat)).length;
+          const n = Object.values(NODE_TYPES).filter((d) => !d.hidden && fitsPlace(d, place) && (d.cat === cat || d.also === cat)).length; if (place && !n) return null;
           return h('button', { class: 'ne-folder', 'data-cat': cat, style: `--c:${CAT_COLOR[cat]}`, onclick: () => { folder = cat; draw(); } },
             h('span', { class: 'ne-ficon' }, icon(CAT_ICON[cat] || 'folder')), h('b', {}, cat), h('small', {}, CAT_HELP[cat]), h('em', {}, String(n)));
         })));
     }
     const back = h('button', { class: 'ne-btn', title: 'Back', onclick: () => { folder = null; draw(); } }, icon('left'));
-    const title = h('b', {}, 'Add Node');
+    const title = h('b', {}, place ? 'Connect a Node' : 'Add Node');
     picker = h('div', { class: 'ne-picker', onpointerdown: (e) => { if (e.target === picker) closePicker(); } },
       h('div', { class: 'ne-psheet' },
-        h('div', { class: 'ne-phead' }, back, title, sel ? h('small', {}, `wires to “${def(sel).label}”`) : h('small', {}), h('button', { class: 'ne-btn', onclick: closePicker }, icon('close'))),
+        h('div', { class: 'ne-phead' }, back, title, place ? h('small', {}, place.splice ? 'into the wire' : `wires to “${def(g.nodes.find((q) => q.id === place.from.node) || {}).label}”`) : sel ? h('small', {}, `wires to “${def(sel).label}”`) : h('small', {}), h('button', { class: 'ne-btn', onclick: closePicker }, icon('close'))),
         search, list));
     draw();
     root.append(picker);
@@ -874,9 +928,10 @@ export function openNodeEditor(opts) {
     if (d.type === 'port') {
       if (!d.moved) { tapPort(d.el); return; }
       temp = null;
-      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.port');
-      if (!(target && connect(portInfo(d.el), portInfo(target)))) drawLinks();
-      setPending(null);
+      const target = document.elementFromPoint(e.clientX, e.clientY)?.closest('.port'), from = portInfo(d.el);
+      if (target) { if (!connect(from, portInfo(target))) drawLinks(); setPending(null); }
+      else if (!document.elementFromPoint(e.clientX, e.clientY)?.closest('.ne-node')) { setPending(null); drawLinks(); openPicker({ from, at: toWorld(e.clientX, e.clientY) }); } // let go on empty space: pick a node to plug in there
+      else { drawLinks(); setPending(null); }
     } else if (d.type === 'box') {
       band.hidden = true;
       if (d.moved) { const a = toWorld(Math.min(d.x, e.clientX), Math.min(d.y, e.clientY)), b = toWorld(Math.max(d.x, e.clientX), Math.max(d.y, e.clientY));
@@ -889,9 +944,10 @@ export function openNodeEditor(opts) {
       for (const el of world.querySelectorAll('.ne-node')) el.classList.toggle('sel', el.dataset.id === selected);
     } else if (d.type === 'wire' && !d.moved) {
       const l = g.links[d.i];
-      if (l) popMenu({ left: e.clientX - 60, top: e.clientY - 10, bottom: e.clientY + 10 }, [{ icon: 'trash', label: 'Delete Wire', fn: () => { snap(); g.links = g.links.filter((q) => q !== l); emit(); render(); } }]);
+      const at = toWorld(e.clientX, e.clientY), ex = l && outKind(def(g.nodes.find((q) => q.id === l.from.node) || {})) === 'exec' && !(def(g.nodes.find((q) => q.id === l.from.node) || {}).value);
+      if (l) popMenu({ left: e.clientX - 60, top: e.clientY - 10, bottom: e.clientY + 10 }, [ex && { icon: 'plus', label: 'Insert Node Here…', fn: () => openPicker({ splice: l, at }) }, { icon: 'trash', label: 'Delete Wire', fn: () => { snap(); g.links = g.links.filter((q) => q !== l); emit(); render(); } }]);
     } else if (d.type === 'pan' && !d.moved) {
-      if (pending) setPending(null);
+      if (pending) { const from = pending; setPending(null); openPicker({ from, at: toWorld(e.clientX, e.clientY) }); } // a dot was picked, then empty space: add a node there, wired to it
       else if (selected) { selected = null; for (const el of world.querySelectorAll('.ne-node.sel')) el.classList.remove('sel'); }
     }
   };

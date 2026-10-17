@@ -1,7 +1,7 @@
 // Pocket Editor: build Pocket Engine games on a phone.
 // Layout: toolbar · Scene view · Hierarchy / Inspector / Project panels.
 // A project is plain scene JSON (see examples/templates.js), the same thing Engine.start() plays.
-import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
+import { jsonDiff, installPlugins, installedPlugins, Mods, supabaseSQL, profilesSQL, storageSQL, socialSQL, socialOnlineSetup, ACCOUNT_RESERVED, Engine, Scene, SaveFiles, LIGHT_PRESETS, Behaviors, paramDefault, SPRITE_GROUPS, artURL, TWEEN_EFFECTS, SEQ_STEP_DEFAULT, uid, anchorPoint, VERSION, VOXEL_NAMES, GEOMETRIES, ACTIONS, RULE_EVENTS, partSize, M4, DEG, NODE_TYPES, Ease, EASES, sampleTrack, ANIM_PROPS, ANIM_MULT, LOGIC_EVENTS, logicSay, uiOrigin, uiArea, uiBox, worldToLocal, localDelta, TILE_PALETTE, TILE_KINDS, Log, PHYSICS_LAYERS, layerMatrix, SOUNDS, FONTS, UI_THEMES, themeOf, googleFont, loadFonts, frameSlice, PHOTON_REGIONS, NOTIFY_TYPES, NOTIFY_DEFAULTS, Haptics, PERMISSIONS, APP_PALETTES, THEME_TOKENS, drawShapePreview, useCustomAssets } from '../engine/pocket.js';
 import { EMOJI, MODELS_3D, UI_WIDGETS as UI_BASE, UI_WIDGETS_MORE, BEH_META, CAT_ORDER, topBar } from './library.js';
 const UI_WIDGETS = [...UI_WIDGETS_MORE, ...UI_BASE.map((w) => ({ group: 'Menus & HUD', ...w }))];
 const UI_GROUPS = ['App', 'Social', 'Buttons', 'Inputs', 'Lists', 'Animated', 'Loading', 'Navigation', 'Popups', 'Controls', 'Text & HUD', 'Menus & HUD'];
@@ -4681,7 +4681,24 @@ function renderSceneSettings(box) {
         h('button', { class: 'btn', onclick: () => addAccountPage('profile') }, icon('plus'), 'Add edit-profile page')),
     ];
   };
-  const copySQL = () => { const sql = onlineCols.map(supabaseSQL).join('\n') + (st.profiles && st.profiles !== 'off' ? '\n' + profilesSQL(st) : ''); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
+  const allSQL = () => socialSQL({ ...st, name: root.name || project.name }, root.collections || []);
+  const SOCIAL_COLS = ['posts', 'comments', 'stories', 'follows', 'friends', 'notifications', 'messages', 'profiles'], isSocial = (root.collections || []).some((c) => SOCIAL_COLS.includes(fieldKeyOf(c.name)));
+  /** One click: accounts with a username, every social collection online and live, a media bucket, sign-in and sign-up pages; then the one SQL script to run. */
+  const setupSocial = () => {
+    const done = socialOnlineSetup(root), hasPage = (v) => project.entities.some((e) => e.ui && e.behaviors?.some((b) => b.type === 'uiShowIf' && (b.var || 'page') === 'page' && b.value === v));
+    if (!hasPage('signin')) { const t = pageTemplates().find((x) => x.key === 'signin'); if (t) { newPage(null, { name: 'signin', template: t }); if (hasPage('signin')) done.push('A Sign In page (page = signin)'); } }
+    if (!hasPage('signup')) { addAccountPage('signup'); if (hasPage('signup')) done.push('A sign-up page with Email, Password, Name and Username (page = signup)'); }
+    if (!st.signInPage && hasPage('signin')) { st.signInPage = 'signin'; done.push('People sign in before they use the app'); }
+    changed({ inspector: true }); pushHistory?.();
+    const sql = allSQL(), ta = h('textarea', { class: 'code', rows: 12, readonly: true, style: 'width:100%' }, sql);
+    openDialog('Social app on Supabase', [
+      h('p', { class: 'desc' }, done.length ? 'Set up:' : 'Everything was already set up.'), done.length && h('ul', { class: 'desc' }, done.map((d) => h('li', {}, d))),
+      h('p', { class: 'desc' }, 'Last step: copy this SQL, paste it in Supabase › SQL Editor and press Run (run it again whenever you add a collection). It makes the tables, who-can-see-what rules, likes and votes that count each person once, private messages and notifications, and the media bucket.'),
+      ta, h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => navigator.clipboard?.writeText(sql).then(() => toast('SQL copied: paste it in Supabase › SQL Editor and Run'), () => { ta.select(); toast('Select the SQL and copy it'); }) }, icon('copy'), 'Copy SQL')),
+      h('p', { class: 'desc' }, 'In Supabase › Authentication: turn off “Confirm email” while testing, and put your app’s address in URL Configuration.'),
+    ]);
+  };
+  const copySQL = () => { const sql = allSQL(); navigator.clipboard?.writeText(sql).then(() => toast('Setup SQL copied: paste it in Supabase › SQL Editor and Run'), () => openDialog('Setup SQL', [h('textarea', { class: 'code', rows: 16, readonly: true, style: 'width:100%' }, sql)])); };
   box.append(comp('Supabase (accounts & online data)', [
     h('p', { class: 'desc' }, 'Your app\'s own accounts and online data, with a free Supabase project. People sign up and sign in (email, Google, Apple…), and data collections can be stored online: private to each person (their notes on every phone), shared with everyone (a feed, a chat, a shop catalogue), or read from tables you already have.'),
     h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: () => connectSupabase() }, icon('bolt'), sbOn ? 'Connect Supabase: check & tables' : 'Connect Supabase')),
@@ -4691,7 +4708,9 @@ function renderSceneSettings(box) {
     sbOn && RS('settings.signInPage', { label: 'Sign-in page (blank = signing in is optional)', type: 'text', def: '', placeholder: 'signin', infoText: 'While nobody is signed in the app shows this page (add a Sign-in Page from Add › UI & Menus › App). After signing in it goes on to its first page.' }),
     sbOn && root.settings.signInPage && R('settings.afterSignInPage', { label: 'Page after signing in (blank = the first page)', type: 'text', def: '' }),
     sbOn && h('p', { class: 'desc' }, `Online collections: ${onlineCols.length ? onlineCols.map((c) => c.name).join(', ') : 'none yet (Game Settings › Data › a collection › Store online)'}.`),
-    sbOn && (onlineCols.length || (st.profiles && st.profiles !== 'off')) && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: copySQL }, icon('copy'), 'Copy setup SQL')),
+    sbOn && isSocial && h('div', { class: 'btns' }, h('button', { class: 'btn primary', onclick: setupSocial }, icon('bolt'), 'Set up social app (accounts, posts, likes, messages…)')),
+    sbOn && isSocial && h('p', { class: 'desc' }, 'Puts every social part online with sign-up and usernames: posts, comments, likes and reposts (each person counts once), polls, follows, friends, private messages, notifications, stories and profiles, live on every phone.'),
+    sbOn && (onlineCols.length || (st.profiles && st.profiles !== 'off')) && h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: copySQL }, icon('copy'), 'Copy all setup SQL')),
     sbOn && accountsUI(),
     sbOn && h('h5', { class: 'sub-head' }, 'Media'),
     sbOn && R('settings.supabaseBucket', { label: 'Media bucket (photos, GIFs and videos in posts)', type: 'text', def: '', placeholder: 'media', infoText: 'A Supabase Storage bucket. With one, pictures and videos people post are uploaded there and everyone sees them; without one, photos and small videos are kept inside the post.' }),

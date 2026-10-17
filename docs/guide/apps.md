@@ -131,7 +131,7 @@ Text           {left} to do
 
 ## Accounts and online data (Supabase)
 
-Apps can have their own accounts and keep data online with a free [Supabase](https://supabase.com) project: people sign up and sign in, and data collections are stored in Supabase tables. (For games, PlayFab and Photon fit better: leaderboards, cloud saves, multiplayer.)
+(PlayFab and Photon are for games, and show up only once an app has a game inside it.) Apps can have their own accounts and keep data online with a free [Supabase](https://supabase.com) project: people sign up and sign in, and data collections are stored in Supabase tables. (For games, PlayFab and Photon fit better: leaderboards, cloud saves, multiplayer.)
 
 ### Connect your project
 

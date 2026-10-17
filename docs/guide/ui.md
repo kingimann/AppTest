@@ -206,7 +206,15 @@ Apps and menus are built from **pages**. A page is a panel with **Show If** (or 
     - Items: names on the **left** or **centred**, **regular / bold / heavy** text, **arrows (›)** on page items, and section titles as **small capitals**, a **title** or **accent capitals**.
     - Colours: a **background picture** (and how strong it is), and separate colours for **icons**, the **selected item's text**, **section titles** and **lines**.
     - Size: **width as a % of the screen**.
-- **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 4 right buttons.
+- **App Bar:** a top bar with ‹ Back / ☰, a title that follows the page, and up to 5 right buttons.
+  - **Right buttons** are cards in the Inspector, shown left to right as on the bar. Each one has:
+    - an **icon** (any icon, an emoji or your own);
+    - what it **does**: open a page, light / dark mode, open the side menu, new post, settings, or send a message;
+    - an optional **badge** variable (e.g. `notifications_unread`);
+    - **Only on some pages** (blank = every page).
+  - **Add Button** offers Notifications, Search, Messages, Friends, Light / dark mode, Your profile picture, New post, Settings, Side menu or a custom one. Use **⋯** to move or remove a button. Nothing is fixed: take away the bell or the search if you don't want them.
+  - The **light / dark** button shows a moon in light mode and a sun in dark mode. The **profile picture** button shows your avatar.
+  - As text, one per line: `icon | does | badge variable | only on pages`, e.g. `theme | dark mode toggle` or `avatar | page:profile | | profile`. The first line is the button at the right edge.
 - **App Layout:** all three set up to work together.
 - **Back Button**, **Sliding Page**, **Swipe Pages**, **Tab Bar**.
 

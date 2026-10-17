@@ -195,7 +195,8 @@ Every Visual Script in the game, as cards showing the object, a mini map, which 
 What your game reports while it runs: the **Debug Log** instruction and node, `P.log()` / `P.warn()` in scripts, warnings (like spawning a template that doesn't exist) and errors with their stack.
 
 - Filter by Log / Warn / Error, search, tap a message for details, **Show object**.
-- **Watch** variables: pinned chips show live values.
+- **Watch** variables: pinned chips show live values. Start with the 👁 button next to the search.
+- On a phone, the message kinds and the search stay at the top and the command line stays at the bottom; only the messages scroll.
 - **Command line:** `score`, `score = 10`, `send win`, `page shop`, `pause`, `step`, `restart`, `level 2`, `speed 0.5`, `objects`, `find Player`, `help`.
 
 Errors never freeze the game: an error in a component, node or script is logged and the game keeps running.

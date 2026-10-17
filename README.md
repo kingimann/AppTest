@@ -1013,7 +1013,7 @@ The play bar: **Stop**, **Pause**, **Step** (one frame while paused), **Inspect*
 - The **Console** tab lists what your game reports while it runs: the **Debug Log** action (Triggers) and node (Visual Script), `P.log()` / `P.warn()` in custom scripts, warnings (e.g. spawning a template that doesn't exist) and errors.
 - Repeated messages fold into one line with a count, and **Merge identical messages** (⋮) folds them even when other messages come in between. Filter by Log / Warn / Error and **search** the text and object names.
 - **Tap a message** for its details: the full text (selectable), where it came from, an error's **stack** (where in the code it happened), and **Copy**, **Show object** (or **Inspect** it while playing) and **Find similar**.
-- **Watch variables:** pinned chips at the top show variables' live values while the game runs (they flash when they change). Add with **+**, or `watch score`.
+- **Watch variables:** pinned chips at the top show variables' live values while the game runs (they flash when they change). Add with the 👁 button next to the search (then **+**), or `watch score`. The kinds and search stay at the top of the Console and the command line at the bottom; only the messages scroll.
 - **Command line** at the bottom, to look inside and change the running game:
   - `score` shows a variable, `score = 10`, `score += 5`, `name = 'Ana'`, `items = [1, 2, 3]` change it, and `vars` lists them all.
   - `send win` (or `send hit 5` with a value), `page shop`, `back`, `pause`, `resume`, `step`, `restart`, `win`, `lose`, `level 2`, `speed 0.5` (slow motion).

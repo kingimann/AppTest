@@ -128,7 +128,7 @@ scene.equipStat('damage');
 |---|---|
 | **Enemy AI** | Patrols, chases when it sees the target (walls block its view), attacks in range, gives up and goes home |
 | **Chase**, **Follow**, **Wander**, **Orbit**, **Patrol**, **Path** | Simple movement |
-| **Pathfinding (Navigator)** | A* around walls to a tag or object, 2D and 3D |
+| **Pathfinding (Navigator)** | A* around walls to a tag or object, 2D and 3D (runs as WebAssembly, so many chasers stay smooth) |
 | **Turret** | Turns toward the player and fires a template |
 | **Spawner**, **Wave Spawner** | Create enemies over time or in waves (`{wave}`) |
 | **State Machine** | Your own states: patrol, alert, chase, attack |

@@ -480,6 +480,27 @@ export class Entity {
 export const VOXEL_PALETTE = ['#6aa84f', '#8d6e63', '#9e9e9e', '#6d4c41', '#3d8b37', '#e3cf8f', '#4fa3e0', '#c0392b', '#f5f5f5', '#2b2b2b', '#f1c40f', '#8e44ad'];
 export const VOXEL_NAMES = ['Grass', 'Dirt', 'Stone', 'Wood', 'Leaves', 'Sand', 'Water', 'Brick', 'Snow', 'Obsidian', 'Gold', 'Crystal'];
 const CHUNK = 16;
+// ============================================================================
+// WebAssembly helpers: grid A* pathfinding (binary heap) and voxel chunk meshing, 1.5 KB of hand-written
+// WebAssembly (engine/wasm/pocket.wat). The JS versions run where it's unavailable, or with Wasm.on = false.
+// ============================================================================
+const WASM_B64 = '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';
+export const Wasm = { on: true, ex: null, error: '' };
+try {
+  if (typeof WebAssembly === 'object') Wasm.ex = new WebAssembly.Instance(new WebAssembly.Module(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)))).exports;
+} catch (err) { Wasm.error = String(err?.message || err); }
+const wasmOn = () => Wasm.on && !!Wasm.ex;
+/** The module's memory, grown to hold `bytes`. */
+function wasmBuf(bytes) { const m = Wasm.ex.mem, more = Math.ceil((bytes - m.buffer.byteLength) / 65536); if (more > 0) m.grow(more); return m.buffer; }
+/** Voxel faces: normal, shade, 4 corners. */
+const VOX_FACES = [
+  [[1, 0, 0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], 0.86], [[-1, 0, 0], [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], 0.86],
+  [[0, 1, 0], [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], 1], [[0, -1, 0], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], 0.6],
+  [[0, 0, 1], [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], 0.93], [[0, 0, -1], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], 0.93],
+];
+if (Wasm.ex) { const F = new Float32Array(Wasm.ex.mem.buffer, 0, 96); VOX_FACES.forEach(([n, q, sh], f) => F.set([...n, sh, ...q.flat()], f * 16)); }
+/** Per-block brightness jitter (0.94 – 1.04), the same in WebAssembly. */
+const voxJit = (i, j, k) => { let h = Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ Math.imul(k, 83492791); h = Math.imul(h ^ (h >>> 13), 1274126177); return 0.94 + Math.fround((h & 65535) * 0.00000152587890625); };
 
 /** 2D tile types: what a painted cell does. */
 export const TILE_KINDS = [['solid', 'Solid (walls, ground)'], ['platform', 'One-way platform'], ['hazard', 'Hazard (hurts the player)'], ['decor', 'Decoration (no collision)']];
@@ -4358,18 +4379,26 @@ export class Renderer3D {
 
   /** Build one chunk's faces (only faces next to air) as an interleaved pos/normal/color buffer. */
   buildChunk(V, cx, cz) {
-    const out = [], s = V.size, b = V.bounds;
-    const FACES = [
-      [[1, 0, 0], [[1, 0, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1]], 0.86], [[-1, 0, 0], [[0, 0, 1], [0, 1, 1], [0, 1, 0], [0, 0, 0]], 0.86],
-      [[0, 1, 0], [[0, 1, 1], [1, 1, 1], [1, 1, 0], [0, 1, 0]], 1], [[0, -1, 0], [[0, 0, 0], [1, 0, 0], [1, 0, 1], [0, 0, 1]], 0.6],
-      [[0, 0, 1], [[1, 0, 1], [1, 1, 1], [0, 1, 1], [0, 0, 1]], 0.93], [[0, 0, -1], [[0, 0, 0], [0, 1, 0], [1, 1, 0], [1, 0, 0]], 0.93],
-    ];
-    const cols = V.palette.map(hexToRgb);
+    const s = V.size, b = V.bounds, cols = V.palette.map(hexToRgb);
+    if (wasmOn()) { // WebAssembly: the chunk (plus a one-block border) as a byte grid, meshed in one call
+      const ny = b.j1 - b.j0 + 1, Y2 = ny + 2, Z2 = CHUNK + 2, n = Z2 * Z2 * Y2, i0 = cx * CHUNK, k0 = cz * CHUNK;
+      let solid = 0; const vol = new Uint8Array(n);
+      const B = V.blocks; // (VoxelWorld.key inlined: one block up is +1024)
+      for (let x = 0; x < Z2; x++) for (let z = 0; z < Z2; z++) {
+        const base = (x * Z2 + z) * Y2; let key = VoxelWorld.key(i0 + x - 1, b.j0 - 1, k0 + z - 1);
+        for (let y = 0; y < Y2; y++, key += 1024) { const c = B.get(key); if (c) { vol[base + y] = Math.min(255, c); if (x && z && y && x <= CHUNK && z <= CHUNK && y <= ny) solid++; } }
+      }
+      const oV = 1024, oP = (oV + n + 15) & ~15, oO = (oP + cols.length * 12 + 15) & ~15, buf = wasmBuf(oO + solid * 6 * 6 * 36);
+      new Uint8Array(buf, oV, n).set(vol); new Float32Array(buf, oP, cols.length * 3).set(cols.flat());
+      const count = Wasm.ex.mesh(oV, CHUNK, ny, i0, b.j0, k0, s, oP, cols.length, oO);
+      return new Float32Array(Wasm.ex.mem.buffer.slice(oO, oO + count * 4));
+    }
+    const out = [];
     for (let i = cx * CHUNK; i < cx * CHUNK + CHUNK; i++) for (let k = cz * CHUNK; k < cz * CHUNK + CHUNK; k++) for (let j = b.j0; j <= b.j1; j++) {
       const c = V.get(i, j, k);
       if (!c) continue;
-      const base = cols[(c - 1) % cols.length], h = Math.sin(i * 12.9898 + j * 78.233 + k * 37.719) * 43758.5453, jit = 0.94 + (h - Math.floor(h)) * 0.1;
-      for (const [n, q, shade] of FACES) {
+      const base = cols[(c - 1) % cols.length], jit = voxJit(i, j, k);
+      for (const [n, q, shade] of VOX_FACES) {
         if (V.get(i + n[0], j + n[1], k + n[2])) continue;
         const fc = c === 1 && n[1] !== 1 && cols[1] ? cols[1] : base; // grass blocks have dirt sides
         const r = fc[0] * jit * shade, g = fc[1] * jit * shade, bl = fc[2] * jit * shade;
@@ -17035,21 +17064,29 @@ registerBehavior('enemyAI', {
 });
 
 /** Grid A* over the level: static colliders are walls. Returns a list of points or null. */
-function findPath(s, from, to, cell, agentR, ignore) {
+export function findPath(s, from, to, cell, agentR, ignore) {
   const three = s.mode === '3d', walls = s.entities.filter((q) => q.body && q.body.type === 'static' && !q.body.sensor && !q.dead && q !== ignore && !q.ui);
   let x0 = Math.min(from.x, to.x), x1 = Math.max(from.x, to.x), y0 = Math.min(three ? from.z : from.y, three ? to.z : to.y), y1 = Math.max(three ? from.z : from.y, three ? to.z : to.y);
   const pad = cell * 12; x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
   const W = Math.min(160, Math.ceil((x1 - x0) / cell) + 1), H = Math.min(160, Math.ceil((y1 - y0) / cell) + 1);
   const blocked = new Uint8Array(W * H), wb = walls.map((q) => { const ex = q.extents(); return { cx: q.x + (ex.ox || 0), cy: three ? q.z + (ex.oz || 0) : q.y + (ex.oy || 0), hx: (ex.sphere ? ex.r : ex.bx ?? ex.hx) + agentR, hy: (ex.sphere ? ex.r : three ? ex.hz : ex.by ?? ex.hy) + agentR, top: q.y + (ex.oy || 0) + (ex.sphere ? ex.r : ex.hy), bot: q.y + (ex.oy || 0) - (ex.sphere ? ex.r : ex.hy) }; })
     .filter((w) => !three || (w.top > from.y - 0.4 && w.bot < from.y + 0.9)); // 3D: only things at body height are walls (floors aren't)
-  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
-    const x = x0 + i * cell, y = y0 + j * cell;
-    for (const w of wb) if (Math.abs(x - w.cx) < w.hx && Math.abs(y - w.cy) < w.hy) { blocked[j * W + i] = 1; break; }
+  for (const w of wb) { // each wall marks the cells whose centres are inside it
+    const i0 = Math.max(0, Math.floor((w.cx - w.hx - x0) / cell) + 1), i1 = Math.min(W - 1, Math.ceil((w.cx + w.hx - x0) / cell) - 1);
+    const j0 = Math.max(0, Math.floor((w.cy - w.hy - y0) / cell) + 1), j1 = Math.min(H - 1, Math.ceil((w.cy + w.hy - y0) / cell) - 1);
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) blocked[j * W + i] = 1;
   }
   const idx = (x, y) => [Math.round((x - x0) / cell), Math.round((y - y0) / cell)];
   const [si, sj] = idx(from.x, three ? from.z : from.y), [ti, tj] = idx(to.x, three ? to.z : to.y);
   if (ti < 0 || tj < 0 || ti >= W || tj >= H || si < 0 || sj < 0 || si >= W || sj >= H) return null;
   blocked[sj * W + si] = 0; blocked[tj * W + ti] = 0;
+  const toPt = (c) => { const ci = c % W, cj = (c / W) | 0; return three ? { x: x0 + ci * cell, y: from.y, z: y0 + cj * cell } : { x: x0 + ci * cell, y: y0 + cj * cell, z: 0 }; };
+  if (wasmOn()) { // WebAssembly A* (binary heap)
+    const N = W * H, oB = 1024, oG = (oB + N + 7) & ~7, oC = oG + 4 * N, oX = oC + 4 * N, oH = (oX + N + 7) & ~7, oO = oH + 64 * N, buf = wasmBuf(oO + 4 * N);
+    new Uint8Array(buf, oB, N).set(blocked);
+    const len = Wasm.ex.astar(W, H, sj * W + si, tj * W + ti, oB, oG, oC, oX, oH, oO);
+    return len ? Array.from(new Int32Array(Wasm.ex.mem.buffer, oO, len), toPt) : null;
+  }
   const g = new Float32Array(W * H).fill(Infinity), came = new Int32Array(W * H).fill(-1), open = [[0, si, sj]], closed = new Uint8Array(W * H);
   g[sj * W + si] = 0;
   const hf = (i, j) => Math.hypot(i - ti, j - tj);

@@ -439,7 +439,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
   - **Wallpaper:** pick a colour or gradient for each chat (Chat info › Wallpaper, or the message `chat wallpaper`). *Default wallpaper* sets one for every chat. Times get a pill so they stay readable.
   - **@mentions** in a group notify the person mentioned (“mentioned you: …”).
   - Stars, wallpapers and *Delete for me* are kept on the phone. Messages, voice messages, pins and forwards are shared with the conversation.
-  - **Typing:** tap the message bar and it opens right where it is (above the Bottom Nav), with the phone's keyboard up at once; tap the 🎙 to record straight away.
+  - **Typing:** tap the message bar and it opens right where it is (above the Bottom Nav), with the phone's keyboard up at once; while the keyboard is up the bar sits right on top of it (over the Bottom Nav, like a native app) and goes back when it closes. Tap the 🎙 to record straight away.
   - **Ticks** next to your messages: a little clock while sending, **✓** sent, grey **✓✓** delivered to everyone in the chat, blue **✓✓** once everyone has seen it (or answered after it). The Inbox shows the same ✓ / ✓✓ on your last message.
   - **Message info** groups the people as *Seen by*, *Delivered to* and *Not delivered yet*, with the times.
   - **Pull down to refresh:** at the top of a conversation (and in the Inbox), pull down: a spinner shows and online messages are fetched again (*Up to date* when the chat isn't online). Turn it off with *Pull down to refresh*.

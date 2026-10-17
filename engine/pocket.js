@@ -1454,6 +1454,10 @@ export class Scene {
   /** Show a page: sets the page variable; with history, Back returns to the page you came from. */
   navTo(page, v = 'page', o = {}) {
     page = String(page ?? ''); v = v || 'page';
+    if (page) { // "signin" while the page is called "sign-in" (or "Sign In"): go to that page
+      const vals = []; for (const q of [...this.entities, ...this.pending]) if (!q.dead) for (const x of q.behaviors) if (x.type === 'uiShowIf' && x.params && (x.params.var || 'page') === v && (x.params.op || '=') === '=') vals.push(String(x.params.value ?? ''));
+      if (vals.length && !vals.includes(page)) { const nk = (t) => t.toLowerCase().replace(/[^a-z0-9]/g, ''), m = vals.find((q) => nk(q) === nk(page)); if (m) page = m; }
+    }
     const cur = this.vars[v], st = ((this.navStacks ||= {})[v] ||= []);
     this.navVar = v;
     if (o.clear) st.length = 0;
@@ -15284,7 +15288,7 @@ function autoPage(s, v, value) {
 function pageCheck(s) {
   const pages = new Set(), links = [];
   for (const e of [...s.entities, ...(s.pending || [])]) for (const b of e.behaviors) { const P = b.params || {};
-    if (b.type === 'uiShowIf' && (P.op || '=') === '=' && (P.var || 'page') === 'page') pages.add(String(P.value ?? '').toLowerCase());
+    if (b.type === 'uiShowIf' && (P.op || '=') === '=' && (P.var || 'page') === 'page') pages.add(String(P.value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')); // (sign-in, Sign In and signin are the same page: navTo finds it)
     const rowsOf = (t) => String(t || '').split('\n').map((l) => l.trim()).filter((l) => l && !/^[#>=~-]/.test(l)).map((l) => l.split('|').map((x) => x.trim()));
     if (b.type === 'uiBottomNav') for (const r of rowsOf(P.tabs)) if (r[2] && !r[2].includes(':')) links.push([r[2], `the Bottom Nav tab “${r[0] || r[2]}”`]);
     if (b.type === 'uiSideBar') for (const r of [...rowsOf(P.items), ...rowsOf(P.footer)]) { const a = (r[2] || '').replace(/^button:/, ''); if (a && !a.includes(':')) links.push([a, `the Side Menu item “${r[0] || a}”`]); }
@@ -15294,7 +15298,7 @@ function pageCheck(s) {
   }
   if (!pages.size) return;
   const seen = new Set();
-  for (const [pg, from0] of links) { const from = from0.charAt(0).toUpperCase() + from0.slice(1), k = String(pg).trim().toLowerCase(); if (!k || pages.has(k) || seen.has(k + from)) continue; seen.add(k + from);
+  for (const [pg, from0] of links) { const from = from0.charAt(0).toUpperCase() + from0.slice(1), k = String(pg).trim().toLowerCase(); if (!k || pages.has(k.replace(/[^a-z0-9]/g, '')) || seen.has(k + from)) continue; seen.add(k + from);
     if (AUTO_PAGES[k]) Log.add('info', `${from} opens the page “${pg}”, which isn't in the app: a ${AUTO_PAGES[k][1]} page is made while it runs. Make it in the editor (⋯ › Make the “${pg}” page) to keep and change it.`, 'Pages');
     else Log.add('warn', `${from} opens the page “${pg}”, which isn't in the app, so the first page shows instead. The editor makes missing pages for you (Preferences › Editing › Missing pages & data), or make one called “${pg}” (Pages › New page).`, 'Pages'); }
 }

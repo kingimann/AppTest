@@ -228,6 +228,24 @@ engine.audio.setMuted(true); engine.audio.setVolume(0.5);
 - Both apply post-processing and lower their resolution when a phone can't keep a smooth frame rate.
 - `renderer.worldToScreen(scene, x, y[, z])` and `renderer.screenToWorld(scene, sx, sy)` convert coordinates. `screenRay(scene, sx, sy)` gives a 3D ray.
 
+## WebAssembly
+
+Two hot paths run as WebAssembly. The module is 1.5 KB, written by hand in `engine/wasm/pocket.wat`, and embedded in the engine, so there's nothing to download.
+
+| | |
+|---|---|
+| **Pathfinding** (Navigator, `findPath`) | Grid A* with a binary heap. Same paths as the JS version, about 7× faster on big maps. |
+| **Voxel meshing** (voxel worlds) | Each 16×16 chunk becomes triangles in one call. Same triangles as the JS version, about 8× faster, so mining and building re-mesh without hitches. |
+
+```js
+import { Wasm, findPath } from './engine/pocket.js';
+Wasm.ex      // the module's exports (null if WebAssembly isn't available)
+Wasm.on = false; // use the JS versions (they give the same results)
+findPath(scene, from, to, cellSize, agentRadius) // → [{ x, y, z }, …] or null
+```
+
+Where WebAssembly isn't available (very old browsers, locked-down pages) the JS versions run automatically. For realistic stacking and rolling, the Rapier physics engine (also WebAssembly) is a per-level option: see the physics guide.
+
 ## Making the editor understand your code
 
 - Components you register with `registerBehavior` show up in the editor's Add Component (when your module is loaded before it), with a settings form built from their `params`. See [Writing your own components](#/guide/custom-components).

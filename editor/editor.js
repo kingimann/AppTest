@@ -23,7 +23,7 @@ import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
 import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems } from './items.js';
 import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
-import { initData, dataEditor, ensureCollection, connectSupabase } from './data.js';
+import { initData, dataEditor, ensureCollection, connectSupabase, STARTER_COLLECTIONS } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import * as CM from './codemagic.js';
@@ -273,6 +273,7 @@ function openProject(json, id = uid('p')) {
   rebuild();
   refreshAll();
   installPlugins(root.plugins); // its components and nodes show in the editor
+  try { reqKnown = new Set(unmetReqs().keys()); } catch { reqKnown = null; } // (what's already missing shows in the Hierarchy; only new gaps ask)
   if (manualSave()) { setDirty(!allProjects()[id]); edited = false; return; } // a new project isn't saved until you save it
   installPlugins(root.plugins);
   saveNow();
@@ -306,7 +307,7 @@ function setLevel(i) {
   levelIdx = Math.max(0, Math.min(i, levelList().length - 1));
   project = levelList()[levelIdx];
   project.mode ||= root.mode;
-  selectedId = null;
+  selectedId = null; try { reqKnown = new Set(unmetReqs().keys()); } catch { reqKnown = null; }
   if (viewMode === 'top' && project.mode !== '3d') { viewMode = 'scene'; $('#app').dataset.view = 'scene'; }
   resetCamera(); rebuild(); refreshAll();
 }
@@ -434,6 +435,7 @@ function updateUndoButtons() { $('#undoBtn').disabled = hIndex <= 0; $('#redoBtn
 /** Call after any edit. structure: object list / inspector layout changed. */
 function changed({ structure = false, inspector = false } = {}) {
   requestRebuild();
+  if (!reqBusy) queueReqCheck();
   saveSoon();
   pushHistorySoon();
   if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); if (dockTab === 'scripts') renderScripts(); }
@@ -2283,6 +2285,10 @@ function renderHierarchy() {
     h('div', { class: 'h-dup-b' },
       h('button', { class: 'btn', title: 'Select them', onclick: () => { multi = new Set(g.ids); select(g.ids[g.ids.length - 1]); renderHierarchy(); } }, icon('check'), 'Show'),
       h('button', { class: 'btn primary', title: 'Keep the one on top, delete the others', onclick: () => keepOnlyOne(g) }, icon('trash'), 'Keep one'))))));
+  const UR = unmetReqs(); // parts that can't work yet: what they need, added in one tap
+  if (UR.size) box.append(h('div', { class: 'h-dups h-reqs' }, h('div', { class: 'h-dup' }, icon('warn'),
+    h('div', { class: 'h-dup-t' }, h('b', {}, `${UR.size} thing${UR.size > 1 ? 's' : ''} missing for parts of your app to work`), h('small', {}, [...UR.values()].slice(0, 3).map((q) => (q.kind === 'coll' ? `${q.name} data` : `the “${q.name}” page`) + ' for ' + q.by[0]).join(' · ') + (UR.size > 3 ? ' …' : ''))),
+    h('div', { class: 'h-dup-b' }, h('button', { class: 'btn primary', 'data-req-fix': '1', onclick: () => fixReqs([...UR.values()]) }, icon('plus'), 'Add them')))));
   if (sig && sig !== dupSig && (dupSig === null || dups.some((g) => !dupSig.includes(g.ids.join(','))))) { const g = dups.find((q) => !(dupSig || '').includes(q.ids.join(','))); toast(`Heads up: ${g.label}. The Hierarchy shows them.`); } // a duplicate just appeared (or was there when the project opened)
   dupSig = sig;
   const rows = h('div');
@@ -8277,7 +8283,61 @@ const PAGE_TPL_FOR = { inbox: 'inbox', messages: 'inbox', chats: 'inbox', chat: 
 const pageTplFor = (name) => { const k = PAGE_TPL_FOR[String(name || '').toLowerCase()]; return k ? pageTemplates().find((t) => t.key === k) : undefined; };
 /** Make a page a button points at, ready-made when its name says what it is. */
 const makeLinkedPage = (val) => newPage(null, { name: String(val).charAt(0).toUpperCase() + String(val).slice(1), tab: false, stay: true, template: pageTplFor(val) });
-/** The Bottom Nav's tabs as cards: an icon to pick, a label, the page it opens, a badge; add a tab from a page (or a new one). */
+// ---- Requirements: what a component needs to work (its data, the pages it opens). Adding it adds them; taking them away asks first ----
+const REQ_EXTRA = { uiInbox: ['Reads'], uiChat: ['Reads'], uiFriends: ['Follows', 'Friends'], uiActivity: ['Notifications'], uiProfile: ['Profiles', 'Follows'], uiStories: ['StoryViews'], uiBookmarks: ['Bookmarks'], uiAchievements: ['Points'], uiWhoToFollow: ['Follows'], uiMarketplace: ['Messages'] };
+const ck = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+let collDefs = null;
+/** A ready-made collection by name (from the templates: Posts, Messages, Stories, Tasks…). */
+const collDef = (name) => { if (!collDefs) { collDefs = new Map(); const add = (c) => { if (c?.name && !collDefs.has(ck(c.name))) collDefs.set(ck(c.name), c); }; for (const t of Object.values(templates)) for (const c of t?.collections || []) add(c); for (const c of Object.values(STARTER_COLLECTIONS)) add(c); } return collDefs.get(ck(name)); };
+const REQ_WHAT = { Posts: 'the posts', Comments: 'comments on posts', Messages: 'the conversations', Reads: 'who has seen which messages', Stories: 'the stories', StoryViews: 'who watched each story', Profiles: 'people’s profiles (and chat keys)', Follows: 'who follows whom', Friends: 'friends and requests', Notifications: 'notifications', Bookmarks: 'saved posts', Points: 'points and achievements', Listings: 'things for sale' };
+/** Everything something in the game needs that isn't there: Map key → { kind: 'coll' | 'page', name, by: [labels] }. */
+function unmetReqs() {
+  const out = new Map(); if (!root || !project) return out;
+  const have = new Set((root.collections || []).map((c) => ck(c.name))), app = !!levelList()[0]?.settings?.app, pages = new Set([...(uiPages().get('page') || [])].map((v) => String(v).toLowerCase()));
+  const need = (key, o, by) => { const q = out.get(key); if (q) { if (!q.by.includes(by)) q.by.push(by); } else out.set(key, { ...o, by: [by] }); };
+  const wantColl = (n, by) => { n = String(n || '').trim(); const d = n && !have.has(ck(n)) && collDef(n); if (d) need('coll:' + ck(n), { kind: 'coll', name: d.name }, by); };
+  const wantPage = (v, by) => { v = String(v || '').trim().toLowerCase(); if (!app || !v || v.includes(':') || pages.has(v) || !pageTplFor(v)) return; need('page:' + v, { kind: 'page', name: v }, by); };
+  for (const lv of levelList()) for (const e of lv.entities || []) for (const b of e.behaviors || []) {
+    const D = Behaviors[b.type]; if (!D) continue; if (b.type === 'uiSideBar' && !b.social) continue;
+    const lb = D.label.replace(/ \(.*\)$/, ''), by = e.name && e.name !== lb ? `${lb} (${e.name})` : lb, val = (k) => b[k] ?? D.params?.find((q) => q.key === k)?.default;
+    for (const P of D.params || []) { if (/collection$/i.test(P.key)) wantColl(val(P.key), by); else if (lv === project && /Page$/.test(P.key) && typeof val(P.key) === 'string') wantPage(val(P.key), by); }
+    for (const n of REQ_EXTRA[b.type] || []) wantColl(n, by);
+    if (lv !== project) continue;
+    const rowsOf = (t) => String(t || '').split('\n').map((l) => l.trim()).filter((l) => l && !/^[#>=~-]/.test(l)).map((l) => l.split('|').map((x) => x.trim()));
+    if (b.type === 'uiBottomNav') for (const r of rowsOf(b.tabs)) wantPage(r[2], `the Bottom Nav tab “${r[0] || r[2]}”`);
+    if (b.type === 'uiSideBar') for (const r of [...rowsOf(b.items), ...rowsOf(b.footer)]) wantPage(String(r[2] || '').replace(/^button:/, ''), `the Side Menu item “${r[0] || r[2]}”`);
+    if (b.type === 'uiAppBar') for (const r of rowsOf(b.actions)) if (/^page:/.test(r[1] || '')) wantPage(r[1].slice(5), `the App Bar button “${r[0]}”`);
+  }
+  return out;
+}
+let reqKnown = null, reqBusy = false, reqTimer = 0;
+/** Add what's missing: the ready-made collections and pages. */
+function fixReqs(list) {
+  reqBusy = true; const made = [], before = new Set(reqKnown || []);
+  for (const q of list) before.delete('coll:' + ck(q.name)), before.delete('page:' + q.name);
+  try { for (let round = 0; round < 5 && list.length; round++) { for (const q of list) {
+    if (q.kind === 'coll' && !(root.collections || []).some((c) => ck(c.name) === ck(q.name))) { const d = collDef(q.name); if (d) { (root.collections ||= []).push({ ...clone(d), rows: [] }); made.push(`${d.name} data`); } }
+    if (q.kind === 'page' && !(uiPages().get('page') || new Set()).has(q.name)) { const nv = newPage(null, { name: q.name.charAt(0).toUpperCase() + q.name.slice(1), tab: false, side: false, stay: true, template: pageTplFor(q.name) }); if (nv) made.push(`the “${q.name}” page`); }
+  } list = [...unmetReqs().entries()].filter(([k]) => !before.has(k)).map(([, q]) => q); } } finally { reqBusy = false; } // (what the added parts need in turn)
+  reqKnown = new Set(unmetReqs().keys()); changed({ structure: true });
+  if (made.length) toast('Added ' + made.join(', ')); return made;
+}
+const reqLine = (q) => h('div', { class: 'req-row' }, h('span', { class: 'req-ic' }, icon(q.kind === 'coll' ? 'list' : 'layers')), h('div', {}, h('b', {}, q.kind === 'coll' ? `${q.name} data` : `The “${q.name}” page`), h('small', {}, (q.kind === 'coll' ? `keeps ${REQ_WHAT[q.name] || 'its records'}` : `ready-made: ${pageTplFor(q.name)?.label || q.name}`) + ' · for ' + q.by.slice(0, 2).join(', ') + (q.by.length > 2 ? ` +${q.by.length - 2}` : ''))));
+/** After a change: anything newly missing (something was added that needs more, or something it needed was taken away) is offered right away. */
+function queueReqCheck() {
+  clearTimeout(reqTimer); reqTimer = setTimeout(() => {
+    if (reqBusy || playing || !project || !root) return; const U = unmetReqs();
+    if (reqKnown === null) { reqKnown = new Set(U.keys()); return; } // (a project just opened: the Hierarchy says what's missing)
+    const fresh = [...U.entries()].filter(([k]) => !reqKnown.has(k)).map(([, q]) => q); reqKnown = new Set(U.keys());
+    if (!fresh.length || !layer.hidden) { if (fresh.length) setTimeout(queueReqCheck, 800); return; }
+    const by = [...new Set(fresh.flatMap((q) => q.by))];
+    openDialog('Needed to work', [h('div', { class: 'tour' }, h('p', {}, `${by.slice(0, 2).join(' and ')}${by.length > 2 ? ` and ${by.length - 2} more` : ''} can't work without:`), h('div', { class: 'req-list' }, fresh.map(reqLine)),
+      h('div', { class: 'btns' }, h('button', { class: 'btn primary', 'data-req-add': '1', onclick: () => { closeLayer(); fixReqs(fresh); } }, icon('check'), fresh.length > 1 ? 'Add them' : 'Add it'),
+        h('button', { class: 'btn', onclick: () => { closeLayer(); undoRedo(-1); reqKnown = new Set(unmetReqs().keys()); toast('Undone'); } }, icon('undo'), 'Undo')),
+      h('p', { class: 'desc' }, 'Everything in the app works together: a part that needs data or another page gets it when you add it.'))]);
+  }, 150);
+}
+/** A ready-made page for a page name a button points at an icon to pick, a label, the page it opens, a badge; add a tab from a page (or a new one). */
 function navTabEditor(get, set, path, b) {
   const box = h('div', { class: 'navtabs' });
   const v = b?.var || 'page';

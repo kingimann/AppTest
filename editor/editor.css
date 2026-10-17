@@ -2296,3 +2296,9 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .h-head .h-tools button, .h-head .h-tools input { height: 44px; }
 .h-head .h-chips { padding-bottom: 8px; }
 .log-clear.log-help { color: #ffca28; border-color: #6b5a1e; }
+/* requirements: what a part needs to work */
+.req-list { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 14px; text-align: left; }
+.req-row { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--g3); }
+.req-row b { display: block; font-size: 15px; } .req-row small { color: var(--muted); font-size: 12.5px; }
+.req-ic { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent, #4c8bd6) 22%, transparent); color: var(--accent-text); }
+.h-reqs .h-dup { background: color-mix(in srgb, #ffca28 12%, var(--g3)); }

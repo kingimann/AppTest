@@ -10857,6 +10857,17 @@ const meOfVars = (s, a, h) => {
   const A = author && !/[{}]/.test(author) ? author : me?.author || 'You';
   return { author: A, handle: handle && !/[{}]/.test(handle) ? handle : dA && me ? me.handle : A.toLowerCase().replace(/\s+/g, '') };
 };
+/** The built-in sample conversations (no Messages collection yet), shared by the Inbox and Chat, with whoever is testing as their “me” (they were Alex's). */
+function sampleChats(s) {
+  if (s._sampleChats) return s._sampleChats;
+  const M = meOfVars(s), mh = String(M.handle || 'alex').replace(/^@/, '').toLowerCase() || 'alex', nm = M.author || 'Me', sw = (h) => (String(h).toLowerCase() === 'alex' ? mh : h);
+  return (s._sampleChats = SAMPLE_CHATS().map((r) => { const o = { ...r };
+    if (String(o.handle).toLowerCase() === 'alex') { o.handle = mh; o.author = nm; }
+    if (/^dm-/.test(o.chat)) { const [a, b] = o.chat.slice(3).split('-').map(sw); o.chat = dmId(a, b); }
+    if (o.members) o.members = String(o.members).split(',').map((x) => sw(x.trim())).join(',');
+    if (o.text) o.text = String(o.text).replace(/\bAlex\b/g, nm.split(' ')[0]);
+    return o; }));
+}
 const isMineMsg = (r, me) => !!(r._me || r._mine || (r.handle ? String(r.handle).replace(/^@/, '') === me.handle : r.author === me.author));
 /** A direct-message conversation id for two people (the same from both sides). */
 const dmId = (a, b) => 'dm-' + [String(a).replace(/^@/, ''), String(b).replace(/^@/, '')].sort().join('-');
@@ -11284,7 +11295,7 @@ registerBehavior('uiChat', {
     const pub = () => p.access === 'anyone (a public room)';
     const chatOf = (s) => { const v = p.chatVar ? s.vars[p.chatVar] : ''; return String(v == null || v === '' ? (pub() ? p.room || 'general' : '') : v); };
     const me = (s) => meOfVars(s, p.author, p.handle);
-    const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
+    const all = (s) => (has(s) ? D(s).rows(p.collection) : sampleChats(s));
     /** Private: only the two people of a direct message, or a group's members, can see and write in it. */
     const allowed = (s) => { if (pub()) return true; const c = chatOf(s); if (!c || !(/^dm-/.test(c) || isGroupChat(c))) return false; return chatMembers(all(s), c).includes(handleOf(me(s).handle)); };
     const rows = (s) => { const c = chatOf(s); if (!allowed(s)) return []; const gone = chatMeta(s).gone; return all(s).filter((r) => String(r.chat ?? '') === c && !(gone.length && gone.includes(String(r.id)))).sort((a, b) => (a._at || 0) - (b._at || 0)).map((r) => (r.enc ? E2EE.view(s, r) : r)); }; // (sealed messages opened)
@@ -11315,7 +11326,7 @@ registerBehavior('uiChat', {
       }
     };
     /** Add a message row (a collection, else the sample chats). */
-    const addRow = (s, rec) => { if (has(s)) return D(s).add(p.collection, rec); const r = { id: 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...rec, _at: Date.now(), _me: rec._me ?? true }; (sample ||= SAMPLE_CHATS()).push(r); return r; };
+    const addRow = (s, rec) => { if (has(s)) return D(s).add(p.collection, rec); const r = { id: 'x' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), ...rec, _at: Date.now(), _me: rec._me ?? true }; sampleChats(s).push(r); return r; };
     /** The pinned message: the newest "pinned / unpinned" note in the conversation (a note is your own row, so it works online for everyone). */
     const pinnedOf = (R) => { const n = [...R].reverse().find((r) => r.system && r.pin != null); return n && n.pin ? R.find((r) => String(r.id) === String(n.pin) && !r.deleted) || null : null; };
     const setPin = (s, r, on) => { const M = me(s); addRow(s, { chat: chatOf(s), author: M.author, handle: M.handle, system: true, pin: on ? String(r.id) : '', text: r._e2ee ? `${M.author || 'Someone'} ${on ? 'pinned' : 'unpinned'} a message` : `${M.author || 'Someone'} ${on ? 'pinned' : 'unpinned'} “${snippet(r).slice(0, 40)}”` }); s.snackbar?.(on ? 'Pinned' : 'Unpinned'); };
@@ -11700,7 +11711,7 @@ registerBehavior('uiInbox', {
     const D = (s) => s.engine.data, has = (s) => !!D(s).def(p.collection);
     const me = (s) => meOfVars(s, p.author, p.handle);
     const colors = () => ({ bg: tok('@card') || '#fff', text: tok(p.text || '@text'), sub: tok(p.sub || '@sub'), line: tok(p.line || '@line'), acc: tok(p.accent || '@accent'), field: 'rgba(128,128,128,0.12)' });
-    const all = (s) => (has(s) ? D(s).rows(p.collection) : (sample ||= SAMPLE_CHATS()));
+    const all = (s) => (has(s) ? D(s).rows(p.collection) : sampleChats(s));
     const convs = (s) => {
       const M = me(s), mh = handleOf(M.handle), A = all(s), meta = chatMeta(s), by = new Map(), out = [];
       for (const r of A) { const c = String(r.chat ?? ''); if (!c) continue; (by.get(c) || by.set(c, []).get(c)).push(r); }
@@ -11727,7 +11738,7 @@ registerBehavior('uiInbox', {
       if (people.length === 1) { const pp = people[0]; open(s, { c: dmId(mh, pp.handle), title: pp.name }); return; }
       const c = 'g-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), title = name || [M.author.split(' ')[0], ...people.map((pp) => pp.name.split(' ')[0])].slice(0, 4).join(', ');
       const rec = { chat: c, author: M.author, handle: M.handle, text: `${M.author.split(' ')[0]} created the group “${title}”`, system: true, members: [mh, ...people.map((pp) => pp.handle)].join(','), title };
-      if (has(s)) D(s).add(p.collection, rec); else (sample ||= SAMPLE_CHATS()).push({ id: 'g' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
+      if (has(s)) D(s).add(p.collection, rec); else sampleChats(s).push({ id: 'g' + Date.now().toString(36), ...rec, _at: Date.now(), _me: true });
       const G = s.engine.social; if (G) for (const pp of people) G.notify(pp.handle, 'message', { text: `added you to “${title}”`, post: '' });
       open(s, { c, title });
     };

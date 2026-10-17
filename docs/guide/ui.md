@@ -414,6 +414,7 @@ Pieces for feeds, stories and profiles, like the big social apps. They're in *Pr
     - the members list, with the **Admin** (who made the group), who can **Remove** people;
     - **Leave group**.
     Each change is a note in the chat, and the newest member list decides who can read and write, online too. Someone removed or who left can't read new messages; in a sealed group, new members can only open messages sent after they joined.
+  - **Sample chats** (before there's a Messages collection) belong to whoever is testing, so opening one from the Inbox opens it in the Chat.
   - **No conversation of yours open** (a Messages tab that goes straight to the Chat page, or a chat you're not in): the Chat lists **your conversations**, newest first, with a **New message** button. Tap one to open it.
   - **Voice messages:** the 🎙 on the message bar starts recording straight away (and, in the open bar, with nothing typed the send button is a **microphone**). Tap it, talk (up to a minute; the bar shows a timer and your voice level), then **send** or **bin** it. A voice message shows ▶, a waveform and its length; tap it to play or pause. Turn it off with *Voice messages*.
   - **Links:** a message with a web address gets a **card** with the site's name; tap the card to open it (*Link cards*).

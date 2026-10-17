@@ -38,6 +38,12 @@ App projects show an **App** badge in your list of projects.
 An app is a set of **pages**. A page is a full-screen panel with **Show If** on the `page` variable (`page = home`, `page = detail`…), and everything inside it shows and hides with it. Pages slide in when you open them and slide back when you go back.
 
 - Open a page with a **Button** (*go to page*), a **Bottom Nav** tab, a **Side Menu** item, or a Data List row.
+- **Everything comes with what it needs:** components and page templates have requirements. When you add one, the editor checks what it needs and asks you to add it in one tap (**Needed to work › Add them**), or **Undo**. That covers:
+  - **Data:** for example, an Inbox needs *Messages* (and *Reads*), a Feed needs *Posts* and *Comments*, Friends needs *Follows* and *Friends*, Notifications needs *Notifications*.
+  - **Pages it opens:** for example, an Inbox opens the *chat* page, and a Feed's message button opens it too.
+  - **Pages your tabs, menu items and App Bar buttons open.**
+
+  It works in a chain: a new chat page brings its own Messages data. Taking away something another part needs (deleting the chat page, a collection, a page a tab opens) asks the same way: put it back with **Undo**, or make a new one. Projects that already miss something show it at the top of the **Hierarchy** with **Add them**.
 - **A button that opens a page you haven't made yet:**
   - **Social pages are made while the app runs.** These are *inbox* / *messages*, *chat*, *notifications*, *friends*, *saved*, *marketplace* and *achievements*. A Messages tab with no Messages page still opens your messages, and the Console says it was made for you.
   - **Any other missing page** shows the first page, with a warning in the Console.

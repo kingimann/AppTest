@@ -1,7 +1,7 @@
 // Node Editor: full-screen, touch-first visual scripting for the "Visual Script" (graph) behavior.
 // Tap a dot, then another dot, to wire them (or drag from dot to dot). Drag nodes to move them,
 // drag empty space to pan, pinch to zoom. Edits are written straight back through onChange().
-import { NODE_TYPES } from '../engine/pocket.js';
+import { NODE_TYPES, OBJ_WORDS } from '../engine/pocket.js';
 import { icon } from './icons.js';
 
 const NODE_W = 260;
@@ -301,7 +301,7 @@ const outKind = (d) => d.value || 'exec';
  * Returns { close }.
  */
 /** What looks wrong in a script: Map of node id → why (nodes that never run, values wired to nothing…). Find Problems and Check use it. */
-export function graphProblems(g) {
+export function graphProblems(g, names) { // names: every object (and template) in the game, to catch a target that doesn't exist
   const nodes = g?.nodes || [], links = g?.links || [], byId = new Map(nodes.map((n) => [n.id, n])), W = new Map();
   for (const n of nodes) {
     const d = def(n);
@@ -312,6 +312,7 @@ export function graphProblems(g) {
     else if (d.exec && !links.some((l) => l.to.node === n.id && l.to.port === 'in')) W.set(n.id, 'Never runs: nothing is wired into its white dot');
     else if (!d.exec && !d.value && (d.outs || []).length && !links.some((l) => l.from.node === n.id)) W.set(n.id, 'Does nothing yet: wire something to it');
     for (const l of links) if (l.to.node === n.id && !byId.has(l.from.node)) W.set(n.id, 'A wire comes from a node that was removed');
+    if (names && !W.has(n.id) && (d.params || []).some((q) => q.key === 'object')) { const v = String(n.params?.object ?? '').trim(); if (v && !/[{}]/.test(v) && !OBJ_WORDS.has(v.toLowerCase()) && !names.has(v)) W.set(n.id, `No object called “${v}”: it will do nothing`); }
   }
   if (nodes.length && !nodes.some((n) => NODE_TYPES[n.type]?.cat === 'Events' || def(n).outs?.length && !def(n).exec && !def(n).value)) W.set(nodes[0].id, W.get(nodes[0].id) || 'No Event node: nothing starts this script (add a green Event, like On Tap)');
   return W;
@@ -472,9 +473,9 @@ export function openNodeEditor(opts) {
     if (spec.type === 'longtext') return h('textarea', { rows: 3, spellcheck: true, oninput: (e) => set(e.target.value), onblur: end }, val ?? '');
     if (spec.type === 'color') return h('input', { type: 'color', value: val || '#ffffff', oninput: (e) => set(e.target.value), onchange: end });
     if (spec.type === 'number') { // a number: anything else is shown in red while typing, then put back with a note
-      const ok = (t) => /^\s*[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?\s*$/i.test(t);
-      const num = h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, 'aria-invalid': 'false', oninput: (e) => { const t = e.target.value, good = ok(t); num.classList.toggle('bad', !good && t.trim() !== ''); num.setAttribute('aria-invalid', String(!good)); num.title = good ? '' : `${spec.label || spec.key} needs a number`; if (good) set(parseFloat(t)); },
-        onblur: () => { end(); if (!ok(num.value)) { const was = n.params?.[spec.key] ?? spec.default ?? 0; opts.toast?.(`“${num.value}” isn’t a number: ${spec.label || spec.key} is back to ${was}`); num.value = was; num.classList.remove('bad'); num.setAttribute('aria-invalid', 'false'); num.title = ''; } } });
+      const ok = (t) => /^\s*[-+]?(\d+\.?\d*|\.\d+)(e[-+]?\d+)?\s*$/i.test(t) && Number.isFinite(parseFloat(t)) && Math.abs(parseFloat(t)) < 1e15; // (1e309 is Infinity: not a number a game can use)
+      const num = h('input', { type: 'text', inputMode: 'decimal', value: val ?? 0, 'aria-invalid': 'false', oninput: (e) => { const t = e.target.value, good = ok(t); num.classList.toggle('bad', !good && t.trim() !== ''); num.setAttribute('aria-invalid', String(!good)); num.title = good ? '' : `${spec.label || spec.key} needs a number${/e/i.test(t) || t.replace(/\D/g, '').length > 15 ? ' (that one is too big)' : ''}`; if (good) set(parseFloat(t)); },
+        onfocus: () => { num._start = n.params?.[spec.key] ?? spec.default ?? 0; }, onblur: () => { end(); if (!ok(num.value)) { const was = num._start ?? n.params?.[spec.key] ?? spec.default ?? 0; if (n.params?.[spec.key] !== was) { (n.params ||= {})[spec.key] = was; emit(); } /* (back to what it was before this edit, not a half-typed 1e3) */ opts.toast?.(`“${num.value}” ${/^\s*[-+]?[\d.]+(e[-+]?\d+)?\s*$/i.test(num.value) ? 'is too big' : 'isn’t a number'}: ${spec.label || spec.key} is back to ${was}`); num.value = was; num.classList.remove('bad'); num.setAttribute('aria-invalid', 'false'); num.title = ''; } } });
       return num;
     }
     const inp = h('input', { type: 'text', value: val ?? '', autocapitalize: 'off', spellcheck: false, oninput: (e) => set(e.target.value), onblur: end });
@@ -526,7 +527,7 @@ export function openNodeEditor(opts) {
   function nodeMenu(n, anchor) {
     popMenu(anchor, [
       { cap: def(n).label },
-      { icon: 'copy', label: 'Duplicate', fn: () => { snap(); const c = JSON.parse(JSON.stringify(n)); c.id = nid(); c.x += 30; c.y += 40; g.nodes.push(c); selected = c.id; emit(); render(); } },
+      { icon: 'copy', label: 'Duplicate', fn: () => { snap(); const c = JSON.parse(JSON.stringify(n)); c.id = nid(); const p0 = freeSpotFor(n); c.x = p0.x; c.y = p0.y; g.nodes.push(c); selected = c.id; emit(); render(); focusNode?.(c.id); } }, // (beside it, never on top of it)
       { icon: 'copy', label: 'Copy', fn: () => copyNodes([n]) },
       def(n).outs?.length && { icon: 'copy', label: 'Copy From Here (whole chain)', fn: () => copyNodes(chainFrom(n)) },
       !def(n).comment && { icon: n.off ? 'eye' : 'eyeoff', label: n.off ? 'Turn On' : 'Turn Off (skip it)', fn: () => { snap(); n.off = !n.off; if (!n.off) delete n.off; emit(); render(); } },
@@ -548,6 +549,13 @@ export function openNodeEditor(opts) {
     selBar.hidden = !selMode;
     selCount.textContent = multi.size ? `${multi.size} selected` : 'Tap nodes or drag a box';
     for (const el of world.querySelectorAll('.ne-node')) el.classList.toggle('msel', multi.has(el.dataset.id));
+  }
+  /** Where a copy of node n can go without covering it (or anything else): below it, else to its right. */
+  function freeSpotFor(n) {
+    const el = world.querySelector(`.ne-node[data-id="${n.id}"]`), w = (el?.offsetWidth || 240) + 24, hgt = (el?.offsetHeight || 120) + 24;
+    const hits = (x, y) => g.nodes.some((q) => { const qe = world.querySelector(`.ne-node[data-id="${q.id}"]`), qw = qe?.offsetWidth || 240, qh = qe?.offsetHeight || 120; return x < q.x + qw && x + w - 24 > q.x && y < q.y + qh && y + hgt - 24 > q.y; });
+    for (let i = 1; i < 12; i++) for (const [x, y] of [[n.x, n.y + hgt * i], [n.x + w * i, n.y]]) if (!hits(x, y)) return { x, y };
+    return { x: n.x + 40, y: n.y + hgt };
   }
   function duplicateSel() {
     const L = g.nodes.filter((q) => multi.has(q.id)); if (!L.length) return;
@@ -619,7 +627,7 @@ export function openNodeEditor(opts) {
     emit(); render(); requestAnimationFrame(fit); toast('Tidied up');
   }
   function checkProblems() {
-    const byId = new Map(g.nodes.map((n) => [n.id, n])), W = graphProblems(g);
+    const byId = new Map(g.nodes.map((n) => [n.id, n])), W = graphProblems(g, opts.allNames?.() || new Set([...(opts.objects || []), ...(opts.templates || [])]));
     warn = W.size ? W : null; render();
     if (!W.size) { toast('No problems found ✓'); return; }
     const list = sheet(`${W.size} thing${W.size > 1 ? 's' : ''} to check`, (L) => [L]);

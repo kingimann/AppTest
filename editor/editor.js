@@ -3083,7 +3083,7 @@ function validate(b, j) {
 
 /** Odin-style Project Validator: every level, object and component checked at once; tap a problem to go to it. */
 function projectProblems() {
-  const out = [], keep = project;
+  const out = [], keep = project, allNames = new Set(levelList().flatMap((lv) => (lv.entities || []).flatMap((e) => [e.name, ...(e.tags || [])]).filter(Boolean))); // (a script may target an object on any level, or a tag)
   levelList().forEach((lv, li) => {
     project = lv;
     try {
@@ -3097,7 +3097,7 @@ function projectProblems() {
           for (const p of def.params) if (p.required && (b[p.key] ?? '') === '') add('error', def.label, `${p.label || p.key} is required.`);
         }
         for (const b of e.behaviors || []) if (b.type === 'graph') for (const [gr, nm] of [[b.graph, ''], ...(b.scripts || []).map((x) => [x.graph, x.name || 'script'])]) { // inside Visual Scripts: nodes that never run, loose values…
-          for (const [nid, why] of graphProblems(gr)) { const n = (gr?.nodes || []).find((q) => q.id === nid); add('warn', 'Visual Script' + (nm ? ` (${nm})` : ''), `${NODE_TYPES[n?.type]?.label || n?.type || 'A node'}: ${why}.`); } }
+          for (const [nid, why] of graphProblems(gr, allNames)) { const n = (gr?.nodes || []).find((q) => q.id === nid); add('warn', 'Visual Script' + (nm ? ` (${nm})` : ''), `${NODE_TYPES[n?.type]?.label || n?.type || 'A node'}: ${why}.`); } }
       }
       for (const g of findDuplicates(lv.entities || [])) { const e = (lv.entities || []).find((q) => q.id === g.ids[g.ids.length - 1]); out.push({ lvl: 'warn', li, id: e?.id, name: g.label, comp: 'Duplicate', msg: g.why }); }
     } finally { project = keep; }
@@ -3188,6 +3188,7 @@ function editGraph(target, path) {
     stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id + '|' + (sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),
+    allNames: () => new Set(levelList().flatMap((lv) => (lv.entities || []).flatMap((x) => [x.name, ...(x.tags || [])]).filter(Boolean))), // (Check: a target on any level, or a tag)
     vars: [...new Set(['score', 'lives', 'hp', ...Object.keys(levelList()[0].vars || {}), ...Object.keys(project.vars || {})])],
     scripts: () => allScripts().filter((q) => q.id !== B()?.scriptRef),
     linked: () => { const sc = scriptOf(B()); if (!sc) return null; let n = 0; eachScriptUse(sc.id, () => n++); return { name: sc.name, uses: n }; },

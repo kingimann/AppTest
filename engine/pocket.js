@@ -22806,6 +22806,24 @@ registerBehavior('graph', {
       return ret.v;
     };
     const missWarned = new Set();
+    /** Something in a loop's pass carries on later (a Wait): the loop holds on until it's done. Returns the release. */
+    const hold = (ctx) => { const F = ctx.flow; if (F) F.n++; return () => { if (F) { F.n--; F.check?.(); } }; };
+    /** A loop's passes one after another: a pass with a Wait in it finishes before the next starts, and "done" runs after the last.
+     * pass(i) gives what that pass knows ({ index, item… }), or null to stop (a While whose condition is false). */
+    const seq = (n, ctx, count, pass, after) => {
+      const outer = ctx.flow, L = { stop: false }; let i = 0, held = false;
+      const next = () => {
+        while (i < count && !L.stop && !ctx.e.dead) {
+          const extra = pass(i++); if (extra === null) break;
+          const F = { n: 0, check: null };
+          follow(n, 'each', { ...ctx, steps: ctx.steps, loop: L, flow: F, ...extra });
+          if (F.n > 0) { if (!held && outer) { outer.n++; held = true; } F.check = () => { if (F.n === 0) { F.check = null; next(); } }; return; }
+        }
+        if (!ctx.e.dead) { if (after) after(); else follow(n, 'done', ctx); }
+        if (held) { held = false; outer.n--; outer.check?.(); }
+      };
+      next();
+    };
     const run = (n, ctx) => {
       if (!n || ++ctx.steps > 300) return; // (a chain keeps going after its object is destroyed, like the rest of a Unity frame)
       const st = ctx.s.engine.graphStats;
@@ -22814,7 +22832,7 @@ registerBehavior('graph', {
       const PR = NODE_TYPES[n.type]?.pluginRun; // a plugin's node: its run() returns the output to follow (or a promise of it)
       if (PR) {
         let port; try { port = PR({ s: ctx.s, e: ctx.e, other: ctx.other, eventValue: ctx.eventValue, param: (k) => param(n, k), input: (k) => input(n, k, ctx, 0) }, Pocket); } catch (err) { Log.add('error', `${NODE_TYPES[n.type].label}: ${err.message}`, 'Plugin'); }
-        if (port && typeof port.then === 'function') { const later = { ...ctx, steps: 0 }; port.then((pp) => { if (!ctx.e.dead) follow(n, typeof pp === 'string' ? pp : 'then', later); }); return; }
+        if (port && typeof port.then === 'function') { const later = { ...ctx, steps: 0 }, rel = hold(ctx); port.then((pp) => { if (!ctx.e.dead) follow(n, typeof pp === 'string' ? pp : 'then', later); rel(); }, rel); return; }
         return follow(n, typeof port === 'string' ? port : 'then', ctx);
       }
       if (n.type.startsWith('la_')) { // a Triggers instruction as a node
@@ -22832,11 +22850,11 @@ registerBehavior('graph', {
       switch (n.type) {
         case 'branch': return follow(n, I('condition') ? 'true' : 'false', ctx);
         case '_signal': if (ctx.onSignal) ctx.onSignal(P('port'), ctx); else (e._sig ||= []).push({ tag: P('tag'), port: P('port'), other: ctx.other, value: ctx.eventValue }); return; // a node run by Triggers reports its output
-        case 'wait': { s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
+        case 'wait': { const rel = hold(ctx); s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); rel(); }); return; }
         case 'chance': return follow(n, Math.random() * 100 < (+I('percent') || 0) ? 'yes' : 'no', ctx);
         case 'once': if (state.get(n.id)) return; state.set(n.id, true); break;
         case 'sequence': for (const port of ['first', 'second', 'third']) follow(n, port, ctx); return;
-        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))), L = { stop: false }; for (let i = 0; i < c && !L.stop; i++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
+        case 'loop': { const c = Math.min(100, Math.max(0, Math.floor(+I('count') || 0))); return seq(n, ctx, c, (i) => ({ index: i })); }
         case 'flipFlop': { const a = !state.get(n.id); state.set(n.id, a); return follow(n, a ? 'A' : 'B', ctx); }
         case 'cooldown': { const last = state.get(n.id); if (last != null && s.time - last < (+I('seconds') || 0)) return follow(n, 'blocked', ctx); state.set(n.id, s.time); return follow(n, 'then', ctx); }
         case 'countTo': { const c = (state.get(n.id) || 0) + 1, need = Math.max(1, Math.round(+I('times') || 1)); if (c >= need) { state.set(n.id, P('after') === 'stay done' ? need : 0); return follow(n, 'reached', ctx); } state.set(n.id, c); return follow(n, 'not yet', ctx); }
@@ -22951,10 +22969,10 @@ registerBehavior('graph', {
         case 'toggleComp': { const t = P('object') ? s.find(P('object')) : e, k = String(P('component') || '').trim().toLowerCase(); if (!t || !k) break; for (const b of t.behaviors) if ((b.type || '').toLowerCase() === k || (Behaviors[b.type]?.label || '').toLowerCase() === k) b.off = P('mode') === 'off' ? true : P('mode') === 'on' ? false : !b.off; break; }
         case 'waitUntil': {
           const start = s.time, limit = +P('timeout') || 0, c2 = { ...ctx, steps: 0 };
-          const check = () => { if (e.dead || s.engine.scene !== s) return; if (input(n, 'condition', c2)) follow(n, 'then', { ...c2, steps: 0 }); else if (limit > 0 && s.time - start >= limit) return; else s.after(0, check); };
+          const rel = hold(ctx), check = () => { if (e.dead || s.engine.scene !== s) return rel(); if (input(n, 'condition', c2)) { follow(n, 'then', { ...c2, steps: 0 }); rel(); } else if (limit > 0 && s.time - start >= limit) return rel(); else s.after(0, check); };
           check(); return;
         }
-        case 'randomWait': { const a = +I('min') || 0, b = +I('max') || 0; s.after(Math.max(0, rand(Math.min(a, b), Math.max(a, b))), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); }); return; }
+        case 'randomWait': { const a = +I('min') || 0, b = +I('max') || 0, rel = hold(ctx); s.after(Math.max(0, rand(Math.min(a, b), Math.max(a, b))), () => { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); rel(); }); return; }
         case 'playAnim': { const lp = P('loop'), loop = lp === 'loop' ? true : lp === 'once' ? false : undefined; playClip(e, P('clip'), loop); break; }
         case 'stopAnim': for (const a of anims(e)) a.stop(); break;
         case 'animSpeed': for (const a of anims(e)) a.setSpeed(+I('speed') || 0); break;
@@ -23073,7 +23091,7 @@ registerBehavior('graph', {
           else if (n.type === 'setSun') tgt = { color: P('color'), intensity: +I('brightness') || 0, ambient: +I('ambient') || 0 };
           else { const pr = LIGHT_PRESETS[P('preset')] || LIGHT_PRESETS.Day; tgt = s.mode === '3d' ? pr.d3 : { darkness: 1 - pr.d2[0], color: pr.d2[1] }; }
           fadeLighting(s, tgt, sec);
-          s.after(sec, () => { if (!e.dead) follow(n, 'done', later); });
+          const rel = hold(ctx); s.after(sec, () => { if (!e.dead) follow(n, 'done', later); rel(); });
           break;
         }
         case 'esSave': s.engine.saves.save(P('key') || 'value', listVal(I('value')), P('file')); break;
@@ -23112,7 +23130,7 @@ registerBehavior('graph', {
           listSave(s, P('name'), a); break;
         }
         case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
-        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000), L = { stop: false }; for (let i = 0; i < a.length && !L.stop; i++) follow(n, 'each', { ...ctx, index: i + 1, item: a[i], steps: ctx.steps, loop: L }); return follow(n, 'done', ctx); }
+        case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); return seq(n, ctx, a.length, (i) => ({ index: i + 1, item: a[i] })); }
         case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
         case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
         case 'callLater': {
@@ -23121,9 +23139,8 @@ registerBehavior('graph', {
         }
         case 'forRange': {
           const a = +I('from') || 0, b = +I('to') || 0, st = Math.abs(+I('step') || 1) * (b >= a ? 1 : -1);
-          const L = { stop: false };
-          for (let i = a, c = 0; (st > 0 ? i <= b : i >= b) && c < 1000 && !L.stop; i += st, c++) follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L });
-          return follow(n, 'done', ctx);
+          const cnt = st ? Math.min(1000, Math.floor((b - a) / st + 1e-9) + 1) : 0;
+          return seq(n, ctx, Math.max(0, cnt), (k) => ({ index: a + k * st }));
         }
         case 'repeatEvery': {
           const sec = Math.max(0.02, +I('seconds') || 0.5), times = Math.floor(+I('times') || 0), id = P('id') || '', token = {};
@@ -23259,9 +23276,8 @@ registerBehavior('graph', {
         case 'goToPage': { const h = P('history'); s.navTo(P('page'), P('var') || 'page', { history: h === 'open (Back returns)', clear: h === 'start over (clear history)' }); break; }
         case 'goBack': return follow(n, s.navBack(P('var') || undefined) ? 'then' : 'nowhere to go', ctx);
         case 'whileLoop': case 'repeatUntil': {
-          const L = { stop: false }, max = clamp(Math.round(+P('max') || 1000), 1, 10000), until = n.type === 'repeatUntil';
-          for (let i = 0; i < max && !L.stop; i++) { const c = !!input(n, until ? 'stop when' : 'condition', ctx); if (until ? c : !c) break; follow(n, 'each', { ...ctx, index: i, steps: ctx.steps, loop: L }); }
-          return follow(n, 'done', ctx);
+          const max = clamp(Math.round(+P('max') || 1000), 1, 10000), until = n.type === 'repeatUntil';
+          return seq(n, ctx, max, (i) => { const c = !!input(n, until ? 'stop when' : 'condition', ctx); return (until ? c : !c) ? null : { index: i }; });
         }
         case 'breakLoop': if (ctx.loop) ctx.loop.stop = true; return;
         case 'continueLoop': return;
@@ -23283,7 +23299,7 @@ registerBehavior('graph', {
         case 'mapRemove': { const m = { ...mapOf(s, P('name')) }; delete m[asText(I('key'))]; s.setVar(P('name'), m); break; }
         case 'mapClear': s.setVar(P('name'), {}); break;
         case 'mapKeys': listSave(s, P('to') || 'keys', Object.keys(mapOf(s, P('name')))); break;
-        case 'mapForEach': { const L = { stop: false }; for (const [i, [k, v]] of Object.entries(mapOf(s, P('name'))).slice(0, 1000).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, index: i + 1, key: k, item: v, steps: ctx.steps, loop: L }); } return follow(n, 'done', ctx); }
+        case 'mapForEach': { const M = Object.entries(mapOf(s, P('name'))).slice(0, 1000); return seq(n, ctx, M.length, (i) => ({ index: i + 1, key: M[i][0], item: M[i][1] })); }
         case 'sendValue': s.send(P('message'), listVal(I('value'))); break;
         case 'waitEvent': {
           const later = { ...ctx, steps: 0 }, name = P('message'), to = +P('timeout') || 0; let done = false;
@@ -23408,7 +23424,7 @@ registerBehavior('graph', {
         case 'copyText': { const text = fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data)), later = { ...ctx, steps: 0 }; if (!navigator.clipboard) return follow(n, 'failed', ctx); navigator.clipboard.writeText(text).then(() => { if (!e.dead) follow(n, 'then', later); }, () => { if (!e.dead) follow(n, 'failed', later); }); return; }
         case 'openLink': { const u = String(P('url') || '').trim(); if (/^https?:\/\/[^\s]+\.[^\s]+/i.test(u) && !s.engine.editing) window.open(u, '_blank', 'noopener'); else if (s.engine.editing) Log.add('info', 'Open Website: ' + u + ' (opens in the built game)'); break; }
         case 'setObjLayer': { const w = P('target'), t = w === 'other' ? ctx.other : w === 'object' ? uiFind(s, e, P('object')) : e; if (t) s.setLayer(t, P('layer')); break; }
-        case 'forEachInLayer': { const L = { stop: false }; for (const [i, q] of s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200).entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); } return follow(n, 'done', ctx); }
+        case 'forEachInLayer': { const Q = s.findInLayer(P('layer')).filter((q) => !q.template && q !== e).slice(0, 200); return seq(n, ctx, Q.length, (i) => ({ other: Q[i], index: i, steps: 0 })); }
         case 'uiShow': {
           const t = uiFind(s, e, P('object')); if (!t) break;
           const m = P('mode'), show = m === 'toggle' ? !t.visible : m !== 'hide', later = { ...ctx, steps: 0 };
@@ -23462,9 +23478,7 @@ registerBehavior('graph', {
           const r = n.type === 'overlap' ? (+I('radius') || defRange(s)) : Infinity, tag = P('tag');
           const list = s.entities.filter((q) => q !== e && !q.dead && !q.ui && !q.template && (n.type === 'overlap' ? tagOk(q, tag) : tag && q.has(tag)) && Math.hypot(q.x - e.x, q.y - e.y, q.z - e.z) <= r)
             .sort((a, b) => Math.hypot(a.x - e.x, a.y - e.y, a.z - e.z) - Math.hypot(b.x - e.x, b.y - e.y, b.z - e.z)).slice(0, 100);
-          const L = { stop: false }; for (const [i, q] of list.entries()) { if (L.stop) break; follow(n, 'each', { ...ctx, other: q, index: i, steps: 0, loop: L }); }
-          if (n.type === 'forEachTag') return follow(n, 'done', ctx);
-          return list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx);
+          return seq(n, ctx, list.length, (i) => ({ other: list[i], index: i, steps: 0 }), n.type === 'forEachTag' ? null : () => (list.length ? follow(n, 'found', { ...ctx, other: list[0] }) : follow(n, 'none', ctx)));
         }
         case 'pickNearest': { const t = nearest(s, e, P('tag')), mx = +I('maxDistance') || Infinity; return t && Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z) <= mx ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
         case 'pickObject': { const k = P('object'), t = s.find(k) && !s.find(k).dead ? s.find(k) : nearest(s, e, k); return t ? follow(n, 'found', { ...ctx, other: t }) : follow(n, 'none', ctx); }
@@ -23472,9 +23486,8 @@ registerBehavior('graph', {
         case 'goPageWith': { const nm = P('name'); if (nm) s.setVar(nm, listVal(asText(I('value')))); s.navTo(P('page'), P('var') || 'page', { history: true }); break; }
         case 'forEachRecord': {
           const D = s.engine.data, def = D.def(P('collection')); if (!def) { Log.add('warn', `There is no data collection called “${P('collection')}”`, 'Data'); return follow(n, 'done', ctx); }
-          const col = fieldKey(def.name), rows = D.query(col, { filter: P('filter'), sort: P('sort') || 'newest first', vars: s.vars }).slice(0, Math.max(0, Math.min(1000, +P('max') || 100))), L = { stop: false };
-          for (let i = 0; i < rows.length && !L.stop; i++) follow(n, 'each', { ...ctx, index: i + 1, item: rows[i].id, record: { col, rec: rows[i] }, steps: ctx.steps, loop: L });
-          return follow(n, 'done', ctx);
+          const col = fieldKey(def.name), rows = D.query(col, { filter: P('filter'), sort: P('sort') || 'newest first', vars: s.vars }).slice(0, Math.max(0, Math.min(1000, +P('max') || 100)));
+          return seq(n, ctx, rows.length, (i) => ({ index: i + 1, item: rows[i].id, record: { col, rec: rows[i] } }));
         }
         case 'findRecord': {
           const D = s.engine.data, def = D.def(P('collection')); if (!def) return follow(n, 'not found', ctx);

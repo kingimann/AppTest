@@ -4863,7 +4863,7 @@ export function uiArea(W, H, safe, e) {
  */
 function layoutUI(E, s) {
   const S = E.safe, mode = s.settings.uiOverlap || 'bars', screen = E.paused ? 'paused' : s.state;
-  const b = { top: 0, right: 0, bottom: 0, left: 0 }, u = { top: 0, right: 0, bottom: 0, left: 0 };
+  const b = { top: 0, right: 0, bottom: 0, left: 0 }, u = { top: 0, right: 0, bottom: 0, left: 0 }; let lb = 0;
   for (const e of s.entities) {
     if (!e.ui || e.dead) continue;
     for (const bh of e.behaviors) {
@@ -4871,11 +4871,12 @@ function layoutUI(E, s) {
       e._dock = true;
       if (mode === 'off' || !e.visible || e._parentHidden || e._clipHidden || (!E.editing && ![screen, 'always'].includes(uiScreenOf(e)))) continue;
       const d = bh.dock(e, s);
-      if (d && d.size > 0) { b[d.edge] = Math.max(b[d.edge], d.size); if (d.under) u[d.edge] = Math.max(u[d.edge], d.size); } // under: pages run beneath it (a see-through bar), what's on them stays clear
+      if (d && d.size > 0) { b[d.edge] = Math.max(b[d.edge], d.size); if (d.under) u[d.edge] = Math.max(u[d.edge], d.size); if (d.lists && d.edge === 'bottom') lb = Math.max(lb, d.size); } // under: pages run beneath it (a see-through bar), what's on them stays clear
     }
   }
   S.bars = b.top || b.right || b.bottom || b.left ? b : null;
   S.under = u.top || u.right || u.bottom || u.left ? u : null;
+  S.underLists = lb; // how far a scrolling list filling a page reaches down under the bottom bar
   if (mode === 'push apart') pushApart(E, s, screen);
   else if (E._pushed) { for (const e of s.entities) delete e._push; E._pushed = false; }
 }
@@ -4967,7 +4968,8 @@ function fitToArea(e, W, H, safe) {
 }
 function applyStretch(e, W, H, safe) {
   const m = +e.margin || 0, ao = uiOrigin(e, W, H, safe), p = e.parentEnt?.ui ? uiBox(e.parentEnt, W, H, safe) : null, K = uiK(safe);
-  const Un = p ? underOf(e.parentEnt, safe) : null;
+  let Un = p ? underOf(e.parentEnt, safe) : null;
+  if (Un && runsUnderBar(e, safe)) { const B = safe.bars || {}, F = barsFor(e.parentEnt, safe) || {}; Un = { ...Un, bottom: Math.max(0, Un.bottom - Math.min(safe.underLists, (B.bottom || 0) - (F.bottom || 0))) }; } // a feed or chat runs on under a floating / see-through bottom bar (it pads its end clear of it), so the bar floats over it rather than sitting in a box
   const box = p ? (Un ? { l: p.x - p.w / 2 + Un.left, t: p.y - p.h / 2 + Un.top, w: p.w - Un.left - Un.right, h: p.h - Un.top - Un.bottom } : { l: p.x - p.w / 2, t: p.y - p.h / 2, w: p.w, h: p.h }) : uiArea(W, H, safe, e); // (in a page under a see-through bar: the part not under it)
   const set = (k, v) => { for (const c of [e.shape, e.sprite, e.bar, e.minimap]) if (c) c[k] = v; };
   // one margin all round, or marginTop / marginBottom / marginLeft / marginRight (room for an app bar, a bottom nav…)
@@ -5027,6 +5029,9 @@ function ownScreen(scene, screen) {
 }
 
 
+/** Lists that pad their own end clear of a bottom bar (coveredBottom), so they can fill a page down under a floating one. */
+const UNDER_BAR_LISTS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiPhotoGrid']);
+const runsUnderBar = (e, safe) => !!safe?.underLists && (e.stretch === 'both' || e.stretch === 'height') && !!e.parentEnt && isBackdrop(e.parentEnt) && e.behaviors.some((b) => UNDER_BAR_LISTS.has(b.type));
 const STACK_FILLERS = new Set(['uiFeed', 'uiChat', 'uiInbox', 'uiActivity', 'uiBookmarks', 'uiMarketplace', 'uiAchievements', 'uiFriends', 'uiScroll', 'uiDataList', 'uiList', 'uiPhotoGrid', 'uiTrending', 'uiWhoToFollow']);
 /**
  * A page set to "Line everything up": what is in it stacks top to bottom, in the order it was put there, with an even gap, so
@@ -7834,9 +7839,9 @@ registerBehavior('uiBottomNav', {
         placeTop(e, s); // (under an App Bar first, so the space it holds is right this frame)
         if (p.reserve === false || hide > 0.99) return null;
         const E = s.engine, K = uiK(E.safe), G = geo(e), o = uiOrigin(e, E.width, E.height, E.safe), top = o.y + G.by * K, bot = o.y + (G.by + G.bh) * K;
-        const U = under(s);
+        const U = under(s), L = U && (p.style !== 'minimal' || opacity(s) < 0.97 || blurOf(s) > 0 || p.underPages === 'yes'); // lists: a feed or chat filling the page scrolls on beneath it too (not under bare minimal tabs)
         if ((top + bot) / 2 < E.height / 2) return { edge: 'top', size: Math.max(0, bot - E.safe.top) * (1 - hide), under: U };
-        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide), under: U };
+        return { edge: 'bottom', size: Math.max(0, E.height - E.safe.bottom - top) * (1 - hide), under: U, lists: L };
       },
       start(e, s) {
         navScene = s; T = tabs(); BH.start(s, e); sizeBar(e); placeTop(e, s);
@@ -9074,6 +9079,7 @@ const UK = {
   fit(s, e, b) {
     if (e.ignoreBars || e.ignoreSafe || e._dock) return b; const E = s.engine; if (!E.safe) return b; // (on a page too: a feed taller than the room left would scroll its last posts under the bar, out of reach)
     const A = uiArea(E.width, E.height, E.safe, e), o = uiOrigin(e, E.width, E.height, E.safe), k = uiK(E.safe) || 1;
+    if (runsUnderBar(e, E.safe)) A.h += Math.min(E.safe.underLists, E.safe.bars?.bottom || 0); // (filling a page under a floating bar: it pads its own end clear of it)
     const fl = UK.floatBottom(s, e, o.x + b.x * k, o.x + (b.x + b.w) * k, A.t), t = UK.local(s, e, { x: A.l, y: Math.max(A.t, fl) }), bt = UK.local(s, e, { x: A.l, y: A.t + A.h }), y0 = Math.max(b.y, t.y), y1 = Math.min(b.y + b.h, bt.y); // (and below a button floating in the top corner)
     if (y1 - y0 < 40 || (y0 <= b.y + 0.5 && y1 >= b.y + b.h - 0.5)) return b; return { ...b, y: y0, h: y1 - y0, cy: (y0 + y1) / 2 };
   },
